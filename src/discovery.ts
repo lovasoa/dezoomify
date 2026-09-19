@@ -17,7 +17,7 @@ export interface DiscoveryStructuredError {
   code: string;
   category: string;
   retryable: boolean;
-  message: string;
+  message?: string;
   transport?: string;
   phase?: string;
 }
@@ -350,20 +350,10 @@ export function noImageFoundError(via?: string): DiscoveryStructuredError {
     code: "NO_IMAGE_FOUND",
     category: "discovery",
     retryable: false,
-    message:
-      "No zoomable image was found at this address. Try a page that contains a zoom viewer, or try the browser extension.",
-    transport: via ?? "direct",
-    phase: "discovery",
-  };
-}
-
-export function discoveryFailedError(via?: string): DiscoveryStructuredError {
-  return {
-    code: "DISCOVERY_FAILED",
-    category: "transport",
-    retryable: true,
-    message:
-      "Something went wrong while looking for a zoomable image here. Try again in a moment, or try the browser extension below.",
+    // Pre-view hint surfaces (fetcher throw path, discovery hook) resolve
+    // the headline through the shared failure table at render time; the
+    // message here is the throw-time text only.
+    message: "No zoomable image was found at this address.",
     transport: via ?? "direct",
     phase: "discovery",
   };

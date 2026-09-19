@@ -1,4 +1,4 @@
-// Desktop queue (todo 5.3): sequential multi-job table in the integration
+// Desktop queue: sequential multi-job table in the integration
 // layer, over the single-job engine.
 //
 // One active job at a time; further submits wait FIFO. Tracks progress per
@@ -27,16 +27,6 @@ export interface DesktopQueue {
   readonly entries: Array<DesktopQueueEntry>;
   readonly activeId: string | null;
   readonly nextId: number;
-}
-
-export interface DesktopQueueCapabilities {
-  readonly bulkSupported?: boolean;
-}
-
-/** Whether the negotiated capabilities offer the desktop queue. */
-export function isDesktopQueueAvailable(caps: DesktopQueueCapabilities | null | undefined): boolean {
-  if (!caps) return false;
-  return caps.bulkSupported === true;
 }
 
 /** Empty queue. */

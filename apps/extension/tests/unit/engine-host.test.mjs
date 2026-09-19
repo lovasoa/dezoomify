@@ -47,16 +47,14 @@ function harness({ assembly = fakeAssembly(), acquireTile, sourceTransport, prob
     onPermissionRequired: (detail) => seen.push(["permission", detail]),
     onRecoveryRequested: (generation) => seen.push(["recovery-decision", generation]),
     onHostFailure: (error) => seen.push(["host-failure", error]),
-    onEvent: (event) => seen.push(["event", event.type]),
     log: (level, code, detail) => logs.push({ level, code, detail }),
   });
   return { controller, sent, seen, assembly, logs };
 }
 
+// Canonical HostEffect: bare typed effects, no kind/event envelope.
 const TILE_EFFECT = {
-  kind: "effect",
   type: "acquire-tile",
-  effect: "fx:2",
   tile: 0,
   placement: { position: { x: 0, y: 0 }, expected_size: { width: 16, height: 16 }, canvas: { width: 32, height: 32 }, processing: "none" },
   request: { id: 0, uri: "https://cdn.test/tile_0.jpg", headers: [], purpose: "tile" },
@@ -70,8 +68,9 @@ test("tile acquisition decodes with the placement before the outcome settles", a
   await flush();
   const acquire = seen.find(([kind]) => kind === "extension");
   assert.equal(acquire[1], "https://cdn.test/tile_0.jpg");
-  const decoded = sent.find((message) => message.type === "engine.bytes");
-  assert.ok(decoded, "bytes outcome was sent");
+  const acquired = sent.find((message) => message.type === "engine.acquired");
+  assert.ok(acquired, "body-free acquired outcome was sent");
+  assert.equal(acquired.requestId, 0);
 });
 
 test("a tile that cannot decode reports a failed acquisition, not a broken output", async () => {
@@ -104,7 +103,7 @@ test("an access grant re-drives the paused acquisition instead of failing the jo
     probeSize: async () => ({ status: "available", width: 256, height: 256 }),
     classifyFailure: (error) => ({ blocked_reason: error?.category ?? "network", code: "extension.network", retryable: true, message: String(error?.message ?? error), transport: "browser-session" }),
     onPermissionRequired: (detail) => retried.push(detail),
-    onRecoveryRequested() {}, onHostFailure() {}, onEvent() {},
+    onRecoveryRequested() {}, onHostFailure() {},
   });
   controller.handleEngineMessages([TILE_EFFECT]);
   await flush();
@@ -113,7 +112,7 @@ test("an access grant re-drives the paused acquisition instead of failing the jo
   controller.resolvePermission(true);
   await flush();
   assert.equal(attempts, 2);
-  assert.ok(sent.some((message) => message.type === "engine.bytes"));
+  assert.ok(sent.some((message) => message.type === "engine.acquired"));
 });
 
 test("a granted-origin refusal fails typed without re-prompting for a grant", async () => {
@@ -132,7 +131,7 @@ test("a granted-origin refusal fails typed without re-prompting for a grant", as
     probeSize: async () => ({ status: "available", width: 256, height: 256 }),
     classifyFailure: (error) => ({ blocked_reason: error?.category ?? "network", code: "extension.network", retryable: false, message: String(error?.message ?? error), transport: "browser-session" }),
     onPermissionRequired: (detail) => retried.push(detail),
-    onRecoveryRequested() {}, onHostFailure() {}, onEvent() {},
+    onRecoveryRequested() {}, onHostFailure() {},
   });
   controller.handleEngineMessages([TILE_EFFECT]);
   await flush();
@@ -145,9 +144,7 @@ test("a granted-origin refusal fails typed without re-prompting for a grant", as
 test("metadata requests route through the source transport", async () => {
   const { controller, seen } = harness();
   controller.handleEngineMessages([{
-    kind: "effect",
     type: "acquire-resource",
-    effect: "fx:0",
     request: { id: 0, uri: "https://source.test/image.dzi", headers: [], purpose: "metadata" },
   }]);
   await flush();
@@ -159,9 +156,7 @@ test("a failed source fetch retries through the extension-origin transport", asy
     sourceTransport: { async fetchResource() { throw Object.assign(new Error("cors"), { category: "network" }); } },
   });
   controller.handleEngineMessages([{
-    kind: "effect",
     type: "acquire-resource",
-    effect: "fx:0",
     request: { id: 0, uri: "https://cdn.test/info.json", headers: [], purpose: "metadata" },
   }]);
   await flush();
@@ -178,9 +173,7 @@ test("a definitive source HTTP response is not retried through the extension ori
     sourceTransport: { async fetchResource() { throw Object.assign(new Error("not found"), { category: "network", sourceDefinitive: true }); } },
   });
   controller.handleEngineMessages([{
-    kind: "effect",
     type: "acquire-resource",
-    effect: "fx:0",
     request: { id: 0, uri: "https://source.test/missing.dzi", headers: [], purpose: "metadata" },
   }]);
   await flush();
@@ -205,24 +198,23 @@ test("probe effects report measurements without retaining tiles", async () => {
   assert.equal(sent.some((message) => message.type === "engine.bytes"), false);
 });
 
-test("lifecycle effects and events run in engine order on one chain", async () => {
+test("lifecycle effects run in engine order on one chain", async () => {
   const { controller, assembly, sent } = harness();
   controller.handleEngineMessages([
-    { kind: "effect", type: "finalize-output", effect: "fx:10", partial: false, format: "png", canvas: { width: 32, height: 32 } },
-    { kind: "event", type: "completed" },
+    { type: "finalize-output", partial: false, format: "png", canvas: { width: 32, height: 32 } },
   ]);
   await flush();
   await flush();
   const kinds = assembly.calls.map(([kind]) => kind);
   assert.deepEqual(kinds, ["finalizeOutput"]);
   assert.deepEqual(assembly.calls[0], ["finalizeOutput", false, "png", { width: 32, height: 32 }]);
-  const finalized = sent.find((message) => message.type === "engine.command");
-  assert.deepEqual(finalized.command, { type: "finalization-succeeded" });
+  const finalized = sent.find((message) => message.type === "engine.finalize");
+  assert.deepEqual(finalized.outcome, { type: "finalization-succeeded", disposition: "browser-save-initiated" });
 });
 
 test("cancel-work releases retained resources and cancels fetching", async () => {
   const { controller, assembly, seen } = harness();
-  controller.handleEngineMessages([{ kind: "effect", type: "cancel-work", effect: "fx:20" }]);
+  controller.handleEngineMessages([{ type: "cancel-work" }]);
   assert.deepEqual(assembly.calls.map(([kind]) => kind), ["release"]);
   assert.ok(seen.some(([kind]) => kind === "cancel"));
 });
@@ -232,14 +224,13 @@ test("a failed awaited output replies typed instead of crashing the host", async
   assembly.finalizeOutput = async () => { throw Object.assign(new Error("too large"), { code: "PLAN_INVALID", retryable: false }); };
   const { controller, sent, seen } = harness({ assembly });
   controller.handleEngineMessages([
-    { kind: "effect", type: "finalize-output", effect: "fx:10", partial: false, format: "png", canvas: { width: 99999, height: 99999 } },
-    { kind: "event", type: "failed", error: { code: "PLAN_INVALID" } },
+    { type: "finalize-output", partial: false, format: "png", canvas: { width: 99999, height: 99999 } },
   ]);
   await flush();
   await flush();
-  const finalized = sent.find((message) => message.command?.type === "finalization-failed");
+  const finalized = sent.find((message) => message.outcome?.type === "finalization-failed");
   assert.ok(finalized, "typed finalization failure was sent");
-  assert.equal(finalized.command.error.code, "PLAN_INVALID");
+  assert.equal(finalized.outcome.error.code, "PLAN_INVALID");
   assert.equal(seen.some(([kind]) => kind === "host-failure"), false, "an awaited failure is not a host crash");
 });
 
@@ -267,9 +258,7 @@ test("coordinator source fetches name the engine request on the extension bus", 
   });
   const { controller, sent } = harness({ sourceTransport });
   controller.handleEngineMessages([{
-    kind: "effect",
     type: "acquire-resource",
-    effect: "fx:0",
     request: { id: 4, uri: "https://source.test/image.dzi", headers: [], purpose: "metadata" },
   }]);
   await flush();
@@ -304,9 +293,8 @@ test("a failed site-origin source fetch falls back to the extension origin", asy
   await flush();
   assert.equal(sourceAttempts, 1, "the site-origin tile tries the source transport first");
   assert.deepEqual(seen.map(([kind]) => kind), ["extension"]);
-  const bytes = sent.find((message) => message.type === "engine.bytes");
-  assert.equal(bytes?.requestId, 0);
-  assert.deepEqual([...bytes.bytes], [1, 2, 3]);
+  const acquired = sent.find((message) => message.type === "engine.acquired");
+  assert.equal(acquired?.requestId, 0);
   assert.ok(logs.some((log) => log.code === "source-fetch-failed"), "the source failure is logged before the fallback");
 });
 

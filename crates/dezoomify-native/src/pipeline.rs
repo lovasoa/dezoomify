@@ -1,9 +1,11 @@
-//! Native download pipeline: one [`dezoomify_job::Job`] owns discovery,
+//! Native download pipeline: one [`dezoomify_engine::EngineJob`] owns discovery,
 //! selection, planning, retry, and lifecycle policy; this module executes its
 //! effects with real HTTP, decode, assemble, encode, and atomic-write fns.
 //!
-//! All network I/O goes through [`crate::http`]; all format logic stays in
-//! `dezoomify-core`; all lifecycle policy stays in `dezoomify-job`.
+//! All network I/O goes through [`crate::transport::NativeTransport`] (one
+//! reusable reqwest client per job scope, single-attempt fetches); all format
+//! logic stays in `dezoomify-core`; all lifecycle policy stays in
+//! `dezoomify-engine`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -13,12 +15,12 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use dezoomify_core::core::model::{ProcessingRecipe, Request};
-use dezoomify_core::core::{adaptive::ObservationResult, redact_uri};
+use dezoomify_core::core::model::Request;
+use dezoomify_core::core::redact_uri;
 use dezoomify_core::Vec2d;
 
 use crate::error::NativeError;
-use crate::http::{fetch, FetchLimits, UserHeaders};
+use crate::http::{FetchLimits, UserHeaders};
 use crate::output::{validate_destination, OutputFormat};
 
 /// Default JPEG quality for `.jpg` output and `iiif-dir` tiles: `100`
@@ -38,11 +40,11 @@ pub const WEBP_MAX_SIDE: u32 = 16_383;
 /// `iiif-dir` tile width: one entry of the `tiles` block in `info.json`.
 pub const IIIF_TILE_WIDTH: u32 = 512;
 
-/// Fixed tile-worker pool width (todo 3.1): every scheduler, pipeline batch,
+/// Fixed tile-worker pool width: every scheduler, pipeline batch,
 /// and perf smoke uses 16 workers on scoped std threads with backpressure.
 pub const MAX_CONCURRENT: usize = 16;
 
-/// Spill decision threshold (todo 3.1): canvases beyond 512 MiB spill decoded
+/// Spill decision threshold: canvases beyond 512 MiB spill decoded
 /// tiles to a temp dir one at a time and stream the encode, so peak memory
 /// stays near one canvas plus one tile.
 pub const SPILL_THRESHOLD_BYTES: u64 = 512 << 20;
@@ -119,16 +121,6 @@ pub enum PartialPolicy {
     Keep,
 }
 
-/// Interactive choice for a partial result: keep the blank-filled output,
-/// discard it (honest `tile.download-failed`, no output), or retry the
-/// failed tiles once more.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PartialDecision {
-    Keep,
-    Discard,
-    Retry,
-}
-
 /// Pending partial request announced by the driver while it waits for an
 /// interactive choice. Tile ids only, never URLs or paths.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -141,15 +133,26 @@ pub struct PartialRequest {
 #[derive(Debug, Default)]
 struct PartialGateInner {
     pending: Option<PartialRequest>,
-    decision: Option<PartialDecision>,
+    decision: Option<AnsweredDecision>,
+}
+
+/// One answered partial decision carrying the engine generation it answers.
+/// The generation travels with the decision (never re-applied from the
+/// current engine effect), so a stale host answer is engine-rejected at the
+/// boundary instead of being consumed in order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AnsweredDecision {
+    generation: u32,
+    decision: dezoomify_protocol::dto::RecoveryChoice,
 }
 
 /// Interactive partial gate shared between the background driver and the
 /// host shell. The driver announces the missing ledger and waits up to 60s
-/// for the host answer; the host answers via [`PartialGate::answer`].
-/// Fail-closed: timeout, cancellation, or no gate falls back to
-/// [`PartialPolicy`]. Early answers survive (stored before the wait starts)
-/// and each wait consumes exactly one decision so a retry can ask again.
+/// for the host answer; the host answers via [`PartialGate::answer`] with
+/// the generation from its snapshot. Fail-closed: timeout, cancellation,
+/// or no gate falls back to [`PartialPolicy`]. Early answers survive
+/// (stored before the wait starts) and each wait consumes exactly one
+/// decision so a retry can ask again.
 #[derive(Debug, Default)]
 pub struct PartialGate {
     inner: Mutex<PartialGateInner>,
@@ -174,25 +177,32 @@ impl PartialGate {
         }
     }
 
-    /// Answer the pending request. Wakes a waiting driver; an early answer
-    /// is stored for the next wait.
-    pub fn answer(&self, decision: PartialDecision) {
+    /// Answer the pending request with the generation from the host's
+    /// snapshot. Wakes a waiting driver; an early answer is stored for the
+    /// next wait. The generation is carried through to the engine answer,
+    /// so a stale answer is engine-rejected instead of consumed in order.
+    pub fn answer(&self, generation: u32, decision: dezoomify_protocol::dto::RecoveryChoice) {
+        let answered = AnsweredDecision {
+            generation,
+            decision,
+        };
         match self.inner.lock() {
             Ok(mut guard) => {
-                guard.decision = Some(decision);
+                guard.decision = Some(answered);
             }
             Err(poisoned) => {
-                poisoned.into_inner().decision = Some(decision);
+                poisoned.into_inner().decision = Some(answered);
             }
         }
     }
 
     /// Non-blocking take of a stored decision, if any.
-    pub fn take_decision(&self) -> Option<PartialDecision> {
-        match self.inner.lock() {
+    pub(crate) fn take_decision(&self) -> Option<(u32, dezoomify_protocol::dto::RecoveryChoice)> {
+        let answered = match self.inner.lock() {
             Ok(mut guard) => guard.decision.take(),
             Err(poisoned) => poisoned.into_inner().decision.take(),
-        }
+        };
+        answered.map(|answered| (answered.generation, answered.decision))
     }
 
     /// Snapshot of the pending request, if any.
@@ -205,13 +215,14 @@ impl PartialGate {
     }
 
     /// Wait up to `timeout` for an interactive answer, polling so
-    /// cancellation stays prompt. Returns `None` on timeout or when
-    /// `cancel_flag` is set (fail-closed to policy at the caller).
+    /// cancellation stays prompt. Returns the answering generation with
+    /// the decision, or `None` on timeout or when `cancel_flag` is set
+    /// (fail-closed to policy at the caller).
     pub fn wait_for_decision(
         &self,
         timeout: Duration,
         cancel_flag: &AtomicBool,
-    ) -> Option<PartialDecision> {
+    ) -> Option<(u32, dezoomify_protocol::dto::RecoveryChoice)> {
         if let Some(decision) = self.take_decision() {
             return Some(decision);
         }
@@ -244,23 +255,6 @@ impl PartialGate {
     }
 }
 
-/// Map an opaque shell choice onto an interactive partial decision.
-/// Stable markers only, never display strings: `discard`/`fail` discards,
-/// `keep`/`partial` keeps, `att:`/`retry` retries.
-#[must_use]
-pub fn partial_decision_from_choice(choice: &str) -> Option<PartialDecision> {
-    let lower = choice.to_ascii_lowercase();
-    if lower.contains("discard") || lower.contains("fail") {
-        Some(PartialDecision::Discard)
-    } else if lower.starts_with("att:") || lower.contains("retry") {
-        Some(PartialDecision::Retry)
-    } else if lower.contains("keep") || lower.contains("partial") {
-        Some(PartialDecision::Keep)
-    } else {
-        None
-    }
-}
-
 /// Pipeline configuration: fetch limits, tile bounds, concurrency.
 #[derive(Clone, Debug)]
 pub struct PipelineConfig {
@@ -275,10 +269,10 @@ pub struct PipelineConfig {
     /// Tile retry budget owned by the job engine. `0` means no retries:
     /// the first failure fails the tile (generic-probing parity).
     pub max_retries: u32,
-    /// Delay before the first tile retry; each subsequent retry doubles
-    /// (`retry_delay`, `2*retry_delay`, ...) plus deterministic per-tile
-    /// jitter from the tile position, mirroring `network.rs`. Default 2s.
-    pub retry_delay: Duration,
+    /// Base retry wait in milliseconds, owned by the job engine (attempt
+    /// `n` waits this value doubled `n-1` times, capped by the backoff
+    /// ceiling; an observed `retry-after` still overrides upward).
+    pub retry_base_delay_ms: u64,
     /// Minimum interval between tile request starts (per-tile throttle).
     /// `ZERO` disables the sleep (the CLI default); the reference default
     /// is 50ms. Applied as start staggering, not as a post-completion wait.
@@ -320,10 +314,10 @@ pub struct PipelineConfig {
     /// level-specifying arg was given (`should_use_largest`); uncapped width
     /// already selects the largest level emergently.
     pub largest: bool,
-    /// Format selector (`--dezoomer`): `None` auto-detects via
+    /// Format selector (`--format`): `None` auto-detects via
     /// `default_registry`; `Some(name)` selects the single named program via
     /// `registry_for` (case-insensitive, `auto` also means auto-detect).
-    /// Unknown names fail with typed `discovery.unknown-dezoomer`.
+    /// Unknown names fail with typed `discovery.unknown-format`.
     pub format: Option<String>,
     /// What to do when required tiles still fail after retries.
     /// Default `Keep` matches the reference `PartialDownload` file behavior
@@ -339,12 +333,21 @@ pub struct PipelineConfig {
     /// work at the next effect boundary, cleans up, and reports
     /// `job.cancelled` without writing output. Clones share the flag.
     pub cancel_flag: Arc<AtomicBool>,
-    /// Pause v1 demonstration (todo 5.7 `--pause-after`): when `Some(n)`,
-    /// the driver pauses the engine after `n` tiles are acquired (suspending
-    /// new `acquire-tile` scheduling, finishing in-flight, retaining
-    /// decoded output), verifies no new work while paused, then resumes and
-    /// completes. `None` disables the demonstration. Never set by default.
-    pub pause_after: Option<usize>,
+    /// Bound on retained (overlapping, unpainted) tile bytes in the output
+    /// sink. Beyond it the job fails `output.canvas-limit` instead of
+    /// growing without bound.
+    pub output_retain_cap: u64,
+    /// Bound on job-owned temp spool bytes for unknown-dimension assembly.
+    /// Beyond it the job fails `output.canvas-limit`; the spool directory
+    /// is removed on commit/rollback, never the destination.
+    pub output_spool_cap: u64,
+    /// External live commands for hosts with a handle (the typed runner):
+    /// selection (image/level/deferred follow), pause/resume. Cancel travels
+    /// on the shared flag, partial answers on the gate. `None` disables
+    /// remote commands; the engine overlay itself stays available through
+    /// pre-start options.
+    pub exec_command_rx:
+        Option<Arc<std::sync::Mutex<std::sync::mpsc::Receiver<dezoomify_engine::UserCommand>>>>,
 }
 
 impl Default for PipelineConfig {
@@ -355,7 +358,7 @@ impl Default for PipelineConfig {
             max_tiles: 1 << 20,
             max_concurrent: 16,
             max_retries: 3,
-            retry_delay: Duration::from_secs(2),
+            retry_base_delay_ms: dezoomify_engine::retry::RETRY_BASE_DELAY_MS,
             min_interval: Duration::ZERO,
             compression: 5,
             cache_dir: Some(default_tile_cache_dir()),
@@ -368,7 +371,9 @@ impl Default for PipelineConfig {
             partial_policy: PartialPolicy::Keep,
             partial_gate: None,
             cancel_flag: Arc::new(AtomicBool::new(false)),
-            pause_after: None,
+            output_retain_cap: 512 << 20,
+            output_spool_cap: 1 << 30,
+            exec_command_rx: None,
         }
     }
 }
@@ -399,15 +404,6 @@ impl PipelineConfig {
     pub fn jpeg_quality(&self) -> u8 {
         100u8.saturating_sub(self.compression)
     }
-
-    /// PNG deflate tier from `--compression` (reference
-    /// `png_encoder.rs:30-34`): 0-19 fast, 20-60 balanced, above high.
-    /// The default compression 5 selects fast, matching the previous
-    /// fixed encoder byte for byte.
-    #[must_use]
-    pub(crate) fn png_compression(&self) -> image::codecs::png::CompressionType {
-        png_compression_for(self.compression)
-    }
 }
 
 /// PNG deflate tier for a `--compression` value (reference
@@ -435,14 +431,6 @@ pub(crate) fn tiff_compression_for(compression: u8) -> tiff::encoder::compressio
     }
 }
 
-/// Progress event emitted by the pipeline. Kinds: `discovery`, `downloading`,
-/// `encoding`. Details carry counts; nothing is fabricated.
-#[derive(Clone, Debug)]
-pub struct PipelineEvent {
-    pub kind: String,
-    pub detail: BTreeMap<String, String>,
-}
-
 /// Successful pipeline result for the bytes actually written.
 #[derive(Clone, Debug)]
 pub struct PipelineOutcome {
@@ -456,6 +444,10 @@ pub struct PipelineOutcome {
     /// Tile ids left blank in a kept partial (empty for complete saves).
     /// Redacted ids only, never URLs or paths.
     pub missing: Vec<String>,
+    /// Honest execution accounting for the shipped pipeline: attempts,
+    /// retries, bytes fetched, retained/encoded/spool peaks, and the
+    /// accounted peak (canvas plus peak retained plus encoded).
+    pub instrumentation: crate::exec::Instrumentation,
 }
 
 fn user_headers_for(input_url: &str, config: &PipelineConfig) -> UserHeaders {
@@ -470,13 +462,33 @@ pub fn run(
     output_path: &str,
     overwrite: bool,
     config: &PipelineConfig,
-    on_event: &mut dyn FnMut(PipelineEvent),
+    on_snapshot: &mut dyn FnMut(&dezoomify_engine::JobSnapshot),
 ) -> Result<PipelineOutcome, NativeError> {
     let format = OutputFormat::infer_from_path(std::path::Path::new(output_path))?;
     validate_destination(std::path::Path::new(output_path), &format, overwrite)?;
 
     let user = user_headers_for(input_url, config);
-    crate::job_driver::drive(input_url, output_path, overwrite, config, &user, on_event)
+    let result = crate::exec::execute(
+        input_url,
+        &crate::exec::OutputSpec {
+            output_path: PathBuf::from(output_path),
+            overwrite,
+            format,
+            auto_output_dir: None,
+        },
+        config,
+        &user,
+        on_snapshot,
+    )?;
+    Ok(PipelineOutcome {
+        output_path: result.output_path,
+        tile_count: result.tile_count,
+        image_size: result.image_size,
+        format: result.format,
+        partial: result.partial,
+        missing: result.missing,
+        instrumentation: result.instrumentation,
+    })
 }
 
 /// Run a desktop-style job that saves directly to a configured directory.
@@ -487,10 +499,41 @@ pub fn run_auto_named(
     output_dir: &Path,
     format: OutputFormat,
     config: &PipelineConfig,
-    on_event: &mut dyn FnMut(PipelineEvent),
+    on_snapshot: &mut dyn FnMut(&dezoomify_engine::JobSnapshot),
 ) -> Result<PipelineOutcome, NativeError> {
     let user = user_headers_for(input_url, config);
-    crate::job_driver::drive_auto_named(input_url, output_dir, format, config, &user, on_event)
+    let result = crate::exec::execute(
+        input_url,
+        &crate::exec::OutputSpec {
+            output_path: output_dir.join(format!("dezoomify.{}", output_dir_extension(format))),
+            overwrite: false,
+            format,
+            auto_output_dir: Some(output_dir.to_path_buf()),
+        },
+        config,
+        &user,
+        on_snapshot,
+    )?;
+    Ok(PipelineOutcome {
+        output_path: result.output_path,
+        tile_count: result.tile_count,
+        image_size: result.image_size,
+        format: result.format,
+        partial: result.partial,
+        missing: result.missing,
+        instrumentation: result.instrumentation,
+    })
+}
+
+fn output_dir_extension(format: OutputFormat) -> &'static str {
+    match format {
+        OutputFormat::Png => "png",
+        OutputFormat::Jpeg => "jpg",
+        OutputFormat::Tiff => "tif",
+        OutputFormat::Zif => "zif",
+        OutputFormat::Webp => "webp",
+        OutputFormat::IiifDir => "iiif",
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -518,7 +561,9 @@ pub(crate) fn merge_headers(request: &Request) -> BTreeMap<String, String> {
 /// The decoded tile carries the first-seen ICC profile and EXIF metadata
 /// alongside the pixels (reference `tile.rs:186-219`); metadata extraction
 /// failures fall back to `None` while decode failures fail the tile.
-pub(crate) struct DecodedTile {
+/// Decoded tile pixels plus first-seen ICC/EXIF metadata. Pub for the
+/// output sink, which owns painting order and deterministic metadata.
+pub struct DecodedTile {
     pub image: image::RgbaImage,
     pub icc_profile: Option<Vec<u8>>,
     pub exif_metadata: Option<Vec<u8>>,
@@ -548,48 +593,6 @@ pub(crate) fn load_image_with_metadata(
     })
 }
 
-pub(crate) fn fetch_and_decode_cached(
-    uri: &str,
-    headers: &BTreeMap<String, String>,
-    processing: &ProcessingRecipe,
-    config: &PipelineConfig,
-    user: &UserHeaders,
-    cache: Option<(&std::path::Path, &str)>,
-) -> Result<DecodedTile, NativeError> {
-    if let Some((dir, namespace)) = cache {
-        if let Some(bytes) = crate::cache::load(dir, namespace, uri) {
-            if let Ok(loaded) = load_image_with_metadata(&bytes) {
-                return Ok(DecodedTile {
-                    image: loaded.image.to_rgba8(),
-                    icc_profile: loaded.icc_profile,
-                    exif_metadata: loaded.exif_metadata,
-                });
-            }
-        }
-    }
-    let mut request = Request::new(uri);
-    request.headers = headers.clone();
-    let merged = merge_headers(&request);
-    let outcome = fetch(uri, &merged, Some(user), None, &config.fetch)?;
-    if !outcome.ok() {
-        return Err(NativeError::new(
-            "tile.http-error",
-            describe_http_failure(&outcome),
-        ));
-    }
-    let bytes = processing.apply(outcome.body).map_err(NativeError::from)?;
-    if let Some((dir, namespace)) = cache {
-        let _ = crate::cache::store(dir, namespace, uri, &bytes);
-    }
-    let loaded = load_image_with_metadata(&bytes)
-        .map_err(|e| NativeError::new("tile.decode-failed", format!("tile decode failed: {e}")))?;
-    Ok(DecodedTile {
-        image: loaded.image.to_rgba8(),
-        icc_profile: loaded.icc_profile,
-        exif_metadata: loaded.exif_metadata,
-    })
-}
-
 /// Provide actionable, redacted HTTP diagnostics for host logs.
 pub(crate) fn describe_http_failure(outcome: &crate::http::FetchOutcome) -> String {
     let mut requested = redact_uri(&outcome.final_uri);
@@ -598,52 +601,6 @@ pub(crate) fn describe_http_failure(outcome: &crate::http::FetchOutcome) -> Stri
         requested.push_str("...");
     }
     format!("request to {requested} returned HTTP {}", outcome.status)
-}
-
-pub(crate) struct ProbeRead {
-    pub observation: ObservationResult,
-    pub decoded: Option<DecodedTile>,
-}
-
-pub(crate) fn probe_tile_bytes(
-    uri: &str,
-    headers: &BTreeMap<String, String>,
-    processing: &ProcessingRecipe,
-    config: &PipelineConfig,
-    user: &UserHeaders,
-) -> ProbeRead {
-    let missing = || ProbeRead {
-        observation: ObservationResult::Missing,
-        decoded: None,
-    };
-    let mut request = Request::new(uri);
-    request.headers = headers.clone();
-    let merged = merge_headers(&request);
-    let Ok(outcome) = fetch(uri, &merged, Some(user), None, &config.fetch) else {
-        return missing();
-    };
-    if !outcome.ok() || outcome.body.is_empty() {
-        return missing();
-    }
-    let Ok(bytes) = processing.apply(outcome.body) else {
-        return missing();
-    };
-    match load_image_with_metadata(&bytes) {
-        Ok(loaded) => ProbeRead {
-            observation: ObservationResult::Available {
-                size: Vec2d {
-                    x: loaded.image.width(),
-                    y: loaded.image.height(),
-                },
-            },
-            decoded: Some(DecodedTile {
-                image: loaded.image.to_rgba8(),
-                icc_profile: loaded.icc_profile,
-                exif_metadata: loaded.exif_metadata,
-            }),
-        },
-        Err(_) => missing(),
-    }
 }
 
 pub(crate) fn blit_onto(
@@ -1002,70 +959,9 @@ pub(crate) fn render_iiif_dir(
     Ok((iiif_info_json(id, width, height), files))
 }
 
-/// Retry wait for a tile with `failures` prior failures: the base
-/// `retry_delay` plus deterministic position jitter (`idx = (x + y) % 100`
-/// of one hundredth each), doubled per retry. Mirrors `network.rs`:
-/// the first retry waits the base delay, the next twice that, and so on.
-/// `failures == 0` (first attempt) waits nothing.
-pub(crate) fn retry_wait(
-    retry_delay: Duration,
-    destination_x: u32,
-    destination_y: u32,
-    failures: u32,
-) -> Duration {
-    if failures == 0 {
-        return Duration::ZERO;
-    }
-    let idx = destination_x.wrapping_add(destination_y) % 100;
-    let jitter = retry_delay
-        .checked_div(100)
-        .and_then(|unit| unit.checked_mul(idx))
-        .unwrap_or(Duration::ZERO);
-    let mut wait = retry_delay + jitter;
-    for _ in 1..failures {
-        wait = wait.checked_mul(2).unwrap_or(Duration::MAX);
-    }
-    wait
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn first_attempt_never_waits() {
-        assert_eq!(
-            retry_wait(Duration::from_secs(2), 10, 20, 0),
-            Duration::ZERO
-        );
-    }
-
-    #[test]
-    fn first_retry_waits_base_plus_position_jitter() {
-        // idx = (10 + 20) % 100 = 30 → 2s + 30 * 20ms = 2.6s.
-        assert_eq!(
-            retry_wait(Duration::from_secs(2), 10, 20, 1),
-            Duration::from_millis(2600)
-        );
-        // Origin tiles carry no jitter.
-        assert_eq!(
-            retry_wait(Duration::from_secs(2), 0, 0, 1),
-            Duration::from_secs(2)
-        );
-    }
-
-    #[test]
-    fn retries_double_each_time() {
-        let first = retry_wait(Duration::from_secs(2), 10, 20, 1);
-        assert_eq!(
-            retry_wait(Duration::from_secs(2), 10, 20, 2),
-            first.checked_mul(2).unwrap()
-        );
-        assert_eq!(
-            retry_wait(Duration::from_secs(2), 10, 20, 3),
-            first.checked_mul(4).unwrap()
-        );
-    }
 
     #[test]
     fn compression_maps_to_jpeg_quality_and_png_tiers() {
@@ -1277,6 +1173,7 @@ mod tests {
 
     #[test]
     fn partial_gate_early_answer_survives_wait() {
+        use dezoomify_protocol::dto::RecoveryChoice;
         let gate = PartialGate::new();
         gate.announce(PartialRequest {
             missing: vec!["tile:1".to_string()],
@@ -1287,13 +1184,34 @@ mod tests {
             gate.pending_request().expect("pending").missing,
             vec!["tile:1".to_string()]
         );
-        gate.answer(PartialDecision::Keep);
+        gate.answer(7, RecoveryChoice::Keep);
         let flag = AtomicBool::new(false);
         assert_eq!(
             gate.wait_for_decision(Duration::from_secs(5), &flag),
-            Some(PartialDecision::Keep)
+            Some((7, RecoveryChoice::Keep))
         );
         // Each wait consumes exactly one decision so a retry can ask again.
+        assert_eq!(gate.take_decision(), None);
+    }
+
+    #[test]
+    fn partial_gate_carries_generations_in_order() {
+        use dezoomify_protocol::dto::RecoveryChoice;
+        let gate = PartialGate::new();
+        // Each wait consumes exactly one answered generation, so a stale
+        // host answer reaches the engine with its own generation and is
+        // rejected there instead of consumed in order.
+        let flag = AtomicBool::new(false);
+        gate.answer(3, RecoveryChoice::Keep);
+        assert_eq!(
+            gate.wait_for_decision(Duration::from_secs(5), &flag),
+            Some((3, RecoveryChoice::Keep))
+        );
+        gate.answer(4, RecoveryChoice::Discard);
+        assert_eq!(
+            gate.wait_for_decision(Duration::from_secs(5), &flag),
+            Some((4, RecoveryChoice::Discard))
+        );
         assert_eq!(gate.take_decision(), None);
     }
 
@@ -1317,22 +1235,5 @@ mod tests {
             None,
             "cancellation never blocks the driver"
         );
-    }
-
-    #[test]
-    fn partial_choice_markers_map_without_display_strings() {
-        assert_eq!(
-            partial_decision_from_choice("partial:keep"),
-            Some(PartialDecision::Keep)
-        );
-        assert_eq!(
-            partial_decision_from_choice("partial:discard"),
-            Some(PartialDecision::Discard)
-        );
-        assert_eq!(
-            partial_decision_from_choice("att:0:ready"),
-            Some(PartialDecision::Retry)
-        );
-        assert_eq!(partial_decision_from_choice("img:0"), None);
     }
 }

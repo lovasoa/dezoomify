@@ -1,31 +1,33 @@
 /** Dedicated extension job-tab integration. No webpage postMessage bridge. */
 import { describeFailure, isActiveJobStatus, jobPageTitle, renderView } from "@dezoomify/shared-ui";
+import { createJobService } from "@dezoomify/app-model";
+import { presentFailure, presentSnapshot, presentStatus } from "@dezoomify/shared-ui";
 import { createElement } from "react";
-import type { StructuredError, UiStatus, ViewContext as SharedViewContext } from "@dezoomify/shared-ui";
+import type { JobHandle, JobSnapshot } from "@dezoomify/app-model";
+import type { ErrorDto, JobState } from "@dezoomify/app-model";
+import type {
+  PresentationStatus,
+  SnapshotPresentation,
+  StructuredError,
+  ViewContext as SharedViewContext,
+} from "@dezoomify/shared-ui";
 import {
   canvasToPngBlob,
+  createBrowserRunner,
   createCanvasAssembly,
-  createEngineHost,
   createProbeSize,
+  createSelectionDriver,
   createTileDecoder,
-  dispatchTyped,
-  MAX_DEFERRED_FOLLOWS,
-  pickDeferredUri,
-  pickEngineSelection,
   saveBlobViaAnchor,
-  type DispatchTable,
-  type WorkerHostOutput,
 } from "@dezoomify/browser-runtime";
 import { createExtensionFetcher } from "../runtime/fetch.ts";
 import { originOfUrl } from "@dezoomify/browser-runtime";
 import { createLogger } from "@dezoomify/browser-runtime/logging";
-import type { EngineHost } from "@dezoomify/browser-runtime";
 import { AccessRequestView, PartialOutputActions } from "./view.tsx";
 import { createCoordinatorSourceTransport, createEngineResourceFetcher, engineFailure, isJobBinding } from "./transport.ts";
 import type { JobBinding } from "./transport.ts";
-import type { JobEvent, ProcessingRecipe } from "@dezoomify/wasm-bindings";
+import type { ProcessingRecipe } from "@dezoomify/wasm-bindings";
 
-declare const __DEZOOMIFY_TEST_DRIVER__: boolean;
 declare const __DEZOOMIFY_TEST_PERMISSION_MOCK__: boolean;
 
 type ExtensionApi = {
@@ -53,29 +55,22 @@ let binding: JobBinding | null = null;
 let siteOrigin = "";
 /** Fallback request ids for probes that arrive without an engine request id. Start clear of the engine's small sequential ids. */
 let probeSeq = 1 << 30;
-let controller: EngineHost | null = null;
+// One shared browser runner attempt. The runner owns the worker, the WASM
+// session, cross-worker processing calls, the abort scope, and disposal;
+// this tab keeps binding, transport, assembly, and view wiring. The single
+// authoritative snapshot renders directly; no derived mirrors.
+let jobHandle: JobHandle | null = null;
 let sourceTransport: ReturnType<typeof createCoordinatorSourceTransport> | null = null;
-let jobWorker: Worker | null = null;
+/** Runner abort signal of the live attempt (drives the cancelled() transport view). */
+let attemptSignal: AbortSignal | null = null;
 /** @type {ReturnType<typeof createCanvasAssembly> | null} */
 let assembly: ReturnType<typeof createCanvasAssembly> | null = null;
-let seq = 0;
-let started = false;
-let selected = false;
-let hostFailed = false;
-let lastSource = "";
-let selectedTitle: string | undefined;
-// Deferred-follow depth for the current logical job: reset when a new binding
-// or explicit retry starts, incremented once per followed ImageRequest.
-let followDepth = 0;
-// The engine emits the initial 0/N tile snapshot before it dispatches tile
-// effects. Keep it while a permission view temporarily replaces the job view
-// so approval resumes the same determinate progress display immediately.
-let lastTileProgress: { current: number; total: number } | null = null;
-let accessRequest: { hosts: string[]; requesting: boolean } | null = null;
-let partialDecision: number | null = null;
-// Cross-worker processing calls (session.applyProcessing) awaiting a reply.
-const pendingProcess = new Map<number, { resolve: (bytes: ArrayBuffer) => void; reject: (error: unknown) => void }>();
-let processSeq = 0;
+let saveCompleted = false;
+/** Single authoritative snapshot: render it directly, never a derived copy. */
+let activeSnapshot: JobSnapshot | null = null;
+let localFailure: StructuredError | null = null;
+/** Ephemeral permission view (telemetry only, never gates commands). */
+let pendingPermission: { hosts: string[]; requesting: boolean } | null = null;
 const testGrantedOrigins = new Set<string>();
 const bootstrapJobId = new URLSearchParams(location.hash.slice(1)).get("jobId");
 
@@ -97,7 +92,7 @@ export const EXTENSION_JOB_BASE_TITLE = "Dezoomify job";
  * Keep the job-tab title useful while a job runs. Hosts own the
  * `document.title` assignment; shared UI stays pure.
  */
-export function syncExtensionJobTitle(status: UiStatus, sourceUrl: string): void {
+export function syncExtensionJobTitle(status: PresentationStatus, sourceUrl: string): void {
   if (typeof document === "undefined") return;
   try {
     const active = isActiveJobStatus(status);
@@ -108,12 +103,80 @@ export function syncExtensionJobTitle(status: UiStatus, sourceUrl: string): void
   }
 }
 
-function render(status: UiStatus, ctx: ViewContext = {}) {
+/** Save filename from the authoritative snapshot catalog; undefined when nothing is selected yet. */
+function activeTitle(): string | undefined {
+  const catalog = activeSnapshot?.selection.catalog;
+  const idx = activeSnapshot?.selection.image;
+  if (!catalog || idx === null || idx === undefined) return undefined;
+  const entry = catalog.entries[idx];
+  if (entry && entry.kind === "image" && typeof entry.title === "string" && entry.title !== "") return entry.title;
+  return undefined;
+}
+
+/**
+ * Host-step status for the pre-terminal title/activity only. Headlines and
+ * progress always come from presentSnapshot of the DTO; this never drives
+ * engine commands.
+ */
+function statusForLifecycle(lifecycle: JobState): PresentationStatus {
+  switch (lifecycle) {
+    case "Created":
+    case "Discovering":
+      return "discovering";
+    case "AwaitingImageSelection":
+      return "choosing-image";
+    case "AwaitingLevelSelection":
+      return "choosing-level";
+    case "Planning":
+      return "preflighting";
+    case "Finalizing":
+      return "saving";
+    case "AcquiringTiles":
+    case "AwaitingPartialDecision":
+    case "Cancelling":
+      return "downloading";
+    case "Completed":
+    case "PartiallyCompleted":
+      return "completed";
+    case "Failed":
+      return "failed";
+    case "Cancelled":
+      return "cancelled";
+  }
+}
+
+function presentFor(status: PresentationStatus, ctx: ViewContext): SnapshotPresentation {
+  if (localFailure) return presentFailure(localFailure, "browser-session");
+  if (activeSnapshot) {
+    // Display-only is a host-known output fact (tainted canvas): probe the
+    // assembly like the website does and pass it explicitly to
+    // presentSnapshot. It is never written into the DTO.
+    let displayOnly = false;
+    try {
+      displayOnly = assembly?.isTainted?.() === true;
+    } catch {
+      displayOnly = false;
+    }
+    return presentSnapshot(activeSnapshot, "browser-session", { displayOnly });
+  }
+  return presentStatus(status, {
+    transport: "browser-session",
+    ...(ctx.failure ? { error: ctx.failure } : {}),
+  });
+}
+
+function render(status: PresentationStatus, ctx: ViewContext = {}) {
   const target = root();
   if (!target) return;
-  seq += 1;
   const viewActivity = { ...(ctx.jobActivity ?? {}), ...(uiLogLines.length ? { log: uiLogLines.slice() } : {}) };
-  renderView(target, { status, seq, sessionId: binding?.jobId ?? "job:pending", transport: "browser-session", imageCount: 0, ...(ctx.failure ? { error: ctx.failure } : {}) }, {
+  const presentation = presentFor(status, ctx);
+  // Outstanding partial decision, read off the DTO only: the closed
+  // keep/retry/discard answers are the engine's RecoveryChoice values, never
+  // fabricated actions.
+  const decisionGeneration = activeSnapshot?.lifecycle === "AwaitingPartialDecision"
+    ? activeSnapshot.decision?.generation
+    : undefined;
+  renderView(target, presentation, {
     onSubmitUrl: () => {},
     onCancel: closeJob,
     onCopyDiagnostics: copyDiagnostics,
@@ -123,14 +186,14 @@ function render(status: UiStatus, ctx: ViewContext = {}) {
     ...ctx,
     ...(Object.keys(viewActivity).length ? { jobActivity: viewActivity } : {}),
   }, {
-    ...(accessRequest ? { replace: createElement(AccessRequestView, {
-      origin: accessRequest.hosts.length === 1 ? accessRequest.hosts[0] : "the required image host",
-      requesting: accessRequest.requesting,
+    ...(pendingPermission ? { replace: createElement(AccessRequestView, {
+      origin: pendingPermission.hosts.length === 1 ? pendingPermission.hosts[0] : "the required image host",
+      requesting: pendingPermission.requesting,
       onRequest: () => {
-      if (!accessRequest || accessRequest.requesting) return;
-      accessRequest.requesting = true;
+      if (!pendingPermission || pendingPermission.requesting) return;
+      pendingPermission.requesting = true;
       render(status, ctx);
-      const hosts = accessRequest.hosts;
+      const hosts = pendingPermission.hosts;
       const origins = hosts.map((origin) => `${origin}/*`);
       // Optional-host consent must be requested synchronously from this
       // click handler. A message hop to the service worker loses Chrome's
@@ -147,21 +210,21 @@ function render(status: UiStatus, ctx: ViewContext = {}) {
           ...(__DEZOOMIFY_TEST_PERMISSION_MOCK__ ? { testGrant: true } : {}),
         }));
       }).catch(() => {
-        if (!accessRequest) return;
-        accessRequest.requesting = false;
+        if (!pendingPermission) return;
+        pendingPermission.requesting = false;
         render(status, ctx);
       });
       },
     }) } : {}),
-    ...(partialDecision !== null ? { after: createElement(PartialOutputActions, { onChoose: (keep) => {
-      const generation = partialDecision;
-      if (generation === null) return;
-      partialDecision = null;
-      controller?.chooseRecovery(generation, keep ? "keep" : "discard");
-      render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Finishing the image" } });
+    ...(decisionGeneration !== undefined && !pendingPermission ? { after: createElement(PartialOutputActions, { onChoose: (keep) => {
+      void jobHandle?.command({ type: "answer-partial", generation: decisionGeneration, decision: keep ? "keep" : "discard" });
+      render("downloading", { jobActivity: { startedAt: Date.now() } });
+    }, onRetry: () => {
+      void jobHandle?.command({ type: "answer-partial", generation: decisionGeneration, decision: "retry" });
+      render("downloading", { jobActivity: { startedAt: Date.now() } });
     } }) } : {}),
   });
-  syncExtensionJobTitle(status, typeof ctx.jobActivity?.url === "string" && ctx.jobActivity.url !== "" ? ctx.jobActivity.url : lastSource);
+  syncExtensionJobTitle(status, siteOrigin);
 }
 
 function send(message: unknown): Promise<unknown> {
@@ -173,7 +236,12 @@ function send(message: unknown): Promise<unknown> {
 
 function closeJob() {
   jobLog.info("job-close", `jobId=${binding?.jobId ?? "unknown"}`);
-  controller?.cancel();
+  const handle = jobHandle;
+  jobHandle = null;
+  if (handle) {
+    void handle.command({ type: "cancel" }).catch(() => {});
+    void handle.dispose().catch(() => {});
+  }
   if (binding) void send(boundEnvelope("dz.job.cancel")).catch(() => {});
   if (binding) void send(boundEnvelope("dz.job.closed")).catch(() => {});
 }
@@ -181,42 +249,31 @@ function closeJob() {
 function showAccessRequired(detail: { hosts: string[] }) {
   const hosts = Array.isArray(detail.hosts) ? detail.hosts : [];
   jobLog.info("permission-requested", `jobId=${binding?.jobId ?? "unknown"} hosts=${hosts.length}`);
-  accessRequest = { hosts, requesting: false };
-  render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Waiting for access" } });
+  pendingPermission = { hosts, requesting: false };
+  render("downloading", { jobActivity: { startedAt: Date.now() } });
 }
 
 function resolvePermission(message: Record<string, unknown>) {
   if (!binding || message.jobId !== binding.jobId || typeof message.granted !== "boolean") return;
   jobLog.info("permission-resolved", `jobId=${binding.jobId} granted=${message.granted}`);
-  accessRequest = null;
+  pendingPermission = null;
   if (__DEZOOMIFY_TEST_PERMISSION_MOCK__ && message.granted && Array.isArray(message.origins)) {
     for (const origin of message.origins) if (typeof origin === "string") testGrantedOrigins.add(origin);
   }
   if (message.granted) {
-    const progress = lastTileProgress;
     render("downloading", {
-      ...(progress ? { currentProgress: progress } : {}),
-      jobActivity: { startedAt: Date.now(), stepLabel: "Acquiring image tiles" },
+      jobActivity: { startedAt: Date.now() },
     });
   }
-  controller?.resolvePermission(message.granted);
-}
-
-/**
- * The engine stopped for a typed partial decision: every failed tile has
- * exhausted its retries. Only an explicit user action chooses keep/discard;
- * the engine owns the consequence (encode with missing regions, or fail).
- */
-function showPartialDecision(generation: number) {
-  if (!Number.isSafeInteger(generation) || generation < 0) return;
-  partialDecision = generation;
-  render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Some tiles are missing" } });
+  try {
+    jobHandle?.resolvePermission?.(message.granted);
+  } catch { /* grant resolution is best effort */ }
 }
 
 /** Source host for shared copy interpolation; "" when the input is unparseable. */
 function sourceHost(): string {
   try {
-    return new URL(lastSource).host;
+    return new URL(siteOrigin).host;
   } catch {
     return "";
   }
@@ -226,67 +283,52 @@ function sourceHost(): string {
  * One shared presenter for engine failures: the plain headline goes in
  * `message`, the engine's raw per-format aggregate moves to `detail`, and the
  * stable category/phase/retryable are derived from the code. The extension
- * never renders the raw engine block as the first message.
+ * never renders the raw engine block as the first message. Every field is
+ * typed from the terminal ErrorDto; nothing is read off untyped shapes.
  */
-function presentEngineFailure(raw: unknown): StructuredError {
-  const candidate = raw && typeof raw === "object"
-    ? raw as { code?: unknown; message?: unknown; detail?: unknown; retryable?: unknown; phase?: unknown; transport?: unknown; request?: unknown; http?: unknown; preview?: unknown }
-    : null;
+function presentEngineFailure(error: ErrorDto): StructuredError {
   return describeFailure({
-    code: typeof candidate?.code === "string" ? candidate.code : "job.failed",
-    engineDetail: typeof candidate?.detail === "string"
-      ? candidate.detail
-      : (typeof candidate?.message === "string" ? candidate.message : ""),
-    retryable: typeof candidate?.retryable === "boolean" ? candidate.retryable : undefined,
-    phase: typeof candidate?.phase === "string" ? candidate.phase : undefined,
+    code: error.code,
+    engineDetail: error.detail ?? error.message,
+    retryable: error.retryable,
+    phase: error.phase,
     // The extension always fetches under the granted browser session; the
     // engine's typed event carries no transport, so the details line would
     // otherwise misreport `direct`.
-    transport: typeof candidate?.transport === "string" ? candidate.transport : "browser-session",
+    transport: error.transport ?? "browser-session",
     host: sourceHost(),
-    url: typeof candidate?.request === "string" ? candidate.request : undefined,
-    http: typeof candidate?.http === "number" ? candidate.http : undefined,
-    preview: typeof candidate?.preview === "string" ? candidate.preview : undefined,
+    url: error.request,
+    http: error.http,
+    preview: error.preview,
   });
 }
 
 /** Host-side effect execution failed terminally: render it and stop. */
 function onHostFailure(error: unknown) {
-  if (hostFailed) return;
-  hostFailed = true;
+  if (localFailure) return;
   const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code) : "output-failed";
   const phase = error && typeof error === "object" && "phase" in error ? String((error as { phase?: unknown }).phase) : "unknown";
   jobLog.error("host-failure", `jobId=${binding?.jobId ?? "unknown"} code=${code} phase=${phase} message=${error instanceof Error ? error.message : String(error)}`);
   const candidate = error && typeof error === "object"
     ? error as { code?: unknown; message?: unknown; retryable?: unknown; detail?: unknown; phase?: unknown; transport?: unknown }
     : null;
-  const message = code === "adapter.wrong-state"
-    ? "The extension lost sync while reading this image. Start the scan again."
-    : (typeof candidate?.message === "string" ? candidate.message : "The image could not be assembled in this tab.");
-  const failure = describeFailure({
+  localFailure = describeFailure({
     code,
-    message,
-    engineDetail: typeof candidate?.detail === "string" ? candidate.detail : undefined,
-    category: "extension",
+    engineDetail: typeof candidate?.detail === "string"
+      ? candidate.detail
+      : (typeof candidate?.message === "string" ? candidate.message : undefined),
     retryable: candidate?.retryable === true,
     phase,
     transport: typeof candidate?.transport === "string" ? candidate.transport : undefined,
     host: sourceHost(),
   });
-  render("failed", { failure, jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } });
+  render("failed", { jobActivity: { startedAt: Date.now() } });
 }
 
-/** Apply one core processing recipe through the worker session. */
-function processTile(recipe: ProcessingRecipe, bytes: ArrayBuffer): Promise<ArrayBuffer> {
-  if (!jobWorker) return Promise.reject(Object.assign(new Error("worker unavailable"), { code: "WORKER_FAILED" }));
-  const requestId = ++processSeq;
-  return new Promise((resolve, reject) => {
-    pendingProcess.set(requestId, { resolve, reject });
-    jobWorker?.postMessage({ type: "engine.process", requestId, recipe, bytes }, [bytes]);
-  });
-}
-
-function createAssembly(sourceUrl: string) {
+function createAssembly(
+  sourceUrl: string,
+  processTile: (recipe: ProcessingRecipe, bytes: ArrayBuffer) => Promise<ArrayBuffer>,
+) {
   const decoder = createTileDecoder();
   return createCanvasAssembly({
     decode: (bytes: ArrayBuffer) => decoder.decode(bytes),
@@ -309,7 +351,8 @@ function createAssembly(sourceUrl: string) {
       if (!(blob instanceof Blob)) throw new TypeError("encoded output is not a Blob");
       const url = URL.createObjectURL(blob);
       try {
-        saveBlobViaAnchor(document, url, width, height, selectedTitle);
+        saveBlobViaAnchor(document, url, width, height, activeTitle());
+        saveCompleted = true;
       } finally {
         // The anchor save reads the URL synchronously; revoke lazily so the
         // browser never races a slow download start.
@@ -320,79 +363,55 @@ function createAssembly(sourceUrl: string) {
   });
 }
 
-const eventHandlers = {
-  progress: (event) => {
-    jobLog.debug("engine-progress", `acquired=${event.acquired} total=${event.total}`);
-    lastTileProgress = { current: event.acquired, total: event.total };
-    render("downloading", { currentProgress: lastTileProgress, jobActivity: { startedAt: Date.now(), stepLabel: "Acquiring image tiles" } });
-  },
-  failed: (event) => {
-    jobLog.error("engine-event", `type=failed error=${JSON.stringify(event.error)}`);
-    partialDecision = null;
-    render("failed", { failure: presentEngineFailure(event.error), jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } });
-  },
-  cancelled: () => {
-    jobLog.info("engine-event", "type=cancelled");
-    partialDecision = null;
-    render("cancelled", { jobActivity: { startedAt: Date.now(), stepLabel: "Cancelled" } });
-  },
-  completed: () => {
-    jobLog.info("engine-event", "type=completed");
-    partialDecision = null;
-    render("completed", { jobActivity: { startedAt: Date.now(), stepLabel: "Completed" } });
-  },
-  "partial-completed": () => {
-    jobLog.info("engine-event", "type=partial-completed");
-    partialDecision = null;
-    render("completed", { jobActivity: { startedAt: Date.now(), stepLabel: "Completed (partial)" } });
-  },
-  catalog: (event) => {
-    if (selected) return;
-    const entries = event.catalog.entries;
-    jobLog.info("engine-event", `type=catalog entries=${entries.length}`);
-    const selection = pickEngineSelection(event.catalog);
-    if (!selection) {
-      // A still-deferred catalog (IIIF manifest, bulk list) resolves through
-      // its first request with a fresh, bounded attempt. The engine never
-      // follows deferred metadata silently.
-      const deferredUri = pickDeferredUri(event.catalog);
-      if (deferredUri && followDepth < MAX_DEFERRED_FOLLOWS) {
-        followDepth += 1;
-        jobLog.info("deferred-follow", `depth=${followDepth}`);
-        render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Resolving the image metadata" } });
-        // Defer the teardown out of this engine event chain so the current
-        // attempt settles before its worker and controller are replaced.
-        queueMicrotask(() => startAttempt(deferredUri));
-        return;
-      }
-      selected = true;
-      onHostFailure(Object.assign(
-        new Error(deferredUri
-          ? "The image metadata stayed deferred after the resolution limit."
-          : "No downloadable image was found on this page."),
-        { code: deferredUri ? "discovery.deferred" : "NO_IMAGE_FOUND", retryable: false },
-      ));
-      controller?.cancel();
+/**
+ * Drive selection and deferred follows from the authoritative snapshot via
+ * the shared selection driver. Ready images select once; still-deferred
+ * entries follow in the same job through the follow-up command (engine owns
+ * budget and cycle guards, never a host recursion with a fresh attempt).
+ * Reads only the generated DTO shape.
+ */
+// One selection driver per attempt: a follow command's own answer snapshot
+// still carries the old catalog, so replays must not resend the follow.
+let selectionDriver = createSelectionDriver();
+
+function driveSnapshot(snapshot: JobSnapshot) {
+  const drive = selectionDriver.drive(snapshot);
+  switch (drive.action) {
+    case "already-driven":
+      return;
+    case "selected":
+    case "waiting":
+      return;
+    case "select": {
+      const catalog = snapshot.selection.catalog;
+      if (catalog) jobLog.info("selection-catalog", `entries=${catalog.entries.length}`);
+      render(statusForLifecycle(snapshot.lifecycle), { jobActivity: { startedAt: Date.now() } });
+      void jobHandle?.command({ type: "select-image", image: drive.image }).catch(() => {});
+      void jobHandle?.command({ type: "select-level", level: drive.level }).catch(() => {});
       return;
     }
-    selected = true;
-    selectedTitle = selection.title;
-    render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Preparing the image" } });
-    controller?.selectImage(selection.image);
-    controller?.selectLevel(selection.level);
-  },
-  warning: (event) => {
-    jobLog.warn("engine-warning", JSON.stringify(event.error));
-  },
-  "recovery-request": () => {},
-  "job-state": () => {},
-  paused: () => {},
-  resumed: () => {},
-} satisfies DispatchTable<JobEvent, void>;
+    case "follow-deferred":
+      followDeferredAt(drive.position);
+      return;
+    case "unselectable":
+      onHostFailure(Object.assign(
+        new Error("No downloadable image was found on this page."),
+        { code: "NO_IMAGE_FOUND", retryable: false },
+      ));
+      void jobHandle?.command({ type: "cancel" }).catch(() => {});
+      return;
+  }
+}
 
-function handleEvent(event: JobEvent) {
-  if (hostFailed) return;
-  dispatchTyped(eventHandlers, event);
+function followDeferredAt(image: number) {
+  jobLog.info("deferred-follow", `image=${image}`);
+  render("discovering", { jobActivity: { startedAt: Date.now() } });
+  void jobHandle?.command({ type: "follow-deferred", image }).catch((error) => {
+    onHostFailure(Object.assign(
+      new Error("The image metadata stayed deferred after the resolution limit."),
+      { code: "discovery.deferred", retryable: false, detail: error instanceof Error ? error.message : undefined },
+    ));
+  });
 }
 
 function setup(bound: unknown) {
@@ -411,56 +430,49 @@ function setup(bound: unknown) {
     siteOrigin = typeof documentUrl === "string" ? originOfUrl(documentUrl) : "";
   } catch { siteOrigin = ""; }
   jobLog.info("binding-received", `jobId=${binding.jobId} tab=${binding.tabId} frame=${binding.frameId} gen=${binding.documentGeneration}`);
-  followDepth = 0;
   startAttempt();
 }
 
 /**
  * Tear down the current attempt. The durable source binding survives; the
- * worker, WASM session, controller, output assembly, and pending fetch state
- * do not. Called before every attempt so a retry can never reuse a terminal
+ * runner attempt (worker, WASM session, output assembly, fetch state) does
+ * not. Called before every attempt so a retry can never reuse a terminal
  * engine session or a stale request ledger.
  */
 function stopAttempt() {
-  const activeController = controller;
-  controller = null;
-  try { activeController?.dispose(); } catch { /* teardown is best effort */ }
-  const worker = jobWorker;
-  jobWorker = null;
-  try { worker?.terminate(); } catch { /* already gone */ }
+  const handle = jobHandle;
+  jobHandle = null;
+  attemptSignal = null;
+  if (handle) {
+    try {
+      void handle.dispose().catch(() => {});
+    } catch { /* teardown is best effort */ }
+  }
   try { assembly?.release(); } catch { /* bitmap cleanup is best effort */ }
   assembly = null;
+  saveCompleted = false;
   sourceTransport = null;
-  for (const { reject } of pendingProcess.values()) reject(Object.assign(new Error("attempt stopped"), { code: "WORKER_FAILED" }));
-  pendingProcess.clear();
 }
 
 /** Clear every per-attempt flag and buffer; the source binding is untouched. */
 function resetAttemptState() {
-  started = false;
-  selected = false;
-  hostFailed = false;
-  selectedTitle = undefined;
-  lastSource = "";
-  lastTileProgress = null;
-  accessRequest = null;
-  partialDecision = null;
+  activeSnapshot = null;
+  localFailure = null;
+  pendingPermission = null;
 }
 
 /**
- * Begin one discovery-and-fetch attempt. The first attempt follows the job
- * tab's readiness announcement; a retry follows an explicit user action and a
- * fresh coordinator snapshot. Either way the attempt gets a fresh worker,
- * controller, and assembly so no state leaks between attempts.
+ * Begin one discovery-and-fetch attempt behind the shared browser runner.
+ * The extension injects its source-bound transport (tab-origin fetch under
+ * the narrowest grant plus extension-origin fallback), its output assembly
+ * (page canvas, anchor save), and its product actions (explicit permission
+ * prompt, keep/discard recovery). Retries, partials, and ordering stay in
+ * the engine; the abort scope and disposal live in the runner attempt.
  */
-function startAttempt(followUrl?: string) {
+async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
   if (!binding) return;
-  const origin = lastSource;
-  stopAttempt();
-  resetAttemptState();
+  selectionDriver = createSelectionDriver();
   const activeBinding = binding;
-  const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
-  jobWorker = worker;
   const fetcher = createExtensionFetcher({
     hasPermission: async (origin) => testGrantedOrigins.has(origin) ||
       (!__DEZOOMIFY_TEST_PERMISSION_MOCK__ && !!(api?.permissions?.contains && await api.permissions.contains({ origins: [`${origin}/*`] }))),
@@ -480,101 +492,129 @@ function startAttempt(followUrl?: string) {
     },
     cancel: () => fetcher.cancel(),
   };
-  sourceTransport = createCoordinatorSourceTransport({ sendMessage: send });
+  const coordinator = createCoordinatorSourceTransport({ sendMessage: send });
+  sourceTransport = coordinator;
   let attemptCancelled = false;
-  const cancelFetch = () => { attemptCancelled = true; fetcher.cancel(); };
   // Metadata and the bound site's own tiles and probes prefer the source
   // tab's origin context and fall back to the granted extension-origin
   // session; cross-origin tiles always use the extension origin.
   const fetchResource = createEngineResourceFetcher({
     binding: () => activeBinding,
     siteOrigin: () => siteOrigin,
-    sourceTransport,
+    sourceTransport: coordinator,
     extensionTransport,
-    cancelled: () => attemptCancelled,
+    cancelled: () => attemptCancelled || attemptSignal?.aborted === true,
     onSourceFailure: (cause) => jobLog.warn("source-fetch-failed", `code=${String(cause.code ?? cause.blocked_reason ?? "network")} retrying=extension-origin`),
   });
   const probeDecoder = createTileDecoder();
-  const probeSize = createProbeSize({
-    fetchTile: async (url: string, headers: Record<string, string>, requestId?: number) => {
-      const id = typeof requestId === "number" && Number.isSafeInteger(requestId) && requestId >= 0 ? requestId : (probeSeq += 1);
-      const result = await fetchResource({
-        request: {
-          id,
-          uri: url,
-          headers: Object.entries(headers).map(([name, value]) => ({ name, value })),
-          purpose: "probe",
-        },
-      });
-      const bytes = result.bytes instanceof Uint8Array
-        ? new Uint8Array(result.bytes).slice().buffer as ArrayBuffer
-        : result.bytes as unknown as ArrayBuffer;
-      return { bytes };
+  const runner = createBrowserRunner({
+    createWorker: () => new Worker(new URL("./worker.js", import.meta.url), { type: "module" }),
+    fetchResource: (effect, signal) => {
+      attemptSignal = signal;
+      if (signal.aborted || attemptCancelled) {
+        return Promise.reject(Object.assign(new Error("request cancelled"), { category: "cancelled" }));
+      }
+      return fetchResource(effect);
     },
-    decode: (bytes: ArrayBuffer) => probeDecoder.decode(bytes),
-    loadImage: (url: string) => new Promise((resolve, reject) => {
+    probeSize: createProbeSize({
+      fetchTile: async (url: string, headers: Record<string, string>, requestId?: number) => {
+        const id = typeof requestId === "number" && Number.isSafeInteger(requestId) && requestId >= 0 ? requestId : (probeSeq += 1);
+        const result = await fetchResource({
+          request: {
+            id,
+            uri: url,
+            headers: Object.entries(headers).map(([name, value]) => ({ name, value })),
+            purpose: "probe",
+          },
+        });
+        const bytes = new Uint8Array(result.bytes).slice().buffer as ArrayBuffer;
+        return { bytes };
+      },
+      decode: (bytes: ArrayBuffer) => probeDecoder.decode(bytes),
+      loadImage: (url: string) => new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve({
+          width: img.naturalWidth,
+          height: img.naturalHeight,
+          image: img,
+        });
+        img.onerror = () => reject(new Error("probe image failed to load"));
+        img.src = url;
+      }),
+    }),
+    loadDisplayImage: (url: string) => new Promise((resolve, reject) => {
       const img = new Image();
-      img.onload = () => resolve({
-        width: img.naturalWidth,
-        height: img.naturalHeight,
-        image: img,
-      });
-      img.onerror = () => reject(new Error("probe image failed to load"));
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("display image failed to load"));
       img.src = url;
     }),
-  });
-  controller = createEngineHost({
-    worker,
-    jobId: () => activeBinding.jobId,
-    fetchResource,
-    cancelFetch,
-    get assembly() {
-      if (!assembly) throw new Error("output assembly is not initialized");
-      return assembly;
+    classifyFailure: engineFailure,
+    createAssembly: ({ sourceUrl, processTile }) => {
+      const asm = createAssembly(sourceUrl, processTile);
+      assembly = asm;
+      return asm;
     },
     // Browser session baseline: 6 concurrent tile fetches (matches the
     // website). The engine validates the budget at job creation.
     quotas: { max_concurrent_fetches: 6 },
-    probeSize,
-    classifyFailure: engineFailure,
-    onPermissionRequired: showAccessRequired,
-    onRecoveryRequested: showPartialDecision,
-    onHostFailure,
-    onEvent: handleEvent,
+    sessionId: () => activeBinding.jobId,
+    getTransport: () => "browser-session",
+    isPermissionPending: () => pendingPermission !== null,
+    getOutputState: () => (saveCompleted ? "writable" : "pending"),
+    onPermissionRequired: (detail) => {
+      showAccessRequired(detail);
+    },
+    onRecoveryRequested: () => {
+      // The authoritative snapshot carries the decision generation; re-render
+      // it directly instead of copying the generation aside.
+      if (activeSnapshot) renderForSnapshot(activeSnapshot);
+    },
+    log: (level, code, detail) => jobLog.log(level, code, detail),
+    onAbort: () => {
+      attemptCancelled = true;
+      try {
+        fetcher.cancel();
+      } catch { /* abort must never break teardown */ }
+    },
   });
-  worker.addEventListener("message", (event: MessageEvent<WorkerHostOutput>) => {
-    if (event.data?.type === "engine.messages") {
-      const messages = event.data.messages;
-      jobLog.debug("worker-message", `type=engine.messages count=${messages.length}`);
-      controller?.handleEngineMessages(messages);
-    }
-    else if (event.data?.type === "engine.processed" || event.data?.type === "engine.process-failed") {
-      const requestId = typeof event.data.requestId === "number" ? event.data.requestId : -1;
-      const pending = pendingProcess.get(requestId);
-      if (pending) {
-        pendingProcess.delete(requestId);
-        if (event.data.type === "engine.processed" && event.data.bytes instanceof ArrayBuffer) pending.resolve(event.data.bytes);
-        else pending.reject(Object.assign(new Error("tile processing failed"), { code: "tile.processing-failed" }));
-      }
-    }
-    else if (event.data?.type === "engine.log" && typeof event.data.line === "string") {
-      uiLogLines.push(event.data.line);
-      if (uiLogLines.length > UI_LOG_MAX_LINES) uiLogLines.splice(0, uiLogLines.length - UI_LOG_MAX_LINES);
-    }
-    else if (event.data?.type === "engine.error") { jobLog.error("worker-error", `jobId=${binding?.jobId ?? "unknown"} message=${JSON.stringify(event.data.error)}`); onHostFailure(event.data.error); }
-  });
-  if (followUrl) {
-    // A deferred follow rides the same binding and source identity; the
-    // engine session is fresh and rooted at the resolved request URI.
-    started = true;
-    lastSource = origin;
-    assembly = createAssembly(followUrl);
-    jobLog.info("engine-start", `jobId=${activeBinding.jobId} url=${followUrl}`);
-    render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Resolving the image metadata" } });
-    controller?.start([{ url: followUrl }]);
+  const service = createJobService(runner);
+  try {
+    const handle = await service.start(
+      { inputs, engine: {}, exec: { kind: "browser", sourceUrl: inputs[0]?.url ?? "" } },
+      {
+        snapshot: (snapshot: JobSnapshot) => {
+          if (localFailure) return;
+          activeSnapshot = snapshot;
+          driveSnapshot(snapshot);
+          renderForSnapshot(snapshot);
+        },
+        hostStatus: () => {},
+      },
+    );
+    jobHandle = handle;
+  } catch (error) {
+    onHostFailure(error);
+  }
+}
+
+/** Render one authoritative snapshot: terminal.type wins over the live lifecycle. */
+function renderForSnapshot(snapshot: JobSnapshot) {
+  const terminal = snapshot.terminal;
+  if (terminal?.type === "failed") {
+    jobLog.error("engine-terminal", `type=failed code=${terminal.error.code}`);
+    localFailure = presentEngineFailure(terminal.error);
+    render("failed", { jobActivity: { startedAt: Date.now() } });
     return;
   }
-  render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Waiting for image candidates" } });
+  if (terminal?.type === "cancelled") {
+    render("cancelled", { jobActivity: { startedAt: Date.now() } });
+    return;
+  }
+  if (terminal?.type === "completed" || terminal?.type === "partial-completed") {
+    render("completed", { jobActivity: { startedAt: Date.now() } });
+    return;
+  }
+  render(statusForLifecycle(snapshot.lifecycle), { jobActivity: { startedAt: Date.now() } });
 }
 
 /**
@@ -584,7 +624,7 @@ function startAttempt(followUrl?: string) {
  */
 function announceReady() {
   jobLog.info("job-ready-sent", `jobId=${bootstrapJobId ?? "unknown"}`);
-  render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Connecting to Dezoomify" } });
+  render("discovering", { jobActivity: { startedAt: Date.now() } });
   void send({ type: "dz.job.ready", jobId: bootstrapJobId, requestId: requestId("job-ready") }).catch(() =>
     onHostFailure(Object.assign(new Error("Could not connect this job tab to the extension."), { code: "network", retryable: true })));
 }
@@ -596,7 +636,6 @@ function announceReady() {
  */
 function retryJob() {
   jobLog.info("retry-requested", `jobId=${binding?.jobId ?? bootstrapJobId ?? "unknown"}`);
-  followDepth = 0;
   if (!binding) {
     resetAttemptState();
     announceReady();
@@ -607,20 +646,32 @@ function retryJob() {
     onHostFailure(Object.assign(new Error("Could not ask the extension to retry this job."), { code: "network", retryable: true })));
 }
 
+/**
+ * Prepare one attempt slot. The first attempt follows the job tab's
+ * readiness announcement; a retry follows an explicit user action and a
+ * fresh coordinator snapshot. The runner starts once image candidates
+ * arrive (`beginAttempt`); either way the attempt gets a fresh runner so no
+ * state leaks between attempts.
+ */
+function startAttempt() {
+  if (!binding) return;
+  stopAttempt();
+  resetAttemptState();
+  render("discovering", { jobActivity: { startedAt: Date.now() } });
+}
+
 function candidates(message: Record<string, unknown>) {
-  if (!binding || !message || message.jobId !== binding.jobId || started) return;
+  if (!binding || !message || message.jobId !== binding.jobId || jobHandle) return;
   const values = Array.isArray(message.inputs) ? message.inputs.flatMap((candidate) => {
     if (!candidate || typeof candidate !== "object" || !("url" in candidate) || typeof candidate.url !== "string") return [];
     return [{ url: candidate.url, ...("contents" in candidate && typeof candidate.contents === "string" ? { contents: candidate.contents } : {}) }];
   }) : [];
   if (!values.length) return;
-  started = true;
   jobLog.info("candidates-received", `jobId=${binding.jobId} count=${values.length} overflow=${typeof message.overflow === "number" ? message.overflow : 0}`);
-  render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Finding the zoomable image" } });
-  lastSource = values[0].url;
-  assembly = createAssembly(lastSource);
-  jobLog.info("engine-start", `jobId=${binding.jobId} url=${lastSource}`);
-  controller?.start(values);
+  render("discovering", { jobActivity: { startedAt: Date.now() } });
+  const firstUrl = values[0].url;
+  jobLog.info("engine-start", `jobId=${binding.jobId} url=${firstUrl}`);
+  void beginAttempt(values);
 }
 
 api?.runtime?.onMessage?.addListener((message) => {

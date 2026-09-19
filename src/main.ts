@@ -3,39 +3,52 @@
 // Real pipeline: worker-hosted wasm core discovery -> direct-first transport
 // with automatic eligible metadata-proxy fallback -> tile acquisition -> canvas
 // assembly -> real PNG save. Nothing here fabricates progress or completion.
-import { createController } from "../packages/shared-ui/src/controller.ts";
+//
+// The browser job service (packages/app-model service over the shared
+// browser runner) folds engine events into authoritative JobSnapshots; the
+// view renders presentSnapshot of the latest snapshot. Host-local failures
+// (invalid input, host rejections) render through presentFailure. No
+// synthetic controller walk exists.
 import {
+  createJobService,
   HISTORY_KEY_WEBSITE,
   clearHistory as clearHistoryStore,
   loadHistory as loadHistoryStore,
   pushHistory,
   saveHistory as saveHistoryStore,
   toHistoryEntry,
-} from "../packages/shared-ui/src/history.ts";
-import type { HistoryEntry } from "../packages/shared-ui/src/history.ts";
-import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../packages/shared-ui/src/view.tsx";
-import type { ViewContext } from "../packages/shared-ui/src/view.tsx";
-import type { ErrorDto, HeaderDto, JobEvent, ProcessingRecipe } from "@dezoomify/wasm-bindings";
+} from "../packages/app-model/src/index.ts";
+import type {
+  HistoryEntry,
+  JobHandle,
+  JobSnapshot,
+} from "../packages/app-model/src/index.ts";
+import {
+  describeFailure,
+  presentFailure,
+  presentIdle,
+  presentSnapshot,
+  renderView,
+  showDesktopAppGuidance,
+  showExtensionGuidance,
+  t,
+} from "../packages/shared-ui/src/index.ts";
+import type { SnapshotPresentation, StructuredError, ViewContext } from "../packages/shared-ui/src/index.ts";
 import { DEFAULT_PAGE_TITLE, isActiveJobStatus, jobPageTitle } from "../packages/shared-ui/src/view-helpers.ts";
-import { describeFailure } from "../packages/shared-ui/src/failure.ts";
 import {
   RATE_LIMITED_BY_SITE_MESSAGE,
   SITE_BUSY_MESSAGE,
   classifyReadableBytes,
-  discoveryFailedError,
   noImageFoundError,
 } from "./discovery.ts";
 import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.ts";
-import { errorTransportFor, isProxyEligible } from "./webIntegration.ts";
+import { errorTransportFor, isProxyEligible } from "../packages/browser-runtime/src/web-integration.ts";
 import { createProxyTransport, PROXY_METADATA_MAX_BYTES } from "./proxyTransport.ts";
 import {
+  createBrowserRunner,
   createCanvasAssembly,
-  createEngineHost,
   createProbeSize,
-  dispatchTyped,
-  type DispatchTable,
-  type EngineHost,
-  type WorkerHostOutput,
+  type BrowserJobHandle,
 } from "../packages/browser-runtime/src/index.ts";
 import {
   blockedReason,
@@ -54,13 +67,12 @@ import {
   isAllowedSourceUrl,
   isLocalFileUrl,
 } from "../packages/browser-runtime/src/plan-gates.ts";
-import { MAX_DEFERRED_FOLLOWS, pickDeferredUri, pickEngineSelection } from "../packages/browser-runtime/src/engine-selection.ts";
+import { createSelectionDriver } from "../packages/browser-runtime/src/engine-selection.ts";
 import {
   cancelAllWeb,
   createWebQueue,
   enqueueWebQueue,
   finishActiveWebEntry,
-  isWebQueueAvailable,
   summarizeWebQueue,
 } from "../packages/browser-runtime/src/queue.ts";
 import {
@@ -81,11 +93,11 @@ import { createLogger } from "../packages/browser-runtime/src/logging.ts";
 import { createWebFetcher, type WebFetcher } from "../packages/browser-runtime/src/web-fetch.ts";
 import { PROXY_TRANSPORT_LABEL } from "../packages/browser-runtime/src/transport-labels.ts";
 import {
-  BROWSER_SAVE_COLOR_WARNING,
   canvasToPngBlob,
   isCanvasTaintError,
   saveBlobViaAnchor,
 } from "../packages/browser-runtime/src/canvas-save.ts";
+import type { ErrorDto, HeaderDto, ProcessingRecipe } from "@dezoomify/wasm-bindings";
 
 // Re-export the shared browser limits for existing website test imports.
 export {
@@ -98,24 +110,28 @@ export {
 
 const preview = createPreviewControls();
 
-let sessionId = `sess:web-${Date.now()}`;
-const controller = createController(sessionId);
-let currentSeq = 0;
-let engineHost: EngineHost | null = null;
-let engineWorker: Worker | null = null;
-let jobToken = 0;
+// One browser runner attempt (worker, session, abort scope, disposal). The
+// runner owns the engine host; product code here keeps URL input, transport
+// product actions, history, queue, and view wiring only.
+let jobHandle: JobHandle | null = null;
+let activeRun = 0;
 let resultBlobUrl: string | null = null;
 let resultTitle: string | undefined;
-// Cross-worker processing calls (session.applyProcessing) awaiting a reply.
-const pendingProcess = new Map<number, { resolve: (bytes: ArrayBuffer) => void; reject: (error: unknown) => void }>();
-let processSeq = 0;
-// Pause v1 (todo 5.7, suspend-acquisition): the website stops scheduling new
-// tiles while paused, finishes in-flight work, retains the canvas, and
-// re-drives on resume. Integration-layer only; the engine pause lives in
-// `dezoomify-job` for native hosts.
-let jobPaused = false;
+// Single authoritative snapshot of the active job, folded by the job service.
+let activeSnapshot: JobSnapshot | null = null;
+// Host-known display-only flag (tainted canvas): passed explicitly to
+// presentSnapshot until the engine snapshot round-trips with
+// output.disposition. Never written into the DTO.
+let displayOnlyActive = false;
+// Host-local failure that never reached an engine snapshot (invalid input,
+// host rejections). View telemetry only; renders through presentFailure.
+let hostFailure: StructuredError | null = null;
+// Dedupe key for the engine-failure presentation below: failurePresentationOf
+// runs on every render, so without this the failure would log and rebuild on
+// every heartbeat (and the rebuild's re-render would recurse forever).
+let lastEngineFailureKey: string | null = null;
 
-// Recent-jobs history (todo 5.2): local-only ledger, newest first, at most
+// Recent-jobs history: local-only ledger, newest first, at most
 // 20 entries. Each entry keeps its full source address.
 const memoryHistoryFallback = new Map<string, string>();
 const webHistoryStore = {
@@ -161,19 +177,12 @@ function recordWebHistory(url: string, width: number, height: number, format: st
   viewCtx.history = [...webHistory];
 }
 
-// Website single-queue (todo 5.3): enqueue while a job runs, sequential. The
+// Website single-queue: enqueue while a job runs, sequential. The
 // engine stays single-job; this queue lives in the integration layer (here),
 // never in the engine. One active job at a time; further submits wait FIFO.
 // A failed entry never stops the rest. Hash writes stay active-only: only the
 // running job owns `window.location.hash`, queued URLs never do.
 let webQueue = createWebQueue();
-// Negotiated queue availability: the website baseline offers the queue
-// (`bulk_supported` true); an N-1 peer without it falls back to the legacy
-// cancel-previous behavior.
-const WEB_QUEUE_CAPS = { bulkSupported: true };
-function webQueueEnabled(): boolean {
-  return isWebQueueAvailable(WEB_QUEUE_CAPS);
-}
 
 // --- Live job activity (drives the progressive-disclosure job view) ---
 const jobActivity = createJobActivity({ onUpdate: update });
@@ -236,11 +245,6 @@ function recordMetadataAttempt(
   refreshDiagnostics();
 }
 
-function nextEvent(kind: string, extra: Record<string, unknown> = {}) {
-  currentSeq++;
-  return { seq: currentSeq, sessionId, kind, ...extra };
-}
-
 const tileThrottle = createTileThrottle();
 const tileDecoder = createTileDecoder();
 
@@ -277,16 +281,17 @@ const webFetcher: WebFetcher = createWebFetcher({
   messages: {
     rateLimitedBySite: RATE_LIMITED_BY_SITE_MESSAGE,
     siteBusy: SITE_BUSY_MESSAGE,
-    discoveryFailed: (via) => discoveryFailedError(via).message,
+    discoveryFailed: (_via) => noImageFoundError().message ?? "No zoomable image was found at this address.",
   },
   throttle: (url) => tileThrottle.throttle(url),
 });
 async function probeSizeFor(
   url: string,
   headers: Record<string, string>,
+  signal?: AbortSignal,
 ) {
   const probe = createProbeSize({
-    fetchTile: (probeUrl, probeHeaders) => webFetcher.fetchTileFor(probeUrl, probeHeaders),
+    fetchTile: (probeUrl, probeHeaders) => webFetcher.fetchTileFor(probeUrl, probeHeaders, undefined, signal),
     decode: (bytes) => tileDecoder.decode(bytes),
     loadImage: async (probeUrl) => {
       const img = await loadTileImage(probeUrl, {
@@ -306,29 +311,13 @@ async function probeSizeFor(
   return probe(url, headers);
 }
 
-/** Tear down the active engine attempt: worker, session, assembly, buffers. */
+/** Tear down the active runner attempt: worker, session, assembly, buffers. */
 function disposeAttempt(): void {
-  const host = engineHost;
-  engineHost = null;
-  try { host?.dispose(); } catch { /* teardown is best effort */ }
-  const worker = engineWorker;
-  engineWorker = null;
-  try { worker?.terminate(); } catch { /* already gone */ }
-  for (const { reject } of pendingProcess.values()) {
-    reject(failure("WORKER_FAILED", "The image engine stopped.", false));
-  }
-  pendingProcess.clear();
-}
-
-/** Apply one core processing recipe through the worker session. */
-function processTile(recipe: ProcessingRecipe, bytes: ArrayBuffer): Promise<ArrayBuffer> {
-  const worker = engineWorker;
-  if (!worker) return Promise.reject(failure("WORKER_FAILED", "The image engine is not running.", false));
-  const requestId = ++processSeq;
-  return new Promise<ArrayBuffer>((resolve, reject) => {
-    pendingProcess.set(requestId, { resolve, reject });
-    worker.postMessage({ type: "engine.process", requestId, recipe, bytes }, [bytes]);
-  });
+  const handle = jobHandle;
+  jobHandle = null;
+  try {
+    void handle?.dispose();
+  } catch { /* teardown is best effort */ }
 }
 
 /** Normalize generated request headers for `fetch`. */
@@ -338,7 +327,10 @@ function headerRecord(headers: HeaderDto[] | undefined): Record<string, string> 
 
 let activeAssembly: ReturnType<typeof createCanvasAssembly> | null = null;
 
-function createAssembly(sourceUrl: string): ReturnType<typeof createCanvasAssembly> {
+function createAssembly(
+  sourceUrl: string,
+  processTile: (recipe: ProcessingRecipe, bytes: ArrayBuffer) => Promise<ArrayBuffer>,
+): ReturnType<typeof createCanvasAssembly> {
   const decoder = createTileDecoder();
   return createCanvasAssembly({
     decode: (bytes: ArrayBuffer) => decoder.decode(bytes),
@@ -372,7 +364,9 @@ function createAssembly(sourceUrl: string): ReturnType<typeof createCanvasAssemb
       viewCtx.originClean = false;
       viewCtx.sourceUrl = sourceUrl;
       viewCtx.desktopHandoffUrl = desktopHandoffLink(sourceUrl);
-      controller.dispatch(nextEvent("preflight-display-only", { transport: "display" }) as never);
+      // Display-only is a host-known output fact; it rides an explicit
+      // presentation flag, never a forged snapshot field.
+      displayOnlyActive = true;
       const dims = activeAssembly?.dimensions();
       recordWebHistory(sourceUrl, dims?.width ?? 0, dims?.height ?? 0, "display");
       update();
@@ -383,11 +377,8 @@ function createAssembly(sourceUrl: string): ReturnType<typeof createCanvasAssemb
 }
 
 /** Shared presenter for engine failures: headline plus stable classification. */
-function presentEngineFailure(error: ErrorDto, url: string, token: number): void {
-  if (token !== jobToken) return;
+function presentEngineFailure(error: ErrorDto, url: string): void {
   const code = error.code;
-  const via = webFetcher.getActiveTransport() === PROXY_TRANSPORT_LABEL ? "proxy" : "direct";
-  const lower = code.toLowerCase();
   webLog.error("failed", `code=${code} message=${error.message}`);
   if (code === "PLAN_INVALID" || code === "job.resource-limit") {
     const link = desktopHandoffLink(url);
@@ -396,37 +387,47 @@ function presentEngineFailure(error: ErrorDto, url: string, token: number): void
       viewCtx.desktopHandoffUrl = link;
     }
   }
-  const noImageFound =
-    code === "NO_IMAGE_FOUND" || lower.indexOf("no-images") >= 0 || lower.indexOf("catalog") >= 0 || lower.indexOf("empty-resource") >= 0;
-  const discoveryFailed = lower.indexOf("discovery") >= 0 || lower.indexOf("unknown-dezoomer") >= 0;
-  const discoveryCopy = noImageFound
-    ? noImageFoundError(via)
-    : discoveryFailed
-      ? discoveryFailedError(via)
-      : null;
-  controller.dispatch(
-    nextEvent("fail", {
-      error: describeFailure({
-        code,
-        engineDetail: error.detail ?? error.message,
-        ...(discoveryCopy
-          ? { message: discoveryCopy.message, category: discoveryCopy.category }
-          : {}),
-        phase: error.phase,
-        retryable: discoveryCopy ? discoveryCopy.retryable : error.retryable,
-        transport: error.transport ?? errorTransportFor(code, webFetcher.getActiveTransport()),
-        host: hostOf(url),
-        url: error.request,
-        http: error.http,
-        preview: error.preview,
-      }),
-    }) as never,
-  );
-  update();
+  const discovery = classifyDiscoveryCopy(code);
+  hostFailure = describeFailure({
+    code,
+    engineDetail: error.detail ?? error.message,
+    phase: error.phase,
+    retryable: discovery ? discovery.retryable : error.retryable,
+    transport: error.transport ?? errorTransportFor(code, webFetcher.getActiveTransport()),
+    host: hostOf(url),
+    url: error.request,
+    http: error.http,
+    preview: error.preview,
+  });
+  // No update() here: callers render (failurePresentationOf runs inside a
+  // render pass); re-rendering from inside would recurse without bound.
+}
+
+/**
+ * Website discovery facts for the shared failure table: the transport the
+ * metadata rode plus the retry policy. Headline copy stays in the table;
+ * only facts travel here.
+ */
+function classifyDiscoveryCopy(code: string): { retryable: boolean } | null {
+  const lower = code.toLowerCase();
+  if (
+    code === "NO_IMAGE_FOUND" ||
+    lower.indexOf("no-images") >= 0 ||
+    lower.indexOf("catalog") >= 0 ||
+    lower.indexOf("empty-resource") >= 0
+  ) {
+    return { retryable: false };
+  }
+  if (lower.indexOf("discovery") >= 0 || lower.indexOf("unknown-format") >= 0) {
+    return { retryable: true };
+  }
+  return null;
 }
 
 function reportProgress(current: number, total: number, message: string): void {
-  viewCtx.currentProgress = { current, total, message };
+  // Progress text is view telemetry only: it rides the shared view context
+  // and never gates engine commands.
+  viewCtx.currentProgress = { ...(viewCtx.currentProgress ?? {}), message };
   jobActivity.touchProgress();
   jobActivity.scheduleUpdate();
 }
@@ -455,15 +456,47 @@ function clearHash(): void {
   }
 }
 
-async function runJob(url: string, followDepth = 0, origin = url): Promise<void> {
-  const token = ++jobToken;
+/** Snapshot-failure presentation with the website's discovery copy. */
+function failurePresentationOf(snapshot: JobSnapshot): SnapshotPresentation | null {
+  const terminal = snapshot.terminal;
+  if (!terminal || terminal.type !== "failed") return null;
+  // Runs on every render: present (log + hostFailure) exactly once per
+  // distinct engine failure, then reuse the stored presentation inputs.
+  const key = `${terminal.error.code}\n${terminal.error.message}\n${terminal.error.detail ?? ""}`;
+  if (key !== lastEngineFailureKey) {
+    presentEngineFailure(terminal.error, viewCtx.jobActivity?.url ?? "");
+    lastEngineFailureKey = key;
+  }
+  return hostFailure ? presentFailure(hostFailure, webFetcher.getActiveTransport()) : null;
+}
+
+function activeTransport(): string | null {
+  return webFetcher.getActiveTransport();
+}
+
+function currentPresentation(): SnapshotPresentation {
+  // Render the authoritative snapshot directly; hostFailure covers failures
+  // that never reached a snapshot. Display-only rides an explicit host flag.
+  if (hostFailure && !activeSnapshot) return presentFailure(hostFailure, activeTransport());
+  if (!activeSnapshot) return presentIdle();
+  return failurePresentationOf(activeSnapshot) ?? presentSnapshot(activeSnapshot, activeTransport(), { displayOnly: displayOnlyActive });
+}
+
+function isTerminalNow(): boolean {
+  return hostFailure !== null || (activeSnapshot?.terminal ?? null) !== null;
+}
+
+async function runJob(url: string, origin = url): Promise<void> {
+  const run = ++activeRun;
   webFetcher.resetActiveTransport();
   tileThrottle.reset();
   resetActivity(origin);
   setCanvasVisible(document, false);
   preview.resetTransform(document);
-  jobPaused = false;
-  viewCtx.paused = false;
+  activeSnapshot = null;
+  displayOnlyActive = false;
+  hostFailure = null;
+  lastEngineFailureKey = null;
   viewCtx.imageChoice = undefined;
   viewCtx.currentProgress = undefined;
   viewCtx.completedInfo = undefined;
@@ -472,162 +505,60 @@ async function runJob(url: string, followDepth = 0, origin = url): Promise<void>
   viewCtx.originClean = true;
   resultTitle = undefined;
   // Hash owns the active job only: queued URLs never touch the hash until
-  // they become active and reach this point. A deferred follow keeps the
-  // user's original address; the resolved request never rewrites it.
-  if (followDepth === 0) writeHash(origin);
+  // they become active and reach this point.
+  writeHash(origin);
   jobActivity.startHeartbeat();
-  jobActivity.setStep("Finding the zoomable image…", `Contacting ${hostOf(origin)}…`);
-  controller.dispatch(nextEvent("start-discovery", { transport: "direct" }) as never);
   update();
 
-  let selected = false;
-  let displayOnly = false;
-  let terminal: "done" | "failed" | "cancelled" | "display" | "deferred" = "done";
-  let deferredNext: string | null = null;
   let settle: () => void = () => {};
   const finished = new Promise<void>((resolve) => { settle = resolve; });
-
-  const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
-  engineWorker = worker;
-  const assembly = createAssembly(origin);
-  activeAssembly = assembly;
+  let settledOutcome: "done" | "failed" | "cancelled" = "done";
 
   const onHostFailure = (error: unknown): void => {
-    if (token !== jobToken) return;
-    if (terminal !== "done") return;
+    if (run !== activeRun) return;
+    if (hostFailure || activeSnapshot?.terminal) return;
     const structured = error as { code?: unknown; message?: unknown; detail?: unknown; retryable?: unknown };
     const code = typeof structured?.code === "string" ? structured.code : "OUTPUT_FAILED";
     webLog.error("host-failure", `code=${code} message=${String(structured?.message ?? code)}`);
-    controller.dispatch(
-      nextEvent("fail", {
-        error: describeFailure({
-          code,
-          engineDetail: typeof structured?.detail === "string" ? structured.detail : undefined,
-          message: typeof structured?.message === "string" ? structured.message : undefined,
-          retryable: typeof structured?.retryable === "boolean" ? structured.retryable : undefined,
-          transport: "browser-session",
-          host: hostOf(origin),
-        }),
-      }) as never,
-    );
-    terminal = "failed";
+    hostFailure = describeFailure({
+      code,
+      engineDetail: typeof structured?.detail === "string" ? structured.detail : undefined,
+      message: typeof structured?.message === "string" ? structured.message : undefined,
+      retryable: typeof structured?.retryable === "boolean" ? structured.retryable : undefined,
+      transport: "browser-session",
+      host: hostOf(origin),
+    });
+    settledOutcome = "failed";
     update();
     settle();
   };
 
-  const complete = (): void => {
-    if (displayOnly || assembly.isTainted()) {
-      terminal = "display";
-      settle();
-      return;
-    }
-    controller.dispatch(nextEvent("save-start") as never);
-    recordWebHistory(origin, viewCtx.completedInfo?.width ?? 0, viewCtx.completedInfo?.height ?? 0, "png");
-    controller.dispatch(nextEvent("save-done") as never);
-    terminal = "done";
-    update();
-    settle();
-  };
-
-  const eventHandlers = {
-    catalog: (event) => {
-      if (selected) return;
-      selected = true;
-      const catalog = event.catalog;
-      const entries = catalog.entries;
-      const via = webFetcher.getActiveTransport() === PROXY_TRANSPORT_LABEL ? "proxy" : "direct";
-      if (entries.length === 0) {
-        controller.dispatch(nextEvent("images-found", { imageCount: 0, transport: via }) as never);
-        onHostFailure(failure("NO_IMAGE_FOUND", noImageFoundError(via).message, false, "discovery returned an empty image catalog"));
-        return;
-      }
-      const selection = pickEngineSelection(catalog, BROWSER_LIMITS);
-      if (!selection) {
-        // No resolved image is selectable. A still-deferred catalog (IIIF
-        // manifest, bulk list) resolves through its first request with a
-        // fresh, bounded attempt; the engine never follows it silently.
-        const deferredUri = pickDeferredUri(catalog);
-        if (deferredUri) {
-          if (followDepth >= MAX_DEFERRED_FOLLOWS) {
-            controller.dispatch(nextEvent("images-found", { imageCount: entries.length, transport: via }) as never);
-            onHostFailure(failure("discovery.deferred", "The image metadata stayed deferred after the resolution limit.", false));
-            return;
-          }
-          deferredNext = deferredUri;
-          terminal = "deferred";
-          settle();
-          return;
-        }
-        onHostFailure(failure("CATALOG_UNSELECTABLE", "The image catalog has no level this browser can select.", false));
-        return;
-      }
-      controller.dispatch(nextEvent("images-found", { imageCount: entries.length, transport: via }) as never);
-      const entry = entries[selection.image];
-      const image = entry && entry.kind === "image" ? entry : null;
-      resultTitle = image?.title;
-      const level = image?.levels?.[selection.level];
-      if (level) viewCtx.imageChoice = { width: level.width, height: level.height, tiles: 0 };
-      controller.dispatch(nextEvent("image-chosen") as never);
-      jobActivity.setStep("Choosing the highest resolution…");
-      controller.dispatch(nextEvent("level-chosen") as never);
-      controller.dispatch(nextEvent("preflight-ok", { transport: via }) as never);
-      update();
-      engineHost?.selectImage(selection.image);
-      engineHost?.selectLevel(selection.level);
-    },
-    progress: (event) => {
-      reportProgress(event.acquired, event.total, `Saving ${event.total} tiles…`);
-      update();
-    },
-    warning: (event) => webLog.warn("engine-warning", JSON.stringify(event.error)),
-    "recovery-request": () => {},
-    "job-state": () => {},
-    paused: () => {},
-    resumed: () => {},
-    completed: complete,
-    "partial-completed": complete,
-    failed: (event) => {
-      presentEngineFailure(event.error, origin, token);
-      terminal = "failed";
-      settle();
-    },
-    cancelled: () => {
-      controller.dispatch(nextEvent("cancel") as never);
-      terminal = "cancelled";
-      update();
-      settle();
-    },
-  } satisfies DispatchTable<JobEvent, void>;
-
-  const onEngineEvent = (event: JobEvent): void => {
-    if (token !== jobToken) return;
-    dispatchTyped(eventHandlers, event);
-  };
-
-  const host = createEngineHost({
-    worker,
-    jobId: () => sessionId,
-    fetchResource: async (effect) => {
+  // One shared browser runner: the website injects its transport (direct
+  // first with automatic eligible metadata-proxy fallback) and its output
+  // assembly (visible page canvas, anchor save). Retries, partials, and
+  // ordering stay in the engine; the abort scope and disposal live here.
+  // The app-model job service folds the runner's events into authoritative
+  // snapshots; the observer below renders and drives product side effects.
+  const runner = createBrowserRunner({
+    createWorker: () => new Worker(new URL("./worker.js", import.meta.url), { type: "module" }),
+    fetchResource: async (effect, signal) => {
       const request = effect.request;
       if (request.purpose === "metadata") {
-        const result = await webFetcher.fetchMetadataFor(request.uri, headerRecord(request.headers));
+        const result = await webFetcher.fetchMetadataFor(request.uri, headerRecord(request.headers), signal);
         return {
           bytes: new Uint8Array(result.bytes),
           ...(typeof result.finalUri === "string" && result.finalUri !== "" ? { finalUri: result.finalUri } : {}),
         };
       }
-      const result = await webFetcher.fetchTileFor(request.uri, headerRecord(request.headers));
+      const result = await webFetcher.fetchTileFor(request.uri, headerRecord(request.headers), undefined, signal);
       return { bytes: new Uint8Array(result.bytes) };
     },
-    fetchResourceOnce: async (effect) => {
+    fetchResourceOnce: async (effect, signal) => {
       const request = effect.request;
-      const result = await webFetcher.fetchTileFor(request.uri, headerRecord(request.headers), 0);
+      const result = await webFetcher.fetchTileFor(request.uri, headerRecord(request.headers), 0, signal);
       return { bytes: new Uint8Array(result.bytes) };
     },
-    cancelFetch: () => { /* fetches finish harmlessly after a token change */ },
-    assembly,
-    quotas: { max_concurrent_fetches: websiteTileConcurrency() },
-    probeSize: probeSizeFor,
+    probeSize: (probeUrl, probeHeaders, requestId, signal) => probeSizeFor(probeUrl, probeHeaders, signal),
     loadDisplayImage: (tileUrl: string) =>
       loadTileImage(tileUrl, {
         hooks: {
@@ -663,107 +594,163 @@ async function runJob(url: string, followDepth = 0, origin = url): Promise<void>
         ...(typeof structured?.detail === "string" ? { detail: structured.detail } : {}),
       };
     },
-    onPermissionRequired: () => { /* the website has no host grants */ },
-    onRecoveryRequested: (generation) => { engineHost?.chooseRecovery(generation, "discard"); },
-    onHostFailure,
-    onEvent: onEngineEvent,
+    createAssembly: ({ processTile }) => {
+      const assembly = createAssembly(origin, processTile);
+      activeAssembly = assembly;
+      return assembly;
+    },
+    quotas: { max_concurrent_fetches: websiteTileConcurrency() },
+    sessionId: () => `job:web-${run}`,
+    getTransport: () => webFetcher.getActiveTransport(),
+    // The website has no host grants: nothing ever suspends for permission.
+    isPermissionPending: () => false,
+    getOutputState: () => (resultBlobUrl ? "writable" : "pending"),
+    onRecoveryRequested: (generation) => {
+      // Website policy answers partial decisions immediately as discard;
+      // the engine owns the consequence.
+      void jobHandle?.command({ type: "answer-partial", generation, decision: "discard" });
+    },
     log: (level, code, detail) => {
       if (level === "error") webLog.error(code, detail);
       else if (level === "warn") webLog.warn(code, detail);
       else webLog.info(code, detail);
     },
   });
-  engineHost = host;
 
-  worker.addEventListener("message", (event: MessageEvent<WorkerHostOutput>) => {
-    const data = event.data;
-    if (!data || typeof data.type !== "string") return;
-    if (data.type === "engine.messages") {
-      engineHost?.handleEngineMessages(data.messages);
+  const service = createJobService(runner);
+  // One selection driver per run: a follow command's own answer snapshot
+  // still carries the old catalog, so replays must not resend the follow.
+  const selectionDriver = createSelectionDriver();
+
+  const onSnapshot = (snapshot: JobSnapshot): void => {
+    if (run !== activeRun) return;
+    activeSnapshot = snapshot;
+
+    // Auto-selection drives from the authoritative snapshot through the
+    // shared pure selection driver: ready images select once, still-deferred
+    // entries follow in the same job (the engine owns budget and cycle
+    // guards). Engine commands plus the product side effects (title,
+    // image choice) stay here.
+    const drive = selectionDriver.drive(snapshot, BROWSER_LIMITS);
+    if (drive.action === "already-driven") return;
+    if (drive.action === "select") {
+      const entry = snapshot.selection.catalog?.entries[drive.image];
+      const image = entry && entry.kind === "image" ? entry : null;
+      resultTitle = drive.title ?? (typeof image?.title === "string" ? image.title : undefined);
+      const level = image?.levels?.[drive.level];
+      if (level && typeof level.width === "number" && typeof level.height === "number") viewCtx.imageChoice = { width: level.width, height: level.height, tiles: 0 };
+      update();
+      const handle = jobHandle;
+      if (handle) {
+        void handle.command({ type: "select-image", image: drive.image });
+        void handle.command({ type: "select-level", level: drive.level });
+      }
       return;
     }
-    if (data.type === "engine.processed" || data.type === "engine.process-failed") {
-      const requestId = typeof data.requestId === "number" ? data.requestId : -1;
-      const pending = pendingProcess.get(requestId);
-      if (!pending) return;
-      pendingProcess.delete(requestId);
-      if (data.type === "engine.processed" && data.bytes instanceof ArrayBuffer) pending.resolve(data.bytes);
-      else pending.reject(failure("TILE_PROCESSING_FAILED", "A tile could not be processed.", false));
+    if (drive.action === "follow-deferred") {
+      followDeferredAt(drive.position);
       return;
     }
-    if (data.type === "engine.log" && typeof data.line === "string") {
-      webLog.info("runtime", data.line);
+    if (drive.action === "unselectable") {
+      onHostFailure(failure("CATALOG_UNSELECTABLE", "The image catalog has no level this browser can select.", false));
       return;
     }
-    if (data.type === "engine.error") {
-      onHostFailure(data.error);
+
+    const completed = snapshot.progress.completed;
+    const total = snapshot.progress.total ?? null;
+    if (completed > 0 || total !== null) {
+      reportProgress(completed, total ?? 0, `Saving ${total ?? "?"} tiles…`);
+      update();
     }
-  });
+
+    const terminalOutcome = snapshot.terminal;
+    const terminalKind = terminalOutcome?.type;
+    if (terminalOutcome && terminalKind) {
+      if (activeAssembly?.isTainted() === true) {
+        settledOutcome = "done";
+        settle();
+        return;
+      }
+      if (terminalKind === "completed" || terminalKind === "partial-completed") {
+        recordWebHistory(origin, viewCtx.completedInfo?.width ?? 0, viewCtx.completedInfo?.height ?? 0, "png");
+        settledOutcome = "done";
+        update();
+        settle();
+        return;
+      }
+      if (terminalKind === "failed") {
+        settledOutcome = "failed";
+        update();
+        settle();
+        return;
+      }
+      settledOutcome = "cancelled";
+      update();
+      settle();
+    }
+  };
+
+  function followDeferredAt(image: number): void {
+    webLog.info("deferred-follow", `image=${image} host=${hostOf(origin)}`);
+    const handle = jobHandle;
+    if (handle) {
+      void handle.command({ type: "follow-deferred", image }).catch((error) =>
+        onHostFailure(error instanceof Error ? error : failure("discovery.deferred", "The image metadata stayed deferred after the resolution limit.", false)),
+      );
+    }
+    update();
+  }
 
   try {
-    host.start([{ url }]);
+    const handle = await service.start(
+      { inputs: [{ url }], engine: {}, exec: { kind: "browser", sourceUrl: origin } },
+      { snapshot: onSnapshot, hostStatus: () => {} },
+    );
+    if (run !== activeRun) {
+      await handle.dispose();
+      return;
+    }
+    jobHandle = handle;
     await finished;
-    if (token !== jobToken) return;
+    if (run !== activeRun) return;
   } catch (error) {
-    if (token !== jobToken) return;
+    if (run !== activeRun) return;
     onHostFailure(error);
   }
-  if (token !== jobToken) return;
+  if (run !== activeRun) return;
   jobActivity.stopHeartbeat();
   jobActivity.refreshLongestPending();
   disposeAttempt();
   activeAssembly = null;
-  if ((terminal as string) === "deferred" && deferredNext) {
-    // The catalog asked for another resource: restart the whole attempt
-    // against it under the same logical job and original address. The bound
-    // is checked in the catalog handler; the engine never follows silently.
-    sessionId = `sess:web-${Date.now()}`;
-    controller.reset(sessionId);
-    currentSeq = 0;
-    webLog.info("deferred-follow", `depth=${followDepth + 1} host=${hostOf(deferredNext)}`);
-    void runJob(deferredNext, followDepth + 1, origin);
-    return;
-  }
-  const queueOutcome: "done" | "failed" | "cancelled" =
-    (terminal as string) === "failed" ? "failed" : (terminal as string) === "cancelled" ? "cancelled" : "done";
+  const queueOutcome: "done" | "failed" | "cancelled" = settledOutcome;
   // Sequential queue: the active entry settles, then the first waiting
   // entry (if any) becomes active and starts. A failed entry never stops
   // the rest. Engine stays single-job throughout.
-  if (webQueueEnabled()) {
-    const settled = finishActiveWebEntry(webQueue, queueOutcome);
-    webQueue = settled.queue;
-    const next = settled.next;
-    if (next) {
-      const status = controller.getState().status;
-      if (status === "completed" || status === "cancelled" || status === "failed" || status === "display-only") {
-        controller.reset(sessionId);
-        currentSeq = 0;
-      }
-      const summary = summarizeWebQueue(webQueue);
-      webLog.info("queue", `succeeded=${summary.succeeded} failed=${summary.failed} pending=${summary.pending}`);
-      void runJob(next.url);
+  const settled = finishActiveWebEntry(webQueue, queueOutcome);
+  webQueue = settled.queue;
+  const next = settled.next;
+  if (next) {
+    if (isTerminalNow()) {
+      activeSnapshot = null;
+      displayOnlyActive = false;
+      hostFailure = null;
     }
+    const summary = summarizeWebQueue(webQueue);
+    webLog.info("queue", `succeeded=${summary.succeeded} failed=${summary.failed} pending=${summary.pending}`);
+    void runJob(next.url);
   }
 }
 
 function submitQueuedUrl(url: string): void {
-  if (!webQueueEnabled()) {
-    void runJob(url);
-    return;
-  }
   const res = enqueueWebQueue(webQueue, url);
   webQueue = res.queue;
   if (res.code !== "ok" || !res.entry) {
-    controller.dispatch(
-      nextEvent("fail", {
-        error: {
-          code: "INVALID_URL",
-          category: "validation",
-          retryable: false,
-          message: "Please enter a valid web address starting with http:// or https://",
-        },
-      }) as never,
-    );
+    hostFailure = {
+      code: "INVALID_URL",
+      category: "validation",
+      retryable: false,
+      message: "Please enter a valid web address starting with http:// or https://",
+    };
     update();
     return;
   }
@@ -812,56 +799,55 @@ function syncPageTitle(status: string): void {
 
 function update(): void {
   if (!appContainer) return;
-  const state = controller.getState();
-  if (state.status === "downloading" && viewCtx.currentProgress) {
-    const progress = viewCtx.currentProgress;
-    progress.active = Math.min(
-      jobActivity.state.pendingRequests ?? 0,
-      Math.max(0, progress.total - progress.current),
-    );
-  }
-  const activeTransport = webFetcher.getActiveTransport();
-  if (activeTransport && !state.transport) {
-    state.transport = activeTransport;
+  const presentation = currentPresentation();
+  // In-flight tile count rides the context; counts come from the snapshot.
+  // Telemetry (pending requests, progress text) never gates engine commands.
+  const keptMessage = viewCtx.currentProgress?.message;
+  const snapTotal = activeSnapshot?.progress.total ?? null;
+  const snapDone = activeSnapshot?.progress.completed ?? 0;
+  if (presentation.phase === "job" && snapTotal) {
+    viewCtx.currentProgress = {
+      active: Math.min(
+        jobActivity.state.pendingRequests ?? 0,
+        Math.max(0, snapTotal - snapDone),
+      ),
+      ...(keptMessage ? { message: keptMessage } : {}),
+    };
+  } else if (keptMessage && presentation.phase === "job") {
+    viewCtx.currentProgress = { message: keptMessage };
+  } else if (presentation.phase !== "job") {
+    viewCtx.currentProgress = undefined;
   }
   if (viewCtx.jobActivity) jobActivity.refreshLongestPending();
-  syncPageTitle(state.status);
+  syncPageTitle(presentation.phase === "job" ? "downloading" : presentation.phase);
   renderView(
     appContainer,
-    state,
+    presentation,
     {
       onSubmitUrl(url: string) {
         if (isLocalFileUrl(url)) {
           viewCtx.initialUrl = url;
           viewCtx.sourceUrl = url;
           viewCtx.desktopHandoffUrl = undefined;
-          controller.dispatch(
-            nextEvent("fail", {
-              error: {
-                code: "INVALID_URL",
-                category: "validation",
-                retryable: false,
-                message: "Local files cannot be opened on this website. Use the desktop app for files on your computer.",
-                transport: "direct",
-                phase: "discovery",
-                detail: "Local file: open the desktop app and choose the file there; nothing is sent.",
-              },
-            }) as never,
-          );
+          hostFailure = {
+            code: "INVALID_URL",
+            category: "validation",
+            retryable: false,
+            message: "Local files cannot be opened on this website. Use the desktop app for files on your computer.",
+            transport: "direct",
+            phase: "discovery",
+            detail: "Local file: open the desktop app and choose the file there; nothing is sent.",
+          };
           update();
           return;
         }
         if (!isAllowedSourceUrl(url)) {
-          controller.dispatch(
-            nextEvent("fail", {
-              error: {
-                code: "INVALID_URL",
-                category: "validation",
-                retryable: false,
-                message: "Please enter a valid web address starting with http:// or https://",
-              },
-            }) as never,
-          );
+          hostFailure = {
+            code: "INVALID_URL",
+            category: "validation",
+            retryable: false,
+            message: "Please enter a valid web address starting with http:// or https://",
+          };
           update();
           return;
         }
@@ -870,45 +856,26 @@ function update(): void {
       onPause() {
         // Pause v1: stop scheduling new tiles; in-flight finishes, the
         // canvas is retained, resume re-drives the FIFO queue.
-        if (jobPaused) return;
-        jobPaused = true;
-        viewCtx.paused = true;
+        void jobHandle?.command({ type: "pause" });
         jobActivity.pause();
-        engineHost?.pause();
         webLog.info("paused", "no new pieces are being fetched");
         update();
       },
       onResume() {
-        if (!jobPaused) return;
-        jobPaused = false;
-        viewCtx.paused = false;
+        void jobHandle?.command({ type: "resume" });
         jobActivity.resume();
-        engineHost?.resume();
         webLog.info("resumed", "fetching queued pieces again");
         update();
       },
       onCancel() {
-        jobToken += 1;
-        jobPaused = false;
-        viewCtx.paused = false;
+        activeRun += 1;
         jobActivity.stopHeartbeat();
         disposeAttempt();
         // Stop returns directly to the initial view. Effects from the retired
-        // token finish harmlessly without mutating the replacement job.
-        if (webQueueEnabled()) {
-          webQueue = cancelAllWeb(webQueue);
-          webQueue = createWebQueue();
-        }
-        sessionId = `sess:web-${Date.now()}`;
-        controller.reset(sessionId);
-        currentSeq = 0;
-        viewCtx.currentProgress = undefined;
-        viewCtx.completedInfo = undefined;
-        viewCtx.jobActivity = undefined;
-        viewCtx.initialUrl = undefined;
-        viewCtx.imageChoice = undefined;
-        viewCtx.sourceUrl = undefined;
-        viewCtx.desktopHandoffUrl = undefined;
+        // run finish harmlessly without mutating the replacement job.
+        webQueue = cancelAllWeb(webQueue);
+        webQueue = createWebQueue();
+        resetJobViewState();
         webFetcher.resetActiveTransport();
         tileThrottle.reset();
         setCanvasVisible(document, false);
@@ -921,30 +888,17 @@ function update(): void {
         update();
       },
       onReset() {
-        jobToken += 1;
-        jobPaused = false;
-        viewCtx.paused = false;
+        activeRun += 1;
         jobActivity.stopHeartbeat();
         disposeAttempt();
         webFetcher.resetActiveTransport();
         tileThrottle.reset();
         setCanvasVisible(document, false);
         preview.resetTransform(document);
-        sessionId = `sess:web-${Date.now()}`;
-        controller.reset(sessionId);
-        currentSeq = 0;
         // Reset clears the whole queue: no new work is issued afterwards.
-        if (webQueueEnabled()) {
-          webQueue = cancelAllWeb(webQueue);
-          webQueue = createWebQueue();
-        }
-        viewCtx.currentProgress = undefined;
-        viewCtx.completedInfo = undefined;
-        viewCtx.jobActivity = undefined;
-        viewCtx.initialUrl = undefined;
-        viewCtx.imageChoice = undefined;
-        viewCtx.sourceUrl = undefined;
-        viewCtx.desktopHandoffUrl = undefined;
+        webQueue = cancelAllWeb(webQueue);
+        webQueue = createWebQueue();
+        resetJobViewState();
         clearHash();
         if (resultBlobUrl) {
           URL.revokeObjectURL(resultBlobUrl);
@@ -1028,6 +982,21 @@ function update(): void {
   );
 }
 
+function resetJobViewState(): void {
+  activeSnapshot = null;
+  displayOnlyActive = false;
+  hostFailure = null;
+  lastEngineFailureKey = null;
+  lastEngineFailureKey = null;
+  viewCtx.currentProgress = undefined;
+  viewCtx.completedInfo = undefined;
+  viewCtx.jobActivity = undefined;
+  viewCtx.initialUrl = undefined;
+  viewCtx.imageChoice = undefined;
+  viewCtx.sourceUrl = undefined;
+  viewCtx.desktopHandoffUrl = undefined;
+}
+
 function startFromHash(): void {
   if (typeof window === "undefined") return;
   const raw = parseHash(window.location.hash);
@@ -1070,4 +1039,4 @@ if (appContainer) {
   update();
 }
 
-export { controller, update };
+export { update, currentPresentation };

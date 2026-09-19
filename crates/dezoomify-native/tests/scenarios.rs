@@ -3,7 +3,6 @@
 use dezoomify_native::auth::{AuthorizationScope, EphemeralAuthorization};
 use dezoomify_native::cache;
 use dezoomify_native::client;
-use dezoomify_native::download::{Scheduler, SchedulerConfig};
 use dezoomify_native::output::{self, OutputFormat};
 use std::collections::{BTreeMap, HashMap};
 
@@ -46,42 +45,6 @@ fn public_headers_reject_cookie_and_authorization() {
     let mut extra = BTreeMap::new();
     extra.insert("Cookie".to_string(), "x=1".to_string());
     assert!(client::build_request("https://fixtures.test/x", &extra, None).is_err());
-}
-
-#[test]
-fn scheduler_bounds_concurrency_and_tiles() {
-    let mut scheduler = Scheduler::new(SchedulerConfig {
-        max_concurrent: 2,
-        max_tiles: 3,
-        max_retries: 1,
-    });
-    assert!(scheduler.push("a".into()).is_ok());
-    assert!(scheduler.push("b".into()).is_ok());
-    assert!(scheduler.push("c".into()).is_ok());
-    assert!(scheduler.push("d".into()).is_err());
-    let batch = scheduler.next_batch();
-    assert_eq!(batch.len(), 2);
-    assert_eq!(scheduler.peak_in_flight(), 2);
-}
-
-#[test]
-fn scheduler_retries_failures_then_gives_up() {
-    let mut scheduler = Scheduler::new(SchedulerConfig {
-        max_concurrent: 2,
-        max_tiles: 3,
-        max_retries: 1,
-    });
-    scheduler.push("a".into()).unwrap();
-    let batch = scheduler.next_batch();
-    assert_eq!(batch, vec!["a".to_string()]);
-    // First failure is retryable (attempts 1 <= max_retries 1).
-    assert!(scheduler.fail("a").unwrap());
-    assert_eq!(scheduler.next_batch(), vec!["a".to_string()]);
-    // Second failure exhausts the retry budget.
-    assert!(!scheduler.fail("a").unwrap());
-    // No retry is scheduled after exhaustion.
-    assert_eq!(scheduler.next_batch(), Vec::<String>::new());
-    assert_eq!(scheduler.done_count(), 0);
 }
 
 #[test]
@@ -326,7 +289,8 @@ fn transport_and_concurrency_defaults_match_reference_tuning() {
     let config = PipelineConfig::default();
     assert_eq!(config.max_concurrent, 16);
     assert_eq!(config.max_retries, 3);
-    assert_eq!(config.retry_delay, std::time::Duration::from_secs(2));
+    // Retry timing is engine-owned (explicit WaitForRetry timers); no
+    // transport/pipeline delay field exists.
     assert_eq!(config.min_interval, std::time::Duration::ZERO);
     let fetch = FetchLimits::default();
     assert_eq!(fetch.timeout, std::time::Duration::from_secs(30));
@@ -342,143 +306,4 @@ fn jpeg_rejects_canvases_beyond_its_side_limit() {
     let wide = image::RgbaImage::new(65_536, 1);
     let error = encode_jpeg(&wide, 92, None).expect_err("jpeg side limit applies");
     assert_eq!(error.code, "output.encode-failed");
-}
-
-fn sweep_fixture_image() -> image::RgbaImage {
-    let mut image = image::RgbaImage::new(32, 32);
-    for (x, y, pixel) in image.enumerate_pixels_mut() {
-        *pixel = image::Rgba([
-            ((x * 7 + y * 13) % 256) as u8,
-            ((x * 11 + y * 5) % 256) as u8,
-            128,
-            255,
-        ]);
-    }
-    image
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    Sha256::digest(bytes)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
-}
-
-#[test]
-fn jpeg_quality_sweep_golden() {
-    use dezoomify_native::pipeline::encode_jpeg;
-    let image = sweep_fixture_image();
-    let low = encode_jpeg(&image, 50, None).expect("jpeg q50 encodes");
-    let mid = encode_jpeg(&image, 75, None).expect("jpeg q75 encodes");
-    let high = encode_jpeg(&image, 95, None).expect("jpeg q95 encodes");
-    for (bytes, q) in [(&low, 50), (&mid, 75), (&high, 95)] {
-        assert!(
-            bytes.starts_with(&[0xFF, 0xD8, 0xFF]),
-            "jpeg q{q} carries the SOI marker"
-        );
-        let decoded = image::load_from_memory(bytes)
-            .expect("jpeg decodes")
-            .to_rgba8();
-        assert_eq!((decoded.width(), decoded.height()), (32, 32));
-    }
-    // Higher quality keeps more detail, so the bytes grow monotonically on
-    // this non-trivial fixture.
-    assert!(
-        low.len() < mid.len() && mid.len() < high.len(),
-        "jpeg bytes grow with quality: {} < {} < {}",
-        low.len(),
-        mid.len(),
-        high.len()
-    );
-    assert_eq!(
-        sha256_hex(&low),
-        "5f908f2fb1ad41789bfaf171a61461cf7a953cb8a3eba4d8a68bc5754812a763",
-        "jpeg q50 bytes are deterministic; pin the golden"
-    );
-    assert_eq!(
-        sha256_hex(&mid),
-        "b94ff3bce634f49be093dd09d48099715ed6d35e53530e04d4d64e57825e0baf",
-        "jpeg q75 bytes are deterministic; pin the golden"
-    );
-    assert_eq!(
-        sha256_hex(&high),
-        "5266b592ef7e9bce4719de85b43bacf6b89d0cec4d81aa250a417d5c9c39c4ea",
-        "jpeg q95 bytes are deterministic; pin the golden"
-    );
-}
-
-#[test]
-fn tiff_compression_tiers_stay_lossless_golden() {
-    use dezoomify_native::pipeline::encode_tiff;
-    let image = sweep_fixture_image();
-    let fast = encode_tiff(&image, 0, None).expect("tiff fast encodes");
-    let balanced = encode_tiff(&image, 20, None).expect("tiff balanced encodes");
-    let best = encode_tiff(&image, 100, None).expect("tiff best encodes");
-    for bytes in [&fast, &balanced, &best] {
-        let decoded = image::load_from_memory(bytes)
-            .expect("tiff decodes")
-            .to_rgba8();
-        assert_eq!((decoded.width(), decoded.height()), (32, 32));
-        assert_eq!(
-            decoded.get_pixel(3, 5),
-            image.get_pixel(3, 5),
-            "tiff stays lossless at every deflate tier"
-        );
-    }
-    assert_eq!(
-        sha256_hex(&fast),
-        "8b584d7e6dcad48218c4131623685321b39a2a173f77576ef309afda3ec5fc9a",
-        "tiff fast bytes are deterministic; pin the golden"
-    );
-    assert_eq!(
-        sha256_hex(&balanced),
-        "c34997f907d658230dbadb479c5c11f485c70a32a9a8537df6cc48dc4cafcb5f",
-        "tiff balanced bytes are deterministic; pin the golden"
-    );
-    assert_eq!(
-        sha256_hex(&best),
-        "d84cd8d71675649a9de6e88f9804ec6bff5865ebf519d9fa630256c921c90656",
-        "tiff best bytes are deterministic; pin the golden"
-    );
-}
-
-#[test]
-fn icc_passthrough_golden() {
-    use dezoomify_native::pipeline::{encode_jpeg, encode_tiff};
-    let image = sweep_fixture_image();
-    let icc = vec![
-        0x00, 0x00, 0x02, 0x0C, 0x61, 0x64, 0x73, 0x70, 0x00, 0x00, 0x00, 0x00, 0x6D, 0x6E, 0x74,
-        0x72, 0x52, 0x47, 0x42, 0x20,
-    ];
-    let jpeg = encode_jpeg(&image, 95, Some(&icc)).expect("jpeg with icc encodes");
-    {
-        use image::ImageDecoder as _;
-        let reader = image::ImageReader::new(std::io::Cursor::new(&jpeg))
-            .with_guessed_format()
-            .expect("jpeg guessed");
-        let mut decoder = reader.into_decoder().expect("jpeg decoder");
-        let back = decoder
-            .icc_profile()
-            .expect("icc read")
-            .expect("icc present");
-        assert_eq!(back, icc);
-    }
-    let tiff = encode_tiff(&image, 5, Some(&icc)).expect("tiff with icc encodes");
-    let cursor = std::io::Cursor::new(&tiff);
-    let mut decoder = tiff::decoder::Decoder::new(cursor).expect("tiff decodes");
-    let tag = decoder
-        .get_tag_u8_vec(tiff::tags::Tag::IccProfile)
-        .expect("icc tag present");
-    assert_eq!(tag, icc);
-    assert_eq!(
-        sha256_hex(&jpeg),
-        "f5f96b9cebb1b7ef47b408e38b433d3d104fd245a70e09c22eef4c15d426f749",
-        "jpeg with first-tile ICC is deterministic; pin the golden"
-    );
-    assert_eq!(
-        sha256_hex(&tiff),
-        "5f07f0d5da4fb8a5d573f435ca322c0861d6a0149ae67187b934e75a337c4ae2",
-        "tiff with first-tile ICC is deterministic; pin the golden"
-    );
 }

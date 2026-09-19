@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createWebIntegration, errorTransportFor, isOrdinaryImageTile, isProxyEligible } from "../src/webIntegration.ts";
+import { createWebFetcher } from "../packages/browser-runtime/src/web-fetch.ts";
+import {
+  errorTransportFor,
+  isOrdinaryImageTile,
+  isProxyEligible,
+} from "../packages/browser-runtime/src/web-integration.ts";
 import {
   PROXY_MAX_INFLIGHT,
   PROXY_MAX_REQUESTS_PER_SECOND,
@@ -14,19 +19,30 @@ import { DIRECT_TRANSPORT_LABEL, PROXY_TRANSPORT_LABEL } from "../packages/brows
 import { DIRECT_METADATA_TIMEOUT_MS } from "../packages/browser-runtime/src/tile-policy.ts";
 import { drawPlacedTile } from "../packages/browser-runtime/src/tile-draw.ts";
 import { renderSaveGuidance } from "../packages/shared-ui/src/components.ts";
-import { encodePng } from "../packages/browser-runtime/src/save.ts";
-import { inflateSync } from "node:zlib";
+import { canvasToPngBlob, isCanvasTaintError } from "../packages/browser-runtime/src/canvas-save.ts";
 import { act } from "./react-dom.mjs";
+import { presentIdle } from "../packages/shared-ui/src/snapshot-view.ts";
 import { renderView } from "../packages/shared-ui/src/view.tsx";
 
 const REPO_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
-function directOk() {
+function okBytes(...values) {
+  return new Uint8Array(values).buffer;
+}
+
+function directImpl(bytes = okBytes(1), status = 200) {
   return {
     calls: 0,
-    async fetchResource(url) {
+    async fetchImpl() {
       this.calls += 1;
-      return { outcome: "readable", finalUrl: url, status: 200, headers: {}, bytes: new Uint8Array([1]).buffer };
+      return {
+        status,
+        url: "https://public.test/image.json",
+        headers: { get: () => null },
+        async arrayBuffer() {
+          return bytes.slice(0);
+        },
+      };
     },
   };
 }
@@ -34,50 +50,97 @@ function directOk() {
 function directCorsFail() {
   return {
     calls: 0,
-    async fetchResource(url) {
+    async fetchImpl() {
       this.calls += 1;
-      return { outcome: "network-error", reason: "Failed to fetch" };
+      throw new Error("Failed to fetch");
     },
   };
 }
 
-function proxyOk() {
+function proxyImpl(bytes = okBytes(9)) {
   return {
     calls: 0,
-    lastBody: null,
-    async fetchViaProxy(targetUrl) {
+    async fetchViaProxy() {
       this.calls += 1;
-      return { ok: true, status: 200, bytes: new Uint8Array([9]).buffer, contentType: "application/json" };
+      return { ok: true, status: 200, bytes: bytes.slice(0), contentType: "application/json" };
     },
   };
+}
+
+function webDeps({ direct, proxy }) {
+  const attempts = [];
+  let started = 0;
+  const deps = {
+    fetchImpl: (...args) => direct.fetchImpl(...args),
+    proxyTransport: { fetchViaProxy: (...args) => proxy.fetchViaProxy(...args) },
+    isProxyEligible: (req) => isProxyEligible(req),
+    classifyHint: undefined,
+    hooks: {
+      onRequestStart: () => {
+        started += 1;
+        return started;
+      },
+      onRequestEnd() {},
+      onLog() {},
+      onUpdate() {},
+      onMetadataAttempt: (attempt) => attempts.push(attempt),
+    },
+    messages: {
+      rateLimitedBySite: "rate limited",
+      siteBusy: "busy",
+      discoveryFailed: () => "discovery failed",
+    },
+    sleepFn: async () => {},
+    randomFn: () => 0,
+  };
+  return { deps, attempts };
 }
 
 test("direct is always first; proxy not called on direct success", async () => {
-  const transports = [];
-  const direct = directOk();
-  const proxy = proxyOk();
-  const web = createWebIntegration({ direct, proxy, onTransport: (t) => transports.push(t) });
-  const res = await web.fetchMetadata({ url: "https://public.test/image.json", kind: "metadata" });
+  const direct = directImpl();
+  const proxy = proxyImpl();
+  const { deps, attempts } = webDeps({ direct, proxy });
+  const fetcher = createWebFetcher(deps);
+  const res = await fetcher.fetchMetadataFor("https://public.test/image.json", {});
   assert.equal(res.via, "direct");
   assert.equal(direct.calls, 1);
   assert.equal(proxy.calls, 0);
-  assert.deepEqual(transports, [DIRECT_TRANSPORT_LABEL]);
+  assert.equal(fetcher.getActiveTransport(), DIRECT_TRANSPORT_LABEL);
+  assert.deepEqual(attempts.map((a) => a.transport), ["direct"]);
 });
 
 test("eligible metadata failure automatically calls proxy without extra user action", async () => {
-  const transports = [];
   const direct = directCorsFail();
-  const proxy = proxyOk();
-  const web = createWebIntegration({ direct, proxy, onTransport: (t) => transports.push(t) });
-  const res = await web.fetchMetadata({ url: "https://public.test/image.json", kind: "metadata" });
+  const proxy = proxyImpl();
+  const { deps, attempts } = webDeps({ direct, proxy });
+  const fetcher = createWebFetcher(deps);
+  const res = await fetcher.fetchMetadataFor("https://public.test/image.json", {});
   assert.equal(res.via, "proxy");
   assert.equal(direct.calls, 1);
   assert.equal(proxy.calls, 1);
-  assert.deepEqual(transports, [DIRECT_TRANSPORT_LABEL, PROXY_TRANSPORT_LABEL]);
+  assert.equal(fetcher.getActiveTransport(), PROXY_TRANSPORT_LABEL);
+  assert.deepEqual(attempts.map((a) => a.transport), ["direct", "metadata proxy"]);
 });
 
-test("proxy eligibility matrix", () => {
-  const okReq = { url: "https://public.test/image.json", kind: "metadata" };
+test("metadata proxy rate-limit retries once, then succeeds", async () => {
+  const direct = directCorsFail();
+  const proxy = {
+    calls: 0,
+    async fetchViaProxy() {
+      this.calls += 1;
+      if (this.calls === 1) return { ok: false, status: 429, code: "PROXY_RATE_LIMITED", retryAfterMs: 0 };
+      return { ok: true, status: 200, bytes: okBytes(5), contentType: "application/json" };
+    },
+  };
+  const { deps } = webDeps({ direct, proxy });
+  const fetcher = createWebFetcher(deps);
+  const res = await fetcher.fetchMetadataFor("https://public.test/image.json", {});
+  assert.equal(res.via, "proxy");
+  assert.equal(proxy.calls, 2);
+  assert.ok(res.bytes.byteLength > 0, "retried bytes reach discovery");
+});
+
+test("proxy eligibility matrix", () => {  const okReq = { url: "https://public.test/image.json", kind: "metadata" };
   assert.equal(isProxyEligible(okReq).eligible, true);
   // Tile never proxied.
   assert.equal(isProxyEligible({ ...okReq, kind: "tile" }).eligible, false);
@@ -94,26 +157,49 @@ test("proxy eligibility matrix", () => {
   }
 });
 
-test("no proxy for http-error, policy-denied, cancelled, tile", async () => {
-  for (const outcome of [
-    { outcome: "http-error", finalUrl: "https://public.test/x", status: 404, headers: {} },
-    { outcome: "policy-denied", reason: "x", code: "TRANSPORT_POLICY_DENIED" },
-    { outcome: "cancelled", reason: "aborted" },
-  ]) {
-    const direct = { calls: 0, async fetchResource() { this.calls += 1; return outcome; } };
-    const proxy = proxyOk();
-    const web = createWebIntegration({ direct, proxy, onTransport: () => {} });
-    const res = await web.fetchMetadata({ url: "https://public.test/x", kind: "metadata" });
-    assert.equal(res.via, "direct", JSON.stringify(outcome));
+test("no proxy for http-error, ineligible targets, cancelled, tile", async () => {
+  // HTTP refusals never fall back: the failure is authoritative, not a CORS gap.
+  {
+    const direct = directImpl(okBytes(7), 404);
+    const proxy = proxyImpl();
+    const { deps } = webDeps({ direct, proxy });
+    const fetcher = createWebFetcher(deps);
+    await assert.rejects(fetcher.fetchMetadataFor("https://public.test/x", {}), (error) => error.code === "DISCOVERY_HTTP_ERROR");
+    assert.equal(proxy.calls, 0);
+  }
+  // Credential-bearing targets are ineligible: no proxy attempt is made.
+  {
+    const direct = directCorsFail();
+    const proxy = proxyImpl();
+    const { deps } = webDeps({ direct, proxy });
+    const fetcher = createWebFetcher(deps);
+    await assert.rejects(
+      fetcher.fetchMetadataFor("https://user:pw@public.test/x", {}),
+      (error) => error.code === "DISCOVERY_FAILED",
+    );
+    assert.equal(proxy.calls, 0);
+  }
+  // A retired job never falls back to the proxy.
+  {
+    const direct = directCorsFail();
+    const proxy = proxyImpl();
+    const { deps } = webDeps({ direct, proxy });
+    const fetcher = createWebFetcher(deps);
+    const ctrl = new AbortController();
+    ctrl.abort();
+    await assert.rejects(
+      fetcher.fetchMetadataFor("https://public.test/x", {}, ctrl.signal),
+      (error) => error.code === "TRANSPORT_CANCELLED",
+    );
     assert.equal(proxy.calls, 0);
   }
   // Tile path never proxies even on network-error.
   {
     const direct = directCorsFail();
-    const proxy = proxyOk();
-    const web = createWebIntegration({ direct, proxy, onTransport: () => {} });
-    const res = await web.fetchTile({ url: "https://public.test/0_0.jpg", kind: "tile" });
-    assert.equal(res.via, "direct");
+    const proxy = proxyImpl();
+    const { deps } = webDeps({ direct, proxy });
+    const fetcher = createWebFetcher(deps);
+    await assert.rejects(fetcher.fetchTileFor("https://public.test/0_0.jpg", {}, 0));
     assert.equal(proxy.calls, 0);
   }
 });
@@ -252,19 +338,12 @@ test("proxyTransport surfaces the upstream URL so proxied metadata keeps its til
   assert.equal(r2.finalUrl, undefined);
 });
 
-test("handoff suggestions come from capabilities; ordinary display always offered", () => {
-  const web = createWebIntegration({ direct: directOk(), proxy: proxyOk(), capabilities: {} });
-  assert.deepEqual(web.getHandoffSuggestions(), ["ordinary-image-display"]);
-  const web2 = createWebIntegration({ direct: directOk(), proxy: proxyOk(), capabilities: { extensionAvailable: true, nativeAvailable: true } });
-  assert.deepEqual(web2.getHandoffSuggestions(), ["ordinary-image-display", "extension", "native"]);
-});
-
 test("proxy fallback is unconditional: no opt-out UI, 1500 ms direct head start", () => {
   assert.equal(DIRECT_METADATA_TIMEOUT_MS, 1500);
   const el = globalThis.document.createElement("div");
   globalThis.document.body.appendChild(el);
   act(() => renderView(el,
-    { status: "idle", seq: 0, sessionId: "s-proxy", imageCount: 0, transport: null },
+    presentIdle(),
     { onSubmitUrl: () => {}, onCancel: () => {}, onReset: () => {}, onSave: () => {} },
   ));
   assert.equal(el.querySelector("#dz-proxy-optin"), null, "idle view renders no proxy toggle");
@@ -291,25 +370,7 @@ test("page policy permits cross-origin tile images for display", () => {
   assert.ok(html.includes("img-src 'self' data: blob: https:"), "CSP must allow cross-origin tile display");
 });
 
-function idatOf(png) {
-  let off = 8;
-  const parts = [];
-  while (off < png.length) {
-    const len = new DataView(png.buffer, png.byteOffset + off).getUint32(0);
-    const type = String.fromCharCode(...png.subarray(off + 4, off + 8));
-    if (type === "IDAT") parts.push(png.subarray(off + 8, off + 8 + len));
-    off += 12 + len;
-  }
-  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-  let at = 0;
-  for (const part of parts) {
-    out.set(part, at);
-    at += part.length;
-  }
-  return out;
-}
-
-test("edge tiles crop to the plan, saves warn on color profiles, PNG compresses", () => {
+test("edge tiles crop to the plan, saves warn on color profiles, PNG encodes via canvas", async () => {
   // Padded edge tiles (e.g. Google Arts & Culture) crop from the right and
   // bottom; the mismatch is logged without identifying any tile.
   const draws = [];
@@ -324,20 +385,17 @@ test("edge tiles crop to the plan, saves warn on color profiles, PNG compresses"
   // colors may shift.
   assert.ok(renderSaveGuidance(true).includes("Colors may shift"));
 
-  // The repository-owned PNG encoder compresses with real DEFLATE: the IDAT
-  // payload inflates back to the exact scanlines and is far smaller than raw.
-  const width = 16;
-  const height = 16;
-  const pixels = new Uint8ClampedArray(width * height * 4).fill(200);
-  const png = encodePng(pixels, width, height);
-  assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10], "PNG magic");
-  const scanline = width * 4 + 1;
-  const raw = new Uint8Array(scanline * height);
-  for (let y = 0; y < height; y++) {
-    raw[y * scanline] = 0;
-    raw.set(pixels.subarray(y * width * 4, (y + 1) * width * 4), y * scanline + 1);
-  }
-  const idat = idatOf(png);
-  assert.ok(idat.length < raw.length, `IDAT compresses (${idat.length} < ${raw.length})`);
-  assert.deepEqual([...inflateSync(idat)], [...raw], "IDAT round-trips the scanlines");
+  // The shipped save path encodes through the canvas host: a blob resolves
+  // the save, a null blob fails closed with a typed code, and a tainted
+  // canvas error propagates untouched for the display-only fallback.
+  const seen = [];
+  const blob = { kind: "png-blob" };
+  const ok = await canvasToPngBlob({ toBlob: (cb, mime) => { seen.push(mime); cb(blob); } });
+  assert.equal(ok, blob);
+  assert.deepEqual(seen, ["image/png"]);
+  await assert.rejects(canvasToPngBlob({ toBlob: (cb) => cb(null) }), (error) => error.code === "OUTPUT_ENCODE_FAILED");
+  const taint = new Error("tainted");
+  taint.name = "SecurityError";
+  assert.equal(isCanvasTaintError(taint), true);
+  await assert.rejects(canvasToPngBlob({ toBlob: () => { throw taint; } }), (error) => error === taint);
 });

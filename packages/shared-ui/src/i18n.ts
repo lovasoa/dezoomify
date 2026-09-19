@@ -200,6 +200,10 @@ const en = {
   "view.step.downloading": "Saving image tiles…",
   "view.step.saving": "Assembling the final picture…",
   "view.step.working": "Working…",
+  "view.step.contactingDetail": "Contacting the image host…",
+  "view.step.recoveryDetail": "A recovery decision needs attention before the job can continue.",
+  "view.step.encodingDetail": "Encoding in the app.",
+  "view.step.cleanupDetail": "Cleaning up unfinished files…",
   // Live job section.
   "view.job.workingOn": "Working on",
   "view.job.cancel": "Cancel",
@@ -215,8 +219,6 @@ const en = {
     "Still working, {host} is slow to answer. You can wait, or cancel and try again later.",
   // Display-only section.
   "view.display.title": "Showing preview – not saved yet",
-  "view.display.shownPlain": "Shown below without saving.",
-  "view.display.shownPrefix": "Shown below without saving.",
   "view.display.openDesktop": "Open in desktop app",
   // One-click desktop handoff (todo 5.5): the button names the origin and the
   // summary names scope/recipient/job memory-only, mirroring the extension
@@ -363,6 +365,8 @@ const en = {
     "Some pieces of this picture from {host} could not be saved. Retry the failed pieces, or keep the partial picture with blank areas.",
   "desktop.discovery.none":
     "Could not find a zoomable image at this address from {host}. Try a different page or check the address.",
+  "view.discovery.none":
+    "No zoomable image was found at this address. Try a page that contains a zoom viewer, or try the browser extension.",
   "desktop.plan.none":
     "This picture has no usable size to save from {host}. Try a different picture or a smaller Max width.",
   "desktop.transport.stalled": "Saving stalled while contacting {host}. Check your connection and try again.",
@@ -371,6 +375,7 @@ const en = {
   "desktop.job.cancelledMsg": "The image save was stopped. Any unfinished file was removed.",
   "desktop.start.failed": "Could not start saving this picture from {host}. Try again.",
   "desktop.choice.failed": "That choice was not accepted. Try again.",
+  "view.ext.desynced": "The extension lost sync while reading this image. Start the scan again.",
   "desktop.save.generic": "Could not save this picture from {host}. Try again with a different address.",
   "desktop.internal.error":
     "Something unexpected stopped this save from {host}. Try again, and copy diagnostics if it keeps happening.",
@@ -419,8 +424,6 @@ const en = {
   "desktop.rec.destTitle": "Save destination needs attention",
   "desktop.rec.destDesc":
     "The save destination was not accepted. Choose an output file, try again, or use another app.",
-  "desktop.rec.chooseTitle": "Choose where to save",
-  "desktop.rec.chooseDesc": "Pick the output file to continue saving this image.",
   "desktop.rec.keep": "Keep partial image",
   "desktop.rec.discard": "Discard partial",
   "desktop.rec.retryTiles": "Retry failed tiles",

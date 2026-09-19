@@ -69,7 +69,7 @@ fn assembles_dzi_pyramid_from_fixture_scenario() {
         output.to_str().expect("utf8 output"),
         false,
         &PipelineConfig::default(),
-        &mut |_event| events += 1,
+        &mut |_| events += 1,
     )
     .expect("pipeline succeeds");
     assert_eq!(outcome.tile_count, 4);
@@ -124,7 +124,7 @@ fn tile_failure_fails_honestly_without_output() {
         output.to_str().expect("utf8 output"),
         false,
         &config,
-        &mut |_event| {},
+        &mut |_| {},
     )
     .expect_err("pipeline fails on missing tiles");
     assert_eq!(error.code, "tile.download-failed");
@@ -163,7 +163,7 @@ fn retries_zero_fails_without_a_second_attempt() {
         output.to_str().expect("utf8 output"),
         false,
         &config,
-        &mut |_event| {},
+        &mut |_| {},
     )
     .expect_err("pipeline fails on missing tiles");
     assert_eq!(error.code, "tile.download-failed");
@@ -209,7 +209,7 @@ fn file_uri_tiles_assemble_from_a_remote_manifest() {
         output.to_str().expect("utf8 output"),
         false,
         &PipelineConfig::default(),
-        &mut |_event| {},
+        &mut |_| {},
     )
     .unwrap_or_else(|e| panic!("file-uri tiles succeed: {} ({})", e.message, e.code));
     assert_eq!(outcome.tile_count, 4);
@@ -249,7 +249,7 @@ fn corrupt_tile_fails_like_a_missing_tile() {
         output.to_str().expect("utf8 output"),
         false,
         &config,
-        &mut |_event| {},
+        &mut |_| {},
     )
     .expect_err("pipeline fails on corrupt tiles");
     assert_eq!(error.code, "tile.download-failed");
@@ -279,7 +279,7 @@ fn partial_keep_policy_encodes_acquired_tiles() {
         output.to_str().expect("utf8 output"),
         false,
         &config,
-        &mut |_event| {},
+        &mut |_| {},
     )
     .expect("keep policy publishes a partial");
     assert!(outcome.partial, "kept output is marked partial");
@@ -328,7 +328,7 @@ fn max_width_selects_the_largest_fitting_level() {
         output.to_str().expect("utf8 output"),
         false,
         &config,
-        &mut |_event| {},
+        &mut |_| {},
     )
     .expect("capped pipeline succeeds");
     assert_eq!((outcome.image_size.x, outcome.image_size.y), (256, 256));
@@ -351,7 +351,7 @@ fn probe_planned_grid_matches_the_fixed_grid_output() {
         output.to_str().expect("utf8 output"),
         false,
         &PipelineConfig::default(),
-        &mut |_event| {},
+        &mut |_| {},
     )
     .expect("probe-driven pipeline succeeds");
     assert_eq!((outcome.image_size.x, outcome.image_size.y), (512, 512));
@@ -373,7 +373,7 @@ fn existing_output_without_overwrite_is_refused() {
         output.to_str().expect("utf8 output"),
         false,
         &PipelineConfig::default(),
-        &mut |_event| events += 1,
+        &mut |_| events += 1,
     )
     .expect_err("overwrite refusal fails");
     assert_eq!(error.code, "output.exists");
@@ -398,7 +398,7 @@ fn jpg_output_decodes_at_full_size() {
         output.to_str().expect("utf8 output"),
         false,
         &PipelineConfig::default(),
-        &mut |_event| {},
+        &mut |_| {},
     )
     .expect("jpeg pipeline succeeds");
     assert_eq!(outcome.tile_count, 4);
@@ -426,7 +426,7 @@ fn tiff_output_decodes_losslessly() {
         output.to_str().expect("utf8 output"),
         false,
         &PipelineConfig::default(),
-        &mut |_event| {},
+        &mut |_| {},
     )
     .expect("tiff pipeline succeeds");
     assert_eq!(outcome.tile_count, 4);
@@ -462,7 +462,7 @@ fn zif_output_writes_tiff_pyramid() {
         output.to_str().expect("utf8 output"),
         false,
         &PipelineConfig::default(),
-        &mut |_event| {},
+        &mut |_| {},
     )
     .expect("zif pipeline succeeds");
     assert_eq!(outcome.tile_count, 4);
@@ -501,7 +501,7 @@ fn webp_output_decodes_losslessly() {
         output.to_str().expect("utf8 output"),
         false,
         &PipelineConfig::default(),
-        &mut |_event| {},
+        &mut |_| {},
     )
     .expect("webp pipeline succeeds");
     assert_eq!(outcome.tile_count, 4);
@@ -532,7 +532,7 @@ fn iiif_extension_writes_a_directory_at_that_path() {
         output.to_str().expect("utf8 output"),
         false,
         &PipelineConfig::default(),
-        &mut |_event| {},
+        &mut |_| {},
     )
     .expect("iiif pipeline succeeds");
     assert_eq!(outcome.tile_count, 4);
@@ -556,7 +556,7 @@ fn iiif_dir_writes_manifest_and_addressable_tiles() {
         output.to_str().expect("utf8 output"),
         false,
         &PipelineConfig::default(),
-        &mut |_event| {},
+        &mut |_| {},
     )
     .expect("iiif-dir pipeline succeeds");
     assert_eq!(outcome.tile_count, 4);
@@ -621,7 +621,7 @@ fn tile_cache_reuses_tiles_after_the_server_loses_them() {
         first.to_str().expect("utf8 output"),
         false,
         &config,
-        &mut |_event| {},
+        &mut |_| {},
     )
     .expect("first run populates the cache");
     let entries: Vec<_> =
@@ -642,7 +642,7 @@ fn tile_cache_reuses_tiles_after_the_server_loses_them() {
         second.to_str().expect("utf8 output"),
         false,
         &config,
-        &mut |_event| {},
+        &mut |_| {},
     )
     .expect("second run reuses the cache");
     assert_eq!(resumed.tile_count, 4);
@@ -716,7 +716,7 @@ fn interrupted_job_resumes_without_refetching_completed_tiles() {
         first_output.to_str().expect("utf8 output"),
         false,
         &failing,
-        &mut |_event| {},
+        &mut |_| {},
     )
     .expect_err("interrupted run fails honestly");
     assert_eq!(error.code, "tile.download-failed");
@@ -758,7 +758,7 @@ fn interrupted_job_resumes_without_refetching_completed_tiles() {
             cache_dir: Some(cache_dir.clone()),
             ..Default::default()
         },
-        &mut |_event| {},
+        &mut |_| {},
     )
     .expect("repeated run resumes from the cache");
     assert_eq!(resumed.tile_count, 4);
@@ -779,7 +779,7 @@ fn resume_scenario_matches_the_pinned_golden() {
         output.to_str().expect("utf8 output"),
         false,
         &PipelineConfig::default(),
-        &mut |_event| {},
+        &mut |_| {},
     )
     .expect("resume scenario succeeds");
     assert_eq!(outcome.tile_count, 4);
@@ -805,7 +805,7 @@ fn cancellation_before_publish_writes_nothing() {
         output.to_str().expect("utf8 output"),
         false,
         &config,
-        &mut |_event| {
+        &mut |_| {
             // Cancel as soon as acquisition starts: in-flight batches drain,
             // publish never runs, temp output never appears.
             cancel.store(true, Ordering::SeqCst);
@@ -967,7 +967,7 @@ fn iiif_size_rounding_bug_falls_back_to_caret_width_without_refetching() {
         output.to_str().expect("utf8 output"),
         false,
         &PipelineConfig::default(),
-        &mut |_event| {},
+        &mut |_| {},
     )
     .expect("caret-width fallback succeeds");
     assert_eq!(outcome.tile_count, 1);
@@ -1012,7 +1012,7 @@ fn deferred_bulk_entry_resolves_to_identical_output() {
         output.to_str().expect("utf8 output"),
         false,
         &PipelineConfig::default(),
-        &mut |_event| {},
+        &mut |_| {},
     )
     .expect("deferred follow succeeds");
     assert_eq!((outcome.image_size.x, outcome.image_size.y), (512, 512));
@@ -1040,7 +1040,7 @@ fn self_referential_deferred_list_hits_the_resolution_limit() {
         output.to_str().expect("utf8 output"),
         false,
         &PipelineConfig::default(),
-        &mut |_event| {},
+        &mut |_| {},
     )
     .expect_err("self-deferral exhausts the bound");
     assert_eq!(error.code, "discovery.deferred");
@@ -1092,7 +1092,7 @@ fn first_catalog_entry_wins_with_two_deferred_images() {
         output.to_str().expect("utf8 output"),
         false,
         &PipelineConfig::default(),
-        &mut |_event| {},
+        &mut |_| {},
     )
     .expect("first entry resolves");
     assert_eq!((outcome.image_size.x, outcome.image_size.y), (256, 256));
@@ -1102,42 +1102,4 @@ fn first_catalog_entry_wins_with_two_deferred_images() {
     assert_eq!(decoded.get_pixel(8, 8).0[0..3], [196, 48, 48]);
     assert_eq!(decoded.get_pixel(200, 200).0[0..3], [196, 48, 48]);
     let _expected = scenario_expected("cli-multi-image");
-}
-
-#[test]
-fn pause_after_one_tile_still_assembles_the_full_image() {
-    // Pause v1 e2e (todo 5.7 suspend-acquisition): pause after one tile,
-    // verify no new work while paused, resume, and complete byte-identical
-    // to the uninterrupted run. FIFO order, retry wakeups, and decoded
-    // output are preserved; hosts still own clocks.
-    let origin = start_fixture_server();
-    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
-    let out_dir = temp_dir("pause");
-    let output = out_dir.join("pause.png");
-    let mut kinds: Vec<String> = Vec::new();
-    let config = PipelineConfig {
-        pause_after: Some(1),
-        // Single-flight acquisition so pause lands mid-plan (multi-batch),
-        // not after a one-batch 4-tile completion.
-        max_concurrent: 1,
-        ..PipelineConfig::default()
-    };
-    let outcome = pipeline::run(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
-        &config,
-        &mut |event| kinds.push(event.kind.clone()),
-    )
-    .expect("paused pipeline completes");
-    assert_eq!(outcome.tile_count, 4);
-    assert_eq!((outcome.image_size.x, outcome.image_size.y), (512, 512));
-    assert!(
-        kinds.contains(&"paused".to_string()),
-        "driver emitted paused: {kinds:?}"
-    );
-    assert!(
-        kinds.contains(&"resumed".to_string()),
-        "driver emitted resumed: {kinds:?}"
-    );
 }

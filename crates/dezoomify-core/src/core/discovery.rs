@@ -60,23 +60,6 @@ pub enum TransportKind {
     DisplayOnly,
 }
 
-impl TransportKind {
-    /// Lenient wire parse of a host transport string. Aliases cover the
-    /// strings today's hosts actually send; unknown and missing values
-    /// fall back to the direct transport (it is the first every host
-    /// tries), so a stale host never fails discovery outright.
-    #[must_use]
-    pub fn from_wire(value: Option<&str>) -> Self {
-        match value {
-            Some("metadata-proxy" | "proxy") => Self::MetadataProxy,
-            Some("browser-session" | "extension-origin") => Self::BrowserSession,
-            Some("native") => Self::Native,
-            Some("display-only") => Self::DisplayOnly,
-            _ => Self::Direct,
-        }
-    }
-}
-
 /// Stable code of one fetch failure. Variant names mirror the codes the
 /// hosts already emit, so the browser passes its strings through
 /// unmapped; [`FetchCode::Unknown`] exists only to decode foreign codes
@@ -528,7 +511,7 @@ enum DiscoveryProgram {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct DezoomerSpec {
+pub struct FormatSpec {
     name: &'static str,
     display_name: &'static str,
     recognize: fn(&str) -> bool,
@@ -537,7 +520,7 @@ pub struct DezoomerSpec {
     program: DiscoveryProgram,
 }
 
-impl DezoomerSpec {
+impl FormatSpec {
     #[must_use]
     pub const fn new(name: &'static str, routes: &'static [DiscoveryRoute]) -> Self {
         Self::from_program(name, DiscoveryProgram::Rules(routes, None))
@@ -552,7 +535,7 @@ impl DezoomerSpec {
     #[must_use]
     pub const fn on_failure(mut self, handler: FailureHandler) -> Self {
         let DiscoveryProgram::Rules(routes, ..) = self.program else {
-            panic!("an immediate dezoomer cannot handle resource failures");
+            panic!("an immediate format cannot handle resource failures");
         };
         self.program = DiscoveryProgram::Rules(routes, Some(handler));
         self
@@ -605,7 +588,7 @@ impl DezoomerSpec {
     }
 }
 
-impl PartialEq for DezoomerSpec {
+impl PartialEq for FormatSpec {
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name
     }
@@ -793,7 +776,7 @@ enum CandidateState {
 }
 
 struct Candidate {
-    spec: DezoomerSpec,
+    spec: FormatSpec,
     state: CandidateState,
     history: Vec<RequestId>,
 }
@@ -815,7 +798,7 @@ pub struct DiscoveryOperation {
 }
 
 impl DiscoveryOperation {
-    pub(crate) fn new(input: String, specs: &[DezoomerSpec], limits: DiscoveryLimits) -> Self {
+    pub(crate) fn new(input: String, specs: &[FormatSpec], limits: DiscoveryLimits) -> Self {
         let candidates = specs
             .iter()
             .map(|&spec| Candidate {
@@ -1167,7 +1150,7 @@ mod tests {
     #[test]
     fn input_acquisition_is_implicit_and_extractors_receive_it() {
         let mut registry = Registry::new();
-        registry.register(DezoomerSpec::new("test", COMPLETE));
+        registry.register(FormatSpec::new("test", COMPLETE));
         let mut operation = registry.start("memory://metadata");
         let need = operation.missing_resources().unwrap().pop().unwrap();
         assert_eq!(need.request.uri, "memory://metadata");
@@ -1180,7 +1163,7 @@ mod tests {
     #[test]
     fn extractors_receive_the_redirect_target_uri() {
         let mut registry = Registry::new();
-        registry.register(DezoomerSpec::new("final-uri", FINAL_URI));
+        registry.register(FormatSpec::new("final-uri", FINAL_URI));
         let mut operation = registry.start("https://example.test/redirect");
         let need = operation.missing_resources().unwrap().pop().unwrap();
         operation
@@ -1207,7 +1190,7 @@ mod tests {
         // collapse to the request URI at every layer.
         for with_empty in [false, true] {
             let mut registry = Registry::new();
-            registry.register(DezoomerSpec::new("final-uri", FINAL_URI));
+            registry.register(FormatSpec::new("final-uri", FINAL_URI));
             let mut operation = registry.start("https://example.test/redirect");
             let need = operation.missing_resources().unwrap().pop().unwrap();
             let mut response = ResourceResponse::new(need.id, b"metadata");
@@ -1240,7 +1223,7 @@ mod tests {
     #[test]
     fn resources_expose_lossy_text() {
         let mut registry = Registry::new();
-        registry.register(DezoomerSpec::new("text", TEXT));
+        registry.register(FormatSpec::new("text", TEXT));
         let mut operation = registry.start("memory://metadata");
         provide(&mut operation, b"metadata\xff");
         assert!(operation.finish().unwrap().is_empty());
@@ -1262,7 +1245,7 @@ mod tests {
     #[test]
     fn url_mapping_happens_before_acquisition() {
         let mut registry = Registry::new();
-        registry.register(DezoomerSpec::new("mapped", MAPPED));
+        registry.register(FormatSpec::new("mapped", MAPPED));
         let mut operation = registry.start("memory://image/tile.jpg");
         assert_eq!(
             operation.next_priority_need().unwrap().unwrap().request.uri,
@@ -1297,7 +1280,7 @@ mod tests {
     #[test]
     fn followed_resources_are_redispatched_with_history() {
         let mut registry = Registry::new();
-        registry.register(DezoomerSpec::new("chain", CHAIN));
+        registry.register(FormatSpec::new("chain", CHAIN));
         let mut operation = registry.start("memory://image/metadata");
         provide(&mut operation, b"metadata");
         let need = operation.next_priority_need().unwrap().unwrap();
@@ -1313,8 +1296,8 @@ mod tests {
     #[test]
     fn identical_requests_are_fanned_out_and_parser_errors_try_the_next_candidate() {
         let mut registry = Registry::new();
-        registry.register(DezoomerSpec::new("reject", REJECT));
-        registry.register(DezoomerSpec::new("accept", COMPLETE));
+        registry.register(FormatSpec::new("reject", REJECT));
+        registry.register(FormatSpec::new("accept", COMPLETE));
         let mut operation = registry.start("memory://shared");
         assert_eq!(operation.missing_resources().unwrap().len(), 1);
         provide(&mut operation, b"metadata");
@@ -1344,8 +1327,8 @@ mod tests {
     #[test]
     fn history_is_candidate_local_when_requests_are_shared() {
         let mut registry = Registry::new();
-        registry.register(DezoomerSpec::new("a", HISTORY_A));
-        registry.register(DezoomerSpec::new("b", HISTORY_B));
+        registry.register(FormatSpec::new("a", HISTORY_A));
+        registry.register(FormatSpec::new("b", HISTORY_B));
         let mut operation = registry.start("memory://shared");
         let shared = operation.missing_resources().unwrap().pop().unwrap();
         operation
@@ -1382,7 +1365,7 @@ mod tests {
     #[test]
     fn failure_handlers_choose_the_next_action() {
         let mut registry = Registry::new();
-        registry.register(DezoomerSpec::new("failure", COMPLETE).on_failure(recover));
+        registry.register(FormatSpec::new("failure", COMPLETE).on_failure(recover));
         let mut operation = registry.start("memory://failure");
         let need = operation.missing_resources().unwrap().pop().unwrap();
         operation
@@ -1406,7 +1389,7 @@ mod tests {
     #[test]
     fn following_the_same_uri_is_rejected() {
         let mut registry = Registry::new();
-        registry.register(DezoomerSpec::new("repeat", REPEAT));
+        registry.register(FormatSpec::new("repeat", REPEAT));
         let mut operation = registry.start("memory://repeat");
         let need = operation.missing_resources().unwrap().pop().unwrap();
         let error = operation
@@ -1430,7 +1413,7 @@ mod tests {
     #[test]
     fn operation_limits_are_enforced() {
         let mut registry = Registry::new();
-        registry.register(DezoomerSpec::new("loop", LOOP));
+        registry.register(FormatSpec::new("loop", LOOP));
         let mut transitions = registry.start_with_limits(
             "memory://start",
             DiscoveryLimits {
@@ -1449,8 +1432,8 @@ mod tests {
         assert_eq!(error, DiscoveryError::TransitionLimitExceeded);
 
         let mut limited = Registry::new();
-        limited.register(DezoomerSpec::new("high", HIGH));
-        limited.register(DezoomerSpec::new("low", LOW));
+        limited.register(FormatSpec::new("high", HIGH));
+        limited.register(FormatSpec::new("low", LOW));
         let mut resources = limited.start_with_limits(
             "memory://root",
             DiscoveryLimits {
@@ -1481,7 +1464,7 @@ mod tests {
         assert!(resources.finish().unwrap().is_empty());
 
         let mut bytes = Registry::new();
-        bytes.register(DezoomerSpec::new("bytes", COMPLETE));
+        bytes.register(FormatSpec::new("bytes", COMPLETE));
         let mut bytes = bytes.start_with_limits(
             "memory://metadata",
             DiscoveryLimits {
@@ -1528,8 +1511,8 @@ mod tests {
     #[test]
     fn priority_stays_depth_first_across_followed_resources() {
         let mut registry = Registry::new();
-        registry.register(DezoomerSpec::new("high", HIGH));
-        registry.register(DezoomerSpec::new("low", LOW));
+        registry.register(FormatSpec::new("high", HIGH));
+        registry.register(FormatSpec::new("low", LOW));
         let mut operation = registry.start("memory://root");
         assert_eq!(operation.missing_resources().unwrap().len(), 2);
         let high = operation.next_priority_need().unwrap().unwrap();
@@ -1697,30 +1680,5 @@ mod tests {
         assert_eq!(lenient.transport, TransportKind::Direct);
         assert_eq!(lenient.http, None);
         assert_eq!(lenient.reason, None);
-    }
-
-    #[test]
-    fn transport_kind_parses_host_strings() {
-        assert_eq!(
-            TransportKind::from_wire(Some("browser-session")),
-            TransportKind::BrowserSession
-        );
-        assert_eq!(
-            TransportKind::from_wire(Some("extension-origin")),
-            TransportKind::BrowserSession
-        );
-        assert_eq!(
-            TransportKind::from_wire(Some("metadata-proxy")),
-            TransportKind::MetadataProxy
-        );
-        assert_eq!(
-            TransportKind::from_wire(Some("native")),
-            TransportKind::Native
-        );
-        assert_eq!(TransportKind::from_wire(None), TransportKind::Direct);
-        assert_eq!(
-            TransportKind::from_wire(Some("stale-host")),
-            TransportKind::Direct
-        );
     }
 }

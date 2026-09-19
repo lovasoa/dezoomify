@@ -1,4 +1,4 @@
-//! Perf smoke for todo 3.1: fixed pool and streaming memory model. Fast and
+//! Perf smoke for the fixed pool and streaming memory model. Fast and
 //! deterministic: no
 //! gigapixel allocation, no public network. Wall-time numbers print for CI
 //! tracking; the hard gate is the deterministic memory model plus a 20
@@ -6,11 +6,10 @@
 //! `perf-baseline.json`.
 
 use dezoomify_native::pipeline::{
-    canvas_bytes, encode_jpeg, encode_png, encode_tiff, estimated_peak_legacy_bytes,
+    self, canvas_bytes, encode_jpeg, encode_png, encode_tiff, estimated_peak_legacy_bytes,
     estimated_peak_streaming_bytes, exceeds_available_memory, required_memory_bytes, should_spill,
     PipelineConfig, MAX_CONCURRENT, SPILL_THRESHOLD_BYTES,
 };
-use dezoomify_native::pool::run_bounded;
 use std::time::Instant;
 
 fn sweep_image() -> image::RgbaImage {
@@ -36,10 +35,6 @@ fn baseline() -> serde_json::Value {
 fn pool_width_is_unified_at_sixteen() {
     assert_eq!(MAX_CONCURRENT, 16);
     assert_eq!(PipelineConfig::default().max_concurrent, 16);
-    assert_eq!(
-        dezoomify_native::download::SchedulerConfig::default().max_concurrent,
-        16
-    );
 }
 
 #[test]
@@ -78,26 +73,193 @@ fn available_memory_gate_is_deterministic() {
     assert!(exceeds_available_memory(1025, 1024));
 }
 
-#[test]
-fn tile_pool_bounds_concurrency() {
-    let start = Instant::now();
-    let jobs: Vec<Box<dyn FnOnce() -> usize + Send>> = (0..16)
-        .map(|index| {
-            let boxed: Box<dyn FnOnce() -> usize + Send> = Box::new(move || {
-                std::thread::sleep(std::time::Duration::from_millis(2));
-                index
-            });
-            boxed
-        })
-        .collect();
-    let out = run_bounded(jobs, MAX_CONCURRENT);
-    assert_eq!(out.len(), 16);
-    let elapsed = start.elapsed();
-    println!("pool 16 tiles in {elapsed:?}");
-    assert!(
-        elapsed < std::time::Duration::from_secs(5),
-        "fixed pool must finish promptly"
+/// Four generated tiles plus a `tiles.yaml` manifest: the same local-input
+/// shape the runner tests use, so the concurrency bound is measured on the
+/// shipped fetch/decode/place path instead of a throwaway pool.
+fn write_local_tiles(work: &std::path::Path) -> String {
+    for name in ["tile-0_0", "tile-1_0", "tile-0_1", "tile-1_1"] {
+        let mut tile = image::RgbaImage::new(256, 256);
+        for (x, y, pixel) in tile.enumerate_pixels_mut() {
+            *pixel = image::Rgba([(x % 256) as u8, (y % 256) as u8, 128, 255]);
+        }
+        let mut bytes = Vec::new();
+        let encoder = image::codecs::png::PngEncoder::new(&mut bytes);
+        image::ImageEncoder::write_image(
+            encoder,
+            tile.as_raw(),
+            256,
+            256,
+            image::ExtendedColorType::Rgba8,
+        )
+        .expect("tile encodes");
+        std::fs::write(work.join(format!("{name}.png")), &bytes).expect("write tile");
+    }
+    let dir = work.to_str().expect("utf8 dir").to_string();
+    let yaml = format!(
+        "url_template: \"file://{dir}/tile-{{{{x}}}}_{{{{y}}}}.png\"\n\
+         x_template: \"x * tile_size\"\n\
+         y_template: \"y * tile_size\"\n\
+         variables:\n\
+         \x20 - {{ name: x, from: 0, to: 1 }}\n\
+         \x20 - {{ name: y, from: 0, to: 1 }}\n\
+         \x20 - {{ name: tile_size, value: 256 }}\n\
+         width: 512\n\
+         height: 512\n\
+         title: \"Perf tiles\"\n"
     );
+    let manifest = work.join("tiles.yaml");
+    std::fs::write(&manifest, yaml.as_bytes()).expect("write manifest");
+    manifest.to_str().expect("utf8 manifest").to_string()
+}
+
+#[test]
+fn exec_bounds_inflight_to_max_concurrent() {
+    let start = Instant::now();
+    let work = std::env::temp_dir().join(format!("dz-perf-exec-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).expect("temp dir");
+    let input = write_local_tiles(&work);
+    let output = work.join("perf.png");
+    let config = PipelineConfig {
+        max_concurrent: 2,
+        ..PipelineConfig::default()
+    };
+    let outcome = pipeline::run(
+        &input,
+        output.to_str().expect("utf8 output"),
+        false,
+        &config,
+        &mut |_| {},
+    )
+    .expect("local pipeline succeeds");
+    assert_eq!(outcome.tile_count, 4);
+    // The engine's own budget bounds outstanding work: the honest
+    // instrumentation peaks within it on the shipped path, with no separate
+    // scheduler or pool to enforce the width.
+    assert_eq!(outcome.instrumentation.acquired, 4);
+    assert!(
+        (1..=2).contains(&outcome.instrumentation.peak_inflight),
+        "inflight stays within the engine budget: {}",
+        outcome.instrumentation.peak_inflight
+    );
+    let elapsed = start.elapsed();
+    println!(
+        "exec 4 tiles with max_concurrent=2 in {elapsed:?} (peak_inflight={})",
+        outcome.instrumentation.peak_inflight
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(60),
+        "bounded exec must finish promptly"
+    );
+    let _ = std::fs::remove_dir_all(&work);
+}
+
+/// Grid-shaped local inputs for the scaling test: `grid` by `grid` tiles of
+/// `tile_px`, the same local-input shape the runner tests use, so scaling is
+/// measured on the shipped fetch/decode/place path.
+fn write_local_tiles_grid(work: &std::path::Path, grid: u32, tile_px: u32) -> String {
+    for x in 0..grid {
+        for y in 0..grid {
+            let mut tile = image::RgbaImage::new(tile_px, tile_px);
+            for (px, py, pixel) in tile.enumerate_pixels_mut() {
+                *pixel = image::Rgba([
+                    ((px + x * 13) % 256) as u8,
+                    ((py + y * 29) % 256) as u8,
+                    128,
+                    255,
+                ]);
+            }
+            let mut bytes = Vec::new();
+            let encoder = image::codecs::png::PngEncoder::new(&mut bytes);
+            image::ImageEncoder::write_image(
+                encoder,
+                tile.as_raw(),
+                tile_px,
+                tile_px,
+                image::ExtendedColorType::Rgba8,
+            )
+            .expect("tile encodes");
+            std::fs::write(work.join(format!("tile-{x}_{y}.png")), &bytes).expect("write tile");
+        }
+    }
+    let edge = grid * tile_px;
+    let dir = work.to_str().expect("utf8 dir").to_string();
+    let yaml = format!(
+        "url_template: \"file://{dir}/tile-{{{{x}}}}_{{{{y}}}}.png\"\n\
+         x_template: \"x * tile_size\"\n\
+         y_template: \"y * tile_size\"\n\
+         variables:\n\
+         \x20 - {{ name: x, from: 0, to: {} }}\n\
+         \x20 - {{ name: y, from: 0, to: {} }}\n\
+         \x20 - {{ name: tile_size, value: {tile_px} }}\n\
+         width: {edge}\n\
+         height: {edge}\n\
+         title: \"Scaling tiles\"\n",
+        grid - 1,
+        grid - 1,
+    );
+    let manifest = work.join("tiles.yaml");
+    std::fs::write(&manifest, yaml.as_bytes()).expect("write manifest");
+    manifest.to_str().expect("utf8 manifest").to_string()
+}
+
+/// Scheduling scaling on the REAL pipeline: 1/16/64/256-tile grids through
+/// the shipped `pipeline::run` (local fetch, decode, assemble, encode).
+/// In-flight descriptors stay within the engine slot budget at every shape
+/// while completions track the plan exactly (linear by construction).
+#[test]
+fn exec_scales_with_bounded_inflight_across_increasing_tile_counts() {
+    use std::time::Instant;
+    let work = std::env::temp_dir().join(format!("dz-perf-scale-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).expect("temp dir");
+    const BUDGET: usize = 8;
+    let mut table = Vec::new();
+    for grid in [1u32, 4, 8, 16] {
+        let expected = (grid * grid) as usize;
+        // The local-input route matches the `tiles.yaml` filename, so each
+        // shape gets its own directory.
+        let shape = work.join(format!("grid-{grid}"));
+        std::fs::create_dir_all(&shape).expect("shape dir");
+        let input = write_local_tiles_grid(&shape, grid, 64);
+        let output = work.join(format!("scale-{grid}.png"));
+        let config = PipelineConfig {
+            max_concurrent: BUDGET,
+            ..PipelineConfig::default()
+        };
+        let start = Instant::now();
+        let outcome = pipeline::run(
+            &input,
+            output.to_str().expect("utf8 output"),
+            false,
+            &config,
+            &mut |_| {},
+        )
+        .expect("local pipeline succeeds");
+        let elapsed = start.elapsed();
+        assert_eq!(
+            outcome.tile_count, expected,
+            "plan size for {grid}x{grid} grid"
+        );
+        assert_eq!(
+            outcome.instrumentation.acquired, expected as u64,
+            "completions track the plan for {grid}x{grid} grid"
+        );
+        assert!(
+            (1..=BUDGET).contains(&outcome.instrumentation.peak_inflight),
+            "inflight stays within the engine budget at {expected} tiles: {}",
+            outcome.instrumentation.peak_inflight
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(120),
+            "scaling shape {expected} tiles must finish promptly"
+        );
+        table.push((expected, outcome.instrumentation.peak_inflight, elapsed));
+    }
+    for (tiles, peak, elapsed) in &table {
+        println!("native scaling: tiles={tiles} peak_inflight={peak} elapsed={elapsed:?}");
+    }
+    let _ = std::fs::remove_dir_all(&work);
 }
 
 #[test]

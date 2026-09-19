@@ -11,7 +11,7 @@
 // no I/O, no clocks.
 import { BROWSER_LIMITS, probeLimits, safeArea } from "./limits.ts";
 import type { BrowserLimits } from "./types.ts";
-import type { CatalogDto, ImageDto, LevelDto } from "@dezoomify/wasm-bindings";
+import type { CatalogDto, EngineSnapshotDto, ImageDto, LevelDto } from "@dezoomify/wasm-bindings";
 
 /**
  * Deferred-resolution bound: the initial discovery plus this many deferred
@@ -113,4 +113,91 @@ export function pickDeferredUri(catalog: CatalogDto | undefined): string | null 
     }
   }
   return null;
+}
+
+/**
+ * Closed host decision for one authoritative snapshot: what the product
+ * does about selection before rendering. Both browser products (website,
+ * extension job tab) drive auto-selection and deferred follows from this
+ * one pure projection over the generated DTO; each maps the decision onto
+ * its own commands and product side effects (logging, titles, history).
+ * Pure: no I/O, no clocks, no commands.
+ */
+export type SelectionDrive =
+  | { action: "selected" }
+  | { action: "waiting" }
+  | { action: "select"; image: number; level: number; title?: string }
+  | { action: "follow-deferred"; position: number }
+  | { action: "unselectable" };
+
+export function planSelectionDrive(
+  snapshot: EngineSnapshotDto,
+  limits: BrowserLimits = BROWSER_LIMITS,
+): SelectionDrive {
+  const selection = snapshot.selection;
+  // An explicitly chosen image needs nothing: the engine owns the rest.
+  if (selection?.image !== null && selection?.image !== undefined) return { action: "selected" };
+  const catalog = selection?.catalog;
+  if (catalog) {
+    const picked = pickEngineSelection(catalog, limits);
+    if (picked) {
+      return {
+        action: "select",
+        image: picked.image,
+        level: picked.level,
+        ...(typeof picked.title === "string" ? { title: picked.title } : {}),
+      };
+    }
+    const deferredIndex = catalog.entries.findIndex((entry) => entry?.kind === "image-request");
+    if (deferredIndex >= 0) return { action: "follow-deferred", position: deferredIndex };
+    return { action: "unselectable" };
+  }
+  const deferred = Array.isArray(selection?.deferred) ? selection.deferred : [];
+  if (deferred.length > 0 && typeof deferred[0]?.position === "number") {
+    return { action: "follow-deferred", position: deferred[0].position };
+  }
+  // No catalog and no deferred entries yet: the engine is still discovering;
+  // never fail or select without snapshot facts.
+  return { action: "waiting" };
+}
+
+/**
+ * Idempotent driver over {@link planSelectionDrive}: products call
+ * `drive(snapshot)` on every snapshot and send the returned decision at
+ * most once per distinct follow target. The follow command's own answer
+ * snapshot still carries the old catalog while the fetch is in flight, so
+ * without this guard every product would send the same follow twice and
+ * the engine would (correctly) reject the duplicate as wrong-state, which
+ * the runner treats as terminal for the job. One driver per job run;
+ * targets key on catalog position plus entry URI so a replaced catalog may
+ * legitimately defer the same position again.
+ */
+export type DrivenSelection = SelectionDrive | { action: "already-driven" };
+
+export interface SelectionDriver {
+  drive(snapshot: EngineSnapshotDto, limits?: BrowserLimits): DrivenSelection;
+  reset(): void;
+}
+
+export function createSelectionDriver(): SelectionDriver {
+  let followed = new Set<string>();
+  return {
+    drive(snapshot: EngineSnapshotDto, limits: BrowserLimits = BROWSER_LIMITS): DrivenSelection {
+      const drive = planSelectionDrive(snapshot, limits);
+      if (drive.action !== "follow-deferred") return drive;
+      const entries = snapshot.selection.catalog?.entries;
+      const candidate = entries?.[drive.position];
+      const entryUri = candidate?.kind === "image-request" ? candidate.uri : undefined;
+      const deferredUri = snapshot.selection.deferred.find(
+        (entry) => entry.position === drive.position,
+      )?.uri;
+      const key = `${drive.position}:${entryUri ?? deferredUri ?? ""}`;
+      if (followed.has(key)) return { action: "already-driven" };
+      followed.add(key);
+      return drive;
+    },
+    reset(): void {
+      followed = new Set<string>();
+    },
+  };
 }

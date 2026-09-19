@@ -99,6 +99,10 @@ export const de = {
   "view.step.downloading": "Bildkacheln werden gespeichert…",
   "view.step.saving": "Endbild wird zusammengesetzt…",
   "view.step.working": "Arbeitet…",
+  "view.step.contactingDetail": "Bildhost wird kontaktiert…",
+  "view.step.recoveryDetail": "Eine Wiederherstellungsentscheidung ist erforderlich.",
+  "view.step.encodingDetail": "Wird in der App kodiert.",
+  "view.step.cleanupDetail": "Unfertige Dateien werden aufgeraumt…",
   // Live job section.
   "view.job.workingOn": "Arbeitet an",
   "view.job.cancel": "Abbrechen",
@@ -114,8 +118,6 @@ export const de = {
     "Lauft noch, {host} antwortet langsam. Sie konnen warten oder abbrechen und es spater erneut versuchen.",
   // Display-only section.
   "view.display.title": "Vorschau wird gezeigt, noch nicht gespeichert",
-  "view.display.shownPlain": "Unten gezeigt, ohne zu speichern.",
-  "view.display.shownPrefix": "Unten gezeigt, ohne zu speichern.",
   "view.display.openDesktop": "In der Desktop-App offnen",
   // One-click desktop handoff (todo 5.5): the button names the origin and the
   // summary names scope/recipient/job memory-only, mirroring the extension
@@ -262,6 +264,8 @@ export const de = {
     "Einige Teile dieses Bildes von {host} konnten nicht gespeichert werden. Versuchen Sie die fehlenden Teile erneut oder behalten Sie das Teilbild mit leeren Flachen.",
   "desktop.discovery.none":
     "Kein zoombares Bild unter dieser Adresse von {host} gefunden. Versuchen Sie eine andere Seite oder pruefen Sie die Adresse.",
+  "view.discovery.none":
+    "Unter dieser Adresse wurde kein zoombares Bild gefunden. Versuchen Sie eine Seite mit Betrachter oder die Browsererweiterung.",
   "desktop.plan.none":
     "Dieses Bild hat von {host} aus keine speicherbare Grosse. Versuchen Sie ein anderes Bild oder eine kleinere Max. Breite.",
   "desktop.transport.stalled": "Speichern stockt beim Kontakt mit {host}. Pruefen Sie Ihre Verbindung und versuchen Sie es erneut.",
@@ -270,6 +274,7 @@ export const de = {
   "desktop.job.cancelledMsg": "Das Speichern des Bildes wurde gestoppt. Jede unfertige Datei wurde entfernt.",
   "desktop.start.failed": "Das Speichern dieses Bildes von {host} konnte nicht gestartet werden. Versuchen Sie es erneut.",
   "desktop.choice.failed": "Diese Wahl wurde nicht angenommen. Versuchen Sie es erneut.",
+  "view.ext.desynced": "Die Erweiterung hat die Synchronisierung verloren. Starten Sie den Scan erneut.",
   "desktop.save.generic": "Dieses Bild von {host} konnte nicht gespeichert werden. Versuchen Sie es mit einer anderen Adresse erneut.",
   "desktop.internal.error":
     "Etwas Unerwartetes hat dieses Speichern von {host} gestoppt. Versuchen Sie es erneut und kopieren Sie die Diagnose, falls es erneut geschieht.",
@@ -318,8 +323,6 @@ export const de = {
   "desktop.rec.destTitle": "Speicherziel braucht Aufmerksamkeit",
   "desktop.rec.destDesc":
     "Das Speicherziel wurde nicht angenommen. Wahlen Sie eine Ausgabedatei, versuchen Sie es erneut oder nutzen Sie eine andere App.",
-  "desktop.rec.chooseTitle": "Wahlen Sie, wo gespeichert wird",
-  "desktop.rec.chooseDesc": "Wahlen Sie die Ausgabedatei, um dieses Bild weiter zu speichern.",
   "desktop.rec.keep": "Teilbild behalten",
   "desktop.rec.discard": "Teilbild verwerfen",
   "desktop.rec.retryTiles": "Fehlende Kacheln erneut versuchen",

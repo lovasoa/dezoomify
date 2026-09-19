@@ -2,41 +2,24 @@
 //! here exactly once and `tsify` projects it into the WASM declaration.
 
 use serde::{Deserialize, Serialize};
-use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
+use std::num::{NonZeroU32, NonZeroU64};
 
 // ---------------------------------------------------------------------------
-// Bounded integers (always safe across the JavaScript boundary)
+// Format grid (one generation source for TS)
 // ---------------------------------------------------------------------------
-
-/// Maximum coordinate/dimension/count (fits JavaScript safe integers).
-pub const MAX_DIMENSION: u64 = 1 << 30;
-/// Maximum tiles, probes, or retries.
-pub const MAX_COUNT: u64 = 1 << 24;
-
-// ---------------------------------------------------------------------------
-// Runtime limits, format grid, transports (one generation source for TS)
-// ---------------------------------------------------------------------------
-
-/// Largest browser-tab canvas area in pixels (16384 x 16384).
-pub const MAX_BROWSER_AREA: u64 = 268_435_456;
-/// Metadata proxy response cap in bytes (2 MiB, mirrors the server limit).
-pub const PROXY_MAX_BYTES: u64 = 2_097_152;
-/// Direct-first metadata head-start window in milliseconds.
-pub const METADATA_WINDOW_MS: u64 = 1_500;
-
-/// Active-transport labels (mirrors browser-runtime types.ts, verified by tests).
-pub const DIRECT_TRANSPORT_LABEL: &str = "Direct from your browser";
-pub const PROXY_TRANSPORT_LABEL: &str = "Metadata proxy";
 
 /// Format grid in registry precedence order: (id, display name).
-/// Mirrors `dezoomify-core/src/core/registry.rs` BUILTINS snapshot (18 entries).
+/// This is a snapshot of the core registry (`Registry::snapshot` over every
+/// built-in format); the engine test `format_grid_matches_registry` fails on
+/// any drift, so the two lists cannot diverge silently.
 pub const FORMAT_GRID: &[(&str, &str)] = &[
     ("custom", "Custom tiles"),
     ("google_arts_and_culture", "Arts & Culture"),
     ("zoomify", "Zoomify"),
     ("iiif", "IIIF"),
     ("deepzoom", "Seadragon (Deep Zoom Image)"),
-    ("generic", "Generic dezoomer"),
+    ("second_canvas", "Second Canvas"),
+    ("generic", "Generic format"),
     ("krpano", "krpano"),
     ("iipimage", "IIPImage"),
     ("xlimage", "XLimage"),
@@ -51,11 +34,8 @@ pub const FORMAT_GRID: &[(&str, &str)] = &[
     ("bulk_text", "Bulk text"),
 ];
 
-/// Power-user format ids (subset of FORMAT_GRID, hidden by default).
-pub const POWER_USER_FORMATS: &[&str] = &["custom", "bulk_text"];
-
 // ---------------------------------------------------------------------------
-// Requests and byte-buffer ownership
+// Requests and direct byte ownership
 // ---------------------------------------------------------------------------
 
 /// Purpose of a resource request (metadata vs tile vs probe).
@@ -148,17 +128,6 @@ pub struct TilePlacementDto {
     pub probe_output: bool,
 }
 
-/// Typed reference to bytes owned by the WASM arena.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub struct BufferHandle {
-    pub id: u32,
-    pub generation: u32,
-    pub length: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub checksum: Option<String>,
-}
-
 // ---------------------------------------------------------------------------
 // Catalog and selection
 // ---------------------------------------------------------------------------
@@ -248,7 +217,9 @@ impl JobInputDto {
     }
 }
 
-// Job commands (shared UI/CLI -> job)
+// User commands (UI -> job): intent that can never supply bytes, complete
+// an effect, or claim publication. Host completions travel separately as
+// [`HostCompletion`]; the split is structural, not documentary.
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -258,9 +229,44 @@ pub enum JobCommand {
     Start {
         inputs: Vec<JobInputDto>,
     },
+    SelectImage {
+        image: u32,
+    },
+    /// Follow one still-deferred catalog entry within the same job
+    /// (zero-based position). Bounded and cycle-guarded; the catalog is
+    /// replaced on success with no new job ID.
+    FollowDeferred {
+        image: u32,
+    },
+    SelectLevel {
+        level: u32,
+    },
+    /// Answer the outstanding partial decision. Same generation + decision
+    /// vocabulary as the engine `AnswerPartial`; stale generations are
+    /// rejected, never consumed in order.
+    AnswerPartial {
+        generation: u32,
+        decision: RecoveryChoice,
+    },
+    Cancel,
+    Pause,
+    Resume,
+}
+
+// Host completions (host -> job): answers to outstanding [`HostEffect`]s.
+// Only these carry bytes, failures, observations, and publication claims.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum HostCompletion {
     ProvideResource {
         request: u32,
-        buffer: BufferHandle,
+        /// Resource body, carried directly in the completion. Nothing is
+        /// retained adapter-side; tile success is body-free
+        /// (`ProvideDisplayOutcome`) and never carries bytes.
+        bytes: Vec<u8>,
         /// Post-redirect URL observed by the host, when it has one. Relative
         /// tile URLs resolve against this instead of the request URI.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -269,12 +275,6 @@ pub enum JobCommand {
     ProvideFetchFailure {
         request: u32,
         error: FetchFailureDto,
-    },
-    SelectImage {
-        image: u32,
-    },
-    SelectLevel {
-        level: u32,
     },
     /// Probe observation for one outstanding `acquire-tile` with
     /// `purpose: probe`. Correlated by the adapter-minted request id (like
@@ -287,21 +287,35 @@ pub enum JobCommand {
     },
     /// Display-only observation for one outstanding `acquire-tile` in
     /// `AcquiringTiles`. The host has already retained a valid ordinary
-    /// image element and the adapter forwards a successful `TileOutcome`.
+    /// image element and the adapter forwards a typed `TileDisplayed`.
     ProvideDisplayOutcome {
         request: u32,
     },
-    RecoveryChoice {
-        generation: u32,
-        choice: RecoveryChoice,
+    /// Successful acquisition of one outstanding `acquire-tile` in
+    /// `AcquiringTiles`. The host has already fetched, decoded, and placed
+    /// the tile; the body is NOT carried (it never re-enters the adapter).
+    /// The adapter forwards a typed `TileAcquired`.
+    TileAcquired {
+        request: u32,
     },
-    FinalizationSucceeded,
+    /// Elapsed retry wait for one outstanding `wait-retry-timer` host
+    /// effect. The engine owns no clocks: the host waits `delay_ms` on its
+    /// own clock, then answers with the same tile and attempt. While
+    /// paused, the host parks the completion and answers on resume. Stale
+    /// or duplicate completions are ignored.
+    RetryTimerElapsed {
+        tile: u32,
+        attempt: u32,
+    },
+    FinalizationSucceeded {
+        /// Honest disposition from the host that performed the save:
+        /// tainted (display-only) canvases report DisplayOnly so every
+        /// product presents preview instead of claiming a saved file.
+        disposition: OutputDispositionDto,
+    },
     FinalizationFailed {
         error: ErrorDto,
     },
-    Cancel,
-    Pause,
-    Resume,
 }
 
 // ---------------------------------------------------------------------------
@@ -332,6 +346,16 @@ pub enum HostEffect {
         format: OutputFormat,
         canvas: Option<SizeDto>,
     },
+    /// Explicit retry wait for one tile: the host waits `delay_ms` on its
+    /// own clock and then answers with `RetryTimerElapsed` carrying the
+    /// same tile and attempt. No new acquisition for this tile starts
+    /// before that completion. While paused, the host parks the timer and
+    /// issues the completion on resume.
+    WaitRetryTimer {
+        tile: u32,
+        attempt: u32,
+        delay_ms: u64,
+    },
     CancelWork,
     RequestDecision {
         generation: u32,
@@ -339,17 +363,8 @@ pub enum HostEffect {
 }
 
 // ---------------------------------------------------------------------------
-// Events (job -> UI; absolute snapshots, terminal exactly once)
+// Job lifecycle (engine -> hosts; absolute snapshots, terminal exactly once)
 // ---------------------------------------------------------------------------
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum EventKind {
-    Replayable,
-    Transient,
-    DecisionRequesting,
-    Terminal,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
@@ -367,60 +382,6 @@ pub enum JobState {
     PartiallyCompleted,
     Failed,
     Cancelled,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "kebab-case")]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum JobEvent {
-    JobState {
-        state: JobState,
-    },
-    Catalog {
-        catalog: CatalogDto,
-    },
-    Progress {
-        acquired: u64,
-        total: u64,
-    },
-    Warning {
-        error: ErrorDto,
-    },
-    RecoveryRequest {
-        generation: u32,
-        actions: Vec<RecoveryAction>,
-    },
-    Completed,
-    PartialCompleted,
-    Failed {
-        error: ErrorDto,
-    },
-    Cancelled,
-    Paused,
-    Resumed,
-}
-
-impl JobEvent {
-    #[must_use]
-    pub fn kind(&self) -> EventKind {
-        match self {
-            Self::JobState { .. }
-            | Self::Catalog { .. }
-            | Self::Progress { .. }
-            | Self::Paused
-            | Self::Resumed => EventKind::Replayable,
-            Self::Warning { .. } => EventKind::Transient,
-            Self::RecoveryRequest { .. } => EventKind::DecisionRequesting,
-            Self::Completed | Self::PartialCompleted | Self::Failed { .. } | Self::Cancelled => {
-                EventKind::Terminal
-            }
-        }
-    }
-
-    #[must_use]
-    pub fn is_terminal(&self) -> bool {
-        self.kind() == EventKind::Terminal
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -660,6 +621,10 @@ pub struct FetchFailureDto {
     pub blocked_reason: Option<BlockedReason>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub http: Option<u16>,
+    /// Host-observed `retry-after` in milliseconds, when the response
+    /// carried one. The engine waits at least this long before the retry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -771,15 +736,6 @@ pub fn redact_error_text(input: &str) -> String {
 pub struct SessionConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "typescript", tsify(type = "number"))]
-    pub max_buffer_bytes: Option<NonZeroU64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "typescript", tsify(type = "number"))]
-    pub max_total_bytes: Option<NonZeroU64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "typescript", tsify(type = "number"))]
-    pub max_buffers: Option<NonZeroUsize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "typescript", tsify(type = "number"))]
     pub max_concurrent_fetches: Option<NonZeroU32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "typescript", tsify(type = "number"))]
@@ -791,10 +747,129 @@ pub struct SessionConfig {
     pub max_retries: Option<u32>,
 }
 
+// ---------------------------------------------------------------------------
+// Engine snapshots (authoritative per-job projections for UI rendering)
+// ---------------------------------------------------------------------------
+//
+// The engine projects one absolute snapshot per transition: lifecycle,
+// pause flag, progress, selection/decision payload, terminal result, and
+// output summary. Snapshots carry no secrets, pixels, paths, or handles,
+// and no routing identifiers (job IDs stay host-side).
+
+/// Closed retry category for one classified tile failure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum FailureCategoryDto {
+    Permanent,
+    Transient,
+}
+
+/// Structured facts for one failed tile attempt (bounded diagnostics).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum HostMessage {
-    Effect(HostEffect),
-    Event(JobEvent),
+pub struct TileFailureDto {
+    pub code: String,
+    pub category: FailureCategoryDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_after_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// Unit progress for the active phase (totals stay unknown until the plan
+/// resolves).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct SnapshotProgressDto {
+    pub completed: u64,
+    pub total: Option<u64>,
+}
+
+/// One still-deferred catalog entry: position plus follow-up URI.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct SnapshotDeferredDto {
+    pub position: u32,
+    pub uri: String,
+}
+
+/// Current selection state (positions into the kept catalog).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct SnapshotSelectionDto {
+    pub image: Option<u32>,
+    pub level: Option<u32>,
+    pub level_count: u32,
+    /// The kept catalog with full geometry, once discovered. Replaced when
+    /// a deferred catalog entry is followed within the same job.
+    pub catalog: Option<CatalogDto>,
+    pub deferred: Vec<SnapshotDeferredDto>,
+}
+
+/// One tile settled as missing, with its full structured detail.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct MissingTileDto {
+    pub tile: u32,
+    pub failures: Vec<TileFailureDto>,
+}
+
+/// Outstanding partial decision payload.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct SnapshotDecisionDto {
+    pub generation: u32,
+    pub missing: Vec<MissingTileDto>,
+}
+
+/// Terminal outcome, set exactly once.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum SnapshotTerminalDto {
+    Completed,
+    PartialCompleted { missing: Vec<u32> },
+    Failed { error: ErrorDto },
+    Cancelled,
+}
+
+/// Honest output disposition reported by the host that performed the save.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum OutputDispositionDto {
+    NativePublication,
+    BrowserSaveInitiated,
+    BrowserSaveReady,
+    DisplayOnly,
+}
+
+/// Output summary: geometry, completeness, and the honest disposition.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct SnapshotOutputDto {
+    pub canvas: Option<SizeDto>,
+    pub format: OutputFormat,
+    pub complete: bool,
+    pub missing: Vec<u32>,
+    pub disposition: Option<OutputDispositionDto>,
+}
+
+/// Authoritative per-job projection. Snapshots are absolute: UIs render
+/// the latest snapshot and never reconstruct phases from event walks.
+/// `revision` increases on every transition; observers drop stale ones.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct EngineSnapshotDto {
+    pub revision: u32,
+    pub lifecycle: JobState,
+    pub paused: bool,
+    pub progress: SnapshotProgressDto,
+    pub selection: SnapshotSelectionDto,
+    pub decision: Option<SnapshotDecisionDto>,
+    pub terminal: Option<SnapshotTerminalDto>,
+    pub output: Option<SnapshotOutputDto>,
 }

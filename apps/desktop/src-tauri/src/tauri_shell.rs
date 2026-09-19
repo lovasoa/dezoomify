@@ -6,9 +6,9 @@
 // table. No tile bytes cross IPC, only protocol progress and events.
 //
 // All commands are async Tauri commands over `State<Mutex<JobTable>>` +
-// `AppHandle`. The mutex is held only inside the synchronous `run_dispatch`
-// helper (never across await/dialog); lifecycle, driver threads,
-// `poll_drivers`, and the shared `NativeRuntime` stay owned by `jobs.rs`.
+// `AppHandle`. The mutex is held only inside the synchronous typed dispatch
+// calls (never across await/dialog); lifecycle, driver threads, and
+// `poll_drivers` stay owned by `jobs.rs`.
 
 use std::sync::Mutex;
 
@@ -65,7 +65,10 @@ mod output_tests {
         // desktop handler. Only the child process sees this isolated PATH.
         for (name, script) in [
             ("xdg-open", "#!/bin/sh\nexit 1\n"),
-            ("gio", "#!/bin/sh\nprintf '%s\\n' \"$2\" >> \"$DEZOOMIFY_TEST_LAUNCH_ROOT/calls\"\nexit 0\n"),
+            (
+                "gio",
+                "#!/bin/sh\nprintf '%s\\n' \"$2\" >> \"$DEZOOMIFY_TEST_LAUNCH_ROOT/calls\"\nexit 0\n",
+            ),
         ] {
             let path = root.join(name);
             fs::write(&path, script).unwrap();
@@ -196,48 +199,52 @@ struct CapabilitySnapshot {
     commands: Vec<&'static str>,
 }
 
-/// Projected IPC payload shapes. Every job emit carries both `job` and
-/// `jobId` aliases plus `seq` so the frontend stale-job and stale-seq guards
-/// keep working, alongside the typed fields each channel documents:
-/// - `job-state`: `{job,jobId,seq,kind,state,detail,origin}`
-/// - `job-progress`: `{job,jobId,seq,kind,state,acquired,total,detail,origin}`
-/// - `job-output`: `{job,jobId,seq,kind,state,format,width,height,tileCount,detail,origin}`
-/// - `job-error`: `{job,jobId,seq,kind,state,code,phase,retryable,recovery,message,detail,origin,transport,resource-kind}`
+/// Projected IPC payload shape. Every job emit is the canonical
+/// `EngineSnapshotDto` verbatim (`revision`, `lifecycle`, `paused`,
+/// `progress`, `selection` with catalog, `decision`, `terminal`, `output`)
+/// plus the `job` + `jobId` routing aliases the frontend identity guard
+/// reads. No folded `state`/`acquired`/`recovery`/`origin` fields exist.
 ///
-/// Only counts, hashes, codes, and the redacted origin cross IPC; tile
-/// bytes, paths, full URLs, and secrets never do. `resource-kind` is emitted
-/// alongside the `resource_kind` alias for frontend compatibility.
-fn emit_projected(app: &AppHandle, emit: crate::jobs::ProjectedEmit) {
+/// Only the DTO crosses IPC; tile bytes, pixels, paths, full URLs, and
+/// secrets never do.
+fn emit_snapshot(app: &AppHandle, emit: crate::jobs::SnapshotEmit) {
     debug_assert!(!crate::jobs::payload_has_forbidden_keys(&emit.payload));
     let _ = app.emit(emit.channel, emit.payload);
 }
 
-/// Drain the table's projected emits and emit each on its channel.
-/// Per-job seq stays monotonic (`saturating_add` in `jobs.rs`); terminals
-/// were enqueued exactly once and post-terminal messages were ignored, so
-/// draining preserves exactly-once terminal delivery.
-fn drain_and_emit(app: &AppHandle, table: &mut crate::jobs::JobTable) {
-    for emit in table.drain_pending() {
-        emit_projected(app, emit);
+/// Emit synchronous snapshot emits plus freshly polled runner snapshots.
+/// Per-job revisions flow verbatim from the runner (`saturating_add` at
+/// the driver); terminals were forwarded exactly once and post-terminal
+/// snapshots are dropped, so this preserves exactly-once terminal delivery.
+fn poll_and_emit(
+    app: &AppHandle,
+    table: &mut crate::jobs::JobTable,
+    sync: Vec<crate::jobs::SnapshotEmit>,
+) {
+    for emit in sync {
+        emit_snapshot(app, emit);
+    }
+    for emit in table.poll_drivers() {
+        emit_snapshot(app, emit);
     }
 }
 
-fn run_dispatch(
-    state: &State<'_, Mutex<JobTable>>,
-    command: &str,
-    job: Option<&str>,
-    arg: Option<&str>,
-) -> Result<Dispatched, CommandFailure> {
-    let mut table = state.lock().map_err(|_| CommandFailure {
+/// Run one typed commands-layer dispatch under the table lock.
+fn lock_table<'a>(
+    state: &'a State<'_, Mutex<JobTable>>,
+) -> Result<std::sync::MutexGuard<'a, JobTable>, CommandFailure> {
+    state.lock().map_err(|_| CommandFailure {
         code: "shell.lock".into(),
         message: "job table poisoned".into(),
-    })?;
-    let outcome = commands::dispatch(&mut table, command, job, arg)?;
-    Ok(Dispatched {
+    })
+}
+
+fn to_dispatched(outcome: commands::DispatchOutcome) -> Dispatched {
+    Dispatched {
         job: outcome.job,
         seq: outcome.seq,
         event: outcome.event,
-    })
+    }
 }
 
 #[tauri::command]
@@ -250,20 +257,20 @@ async fn start_job(
     // Validates `input_url` plus the minimal settings JSON (validated
     // bounds, fail closed on invalid), then spawns the driver via
     // `jobs.rs start_job_with_settings` (CLI-parity transport). Emits the
-    // `dezoomify://job-state` discovering event for the new job. Header
-    // values never enter logs or error strings.
+    // initial `job-snapshot` for the new job. Header values never enter
+    // logs or error strings.
     if !commands::is_valid_input_url(&input_url) {
         return Err(CommandError::invalid_input(
             "input_url must be an http(s) URL up to 2048 bytes without userinfo",
         )
         .into());
     }
-    let dispatched = {
+    let (dispatched, initial) = {
         let mut table = state.lock().map_err(|_| CommandFailure {
             code: "shell.lock".into(),
             message: "job table poisoned".into(),
         })?;
-        let id = match settings.as_ref() {
+        let (id, emit) = match settings.as_ref() {
             None => table
                 .start_job(&input_url)
                 .map_err(|e| CommandError::invalid_input(&e))?,
@@ -274,19 +281,22 @@ async fn start_job(
                     .map_err(|e| CommandError::invalid_input(&e))?
             }
         };
-        let seq = table.last_seq(&id).unwrap_or(1);
-        Dispatched {
-            job: id,
-            seq,
-            event: "job-state:discovering".to_string(),
-        }
+        let seq = emit.seq;
+        (
+            Dispatched {
+                job: id,
+                seq,
+                event: "job-snapshot".to_string(),
+            },
+            emit,
+        )
     };
     {
         let mut table = state.lock().map_err(|_| CommandFailure {
             code: "shell.lock".into(),
             message: "job table poisoned".into(),
         })?;
-        drain_and_emit(&app, &mut table);
+        poll_and_emit(&app, &mut table, vec![initial]);
     }
     Ok(dispatched)
 }
@@ -297,16 +307,19 @@ async fn cancel_job(
     app: AppHandle,
     job: String,
 ) -> Result<Dispatched, CommandFailure> {
-    // Signals `cancel_flag` + the engine `Cancel` transition inside
-    // `jobs.rs cancel_job` (via `dispatch`); the `Cancelling`/`CleaningUp`/
-    // `Cancelled` chain was enqueued as projected `job-state` emits.
-    let dispatched = run_dispatch(&state, "cancel_job", Some(&job), None)?;
+    // Signals the runner cancel flag inside `jobs.rs cancel_job`; the
+    // terminal snapshot arrives on the snapshot stream exactly once.
+    let (dispatched, sync) = {
+        let mut table = lock_table(&state)?;
+        let (outcome, emits) = commands::dispatch_cancel_job(&mut table, &job)?;
+        (to_dispatched(outcome), emits)
+    };
     {
         let mut table = state.lock().map_err(|_| CommandFailure {
             code: "shell.lock".into(),
             message: "job table poisoned".into(),
         })?;
-        drain_and_emit(&app, &mut table);
+        poll_and_emit(&app, &mut table, sync);
     }
     Ok(dispatched)
 }
@@ -316,19 +329,68 @@ async fn answer_choice(
     state: State<'_, Mutex<JobTable>>,
     app: AppHandle,
     job: String,
-    choice: String,
+    choice: serde_json::Value,
 ) -> Result<Dispatched, CommandFailure> {
-    // Maps `img:`/`lvl:`/`keep`/`discard`/`att:` onto `pipeline_config`
-    // inside `jobs.rs answer_choice` (via `dispatch`); the precise
-    // `Awaiting*`/`Running` state was enqueued as a projected `job-state`
-    // emit with the redacted origin.
-    let dispatched = run_dispatch(&state, "answer_choice", Some(&job), Some(&choice))?;
+    // The choice arrives as structured JSON decoding to a typed `Choice`
+    // inside `jobs.rs answer_choice`; partial answers resolve through the
+    // runner snapshot stream.
+    let (dispatched, sync) = {
+        let mut table = lock_table(&state)?;
+        let (outcome, emits) = commands::dispatch_answer_choice(&mut table, &job, choice)?;
+        (to_dispatched(outcome), emits)
+    };
     {
         let mut table = state.lock().map_err(|_| CommandFailure {
             code: "shell.lock".into(),
             message: "job table poisoned".into(),
         })?;
-        drain_and_emit(&app, &mut table);
+        poll_and_emit(&app, &mut table, sync);
+    }
+    Ok(dispatched)
+}
+
+#[tauri::command]
+async fn pause_job(
+    state: State<'_, Mutex<JobTable>>,
+    app: AppHandle,
+    job: String,
+) -> Result<Dispatched, CommandFailure> {
+    // Forwards engine `Pause` inside `jobs.rs pause_job` (wrong-phase safe);
+    // the paused flag arrives on the snapshot stream verbatim.
+    let (dispatched, sync) = {
+        let mut table = lock_table(&state)?;
+        let (outcome, emits) = commands::dispatch_pause_job(&mut table, &job)?;
+        (to_dispatched(outcome), emits)
+    };
+    {
+        let mut table = state.lock().map_err(|_| CommandFailure {
+            code: "shell.lock".into(),
+            message: "job table poisoned".into(),
+        })?;
+        poll_and_emit(&app, &mut table, sync);
+    }
+    Ok(dispatched)
+}
+
+#[tauri::command]
+async fn resume_job(
+    state: State<'_, Mutex<JobTable>>,
+    app: AppHandle,
+    job: String,
+) -> Result<Dispatched, CommandFailure> {
+    // Forwards engine `Resume` inside `jobs.rs resume_job`; same routing as
+    // `pause_job` above.
+    let (dispatched, sync) = {
+        let mut table = lock_table(&state)?;
+        let (outcome, emits) = commands::dispatch_resume_job(&mut table, &job)?;
+        (to_dispatched(outcome), emits)
+    };
+    {
+        let mut table = state.lock().map_err(|_| CommandFailure {
+            code: "shell.lock".into(),
+            message: "job table poisoned".into(),
+        })?;
+        poll_and_emit(&app, &mut table, sync);
     }
     Ok(dispatched)
 }
@@ -337,7 +399,10 @@ async fn answer_choice(
 async fn query_capabilities(
     state: State<'_, Mutex<JobTable>>,
 ) -> Result<CapabilitySnapshot, CommandFailure> {
-    run_dispatch(&state, "query_capabilities", None, None)?;
+    {
+        let mut table = lock_table(&state)?;
+        commands::dispatch_query_capabilities(&mut table)?;
+    }
     Ok(CapabilitySnapshot {
         native_available: true,
         encoders: commands::SUPPORTED_FORMATS
@@ -385,7 +450,7 @@ async fn request_destination(
             return Err(CommandError::invalid_input(
                 "format must be one of png, jpeg, tiff, zif, webp, iiif-dir",
             )
-            .into())
+            .into());
         }
     };
     // Settings-selected output dir seeds the dialog's initial directory; the
@@ -447,7 +512,7 @@ async fn request_destination(
             return Err(CommandError::invalid_input(
                 "format must be one of png, jpeg, tiff, zif, webp, iiif-dir",
             )
-            .into())
+            .into());
         }
     };
     let denied = OutputFormat::infer_from_path(&path)
@@ -465,19 +530,20 @@ async fn request_destination(
     // runtime reports completion only after atomic output finalization.
     // The raw path stays native; it never crosses IPC.
     // Overwrite stays false until an explicit overwrite confirmation exists.
+    let sync = {
+        let mut table = state.lock().map_err(|_| CommandFailure {
+            code: "shell.lock".into(),
+            message: "job table poisoned".into(),
+        })?;
+        let (_, emits) = commands::dispatch_destination(&mut table, &job, &format, &path, false)?;
+        emits
+    };
     {
         let mut table = state.lock().map_err(|_| CommandFailure {
             code: "shell.lock".into(),
             message: "job table poisoned".into(),
         })?;
-        commands::dispatch_destination(&mut table, &job, &format, &path, false)?;
-    }
-    {
-        let mut table = state.lock().map_err(|_| CommandFailure {
-            code: "shell.lock".into(),
-            message: "job table poisoned".into(),
-        })?;
-        drain_and_emit(&app, &mut table);
+        poll_and_emit(&app, &mut table, sync);
     }
     Ok(DestinationResult {
         outcome: "granted",
@@ -545,29 +611,27 @@ fn handle_deep_link_argv(app: &AppHandle, argv: &[String]) {
     }
 }
 
-/// Background driver poller: folds worker progress and terminal outcomes
-/// into the transcript and emits each projected event on its channel.
-/// Polls every 100 ms without blocking commands; the table lock is held
-/// only for the synchronous pump+drain, never across await/dialog.
-/// Terminals were enqueued exactly once and post-terminal messages ignored,
-/// so the poller preserves exactly-once delivery. No tile bytes cross IPC;
-/// payloads are already redacted in `jobs.rs`.
+/// Background driver poller: forwards worker snapshots verbatim on the
+/// snapshot channel. Polls every 100 ms without blocking commands; the
+/// table lock is held only for the synchronous pump, never across
+/// await/dialog. Terminals were forwarded exactly once and post-terminal
+/// snapshots dropped, so the poller preserves exactly-once delivery. No
+/// tile bytes cross IPC; payloads are already redacted in `jobs.rs`.
 fn spawn_driver_poller(app: AppHandle) {
     let _ = std::thread::Builder::new()
         .name("dezoomify-driver-poll".to_string())
         .spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_millis(100));
-            let pending: Vec<crate::jobs::ProjectedEmit> = {
+            let pending: Vec<crate::jobs::SnapshotEmit> = {
                 let state = app.state::<Mutex<JobTable>>();
                 let mut table = match state.lock() {
                     Ok(table) => table,
                     Err(_) => break,
                 };
-                table.poll_drivers();
-                table.drain_pending()
+                table.poll_drivers()
             };
             for emit in pending {
-                emit_projected(&app, emit);
+                emit_snapshot(&app, emit);
             }
         });
 }
@@ -602,8 +666,8 @@ pub fn run() {
             // (`dezoomify-desktop dezoomify://open?...`).
             let argv: Vec<String> = std::env::args().collect();
             handle_deep_link_argv(app.handle(), &argv);
-            // Real-time projection: driver progress/output/error reach the
-            // frontend on their channels without waiting for the next command.
+            // Real-time snapshots: runner progress and terminals reach the
+            // frontend on the snapshot channel without waiting for the next command.
             spawn_driver_poller(app.handle().clone());
             Ok(())
         })

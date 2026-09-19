@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/xtask", "crates/fixture-server", "crates/dezoomify-core", "crates/dezoomify-protocol", "crates/dezoomify-job", "crates/dezoomify-wasm", "crates/dezoomify-native", "apps/cli", "apps/desktop/src-tauri"]
+members = ["crates/xtask", "crates/fixture-server", "crates/dezoomify-core", "crates/dezoomify-protocol", "crates/dezoomify-engine", "crates/dezoomify-wasm", "crates/dezoomify-native", "apps/cli", "apps/desktop/src-tauri"]
 resolver = "2"
 
 [workspace.package]
@@ -19,7 +19,7 @@ debug = 0
 inherits = "dev"
 debug = 2
 
-# Shared lint policy (todo 6.1): `[workspace.lints]` is the authored default
+# Shared lint policy: `[workspace.lints]` is the authored default
 # (`missing_docs`/`pedantic` warn so legacy debt stays visible; `nursery`
 # stays allowed until audited). NOTE (cargo 1.98): `[lints] workspace = true`
 # cannot be combined with per-lint overrides in the same manifest, so only
@@ -62,7 +62,6 @@ aes = "0.9"
 cbc = "0.2"
 thiserror = "2"
 html-escape = "0.2"
-ureq = "3.4"
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
 sha2 = "0.11"
 sysinfo = "0.39"

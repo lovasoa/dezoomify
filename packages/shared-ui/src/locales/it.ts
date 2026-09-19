@@ -99,6 +99,10 @@ export const it = {
   "view.step.downloading": "Salvataggio dei riquadri…",
   "view.step.saving": "Composizione dell immagine finale…",
   "view.step.working": "Elaborazione…",
+  "view.step.contactingDetail": "Contatto dell'host dell'immagine…",
+  "view.step.recoveryDetail": "E richiesta una decisione di ripristino prima di continuare.",
+  "view.step.encodingDetail": "Codifica nell'app.",
+  "view.step.cleanupDetail": "Pulizia dei file non finiti…",
   // Live job section.
   "view.job.workingOn": "Elaborazione di",
   "view.job.cancel": "Annulla",
@@ -114,8 +118,6 @@ export const it = {
     "Ancora al lavoro, {host} tarda a rispondere. Puoi attendere, oppure annullare e riprovare piu tardi.",
   // Display-only section.
   "view.display.title": "Anteprima mostrata, non ancora salvata",
-  "view.display.shownPlain": "Mostrata qui sotto senza salvare.",
-  "view.display.shownPrefix": "Mostrata qui sotto senza salvare.",
   "view.display.openDesktop": "Apri nell applicazione desktop",
   // One-click desktop handoff (todo 5.5): the button names the origin and the
   // summary names scope/recipient/job memory-only, mirroring the extension
@@ -262,6 +264,8 @@ export const it = {
     "Alcune parti di questa immagine da {host} non si sono potute salvare. Riprova le parti mancanti, oppure conserva l immagine parziale con aree vuote.",
   "desktop.discovery.none":
     "Nessuna immagine zoomabile trovata a questo indirizzo da {host}. Prova un altra pagina o controlla l indirizzo.",
+  "view.discovery.none":
+    "Nessuna immagine zoomabile trovata a questo indirizzo. Prova una pagina con un visualizzatore o l estensione del browser.",
   "desktop.plan.none":
     "Questa immagine non ha dimensioni utili da salvare da {host}. Prova un altra immagine o una Larghezza max minore.",
   "desktop.transport.stalled": "Salvataggio fermo durante il contatto con {host}. Controlla la connessione e riprova.",
@@ -270,6 +274,7 @@ export const it = {
   "desktop.job.cancelledMsg": "Il salvataggio dell immagine e stato interrotto. Ogni file incompleto e stato rimosso.",
   "desktop.start.failed": "Impossibile avviare il salvataggio di questa immagine da {host}. Riprova.",
   "desktop.choice.failed": "Questa scelta non e stata accettata. Riprova.",
+  "view.ext.desynced": "L estensione ha perso la sincronizzazione. Riavvia la scansione.",
   "desktop.save.generic": "Impossibile salvare questa immagine da {host}. Riprova con un altro indirizzo.",
   "desktop.internal.error":
     "Un problema imprevisto ha interrotto questo salvataggio da {host}. Riprova e copia la diagnostica se ricapita.",
@@ -318,8 +323,6 @@ export const it = {
   "desktop.rec.destTitle": "La destinazione di salvataggio richiede attenzione",
   "desktop.rec.destDesc":
     "La destinazione di salvataggio non e stata accettata. Scegli un file di uscita, riprova oppure usa un altra applicazione.",
-  "desktop.rec.chooseTitle": "Scegli dove salvare",
-  "desktop.rec.chooseDesc": "Scegli il file di uscita per continuare a salvare questa immagine.",
   "desktop.rec.keep": "Conserva l immagine parziale",
   "desktop.rec.discard": "Scarta la parziale",
   "desktop.rec.retryTiles": "Riprova i riquadri mancanti",

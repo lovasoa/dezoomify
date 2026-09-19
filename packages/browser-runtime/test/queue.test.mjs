@@ -8,19 +8,10 @@ import {
   enqueueWebQueue,
   finishActiveWebEntry,
   humanWebQueueSummary,
-  isWebQueueAvailable,
   pendingWebEntries,
   retryWebEntry,
   summarizeWebQueue,
 } from "../src/queue.ts";
-
-test("website single-queue is capability-gated with N-1 compat", () => {
-  assert.equal(isWebQueueAvailable({ bulkSupported: true }), true);
-  assert.equal(isWebQueueAvailable({ bulkSupported: false }), false);
-  assert.equal(isWebQueueAvailable({}), false);
-  assert.equal(isWebQueueAvailable(null), false);
-  assert.equal(isWebQueueAvailable(undefined), false);
-});
 
 test("enqueue while idle activates, further submits wait FIFO", () => {
   let q = createWebQueue();

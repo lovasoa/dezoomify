@@ -12,13 +12,11 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use arguments::Args;
-use dezoomify_native::http::{FetchLimits, TlsPolicy};
-use dezoomify_native::pipeline::{PipelineConfig, PipelineEvent};
-use dezoomify_native::{pipeline, JobEvent, JobRequest, NativeRuntime};
+use dezoomify_native::{JobOptions, NativeRunner, OutputTarget};
 
 /// Minimum-interval pacing between bulk images. Ports the reference
-/// `Throttler` idea synchronously: per-tile throttling still needs native
-/// support, so single-image runs apply no delay.
+/// `Throttler` idea synchronously for bulk image pacing; per-tile request
+/// staggering is native (`JobOptions::min_interval`).
 struct Throttler {
     last: Option<Instant>,
     min_interval: Duration,
@@ -239,7 +237,10 @@ fn prompt_line(prompt: &str) -> Option<String> {
     }
 }
 
-fn pipeline_config_for(parsed: &Args) -> PipelineConfig {
+/// Map CLI args onto one validated [`JobOptions`] for the shared native
+/// runner. Hosts map their own args/settings onto this struct; validation is
+/// typed and happens in [`NativeRunner::start`] before any effect.
+fn job_options_for(parsed: &Args, input: &str, output: &Path) -> JobOptions {
     let mut user_headers = parsed.headers.clone();
     if let Some(referer) = parsed.request_referer() {
         if !user_headers.contains_key("referer") {
@@ -249,52 +250,46 @@ fn pipeline_config_for(parsed: &Args) -> PipelineConfig {
     // `--largest` (or bulk-implied largest) selects the uncapped level,
     // mirroring the reference `should_use_largest` rule. The `largest` flag
     // itself is also passed through so size caps are ignored natively.
-    // `--dezoomer` selects the native `format` (`auto` auto-detects, named
-    // selects the single program); `max_retries` (including 0) is passed
-    // through unchanged. Partial output is kept by default (reference
-    // `PartialDownload` file behavior); `--no-partial` discards instead.
+    // `--format` selects the native `format` (`auto` auto-detects, named
+    // selects the single program); `max_retries` (including 0),
+    // `retry_base_delay`, `parallelism`, and `min_interval` are passed
+    // through unchanged. Partial output is kept by default
+    // (reference `PartialDownload` file behavior); `--no-partial` discards
+    // instead.
     let max_width = if parsed.should_use_largest() {
         None
     } else {
         parsed.max_width
     };
-    PipelineConfig {
-        user_headers,
+    JobOptions {
+        input_url: input.to_string(),
+        output: OutputTarget::File(output.to_path_buf()),
+        overwrite: parsed.overwrite,
+        format: if parsed.format.eq_ignore_ascii_case("auto") {
+            None
+        } else {
+            Some(parsed.format.clone())
+        },
+        image_index: parsed.image_index,
+        zoom_level: parsed.zoom_level,
+        largest: parsed.should_use_largest(),
         max_width,
         max_height: parsed.max_height,
-        zoom_level: parsed.zoom_level,
-        image_index: parsed.image_index,
-        largest: parsed.should_use_largest(),
-        max_concurrent: parsed.parallelism,
         max_retries: parsed.retries,
-        retry_delay: parsed.retry_delay,
-        min_interval: parsed.min_interval,
+        retry_base_delay: parsed.retry_delay,
+        keep_partial: parsed.keep_partial,
         compression: parsed.compression,
+        headers: user_headers,
         cache_dir: parsed
             .tile_cache
             .clone()
             .or_else(|| Some(dezoomify_native::pipeline::default_tile_cache_dir())),
-        pause_after: parsed.pause_after,
-        format: if parsed.dezoomer.eq_ignore_ascii_case("auto") {
-            None
-        } else {
-            Some(parsed.dezoomer.clone())
-        },
-        partial_policy: if parsed.keep_partial {
-            dezoomify_native::pipeline::PartialPolicy::Keep
-        } else {
-            dezoomify_native::pipeline::PartialPolicy::Fail
-        },
-        fetch: FetchLimits {
-            timeout: parsed.timeout,
-            connect_timeout: parsed.connect_timeout,
-            max_idle_per_host: parsed.max_idle_per_host,
-            tls: TlsPolicy {
-                accept_invalid_certs: parsed.accept_invalid_certs,
-            },
-            ..FetchLimits::default()
-        },
-        ..PipelineConfig::default()
+        timeout: parsed.timeout,
+        connect_timeout: parsed.connect_timeout,
+        max_idle_per_host: parsed.max_idle_per_host,
+        accept_invalid_certs: parsed.accept_invalid_certs,
+        max_concurrent: parsed.parallelism,
+        min_interval: parsed.min_interval,
     }
 }
 
@@ -304,8 +299,8 @@ fn pipeline_config_for(parsed: &Args) -> PipelineConfig {
 fn emit_verbose_diagnostics(level: &str, parsed: &Args) {
     if report::is_verbose(level) {
         eprintln!(
-            "debug dezoomer={} retries={} parallelism={} largest={} logging={}",
-            parsed.dezoomer, parsed.retries, parsed.parallelism, parsed.largest, parsed.logging,
+            "debug format={} retries={} parallelism={} largest={} logging={}",
+            parsed.format, parsed.retries, parsed.parallelism, parsed.largest, parsed.logging,
         );
     }
     if report::is_trace(level) {
@@ -328,84 +323,166 @@ fn emit_verbose_diagnostics(level: &str, parsed: &Args) {
 fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
     let level = parsed.logging.as_str();
     emit_verbose_diagnostics(level, parsed);
-    let runtime = NativeRuntime::new(1 << 30);
-    let output_str = output.to_string_lossy().into_owned();
-    let mut handle = match runtime.start(JobRequest {
-        input_url: input.to_string(),
-        output_path: output_str.clone(),
-        overwrite: parsed.overwrite,
-    }) {
-        Ok(handle) => handle,
+    let json = parsed.json;
+    let keep_partial = parsed.keep_partial;
+    let job = match NativeRunner::start(job_options_for(parsed, input, output)) {
+        Ok(job) => job,
         Err(error) => {
             eprintln!("error: {} ({})", error.message, error.code);
             return false;
         }
     };
-    handle.emit("started");
-    // `emit` just pushed, so `last()` is `Some` by construction; a missing
-    // event is an internal error, reported like any other failure (the 6.1
-    // unwrap policy forbids panicking on it).
-    let Some(started) = handle.events().last() else {
-        eprintln!("error: job started without an event (native.internal)");
-        return false;
-    };
-    print_event(parsed.json, started, level);
-
-    let config = pipeline_config_for(parsed);
-    let json = parsed.json;
-    let result = pipeline::run(
-        input,
-        &output_str,
-        parsed.overwrite,
-        &config,
-        &mut |event: PipelineEvent| {
-            handle.emit_detail(&event.kind, event.detail.clone());
-            if let Some(last) = handle.events().last() {
-                print_event(json, last, level);
+    let job_id = job.id.clone();
+    // Stream engine snapshots verbatim in revision order; exactly one carries
+    // the terminal. Non-terminal snapshots print as progress; the terminal
+    // revision is reused for the machine completion record so stdout seqs stay
+    // strictly increasing (no separate event is printed for it). Partial
+    // decisions auto-answer from the CLI policy immediately (no 60s gate
+    // wait): keep (blank-filled `.partial` sibling) or discard
+    // (`tile.download-failed`, no output).
+    let terminal_seq: u64;
+    let mut first = true;
+    loop {
+        let snapshot = match job.snapshots().recv() {
+            Ok(snapshot) => snapshot,
+            Err(_) => {
+                eprintln!("error: job ended without a terminal event (native.internal)");
+                return false;
             }
-        },
-    );
-    match result {
-        Ok(outcome) => {
-            handle.finish();
+        };
+        // Auto-answer partial decisions from policy before printing: the
+        // engine waits for `AnswerPartial`, and the CLI is non-interactive.
+        if let Some(decision) = snapshot.snapshot.decision.as_ref() {
+            use dezoomify_protocol::dto::RecoveryChoice;
+            let generation = decision.generation;
+            let choice = if keep_partial {
+                RecoveryChoice::Keep
+            } else {
+                RecoveryChoice::Discard
+            };
+            let _ = job.send(dezoomify_native::UserCommand::AnswerPartial {
+                generation,
+                decision: choice,
+            });
+        }
+        if snapshot.snapshot.terminal.is_some() || snapshot.published.is_some() {
+            terminal_seq = u64::from(snapshot.snapshot.revision);
+            break;
+        }
+        // The first snapshot always prints as `started` (preserving the
+        // accessibility-adjacent CLI contract); later snapshots print engine
+        // progress verbatim. Engine revisions start above 1, so revision
+        // alone cannot mark the start.
+        if first {
+            first = false;
+            print_snapshot(
+                json,
+                &snapshot.job,
+                u64::from(snapshot.snapshot.revision),
+                "started",
+                &BTreeMap::new(),
+                level,
+            );
+            continue;
+        }
+        let (kind, detail) = progress_view(&snapshot);
+        print_snapshot(
+            json,
+            &snapshot.job,
+            u64::from(snapshot.snapshot.revision),
+            kind,
+            &detail,
+            level,
+        );
+    }
+    // `join` owns quiescence and cleanup; its publication agrees with the
+    // streamed terminal (native publication that won the cancel race, or
+    // `job.cancelled`/typed failure with nothing published).
+    match job.join() {
+        Ok(summary) => {
             if json {
                 println!(
                     "{}",
                     report::machine_completed(&report::CompletedOutput {
-                        job: &handle.id,
-                        seq: handle.seq(),
-                        format: &outcome.format,
-                        width: outcome.image_size.x,
-                        height: outcome.image_size.y,
-                        tile_count: outcome.tile_count,
-                        partial: outcome.partial,
+                        job: &job_id,
+                        seq: terminal_seq,
+                        format: &summary.format,
+                        width: summary.width,
+                        height: summary.height,
+                        tile_count: summary.tile_count,
+                        partial: summary.partial,
                     })
                 );
             } else if report::show_success(level) {
-                if outcome.partial {
+                if summary.partial {
                     eprintln!(
                         "kept partial {} ({} tiles, {}x{}) (missing tiles left blank)",
-                        outcome.output_path.display(),
-                        outcome.tile_count,
-                        outcome.image_size.x,
-                        outcome.image_size.y,
+                        summary.path.display(),
+                        summary.tile_count,
+                        summary.width,
+                        summary.height,
                     );
                 } else {
                     eprintln!(
                         "saved {} ({} tiles, {}x{})",
-                        outcome.output_path.display(),
-                        outcome.tile_count,
-                        outcome.image_size.x,
-                        outcome.image_size.y,
+                        summary.path.display(),
+                        summary.tile_count,
+                        summary.width,
+                        summary.height,
                     );
                 }
             }
             true
         }
+        Err(error) if error.code == "job.cancelled" => {
+            eprintln!("error: job cancelled before completion (job.cancelled)");
+            false
+        }
         Err(error) => {
             eprintln!("error: {} ({})", error.message, error.code);
             false
         }
+    }
+}
+
+/// Printable view of a non-terminal engine snapshot: the `started` marker
+/// for revision 0/1, otherwise the lifecycle kind plus monotonic
+/// `acquired`/`total` counts.
+fn progress_view(
+    snapshot: &dezoomify_native::JobSnapshot,
+) -> (&'static str, BTreeMap<String, String>) {
+    if snapshot.snapshot.revision <= 1 {
+        return ("started", BTreeMap::new());
+    }
+    let mut detail = BTreeMap::new();
+    detail.insert(
+        "acquired".to_string(),
+        snapshot.snapshot.progress.completed.to_string(),
+    );
+    detail.insert(
+        "total".to_string(),
+        snapshot.snapshot.progress.total.unwrap_or(0).to_string(),
+    );
+    (snapshot_kind(&snapshot.snapshot.lifecycle), detail)
+}
+
+/// Project an engine lifecycle onto the stable CLI event kind.
+fn snapshot_kind(lifecycle: &dezoomify_protocol::dto::JobState) -> &'static str {
+    use dezoomify_protocol::dto::JobState;
+    match lifecycle {
+        JobState::Created
+        | JobState::Discovering
+        | JobState::AwaitingImageSelection
+        | JobState::AwaitingLevelSelection
+        | JobState::Planning => "discovery",
+        JobState::AcquiringTiles => "downloading",
+        JobState::AwaitingPartialDecision => "recovery-requested",
+        JobState::Finalizing
+        | JobState::Cancelling
+        | JobState::Completed
+        | JobState::PartiallyCompleted
+        | JobState::Failed
+        | JobState::Cancelled => "encoding",
     }
 }
 
@@ -553,74 +630,100 @@ fn run_one_bulk_image(
     url: &str,
     output: &str,
 ) -> Result<(usize, String), (String, String)> {
-    let runtime = NativeRuntime::new(1 << 30);
-    let mut handle = match runtime.start(JobRequest {
-        input_url: url.to_string(),
-        output_path: output.to_string(),
-        overwrite: parsed.overwrite,
-    }) {
-        Ok(handle) => handle,
-        Err(error) => return Err((error.code, error.message)),
-    };
-    handle.emit("started");
     // Bulk progress stays human on stderr; machine mode emits only
     // bulk-item lines on stdout, so event details never pollute JSON.
-    if !parsed.json {
-        if let Some(last) = handle.events().last() {
-            print_event(false, last, &parsed.logging);
+    let show = !parsed.json;
+    let logging = parsed.logging.clone();
+    let job = match NativeRunner::start(job_options_for(parsed, url, Path::new(output))) {
+        Ok(job) => job,
+        Err(error) => return Err((error.code, error.message)),
+    };
+    if show {
+        print_snapshot(false, &job.id, 1, "started", &BTreeMap::new(), &logging);
+    }
+    loop {
+        let snapshot = match job.snapshots().recv() {
+            Ok(snapshot) => snapshot,
+            Err(_) => {
+                return Err((
+                    "native.internal".to_string(),
+                    "job ended without a terminal event".to_string(),
+                ));
+            }
+        };
+        if let Some(decision) = snapshot.snapshot.decision.as_ref() {
+            use dezoomify_protocol::dto::RecoveryChoice;
+            let generation = decision.generation;
+            let choice = if parsed.keep_partial {
+                RecoveryChoice::Keep
+            } else {
+                RecoveryChoice::Discard
+            };
+            let _ = job.send(dezoomify_native::UserCommand::AnswerPartial {
+                generation,
+                decision: choice,
+            });
+        }
+        if snapshot.snapshot.terminal.is_some() || snapshot.published.is_some() {
+            break;
+        }
+        if show {
+            let (kind, detail) = progress_view(&snapshot);
+            // The `started` marker above covers revision 0/1; print later
+            // revisions once, not twice.
+            if snapshot.snapshot.revision > 1 {
+                print_snapshot(
+                    false,
+                    &snapshot.job,
+                    u64::from(snapshot.snapshot.revision),
+                    kind,
+                    &detail,
+                    &logging,
+                );
+            }
         }
     }
-    let config = pipeline_config_for(parsed);
-    let logging = parsed.logging.clone();
-    let result = pipeline::run(
-        url,
-        output,
-        parsed.overwrite,
-        &config,
-        &mut |event: PipelineEvent| {
-            handle.emit_detail(&event.kind, event.detail.clone());
-            if !parsed.json {
-                if let Some(last) = handle.events().last() {
-                    print_event(false, last, &logging);
-                }
-            }
-        },
-    );
-    match result {
-        Ok(outcome) => {
-            let _ = handle.finish();
-            let actual = outcome.output_path.to_string_lossy().into_owned();
-            Ok((outcome.tile_count, actual))
-        }
+    match job.join() {
+        Ok(summary) => Ok((
+            summary.tile_count,
+            summary.path.to_string_lossy().into_owned(),
+        )),
+        Err(error) if error.code == "job.cancelled" => Err((
+            "job.cancelled".to_string(),
+            "job cancelled before completion".to_string(),
+        )),
         Err(error) => Err((error.code, error.message)),
     }
 }
 
-fn print_event(json: bool, event: &JobEvent, logging: &str) {
+fn print_snapshot(
+    json: bool,
+    job: &str,
+    seq: u64,
+    kind: &str,
+    detail: &BTreeMap<String, String>,
+    logging: &str,
+) {
     if json {
-        println!(
-            "{}",
-            report::machine_event_detail(&event.job, event.seq, event.kind.as_str(), &event.detail)
-        );
+        println!("{}", report::machine_event_detail(job, seq, kind, detail));
         return;
     }
     if !report::show_progress(logging) {
         return;
     }
-    let detail = event
-        .detail
+    let flat = detail
         .iter()
         .map(|(key, value)| format!("{key}={value}"))
         .collect::<Vec<_>>()
         .join(" ");
-    if detail.is_empty() {
-        eprintln!("{} {}", event.kind, event.job);
+    if flat.is_empty() {
+        eprintln!("{kind} {job}");
     } else {
-        eprintln!("{} {} {detail}", event.kind, event.job);
+        eprintln!("{kind} {job} {flat}");
     }
     if report::is_trace(logging) {
-        if let Ok(payload) = serde_json::to_string(&event.detail) {
-            eprintln!("trace {} {} {payload}", event.kind, event.job);
+        if let Ok(payload) = serde_json::to_string(detail) {
+            eprintln!("trace {kind} {job} {payload}");
         }
     }
 }

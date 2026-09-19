@@ -1,13 +1,13 @@
-//! Stable registration and precedence policy for pure dezoomers.
+//! Stable registration and precedence policy for pure formats.
 
-use super::discovery::{DezoomerSpec, DiscoveryLimits, DiscoveryOperation};
+use super::discovery::{DiscoveryLimits, DiscoveryOperation, FormatSpec};
 use crate::{
     arcgis, bulk_text, custom_yaml, dzi, fsi, generic, google_arts_and_culture, hungaricana, iiif,
     iipimage, krpano, lizardtech, pnav, second_canvas, topviewer, vls, wmts, xlimage, zoomify,
 };
 
-/// Every built-in dezoomer, in candidate priority order.
-const BUILTINS: &[DezoomerSpec] = &[
+/// Every built-in format, in candidate priority order.
+const BUILTINS: &[FormatSpec] = &[
     custom_yaml::SPEC,
     google_arts_and_culture::SPEC,
     zoomify::SPEC,
@@ -29,15 +29,15 @@ const BUILTINS: &[DezoomerSpec] = &[
     bulk_text::SPEC,
 ];
 
-/// Built-in dezoomer names in candidate priority order.
+/// Built-in format names in candidate priority order.
 pub fn builtin_names() -> impl Iterator<Item = &'static str> {
-    BUILTINS.iter().map(DezoomerSpec::name)
+    BUILTINS.iter().map(FormatSpec::name)
 }
 
-/// An ordered set of dezoomers to try. Earlier registrations have priority.
+/// An ordered set of formats to try. Earlier registrations have priority.
 #[derive(Default, Clone)]
 pub struct Registry {
-    specs: Vec<DezoomerSpec>,
+    specs: Vec<FormatSpec>,
 }
 
 impl Registry {
@@ -46,8 +46,8 @@ impl Registry {
         Self::default()
     }
 
-    /// Register one dezoomer. Earlier registrations are tried first.
-    pub fn register(&mut self, spec: DezoomerSpec) {
+    /// Register one format. Earlier registrations are tried first.
+    pub fn register(&mut self, spec: FormatSpec) {
         self.specs.push(spec);
     }
 
@@ -69,7 +69,7 @@ impl Registry {
 
     /// Look up a registered format by stable id.
     #[must_use]
-    pub fn spec_named(&self, name: &str) -> Option<&DezoomerSpec> {
+    pub fn spec_named(&self, name: &str) -> Option<&FormatSpec> {
         self.specs.iter().find(|spec| spec.name() == name)
     }
 
@@ -83,22 +83,22 @@ impl Registry {
     }
 }
 
-/// The first built-in dezoomer which prefers `uri`.
-fn preferred_name(uri: &str) -> Option<&'static DezoomerSpec> {
+/// The first built-in format which prefers `uri`.
+fn preferred_name(uri: &str) -> Option<&'static FormatSpec> {
     BUILTINS.iter().find(|spec| spec.prefers(uri))
 }
 
-/// Compose every built-in dezoomer, preferring the one whose URL hints match.
+/// Compose every built-in format, preferring the one whose URL hints match.
 #[must_use]
 pub fn default_registry(uri: &str) -> Registry {
     let preferred = preferred_name(uri);
-    let is_other = |&b: &&DezoomerSpec| !preferred.is_some_and(|d| b == d);
+    let is_other = |&b: &&FormatSpec| !preferred.is_some_and(|d| b == d);
     let others = BUILTINS.iter().filter(is_other);
     let specs = preferred.iter().copied().chain(others).copied().collect();
     Registry { specs }
 }
 
-/// Resolve a single built-in dezoomer by its name.
+/// Resolve a single built-in format by its name.
 #[must_use]
 pub fn registry_for(name: &str) -> Option<Registry> {
     let spec = BUILTINS
@@ -127,7 +127,7 @@ mod tests {
                 ("iiif", "IIIF"),
                 ("deepzoom", "Seadragon (Deep Zoom Image)"),
                 ("second_canvas", "Second Canvas"),
-                ("generic", "Generic dezoomer"),
+                ("generic", "Generic format"),
                 ("krpano", "krpano"),
                 ("iipimage", "IIPImage"),
                 ("xlimage", "XLimage"),
@@ -159,21 +159,21 @@ mod tests {
     #[test]
     fn route_preferences_promote_the_matching_program() {
         assert_eq!(
-            preferred_name("x/info.json").map(DezoomerSpec::name),
+            preferred_name("x/info.json").map(FormatSpec::name),
             Some("iiif")
         );
-        assert_eq!(preferred_name("x/unknown").map(DezoomerSpec::name), None);
+        assert_eq!(preferred_name("x/unknown").map(FormatSpec::name), None);
         assert_eq!(
             default_registry("x/info.json").specs[0].name(),
             "iiif",
             "the matching program must be tried first"
         );
         assert_eq!(
-            preferred_name("server?fif=image.tif").map(DezoomerSpec::name),
+            preferred_name("server?fif=image.tif").map(FormatSpec::name),
             Some("iipimage")
         );
         assert_eq!(
-            preferred_name("x/TileGroup0/0-0-0.jpg").map(DezoomerSpec::name),
+            preferred_name("x/TileGroup0/0-0-0.jpg").map(FormatSpec::name),
             Some("zoomify")
         );
     }

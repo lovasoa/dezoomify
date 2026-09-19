@@ -12,7 +12,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 dezoomify-core = { path = "../dezoomify-core" }
 dezoomify-protocol = { path = "../dezoomify-protocol", features = ["typescript"] }
-dezoomify-job = { path = "../dezoomify-job" }
+dezoomify-engine = { path = "../dezoomify-engine" }
 serde.workspace = true
 wasm-bindgen.workspace = true
 serde-wasm-bindgen.workspace = true
@@ -21,7 +21,8 @@ tsify.workspace = true
 [dev-dependencies]
 wasm-bindgen-test.workspace = true
 
-# 6.1 debt (unblocked for cargo 1.98): adapter docs pending.
+# Manual lint tables until legacy debt clears (see the workspace policy
+# note in the root Cargo.toml).
 [lints.rust]
 missing_docs = "allow"
 

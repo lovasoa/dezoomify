@@ -30,9 +30,9 @@ const profiles: NetworkProfile[] = ["maximum", "balanced", "gentle"];
 type SizePreset = "full" | "3840" | "2048" | "custom";
 
 function sizePresetFor(settings: DesktopSettings): SizePreset {
-  if (settings.maxWidth === null && settings.maxHeight === null) return "full";
-  if (settings.maxWidth === 3840 && settings.maxHeight === null) return "3840";
-  if (settings.maxWidth === 2048 && settings.maxHeight === null) return "2048";
+  if (settings.max_width === null && settings.max_height === null) return "full";
+  if (settings.max_width === 3840 && settings.max_height === null) return "3840";
+  if (settings.max_width === 2048 && settings.max_height === null) return "2048";
   return "custom";
 }
 
@@ -98,20 +98,20 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
     if (candidate.settings) onChange(candidate.settings);
   };
 
-  const chooseDirectory = async (key: "outputDir" | "cacheDir") => {
+  const chooseDirectory = async (key: "output_dir" | "cache_dir") => {
     const value = await pickDirectory(settings[key]);
     if (value) commit({ [key]: value });
   };
 
   const chooseSize = (preset: SizePreset) => {
-    if (preset === "full") commit({ maxWidth: null, maxHeight: null });
-    else if (preset === "3840") commit({ maxWidth: 3840, maxHeight: null });
-    else if (preset === "2048") commit({ maxWidth: 2048, maxHeight: null });
+    if (preset === "full") commit({ max_width: null, max_height: null });
+    else if (preset === "3840") commit({ max_width: 3840, max_height: null });
+    else if (preset === "2048") commit({ max_width: 2048, max_height: null });
     else setAdvancedOpen(true);
   };
 
-  const jpeg = settings.outputFormat === "jpeg";
-  const showCompression = settings.outputFormat !== "webp" && settings.outputFormat !== "iiif-dir";
+  const jpeg = settings.output_format === "jpeg";
+  const showCompression = settings.output_format !== "webp" && settings.output_format !== "iiif-dir";
   const compressionValue = jpeg ? 100 - settings.compression : settings.compression;
   const compressionLabel = jpeg
     ? t("desktop.advanced.jpegQuality")
@@ -128,19 +128,19 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
           <button
             type="button"
             className="dz-quick-button"
-            title={settings.outputDir ?? t("desktop.quick.chooseFolder")}
-            onClick={() => void chooseDirectory("outputDir")}
+            title={settings.output_dir ?? t("desktop.quick.chooseFolder")}
+            onClick={() => void chooseDirectory("output_dir")}
           >
-            {folderName(settings.outputDir)}
+            {folderName(settings.output_dir)}
           </button>
         </QuickOption>
 
         <QuickOption label={t("desktop.quick.format")}>
           <select
             aria-label={t("desktop.quick.format")}
-            value={settings.outputFormat}
+            value={settings.output_format}
             onChange={(event) =>
-              commit({ outputFormat: event.currentTarget.value as DesktopOutputFormat })
+              commit({ output_format: event.currentTarget.value as DesktopOutputFormat })
             }
           >
             {formats.map((format) => (
@@ -165,9 +165,9 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
         <QuickOption label={t("desktop.quick.network")}>
           <select
             aria-label={t("desktop.quick.network")}
-            value={settings.networkProfile}
+            value={settings.network_profile}
             onChange={(event) =>
-              commit({ networkProfile: event.currentTarget.value as NetworkProfile })
+              commit({ network_profile: event.currentTarget.value as NetworkProfile })
             }
           >
             {profiles.map((profile) => (
@@ -244,9 +244,9 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
                 max="1000000"
                 placeholder={t("desktop.advanced.width")}
                 aria-label={t("desktop.advanced.width")}
-                value={settings.maxWidth ?? ""}
+                value={settings.max_width ?? ""}
                 onChange={(event) =>
-                  commit({ maxWidth: event.currentTarget.value ? Number(event.currentTarget.value) : null })
+                  commit({ max_width: event.currentTarget.value ? Number(event.currentTarget.value) : null })
                 }
               />
               <span aria-hidden="true">×</span>
@@ -256,9 +256,9 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
                 max="1000000"
                 placeholder={t("desktop.advanced.height")}
                 aria-label={t("desktop.advanced.height")}
-                value={settings.maxHeight ?? ""}
+                value={settings.max_height ?? ""}
                 onChange={(event) =>
-                  commit({ maxHeight: event.currentTarget.value ? Number(event.currentTarget.value) : null })
+                  commit({ max_height: event.currentTarget.value ? Number(event.currentTarget.value) : null })
                 }
               />
             </div>
@@ -286,10 +286,10 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
             <button
               type="button"
               className="dz-compact-action"
-              title={settings.cacheDir ?? undefined}
-              onClick={() => void chooseDirectory("cacheDir")}
+              title={settings.cache_dir ?? undefined}
+              onClick={() => void chooseDirectory("cache_dir")}
             >
-              {settings.cacheDir ? t("desktop.advanced.change") : t("desktop.advanced.choose")}
+              {settings.cache_dir ? t("desktop.advanced.change") : t("desktop.advanced.choose")}
             </button>
           </PreferenceRow>
 

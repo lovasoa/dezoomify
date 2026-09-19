@@ -1,6 +1,6 @@
 //! WMTS layer selection and level planning.
 //!
-//! Split from `wmts/mod.rs` (todo 4.1): this module owns `WmtsContext`
+//! This module owns `WmtsContext`
 //! assembly from layers plus tile URL templates. XML parsing lives in
 //! `capabilities`, matrix math in `tilematrix`.
 

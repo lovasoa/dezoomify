@@ -1,4 +1,4 @@
-// Website single-queue (todo 5.3): enqueue while a job runs, sequential.
+// Website single-queue: enqueue while a job runs, sequential.
 //
 // The engine stays single-job; this queue lives in the integration layer
 // (the website orchestrator). One active job at a time, further submits wait
@@ -19,16 +19,6 @@ export interface WebQueue {
   readonly entries: Array<WebQueueEntry>;
   readonly activeId: string | null;
   readonly nextId: number;
-}
-
-export interface WebQueueCapabilities {
-  readonly bulkSupported?: boolean;
-}
-
-/** Whether the negotiated capabilities offer the website single-queue. */
-export function isWebQueueAvailable(caps: WebQueueCapabilities | null | undefined): boolean {
-  if (!caps) return false;
-  return caps.bulkSupported === true;
 }
 
 /** Empty queue. No active job, no entries, counter at zero. */

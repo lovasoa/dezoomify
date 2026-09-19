@@ -40,6 +40,8 @@ Focused aliases remain available for iteration:
 | `job [--transcripts]` | job engine, with optional workflow/transcript focus |
 | `wasm [--browser chromium]` | WASM adapter and generated Node harness; optional Chromium website E2E |
 | `browser [--build-only\|--browser chromium\|--scenario <id>]` | browser-runtime Node contracts; a browser selection adds website Chromium E2E |
+| `ui` | shared-UI snapshot presentation and product-agnostic view contract |
+| `app-model` | host-neutral service, snapshot predicates, history, labels |
 | `web [--e2e]` | website Node suite; `--e2e` adds Chromium Playwright |
 | `native` | native runtime and CLI Rust suites |
 | `desktop [--e2e-window]` | desktop Rust and Node suites; the option runs the explicit real-window gate instead |
@@ -73,6 +75,8 @@ Use the narrowest owning target first. Targets reject unknown options instead of
 | `rust` | one `cargo test --workspace` run |
 | `wasm` | generated WASM Node harness |
 | `browser` | browser-runtime Node suite |
+| `ui` | shared-UI snapshot presentation and view contract |
+| `app-model` | host-neutral model Node suite |
 | `web` | website Node suite plus Chromium Playwright E2E |
 | `desktop` | desktop Node suite; the path-gated desktop workflow owns desktop testing when applicable |
 | `extension` | full generated-package extension unit and Chromium/Firefox E2E gate |

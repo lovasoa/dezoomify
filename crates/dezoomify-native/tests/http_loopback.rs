@@ -1,6 +1,11 @@
 //! C1 acceptance: real-socket HTTP egress tests (redirects, size limits,
-//! retries, and failures. Each test drives raw TCP listeners on loopback so
-//! every byte crosses a real socket; no emulated transport.
+//! single-attempt failures, and credential scoping. Each test drives raw TCP
+//! listeners on loopback so every byte crosses a real socket; no emulated
+//! transport.
+//!
+//! The transport performs exactly one HTTP exchange per call and never
+//! retries: the engine owns the whole retry budget, so a reset connection
+//! surfaces immediately as `transport.network-error` after a single hit.
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -15,7 +20,6 @@ fn limits() -> FetchLimits {
         timeout: std::time::Duration::from_secs(10),
         connect_timeout: std::time::Duration::from_secs(5),
         max_redirects: 5,
-        retries: 1,
         max_idle_per_host: 32,
         tls: Default::default(),
     }
@@ -155,8 +159,12 @@ fn rejects_redirect_when_limit_is_exceeded_by_one() {
 }
 
 #[test]
-fn fails_after_retry_exhaustion() {
-    let (port, server) = serve(vec![Vec::new(), Vec::new()]);
+fn reset_connection_fails_after_a_single_attempt() {
+    // Single-attempt transport: one reset connection surfaces immediately as
+    // `transport.network-error` with exactly one hit on the server. Retry
+    // budgeting belongs to the engine, which reports structured `TileFailed`
+    // facts and schedules explicit `WaitForRetry` timers instead.
+    let (port, server) = serve(vec![Vec::new()]);
     let error = fetch(
         &format!("http://127.0.0.1:{port}/dead"),
         &BTreeMap::new(),
@@ -164,7 +172,7 @@ fn fails_after_retry_exhaustion() {
         None,
         &limits(),
     )
-    .expect_err("both attempts reset");
+    .expect_err("reset connection fails");
     assert_eq!(error.code, "transport.network-error");
     server.join().expect("server");
 }

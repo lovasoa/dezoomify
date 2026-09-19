@@ -53,7 +53,7 @@ export const RATE_LIMIT_RETRY_DELAY_MS = 750;
 
 export const PROXY_UPSTREAM_URL_HEADER = "x-proxy-upstream-url";
 
-/** Per-origin token bucket (todo 3.2): burst 20, refill 5/s per origin. */
+/** Per-origin token bucket: burst 20, refill 5/s per origin. */
 const ORIGIN_BUCKET_CAPACITY = 20;
 const ORIGIN_BUCKET_REFILL_PER_SEC = 5;
 

@@ -2,8 +2,8 @@
 
 use crate::Vec2d;
 use crate::core::{
-    CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, ImageCatalog, ImageDescriptor,
+    CatalogEntry, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImageCatalog, ImageDescriptor,
     LevelDescriptor, ProcessingRecipe, Request,
 };
 use std::sync::Arc;
@@ -17,7 +17,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::Any.then(parse_page),
 ];
 
-pub const SPEC: DezoomerSpec = DezoomerSpec::new("google_arts_and_culture", ROUTES)
+pub const SPEC: FormatSpec = FormatSpec::new("google_arts_and_culture", ROUTES)
     .with_display_name("Arts & Culture")
     .recognizing(is_google_arts_url, "not a Google Arts & Culture URL");
 

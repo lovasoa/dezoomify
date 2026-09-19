@@ -7,10 +7,10 @@ use serde::Deserialize;
 
 use crate::Vec2d;
 use crate::core::{
-    AdaptiveProgram, AdaptiveSource, CatalogEntry, DezoomerSpec, DiscoverableStep,
-    DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
-    DiscoveryStep, Grid, ImageCatalog, ImageDescriptor, LevelDescriptor, ObservationResult,
-    ProbeContinuation, Request, TileRole, TileSourceError, TileSpec, resolve_relative,
+    AdaptiveProgram, AdaptiveSource, CatalogEntry, DiscoverableStep, DiscoveryContext,
+    DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec,
+    Grid, ImageCatalog, ImageDescriptor, LevelDescriptor, ObservationResult, ProbeContinuation,
+    Request, TileRole, TileSourceError, TileSpec, resolve_relative,
 };
 use crate::web_page::page_title;
 
@@ -27,7 +27,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::UrlPredicate(is_image_json).then(complete_from_json),
 ];
 
-pub const SPEC: DezoomerSpec = DezoomerSpec::new("pnav", ROUTES)
+pub const SPEC: FormatSpec = FormatSpec::new("pnav", ROUTES)
     .with_display_name("pnav")
     .recognizing(is_pnav_url, "not a pnav entity URL")
     .preferring(is_pnav_url);

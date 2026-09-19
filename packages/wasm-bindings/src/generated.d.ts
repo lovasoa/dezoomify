@@ -43,10 +43,51 @@ export interface ImageRequestDto {
 }
 
 /**
+ * Authoritative per-job projection. Snapshots are absolute: UIs render
+ * the latest snapshot and never reconstruct phases from event walks.
+ * `revision` increases on every transition; observers drop stale ones.
+ */
+export interface EngineSnapshotDto {
+    revision: number;
+    lifecycle: JobState;
+    paused: boolean;
+    progress: SnapshotProgressDto;
+    selection: SnapshotSelectionDto;
+    decision: SnapshotDecisionDto | undefined;
+    terminal: SnapshotTerminalDto | undefined;
+    output: SnapshotOutputDto | undefined;
+}
+
+/**
+ * Closed retry category for one classified tile failure.
+ */
+export type FailureCategoryDto = "permanent" | "transient";
+
+/**
+ * Current selection state (positions into the kept catalog).
+ */
+export interface SnapshotSelectionDto {
+    image: number | undefined;
+    level: number | undefined;
+    level_count: number;
+    /**
+     * The kept catalog with full geometry, once discovered. Replaced when
+     * a deferred catalog entry is followed within the same job.
+     */
+    catalog: CatalogDto | undefined;
+    deferred: SnapshotDeferredDto[];
+}
+
+/**
  * Extension-to-native messages. Browser manifest enforcement authenticates
  * the sender; challenges and nonces provide session binding and replay defense.
  */
 export type NativeHostRequest = { kind: "handshake"; protocol?: string | undefined; clientVersion?: number | undefined } | { kind: "negotiate"; clientVersion: number; jobId: string; extensionId?: string | undefined } | { kind: "consent"; challenge: string; nonce: string; jobId: string; origins: string[]; cookieNames?: string[]; confirmed: boolean } | { kind: "credential"; challenge: string; nonce: string; jobId: string; sourceUrl: string; origins: string[]; cookies?: NativeCookie[] } | { kind: "decline"; challenge: string };
+
+/**
+ * Honest output disposition reported by the host that performed the save.
+ */
+export type OutputDispositionDto = "native-publication" | "browser-save-initiated" | "browser-save-ready" | "display-only";
 
 /**
  * Host-neutral placement of one tile in the output image, projected from
@@ -104,19 +145,38 @@ export interface RequestDto {
 }
 
 /**
- * Opaque handle to one arena generation. Serialize-safe for JS transfer.
+ * One still-deferred catalog entry: position plus follow-up URI.
  */
-export interface ArenaHandle {
-    /**
-     * Slot index. Never reused for a different live allocation without a
-     * generation bump.
-     */
-    id: number;
-    /**
-     * Allocation generation of this slot. Mismatches are stale, never
-     * use-after-free.
-     */
+export interface SnapshotDeferredDto {
+    position: number;
+    uri: string;
+}
+
+/**
+ * One tile settled as missing, with its full structured detail.
+ */
+export interface MissingTileDto {
+    tile: number;
+    failures: TileFailureDto[];
+}
+
+/**
+ * Output summary: geometry, completeness, and the honest disposition.
+ */
+export interface SnapshotOutputDto {
+    canvas: SizeDto | undefined;
+    format: OutputFormat;
+    complete: boolean;
+    missing: number[];
+    disposition: OutputDispositionDto | undefined;
+}
+
+/**
+ * Outstanding partial decision payload.
+ */
+export interface SnapshotDecisionDto {
     generation: number;
+    missing: MissingTileDto[];
 }
 
 /**
@@ -132,6 +192,22 @@ export interface CatalogDto {
 }
 
 /**
+ * Structured facts for one failed tile attempt (bounded diagnostics).
+ */
+export interface TileFailureDto {
+    code: string;
+    category: FailureCategoryDto;
+    http?: number;
+    retry_after_ms?: number;
+    detail?: string;
+}
+
+/**
+ * Terminal outcome, set exactly once.
+ */
+export type SnapshotTerminalDto = { type: "completed" } | { type: "partial-completed"; missing: number[] } | { type: "failed"; error: ErrorDto } | { type: "cancelled" };
+
+/**
  * The browser output representation requested by the job engine.
  */
 export type OutputFormat = "png";
@@ -144,13 +220,12 @@ export interface ProcessingRequest {
 }
 
 /**
- * Typed reference to bytes owned by the WASM arena.
+ * Unit progress for the active phase (totals stay unknown until the plan
+ * resolves).
  */
-export interface BufferHandle {
-    id: number;
-    generation: number;
-    length: number;
-    checksum?: string;
+export interface SnapshotProgressDto {
+    completed: number;
+    total: number | undefined;
 }
 
 export interface ErrorDto {
@@ -176,6 +251,11 @@ export interface FetchFailureDto {
     transport: ErrorTransport;
     blocked_reason?: BlockedReason;
     http?: number;
+    /**
+     * Host-observed `retry-after` in milliseconds, when the response
+     * carried one. The engine waits at least this long before the retry.
+     */
+    retry_after_ms?: number;
     preview?: string;
     detail?: string;
 }
@@ -201,9 +281,6 @@ export interface RecoveryAction {
 }
 
 export interface SessionConfig {
-    max_buffer_bytes?: number;
-    max_total_bytes?: number;
-    max_buffers?: number;
     max_concurrent_fetches?: number;
     max_concurrent_decodes?: number;
     max_tiles?: number;
@@ -212,19 +289,17 @@ export interface SessionConfig {
 
 export type BlockedReason = "access-required" | "blocked-ipv4" | "blocked-ipv6" | "cancelled" | "content-type" | "dns-rebinding" | "dns-rebinding-v6" | "forbidden" | "invalid-url" | "limit-exceeded" | "loopback-host" | "malformed" | "malformed-body" | "method" | "network" | "non-standard-port" | "origin" | "private-host" | "protocol-version" | "redirect-limit" | "redirect-target" | "redirect-unavailable" | "scheme" | "signed-query" | "source-document-lost" | "throttled" | "userinfo";
 
-export type DispatchResult = { status: "ok"; messages: HostMessage[] } | { status: "error"; error: ErrorDto };
+export type DispatchResult = { status: "ok"; messages: HostEffect[]; snapshot: EngineSnapshotDto } | { status: "error"; error: ErrorDto };
 
 export type ErrorPhase = "handshake" | "validation" | "discovery" | "acquisition" | "decode" | "processing" | "output" | "publication" | "cleanup";
 
 export type ErrorTransport = "direct" | "metadata-proxy" | "browser-session" | "native" | "display-only";
 
-export type HostEffect = { type: "acquire-resource"; request: RequestDto } | { type: "acquire-tile"; request: RequestDto; tile: number; placement: TilePlacementDto } | { type: "finalize-output"; partial: boolean; format: OutputFormat; canvas: SizeDto | undefined } | { type: "cancel-work" } | { type: "request-decision"; generation: number };
+export type HostCompletion = { type: "provide-resource"; request: number; bytes: number[]; final_uri?: string } | { type: "provide-fetch-failure"; request: number; error: FetchFailureDto } | { type: "provide-probe-outcome"; request: number; outcome: ProbeOutcome } | { type: "provide-display-outcome"; request: number } | { type: "tile-acquired"; request: number } | { type: "retry-timer-elapsed"; tile: number; attempt: number } | { type: "finalization-succeeded"; disposition: OutputDispositionDto } | { type: "finalization-failed"; error: ErrorDto };
 
-export type HostMessage = ({ kind: "effect" } & HostEffect) | ({ kind: "event" } & JobEvent);
+export type HostEffect = { type: "acquire-resource"; request: RequestDto } | { type: "acquire-tile"; request: RequestDto; tile: number; placement: TilePlacementDto } | { type: "finalize-output"; partial: boolean; format: OutputFormat; canvas: SizeDto | undefined } | { type: "wait-retry-timer"; tile: number; attempt: number; delay_ms: number } | { type: "cancel-work" } | { type: "request-decision"; generation: number };
 
-export type JobCommand = { type: "start"; inputs: JobInputDto[] } | { type: "provide-resource"; request: number; buffer: BufferHandle; final_uri?: string } | { type: "provide-fetch-failure"; request: number; error: FetchFailureDto } | { type: "select-image"; image: number } | { type: "select-level"; level: number } | { type: "provide-probe-outcome"; request: number; outcome: ProbeOutcome } | { type: "provide-display-outcome"; request: number } | { type: "recovery-choice"; generation: number; choice: RecoveryChoice } | { type: "finalization-succeeded" } | { type: "finalization-failed"; error: ErrorDto } | { type: "cancel" } | { type: "pause" } | { type: "resume" };
-
-export type JobEvent = { type: "job-state"; state: JobState } | { type: "catalog"; catalog: CatalogDto } | { type: "progress"; acquired: number; total: number } | { type: "warning"; error: ErrorDto } | { type: "recovery-request"; generation: number; actions: RecoveryAction[] } | { type: "completed" } | { type: "partial-completed" } | { type: "failed"; error: ErrorDto } | { type: "cancelled" } | { type: "paused" } | { type: "resumed" };
+export type JobCommand = { type: "start"; inputs: JobInputDto[] } | { type: "select-image"; image: number } | { type: "follow-deferred"; image: number } | { type: "select-level"; level: number } | { type: "answer-partial"; generation: number; decision: RecoveryChoice } | { type: "cancel" } | { type: "pause" } | { type: "resume" };
 
 export type JobState = "Created" | "Discovering" | "AwaitingImageSelection" | "AwaitingLevelSelection" | "Planning" | "AcquiringTiles" | "AwaitingPartialDecision" | "Finalizing" | "Cancelling" | "Completed" | "PartiallyCompleted" | "Failed" | "Cancelled";
 
@@ -238,55 +313,42 @@ export type ResourceKind = "metadata" | "tile" | "probe" | "output";
 
 
 /**
- * The `Session` export: owns one job and one byte arena.
+ * The `Session` export: owns one job.
  */
 export class Session {
     free(): void;
     [Symbol.dispose](): void;
-    /**
-     * Reserve `length` bytes for host-supplied data (`buffers`).
-     */
-    allocateBuffer(length: number): ArenaHandle;
     /**
      * Apply one core processing recipe to tile bytes (pure: no job
      * state, same recipes as the discovery adapter).
      */
     applyProcessing(request: ProcessingRequest, bytes: Uint8Array): Uint8Array;
     /**
-     * Project an arena handle onto its canonical protocol reference
-     * (`buffers`): typed `provide-resource` commands carry a
-     * `BufferHandle`, distinct from the
-     * arena form `allocateBuffer` returns.
+     * Run one typed user command and return its ordered host effects
+     * plus the canonical snapshot after the answer. User commands
+     * never carry bytes or claim publication.
      */
-    bufferHandle(handle: ArenaHandle): BufferHandle;
+    command(command: JobCommand): DispatchResult;
     /**
-     * Seal one buffer for a subsequent correlated command (`buffers`).
+     * Answer one outstanding host effect and return its ordered host
+     * effects plus the canonical snapshot after the answer. Only
+     * completions carry bytes, failures, observations, and
+     * publication claims.
      */
-    commitBuffer(handle: ArenaHandle, actual: number): void;
-    /**
-     * Run one typed command and return its ordered host messages.
-     */
-    dispatch(command: JobCommand): DispatchResult;
+    complete(completion: HostCompletion): DispatchResult;
     /**
      * Cancel/release session resources; repeat-safe (`dispose`).
      */
     dispose(): DispatchResult;
     /**
-     * Release a buffer handle; idempotent (`buffers`).
-     */
-    freeBuffer(handle: ArenaHandle): void;
-    /**
      * Validate typed configuration and own exactly one job session.
      */
     constructor(config: SessionConfig);
     /**
-     * Move adapter-held bytes out exactly once (`buffers`).
+     * Project the canonical engine snapshot for the active job.
+     * Absolute state for UI rendering; issues no work.
      */
-    takeBuffer(handle: ArenaHandle): Uint8Array;
-    /**
-     * Copy host bytes into an uncommitted allocation (`buffers`).
-     */
-    writeBuffer(handle: ArenaHandle, offset: number, data: Uint8Array): void;
+    snapshot(): EngineSnapshotDto;
 }
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
@@ -294,16 +356,12 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_session_free: (a: number, b: number) => void;
-    readonly session_allocateBuffer: (a: number, b: number) => [number, number, number];
     readonly session_applyProcessing: (a: number, b: any, c: number, d: number) => [number, number, number, number];
-    readonly session_bufferHandle: (a: number, b: any) => [number, number, number];
-    readonly session_commitBuffer: (a: number, b: any, c: number) => [number, number];
-    readonly session_dispatch: (a: number, b: any) => [number, number, number];
+    readonly session_command: (a: number, b: any) => [number, number, number];
+    readonly session_complete: (a: number, b: any) => [number, number, number];
     readonly session_dispose: (a: number) => [number, number, number];
-    readonly session_freeBuffer: (a: number, b: any) => [number, number];
     readonly session_new: (a: any) => [number, number, number];
-    readonly session_takeBuffer: (a: number, b: any) => [number, number, number, number];
-    readonly session_writeBuffer: (a: number, b: any, c: number, d: number, e: number) => [number, number];
+    readonly session_snapshot: (a: number) => [number, number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

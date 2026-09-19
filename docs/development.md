@@ -5,7 +5,7 @@ One monorepo: Rust crates, generated WASM bindings, shared UI, hosts, extension 
 ## Working areas
 
 - `crates/dezoomify-core`: pure discovery, catalogs, tile plans, processing recipes.
-- `crates/dezoomify-job`: pure state machine through finalization and cleanup.
+- `crates/dezoomify-engine`: pure state machine through finalization and cleanup.
 - `crates/dezoomify-protocol`: contract source; `packages/wasm-bindings` tracks the emitted declaration.
 - `crates/dezoomify-native`: native effects for CLI and Tauri.
 - `crates/dezoomify-wasm`: core and job behavior for browser hosts.
@@ -116,7 +116,7 @@ Follow [Contributing a format](CONTRIBUTING-format.md). In short:
 ### Change the shared UI
 
 1. Iterate under `cargo xtask dev ui`.
-2. Run `cargo xtask test web`, then affected `test desktop` / `test extension`.
+2. Run `cargo xtask test ui` and `cargo xtask test app-model`, then `cargo xtask test web` plus affected `test desktop` / `test extension`.
 3. Run `cargo xtask build web` to catch integration and bundle-policy failures.
 
 ### Change the protocol

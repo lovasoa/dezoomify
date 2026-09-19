@@ -10,6 +10,7 @@ import {
   openLevelPicker,
   showExtensionGuidance,
 } from "../packages/shared-ui/src/view.tsx";
+import { presentFailure, presentIdle, presentSnapshot, presentStatus } from "../packages/shared-ui/src/snapshot-view.ts";
 
 const callbacks = {
   onSubmitUrl: () => {},
@@ -18,8 +19,21 @@ const callbacks = {
   onSave: () => {},
 };
 
-function render(el, state, cb, ctx, options) {
-  act(() => renderView(el, state, cb ?? callbacks, ctx, options));
+function render(el, presentation, cb, ctx, options) {
+  act(() => renderView(el, presentation, cb ?? callbacks, ctx, options));
+}
+
+function progressPresentation(current, total) {
+  return presentSnapshot({
+    revision: 3,
+    lifecycle: "AcquiringTiles",
+    paused: false,
+    progress: { completed: current, total },
+    selection: { image: undefined, level: undefined, level_count: 0, catalog: undefined, deferred: [] },
+    decision: undefined,
+    terminal: undefined,
+    output: undefined,
+  }, "direct");
 }
 
 /** Every button must expose a non-empty accessible name (text or aria-label). */
@@ -34,7 +48,7 @@ function assertButtonsNamed(root, where) {
 
 test("static accessibility contract: idle form controls are labelled and the submit action is named", () => {
   const el = makeContainer();
-  render(el, { status: "idle", seq: 0, sessionId: "s1", imageCount: 0, transport: null });
+  render(el, presentIdle());
   const card = el.querySelector(".dz-card");
   const input = card.querySelector("#dz-url-input");
   assert.ok(input, "url input mounted");
@@ -50,10 +64,9 @@ test("static accessibility contract: live job region announces progress with a l
   const el = makeContainer();
   render(
     el,
-    { status: "downloading", seq: 1, sessionId: "s1", imageCount: 0, transport: "direct" },
+    progressPresentation(3, 12),
     callbacks,
     {
-      currentProgress: { current: 3, total: 12 },
       jobActivity: { url: "https://museum.example.org/x", startedAt: Date.now() - 3000, now: Date.now() },
     },
   );
@@ -76,14 +89,10 @@ test("static accessibility contract: failed view layers guidance with named reco
   const el = makeContainer();
   render(
     el,
-    {
-      status: "failed",
-      seq: 1,
-      sessionId: "s1",
-      imageCount: 0,
-      transport: "direct",
-      error: { code: "X", category: "c", retryable: true, message: "No zoomable image could be found." },
-    },
+    presentFailure(
+      { code: "X", category: "c", retryable: true, message: "No zoomable image could be found." },
+      "direct",
+    ),
     callbacks,
     { sourceUrl: "https://museum.example.org/viewer?page=1" },
   );
@@ -107,7 +116,7 @@ test("native completion opens saved output without browser save guidance", () =>
   const el = makeContainer();
   render(
     el,
-    { status: "completed", seq: 1, sessionId: "s1", imageCount: 1, transport: "native" },
+    presentStatus("completed", { transport: "native" }),
     { ...callbacks, onOpenOutput() {}, onRevealOutput() {} },
     { nativeSaved: { partial: false }, completedInfo: { width: 100, height: 80, mime: "image/png" } },
   );
@@ -125,7 +134,7 @@ test("history rows select a source without submitting it", () => {
   let submitted = false;
   render(
     el,
-    { status: "idle", seq: 1, sessionId: "s1", imageCount: 0 },
+    presentIdle(),
     { ...callbacks, onSubmitUrl() { submitted = true; }, onHistorySelect(value) { selected = value; } },
     { history: [entry] },
   );
@@ -140,7 +149,7 @@ test("idle product content renders between the URL input and recent pictures", (
   const el = makeContainer();
   render(
     el,
-    { status: "idle", seq: 1, sessionId: "s1", imageCount: 0 },
+    presentIdle(),
     callbacks,
     { history: [{ url: "https://museum.example/image", origin: "https://museum.example", at: 1 }] },
     { idleBeforeHistory: createElement("section", { id: "product-settings" }) },
@@ -153,7 +162,7 @@ test("completion treats saved filenames as text", () => {
   const el = makeContainer();
   render(
     el,
-    { status: "completed", seq: 1, sessionId: "s1", imageCount: 1 },
+    presentStatus("completed"),
     callbacks,
     { savedOutput: { name: "<img src=x onerror=alert(1)>", width: 10, height: 10, doneTiles: 1, totalTiles: 1, failedTiles: 0 } },
   );
@@ -164,7 +173,7 @@ test("static accessibility contract: completed and display-only views keep every
   const done = makeContainer();
   render(
     done,
-    { status: "completed", seq: 1, sessionId: "s1", imageCount: 1, transport: "direct" },
+    presentStatus("completed", { transport: "direct" }),
     callbacks,
     { completedInfo: { width: 100, height: 80, mime: "image/png" }, originClean: true },
   );
@@ -173,7 +182,7 @@ test("static accessibility contract: completed and display-only views keep every
   const preview = makeContainer();
   render(
     preview,
-    { status: "display-only", seq: 1, sessionId: "s1", imageCount: 1, transport: "display" },
+    presentStatus("display-only", { transport: "display" }),
     callbacks,
     { originClean: false, desktopHandoffUrl: "dezoomify://open?v=2&src=https%3A%2F%2Fx" },
   );

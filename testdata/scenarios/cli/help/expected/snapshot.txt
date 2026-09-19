@@ -4,16 +4,15 @@ usage: dezoomify-cli [options] <input-url> <output>
 options:
   --overwrite                 overwrite an existing output file
   --json                      print machine-readable JSON events on stdout
-  -d, --dezoomer <name>       format to use, or auto to detect (default auto)
+  -d, --format <name>         format to use, or auto to detect (default auto)
   -l, --largest               select the largest level (highest resolution)
   -w, --max-width <px>        largest level whose width fits (positive integer)
   -h, --max-height <px>       largest level whose height fits (positive integer)
   --zoom-level <n>            select level by index, 0 is smallest, too large uses last
   --image-index <n>           select image by index, 0 is first, too large uses last
-  --pause-after <n>           pause after n tiles, then resume (Pause v1 demo)
   -n, --parallelism <n>       max concurrent tile downloads (default 16)
   -r, --retries <n>           tile retry budget, 0 means no retries (default 3)
-  --retry-delay <duration>    delay before first retry, then doubling (default 2s)
+  --retry-delay <duration>    base retry wait, doubling per attempt (default 2s)
   --compression <0-100>       output compression, 0 is less, 100 is more (default 5)
   -H, --header "Name: value"  HTTP header for tile requests (repeatable, last wins)
   --max-idle-per-host <n>     max idle connections per host (default 32)

@@ -1,20 +1,28 @@
 # Native apps
 
-The CLI and Tauri desktop app share `crates/dezoomify-native`: native HTTP, filesystem, decoding, processing, and encoders driving `crates/dezoomify-job`. Effect meanings are in the [host-effect contract](job-engine.md#host-effect-contract); native execution only below. User behavior: [Desktop app guide](user/desktop-app.md), [Command-line guide](user/command-line.md).
+The CLI, desktop backend, and Native Messaging host share one native runner (`crates/dezoomify-native/src/runner.rs`): native HTTP, filesystem, decoding, processing, and encoders driving `crates/dezoomify-engine`. Effect meanings are in the [host-effect contract](job-engine.md#host-effect-contract); native execution only below. User behavior: [Desktop app guide](user/desktop-app.md), [Command-line guide](user/command-line.md).
+
+## One native runner
+
+`NativeRunner::start` validates `JobOptions` and spawns one background driver thread (`pipeline::run` over `exec::execute`) per job. There is one engine-driven path only: no dummy engines, no transient cancellation engines, no separate `runner` vs `exec` vs `pipeline` execution paths. Snapshots forward the engine `JobSnapshot` verbatim (revision, `JobState` lifecycle, paused overlay, progress, selection with catalog/deferred, decision with generation, terminal `SnapshotTerminalDto`, output, notices) plus the native publication record once committed. No runner-local lifecycle, terminal, or recovery fold exists. Commands are the engine `UserCommand` vocabulary verbatim: `SelectImage`, `FollowDeferred`, `SelectLevel`, `AnswerPartial{generation, decision: RecoveryChoice}`, `Pause`, `Resume`, `Cancel`. Commands never supply bytes and never claim publication; publication is reported by the driver through `OutputCommitted{NativePublication}` only after finalization.
+
+Deferred catalog entries resolve in place on the same job via `FollowDeferred` (engine-bounded follow/cycle guard, no host recursive replacement jobs). A rejected follow (cycle, budget exhausted) ends the job as `discovery.deferred`, preserving the host-loop code.
 
 ## Native runtime
 
-- HTTP with redirects, user headers, auth, 16 concurrent tile fetches (website 6, extension 6, native 16), per-host pacing 5/s (200 ms floor, `max(--min-interval, 200 ms)`), retry backoff (2 s base, doubling; `--retries 0` means none), 30 s request / 6 s connect timeouts, HTTP/1.1 keep-alive (32 idle per host, 15 s, 100 total), transport retries 1, persistent throttles fail closed, cancellation;
-- format selection (`PipelineConfig::format`: `None`/`auto` detects; a name picks one program; unknown names fail `discovery.unknown-dezoomer`);
+- One reusable reqwest transport per job (connection reuse across metadata/probe/tiles; 32 idle per host, 15 s idle), 16 concurrent tile fetches (website 6, extension 6, native 16), per-host pacing 5/s (200 ms floor, `max(--min-interval, 200 ms)`), engine-driven retry timing (1 s base doubling to 30 s max, `Retry-After` honored to 300 s; `--retries 0` means first failure settles the tile), 30 s request / 6 s connect timeouts, HTTP/1.1 keep-alive, single-attempt fetches with manual redirect handling, persistent throttles fail closed, cancellation. One engine slot covers the full acquire/process/decode/place path: at most `max_concurrent` fetches plus chained decodes are ever in flight, with no second scheduler and no unbounded decoded-result queue beyond the engine budget;
+- format selection (`PipelineConfig::format`: `None`/`auto` detects; a name picks one program; unknown names fail `discovery.unknown-format`);
 - remote fetch plus local reads (plain paths, `file://` absolute paths only; single local `tiles.yaml` and local tile URIs flow end to end; credentials stay scoped, errors redacted);
-- level selection (`--largest`, exact `--zoom-level`, width/height caps, `--image-index`; out-of-range picks the last);
-- fixed-pool fetch plus decode (16 workers, no async runtime), assembly bounded by available memory;
+- level selection (`--largest`, exact `--zoom-level`, width/height caps, `--image-index`; out-of-range picks the last; pre-start options seed the engine, live `SelectImage`/`SelectLevel`/`FollowDeferred` travel on the runner command channel);
+- fixed-pool fetch plus decode over one reqwest transport with a 2-worker Tokio I/O runtime, assembly bounded by available memory;
 - PNG (deflate tier from `--compression`), JPEG (quality `100 - compression`, default 95), TIFF (deflate, always lossless), ZIF (multi-level pyramid, per-level deflate), lossless WebP, `iiif-dir`, atomic publication, first-tile ICC preserved (JPEG, PNG, TIFF, ZIF, WebP) and EXIF (PNG);
 - tile resume cache on by default (`<cache-dir>/<job>/<key>`, custom `--tile-cache`); reruns skip tiles whose stored bytes still decode.
 
-Temp files are job-scoped. Success moves output into place atomically where possible; cancellation and failure remove uncommitted output. Pause v1 (`--pause-after N` demo plus engine `Pause`/`Resume`) stops new `acquire-tile` scheduling, finishes in-flight work, keeps decoded output and queue order, and resumes the pending queue on resume. The cache keeps response bodies keyed by versioned URL digests under a per-job namespace from the input URL; never headers, cookies, or credentials. Corrupt entries fall back to fresh fetch.
+Temp files are job-scoped. Success moves output into place atomically where possible; cancellation and failure remove uncommitted output. Pause (`Pause`/`Resume` over the runner channel) stops new `acquire-tile` scheduling, finishes in-flight work, keeps decoded output and queue order, and resumes the pending queue on resume. The cache keeps response bodies keyed by versioned URL digests under a per-job namespace from the input URL; never headers, cookies, or credentials. Corrupt entries fall back to fresh fetch.
 
-The canvas costs 4 bytes per pixel. Before allocating, the runtime compares against `System::available_memory()` and fails `output.canvas-limit` when larger; no safety margin. `--max-width` fits a smaller level into memory. Tracked numbers: `cargo xtask test perf --smoke`, criterion `native_pipeline` benches.
+One output owner (`sink.rs`): streaming paint with deterministic plan-order overlapping-tile placement, bounded retention (`output_retain_cap`) and spool (`output_spool_cap`) enforced on actual retained resources (decoded tiles, reorder/encoder buffers) plus tracked in-flight decode bytes, one commit point (cancel checked first, then destination validation, then exactly one atomic publication), job-owned-temp-only cleanup. Every blocking decode reserves its body bytes up front and releases them when its closure finishes; cancelling the parent task detaches the sub-100ms tail but never uncounts it. Cancel reports only after quiescence (every tracked task aborted and joined, plus every tracked decode tail released; detached tails drop their results and publish nothing). The cancel/publication race is ordered: a committed publication is reported as completed, otherwise nothing is published and pre-existing destinations stay byte-identical. Results distinguish native publication (`NativePublication`) from browser dispositions (`BrowserSaveInitiated`, `BrowserSaveReady`, `DisplayOnly`); native never claims an initiated browser download reached disk.
+
+The canvas costs 4 bytes per pixel. Before allocating, the runtime compares against `System::available_memory()` and fails `output.canvas-limit` when larger; no safety margin. `--max-width` fits a smaller level into memory. Honest accounting (`Instrumentation`): attempts, acquired, transient/permanent failures, scheduled retries, timer wait, fetched bytes, peak in-flight, peak retained/spool, peak in-flight decode bytes, canvas/encoded bytes, and the accounted peak (canvas plus peak retained plus encoded). Tracked numbers: `cargo xtask test perf --smoke`, criterion `native_pipeline` benches.
 
 ### Output naming and encoders
 
@@ -29,9 +37,7 @@ Other extensions fail typed before any work. JPEG caps at 65535 px per side, Web
 
 ### Partial output
 
-Post-retry tile failures keep a gappy output at a `.partial` sibling (`out.png` → `out.partial.png`), `partial: true` by default; `--no-partial` fails `tile.download-failed` with no output. The shell never presents partial bytes as complete: the driver announces the redacted missing ledger (`recovery-requested`/`missing-work`), waits up to 60 s for keep/discard/retry (fail-closed to policy), and ends `partial-completed` with missing ids plus sibling basename (never the granted path). Discarding fails `tile.download-failed` with no output.
-
-### Capability baseline
+Post-retry tile failures keep a gappy output at a `.partial` sibling (`out.png` → `out.partial.png`), `partial: true` by default; `--no-partial` fails `tile.download-failed` with no output. The shell never presents partial bytes as complete: the driver announces the redacted missing ledger with the engine generation, waits up to 60 s for keep/discard/retry (`RecoveryChoice` verbatim, fail-closed to policy), and ends `partial-completed` with missing ids plus sibling basename (never the granted path). A retry requeues exactly the settled-as-failed tiles in plan order with a fresh budget and preserves successes (good tiles are never refetched). Discarding fails `tile.download-failed` with no output. The CLI auto-answers partial decisions from its policy immediately (non-interactive, no 60 s wait); the desktop forwards the user choice with the pending generation (stale generations are rejected by the engine).
 
 ### Capability baseline
 
@@ -39,7 +45,7 @@ The native baseline reports encoders `[png, jpeg, tiff, zif, webp]`, destination
 
 ## Desktop
 
-The Tauri app hosts the shared UI. Its integration maps protocol commands to Tauri invocations and native events back. A start carries every output setting from the main screen; the driver names output from the catalog title and saves straight into the configured folder, no second dialog.
+The Tauri app hosts the shared UI. Its integration maps protocol commands to Tauri invocations and native events back. A start carries every output setting from the main screen; the driver names output from the catalog title and saves straight into the configured folder, no second dialog. The Native Messaging host (`dezoomify-native-host`) runs the same `JobTable` on the same runner: handoff jobs start with origin-scoped headers and resolve through the same snapshots, partial gate, cancel flag, and publication.
 
 Website and deep-link [handoffs](protocol.md#handoff) are bounded, secret-free, untrusted input: validated, then user-confirmed, never client-signed. Extension handoff uses allowlisted Native Messaging (browser-enforced extension IDs authenticate the sender); challenge plus one-use nonce bind one session against replay. Cookies transfer only after separate origin-scoped consent and persist nowhere.
 
@@ -53,7 +59,7 @@ One output per job, saved in submission order. The format picker offers `png`, `
 
 Settings render only while idle. History selection prefills the input without starting. Completion uses native open/reveal on the published path (completed or partially completed only) via the platform launcher on a blocking worker with fallbacks; file-existence, launcher, and IPC errors stay distinct, and every failed file action updates the visible error plus diagnostics. No caller-supplied path crosses IPC. Encoding progress never erases tile counts.
 
-No catalog notice, no display-only branch on the native path. The driver folds the catalog internally (first image, largest fitting level; only pre-grant `answer_choice` overrides); the shell progress allowlist carries counts only. The frontend `catalogNotice` is local-only save-name geometry, never protocol; window E2E pins both absences.
+No catalog notice, no display-only branch on the native path. The driver folds the catalog internally (first image, largest fitting level; pre-grant `answer_choice` seeds options plus a live engine command when already awaiting selection); the shell progress allowlist carries counts only. Engine terminals map once to native product codes for IPC (`job.no-images` → `discovery.no-image`, etc.; already-native codes pass through), so the frontend renders one vocabulary. The frontend `catalogNotice` is local-only save-name geometry, never protocol; window E2E pins both absences. Pause/resume travel live (`answer_choice` pause/resume plus the runner channel); open/reveal resolve the published sibling, never a caller-supplied path.
 
 ### Desktop partial-output honesty
 
@@ -77,6 +83,6 @@ Per-OS install smoke runs in the desktop CI `bundle-smoke` matrix (see [Testing]
 
 ## CLI
 
-Maps arguments to commands; prints typed events as human or machine records (`--json`). Non-interactive: missing arguments print help, fixed retry budget 3, failures exit with the typed error class. Flags: `--overwrite`, `--json`, `-d/--dezoomer`, `--largest`, `--max-width`, `--max-height`, `--zoom-level`, `--image-index`, `--retries`, `--keep-partial` (default) / `--no-partial`, `--tile-cache`, `--bulk`, `--pause-after <n>` (Pause v1 demo), `-H "Name: value"`, positionals `<input-url> <output>`. One job per run, one output (`.png`, `.jpg`/`.jpeg`, `.tif`/`.tiff`, `.zif`, `.webp`, `.iiif`, extensionless `iiif-dir`).
+Maps arguments to commands on the shared runner; prints typed events as human or machine records (`--json`). Engine lifecycles map to stable kinds (`discovery`, `downloading`, `recovery-requested`, `encoding`); the first snapshot always prints as `started` and the terminal revision is reused for the machine completion record. Non-interactive: missing arguments print help, fixed retry budget 3, failures exit with the typed error class. Flags: `--overwrite`, `--json`, `-d/--format`, `--largest`, `--max-width`, `--max-height`, `--zoom-level`, `--image-index`, `--retries`, `--retry-delay`, `--keep-partial` (default) / `--no-partial`, `--tile-cache`, `--bulk`, `-H "Name: value"`, positionals `<input-url> <output>`. One job per run, one output (`.png`, `.jpg`/`.jpeg`, `.tif`/`.tiff`, `.zif`, `.webp`, `.iiif`, extensionless `iiif-dir`). `--retry-delay` sets the engine backoff base (doubling per attempt).
 
 `--bulk` runs one bounded single-job run per list entry with per-entry plus totals reporting; exit 1 when any entry fails. Options reference: [Command-line guide](user/command-line.md#useful-options). Errors: [Errors](errors.md). Engine: [Job engine](job-engine.md).

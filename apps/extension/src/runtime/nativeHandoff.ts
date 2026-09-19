@@ -43,9 +43,9 @@ export const MAX_NATIVE_FRAME_BYTES = 1024 * 1024;
 export const JOB_BINDING_VERSION = 1;
 type NativeJobBinding = { jobId: string; tabId: number; frameId: number; documentGeneration: string };
 type NativeMessage = Record<string, unknown> & { requestId?: string; kind?: string; error?: { code?: string }; capabilities?: { handoff?: boolean }; negotiatedVersion?: number; challenge?: string; nonce?: string; job?: string };
-type LegacyArgs = { sourceUrl: string; origins: string[]; cookieNames: string[]; jobId: string; extensionId?: string; sendNativeMessage: (message: NativeHostRequest) => Promise<NativeMessage>; getCookies: (origin: string) => Promise<Array<{ name: string; value: string }>>; showConsent: (details: ReturnType<typeof buildHandoffConsentDetails>) => Promise<boolean>; connectNative?: undefined };
+type DirectArgs = { sourceUrl: string; origins: string[]; cookieNames: string[]; jobId: string; extensionId?: string; sendNativeMessage: (message: NativeHostRequest) => Promise<NativeMessage>; getCookies: (origin: string) => Promise<Array<{ name: string; value: string }>>; showConsent: (details: ReturnType<typeof buildHandoffConsentDetails>) => Promise<boolean>; connectNative?: undefined };
 type PortEvent<T> = { addListener?: (listener: T) => void; addEventListener?: (listener: T) => void };
-type PortArgs = Omit<LegacyArgs, "connectNative" | "jobId" | "sendNativeMessage"> & { job: NativeJobBinding; hostName?: string; connectNative: (host: string) => { postMessage: (message: NativeMessage) => void; disconnect?: () => void; onMessage?: PortEvent<(message: NativeMessage) => void>; onDisconnect?: PortEvent<() => void> }; jobId?: string; sendNativeMessage?: LegacyArgs["sendNativeMessage"] };
+type PortArgs = Omit<DirectArgs, "connectNative" | "jobId" | "sendNativeMessage"> & { job: NativeJobBinding; hostName?: string; connectNative: (host: string) => { postMessage: (message: NativeMessage) => void; disconnect?: () => void; onMessage?: PortEvent<(message: NativeMessage) => void>; onDisconnect?: PortEvent<() => void> }; jobId?: string; sendNativeMessage?: DirectArgs["sendNativeMessage"] };
 
 /** Query keys that must never appear in a handoff source URL. Single shared
  * vocabulary: mirrors `dezoomify_protocol::dto::SENSITIVE_QUERY_KEYS`,
@@ -337,6 +337,9 @@ async function requestNativeHandoffViaPort(args: PortArgs) {
     const negotiated = await request({ kind: "negotiate", clientVersion: CURRENT_NATIVE_PROTOCOL, jobId: args.job.jobId, extensionId: args.extensionId ?? "" });
     if (negotiated.error) return fail(negotiated.error.code ?? "handoff.rejected");
     if (negotiated.kind !== "negotiated" || !Number.isInteger(negotiated.negotiatedVersion)) return fail("protocol.incompatible");
+    // One exact supported revision: any mismatch rejects before consent or
+    // credential exchange (replay protection binds the exchange below).
+    if (negotiated.negotiatedVersion !== CURRENT_NATIVE_PROTOCOL) return fail("protocol.incompatible");
     const { challenge, nonce } = negotiated;
     if (typeof challenge !== "string" || typeof nonce !== "string" || challenge.length > MAX_TOKEN_LENGTH || nonce.length > MAX_TOKEN_LENGTH) return fail("bad-nonce");
     let confirmed = false;
@@ -369,8 +372,8 @@ function validateJobBinding(job: unknown): job is NativeJobBinding {
     typeof candidate.documentGeneration === "string" && candidate.documentGeneration.length > 0 && candidate.documentGeneration.length <= MAX_TOKEN_LENGTH;
 }
 
-/** Legacy one-shot compatibility path for older callers/native hosts. */
-async function requestNativeHandoffLegacy(args: LegacyArgs) {
+/** Single direct handoff exchange (current protocol only, no version range). */
+async function requestNativeHandoffDirect(args: DirectArgs) {
   let nativeCalls = 0;
   const fail = (code: string) => ({ ok: false, code, credentialSent: false, nativeCalls });
   const source = validateHandoffSource(args.sourceUrl);
@@ -420,7 +423,9 @@ async function requestNativeHandoffLegacy(args: LegacyArgs) {
   if (negotiated.error) return fail(negotiated.error.code ?? "handoff.rejected");
   if (negotiated.kind !== "negotiated") return fail("handoff.rejected");
   const negotiatedVersion = negotiated.negotiatedVersion;
-  if (typeof negotiatedVersion !== "number" || !Number.isInteger(negotiatedVersion) || negotiatedVersion < MIN_NATIVE_PROTOCOL || negotiatedVersion > CURRENT_NATIVE_PROTOCOL) {
+  // One exact supported revision: any mismatch rejects before consent or
+  // credential exchange.
+  if (typeof negotiatedVersion !== "number" || !Number.isInteger(negotiatedVersion) || negotiatedVersion !== CURRENT_NATIVE_PROTOCOL) {
     return fail("protocol.incompatible");
   }
   const challenge = negotiated.challenge;
@@ -544,7 +549,7 @@ async function requestNativeHandoffLegacy(args: LegacyArgs) {
   return { ok: true, job: typeof started.job === "string" ? started.job : args.jobId, credentialSent: true, nativeCalls };
 }
 
-export async function requestNativeHandoff(args: LegacyArgs | PortArgs) {
+export async function requestNativeHandoff(args: DirectArgs | PortArgs) {
   if (typeof args?.connectNative === "function") return requestNativeHandoffViaPort(args);
-  return requestNativeHandoffLegacy(args);
+  return requestNativeHandoffDirect(args);
 }

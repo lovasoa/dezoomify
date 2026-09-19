@@ -2,12 +2,7 @@
 // Layered presentation helpers plus the payload/deep-link validators.
 // Pure: the host string and controller status arrive as parameters, so this
 // module owns no job state. File move, no behavior change.
-import { categoryFor, phaseFor, plainMessageFor, t } from "@dezoomify/shared-ui";
-
-// Failure classification and plain-language headlines live once in the shared
-// UI (`packages/shared-ui/src/failure.ts`); desktop re-exports them so its
-// callers keep one import site and no copy is duplicated here.
-export { categoryFor, phaseFor, plainMessageFor };
+import { t } from "@dezoomify/shared-ui";
 
 
 export function isValidInputUrl(url: string): boolean {
@@ -110,52 +105,6 @@ export function trimTechnical(text: string, max = 2000): string {
 }
 
 
-// Missing-tile ids for the partial view: typed fields first, then
-// tile ids inside free-form detail text. Ids are short tokens only;
-// URLs and paths never enter the list.
-export function extractMissingTiles(
-  payload: Record<string, unknown>,
-  detailObj: Record<string, unknown> | null,
-  detailRaw: string,
-): Array<string> {
-  const out: Array<string> = [];
-  const pushToken = (v: unknown): void => {
-    if (typeof v !== "string") return;
-    const t = v.trim();
-    if (t.length === 0 || t.length > 128) return;
-    if (t.indexOf("http://") >= 0 || t.indexOf("https://") >= 0) return;
-    if (t.indexOf("/") >= 0 && t.indexOf(":") < 0) return;
-    if (out.indexOf(t) < 0) out.push(t);
-  };
-  const tables: Array<Record<string, unknown> | null | undefined> = [payload, detailObj ?? undefined];
-  for (const table of tables) {
-    if (!table) continue;
-    for (const key of ["missing", "missingTiles", "missing_tiles", "failedTiles", "failed_tiles", "tiles", "failed"]) {
-      const v = (table as Record<string, unknown>)[key];
-      if (Array.isArray(v)) {
-        for (const item of v) {
-          if (typeof item === "string") pushToken(item);
-          else if (item && typeof item === "object") {
-            const obj = item as Record<string, unknown>;
-            pushToken(obj["tile"] ?? obj["id"] ?? obj["name"]);
-          }
-        }
-      } else if (typeof v === "string" && v.length > 0 && v.length <= 2048) {
-        for (const part of v.split(/[\s,;]+/)) pushToken(part);
-      }
-    }
-  }
-  const text = String(detailRaw ?? "");
-  const tileRe = /tile[:#\s]*([A-Za-z0-9._-]{1,64})/gi;
-  let m: RegExpExecArray | null;
-  while ((m = tileRe.exec(text)) !== null) {
-    pushToken(m[1]);
-    if (out.length >= 60) break;
-  }
-  return out.slice(0, 60);
-}
-
-
 export function formatMissingSummary(missing: Array<string>, failedCount?: number): string {
   const count = missing.length > 0 ? missing.length : (failedCount ?? 0);
   if (count <= 0) return t("desktop.rec.missingSome");
@@ -164,116 +113,6 @@ export function formatMissingSummary(missing: Array<string>, failedCount?: numbe
   const shown = missing.slice(0, 20).join(", ");
   const rest = missing.length > 20 ? t("desktop.rec.more", { n: missing.length - 20 }) : "";
   return t("desktop.rec.missingList", { n: missing.length, plural, shown, rest });
-}
-
-
-// --- IPC payload parsing ---
-
-export type PayloadTable = Record<string, unknown>;
-
-export function asPayload(raw: unknown): PayloadTable {
-  if (typeof raw === "object" && raw !== null) return raw as PayloadTable;
-  return { value: raw };
-}
-
-export function payloadText(payload: PayloadTable): string {
-  const parts: Array<string> = [];
-  for (const key of ["kind", "event", "detail", "state", "reason", "status", "phase"]) {
-    const v = payload[key];
-    if (typeof v === "string" && v.length > 0) parts.push(v);
-  }
-  return parts.join(" ").toLowerCase();
-}
-
-export function payloadJob(payload: PayloadTable): string | null {
-  for (const key of ["job", "jobId", "job_id"]) {
-    const v = payload[key];
-    if (typeof v === "string" && v.length > 0) return v;
-  }
-  return null;
-}
-
-export function payloadSeq(payload: PayloadTable): number | null {
-  for (const key of ["seq", "seqNo", "sequence", "eventSeq"]) {
-    const v = payload[key];
-    if (typeof v === "number" && Number.isFinite(v) && v >= 0) return Math.floor(v);
-    if (typeof v === "string" && v.trim() !== "") {
-      const n = Number(v.trim());
-      if (Number.isFinite(n) && n >= 0) return Math.floor(n);
-    }
-  }
-  return null;
-}
-
-export function strField(payload: PayloadTable, keys: Array<string>): string | undefined {
-  for (const key of keys) {
-    const v = payload[key];
-    if (typeof v === "string" && v.length > 0) return v;
-  }
-  return undefined;
-}
-
-// Numeric field from a payload key (number or numeric string) or from a
-// "k=v"/"k: v" pair inside free-form detail text (the shell joins pipeline
-// detail maps as "acquired=3 total=10").
-export function numField(payload: PayloadTable, detailText: string, keys: Array<string>): number | undefined {
-  for (const key of keys) {
-    const v = payload[key];
-    if (typeof v === "number" && Number.isFinite(v) && v >= 0) return Math.floor(v);
-    if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v.trim()))) {
-      const n = Math.floor(Number(v.trim()));
-      if (n >= 0) return n;
-    }
-  }
-  for (const key of keys) {
-    const m = detailText.match(new RegExp(`(?:^|\\s)${key}\\s*[:=]\\s*(\\d+)`, "i"));
-    if (m) {
-      const n = Math.floor(Number(m[1]));
-      if (Number.isFinite(n) && n >= 0) return n;
-    }
-  }
-  return undefined;
-}
-
-// Structured detail attached to an event: JSON object string, "k=v" pairs,
-// or a plain technical sentence. Returns the parsed object when the detail
-// is shaped, so reason/recovery/attempt/code/message stay typed (never
-// branched from display strings elsewhere).
-export function parseDetailObject(detail: string): PayloadTable | null {
-  const trimmed = detail.trim();
-  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-    try {
-      const parsed: unknown = JSON.parse(trimmed);
-      if (typeof parsed === "object" && parsed !== null) return parsed as PayloadTable;
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
-export function payloadReason(payload: PayloadTable, text: string): "destination" | "partial" | null {
-  const direct = strField(payload, ["reason", "recoveryReason", "recovery_reason"]);
-  if (direct) {
-    const lower = direct.toLowerCase();
-    if (lower.indexOf("destination") >= 0) return "destination";
-    if (lower.indexOf("partial") >= 0) return "partial";
-  }
-  const detail = strField(payload, ["detail"]);
-  if (detail) {
-    const obj = parseDetailObject(detail);
-    if (obj) {
-      const inner = strField(obj, ["reason"]);
-      if (inner) {
-        const lower = inner.toLowerCase();
-        if (lower.indexOf("destination") >= 0) return "destination";
-        if (lower.indexOf("partial") >= 0) return "partial";
-      }
-    }
-  }
-  if (text.indexOf("destination") >= 0) return "destination";
-  if (text.indexOf("partial") >= 0) return "partial";
-  return null;
 }
 
 
@@ -464,25 +303,17 @@ export function parseRawDeepLinkUrl(raw: string): ValidatedDeepLink | null {
   return { sourceUrl: sourceUrl.trim(), hint, version: Number(versionRaw) };
 }
 
-export function extractDeepLinkUrl(payload: PayloadTable): string | null {
-  for (const key of ["url", "sourceUrl", "source_url", "input_url", "inputUrl", "href", "detail"]) {
-    const v = payload[key];
-    if (typeof v === "string" && v.length > 0) return v;
-  }
-  return null;
-}
-
 // Validate a `dezoomify://deep-link-pending` payload again in the frontend
-// before showing the confirm UI. Accepts the redacted
+// before showing the confirm UI. Accepts exactly the redacted
 // `{source_url, hint, version}` triple emitted by the Rust shell, or a raw
-// `dezoomify://open` URL in legacy shapes. Null means reject (no-op).
-export function validateDeepLinkPayload(payload: PayloadTable): ValidatedDeepLink | null {
-  const sourceRaw =
-    payload["source_url"] ?? payload["sourceUrl"] ?? extractDeepLinkUrl(payload);
+// `dezoomify://open` URL value re-validated strictly below.
+// Null means reject (no-op).
+export function validateDeepLinkPayload(payload: Record<string, unknown>): ValidatedDeepLink | null {
+  const sourceRaw = payload["source_url"];
   if (typeof sourceRaw === "string" && sourceRaw.trim().startsWith("dezoomify://")) {
     return parseRawDeepLinkUrl(sourceRaw);
   }
-  const version = normalizeDeepLinkVersion(payload["version"] ?? payload["v"]);
+  const version = normalizeDeepLinkVersion(payload["version"]);
   if (version === null) return null;
   if (!isValidDeepLinkSource(sourceRaw)) return null;
   const hint = normalizeDeepLinkHint(payload["hint"] ?? null);

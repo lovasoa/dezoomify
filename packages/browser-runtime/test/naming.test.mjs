@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { extensionForSaveFormat, safeTitleStem, suggestedNameFor } from "../src/save-name.ts";
-import { suggestedNameFor as sharedSuggestedNameFor } from "../../shared-ui/src/saveName.ts";
+import { suggestedNameFor as canonicalSuggestedNameFor } from "../../app-model/src/labels.ts";
 import {
   BROWSER_SESSION_TRANSPORT_LABEL,
   DIRECT_TRANSPORT_LABEL,
@@ -41,8 +41,8 @@ test("suggestedNameFor prefers safe core titles and rejects unsafe stems", () =>
   assert.equal(safeTitleStem("A\u0000B"), "A_B");
 });
 
-test("shared-ui re-exports the canonical save-name helper (no fork)", () => {
-  assert.equal(sharedSuggestedNameFor(4, 4, "png"), suggestedNameFor(4, 4, "png"));
+test("browser-runtime matches the canonical save-name helper (no fork)", () => {
+  assert.equal(canonicalSuggestedNameFor(4, 4, "png"), suggestedNameFor(4, 4, "png"));
 });
 
 test("transport labels are canonical and distinct", () => {

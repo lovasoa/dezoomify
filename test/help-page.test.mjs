@@ -4,6 +4,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { act } from "./react-dom.mjs";
+import { presentFailure } from "../packages/shared-ui/src/snapshot-view.ts";
 import { renderView } from "../packages/shared-ui/src/view.tsx";
 
 const webDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -94,19 +95,15 @@ test("app pages link the in-app docs instead of legacy doc sites", () => {
 test("failure guidance links the in-app image-address guide", () => {
   const el = globalThis.document.createElement("div");
   globalThis.document.body.appendChild(el);
-  act(() => renderView(el, {
-    status: "failed",
-    seq: 1,
-    sessionId: "s-help",
-    imageCount: 0,
-    transport: "direct",
-    error: {
+  act(() => renderView(el, presentFailure(
+    {
       code: "NO_IMAGE_FOUND",
       category: "discovery",
       retryable: false,
       message: "No zoomable image could be found.",
     },
-  }, { onSubmitUrl: () => {}, onCancel: () => {}, onReset: () => {}, onSave: () => {} }));
+    "direct",
+  ), { onSubmitUrl: () => {}, onCancel: () => {}, onReset: () => {}, onSave: () => {} }));
   assert.ok(
     el.querySelector('a[href="./help/finding-the-image-address.html"]'),
     "failures point at the in-app image-address guide",

@@ -21,8 +21,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use dezoomify_native::http::{FetchLimits, TlsPolicy};
-use dezoomify_native::pipeline::PipelineConfig;
+use dezoomify_native::runner::JobOptions;
 
 /// Default compression (reference `--compression`, JPEG quality 100-5 = 95).
 pub const DEFAULT_COMPRESSION: u8 = 5;
@@ -90,39 +89,33 @@ impl DesktopSettings {
     }
 }
 
-/// Build the native driver config with CLI parity: fixed transport
+/// Build the native runner options with CLI parity: fixed transport
 /// (parallelism 16, timeout 30s, connect 6s, max_idle 32, max_tiles 1M,
 /// available-memory canvas preflight) plus the validated settings-mapped fields. No implicit
 /// Referer is added: only explicit user headers are sent (origin-scoped by
-/// the native `UserHeaders` layer, never logged or cached).
-pub fn pipeline_config_for(settings: &DesktopSettings) -> PipelineConfig {
+/// the native `UserHeaders` layer, never logged or cached). The output
+/// target is set by the job table when a destination exists (dialog grant
+/// or automatic directory).
+pub fn job_options_for(settings: &DesktopSettings) -> JobOptions {
     let (max_concurrent, min_interval) = match settings.network_profile {
         NetworkProfile::Maximum => (16, Duration::ZERO),
         NetworkProfile::Balanced => (8, Duration::from_millis(200)),
         NetworkProfile::Gentle => (4, Duration::from_millis(500)),
     };
-    PipelineConfig {
-        user_headers: settings.headers.clone(),
+    JobOptions {
+        headers: settings.headers.clone(),
         max_width: settings.max_width,
         max_height: settings.max_height,
         max_concurrent,
         max_retries: settings.retries,
-        retry_delay: Duration::from_secs(2),
         min_interval,
         compression: settings.compression,
-        cache_dir: settings
-            .cache_dir
-            .clone()
-            .or_else(|| Some(dezoomify_native::pipeline::default_tile_cache_dir())),
-        fetch: FetchLimits {
-            timeout: Duration::from_secs(30),
-            connect_timeout: Duration::from_secs(6),
-            max_idle_per_host: 32,
-            tls: TlsPolicy::default(),
-            ..FetchLimits::default()
-        },
-        max_tiles: 1 << 20,
-        ..PipelineConfig::default()
+        cache_dir: settings.cache_dir.clone(),
+        timeout: Duration::from_secs(30),
+        connect_timeout: Duration::from_secs(6),
+        max_idle_per_host: 32,
+        keep_partial: true,
+        ..JobOptions::default()
     }
 }
 
@@ -419,8 +412,7 @@ pub fn parse_settings(value: &serde_json::Value) -> Result<DesktopSettings, Stri
         Some(v) => parse_opt_dir(v, "output_dir")?,
     };
     let output_format = parse_output_format(obj.get("output_format"))?;
-    // Accept both snake_case and kebab-case aliases from the frontend.
-    let cache_dir = match obj.get("cache_dir").or_else(|| obj.get("cache-dir")) {
+    let cache_dir = match obj.get("cache_dir") {
         None => None,
         Some(v) => parse_opt_dir(v, "cache_dir")?,
     };
@@ -454,15 +446,14 @@ mod tests {
         assert_eq!(settings.retries, 3);
         assert_eq!(settings.max_width, None);
         assert_eq!(settings.max_height, None);
-        let config = pipeline_config_for(&settings);
-        assert_eq!(config.compression, 5);
-        assert_eq!(config.max_retries, 3);
-        assert_eq!(config.max_concurrent, 16);
-        assert_eq!(config.fetch.timeout, Duration::from_secs(30));
-        assert_eq!(config.fetch.connect_timeout, Duration::from_secs(6));
-        assert_eq!(config.fetch.max_idle_per_host, 32);
-        assert_eq!(config.max_tiles, 1 << 20);
-        assert_eq!(config.jpeg_quality(), 95);
+        let options = job_options_for(&settings);
+        assert_eq!(options.compression, 5);
+        assert_eq!(options.max_retries, 3);
+        assert_eq!(options.max_concurrent, 16);
+        assert_eq!(options.timeout, Duration::from_secs(30));
+        assert_eq!(options.connect_timeout, Duration::from_secs(6));
+        assert_eq!(options.max_idle_per_host, 32);
+        assert!(options.keep_partial);
     }
 
     #[test]
@@ -497,14 +488,14 @@ mod tests {
     #[test]
     fn network_profiles_apply_real_pacing_and_concurrency() {
         let balanced = parse_settings(&json!({"network_profile": "balanced"})).unwrap();
-        let balanced_config = pipeline_config_for(&balanced);
-        assert_eq!(balanced_config.max_concurrent, 8);
-        assert_eq!(balanced_config.min_interval, Duration::from_millis(200));
+        let balanced_options = job_options_for(&balanced);
+        assert_eq!(balanced_options.max_concurrent, 8);
+        assert_eq!(balanced_options.min_interval, Duration::from_millis(200));
 
         let gentle = parse_settings(&json!({"network_profile": "gentle"})).unwrap();
-        let gentle_config = pipeline_config_for(&gentle);
-        assert_eq!(gentle_config.max_concurrent, 4);
-        assert_eq!(gentle_config.min_interval, Duration::from_millis(500));
+        let gentle_options = job_options_for(&gentle);
+        assert_eq!(gentle_options.max_concurrent, 4);
+        assert_eq!(gentle_options.min_interval, Duration::from_millis(500));
         assert!(parse_settings(&json!({"network_profile": "unsafe"})).is_err());
     }
 

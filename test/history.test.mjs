@@ -11,7 +11,7 @@ import {
   saveHistory,
   serializeHistory,
   toHistoryEntry,
-} from "../packages/shared-ui/src/history.ts";
+} from "../packages/app-model/src/history.ts";
 
 function memoryStore() {
   const map = new Map();

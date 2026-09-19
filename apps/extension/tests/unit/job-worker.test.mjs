@@ -24,8 +24,12 @@ test("worker and generated WASM complete the first discovery round trip", async 
   const metadata = new TextEncoder().encode('<Image TileSize="256" Overlap="0" Format="jpg"><Size Width="512" Height="512"/></Image>');
   await host.onMessage({ type: "engine.bytes", jobId: "job:one", requestId: acquire.request.id, bytes: metadata });
   assert.equal(sent.some((message) => message.type === "engine.error"), false);
+  // The discovered catalog rides the authoritative snapshot
+  // (selection.catalog), never a synthetic catalog message.
+  const round = sent.find((message) => message.type === "engine.messages");
+  const entries = round?.snapshot?.selection?.catalog?.entries ?? [];
   assert.ok(
-    sent.flatMap((message) => message.messages ?? []).some((message) => message.type === "catalog"),
+    entries.some((entry) => entry?.kind === "image"),
     JSON.stringify(sent),
   );
   const codes = logs.map((entry) => entry.code);
@@ -37,7 +41,8 @@ test("worker and generated WASM complete the first discovery round trip", async 
 test("worker disposal is repeat-safe and does not manufacture effects", async () => {
   const calls = [];
   class Session {
-    dispatch() { return { status: "ok", messages: [] }; }
+    command() { return { status: "ok", messages: [] }; }
+    complete() { return { status: "ok", messages: [] }; }
     dispose() { calls.push("dispose"); return { status: "ok", messages: [] }; }
   }
   const host = createJobWorkerHost({ postMessage() {}, wasm: async () => ({ Session }) });
@@ -52,7 +57,7 @@ test("worker preserves typed WASM diagnostics", async () => {
   const logs = [];
   class Session {
     constructor() {}
-    dispatch() {
+    command() {
       return { status: "error", error: {
         code: "adapter.wrong-state",
         phase: "validation",

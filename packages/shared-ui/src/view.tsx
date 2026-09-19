@@ -15,21 +15,17 @@ import type { ReactElement, ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { flushSync } from "react-dom";
-import type { ControllerState, StructuredError } from "./controller.ts";
-import type { HistoryEntry } from "./history.ts";
-import {
-  getPhaseForStatus,
-} from "./view-types.ts";
+import type { SnapshotPresentation, StructuredError } from "./snapshot-view.ts";
+import type { HistoryEntry } from "@dezoomify/app-model";
 import type {
   ConfirmModalArgs, ImagePickerArgs, LevelPickerArgs, PlatformHints,
   ViewCallbacks, ViewContext, ViewRenderOptions,
 } from "./view-types.ts";
 import {
-  defaultStepFor, displaySourceUrl, errorDiagnosticsText, handoffOriginFor,
+  displaySourceUrl, errorDiagnosticsText, handoffOriginFor,
   hostFromUrl, isFileHandoffSource, reportIssueUrl,
 } from "./view-helpers.ts";
 
-export { getPhaseForStatus } from "./view-types.ts";
 export { DEFAULT_PAGE_TITLE, handoffOriginFor, isActiveJobStatus, isFileHandoffSource, jobPageTitle } from "./view-helpers.ts";
 export type {
   ConfirmModalArgs, ImagePickerArgs, ImagePickerOption, JobActivity,
@@ -78,7 +74,7 @@ function historyDateLabel(at: number): string {
 }
 
 function diagnosticsText(
-  state: ControllerState,
+  presentation: SnapshotPresentation,
   ctx?: ViewContext,
   elapsedMs?: number,
   timeoutMs?: number,
@@ -86,13 +82,15 @@ function diagnosticsText(
   const a = ctx?.jobActivity ?? {};
   const p = ctx?.currentProgress;
   const lines = [
-    `Status: ${state.status}`,
-    `Transport: ${state.transport ?? "direct"}`,
+    `Status: ${presentation.stateLabel ?? presentation.phase}`,
+    `Transport: ${presentation.transport ?? "direct"}`,
     `Elapsed: ${Math.round((elapsedMs ?? 0) / 1000)} s`,
     `Per-request timeout: ${Math.round((timeoutMs ?? a.timeoutMs ?? 30000) / 1000)} s`,
     `Requests: ${a.pendingRequests ?? 0} pending, ${a.completedRequests ?? 0} done, ${a.failedRequests ?? 0} failed`,
   ];
-  if (p) lines.push(`Tiles: ${p.current} of ${p.total}`);
+  if (presentation.progress) {
+    lines.push(`Tiles: ${presentation.progress.current} of ${presentation.progress.total ?? "?"}`);
+  }
   if (p?.active !== undefined) lines.push(`Tiles active: ${p.active}`);
   if (p?.retrying !== undefined) lines.push(`Tiles retrying: ${p.retrying}`);
   if (a.url) lines.push(`Source: ${displaySourceUrl(a.url)}`);
@@ -271,6 +269,7 @@ function IdleView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: ViewCont
 interface JobDerived {
   paused: boolean;
   step: string;
+  detail?: string;
   sourceUrl: string;
   timeText: string;
   countsText: string;
@@ -285,10 +284,10 @@ interface JobDerived {
   copiedLog: string;
 }
 
-function deriveJob(state: ControllerState, ctx?: ViewContext): JobDerived {
+function deriveJob(presentation: SnapshotPresentation, ctx?: ViewContext): JobDerived {
   const activity = ctx?.jobActivity ?? {};
-  const current = ctx?.currentProgress?.current ?? 0;
-  const total = ctx?.currentProgress?.total ?? 0;
+  const current = presentation.progress?.current ?? 0;
+  const total = presentation.progress?.total ?? 0;
   const determinate = total > 0;
   const donePct = determinate ? Math.max(0, Math.min(100, (current / total) * 100)) : 0;
   const active = determinate
@@ -296,7 +295,7 @@ function deriveJob(state: ControllerState, ctx?: ViewContext): JobDerived {
     : 0;
   const activePct = determinate ? (active / total) * 100 : 0;
   const retrying = Math.max(0, Math.min(ctx?.currentProgress?.retrying ?? 0, active));
-  const paused = ctx?.paused === true || activity.paused === true;
+  const paused = presentation.paused || activity.paused === true;
   const now = activity.now ?? Date.now();
   const startedAt = activity.startedAt ?? now;
   const timerNow = activity.pausedAt ?? now;
@@ -305,14 +304,17 @@ function deriveJob(state: ControllerState, ctx?: ViewContext): JobDerived {
   const timeoutMs = activity.timeoutMs ?? 30000;
   const lastProgressAt = activity.lastProgressAt ?? startedAt;
   const stalledMs = Math.max(0, timerNow - lastProgressAt);
-  const showStalled = stalledMs >= 10000 && state.status !== "saving";
+  const showStalled = stalledMs >= 10000 && presentation.headlineKey !== "view.step.saving";
+  const detail = presentation.detailKey
+    ? t(presentation.detailKey, presentation.detailVars)
+    : undefined;
   const step = paused
     ? "Paused"
     : retrying > 0
       ? `Retrying ${retrying} tile${retrying === 1 ? "" : "s"}…`
       : showStalled
         ? `Waiting for ${hostFromUrl(activity.url)}…`
-        : activity.stepLabel || ctx?.currentProgress?.message || defaultStepFor(state.status);
+        : t(presentation.headlineKey, presentation.headlineVars);
   const sourceUrl = activity.url ? displaySourceUrl(activity.url) : "";
   const estimatedTotalMs = ctx?.currentProgress?.estimatedTotalMs ?? (
     determinate && current >= 2 && elapsedMs >= 2000
@@ -325,13 +327,14 @@ function deriveJob(state: ControllerState, ctx?: ViewContext): JobDerived {
   const countsText = determinate
     ? `${current} done${active > 0 ? ` + ${active} in progress` : ""} / ${total}`
     : "";
-  const diagText = diagnosticsText(state, ctx, elapsedMs, timeoutMs);
+  const diagText = diagnosticsText(presentation, ctx, elapsedMs, timeoutMs);
   const logText = activityLogText(ctx);
   const copiedLog = activity.log && activity.log.length > 0 ? `\n\nEvents\n${activity.log.join("\n")}` : "";
   const copied = `${diagText}${activity.diagnostics ? `\n\n${activity.diagnostics}` : ""}${copiedLog}`;
   return {
     paused,
     step,
+    ...(detail ? { detail } : {}),
     sourceUrl,
     timeText,
     countsText,
@@ -348,15 +351,15 @@ function deriveJob(state: ControllerState, ctx?: ViewContext): JobDerived {
 }
 
 function JobView({
-  state,
+  presentation,
   callbacks,
   ctx,
 }: {
-  state: ControllerState;
+  presentation: SnapshotPresentation;
   callbacks: ViewCallbacks;
   ctx?: ViewContext;
 }) {
-  const d = deriveJob(state, ctx);
+  const d = deriveJob(presentation, ctx);
   const showPause = !d.paused && typeof callbacks.onPause === "function";
   const showResume = d.paused && typeof callbacks.onResume === "function";
   return (
@@ -385,6 +388,11 @@ function JobView({
           <span className="dz-progress-step-text" id="dz-job-step-text">
             {d.step}
           </span>
+          {d.detail ? (
+            <span className="dz-progress-step-detail" id="dz-job-step-detail">
+              {d.detail}
+            </span>
+          ) : null}
         </span>
         <span className="dz-progress-count" id="dz-job-counts">
           {d.countsText}
@@ -665,15 +673,15 @@ function CompletedView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: Vie
 }
 
 function FailedView({
-  state,
+  presentation,
   callbacks,
   ctx,
 }: {
-  state: ControllerState;
+  presentation: SnapshotPresentation;
   callbacks: ViewCallbacks;
   ctx?: ViewContext;
 }) {
-  const error: StructuredError = state.error ?? {
+  const error: StructuredError = presentation.terminal?.error ?? {
     code: "UNKNOWN",
     category: "unknown",
     retryable: true,
@@ -832,37 +840,22 @@ function CancelledView({ callbacks }: { callbacks: ViewCallbacks }) {
   );
 }
 
-function GenericView({ state, callbacks }: { state: ControllerState; callbacks: ViewCallbacks }) {
-  return (
-    <div className="dz-view-body dz-fade-in" style={{ padding: "1rem 0" }}>
-      <p style={{ color: "var(--dz-text-secondary)" }}>
-        Status: <strong>{state.status}</strong>
-      </p>
-      {callbacks.onReset ? (
-        <button type="button" className="dz-btn-secondary" id="dz-btn-reset" onClick={() => callbacks.onReset?.()}>
-          {t("view.generic.reset")}
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Root renderer.
 // ---------------------------------------------------------------------------
 
 function SharedView({
-  state,
+  presentation,
   callbacks,
   ctx,
   options,
 }: {
-  state: ControllerState;
+  presentation: SnapshotPresentation;
   callbacks: ViewCallbacks;
   ctx?: ViewContext;
   options?: ViewRenderOptions;
 }) {
-  const phase = getPhaseForStatus(state.status);
+  const phase = presentation.phase;
   if (options?.replace) return options.replace;
   return (
     <div className="dz-card" data-view-phase={phase}>
@@ -872,12 +865,11 @@ function SharedView({
       {phase === "idle" ? <IdleView callbacks={callbacks} ctx={ctx} /> : null}
       {phase === "idle" ? options?.idleBeforeHistory : null}
       {phase === "idle" ? <HistorySection callbacks={callbacks} ctx={ctx} /> : null}
-      {phase === "job" ? <JobView state={state} callbacks={callbacks} ctx={ctx} /> : null}
+      {phase === "job" ? <JobView presentation={presentation} callbacks={callbacks} ctx={ctx} /> : null}
       {phase === "display-only" ? <DisplayOnlyView callbacks={callbacks} ctx={ctx} /> : null}
       {phase === "completed" ? <CompletedView callbacks={callbacks} ctx={ctx} /> : null}
-      {phase === "failed" ? <FailedView state={state} callbacks={callbacks} ctx={ctx} /> : null}
+      {phase === "failed" ? <FailedView presentation={presentation} callbacks={callbacks} ctx={ctx} /> : null}
       {phase === "cancelled" ? <CancelledView callbacks={callbacks} /> : null}
-      {phase === "generic" ? <GenericView state={state} callbacks={callbacks} /> : null}
       {options?.after}
     </div>
   );
@@ -896,12 +888,12 @@ function renderInto(container: HTMLElement, node: ReactElement): void {
 
 export function renderView(
   container: HTMLElement,
-  state: ControllerState,
+  presentation: SnapshotPresentation,
   callbacks: ViewCallbacks,
   ctx?: ViewContext,
   options?: ViewRenderOptions,
 ): void {
-  renderInto(container, <SharedView state={state} callbacks={callbacks} ctx={ctx} options={options} />);
+  renderInto(container, <SharedView presentation={presentation} callbacks={callbacks} ctx={ctx} options={options} />);
 }
 
 // ---------------------------------------------------------------------------
@@ -977,17 +969,17 @@ function mountOverlay(hostDocument: Document, render: (close: () => void) => Rea
   const close = () => {
     if (closed) return;
     closed = true;
-    if (activeOverlay === controller) activeOverlay = null;
+    if (activeOverlay === overlay) activeOverlay = null;
     // Detach and unmount synchronously: `close` only runs from an overlay's
     // own event handlers or before the next overlay mounts, never during a
     // render, so the next overlay replaces this one immediately.
     host.remove();
     root.unmount();
   };
-  const controller = { close };
-  activeOverlay = controller;
+  const overlay = { close };
+  activeOverlay = overlay;
   flushSync(() => root.render(render(close)));
-  return controller;
+  return overlay;
 }
 
 export function openModal(

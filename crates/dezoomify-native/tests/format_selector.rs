@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use dezoomify_fixture_server::{router, AppState, RouteTable};
-use dezoomify_native::pipeline::{PipelineConfig, PipelineEvent};
+use dezoomify_native::pipeline::PipelineConfig;
 
 fn start_fixture_server() -> String {
     let scenarios_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/scenarios");
@@ -61,7 +61,7 @@ fn run_with_format(
         output.to_str().expect("utf8 output"),
         false,
         &config,
-        &mut |_event: PipelineEvent| {},
+        &mut |_snapshot| {},
     )
 }
 
@@ -130,7 +130,7 @@ fn unknown_format_fails_typed_without_output() {
     let error = run_with_format(&input, &output, Some("nope".to_string()))
         .expect_err("unknown format must fail");
     // Stable code, never display-string matching.
-    assert_eq!(error.code, "discovery.unknown-dezoomer");
+    assert_eq!(error.code, "discovery.unknown-format");
     assert!(
         error.message.contains("nope"),
         "message names the bad format without credentials: {}",

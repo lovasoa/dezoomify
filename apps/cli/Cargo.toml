@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 dezoomify-core = { path = "../../crates/dezoomify-core" }
 dezoomify-native = { path = "../../crates/dezoomify-native" }
+dezoomify-protocol = { path = "../../crates/dezoomify-protocol" }
 serde_json.workspace = true
 
 [dev-dependencies]

@@ -1,24 +1,32 @@
 // Minimal host-neutral shared-ui helpers (no React, no browser globals).
-import type { StructuredError } from "./controller.ts";
+import type { StructuredError } from "./snapshot-view.ts";
 
-// Canonical transport labels (todo 2.2 single source): the implementation
-// lives one layer down in `packages/browser-runtime/src/transport-labels.ts`
-// (dependency-free); this module only re-exports them for rendering, so the
-// dependency points inward. Codes ("direct", "proxy", "display",
-// "browser-session", "native") map to these display strings; raw labels pass
-// through for back-compat.
+/** Product capabilities the shared view and guidance copy read. */
+export interface AppCapabilities {
+  extensionAvailable?: boolean;
+  nativeAvailable?: boolean;
+  proxyAllowed?: boolean;
+  browserCanSave?: boolean;
+}
+
+// Canonical transport labels (single source): the implementation lives in
+// `@dezoomify/app-model` (host-neutral, dependency-free); this module only
+// re-exports it for rendering. Codes ("direct", "metadata-proxy",
+// "display-only", "browser-session", "native") map to these display strings;
+// raw labels pass through for back-compat.
 //
 // The namespace-destructure shape below keeps the same single source and
 // export surface while giving the bundler plain local bindings (a bare
 // import-plus-re-export of the same names miscompiles the local references
 // in the desktop bundle, throwing `DIRECT_TRANSPORT_LABEL` at runtime).
-import * as TransportLabels from "../../browser-runtime/src/transport-labels.ts";
+import * as TransportLabels from "@dezoomify/app-model";
 const {
   DIRECT_TRANSPORT_LABEL,
   PROXY_TRANSPORT_LABEL,
   DISPLAY_TRANSPORT_LABEL,
   BROWSER_SESSION_TRANSPORT_LABEL,
   NATIVE_TRANSPORT_LABEL,
+  renderTransportLabel,
 } = TransportLabels;
 export {
   DIRECT_TRANSPORT_LABEL,
@@ -26,18 +34,8 @@ export {
   DISPLAY_TRANSPORT_LABEL,
   BROWSER_SESSION_TRANSPORT_LABEL,
   NATIVE_TRANSPORT_LABEL,
+  renderTransportLabel,
 };
-
-export function renderTransportLabel(transport: string): string {
-  if (transport === "direct" || transport === DIRECT_TRANSPORT_LABEL) return DIRECT_TRANSPORT_LABEL;
-  if (transport === "proxy" || transport === PROXY_TRANSPORT_LABEL) return PROXY_TRANSPORT_LABEL;
-  if (transport === "display" || transport === DISPLAY_TRANSPORT_LABEL) return DISPLAY_TRANSPORT_LABEL;
-  if (transport === "browser-session" || transport === BROWSER_SESSION_TRANSPORT_LABEL) {
-    return BROWSER_SESSION_TRANSPORT_LABEL;
-  }
-  if (transport === "native" || transport === NATIVE_TRANSPORT_LABEL) return NATIVE_TRANSPORT_LABEL;
-  return transport;
-}
 
 export function renderSaveGuidance(originClean: boolean): string {
   if (originClean) {
@@ -58,6 +56,43 @@ export function renderSaveGuidance(originClean: boolean): string {
 export function renderErrorSummary(error: StructuredError): string {
   const action = error.retryable ? "Please try again." : "Please try a different picture or app.";
   return `${error.message} ${action}`;
+}
+
+/**
+ * Plain-language app-choice guidance rendered from capabilities.
+ * No jargon: avoid technical terms so tests can assert absence.
+ */
+export function renderAppChoice(cap: AppCapabilities): string {
+  const lines: string[] = [];
+  lines.push("Best next step:");
+  if (cap.nativeAvailable) {
+    lines.push(
+      "For very large pictures, use the desktop app on your computer. It can handle bigger files.",
+    );
+  } else if (cap.extensionAvailable) {
+    lines.push(
+      "You can also try the browser add-on. It can open pictures that need you to be signed in.",
+    );
+  } else if (cap.browserCanSave === false) {
+    lines.push(
+      "This preview can only be viewed here. To keep a full copy, try the desktop app on your computer.",
+    );
+  } else {
+    lines.push("You can continue in this browser. No extra steps are needed.");
+  }
+  lines.push("What each choice can do:");
+  lines.push("- This browser works for most public pictures you can already see.");
+  if (cap.extensionAvailable) {
+    lines.push("- The browser add-on helps when a picture needs you to be signed in.");
+  } else {
+    lines.push("- The browser add-on is not connected right now.");
+  }
+  if (cap.nativeAvailable) {
+    lines.push("- The desktop app is ready and handles the largest pictures.");
+  } else {
+    lines.push("- The desktop app is not connected right now.");
+  }
+  return lines.join("\n");
 }
 
 export function renderProgress(current: number, total: number): string {

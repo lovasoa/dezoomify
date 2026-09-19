@@ -1,5 +1,8 @@
-//! Retries `0` is real: first failure fails with no refetch.
-//! Counts loopback tile requests to prove no second request is sent.
+//! Retry budgets are engine-owned and classification-driven: permanent
+//! failures (HTTP 403/404, deterministic decode failures) attempt exactly
+//! once no matter the budget, while transient failures (HTTP 500/503,
+//! timeouts) retry to the exact budget on explicit engine timers. Counts
+//! loopback tile requests to prove it.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -112,7 +115,11 @@ fn setup_three_of_four() -> (String, Arc<Mutex<HashMap<String, usize>>>) {
                 http_response("200 OK", "image/png", &bytes),
             );
         }
-        // `/pyr_files/9/1_1.png` stays absent (404).
+        // The last tile is permanently missing.
+        map.insert(
+            "/pyr_files/9/1_1.png".to_string(),
+            http_response("404 Not Found", "text/plain", b"tile failure"),
+        );
     }
     let base = serve_counted(Arc::clone(&shared), Arc::clone(&counts));
     (base, counts)
@@ -142,52 +149,10 @@ fn retries_zero_sends_no_second_request() {
     assert_eq!(error.code, "tile.download-failed");
     assert!(!output.exists());
     let counts = counts.lock().expect("lock");
-    // Each of the four tiles is requested exactly once; the missing tile
-    // is never refetched.
-    for tile in ["0_0", "1_0", "0_1", "1_1"] {
-        let path = format!("/pyr_files/9/{tile}.png");
-        assert_eq!(
-            counts.get(&path).copied().unwrap_or(0),
-            1,
-            "tile {tile} requested exactly once with retries=0: {counts:?}"
-        );
-    }
-}
-
-#[test]
-fn retries_one_refetches_the_missing_tile() {
-    // Explicit `Fail` (see above): missing tile still fails after one retry.
-    let (base, counts) = setup_three_of_four();
-    let input = format!("{base}/pyr.dzi");
-    let out_dir = temp_dir("one");
-    let output = out_dir.join("one.png");
-    let config = PipelineConfig {
-        max_retries: 1,
-        partial_policy: PartialPolicy::Fail,
-        ..Default::default()
-    };
-    let error = dezoomify_native::pipeline::run(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
-        &config,
-        &mut |_| {},
-    )
-    .expect_err("missing tile still fails after one retry");
-    assert_eq!(error.code, "tile.download-failed");
-    let counts = counts.lock().expect("lock");
-    // Good tiles are requested once; the missing tile is retried once.
-    for tile in ["0_0", "1_0", "0_1"] {
-        let path = format!("/pyr_files/9/{tile}.png");
-        assert_eq!(
-            counts.get(&path).copied().unwrap_or(0),
-            1,
-            "good tile {tile} requested once: {counts:?}"
-        );
-    }
+    // The missing tile is never refetched with retries=0.
     assert_eq!(
         counts.get("/pyr_files/9/1_1.png").copied().unwrap_or(0),
-        2,
-        "missing tile retried once with retries=1: {counts:?}"
+        1,
+        "missing tile requested once with retries=0: {counts:?}"
     );
 }

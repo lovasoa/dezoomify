@@ -19,7 +19,8 @@
     "@dezoomify/shared-ui": "workspace:*",
     "@dezoomify/wasm-bindings": "workspace:*",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "@dezoomify/app-model": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

@@ -43,14 +43,12 @@ function harness({ fetchResource, loadDisplayImage, assembly = fakeAssembly(), p
     onPermissionRequired: () => {},
     onRecoveryRequested: () => seen.push(["recovery"]),
     onHostFailure: (error) => seen.push(["host-failure", error]),
-    onEvent: (event) => seen.push(["event", event.type]),
     log: (level, code, detail) => logs.push({ level, code, detail }),
   });
   return { controller, sent, seen, assembly, logs };
 }
 
 const TILE = {
-  kind: "effect",
   type: "acquire-tile",
   effect: "fx:2",
   tile: 0,
@@ -63,7 +61,6 @@ function flush() { return new Promise((resolve) => setTimeout(resolve, 0)); }
 test("metadata carries the observed post-redirect URL", async () => {
   const { controller, sent } = harness();
   controller.handleEngineMessages([{
-    kind: "effect",
     type: "acquire-resource",
     effect: "fx:0",
     request: { id: 4, uri: "https://cdn.test/info.json", headers: [], purpose: "metadata" },
@@ -141,23 +138,38 @@ test("processed tiles never use the display fallback", async () => {
   assert.ok(failure, "processed acquisition fails instead of dropping the recipe");
 });
 
-test("lifecycle effects and events run in engine order on one chain", async () => {
+test("selection and deferred-follow commands forward typed to the engine", async () => {
+  const { controller, sent } = harness();
+  controller.selectImage(2);
+  controller.followDeferred(1);
+  controller.selectLevel(3);
+  controller.chooseRecovery(0, "keep");
+  assert.deepEqual(sent.map((message) => message.command), [
+    { type: "select-image", image: 2 },
+    { type: "follow-deferred", image: 1 },
+    { type: "select-level", level: 3 },
+    { type: "answer-partial", generation: 0, decision: "keep" },
+  ]);
+});
+
+test("lifecycle effects run in engine order on one chain", async () => {
   const { controller, assembly, sent } = harness();
+  // Snapshots (terminals included) ride alongside, never as messages: the
+  // only job-state object always forwards, including after cancel.
   controller.handleEngineMessages([
-    { kind: "effect", type: "finalize-output", effect: "fx:10", partial: false, format: "png", canvas: { width: 32, height: 32 } },
-    { kind: "event", type: "completed" },
+    { type: "finalize-output", effect: "fx:10", partial: false, format: "png", canvas: { width: 32, height: 32 } },
   ]);
   await flush();
   await flush();
   assert.deepEqual(assembly.calls.map(([kind]) => kind), ["finalizeOutput"]);
   assert.deepEqual(assembly.calls[0], ["finalizeOutput", false, "png", { width: 32, height: 32 }]);
-  const finalized = sent.find((message) => message.type === "engine.command");
-  assert.deepEqual(finalized.command, { type: "finalization-succeeded" });
+  const finalized = sent.find((message) => message.type === "engine.finalize");
+  assert.deepEqual(finalized.outcome, { type: "finalization-succeeded", disposition: "browser-save-initiated" });
 });
 
 test("cancel-work releases retained resources and cancels fetching", async () => {
   const { controller, assembly, seen } = harness();
-  controller.handleEngineMessages([{ kind: "effect", type: "cancel-work", effect: "fx:20" }]);
+  controller.handleEngineMessages([{ type: "cancel-work", effect: "fx:20" }]);
   assert.deepEqual(assembly.calls.map(([kind]) => kind), ["release"]);
   assert.ok(seen.some(([kind]) => kind === "cancel"));
 });
@@ -167,14 +179,13 @@ test("a failed awaited output replies typed instead of faking success", async ()
   assembly.finalizeOutput = async () => { throw Object.assign(new Error("too large"), { code: "PLAN_INVALID", retryable: false }); };
   const { controller, sent, seen } = harness({ assembly });
   controller.handleEngineMessages([
-    { kind: "effect", type: "finalize-output", effect: "fx:10", partial: false, format: "png", canvas: { width: 99999, height: 99999 } },
-    { kind: "event", type: "failed", error: { code: "PLAN_INVALID" } },
+    { type: "finalize-output", effect: "fx:10", partial: false, format: "png", canvas: { width: 99999, height: 99999 } },
   ]);
   await flush();
   await flush();
-  const finalized = sent.find((message) => message.command?.type === "finalization-failed");
+  const finalized = sent.find((message) => message.outcome?.type === "finalization-failed");
   assert.ok(finalized, "typed finalization failure was sent");
-  assert.equal(finalized.command.error.code, "PLAN_INVALID");
-  assert.equal(finalized.command.error.phase, "output");
+  assert.equal(finalized.outcome.error.code, "PLAN_INVALID");
+  assert.equal(finalized.outcome.error.phase, "output");
   assert.equal(seen.some(([kind]) => kind === "host-failure"), false, "an awaited failure is not a host crash");
 });

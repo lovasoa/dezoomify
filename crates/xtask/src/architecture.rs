@@ -3,11 +3,20 @@
 //! - `packages/shared-ui` is host-neutral: after stripping comments and
 //!   string literals, no module may reference the host globals `window`,
 //!   `fetch`, `chrome`, or `tauri` (the extension page's no-bundler replica
-//!   and the browser runtimes own every host effect).
-//! - `packages/browser-runtime` never imports `shared-ui`: save names and
-//!   transport labels live one layer down (`save-name.ts`,
-//!   `transport-labels.ts`) and shared-ui re-exports them, so the dependency
-//!   points inward.
+//!   and the browser runtimes own every host effect). Shared UI never
+//!   imports `packages/browser-runtime`: canonical presentation helpers
+//!   (transport labels, save names, history) live in
+//!   `packages/app-model` and shared-ui re-exports them.
+//! - `packages/app-model` is host-neutral and React-free: no host globals,
+//!   no `react`/`react-dom`, no host storage or canvas access. It imports
+//!   generated contract types (`@dezoomify/wasm-bindings`) and relative
+//!   siblings only.
+//! - `packages/browser-runtime` never imports `shared-ui` or `app-model`
+//!   consumers in the wrong direction: save names and transport labels stay
+//!   consumable without a runtime-to-UI import.
+//! - `apps/desktop/src/jobService.ts` uses the public Tauri API only
+//!   (`@tauri-apps/api/core`, `@tauri-apps/api/event`): no
+//!   host-injected Tauri globals, no validation-only fallbacks.
 //!
 //! Only quoted import/export specifiers count for the runtime rule, so prose
 //! comments mentioning shared-ui stay allowed.
@@ -17,18 +26,167 @@ use std::path::{Path, PathBuf};
 /// Host-global tokens forbidden in shared-ui code (lowercase compare).
 const FORBIDDEN_TOKENS: &[&str] = &["window", "fetch", "chrome", "tauri"];
 
+/// Host-global and framework tokens forbidden in app-model code.
+const APP_MODEL_FORBIDDEN_TOKENS: &[&str] = &[
+    "window",
+    "document",
+    "fetch",
+    "chrome",
+    "tauri",
+    "react",
+    "localstorage",
+];
+
 pub fn verify(args: &[String]) -> Result<(), String> {
     if !args.is_empty() {
         return Err("usage: cargo xtask check (no options)".to_string());
     }
     let root = super::repo_root();
     check_shared_ui(&root.join("packages/shared-ui/src"))?;
+    check_app_model(&root.join("packages/app-model/src"))?;
     check_runtime(&root.join("packages/browser-runtime/src"))?;
+    check_desktop_service(&root.join("apps/desktop/src/jobService.ts"))?;
     check_browser_single_sources(&root)?;
     check_website_runtime_usage(&root)?;
     check_protocol_boundaries(&root)?;
+    check_engine_single_api(&root)?;
+    check_engine_single_runner(&root)?;
     println!("architecture: ok");
     Ok(())
+}
+
+/// The engine exposes one lifecycle implementation: hosts drive
+/// `EngineJob` (`start`/`command`/`complete`/`provide_metadata`) and never
+/// the old command surface (`Job::on_command`, `drain_messages`,
+/// `JobCommand`, `Outcome`). The old items stay crate-private inside
+/// `dezoomify-engine` for the facade bridge only.
+fn check_engine_single_api(root: &Path) -> Result<(), String> {
+    for dir in [
+        "crates/dezoomify-native/src",
+        "crates/dezoomify-wasm/src",
+        "apps/desktop/src-tauri/src",
+        "apps/cli/src",
+    ] {
+        let base = root.join(dir);
+        for file in list_rs(&base)? {
+            let text = std::fs::read_to_string(&file)
+                .map_err(|e| format!("read {}: {e}", file.display()))?;
+            let code = strip_comments(&text);
+            // The ABI `JobCommand` (protocol DTO) shares its name with the
+            // old engine surface, so only engine-qualified paths and the
+            // old driving methods are forbidden here.
+            for forbidden in [
+                "on_command(",
+                "drain_messages(",
+                "JobMessageBody",
+                "dezoomify_engine::JobCommand",
+                "dezoomify_engine::Outcome",
+                "engine::JobCommand",
+                "engine::Outcome",
+                "transition::Job",
+                "state::State",
+            ] {
+                if contains_word(&code, forbidden) {
+                    return Err(format!(
+                        "engine duality: {} references `{forbidden}`; hosts drive EngineJob only",
+                        file.display()
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Positive ownership proofs complementing the duality absence check above:
+/// the single native runner owns the engine inside `dezoomify-native`
+/// (`NativeRunner` drives `EngineJob`), the WASM session drives `EngineJob`,
+/// and out-of-crate hosts (desktop backend, CLI) drive the job through the
+/// single `NativeRunner` instead of a second runner.
+fn check_engine_single_runner(root: &Path) -> Result<(), String> {
+    for (path, required) in [
+        ("crates/dezoomify-native/src/exec.rs", "EngineJob"),
+        ("crates/dezoomify-native/src/runner.rs", "dezoomify_engine"),
+        ("crates/dezoomify-wasm/src/session.rs", "EngineJob"),
+        ("apps/desktop/src-tauri/src/jobs.rs", "NativeRunner"),
+        ("apps/cli/src/main.rs", "NativeRunner"),
+    ] {
+        let file = root.join(path);
+        let text =
+            std::fs::read_to_string(&file).map_err(|e| format!("read {}: {e}", file.display()))?;
+        if !text.contains(required) {
+            return Err(format!(
+                "engine ownership: {path} must drive `{required}` (one EngineJob, one native runner)"
+            ));
+        }
+    }
+    // Exactly one runner struct owns native execution: a second runner type
+    // in `dezoomify-native` would split the single-runner contract.
+    let native = root.join("crates/dezoomify-native/src");
+    let mut runners = Vec::new();
+    for file in list_rs(&native)? {
+        let text =
+            std::fs::read_to_string(&file).map_err(|e| format!("read {}: {e}", file.display()))?;
+        for line in strip_comments(&text).lines() {
+            let line = line.trim();
+            if line.starts_with("pub struct ") && line.contains("Runner") {
+                runners.push(format!("{}: {line}", file.display()));
+            }
+        }
+    }
+    if runners != vec![runners.first().cloned().unwrap_or_default()]
+        || !runners.iter().any(|r| r.contains("NativeRunner"))
+    {
+        return Err(format!(
+            "engine ownership: exactly one native runner struct is allowed, found {runners:?}"
+        ));
+    }
+    // The website imports the shared browser runtime directly (semantic
+    // import-direction proof alongside the required-factory list below).
+    let main = std::fs::read_to_string(root.join("src/main.ts"))
+        .map_err(|e| format!("read src/main.ts: {e}"))?;
+    if !main.contains("packages/browser-runtime") {
+        return Err(
+            "website runtime bypass: src/main.ts must import packages/browser-runtime".to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// True when `token` occurs with a non-identifier boundary on both sides.
+fn contains_word(code: &str, token: &str) -> bool {
+    let mut start = 0;
+    while let Some(index) = code[start..].find(token) {
+        let from = start + index;
+        let to = from + token.len();
+        let before = code[..from].chars().next_back();
+        let after = code[to..].chars().next();
+        let boundary = |c: Option<char>| c.is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_'));
+        if boundary(before) && boundary(after) {
+            return true;
+        }
+        start = to;
+    }
+    false
+}
+
+fn list_rs(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut out = Vec::new();
+    let entries =
+        std::fs::read_dir(dir).map_err(|e| format!("cannot list {}: {e}", dir.display()))?;
+    let mut entries: Vec<_> = entries
+        .map(|e| e.map_err(|e| format!("dir entry: {e}")))
+        .collect::<Result<_, _>>()?;
+    entries.sort_by_key(|e| e.path());
+    for entry in entries {
+        let path = entry.path();
+        if path.is_dir() {
+            out.extend(list_rs(&path)?);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+            out.push(path);
+        }
+    }
+    Ok(out)
 }
 
 fn check_protocol_boundaries(root: &Path) -> Result<(), String> {
@@ -39,9 +197,9 @@ fn check_protocol_boundaries(root: &Path) -> Result<(), String> {
         return Err("core catalogs must use immutable positions, not StableId".to_string());
     }
     for path in [
-        "crates/dezoomify-job/src/job.rs",
-        "crates/dezoomify-job/src/transition.rs",
-        "crates/dezoomify-native/src/job_driver.rs",
+        "crates/dezoomify-engine/src/job.rs",
+        "crates/dezoomify-engine/src/transition.rs",
+        "crates/dezoomify-native/src/runner.rs",
         "crates/dezoomify-wasm/src/session.rs",
     ] {
         let file = root.join(path);
@@ -79,7 +237,7 @@ fn check_website_runtime_usage(root: &Path) -> Result<(), String> {
     for required in [
         "createJobActivity",
         "createTileDecoder",
-        "createEngineHost",
+        "createBrowserRunner",
         "createCanvasAssembly",
         "createProbeSize",
         "createTileThrottle",
@@ -119,17 +277,12 @@ fn check_website_runtime_usage(root: &Path) -> Result<(), String> {
 }
 
 fn check_browser_single_sources(root: &Path) -> Result<(), String> {
+    // The old `src/webIntegration.ts` re-export shim is deleted: the website
+    // imports the shared browser runtime directly. The shim must not return.
     let shim_path = root.join("src/webIntegration.ts");
-    let shim = std::fs::read_to_string(&shim_path)
-        .map_err(|e| format!("read {}: {e}", shim_path.display()))?;
-    let code: String = shim
-        .lines()
-        .filter(|line| !line.trim_start().starts_with("//"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    if code.trim() != "export * from \"../packages/browser-runtime/src/web-integration.ts\";" {
+    if shim_path.exists() {
         return Err(format!(
-            "website integration duplicate: {} must remain a re-export-only compatibility shim",
+            "website integration duplicate: {} must not exist; import ../packages/browser-runtime/src/web-integration.ts directly",
             shim_path.display()
         ));
     }
@@ -166,6 +319,68 @@ fn check_shared_ui(dir: &Path) -> Result<(), String> {
                     file.display()
                 ));
             }
+        }
+        for spec in quoted_specifiers(&strip_comments(&text)) {
+            if spec.contains("browser-runtime") {
+                return Err(format!(
+                    "shared-ui inversion: {} imports `{spec}` (canonical helpers live in @dezoomify/app-model)",
+                    file.display()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_app_model(dir: &Path) -> Result<(), String> {
+    for file in list_ts(dir)? {
+        let text =
+            std::fs::read_to_string(&file).map_err(|e| format!("read {}: {e}", file.display()))?;
+        let code = strip_comments_and_strings(&text);
+        for token in tokens(&code) {
+            if APP_MODEL_FORBIDDEN_TOKENS.contains(&token.as_str()) {
+                return Err(format!(
+                    "app-model host leak: {} references `{token}` (app-model is React-free with no host globals)",
+                    file.display()
+                ));
+            }
+        }
+        for spec in quoted_specifiers(&strip_comments(&text)) {
+            if spec.contains("browser-runtime")
+                || spec.contains("shared-ui")
+                || spec == "react"
+                || spec.starts_with("react/")
+                || spec == "react-dom"
+                || spec.starts_with("react-dom/")
+                || spec.contains("@tauri")
+            {
+                return Err(format!(
+                    "app-model inversion: {} imports `{spec}` (app-model imports generated bindings and siblings only)",
+                    file.display()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_desktop_service(path: &Path) -> Result<(), String> {
+    let text =
+        std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    for required in ["@tauri-apps/api/core", "@tauri-apps/api/event"] {
+        if !text.contains(required) {
+            return Err(format!(
+                "desktop service bypass: {} must use the public Tauri API `{required}`",
+                path.display()
+            ));
+        }
+    }
+    for forbidden in ["__TAURI_INTERNALS__", "__TAURI_EVENT__", "__TAURI__"] {
+        if text.contains(forbidden) {
+            return Err(format!(
+                "desktop service host leak: {} references `{forbidden}` (use @tauri-apps/api with explicit doubles)",
+                path.display()
+            ));
         }
     }
     Ok(())

@@ -49,12 +49,9 @@ function assertNoTrailingSpaces(content, label) {
   }
 }
 
-const EXPECTED_COMMANDS = ["answer_choice", "cancel_job", "open_saved_output", "query_capabilities", "request_destination", "start_job"];
+const EXPECTED_COMMANDS = ["answer_choice", "cancel_job", "open_saved_output", "pause_job", "query_capabilities", "request_destination", "resume_job", "start_job"];
 const EXPECTED_CHANNELS = [
-  "dezoomify://job-state",
-  "dezoomify://job-progress",
-  "dezoomify://job-output",
-  "dezoomify://job-error",
+  "dezoomify://job-snapshot",
   "dezoomify://deep-link-pending",
 ];
 const EXPECTED_ENCODERS = ["png", "jpeg", "tiff", "zif", "webp"];
@@ -139,13 +136,16 @@ test("protocol range, encoders, native host, updater stay consistent", () => {
   assert.ok(hostSrc.includes("capability.unavailable"), "fail-closed rejection");
 });
 
-test("event channels match and forbid tile bytes", () => {
+test("event channels are single-sourced and forbid tile bytes", () => {
   const eventsTs = readText("../src/events.ts");
   const integrationTs = readText("../src/desktopIntegration.ts");
   const fromEvents = extractBracketStrings(eventsTs, "DESKTOP_EVENT_CHANNELS");
-  const fromIntegration = extractBracketStrings(integrationTs, "DESKTOP_EVENT_CHANNELS");
   assert.deepEqual(sorted(fromEvents), sorted(EXPECTED_CHANNELS));
-  assert.deepEqual(sorted(fromIntegration), sorted(EXPECTED_CHANNELS));
+  // The integration module re-exports the canonical registry instead of
+  // keeping a second literal: one source, no drift.
+  assert.ok(integrationTs.includes('from "./events.ts"'), "integration re-exports the canonical channels");
+  assert.ok(integrationTs.includes("DESKTOP_EVENT_CHANNELS"), "integration exposes the canonical channels");
+  assert.equal(integrationTs.includes("dezoomify://job-state"), false, "no second channel literal");
   assert.ok(eventsTs.includes("assertNoTileBytes"), "redaction helper");
   assert.ok(eventsTs.includes("FORBIDDEN_IPC_KEYS"), "forbidden-IPC-key set backs the guard");
   for (const rel of ["../src-tauri/tauri.conf.json", "../src-tauri/capabilities/generated.json", "../../../generated/desktop-capabilities.json"]) {

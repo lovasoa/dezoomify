@@ -175,6 +175,36 @@ impl From<dezoomify_core::core::processing::ProcessingError> for NativeError {
     }
 }
 
+/// Map an engine terminal failure code onto the stable native product code
+/// while preserving the engine message. Branches on the stable engine code
+/// only, never on message text. Unknown codes fail closed as internal.
+#[must_use]
+pub fn map_engine_failure_to_native(code: &str) -> &str {
+    match code {
+        "job.discovery-failed" | "job.catalog-invalid" | "job.empty-resource" => "discovery.failed",
+        "job.no-images" => "discovery.no-image",
+        "job.unknown-format" => "discovery.unknown-format",
+        "job.resource-limit" => "tile.limit",
+        "job.plan-invalid" => "discovery.tile-plan",
+        "job.plan-empty" => "discovery.no-level",
+        "job.partial-discarded" => "tile.download-failed",
+        // Already-native product codes pass through untouched.
+        already
+            if already.starts_with("discovery.")
+                || already.starts_with("tile.")
+                || already.starts_with("transport.")
+                || already.starts_with("output.")
+                || already.starts_with("auth.")
+                || already.starts_with("protocol.")
+                || already.starts_with("handoff.")
+                || already == "job.cancelled" =>
+        {
+            already
+        }
+        _ => "native.internal",
+    }
+}
+
 /// Stable phase for a native error code. Branches only on the namespaced
 /// code prefix/exact code, never on display strings.
 #[must_use]
@@ -185,8 +215,8 @@ pub fn error_phase(code: &str) -> &'static str {
         "validation"
     } else if code.starts_with("discovery.")
         || code.starts_with("job.discovery")
-        || code == "discovery.unknown-dezoomer"
-        || code == "job.unknown-dezoomer"
+        || code == "discovery.unknown-format"
+        || code == "job.unknown-format"
         || code == "job.no-images"
         || code == "job.catalog-invalid"
         || code == "job.empty-resource"
@@ -343,8 +373,8 @@ mod tests {
 
     #[test]
     fn legacy_remaps_stay_stable() {
-        // Preserved from job_driver.rs:263-275 via map_failure_code; the
-        // boundary mapping must agree on phase/recovery for each legacy code.
+        // Preserved via `exec::map_failure_code`; the boundary mapping must
+        // agree on phase/recovery for each legacy code.
         for code in [
             "discovery.failed",
             "discovery.no-image",
@@ -481,7 +511,7 @@ mod tests {
             "discovery.no-image",
             "discovery.tile-plan",
             "discovery.no-level",
-            "discovery.unknown-dezoomer",
+            "discovery.unknown-format",
             "tile.decode-failed",
             "tile.processing-failed",
             "tile.limit",

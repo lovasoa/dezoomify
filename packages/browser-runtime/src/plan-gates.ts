@@ -59,7 +59,7 @@ export interface DeclaredSize {
 }
 
 /**
- * Pre-plan gate (todo 5.3): declared sizes fail fast with desktop handoff
+ * Pre-plan gate: declared sizes fail fast with desktop handoff
  * guidance. Returns null when the size fits (or is undeclared, letting the
  * probe-driven path continue); otherwise the structured failure to throw.
  */

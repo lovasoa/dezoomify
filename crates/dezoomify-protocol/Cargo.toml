@@ -14,13 +14,14 @@ wasm-bindgen = { workspace = true, optional = true }
 [features]
 typescript = ["dep:tsify", "dep:wasm-bindgen"]
 
-# 6.1 debt (unblocked for cargo 1.98): DTO docs pending.
+# Manual lint tables until legacy debt clears (see the workspace policy
+# note in the root Cargo.toml).
 [lints.rust]
 missing_docs = "allow"
 
-# 6.1 debt: `missing_errors_doc`, `unreadable_literal`, `redundant_clone`
-# and doc-formatting lints fire across the DTO/codec surface; fix them
-# before re-tightening to the workspace warn. (`unwrap_used` is denied at
-# the crate root instead, so shipped code stays panic-free.)
+# `missing_errors_doc`, `unreadable_literal`, `redundant_clone` and
+# doc-formatting lints fire across the DTO/codec surface; fix them before
+# re-tightening to the workspace warn. (`unwrap_used` is denied at the crate
+# root instead, so shipped code stays panic-free.)
 [lints.clippy]
 pedantic = "allow"

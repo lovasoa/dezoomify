@@ -8,6 +8,8 @@ macro_rules! desktop_commands {
         $callback!(
             start_job,
             cancel_job,
+            pause_job,
+            resume_job,
             answer_choice,
             request_destination,
             open_saved_output,

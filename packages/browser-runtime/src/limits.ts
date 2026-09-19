@@ -71,7 +71,7 @@ export function probeLimits(
 }
 
 /**
- * Tile-count estimate for a declared size assuming 256 px tiles (todo 5.3).
+ * Tile-count estimate for a declared size assuming 256 px tiles.
  * 256 px is the smallest common tile, so the estimate is a conservative
  * upper bound. Overflow-safe: returns null for invalid sizes or when the
  * multiply would exceed MAX_SAFE_INTEGER.

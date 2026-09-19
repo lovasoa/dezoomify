@@ -5,6 +5,7 @@ import { desktopHandoffLink } from "../src/main.ts";
 import { EN, t } from "../packages/shared-ui/src/i18n.ts";
 import { act } from "./react-dom.mjs";
 import { renderView } from "../packages/shared-ui/src/view.tsx";
+import { presentFailure, presentStatus } from "../packages/shared-ui/src/snapshot-view.ts";
 import * as runtimeHandoff from "../apps/extension/src/runtime/nativeHandoff.ts";
 import * as backgroundHandoff from "../apps/extension/src/background/handoff.ts";
 
@@ -58,19 +59,15 @@ const viewCallbacks = {
   onSave: () => {},
 };
 
-const failedState = {
-  status: "failed",
-  seq: 1,
-  sessionId: "s-handoff",
-  imageCount: 0,
-  transport: "direct",
-  error: {
+const failedState = presentFailure(
+  {
     code: "PLAN_INVALID",
     category: "engine",
     retryable: false,
     message: "This picture is too large for a browser tab.",
   },
-};
+  "direct",
+);
 
 test("handoff 5.5: failed and display-only views offer Send with consent summary", () => {
   const link = desktopHandoffLink("https://example.com/view?page=1");
@@ -90,13 +87,7 @@ test("handoff 5.5: failed and display-only views offer Send with consent summary
   assert.ok(consent.textContent.includes("https://example.com/"), "consent summary names the origin");
 
   const displayOnly = renderContainer();
-  act(() => renderView(displayOnly, {
-    status: "display-only",
-    seq: 2,
-    sessionId: "s-handoff",
-    imageCount: 1,
-    transport: "browser-session",
-  }, viewCallbacks, {
+  act(() => renderView(displayOnly, presentStatus("display-only", { transport: "browser-session" }), viewCallbacks, {
     sourceUrl: "https://example.com/view?page=1",
     desktopHandoffUrl: link,
   }));
