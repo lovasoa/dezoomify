@@ -1,14 +1,11 @@
-//! Perf smoke for the fixed pool and streaming memory model. Fast and
-//! deterministic: no
-//! gigapixel allocation, no public network. Wall-time numbers print for CI
-//! tracking; the hard gate is the deterministic memory model plus a 20
-//! percent regression bound on encoded byte sizes versus
-//! `perf-baseline.json`.
+//! Perf smoke for the real native pipeline. Fast and deterministic: no
+//! public network. Wall-time numbers print for CI tracking; hard gates cover
+//! actual bounded pipeline instrumentation plus a 20 percent regression
+//! bound on encoded byte sizes versus `perf-baseline.json`.
 
 use dezoomify_native::pipeline::{
-    self, canvas_bytes, encode_jpeg, encode_png, encode_tiff, estimated_peak_legacy_bytes,
-    estimated_peak_streaming_bytes, exceeds_available_memory, required_memory_bytes, should_spill,
-    PipelineConfig, MAX_CONCURRENT, SPILL_THRESHOLD_BYTES,
+    self, encode_jpeg, encode_png, encode_tiff, exceeds_available_memory, required_memory_bytes,
+    PipelineConfig, MAX_CONCURRENT,
 };
 use std::time::Instant;
 
@@ -35,28 +32,6 @@ fn baseline() -> serde_json::Value {
 fn pool_width_is_unified_at_sixteen() {
     assert_eq!(MAX_CONCURRENT, 16);
     assert_eq!(PipelineConfig::default().max_concurrent, 16);
-}
-
-#[test]
-fn spill_threshold_is_512mib() {
-    assert_eq!(SPILL_THRESHOLD_BYTES, 512 << 20);
-    assert!(should_spill(20_000, 20_000), "20k canvas spills");
-    assert!(!should_spill(512, 512), "512 canvas stays in memory");
-    assert_eq!(canvas_bytes(20_000, 20_000), Some(1_600_000_000));
-}
-
-#[test]
-fn twenty_k_streaming_halves_legacy_peak() {
-    let legacy = estimated_peak_legacy_bytes(20_000, 20_000).expect("legacy model");
-    let streaming = estimated_peak_streaming_bytes(20_000, 20_000).expect("streaming model");
-    assert_eq!(legacy, 1_600_000_000u64 * 3);
-    assert!(
-        streaming * 2 <= legacy,
-        "streaming {streaming} must be at most half of legacy {legacy}"
-    );
-    let ratio = streaming as f64 / legacy as f64;
-    assert!(ratio < 0.4, "streaming ratio {ratio} stays well under half");
-    println!("20k legacy={legacy} streaming={streaming} ratio={ratio:.3}");
 }
 
 #[test]
