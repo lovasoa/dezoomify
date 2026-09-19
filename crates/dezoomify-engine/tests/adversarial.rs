@@ -1,7 +1,8 @@
 mod support;
 
 use dezoomify_core::core::discovery::{FetchCause, FetchCode, TransportKind};
-use dezoomify_engine::{Config, JobCommand};
+use dezoomify_engine::Config;
+use support::JobCommand;
 use support::{ScriptedHost, DZI, DZI_INPUT_URL};
 
 fn host_with_id(job: &str) -> ScriptedHost {
@@ -24,14 +25,12 @@ fn duplicate_response_is_ignored() {
     .unwrap();
     let len = host.transcript().len();
     // Replaying the consumed discovery request is a safe no-op.
-    let outcome = host
-        .apply(JobCommand::ResourceBytes {
-            request: 0,
-            bytes: dzi_bytes(),
-            final_uri: None,
-        })
-        .unwrap();
-    assert_eq!(outcome, dezoomify_engine::Outcome::Ignored);
+    host.apply(JobCommand::ResourceBytes {
+        request: 0,
+        bytes: dzi_bytes(),
+        final_uri: None,
+    })
+    .unwrap();
     assert_eq!(host.transcript().len(), len);
     assert_eq!(host.state(), "AwaitingImageSelection");
 
@@ -41,8 +40,8 @@ fn duplicate_response_is_ignored() {
     host.apply(JobCommand::SelectLevel { level: 9 }).unwrap();
     host.apply(JobCommand::TileAcquired { tile: 0 }).unwrap();
     let len = host.transcript().len();
-    let outcome = host.apply(JobCommand::TileAcquired { tile: 0 }).unwrap();
-    assert_eq!(outcome, dezoomify_engine::Outcome::Ignored);
+    // Duplicate tile completion never double-completes work.
+    host.apply(JobCommand::TileAcquired { tile: 0 }).unwrap();
     assert_eq!(host.transcript().len(), len);
 }
 
@@ -51,14 +50,12 @@ fn unknown_request_is_ignored_without_corruption() {
     let mut host = host_with_id("job:mine");
     host.start().unwrap();
     let len = host.transcript().len();
-    let err = host
-        .apply(JobCommand::ResourceBytes {
-            request: 99,
-            bytes: dzi_bytes(),
-            final_uri: None,
-        })
-        .unwrap();
-    assert_eq!(err, dezoomify_engine::Outcome::Ignored);
+    host.apply(JobCommand::ResourceBytes {
+        request: 99,
+        bytes: dzi_bytes(),
+        final_uri: None,
+    })
+    .unwrap();
     assert_eq!(host.transcript().len(), len);
     assert_eq!(host.state(), "Discovering");
     // The outstanding request still proceeds normally afterwards.
@@ -125,14 +122,19 @@ fn double_cancel_is_idempotent() {
 fn empty_resource_bytes_fail_without_catalog() {
     let mut host = host_with_id("job:empty");
     host.start().unwrap();
-    host.apply(JobCommand::ResourceBytes {
-        request: 0,
-        bytes: Vec::new(),
-        final_uri: None,
-    })
-    .unwrap();
-    assert_eq!(host.state(), "Failed");
-    assert_eq!(host.terminal_count(), 1);
+    // Empty bodies are a host contract violation: the canonical API rejects
+    // them at the boundary instead of failing the job, so discovery stays
+    // live with no catalog and no terminal.
+    let err = host
+        .apply(JobCommand::ResourceBytes {
+            request: 0,
+            bytes: Vec::new(),
+            final_uri: None,
+        })
+        .unwrap_err();
+    assert_eq!(err.code, "job.empty-resource");
+    assert_eq!(host.state(), "Discovering");
+    assert_eq!(host.terminal_count(), 0);
     assert!(
         !host
             .transcript()
@@ -178,21 +180,19 @@ fn batch_sibling_answer_after_a_winner_is_ignored() {
     .unwrap();
     assert_eq!(host.state(), "AwaitingImageSelection");
     let len = host.transcript().len();
-    let late = host
-        .apply(JobCommand::ResourceBytes {
-            request: requests[1],
-            bytes: vec![1, 2, 3],
-            final_uri: None,
-        })
-        .unwrap();
-    assert_eq!(late, dezoomify_engine::Outcome::Ignored);
-    let late_failure = host
-        .apply(JobCommand::FetchFailure {
-            request: requests[1],
-            cause: FetchCause::new(FetchCode::DiscoveryFailed, TransportKind::Direct),
-        })
-        .unwrap();
-    assert_eq!(late_failure, dezoomify_engine::Outcome::Ignored);
+    // A live-but-late sibling answer is accepted with no new work: the
+    // winning catalog survives and the transcript does not move.
+    host.apply(JobCommand::ResourceBytes {
+        request: requests[1],
+        bytes: vec![1, 2, 3],
+        final_uri: None,
+    })
+    .unwrap();
+    host.apply(JobCommand::FetchFailure {
+        request: requests[1],
+        cause: FetchCause::new(FetchCode::DiscoveryFailed, TransportKind::Direct),
+    })
+    .unwrap();
     assert_eq!(host.transcript().len(), len);
     assert_eq!(host.state(), "AwaitingImageSelection");
 }

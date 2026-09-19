@@ -49,8 +49,88 @@ pub fn verify(args: &[String]) -> Result<(), String> {
     check_browser_single_sources(&root)?;
     check_website_runtime_usage(&root)?;
     check_protocol_boundaries(&root)?;
+    check_engine_single_api(&root)?;
     println!("architecture: ok");
     Ok(())
+}
+
+/// The engine exposes one lifecycle implementation: hosts drive
+/// `EngineJob` (`start`/`command`/`complete`/`provide_metadata`) and never
+/// the old command surface (`Job::on_command`, `drain_messages`,
+/// `JobCommand`, `Outcome`). The old items stay crate-private inside
+/// `dezoomify-engine` for the facade bridge only.
+fn check_engine_single_api(root: &Path) -> Result<(), String> {
+    for dir in [
+        "crates/dezoomify-native/src",
+        "crates/dezoomify-wasm/src",
+        "apps/desktop/src-tauri/src",
+        "apps/cli/src",
+    ] {
+        let base = root.join(dir);
+        for file in list_rs(&base)? {
+            let text = std::fs::read_to_string(&file)
+                .map_err(|e| format!("read {}: {e}", file.display()))?;
+            let code = strip_comments(&text);
+            // The ABI `JobCommand` (protocol DTO) shares its name with the
+            // old engine surface, so only engine-qualified paths and the
+            // old driving methods are forbidden here.
+            for forbidden in [
+                "on_command(",
+                "drain_messages(",
+                "JobMessageBody",
+                "dezoomify_engine::JobCommand",
+                "dezoomify_engine::Outcome",
+                "engine::JobCommand",
+                "engine::Outcome",
+                "transition::Job",
+                "state::State",
+            ] {
+                if contains_word(&code, forbidden) {
+                    return Err(format!(
+                        "engine duality: {} references `{forbidden}`; hosts drive EngineJob only",
+                        file.display()
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// True when `token` occurs with a non-identifier boundary on both sides.
+fn contains_word(code: &str, token: &str) -> bool {
+    let mut start = 0;
+    while let Some(index) = code[start..].find(token) {
+        let from = start + index;
+        let to = from + token.len();
+        let before = code[..from].chars().next_back();
+        let after = code[to..].chars().next();
+        let boundary = |c: Option<char>| c.is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_'));
+        if boundary(before) && boundary(after) {
+            return true;
+        }
+        start = to;
+    }
+    false
+}
+
+fn list_rs(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut out = Vec::new();
+    let entries =
+        std::fs::read_dir(dir).map_err(|e| format!("cannot list {}: {e}", dir.display()))?;
+    let mut entries: Vec<_> = entries
+        .map(|e| e.map_err(|e| format!("dir entry: {e}")))
+        .collect::<Result<_, _>>()?;
+    entries.sort_by_key(|e| e.path());
+    for entry in entries {
+        let path = entry.path();
+        if path.is_dir() {
+            out.extend(list_rs(&path)?);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+            out.push(path);
+        }
+    }
+    Ok(out)
 }
 
 fn check_protocol_boundaries(root: &Path) -> Result<(), String> {

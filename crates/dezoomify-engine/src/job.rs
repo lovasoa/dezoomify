@@ -1722,7 +1722,7 @@ impl Job {
 /// rejected), or plain filesystem paths read via `fs::read`. Empty and
 /// over-long inputs are rejected. Messages never echo the input text, which
 /// may name private directories.
-fn is_valid_input_url(input_url: &str) -> bool {
+pub(crate) fn is_valid_input_url(input_url: &str) -> bool {
     if input_url.is_empty() || input_url.len() > 2048 {
         return false;
     }

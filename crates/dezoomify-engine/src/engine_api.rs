@@ -102,6 +102,8 @@
 use std::collections::HashMap;
 
 use dezoomify_core::core::discovery::{FetchCause, FetchCode, TransportKind};
+use dezoomify_core::core::model::ProcessingRecipe as CoreProcessingRecipe;
+use dezoomify_core::Vec2d;
 use dezoomify_protocol::dto::{
     EngineSnapshotDto, ErrorDto as ProtocolErrorDto, ErrorPhase as ProtocolErrorPhase,
     FailureCategoryDto, JobState as ProtocolJobState, MissingTileDto,
@@ -292,23 +294,70 @@ impl std::fmt::Display for EffectId {
     }
 }
 
+/// One request header the host sends with a tile fetch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HeaderPair {
+    /// Header name.
+    pub name: String,
+    /// Header value.
+    pub value: String,
+}
+
+/// Pixel position of one tile's top-left corner in the output image.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TilePosition {
+    /// Pixels from the left edge.
+    pub x: u32,
+    /// Pixels from the top edge.
+    pub y: u32,
+}
+
+/// Pixel extent of one tile or the output canvas.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TileSize {
+    /// Width in pixels.
+    pub width: u32,
+    /// Height in pixels.
+    pub height: u32,
+}
+
+fn tile_position_of(size: Vec2d) -> TilePosition {
+    TilePosition {
+        x: size.x,
+        y: size.y,
+    }
+}
+
+fn tile_size_of(size: Vec2d) -> TileSize {
+    TileSize {
+        width: size.x,
+        height: size.y,
+    }
+}
+
 /// One unit of work the host must carry out. Each effect completes exactly
 /// once through `complete` (or `provide_metadata` for metadata bodies).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Effect {
     /// Acquire one metadata resource.
     AcquireMetadata { id: EffectId, uri: String },
-    /// Observe one probe tile's geometry (bytes stay with the host).
-    ProbeTile {
-        id: EffectId,
-        tile: u32,
-        uri: String,
-    },
-    /// Acquire and decode one tile.
+    /// Acquire and decode one tile, with the complete output placement the
+    /// host needs at acquisition time (position, expected size, canvas,
+    /// processing recipe), so acquisition and decode failures surface
+    /// through the same tile outcome. Probe tiles observe geometry only
+    /// (bytes stay with the host); a successful probe the plan reuses is
+    /// marked `probe_output`.
     AcquireTile {
         id: EffectId,
         tile: u32,
         uri: String,
+        headers: Vec<HeaderPair>,
+        processing: CoreProcessingRecipe,
+        destination: TilePosition,
+        expected_size: Option<TileSize>,
+        canvas: Option<TileSize>,
+        probe: bool,
+        probe_output: bool,
     },
     /// Wait before retrying one tile; the host reports the elapsed timer.
     WaitRetryTimer {
@@ -318,7 +367,11 @@ pub enum Effect {
         delay_ms: u64,
     },
     /// Assemble, encode, and save or display the output exactly once.
-    FinalizeOutput { id: EffectId, partial: bool },
+    FinalizeOutput {
+        id: EffectId,
+        partial: bool,
+        canvas: Option<TileSize>,
+    },
     /// Ask the user what to do about missing tiles.
     RequestPartialDecision {
         id: EffectId,
@@ -335,7 +388,6 @@ impl Effect {
     pub const fn id(&self) -> EffectId {
         match *self {
             Self::AcquireMetadata { id, .. }
-            | Self::ProbeTile { id, .. }
             | Self::AcquireTile { id, .. }
             | Self::WaitRetryTimer { id, .. }
             | Self::FinalizeOutput { id, .. }
@@ -484,6 +536,9 @@ pub struct Selection {
     pub level: Option<u32>,
     /// Selectable level positions for the chosen image.
     pub level_count: u32,
+    /// The kept catalog with full geometry, once discovered. Replaced when
+    /// a deferred catalog entry is followed within the same job.
+    pub catalog: Option<dezoomify_protocol::dto::CatalogDto>,
     /// Still-deferred catalog entries: position plus follow-up URI. The
     /// host follows one within the same job; the entries are reported,
     /// never silently replaced by host-side recursion.
@@ -547,6 +602,21 @@ pub struct OutputSummary {
     pub disposition: Option<OutputDisposition>,
 }
 
+/// One transient engine notice: a scheduled retry or a settled missing
+/// tile. Notices are a bounded recent log (never a lifecycle), carried so
+/// hosts keep the same diagnostic trace they had from the event stream.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EngineNotice {
+    /// Job-scoped revision that produced the notice.
+    pub revision: u32,
+    /// Affected engine tile id.
+    pub tile: u32,
+    /// Retry attempt the notice belongs to, when it is a retry.
+    pub attempt: Option<u32>,
+    /// Tiles settled as missing, when the notice settles work.
+    pub missing: Vec<u32>,
+}
+
 /// Job projection: lifecycle, pause flag, progress, selection/decision
 /// payload, terminal result, and output summary. No secrets, pixels,
 /// paths, or handles cross here.
@@ -568,6 +638,8 @@ pub struct JobSnapshot {
     pub terminal: Option<Terminal>,
     /// Output summary, once the plan declares geometry.
     pub output: Option<OutputSummary>,
+    /// Bounded recent engine notices (retries, settled work).
+    pub notices: Vec<EngineNotice>,
 }
 
 /// Engine answer: newly issued effects plus the current snapshot.
@@ -618,7 +690,8 @@ pub struct EngineError {
 }
 
 impl EngineError {
-    fn new(code: &str, message: impl Into<String>) -> Self {
+    /// Stable rejection with a code and message.
+    pub fn new(code: &str, message: impl Into<String>) -> Self {
         Self {
             code: code.into(),
             message: message.into(),
@@ -654,6 +727,7 @@ enum Outstanding {
 }
 
 /// One end-to-end user request behind the canonical API.
+#[derive(Debug)]
 pub struct EngineJob {
     inner: Job,
     options: JobOptions,
@@ -663,11 +737,38 @@ pub struct EngineJob {
     terminal_failure: Option<(String, String)>,
     catalog_images: u32,
     catalog_levels: Vec<u32>,
+    catalog: Option<dezoomify_protocol::dto::CatalogDto>,
     deferred: Vec<DeferredEntry>,
     disposition: Option<OutputDisposition>,
+    notices: Vec<EngineNotice>,
 }
 
 impl EngineJob {
+    /// Validate job options without starting: inputs, budgets, and format.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationError`] for the same inputs [`EngineJob::start`]
+    /// rejects.
+    pub fn validate_options(options: &JobOptions) -> Result<(), ValidationError> {
+        if options.inputs.is_empty()
+            || options
+                .inputs
+                .iter()
+                .any(|input| !crate::job::is_valid_input_url(&input.url))
+        {
+            return Err(EngineError::new(
+                "job.invalid-input",
+                "inputs must contain valid http(s) URLs, file:// URIs, or local paths up to 2048 bytes",
+            ));
+        }
+        let config = options.config();
+        config
+            .validate()
+            .map_err(|error| EngineError::new(&error.code, error.message))?;
+        Ok(())
+    }
+
     /// Validate options and enter discovery with the first effects.
     ///
     /// # Errors
@@ -675,16 +776,7 @@ impl EngineJob {
     /// Returns [`ValidationError`] when inputs are empty or invalid, the
     /// format name is unknown, or a budget fails validation.
     pub fn start(options: JobOptions) -> Result<(Self, Update), ValidationError> {
-        if options.inputs.is_empty() {
-            return Err(EngineError::new(
-                "job.invalid-input",
-                "at least one discovery input is required",
-            ));
-        }
-        let config = options.config();
-        config
-            .validate()
-            .map_err(|error| EngineError::new(&error.code, error.message))?;
+        Self::validate_options(&options)?;
         let inner_inputs: Vec<crate::JobInput> = options
             .inputs
             .iter()
@@ -693,7 +785,7 @@ impl EngineJob {
                 None => crate::JobInput::new(input.url.clone()),
             })
             .collect();
-        let mut inner = Job::new_with_inputs(inner_inputs, config)
+        let mut inner = Job::new_with_inputs(inner_inputs, options.config())
             .map_err(|error| EngineError::new(&error.code, error.message))?;
         if let Some(name) = options.format.clone() {
             inner.set_format(Some(name));
@@ -707,7 +799,9 @@ impl EngineJob {
             terminal_failure: None,
             catalog_images: 0,
             catalog_levels: Vec::new(),
+            catalog: None,
             deferred: Vec::new(),
+            notices: Vec::new(),
             disposition: None,
         };
         job.inner
@@ -854,6 +948,24 @@ impl EngineJob {
         self.project()
     }
 
+    /// Current job projection packaged as an empty answer: no new effects,
+    /// only the snapshot. Hosts use it when a completion arrives with
+    /// nothing to reply (cancel/terminal guard).
+    #[must_use]
+    pub fn snapshot_update(&self) -> Update {
+        Update {
+            effects: Vec::new(),
+            snapshot: self.project(),
+        }
+    }
+
+    /// Project the canonical wire snapshot for the active job: the same
+    /// projector every host renders. No new work is issued.
+    #[must_use]
+    pub fn project_dto(&self) -> dezoomify_protocol::dto::EngineSnapshotDto {
+        project_engine_snapshot(&self.inner)
+    }
+
     fn translate_completion(
         &mut self,
         effect: EffectId,
@@ -977,6 +1089,15 @@ impl EngineJob {
         Ok(id)
     }
 
+    /// Record one transient notice, keeping the recent log bounded.
+    fn push_notice(&mut self, notice: EngineNotice) {
+        self.notices.push(notice);
+        if self.notices.len() > 20 {
+            let overflow = self.notices.len() - 20;
+            self.notices.drain(..overflow);
+        }
+    }
+
     /// Drain the inner message queue into newly issued effects plus the
     /// current snapshot. Events update the projection; effects mint fresh
     /// per-attempt IDs with their correlation recorded.
@@ -1010,19 +1131,47 @@ impl EngineJob {
                 Ok(Some(Effect::AcquireMetadata { id, uri }))
             }
             InnerEffect::AcquireTile {
-                tile, uri, probe, ..
+                tile,
+                uri,
+                headers,
+                processing,
+                destination,
+                expected_size,
+                canvas,
+                probe,
+                probe_output,
             } => {
+                let pairs: Vec<HeaderPair> = headers
+                    .into_iter()
+                    .map(|(name, value)| HeaderPair { name, value })
+                    .collect();
                 if probe {
                     self.outstanding.insert(id, Outstanding::Probe { tile });
-                    Ok(Some(Effect::ProbeTile { id, tile, uri }))
                 } else {
                     self.outstanding.insert(id, Outstanding::Tile { tile });
-                    Ok(Some(Effect::AcquireTile { id, tile, uri }))
                 }
+                Ok(Some(Effect::AcquireTile {
+                    id,
+                    tile,
+                    uri,
+                    headers: pairs,
+                    processing,
+                    destination: tile_position_of(destination),
+                    expected_size: expected_size.map(tile_size_of),
+                    canvas: canvas.map(tile_size_of),
+                    probe,
+                    probe_output,
+                }))
             }
-            InnerEffect::FinalizeOutput { partial, .. } => {
+            InnerEffect::FinalizeOutput {
+                partial, canvas, ..
+            } => {
                 self.outstanding.insert(id, Outstanding::Finalize);
-                Ok(Some(Effect::FinalizeOutput { id, partial }))
+                Ok(Some(Effect::FinalizeOutput {
+                    id,
+                    partial,
+                    canvas: canvas.map(tile_size_of),
+                }))
             }
             InnerEffect::WaitForRetry {
                 tile,
@@ -1085,6 +1234,23 @@ impl EngineJob {
                         }
                     }
                 }
+                self.catalog = Some(catalog);
+            }
+            InnerEvent::Warning { tile, attempt } => {
+                self.push_notice(EngineNotice {
+                    revision: self.inner.seq(),
+                    tile,
+                    attempt: Some(attempt),
+                    missing: Vec::new(),
+                });
+            }
+            InnerEvent::MissingWork { failed } => {
+                self.push_notice(EngineNotice {
+                    revision: self.inner.seq(),
+                    tile: failed.first().copied().unwrap_or(0),
+                    attempt: None,
+                    missing: failed,
+                });
             }
             InnerEvent::Failed { code, message } => {
                 self.terminal_failure = Some((code, message));
@@ -1095,8 +1261,6 @@ impl EngineJob {
             | InnerEvent::State { .. }
             | InnerEvent::Levels { .. }
             | InnerEvent::Progress { .. }
-            | InnerEvent::Warning { .. }
-            | InnerEvent::MissingWork { .. }
             | InnerEvent::RecoveryRequested { .. }
             | InnerEvent::Paused
             | InnerEvent::Resumed => {}
@@ -1142,6 +1306,7 @@ impl EngineJob {
                             .and_then(|index| self.catalog_levels.get(index).copied())
                     })
                     .unwrap_or(0),
+                catalog: self.catalog.clone(),
                 deferred: self.deferred.clone(),
             },
             decision: self
@@ -1153,6 +1318,7 @@ impl EngineJob {
                 }),
             output: self.output_summary(),
             terminal,
+            notices: self.notices.clone(),
         }
     }
 

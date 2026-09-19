@@ -5,8 +5,8 @@
 
 mod support;
 
-use dezoomify_engine::{Config, JobCommand};
-use support::{ScriptedHost, DZI, DZI_INPUT_URL};
+use dezoomify_engine::Config;
+use support::{JobCommand, ScriptedHost, DZI, DZI_INPUT_URL};
 
 fn host_with_id(job: &str) -> ScriptedHost {
     ScriptedHost::new(job, DZI_INPUT_URL, Config::default()).unwrap()
