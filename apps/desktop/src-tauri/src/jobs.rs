@@ -2159,6 +2159,7 @@ mod tests {
             format: format.to_string(),
             partial: false,
             missing: Vec::new(),
+            instrumentation: Default::default(),
         }
     }
 
@@ -2179,6 +2180,7 @@ mod tests {
             format: format.to_string(),
             partial: true,
             missing: missing.to_vec(),
+            instrumentation: Default::default(),
         }
     }
 }

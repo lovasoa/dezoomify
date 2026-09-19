@@ -2,8 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use dezoomify_core::Vec2d;
 use dezoomify_core::core::discovery::FetchCause;
+use dezoomify_core::Vec2d;
 /// Canonical partial-decision vocabulary, owned by the protocol. The engine
 /// answers the outstanding partial decision with this exact type; there is
 /// no engine-local duplicate.
