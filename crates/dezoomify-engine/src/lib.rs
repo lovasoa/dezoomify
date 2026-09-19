@@ -58,8 +58,8 @@ pub use engine_api::{
 pub(crate) use job::{Job, JobInput};
 pub use projection::project_catalog;
 pub use retry::{
-    FailureCategory, MAX_FAILURE_DETAIL_CHARS, MAX_RETRY_AFTER_MS, RETRY_BASE_DELAY_MS,
-    RETRY_MAX_DELAY_MS, TileFailure, classify_tile_failure, retry_delay_ms,
+    classify_tile_failure, retry_delay_ms, FailureCategory, TileFailure, MAX_FAILURE_DETAIL_CHARS,
+    MAX_RETRY_AFTER_MS, RETRY_BASE_DELAY_MS, RETRY_MAX_DELAY_MS,
 };
 pub(crate) use state::State;
 pub(crate) use transition::{JobCommand, JobEffect, Outcome};

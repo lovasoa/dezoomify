@@ -105,9 +105,9 @@
 
 use std::collections::HashMap;
 
-use dezoomify_core::Vec2d;
 use dezoomify_core::core::discovery::{FetchCause, FetchCode, TransportKind};
 use dezoomify_core::core::model::{CatalogEntry, ProcessingRecipe as CoreProcessingRecipe};
+use dezoomify_core::Vec2d;
 use dezoomify_protocol::dto::{
     EngineSnapshotDto, ErrorDto as ProtocolErrorDto, ErrorPhase as ProtocolErrorPhase,
     FailureCategoryDto, JobState, MissingTileDto, OutputDispositionDto,

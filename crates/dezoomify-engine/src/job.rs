@@ -7,7 +7,6 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
-use dezoomify_core::Vec2d;
 use dezoomify_core::core::adaptive::{DiscoverableStep, ObservationResult, ProbeContinuation};
 use dezoomify_core::core::discovery::{
     DiscoveryError, DiscoveryOperation, FetchCause, ResourceFailure, ResourceResponse,
@@ -15,9 +14,10 @@ use dezoomify_core::core::discovery::{
 use dezoomify_core::core::model::{CatalogEntry, ImageCatalog, ProcessingRecipe, TileRole};
 use dezoomify_core::core::registry::{default_registry, registry_for};
 use dezoomify_core::core::tile_plan::TileSource;
+use dezoomify_core::Vec2d;
 
 use crate::config::Config;
-use crate::retry::{TileFailure, retry_delay_ms};
+use crate::retry::{retry_delay_ms, TileFailure};
 use crate::state::State;
 use crate::transition::{JobCommand, JobEffect, JobError, Outcome, RecoveryChoice};
 

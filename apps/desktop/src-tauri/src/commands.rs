@@ -424,6 +424,7 @@ mod tests {
                 format: "png".to_string(),
                 partial,
                 missing: Vec::new(),
+                instrumentation: Default::default(),
             }
         }
         let (engine_terminal, published) = match terminal {
