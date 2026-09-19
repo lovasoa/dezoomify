@@ -357,7 +357,8 @@ mod tests {
     /// verbatim forwarder (no I/O): the terminal itself is hand-built,
     /// everything after it is production behavior.
     fn fold_test_terminal(table: &mut JobTable, id: &str, terminal: TestTerminal) {
-        use dezoomify_native::runner::{Lifecycle, OutputSummary, Terminal};
+        use dezoomify_native::runner::OutputSummary;
+        use dezoomify_protocol::dto::{JobState, SnapshotTerminalDto};
         fn summary(partial: bool) -> OutputSummary {
             OutputSummary {
                 path: std::path::PathBuf::from("/tmp/dz-published.png"),
@@ -369,13 +370,33 @@ mod tests {
                 missing: Vec::new(),
             }
         }
-        let terminal = match terminal {
-            TestTerminal::Completed => Terminal::Completed(summary(false)),
-            TestTerminal::Partial => Terminal::Completed(summary(true)),
-            TestTerminal::Failed => Terminal::Failed(dezoomify_native::error::NativeError::new(
-                "tile.download-failed",
-                "boom",
-            )),
+        let (engine_terminal, published) = match terminal {
+            TestTerminal::Completed => (SnapshotTerminalDto::Completed, Some(summary(false))),
+            TestTerminal::Partial => (
+                SnapshotTerminalDto::PartialCompleted {
+                    missing: Vec::new(),
+                },
+                Some(summary(true)),
+            ),
+            TestTerminal::Failed => (
+                SnapshotTerminalDto::Failed {
+                    error: dezoomify_protocol::dto::ErrorDto {
+                        code: "tile.download-failed".to_string(),
+                        phase: dezoomify_protocol::dto::ErrorPhase::Acquisition,
+                        retryable: true,
+                        message: "boom".to_string(),
+                        recovery: Vec::new(),
+                        request: None,
+                        transport: None,
+                        blocked_reason: None,
+                        resource_kind: None,
+                        http: None,
+                        preview: None,
+                        detail: None,
+                    },
+                },
+                None,
+            ),
         };
         // A destination must exist before a terminal can forward: grant a
         // scratch path first (failures there would be test bugs, not product
@@ -386,12 +407,27 @@ mod tests {
             id,
             &dezoomify_native::runner::JobSnapshot {
                 job: id.to_string(),
-                seq: 2,
-                lifecycle: Lifecycle::Finalizing,
-                acquired: 0,
-                total: 0,
-                recovery: None,
-                terminal: Some(terminal),
+                snapshot: dezoomify_engine::JobSnapshot {
+                    revision: 2,
+                    lifecycle: JobState::Finalizing,
+                    paused: false,
+                    progress: dezoomify_engine::Progress {
+                        completed: 0,
+                        total: Some(0),
+                    },
+                    selection: dezoomify_engine::Selection {
+                        image: None,
+                        level: None,
+                        level_count: 0,
+                        catalog: None,
+                        deferred: Vec::new(),
+                    },
+                    decision: None,
+                    terminal: Some(engine_terminal),
+                    output: None,
+                    notices: Vec::new(),
+                },
+                published,
             },
         );
     }
@@ -510,6 +546,15 @@ mod tests {
         let err = dispatch_destination(&mut table, "job:nope", "png", &path, false).unwrap_err();
         assert_eq!(err.code, "job.unknown");
         table.cancel_job(&id).unwrap();
+        // Poll until the cancelled terminal settles the job (bounded wait);
+        // only then are post-terminal grants stale.
+        for _ in 0..200 {
+            if table.is_settled(&id) {
+                break;
+            }
+            let _ = table.poll_drivers();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         let err = dispatch_destination(&mut table, &id, "png", &path, false).unwrap_err();
         assert_eq!(err.code, "job.stale");
     }

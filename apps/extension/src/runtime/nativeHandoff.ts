@@ -337,6 +337,9 @@ async function requestNativeHandoffViaPort(args: PortArgs) {
     const negotiated = await request({ kind: "negotiate", clientVersion: CURRENT_NATIVE_PROTOCOL, jobId: args.job.jobId, extensionId: args.extensionId ?? "" });
     if (negotiated.error) return fail(negotiated.error.code ?? "handoff.rejected");
     if (negotiated.kind !== "negotiated" || !Number.isInteger(negotiated.negotiatedVersion)) return fail("protocol.incompatible");
+    // One exact supported revision: any mismatch rejects before consent or
+    // credential exchange (replay protection binds the exchange below).
+    if (negotiated.negotiatedVersion !== CURRENT_NATIVE_PROTOCOL) return fail("protocol.incompatible");
     const { challenge, nonce } = negotiated;
     if (typeof challenge !== "string" || typeof nonce !== "string" || challenge.length > MAX_TOKEN_LENGTH || nonce.length > MAX_TOKEN_LENGTH) return fail("bad-nonce");
     let confirmed = false;
@@ -420,7 +423,9 @@ async function requestNativeHandoffDirect(args: LegacyArgs) {
   if (negotiated.error) return fail(negotiated.error.code ?? "handoff.rejected");
   if (negotiated.kind !== "negotiated") return fail("handoff.rejected");
   const negotiatedVersion = negotiated.negotiatedVersion;
-  if (typeof negotiatedVersion !== "number" || !Number.isInteger(negotiatedVersion) || negotiatedVersion < MIN_NATIVE_PROTOCOL || negotiatedVersion > CURRENT_NATIVE_PROTOCOL) {
+  // One exact supported revision: any mismatch rejects before consent or
+  // credential exchange.
+  if (typeof negotiatedVersion !== "number" || !Number.isInteger(negotiatedVersion) || negotiatedVersion !== CURRENT_NATIVE_PROTOCOL) {
     return fail("protocol.incompatible");
   }
   const challenge = negotiated.challenge;

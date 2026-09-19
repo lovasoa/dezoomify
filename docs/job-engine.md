@@ -46,7 +46,7 @@ Effects carry engine-minted, job-scoped correlation (`EffectId`, one fresh ID pe
 
 Discovery, selection, planning, tile acquisition, then one awaited finalization. The engine exposes only phases it observes; codec and save progress are product-local UI events.
 
-Selection is explicit when discovery finds several images or levels. Commands carry zero-based positions into the kept catalog. Headless callers pass a deterministic selection rule up front; the engine never guesses. Discovery also returns still-deferred entries (a IIIF service, a bulk-list entry) as `ImageRequest` items carrying a follow-up URI; the host follows one with a fresh bounded job instead of selecting it.
+Selection is explicit when discovery finds several images or levels. Commands carry zero-based positions into the kept catalog. Headless callers pass a deterministic selection rule up front; the engine never guesses. Discovery also returns still-deferred entries (a IIIF service, a bulk-list entry) as `ImageRequest` items carrying a follow-up URI; the host follows one within the same engine job (`FollowDeferred`, bounded follows, cycle-guarded, catalog replaced, no host-created replacement jobs).
 
 ## Retry and progress
 
@@ -78,7 +78,7 @@ While paused the engine schedules no new `acquire-tile` effects, finishes in-fli
 
 ## Behavior table (implemented)
 
-`dezoomify-engine` answers synchronously: every `start`/`command`/`complete`/`provide_metadata` returns an `Update` with the newly issued effects and the current `JobSnapshot` (job-scoped revision, lifecycle, pause flag, progress, selection/decision payload, terminal result, output summary, recent notices). `Terminal` = `Completed` / `PartiallyCompleted` / `Failed` / `Cancelled`. Post-terminal inputs return stable `job.post-terminal` rejection with no work. Unknown or already-settled completions return `job.stale-effect` with no work.
+`dezoomify-engine` answers synchronously: every `start`/`command`/`complete`/`provide_metadata` returns an `Update` with the newly issued effects and the current `JobSnapshot` (job-scoped revision, lifecycle, pause flag, progress, selection/decision payload, terminal result, output summary, recent notices). `Terminal` = `Completed` / `PartiallyCompleted` / `Failed` / `Cancelled`. Post-terminal inputs return stable `job.post-terminal` rejection with no work. Unknown or already-settled completions return `job.stale-effect` with no work. Wrong-kind completions (`job.wrong-result-kind`, including bytes aimed at a non-metadata effect and publication claims outside finalization) and empty metadata bodies (`job.empty-resource`) preserve the outstanding effect so the host can still answer it correctly; a rejected `OutputCommitted` never sets the output disposition.
 
 ## Host-effect contract
 

@@ -1059,6 +1059,7 @@ dependencies = [
  "dezoomify-core",
  "dezoomify-fixture-server",
  "dezoomify-native",
+ "dezoomify-protocol",
  "serde_json",
  "tokio",
 ]

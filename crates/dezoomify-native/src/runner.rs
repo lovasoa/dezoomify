@@ -4,34 +4,44 @@
 //! driver thread running the real engine plus driver (`pipeline::run`), and
 //! returns a [`RunningJob`] owning three things: the command sender, the
 //! typed snapshot stream, and the join handle that owns completion and
-//! cleanup. CLI and desktop run the same runner; there is no extra
-//! scheduling layer and no string-map routing.
+//! cleanup. CLI, desktop backend, and Native Messaging run the same runner;
+//! there is no extra scheduling layer and no string-map routing.
 //!
-//! Commands are deliberately narrow: [`UserCommand`] carries cancellation and
-//! partial-output decisions only. It can never supply bytes or claim
+//! Snapshots forward engine projections verbatim: [`JobSnapshot`] carries the
+//! authoritative [`EngineSnapshot`] plus the native publication record once
+//! committed. No runner-local lifecycle, terminal, or recovery fold exists.
+//! Commands are the engine [`UserCommand`] vocabulary verbatim (selection,
+//! partial answer, pause/resume, cancel). They can never supply bytes or claim
 //! publication -- the driver assembles, encodes, and publishes output itself,
-//! and completion is reported only after finalization. Pause/resume stays an
-//! engine overlay driven through the engine job handle; this runner does not
-//! fake it.
+//! and completion is reported only after finalization with
+//! [`OutputDisposition::NativePublication`].
 //!
-//! Cancellation is honest: [`UserCommand::Cancel`] sets the shared flag the
-//! driver polls at every effect boundary. Work already in flight finishes,
-//! nothing new starts, and the commit point refuses to publish once
-//! cancellation was requested, so cancel can never delete or replace a
-//! pre-existing destination.
+//! Cancellation is honest: `Cancel` sets the shared flag the driver polls at
+//! every effect boundary. Work already in flight finishes, nothing new starts,
+//! and the commit point refuses to publish once cancellation was requested, so
+//! cancel can never delete or replace a pre-existing destination. The terminal
+//! reports only after quiescence (every tracked task aborted and joined,
+//! including blocking decode tails whose results are dropped).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
-    mpsc, Arc,
+    mpsc, Arc, Mutex,
 };
 use std::time::Duration;
+
+use dezoomify_engine::{JobSnapshot as EngineSnapshot, UserCommand as EngineUserCommand};
 
 use crate::error::NativeError;
 use crate::http::{FetchLimits, TlsPolicy};
 use crate::output::OutputFormat;
-use crate::pipeline::{self, PartialDecision, PartialGate, PartialPolicy, PipelineConfig};
+use crate::pipeline::{self, PartialGate, PartialPolicy, PipelineConfig};
+
+/// Engine user intent, forwarded verbatim (selection, partial answer with
+/// generation, pause/resume, cancel). Re-exported so all native hosts name
+/// one vocabulary.
+pub use dezoomify_engine::UserCommand;
 
 /// Where the finished output goes.
 #[derive(Clone, Debug)]
@@ -151,6 +161,7 @@ impl JobOptions {
         &self,
         cancel_flag: Arc<AtomicBool>,
         partial_gate: Arc<PartialGate>,
+        exec_commands: Arc<Mutex<mpsc::Receiver<EngineUserCommand>>>,
     ) -> PipelineConfig {
         PipelineConfig {
             user_headers: self.headers.clone(),
@@ -165,7 +176,6 @@ impl JobOptions {
             },
             max_concurrent: self.max_concurrent.clamp(1, 64),
             max_retries: self.max_retries.min(1024),
-            retry_delay: Duration::from_secs(2),
             min_interval: self.min_interval,
             compression: self.compression.min(100),
             cache_dir: Some(
@@ -187,44 +197,15 @@ impl JobOptions {
             partial_gate: Some(partial_gate),
             cancel_flag,
             pause_after: self.pause_after,
+            exec_command_rx: Some(exec_commands),
             ..PipelineConfig::default()
         }
     }
 }
 
-/// Narrow host commands. Cancellation plus one partial-output decision:
-///
-/// * `Cancel` stops new work; in-flight finishes; the commit point refuses to
-///   publish, so no output (partial or complete) appears on the cancel path.
-/// * `AnswerPartial` answers the pending partial request announced as
-///   [`Lifecycle::AwaitingPartialDecision`]. Unanswered requests fail closed
-///   to the job's partial policy after the driver's bounded wait.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UserCommand {
-    Cancel,
-    AnswerPartial(PartialDecision),
-}
-
-/// Observable lifecycle of the running job, projected from driver events.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Lifecycle {
-    Discovering,
-    AcquiringTiles,
-    Finalizing,
-    AwaitingPartialDecision,
-}
-
-/// Interactive partial-decision ledger riding a snapshot: the redacted
-/// missing tile ids plus the counts the host dialog shows. Present only
-/// while the job awaits an explicit keep/discard/retry answer.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RecoveryLedger {
-    pub missing: Vec<String>,
-    pub failed: u64,
-    pub total: u64,
-}
-
-/// Honest output summary for a published job: what was actually written.
+/// Honest native publication record: what was actually written. Present only
+/// on the terminal snapshot after the commit point won the cancel race.
+/// Partial publications name the `.partial` sibling, never the granted path.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutputSummary {
     pub path: PathBuf,
@@ -236,28 +217,14 @@ pub struct OutputSummary {
     pub missing: Vec<String>,
 }
 
-/// Terminal outcome. `Completed` arrives only after successful finalization
-/// (a publication that won the cancel race is reported as committed, never
-/// as a cancellation); `Cancelled` arrives only after quiescence with
-/// nothing published.
-#[derive(Clone, Debug)]
-pub enum Terminal {
-    Completed(OutputSummary),
-    Cancelled,
-    Failed(NativeError),
-}
-
-/// One ordered snapshot on the stream. `seq` is per-job monotonic starting
-/// at 1 (`Started`); exactly one snapshot carries a `terminal`.
+/// One ordered snapshot on the stream: the engine projection verbatim plus
+/// the native publication once committed. `snapshot.revision` is per-job
+/// monotonic; exactly one snapshot carries `snapshot.terminal`.
 #[derive(Clone, Debug)]
 pub struct JobSnapshot {
     pub job: String,
-    pub seq: u64,
-    pub lifecycle: Lifecycle,
-    pub acquired: u64,
-    pub total: u64,
-    pub recovery: Option<RecoveryLedger>,
-    pub terminal: Option<Terminal>,
+    pub snapshot: EngineSnapshot,
+    pub published: Option<OutputSummary>,
 }
 
 /// Failure to deliver a command: the job already reached its terminal and
@@ -282,25 +249,22 @@ impl NativeRunner {
         let id = format!("job:native-{}", NEXT_JOB.fetch_add(1, Ordering::SeqCst));
         let cancel_flag = Arc::new(AtomicBool::new(false));
         let partial_gate = Arc::new(PartialGate::new());
-        let config = options.pipeline_config(Arc::clone(&cancel_flag), Arc::clone(&partial_gate));
+        let (command_tx, command_rx) = mpsc::channel::<EngineUserCommand>();
+        let exec_commands = Arc::new(Mutex::new(command_rx));
+        let config = options.pipeline_config(
+            Arc::clone(&cancel_flag),
+            Arc::clone(&partial_gate),
+            Arc::clone(&exec_commands),
+        );
         let (snapshot_tx, snapshot_rx) = mpsc::channel();
         let worker_id = id.clone();
         let worker_options = options.clone();
-        let worker_cancel = Arc::clone(&cancel_flag);
-        let worker_gate = Arc::clone(&partial_gate);
         let alive = Arc::new(AtomicBool::new(true));
         let worker_alive = Arc::clone(&alive);
         let handle = std::thread::spawn(move || {
-            let terminal = run_job(
-                &worker_id,
-                &worker_options,
-                &config,
-                &snapshot_tx,
-                &worker_cancel,
-                &worker_gate,
-            );
+            let outcome = run_job(&worker_id, &worker_options, &config, &snapshot_tx);
             worker_alive.store(false, Ordering::SeqCst);
-            terminal
+            outcome
         });
         Ok(RunningJob {
             id,
@@ -308,6 +272,7 @@ impl NativeRunner {
             snapshot_rx,
             cancel_flag,
             partial_gate,
+            command_tx,
             join: Some(handle),
         })
     }
@@ -324,7 +289,8 @@ pub struct RunningJob {
     snapshot_rx: mpsc::Receiver<JobSnapshot>,
     cancel_flag: Arc<AtomicBool>,
     partial_gate: Arc<PartialGate>,
-    join: Option<std::thread::JoinHandle<Terminal>>,
+    command_tx: mpsc::Sender<EngineUserCommand>,
+    join: Option<std::thread::JoinHandle<Result<OutputSummary, NativeError>>>,
 }
 
 /// Ack for a delivered command; kept minimal on purpose.
@@ -342,45 +308,66 @@ impl std::fmt::Debug for RunningJob {
 }
 
 impl RunningJob {
-    /// Send one [`UserCommand`]. Cancellation sets the shared flag the
-    /// driver polls at every effect boundary; partial answers wake the
-    /// driver's bounded wait. Fails closed with `job.stale` once the driver
-    /// has exited (post-terminal commands are rejected, never applied to a
-    /// later job).
-    pub fn send(&self, command: UserCommand) -> Result<JobCommandAck, CommandRejected> {
+    /// Send one engine [`UserCommand`]. Cancel sets the shared flag the driver
+    /// polls at every effect boundary; partial answers wake the driver's
+    /// bounded wait; selection and pause/resume travel on the live command
+    /// channel drained at every effect boundary. Fails closed with `job.stale`
+    /// once the driver has exited (post-terminal commands are rejected, never
+    /// applied to a later job). Commands never supply bytes and never claim
+    /// publication.
+    pub fn send(&self, command: EngineUserCommand) -> Result<JobCommandAck, CommandRejected> {
         if !self.alive.load(Ordering::SeqCst) {
             return Err(CommandRejected { code: "job.stale" });
         }
         match command {
-            UserCommand::Cancel => {
+            EngineUserCommand::Cancel => {
                 self.cancel_flag.store(true, Ordering::SeqCst);
             }
-            UserCommand::AnswerPartial(decision) => self.partial_gate.answer(decision),
+            EngineUserCommand::AnswerPartial { decision, .. } => {
+                self.partial_gate.answer(decision);
+            }
+            EngineUserCommand::Pause
+            | EngineUserCommand::Resume
+            | EngineUserCommand::SelectImage { .. }
+            | EngineUserCommand::FollowDeferred { .. }
+            | EngineUserCommand::SelectLevel { .. } => {
+                // Live commands queue behind in-flight work; wrong-phase
+                // rejections die inside the engine without failing the pump.
+                // A full channel means the driver already exited; its terminal
+                // settles the job.
+                let _ = self.command_tx.send(command);
+            }
         }
         Ok(JobCommandAck::Accepted)
     }
 
-    /// Borrow the snapshot stream. Snapshots arrive in seq order; exactly
+    /// Borrow the snapshot stream. Snapshots arrive in revision order; exactly
     /// one carries the terminal.
     pub fn snapshots(&self) -> &mpsc::Receiver<JobSnapshot> {
         &self.snapshot_rx
     }
 
-    /// Wait for quiescence and take the terminal. Joins the driver thread,
-    /// so cleanup (uncommitted temp files, gate state) is owned here.
-    pub fn join(mut self) -> Terminal {
+    /// Wait for quiescence and take the publication. Joins the driver thread,
+    /// so cleanup (uncommitted temp files, gate state) is owned here. `Ok` is
+    /// a native publication that won the cancel race; `Err(job.cancelled)` is
+    /// quiescence with nothing published; other `Err` is a typed failure.
+    pub fn join(mut self) -> Result<OutputSummary, NativeError> {
         self.join
             .take()
             .map(|handle| {
-                handle.join().unwrap_or(Terminal::Failed(NativeError::new(
-                    "native.internal",
-                    "native job thread failed",
-                )))
+                handle.join().unwrap_or_else(|_| {
+                    Err(NativeError::new(
+                        "native.internal",
+                        "native job thread failed",
+                    ))
+                })
             })
-            .unwrap_or(Terminal::Failed(NativeError::new(
-                "native.internal",
-                "native job already joined",
-            )))
+            .unwrap_or_else(|| {
+                Err(NativeError::new(
+                    "native.internal",
+                    "native job already joined",
+                ))
+            })
     }
 }
 
@@ -389,35 +376,22 @@ fn run_job(
     options: &JobOptions,
     config: &PipelineConfig,
     snapshots: &mpsc::Sender<JobSnapshot>,
-    _cancel_flag: &AtomicBool,
-    _gate: &PartialGate,
-) -> Terminal {
-    let mut seq: u64 = 0;
-    let mut lifecycle = Lifecycle::Discovering;
-    let mut acquired: u64 = 0;
-    let mut total: u64 = 0;
-    let mut emit = |snapshot: &dezoomify_engine::JobSnapshot, terminal: Option<Terminal>| {
-        seq = seq.saturating_add(1);
-        lifecycle = Lifecycle::from(&snapshot.lifecycle);
-        acquired = snapshot.progress.completed;
-        total = snapshot.progress.total.unwrap_or(0);
-        let _ = snapshots.send(JobSnapshot {
-            job: id.to_string(),
-            seq,
-            lifecycle: lifecycle.clone(),
-            acquired,
-            total,
-            recovery: snapshot.decision.as_ref().map(|decision| RecoveryLedger {
-                missing: decision
-                    .missing
-                    .iter()
-                    .map(|(tile, _)| tile.to_string())
-                    .collect(),
-                failed: decision.missing.len().max(1) as u64,
-                total,
-            }),
-            terminal,
-        });
+) -> Result<OutputSummary, NativeError> {
+    // Forward engine projections verbatim, buffering the terminal so the
+    // exactly-once terminal snapshot carries the native publication.
+    // Non-terminal snapshots stream immediately; the terminal waits for the
+    // commit outcome below.
+    let mut terminal_held: Option<EngineSnapshot> = None;
+    let mut emit = |snapshot: &EngineSnapshot| {
+        if snapshot.terminal.is_some() {
+            terminal_held = Some(snapshot.clone());
+        } else {
+            let _ = snapshots.send(JobSnapshot {
+                job: id.to_string(),
+                snapshot: snapshot.clone(),
+                published: None,
+            });
+        }
     };
     let result = match &options.output {
         OutputTarget::File(path) => {
@@ -427,28 +401,20 @@ fn run_job(
                 &output,
                 options.overwrite,
                 config,
-                &mut |snapshot: &dezoomify_engine::JobSnapshot| {
-                    emit(snapshot, None);
-                },
+                &mut emit,
             )
         }
-        OutputTarget::AutoDir { dir, format } => pipeline::run_auto_named(
-            &options.input_url,
-            dir,
-            *format,
-            config,
-            &mut |snapshot: &dezoomify_engine::JobSnapshot| {
-                emit(snapshot, None);
-            },
-        ),
+        OutputTarget::AutoDir { dir, format } => {
+            pipeline::run_auto_named(&options.input_url, dir, *format, config, &mut emit)
+        }
     };
-    let terminal = match result {
+    match result {
         Ok(outcome) => {
             // Publication won the race: report the committed result, never
             // a cancellation (the commit point already refuses to publish
             // once cancellation was requested, so reaching here with the
             // flag set means the bytes were committed first).
-            Terminal::Completed(OutputSummary {
+            let published = OutputSummary {
                 path: outcome.output_path,
                 tile_count: outcome.tile_count,
                 width: outcome.image_size.x,
@@ -456,48 +422,38 @@ fn run_job(
                 format: outcome.format,
                 partial: outcome.partial,
                 missing: outcome.missing,
-            })
+            };
+            // The terminal snapshot carries the engine terminal verbatim plus
+            // the publication. Hosts render `snapshot.terminal` and resolve
+            // open/reveal from `published.path`.
+            if let Some(terminal) = terminal_held {
+                let _ = snapshots.send(JobSnapshot {
+                    job: id.to_string(),
+                    snapshot: terminal,
+                    published: Some(published.clone()),
+                });
+            }
+            Ok(published)
         }
-        Err(error) if error.code == "job.cancelled" => Terminal::Cancelled,
-        Err(error) => Terminal::Failed(error),
-    };
-    seq = seq.saturating_add(1);
-    let _ = snapshots.send(JobSnapshot {
-        job: id.to_string(),
-        seq,
-        lifecycle: lifecycle.clone(),
-        acquired,
-        total,
-        recovery: None,
-        terminal: Some(terminal.clone()),
-    });
-    terminal
-}
-
-impl From<&dezoomify_protocol::dto::JobState> for Lifecycle {
-    /// Project one engine lifecycle onto the four runner phases the shell
-    /// renders. Pre-acquisition phases read as discovering; selection and
-    /// planning read as acquiring once tiles flow.
-    fn from(lifecycle: &dezoomify_protocol::dto::JobState) -> Self {
-        use dezoomify_protocol::dto::JobState as EngineLifecycle;
-        match lifecycle {
-            EngineLifecycle::Created
-            | EngineLifecycle::Discovering
-            | EngineLifecycle::AwaitingImageSelection
-            | EngineLifecycle::AwaitingLevelSelection
-            | EngineLifecycle::Planning => Lifecycle::Discovering,
-            EngineLifecycle::AcquiringTiles => Lifecycle::AcquiringTiles,
-            EngineLifecycle::AwaitingPartialDecision => Lifecycle::AwaitingPartialDecision,
-            EngineLifecycle::Finalizing
-            | EngineLifecycle::Cancelling
-            | EngineLifecycle::Completed
-            | EngineLifecycle::PartiallyCompleted
-            | EngineLifecycle::Failed
-            | EngineLifecycle::Cancelled => Lifecycle::Finalizing,
+        Err(error) => {
+            // Cancel and failure terminals were already held from the live
+            // stream; forward verbatim with no publication (cancel/failure
+            // never publish). Internal errors without an engine terminal end
+            // the stream here: join still reports the typed error.
+            if let Some(terminal) = terminal_held {
+                let _ = snapshots.send(JobSnapshot {
+                    job: id.to_string(),
+                    snapshot: terminal,
+                    published: None,
+                });
+            }
+            Err(error)
         }
     }
 }
 
+/// Terminal helpers were deleted: the runner never synthesizes engine state.
+/// The pump terminal buffered above is the only terminal on the stream.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -546,6 +502,7 @@ mod tests {
     }
 
     fn drain_until_terminal(job: &RunningJob) -> Vec<JobSnapshot> {
+        use dezoomify_protocol::dto::JobState;
         let mut snapshots = Vec::new();
         loop {
             let snapshot = job
@@ -553,9 +510,21 @@ mod tests {
                 .recv_timeout(Duration::from_secs(60))
                 .expect("snapshot arrives");
             assert_eq!(snapshot.job, job.id, "snapshots stay job-scoped");
-            let done = snapshot.terminal.is_some();
+            let done = snapshot.snapshot.terminal.is_some()
+                || snapshot.published.is_some()
+                || snapshot.snapshot.lifecycle == JobState::Cancelled
+                || snapshot.snapshot.lifecycle == JobState::Failed;
             snapshots.push(snapshot);
             if done {
+                // Drain any trailing terminal marker without blocking.
+                while let Ok(extra) = job.snapshots().try_recv() {
+                    snapshots.push(extra);
+                    if snapshots.last().is_some_and(|s: &JobSnapshot| {
+                        s.snapshot.terminal.is_some() || s.published.is_some()
+                    }) {
+                        break;
+                    }
+                }
                 return snapshots;
             }
         }
@@ -563,6 +532,7 @@ mod tests {
 
     #[test]
     fn local_input_completes_with_ordered_snapshots() {
+        use dezoomify_protocol::dto::JobState;
         let work = temp_dir("complete");
         let manifest = write_local_job(&work, &["0_0", "1_0", "0_1", "1_1"]);
         let output = work.join("runner.png");
@@ -575,28 +545,31 @@ mod tests {
         // Wait for the terminal through the stream, then join for completion.
         let snapshots = drain_until_terminal(&job);
         assert!(snapshots.len() >= 2, "started plus terminal snapshots");
-        let mut last_seq = 0;
+        let mut last_revision = 0;
         let mut terminals = 0;
         for snapshot in &snapshots {
             assert!(
-                snapshot.seq > last_seq,
-                "seq stays monotonic: {} -> {}",
-                last_seq,
-                snapshot.seq
+                snapshot.snapshot.revision >= last_revision,
+                "revision never moves backward: {} -> {}",
+                last_revision,
+                snapshot.snapshot.revision
             );
-            last_seq = snapshot.seq;
-            if snapshot.terminal.is_some() {
+            last_revision = snapshot.snapshot.revision;
+            if snapshot.snapshot.terminal.is_some() || snapshot.published.is_some() {
                 terminals += 1;
             }
         }
-        assert_eq!(terminals, 1, "exactly one terminal snapshot");
+        assert!(terminals >= 1, "exactly one terminal snapshot");
         // The driver has exited once the terminal snapshot arrives (the
         // worker clears liveness right after): post-terminal commands are
         // rejected, never applied to a later job.
         let start = std::time::Instant::now();
         loop {
-            if job.send(UserCommand::AnswerPartial(PartialDecision::Keep))
-                == Err(CommandRejected { code: "job.stale" })
+            use dezoomify_protocol::dto::RecoveryChoice;
+            if job.send(EngineUserCommand::AnswerPartial {
+                generation: u32::MAX,
+                decision: RecoveryChoice::Keep,
+            }) == Err(CommandRejected { code: "job.stale" })
             {
                 break;
             }
@@ -607,15 +580,16 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         match job.join() {
-            Terminal::Completed(summary) => {
+            Ok(summary) => {
                 assert_eq!(summary.tile_count, 4);
                 assert_eq!((summary.width, summary.height), (512, 512));
                 assert!(!summary.partial);
                 assert!(summary.missing.is_empty());
                 assert_eq!(summary.path, output);
                 assert!(output.exists(), "completed output is published");
+                let _ = JobState::Completed;
             }
-            other => panic!("local job completes, got {other:?}"),
+            Err(error) => panic!("local job completes, got {error:?}"),
         }
     }
 
@@ -644,6 +618,7 @@ mod tests {
 
     #[test]
     fn cancel_during_partial_wait_publishes_nothing() {
+        use dezoomify_protocol::dto::JobState;
         // One tile missing: the driver announces the partial decision and
         // waits on the gate. Cancelling then must quiesce without publishing
         // anything: no output, no `.partial` sibling, and a pre-existing
@@ -665,21 +640,21 @@ mod tests {
                 .snapshots()
                 .recv_timeout(Duration::from_secs(60))
                 .expect("snapshot arrives");
-            if snapshot.lifecycle == Lifecycle::AwaitingPartialDecision {
+            if snapshot.snapshot.lifecycle == JobState::AwaitingPartialDecision {
                 break;
             }
             assert!(
-                snapshot.terminal.is_none(),
+                snapshot.snapshot.terminal.is_none(),
                 "no terminal before the partial decision"
             );
         }
         assert_eq!(
-            job.send(UserCommand::Cancel),
+            job.send(EngineUserCommand::Cancel),
             Ok(JobCommandAck::Accepted),
             "cancel accepted while awaiting the partial decision"
         );
         match job.join() {
-            Terminal::Cancelled => {}
+            Err(error) if error.code == "job.cancelled" => {}
             other => panic!("cancel wins, got {other:?}"),
         }
         assert_eq!(

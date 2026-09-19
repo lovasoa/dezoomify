@@ -4,6 +4,7 @@ import { createJobService } from "@dezoomify/app-model";
 import { presentFailure, presentSnapshot, presentStatus } from "@dezoomify/shared-ui";
 import { createElement } from "react";
 import type { JobHandle, JobSnapshot } from "@dezoomify/app-model";
+import type { ErrorDto, JobState } from "@dezoomify/app-model";
 import type {
   PresentationStatus,
   SnapshotPresentation,
@@ -105,33 +106,44 @@ export function syncExtensionJobTitle(status: PresentationStatus, sourceUrl: str
 
 /** Save filename from the authoritative snapshot catalog; undefined when nothing is selected yet. */
 function activeTitle(): string | undefined {
-  const snap = activeSnapshot as (JobSnapshot & { catalog?: { entries?: Array<{ kind?: string; title?: unknown }> } } | null);
-  const catalog = snap && typeof snap === "object" && "catalog" in snap ? snap.catalog : undefined;
-  if (!catalog || !Array.isArray(catalog.entries)) return undefined;
-  const idx = snap?.selection?.image;
-  if (idx === null || idx === undefined) return undefined;
+  const catalog = activeSnapshot?.selection.catalog;
+  const idx = activeSnapshot?.selection.image;
+  if (!catalog || idx === null || idx === undefined) return undefined;
   const entry = catalog.entries[idx];
   if (entry && entry.kind === "image" && typeof entry.title === "string" && entry.title !== "") return entry.title;
   return undefined;
 }
 
-/** Authoritative decision generation across DTO shapes (decision/recovery). */
-function decisionGenerationOf(snap: JobSnapshot | null): number | undefined {
-  if (!snap) return undefined;
-  const like = snap as unknown as { decision?: { generation?: unknown }; recovery?: { generation?: unknown } };
-  const fromDecision = typeof like.decision?.generation === "number" ? like.decision.generation : undefined;
-  if (fromDecision !== undefined) return fromDecision;
-  const fromRecovery = typeof like.recovery?.generation === "number" ? like.recovery.generation : undefined;
-  return fromRecovery;
-}
-
-/** Terminal kind across DTO shapes (terminal.type/terminal.kind). */
-function terminalKindOfSnapshot(snap: JobSnapshot | null): string | null {
-  if (!snap?.terminal) return null;
-  const term = snap.terminal as unknown as { kind?: unknown; type?: unknown };
-  if (typeof term.kind === "string") return term.kind;
-  if (typeof term.type === "string") return term.type;
-  return null;
+/**
+ * Host-step status for the pre-terminal title/activity only. Headlines and
+ * progress always come from presentSnapshot of the DTO; this never drives
+ * engine commands.
+ */
+function statusForLifecycle(lifecycle: JobState): PresentationStatus {
+  switch (lifecycle) {
+    case "Created":
+    case "Discovering":
+      return "discovering";
+    case "AwaitingImageSelection":
+      return "choosing-image";
+    case "AwaitingLevelSelection":
+      return "choosing-level";
+    case "Planning":
+      return "preflighting";
+    case "Finalizing":
+      return "saving";
+    case "AcquiringTiles":
+    case "AwaitingPartialDecision":
+    case "Cancelling":
+      return "downloading";
+    case "Completed":
+    case "PartiallyCompleted":
+      return "completed";
+    case "Failed":
+      return "failed";
+    case "Cancelled":
+      return "cancelled";
+  }
 }
 
 function presentFor(status: PresentationStatus, ctx: ViewContext): SnapshotPresentation {
@@ -148,6 +160,12 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
   if (!target) return;
   const viewActivity = { ...(ctx.jobActivity ?? {}), ...(uiLogLines.length ? { log: uiLogLines.slice() } : {}) };
   const presentation = presentFor(status, ctx);
+  // Outstanding partial decision, read off the DTO only: the closed
+  // keep/retry/discard answers are the engine's RecoveryChoice values, never
+  // fabricated actions.
+  const decisionGeneration = activeSnapshot?.lifecycle === "AwaitingPartialDecision"
+    ? activeSnapshot.decision?.generation
+    : undefined;
   renderView(target, presentation, {
     onSubmitUrl: () => {},
     onCancel: closeJob,
@@ -188,15 +206,11 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
       });
       },
     }) } : {}),
-    ...(decisionGenerationOf(activeSnapshot) !== undefined && decisionGenerationOf(activeSnapshot) !== null && !pendingPermission ? { after: createElement(PartialOutputActions, { onChoose: (keep) => {
-      const generation = decisionGenerationOf(activeSnapshot);
-      if (generation === undefined || generation === null) return;
-      void jobHandle?.command({ type: "recovery-choice", generation, choice: keep ? "keep" : "discard" });
+    ...(decisionGeneration !== undefined && !pendingPermission ? { after: createElement(PartialOutputActions, { onChoose: (keep) => {
+      void jobHandle?.command({ type: "recovery-choice", generation: decisionGeneration, choice: keep ? "keep" : "discard" });
       render("downloading", { jobActivity: { startedAt: Date.now() } });
     }, onRetry: () => {
-      const generation = decisionGenerationOf(activeSnapshot);
-      if (generation === undefined || generation === null) return;
-      void jobHandle?.command({ type: "recovery-choice", generation, choice: "retry" });
+      void jobHandle?.command({ type: "recovery-choice", generation: decisionGeneration, choice: "retry" });
       render("downloading", { jobActivity: { startedAt: Date.now() } });
     } }) } : {}),
   });
@@ -259,27 +273,23 @@ function sourceHost(): string {
  * One shared presenter for engine failures: the plain headline goes in
  * `message`, the engine's raw per-format aggregate moves to `detail`, and the
  * stable category/phase/retryable are derived from the code. The extension
- * never renders the raw engine block as the first message.
+ * never renders the raw engine block as the first message. Every field is
+ * typed from the terminal ErrorDto; nothing is read off untyped shapes.
  */
-function presentEngineFailure(raw: unknown): StructuredError {
-  const candidate = raw && typeof raw === "object"
-    ? raw as { code?: unknown; message?: unknown; detail?: unknown; retryable?: unknown; phase?: unknown; transport?: unknown; request?: unknown; http?: unknown; preview?: unknown }
-    : null;
+function presentEngineFailure(error: ErrorDto): StructuredError {
   return describeFailure({
-    code: typeof candidate?.code === "string" ? candidate.code : "job.failed",
-    engineDetail: typeof candidate?.detail === "string"
-      ? candidate.detail
-      : (typeof candidate?.message === "string" ? candidate.message : ""),
-    retryable: typeof candidate?.retryable === "boolean" ? candidate.retryable : undefined,
-    phase: typeof candidate?.phase === "string" ? candidate.phase : undefined,
+    code: error.code,
+    engineDetail: error.detail ?? error.message,
+    retryable: error.retryable,
+    phase: error.phase,
     // The extension always fetches under the granted browser session; the
     // engine's typed event carries no transport, so the details line would
     // otherwise misreport `direct`.
-    transport: typeof candidate?.transport === "string" ? candidate.transport : "browser-session",
+    transport: error.transport ?? "browser-session",
     host: sourceHost(),
-    url: typeof candidate?.request === "string" ? candidate.request : undefined,
-    http: typeof candidate?.http === "number" ? candidate.http : undefined,
-    preview: typeof candidate?.preview === "string" ? candidate.preview : undefined,
+    url: error.request,
+    http: error.http,
+    preview: error.preview,
   });
 }
 
@@ -346,23 +356,19 @@ function createAssembly(
 /**
  * Drive selection and deferred follows from the authoritative snapshot.
  * Ready images select once (gated by `snapshot.selection.image`, never a
- * product mirror); still-deferred entries follow in the same job through
- * `follow-deferred` (engine owns budget and cycle guards, never a host
- * recursion with a fresh attempt). Handles both the catalog shape (with
- * pickEngineSelection) and the generated DTO shape (selection.deferred).
+ * product mirror); still-deferred entries follow in the same job through the
+ * follow-up command (engine owns budget and cycle guards, never a host
+ * recursion with a fresh attempt). Reads only the generated DTO shape:
+ * `selection.catalog` and `selection.deferred`.
  */
 function driveSnapshot(snapshot: JobSnapshot) {
-  const like = snapshot as unknown as {
-    catalog?: { entries?: Array<{ kind?: string }> };
-    selection?: { image?: number | null; deferred?: Array<{ position: number }> };
-  };
-  if (like.selection?.image !== null && like.selection?.image !== undefined) return;
-  const catalog = like.catalog;
-  if (catalog && Array.isArray(catalog.entries)) {
-    jobLog.info("engine-event", `type=catalog entries=${catalog.entries.length}`);
-    const selection = pickEngineSelection(catalog as unknown as Parameters<typeof pickEngineSelection>[0]);
+  if (snapshot.selection.image !== null && snapshot.selection.image !== undefined) return;
+  const catalog = snapshot.selection.catalog;
+  if (catalog) {
+    jobLog.info("selection-catalog", `entries=${catalog.entries.length}`);
+    const selection = pickEngineSelection(catalog);
     if (selection) {
-      render("downloading", { jobActivity: { startedAt: Date.now() } });
+      render(statusForLifecycle(snapshot.lifecycle), { jobActivity: { startedAt: Date.now() } });
       void jobHandle?.command({ type: "select-image", image: selection.image }).catch(() => {});
       void jobHandle?.command({ type: "select-level", level: selection.level }).catch(() => {});
       return;
@@ -373,8 +379,8 @@ function driveSnapshot(snapshot: JobSnapshot) {
       return;
     }
   } else {
-    const deferred = Array.isArray(like.selection?.deferred) ? like.selection.deferred : [];
-    if (deferred.length > 0 && typeof deferred[0]?.position === "number") {
+    const deferred = snapshot.selection.deferred;
+    if (deferred.length > 0) {
       followDeferredAt(deferred[0].position);
       return;
     }
@@ -392,6 +398,10 @@ function driveSnapshot(snapshot: JobSnapshot) {
 function followDeferredAt(image: number) {
   jobLog.info("deferred-follow", `image=${image}`);
   render("discovering", { jobActivity: { startedAt: Date.now() } });
+  // Contract gap (see report): the core engine owns a FollowDeferred command
+  // but the protocol DTO / generated TS JobCommand has no follow-deferred
+  // variant, so this stays a cast until the contract grows one. Same cast
+  // exists on the website path (src/main.ts).
   void jobHandle?.command({ type: "follow-deferred", image } as unknown as Parameters<NonNullable<typeof jobHandle>["command"]>[0]).catch((error) => {
     onHostFailure(Object.assign(
       new Error("The image metadata stayed deferred after the resolution limit."),
@@ -584,25 +594,24 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
   }
 }
 
-/** Render one folded snapshot: terminal phases win over the live status. */
+/** Render one authoritative snapshot: terminal.type wins over the live lifecycle. */
 function renderForSnapshot(snapshot: JobSnapshot) {
-  const kind = terminalKindOfSnapshot(snapshot);
-  const term = snapshot.terminal as unknown as { error?: unknown } | null | undefined;
-  if ((kind === "failed") && term && typeof term.error === "object" && term.error !== null) {
-    jobLog.error("engine-event", `type=failed error=${JSON.stringify(term.error)}`);
-    localFailure = presentEngineFailure(term.error);
+  const terminal = snapshot.terminal;
+  if (terminal?.type === "failed") {
+    jobLog.error("engine-terminal", `type=failed code=${terminal.error.code}`);
+    localFailure = presentEngineFailure(terminal.error);
     render("failed", { jobActivity: { startedAt: Date.now() } });
     return;
   }
-  if (kind === "cancelled") {
+  if (terminal?.type === "cancelled") {
     render("cancelled", { jobActivity: { startedAt: Date.now() } });
     return;
   }
-  if (kind === "completed" || kind === "partial-completed") {
+  if (terminal?.type === "completed" || terminal?.type === "partial-completed") {
     render("completed", { jobActivity: { startedAt: Date.now() } });
     return;
   }
-  render("downloading", { jobActivity: { startedAt: Date.now() } });
+  render(statusForLifecycle(snapshot.lifecycle), { jobActivity: { startedAt: Date.now() } });
 }
 
 /**

@@ -6,17 +6,19 @@
 // observer entry keyed by its snapshot identity.
 //
 // Snapshot-only transport: the shell emits `dezoomify://job-snapshot`
-// `JobSnapshot` payloads verbatim from the runner (identity, revision,
-// protocol state, monotonic counts, typed recovery, exactly one terminal).
-// The service forwards each snapshot payload directly to its observer: no
-// channel/kind fold, no seq guard, no settled mirror. Exactly-once
-// terminals, monotonic progress, honest partials, typed failure codes, and
-// redaction are the shell's contract; the frontend never refolds them.
+// `EngineSnapshotDto` payloads verbatim from the runner (revision,
+// lifecycle, paused, progress, selection with catalog, decision, terminal,
+// output). The service forwards each canonical snapshot directly to its
+// observer: no channel/kind fold, no seq guard, no settled mirror.
+// Exactly-once terminals, monotonic progress, honest partials, typed
+// failure codes, and redaction are the shell's contract; the frontend
+// never refolds them.
 //
 // Command routing against the shipped shell (DESKTOP_COMMANDS):
-// cancel -> cancel_job; image/level/recovery choices -> answer_choice with
-// the shell's typed choice shapes (single source here); pause/resume and
-// engine-internal commands have no shell command yet and reject with
+// cancel -> cancel_job; pause/resume -> pause_job/resume_job;
+// image/level/partial choices -> answer_choice with the shell's typed
+// choice shapes (single source here, partial carrying generation+choice).
+// Engine-internal commands have no shell command and reject with
 // desktop.unsupported-command until the typed native IPC lands.
 
 import { invoke } from "@tauri-apps/api/core";
@@ -41,13 +43,13 @@ import { DESKTOP_COMMANDS, NATIVE_FORMATS } from "./desktopIntegration.ts";
 
 // Typed desktop choice shapes sent to the shell `answer_choice` command.
 // Selection shapes are pre-start options; the partial shape carries the
-// wire recovery decision verbatim. Structured end to end: these objects
-// decode to the shell `Choice` enum directly; no string parsing is
-// involved.
+// decision generation plus the keep/retry/discard choice verbatim.
+// Structured end to end: these objects decode to the shell `Choice` enum
+// directly; no string parsing is involved.
 export type AnswerChoice =
   | { kind: "image"; index: number }
   | { kind: "level"; index: number }
-  | { kind: "partial"; decision: "keep" | "retry" | "discard" };
+  | { kind: "partial"; generation: number; decision: "keep" | "retry" | "discard" };
 
 export interface DesktopIpc {
   invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown>;
@@ -124,34 +126,83 @@ interface TrackedObserver {
   observer: JobObserver;
 }
 
-function isSnapshotPayload(value: unknown): value is JobSnapshot {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
-  return (
-    typeof record["jobId"] === "string" &&
-    typeof record["state"] === "string"
-  );
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-/** Local initial snapshot: `Created` with nothing selected. The shell's
- * first verbatim snapshot replaces it; no fold lives here. */
-function initialLocalSnapshot(jobId: string): JobSnapshot {
+// Closed engine lifecycles (the `JobState` union): anything else is not a
+// canonical snapshot and is dropped at the boundary.
+const ENGINE_LIFECYCLES = new Set([
+  "Created",
+  "Discovering",
+  "AwaitingImageSelection",
+  "AwaitingLevelSelection",
+  "Planning",
+  "AcquiringTiles",
+  "AwaitingPartialDecision",
+  "Finalizing",
+  "Cancelling",
+  "Completed",
+  "PartiallyCompleted",
+  "Failed",
+  "Cancelled",
+]);
+
+// Closed terminal outcomes (the `SnapshotTerminalDto` type tag).
+const TERMINAL_TYPES = new Set(["completed", "partial-completed", "failed", "cancelled"]);
+
+/** Canonical DTO guard: revision/lifecycle/progress/selection are required;
+ * decision/terminal/output ride only in their generated shapes. Legacy
+ * folded payloads (state/acquired/recovery/terminal.kind/...) fail here
+ * and never reach an observer. */
+function isSnapshotPayload(value: unknown): value is JobSnapshot {
+  if (!isRecord(value)) return false;
+  if (typeof value["revision"] !== "number") return false;
+  const lifecycle = value["lifecycle"];
+  if (typeof lifecycle !== "string" || !ENGINE_LIFECYCLES.has(lifecycle)) return false;
+  if (value["paused"] !== undefined && typeof value["paused"] !== "boolean") return false;
+  const progress = value["progress"];
+  if (!isRecord(progress) || typeof progress["completed"] !== "number") return false;
+  const total = progress["total"];
+  if (total !== undefined && total !== null && typeof total !== "number") return false;
+  const selection = value["selection"];
+  if (!isRecord(selection)) return false;
+  if (typeof selection["level_count"] !== "number") return false;
+  if (!Array.isArray(selection["deferred"])) return false;
+  const decision = value["decision"];
+  if (decision !== undefined && decision !== null) {
+    if (!isRecord(decision)) return false;
+    if (typeof decision["generation"] !== "number") return false;
+    if (!Array.isArray(decision["missing"])) return false;
+  }
+  const terminal = value["terminal"];
+  if (terminal !== undefined && terminal !== null) {
+    if (!isRecord(terminal)) return false;
+    if (typeof terminal["type"] !== "string" || !TERMINAL_TYPES.has(terminal["type"])) return false;
+    if (terminal["type"] === "failed" && !isRecord(terminal["error"])) return false;
+  }
+  const output = value["output"];
+  if (output !== undefined && output !== null) {
+    if (!isRecord(output)) return false;
+    if (typeof output["complete"] !== "boolean") return false;
+    if (!Array.isArray(output["missing"])) return false;
+  }
+  return true;
+}
+
+/** Local initial snapshot: canonical `Created` with nothing selected. The
+ * shell's first verbatim snapshot replaces it; no fold lives here. */
+function initialLocalSnapshot(): JobSnapshot {
   return {
-    jobId,
     revision: 0,
-    state: "Created",
-    catalog: null,
-    acquired: 0,
-    total: null,
+    lifecycle: "Created",
     paused: false,
-    selection: { image: null, level: null },
-    warnings: [],
-    recovery: null,
-    terminal: null,
-    output: null,
-    displayOnly: false,
-    updatedAt: Date.now(),
-  } as unknown as JobSnapshot;
+    progress: { completed: 0, total: undefined },
+    selection: { image: undefined, level: undefined, level_count: 0, catalog: undefined, deferred: [] },
+    decision: undefined,
+    terminal: undefined,
+    output: undefined,
+  };
 }
 
 export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJobService {
@@ -276,7 +327,7 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
     const existing = observers.get(id);
     if (existing) observers.delete(id);
     observers.set(id, { nativeId: id, observer });
-    const current = initialLocalSnapshot(id);
+    const current = initialLocalSnapshot();
     observer.snapshot(current);
     observer.hostStatus(hostStatus() as never);
 
@@ -302,9 +353,32 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
       if (command.type === "recovery-choice") {
         const choice: AnswerChoice = {
           kind: "partial",
+          generation: command.generation,
           decision: command.choice,
         };
         await ipc.invoke("answer_choice", { job: id, choice });
+        return;
+      }
+      if (command.type === "pause") {
+        try {
+          await ipc.invoke("pause_job", { job: id });
+        } catch (error) {
+          throw serviceError(
+            "desktop.pause-failed",
+            error instanceof Error ? error.message : "The pause request was rejected.",
+          );
+        }
+        return;
+      }
+      if (command.type === "resume") {
+        try {
+          await ipc.invoke("resume_job", { job: id });
+        } catch (error) {
+          throw serviceError(
+            "desktop.resume-failed",
+            error instanceof Error ? error.message : "The resume request was rejected.",
+          );
+        }
         return;
       }
       throw serviceError(

@@ -58,14 +58,15 @@ use crate::error::NativeError;
 use crate::http::{FetchOutcome, UserHeaders};
 use crate::output::OutputFormat;
 use crate::pipeline::{
-    effective_cache_dir, load_image_with_metadata, merge_headers, DecodedTile, ExecCommand,
-    PartialDecision, PartialGate, PartialPolicy, PartialRequest, PipelineConfig,
+    effective_cache_dir, load_image_with_metadata, merge_headers, DecodedTile, PartialGate,
+    PartialPolicy, PartialRequest, PipelineConfig,
 };
 use crate::sink::{Published, Sink};
 use crate::transport::NativeTransport;
 
-/// Deferred-resolution bound: the initial discovery plus this many deferred
-/// follows, matching the legacy loop limit.
+/// Deferred-resolution bound for same-job follows, owned by the engine
+/// (`JobOptions::max_deferred_follows`). The host never spawns replacement
+/// jobs: deferred entries resolve via `FollowDeferred` on the same job.
 const MAX_DEFERRED_FOLLOWS: u32 = 10;
 
 /// Honest execution accounting, reported with every terminal result.
@@ -103,13 +104,6 @@ pub struct Instrumentation {
     pub accounted_peak_bytes: u64,
 }
 
-/// Terminal result of one job attempt: finished output or a deferred URI to
-/// follow with a fresh bounded job.
-pub enum AttemptDone {
-    Done(ExecResult),
-    Deferred(String),
-}
-
 /// Successful execution: the honest published record plus accounting.
 pub struct ExecResult {
     pub output_path: PathBuf,
@@ -129,7 +123,9 @@ pub struct OutputSpec {
     pub auto_output_dir: Option<PathBuf>,
 }
 
-/// Drive one input URL end to end (with bounded deferred follows).
+/// Drive one input URL end to end on the authoritative engine. Deferred
+/// catalog entries resolve in place via `FollowDeferred` on the same job
+/// (engine-bounded, no host recursive replacement jobs).
 pub fn execute(
     input_url: &str,
     output: &OutputSpec,
@@ -137,17 +133,7 @@ pub fn execute(
     user: &UserHeaders,
     on_snapshot: &mut dyn FnMut(&EngineSnapshot),
 ) -> Result<ExecResult, NativeError> {
-    let mut url = input_url.to_string();
-    for _ in 0..=MAX_DEFERRED_FOLLOWS {
-        match execute_attempt(&url, output, config, user, on_snapshot)? {
-            AttemptDone::Done(result) => return Ok(result),
-            AttemptDone::Deferred(next) => url = next,
-        }
-    }
-    Err(NativeError::new(
-        "discovery.deferred",
-        "image metadata stayed deferred after the resolution limit",
-    ))
+    execute_attempt(input_url, output, config, user, on_snapshot)
 }
 
 /// Completions from spawned tasks back to the pump. Each settles exactly
@@ -232,7 +218,7 @@ struct Attempt<'a> {
     pause_demonstrated: bool,
     partial_gate: Option<Arc<PartialGate>>,
     pending_missing: Vec<String>,
-    command_rx: Option<Arc<Mutex<mpsc::Receiver<ExecCommand>>>>,
+    command_rx: Option<Arc<Mutex<mpsc::Receiver<EngineUserCommand>>>>,
     instrumentation: Instrumentation,
     in_flight: usize,
 }
@@ -254,7 +240,7 @@ fn execute_attempt(
     config: &PipelineConfig,
     user: &UserHeaders,
     on_snapshot: &mut dyn FnMut(&EngineSnapshot),
-) -> Result<AttemptDone, NativeError> {
+) -> Result<ExecResult, NativeError> {
     let options = engine_options_for(input_url, config)?;
     let (mut job, update) = EngineJob::start(options).map_err(map_setup_error)?;
     let transport = Arc::new(NativeTransport::new(&config.fetch)?);
@@ -334,16 +320,24 @@ fn execute_attempt(
                     })?,
                 );
             } else {
-                abort_and_join(&attempt.transport, &mut handles);
-                sink.rollback();
-                let uri =
-                    snapshot_deferred_uri(&pump.snapshot, selected as u32).ok_or_else(|| {
+                // Same-job deferred follow: the catalog is replaced in place
+                // with no new job ID (engine-bounded, cycle-guarded). A
+                // rejected follow (cycle, budget exhausted) ends the job with
+                // the stable deferred code the host loop used to own.
+                apply_update(
+                    &mut pump,
+                    job.command(EngineUserCommand::FollowDeferred {
+                        image: u32::try_from(selected).map_err(|_| {
+                            NativeError::new("native.internal", "image position overflow")
+                        })?,
+                    })
+                    .map_err(|e| {
                         NativeError::new(
-                            "discovery.no-image",
-                            "no zoomable image found at the input url",
+                            "discovery.deferred",
+                            format!("deferred follow rejected ({}): {}", e.code, e.message),
                         )
-                    })?;
-                return Ok(AttemptDone::Deferred(uri));
+                    })?,
+                );
             }
             continue;
         }
@@ -503,7 +497,7 @@ fn execute_attempt(
                 .or_else(|| attempt.catalog.first())
                 .map(|image| image.format.clone())
                 .unwrap_or_default();
-            Ok(AttemptDone::Done(ExecResult {
+            Ok(ExecResult {
                 output_path: published.output_path,
                 tile_count: published.tile_count,
                 image_size: published.image_size,
@@ -511,7 +505,7 @@ fn execute_attempt(
                 partial: published.partial,
                 missing: published.missing,
                 instrumentation: attempt.instrumentation,
-            }))
+            })
         }
         Terminal::Error(error) => Err(error),
     }
@@ -577,22 +571,17 @@ fn report_snapshot(
     }
 }
 
-/// Deferred follow-up URI for one still-deferred catalog position.
-fn snapshot_deferred_uri(snapshot: &EngineSnapshot, image: u32) -> Option<String> {
-    snapshot
-        .selection
-        .deferred
-        .iter()
-        .find(|entry| entry.position == image)
-        .map(|entry| entry.uri.clone())
-}
-
+/// Apply host-side live commands (selection, pause/resume). Cancel rides
+/// the flag, partial answers ride the gate. One canonical answer applied to
+/// the pump: newly issued effects queue behind the in-flight ones. Wrong-phase
+/// rejections (e.g. resume-without-pause, select-after-plan) never fail the
+/// pump; post-terminal commands are dropped.
 fn drain_commands(job: &mut EngineJob, pump: &mut Pump, attempt: &mut Attempt<'_>) {
     let rx = match attempt.command_rx.clone() {
         Some(rx) => rx,
         None => return,
     };
-    let commands: Vec<ExecCommand> = match rx.lock() {
+    let commands: Vec<EngineUserCommand> = match rx.lock() {
         Ok(guard) => guard.try_iter().collect(),
         Err(poisoned) => poisoned.into_inner().try_iter().collect(),
     };
@@ -600,12 +589,14 @@ fn drain_commands(job: &mut EngineJob, pump: &mut Pump, attempt: &mut Attempt<'_
         if pump.snapshot.terminal.is_some() {
             break;
         }
-        let update = match command {
-            ExecCommand::Pause => job.command(EngineUserCommand::Pause),
-            ExecCommand::Resume => job.command(EngineUserCommand::Resume),
-        };
-        // Pause/resume rejections (wrong phase) never fail the pump.
-        if let Ok(update) = update {
+        // Cancel/AnswerPartial never arrive here (flag/gate own them).
+        if matches!(
+            command,
+            EngineUserCommand::Cancel | EngineUserCommand::AnswerPartial { .. }
+        ) {
+            continue;
+        }
+        if let Ok(update) = job.command(command) {
             apply_update(pump, update);
         }
     }
@@ -646,7 +637,7 @@ fn failure_error(attempt: &Attempt<'_>) -> NativeError {
         }
     }
     let native_code = if code.starts_with("job.") {
-        map_failure_code(&code).to_string()
+        crate::error::map_engine_failure_to_native(&code).to_string()
     } else {
         code
     };
@@ -874,14 +865,10 @@ fn execute_effects(
                     attempt.cancel_sent = true;
                     continue;
                 };
-                let choice = match decision {
-                    PartialDecision::Retry => {
-                        attempt.pending_missing.clear();
-                        EnginePartialDecision::Retry
-                    }
-                    PartialDecision::Keep => EnginePartialDecision::Keep,
-                    PartialDecision::Discard => EnginePartialDecision::Discard,
-                };
+                let choice = decision;
+                if choice == EnginePartialDecision::Retry {
+                    attempt.pending_missing.clear();
+                }
                 if let Some(gate) = attempt.partial_gate.clone() {
                     gate.clear_pending();
                 }
@@ -1417,7 +1404,11 @@ fn finalize_output(
 /// Interactive partial choice: announce the missing ledger for the host
 /// dialog, wait up to 60s for [`PartialGate::answer`], fail-closed to
 /// [`PartialPolicy`]. Returns `None` only when cancelled while waiting.
-fn await_partial_choice(attempt: &mut Attempt<'_>, generation: u32) -> Option<PartialDecision> {
+/// Decisions use the canonical [`RecoveryChoice`] vocabulary verbatim.
+fn await_partial_choice(
+    attempt: &mut Attempt<'_>,
+    generation: u32,
+) -> Option<EnginePartialDecision> {
     let mut missing: Vec<String> = attempt.pending_missing.clone();
     if missing.is_empty() {
         for tile in &attempt.order {
@@ -1433,9 +1424,9 @@ fn await_partial_choice(attempt: &mut Attempt<'_>, generation: u32) -> Option<Pa
     let _ = generation;
     let Some(gate) = attempt.partial_gate.clone() else {
         return Some(if attempt.config.partial_policy == PartialPolicy::Keep {
-            PartialDecision::Keep
+            EnginePartialDecision::Keep
         } else {
-            PartialDecision::Discard
+            EnginePartialDecision::Discard
         });
     };
     gate.announce(PartialRequest {
@@ -1451,9 +1442,9 @@ fn await_partial_choice(attempt: &mut Attempt<'_>, generation: u32) -> Option<Pa
         return None;
     }
     Some(if attempt.config.partial_policy == PartialPolicy::Keep {
-        PartialDecision::Keep
+        EnginePartialDecision::Keep
     } else {
-        PartialDecision::Discard
+        EnginePartialDecision::Discard
     })
 }
 
@@ -1506,19 +1497,6 @@ fn map_setup_error(error: EngineJobError) -> NativeError {
 
 /// Map a terminal job failure onto the stable native product code while
 /// preserving the engine message.
-fn map_failure_code(code: &str) -> &'static str {
-    match code {
-        "job.discovery-failed" | "job.catalog-invalid" | "job.empty-resource" => "discovery.failed",
-        "job.no-images" => "discovery.no-image",
-        "job.unknown-dezoomer" => "discovery.unknown-dezoomer",
-        "job.resource-limit" => "tile.limit",
-        "job.plan-invalid" => "discovery.tile-plan",
-        "job.plan-empty" => "discovery.no-level",
-        "job.partial-discarded" => "tile.download-failed",
-        _ => "native.internal",
-    }
-}
-
 /// Typed fetch cause for the engine. Native HTTP refusals carry their
 /// status; transport-level failures decode their stable code. The engine
 /// renders the diagnostics; the request URL and any server signal stay

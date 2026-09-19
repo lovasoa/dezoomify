@@ -5,18 +5,19 @@
 //
 // The typed job service (apps/desktop/src/jobService.ts) owns the job
 // lifecycle over the public Tauri API: start_job, answer_choice, cancel_job,
-// request_destination, open_saved_output, and query_capabilities. It
-// subscribes to the dezoomify:// event channels, projects each typed payload
-// into the shared snapshot fold, and publishes authoritative JobSnapshots;
+// pause_job, resume_job, request_destination, open_saved_output, and
+// query_capabilities. It subscribes to the single dezoomify://job-snapshot
+// channel, forwards each canonical EngineSnapshotDto verbatim, and publishes
+// authoritative JobSnapshots;
 // this file renders them through presentSnapshot and keeps only product
 // wiring: queue, history, settings, recovery actions, deep links, and the
 // auxiliary panel. No synthetic controller walk exists: the presentation is
 // derived from the latest snapshot, and host-local failures (invalid input,
 // rejected starts) render through presentFailure.
 //
-// Recovery decisions read the snapshot: AwaitingPartialDecision carries the
-// typed recovery actions (partial keep/discard/retry, destination
-// choose-output/retry) wired to answer_choice and request_destination.
+// Recovery decisions read the snapshot decision: AwaitingPartialDecision
+// carries generation plus missing tiles (partial keep/discard/retry wired
+// to answer_choice with generation+choice).
 import {
   HISTORY_KEY_DESKTOP,
   clearHistory as clearHistoryStore,
@@ -220,8 +221,8 @@ function recordDesktopHistory(url: string, width?: number, height?: number, form
 // Native output formats (todo 4.4, todo 5.1): single source is
 // NATIVE_FORMATS in desktopIntegration.ts matches the formats accepted by
 // SUPPORTED_FORMATS in commands.rs and the tauri_shell.rs dialog filters.
-// The selector below writes grantedFormat; requestOutputAndResume
-// reads it so the Save and choose-output paths never hard-code a format.
+// grantedFormat seeds the submit suggestedName and the completed-view mime;
+// the persisted settings outputFormat owns the choice across reloads.
 function normalizeNativeFormat(value: unknown): NativeFormat {
   if (typeof value === "string") {
     const lower = value.toLowerCase();
@@ -233,69 +234,39 @@ function normalizeNativeFormat(value: unknown): NativeFormat {
   return "png";
 }
 
-function suggestedNameForFormat(
-  format: NativeFormat,
-  width?: unknown,
-  height?: unknown,
-): string {
-  return suggestedNameFor(width, height, format);
-}
-
 // Minimal settings (task 3.5): persisted locally, validated with fail-closed
 // bounds, and sent on the next start_job. Header values never enter logs;
 // use describeSettingsForLog for any diagnostics. The persisted outputFormat
-// (todo 5.1, first-class in settings.ts) seeds the encoder picker below so
+// (todo 5.1, first-class in settings.ts) seeds grantedFormat at boot so
 // the chosen encoder survives reloads; download settings still travel via
 // settingsToInvokeArgs only.
 let desktopSettings: DesktopSettings = loadSettings();
 grantedFormat = normalizeNativeFormat(desktopSettings.outputFormat);
 
-function persistOutputFormat(format: NativeFormat): void {
-  if (desktopSettings.outputFormat === format) return;
-  desktopSettings = { ...desktopSettings, outputFormat: format };
-  saveSettings(desktopSettings);
-}
 let settingsError: string | null = null;
 
-// Outstanding recovery decision, derived from the snapshot. AwaitingPartialDecision
-// carries typed actions: partial keep/discard/retry or destination
-// choose-output/retry. Never a new protocol event; the aux panel renders it.
+// Outstanding recovery decision, derived from the snapshot decision.
+// AwaitingPartialDecision carries generation plus missing tile ordinals;
+// the keep/discard/retry answers ride answer_choice with generation+choice.
 interface PendingDecision {
-  kind: "destination-recovery" | "partial-recovery";
-  reason: string;
-  missingTiles: Array<string>;
-  failedCount?: number;
+  missingTiles: Array<number>;
+  failedCount: number;
   totalCount?: number;
   generation: number;
-}
-
-// AwaitingDestination is a host UI derivation only: the backend never
-// stores it (protocol `JobState` has no such variant). A `Created` snapshot
-// carrying a `choose-output` recovery cue derives this label for the save
-// destination step.
-const AWAITING_DESTINATION = "AwaitingDestination";
-
-function isAwaitingDestination(snapshot: JobSnapshot | null): boolean {
-  if (!snapshot || snapshot.terminal) return false;
-  return (snapshot.recovery?.actions ?? []).some((action) => action.kind === "choose-output");
 }
 
 function pendingDecisionOf(): PendingDecision | null {
   if (localFailure) return null;
   const snapshot = currentSnapshot;
-  if (!snapshot || snapshot.terminal || snapshot.state !== "AwaitingPartialDecision") return null;
-  const recovery = snapshot.recovery;
-  if (!recovery) return null;
-  if (recovery.actions.some((action) => action.kind === "choose-output")) {
-    return { kind: "destination-recovery", reason: "destination", missingTiles: [], generation: recovery.generation };
-  }
+  if (!snapshot || snapshot.terminal || snapshot.lifecycle !== "AwaitingPartialDecision") return null;
+  const decision = snapshot.decision;
+  if (!decision) return null;
+  const missingTiles = decision.missing.map((entry) => entry.tile);
   return {
-    kind: "partial-recovery",
-    reason: "partial",
-    missingTiles: (recovery.missing ?? []).slice(0, 60),
-    ...(typeof recovery.failed === "number" ? { failedCount: recovery.failed } : {}),
-    ...(typeof recovery.total === "number" ? { totalCount: recovery.total } : {}),
-    generation: recovery.generation,
+    missingTiles,
+    failedCount: missingTiles.length,
+    ...(typeof snapshot.progress.total === "number" ? { totalCount: snapshot.progress.total } : {}),
+    generation: decision.generation,
   };
 }
 
@@ -342,19 +313,18 @@ function restoreFocus(target: HTMLElement | null): void {
 function recoveryKeyFor(decision: PendingDecision | null): string | null {
   if (!decision) return null;
   const missing = decision.missingTiles.join(",");
-  return `${decision.kind}:${decision.reason}:${missing}:${decision.failedCount ?? ""}:${decision.totalCount ?? ""}`;
+  return `${decision.generation}:${missing}:${decision.failedCount}:${decision.totalCount ?? ""}`;
 }
 
 // Marked partial completion: a kept partial output stays distinguishable
-// from a complete save. Read from the terminal snapshot's output account
-// (missing tiles plus the `.partial` sibling basename, never the granted
-// path), so the UI can never claim a complete save for partial bytes.
+// from a complete save. Read from the snapshot output account (missing tile
+// ordinals), so the UI can never claim a complete save for partial bytes.
 let outputActionError: { action: "open" | "folder"; code: string } | undefined;
 
 // Live heartbeat for the loading view: advances now and longestPendingMs
 // so the pending box and smooth track stay current between IPC snapshots.
-// The desktop shell reports snapshots (acquired/total), not per-request
-// start/end, so the longest wait derives from last visible progress.
+// The desktop shell reports snapshots (progress.completed/total), not
+// per-request start/end, so the longest wait derives from last progress.
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
 function isTerminalNow(): boolean {
@@ -499,7 +469,7 @@ function failLocally(
     url: sourceUrl || undefined,
     host: hostOf(sourceUrl),
     extras: [
-      `Status: ${currentSnapshot?.state ?? (isAwaitingDestination(currentSnapshot) ? AWAITING_DESTINATION : "idle")}`,
+      `Status: ${currentSnapshot?.lifecycle ?? "idle"}`,
       `Origin: ${redactedOriginOnly(sourceUrl) === "" ? "n/a" : redactedOriginOnly(sourceUrl)}`,
     ],
   });
@@ -557,8 +527,8 @@ function diagnosticsSnapshot() {
     sessionId: NATIVE_TRANSPORT,
     nativeTransport: NATIVE_TRANSPORT,
     progress:
-      currentSnapshot && (currentSnapshot.total !== null || currentSnapshot.acquired > 0)
-        ? { current: currentSnapshot.acquired, total: currentSnapshot.total ?? 0 }
+      currentSnapshot && (currentSnapshot.progress.total !== undefined || currentSnapshot.progress.completed > 0)
+        ? { current: currentSnapshot.progress.completed, total: currentSnapshot.progress.total ?? 0 }
         : undefined,
     origin: redactedOriginOnly(lastInputUrl),
     outputActionError,
@@ -569,7 +539,7 @@ function diagnosticsSnapshot() {
 
 function failurePresentationOf(snapshot: JobSnapshot): SnapshotPresentation | null {
   const terminal = snapshot.terminal;
-  if (!terminal || terminal.kind !== "failed" || !terminal.error) return null;
+  if (!terminal || terminal.type !== "failed") return null;
   const dto = terminal.error;
   const sourceUrl = lastInputUrl || activity().url || "";
   const error = describeFailure({
@@ -613,9 +583,8 @@ function handleSubmitUrl(url: string): void {
     return;
   }
   if (desktopQueueEnabled() && !isTerminalNow()) {
-    // Busy: enqueue behind the active job instead of retiring it. The hash
-    // equivalent here is the save dialog: only the active job ever asks for
-    // a destination, queued entries never do.
+    // Busy: enqueue behind the active job instead of retiring it. Queued
+    // entries never start work until promoted to active.
     const res = enqueueDesktopQueue(desktopQueue, trimmed);
     desktopQueue = res.queue;
     if (res.code !== "ok" || !res.entry) {
@@ -678,7 +647,7 @@ function launchNativeJob(trimmed: string, token: number): void {
       kind: "native",
       destination: {
         kind: "file",
-        suggestedName: suggestedNameForFormat(format),
+        suggestedName: suggestedNameFor(undefined, undefined, format),
         format,
       },
     },
@@ -716,29 +685,26 @@ const jobObserver: JobObserver = {
 };
 
 function onSnapshotSideEffects(snapshot: JobSnapshot): void {
-  if (snapshot.terminal !== null) {
+  if (snapshot.terminal) {
     stopHeartbeat();
-    const kind = snapshot.terminal.kind;
-    if (kind === "completed" || kind === "partial-completed") {
+    const terminal = snapshot.terminal;
+    if (terminal.type === "completed" || terminal.type === "partial-completed") {
       const output = snapshot.output;
-      pushLog(kind === "partial-completed" ? "Partial output ready" : "Output ready");
-      if (kind === "partial-completed" && output?.siblingName) {
-        pushLog(`Partial file: ${output.siblingName}`);
-      }
+      pushLog(terminal.type === "partial-completed" ? "Partial output ready" : "Output ready");
       if (output?.format) {
         grantedFormat = normalizeNativeFormat(output.format);
       }
       if (lastInputUrl !== "") {
         recordDesktopHistory(
           lastInputUrl,
-          output?.width ?? undefined,
-          output?.height ?? undefined,
+          output?.canvas?.width,
+          output?.canvas?.height,
           grantedFormat,
         );
       }
       settleActiveQueue("done");
-    } else if (kind === "failed") {
-      const code = snapshot.terminal.error?.code ?? "JOB_FAILED";
+    } else if (terminal.type === "failed") {
+      const code = terminal.error.code;
       pushLog(`Failed (${code})`);
       settleActiveQueue("failed", { errorCode: code });
     } else {
@@ -748,28 +714,21 @@ function onSnapshotSideEffects(snapshot: JobSnapshot): void {
     return;
   }
   touchProgress();
-  if (snapshot.total !== null && snapshot.total > 0) {
-    noteProgress(snapshot.acquired, snapshot.total);
+  const total = snapshot.progress.total;
+  if (typeof total === "number" && total > 0) {
+    noteProgress(snapshot.progress.completed, total);
     if (activeQueueId) {
-      const res = recordDesktopProgress(desktopQueue, activeQueueId, snapshot.acquired, snapshot.total);
+      const res = recordDesktopProgress(desktopQueue, activeQueueId, snapshot.progress.completed, total);
       desktopQueue = res.queue;
     }
   }
-  if (snapshot.state === "AwaitingPartialDecision" && snapshot.recovery) {
-    const decision = pendingDecisionOf();
-    if (decision) {
-      if (decision.kind === "partial-recovery") {
-        const summary = formatMissingSummary(decision.missingTiles, decision.failedCount);
-        pushLog(`Recovery requested: partial (${summary} keep-partial / discard-partial / retry)`);
-        if (typeof decision.failedCount === "number") {
-          const a = activity();
-          a.failedRequests = decision.failedCount;
-          a.now = Date.now();
-        }
-      } else {
-        pushLog("Recovery requested: destination (choose-output / retry)");
-      }
-    }
+  if (snapshot.lifecycle === "AwaitingPartialDecision" && snapshot.decision) {
+    const missing = snapshot.decision.missing.map((entry) => entry.tile);
+    const summary = formatMissingSummary(missing.map(String), missing.length);
+    pushLog(`Recovery requested: partial (${summary} keep-partial / discard-partial / retry)`);
+    const a = activity();
+    a.failedRequests = missing.length;
+    a.now = Date.now();
   }
 }
 
@@ -981,42 +940,31 @@ function handleCancel(): void {
   handleReset();
 }
 
-// Destination recovery grants a replacement output. On grant, the next
-// snapshot moves into active work; completion itself arrives via the
-// terminal snapshot (exactly-once from the shell).
-function requestOutputAndResume(): void {
+function handlePause(): void {
+  if (isTerminalNow()) return;
   const handle = activeHandle;
-  const decision = pendingDecisionOf();
-  if (!handle || !decision || isTerminalNow()) return;
-  const format = normalizeNativeFormat(grantedFormat);
-  const suggestedName = suggestedNameForFormat(
-    format,
-    currentSnapshot?.output?.width,
-    currentSnapshot?.output?.height,
+  if (!handle) return;
+  pushLog("Pause requested");
+  void handle.command({ type: "pause" }).then(
+    () => update(),
+    (error: unknown) => {
+      failLocally("PAUSE_FAILED", invokeErrorMessage(error, "The pause request was rejected."));
+    },
   );
-  pushLog("Requesting save destination…");
-  void handle.requestDestination({ format, suggestedName }).then(
-    (result) => {
-      if (isTerminalNow()) return;
-      if (result.outcome === "granted") {
-        grantedFormat = format;
-        pushLog("Save destination granted");
-        touchProgress();
-        update();
-      } else if (result.outcome === "denied") {
-        // Stable backend code rides `code` when present (output.exists,
-        // output.destination-denied, ...); fall back to the legacy
-        // OUTPUT_DENIED only for payloads without it.
-        const code = typeof result.code === "string" && result.code.length > 0 ? result.code : "OUTPUT_DENIED";
-        failLocally(code, result.reason ?? t("desktop.output.deniedFallback"));
-      } else {
-        pushLog("Save destination request cancelled");
-        update();
-      }
+}
+
+function handleResume(): void {
+  if (isTerminalNow()) return;
+  const handle = activeHandle;
+  if (!handle) return;
+  pushLog("Resume requested");
+  void handle.command({ type: "resume" }).then(
+    () => {
+      touchProgress();
+      update();
     },
     (error: unknown) => {
-      if (isTerminalNow()) return;
-      failLocally("OUTPUT_DENIED", invokeErrorMessage(error, t("desktop.invoke.destination")));
+      failLocally("RESUME_FAILED", invokeErrorMessage(error, "The resume request was rejected."));
     },
   );
 }
@@ -1045,14 +993,14 @@ async function handleOpenOutput(reveal: boolean): Promise<void> {
   }
 }
 
-// Recovery: retry the outstanding decision (destination -> back to
-// awaiting-destination; partial -> retry failed tiles). Wired to the typed
-// shell `Choice::Retry` via answer_choice.
+// Recovery: retry the outstanding partial decision (retry failed tiles).
+// Wired to the typed shell `Choice::Partial` via answer_choice with
+// generation+choice.
 function handleRecoveryRetry(): void {
   const decision = pendingDecisionOf();
   const handle = activeHandle;
   if (!decision || !handle || isTerminalNow()) return;
-  pushLog(`Retry requested (${decision.reason})`);
+  pushLog("Retry requested (partial)");
   void handle.command({ type: "recovery-choice", generation: decision.generation, choice: "retry" }).then(
     () => {
       touchProgress();
@@ -1071,7 +1019,7 @@ function handleRecoveryRetry(): void {
 function handlePartialChoice(keep: boolean): void {
   const decision = pendingDecisionOf();
   const handle = activeHandle;
-  if (!decision || decision.kind !== "partial-recovery" || !handle) return;
+  if (!decision || !handle) return;
   if (isTerminalNow()) return;
   pushLog(keep ? "Keeping partial image…" : "Discarding partial image…");
   void handle.command({ type: "recovery-choice", generation: decision.generation, choice: keep ? "keep" : "discard" }).then(
@@ -1208,55 +1156,6 @@ function syncInitialUrlFromLocation(): void {
   }
 }
 
-// Output format selector (todo 4.4, todo 5.1): native format radios bound to
-// grantedFormat. Flat flow
-// inside the aux panel, native inputs so Tab and screen readers work; the
-// crisp 2px focus ring comes from desktop.css. Changing a radio updates
-// grantedFormat and persists it via persistOutputFormat (settings.ts
-// outputFormat) so the choice survives reloads; requestOutputAndResume
-// reads grantedFormat when building { format, suggestedName } for
-// requestSaveDestination.
-function appendOutputFormatRadios(parent: HTMLElement, doc: Document): void {
-  const group = doc.createElement("fieldset");
-  group.id = "dz-output-format-group";
-  group.className = "dz-actions-row";
-  group.style.border = "none";
-  group.style.padding = "0";
-  group.style.margin = "0";
-  const legend = doc.createElement("legend");
-  legend.className = "dz-notice-message";
-  legend.textContent = t("desktop.panel.outputFormat");
-  group.appendChild(legend);
-  for (const value of NATIVE_FORMATS) {
-    const label = doc.createElement("label");
-    label.style.display = "inline-flex";
-    label.style.alignItems = "center";
-    label.style.gap = "0.35rem";
-    label.style.marginRight = "1rem";
-    const input = doc.createElement("input");
-    input.type = "radio";
-    input.name = "dz-output-format";
-    input.value = value;
-    if (normalizeNativeFormat(grantedFormat) === value) input.checked = true;
-    input.addEventListener("change", () => {
-      if (input.checked) {
-        grantedFormat = normalizeNativeFormat(input.value);
-        persistOutputFormat(grantedFormat);
-      }
-    });
-    const text = doc.createElement("span");
-    if (value === "png") text.textContent = "PNG";
-    else if (value === "jpeg") text.textContent = "JPEG";
-    else if (value === "tiff") text.textContent = "TIFF";
-    else if (value === "zif") text.textContent = "ZIF";
-    else if (value === "webp") text.textContent = "WebP";
-    else text.textContent = "IIIF folder";
-    label.append(input, text);
-    group.appendChild(label);
-  }
-  parent.appendChild(group);
-}
-
 // Desktop auxiliary panel: typed recovery choices, partial and cancelled
 // notices, plus a copy-diagnostics button. The shared view owns the card
 // layout; this panel is re-applied after every render (idempotent by stable
@@ -1291,13 +1190,6 @@ function ensureDesktopAuxPanel(): void {
   const focusedLabel = focusedInside && focusedInside instanceof HTMLButtonElement
     ? focusedInside.textContent
     : null;
-  const focusedFormat =
-    focusedInside &&
-    focusedInside instanceof HTMLInputElement &&
-    focusedInside.type === "radio" &&
-    focusedInside.name === "dz-output-format"
-      ? focusedInside.value
-      : null;
   if (decisionKey && decisionKey !== prevKey && !recoveryReturnFocus) {
     const opener = activeElementOf(doc);
     recoveryReturnFocus = opener && existing?.contains(opener) ? null : opener;
@@ -1330,7 +1222,6 @@ function ensureDesktopAuxPanel(): void {
   aux.className = "dz-view-body dz-desktop-aux";
   aux.setAttribute("role", "region");
   aux.setAttribute("aria-label", t("desktop.panel.jobActions"));
-  if (decision && decision.kind !== "partial-recovery") appendOutputFormatRadios(aux, doc);
 
   let decisionBox: HTMLElement | null = null;
 
@@ -1361,33 +1252,25 @@ function ensureDesktopAuxPanel(): void {
       row.appendChild(btn);
     }
 
-    if (decision.kind === "partial-recovery") {
-      title.textContent = t("desktop.rec.partialTitle");
-      const missing = decision.missingTiles;
-      const summary = formatMissingSummary(missing, decision.failedCount);
-      desc.textContent = t("desktop.rec.partialDesc", { summary });
-      decisionBox.append(title, desc);
-      if (missing.length > 0) {
-        const list = doc.createElement("p");
-        list.className = "dz-notice-message dz-missing-list";
-        const shown = missing.slice(0, 20).join(", ");
-        const rest = missing.length > 20 ? t("desktop.rec.more", { n: missing.length - 20 }) : "";
-        list.textContent = t("desktop.rec.missing", { shown, rest });
-        decisionBox.appendChild(list);
-      }
-      decisionBox.appendChild(row);
-      addButton(t("desktop.rec.keep"), true, () => handlePartialChoice(true));
-      addButton(t("desktop.rec.discard"), false, () => handlePartialChoice(false));
-      addButton(t("desktop.rec.retryTiles"), false, () => handleRecoveryRetry());
-    } else {
-      // Destination recovery (sole remaining destination kind): choose an
-      // output or retry the outstanding decision.
-      title.textContent = t("desktop.rec.destTitle");
-      desc.textContent = t("desktop.rec.destDesc");
-      decisionBox.append(title, desc, row);
-      addButton(t("desktop.rec.chooseOutput"), true, () => requestOutputAndResume());
-      addButton(t("desktop.rec.tryAgain"), false, () => handleRecoveryRetry());
+    // The only pending decision is the partial one: keep, discard, or
+    // retry the missing tiles through answer_choice generation+choice.
+    title.textContent = t("desktop.rec.partialTitle");
+    const missing = decision.missingTiles.map(String);
+    const summary = formatMissingSummary(missing, decision.failedCount);
+    desc.textContent = t("desktop.rec.partialDesc", { summary });
+    decisionBox.append(title, desc);
+    if (missing.length > 0) {
+      const list = doc.createElement("p");
+      list.className = "dz-notice-message dz-missing-list";
+      const shown = missing.slice(0, 20).join(", ");
+      const rest = missing.length > 20 ? t("desktop.rec.more", { n: missing.length - 20 }) : "";
+      list.textContent = t("desktop.rec.missing", { shown, rest });
+      decisionBox.appendChild(list);
     }
+    decisionBox.appendChild(row);
+    addButton(t("desktop.rec.keep"), true, () => handlePartialChoice(true));
+    addButton(t("desktop.rec.discard"), false, () => handlePartialChoice(false));
+    addButton(t("desktop.rec.retryTiles"), false, () => handleRecoveryRetry());
     decisionBox.addEventListener("keydown", (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -1423,9 +1306,11 @@ function ensureDesktopAuxPanel(): void {
   }
 
   if (showPartialDone) {
-    const output = currentSnapshot?.output;
-    const completedMissing = output?.missingTiles ?? [];
-    const completedSibling = output?.siblingName ?? null;
+    // Marked partial completion: a kept partial output stays distinguishable
+    // from a complete save. The missing tile ordinals ride the snapshot
+    // output account, so the UI can never claim a complete save for
+    // partial bytes.
+    const completedMissing = (currentSnapshot?.output?.missing ?? []).map(String);
     const doneBox = doc.createElement("div");
     doneBox.className = "dz-partial-note";
     doneBox.setAttribute("role", "status");
@@ -1436,10 +1321,7 @@ function ensureDesktopAuxPanel(): void {
     const desc = doc.createElement("p");
     desc.className = "dz-notice-message";
     const summary = formatMissingSummary(completedMissing, completedMissing.length);
-    // Honest sibling basename (never the granted path) rides the existing
-    // translated sentence as a literal: no new copy, no shared-ui change.
-    const summaryWithFile = completedSibling ? `${summary} File: ${completedSibling}.` : summary;
-    desc.textContent = t("desktop.done.partialDesc", { summary: summaryWithFile });
+    desc.textContent = t("desktop.done.partialDesc", { summary });
     doneBox.append(title, desc);
     if (completedMissing.length > 0) {
       const list = doc.createElement("p");
@@ -1472,11 +1354,6 @@ function ensureDesktopAuxPanel(): void {
       const firstBtn = decisionBox ? focusableIn(decisionBox)[0] : undefined;
       if (firstBtn) firstBtn.focus();
     }
-  } else if (focusedFormat) {
-    const radio = aux.querySelector(
-      `input[name="dz-output-format"][value="${focusedFormat}"]`,
-    ) as HTMLElement | null;
-    if (radio && typeof radio.focus === "function") radio.focus();
   } else if (focusedLabel && decisionBox) {
     const candidates = focusableIn(decisionBox);
     for (const candidate of candidates) {
@@ -1596,14 +1473,14 @@ function update() {
   if (viewCtx.jobActivity && presentation.phase === "job") {
     refreshLongestPending();
   }
-  // Completion geometry rides the snapshot output; the view context
+  // Completion geometry rides the snapshot output canvas; the view context
   // only carries what the shared view renders.
-  const output = currentSnapshot?.output ?? null;
-  if (presentation.phase === "completed" && output && output.width && output.height) {
+  const canvas = currentSnapshot?.output?.canvas;
+  if (presentation.phase === "completed" && canvas) {
     viewCtx.completedInfo = {
-      width: output.width,
-      height: output.height,
-      mime: encoderToMime(output.format ?? undefined, grantedMime()),
+      width: canvas.width,
+      height: canvas.height,
+      mime: encoderToMime(currentSnapshot?.output?.format, grantedMime()),
     };
   } else if (presentation.phase !== "completed") {
     viewCtx.completedInfo = undefined;
@@ -1618,6 +1495,12 @@ function update() {
       },
       onCancel() {
         handleCancel();
+      },
+      onPause() {
+        handlePause();
+      },
+      onResume() {
+        handleResume();
       },
       onCopyDiagnostics(text: string) {
         handleCopyDiagnostics(() => `${text}\n\n${buildCopyDiagnostics(diagnosticsSnapshot())}`);

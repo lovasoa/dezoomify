@@ -47,16 +47,14 @@ function harness({ assembly = fakeAssembly(), acquireTile, sourceTransport, prob
     onPermissionRequired: (detail) => seen.push(["permission", detail]),
     onRecoveryRequested: (generation) => seen.push(["recovery-decision", generation]),
     onHostFailure: (error) => seen.push(["host-failure", error]),
-    onEvent: (event) => seen.push(["event", event.type]),
     log: (level, code, detail) => logs.push({ level, code, detail }),
   });
   return { controller, sent, seen, assembly, logs };
 }
 
+// Canonical HostEffect: bare typed effects, no kind/event envelope.
 const TILE_EFFECT = {
-  kind: "effect",
   type: "acquire-tile",
-  effect: "fx:2",
   tile: 0,
   placement: { position: { x: 0, y: 0 }, expected_size: { width: 16, height: 16 }, canvas: { width: 32, height: 32 }, processing: "none" },
   request: { id: 0, uri: "https://cdn.test/tile_0.jpg", headers: [], purpose: "tile" },
@@ -105,7 +103,7 @@ test("an access grant re-drives the paused acquisition instead of failing the jo
     probeSize: async () => ({ status: "available", width: 256, height: 256 }),
     classifyFailure: (error) => ({ blocked_reason: error?.category ?? "network", code: "extension.network", retryable: true, message: String(error?.message ?? error), transport: "browser-session" }),
     onPermissionRequired: (detail) => retried.push(detail),
-    onRecoveryRequested() {}, onHostFailure() {}, onEvent() {},
+    onRecoveryRequested() {}, onHostFailure() {},
   });
   controller.handleEngineMessages([TILE_EFFECT]);
   await flush();
@@ -133,7 +131,7 @@ test("a granted-origin refusal fails typed without re-prompting for a grant", as
     probeSize: async () => ({ status: "available", width: 256, height: 256 }),
     classifyFailure: (error) => ({ blocked_reason: error?.category ?? "network", code: "extension.network", retryable: false, message: String(error?.message ?? error), transport: "browser-session" }),
     onPermissionRequired: (detail) => retried.push(detail),
-    onRecoveryRequested() {}, onHostFailure() {}, onEvent() {},
+    onRecoveryRequested() {}, onHostFailure() {},
   });
   controller.handleEngineMessages([TILE_EFFECT]);
   await flush();
@@ -146,9 +144,7 @@ test("a granted-origin refusal fails typed without re-prompting for a grant", as
 test("metadata requests route through the source transport", async () => {
   const { controller, seen } = harness();
   controller.handleEngineMessages([{
-    kind: "effect",
     type: "acquire-resource",
-    effect: "fx:0",
     request: { id: 0, uri: "https://source.test/image.dzi", headers: [], purpose: "metadata" },
   }]);
   await flush();
@@ -160,9 +156,7 @@ test("a failed source fetch retries through the extension-origin transport", asy
     sourceTransport: { async fetchResource() { throw Object.assign(new Error("cors"), { category: "network" }); } },
   });
   controller.handleEngineMessages([{
-    kind: "effect",
     type: "acquire-resource",
-    effect: "fx:0",
     request: { id: 0, uri: "https://cdn.test/info.json", headers: [], purpose: "metadata" },
   }]);
   await flush();
@@ -179,9 +173,7 @@ test("a definitive source HTTP response is not retried through the extension ori
     sourceTransport: { async fetchResource() { throw Object.assign(new Error("not found"), { category: "network", sourceDefinitive: true }); } },
   });
   controller.handleEngineMessages([{
-    kind: "effect",
     type: "acquire-resource",
-    effect: "fx:0",
     request: { id: 0, uri: "https://source.test/missing.dzi", headers: [], purpose: "metadata" },
   }]);
   await flush();
@@ -206,11 +198,10 @@ test("probe effects report measurements without retaining tiles", async () => {
   assert.equal(sent.some((message) => message.type === "engine.bytes"), false);
 });
 
-test("lifecycle effects and events run in engine order on one chain", async () => {
+test("lifecycle effects run in engine order on one chain", async () => {
   const { controller, assembly, sent } = harness();
   controller.handleEngineMessages([
-    { kind: "effect", type: "finalize-output", effect: "fx:10", partial: false, format: "png", canvas: { width: 32, height: 32 } },
-    { kind: "event", type: "completed" },
+    { type: "finalize-output", partial: false, format: "png", canvas: { width: 32, height: 32 } },
   ]);
   await flush();
   await flush();
@@ -223,7 +214,7 @@ test("lifecycle effects and events run in engine order on one chain", async () =
 
 test("cancel-work releases retained resources and cancels fetching", async () => {
   const { controller, assembly, seen } = harness();
-  controller.handleEngineMessages([{ kind: "effect", type: "cancel-work", effect: "fx:20" }]);
+  controller.handleEngineMessages([{ type: "cancel-work" }]);
   assert.deepEqual(assembly.calls.map(([kind]) => kind), ["release"]);
   assert.ok(seen.some(([kind]) => kind === "cancel"));
 });
@@ -233,8 +224,7 @@ test("a failed awaited output replies typed instead of crashing the host", async
   assembly.finalizeOutput = async () => { throw Object.assign(new Error("too large"), { code: "PLAN_INVALID", retryable: false }); };
   const { controller, sent, seen } = harness({ assembly });
   controller.handleEngineMessages([
-    { kind: "effect", type: "finalize-output", effect: "fx:10", partial: false, format: "png", canvas: { width: 99999, height: 99999 } },
-    { kind: "event", type: "failed", error: { code: "PLAN_INVALID" } },
+    { type: "finalize-output", partial: false, format: "png", canvas: { width: 99999, height: 99999 } },
   ]);
   await flush();
   await flush();
@@ -268,9 +258,7 @@ test("coordinator source fetches name the engine request on the extension bus", 
   });
   const { controller, sent } = harness({ sourceTransport });
   controller.handleEngineMessages([{
-    kind: "effect",
     type: "acquire-resource",
-    effect: "fx:0",
     request: { id: 4, uri: "https://source.test/image.dzi", headers: [], purpose: "metadata" },
   }]);
   await flush();

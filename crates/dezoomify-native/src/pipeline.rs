@@ -121,16 +121,6 @@ pub enum PartialPolicy {
     Keep,
 }
 
-/// Interactive choice for a partial result: keep the blank-filled output,
-/// discard it (honest `tile.download-failed`, no output), or retry the
-/// failed tiles once more.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PartialDecision {
-    Keep,
-    Discard,
-    Retry,
-}
-
 /// Pending partial request announced by the driver while it waits for an
 /// interactive choice. Tile ids only, never URLs or paths.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -143,7 +133,7 @@ pub struct PartialRequest {
 #[derive(Debug, Default)]
 struct PartialGateInner {
     pending: Option<PartialRequest>,
-    decision: Option<PartialDecision>,
+    decision: Option<dezoomify_protocol::dto::RecoveryChoice>,
 }
 
 /// Interactive partial gate shared between the background driver and the
@@ -178,7 +168,7 @@ impl PartialGate {
 
     /// Answer the pending request. Wakes a waiting driver; an early answer
     /// is stored for the next wait.
-    pub fn answer(&self, decision: PartialDecision) {
+    pub fn answer(&self, decision: dezoomify_protocol::dto::RecoveryChoice) {
         match self.inner.lock() {
             Ok(mut guard) => {
                 guard.decision = Some(decision);
@@ -190,7 +180,7 @@ impl PartialGate {
     }
 
     /// Non-blocking take of a stored decision, if any.
-    pub fn take_decision(&self) -> Option<PartialDecision> {
+    pub fn take_decision(&self) -> Option<dezoomify_protocol::dto::RecoveryChoice> {
         match self.inner.lock() {
             Ok(mut guard) => guard.decision.take(),
             Err(poisoned) => poisoned.into_inner().decision.take(),
@@ -213,7 +203,7 @@ impl PartialGate {
         &self,
         timeout: Duration,
         cancel_flag: &AtomicBool,
-    ) -> Option<PartialDecision> {
+    ) -> Option<dezoomify_protocol::dto::RecoveryChoice> {
         if let Some(decision) = self.take_decision() {
             return Some(decision);
         }
@@ -246,16 +236,6 @@ impl PartialGate {
     }
 }
 
-/// Host-side external commands into a running job (Pause/Resume only).
-/// Cancel travels on the shared flag, partial answers on the gate. The
-/// pump drains these at every effect boundary; commands never supply bytes
-/// and never claim publication.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ExecCommand {
-    Pause,
-    Resume,
-}
-
 /// Pipeline configuration: fetch limits, tile bounds, concurrency.
 #[derive(Clone, Debug)]
 pub struct PipelineConfig {
@@ -270,11 +250,6 @@ pub struct PipelineConfig {
     /// Tile retry budget owned by the job engine. `0` means no retries:
     /// the first failure fails the tile (generic-probing parity).
     pub max_retries: u32,
-    /// Legacy delay before the first tile retry. No longer consulted: retry
-    /// timing is engine-owned (explicit `WaitForRetry` timer effects with
-    /// exponential backoff plus observed `retry-after`). Retained so CLI
-    /// `--retry-delay` keeps parsing with no behavior change.
-    pub retry_delay: Duration,
     /// Minimum interval between tile request starts (per-tile throttle).
     /// `ZERO` disables the sleep (the CLI default); the reference default
     /// is 50ms. Applied as start staggering, not as a post-completion wait.
@@ -349,10 +324,13 @@ pub struct PipelineConfig {
     /// Beyond it the job fails `output.canvas-limit`; the spool directory
     /// is removed on commit/rollback, never the destination.
     pub output_spool_cap: u64,
-    /// External Pause/Resume commands for hosts with a live handle (the
-    /// typed runner). `None` disables remote pause; the engine overlay
-    /// itself stays available through the `--pause-after` demonstration.
-    pub exec_command_rx: Option<Arc<std::sync::Mutex<std::sync::mpsc::Receiver<ExecCommand>>>>,
+    /// External live commands for hosts with a handle (the typed runner):
+    /// selection (image/level/deferred follow), pause/resume. Cancel travels
+    /// on the shared flag, partial answers on the gate. `None` disables
+    /// remote commands; the engine overlay itself stays available through
+    /// the `--pause-after` demonstration and pre-start options.
+    pub exec_command_rx:
+        Option<Arc<std::sync::Mutex<std::sync::mpsc::Receiver<dezoomify_engine::UserCommand>>>>,
 }
 
 impl Default for PipelineConfig {
@@ -363,7 +341,6 @@ impl Default for PipelineConfig {
             max_tiles: 1 << 20,
             max_concurrent: 16,
             max_retries: 3,
-            retry_delay: Duration::from_secs(2),
             min_interval: Duration::ZERO,
             compression: 5,
             cache_dir: Some(default_tile_cache_dir()),
@@ -1179,6 +1156,7 @@ mod tests {
 
     #[test]
     fn partial_gate_early_answer_survives_wait() {
+        use dezoomify_protocol::dto::RecoveryChoice;
         let gate = PartialGate::new();
         gate.announce(PartialRequest {
             missing: vec!["tile:1".to_string()],
@@ -1189,11 +1167,11 @@ mod tests {
             gate.pending_request().expect("pending").missing,
             vec!["tile:1".to_string()]
         );
-        gate.answer(PartialDecision::Keep);
+        gate.answer(RecoveryChoice::Keep);
         let flag = AtomicBool::new(false);
         assert_eq!(
             gate.wait_for_decision(Duration::from_secs(5), &flag),
-            Some(PartialDecision::Keep)
+            Some(RecoveryChoice::Keep)
         );
         // Each wait consumes exactly one decision so a retry can ask again.
         assert_eq!(gate.take_decision(), None);

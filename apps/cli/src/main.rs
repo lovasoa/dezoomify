@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use arguments::Args;
-use dezoomify_native::{JobOptions, Lifecycle, NativeRunner, OutputTarget, Terminal};
+use dezoomify_native::{JobOptions, NativeRunner, OutputTarget};
 
 /// Minimum-interval pacing between bulk images. Ports the reference
 /// `Throttler` idea synchronously for bulk image pacing; per-tile request
@@ -326,6 +326,7 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
     let level = parsed.logging.as_str();
     emit_verbose_diagnostics(level, parsed);
     let json = parsed.json;
+    let keep_partial = parsed.keep_partial;
     let job = match NativeRunner::start(job_options_for(parsed, input, output)) {
         Ok(job) => job,
         Err(error) => {
@@ -334,11 +335,15 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
         }
     };
     let job_id = job.id.clone();
-    // Stream snapshots in seq order; exactly one carries the terminal.
-    // Non-terminal snapshots print as progress; the terminal snapshot's seq
-    // is reused for the machine completion record so stdout seqs stay
-    // strictly increasing (no separate event is printed for it).
+    // Stream engine snapshots verbatim in revision order; exactly one carries
+    // the terminal. Non-terminal snapshots print as progress; the terminal
+    // revision is reused for the machine completion record so stdout seqs stay
+    // strictly increasing (no separate event is printed for it). Partial
+    // decisions auto-answer from the CLI policy immediately (no 60s gate
+    // wait): keep (blank-filled `.partial` sibling) or discard
+    // (`tile.download-failed`, no output).
     let terminal_seq: u64;
+    let mut first = true;
     loop {
         let snapshot = match job.snapshots().recv() {
             Ok(snapshot) => snapshot,
@@ -347,17 +352,56 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
                 return false;
             }
         };
-        if snapshot.terminal.is_some() {
-            terminal_seq = snapshot.seq;
+        // Auto-answer partial decisions from policy before printing: the
+        // engine waits for `AnswerPartial`, and the CLI is non-interactive.
+        if let Some(decision) = snapshot.snapshot.decision.as_ref() {
+            use dezoomify_protocol::dto::RecoveryChoice;
+            let generation = decision.generation;
+            let choice = if keep_partial {
+                RecoveryChoice::Keep
+            } else {
+                RecoveryChoice::Discard
+            };
+            let _ = job.send(dezoomify_native::UserCommand::AnswerPartial {
+                generation,
+                decision: choice,
+            });
+        }
+        if snapshot.snapshot.terminal.is_some() || snapshot.published.is_some() {
+            terminal_seq = u64::from(snapshot.snapshot.revision);
             break;
         }
+        // The first snapshot always prints as `started` (preserving the
+        // accessibility-adjacent CLI contract); later snapshots print engine
+        // progress verbatim. Engine revisions start above 1, so revision
+        // alone cannot mark the start.
+        if first {
+            first = false;
+            print_snapshot(
+                json,
+                &snapshot.job,
+                u64::from(snapshot.snapshot.revision),
+                "started",
+                &BTreeMap::new(),
+                level,
+            );
+            continue;
+        }
         let (kind, detail) = progress_view(&snapshot);
-        print_snapshot(json, &snapshot.job, snapshot.seq, kind, &detail, level);
+        print_snapshot(
+            json,
+            &snapshot.job,
+            u64::from(snapshot.snapshot.revision),
+            kind,
+            &detail,
+            level,
+        );
     }
-    // `join` owns quiescence and cleanup; its terminal agrees with the
-    // streamed one.
+    // `join` owns quiescence and cleanup; its publication agrees with the
+    // streamed terminal (native publication that won the cancel race, or
+    // `job.cancelled`/typed failure with nothing published).
     match job.join() {
-        Terminal::Completed(summary) => {
+        Ok(summary) => {
             if json {
                 println!(
                     "{}",
@@ -392,39 +436,55 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
             }
             true
         }
-        Terminal::Cancelled => {
+        Err(error) if error.code == "job.cancelled" => {
             eprintln!("error: job cancelled before completion (job.cancelled)");
             false
         }
-        Terminal::Failed(error) => {
+        Err(error) => {
             eprintln!("error: {} ({})", error.message, error.code);
             false
         }
     }
 }
 
-/// Printable view of a non-terminal runner snapshot: the `started` marker
-/// for seq 1, otherwise the lifecycle kind plus monotonic
+/// Printable view of a non-terminal engine snapshot: the `started` marker
+/// for revision 0/1, otherwise the lifecycle kind plus monotonic
 /// `acquired`/`total` counts.
 fn progress_view(
     snapshot: &dezoomify_native::JobSnapshot,
 ) -> (&'static str, BTreeMap<String, String>) {
-    if snapshot.seq == 1 {
+    if snapshot.snapshot.revision <= 1 {
         return ("started", BTreeMap::new());
     }
     let mut detail = BTreeMap::new();
-    detail.insert("acquired".to_string(), snapshot.acquired.to_string());
-    detail.insert("total".to_string(), snapshot.total.to_string());
-    (snapshot_kind(&snapshot.lifecycle), detail)
+    detail.insert(
+        "acquired".to_string(),
+        snapshot.snapshot.progress.completed.to_string(),
+    );
+    detail.insert(
+        "total".to_string(),
+        snapshot.snapshot.progress.total.unwrap_or(0).to_string(),
+    );
+    (snapshot_kind(&snapshot.snapshot.lifecycle), detail)
 }
 
-/// Project a runner lifecycle onto the stable CLI event kind.
-fn snapshot_kind(lifecycle: &Lifecycle) -> &'static str {
+/// Project an engine lifecycle onto the stable CLI event kind.
+fn snapshot_kind(lifecycle: &dezoomify_protocol::dto::JobState) -> &'static str {
+    use dezoomify_protocol::dto::JobState;
     match lifecycle {
-        Lifecycle::Discovering => "discovery",
-        Lifecycle::AcquiringTiles => "downloading",
-        Lifecycle::Finalizing => "encoding",
-        Lifecycle::AwaitingPartialDecision => "recovery-requested",
+        JobState::Created
+        | JobState::Discovering
+        | JobState::AwaitingImageSelection
+        | JobState::AwaitingLevelSelection
+        | JobState::Planning => "discovery",
+        JobState::AcquiringTiles => "downloading",
+        JobState::AwaitingPartialDecision => "recovery-requested",
+        JobState::Finalizing
+        | JobState::Cancelling
+        | JobState::Completed
+        | JobState::PartiallyCompleted
+        | JobState::Failed
+        | JobState::Cancelled => "encoding",
     }
 }
 
@@ -593,28 +653,48 @@ fn run_one_bulk_image(
                 ));
             }
         };
-        if snapshot.terminal.is_some() {
+        if let Some(decision) = snapshot.snapshot.decision.as_ref() {
+            use dezoomify_protocol::dto::RecoveryChoice;
+            let generation = decision.generation;
+            let choice = if parsed.keep_partial {
+                RecoveryChoice::Keep
+            } else {
+                RecoveryChoice::Discard
+            };
+            let _ = job.send(dezoomify_native::UserCommand::AnswerPartial {
+                generation,
+                decision: choice,
+            });
+        }
+        if snapshot.snapshot.terminal.is_some() || snapshot.published.is_some() {
             break;
         }
         if show {
             let (kind, detail) = progress_view(&snapshot);
-            // The runner's own seq-1 snapshot was already printed as
-            // `started` above; print it once, not twice.
-            if snapshot.seq > 1 {
-                print_snapshot(false, &snapshot.job, snapshot.seq, kind, &detail, &logging);
+            // The `started` marker above covers revision 0/1; print later
+            // revisions once, not twice.
+            if snapshot.snapshot.revision > 1 {
+                print_snapshot(
+                    false,
+                    &snapshot.job,
+                    u64::from(snapshot.snapshot.revision),
+                    kind,
+                    &detail,
+                    &logging,
+                );
             }
         }
     }
     match job.join() {
-        Terminal::Completed(summary) => Ok((
+        Ok(summary) => Ok((
             summary.tile_count,
             summary.path.to_string_lossy().into_owned(),
         )),
-        Terminal::Cancelled => Err((
+        Err(error) if error.code == "job.cancelled" => Err((
             "job.cancelled".to_string(),
             "job cancelled before completion".to_string(),
         )),
-        Terminal::Failed(error) => Err((error.code, error.message)),
+        Err(error) => Err((error.code, error.message)),
     }
 }
 
