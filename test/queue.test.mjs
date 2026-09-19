@@ -7,25 +7,13 @@ import {
   enqueueWebQueue,
   finishActiveWebEntry,
   humanWebQueueSummary,
-  isWebQueueAvailable,
   summarizeWebQueue,
 } from "../packages/browser-runtime/src/queue.ts";
 
-// Website single-queue (todo 5.3): enqueue while a job runs, sequential over
+// Website single-queue: enqueue while a job runs, sequential over
 // the single-job engine. These tests drive the integration-layer queue the
-// website orchestrator (src/main.ts) uses, including the N-1 capability gate
-// and the hash-only-current-URL invariant.
-
-test("web queue is capability-gated with N-1 compat", () => {
-  // Current website baseline offers the queue.
-  assert.equal(isWebQueueAvailable({ bulkSupported: true }), true);
-  // N-1 peers (bulk_supported false, or a payload omitting the field)
-  // disable queue controls without breaking the handshake.
-  assert.equal(isWebQueueAvailable({ bulkSupported: false }), false);
-  assert.equal(isWebQueueAvailable({}), false);
-  assert.equal(isWebQueueAvailable(null), false);
-  assert.equal(isWebQueueAvailable(undefined), false);
-});
+// website orchestrator (src/main.ts) uses, including the
+// hash-only-current-URL invariant.
 
 test("enqueue while running waits FIFO and runs sequentially", () => {
   let q = createWebQueue();

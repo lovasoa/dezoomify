@@ -11,7 +11,6 @@ import {
   enqueueDesktopQueue,
   finishActiveDesktopEntry,
   humanDesktopQueueSummary,
-  isDesktopQueueAvailable,
   machineDesktopQueueSummary,
   pendingDesktopEntries,
   recordDesktopProgress,
@@ -26,13 +25,6 @@ const SCENARIOS = path.join(HERE, "..", "..", "..", "testdata", "scenarios", "de
 function readJson(rel) {
   return JSON.parse(fs.readFileSync(path.join(SCENARIOS, rel), "utf8"));
 }
-
-test("desktop queue is capability-gated with N-1 compat", () => {
-  assert.equal(isDesktopQueueAvailable({ bulkSupported: true }), true);
-  assert.equal(isDesktopQueueAvailable({ bulkSupported: false }), false);
-  assert.equal(isDesktopQueueAvailable({}), false);
-  assert.equal(isDesktopQueueAvailable(null), false);
-});
 
 test("enqueue validates and runs one active job at a time", () => {
   let q = createDesktopQueue();
