@@ -13,8 +13,6 @@ export const HISTORY_KEY_WEBSITE = "dezoomify.history.v2";
 
 export const HISTORY_KEY_DESKTOP = "dezoomify.desktop.history.v2";
 
-export const HISTORY_KEY_EXTENSION = "dezoomify.ext.history.v2";
-
 export interface HistoryEntry {
   origin: string;
   url: string;

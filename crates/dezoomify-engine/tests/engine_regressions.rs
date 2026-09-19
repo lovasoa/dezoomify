@@ -4,7 +4,7 @@
 
 mod support;
 
-use dezoomify_engine::{Config, TileFailure};
+use dezoomify_engine::{Config, Effect, TileFailure};
 use support::JobCommand;
 use support::ScriptedHost;
 
@@ -70,7 +70,7 @@ fn transient_failure_eventually_succeeds_after_retry_wait() {
     assert!(host
         .effects
         .iter()
-        .any(|v| v.get("kind").and_then(serde_json::Value::as_str) == Some("wait-retry")));
+        .any(|effect| matches!(effect, Effect::WaitRetryTimer { .. })));
 
     // Timer elapses: the retry is re-issued and can still succeed.
     host.apply(JobCommand::RetryTimerElapsed {
@@ -119,19 +119,13 @@ fn deferred_follow_continues_same_job_without_new_id() {
         .effects
         .iter()
         .rev()
-        .find(|v| v.get("kind").and_then(serde_json::Value::as_str) == Some("acquire-resource"))
+        .find_map(|effect| match effect {
+            Effect::AcquireMetadata { id, uri } => Some((id, uri)),
+            _ => None,
+        })
         .expect("follow-up fetch");
-    assert_eq!(
-        follow_request
-            .get("uri")
-            .and_then(serde_json::Value::as_str),
-        Some("https://example.test/a.dzi")
-    );
-    let request = follow_request
-        .get("request")
-        .and_then(serde_json::Value::as_u64)
-        .and_then(|request| u32::try_from(request).ok())
-        .expect("follow request id");
+    assert_eq!(follow_request.1, "https://example.test/a.dzi");
+    let request = follow_request.0.get();
     host.apply(JobCommand::ResourceBytes {
         request,
         bytes: DZI.as_bytes().to_vec(),
@@ -182,9 +176,10 @@ fn deferred_follow_budget_is_bounded() {
         .effects
         .iter()
         .rev()
-        .find(|v| v.get("kind").and_then(serde_json::Value::as_str) == Some("acquire-resource"))
-        .and_then(|v| v.get("request").and_then(serde_json::Value::as_u64))
-        .and_then(|request| u32::try_from(request).ok())
+        .find_map(|effect| match effect {
+            Effect::AcquireMetadata { id, .. } => Some(id.get()),
+            _ => None,
+        })
         .expect("follow request id");
     host.apply(JobCommand::ResourceBytes {
         request,

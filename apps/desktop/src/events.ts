@@ -17,13 +17,6 @@ export const DESKTOP_EVENT_CHANNELS = [
 
 export type DesktopEventChannel = (typeof DESKTOP_EVENT_CHANNELS)[number];
 
-export interface DesktopEventEnvelope {
-  channel: DesktopEventChannel;
-  jobId: string;
-  seq: number;
-  payload: Record<string, unknown>;
-}
-
 /// Canonical runner snapshot, emitted on `dezoomify://job-snapshot`
 /// for every runner snapshot the shell forwards verbatim. The payload is
 /// the authoritative `EngineSnapshotDto`: revision, lifecycle, paused,

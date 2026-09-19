@@ -11,9 +11,6 @@ dezoomify-core = { path = "../dezoomify-core" }
 dezoomify-protocol = { path = "../dezoomify-protocol" }
 serde.workspace = true
 
-[dev-dependencies]
-serde_json.workspace = true
-
 [lints.rust]
 missing_docs = "allow"
 

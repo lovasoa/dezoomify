@@ -43,9 +43,9 @@ export const MAX_NATIVE_FRAME_BYTES = 1024 * 1024;
 export const JOB_BINDING_VERSION = 1;
 type NativeJobBinding = { jobId: string; tabId: number; frameId: number; documentGeneration: string };
 type NativeMessage = Record<string, unknown> & { requestId?: string; kind?: string; error?: { code?: string }; capabilities?: { handoff?: boolean }; negotiatedVersion?: number; challenge?: string; nonce?: string; job?: string };
-type LegacyArgs = { sourceUrl: string; origins: string[]; cookieNames: string[]; jobId: string; extensionId?: string; sendNativeMessage: (message: NativeHostRequest) => Promise<NativeMessage>; getCookies: (origin: string) => Promise<Array<{ name: string; value: string }>>; showConsent: (details: ReturnType<typeof buildHandoffConsentDetails>) => Promise<boolean>; connectNative?: undefined };
+type DirectArgs = { sourceUrl: string; origins: string[]; cookieNames: string[]; jobId: string; extensionId?: string; sendNativeMessage: (message: NativeHostRequest) => Promise<NativeMessage>; getCookies: (origin: string) => Promise<Array<{ name: string; value: string }>>; showConsent: (details: ReturnType<typeof buildHandoffConsentDetails>) => Promise<boolean>; connectNative?: undefined };
 type PortEvent<T> = { addListener?: (listener: T) => void; addEventListener?: (listener: T) => void };
-type PortArgs = Omit<LegacyArgs, "connectNative" | "jobId" | "sendNativeMessage"> & { job: NativeJobBinding; hostName?: string; connectNative: (host: string) => { postMessage: (message: NativeMessage) => void; disconnect?: () => void; onMessage?: PortEvent<(message: NativeMessage) => void>; onDisconnect?: PortEvent<() => void> }; jobId?: string; sendNativeMessage?: LegacyArgs["sendNativeMessage"] };
+type PortArgs = Omit<DirectArgs, "connectNative" | "jobId" | "sendNativeMessage"> & { job: NativeJobBinding; hostName?: string; connectNative: (host: string) => { postMessage: (message: NativeMessage) => void; disconnect?: () => void; onMessage?: PortEvent<(message: NativeMessage) => void>; onDisconnect?: PortEvent<() => void> }; jobId?: string; sendNativeMessage?: DirectArgs["sendNativeMessage"] };
 
 /** Query keys that must never appear in a handoff source URL. Single shared
  * vocabulary: mirrors `dezoomify_protocol::dto::SENSITIVE_QUERY_KEYS`,
@@ -373,7 +373,7 @@ function validateJobBinding(job: unknown): job is NativeJobBinding {
 }
 
 /** Single direct handoff exchange (current protocol only, no version range). */
-async function requestNativeHandoffDirect(args: LegacyArgs) {
+async function requestNativeHandoffDirect(args: DirectArgs) {
   let nativeCalls = 0;
   const fail = (code: string) => ({ ok: false, code, credentialSent: false, nativeCalls });
   const source = validateHandoffSource(args.sourceUrl);
@@ -549,7 +549,7 @@ async function requestNativeHandoffDirect(args: LegacyArgs) {
   return { ok: true, job: typeof started.job === "string" ? started.job : args.jobId, credentialSent: true, nativeCalls };
 }
 
-export async function requestNativeHandoff(args: LegacyArgs | PortArgs) {
-  if (typeof args?.connectNative === "function") return requestNativeHandoffViaPort(args as PortArgs);
-  return requestNativeHandoffDirect(args as LegacyArgs);
+export async function requestNativeHandoff(args: DirectArgs | PortArgs) {
+  if (typeof args?.connectNative === "function") return requestNativeHandoffViaPort(args);
+  return requestNativeHandoffDirect(args);
 }

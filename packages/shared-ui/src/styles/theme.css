@@ -1487,17 +1487,6 @@ abbr[title] {
   margin: 0.5rem 0;
 }
 
-/* Backwards compatibility for any .dz-alert-error references */
-.dz-alert-error {
-  margin-top: 1rem;
-  padding: 0;
-  background: transparent;
-  border: none;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
 /* ============================================================
    NOTICE / DISPLAY-ONLY STATE (Airy, No Nested Boxes)
    ============================================================ */

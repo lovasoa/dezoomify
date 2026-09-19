@@ -21,9 +21,9 @@ renders authoritative snapshots.
   latest snapshot and never reconstructs phases from event walks. `revision`
   increases on every applied event; observers drop stale revisions and
   unknown job ids at the async subscription boundary.
-- `applyJobEvent` is pure and total: terminal outcomes are set exactly
-  once, late events after a terminal outcome are dropped, pause keeps the
-  last progress values, and warnings stay bounded.
+- `isTerminalSnapshot`/`isActiveSnapshot` are pure predicates over absolute
+  snapshots: terminals are set exactly once by the engine, observers settle
+  on them, and nothing here folds events or assigns revisions.
 - `HostStatus` is presentation only (transport, permission, output). It is
   never a phase machine; phases come from snapshots. The initial status is
   neutral (no transport, no permission implied, output pending) until the

@@ -218,8 +218,3 @@ export function createExtensionFetcher(deps: FetchDeps) {
   function cancel() { for (const controller of active) controller.abort(); active.clear(); }
   return { fetchResource, cancel };
 }
-
-/** Compatibility name; `requestPermission` is deliberately ignored. */
-export function createSessionFetcher(deps: FetchDeps & { requestPermission?: unknown }) {
-  return createExtensionFetcher({ fetchImpl: deps.fetchImpl, hasPermission: deps.hasPermission, setTimeoutFn: deps.setTimeoutFn, clearTimeoutFn: deps.clearTimeoutFn });
-}

@@ -49,7 +49,6 @@ function harness({ fetchResource, loadDisplayImage, assembly = fakeAssembly(), p
 }
 
 const TILE = {
-  kind: "effect",
   type: "acquire-tile",
   effect: "fx:2",
   tile: 0,
@@ -62,7 +61,6 @@ function flush() { return new Promise((resolve) => setTimeout(resolve, 0)); }
 test("metadata carries the observed post-redirect URL", async () => {
   const { controller, sent } = harness();
   controller.handleEngineMessages([{
-    kind: "effect",
     type: "acquire-resource",
     effect: "fx:0",
     request: { id: 4, uri: "https://cdn.test/info.json", headers: [], purpose: "metadata" },
@@ -159,7 +157,7 @@ test("lifecycle effects run in engine order on one chain", async () => {
   // Snapshots (terminals included) ride alongside, never as messages: the
   // only job-state object always forwards, including after cancel.
   controller.handleEngineMessages([
-    { kind: "effect", type: "finalize-output", effect: "fx:10", partial: false, format: "png", canvas: { width: 32, height: 32 } },
+    { type: "finalize-output", effect: "fx:10", partial: false, format: "png", canvas: { width: 32, height: 32 } },
   ]);
   await flush();
   await flush();
@@ -171,7 +169,7 @@ test("lifecycle effects run in engine order on one chain", async () => {
 
 test("cancel-work releases retained resources and cancels fetching", async () => {
   const { controller, assembly, seen } = harness();
-  controller.handleEngineMessages([{ kind: "effect", type: "cancel-work", effect: "fx:20" }]);
+  controller.handleEngineMessages([{ type: "cancel-work", effect: "fx:20" }]);
   assert.deepEqual(assembly.calls.map(([kind]) => kind), ["release"]);
   assert.ok(seen.some(([kind]) => kind === "cancel"));
 });
@@ -181,7 +179,7 @@ test("a failed awaited output replies typed instead of faking success", async ()
   assembly.finalizeOutput = async () => { throw Object.assign(new Error("too large"), { code: "PLAN_INVALID", retryable: false }); };
   const { controller, sent, seen } = harness({ assembly });
   controller.handleEngineMessages([
-    { kind: "effect", type: "finalize-output", effect: "fx:10", partial: false, format: "png", canvas: { width: 99999, height: 99999 } },
+    { type: "finalize-output", effect: "fx:10", partial: false, format: "png", canvas: { width: 99999, height: 99999 } },
   ]);
   await flush();
   await flush();

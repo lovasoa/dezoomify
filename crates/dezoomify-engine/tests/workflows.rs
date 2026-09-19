@@ -1,6 +1,6 @@
 mod support;
 
-use dezoomify_engine::{Config, DiscoveryInput, RecoveryChoice};
+use dezoomify_engine::{Config, DiscoveryInput, Effect, RecoveryChoice};
 use support::JobCommand;
 use support::ScriptedHost;
 
@@ -55,10 +55,10 @@ fn ordered_inputs_fall_back_to_the_next_url_root() {
     .unwrap();
     host.start().unwrap();
     assert_eq!(host.state(), "Discovering");
-    assert!(host
-        .effects
-        .iter()
-        .any(|effect| effect["kind"] == "acquire-resource" && effect["uri"] == fallback));
+    assert!(host.effects.iter().any(|effect| match effect {
+        Effect::AcquireMetadata { uri, .. } => uri == fallback,
+        _ => false,
+    }));
 }
 
 #[test]
@@ -115,10 +115,10 @@ fn keeping_a_partial_result_decodes_only_acquired_tiles() {
     })
     .unwrap();
 
-    assert!(host.effects.iter().any(|effect| {
-        effect.get("kind").and_then(serde_json::Value::as_str) == Some("finalize-output")
-            && effect.get("partial").and_then(serde_json::Value::as_bool) == Some(true)
-    }));
+    assert!(host
+        .effects
+        .iter()
+        .any(|effect| { matches!(effect, Effect::FinalizeOutput { partial: true, .. }) }));
     host.apply(JobCommand::FinalizationSucceeded).unwrap();
     assert_eq!(host.state(), "PartiallyCompleted");
     assert_eq!(host.terminal_kind().as_deref(), Some("partial-completed"));

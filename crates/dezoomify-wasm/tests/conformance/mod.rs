@@ -8,7 +8,7 @@ use wasm_bindgen_test::*;
 #[wasm_bindgen_test]
 fn typed_session_returns_messages_directly() {
     let mut session = Session::new(SessionConfig::default()).expect("session");
-    let (messages, _snapshot) = session
+    let (messages, snapshot) = session
         .dispatch(JobCommand::Start {
             inputs: vec![JobInputDto::new("https://example.com/image.dzi")],
         })
@@ -16,5 +16,8 @@ fn typed_session_returns_messages_directly() {
     assert!(messages
         .iter()
         .any(|message| matches!(message, HostEffect::AcquireResource { .. })));
-    assert_eq!(session.state().as_str(), "Discovering");
+    assert_eq!(
+        snapshot.lifecycle,
+        dezoomify_protocol::dto::JobState::Discovering
+    );
 }
