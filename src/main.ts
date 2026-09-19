@@ -73,7 +73,6 @@ import {
   createWebQueue,
   enqueueWebQueue,
   finishActiveWebEntry,
-  isWebQueueAvailable,
   summarizeWebQueue,
 } from "../packages/browser-runtime/src/queue.ts";
 import {
@@ -184,13 +183,6 @@ function recordWebHistory(url: string, width: number, height: number, format: st
 // A failed entry never stops the rest. Hash writes stay active-only: only the
 // running job owns `window.location.hash`, queued URLs never do.
 let webQueue = createWebQueue();
-// Negotiated queue availability: the website baseline offers the queue
-// (`bulk_supported` true); an N-1 peer without it falls back to the legacy
-// cancel-previous behavior.
-const WEB_QUEUE_CAPS = { bulkSupported: true };
-function webQueueEnabled(): boolean {
-  return isWebQueueAvailable(WEB_QUEUE_CAPS);
-}
 
 // --- Live job activity (drives the progressive-disclosure job view) ---
 const jobActivity = createJobActivity({ onUpdate: update });
@@ -734,28 +726,22 @@ async function runJob(url: string, origin = url): Promise<void> {
   // Sequential queue: the active entry settles, then the first waiting
   // entry (if any) becomes active and starts. A failed entry never stops
   // the rest. Engine stays single-job throughout.
-  if (webQueueEnabled()) {
-    const settled = finishActiveWebEntry(webQueue, queueOutcome);
-    webQueue = settled.queue;
-    const next = settled.next;
-    if (next) {
-      if (isTerminalNow()) {
-        activeSnapshot = null;
-        displayOnlyActive = false;
-        hostFailure = null;
-      }
-      const summary = summarizeWebQueue(webQueue);
-      webLog.info("queue", `succeeded=${summary.succeeded} failed=${summary.failed} pending=${summary.pending}`);
-      void runJob(next.url);
+  const settled = finishActiveWebEntry(webQueue, queueOutcome);
+  webQueue = settled.queue;
+  const next = settled.next;
+  if (next) {
+    if (isTerminalNow()) {
+      activeSnapshot = null;
+      displayOnlyActive = false;
+      hostFailure = null;
     }
+    const summary = summarizeWebQueue(webQueue);
+    webLog.info("queue", `succeeded=${summary.succeeded} failed=${summary.failed} pending=${summary.pending}`);
+    void runJob(next.url);
   }
 }
 
 function submitQueuedUrl(url: string): void {
-  if (!webQueueEnabled()) {
-    void runJob(url);
-    return;
-  }
   const res = enqueueWebQueue(webQueue, url);
   webQueue = res.queue;
   if (res.code !== "ok" || !res.entry) {
@@ -887,10 +873,8 @@ function update(): void {
         disposeAttempt();
         // Stop returns directly to the initial view. Effects from the retired
         // run finish harmlessly without mutating the replacement job.
-        if (webQueueEnabled()) {
-          webQueue = cancelAllWeb(webQueue);
-          webQueue = createWebQueue();
-        }
+        webQueue = cancelAllWeb(webQueue);
+        webQueue = createWebQueue();
         resetJobViewState();
         webFetcher.resetActiveTransport();
         tileThrottle.reset();
@@ -912,10 +896,8 @@ function update(): void {
         setCanvasVisible(document, false);
         preview.resetTransform(document);
         // Reset clears the whole queue: no new work is issued afterwards.
-        if (webQueueEnabled()) {
-          webQueue = cancelAllWeb(webQueue);
-          webQueue = createWebQueue();
-        }
+        webQueue = cancelAllWeb(webQueue);
+        webQueue = createWebQueue();
         resetJobViewState();
         clearHash();
         if (resultBlobUrl) {
