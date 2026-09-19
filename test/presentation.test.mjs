@@ -114,6 +114,18 @@ test("failure presenter keeps the engine block out of the headline", () => {
   assert.equal(error.detail, engineBlock);
 });
 
+test("a fetch failure keeps its classified headline", () => {
+  const error = describeFailure({
+    code: "TRANSPORT_HTTP_ERROR",
+    message: "The site refused to share this file (HTTP 403). It may block shared servers; the browser extension or the desktop app may still work.",
+    retryable: false,
+  });
+  assert.equal(
+    error.message,
+    "The site refused to share this file (HTTP 403). It may block shared servers; the browser extension or the desktop app may still work.",
+  );
+});
+
 test("failure classification derives from codes, never text", () => {
   assert.equal(categoryFor("NO_IMAGE_FOUND"), "discovery");
   assert.equal(categoryFor("INVALID_URL"), "validation");

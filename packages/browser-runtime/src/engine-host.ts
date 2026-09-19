@@ -35,6 +35,7 @@ import type {
   BlockedReason,
   ErrorDto,
   ErrorTransport,
+  FetchFailureCode,
   FetchFailureDto,
   HostEffect,
   JobInputDto,
@@ -66,7 +67,7 @@ export type AcquireEffect = Extract<HostEffect, { type: "acquire-resource" | "ac
 type EffectMessage = HostEffect;
 
 export interface HostFailure {
-  code: string;
+  code: FetchFailureCode;
   retryable: boolean;
   message: string;
   blocked_reason?: BlockedReason;
@@ -488,7 +489,7 @@ export function createEngineHost(deps: EngineHostDeps) {
   function finalizationError(error: unknown): ErrorDto {
     const failure = deps.classifyFailure(error);
     return {
-      code: failure.code,
+      code: `${failure.code}`,
       phase: "output",
       retryable: failure.retryable,
       message: failure.message,

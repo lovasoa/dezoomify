@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createWebFetcher } from "../src/web-fetch.ts";
+import { classifyProxyFailure, createWebFetcher } from "../src/web-fetch.ts";
 
 function hooks(log = []) {
   let seq = 0;
@@ -24,6 +24,16 @@ const messages = {
   siteBusy: "SITE_BUSY",
   discoveryFailed: (via) => `DISCOVERY_FAILED_VIA_${via}`,
 };
+
+test("a proxy 403 retains its canonical fetch code and classified sentence", () => {
+  const failure = classifyProxyFailure({ status: 403, code: "TRANSPORT_HTTP_ERROR" });
+  assert.equal(failure.code, "TRANSPORT_HTTP_ERROR");
+  assert.equal(failure.retryable, false);
+  assert.equal(
+    failure.message,
+    "The site refused to share this file (HTTP 403). It may block shared servers; the browser extension or the desktop app may still work.",
+  );
+});
 
 function okBytesFetch(bytes = new Uint8Array([1, 2]).buffer, url = "https://a.test/final.json") {
   return async () => ({

@@ -42,7 +42,7 @@ Commands, effects, events, config, errors, URLs, and handles cross as plain Java
 
 ## Errors
 
-`ErrorDto`: stable code, phase, retryability, user message, recovery actions, plus optional request URI, transport, resource kind, blocked reason, HTTP status, bounded server signal, diagnostics. Browser fetch failures cross as `FetchFailureDto` (host-observed facts only); the Rust session adds the correlated request's phase, URI, and kind, so classifiers omit and invent nothing. See [Errors and recovery](errors.md).
+`ErrorDto`: stable code, phase, retryability, user message, recovery actions, plus optional request URI, transport, resource kind, blocked reason, HTTP status, bounded server signal, diagnostics. Browser fetch failures cross as `FetchFailureDto` with a generated `FetchFailureCode`; the Rust session adds the correlated request's phase, URI, and resource kind, so classifiers omit and invent nothing. The fetch code replaces the untyped fetch-code string and preserves its stable wire values. See [Errors and recovery](errors.md).
 
 Adapter faults (bad external input, session misuse) travel the separate `DispatchResult` error branch and never replace a job failure.
 

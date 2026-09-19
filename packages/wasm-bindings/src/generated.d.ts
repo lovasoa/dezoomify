@@ -185,6 +185,14 @@ export interface SnapshotDecisionDto {
 export type RequestPurpose = "metadata" | "tile" | "probe";
 
 /**
+ * Stable code for a host-observed fetch failure.
+ *
+ * Variant identifiers are the protocol's serialized values, so this enum
+ * preserves the pre-existing wire vocabulary without rename tables.
+ */
+export type FetchFailureCode = "TRANSPORT_HTTP_ERROR" | "DISCOVERY_HTTP_ERROR" | "UPSTREAM_RATE_LIMITED" | "TRANSPORT_POLICY_DENIED" | "PROXY_BUDGET_EXCEEDED" | "PROXY_ERROR" | "PROXY_NETWORK_ERROR" | "PROXY_RATE_LIMITED" | "DISCOVERY_FAILED" | "TRANSPORT_TIMEOUT" | "TRANSPORT_NETWORK_ERROR" | "TRANSPORT_CANCELLED" | "TRANSPORT_BAD_URL" | "TRANSPORT_BAD_REDIRECT" | "TRANSPORT_REDIRECT_LIMIT" | "TRANSPORT_SIZE_LIMIT";
+
+/**
  * Stable ordered catalog projection (never exposes private core enums).
  */
 export interface CatalogDto {
@@ -244,7 +252,7 @@ export interface ErrorDto {
 }
 
 export interface FetchFailureDto {
-    code: string;
+    code: FetchFailureCode;
     retryable: boolean;
     message: string;
     recovery?: RecoveryAction[];

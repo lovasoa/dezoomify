@@ -56,7 +56,7 @@ fn typed_fetch_error_requires_and_preserves_context() {
         })
         .expect("discovery request");
     let error = FetchFailureDto {
-        code: "PROXY_ERROR".into(),
+        code: dezoomify_protocol::dto::FetchFailureCode::PROXY_ERROR,
         retryable: true,
         message: "The metadata proxy failed.".into(),
         recovery: Vec::new(),
@@ -212,7 +212,7 @@ fn session_acquiring_tiles() -> (Session, Vec<(u32, u32)>) {
 
 fn transient_timeout() -> FetchFailureDto {
     FetchFailureDto {
-        code: "TRANSPORT_TIMEOUT".into(),
+        code: dezoomify_protocol::dto::FetchFailureCode::TRANSPORT_TIMEOUT,
         retryable: true,
         message: "tile fetch timed out".into(),
         recovery: Vec::new(),
