@@ -209,7 +209,7 @@ export function createEngineHost(deps: EngineHostDeps) {
       const abandoned = await sleepWithAbort(effect.delay_ms, ctrl.signal);
       if (tornDown() || abandoned || ctrl.signal.aborted) return;
       log("debug", "effect-retry-elapsed", `tile=${effect.tile} attempt=${effect.attempt}`);
-      sendToEngine({ type: "engine.timer-elapsed", tile: effect.tile, attempt: effect.attempt });
+      sendToEngine({ type: "engine.timer-elapsed", effect: effect.effect });
     } finally {
       pendingRetries.delete(ctrl);
     }
@@ -523,7 +523,7 @@ export function createEngineHost(deps: EngineHostDeps) {
     } catch (error) {
       sendToEngine({
         type: "engine.finalize",
-        outcome: { type: "finalization-failed", error: finalizationError(error) },
+        outcome: { type: "finalization-failed", effect: effect.effect, error: finalizationError(error) },
       });
       return;
     }
@@ -534,6 +534,7 @@ export function createEngineHost(deps: EngineHostDeps) {
       // instead of claiming a saved file.
       outcome: {
         type: "finalization-succeeded",
+        effect: effect.effect,
         disposition: deps.assembly.isTainted?.() === true ? "display-only" : "browser-save-initiated",
       },
     });

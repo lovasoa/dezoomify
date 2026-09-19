@@ -6,15 +6,17 @@
 
 ## WASM session ABI
 
-One JavaScript `Session` owns one Rust job and byte arena:
+One JavaScript `Session` owns one Rust job. Metadata bodies pass directly to the engine; tile success carries no body.
 
 ```mermaid
 sequenceDiagram
     participant JS as JavaScript host
-    participant S as Session (Rust job + arena)
+    participant S as Session (Rust job)
     JS->>S: new Session(SessionConfig)
     S-->>JS: validated session
-    JS->>S: dispatch(JobCommand)
+    JS->>S: command(JobCommand)
+    S-->>JS: DispatchResult with ordered HostEffect[] + EngineSnapshotDto
+    JS->>S: complete(HostCompletion)
     S-->>JS: DispatchResult with ordered HostEffect[] + EngineSnapshotDto
     JS->>S: snapshot()
     S-->>JS: current EngineSnapshotDto
@@ -23,19 +25,20 @@ sequenceDiagram
 ```
 
 - `new Session(SessionConfig)` validates typed quotas;
-- `dispatch(JobCommand)` returns a `DispatchResult` immediately;
+- `command(JobCommand)` sends user intent and returns a `DispatchResult` immediately;
+- `complete(HostCompletion)` answers a host effect and returns a `DispatchResult`;
 - a successful result contains ordered `HostEffect[]` values plus the
   absolute `EngineSnapshotDto` after the answer;
 - `snapshot()` returns the current `EngineSnapshotDto` without dispatching;
 - `dispose()` returns its final `DispatchResult` and is repeat-safe;
 
-Commands, effects, events, config, errors, URLs, and handles cross as plain JavaScript objects (fallible `tsify`/`serde-wasm-bindgen` conversion). Binary bodies cross inside commands; engine quotas bound retained bytes. Fixed vocabularies (processing recipes, output formats) are generated string unions, never free text. Present probe observations carry non-zero dimensions; a missing observation is its own union variant.
+Commands, effects, events, config, errors, URLs, and handles cross as plain JavaScript objects (fallible `tsify`/`serde-wasm-bindgen` conversion). Metadata bodies cross inside host completions; processing bodies use `applyProcessing`; engine quotas bound retained bytes. Fixed vocabularies (processing recipes, output formats) are generated string unions, never free text. Present probe observations carry non-zero dimensions; a missing observation is its own union variant.
 
 ## Commands, effects, and snapshots
 
-`JobCommand` carries user intent only: `Start` carries ordered discovery roots; image/level choices are zero-based catalog positions; deferred metadata travels as `ImageRequest` entries with a follow-up URI the host follows within the same job through `follow-deferred{image}` (bounded follows, cycle-guarded, catalog replaced, no host-created replacement jobs); partial answers cross as `answer-partial{generation, decision}` with the engine `AnswerPartial` vocabulary, and stale generations are rejected rather than consumed in order. `HostCompletion` answers one correlated effect: bytes, failures, observations, and publication claims cross only here. Discovery failure context travels through the engine `note_metadata_failure` retention; the adapter retains nothing and the engine clears the retention on a winning catalog. The split is structural: the session routes user commands to the engine `command` entry point and completions to `complete`/`provide_metadata`, so user commands never supply bytes and never claim publication; bytes travel through `provide_metadata` and publication is reported by the host through the finalize completion. A host-reported `RetryTimerElapsed{tile, attempt}` answers one outstanding `wait-retry-timer` effect; stale or duplicate completions are ignored.
+`JobCommand` carries user intent only: `Start` carries ordered discovery roots; image/level choices are zero-based catalog positions; deferred metadata travels as `ImageRequest` entries with a follow-up URI the host follows within the same job through `follow-deferred{image}` (bounded follows, cycle-guarded, catalog replaced, no host-created replacement jobs); partial answers cross as `answer-partial{generation, decision}` with the engine `AnswerPartial` vocabulary, and stale generations are rejected rather than consumed in order. `HostCompletion` answers one correlated effect: bytes, failures, observations, and publication claims cross only here. Discovery failure context travels through the engine `note_metadata_failure` retention; the adapter retains nothing and the engine clears the retention on a winning catalog. The split is structural: the session routes user commands to the engine `command` entry point and completions to `complete`/`provide_metadata`, so user commands never supply bytes and never claim publication; bytes travel through `provide_metadata` and publication is reported by the host through the finalize completion. A host-reported `RetryTimerElapsed{effect}` answers the exact outstanding `wait-retry-timer` effect. Finalization success and failure likewise echo `effect`. The session forwards those engine-minted IDs without maintaining timer or finalization correlation tables; stale, duplicate, and wrong-kind answers are rejected without consuming a live effect.
 
-`HostEffect` (resource/tile/probe acquisition, finalization, cancellation, recovery decisions) is exhaustive; boundaries handle it through typed tables. Job state crosses as absolute `EngineSnapshotDto` projections, never as event walks. Effect meanings are in the [host-effect contract](job-engine.md#host-effect-contract). The retry timer effect is `wait-retry-timer{tile, attempt, delay_ms}`: the host waits `delay_ms` on its own clock and then answers with the matching `RetryTimerElapsed`. Tile failures cross as `TileFailureDto{code, category, http, retry_after_ms, detail}` with bounded diagnostics; `FetchFailureDto` carries the host-observed `retry_after_ms` when the response carries one. The engine backoff is a 1 s base doubling to a 30 s ceiling, with an observed `retry-after` honored to 300 s. Tile acquisition carries `TilePlacementDto{position, expected_size, canvas, processing, probe_output}` so hosts assemble without re-deriving geometry. The format grid includes `second_canvas`.
+`HostEffect` (resource/tile/probe acquisition, finalization, cancellation, recovery decisions) is exhaustive; boundaries handle it through typed tables. Job state crosses as absolute `EngineSnapshotDto` projections, never as event walks. Effect meanings are in the [host-effect contract](job-engine.md#host-effect-contract). The retry timer effect is `wait-retry-timer{effect, tile, attempt, delay_ms}`: the host waits `delay_ms` on its own clock and then answers with the matching `RetryTimerElapsed{effect}`. The engine parks ready retries while paused; the host only waits and reports completion. Tile failures cross as `TileFailureDto{code, category, http, retry_after_ms, detail}` with bounded diagnostics; `FetchFailureDto` carries the host-observed `retry_after_ms` when the response carries one. The engine backoff is a 1 s base doubling to a 30 s ceiling, with an observed `retry-after` honored to 300 s. Tile acquisition carries `TilePlacementDto{position, expected_size, canvas, processing, probe_output}` so hosts assemble without re-deriving geometry. The format grid includes `second_canvas`.
 
 ## Errors
 

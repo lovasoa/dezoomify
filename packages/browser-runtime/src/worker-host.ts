@@ -51,7 +51,7 @@ export type WorkerHostMessage =
   | { type: "engine.process"; requestId: number; recipe: ProcessingRecipe; bytes: Uint8Array | ArrayBuffer }
   | { type: "engine.rank"; requestId: number; urls: string[] }
   | { type: "engine.failure"; requestId: number; error: FetchFailureDto }
-  | { type: "engine.timer-elapsed"; tile: number; attempt: number }
+  | { type: "engine.timer-elapsed"; effect: number }
   | { type: "engine.command"; command: JobCommand }
   | { type: "engine.finalize"; outcome: Extract<HostCompletion, { type: "finalization-succeeded" } | { type: "finalization-failed" }> }
   | { type: "engine.dispose" };
@@ -168,7 +168,7 @@ export function createJobWorkerHost(deps: {
       complete({ type: "provide-fetch-failure", request: input.requestId, error: input.error });
     },
     "engine.timer-elapsed": (input) => {
-      complete({ type: "retry-timer-elapsed", tile: input.tile, attempt: input.attempt });
+      complete({ type: "retry-timer-elapsed", effect: input.effect });
     },
     "engine.command": (input) => dispatch(input.command),
     "engine.finalize": (input) => complete(input.outcome),

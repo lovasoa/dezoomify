@@ -225,13 +225,14 @@ fn transient_timeout() -> FetchFailureDto {
     }
 }
 
-fn timer_of(messages: &[HostEffect]) -> Option<(u32, u32, u64)> {
+fn timer_of(messages: &[HostEffect]) -> Option<(u32, u32, u32, u64)> {
     messages.iter().find_map(|message| match message {
         HostEffect::WaitRetryTimer {
+            effect,
             tile,
             attempt,
             delay_ms,
-        } => Some((*tile, *attempt, *delay_ms)),
+        } => Some((*effect, *tile, *attempt, *delay_ms)),
         _ => None,
     })
 }
@@ -349,13 +350,13 @@ fn transient_failure_eventually_succeeds_after_host_wait() {
         })
         .expect("transient failure accepted");
     let wait = timer_of(&messages).expect("retry wait issued");
-    assert_eq!((wait.0, wait.1), (tile, 1));
-    assert!(wait.2 > 0);
+    assert_eq!((wait.1, wait.2), (tile, 1));
+    assert!(wait.3 > 0);
     assert_eq!(reacquired_request(&messages, tile), None);
 
     // The host waits, then answers the timer: the retry succeeds.
     let (messages, _snapshot) = session
-        .complete(HostCompletion::RetryTimerElapsed { tile, attempt: 1 })
+        .complete(HostCompletion::RetryTimerElapsed { effect: wait.0 })
         .expect("timer elapsed");
     request = reacquired_request(&messages, tile).expect("second attempt issued");
 
@@ -413,18 +414,20 @@ fn display_only_finalize_reports_display_only_disposition() {
     let (mut session, tiles) = session_acquiring_tiles();
     // Ordinary image display: every tile completes body-free, then the host
     // finalizes with the honest display-only disposition it observed.
-    let mut finalize_seen = false;
+    let mut finalize_effect = None;
     for (_, request) in &tiles {
         let (messages, _snapshot) = session
             .complete(HostCompletion::ProvideDisplayOutcome { request: *request })
             .expect("display outcome");
-        finalize_seen |= messages
-            .iter()
-            .any(|message| matches!(message, HostEffect::FinalizeOutput { .. }));
+        finalize_effect = messages.iter().find_map(|message| match message {
+            HostEffect::FinalizeOutput { effect, .. } => Some(*effect),
+            _ => None,
+        });
     }
-    assert!(finalize_seen, "display-only acquisition finalizes");
+    let finalize_effect = finalize_effect.expect("display-only acquisition finalizes");
     let (_messages, snapshot) = session
         .complete(HostCompletion::FinalizationSucceeded {
+            effect: finalize_effect,
             disposition: OutputDispositionDto::DisplayOnly,
         })
         .expect("display-only finalize accepted");

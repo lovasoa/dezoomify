@@ -201,7 +201,7 @@ test("probe effects report measurements without retaining tiles", async () => {
 test("lifecycle effects run in engine order on one chain", async () => {
   const { controller, assembly, sent } = harness();
   controller.handleEngineMessages([
-    { type: "finalize-output", partial: false, format: "png", canvas: { width: 32, height: 32 } },
+    { type: "finalize-output", effect: 10, partial: false, format: "png", canvas: { width: 32, height: 32 } },
   ]);
   await flush();
   await flush();
@@ -209,12 +209,12 @@ test("lifecycle effects run in engine order on one chain", async () => {
   assert.deepEqual(kinds, ["finalizeOutput"]);
   assert.deepEqual(assembly.calls[0], ["finalizeOutput", false, "png", { width: 32, height: 32 }]);
   const finalized = sent.find((message) => message.type === "engine.finalize");
-  assert.deepEqual(finalized.outcome, { type: "finalization-succeeded", disposition: "browser-save-initiated" });
+  assert.deepEqual(finalized.outcome, { type: "finalization-succeeded", effect: 10, disposition: "browser-save-initiated" });
 });
 
 test("cancel-work releases retained resources and cancels fetching", async () => {
   const { controller, assembly, seen } = harness();
-  controller.handleEngineMessages([{ type: "cancel-work" }]);
+  controller.handleEngineMessages([{ type: "cancel-work", effect: 20 }]);
   assert.deepEqual(assembly.calls.map(([kind]) => kind), ["release"]);
   assert.ok(seen.some(([kind]) => kind === "cancel"));
 });
@@ -224,12 +224,13 @@ test("a failed awaited output replies typed instead of crashing the host", async
   assembly.finalizeOutput = async () => { throw Object.assign(new Error("too large"), { code: "PLAN_INVALID", retryable: false }); };
   const { controller, sent, seen } = harness({ assembly });
   controller.handleEngineMessages([
-    { type: "finalize-output", partial: false, format: "png", canvas: { width: 99999, height: 99999 } },
+    { type: "finalize-output", effect: 10, partial: false, format: "png", canvas: { width: 99999, height: 99999 } },
   ]);
   await flush();
   await flush();
   const finalized = sent.find((message) => message.outcome?.type === "finalization-failed");
   assert.ok(finalized, "typed finalization failure was sent");
+  assert.equal(finalized.outcome.effect, 10);
   assert.equal(finalized.outcome.error.code, "PLAN_INVALID");
   assert.equal(seen.some(([kind]) => kind === "host-failure"), false, "an awaited failure is not a host crash");
 });
