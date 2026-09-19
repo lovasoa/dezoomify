@@ -1,4 +1,4 @@
-//! Native download pipeline: one [`dezoomify_engine::Job`] owns discovery,
+//! Native download pipeline: one [`dezoomify_engine::EngineJob`] owns discovery,
 //! selection, planning, retry, and lifecycle policy; this module executes its
 //! effects with real HTTP, decode, assemble, encode, and atomic-write fns.
 //!

@@ -1,42 +1,45 @@
 //! One-session job owner: typed configuration and dispatch, one pure
 //! processing operation, and disposal.
 //!
-//! ## Real job-engine delegation
+//! ## Canonical engine delegation
 //!
-//! [`Session`] owns a [`dezoomify_engine::Job`] and delegates the whole
-//! lifecycle to it. The adapter projects the engine's single typed FIFO
-//! queue directly onto generated ABI contract values.
+//! [`Session`] owns a [`dezoomify_engine::EngineJob`] and drives the whole
+//! lifecycle through the canonical API (`start`, `command`, `complete`,
+//! `provide_metadata`). Each answer returns the newly issued effects plus
+//! the current snapshot; the adapter projects the new effects onto the
+//! generated ABI contract values and derives the ABI event stream from
+//! snapshot diffs (state, catalog, progress, decision, notices, terminal).
 //!
 //! Host interaction map (every path is explicit and correlated):
 //!
 //! * `Start` creates the engine job and emits its first effects/events.
 //! * Discovery bytes: `ProvideResource` carries the resource body directly
-//!   (`bytes`) for one outstanding `acquire-resource` effect (the engine
-//!   may ask for several metadata resources). Bytes cross in the command;
-//!   nothing is retained adapter-side.
+//!   (`bytes`) for one outstanding metadata effect. Bytes cross in the
+//!   command; nothing is retained adapter-side.
 //! * Tile success is body-free: `ProvideDisplayOutcome` answers one
-//!   outstanding `acquire-tile` effect and forwards a typed `TileDisplayed`
+//!   outstanding tile effect and forwards a typed `TileDisplayed`
 //!   (the host holds an ordinary image element with no readable bytes; the
 //!   tainted output completes as display-only downstream).
-//! * Probe observations: each `acquire-tile` with `purpose: probe` is
+//! * Probe observations: each tile effect with `purpose: probe` is
 //!   answered with `ProvideProbeOutcome` (request id plus a discriminated
-//!   available/missing observation) and forwarded as the engine `ProbeOutcome`.
-//!   Probe bytes are measured by the host and never retained.
-//! * `ProvideFetchFailure` maps to `FetchFailure` (discovery request), a
-//!   typed `TileFailed` carrying the observed HTTP status and `retry-after`
-//!   hint for tile refusals (permanent failures such as HTTP 403 settle
-//!   after exactly one attempt; transient failures retry on the exact
-//!   budget with explicit timer effects), or a missing `ProbeOutcome`
-//!   (probe request).
-//! * `RetryTimerElapsed` answers one outstanding `wait-retry-timer` effect
-//!   with the same tile and attempt after the host waited `delay_ms` on
-//!   its own clock. While paused the host parks the completion and answers
-//!   on resume; stale completions are ignored.
+//!   available/missing observation) and forwarded as the engine
+//!   `ProbeAvailable`/`ProbeMissing`. Probe bytes are measured by the host
+//!   and never retained.
+//! * `ProvideFetchFailure` maps to a metadata failure (discovery request),
+//!   a typed `TileFailed` carrying the observed HTTP status and
+//!   `retry-after` hint for tile refusals (permanent failures such as HTTP
+//!   403 settle after exactly one attempt; transient failures retry on the
+//!   exact budget with explicit timer effects), or a missing probe
+//!   observation (probe request).
+//! * `RetryTimerElapsed` answers one outstanding retry-timer effect with
+//!   the same tile and attempt after the host waited `delay_ms` on its own
+//!   clock. While paused the host parks the completion and answers on
+//!   resume; stale completions are ignored.
 //! * Decisions: `SelectImage`, `SelectLevel`, and `RecoveryChoice` map 1:1
-//!   onto engine responses. `RecoveryChoice` must reference the outstanding
+//!   onto engine commands. `RecoveryChoice` must reference the outstanding
 //!   numeric decision generation.
 //! * `FinalizationSucceeded` and `FinalizationFailed` complete the one
-//!   awaited `finalize-output` effect.
+//!   awaited finalize effect.
 //! * `CancelWork` instructs the host to close its own retained resources.
 //!
 //! Engine resources beyond this model are engine limitations, not adapter
@@ -47,11 +50,14 @@
 //! (`job.empty-resource`); nothing here can fake completion.
 
 use crate::error::{AdapterError, AdapterErrorCode};
-use dezoomify_core::core::discovery::{FetchCause, FetchCode, PolicyReason, TransportKind};
+use dezoomify_core::core::discovery::TransportKind;
 use dezoomify_engine::{
-    Job as EngineJob, JobCommand as EngineCommand, JobEffect as EngineEffect,
-    JobError as EngineJobError, JobEvent as EngineEvent, JobMessageBody, Outcome,
-    RecoveryChoice as EngineRecoveryChoice, TileFailure as EngineTileFailure,
+    Effect as EngineEffect, EffectId as EngineEffectId, EffectResult as EngineEffectResult,
+    EngineError as EngineJobError, EngineJob, Failure as EngineFailure,
+    JobOptions as EngineOptions, Lifecycle as EngineLifecycle,
+    PartialDecision as EnginePartialDecision, ResponseMetadata as EngineResponseMetadata,
+    SelectionPolicy as EngineSelectionPolicy, Update as EngineUpdate,
+    UserCommand as EngineUserCommand,
 };
 use dezoomify_protocol::dto::{
     ErrorDto, ErrorPhase, ErrorTransport, FetchFailureDto, HeaderDto, HostEffect, HostMessage,
@@ -61,7 +67,7 @@ use dezoomify_protocol::dto::{
 };
 use std::collections::{HashMap, HashSet};
 
-/// Session lifecycle state, projected 1:1 from the engine state machine.
+/// Session lifecycle state, projected from the canonical engine snapshot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SessionState {
     Created,
@@ -109,42 +115,57 @@ impl SessionState {
         )
     }
 
-    fn from_engine(state: dezoomify_engine::State) -> Self {
-        use dezoomify_engine::State as S;
+    fn from_engine(state: EngineLifecycle) -> Self {
         match state {
-            S::Created => Self::Created,
-            S::Discovering => Self::Discovering,
-            S::AwaitingImageSelection => Self::AwaitingImageSelection,
-            S::AwaitingLevelSelection => Self::AwaitingLevelSelection,
-            S::Planning => Self::Planning,
-            S::AcquiringTiles => Self::AcquiringTiles,
-            S::AwaitingPartialDecision => Self::AwaitingPartialDecision,
-            S::Finalizing => Self::Finalizing,
-            S::Cancelling => Self::Cancelling,
-            S::Completed => Self::Completed,
-            S::PartiallyCompleted => Self::PartiallyCompleted,
-            S::Failed => Self::Failed,
-            S::Cancelled => Self::Cancelled,
+            EngineLifecycle::Created => Self::Created,
+            EngineLifecycle::Discovering => Self::Discovering,
+            EngineLifecycle::AwaitingImageSelection => Self::AwaitingImageSelection,
+            EngineLifecycle::AwaitingLevelSelection => Self::AwaitingLevelSelection,
+            EngineLifecycle::Planning => Self::Planning,
+            EngineLifecycle::AcquiringTiles => Self::AcquiringTiles,
+            EngineLifecycle::AwaitingPartialDecision => Self::AwaitingPartialDecision,
+            EngineLifecycle::Finalizing => Self::Finalizing,
+            EngineLifecycle::Completed => Self::Completed,
+            EngineLifecycle::PartiallyCompleted => Self::PartiallyCompleted,
+            EngineLifecycle::Failed => Self::Failed,
+            EngineLifecycle::Cancelled => Self::Cancelled,
         }
     }
 }
 
 /// One adapter session: exactly one engine job plus its request correlation.
-#[derive(Debug)]
 pub struct Session {
     job: Option<EngineJob>,
-    job_config: dezoomify_engine::Config,
+    session_config: SessionConfig,
     state: SessionState,
     disposed: bool,
-    /// Outstanding discovery request ids from acquire-resource effects.
+    /// Last emitted lifecycle (snapshot-diff event derivation).
+    emitted_state: Option<SessionState>,
+    /// Whether the catalog event was emitted for the current catalog.
+    emitted_catalog: bool,
+    /// Last emitted progress counts.
+    emitted_progress: Option<(u64, Option<u64>)>,
+    /// Last emitted decision generation.
+    emitted_decision: Option<u32>,
+    /// Whether the terminal event was emitted.
+    emitted_terminal: bool,
+    /// Last emitted pause flag.
+    emitted_paused: bool,
+    /// Engine notices already emitted (identity keys).
+    emitted_notice_keys: Vec<String>,
+    /// Outstanding metadata effect ids (adapter request id == effect id).
     live_discovery_requests: HashSet<u32>,
-    /// Adapter-minted tile request id -> engine tile id.
+    /// Adapter tile/probe request id -> engine tile id.
     outstanding_tile_requests: HashMap<u32, u32>,
     /// Complete adapter-emitted request context, keyed by its correlation id.
     request_context: HashMap<u32, RequestDto>,
     /// Adapter-minted probe request ids (subset of tile requests emitted
     /// while planning probe-driven levels).
     probe_requests: HashSet<u32>,
+    /// Outstanding retry-timer effects by (tile, attempt).
+    live_timers: HashMap<(u32, u32), EngineEffectId>,
+    /// Outstanding finalize effect, if the host awaits output.
+    live_finalize: Option<EngineEffectId>,
     /// Recovery id from the latest request-decision effect.
     pending_recovery: Option<u32>,
     /// The complete browser failure that caused discovery to terminate.
@@ -160,30 +181,24 @@ impl Session {
     ///
     /// Returns the engine validation failure for invalid job budgets.
     pub fn new(config: SessionConfig) -> Result<Self, AdapterError> {
-        // Optional job-budget overrides; the engine validates them when the
-        // job is created, so zero/oversized values fail typed there.
-        let mut job_config = dezoomify_engine::Config::default();
-        if let Some(value) = config.max_concurrent_fetches {
-            job_config.max_concurrent_fetches = value.get();
-        }
-        if let Some(value) = config.max_concurrent_decodes {
-            job_config.max_concurrent_decodes = value.get();
-        }
-        if let Some(value) = config.max_tiles {
-            job_config.max_tiles = value.get();
-        }
-        if let Some(value) = config.max_retries {
-            job_config.max_retries = value;
-        }
         Ok(Self {
             job: None,
-            job_config,
+            session_config: config,
             state: SessionState::Created,
             disposed: false,
+            emitted_state: None,
+            emitted_catalog: false,
+            emitted_progress: None,
+            emitted_decision: None,
+            emitted_terminal: false,
+            emitted_paused: false,
+            emitted_notice_keys: Vec::new(),
             live_discovery_requests: HashSet::new(),
             outstanding_tile_requests: HashMap::new(),
             request_context: HashMap::new(),
             probe_requests: HashSet::new(),
+            live_timers: HashMap::new(),
+            live_finalize: None,
             pending_recovery: None,
             terminal_discovery_error: None,
         })
@@ -213,7 +228,7 @@ impl Session {
         let job = self.job.as_ref().ok_or_else(|| {
             AdapterError::new(AdapterErrorCode::WrongState, "session has no active job")
         })?;
-        Ok(dezoomify_engine::project_engine_snapshot(job))
+        Ok(job.project_dto())
     }
 
     fn require_live(&self) -> Result<(), AdapterError> {
@@ -246,24 +261,33 @@ impl Session {
             return Ok(Vec::new());
         }
         self.disposed = true;
-        let messages = if let Some(job) = self.job.as_mut() {
-            if !job.is_terminal() {
-                let _ = job.on_command(EngineCommand::Cancel);
-                self.absorb()
-                    .unwrap_or_else(|_| self.force_cancelled_event())
+        let mut messages = if let Some(job) = self.job.as_mut() {
+            if job.snapshot().terminal.is_none() {
+                match job.command(EngineUserCommand::Cancel) {
+                    Ok(update) => self.drain_update(update),
+                    Err(_) => vec![self.force_cancelled_event()],
+                }
             } else {
                 Vec::new()
             }
         } else {
-            self.force_cancelled_event()
+            vec![self.force_cancelled_event()]
         };
+        if !messages.iter().any(|message| {
+            matches!(
+                message,
+                HostMessage::Event(JobEvent::Cancelled | JobEvent::Failed { .. })
+            )
+        }) {
+            messages.push(self.force_cancelled_event());
+        }
         self.job = None;
         Ok(messages)
     }
 
-    fn force_cancelled_event(&mut self) -> Vec<HostMessage> {
+    fn force_cancelled_event(&mut self) -> HostMessage {
         self.state = SessionState::Cancelled;
-        vec![HostMessage::Event(JobEvent::Cancelled)]
+        HostMessage::Event(JobEvent::Cancelled)
     }
 
     /// Apply one core processing recipe to fetched tile bytes. Pure: it
@@ -284,15 +308,15 @@ impl Session {
     }
 
     // -----------------------------------------------------------------------
-    // Command dispatch (delegation to the engine)
+    // Command dispatch (canonical engine delegation)
     // -----------------------------------------------------------------------
 
     fn dispatch_command(&mut self, command: JobCommand) -> Result<Vec<HostMessage>, AdapterError> {
         match command {
             JobCommand::Start { inputs } => self.on_start(inputs),
-            JobCommand::Cancel => self.forward(EngineCommand::Cancel),
-            JobCommand::Pause => self.forward(EngineCommand::Pause),
-            JobCommand::Resume => self.forward(EngineCommand::Resume),
+            JobCommand::Cancel => self.run_user_command(EngineUserCommand::Cancel),
+            JobCommand::Pause => self.run_user_command(EngineUserCommand::Pause),
+            JobCommand::Resume => self.run_user_command(EngineUserCommand::Resume),
             JobCommand::ProvideResource {
                 request,
                 bytes,
@@ -306,11 +330,13 @@ impl Session {
             }
             JobCommand::ProvideDisplayOutcome { request } => self.on_display_outcome(request),
             JobCommand::TileAcquired { request } => self.on_tile_acquired(request),
-            JobCommand::RetryTimerElapsed { tile, attempt } => {
-                self.forward(EngineCommand::RetryTimerElapsed { tile, attempt })
+            JobCommand::RetryTimerElapsed { tile, attempt } => self.on_timer_elapsed(tile, attempt),
+            JobCommand::SelectImage { image } => {
+                self.run_user_command(EngineUserCommand::SelectImage { image })
             }
-            JobCommand::SelectImage { image } => self.forward(EngineCommand::SelectImage { image }),
-            JobCommand::SelectLevel { level } => self.forward(EngineCommand::SelectLevel { level }),
+            JobCommand::SelectLevel { level } => {
+                self.run_user_command(EngineUserCommand::SelectLevel { level })
+            }
             JobCommand::RecoveryChoice { generation, choice } => {
                 if self.pending_recovery != Some(generation) {
                     return Err(AdapterError::new(
@@ -318,22 +344,16 @@ impl Session {
                         "recovery choice does not match the outstanding recovery",
                     ));
                 }
-                self.forward(EngineCommand::RecoveryChoice {
-                    generation,
-                    choice: match choice {
-                        RecoveryChoice::Keep => EngineRecoveryChoice::Keep,
-                        RecoveryChoice::Retry => EngineRecoveryChoice::Retry,
-                        RecoveryChoice::Discard => EngineRecoveryChoice::Discard,
+                self.run_user_command(EngineUserCommand::AnswerPartial {
+                    decision: match choice {
+                        RecoveryChoice::Keep => EnginePartialDecision::Keep,
+                        RecoveryChoice::Retry => EnginePartialDecision::Retry,
+                        RecoveryChoice::Discard => EnginePartialDecision::Discard,
                     },
                 })
             }
-            JobCommand::FinalizationSucceeded => self.forward(EngineCommand::FinalizationSucceeded),
-            JobCommand::FinalizationFailed { error } => {
-                self.forward(EngineCommand::FinalizationFailed {
-                    code: error.code,
-                    message: error.message,
-                })
-            }
+            JobCommand::FinalizationSucceeded => self.on_finalize_succeeded(),
+            JobCommand::FinalizationFailed { error } => self.on_finalize_failed(error),
         }
     }
 
@@ -347,17 +367,22 @@ impl Session {
         Ok(())
     }
 
-    fn forward(&mut self, response: EngineCommand) -> Result<Vec<HostMessage>, AdapterError> {
-        let outcome = self
-            .job
-            .as_mut()
-            .ok_or_else(|| {
-                AdapterError::new(AdapterErrorCode::WrongState, "session has no active job")
-            })?
-            .on_command(response)
+    fn engine_job(&mut self) -> Result<&mut EngineJob, AdapterError> {
+        self.job.as_mut().ok_or_else(|| {
+            AdapterError::new(AdapterErrorCode::WrongState, "session has no active job")
+        })
+    }
+
+    /// Run one user command and project the answer.
+    fn run_user_command(
+        &mut self,
+        command: EngineUserCommand,
+    ) -> Result<Vec<HostMessage>, AdapterError> {
+        let update = self
+            .engine_job()?
+            .command(command)
             .map_err(Self::engine_error)?;
-        let _ = outcome;
-        self.absorb()
+        Ok(self.drain_update(update))
     }
 
     fn on_start(
@@ -379,34 +404,39 @@ impl Session {
         }
         // Probe-driven levels plan through the engine probe step machine;
         // the host answers each probe effect with an observed size.
-        let engine = EngineJob::new_with_inputs(
+        let mut options = EngineOptions::new(
             inputs
                 .into_iter()
-                .map(|input| dezoomify_engine::JobInput {
-                    url: input.url,
-                    contents: input.contents.map(String::into_bytes),
+                .map(|input| match input.contents {
+                    Some(contents) => dezoomify_engine::DiscoveryInput::with_contents(
+                        input.url,
+                        contents.into_bytes(),
+                    ),
+                    None => dezoomify_engine::DiscoveryInput::new(input.url),
                 })
                 .collect(),
-            self.job_config.clone(),
-        )
-        .map_err(Self::engine_error)?;
-        self.job = Some(engine);
-        // Start emits the Discovering state event plus one acquire-resource
-        // effect per outstanding discovery request; nothing here echoes the
-        // URL anywhere.
-        let started = self
-            .job
-            .as_mut()
-            .ok_or_else(|| {
-                AdapterError::new(
-                    AdapterErrorCode::WrongState,
-                    "internal: job missing after bind",
-                )
-            })?
-            .start()
-            .map_err(Self::engine_error)?;
-        debug_assert!(matches!(started, Outcome::Applied));
-        self.absorb()
+        );
+        // Optional job-budget overrides; the engine validates them at
+        // start, so zero/oversized values fail typed there.
+        let config = &self.session_config;
+        if let Some(value) = config.max_concurrent_fetches {
+            options.max_concurrent = value.get();
+        }
+        if let Some(value) = config.max_tiles {
+            options.max_tiles = value.get();
+        }
+        if let Some(value) = config.max_retries {
+            options.max_retries = value;
+        }
+        if options.selection != EngineSelectionPolicy::Manual {
+            options.selection = EngineSelectionPolicy::Manual;
+        }
+        // Start emits the Discovering state plus one metadata effect per
+        // outstanding discovery request; nothing here echoes the URL
+        // anywhere.
+        let (job, update) = EngineJob::start(options).map_err(Self::engine_error)?;
+        self.job = Some(job);
+        Ok(self.drain_update(update))
     }
 
     fn on_provide_resource(
@@ -441,15 +471,17 @@ impl Session {
         if self.state != SessionState::Discovering {
             return Ok(Vec::new());
         }
-        self.forward(EngineCommand::ResourceBytes {
-            request,
-            bytes,
-            // Native hosts report the post-redirect URL; browser
-            // hosts supply it when their fetch exposes one, else the
-            // engine resolves relative tile URLs against the request
-            // URI.
-            final_uri: final_uri.filter(|uri| !uri.is_empty()),
-        })
+        let update = self
+            .engine_job()?
+            .provide_metadata(
+                EngineEffectId(request),
+                EngineResponseMetadata {
+                    final_uri: final_uri.filter(|uri| !uri.is_empty()),
+                },
+                &bytes,
+            )
+            .map_err(Self::engine_error)?;
+        Ok(self.drain_update(update))
     }
 
     fn on_probe_outcome(
@@ -457,7 +489,7 @@ impl Session {
         request: u32,
         outcome: ProbeOutcome,
     ) -> Result<Vec<HostMessage>, AdapterError> {
-        let tile_id = match self.outstanding_tile_requests.get(&request) {
+        let _tile_id = match self.outstanding_tile_requests.get(&request) {
             Some(tile_id) => *tile_id,
             None => {
                 return Err(AdapterError::new(
@@ -476,10 +508,18 @@ impl Session {
         self.outstanding_tile_requests.remove(&request);
         self.probe_requests.remove(&request);
         self.request_context.remove(&request);
-        self.forward(EngineCommand::ProbeOutcome {
-            tile: tile_id,
-            outcome,
-        })
+        let result = match outcome {
+            ProbeOutcome::Available { width, height } => EngineEffectResult::ProbeAvailable {
+                width: u32::try_from(width.get()).unwrap_or(u32::MAX),
+                height: u32::try_from(height.get()).unwrap_or(u32::MAX),
+            },
+            ProbeOutcome::Missing => EngineEffectResult::ProbeMissing,
+        };
+        let update = self
+            .engine_job()?
+            .complete(EngineEffectId(request), result)
+            .map_err(Self::engine_error)?;
+        Ok(self.drain_update(update))
     }
 
     /// Display-only answer for one outstanding tile request: the host holds
@@ -487,15 +527,12 @@ impl Session {
     /// a typed display success; the tainted canvas completes as
     /// display-only downstream.
     fn on_display_outcome(&mut self, request: u32) -> Result<Vec<HostMessage>, AdapterError> {
-        let tile_id = match self.outstanding_tile_requests.get(&request) {
-            Some(tile_id) => *tile_id,
-            None => {
-                return Err(AdapterError::new(
-                    AdapterErrorCode::WrongState,
-                    "display outcome does not match an outstanding request",
-                ));
-            }
-        };
+        if !self.outstanding_tile_requests.contains_key(&request) {
+            return Err(AdapterError::new(
+                AdapterErrorCode::WrongState,
+                "display outcome does not match an outstanding request",
+            ));
+        }
         if self.probe_requests.contains(&request) {
             return Err(AdapterError::new(
                 AdapterErrorCode::WrongState,
@@ -505,22 +542,23 @@ impl Session {
         self.require_engine_state(SessionState::AcquiringTiles)?;
         self.outstanding_tile_requests.remove(&request);
         self.request_context.remove(&request);
-        self.forward(EngineCommand::TileDisplayed { tile: tile_id })
+        let update = self
+            .engine_job()?
+            .complete(EngineEffectId(request), EngineEffectResult::TileDisplayed)
+            .map_err(Self::engine_error)?;
+        Ok(self.drain_update(update))
     }
 
     /// Successful acquisition of one outstanding tile request: the host has
     /// already fetched, decoded, and placed the tile, so the outcome carries
     /// no body. Mirrors `on_display_outcome` correlation exactly.
     fn on_tile_acquired(&mut self, request: u32) -> Result<Vec<HostMessage>, AdapterError> {
-        let tile_id = match self.outstanding_tile_requests.get(&request) {
-            Some(tile_id) => *tile_id,
-            None => {
-                return Err(AdapterError::new(
-                    AdapterErrorCode::WrongState,
-                    "tile acquisition does not match an outstanding request",
-                ));
-            }
-        };
+        if !self.outstanding_tile_requests.contains_key(&request) {
+            return Err(AdapterError::new(
+                AdapterErrorCode::WrongState,
+                "tile acquisition does not match an outstanding request",
+            ));
+        }
         if self.probe_requests.contains(&request) {
             return Err(AdapterError::new(
                 AdapterErrorCode::WrongState,
@@ -530,7 +568,67 @@ impl Session {
         self.require_engine_state(SessionState::AcquiringTiles)?;
         self.outstanding_tile_requests.remove(&request);
         self.request_context.remove(&request);
-        self.forward(EngineCommand::TileAcquired { tile: tile_id })
+        let update = self
+            .engine_job()?
+            .complete(EngineEffectId(request), EngineEffectResult::TileAcquired)
+            .map_err(Self::engine_error)?;
+        Ok(self.drain_update(update))
+    }
+
+    /// Elapsed retry wait: the host waited on its own clock and answers
+    /// with the same tile and attempt. Stale completions are ignored.
+    fn on_timer_elapsed(
+        &mut self,
+        tile: u32,
+        attempt: u32,
+    ) -> Result<Vec<HostMessage>, AdapterError> {
+        let Some(effect) = self.live_timers.remove(&(tile, attempt)) else {
+            return Ok(Vec::new());
+        };
+        let update = self
+            .engine_job()?
+            .complete(effect, EngineEffectResult::TimerElapsed)
+            .map_err(Self::engine_error)?;
+        Ok(self.drain_update(update))
+    }
+
+    fn on_finalize_succeeded(&mut self) -> Result<Vec<HostMessage>, AdapterError> {
+        let Some(effect) = self.live_finalize.take() else {
+            return Err(AdapterError::new(
+                AdapterErrorCode::WrongState,
+                "no output operation is awaited",
+            ));
+        };
+        let update = self
+            .engine_job()?
+            .complete(
+                effect,
+                EngineEffectResult::OutputCommitted {
+                    disposition: dezoomify_engine::OutputDisposition::BrowserSaveInitiated,
+                },
+            )
+            .map_err(Self::engine_error)?;
+        Ok(self.drain_update(update))
+    }
+
+    fn on_finalize_failed(&mut self, error: ErrorDto) -> Result<Vec<HostMessage>, AdapterError> {
+        let Some(effect) = self.live_finalize.take() else {
+            return Err(AdapterError::new(
+                AdapterErrorCode::WrongState,
+                "no output operation is awaited",
+            ));
+        };
+        let update = self
+            .engine_job()?
+            .complete(
+                effect,
+                EngineEffectResult::OutputFailed {
+                    code: error.code,
+                    message: error.message,
+                },
+            )
+            .map_err(Self::engine_error)?;
+        Ok(self.drain_update(update))
     }
 
     fn on_fetch_failure(
@@ -555,16 +653,17 @@ impl Session {
             ));
         };
         match tile {
-            Some(tile_id) => {
+            Some(_tile_id) => {
                 if self.probe_requests.contains(&request) {
                     self.require_engine_state(SessionState::Planning)?;
                     self.outstanding_tile_requests.remove(&request);
                     self.probe_requests.remove(&request);
                     self.request_context.remove(&request);
-                    return self.forward(EngineCommand::ProbeOutcome {
-                        tile: tile_id,
-                        outcome: ProbeOutcome::Missing,
-                    });
+                    let update = self
+                        .engine_job()?
+                        .complete(EngineEffectId(request), EngineEffectResult::ProbeMissing)
+                        .map_err(Self::engine_error)?;
+                    return Ok(self.drain_update(update));
                 }
                 self.require_engine_state(SessionState::AcquiringTiles)?;
                 self.outstanding_tile_requests.remove(&request);
@@ -574,16 +673,21 @@ impl Session {
                 // refusals such as HTTP 403 settle after exactly one
                 // attempt), and an observed `retry-after` hint sets the
                 // explicit wait before a transient retry. The engine emits
-                // one `wait-retry-timer` effect per remaining attempt.
-                self.forward(EngineCommand::TileFailed {
-                    tile: tile_id,
-                    failure: EngineTileFailure::new(
-                        failure.code,
-                        failure.http,
-                        failure.retry_after_ms,
-                        failure.detail,
-                    ),
-                })
+                // one retry-timer effect per remaining attempt.
+                let update = self
+                    .engine_job()?
+                    .complete(
+                        EngineEffectId(request),
+                        EngineEffectResult::TileFailed(EngineFailure {
+                            code: failure.code,
+                            http: failure.http,
+                            retry_after_ms: failure.retry_after_ms,
+                            transport: None,
+                            detail: failure.detail,
+                        }),
+                    )
+                    .map_err(Self::engine_error)?;
+                Ok(self.drain_update(update))
             }
             None => {
                 self.live_discovery_requests.remove(&request);
@@ -599,22 +703,15 @@ impl Session {
                 // nothing free-form crosses, so there is nothing to
                 // redact or bound here. The full request URL is named by
                 // the host itself, outside the engine block.
-                let cause = FetchCause {
-                    code: FetchCode::from_string(failure.code.clone()),
-                    http: failure.http,
-                    transport: match failure.transport {
-                        ErrorTransport::Direct => TransportKind::Direct,
-                        ErrorTransport::MetadataProxy => TransportKind::MetadataProxy,
-                        ErrorTransport::BrowserSession => TransportKind::BrowserSession,
-                        ErrorTransport::Native => TransportKind::Native,
-                        ErrorTransport::DisplayOnly => TransportKind::DisplayOnly,
-                    },
-                    reason: failure
-                        .blocked_reason
-                        .map(|reason| PolicyReason::from_string(reason.as_str())),
+                let transport = match failure.transport {
+                    ErrorTransport::Direct => TransportKind::Direct,
+                    ErrorTransport::MetadataProxy => TransportKind::MetadataProxy,
+                    ErrorTransport::BrowserSession => TransportKind::BrowserSession,
+                    ErrorTransport::Native => TransportKind::Native,
+                    ErrorTransport::DisplayOnly => TransportKind::DisplayOnly,
                 };
                 self.terminal_discovery_error = Some(ErrorDto {
-                    code: failure.code,
+                    code: failure.code.clone(),
                     phase: ErrorPhase::Discovery,
                     retryable: failure.retryable,
                     message: failure.message,
@@ -627,7 +724,20 @@ impl Session {
                     preview: failure.preview,
                     detail: failure.detail,
                 });
-                self.forward(EngineCommand::FetchFailure { request, cause })
+                let update = self
+                    .engine_job()?
+                    .complete(
+                        EngineEffectId(request),
+                        EngineEffectResult::MetadataFailed(EngineFailure {
+                            code: failure.code,
+                            http: failure.http,
+                            retry_after_ms: failure.retry_after_ms,
+                            transport: Some(transport),
+                            detail: None,
+                        }),
+                    )
+                    .map_err(Self::engine_error)?;
+                Ok(self.drain_update(update))
             }
         }
     }
@@ -637,61 +747,142 @@ impl Session {
             "job.post-terminal" | "job.invalid-state" => AdapterErrorCode::WrongState,
             "job.invalid-config" => AdapterErrorCode::Malformed,
             "job.resource-limit" | "job.overflow" => AdapterErrorCode::LimitExceeded,
+            "job.stale-effect" | "job.wrong-result-kind" => AdapterErrorCode::WrongState,
             _ => AdapterErrorCode::WrongState,
         };
         AdapterError::new(code, error.message)
     }
 
     // -----------------------------------------------------------------------
-    // Engine -> adapter projection
+    // Canonical engine answer -> ABI projection
     // -----------------------------------------------------------------------
 
-    /// Project the engine's already ordered typed messages into ABI values.
-    fn absorb(&mut self) -> Result<Vec<HostMessage>, AdapterError> {
-        let messages = self
-            .job
-            .as_mut()
-            .ok_or_else(|| {
-                AdapterError::new(AdapterErrorCode::WrongState, "session has no active job")
-            })?
-            .drain_messages();
-        let mut projected = Vec::with_capacity(messages.len());
-        for message in messages {
-            let body = match message.body {
-                JobMessageBody::Effect(effect) => {
-                    HostMessage::Effect(self.project_effect(message.sequence, effect)?)
-                }
-                JobMessageBody::Event(event) => match self.project_event(event) {
-                    Some(event) => HostMessage::Event(event),
-                    None => continue,
-                },
-            };
-            projected.push(body);
+    /// Project one canonical answer: the newly issued effects become ABI
+    /// host effects, and the snapshot diffs become the ABI events.
+    fn drain_update(&mut self, update: EngineUpdate) -> Vec<HostMessage> {
+        let mut projected = Vec::new();
+        let snapshot = &update.snapshot;
+        let state = SessionState::from_engine(snapshot.lifecycle);
+        // Lifecycle moves first so the initial state event precedes the
+        // first effects, exactly like the engine queue order.
+        if self.emitted_state != Some(state) {
+            self.emitted_state = Some(state);
+            self.state = state;
+            projected.push(HostMessage::Event(JobEvent::JobState {
+                state: protocol_state_of(state),
+            }));
         }
-        if let Some(job) = self.job.as_ref() {
-            self.state = SessionState::from_engine(job.state());
+        // The kept catalog replaces the selection payload on deferred
+        // follows: re-emit it so hosts never render a stale gallery.
+        if let Some(catalog) = snapshot.selection.catalog.clone() {
+            if !self.emitted_catalog {
+                self.emitted_catalog = true;
+                self.terminal_discovery_error = None;
+                projected.push(HostMessage::Event(JobEvent::Catalog { catalog }));
+            }
         }
-        Ok(projected)
+        // Progress advances monotonically; re-emit only on change.
+        let progress = (snapshot.progress.completed, snapshot.progress.total);
+        if self.emitted_progress != Some(progress) {
+            self.emitted_progress = Some(progress);
+            projected.push(HostMessage::Event(JobEvent::Progress {
+                acquired: progress.0,
+                total: progress.1.unwrap_or(0),
+            }));
+        }
+        // Pause overlay transitions.
+        if self.emitted_paused != snapshot.paused {
+            self.emitted_paused = snapshot.paused;
+            projected.push(HostMessage::Event(if snapshot.paused {
+                JobEvent::Paused
+            } else {
+                JobEvent::Resumed
+            }));
+        }
+        // Outstanding partial decision: one cue per generation.
+        if let Some(decision) = &snapshot.decision {
+            if self.emitted_decision != Some(decision.generation) {
+                self.emitted_decision = Some(decision.generation);
+                projected.push(HostMessage::Event(JobEvent::RecoveryRequest {
+                    generation: decision.generation,
+                    actions: vec![RecoveryAction {
+                        id: "retry".to_string(),
+                        kind: RecoveryKind::Retry,
+                        scope: "partial".to_string(),
+                        rationale: "Retry the partial step".to_string(),
+                    }],
+                }));
+            }
+        }
+        // Bounded recent engine notices (retries, settled work),
+        // deduplicated by identity: the recent log truncates, so a
+        // positional skip would miss entries.
+        for notice in &snapshot.notices {
+            let key = format!(
+                "{}:{}:{:?}:{:?}",
+                notice.revision, notice.tile, notice.attempt, notice.missing
+            );
+            if self.emitted_notice_keys.contains(&key) {
+                continue;
+            }
+            self.emitted_notice_keys.push(key);
+            if notice.missing.is_empty() {
+                let mut error = ErrorDto::new(
+                    "job.tile-retry",
+                    ErrorPhase::Acquisition,
+                    format!(
+                        "tile {} failed; retry attempt {}",
+                        notice.tile,
+                        notice.attempt.unwrap_or(0)
+                    ),
+                );
+                error.retryable = true;
+                projected.push(HostMessage::Event(JobEvent::Warning { error }));
+            } else {
+                let mut error = ErrorDto::new(
+                    "job.missing-tiles",
+                    ErrorPhase::Acquisition,
+                    format!("tiles failed: {:?}", notice.missing),
+                );
+                error.retryable = true;
+                projected.push(HostMessage::Event(JobEvent::Warning { error }));
+            }
+        }
+        // Newly issued effects, in canonical order.
+        for effect in &update.effects {
+            if let Some(message) = self.project_effect(effect) {
+                projected.push(HostMessage::Effect(message));
+            }
+        }
+        // Terminal outcome last: exactly one terminal render.
+        if !self.emitted_terminal {
+            if let Some(terminal) = &snapshot.terminal {
+                self.emitted_terminal = true;
+                projected.push(HostMessage::Event(self.project_terminal(terminal)));
+            }
+        }
+        self.state = SessionState::from_engine(snapshot.lifecycle);
+        projected
     }
 
-    fn project_effect(
-        &mut self,
-        sequence: u32,
-        effect: EngineEffect,
-    ) -> Result<HostEffect, AdapterError> {
-        Ok(match effect {
-            EngineEffect::AcquireResource { request, uri, .. } => {
+    fn project_effect(&mut self, effect: &EngineEffect) -> Option<HostEffect> {
+        match effect {
+            EngineEffect::AcquireMetadata { id, uri } => {
+                let request = id.get();
                 self.live_discovery_requests.insert(request);
-                let request = RequestDto {
+                let request_dto = RequestDto {
                     id: request,
-                    uri,
+                    uri: uri.clone(),
                     headers: Vec::new(),
                     purpose: RequestPurpose::Metadata,
                 };
-                self.request_context.insert(request.id, request.clone());
-                HostEffect::AcquireResource { request }
+                self.request_context.insert(request, request_dto.clone());
+                Some(HostEffect::AcquireResource {
+                    request: request_dto,
+                })
             }
             EngineEffect::AcquireTile {
+                id,
                 tile,
                 uri,
                 headers,
@@ -702,40 +893,43 @@ impl Session {
                 probe,
                 probe_output,
             } => {
-                let request = sequence;
-                self.outstanding_tile_requests.insert(request, tile);
-                if probe {
+                let request = id.get();
+                self.outstanding_tile_requests.insert(request, *tile);
+                if *probe {
                     self.probe_requests.insert(request);
                 }
-                let request = RequestDto {
+                let request_dto = RequestDto {
                     id: request,
-                    uri,
+                    uri: uri.clone(),
                     headers: headers
-                        .into_iter()
-                        .map(|(name, value)| HeaderDto { name, value })
+                        .iter()
+                        .map(|header| HeaderDto {
+                            name: header.name.clone(),
+                            value: header.value.clone(),
+                        })
                         .collect(),
-                    purpose: if probe {
+                    purpose: if *probe {
                         RequestPurpose::Probe
                     } else {
                         RequestPurpose::Tile
                     },
                 };
-                self.request_context.insert(request.id, request.clone());
-                HostEffect::AcquireTile {
-                    request,
-                    tile,
+                self.request_context.insert(request, request_dto.clone());
+                Some(HostEffect::AcquireTile {
+                    request: request_dto,
+                    tile: *tile,
                     placement: TilePlacementDto {
                         position: PointDto {
                             x: u64::from(destination.x),
                             y: u64::from(destination.y),
                         },
                         expected_size: expected_size.map(|size| SizeDto {
-                            width: u64::from(size.x),
-                            height: u64::from(size.y),
+                            width: u64::from(size.width),
+                            height: u64::from(size.height),
                         }),
                         canvas: canvas.map(|size| SizeDto {
-                            width: u64::from(size.x),
-                            height: u64::from(size.y),
+                            width: u64::from(size.width),
+                            height: u64::from(size.height),
                         }),
                         processing: match processing {
                             dezoomify_core::core::model::ProcessingRecipe::None => {
@@ -745,121 +939,84 @@ impl Session {
                                 ProcessingRecipe::GoogleArtsDecrypt
                             }
                         },
-                        probe_output,
+                        probe_output: *probe_output,
                     },
-                }
+                })
+            }
+            EngineEffect::WaitRetryTimer {
+                id,
+                tile,
+                attempt,
+                delay_ms,
+            } => {
+                self.live_timers.insert((*tile, *attempt), *id);
+                Some(HostEffect::WaitRetryTimer {
+                    tile: *tile,
+                    attempt: *attempt,
+                    delay_ms: *delay_ms,
+                })
             }
             EngineEffect::FinalizeOutput {
+                id,
                 partial,
-                format,
                 canvas,
-            } => HostEffect::FinalizeOutput {
-                partial,
-                format,
-                canvas: canvas.map(|size| SizeDto {
-                    width: u64::from(size.x),
-                    height: u64::from(size.y),
-                }),
-            },
-            EngineEffect::CancelWork => HostEffect::CancelWork,
-            // One explicit retry wait per remaining transient attempt: the
-            // host waits `delay_ms` on its own clock and answers with
-            // `RetryTimerElapsed` carrying the same tile and attempt.
-            EngineEffect::WaitForRetry {
-                tile,
-                attempt,
-                delay_ms,
-            } => HostEffect::WaitRetryTimer {
-                tile,
-                attempt,
-                delay_ms,
-            },
-            EngineEffect::RequestDecision { generation } => {
-                self.pending_recovery = Some(generation);
-                HostEffect::RequestDecision { generation }
+            } => {
+                self.live_finalize = Some(*id);
+                Some(HostEffect::FinalizeOutput {
+                    partial: *partial,
+                    format: dezoomify_protocol::dto::OutputFormat::Png,
+                    canvas: canvas.map(|size| SizeDto {
+                        width: u64::from(size.width),
+                        height: u64::from(size.height),
+                    }),
+                })
             }
-        })
+            EngineEffect::RequestPartialDecision {
+                id: _, generation, ..
+            } => {
+                self.pending_recovery = Some(*generation);
+                Some(HostEffect::RequestDecision {
+                    generation: *generation,
+                })
+            }
+            EngineEffect::CancelRelease { .. } => Some(HostEffect::CancelWork),
+        }
     }
 
-    fn project_event(&mut self, event: EngineEvent) -> Option<JobEvent> {
-        Some(match event {
-            EngineEvent::State { state } => JobEvent::JobState {
-                state: match state {
-                    dezoomify_engine::State::Created => ProtocolJobState::Created,
-                    dezoomify_engine::State::Discovering => ProtocolJobState::Discovering,
-                    dezoomify_engine::State::AwaitingImageSelection => {
-                        ProtocolJobState::AwaitingImageSelection
-                    }
-                    dezoomify_engine::State::AwaitingLevelSelection => {
-                        ProtocolJobState::AwaitingLevelSelection
-                    }
-                    dezoomify_engine::State::Planning => ProtocolJobState::Planning,
-                    dezoomify_engine::State::AcquiringTiles => ProtocolJobState::AcquiringTiles,
-                    dezoomify_engine::State::AwaitingPartialDecision => {
-                        ProtocolJobState::AwaitingPartialDecision
-                    }
-                    dezoomify_engine::State::Finalizing => ProtocolJobState::Finalizing,
-                    dezoomify_engine::State::Cancelling => ProtocolJobState::Cancelling,
-                    dezoomify_engine::State::Completed => ProtocolJobState::Completed,
-                    dezoomify_engine::State::PartiallyCompleted => {
-                        ProtocolJobState::PartiallyCompleted
-                    }
-                    dezoomify_engine::State::Failed => ProtocolJobState::Failed,
-                    dezoomify_engine::State::Cancelled => ProtocolJobState::Cancelled,
-                },
-            },
-            EngineEvent::Catalog { catalog } => {
-                self.terminal_discovery_error = None;
-                JobEvent::Catalog { catalog }
-            }
-            EngineEvent::Levels { .. } => return None,
-            EngineEvent::Progress { acquired, total } => JobEvent::Progress { acquired, total },
-            EngineEvent::Warning { tile, attempt } => {
-                let mut error = ErrorDto::new(
-                    "job.tile-retry",
-                    ErrorPhase::Acquisition,
-                    format!("tile {tile} failed; retry attempt {attempt}"),
-                );
-                error.retryable = true;
-                JobEvent::Warning { error }
-            }
-            EngineEvent::MissingWork { failed } => {
-                let mut error = ErrorDto::new(
-                    "job.missing-tiles",
-                    ErrorPhase::Acquisition,
-                    format!("tiles failed: {failed:?}"),
-                );
-                error.retryable = true;
-                JobEvent::Warning { error }
-            }
-            EngineEvent::RecoveryRequested { generation } => {
-                let scope = "partial";
-                JobEvent::RecoveryRequest {
-                    generation,
-                    actions: vec![RecoveryAction {
-                        id: "retry".to_string(),
-                        kind: RecoveryKind::Retry,
-                        scope: scope.to_string(),
-                        rationale: format!("Retry the {scope} step"),
-                    }],
-                }
-            }
-            EngineEvent::Completed => JobEvent::Completed,
-            EngineEvent::PartialCompleted => JobEvent::PartialCompleted,
-            EngineEvent::Failed { code, message } => {
+    fn project_terminal(&mut self, terminal: &dezoomify_engine::Terminal) -> JobEvent {
+        match terminal {
+            dezoomify_engine::Terminal::Completed => JobEvent::Completed,
+            dezoomify_engine::Terminal::PartiallyCompleted { .. } => JobEvent::PartialCompleted,
+            dezoomify_engine::Terminal::Failed { code, message } => {
                 let error = if let Some(mut error) = self.terminal_discovery_error.take() {
-                    if error.detail.is_none() && error.message != message {
-                        error.detail = Some(message);
+                    if error.detail.is_none() && error.message != *message {
+                        error.detail = Some(message.clone());
                     }
                     error
                 } else {
-                    ErrorDto::new(code, ErrorPhase::Discovery, message)
+                    ErrorDto::new(code.clone(), ErrorPhase::Discovery, message.clone())
                 };
                 JobEvent::Failed { error }
             }
-            EngineEvent::Cancelled => JobEvent::Cancelled,
-            EngineEvent::Paused => JobEvent::Paused,
-            EngineEvent::Resumed => JobEvent::Resumed,
-        })
+            dezoomify_engine::Terminal::Cancelled => JobEvent::Cancelled,
+        }
+    }
+}
+
+fn protocol_state_of(state: SessionState) -> ProtocolJobState {
+    match state {
+        SessionState::Created => ProtocolJobState::Created,
+        SessionState::Discovering => ProtocolJobState::Discovering,
+        SessionState::AwaitingImageSelection => ProtocolJobState::AwaitingImageSelection,
+        SessionState::AwaitingLevelSelection => ProtocolJobState::AwaitingLevelSelection,
+        SessionState::Planning => ProtocolJobState::Planning,
+        SessionState::AcquiringTiles => ProtocolJobState::AcquiringTiles,
+        SessionState::AwaitingPartialDecision => ProtocolJobState::AwaitingPartialDecision,
+        SessionState::Finalizing => ProtocolJobState::Finalizing,
+        SessionState::Cancelling => ProtocolJobState::Cancelling,
+        SessionState::Completed => ProtocolJobState::Completed,
+        SessionState::PartiallyCompleted => ProtocolJobState::PartiallyCompleted,
+        SessionState::Failed => ProtocolJobState::Failed,
+        SessionState::Cancelled => ProtocolJobState::Cancelled,
     }
 }

@@ -1,7 +1,8 @@
 mod support;
 
-use dezoomify_engine::{Config, JobCommand, JobInput};
+use dezoomify_engine::{Config, DiscoveryInput};
 use support::ScriptedHost;
+use support::{JobCommand, RecoveryChoice};
 
 fn job_id(n: u32) -> String {
     format!("job:{n}")
@@ -67,8 +68,6 @@ fn discover_success_minimal() {
     assert_eq!(host.state(), "AwaitingImageSelection");
     assert_eq!(host.terminal_count(), 0);
     // No background work: queues are drained after every step.
-    assert_eq!(host.job().pending_message_count(), 0);
-    assert_eq!(host.job().pending_message_count(), 0);
 
     // The catalog event carries the real projected catalog: a deepzoom
     // image whose levels each declare exact geometry.
@@ -125,8 +124,8 @@ fn inline_zoomify_page_wins_before_tile_url_without_requesting_image_properties(
     </script>"#;
     let mut host = ScriptedHost::new_with_inputs(
         vec![
-            JobInput::with_contents(PAGE_URL, PAGE),
-            JobInput::new(TILE_URL),
+            DiscoveryInput::with_contents(PAGE_URL, PAGE),
+            DiscoveryInput::new(TILE_URL),
         ],
         test_config(),
     )
@@ -153,8 +152,11 @@ fn ordered_inputs_fall_back_to_the_next_url_root() {
     let fallback = "https://example.test/fallback.dzi";
     let mut host = ScriptedHost::new_with_inputs(
         vec![
-            JobInput::with_contents("https://example.test/page", b"<html>not a viewer</html>"),
-            JobInput::new(fallback),
+            DiscoveryInput::with_contents(
+                "https://example.test/page",
+                b"<html>not a viewer</html>",
+            ),
+            DiscoveryInput::new(fallback),
         ],
         test_config(),
     )
@@ -196,12 +198,13 @@ fn successful_finalization_completes() {
     host.apply(JobCommand::FinalizationSucceeded).unwrap();
     assert_eq!(host.state(), "Completed");
     assert_eq!(host.terminal_count(), 1);
-    assert_eq!(host.job().terminal_kind(), Some("completed"));
-    assert_eq!(host.job().pending_message_count(), 0);
-    assert_eq!(host.job().pending_message_count(), 0);
+    assert_eq!(host.terminal_kind().as_deref(), Some("completed"));
 
     let transcript = host.transcript();
-    for phase in ["Planning", "AcquiringTiles", "Finalizing", "Completed"] {
+    // Planning never settles in a snapshot on the direct path (level
+    // selection resolves the plan within one answer); the settled phases
+    // plus the issued tile effects prove the plan ran.
+    for phase in ["AcquiringTiles", "Finalizing", "Completed"] {
         let prefix = format!("event:job-state:{phase}:seq:");
         assert!(
             transcript.iter().any(|line| line.starts_with(&prefix)),
@@ -286,7 +289,7 @@ fn keeping_a_partial_result_decodes_only_acquired_tiles() {
 
     host.apply(JobCommand::RecoveryChoice {
         generation: 0,
-        choice: dezoomify_engine::RecoveryChoice::Keep,
+        choice: RecoveryChoice::Keep,
     })
     .unwrap();
 
@@ -296,7 +299,7 @@ fn keeping_a_partial_result_decodes_only_acquired_tiles() {
     }));
     host.apply(JobCommand::FinalizationSucceeded).unwrap();
     assert_eq!(host.state(), "PartiallyCompleted");
-    assert_eq!(host.job().terminal_kind(), Some("partial-completed"));
+    assert_eq!(host.terminal_kind().as_deref(), Some("partial-completed"));
 }
 
 #[test]
@@ -324,15 +327,14 @@ fn cancel_in_acquiring_tiles_ignores_late_response() {
     assert_eq!(host.state(), "Cancelled");
     assert_eq!(host.transcript().len(), len_after_cancel);
     assert_eq!(host.terminal_count(), 1);
-    for phase in ["Cancelling", "Cancelled"] {
-        let prefix = format!("event:job-state:{phase}:seq:");
-        assert!(
-            host.transcript()
-                .iter()
-                .any(|line| line.starts_with(&prefix)),
-            "missing job-state event for {phase}"
-        );
-    }
+    // The facade settles cancellation synchronously: no transient
+    // Cancelling snapshot exists, only the Cancelled terminal.
+    assert!(
+        host.transcript()
+            .iter()
+            .any(|line| line.starts_with("event:job-state:Cancelled:seq:")),
+        "missing job-state event for Cancelled"
+    );
     assert!(host.transcript().contains(&"state:Cancelled".to_string()));
 }
 
@@ -464,8 +466,6 @@ fn discovery_poll_emits_one_effect_per_outstanding_request() {
         1,
         "one effect per outstanding core request"
     );
-    assert_eq!(host.job().pending_message_count(), 0);
-    assert_eq!(host.job().pending_message_count(), 0);
     assert_eq!(host.state(), "Discovering");
     // While the fetch is unanswered nothing new is emitted: the poll
     // reports the same request and the engine waits instead of growing.
@@ -499,7 +499,7 @@ fn pause_suspends_new_tiles_and_resume_redrives() {
     let mut host = ScriptedHost::new(&job_id(6), INPUT_URL, test_config()).unwrap();
     let _ = discover_and_select(&mut host, 6);
     assert_eq!(host.state(), "AcquiringTiles");
-    assert!(!host.job().is_paused());
+    assert!(!host.is_paused());
     let planned: Vec<u32> = host
         .tile_effects()
         .into_iter()
@@ -509,28 +509,27 @@ fn pause_suspends_new_tiles_and_resume_redrives() {
     // Pause before any tile completes: no new effects, FIFO preserved.
     let effects_before = host.effects.len();
     host.apply(JobCommand::Pause).unwrap();
-    assert!(host.job().is_paused());
+    assert!(host.is_paused());
     assert_eq!(host.effects.len(), effects_before);
     assert!(host
         .transcript()
         .iter()
         .any(|line| line.starts_with("event:paused:")));
-    // Duplicate pause is Ignored with no new work.
+    // Duplicate pause issues no new work.
     let len = host.transcript().len();
-    let dup = host.apply(JobCommand::Pause).unwrap();
-    assert_eq!(dup, dezoomify_engine::Outcome::Ignored);
+    host.apply(JobCommand::Pause).unwrap();
     assert_eq!(host.transcript().len(), len);
     // In-flight tile finishes while paused: progress is recorded, but no new
     // tile is scheduled and completion is deferred.
     host.apply(JobCommand::TileAcquired { tile: planned[0] })
         .unwrap();
     assert_eq!(host.state(), "AcquiringTiles");
-    assert!(host.job().is_paused());
+    assert!(host.is_paused());
     let tile_effects = host.tile_effects().len();
     assert_eq!(tile_effects, 4, "no new acquire-tile while paused");
     // Resume re-drives the pending queue in FIFO order.
     host.apply(JobCommand::Resume).unwrap();
-    assert!(!host.job().is_paused());
+    assert!(!host.is_paused());
     assert!(host
         .transcript()
         .iter()

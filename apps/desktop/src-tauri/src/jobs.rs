@@ -2199,8 +2199,8 @@ mod tests {
     /// Task 6.1: duplicates are safe no-ops with no state change.
     ///
     /// Desktop projection: re-reported progress never moves the monotonic
-    /// snapshot backwards. Engine parity: an already-consumed/unknown request
-    /// replays as `Ignored` with no transition, effect, or event.
+    /// snapshot backwards. Engine parity: completing an unknown effect is
+    /// rejected with no transition or new work.
     #[test]
     fn duplicate_inputs_are_ignored_without_state_change() {
         // Desktop: lower re-reports never move progress backwards.
@@ -2222,22 +2222,24 @@ mod tests {
         // Only the monotonic max survives; the snapshot never regresses.
         assert_eq!(table.progress_for(&id), Some(snapshot_before));
         assert_eq!(table.progress_for(&id), Some((5, 10)));
-        // Engine parity: unknown/consumed request ids replay as Ignored.
-        let mut engine =
-            dezoomify_engine::Job::new("https://example.com/item", Default::default()).unwrap();
-        engine.start().unwrap();
-        let seq_before = engine.seq();
-        let messages_before = engine.pending_message_count();
-        let outcome = engine
-            .on_command(dezoomify_engine::JobCommand::ResourceBytes {
-                request: u32::MAX,
-                bytes: vec![1, 2, 3],
-                final_uri: None,
-            })
-            .unwrap();
-        assert_eq!(outcome, dezoomify_engine::Outcome::Ignored);
-        assert_eq!(engine.seq(), seq_before, "Ignored bumps no seq");
-        assert_eq!(engine.pending_message_count(), messages_before);
+        // Engine parity: unknown effect completions are rejected with no
+        // state change.
+        let (mut engine, _) =
+            dezoomify_engine::EngineJob::start(engine_options(&["https://example.com/item"]))
+                .unwrap();
+        let revision_before = engine.snapshot().revision;
+        let err = engine
+            .complete(
+                dezoomify_engine::EffectId(u32::MAX),
+                dezoomify_engine::EffectResult::TileAcquired,
+            )
+            .unwrap_err();
+        assert_eq!(err.code, "job.stale-effect");
+        assert_eq!(
+            engine.snapshot().revision,
+            revision_before,
+            "rejected completions change nothing"
+        );
     }
 
     /// Task 6.1: seq is strictly monotonic increasing across the lifecycle.
@@ -2410,24 +2412,26 @@ mod tests {
         }
     }
 
-    /// Wrong-state commands are rejected and unknown numeric replies are ignored.
+    /// Wrong-state commands are rejected through the canonical API.
     #[test]
     fn wrong_state_and_unknown_reply_are_safe() {
-        let mut engine =
-            dezoomify_engine::Job::new("https://example.com/item", Default::default()).unwrap();
-        engine.start().unwrap();
-        let seq_before = engine.seq();
-        let outcome = engine
-            .on_command(dezoomify_engine::JobCommand::ResourceBytes {
-                request: u32::MAX,
-                bytes: vec![1],
-                final_uri: None,
-            })
-            .unwrap();
-        assert_eq!(outcome, dezoomify_engine::Outcome::Ignored);
-        assert_eq!(engine.seq(), seq_before);
+        let (mut engine, _) =
+            dezoomify_engine::EngineJob::start(engine_options(&["https://example.com/item"]))
+                .unwrap();
+        let revision_before = engine.snapshot().revision;
+        // Supplying bytes for an unknown effect is rejected, never applied.
         let err = engine
-            .on_command(dezoomify_engine::JobCommand::SelectImage { image: 99 })
+            .provide_metadata(
+                dezoomify_engine::EffectId(u32::MAX),
+                dezoomify_engine::ResponseMetadata::new(),
+                &[1],
+            )
+            .unwrap_err();
+        assert_eq!(err.code, "job.stale-effect");
+        assert_eq!(engine.snapshot().revision, revision_before);
+        // Selecting before a catalog exists is a wrong-state rejection.
+        let err = engine
+            .command(dezoomify_engine::UserCommand::SelectImage { image: 99 })
             .unwrap_err();
         assert_eq!(err.code, "job.invalid-state");
         // Shell table: unmapped ids are unknown with no work.
@@ -2442,21 +2446,23 @@ mod tests {
     /// with no new work; the shell projects the same moment as `stale`.
     #[test]
     fn engine_post_terminal_returns_job_post_terminal_without_work() {
-        let mut engine =
-            dezoomify_engine::Job::new("https://example.com/item", Default::default()).unwrap();
-        engine.start().unwrap();
+        let (mut engine, _) =
+            dezoomify_engine::EngineJob::start(engine_options(&["https://example.com/item"]))
+                .unwrap();
         engine
-            .on_command(dezoomify_engine::JobCommand::Cancel)
+            .command(dezoomify_engine::UserCommand::Cancel)
             .unwrap();
-        assert!(engine.is_terminal());
-        let seq_before = engine.seq();
-        let messages_before = engine.pending_message_count();
+        assert!(engine.snapshot().terminal.is_some());
+        let revision_before = engine.snapshot().revision;
         let err = engine
-            .on_command(dezoomify_engine::JobCommand::Cancel)
+            .command(dezoomify_engine::UserCommand::Cancel)
             .unwrap_err();
         assert_eq!(err.code, "job.post-terminal");
-        assert_eq!(engine.seq(), seq_before, "no work after terminal");
-        assert_eq!(engine.pending_message_count(), messages_before);
+        assert_eq!(
+            engine.snapshot().revision,
+            revision_before,
+            "no work after terminal"
+        );
         // Shell projection of the same moment.
         let mut table = JobTable::new();
         let id = table.start_job("https://example.com/item").unwrap();
@@ -2755,6 +2761,16 @@ mod tests {
         assert!(events.iter().any(|e| e.kind == "destination"));
         // The runner handle is released once the terminal folded.
         assert!(!table.has_runner(&id));
+    }
+
+    /// Test helper: canonical options for one input URL.
+    fn engine_options(inputs: &[&str]) -> dezoomify_engine::JobOptions {
+        dezoomify_engine::JobOptions::new(
+            inputs
+                .iter()
+                .map(|url| dezoomify_engine::DiscoveryInput::new((*url).to_string()))
+                .collect(),
+        )
     }
 
     /// Test helper: build one runner snapshot.

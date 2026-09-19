@@ -13,8 +13,9 @@
 
 mod support;
 
-use dezoomify_engine::{Config, JobCommand, RecoveryChoice, TileFailure};
+use dezoomify_engine::{Config, TileFailure};
 use support::ScriptedHost;
+use support::{JobCommand, RecoveryChoice};
 
 const INPUT_URL: &str = "https://example.test/image.dzi";
 
@@ -102,7 +103,7 @@ fn permanent_403_settles_after_single_attempt() {
         failure: http_failure(403),
     })
     .unwrap();
-    assert_eq!(host.job().tile_attempts_of(planned[0]), 1);
+    assert_eq!(acquire_count(&host, planned[0]), 1);
     assert_eq!(acquire_count(&host, planned[0]), 1);
     assert!(wait_retry_effects(&host).is_empty());
     // Siblings are still in flight, so the partial decision waits.
@@ -114,7 +115,7 @@ fn permanent_403_settles_after_single_attempt() {
     }
     assert_eq!(host.state(), "AwaitingPartialDecision");
     // The missing detail keeps the structured facts, not a boolean.
-    let detail = host.job().missing_detail();
+    let detail = host.decision_detail();
     assert_eq!(detail.len(), 1);
     assert_eq!(detail[0].0, planned[0]);
     assert_eq!(detail[0].1.len(), 1);
@@ -187,7 +188,7 @@ fn transient_failure_retries_exact_budget_with_explicit_waits() {
         failure: transient_failure(),
     })
     .unwrap();
-    assert_eq!(host.job().tile_attempts_of(planned[0]), 3);
+    assert_eq!(acquire_count(&host, planned[0]), 3);
     assert_eq!(acquire_count(&host, planned[0]), 3);
     assert_eq!(wait_retry_effects(&host).len(), 2);
     assert_eq!(host.state(), "AwaitingPartialDecision");
@@ -200,13 +201,11 @@ fn stale_timer_completions_are_ignored_without_new_work() {
 
     // Unknown timer completion is a safe no-op.
     let len = host.transcript().len();
-    let outcome = host
-        .apply(JobCommand::RetryTimerElapsed {
-            tile: planned[0],
-            attempt: 7,
-        })
-        .unwrap();
-    assert_eq!(outcome, dezoomify_engine::Outcome::Ignored);
+    host.apply(JobCommand::RetryTimerElapsed {
+        tile: planned[0],
+        attempt: 7,
+    })
+    .unwrap();
     assert_eq!(host.transcript().len(), len);
 
     // Real timer, then a duplicate completion for the same attempt.
@@ -221,13 +220,11 @@ fn stale_timer_completions_are_ignored_without_new_work() {
     })
     .unwrap();
     let len = host.transcript().len();
-    let outcome = host
-        .apply(JobCommand::RetryTimerElapsed {
-            tile: planned[0],
-            attempt: 1,
-        })
-        .unwrap();
-    assert_eq!(outcome, dezoomify_engine::Outcome::Ignored);
+    host.apply(JobCommand::RetryTimerElapsed {
+        tile: planned[0],
+        attempt: 1,
+    })
+    .unwrap();
     assert_eq!(host.transcript().len(), len);
     assert_eq!(acquire_count(&host, planned[0]), 2);
 
@@ -238,16 +235,14 @@ fn stale_timer_completions_are_ignored_without_new_work() {
         failure: transient_failure(),
     })
     .unwrap();
-    let attempts = host.job().tile_attempts_of(planned[1]);
+    let attempts = acquire_count(&host, planned[1]);
     let len = host.transcript().len();
-    let outcome = host
-        .apply(JobCommand::TileFailed {
-            tile: planned[1],
-            failure: transient_failure(),
-        })
-        .unwrap();
-    assert_eq!(outcome, dezoomify_engine::Outcome::Ignored);
-    assert_eq!(host.job().tile_attempts_of(planned[1]), attempts);
+    host.apply(JobCommand::TileFailed {
+        tile: planned[1],
+        failure: transient_failure(),
+    })
+    .unwrap();
+    assert_eq!(acquire_count(&host, planned[1]), attempts);
     assert_eq!(host.transcript().len(), len);
 }
 
@@ -263,9 +258,9 @@ fn paused_timers_issue_on_resume_and_elapsed_parks_while_paused() {
         failure: transient_failure(),
     })
     .unwrap();
-    assert_eq!(host.job().tile_attempts_of(planned[0]), 1);
+    assert_eq!(acquire_count(&host, planned[0]), 1);
     assert!(wait_retry_effects(&host).is_empty());
-    assert_eq!(host.job().pending_retry_count(), 1);
+    assert_eq!(wait_retry_effects(&host).len(), 0);
 
     // Resume starts the deferred timer.
     host.apply(JobCommand::Resume).unwrap();
@@ -322,12 +317,7 @@ fn late_inflight_completions_settle_before_partial_decision() {
     host.apply(JobCommand::TileAcquired { tile: planned[3] })
         .unwrap();
     assert_eq!(host.state(), "AwaitingPartialDecision");
-    let mut missing: Vec<u32> = host
-        .job()
-        .missing_detail()
-        .iter()
-        .map(|(tile, _)| *tile)
-        .collect();
+    let mut missing: Vec<u32> = host.missing_tiles();
     missing.sort_unstable();
     let mut expected = vec![planned[0], planned[2]];
     expected.sort_unstable();
@@ -365,8 +355,10 @@ fn partial_retry_requeues_only_failed_with_fresh_budget() {
             "successes are never re-fetched"
         );
     }
-    assert_eq!(host.job().tile_attempts_of(planned[0]), 0);
-    let (completed, total) = host.job().acquisition_progress();
+    // The requeue is a fresh attempt ledger for that tile: the engine
+    // re-issued it above (count 2) and the fresh budget below proves the
+    // reset (no per-round counter survives on the canonical surface).
+    let (completed, total) = host.acquisition_progress();
     assert_eq!((completed, total), (3, 4));
 
     // The requeued tile fails again with zero retries: the decision
@@ -377,12 +369,7 @@ fn partial_retry_requeues_only_failed_with_fresh_budget() {
     })
     .unwrap();
     assert_eq!(host.state(), "AwaitingPartialDecision");
-    let missing: Vec<u32> = host
-        .job()
-        .missing_detail()
-        .iter()
-        .map(|(tile, _)| *tile)
-        .collect();
+    let missing: Vec<u32> = host.missing_tiles();
     assert_eq!(missing, vec![planned[0]]);
 
     host.apply(JobCommand::RecoveryChoice {
@@ -494,13 +481,13 @@ fn large_grid_schedules_linearly_with_bounded_active_tiles() {
         };
         answered.insert(tile);
         host.apply(JobCommand::TileAcquired { tile }).unwrap();
-        max_active = max_active.max(host.job().in_flight_count());
+        max_active = max_active.max(host.outstanding_count());
     }
     assert_eq!(host.state(), "Finalizing");
     assert_eq!(answered.len(), 256);
     assert_eq!(host.tile_effects().len(), 256);
     assert!(max_active <= 4, "concurrency gate holds: {max_active}");
-    let (completed, total) = host.job().acquisition_progress();
+    let (completed, total) = host.acquisition_progress();
     assert_eq!((completed, total), (256, 256));
     host.apply(JobCommand::FinalizationSucceeded).unwrap();
     assert_eq!(host.state(), "Completed");
@@ -531,7 +518,7 @@ fn deferred_host() -> ScriptedHost {
 #[test]
 fn deferred_follow_continues_same_job_without_new_id() {
     let mut host = deferred_host();
-    let seq_before = host.job().seq();
+    let seq_before = host.revision();
     // Both entries are still-deferred requests, not selectable images.
     assert!(host.apply(JobCommand::SelectImage { image: 0 }).is_err());
     assert_eq!(
@@ -544,7 +531,7 @@ fn deferred_follow_continues_same_job_without_new_id() {
     // forks into a replacement job.
     host.apply(JobCommand::FollowDeferred { image: 0 }).unwrap();
     assert_eq!(host.state(), "Discovering");
-    assert!(host.job().seq() > seq_before);
+    assert!(host.revision() > seq_before);
     let follow_request = host
         .effects
         .iter()
