@@ -114,8 +114,6 @@ export const it = {
     "Ancora al lavoro, {host} tarda a rispondere. Puoi attendere, oppure annullare e riprovare piu tardi.",
   // Display-only section.
   "view.display.title": "Anteprima mostrata, non ancora salvata",
-  "view.display.shownPlain": "Mostrata qui sotto senza salvare.",
-  "view.display.shownPrefix": "Mostrata qui sotto senza salvare.",
   "view.display.openDesktop": "Apri nell applicazione desktop",
   // One-click desktop handoff (todo 5.5): the button names the origin and the
   // summary names scope/recipient/job memory-only, mirroring the extension

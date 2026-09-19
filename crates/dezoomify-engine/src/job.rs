@@ -180,16 +180,6 @@ impl std::fmt::Debug for Job {
 }
 
 impl Job {
-    /// Create a validated job in `Created`. No effects are emitted yet.
-    ///
-    /// # Errors
-    ///
-    /// Returns a typed [`JobError`] when the input URL or config is
-    /// invalid.
-    pub fn new(input_url: &str, config: Config) -> Result<Self, JobError> {
-        Self::new_with_inputs(vec![JobInput::new(input_url)], config)
-    }
-
     pub fn new_with_inputs(inputs: Vec<JobInput>, config: Config) -> Result<Self, JobError> {
         if inputs.is_empty() || inputs.iter().any(|input| !is_valid_input_url(&input.url)) {
             return Err(JobError::new(
@@ -278,36 +268,10 @@ impl Job {
         self.terminal.as_deref()
     }
 
-    /// Whether the job is in a terminal state.
-    #[must_use]
-    pub fn is_terminal(&self) -> bool {
-        self.state.is_terminal()
-    }
-
     /// Whether the pause overlay is active (suspend-acquisition).
     #[must_use]
     pub fn is_paused(&self) -> bool {
         self.paused
-    }
-
-    /// Deferred follow-up URI for a catalog position, if that entry is
-    /// still-deferred metadata pointing at another resource. The projected
-    /// catalog carries the same URI in its `ImageRequest` entries, so browser
-    /// hosts follow it without this accessor; native hosts call it directly.
-    /// Both follow the URI with a fresh bounded job.
-    #[must_use]
-    pub fn deferred_uri(&self, image: u32) -> Option<String> {
-        let index = usize::try_from(image).ok()?;
-        match self.catalog.as_ref()?.entries().get(index)? {
-            CatalogEntry::Ready(_) => None,
-            CatalogEntry::Deferred(deferred) => Some(deferred.uri.clone()),
-        }
-    }
-
-    /// Number of queued messages.
-    #[must_use]
-    pub fn pending_message_count(&self) -> usize {
-        self.messages.len()
     }
 
     /// Selectable level count for one catalog image position.
@@ -364,25 +328,6 @@ impl Job {
         detail
     }
 
-    /// Attempts recorded so far for one tile (initial try plus retries).
-    #[must_use]
-    pub fn tile_attempts_of(&self, tile: u32) -> u32 {
-        self.tile_attempts.get(&tile).copied().unwrap_or(0)
-    }
-
-    /// Retry timers awaiting host-reported completion.
-    #[must_use]
-    pub fn pending_retry_count(&self) -> usize {
-        self.pending_retry_timers.len()
-    }
-
-    /// Tiles with an acquisition effect outstanding (bounded by the
-    /// concurrency gate; hosts use it to assert bounded active work).
-    #[must_use]
-    pub fn in_flight_count(&self) -> usize {
-        self.in_flight.len()
-    }
-
     /// Acquisition progress as `(acquired, total)` over the planned tiles.
     #[must_use]
     pub fn acquisition_progress(&self) -> (u64, u64) {
@@ -420,12 +365,6 @@ impl Job {
     #[must_use]
     pub fn drain_messages(&mut self) -> Vec<JobMessage> {
         self.messages.drain(..).collect()
-    }
-
-    /// Peek queued messages without acknowledging work.
-    #[must_use]
-    pub fn peek_messages(&self) -> &VecDeque<JobMessage> {
-        &self.messages
     }
 
     /// Set the format selector before [`Job::start`]: `None` auto-detects,

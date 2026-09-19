@@ -67,80 +67,14 @@ use dezoomify_protocol::dto::{
 };
 use std::collections::{HashMap, HashSet};
 
-/// Session lifecycle state, projected from the canonical engine snapshot.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum SessionState {
-    Created,
-    Discovering,
-    AwaitingImageSelection,
-    AwaitingLevelSelection,
-    Planning,
-    AcquiringTiles,
-    AwaitingPartialDecision,
-    Finalizing,
-    Cancelling,
-    Completed,
-    PartiallyCompleted,
-    Failed,
-    Cancelled,
-}
-
-impl SessionState {
-    /// Stable state name used in `job-state` events (engine spelling).
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Created => "Created",
-            Self::Discovering => "Discovering",
-            Self::AwaitingImageSelection => "AwaitingImageSelection",
-            Self::AwaitingLevelSelection => "AwaitingLevelSelection",
-            Self::Planning => "Planning",
-            Self::AcquiringTiles => "AcquiringTiles",
-            Self::AwaitingPartialDecision => "AwaitingPartialDecision",
-            Self::Finalizing => "Finalizing",
-            Self::Cancelling => "Cancelling",
-            Self::Completed => "Completed",
-            Self::PartiallyCompleted => "PartiallyCompleted",
-            Self::Failed => "Failed",
-            Self::Cancelled => "Cancelled",
-        }
-    }
-
-    /// Terminal states emit no further transitions.
-    #[must_use]
-    pub const fn is_terminal(self) -> bool {
-        matches!(
-            self,
-            Self::Completed | Self::PartiallyCompleted | Self::Failed | Self::Cancelled
-        )
-    }
-
-    fn from_engine(state: EngineLifecycle) -> Self {
-        match state {
-            EngineLifecycle::Created => Self::Created,
-            EngineLifecycle::Discovering => Self::Discovering,
-            EngineLifecycle::AwaitingImageSelection => Self::AwaitingImageSelection,
-            EngineLifecycle::AwaitingLevelSelection => Self::AwaitingLevelSelection,
-            EngineLifecycle::Planning => Self::Planning,
-            EngineLifecycle::AcquiringTiles => Self::AcquiringTiles,
-            EngineLifecycle::AwaitingPartialDecision => Self::AwaitingPartialDecision,
-            EngineLifecycle::Finalizing => Self::Finalizing,
-            EngineLifecycle::Completed => Self::Completed,
-            EngineLifecycle::PartiallyCompleted => Self::PartiallyCompleted,
-            EngineLifecycle::Failed => Self::Failed,
-            EngineLifecycle::Cancelled => Self::Cancelled,
-        }
-    }
-}
-
 /// One adapter session: exactly one engine job plus its request correlation.
 pub struct Session {
     job: Option<EngineJob>,
     session_config: SessionConfig,
-    state: SessionState,
+    state: EngineLifecycle,
     disposed: bool,
     /// Last emitted lifecycle (snapshot-diff event derivation).
-    emitted_state: Option<SessionState>,
+    emitted_state: Option<EngineLifecycle>,
     /// Whether the catalog event was emitted for the current catalog.
     emitted_catalog: bool,
     /// Last emitted progress counts.
@@ -184,7 +118,7 @@ impl Session {
         Ok(Self {
             job: None,
             session_config: config,
-            state: SessionState::Created,
+            state: EngineLifecycle::Created,
             disposed: false,
             emitted_state: None,
             emitted_catalog: false,
@@ -204,9 +138,9 @@ impl Session {
         })
     }
 
-    /// Current lifecycle state (engine projection).
+    /// Current lifecycle phase (engine projection).
     #[must_use]
-    pub const fn state(&self) -> SessionState {
+    pub const fn state(&self) -> EngineLifecycle {
         self.state
     }
 
@@ -286,7 +220,7 @@ impl Session {
     }
 
     fn force_cancelled_event(&mut self) -> HostMessage {
-        self.state = SessionState::Cancelled;
+        self.state = EngineLifecycle::Cancelled;
         HostMessage::Event(JobEvent::Cancelled)
     }
 
@@ -357,11 +291,11 @@ impl Session {
         }
     }
 
-    fn require_engine_state(&self, expected: SessionState) -> Result<(), AdapterError> {
+    fn require_engine_state(&self, expected: EngineLifecycle) -> Result<(), AdapterError> {
         if self.state != expected {
             return Err(AdapterError::new(
                 AdapterErrorCode::WrongState,
-                format!("command not accepted in state {}", self.state.as_str()),
+                format!("command not accepted in state {:?}", self.state),
             ));
         }
         Ok(())
@@ -389,7 +323,7 @@ impl Session {
         &mut self,
         inputs: Vec<dezoomify_protocol::dto::JobInputDto>,
     ) -> Result<Vec<HostMessage>, AdapterError> {
-        self.require_engine_state(SessionState::Created)?;
+        self.require_engine_state(EngineLifecycle::Created)?;
         if inputs.is_empty()
             || inputs.iter().any(|input| {
                 input.url.is_empty()
@@ -468,7 +402,7 @@ impl Session {
         // response as ignored; the adapter preserves that same
         // stale-response behavior instead of turning normal fetch
         // reordering into a session failure.
-        if self.state != SessionState::Discovering {
+        if self.state != EngineLifecycle::Discovering {
             return Ok(Vec::new());
         }
         let update = self
@@ -504,7 +438,7 @@ impl Session {
                 "probe outcome matches a tile request, not a probe request",
             ));
         }
-        self.require_engine_state(SessionState::Planning)?;
+        self.require_engine_state(EngineLifecycle::Planning)?;
         self.outstanding_tile_requests.remove(&request);
         self.probe_requests.remove(&request);
         self.request_context.remove(&request);
@@ -539,7 +473,7 @@ impl Session {
                 "probe requests are answered with provide-probe-outcome, not provide-display-outcome",
             ));
         }
-        self.require_engine_state(SessionState::AcquiringTiles)?;
+        self.require_engine_state(EngineLifecycle::AcquiringTiles)?;
         self.outstanding_tile_requests.remove(&request);
         self.request_context.remove(&request);
         let update = self
@@ -565,7 +499,7 @@ impl Session {
                 "probe requests are answered with provide-probe-outcome, not tile-acquired",
             ));
         }
-        self.require_engine_state(SessionState::AcquiringTiles)?;
+        self.require_engine_state(EngineLifecycle::AcquiringTiles)?;
         self.outstanding_tile_requests.remove(&request);
         self.request_context.remove(&request);
         let update = self
@@ -655,7 +589,7 @@ impl Session {
         match tile {
             Some(_tile_id) => {
                 if self.probe_requests.contains(&request) {
-                    self.require_engine_state(SessionState::Planning)?;
+                    self.require_engine_state(EngineLifecycle::Planning)?;
                     self.outstanding_tile_requests.remove(&request);
                     self.probe_requests.remove(&request);
                     self.request_context.remove(&request);
@@ -665,7 +599,7 @@ impl Session {
                         .map_err(Self::engine_error)?;
                     return Ok(self.drain_update(update));
                 }
-                self.require_engine_state(SessionState::AcquiringTiles)?;
+                self.require_engine_state(EngineLifecycle::AcquiringTiles)?;
                 self.outstanding_tile_requests.remove(&request);
                 self.request_context.remove(&request);
                 // The bridge forwards the observed facts into a typed engine
@@ -694,7 +628,7 @@ impl Session {
                 self.request_context.remove(&request);
                 // A late sibling failure is also a normal consequence of
                 // concurrent discovery after another candidate has won.
-                if self.state != SessionState::Discovering {
+                if self.state != EngineLifecycle::Discovering {
                     return Ok(Vec::new());
                 }
                 // Forward the typed cause so the engine groups discovery
@@ -762,7 +696,7 @@ impl Session {
     fn drain_update(&mut self, update: EngineUpdate) -> Vec<HostMessage> {
         let mut projected = Vec::new();
         let snapshot = &update.snapshot;
-        let state = SessionState::from_engine(snapshot.lifecycle);
+        let state = snapshot.lifecycle;
         // Lifecycle moves first so the initial state event precedes the
         // first effects, exactly like the engine queue order.
         if self.emitted_state != Some(state) {
@@ -861,7 +795,7 @@ impl Session {
                 projected.push(HostMessage::Event(self.project_terminal(terminal)));
             }
         }
-        self.state = SessionState::from_engine(snapshot.lifecycle);
+        self.state = snapshot.lifecycle;
         projected
     }
 
@@ -1003,20 +937,19 @@ impl Session {
     }
 }
 
-fn protocol_state_of(state: SessionState) -> ProtocolJobState {
+fn protocol_state_of(state: EngineLifecycle) -> ProtocolJobState {
     match state {
-        SessionState::Created => ProtocolJobState::Created,
-        SessionState::Discovering => ProtocolJobState::Discovering,
-        SessionState::AwaitingImageSelection => ProtocolJobState::AwaitingImageSelection,
-        SessionState::AwaitingLevelSelection => ProtocolJobState::AwaitingLevelSelection,
-        SessionState::Planning => ProtocolJobState::Planning,
-        SessionState::AcquiringTiles => ProtocolJobState::AcquiringTiles,
-        SessionState::AwaitingPartialDecision => ProtocolJobState::AwaitingPartialDecision,
-        SessionState::Finalizing => ProtocolJobState::Finalizing,
-        SessionState::Cancelling => ProtocolJobState::Cancelling,
-        SessionState::Completed => ProtocolJobState::Completed,
-        SessionState::PartiallyCompleted => ProtocolJobState::PartiallyCompleted,
-        SessionState::Failed => ProtocolJobState::Failed,
-        SessionState::Cancelled => ProtocolJobState::Cancelled,
+        EngineLifecycle::Created => ProtocolJobState::Created,
+        EngineLifecycle::Discovering => ProtocolJobState::Discovering,
+        EngineLifecycle::AwaitingImageSelection => ProtocolJobState::AwaitingImageSelection,
+        EngineLifecycle::AwaitingLevelSelection => ProtocolJobState::AwaitingLevelSelection,
+        EngineLifecycle::Planning => ProtocolJobState::Planning,
+        EngineLifecycle::AcquiringTiles => ProtocolJobState::AcquiringTiles,
+        EngineLifecycle::AwaitingPartialDecision => ProtocolJobState::AwaitingPartialDecision,
+        EngineLifecycle::Finalizing => ProtocolJobState::Finalizing,
+        EngineLifecycle::Completed => ProtocolJobState::Completed,
+        EngineLifecycle::PartiallyCompleted => ProtocolJobState::PartiallyCompleted,
+        EngineLifecycle::Failed => ProtocolJobState::Failed,
+        EngineLifecycle::Cancelled => ProtocolJobState::Cancelled,
     }
 }

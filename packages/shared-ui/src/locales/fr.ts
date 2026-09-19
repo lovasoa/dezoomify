@@ -114,8 +114,6 @@ export const fr = {
     "Toujours en cours, {host} tarde a repondre. Vous pouvez attendre, ou annuler et reessayer plus tard.",
   // Display-only section.
   "view.display.title": "Apercu affiche, non enregistre",
-  "view.display.shownPlain": "Affiche ci-dessous sans enregistrement.",
-  "view.display.shownPrefix": "Affiche ci-dessous sans enregistrement.",
   "view.display.openDesktop": "Ouvrir dans l application de bureau",
   // One-click desktop handoff (todo 5.5): the button names the origin and the
   // summary names scope/recipient/job memory-only, mirroring the extension

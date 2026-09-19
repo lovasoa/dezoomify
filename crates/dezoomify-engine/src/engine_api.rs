@@ -733,7 +733,6 @@ pub struct EngineJob {
     options: JobOptions,
     next_effect: u32,
     outstanding: HashMap<EffectId, Outstanding>,
-    terminal: Option<Terminal>,
     terminal_failure: Option<(String, String)>,
     catalog_images: u32,
     catalog_levels: Vec<u32>,
@@ -795,7 +794,6 @@ impl EngineJob {
             options,
             next_effect: 0,
             outstanding: HashMap::new(),
-            terminal: None,
             terminal_failure: None,
             catalog_images: 0,
             catalog_levels: Vec::new(),
@@ -1351,13 +1349,7 @@ impl EngineJob {
                 Some(Terminal::Failed { code, message })
             }
             Some("cancelled") => Some(Terminal::Cancelled),
-            _ => {
-                if self.terminal.is_some() {
-                    self.terminal.clone()
-                } else {
-                    None
-                }
-            }
+            _ => None,
         }
     }
 

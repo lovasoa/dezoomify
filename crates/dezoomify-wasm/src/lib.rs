@@ -62,7 +62,6 @@ pub mod session;
 
 pub use error::{redact, AdapterError, AdapterErrorCode};
 pub use session::Session;
-pub use session::SessionState;
 
 /// JavaScript (`wasm32`) bindings. Native targets and tests use the plain
 /// Rust API above, which exercises the same logic without a browser.

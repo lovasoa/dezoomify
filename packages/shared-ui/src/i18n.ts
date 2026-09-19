@@ -215,8 +215,6 @@ const en = {
     "Still working, {host} is slow to answer. You can wait, or cancel and try again later.",
   // Display-only section.
   "view.display.title": "Showing preview – not saved yet",
-  "view.display.shownPlain": "Shown below without saving.",
-  "view.display.shownPrefix": "Shown below without saving.",
   "view.display.openDesktop": "Open in desktop app",
   // One-click desktop handoff (todo 5.5): the button names the origin and the
   // summary names scope/recipient/job memory-only, mirroring the extension
