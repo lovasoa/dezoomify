@@ -50,7 +50,7 @@ function harness({ fetchResource, loadDisplayImage, assembly = fakeAssembly(), p
 
 const TILE = {
   type: "acquire-tile",
-  effect: "fx:2",
+  effect: 2,
   tile: 0,
   placement: { position: { x: 0, y: 0 }, expected_size: { width: 16, height: 16 }, canvas: { width: 32, height: 32 }, processing: "none" },
   request: { id: 0, uri: "https://cdn.test/tile_0.jpg", headers: [], purpose: "tile" },
@@ -62,7 +62,7 @@ test("metadata carries the observed post-redirect URL", async () => {
   const { controller, sent } = harness();
   controller.handleEngineMessages([{
     type: "acquire-resource",
-    effect: "fx:0",
+    effect: 0,
     request: { id: 4, uri: "https://cdn.test/info.json", headers: [], purpose: "metadata" },
   }]);
   await flush();
@@ -157,19 +157,19 @@ test("lifecycle effects run in engine order on one chain", async () => {
   // Snapshots (terminals included) ride alongside, never as messages: the
   // only job-state object always forwards, including after cancel.
   controller.handleEngineMessages([
-    { type: "finalize-output", effect: "fx:10", partial: false, format: "png", canvas: { width: 32, height: 32 } },
+    { type: "finalize-output", effect: 10, partial: false, format: "png", canvas: { width: 32, height: 32 } },
   ]);
   await flush();
   await flush();
   assert.deepEqual(assembly.calls.map(([kind]) => kind), ["finalizeOutput"]);
   assert.deepEqual(assembly.calls[0], ["finalizeOutput", false, "png", { width: 32, height: 32 }]);
   const finalized = sent.find((message) => message.type === "engine.finalize");
-  assert.deepEqual(finalized.outcome, { type: "finalization-succeeded", disposition: "browser-save-initiated" });
+  assert.deepEqual(finalized.outcome, { type: "finalization-succeeded", effect: 10, disposition: "browser-save-initiated" });
 });
 
 test("cancel-work releases retained resources and cancels fetching", async () => {
   const { controller, assembly, seen } = harness();
-  controller.handleEngineMessages([{ type: "cancel-work", effect: "fx:20" }]);
+  controller.handleEngineMessages([{ type: "cancel-work", effect: 20 }]);
   assert.deepEqual(assembly.calls.map(([kind]) => kind), ["release"]);
   assert.ok(seen.some(([kind]) => kind === "cancel"));
 });
@@ -179,13 +179,22 @@ test("a failed awaited output replies typed instead of faking success", async ()
   assembly.finalizeOutput = async () => { throw Object.assign(new Error("too large"), { code: "PLAN_INVALID", retryable: false }); };
   const { controller, sent, seen } = harness({ assembly });
   controller.handleEngineMessages([
-    { type: "finalize-output", effect: "fx:10", partial: false, format: "png", canvas: { width: 99999, height: 99999 } },
+    { type: "finalize-output", effect: 10, partial: false, format: "png", canvas: { width: 99999, height: 99999 } },
   ]);
   await flush();
   await flush();
   const finalized = sent.find((message) => message.outcome?.type === "finalization-failed");
   assert.ok(finalized, "typed finalization failure was sent");
+  assert.equal(finalized.outcome.effect, 10);
   assert.equal(finalized.outcome.error.code, "PLAN_INVALID");
   assert.equal(finalized.outcome.error.phase, "output");
   assert.equal(seen.some(([kind]) => kind === "host-failure"), false, "an awaited failure is not a host crash");
+});
+
+test("retry timers echo the engine effect id", async () => {
+  const { controller, sent } = harness();
+  controller.handleEngineMessages([{ type: "wait-retry-timer", effect: 17, tile: 2, attempt: 1, delay_ms: 0 }]);
+  await flush();
+  const elapsed = sent.find((message) => message.type === "engine.timer-elapsed");
+  assert.deepEqual(elapsed, { type: "engine.timer-elapsed", effect: 17 });
 });

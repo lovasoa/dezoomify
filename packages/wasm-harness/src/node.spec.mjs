@@ -196,8 +196,7 @@ describe("generated typed WASM surface", () => {
     assert.ok(wait.delay_ms > 0, "the host waits before retrying");
     const elapsed = session.complete({
       type: "retry-timer-elapsed",
-      tile: wait.tile,
-      attempt: wait.attempt,
+      effect: wait.effect,
     });
     assert.equal(elapsed.status, "ok");
     const reacquired = elapsed.messages.filter((message) =>

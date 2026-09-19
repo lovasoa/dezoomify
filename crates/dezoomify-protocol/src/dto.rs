@@ -281,39 +281,33 @@ pub enum HostCompletion {
     /// `ProvideResource`); the adapter maps it to the engine tile ordinal
     /// and forwards `ProbeOutcome`. `ok=false` (or zero width/height)
     /// reports a missing probe.
-    ProvideProbeOutcome {
-        request: u32,
-        outcome: ProbeOutcome,
-    },
+    ProvideProbeOutcome { request: u32, outcome: ProbeOutcome },
     /// Display-only observation for one outstanding `acquire-tile` in
     /// `AcquiringTiles`. The host has already retained a valid ordinary
     /// image element and the adapter forwards a typed `TileDisplayed`.
-    ProvideDisplayOutcome {
-        request: u32,
-    },
+    ProvideDisplayOutcome { request: u32 },
     /// Successful acquisition of one outstanding `acquire-tile` in
     /// `AcquiringTiles`. The host has already fetched, decoded, and placed
     /// the tile; the body is NOT carried (it never re-enters the adapter).
     /// The adapter forwards a typed `TileAcquired`.
-    TileAcquired {
-        request: u32,
-    },
+    TileAcquired { request: u32 },
     /// Elapsed retry wait for one outstanding `wait-retry-timer` host
     /// effect. The engine owns no clocks: the host waits `delay_ms` on its
-    /// own clock, then answers with the same tile and attempt. While
-    /// paused, the host parks the completion and answers on resume. Stale
-    /// or duplicate completions are ignored.
-    RetryTimerElapsed {
-        tile: u32,
-        attempt: u32,
-    },
+    /// own clock, then answers with the exact effect id it received. The
+    /// engine parks elapsed retries while paused; stale or duplicate
+    /// completions are rejected as stale effects.
+    RetryTimerElapsed { effect: u32 },
     FinalizationSucceeded {
+        /// Correlation of the outstanding `finalize-output` effect.
+        effect: u32,
         /// Honest disposition from the host that performed the save:
         /// tainted (display-only) canvases report DisplayOnly so every
         /// product presents preview instead of claiming a saved file.
         disposition: OutputDispositionDto,
     },
     FinalizationFailed {
+        /// Correlation of the outstanding `finalize-output` effect.
+        effect: u32,
         error: ErrorDto,
     },
 }
@@ -342,16 +336,20 @@ pub enum HostEffect {
     /// Awaited host-owned output operation. The host validates its destination,
     /// assembles/encodes when readable, and replies exactly once.
     FinalizeOutput {
+        /// Engine-minted effect correlation echoed by finalization completion.
+        effect: u32,
         partial: bool,
         format: OutputFormat,
         canvas: Option<SizeDto>,
     },
     /// Explicit retry wait for one tile: the host waits `delay_ms` on its
-    /// own clock and then answers with `RetryTimerElapsed` carrying the
-    /// same tile and attempt. No new acquisition for this tile starts
-    /// before that completion. While paused, the host parks the timer and
-    /// issues the completion on resume.
+    /// own clock and then answers with `RetryTimerElapsed` carrying this
+    /// exact effect id. No new acquisition for this tile starts before that
+    /// completion. The engine parks elapsed retries while paused and
+    /// re-drives them on resume.
     WaitRetryTimer {
+        /// Engine-minted effect correlation echoed by timer completion.
+        effect: u32,
         tile: u32,
         attempt: u32,
         delay_ms: u64,

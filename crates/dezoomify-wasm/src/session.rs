@@ -32,13 +32,13 @@
 //!   exact budget with explicit timer effects), or a missing probe
 //!   observation (probe request).
 //! * `RetryTimerElapsed` answers one outstanding retry-timer effect with
-//!   the same tile and attempt after the host waited `delay_ms` on its own
-//!   clock. While paused the host parks the completion and answers on
-//!   resume; stale completions are ignored.
+//!   the same effect id after the host waited `delay_ms` on its own
+//!   clock. The engine parks elapsed retries while paused and re-drives them
+//!   on resume; stale completions are rejected.
 //! * Decisions: `SelectImage`, `FollowDeferred`, `SelectLevel`, and
 //!   `RecoveryChoice` map 1:1 onto engine commands. `RecoveryChoice` must
 //!   reference the outstanding numeric decision generation.
-//! * `FinalizationSucceeded` and `FinalizationFailed` complete the one
+//! * `FinalizationSucceeded` and `FinalizationFailed` echo and complete the
 //!   awaited finalize effect.
 //! * `CancelWork` instructs the host to close its own retained resources.
 //!
@@ -89,10 +89,6 @@ pub struct Session {
     /// Adapter-minted probe request ids (subset of tile requests emitted
     /// while planning probe-driven levels).
     probe_requests: HashSet<u32>,
-    /// Outstanding retry-timer effects by (tile, attempt).
-    live_timers: HashMap<(u32, u32), EngineEffectId>,
-    /// Outstanding finalize effect, if the host awaits output.
-    live_finalize: Option<EngineEffectId>,
 }
 
 impl Session {
@@ -110,8 +106,6 @@ impl Session {
             outstanding_tile_requests: HashMap::new(),
             request_context: HashMap::new(),
             probe_requests: HashSet::new(),
-            live_timers: HashMap::new(),
-            live_finalize: None,
         })
     }
 
@@ -315,13 +309,14 @@ impl Session {
             }
             HostCompletion::ProvideDisplayOutcome { request } => self.on_display_outcome(request),
             HostCompletion::TileAcquired { request } => self.on_tile_acquired(request),
-            HostCompletion::RetryTimerElapsed { tile, attempt } => {
-                self.on_timer_elapsed(tile, attempt)
+            HostCompletion::RetryTimerElapsed { effect } => self.on_timer_elapsed(effect),
+            HostCompletion::FinalizationSucceeded {
+                effect,
+                disposition,
+            } => self.on_finalize_succeeded(effect, disposition),
+            HostCompletion::FinalizationFailed { effect, error } => {
+                self.on_finalize_failed(effect, error)
             }
-            HostCompletion::FinalizationSucceeded { disposition } => {
-                self.on_finalize_succeeded(disposition)
-            }
-            HostCompletion::FinalizationFailed { error } => self.on_finalize_failed(error),
         }
     }
 
@@ -548,33 +543,21 @@ impl Session {
         Ok(self.drain_update(update))
     }
 
-    /// Elapsed retry wait: the host waited on its own clock and answers
-    /// with the same tile and attempt. Stale completions are ignored.
-    fn on_timer_elapsed(
-        &mut self,
-        tile: u32,
-        attempt: u32,
-    ) -> Result<Vec<HostEffect>, AdapterError> {
-        let Some(effect) = self.live_timers.remove(&(tile, attempt)) else {
-            return Ok(Vec::new());
-        };
+    /// Elapsed retry wait: the host echoes the engine-minted effect id, so
+    /// the engine validates it without a second adapter-side timer table.
+    fn on_timer_elapsed(&mut self, effect: u32) -> Result<Vec<HostEffect>, AdapterError> {
         let update = self
             .engine_job()?
-            .complete(effect, EngineEffectResult::TimerElapsed)
+            .complete(EngineEffectId(effect), EngineEffectResult::TimerElapsed)
             .map_err(Self::engine_error)?;
         Ok(self.drain_update(update))
     }
 
     fn on_finalize_succeeded(
         &mut self,
+        effect: u32,
         disposition: OutputDispositionDto,
     ) -> Result<Vec<HostEffect>, AdapterError> {
-        let Some(effect) = self.live_finalize.take() else {
-            return Err(AdapterError::new(
-                AdapterErrorCode::WrongState,
-                "no output operation is awaited",
-            ));
-        };
         let disposition = match disposition {
             OutputDispositionDto::NativePublication => EngineDisposition::NativePublication,
             OutputDispositionDto::BrowserSaveInitiated => EngineDisposition::BrowserSaveInitiated,
@@ -583,22 +566,23 @@ impl Session {
         };
         let update = self
             .engine_job()?
-            .complete(effect, EngineEffectResult::OutputCommitted { disposition })
+            .complete(
+                EngineEffectId(effect),
+                EngineEffectResult::OutputCommitted { disposition },
+            )
             .map_err(Self::engine_error)?;
         Ok(self.drain_update(update))
     }
 
-    fn on_finalize_failed(&mut self, error: ErrorDto) -> Result<Vec<HostEffect>, AdapterError> {
-        let Some(effect) = self.live_finalize.take() else {
-            return Err(AdapterError::new(
-                AdapterErrorCode::WrongState,
-                "no output operation is awaited",
-            ));
-        };
+    fn on_finalize_failed(
+        &mut self,
+        effect: u32,
+        error: ErrorDto,
+    ) -> Result<Vec<HostEffect>, AdapterError> {
         let update = self
             .engine_job()?
             .complete(
-                effect,
+                EngineEffectId(effect),
                 EngineEffectResult::OutputFailed {
                     code: error.code,
                     message: error.message,
@@ -829,29 +813,25 @@ impl Session {
                 tile,
                 attempt,
                 delay_ms,
-            } => {
-                self.live_timers.insert((*tile, *attempt), *id);
-                Some(HostEffect::WaitRetryTimer {
-                    tile: *tile,
-                    attempt: *attempt,
-                    delay_ms: *delay_ms,
-                })
-            }
+            } => Some(HostEffect::WaitRetryTimer {
+                effect: id.get(),
+                tile: *tile,
+                attempt: *attempt,
+                delay_ms: *delay_ms,
+            }),
             EngineEffect::FinalizeOutput {
                 id,
                 partial,
                 canvas,
-            } => {
-                self.live_finalize = Some(*id);
-                Some(HostEffect::FinalizeOutput {
-                    partial: *partial,
-                    format: dezoomify_protocol::dto::OutputFormat::Png,
-                    canvas: canvas.map(|size| SizeDto {
-                        width: u64::from(size.width),
-                        height: u64::from(size.height),
-                    }),
-                })
-            }
+            } => Some(HostEffect::FinalizeOutput {
+                effect: id.get(),
+                partial: *partial,
+                format: dezoomify_protocol::dto::OutputFormat::Png,
+                canvas: canvas.map(|size| SizeDto {
+                    width: u64::from(size.width),
+                    height: u64::from(size.height),
+                }),
+            }),
             EngineEffect::RequestPartialDecision {
                 id: _, generation, ..
             } => Some(HostEffect::RequestDecision {
