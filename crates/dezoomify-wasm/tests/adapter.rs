@@ -2,8 +2,8 @@
 //! retry round-trip. Exact timer vectors live in E2E, not here.
 
 use dezoomify_protocol::dto::{
-    BlockedReason, ErrorPhase, ErrorTransport, FetchFailureDto, HostEffect, JobCommand,
-    JobInputDto, JobState, SessionConfig,
+    BlockedReason, ErrorPhase, ErrorTransport, FetchFailureDto, HostCompletion, HostEffect,
+    JobCommand, JobInputDto, JobState, SessionConfig,
 };
 use dezoomify_wasm::Session;
 
@@ -13,7 +13,7 @@ fn session() -> Session {
 
 fn start(session: &mut Session) -> (Vec<HostEffect>, dezoomify_protocol::dto::EngineSnapshotDto) {
     session
-        .dispatch(JobCommand::Start {
+        .command(JobCommand::Start {
             inputs: vec![JobInputDto::new("https://example.com/image.dzi")],
         })
         .expect("typed start")
@@ -68,7 +68,7 @@ fn typed_fetch_error_requires_and_preserves_context() {
         detail: None,
     };
     let (messages, snapshot) = session
-        .dispatch(JobCommand::ProvideFetchFailure { request, error })
+        .complete(HostCompletion::ProvideFetchFailure { request, error })
         .expect("typed failure accepted");
     // The terminal answer carries only the release effect so the host can
     // close its retained resources; no new acquisition work is issued.
@@ -93,7 +93,7 @@ fn typed_config_budgets_are_validated_by_the_engine() {
     })
     .expect("construction defers budget validation to the engine");
     let error = session
-        .dispatch(JobCommand::Start {
+        .command(JobCommand::Start {
             inputs: vec![JobInputDto::new("https://example.com/image.dzi")],
         })
         .unwrap_err();
@@ -138,7 +138,7 @@ const DZI: &[u8] = br#"<?xml version="1.0" encoding="UTF-8"?>
 fn session_acquiring_tiles() -> (Session, Vec<(u32, u32)>) {
     let mut session = session();
     let (messages, _snapshot) = session
-        .dispatch(JobCommand::Start {
+        .command(JobCommand::Start {
             inputs: vec![JobInputDto::new("https://example.com/image.dzi")],
         })
         .expect("typed start");
@@ -151,7 +151,7 @@ fn session_acquiring_tiles() -> (Session, Vec<(u32, u32)>) {
         .expect("discovery request");
     // Discovery bodies cross directly in the command; nothing is retained.
     let (_messages, _snapshot) = session
-        .dispatch(JobCommand::ProvideResource {
+        .complete(HostCompletion::ProvideResource {
             request,
             bytes: DZI.to_vec(),
             final_uri: None,
@@ -162,12 +162,12 @@ fn session_acquiring_tiles() -> (Session, Vec<(u32, u32)>) {
         "metadata resolves a kept catalog"
     );
     session
-        .dispatch(JobCommand::SelectImage { image: 0 })
+        .command(JobCommand::SelectImage { image: 0 })
         .expect("image");
     // Levels ascend by size; the last position is the largest (2x2 grid).
     let levels = 10u32;
     let (messages, _snapshot) = session
-        .dispatch(JobCommand::SelectLevel { level: levels - 1 })
+        .command(JobCommand::SelectLevel { level: levels - 1 })
         .expect("level");
     let mut tiles = Vec::new();
     for message in &messages {
@@ -222,7 +222,7 @@ const BULK_LIST: &[u8] = b"https://example.test/a.dzi\nhttps://example.test/b.dz
 fn follow_deferred_continues_same_job_with_replaced_catalog() {
     let mut session = session();
     let (messages, _snapshot) = session
-        .dispatch(JobCommand::Start {
+        .command(JobCommand::Start {
             inputs: vec![JobInputDto::new("https://example.test/list.txt")],
         })
         .expect("typed start");
@@ -234,7 +234,7 @@ fn follow_deferred_continues_same_job_with_replaced_catalog() {
         })
         .expect("discovery request");
     let (_messages, snapshot) = session
-        .dispatch(JobCommand::ProvideResource {
+        .complete(HostCompletion::ProvideResource {
             request,
             bytes: BULK_LIST.to_vec(),
             final_uri: None,
@@ -257,13 +257,13 @@ fn follow_deferred_continues_same_job_with_replaced_catalog() {
 
     // Ready images cannot be selected while entries stay deferred.
     let error = session
-        .dispatch(JobCommand::SelectImage { image: 0 })
+        .command(JobCommand::SelectImage { image: 0 })
         .unwrap_err();
     assert_eq!(error.code(), dezoomify_wasm::AdapterErrorCode::WrongState);
 
     // Same job follows: exactly one new metadata effect for the follow URI.
     let (messages, snapshot) = session
-        .dispatch(JobCommand::FollowDeferred { image: 0 })
+        .command(JobCommand::FollowDeferred { image: 0 })
         .expect("follow");
     assert_eq!(snapshot.lifecycle, JobState::Discovering);
     let follow = messages
@@ -277,7 +277,7 @@ fn follow_deferred_continues_same_job_with_replaced_catalog() {
 
     // The follow-up bytes replace the catalog in place: no new job.
     let (_messages, snapshot) = session
-        .dispatch(JobCommand::ProvideResource {
+        .complete(HostCompletion::ProvideResource {
             request: follow.id,
             bytes: DZI.to_vec(),
             final_uri: None,
@@ -289,11 +289,11 @@ fn follow_deferred_continues_same_job_with_replaced_catalog() {
 
     // The replaced catalog drives the same job to tiles.
     let (_messages, snapshot) = session
-        .dispatch(JobCommand::SelectImage { image: 0 })
+        .command(JobCommand::SelectImage { image: 0 })
         .expect("image");
     let level = snapshot.selection.level_count - 1;
     let (messages, _snapshot) = session
-        .dispatch(JobCommand::SelectLevel { level })
+        .command(JobCommand::SelectLevel { level })
         .expect("level");
     assert_eq!(
         messages
@@ -312,7 +312,7 @@ fn transient_failure_eventually_succeeds_after_host_wait() {
 
     // Attempt 1 fails transiently: the engine issues an explicit wait.
     let (messages, _snapshot) = session
-        .dispatch(JobCommand::ProvideFetchFailure {
+        .complete(HostCompletion::ProvideFetchFailure {
             request,
             error: transient_timeout(),
         })
@@ -324,17 +324,17 @@ fn transient_failure_eventually_succeeds_after_host_wait() {
 
     // The host waits, then answers the timer: the retry succeeds.
     let (messages, _snapshot) = session
-        .dispatch(JobCommand::RetryTimerElapsed { tile, attempt: 1 })
+        .complete(HostCompletion::RetryTimerElapsed { tile, attempt: 1 })
         .expect("timer elapsed");
     request = reacquired_request(&messages, tile).expect("second attempt issued");
 
     // The retried tile plus its siblings complete the acquisition.
     let (mut messages, _snapshot) = session
-        .dispatch(JobCommand::TileAcquired { request })
+        .complete(HostCompletion::TileAcquired { request })
         .expect("retry acquired");
     for (_, sibling) in tiles.iter().skip(1) {
         let (next, _snapshot) = session
-            .dispatch(JobCommand::TileAcquired { request: *sibling })
+            .complete(HostCompletion::TileAcquired { request: *sibling })
             .expect("sibling acquired");
         messages = next;
     }
@@ -351,7 +351,7 @@ fn acquired_tiles_complete_without_body_bytes() {
     let mut finalized = false;
     for (_, request) in &tiles {
         let (messages, _snapshot) = session
-            .dispatch(JobCommand::TileAcquired { request: *request })
+            .complete(HostCompletion::TileAcquired { request: *request })
             .expect("acquired outcome");
         finalized |= messages
             .iter()
@@ -367,7 +367,7 @@ fn provide_resource_for_tile_request_is_rejected() {
     // Tile bytes never enter the adapter: tile requests are answered with
     // acquired/display outcomes or fetch failures, never provide-resource.
     let error = session
-        .dispatch(JobCommand::ProvideResource {
+        .complete(HostCompletion::ProvideResource {
             request,
             bytes: vec![1, 2, 3, 4],
             final_uri: None,
@@ -385,7 +385,7 @@ fn display_only_finalize_reports_display_only_disposition() {
     let mut finalize_seen = false;
     for (_, request) in &tiles {
         let (messages, _snapshot) = session
-            .dispatch(JobCommand::ProvideDisplayOutcome { request: *request })
+            .complete(HostCompletion::ProvideDisplayOutcome { request: *request })
             .expect("display outcome");
         finalize_seen |= messages
             .iter()
@@ -393,7 +393,7 @@ fn display_only_finalize_reports_display_only_disposition() {
     }
     assert!(finalize_seen, "display-only acquisition finalizes");
     let (_messages, snapshot) = session
-        .dispatch(JobCommand::FinalizationSucceeded {
+        .complete(HostCompletion::FinalizationSucceeded {
             disposition: OutputDispositionDto::DisplayOnly,
         })
         .expect("display-only finalize accepted");

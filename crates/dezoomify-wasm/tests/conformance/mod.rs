@@ -9,7 +9,7 @@ use wasm_bindgen_test::*;
 fn typed_session_returns_messages_directly() {
     let mut session = Session::new(SessionConfig::default()).expect("session");
     let (messages, snapshot) = session
-        .dispatch(JobCommand::Start {
+        .command(JobCommand::Start {
             inputs: vec![JobInputDto::new("https://example.com/image.dzi")],
         })
         .expect("start");
