@@ -63,8 +63,6 @@ test("renderView mounts card and updates job section in place without DOM destru
     jobActivity: {
       url: "https://museum.example.org/artwork/1",
       startedAt: Date.now() - 3000,
-      stepLabel: "Finding the zoomable image…",
-      detail: "Contacting museum.example.org…",
     },
   };
 
@@ -94,7 +92,6 @@ test("renderView mounts card and updates job section in place without DOM destru
       ...ctx,
       jobActivity: {
         ...ctx.jobActivity,
-        stepLabel: "Downloading image tiles…",
         completedRequests: 15,
         pendingRequests: 4,
       },
@@ -105,7 +102,8 @@ test("renderView mounts card and updates job section in place without DOM destru
   assert.equal(el.querySelector(".dz-card"), card, "card node preserved across job updates");
   assert.equal(card.querySelector(".dz-job-section"), jobSec, "job section node preserved across job updates");
 
-  assert.equal(stepTextEl.textContent, "Downloading image tiles…");
+  // The step line renders the presentation headline, never host copy.
+  assert.equal(stepTextEl.textContent, "Saving image tiles…");
   const countsEl = card.querySelector("#dz-job-counts");
   assert.equal(countsEl.textContent, "15 done / 60");
   const barEl = card.querySelector("#dz-job-bar");
@@ -158,7 +156,6 @@ test("slow discovery replaces the phase with one waiting status", () => {
       startedAt: now - 20000,
       now,
       lastProgressAt: now - 11000,
-      stepLabel: "Finding the zoomable image…",
     },
   };
   render(el, jobPresentation([{ type: "job-state", state: "Discovering" }]), callbacks, ctx);

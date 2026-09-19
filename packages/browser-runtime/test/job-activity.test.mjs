@@ -40,20 +40,20 @@ test("request clocks drive pending and longest-wait gauges", () => {
   assert.equal(t.activity.state.failedRequests, 1);
 });
 
-test("steps and logs batch paints and cap lines", () => {
+test("touch and logs batch paints and cap lines", () => {
   const t = tracker();
   t.activity.reset("https://a.test/", 30000);
   const before = t.updates;
-  t.activity.setStep("Saving…", "detail");
-  assert.equal(t.activity.state.stepLabel, "Saving…");
-  assert.equal(t.updates, before + 1);
+  t.activity.touchProgress();
+  assert.ok((t.activity.state.lastProgressAt ?? 0) > 0);
+  assert.equal(t.updates, before);
   for (let i = 0; i < ACTIVITY_MAX_LOG_LINES + 10; i++) t.activity.pushLog(`line ${i}`);
   assert.equal(t.activity.state.log?.length, ACTIVITY_MAX_LOG_LINES);
   t.activity.scheduleUpdate();
   t.activity.scheduleUpdate();
   assert.equal(t.frames.length, 1);
   t.frames[0]?.();
-  assert.equal(t.updates, before + 2);
+  assert.equal(t.updates, before + 1);
 });
 
 test("heartbeat repaints only on real change", () => {

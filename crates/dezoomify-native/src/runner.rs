@@ -192,20 +192,17 @@ impl JobOptions {
     }
 }
 
-/// Narrow host commands. Cancellation plus partial-output decisions only:
+/// Narrow host commands. Cancellation plus one partial-output decision:
 ///
 /// * `Cancel` stops new work; in-flight finishes; the commit point refuses to
 ///   publish, so no output (partial or complete) appears on the cancel path.
-/// * `KeepPartial` / `DiscardPartial` / `RetryPartial` answer the pending
-///   partial request announced as [`Lifecycle::AwaitingPartialDecision`].
-///   Unanswered requests fail closed to the job's partial policy after the
-///   driver's bounded wait.
+/// * `AnswerPartial` answers the pending partial request announced as
+///   [`Lifecycle::AwaitingPartialDecision`]. Unanswered requests fail closed
+///   to the job's partial policy after the driver's bounded wait.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UserCommand {
     Cancel,
-    KeepPartial,
-    DiscardPartial,
-    RetryPartial,
+    AnswerPartial(PartialDecision),
 }
 
 /// Observable lifecycle of the running job, projected from driver events.
@@ -358,9 +355,7 @@ impl RunningJob {
             UserCommand::Cancel => {
                 self.cancel_flag.store(true, Ordering::SeqCst);
             }
-            UserCommand::KeepPartial => self.partial_gate.answer(PartialDecision::Keep),
-            UserCommand::DiscardPartial => self.partial_gate.answer(PartialDecision::Discard),
-            UserCommand::RetryPartial => self.partial_gate.answer(PartialDecision::Retry),
+            UserCommand::AnswerPartial(decision) => self.partial_gate.answer(decision),
         }
         Ok(JobCommandAck::Accepted)
     }
@@ -600,7 +595,9 @@ mod tests {
         // rejected, never applied to a later job.
         let start = std::time::Instant::now();
         loop {
-            if job.send(UserCommand::KeepPartial) == Err(CommandRejected { code: "job.stale" }) {
+            if job.send(UserCommand::AnswerPartial(PartialDecision::Keep))
+                == Err(CommandRejected { code: "job.stale" })
+            {
                 break;
             }
             assert!(

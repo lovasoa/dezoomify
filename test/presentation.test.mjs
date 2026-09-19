@@ -116,11 +116,12 @@ test("failure presenter keeps the engine block out of the headline", () => {
     retryable: false,
     host: "example.test",
   });
-  // Prominent message: plain headline naming the source, never the block.
+  // Prominent message: plain headline, never the block. The source host
+  // is host-provided provenance (extras), not table copy.
   assert.equal(error.category, "discovery");
   assert.equal(error.phase, "discovery");
   assert.ok(!error.message.includes("iiif"));
-  assert.ok(error.message.includes("example.test"));
+  assert.ok(error.message.includes("No zoomable image"));
   // The engine block is the only thing in the technical detail.
   assert.equal(error.detail, engineBlock);
 });

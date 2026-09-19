@@ -50,13 +50,14 @@ import { DESKTOP_COMMANDS, NATIVE_FORMATS } from "./desktopIntegration.ts";
 // Keep erasable syntax only so node type-stripping can read this file.
 
 // Typed desktop choice shapes sent to the shell `answer_choice` command.
-// Structured end to end: these objects decode to the shell `Choice` enum
-// directly; no string parsing is involved.
+// Selection shapes are pre-start options; the partial shape carries the
+// wire recovery decision verbatim. Structured end to end: these objects
+// decode to the shell `Choice` enum directly; no string parsing is
+// involved.
 export type AnswerChoice =
   | { kind: "image"; index: number }
   | { kind: "level"; index: number }
-  | { kind: "partial"; keep: boolean }
-  | { kind: "retry" };
+  | { kind: "partial"; decision: "keep" | "retry" | "discard" };
 
 export interface DesktopIpc {
   invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown>;
@@ -628,10 +629,10 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
         return;
       }
       if (command.type === "recovery-choice") {
-        const choice: AnswerChoice =
-          command.choice === "retry"
-            ? { kind: "retry" }
-            : { kind: "partial", keep: command.choice === "keep" };
+        const choice: AnswerChoice = {
+          kind: "partial",
+          decision: command.choice,
+        };
         await ipc.invoke("answer_choice", { job: id, choice });
         return;
       }

@@ -269,6 +269,7 @@ function IdleView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: ViewCont
 interface JobDerived {
   paused: boolean;
   step: string;
+  detail?: string;
   sourceUrl: string;
   timeText: string;
   countsText: string;
@@ -304,13 +305,16 @@ function deriveJob(presentation: SnapshotPresentation, ctx?: ViewContext): JobDe
   const lastProgressAt = activity.lastProgressAt ?? startedAt;
   const stalledMs = Math.max(0, timerNow - lastProgressAt);
   const showStalled = stalledMs >= 10000 && presentation.headlineKey !== "view.step.saving";
+  const detail = presentation.detailKey
+    ? t(presentation.detailKey, presentation.detailVars)
+    : undefined;
   const step = paused
     ? "Paused"
     : retrying > 0
       ? `Retrying ${retrying} tile${retrying === 1 ? "" : "s"}…`
       : showStalled
         ? `Waiting for ${hostFromUrl(activity.url)}…`
-        : activity.stepLabel || ctx?.currentProgress?.message || t(presentation.headlineKey, presentation.headlineVars);
+        : t(presentation.headlineKey, presentation.headlineVars);
   const sourceUrl = activity.url ? displaySourceUrl(activity.url) : "";
   const estimatedTotalMs = ctx?.currentProgress?.estimatedTotalMs ?? (
     determinate && current >= 2 && elapsedMs >= 2000
@@ -330,6 +334,7 @@ function deriveJob(presentation: SnapshotPresentation, ctx?: ViewContext): JobDe
   return {
     paused,
     step,
+    ...(detail ? { detail } : {}),
     sourceUrl,
     timeText,
     countsText,
@@ -383,6 +388,11 @@ function JobView({
           <span className="dz-progress-step-text" id="dz-job-step-text">
             {d.step}
           </span>
+          {d.detail ? (
+            <span className="dz-progress-step-detail" id="dz-job-step-detail">
+              {d.detail}
+            </span>
+          ) : null}
         </span>
         <span className="dz-progress-count" id="dz-job-counts">
           {d.countsText}

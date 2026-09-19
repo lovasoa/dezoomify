@@ -99,6 +99,10 @@ export const fr = {
   "view.step.downloading": "Enregistrement des tuiles…",
   "view.step.saving": "Assemblage de l image finale…",
   "view.step.working": "En cours…",
+  "view.step.contactingDetail": "Contact de l'hote de l'image…",
+  "view.step.recoveryDetail": "Une decision de recuperation est requise avant de continuer.",
+  "view.step.encodingDetail": "Encodage dans l'application.",
+  "view.step.cleanupDetail": "Nettoyage des fichiers inacheves…",
   // Live job section.
   "view.job.workingOn": "En cours sur",
   "view.job.cancel": "Annuler",
@@ -260,6 +264,8 @@ export const fr = {
     "Certaines parties de cette image depuis {host} n ont pas pu etre enregistrees. Reessayez les parties manquees, ou conservez l image partielle avec des zones vides.",
   "desktop.discovery.none":
     "Aucune image zoomable trouvee a cette adresse depuis {host}. Essayez une autre page ou verifiez l adresse.",
+  "view.discovery.none":
+    "Aucune image zoomable trouvee a cette adresse. Essayez une page avec un visualiseur, ou essayez l extension.",
   "desktop.plan.none":
     "Cette image n a aucune taille utilisable a enregistrer depuis {host}. Essayez une autre image ou une Largeur max plus petite.",
   "desktop.transport.stalled": "Enregistrement bloque lors du contact avec {host}. Verifiez votre connexion et reessayez.",
@@ -268,6 +274,7 @@ export const fr = {
   "desktop.job.cancelledMsg": "L enregistrement de l image a ete interrompu. Tout fichier inacheve a ete supprime.",
   "desktop.start.failed": "Impossible de demarrer l enregistrement de cette image depuis {host}. Reessayez.",
   "desktop.choice.failed": "Ce choix n a pas ete accepte. Reessayez.",
+  "view.ext.desynced": "L extension a perdu la synchronisation pendant la lecture. Relancez l analyse.",
   "desktop.save.generic": "Impossible d enregistrer cette image depuis {host}. Reessayez avec une autre adresse.",
   "desktop.internal.error":
     "Un probleme inattendu a interrompu cet enregistrement depuis {host}. Reessayez, et copiez les diagnostics si cela se reproduit.",

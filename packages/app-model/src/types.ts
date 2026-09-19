@@ -183,6 +183,8 @@ export interface JobHandle {
   readonly id: string;
   command(command: UserCommand): Promise<void>;
   dispose(): Promise<void>;
+  /** Resolve a paused host-grant acquisition (browser permission flow). */
+  resolvePermission?(granted: boolean): void;
 }
 
 /** Host-neutral job service. Products inject effects; UI consumes snapshots. */
@@ -199,6 +201,7 @@ export interface JobService {
 export interface RunnerHandle {
   command(command: UserCommand): Promise<void>;
   dispose(): Promise<void>;
+  resolvePermission?(granted: boolean): void;
 }
 
 export interface HostRunner {

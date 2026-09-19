@@ -214,8 +214,8 @@ pub fn dispatch_answer_choice(
     }
     let choice: Choice = serde_json::from_value(choice).map_err(|_| {
         CommandError::invalid_input(
-            "choice must be {\"kind\":\"image\"|\"level\",\"index\":n}, \
-             {\"kind\":\"partial\",\"keep\":bool} or {\"kind\":\"retry\"}",
+            "choice must be {\"kind\":\"image\"|\"level\",\"index\":n} or \
+             {\"kind\":\"partial\",\"decision\":\"keep\"|\"retry\"|\"discard\"}",
         )
     })?;
     match table.answer_choice(job, &choice) {

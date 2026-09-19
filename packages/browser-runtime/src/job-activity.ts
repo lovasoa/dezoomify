@@ -38,7 +38,6 @@ export interface JobActivity {
   scheduleUpdate(): void;
   reset(url: string, timeoutMs: number): void;
   touchProgress(): void;
-  setStep(label: string, detail?: string): void;
   pushLog(line: string, maxLines?: number): void;
   noteRequestStart(label: string): number;
   noteRequestEnd(id: number, ok: boolean): void;
@@ -113,7 +112,6 @@ export function createJobActivity(hooks: ActivityHooks): JobActivity {
     state.url = url;
     state.startedAt = at;
     state.now = at;
-    state.stepLabel = "Finding the zoomable image…";
     state.detail = undefined;
     state.pendingRequests = 0;
     state.completedRequests = 0;
@@ -130,14 +128,6 @@ export function createJobActivity(hooks: ActivityHooks): JobActivity {
 
   function touchProgress(): void {
     ensure().lastProgressAt = now();
-  }
-
-  function setStep(label: string, detail?: string): void {
-    const a = ensure();
-    a.stepLabel = label;
-    if (detail !== undefined) a.detail = detail;
-    touchProgress();
-    hooks.onUpdate();
   }
 
   function pushLog(line: string, maxLines: number = ACTIVITY_MAX_LOG_LINES): void {
@@ -250,7 +240,6 @@ export function createJobActivity(hooks: ActivityHooks): JobActivity {
     scheduleUpdate: scheduleBatchedUpdate,
     reset,
     touchProgress,
-    setStep,
     pushLog,
     noteRequestStart,
     noteRequestEnd,

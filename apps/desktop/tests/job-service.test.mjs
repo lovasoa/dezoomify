@@ -191,9 +191,9 @@ test("commands route to typed shell commands; engine-only commands reject", asyn
     "cancel_job",
     { kind: "image", index: 2 },
     { kind: "level", index: 1 },
-    { kind: "retry" },
-    { kind: "partial", keep: true },
-    { kind: "partial", keep: false },
+    { kind: "partial", decision: "retry" },
+    { kind: "partial", decision: "keep" },
+    { kind: "partial", decision: "discard" },
   ]);
   await assert.rejects(handle.command({ type: "pause" }), (error) => error.code === "desktop.unsupported-command");
   await assert.rejects(handle.command({ type: "resume" }), (error) => error.code === "desktop.unsupported-command");

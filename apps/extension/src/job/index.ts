@@ -1,20 +1,25 @@
 /** Dedicated extension job-tab integration. No webpage postMessage bridge. */
-import { describeFailure, isActiveJobStatus, jobPageTitle, presentStatus, renderView } from "@dezoomify/shared-ui";
+import { describeFailure, isActiveJobStatus, jobPageTitle, renderView } from "@dezoomify/shared-ui";
+import { createJobService } from "@dezoomify/app-model";
+import { presentFailure, presentSnapshot, presentStatus } from "@dezoomify/shared-ui";
 import { createElement } from "react";
-import type { PresentationStatus, StructuredError, ViewContext as SharedViewContext } from "@dezoomify/shared-ui";
+import type { JobHandle, JobSnapshot } from "@dezoomify/app-model";
+import type {
+  PresentationStatus,
+  SnapshotPresentation,
+  StructuredError,
+  ViewContext as SharedViewContext,
+} from "@dezoomify/shared-ui";
 import {
   canvasToPngBlob,
   createBrowserRunner,
   createCanvasAssembly,
   createProbeSize,
   createTileDecoder,
-  dispatchTyped,
   MAX_DEFERRED_FOLLOWS,
   pickDeferredUri,
   pickEngineSelection,
   saveBlobViaAnchor,
-  type BrowserJobHandle,
-  type DispatchTable,
 } from "@dezoomify/browser-runtime";
 import { createExtensionFetcher } from "../runtime/fetch.ts";
 import { originOfUrl } from "@dezoomify/browser-runtime";
@@ -55,13 +60,16 @@ let probeSeq = 1 << 30;
 // One shared browser runner attempt. The runner owns the worker, the WASM
 // session, cross-worker processing calls, the abort scope, and disposal;
 // this tab keeps binding, transport, selection, recovery, and view wiring.
-let jobHandle: BrowserJobHandle | null = null;
+let jobHandle: JobHandle | null = null;
 let sourceTransport: ReturnType<typeof createCoordinatorSourceTransport> | null = null;
 /** Runner abort signal of the live attempt (drives the cancelled() transport view). */
 let attemptSignal: AbortSignal | null = null;
 /** @type {ReturnType<typeof createCanvasAssembly> | null} */
 let assembly: ReturnType<typeof createCanvasAssembly> | null = null;
 let saveCompleted = false;
+let jobServiceHandle: { dispose(): Promise<void> } | null = null;
+let latestSnapshot: JobSnapshot | null = null;
+let localFailure: StructuredError | null = null;
 let started = false;
 let selected = false;
 let hostFailed = false;
@@ -70,10 +78,6 @@ let selectedTitle: string | undefined;
 // Deferred-follow depth for the current logical job: reset when a new binding
 // or explicit retry starts, incremented once per followed ImageRequest.
 let followDepth = 0;
-// The engine emits the initial 0/N tile snapshot before it dispatches tile
-// effects. Keep it while a permission view temporarily replaces the job view
-// so approval resumes the same determinate progress display immediately.
-let lastTileProgress: { current: number; total: number } | null = null;
 let accessRequest: { hosts: string[]; requesting: boolean } | null = null;
 let partialDecision: number | null = null;
 const testGrantedOrigins = new Set<string>();
@@ -108,15 +112,20 @@ export function syncExtensionJobTitle(status: PresentationStatus, sourceUrl: str
   }
 }
 
-function render(status: PresentationStatus, ctx: ViewContext = {}, progress: { current: number; total: number } | null = null) {
-  const target = root();
-  if (!target) return;
-  const viewActivity = { ...(ctx.jobActivity ?? {}), ...(uiLogLines.length ? { log: uiLogLines.slice() } : {}) };
-  let presentation = presentStatus(status, {
+function presentFor(status: PresentationStatus, ctx: ViewContext): SnapshotPresentation {
+  if (localFailure) return presentFailure(localFailure, "browser-session");
+  if (latestSnapshot) return presentSnapshot(latestSnapshot, "browser-session");
+  return presentStatus(status, {
     transport: "browser-session",
     ...(ctx.failure ? { error: ctx.failure } : {}),
   });
-  if (progress) presentation = { ...presentation, progress };
+}
+
+function render(status: PresentationStatus, ctx: ViewContext = {}) {
+  const target = root();
+  if (!target) return;
+  const viewActivity = { ...(ctx.jobActivity ?? {}), ...(uiLogLines.length ? { log: uiLogLines.slice() } : {}) };
+  const presentation = presentFor(status, ctx);
   renderView(target, presentation, {
     onSubmitUrl: () => {},
     onCancel: closeJob,
@@ -162,7 +171,13 @@ function render(status: PresentationStatus, ctx: ViewContext = {}, progress: { c
       if (generation === null) return;
       partialDecision = null;
       void jobHandle?.command({ type: "recovery-choice", generation, choice: keep ? "keep" : "discard" });
-      render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Finishing the image" } });
+      render("downloading", { jobActivity: { startedAt: Date.now() } });
+    }, onRetry: () => {
+      const generation = partialDecision;
+      if (generation === null) return;
+      partialDecision = null;
+      void jobHandle?.command({ type: "recovery-choice", generation, choice: "retry" });
+      render("downloading", { jobActivity: { startedAt: Date.now() } });
     } }) } : {}),
   });
   syncExtensionJobTitle(status, typeof ctx.jobActivity?.url === "string" && ctx.jobActivity.url !== "" ? ctx.jobActivity.url : lastSource);
@@ -191,7 +206,7 @@ function showAccessRequired(detail: { hosts: string[] }) {
   const hosts = Array.isArray(detail.hosts) ? detail.hosts : [];
   jobLog.info("permission-requested", `jobId=${binding?.jobId ?? "unknown"} hosts=${hosts.length}`);
   accessRequest = { hosts, requesting: false };
-  render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Waiting for access" } });
+  render("downloading", { jobActivity: { startedAt: Date.now() } });
 }
 
 function resolvePermission(message: Record<string, unknown>) {
@@ -203,10 +218,12 @@ function resolvePermission(message: Record<string, unknown>) {
   }
   if (message.granted) {
     render("downloading", {
-      jobActivity: { startedAt: Date.now(), stepLabel: "Acquiring image tiles" },
-    }, lastTileProgress);
+      jobActivity: { startedAt: Date.now() },
+    });
   }
-  jobHandle?.resolvePermission(message.granted);
+  try {
+    jobHandle?.resolvePermission?.(message.granted);
+  } catch { /* grant resolution is best effort */ }
 }
 
 /**
@@ -217,7 +234,11 @@ function resolvePermission(message: Record<string, unknown>) {
 function showPartialDecision(generation: number) {
   if (!Number.isSafeInteger(generation) || generation < 0) return;
   partialDecision = generation;
-  render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Some tiles are missing" } });
+  render("downloading", { jobActivity: { startedAt: Date.now() } });
+}
+
+function clearPartialDecision() {
+  partialDecision = null;
 }
 
 /** Source host for shared copy interpolation; "" when the input is unparseable. */
@@ -267,20 +288,17 @@ function onHostFailure(error: unknown) {
   const candidate = error && typeof error === "object"
     ? error as { code?: unknown; message?: unknown; retryable?: unknown; detail?: unknown; phase?: unknown; transport?: unknown }
     : null;
-  const message = code === "adapter.wrong-state"
-    ? "The extension lost sync while reading this image. Start the scan again."
-    : (typeof candidate?.message === "string" ? candidate.message : "The image could not be assembled in this tab.");
   const failure = describeFailure({
     code,
-    message,
-    engineDetail: typeof candidate?.detail === "string" ? candidate.detail : undefined,
-    category: "extension",
+    engineDetail: typeof candidate?.detail === "string"
+      ? candidate.detail
+      : (typeof candidate?.message === "string" ? candidate.message : undefined),
     retryable: candidate?.retryable === true,
     phase,
     transport: typeof candidate?.transport === "string" ? candidate.transport : undefined,
     host: sourceHost(),
   });
-  render("failed", { failure, jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } });
+  render("failed", { failure, jobActivity: { startedAt: Date.now() } });
 }
 
 function createAssembly(
@@ -321,34 +339,7 @@ function createAssembly(
   });
 }
 
-const eventHandlers = {
-  progress: (event) => {
-    jobLog.debug("engine-progress", `acquired=${event.acquired} total=${event.total}`);
-    lastTileProgress = { current: event.acquired, total: event.total };
-    render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Acquiring image tiles" } }, lastTileProgress);
-  },
-  failed: (event) => {
-    jobLog.error("engine-event", `type=failed error=${JSON.stringify(event.error)}`);
-    partialDecision = null;
-    render("failed", { failure: presentEngineFailure(event.error), jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } });
-  },
-  cancelled: () => {
-    jobLog.info("engine-event", "type=cancelled");
-    partialDecision = null;
-    render("cancelled", { jobActivity: { startedAt: Date.now(), stepLabel: "Cancelled" } });
-  },
-  completed: () => {
-    jobLog.info("engine-event", "type=completed");
-    partialDecision = null;
-    render("completed", { jobActivity: { startedAt: Date.now(), stepLabel: "Completed" } });
-  },
-  "partial-completed": () => {
-    jobLog.info("engine-event", "type=partial-completed");
-    partialDecision = null;
-    render("completed", { jobActivity: { startedAt: Date.now(), stepLabel: "Completed (partial)" } });
-  },
-  catalog: (event) => {
-    if (selected) return;
+function onCatalog(event: Extract<JobEvent, { type: "catalog" }>) {
     const entries = event.catalog.entries;
     jobLog.info("engine-event", `type=catalog entries=${entries.length}`);
     const selection = pickEngineSelection(event.catalog);
@@ -360,7 +351,7 @@ const eventHandlers = {
       if (deferredUri && followDepth < MAX_DEFERRED_FOLLOWS) {
         followDepth += 1;
         jobLog.info("deferred-follow", `depth=${followDepth}`);
-        render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Resolving the image metadata" } });
+        render("discovering", { jobActivity: { startedAt: Date.now() } });
         // Defer the teardown out of this engine event chain so the current
         // attempt settles before its runner is replaced by a fresh attempt
         // rooted at the resolved request URI (same binding, same identity).
@@ -369,12 +360,11 @@ const eventHandlers = {
           resetAttemptState();
           started = true;
           jobLog.info("engine-start", `jobId=${binding?.jobId ?? "unknown"} url=${deferredUri}`);
-          render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Resolving the image metadata" } });
+          render("discovering", { jobActivity: { startedAt: Date.now() } });
           void beginAttempt([{ url: deferredUri }]);
         });
         return;
       }
-      selected = true;
       onHostFailure(Object.assign(
         new Error(deferredUri
           ? "The image metadata stayed deferred after the resolution limit."
@@ -384,24 +374,10 @@ const eventHandlers = {
       void jobHandle?.command({ type: "cancel" }).catch(() => {});
       return;
     }
-    selected = true;
     selectedTitle = selection.title;
-    render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Preparing the image" } });
+    render("downloading", { jobActivity: { startedAt: Date.now() } });
     void jobHandle?.command({ type: "select-image", image: selection.image }).catch(() => {});
     void jobHandle?.command({ type: "select-level", level: selection.level }).catch(() => {});
-  },
-  warning: (event) => {
-    jobLog.warn("engine-warning", JSON.stringify(event.error));
-  },
-  "recovery-request": () => {},
-  "job-state": () => {},
-  paused: () => {},
-  resumed: () => {},
-} satisfies DispatchTable<JobEvent, void>;
-
-function handleEvent(event: JobEvent) {
-  if (hostFailed) return;
-  dispatchTyped(eventHandlers, event);
 }
 
 function setup(bound: unknown) {
@@ -433,6 +409,13 @@ function setup(bound: unknown) {
 function stopAttempt() {
   const handle = jobHandle;
   jobHandle = null;
+  const serviceHandle = jobServiceHandle;
+  jobServiceHandle = null;
+  if (serviceHandle) {
+    try {
+      void serviceHandle.dispose().catch(() => {});
+    } catch { /* teardown is best effort */ }
+  }
   attemptSignal = null;
   if (handle) {
     try {
@@ -452,7 +435,8 @@ function resetAttemptState() {
   hostFailed = false;
   selectedTitle = undefined;
   lastSource = "";
-  lastTileProgress = null;
+  latestSnapshot = null;
+  localFailure = null;
   accessRequest = null;
   partialDecision = null;
 }
@@ -570,15 +554,50 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
       } catch { /* abort must never break teardown */ }
     },
   });
+  const service = createJobService(runner);
   try {
-    const handle = await runner.start(
+    const handle = await service.start(
       { inputs, engine: {}, exec: { kind: "browser", sourceUrl: inputs[0]?.url ?? "" } },
-      { event: (event) => handleEvent(event), snapshot: () => {} },
+      {
+        snapshot: (snapshot: JobSnapshot) => {
+          if (hostFailed) return;
+          latestSnapshot = snapshot;
+          if (snapshot.catalog && !selected) {
+            selected = true;
+            onCatalog({ type: "catalog", catalog: snapshot.catalog });
+          }
+          renderForSnapshot(snapshot);
+        },
+        hostStatus: () => {},
+      },
     );
-    jobHandle = handle;
+    jobServiceHandle = handle;
   } catch (error) {
     onHostFailure(error);
   }
+}
+
+/** Render one folded snapshot: terminal phases win over the live status. */
+function renderForSnapshot(snapshot: JobSnapshot) {
+  const terminal = snapshot.terminal;
+  if (terminal?.kind === "failed" && terminal.error) {
+    jobLog.error("engine-event", `type=failed error=${JSON.stringify(terminal.error)}`);
+    clearPartialDecision();
+    localFailure = presentEngineFailure(terminal.error);
+    render("failed", { jobActivity: { startedAt: Date.now() } });
+    return;
+  }
+  if (terminal?.kind === "cancelled") {
+    clearPartialDecision();
+    render("cancelled", { jobActivity: { startedAt: Date.now() } });
+    return;
+  }
+  if (terminal?.kind === "completed" || terminal?.kind === "partial-completed") {
+    clearPartialDecision();
+    render("completed", { jobActivity: { startedAt: Date.now() } });
+    return;
+  }
+  render("downloading", { jobActivity: { startedAt: Date.now() } });
 }
 
 /**
@@ -588,7 +607,7 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
  */
 function announceReady() {
   jobLog.info("job-ready-sent", `jobId=${bootstrapJobId ?? "unknown"}`);
-  render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Connecting to Dezoomify" } });
+  render("discovering", { jobActivity: { startedAt: Date.now() } });
   void send({ type: "dz.job.ready", jobId: bootstrapJobId, requestId: requestId("job-ready") }).catch(() =>
     onHostFailure(Object.assign(new Error("Could not connect this job tab to the extension."), { code: "network", retryable: true })));
 }
@@ -622,7 +641,7 @@ function startAttempt() {
   if (!binding) return;
   stopAttempt();
   resetAttemptState();
-  render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Waiting for image candidates" } });
+  render("discovering", { jobActivity: { startedAt: Date.now() } });
 }
 
 function candidates(message: Record<string, unknown>) {
@@ -634,7 +653,7 @@ function candidates(message: Record<string, unknown>) {
   if (!values.length) return;
   started = true;
   jobLog.info("candidates-received", `jobId=${binding.jobId} count=${values.length} overflow=${typeof message.overflow === "number" ? message.overflow : 0}`);
-  render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Finding the zoomable image" } });
+  render("discovering", { jobActivity: { startedAt: Date.now() } });
   lastSource = values[0].url;
   jobLog.info("engine-start", `jobId=${binding.jobId} url=${lastSource}`);
   void beginAttempt(values);

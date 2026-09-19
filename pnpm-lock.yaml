@@ -109,6 +109,9 @@ importers:
 
   apps/extension:
     dependencies:
+      '@dezoomify/app-model':
+        specifier: workspace:*
+        version: link:../../packages/app-model
       '@dezoomify/browser-runtime':
         specifier: workspace:*
         version: link:../../packages/browser-runtime
@@ -167,6 +170,8 @@ importers:
       '@dezoomify/wasm-bindings':
         specifier: workspace:*
         version: link:../wasm-bindings
+
+  packages/bindings: {}
 
   packages/browser-runtime:
     dependencies:
