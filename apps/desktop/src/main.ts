@@ -546,6 +546,7 @@ function failurePresentationOf(snapshot: JobSnapshot): SnapshotPresentation | nu
     code: dto.code,
     engineDetail: dto.detail ?? dto.message,
     retryable: dto.retryable,
+    message: dto.message,
     phase: dto.phase,
     transport: dto.transport ?? NATIVE_TRANSPORT,
     url: dto.request,

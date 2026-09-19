@@ -291,6 +291,7 @@ function presentEngineFailure(error: ErrorDto): StructuredError {
     code: error.code,
     engineDetail: error.detail ?? error.message,
     retryable: error.retryable,
+    message: error.message,
     phase: error.phase,
     // The extension always fetches under the granted browser session; the
     // engine's typed event carries no transport, so the details line would

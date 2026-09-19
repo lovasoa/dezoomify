@@ -638,7 +638,7 @@ impl Session {
                     .complete(
                         EngineEffectId(request),
                         EngineEffectResult::TileFailed(EngineFailure {
-                            code: failure.code,
+                            code: format!("{:?}", failure.code),
                             http: failure.http,
                             retry_after_ms: failure.retry_after_ms,
                             transport: None,
@@ -671,7 +671,7 @@ impl Session {
                 self.engine_job()?.note_metadata_failure(
                     EngineEffectId(request),
                     ErrorDto {
-                        code: failure.code.clone(),
+                        code: format!("{:?}", failure.code),
                         phase: ErrorPhase::Discovery,
                         retryable: failure.retryable,
                         message: failure.message.clone(),
@@ -690,7 +690,7 @@ impl Session {
                     .complete(
                         EngineEffectId(request),
                         EngineEffectResult::MetadataFailed(EngineFailure {
-                            code: failure.code,
+                            code: format!("{:?}", failure.code),
                             http: failure.http,
                             retry_after_ms: failure.retry_after_ms,
                             transport: Some(transport),

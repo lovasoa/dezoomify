@@ -292,6 +292,7 @@ export function tileFailedError(
     `tile fetch: ${lastOutcome} (HTTP ${lastStatus ?? "n/a"}) after 1 attempt`,
   );
   error.transportKind = "direct";
+  error.fetchFailureCode = httpFailure ? "TRANSPORT_HTTP_ERROR" : "TRANSPORT_NETWORK_ERROR";
   error.url = _url;
   error.cause = {
     code: causeCode,

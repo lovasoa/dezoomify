@@ -9,6 +9,7 @@
  */
 import { blockedReason, forwardCoreHeaders, isPublicHttpUrl, normalizeErrorPreviewText, originOfUrl } from "@dezoomify/browser-runtime";
 import type { HostFailure } from "@dezoomify/browser-runtime";
+import type { FetchFailureCode } from "@dezoomify/wasm-bindings";
 
 export const PROXY_PATH = "/api/proxy";
 export const MAX_BYTES_DEFAULT = 8 * 1024 * 1024;
@@ -50,8 +51,25 @@ export function asFetchFailure(error: unknown): HostFailure {
   const http = typeof candidate?.status === "number" && Number.isInteger(candidate.status) && candidate.status > 0
     ? candidate.status
     : undefined;
+  const code: FetchFailureCode = http !== undefined
+    ? "TRANSPORT_HTTP_ERROR"
+    : category === "cancelled"
+      ? "TRANSPORT_CANCELLED"
+      : category === "throttled"
+        ? "UPSTREAM_RATE_LIMITED"
+        : category === "access-required" || category === "forbidden"
+          ? "TRANSPORT_POLICY_DENIED"
+          : category === "network"
+            ? "TRANSPORT_NETWORK_ERROR"
+            : category === "redirect-unavailable"
+              ? "TRANSPORT_BAD_REDIRECT"
+              : category === "limit-exceeded"
+                ? "TRANSPORT_SIZE_LIMIT"
+                : category === "malformed"
+                  ? "TRANSPORT_BAD_URL"
+                  : "DISCOVERY_FAILED";
   return {
-    code: `extension.${category}`,
+    code,
     retryable: category === "network" || category === "throttled",
     message: typeof candidate?.message === "string" ? candidate.message : "Extension transport failed",
     blocked_reason: category,

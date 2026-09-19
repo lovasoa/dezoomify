@@ -3,7 +3,7 @@
 // Extracted from `./session.ts` so leaf modules (canvas save, assembly,
 // plan gates) can raise typed failures without depending on the discovery
 // client.
-import type { BlockedReason, ErrorTransport } from "@dezoomify/wasm-bindings";
+import type { BlockedReason, ErrorTransport, FetchFailureCode } from "@dezoomify/wasm-bindings";
 
 export interface StructuredFailure extends Error {
   code: string;
@@ -30,6 +30,8 @@ export interface StructuredFailure extends Error {
   retry_after_ms?: number;
   /** Transport kind id (`direct`, `metadata-proxy`, ...). */
   transportKind?: ErrorTransport;
+  /** Generated fetch code used for product wording; never inferred from diagnostic text. */
+  fetchFailureCode?: FetchFailureCode;
   /** Bounded single-line server signal captured from an HTTP error body. */
   preview?: string;
 }
@@ -118,18 +120,19 @@ export function failure(
  * `url`/`http`/`preview`.
  */
 export function fetchFailure(
-  code: string,
   message: string,
   retryable: boolean,
   context: {
     cause: FetchCause;
+    code: FetchFailureCode;
     url?: string;
     preview?: string;
     transportKind?: ErrorTransport;
   },
 ): StructuredFailure {
-  const error = failure(code, message, retryable);
+  const error = failure(context.code, message, retryable);
   error.cause = context.cause;
+  error.fetchFailureCode = context.code;
   if (context.url) error.url = context.url;
   if (context.preview) error.preview = context.preview;
   if (context.transportKind) error.transportKind = context.transportKind;

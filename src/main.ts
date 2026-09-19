@@ -50,12 +50,8 @@ import {
   createProbeSize,
   type BrowserJobHandle,
 } from "../packages/browser-runtime/src/index.ts";
-import {
-  blockedReason,
-  errorTransport,
-  failure,
-  stableErrorCode,
-} from "../packages/browser-runtime/src/failure.ts";
+import { failure } from "../packages/browser-runtime/src/failure.ts";
+import type { StructuredFailure } from "../packages/browser-runtime/src/failure.ts";
 import {
   BROWSER_LIMITS,
   BROWSER_MAX_CANVAS_AREA,
@@ -560,32 +556,20 @@ async function runJob(url: string, origin = url): Promise<void> {
         },
       }),
     classifyFailure: (error) => {
-      const structured = error as {
-        blocked_reason?: unknown;
-        retryable?: unknown;
-        message?: unknown;
-        cause?: { code?: unknown; reason?: unknown; transport?: unknown; http?: unknown };
-        transportKind?: unknown;
-        http?: unknown;
-        preview?: unknown;
-        detail?: unknown;
-        retry_after_ms?: unknown;
-      };
-      const reason = blockedReason(structured?.blocked_reason)
-        ?? blockedReason(structured?.cause?.reason);
-      const transport = errorTransport(structured?.transportKind)
-        ?? errorTransport(structured?.cause?.transport);
+      const structured = error as Partial<StructuredFailure>;
+      const reason = structured.cause?.reason;
+      const transport = structured.transportKind ?? structured.cause?.transport;
       return {
-        code: typeof structured?.cause?.code === "string" ? structured.cause.code : stableErrorCode(error),
-        retryable: structured?.retryable === true,
-        message: typeof structured?.message === "string" ? structured.message : "The browser could not read this resource.",
+        code: structured.fetchFailureCode ?? "DISCOVERY_FAILED",
+        retryable: structured.retryable === true,
+        message: structured.message ?? "The browser could not read this resource.",
         ...(reason ? { blocked_reason: reason } : {}),
         transport: transport ?? "direct",
-        ...(typeof structured?.http === "number" ? { http: structured.http } : {}),
-        ...(typeof structured?.retry_after_ms === "number" ? { retry_after_ms: structured.retry_after_ms } : {}),
-        ...(typeof structured?.cause?.http === "number" ? { http: structured.cause.http } : {}),
-        ...(typeof structured?.preview === "string" ? { preview: structured.preview } : {}),
-        ...(typeof structured?.detail === "string" ? { detail: structured.detail } : {}),
+        ...(typeof structured.http === "number" ? { http: structured.http } : {}),
+        ...(typeof structured.retry_after_ms === "number" ? { retry_after_ms: structured.retry_after_ms } : {}),
+        ...(typeof structured.cause?.http === "number" ? { http: structured.cause.http } : {}),
+        ...(structured.preview ? { preview: structured.preview } : {}),
+        ...(structured.detail ? { detail: structured.detail } : {}),
       };
     },
     createAssembly: ({ processTile }) => {

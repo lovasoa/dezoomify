@@ -561,6 +561,32 @@ pub enum BlockedReason {
     Userinfo,
 }
 
+/// Stable code for a host-observed fetch failure.
+///
+/// Variant identifiers are the protocol's serialized values, so this enum
+/// preserves the pre-existing wire vocabulary without rename tables.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+#[allow(non_camel_case_types)]
+pub enum FetchFailureCode {
+    TRANSPORT_HTTP_ERROR,
+    DISCOVERY_HTTP_ERROR,
+    UPSTREAM_RATE_LIMITED,
+    TRANSPORT_POLICY_DENIED,
+    PROXY_BUDGET_EXCEEDED,
+    PROXY_ERROR,
+    PROXY_NETWORK_ERROR,
+    PROXY_RATE_LIMITED,
+    DISCOVERY_FAILED,
+    TRANSPORT_TIMEOUT,
+    TRANSPORT_NETWORK_ERROR,
+    TRANSPORT_CANCELLED,
+    TRANSPORT_BAD_URL,
+    TRANSPORT_BAD_REDIRECT,
+    TRANSPORT_REDIRECT_LIMIT,
+    TRANSPORT_SIZE_LIMIT,
+}
+
 impl BlockedReason {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -609,7 +635,7 @@ pub enum ResourceKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct FetchFailureDto {
-    pub code: String,
+    pub code: FetchFailureCode,
     pub retryable: bool,
     pub message: String,
     #[serde(default)]

@@ -8,6 +8,7 @@
 // drive the caller's live job view. Keep erasable-syntax-only.
 import { blockedReason, fetchFailure } from "./failure.ts";
 import type { FetchCause, StructuredFailure } from "./failure.ts";
+import type { FetchFailureCode } from "@dezoomify/wasm-bindings";
 import {
   DIRECT_METADATA_TIMEOUT_MS,
   REQUEST_TIMEOUT_MS,
@@ -151,7 +152,7 @@ export function proxyPolicyReasonText(reason?: string): string | null {
 }
 
 export interface ClassifiedProxyFailure {
-  code: string;
+  code: FetchFailureCode;
   message: string;
   retryable: boolean;
   /** Typed cause for the engine: the diagnostics grouping key. */
@@ -238,7 +239,7 @@ export function classifyProxyFailure(
     };
   }
   return {
-    code,
+    code: "PROXY_ERROR",
     message: "The metadata proxy could not fetch this address. Try again shortly.",
     retryable: status >= 500 || status === 0,
     cause,
@@ -281,8 +282,9 @@ function parseRetryAfterMs(headers: unknown, at: number): number | undefined {
 }
 
 function cancelledFailure(url: string): StructuredFailure {
-  return fetchFailure("TRANSPORT_CANCELLED", "The request was cancelled.", false, {
+  return fetchFailure("The request was cancelled.", false, {
     cause: { code: "TRANSPORT_CANCELLED", transport: "direct" },
+    code: "TRANSPORT_CANCELLED",
     url,
     transportKind: "direct",
   });
@@ -540,14 +542,16 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       if (!proxied.ok || !proxied.bytes) {
         if (signal?.aborted || proxied.code === "TRANSPORT_CANCELLED") throw cancelledFailure(url);
         if (proxied.code === "PROXY_RATE_LIMITED") {
-          throw fetchFailure("UPSTREAM_RATE_LIMITED", deps.messages.rateLimitedBySite, true, {
+          throw fetchFailure(deps.messages.rateLimitedBySite, true, {
             cause: { code: "UPSTREAM_RATE_LIMITED", http: 429, transport: "metadata-proxy" },
+            code: "UPSTREAM_RATE_LIMITED",
             url,
           });
         }
         const classified = classifyProxyFailure(proxied);
-        throw fetchFailure(classified.code, classified.message, classified.retryable, {
+        throw fetchFailure(classified.message, classified.retryable, {
           cause: classified.cause,
+          code: classified.code,
           url,
           transportKind: "metadata-proxy",
         });
@@ -565,15 +569,15 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       if (direct.status === 429) {
         // A direct fetch uses the user's own connection, so this throttle is
         // on their IP, not on our server; the fix is waiting, not another app.
-        throw fetchFailure("UPSTREAM_RATE_LIMITED", deps.messages.siteBusy, true, {
+        throw fetchFailure(deps.messages.siteBusy, true, {
           cause: { code: "UPSTREAM_RATE_LIMITED", http: 429, transport: "direct" },
+          code: "UPSTREAM_RATE_LIMITED",
           url,
           preview: direct.preview,
           transportKind: "direct",
         });
       }
       throw fetchFailure(
-        "DISCOVERY_HTTP_ERROR",
         "This page could not be opened. Check the address and try again.",
         false,
         {
@@ -582,14 +586,16 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
             ...(direct.status ? { http: direct.status } : {}),
             transport: "direct",
           },
+          code: "DISCOVERY_HTTP_ERROR",
           url,
           preview: direct.preview,
           transportKind: "direct",
         },
       );
     } else {
-      throw fetchFailure("DISCOVERY_FAILED", deps.messages.discoveryFailed(via), true, {
+      throw fetchFailure(deps.messages.discoveryFailed(via), true, {
         cause: { code: "DISCOVERY_FAILED", transport: "direct" },
+        code: "DISCOVERY_FAILED",
         url,
         transportKind: "direct",
       });
