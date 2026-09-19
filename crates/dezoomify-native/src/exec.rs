@@ -365,15 +365,7 @@ fn execute_attempt(
             && pump.snapshot.terminal.is_none()
             && !attempt.cancel_sent
         {
-            apply_update(
-                &mut pump,
-                job.command(EngineUserCommand::Cancel).map_err(|e| {
-                    NativeError::new(
-                        "native.internal",
-                        format!("cancel rejected ({}): {}", e.code, e.message),
-                    )
-                })?,
-            );
+            apply_update(&mut pump, cancel_job(&mut job)?);
             attempt.cancel_sent = true;
         }
         fold_snapshot(&mut attempt, &pump.snapshot)?;
@@ -737,6 +729,21 @@ fn complete_effect(
     })
 }
 
+/// Cancel is idempotent at the host boundary. The engine can terminalize
+/// between the host's last snapshot projection and its cancel command; in
+/// that case its terminal snapshot is authoritative and must not become a
+/// native internal error.
+fn cancel_job(job: &mut EngineJob) -> Result<EngineUpdate, NativeError> {
+    match job.command(EngineUserCommand::Cancel) {
+        Ok(update) => Ok(update),
+        Err(error) if error.code == "job.post-terminal" => Ok(job.snapshot_update()),
+        Err(error) => Err(NativeError::new(
+            "native.internal",
+            format!("cancel rejected ({}): {}", error.code, error.message),
+        )),
+    }
+}
+
 /// Fold one canonical snapshot into the attempt: the kept catalog, the
 /// monotonic progress, the pending decision ledger, and the terminal
 /// failure facts. Lifecycle moves need no branch: selection and quiescence
@@ -934,12 +941,7 @@ fn execute_effects(
                     if let Some(gate) = attempt.partial_gate.clone() {
                         gate.clear_pending();
                     }
-                    let update = job.command(EngineUserCommand::Cancel).map_err(|e| {
-                        NativeError::new(
-                            "native.internal",
-                            format!("cancel rejected ({}): {}", e.code, e.message),
-                        )
-                    })?;
+                    let update = cancel_job(job)?;
                     apply_update(pump, update);
                     attempt.cancel_sent = true;
                     continue;

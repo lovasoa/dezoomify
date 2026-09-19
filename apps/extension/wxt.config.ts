@@ -67,6 +67,9 @@ export default defineConfig({
     minimum_chrome_version: browser === "chrome" ? "140" : undefined,
   }),
   hooks: {
+    "prepare:publicPaths"(_wxt, paths) {
+      paths.push("test/driver.html");
+    },
     async "build:before"(wxt) {
       const wasm = path.join(repository, "wasm");
       for (const file of ["dezoomify-wasm.js", "dezoomify-wasm_bg.wasm"]) {

@@ -10,6 +10,7 @@
 
 import { collectCandidates, fetchSource } from "./source-operations.ts";
 import { LOG_LEVELS, LOG_MAX_CHARS, createLogger } from "@dezoomify/browser-runtime/logging";
+import type { WxtBrowser } from "wxt/browser";
 import {
   SOURCE_FETCH_BYTE_LIMIT,
   decodeBase64Payload,
@@ -27,12 +28,12 @@ type CandidateBatch = { requestId: string; inputs: CandidateInput[]; overflow: n
 type SourceFetchResult = { ok: boolean; code?: string; status?: number; url?: string; bytes?: number; data?: string };
 type Entry = { jobId: string; tabId: number; frameId: number; documentGeneration: number; attemptGeneration: number; jobTabId: number; sourceUrl: string; sourceValid: boolean; jobActive: boolean; jobReady: boolean; jobRunning: boolean; heldCandidates: Array<{ entry: Entry; candidate: CandidateBatch }>; seenCandidates: Set<string>; snapshotCount: number; grantedOrigins: Set<string>; primary: boolean };
 export type BrowserApi = {
-  action?: { setIcon?: (details: unknown) => Promise<void>; setBadgeText?: (details: unknown) => Promise<void>; onClicked?: { addListener?: (listener: (tab: BrowserTab) => void) => void } };
-  tabs?: { sendMessage?: (tabId: number, message: unknown, options?: { frameId: number }) => Promise<unknown>; update?: (tabId: number, details: unknown) => Promise<unknown>; create?: (details: unknown) => Promise<BrowserTab>; onRemoved?: { addListener?: (listener: (tabId: number) => void) => void }; onUpdated?: { addListener?: (listener: (tabId: number, changeInfo: { url?: string }) => void) => void } };
-  storage?: { session?: { set?: (value: unknown) => Promise<void>; get?: (key: string) => Promise<Record<string, unknown>> } };
-  permissions?: { contains?: (details: { origins: string[] }) => Promise<boolean>; onRemoved?: { addListener?: (listener: (removed: { origins?: string[] }) => void) => void } };
-  scripting?: { executeScript?: (details: { target: { tabId: number; frameIds: number[] }; func: (...args: never[]) => unknown; args: unknown[] }) => Promise<Array<{ frameId: number; result: unknown }>> };
-  runtime?: { getURL?: (path: string) => string; onMessage?: { addListener?: (listener: (message: Message, sender: BrowserSender, sendResponse: (response: unknown) => void) => boolean | void) => void } };
+  action?: { setIcon?: WxtBrowser["action"]["setIcon"]; setBadgeText?: WxtBrowser["action"]["setBadgeText"]; onClicked?: { addListener?: WxtBrowser["action"]["onClicked"]["addListener"] } };
+  tabs?: { sendMessage?: WxtBrowser["tabs"]["sendMessage"]; update?: WxtBrowser["tabs"]["update"]; create?: WxtBrowser["tabs"]["create"]; onRemoved?: { addListener?: WxtBrowser["tabs"]["onRemoved"]["addListener"] }; onUpdated?: { addListener?: WxtBrowser["tabs"]["onUpdated"]["addListener"] } };
+  storage?: { session?: { set?: WxtBrowser["storage"]["session"]["set"]; get?: WxtBrowser["storage"]["session"]["get"] } };
+  permissions?: { contains?: WxtBrowser["permissions"]["contains"]; onRemoved?: { addListener?: WxtBrowser["permissions"]["onRemoved"]["addListener"] } };
+  scripting?: { executeScript?: WxtBrowser["scripting"]["executeScript"] };
+  runtime?: { getURL?: WxtBrowser["runtime"]["getURL"]; onMessage?: { addListener?: WxtBrowser["runtime"]["onMessage"]["addListener"] } };
 };
 export type BrowserTab = { id?: number; url?: string };
 type BrowserSender = { tab?: BrowserTab; frameId?: number };
@@ -206,7 +207,7 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
     const jobId = makeJobId();
     let jobTab;
     try {
-      jobTab = await browserApi?.tabs?.create?.({ url: browserApi?.runtime?.getURL?.(`job.html#jobId=${encodeURIComponent(jobId)}`), active: true });
+      jobTab = await browserApi?.tabs?.create?.({ url: browserApi?.runtime?.getURL?.(`/job.html#jobId=${encodeURIComponent(jobId)}`), active: true });
     } catch (error) {
       backgroundLog("error", "job-tab-create-failed", error instanceof Error ? error.message : error);
       return;
@@ -232,7 +233,7 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
       sourceBindings.get(sourceBindingKey(entry)) === entry;
   }
 
-  async function executeSourceOperation(entry: Entry, func: (...args: never[]) => unknown, args: unknown[] = [], op = "source"): Promise<unknown> {
+  async function executeSourceOperation<Args extends unknown[], Result>(entry: Entry, func: (...args: Args) => Result, args: Args, op = "source"): Promise<unknown> {
     if (!sourceOperationAllowed(entry)) {
       backgroundLog("debug", "active-tab-op-skipped", `op=${op} tab=${entry.tabId} frame=${entry.frameId} reason=binding-invalid`);
       return null;
