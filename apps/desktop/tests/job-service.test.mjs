@@ -100,6 +100,71 @@ function completedOutput(overrides = {}) {
 // Start validation (typed, before any invoke)
 // ---------------------------------------------------------------------------
 
+test("start delivers the latest host snapshot emitted before its IPC reply", async () => {
+  const ipc = fakeIpc();
+  const service = createDesktopJobService({ ipc });
+  const terminal = snapshotPayload({
+    revision: 4,
+    lifecycle: "Failed",
+    terminal: { type: "failed", error: { code: "discovery.no-images" } },
+  });
+  ipc.startJobImpl = async () => {
+    emit(ipc, "dezoomify://job-snapshot", snapshotPayload({ revision: 0, lifecycle: "Created" }));
+    emit(ipc, "dezoomify://job-snapshot", terminal);
+    return { job: "job:native-1" };
+  };
+  const obs = observer();
+  await service.start(nativeRequest(), obs);
+  assert.deepEqual(obs.snapshots, [terminal]);
+  await service.dispose();
+});
+
+test("a failed start does not retain snapshots for a later job", async () => {
+  const ipc = fakeIpc();
+  const service = createDesktopJobService({ ipc });
+  ipc.startJobImpl = async () => {
+    emit(ipc, "dezoomify://job-snapshot", snapshotPayload());
+    throw new Error("start failed");
+  };
+  await assert.rejects(service.start(nativeRequest(), observer()));
+  ipc.startJobImpl = null;
+  const obs = observer();
+  await service.start(nativeRequest(), obs);
+  assert.deepEqual(obs.snapshots, []);
+  await service.dispose();
+});
+
+test("concurrent starts await all event subscriptions", async () => {
+  const ipc = fakeIpc();
+  const listen = ipc.listen;
+  let release;
+  const ready = new Promise(resolve => { release = resolve; });
+  ipc.listen = async (...args) => {
+    await ready;
+    return listen(...args);
+  };
+  const service = createDesktopJobService({ ipc });
+  const first = service.start(nativeRequest(), observer());
+  const second = service.start(nativeRequest(), observer());
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ipc.invokes.length, 0);
+  release();
+  await Promise.all([first, second]);
+  assert.equal(ipc.handlers.size, 2);
+  await service.dispose();
+});
+
+test("subscription failures reject every start without invoking jobs", async () => {
+  const ipc = fakeIpc();
+  ipc.listen = async () => { throw new Error("no host"); };
+  const service = createDesktopJobService({ ipc });
+  for (let i = 0; i < 2; i += 1) {
+    await assert.rejects(service.start(nativeRequest(), observer()), error => error.code === "desktop.host-unavailable");
+  }
+  assert.equal(ipc.invokes.length, 0);
+  await service.dispose();
+});
+
 test("start validates source, exec, and destination before invoking", async () => {
   const ipc = fakeIpc();
   const service = createDesktopJobService({ ipc });

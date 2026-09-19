@@ -38,6 +38,12 @@ renders authoritative snapshots.
 - UI-local state (draft inputs, expanded diagnostics, preview toggles,
   settings forms) stays in the product. It is never a job phase.
 
+Desktop startup waits for all event subscriptions before invoking the host.
+While a start reply is pending, the service keeps the latest absolute host
+snapshot per job and delivers it once the reply supplies that job's ID.
+This covers jobs that fail or finish before the IPC reply arrives without
+inventing a local phase or replaying intermediate transitions.
+
 ## Ownership
 
 `packages/app-model` owns the service interface, the snapshot predicates,
