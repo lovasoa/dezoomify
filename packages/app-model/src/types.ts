@@ -94,6 +94,8 @@ export interface TerminalOutcome {
  * Honest output account. doneTiles counts finalized tiles only; failedTiles
  * counts tiles the engine gave up on; missingTiles names the gaps behind a
  * kept partial. partial is true only for PartiallyCompleted jobs.
+ * siblingName is the basename of the `.partial` file actually written
+ * (never the granted path), when the host reports one.
  */
 export interface OutputSummary {
   doneTiles: number;
@@ -104,6 +106,20 @@ export interface OutputSummary {
   width: number | null;
   height: number | null;
   missingTiles: string[];
+  siblingName?: string;
+}
+
+/**
+ * Outstanding recovery decision. actions are the typed choices the host may
+ * offer; missing/failed/total carry the partial ledger when the host
+ * reports one (desktop native recovery events).
+ */
+export interface RecoveryRequest {
+  generation: number;
+  actions: RecoveryAction[];
+  missing?: string[];
+  failed?: number;
+  total?: number;
 }
 
 /**
@@ -121,7 +137,7 @@ export interface JobSnapshot {
   paused: boolean;
   selection: JobSelection;
   warnings: ErrorDto[];
-  recovery: { generation: number; actions: RecoveryAction[] } | null;
+  recovery: RecoveryRequest | null;
   terminal: TerminalOutcome | null;
   output: OutputSummary | null;
   /** True while tiles render as ordinary image elements with no byte access. */

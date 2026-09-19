@@ -1,7 +1,7 @@
 /** Dedicated extension job-tab integration. No webpage postMessage bridge. */
-import { describeFailure, isActiveJobStatus, jobPageTitle, renderView } from "@dezoomify/shared-ui";
+import { describeFailure, isActiveJobStatus, jobPageTitle, presentStatus, renderView } from "@dezoomify/shared-ui";
 import { createElement } from "react";
-import type { StructuredError, UiStatus, ViewContext as SharedViewContext } from "@dezoomify/shared-ui";
+import type { PresentationStatus, StructuredError, ViewContext as SharedViewContext } from "@dezoomify/shared-ui";
 import {
   canvasToPngBlob,
   createBrowserRunner,
@@ -62,7 +62,6 @@ let attemptSignal: AbortSignal | null = null;
 /** @type {ReturnType<typeof createCanvasAssembly> | null} */
 let assembly: ReturnType<typeof createCanvasAssembly> | null = null;
 let saveCompleted = false;
-let seq = 0;
 let started = false;
 let selected = false;
 let hostFailed = false;
@@ -98,7 +97,7 @@ export const EXTENSION_JOB_BASE_TITLE = "Dezoomify job";
  * Keep the job-tab title useful while a job runs. Hosts own the
  * `document.title` assignment; shared UI stays pure.
  */
-export function syncExtensionJobTitle(status: UiStatus, sourceUrl: string): void {
+export function syncExtensionJobTitle(status: PresentationStatus, sourceUrl: string): void {
   if (typeof document === "undefined") return;
   try {
     const active = isActiveJobStatus(status);
@@ -109,12 +108,16 @@ export function syncExtensionJobTitle(status: UiStatus, sourceUrl: string): void
   }
 }
 
-function render(status: UiStatus, ctx: ViewContext = {}) {
+function render(status: PresentationStatus, ctx: ViewContext = {}, progress: { current: number; total: number } | null = null) {
   const target = root();
   if (!target) return;
-  seq += 1;
   const viewActivity = { ...(ctx.jobActivity ?? {}), ...(uiLogLines.length ? { log: uiLogLines.slice() } : {}) };
-  renderView(target, { status, seq, sessionId: binding?.jobId ?? "job:pending", transport: "browser-session", imageCount: 0, ...(ctx.failure ? { error: ctx.failure } : {}) }, {
+  let presentation = presentStatus(status, {
+    transport: "browser-session",
+    ...(ctx.failure ? { error: ctx.failure } : {}),
+  });
+  if (progress) presentation = { ...presentation, progress };
+  renderView(target, presentation, {
     onSubmitUrl: () => {},
     onCancel: closeJob,
     onCopyDiagnostics: copyDiagnostics,
@@ -199,11 +202,9 @@ function resolvePermission(message: Record<string, unknown>) {
     for (const origin of message.origins) if (typeof origin === "string") testGrantedOrigins.add(origin);
   }
   if (message.granted) {
-    const progress = lastTileProgress;
     render("downloading", {
-      ...(progress ? { currentProgress: progress } : {}),
       jobActivity: { startedAt: Date.now(), stepLabel: "Acquiring image tiles" },
-    });
+    }, lastTileProgress);
   }
   jobHandle?.resolvePermission(message.granted);
 }
@@ -324,7 +325,7 @@ const eventHandlers = {
   progress: (event) => {
     jobLog.debug("engine-progress", `acquired=${event.acquired} total=${event.total}`);
     lastTileProgress = { current: event.acquired, total: event.total };
-    render("downloading", { currentProgress: lastTileProgress, jobActivity: { startedAt: Date.now(), stepLabel: "Acquiring image tiles" } });
+    render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Acquiring image tiles" } }, lastTileProgress);
   },
   failed: (event) => {
     jobLog.error("engine-event", `type=failed error=${JSON.stringify(event.error)}`);

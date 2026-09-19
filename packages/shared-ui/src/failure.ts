@@ -9,7 +9,7 @@
 //
 // Erasable-syntax-only TypeScript (type aliases, plain functions) so node can
 // type-strip it directly in tests, exactly like `i18n.ts`.
-import type { StructuredError } from "./controller.ts";
+import type { StructuredError } from "./snapshot-view.ts";
 import { t } from "./i18n.ts";
 
 // JPEG addresses at most 65535 px per side (copy interpolation only).

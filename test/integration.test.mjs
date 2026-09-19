@@ -21,6 +21,7 @@ import { drawPlacedTile } from "../packages/browser-runtime/src/tile-draw.ts";
 import { renderSaveGuidance } from "../packages/shared-ui/src/components.ts";
 import { canvasToPngBlob, isCanvasTaintError } from "../packages/browser-runtime/src/canvas-save.ts";
 import { act } from "./react-dom.mjs";
+import { presentIdle } from "../packages/shared-ui/src/snapshot-view.ts";
 import { renderView } from "../packages/shared-ui/src/view.tsx";
 
 const REPO_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -342,7 +343,7 @@ test("proxy fallback is unconditional: no opt-out UI, 1500 ms direct head start"
   const el = globalThis.document.createElement("div");
   globalThis.document.body.appendChild(el);
   act(() => renderView(el,
-    { status: "idle", seq: 0, sessionId: "s-proxy", imageCount: 0, transport: null },
+    presentIdle(),
     { onSubmitUrl: () => {}, onCancel: () => {}, onReset: () => {}, onSave: () => {} },
   ));
   assert.equal(el.querySelector("#dz-proxy-optin"), null, "idle view renders no proxy toggle");

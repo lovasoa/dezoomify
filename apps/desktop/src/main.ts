@@ -1,32 +1,22 @@
 // Desktop entry: render the shared UI through the desktop integration.
 // Routing and component composition stay shared; this file only wires the
 // desktop host. Pixels stay native; only protocol progress and job events
-// cross IPC, guarded by assertNoTileBytes and redactForEvent.
+// cross IPC, projected by the typed job service.
 //
-// Tauri commands used here: start_job, answer_choice, cancel_job,
-// request_destination (via integration.requestSaveDestination), and
-// query_capabilities (one boot handshake; see queryCapabilitiesAtBoot).
-// Event channels subscribed here: dezoomify://job-state,
-// dezoomify://job-progress, dezoomify://job-output, dezoomify://job-error,
-// dezoomify://deep-link-pending.
+// The typed job service (apps/desktop/src/jobService.ts) owns the job
+// lifecycle over the public Tauri API: start_job, answer_choice, cancel_job,
+// request_destination, open_saved_output, and query_capabilities. It
+// subscribes to the dezoomify:// event channels, projects each typed payload
+// into the shared snapshot fold, and publishes authoritative JobSnapshots;
+// this file renders them through presentSnapshot and keeps only product
+// wiring: queue, history, settings, recovery actions, deep links, and the
+// auxiliary panel. No synthetic controller walk exists: the presentation is
+// derived from the latest snapshot, and host-local failures (invalid input,
+// rejected starts) render through presentFailure.
 //
-// Controller mapping (TRANSITIONS in packages/shared-ui/src/controller.ts):
-// discovering -> images-found -> image-chosen -> level-chosen ->
-// preflight-ok -> progress -> save-start -> save-done -> completed, plus
-// fail -> failed, cancel -> cancelled, reset -> idle. The native driver
-// auto-selects images[0] at the largest fitting level, so the desktop
-// frontend dispatches only the transitions its real shell signals produce
-// (start, progress, save, terminal); the typed projection in
-// apps/desktop/src/jobService.ts folds the same shell events into
-// authoritative snapshots without any synthetic walk.
-// Recovery-requested (destination/partial) events
-// surface typed choices (retry / choose-output / keep-partial /
-// discard-partial / handoff-to-native) wired to answer_choice (typed
-// `Choice`), request_destination, and requestHandoff.
-//
-// The typed job service owns the authoritative snapshot fold;
-// apps/desktop/src/jobService.ts provides the typed JobService over the
-// public Tauri API and shares the same commands, choices, and channels.
+// Recovery decisions read the snapshot: AwaitingPartialDecision carries the
+// typed recovery actions (partial keep/discard/retry, destination
+// choose-output/retry) wired to answer_choice and request_destination.
 import {
   HISTORY_KEY_DESKTOP,
   clearHistory as clearHistoryStore,
@@ -35,42 +25,34 @@ import {
   saveHistory as saveHistoryStore,
   toHistoryEntry,
   type HistoryEntry,
+  type JobObserver,
+  type JobSnapshot,
+  type JobStartRequest,
 } from "@dezoomify/app-model";
 import {
-  createController,
-  renderView,
+  describeFailure,
   openConfirmModal,
+  presentFailure,
+  presentIdle,
+  presentSnapshot,
+  renderView,
   t,
+  type SnapshotPresentation,
+  type StructuredError,
 } from "@dezoomify/shared-ui";
 import type { ViewContext } from "@dezoomify/shared-ui";
 import { createLogger, suggestedNameFor } from "@dezoomify/browser-runtime";
 import {
-  asPayload,
-  extractMissingTiles,
+  encoderToMime,
   formatMissingSummary,
   hostOf,
   isValidInputUrl,
-  numField,
-  parseDetailObject,
-  payloadJob,
-  payloadReason,
-  payloadSeq,
-  payloadText,
-  phaseFor,
-  encoderToMime,
   readInitialUrl,
   redactedOriginOnly,
-  strField,
+  trimTechnical,
   validateDeepLinkPayload,
 } from "./errorCopy.ts";
 import type { ValidatedDeepLink } from "./errorCopy.ts";
-import {
-  completeJob,
-  dispatchFail,
-  isTerminalStatus,
-  type AnswerChoice,
-} from "./jobController.ts";
-import type { CatalogNotice, PendingDecision } from "./jobController.ts";
 import {
   buildCopyDiagnostics,
   handleCopyDiagnostics,
@@ -84,14 +66,13 @@ import { DesktopSettingsView } from "./settingsView.tsx";
 import { createElement } from "react";
 import {
   createDesktopIntegration,
-  DESKTOP_COMMANDS,
   NATIVE_FORMATS,
   PROTOCOL_MAX,
   PROTOCOL_MIN,
 } from "./desktopIntegration.ts";
 import type { NativeFormat } from "./desktopIntegration.ts";
-import { DESKTOP_EVENT_CHANNELS, assertNoTileBytes, redactForEvent } from "./events.ts";
-import type { DesktopEventChannel } from "./events.ts";
+import { createDesktopJobService } from "./jobService.ts";
+import type { DesktopJobHandle } from "./jobService.ts";
 import {
   cancelAllDesktop,
   cancelDesktopEntry,
@@ -112,8 +93,6 @@ import {
   settingsToInvokeArgs,
 } from "./settings.ts";
 import type { DesktopSettings } from "./settings.ts";
-import { listen as tauriApiListen } from "@tauri-apps/api/event";
-import { invoke as tauriPublicInvoke } from "@tauri-apps/api/core";
 
 const root = typeof document !== "undefined" ? document.getElementById("root") : null;
 const integration = createDesktopIntegration();
@@ -122,9 +101,9 @@ const integration = createDesktopIntegration();
 // documentation origin. The desktop footer itself is static document markup.
 const DESKTOP_DOCS_BASE = "https://dezoomify.ophir.dev";
 
-// Transport reported for every desktop controller transition. Pixels stay
-// native, so the badge never claims a browser transport. The "native" code
-// renders via shared-ui renderTransportLabel (canonical NATIVE label).
+// Transport reported for every desktop job. Pixels stay native, so the badge
+// never claims a browser transport. The "native" code renders via shared-ui
+// renderTransportLabel (canonical NATIVE label).
 const NATIVE_TRANSPORT = "native";
 
 // Per-request timeout shown in the job view (native parity: 30 s request,
@@ -134,20 +113,25 @@ const REQUEST_TIMEOUT_MS = 30000;
 // Capped technical log (oldest dropped first), web parity.
 const MAX_LOG_LINES = 60;
 
-let sessionId = "sess:desktop-1";
-const controller = createController(sessionId);
-// Outbound UI seq namespace for controller.dispatch (stale/foreign guarded
-// by the controller). Inbound IPC seqs live in remoteSeqByJob below: the two
-// namespaces are independent and must not be mixed.
-let currentSeq = 0;
-let currentJobId: string | null = null;
-// Job id abandoned by a newer submit. Late events for it are ignored even
-// before the new job id is known (Rust mints job:n monotonically, never
-// reused, so this can never collide with the new job).
-let retiredJobId: string | null = null;
-// Inbound IPC seq high-water per job id. Events with seq <= stored are stale
-// duplicates or reordered redeliveries and are ignored.
-let remoteSeqByJob: Record<string, number> = {};
+// The typed job service: one service, many window-owned jobs. Deep-link
+// confirmations stay in the product shell; settings ride every start_job.
+const service = createDesktopJobService({
+  settings: () => settingsToInvokeArgs(desktopSettings),
+  onDeepLink: (payload) => {
+    const validated = validateDeepLinkPayload(payload);
+    if (validated) showDeepLinkConfirm(validated);
+  },
+});
+
+// The job this window currently follows. Late snapshots for retired jobs
+// are dropped before they can move the view.
+let activeHandle: DesktopJobHandle | null = null;
+let followedJobId: string | null = null;
+// Authoritative snapshot of the followed job; null before any start.
+let latestSnapshot: JobSnapshot | null = null;
+// Host-local failure that never reached an engine snapshot (invalid input,
+// rejected start, denied dialog). Renders through presentFailure.
+let localFailure: StructuredError | null = null;
 let submitToken = 0;
 let lastInputUrl = "";
 let grantedFormat: NativeFormat = "png";
@@ -270,17 +254,37 @@ function persistOutputFormat(format: NativeFormat): void {
   saveSettings(desktopSettings);
 }
 let settingsError: string | null = null;
-let pendingDecision: PendingDecision | null = null;
-let cancelPending = false;
 
-// Catalog aux (todo 4.3): local-only completion geometry (WxH/K tiles) for
-// the save-name suggestion and the aux choice summary, in the
-// pendingDecision aux pattern, never a new protocol event. The native
-// pipeline auto-saves images[0] at the largest fitting level and emits no
-// imageCount, so no multi-image notice is rendered here; the shared job
-// view's choiceCount notice stays for other apps. `docs/user/desktop-app.md`
-// documents single-output saves only.
-let catalogNotice: CatalogNotice | null = null;
+// Outstanding recovery decision, derived from the snapshot. AwaitingPartialDecision
+// carries typed actions: partial keep/discard/retry or destination
+// choose-output/retry. Never a new protocol event; the aux panel renders it.
+interface PendingDecision {
+  kind: "destination-recovery" | "partial-recovery";
+  reason: string;
+  missingTiles: Array<string>;
+  failedCount?: number;
+  totalCount?: number;
+  generation: number;
+}
+
+function pendingDecisionOf(): PendingDecision | null {
+  if (localFailure) return null;
+  const snapshot = latestSnapshot;
+  if (!snapshot || snapshot.terminal || snapshot.state !== "AwaitingPartialDecision") return null;
+  const recovery = snapshot.recovery;
+  if (!recovery) return null;
+  if (recovery.actions.some((action) => action.kind === "choose-output")) {
+    return { kind: "destination-recovery", reason: "destination", missingTiles: [], generation: recovery.generation };
+  }
+  return {
+    kind: "partial-recovery",
+    reason: "partial",
+    missingTiles: (recovery.missing ?? []).slice(0, 60),
+    ...(typeof recovery.failed === "number" ? { failedCount: recovery.failed } : {}),
+    ...(typeof recovery.total === "number" ? { totalCount: recovery.total } : {}),
+    generation: recovery.generation,
+  };
+}
 
 // Accessibility (Task 5.2): dialog focus state. Each modal stores the element
 // focused before it opened so focus returns on close. Recovery tracks its key
@@ -324,18 +328,14 @@ function restoreFocus(target: HTMLElement | null): void {
 
 function recoveryKeyFor(decision: PendingDecision | null): string | null {
   if (!decision) return null;
-  const missing = (decision.missingTiles ?? []).join(",");
+  const missing = decision.missingTiles.join(",");
   return `${decision.kind}:${decision.reason}:${missing}:${decision.failedCount ?? ""}:${decision.totalCount ?? ""}`;
 }
 
 // Marked partial completion: a kept partial output stays distinguishable
-// from a complete save. Set only on a partial-completed event; cleared on
-// submit and reset. The missing list is redacted tile ids only, never URLs.
-// The sibling basename names the `.partial` file actually written (never the
-// granted path), so the UI can never claim a complete save for partial bytes.
-let completedPartial = false;
-let completedMissing: Array<string> = [];
-let completedSibling: string | null = null;
+// from a complete save. Read from the terminal snapshot's output account
+// (missing tiles plus the `.partial` sibling basename, never the granted
+// path), so the UI can never claim a complete save for partial bytes.
 let outputActionError: { action: "open" | "folder"; code: string } | undefined;
 
 // Live heartbeat for the loading view: advances now and longestPendingMs
@@ -344,16 +344,9 @@ let outputActionError: { action: "open" | "folder"; code: string } | undefined;
 // start/end, so the longest wait derives from last visible progress.
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
-function nextSeq(): number {
-  currentSeq += 1;
-  return currentSeq;
+function isTerminalNow(): boolean {
+  return localFailure !== null || (latestSnapshot?.terminal ?? null) !== null;
 }
-
-// Tauri IPC goes through the public guest bindings only
-// (`@tauri-apps/api/core` invoke, `@tauri-apps/api/event` listen), the same
-// path the typed job service uses. Unreachable hosts reject, and every
-// caller below handles that rejection through its typed error path; there
-// is no host-global sniffing and no silent validation-only fallback.
 
 // --- Live job activity (drives the progressive-disclosure job view) ---
 
@@ -379,7 +372,7 @@ function startHeartbeat(): void {
   stopHeartbeat();
   try {
     heartbeatTimer = setInterval(() => {
-      if (isTerminalStatus(controller.getState().status)) {
+      if (isTerminalNow()) {
         stopHeartbeat();
         return;
       }
@@ -477,67 +470,50 @@ function noteProgress(current: number, total: number): void {
   a.now = Date.now();
 }
 
-// Shared env wiring for the split modules (todo 2.2): single closures over
-// the module job state, so errorCopy/jobController/settingsPanel/diagnostics
-// stay stateless while behavior is unchanged.
-function controllerDispatch(event: unknown): void {
-  controller.dispatch(event as never);
+// Host-local failure presentation: the same layered presenter the other
+// products use, rendered through presentFailure. Clears the recovery
+// decision (derived state) by construction and settles the queue unless the
+// caller opts out (validation failures never created a queue entry).
+function failLocally(
+  code: string,
+  message: string,
+  opts?: {
+    phase?: string;
+    retryable?: boolean;
+    detail?: string;
+    transport?: string;
+    settle?: boolean;
+  },
+): void {
+  const sourceUrl = lastInputUrl || activity().url || "";
+  localFailure = describeFailure({
+    code,
+    engineDetail: trimTechnical(message || ""),
+    extraDetail: opts?.detail && opts.detail !== message ? trimTechnical(opts.detail) : undefined,
+    retryable: opts?.retryable,
+    transport: opts?.transport ?? NATIVE_TRANSPORT,
+    phase: opts?.phase,
+    url: sourceUrl || undefined,
+    host: hostOf(sourceUrl),
+    extras: [
+      `Status: ${latestSnapshot?.state ?? "idle"}`,
+      `Origin: ${redactedOriginOnly(sourceUrl) === "" ? "n/a" : redactedOriginOnly(sourceUrl)}`,
+    ],
+  });
+  pushLog(`Failed (${code}): ${trimTechnical(message, 160)}`);
+  stopHeartbeat();
+  if (opts?.settle !== false) settleActiveQueue("failed", { errorCode: code });
+  update();
 }
 
-const failEnv = {
-  dispatch: controllerDispatch,
-  getStatus: () => controller.getState().status,
-  sessionId: () => sessionId,
-  next: () => nextSeq(),
-  nativeTransport: NATIVE_TRANSPORT,
-  host: () => hostOf(lastInputUrl || activity().url || ""),
-  origin: () => redactedOriginOnly(lastInputUrl || activity().url || ""),
-  sourceUrl: () => lastInputUrl || activity().url || "",
-  clearPending: () => {
-    pendingDecision = null;
-    catalogNotice = null;
-  },
-  stopHeartbeat: () => stopHeartbeat(),
-  pushLog: (line: string) => pushLog(line),
-  update: () => update(),
-};
-
-const jobEnv = {
-  dispatch: controllerDispatch,
-  getStatus: () => controller.getState().status,
-  sessionId: () => sessionId,
-  next: () => nextSeq(),
-  nativeTransport: NATIVE_TRANSPORT,
-  getImageCount: () => controller.getState().imageCount ?? 0,
-  getProgressTotal: () => viewCtx.currentProgress?.total,
-  getCompletedInfo: () => viewCtx.completedInfo,
-  setCompletedInfo: (info: { width: number; height: number; mime: string } | undefined) => {
-    viewCtx.completedInfo = info;
-  },
-  setImageChoice: (choice: { width: number; height: number; tiles?: number } | undefined) => {
-    viewCtx.imageChoice = choice;
-  },
-  getCatalogNotice: () => catalogNotice,
-  setCatalogNotice: (notice: CatalogNotice | null) => {
-    catalogNotice = notice;
-  },
-  setPendingDecision: (decision: PendingDecision | null) => {
-    pendingDecision = decision;
-  },
-  setCompletedPartial: (partial: boolean, missing: Array<string>) => {
-    completedPartial = partial;
-    completedMissing = missing;
-  },
-  pushLog: (line: string) => pushLog(line),
-  setStep: (label: string, detail?: string) => setStep(label, detail),
-  stopHeartbeat: () => stopHeartbeat(),
-  update: () => update(),
-};
-
-// Sibling basename for the honest partial note. Set alongside
-// `completedPartial` on a partial-completed event; cleared on submit/reset.
-function setCompletedSibling(name: string | null): void {
-  completedSibling = name && name.length > 0 && name.length <= 256 ? name : null;
+function invokeErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error
+    ? error.message
+    : typeof error === "string"
+      ? error
+      : error && typeof error === "object" && "message" in error && typeof error.message === "string"
+        ? error.message
+        : fallback;
 }
 
 const settingsEnv: SettingsPanelEnv = {
@@ -578,36 +554,56 @@ async function applyPlatformOutputDefault(): Promise<void> {
 }
 
 function diagnosticsSnapshot() {
-  const state = controller.getState();
+  const presentation = currentPresentation();
   return {
-    status: state.status,
-    transport: state.transport,
-    jobId: currentJobId,
-    attempt: pendingDecision?.attempt,
-    sessionId,
+    status: presentation.stateLabel ?? presentation.phase,
+    transport: presentation.transport,
+    jobId: followedJobId,
+    attempt: undefined,
+    sessionId: NATIVE_TRANSPORT,
     nativeTransport: NATIVE_TRANSPORT,
-    progress: viewCtx.currentProgress
-      ? { current: viewCtx.currentProgress.current, total: viewCtx.currentProgress.total }
-      : undefined,
+    progress:
+      latestSnapshot && (latestSnapshot.total !== null || latestSnapshot.acquired > 0)
+        ? { current: latestSnapshot.acquired, total: latestSnapshot.total ?? 0 }
+        : undefined,
     origin: redactedOriginOnly(lastInputUrl),
     outputActionError,
   };
 }
 
-// --- Controller transitions ---
+// --- Presentation (single source: latest snapshot or host-local failure) ---
 
+function failurePresentationOf(snapshot: JobSnapshot): SnapshotPresentation | null {
+  const terminal = snapshot.terminal;
+  if (!terminal || terminal.kind !== "failed" || !terminal.error) return null;
+  const dto = terminal.error;
+  const sourceUrl = lastInputUrl || activity().url || "";
+  const error = describeFailure({
+    code: dto.code,
+    engineDetail: dto.detail ?? dto.message,
+    retryable: dto.retryable,
+    phase: dto.phase,
+    transport: dto.transport ?? NATIVE_TRANSPORT,
+    url: dto.request,
+    host: hostOf(sourceUrl),
+    ...(typeof dto.http === "number" ? { http: dto.http } : {}),
+    ...(dto.preview ? { preview: dto.preview } : {}),
+    ...(dto.resource_kind ? { extras: [`Resource: ${dto.resource_kind}`] } : {}),
+  });
+  return presentFailure(error, NATIVE_TRANSPORT);
+}
+
+function currentPresentation(): SnapshotPresentation {
+  if (localFailure) return presentFailure(localFailure, NATIVE_TRANSPORT);
+  if (!latestSnapshot) return presentIdle();
+  return failurePresentationOf(latestSnapshot) ?? presentSnapshot(latestSnapshot, NATIVE_TRANSPORT);
+}
 
 function clearJobViewState(): void {
   outputActionError = undefined;
   viewCtx.currentProgress = undefined;
   viewCtx.completedInfo = undefined;
   viewCtx.jobActivity = undefined;
-  viewCtx.imageChoice = undefined;
-  pendingDecision = null;
-  catalogNotice = null;
-  completedPartial = false;
-  completedMissing = [];
-  completedSibling = null;
   // The encoder choice is a persisted preference (settings.ts outputFormat,
   // seeded into grantedFormat at boot): a new submit must not reset it to
   // png, or the reloaded choice would never reach the picker.
@@ -617,56 +613,19 @@ function clearJobViewState(): void {
 function handleSubmitUrl(url: string): void {
   const trimmed = typeof url === "string" ? url.trim() : "";
   if (!isValidInputUrl(trimmed)) {
-    // Validation failures use the same failed view as later job failures.
-    // The shared controller intentionally has no idle -> failed edge, so
-    // enter the submitted-job lifecycle before recording the failure.
-    if (controller.getState().status === "idle") {
-      controller.dispatch({
-        seq: nextSeq(),
-        sessionId,
-        kind: "start-discovery",
-        transport: NATIVE_TRANSPORT,
-      });
-    }
-    controller.dispatch({
-      seq: nextSeq(),
-      sessionId,
-      kind: "fail",
-      transport: NATIVE_TRANSPORT,
-      error: {
-        code: "INVALID_URL",
-        category: "validation",
-        retryable: false,
-        message: t("desktop.url.invalid"),
-        transport: NATIVE_TRANSPORT,
-        phase: "discovery",
-      },
-    });
-    update();
+    // Validation failures use the same failed view as later job failures;
+    // no queue entry exists yet, so nothing settles.
+    failLocally("INVALID_URL", t("desktop.url.invalid"), { settle: false });
     return;
   }
-  if (desktopQueueEnabled() && !isTerminalStatus(controller.getState().status)) {
+  if (desktopQueueEnabled() && !isTerminalNow()) {
     // Busy: enqueue behind the active job instead of retiring it. The hash
     // equivalent here is the save dialog: only the active job ever asks for
     // a destination, queued entries never do.
     const res = enqueueDesktopQueue(desktopQueue, trimmed);
     desktopQueue = res.queue;
     if (res.code !== "ok" || !res.entry) {
-      controller.dispatch({
-        seq: nextSeq(),
-        sessionId,
-        kind: "fail",
-        transport: NATIVE_TRANSPORT,
-        error: {
-          code: "INVALID_URL",
-          category: "validation",
-          retryable: false,
-          message: t("desktop.url.invalid"),
-          transport: NATIVE_TRANSPORT,
-          phase: "discovery",
-        },
-      });
-      update();
+      failLocally("INVALID_URL", t("desktop.url.invalid"), { settle: false });
       return;
     }
     if (res.entry.status === "queued") {
@@ -677,22 +636,10 @@ function handleSubmitUrl(url: string): void {
     }
     activeQueueId = res.entry.id;
   } else {
-    // A submit after a terminal state starts a fresh job on the same session:
-    // reset to idle first (completed/cancelled only accept reset; failed also
-    // accepts start-discovery, and reset is valid there too). N-1 peers
-    // without the queue always take this path: the new submit retires the
-    // previous job id so its late events can never be mistaken for the new job.
-    if (isTerminalStatus(controller.getState().status)) {
-      controller.reset();
-      currentSeq = 0;
-      currentJobId = null;
-      retiredJobId = null;
-      remoteSeqByJob = {};
-      clearJobViewState();
-    } else {
-      retiredJobId = currentJobId;
-      clearJobViewState();
-    }
+    // A submit after a terminal state starts a fresh job; a submit while a
+    // non-queue peer still runs retires it (its late snapshots are dropped
+    // at the service boundary via dispose).
+    retireActiveJob();
     const res = enqueueDesktopQueue(desktopQueue, trimmed);
     desktopQueue = res.queue;
     activeQueueId = res.entry ? res.entry.id : null;
@@ -700,9 +647,19 @@ function handleSubmitUrl(url: string): void {
   launchNativeJob(trimmed, ++submitToken);
 }
 
+/** Stop following the current job; its late events can never move the view. */
+function retireActiveJob(): void {
+  const handle = activeHandle;
+  activeHandle = null;
+  followedJobId = null;
+  latestSnapshot = null;
+  localFailure = null;
+  clearJobViewState();
+  if (handle) void handle.dispose().catch(() => undefined);
+}
+
 function launchNativeJob(trimmed: string, token: number): void {
   lastInputUrl = trimmed;
-  controller.dispatch({ seq: nextSeq(), sessionId, kind: "start-discovery", transport: NATIVE_TRANSPORT });
   resetActivity(trimmed);
   pushLog(`Starting job for ${redactedOriginOnly(trimmed) || "the server"}`);
   // Minimal settings are validated fail-closed here: invalid settings fail
@@ -712,62 +669,116 @@ function launchNativeJob(trimmed: string, token: number): void {
   if (!effective.ok || !effective.settings) {
     const detail = effective.errors.join("; ") || "Invalid settings.";
     settingsError = detail;
-    controller.dispatch({
-      seq: nextSeq(),
-      sessionId,
-      kind: "fail",
-      transport: NATIVE_TRANSPORT,
-      error: {
-        code: "INVALID_SETTINGS",
-        category: "validation",
-        retryable: false,
-        message: t("desktop.settings.invalidSubmit"),
-        transport: NATIVE_TRANSPORT,
-        phase: "discovery",
-        detail,
-        ...(lastInputUrl ? { url: lastInputUrl } : {}),
-        extras: [
-          `Status: ${controller.getState().status}`,
-          `Origin: ${redactedOriginOnly(lastInputUrl || activity().url || "") || "n/a"}`,
-        ],
-      },
-    });
     pushLog("Settings invalid; job not started");
-    stopHeartbeat();
-    settleActiveQueue("failed", { errorCode: "INVALID_SETTINGS" });
-    update();
+    failLocally("INVALID_SETTINGS", t("desktop.settings.invalidSubmit"), { detail });
     return;
   }
   settingsError = null;
   desktopSettings = effective.settings;
   pushLog(`Settings: ${describeSettingsForLog(desktopSettings)}`);
   update();
-  const settingsArgs = settingsToInvokeArgs(desktopSettings);
-  // Tauri commands take camelCase args (`inputUrl` for Rust `input_url`).
+  const format = normalizeNativeFormat(grantedFormat);
+  const request: JobStartRequest = {
+    inputs: [{ url: trimmed }],
+    engine: {},
+    exec: {
+      kind: "native",
+      destination: {
+        kind: "file",
+        suggestedName: suggestedNameForFormat(format),
+        format,
+      },
+    },
+  };
   // An unreachable host rejects into the typed start-failed path below.
-  void tauriPublicInvoke("start_job", { inputUrl: trimmed, settings: settingsArgs }).then(
-    (raw) => {
-      if (token !== submitToken) return;
-      const res = raw as { job?: unknown; seq?: unknown } | null;
-      const job = res && typeof res.job === "string" ? res.job : null;
-      if (job) {
-        currentJobId = job;
-        retiredJobId = null;
-        if (cancelPending) {
-          cancelPending = false;
-          requestNativeCancellation(job);
-        }
+  void service.start(request, jobObserver).then(
+    (handle) => {
+      if (token !== submitToken) {
+        void handle.dispose().catch(() => undefined);
+        return;
       }
+      activeHandle = handle;
+      followedJobId = handle.id;
       update();
     },
     (error: unknown) => {
       if (token !== submitToken) return;
-      cancelPending = false;
-      const message = error instanceof Error ? error.message : t("desktop.invoke.startFallback");
-      dispatchFail(failEnv, "START_FAILED", message);
-      settleActiveQueue("failed", { errorCode: "START_FAILED" });
+      failLocally("START_FAILED", invokeErrorMessage(error, t("desktop.invoke.startFallback")));
     },
   );
+}
+
+// Authoritative snapshots from the typed service. Side effects (logs, queue
+// progress, history, settling) key off snapshot transitions; the view itself
+// renders the presentation derived in update().
+const jobObserver: JobObserver = {
+  snapshot(snapshot: JobSnapshot): void {
+    if (followedJobId !== null && snapshot.jobId !== followedJobId) return;
+    latestSnapshot = snapshot;
+    onSnapshotSideEffects(snapshot);
+    update();
+  },
+  hostStatus(): void {
+    // The desktop transport is native and fixed; nothing to present.
+  },
+};
+
+function onSnapshotSideEffects(snapshot: JobSnapshot): void {
+  if (snapshot.terminal !== null) {
+    stopHeartbeat();
+    const kind = snapshot.terminal.kind;
+    if (kind === "completed" || kind === "partial-completed") {
+      const output = snapshot.output;
+      pushLog(kind === "partial-completed" ? "Partial output ready" : "Output ready");
+      if (kind === "partial-completed" && output?.siblingName) {
+        pushLog(`Partial file: ${output.siblingName}`);
+      }
+      if (output?.format) {
+        grantedFormat = normalizeNativeFormat(output.format);
+      }
+      if (lastInputUrl !== "") {
+        recordDesktopHistory(
+          lastInputUrl,
+          output?.width ?? undefined,
+          output?.height ?? undefined,
+          grantedFormat,
+        );
+      }
+      settleActiveQueue("done");
+    } else if (kind === "failed") {
+      const code = snapshot.terminal.error?.code ?? "JOB_FAILED";
+      pushLog(`Failed (${code})`);
+      settleActiveQueue("failed", { errorCode: code });
+    } else {
+      pushLog("Cancelled; unfinished file removed");
+      settleActiveQueue("cancelled");
+    }
+    return;
+  }
+  touchProgress();
+  if (snapshot.total !== null && snapshot.total > 0) {
+    noteProgress(snapshot.acquired, snapshot.total);
+    if (activeQueueId) {
+      const res = recordDesktopProgress(desktopQueue, activeQueueId, snapshot.acquired, snapshot.total);
+      desktopQueue = res.queue;
+    }
+  }
+  if (snapshot.state === "AwaitingPartialDecision" && snapshot.recovery) {
+    const decision = pendingDecisionOf();
+    if (decision) {
+      if (decision.kind === "partial-recovery") {
+        const summary = formatMissingSummary(decision.missingTiles, decision.failedCount);
+        pushLog(`Recovery requested: partial (${summary} keep-partial / discard-partial / retry)`);
+        if (typeof decision.failedCount === "number") {
+          const a = activity();
+          a.failedRequests = decision.failedCount;
+          a.now = Date.now();
+        }
+      } else {
+        pushLog("Recovery requested: destination (choose-output / retry)");
+      }
+    }
+  }
 }
 
 // Settle the active queue entry at a terminal outcome and start the next
@@ -790,13 +801,8 @@ function settleActiveQueue(
     update();
     return;
   }
-  // Fresh view for the next queued job on the same session.
-  controller.reset();
-  currentSeq = 0;
-  currentJobId = null;
-  retiredJobId = null;
-  remoteSeqByJob = {};
-  clearJobViewState();
+  // Fresh view for the next queued job.
+  retireActiveJob();
   activeQueueId = next.id;
   pushLog(`Queue: starting next job for ${next.origin || "the server"}`);
   launchNativeJob(next.inputUrl, ++submitToken);
@@ -847,17 +853,7 @@ function handleQueueRetry(id: string): void {
   if (res.code !== "ok" || !res.entry) return;
   desktopQueue = res.queue;
   if (res.entry.status === "active") {
-    if (isTerminalStatus(controller.getState().status)) {
-      controller.reset();
-      currentSeq = 0;
-      currentJobId = null;
-      retiredJobId = null;
-      remoteSeqByJob = {};
-      clearJobViewState();
-    } else {
-      retiredJobId = currentJobId;
-      clearJobViewState();
-    }
+    retireActiveJob();
     activeQueueId = res.entry.id;
     pushLog(`Queue: retrying ${res.entry.origin || "the server"}`);
     launchNativeJob(res.entry.inputUrl, ++submitToken);
@@ -958,146 +954,90 @@ function appendDesktopQueuePanel(aux: HTMLElement, doc: Document): void {
   aux.appendChild(box);
 }
 
-function answerChoice(choice: AnswerChoice, onGranted: () => void, failureLabel: string): void {
-  const job = currentJobId;
-  if (!job) {
-    onGranted();
-    return;
-  }
-  void tauriPublicInvoke("answer_choice", { job, choice }).then(
-    () => {
-      onGranted();
-    },
-    (error: unknown) => {
-      const message = error instanceof Error ? error.message : failureLabel;
-      dispatchFail(failEnv, "CHOICE_FAILED", message);
-    },
-  );
-}
-
 function handleSelectImage(index: number): void {
-  if (isTerminalStatus(controller.getState().status)) return;
-  const choice: AnswerChoice = { kind: "image", index };
+  if (isTerminalNow()) return;
   pushLog(`Chose image ${index}`);
-  answerChoice(
-    choice,
-    () => {
-      controller.dispatch({ seq: nextSeq(), sessionId, kind: "image-chosen" });
-      update();
+  const handle = activeHandle;
+  if (!handle) return;
+  void handle.command({ type: "select-image", image: index }).then(
+    () => update(),
+    (error: unknown) => {
+      failLocally("CHOICE_FAILED", invokeErrorMessage(error, t("desktop.invoke.choiceImage")));
     },
-    t("desktop.invoke.choiceImage"),
   );
 }
 
 function handleSelectLevel(level: number): void {
-  if (isTerminalStatus(controller.getState().status)) return;
-  const choice: AnswerChoice = { kind: "level", index: level };
+  if (isTerminalNow()) return;
   pushLog(`Chose level ${level}`);
-  answerChoice(
-    choice,
-    () => {
-      controller.dispatch({ seq: nextSeq(), sessionId, kind: "level-chosen" });
-      update();
-    },
-    t("desktop.invoke.choiceLevel"),
-  );
-}
-
-function requestNativeCancellation(job: string): void {
-  void tauriPublicInvoke("cancel_job", { job }).then(
-    () => {
-      if (isTerminalStatus(controller.getState().status)) return;
-      if (currentJobId !== job) return;
-      pushLog("Cancellation requested; waiting for cleanup…");
-      update();
-    },
+  const handle = activeHandle;
+  if (!handle) return;
+  void handle.command({ type: "select-level", level }).then(
+    () => update(),
     (error: unknown) => {
-      if (isTerminalStatus(controller.getState().status)) return;
-      if (currentJobId !== job) return;
-      const message = error instanceof Error
-        ? error.message
-        : typeof error === "string"
-          ? error
-          : error && typeof error === "object" && "message" in error && typeof error.message === "string"
-            ? error.message
-            : t("desktop.invoke.cancel");
-      dispatchFail(
-        failEnv,
-        "CANCEL_FAILED",
-        message,
-        { phase: "cleanup", retryable: true },
-      );
-      update();
+      failLocally("CHOICE_FAILED", invokeErrorMessage(error, t("desktop.invoke.choiceLevel")));
     },
   );
 }
 
 function handleCancel(): void {
-  if (isTerminalStatus(controller.getState().status)) return;
-  const job = currentJobId;
+  if (isTerminalNow()) return;
+  const handle = activeHandle;
   // Stop is immediate in the UI. The native host still receives cancellation
   // and performs cleanup, while its late events are retired below.
-  if (job) void tauriPublicInvoke("cancel_job", { job }).catch(() => undefined);
+  if (handle) void handle.command({ type: "cancel" }).catch(() => undefined);
   handleReset();
-  if (job) retiredJobId = job;
 }
 
-// Destination recovery grants a replacement output. On grant, the controller enters saving;
-// completion itself arrives via dezoomify://job-output (exactly-once
-// terminal guard ignores any duplicate).
+// Destination recovery grants a replacement output. On grant, the shell's
+// destination event moves the snapshot into active work; completion itself
+// arrives via the output terminal (exactly-once by the fold).
 function requestOutputAndResume(): void {
-  const job = currentJobId;
-  if (!job || isTerminalStatus(controller.getState().status)) return;
+  const handle = activeHandle;
+  const decision = pendingDecisionOf();
+  if (!handle || !decision || isTerminalNow()) return;
   const format = normalizeNativeFormat(grantedFormat);
   const suggestedName = suggestedNameForFormat(
     format,
-    catalogNotice?.width ?? viewCtx.imageChoice?.width ?? viewCtx.completedInfo?.width,
-    catalogNotice?.height ?? viewCtx.imageChoice?.height ?? viewCtx.completedInfo?.height,
+    latestSnapshot?.output?.width,
+    latestSnapshot?.output?.height,
   );
   pushLog("Requesting save destination…");
-  void integration
-    .requestSaveDestination({ jobId: job, format, suggestedName })
-    .then(
-      (result) => {
-        if (isTerminalStatus(controller.getState().status)) return;
-        if (result.outcome === "granted") {
-          grantedFormat = format;
-          if (pendingDecision && pendingDecision.reason === "destination") {
-            pendingDecision = null;
-          }
-          pushLog("Save destination granted");
-          controller.dispatch({ seq: nextSeq(), sessionId, kind: "save-start" });
-          setStep(t("view.step.saving"), t("desktop.step.encodingNative"));
-          update();
-        } else if (result.outcome === "denied") {
-          // Stable backend code rides `code` when present (output.exists,
-          // output.destination-denied, ...); fall back to the legacy
-          // OUTPUT_DENIED only for payloads without it.
-          const denied = result as { reason?: string; code?: string };
-          const code = typeof denied.code === "string" && denied.code.length > 0 ? denied.code : "OUTPUT_DENIED";
-          dispatchFail(failEnv, code, denied.reason ?? t("desktop.output.deniedFallback"));
-        } else {
-          pushLog("Save destination request cancelled");
-          update();
-        }
-      },
-      (error: unknown) => {
-        if (isTerminalStatus(controller.getState().status)) return;
-        const message = error instanceof Error ? error.message : t("desktop.invoke.destination");
-        dispatchFail(failEnv, "OUTPUT_DENIED", message);
-      },
-    );
+  void handle.requestDestination({ format, suggestedName }).then(
+    (result) => {
+      if (isTerminalNow()) return;
+      if (result.outcome === "granted") {
+        grantedFormat = format;
+        pushLog("Save destination granted");
+        setStep(t("view.step.saving"), t("desktop.step.encodingNative"));
+        update();
+      } else if (result.outcome === "denied") {
+        // Stable backend code rides `code` when present (output.exists,
+        // output.destination-denied, ...); fall back to the legacy
+        // OUTPUT_DENIED only for payloads without it.
+        const code = typeof result.code === "string" && result.code.length > 0 ? result.code : "OUTPUT_DENIED";
+        failLocally(code, result.reason ?? t("desktop.output.deniedFallback"));
+      } else {
+        pushLog("Save destination request cancelled");
+        update();
+      }
+    },
+    (error: unknown) => {
+      if (isTerminalNow()) return;
+      failLocally("OUTPUT_DENIED", invokeErrorMessage(error, t("desktop.invoke.destination")));
+    },
+  );
 }
 
 async function handleOpenOutput(reveal: boolean): Promise<void> {
-  const job = currentJobId;
-  if (!job) return;
+  const handle = activeHandle;
+  if (!handle) return;
   outputActionError = undefined;
   root?.querySelector("#dz-open-error")?.remove();
   try {
-    await tauriPublicInvoke("open_saved_output", { job, reveal });
+    await handle.openOutput(reveal);
   } catch (error) {
-    if (job !== currentJobId) return;
+    if (handle !== activeHandle) return;
     const rawCode = error && typeof error === "object" && "code" in error ? error.code : null;
     const code = typeof rawCode === "string" && /^output\.[a-z-]+$/.test(rawCode)
       ? rawCode : "output.invoke-failed";
@@ -1117,58 +1057,51 @@ async function handleOpenOutput(reveal: boolean): Promise<void> {
 // awaiting-destination; partial -> retry failed tiles). Wired to the typed
 // shell `Choice::Retry` via answer_choice.
 function handleRecoveryRetry(): void {
-  const decision = pendingDecision;
-  if (!decision || isTerminalStatus(controller.getState().status)) return;
+  const decision = pendingDecisionOf();
+  const handle = activeHandle;
+  if (!decision || !handle || isTerminalNow()) return;
   pushLog(`Retry requested (${decision.reason})`);
-  answerChoice(
-    { kind: "retry" },
+  void handle.command({ type: "recovery-choice", generation: decision.generation, choice: "retry" }).then(
     () => {
-      pendingDecision = null;
       setStep(t("view.step.downloading"), t("desktop.step.retrying"));
       update();
     },
-    t("desktop.invoke.retry"),
+    (error: unknown) => {
+      failLocally("CHOICE_FAILED", invokeErrorMessage(error, t("desktop.invoke.retry")));
+    },
   );
 }
 
 // Recovery: keep or discard a partial result. Wired to the typed shell
-// `Choice::Partial` via answer_choice. The terminal
-// outcome (partial-completed / failed) arrives as an event; nothing is
-// dispatched locally so the terminal stays exactly-once.
+// `Choice::Partial` via answer_choice. The terminal outcome
+// (partial-completed / failed) arrives as the next snapshot; nothing is
+// rendered locally so the terminal stays exactly-once.
 function handlePartialChoice(keep: boolean): void {
-  const decision = pendingDecision;
-  if (!decision || decision.kind !== "partial-recovery") return;
-  if (isTerminalStatus(controller.getState().status)) return;
+  const decision = pendingDecisionOf();
+  const handle = activeHandle;
+  if (!decision || decision.kind !== "partial-recovery" || !handle) return;
+  if (isTerminalNow()) return;
   pushLog(keep ? "Keeping partial image…" : "Discarding partial image…");
-  answerChoice(
-    { kind: "partial", keep },
+  void handle.command({ type: "recovery-choice", generation: decision.generation, choice: keep ? "keep" : "discard" }).then(
     () => {
-      pendingDecision = null;
       setStep(
         keep ? t("view.step.saving") : t("view.step.working"),
         keep ? t("desktop.step.encodingPartial") : t("desktop.step.discardingPartial"),
       );
       update();
     },
-    t("desktop.invoke.partial"),
+    (error: unknown) => {
+      failLocally("CHOICE_FAILED", invokeErrorMessage(error, t("desktop.invoke.partial")));
+    },
   );
 }
 
 function handleReset(): void {
-  outputActionError = undefined;
-  cancelPending = false;
   submitToken += 1;
-  sessionId = `sess:desktop-${Date.now()}`;
-  controller.reset(sessionId);
-  currentSeq = 0;
-  currentJobId = null;
-  retiredJobId = null;
-  remoteSeqByJob = {};
-  lastInputUrl = "";
+  retireActiveJob();
   // Reset clears the whole queue: no new work is issued afterwards.
   desktopQueue = createDesktopQueue();
   activeQueueId = null;
-  clearJobViewState();
   dismissDeepLinkConfirm(false);
   recoveryReturnFocus = null;
   lastRecoveryKey = null;
@@ -1177,7 +1110,6 @@ function handleReset(): void {
   const prefilled = readInitialUrl();
   if (prefilled) viewCtx.initialUrl = prefilled;
   else viewCtx.initialUrl = undefined;
-  stopHeartbeat();
   update();
 }
 
@@ -1192,10 +1124,6 @@ function handleOpenExternalLink(url: string): void {
 // shareable browser link to copy. The job view hides the share button when
 // the callback is absent; diagnostics copying has its own explicit button.
 
-// Progress and save signals dispatch only the transition each signal
-// represents. Selection steps are never synthesized: the native driver
-// selects images[0] at the largest fitting level internally, and the typed
-// job service projects the same shell events into snapshots.
 function grantedMime(): string {
   return encoderToMime(grantedFormat, "image/png");
 }
@@ -1235,499 +1163,19 @@ function showDeepLinkConfirm(info: ValidatedDeepLink): void {
   });
 }
 
-function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
-  const table = asPayload(raw);
-  assertNoTileBytes(table);
-  const payload = redactForEvent(table);
-
-  if (channel === "dezoomify://deep-link-pending") {
-    // Deep links never auto-start: validate again in the frontend, then wait
-    // for explicit user confirmation (source + provenance). Declining, or a
-    // rejected payload, performs no effect.
-    const validated = validateDeepLinkPayload(payload);
-    if (validated) {
-      showDeepLinkConfirm(validated);
-    }
-    return;
-  }
-
-  // Stale-job guard: events for a job we are no longer following are
-  // ignored. A submit retires the previous job id so its late events can
-  // never be mistaken for the new job, even before the new id is known.
-  const job = payloadJob(payload);
-  if (job && job === retiredJobId && job !== currentJobId) return;
-  if (job && currentJobId && job !== currentJobId) return;
-  if (job && !currentJobId && !retiredJobId) {
-    currentJobId = job;
-  } else if (job && !currentJobId && retiredJobId && job !== retiredJobId) {
-    currentJobId = job;
-    retiredJobId = null;
-  } else if (job && !currentJobId) {
-    return;
-  }
-
-  // Stale-seq guard: per-job monotonic IPC seq; old or reordered events are
-  // ignored. Events without a seq still apply (command responses and legacy
-  // payloads carry none).
-  const remoteSeq = payloadSeq(payload);
-  const seqKey = job ?? currentJobId ?? "";
-  if (remoteSeq !== null && seqKey !== "") {
-    const seen = remoteSeqByJob[seqKey] ?? 0;
-    if (remoteSeq <= seen) return;
-    remoteSeqByJob[seqKey] = remoteSeq;
-    const keys = Object.keys(remoteSeqByJob);
-    if (keys.length > 8) {
-      for (const k of keys) {
-        if (k !== seqKey && k !== (currentJobId ?? "")) delete remoteSeqByJob[k];
-      }
-    }
-  }
-
-  // Exactly-once terminal: once the controller reaches completed, cancelled,
-  // or failed, later job events are ignored (the controller itself also
-  // rejects post-terminal transitions; this additionally freezes progress,
-  // activity, and diagnostics at the terminal snapshot).
-  if (isTerminalStatus(controller.getState().status)) return;
-
-  const text = `${channel} ${payloadText(payload)}`.toLowerCase();
-  const kind = typeof payload["kind"] === "string" ? (payload["kind"] as string).toLowerCase() : "";
-  const detailRaw = strField(payload, ["detail"]) ?? "";
-  const detailObj = detailRaw !== "" ? parseDetailObject(detailRaw) : null;
-
-  // Recovery-requested (destination / partial): surface typed choices and
-  // wait for the user. Nothing is auto-answered and no terminal is
-  // dispatched here.
-  // `flat` strips hyphens/underscores so PascalCase engine states
-  // (`AwaitingRecovery`, `AwaitingPartialDecision`, ...) match the same
-  // branches as kebab-case (`awaiting-recovery`, ...).
-  const flat = text.replace(/[-_]/g, "");
-  if (
-    kind === "recovery-requested" ||
-    text.indexOf("recovery-requested") >= 0 ||
-    text.indexOf("request-decision") >= 0 ||
-    text.indexOf("awaiting-recovery") >= 0 ||
-    flat.indexOf("awaitingrecovery") >= 0 ||
-    text.indexOf("awaitingpartialdecision") >= 0 ||
-    flat.indexOf("awaitingpartialdecision") >= 0 ||
-    text.indexOf("awaiting-partial") >= 0 ||
-    flat.indexOf("awaitingpartial") >= 0
-  ) {
-    const reason = payloadReason(payload, text) ?? "destination";
-    const recovery =
-      strField(payload, ["recovery", "recoveryId", "recovery_id"]) ??
-      (detailObj ? strField(detailObj, ["recovery", "recoveryId", "recovery_id"]) : undefined);
-    const attempt =
-      strField(payload, ["attempt", "attemptId", "attempt_id"]) ??
-      (detailObj ? strField(detailObj, ["attempt", "attemptId", "attempt_id"]) : undefined);
-    const missing = reason === "partial" ? extractMissingTiles(payload, detailObj, detailRaw) : [];
-    const failedCount =
-      numField(payload, detailRaw, ["failed", "failedRequests", "failures"]) ??
-      (detailObj ? numField(detailObj, "", ["failed", "failedRequests", "failures"]) : undefined);
-    const totalCount =
-      numField(payload, detailRaw, ["total", "tiles", "tileCount"]) ??
-      (detailObj ? numField(detailObj, "", ["total", "tiles", "tileCount"]) : undefined);
-    pendingDecision = {
-      kind: reason === "partial" ? "partial-recovery" : "destination-recovery",
-      reason,
-      ...(recovery ? { recovery } : {}),
-      ...(attempt ? { attempt } : {}),
-      ...(reason === "partial" ? { missingTiles: missing } : {}),
-      ...(typeof failedCount === "number" ? { failedCount } : {}),
-      ...(typeof totalCount === "number" ? { totalCount } : {}),
-    };
-    if (reason === "partial") {
-      const summary = formatMissingSummary(missing, failedCount);
-      setStep(t("desktop.step.partialTitle"), t("desktop.step.partialDetail"));
-      pushLog(`Recovery requested: partial (${summary} keep-partial / discard-partial / retry)`);
-      if (typeof failedCount === "number") {
-        const a = activity();
-        a.failedRequests = failedCount;
-        a.now = Date.now();
-      }
-    } else {
-      setStep(t("desktop.step.chooseWhere"), t("desktop.step.chooseWhereDetail"));
-      pushLog("Recovery requested: destination (choose-output / retry)");
-    }
-    update();
-    return;
-  }
-
-  // Failure: typed StructuredError with code, category, retryable, message,
-  // detail, transport, and phase. The engine technical chain arrives in
-  // detail; the first message stays a plain actionable sentence.
-  if (
-    channel === "dezoomify://job-error" ||
-    kind === "failed" ||
-    text.indexOf("fail") >= 0
-  ) {
-    if (kind === "progress" || kind === "downloading" || kind === "discovery" || kind === "encoding") {
-      // Progress detail text never signals failure; fall through.
-    } else {
-      const detailCode = detailObj ? strField(detailObj, ["code"]) : undefined;
-      let code = strField(payload, ["code"]) ?? detailCode ?? "JOB_FAILED";
-      let message =
-        strField(payload, ["message"]) ??
-        (detailObj ? strField(detailObj, ["message"]) : undefined);
-      let detail: string | undefined;
-      if (detailRaw !== "") {
-        if (detailObj) {
-          detail = detailCode && message ? detailRaw : undefined;
-          if (!message) {
-            message = detailCode ? detailRaw : undefined;
-          }
-        } else if (message) {
-          detail = detailRaw;
-        } else {
-          // "code: message" technical chains split back into typed fields.
-          const split = detailRaw.indexOf(":");
-          if (split > 0 && split < 80) {
-            const maybeCode = detailRaw.slice(0, split).trim();
-            const maybeMessage = detailRaw.slice(split + 1).trim();
-            if (maybeCode && maybeMessage && /^[a-z0-9][a-z0-9._-]*$/i.test(maybeCode)) {
-              code = maybeCode;
-              message = maybeMessage;
-              detail = detailRaw;
-            } else {
-              message = detailRaw;
-            }
-          } else {
-            message = detailRaw;
-          }
-        }
-      }
-      if (!message) message = t("desktop.job.failedFallback");
-      // A "code: message" detail that duplicates the message adds no
-      // technical value; keep detail only when it carries more.
-      if (detail === message) detail = undefined;
-      const transport = strField(payload, ["transport"]) ?? NATIVE_TRANSPORT;
-      const phase = strField(payload, ["phase"]) ?? phaseFor(code);
-      // Stable backend verdicts ride the payload (phase/transport/resource-kind
-      // plus retryable); the frontend never recomputes them from messages.
-      const rawRetryable = payload["retryable"];
-      const retryable = typeof rawRetryable === "boolean" ? rawRetryable : undefined;
-      const resourceKind =
-        strField(payload, ["resource-kind", "resource_kind", "resourceKind"]) ??
-        (detailObj ? strField(detailObj, ["resource-kind", "resource_kind", "resourceKind"]) : undefined);
-      const failedCount = numField(payload, `${kind} ${detailRaw}`, ["failed", "failedRequests", "failures"]);
-      if (typeof failedCount === "number") {
-        const a = activity();
-        a.failedRequests = failedCount;
-        a.now = Date.now();
-      }
-      dispatchFail(failEnv, code, message, {
-        transport,
-        phase,
-        ...(typeof retryable === "boolean" ? { retryable } : {}),
-        ...(resourceKind ? { resourceKind } : {}),
-        ...(detail ? { detail } : {}),
-      });
-      settleActiveQueue("failed", { errorCode: code });
-      return;
-    }
-  }
-  if (kind === "error" || text.indexOf("error") >= 0) {
-    const code = strField(payload, ["code"]) ?? "JOB_FAILED";
-    const message = strField(payload, ["message"]) ?? (detailRaw !== "" ? detailRaw : t("desktop.job.failedFallback"));
-    const transport = strField(payload, ["transport"]) ?? NATIVE_TRANSPORT;
-    const rawRetryable = payload["retryable"];
-    const retryable = typeof rawRetryable === "boolean" ? rawRetryable : undefined;
-    const resourceKind = strField(payload, ["resource-kind", "resource_kind", "resourceKind"]);
-    dispatchFail(failEnv, code, message, {
-      transport,
-      phase: strField(payload, ["phase"]) ?? phaseFor(code),
-      ...(typeof retryable === "boolean" ? { retryable } : {}),
-      ...(resourceKind ? { resourceKind } : {}),
-    });
-    settleActiveQueue("failed", { errorCode: code });
-    return;
-  }
-
-  // Cancellation echoes back through job-state; clamp to one transition.
-  // Intermediate cleaning states keep the loading view with a cleanup note;
-  // only an acknowledged cancelled terminal reaches cancelled, after the
-  // shell has removed uncommitted output.
-  if (
-    kind === "cancelled" ||
-    text.indexOf("cancelled") >= 0 ||
-    text.indexOf("canceled") >= 0
-  ) {
-    if (isTerminalStatus(controller.getState().status)) return;
-    controller.dispatch({ seq: nextSeq(), sessionId, kind: "cancel" });
-    pushLog("Cancelled; unfinished file removed");
-    pendingDecision = null;
-    stopHeartbeat();
-    settleActiveQueue("cancelled");
-    update();
-    return;
-  }
-  if (kind === "cancelling" || text.indexOf("cancelling") >= 0 || text.indexOf("cleaning") >= 0) {
-    setStep(t("view.step.working"), t("desktop.step.cleanupDetail"));
-    update();
-    return;
-  }
-  if (text.indexOf("cancel") >= 0) {
-    if (kind === "progress" || kind === "downloading" || kind === "discovery" || kind === "encoding") {
-      // Progress text never signals cancellation; fall through.
-    } else {
-      setStep(t("view.step.working"), t("desktop.step.cleanupDetail"));
-      update();
-      return;
-    }
-  }
-
-  // Completion: output digest plus optional geometry. Only positive geometry
-  // becomes completedInfo (the view renders "W by H" verbatim); the mime
-  // falls back to the granted encoder. A partial-completed terminal stays
-  // distinguishable: the aux panel marks the partial output and its missing
-  // tiles instead of claiming a complete save.
-  if (
-    channel === "dezoomify://job-output" ||
-    kind === "completed" ||
-    kind === "partial-completed" ||
-    kind === "output" ||
-    text.indexOf("complet") >= 0 ||
-    (text.indexOf("output") >= 0 && kind !== "progress")
-  ) {
-    const isPartial =
-      kind === "partial-completed" ||
-      text.indexOf("partial-completed") >= 0 ||
-      text.indexOf("partial completed") >= 0;
-    const width =
-      numField(payload, detailRaw, ["width", "imageWidth", "w"]) ??
-      (detailObj
-        ? numField(detailObj, "", ["width", "imageWidth", "w"])
-        : undefined);
-    const height =
-      numField(payload, detailRaw, ["height", "imageHeight", "h"]) ??
-      (detailObj
-        ? numField(detailObj, "", ["height", "imageHeight", "h"])
-        : undefined);
-    const mime = encoderToMime(
-      strField(payload, ["mime", "mimeType", "contentType", "encoder", "format"]) ??
-        (detailObj ? strField(detailObj, ["mime", "mimeType", "contentType", "encoder", "format"]) : undefined),
-      grantedMime(),
-    );
-    const missing = isPartial ? extractMissingTiles(payload, detailObj, detailRaw) : [];
-    // Sibling basename for the honest partial note (never the granted path;
-    // basenames contain no slashes, so a path can never slip through).
-    const siblingRaw =
-      strField(payload, ["sibling", "siblingName", "partialName", "fileName"]) ??
-      (detailObj ? strField(detailObj, ["sibling", "siblingName", "partialName", "fileName"]) : undefined);
-    const sibling =
-      typeof siblingRaw === "string" &&
-      siblingRaw.length > 0 &&
-      siblingRaw.length <= 256 &&
-      siblingRaw.indexOf("/") < 0 &&
-      siblingRaw.indexOf("\\") < 0
-        ? siblingRaw
-        : null;
-    setCompletedSibling(isPartial ? sibling : null);
-    pushLog(isPartial ? "Partial output ready" : "Output ready");
-    if (isPartial && sibling) {
-      pushLog(`Partial file: ${sibling}`);
-    }
-    completeJob(jobEnv,
-      typeof width === "number" && typeof height === "number" && width > 0 && height > 0
-        ? { width, height, mime }
-        : undefined,
-      isPartial,
-      missing,
-    );
-    if (lastInputUrl !== "") {
-      recordDesktopHistory(
-        lastInputUrl,
-        typeof width === "number" ? width : undefined,
-        typeof height === "number" ? height : undefined,
-        grantedFormat,
-      );
-    }
-    settleActiveQueue("done");
-    return;
-  }
-
-// Save destination granted on the host side (request_destination emits a
-// destination event): record the format and enter saving. The user
-// grant itself arrives via requestOutputAndResume; this covers host-side
-// grants observed as events.
-  if (kind === "destination" || text.indexOf("destination") >= 0) {
-    if (text.indexOf("denied") >= 0) {
-      dispatchFail(failEnv, "OUTPUT_DENIED", t("desktop.output.deniedFallback"));
-      return;
-    }
-    // Adopt the granted format only when the payload names a real format
-    // id. Lifecycle texts also match this branch ("AwaitingDestination"),
-    // and normalizeNativeFormat falls back to png for anything unknown, so
-    // adopting blindly would clobber the persisted encoder choice with png
-    // on every job before the picker is even shown.
-    const format = strField(payload, ["format"]) ?? detailRaw;
-    if (format) {
-      const lower = format.toLowerCase();
-      if ((NATIVE_FORMATS as readonly string[]).includes(lower)) {
-        grantedFormat = lower as NativeFormat;
-      }
-    }
-    if (text.indexOf("awaiting") >= 0 || text.indexOf("request-destination") >= 0) {
-      if (!pendingDecision) {
-        pendingDecision = { kind: "destination-recovery", reason: "destination" };
-      }
-      setStep(t("desktop.step.chooseWhere"), t("desktop.step.pickOutput"));
-      pushLog("Save destination requested");
-      update();
-      return;
-    }
-    controller.dispatch({ seq: nextSeq(), sessionId, kind: "save-start" });
-    setStep(t("view.step.saving"), t("desktop.step.encodingNative"));
-    update();
-    return;
-  }
-
-  // No catalog / image-selection branch: the native pipeline never emits
-  // one. The driver folds the catalog internally (job_driver.rs
-  // handle_event "catalog" only fills the attempt; PipelineEvent kinds are
-  // discovery/downloading/encoding), jobs.rs projects no imageCount (the
-  // progress allowlist is acquired/total/resources/bytes/files), and the
-// shell selects images[0] at the largest fitting level by default. No
-// selection events are synthesized here; the shared view's choiceCount
-// notice stays for other apps (website discovery sets imageCount).
-
-  // Level selection offered: record image-chosen (legal from
-  // choosing-image), then wait for the running signal before level-chosen.
-  if (
-    kind === "levels" ||
-    text.indexOf("levels") >= 0 ||
-    flat.indexOf("levels") >= 0 ||
-    text.indexOf("awaiting-level") >= 0 ||
-    flat.indexOf("awaitinglevel") >= 0
-  ) {
-    controller.dispatch({ seq: nextSeq(), sessionId, kind: "image-chosen" });
-    setStep(t("view.step.choosingLevel"));
-    update();
-    return;
-  }
-
-  // No display-only branch: only the browser tainted-canvas path produces
-  // it (ordinary <img> display with no readable bytes). The native pipeline
-  // always yields readable bytes or a typed failure, so no native event
-  // carries display-only/display_only; the shared view's display-only
-  // section stays for other apps. The progress flow's "no display-only
-  // branch on the native path" window assertion pins this.
-
-  // Progress snapshots: discovery (resources), downloading (acquired/total),
-  // encoding. Each signal dispatches its own progress transition; the
-  // activity ledger and step labels update unconditionally.
-  if (
-    channel === "dezoomify://job-progress" ||
-    kind === "progress" ||
-    kind === "downloading" ||
-    kind === "discovery" ||
-    kind === "encoding" ||
-    text.indexOf("progress") >= 0 ||
-    numField(payload, detailRaw, ["acquired", "completed", "current", "done"]) !== undefined
-  ) {
-    const reportedTotal = numField(payload, detailRaw, ["total"]) ?? 0;
-    const total = Math.max(viewCtx.currentProgress?.total ?? 0, reportedTotal);
-    const current = Math.max(viewCtx.currentProgress?.current ?? 0,
-      reportedTotal > 0 ? numField(payload, detailRaw, ["current", "acquired", "completed", "done"]) ?? 0 : 0);
-    const message = strField(payload, ["message"]);
-    const progressCount = numField(payload, detailRaw, ["imageCount", "images", "count"]);
-    if (progressCount !== undefined || total > 0) {
-      const prevCount = catalogNotice?.imageCount ?? controller.getState().imageCount ?? 0;
-      catalogNotice = {
-        ...(catalogNotice ?? {}),
-        imageCount: progressCount ?? prevCount,
-        ...(total > 0 ? { tiles: total } : {}),
-      };
-    }
-    viewCtx.currentProgress = { current, total, ...(message ? { message } : {}) };
-    noteProgress(current, total);
-    if (activeQueueId) {
-      const res = recordDesktopProgress(desktopQueue, activeQueueId, current, total);
-      desktopQueue = res.queue;
-    }
-    if (kind === "discovery" || text.indexOf("discover") >= 0) {
-      setStep(t("view.step.discovering"), t("desktop.step.contacting", { host: hostOf(lastInputUrl || activity().url || "") }));
-    } else if (kind === "encoding" || text.indexOf("encod") >= 0) {
-      setStep(t("view.step.saving"), t("desktop.step.encodingNative"));
-    } else {
-      setStep(
-        t("view.step.downloading"),
-        total > 0 ? t("desktop.step.tilesAtFull", { current, total }) : undefined,
-      );
-    }
-    controller.dispatch({ seq: nextSeq(), sessionId, kind: "progress" });
-    update();
-    return;
-  }
-
-  // Running / planning / acquisition phases without counts.
-  if (
-    kind === "job-state" ||
-    text.indexOf("running") >= 0 ||
-    text.indexOf("downloading") >= 0 ||
-    text.indexOf("acquiring") >= 0 ||
-    text.indexOf("planning") >= 0 ||
-    text.indexOf("processing") >= 0 ||
-    text.indexOf("discovering") >= 0 ||
-    text.indexOf("job-state") >= 0
-  ) {
-    if (text.indexOf("running") >= 0 || text.indexOf("downloading") >= 0 || text.indexOf("acquiring") >= 0) {
-      const runningCount = numField(payload, detailRaw, ["imageCount", "images", "count"]);
-      if (runningCount !== undefined && !catalogNotice) {
-        catalogNotice = { imageCount: runningCount };
-      }
-      controller.dispatch({ seq: nextSeq(), sessionId, kind: "progress" });
-      setStep(t("view.step.downloading"));
-    } else     if (text.indexOf("cancelling") >= 0 || text.indexOf("cleaning") >= 0) {
-      setStep(t("view.step.working"), t("desktop.step.cleaningShort"));
-    }
-    update();
-    return;
-  }
-  update();
-}
-
-function subscribeToDesktopEvents(): void {
-  for (const channel of DESKTOP_EVENT_CHANNELS) {
-    const name: DesktopEventChannel = channel;
-    try {
-      const maybe = tauriApiListen(name, (event) => {
-        const raw = (event as { payload?: unknown }).payload ?? event;
-        try {
-          handleDesktopEvent(name, raw);
-        } catch {
-          // Guards already threw for tile bytes; never break rendering.
-        }
-      });
-      if (maybe && typeof (maybe as Promise<unknown>).catch === "function") {
-        (maybe as Promise<unknown>).catch(() => undefined);
-      }
-    } catch {
-      // No host listener available; validation-only fallback stays usable.
-    }
-  }
-}
-
 // Boot handshake: invoke the granted `query_capabilities` command once at
 // startup so the `dezoomify:allow-query-capabilities` grant always maps to
 // shipped code. Local IPC only, so it works offline; an unreachable host or
-// a protocol/registry mismatch only records a typed log line: the
-// controller has no `fail` transition from idle, so a mismatch surfaces its
-// stable code without bricking the app, and offline use is never blocked.
+// a protocol/registry mismatch only records a typed log line: the idle view
+// stays usable, and offline use is never blocked.
 function queryCapabilitiesAtBoot(): void {
-  void tauriPublicInvoke("query_capabilities").then(
-    (raw) => {
-      const snapshot = (raw ?? {}) as {
-        protocol_min?: unknown;
-        protocol_max?: unknown;
-        commands?: unknown;
-      };
-      const commands = Array.isArray(snapshot.commands)
-        ? snapshot.commands.map((name) => String(name)).sort()
-        : [];
-      const expected = DESKTOP_COMMANDS.map((name) => String(name)).sort();
+  void service.queryCapabilities().then(
+    (caps) => {
+      const commands = [...caps.commands].sort();
+      const expected = ["answer_choice", "cancel_job", "open_saved_output", "query_capabilities", "request_destination", "start_job"];
       const mismatch =
-        snapshot.protocol_min !== PROTOCOL_MIN ||
-        snapshot.protocol_max !== PROTOCOL_MAX ||
+        caps.protocolMin !== PROTOCOL_MIN ||
+        caps.protocolMax !== PROTOCOL_MAX ||
         commands.length !== expected.length ||
         commands.some((name, index) => name !== expected[index]);
       if (mismatch) {
@@ -1735,7 +1183,7 @@ function queryCapabilitiesAtBoot(): void {
       }
     },
     (error: unknown) => {
-      const detail = error instanceof Error ? error.message : "query_capabilities denied";
+      const detail = invokeErrorMessage(error, "query_capabilities denied");
       pushLog(`Capability handshake failed: ${detail} (capability.unavailable)`);
     },
   );
@@ -1759,7 +1207,7 @@ function initInitialUrl(): void {
 }
 
 function syncInitialUrlFromLocation(): void {
-  if (controller.getState().status !== "idle") return;
+  if (latestSnapshot !== null || localFailure !== null) return;
   const prefilled = readInitialUrl();
   const current = viewCtx.initialUrl;
   if (prefilled && prefilled !== current) {
@@ -1842,9 +1290,9 @@ function appendOutputFormatRadios(parent: HTMLElement, doc: Document): void {
 // lives here. All buttons are native and keyboard reachable.
 function ensureDesktopAuxPanel(): void {
   if (typeof document === "undefined" || !root) return;
-  const state = controller.getState();
+  const presentation = currentPresentation();
   const doc = root.ownerDocument;
-  const decision = pendingDecision;
+  const decision = pendingDecisionOf();
   const decisionKey = recoveryKeyFor(decision);
   const prevKey = lastRecoveryKey;
   const existing = doc.getElementById("dz-desktop-aux");
@@ -1872,8 +1320,8 @@ function ensureDesktopAuxPanel(): void {
     }
   }
   existing?.remove();
-  const showPartialDone = state.status === "completed" && completedPartial;
-  const showCancelledNote = state.status === "cancelled";
+  const showPartialDone = presentation.phase === "completed" && presentation.partial;
+  const showCancelledNote = presentation.phase === "cancelled";
   if (!decision && !showPartialDone && !showCancelledNote) {
     if (prevKey !== null) {
       restoreFocus(recoveryReturnFocus);
@@ -1926,7 +1374,7 @@ function ensureDesktopAuxPanel(): void {
 
     if (decision.kind === "partial-recovery") {
       title.textContent = t("desktop.rec.partialTitle");
-      const missing = decision.missingTiles ?? [];
+      const missing = decision.missingTiles;
       const summary = formatMissingSummary(missing, decision.failedCount);
       desc.textContent = t("desktop.rec.partialDesc", { summary });
       decisionBox.append(title, desc);
@@ -1986,6 +1434,9 @@ function ensureDesktopAuxPanel(): void {
   }
 
   if (showPartialDone) {
+    const output = latestSnapshot?.output;
+    const completedMissing = output?.missingTiles ?? [];
+    const completedSibling = output?.siblingName ?? null;
     const doneBox = doc.createElement("div");
     doneBox.className = "dz-partial-note";
     doneBox.setAttribute("role", "status");
@@ -2022,7 +1473,7 @@ function ensureDesktopAuxPanel(): void {
     aux.appendChild(note);
   }
 
-  if (state.status !== "completed" && desktopQueue.entries.length > 1) appendDesktopQueuePanel(aux, doc);
+  if (presentation.phase !== "completed" && desktopQueue.entries.length > 1) appendDesktopQueuePanel(aux, doc);
 
   card.appendChild(aux);
   if (decisionKey && decisionKey !== prevKey) {
@@ -2149,26 +1600,82 @@ function ensureDesktopFooter(): void {
   footer.setAttribute("data-dz-wired", "true");
 }
 
+// Step copy derives from the snapshot state: discovering, downloading,
+// saving, recovery, and cleanup each name their step with the same desktop
+// copy the event router used to set imperatively.
+function syncActivityStep(presentation: SnapshotPresentation): void {
+  if (presentation.phase !== "job") return;
+  const a = activity();
+  const snapshot = latestSnapshot;
+  const state = snapshot?.state;
+  const decision = pendingDecisionOf();
+  if (decision && state === "AwaitingPartialDecision") {
+    if (decision.kind === "partial-recovery") {
+      a.stepLabel = t("desktop.step.partialTitle");
+      a.detail = t("desktop.step.partialDetail");
+    } else {
+      a.stepLabel = t("desktop.step.chooseWhere");
+      a.detail = t("desktop.step.chooseWhereDetail");
+    }
+    return;
+  }
+  switch (state) {
+    case "Created":
+    case "Discovering":
+      a.stepLabel = t("view.step.discovering");
+      a.detail = t("desktop.step.contacting", { host: hostOf(lastInputUrl || a.url || "") });
+      break;
+    case "AwaitingImageSelection":
+      a.stepLabel = t("view.step.choosingImage");
+      break;
+    case "AwaitingLevelSelection":
+      a.stepLabel = t("view.step.choosingLevel");
+      break;
+    case "Planning":
+    case "Finalizing":
+      a.stepLabel = t("view.step.saving");
+      a.detail = t("desktop.step.encodingNative");
+      break;
+    case "AcquiringTiles":
+      a.stepLabel = t("view.step.downloading");
+      a.detail =
+        snapshot && snapshot.total !== null && snapshot.total > 0
+          ? t("desktop.step.tilesAtFull", { current: snapshot.acquired, total: snapshot.total })
+          : undefined;
+      break;
+    case "Cancelling":
+      a.stepLabel = t("view.step.working");
+      a.detail = t("desktop.step.cleanupDetail");
+      break;
+    default:
+      break;
+  }
+}
+
 function update() {
   if (!root) return;
-  const state = controller.getState();
+  const presentation = currentPresentation();
   const caps = integration.getCapabilities();
-  if (viewCtx.jobActivity && !isTerminalStatus(state.status)) refreshLongestPending();
-  const auxTiles = catalogNotice?.tiles ?? viewCtx.imageChoice?.tiles ?? viewCtx.currentProgress?.total;
-  const auxWidth = catalogNotice?.width ?? viewCtx.imageChoice?.width ?? viewCtx.completedInfo?.width;
-  const auxHeight = catalogNotice?.height ?? viewCtx.imageChoice?.height ?? viewCtx.completedInfo?.height;
-  const auxChoice =
-    catalogNotice || viewCtx.imageChoice || auxTiles !== undefined || auxWidth !== undefined
-      ? {
-          ...(typeof auxWidth === "number" ? { width: auxWidth } : {}),
-          ...(typeof auxHeight === "number" ? { height: auxHeight } : {}),
-          ...(typeof auxTiles === "number" ? { tiles: auxTiles } : {}),
-        }
-      : undefined;
+  if (viewCtx.jobActivity && presentation.phase === "job") {
+    refreshLongestPending();
+    syncActivityStep(presentation);
+  }
+  // Completion geometry rides the enriched snapshot output; the view context
+  // only carries what the shared view renders.
+  const output = latestSnapshot?.output ?? null;
+  if (presentation.phase === "completed" && output && output.width && output.height) {
+    viewCtx.completedInfo = {
+      width: output.width,
+      height: output.height,
+      mime: encoderToMime(output.format ?? undefined, grantedMime()),
+    };
+  } else if (presentation.phase !== "completed") {
+    viewCtx.completedInfo = undefined;
+  }
 
   renderView(
     root,
-    state,
+    presentation,
     {
       onSubmitUrl(url: string) {
         handleSubmitUrl(url);
@@ -2180,15 +1687,15 @@ function update() {
         handleCopyDiagnostics(() => `${text}\n\n${buildCopyDiagnostics(diagnosticsSnapshot())}`);
       },
       onRetrySameUrl() {
-        // Re-run the last submitted address. `handleSubmitUrl` resets the
-        // terminal state first, so this is a true retry rather than a no-op.
+        // Re-run the last submitted address. `handleSubmitUrl` retires the
+        // terminal job first, so this is a true retry rather than a no-op.
         const url = lastInputUrl || viewCtx.jobActivity?.url || "";
         if (isValidInputUrl(url)) handleSubmitUrl(url);
       },
       onReset() {
         handleReset();
       },
-      ...(state.status === "completed" ? {
+      ...(presentation.phase === "completed" ? {
         onOpenOutput: () => { void handleOpenOutput(false); },
         onRevealOutput: () => { void handleOpenOutput(true); },
       } : {}),
@@ -2221,15 +1728,13 @@ function update() {
         browserCanSave: caps.browserCanSave,
         proxyAllowed: caps.proxyAllowed,
       },
-      ...(viewCtx.currentProgress ? { currentProgress: viewCtx.currentProgress } : {}),
-      ...(viewCtx.completedInfo ? { completedInfo: viewCtx.completedInfo } : {}),
-      ...(state.status === "completed" ? { nativeSaved: { partial: completedPartial } } : {}),
+      ...(presentation.phase === "completed" ? { nativeSaved: { partial: presentation.partial } } : {}),
       ...(viewCtx.jobActivity ? { jobActivity: viewCtx.jobActivity } : {}),
       ...(viewCtx.initialUrl ? { initialUrl: viewCtx.initialUrl } : {}),
-      ...(auxChoice ? { imageChoice: auxChoice } : {}),
+      ...(viewCtx.completedInfo ? { completedInfo: viewCtx.completedInfo } : {}),
       history: [...desktopHistory],
     },
-    state.status === "idle" ? {
+    presentation.phase === "idle" ? {
       idleBeforeHistory: createElement(DesktopSettingsView, {
         settings: desktopSettings,
         error: settingsError,
@@ -2248,7 +1753,6 @@ function update() {
 }
 
 initInitialUrl();
-subscribeToDesktopEvents();
 queryCapabilitiesAtBoot();
 
 if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
@@ -2261,62 +1765,47 @@ if (root !== null) {
 }
 
 function getCurrentJobId(): string | null {
-  return currentJobId;
-}
-
-function getSessionId(): string {
-  return sessionId;
-}
-
-function getSeq(): number {
-  return currentSeq;
+  return followedJobId;
 }
 
 function getPendingDecision(): PendingDecision | null {
-  if (!pendingDecision) return null;
+  const decision = pendingDecisionOf();
+  if (!decision) return null;
   return {
-    ...pendingDecision,
-    ...(pendingDecision.missingTiles ? { missingTiles: [...pendingDecision.missingTiles] } : {}),
+    ...decision,
+    missingTiles: [...decision.missingTiles],
   };
 }
 
-function getCatalogNotice(): CatalogNotice | null {
-  return catalogNotice ? { ...catalogNotice } : null;
-}
-
 function getCompletedPartial(): boolean {
-  return completedPartial;
+  return currentPresentation().partial;
 }
 
 function getCompletedMissing(): Array<string> {
-  return [...completedMissing];
+  return [...(latestSnapshot?.output?.missingTiles ?? [])];
 }
 
 function getCompletedSibling(): string | null {
-  return completedSibling;
+  return latestSnapshot?.output?.siblingName ?? null;
 }
 
-function getRemoteSeq(jobId: string): number {
-  return remoteSeqByJob[jobId] ?? 0;
+function getLatestSnapshot(): JobSnapshot | null {
+  return latestSnapshot;
 }
 
 export {
-  controller,
   integration,
+  service,
   update,
   getCurrentJobId,
-  getSessionId,
-  getSeq,
   getPendingDecision,
-  getCatalogNotice,
   getCompletedPartial,
   getCompletedMissing,
   getCompletedSibling,
-  getRemoteSeq,
+  getLatestSnapshot,
   getEffectiveSettings,
   buildCopyDiagnostics,
   handleCopyDiagnostics,
-  handleDesktopEvent,
   validateDeepLinkPayload,
   showDeepLinkConfirm,
   dismissDeepLinkConfirm,

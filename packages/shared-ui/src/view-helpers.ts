@@ -1,5 +1,4 @@
-import type { StructuredError } from "./controller.ts";
-import { t } from "./i18n.ts";
+import type { StructuredError } from "./snapshot-view.ts";
 
 export function truncateMiddle(value: string, max = 90): string {
   const text = String(value ?? "");
@@ -69,19 +68,6 @@ export function isFileHandoffSource(sourceUrl?: string): boolean {
   try { return new URL(String(sourceUrl ?? "").trim()).protocol === "file:"; }
   catch { return false; }
 }
-
-export function defaultStepFor(status: string): string {
-  switch (status) {
-    case "discovering": return t("view.step.discovering");
-    case "choosing-image": return t("view.step.choosingImage");
-    case "choosing-level": return t("view.step.choosingLevel");
-    case "preflighting": return t("view.step.preflighting");
-    case "downloading": return t("view.step.downloading");
-    case "saving": return t("view.step.saving");
-    default: return t("view.step.working");
-  }
-}
-
 /**
  * Technical-details text, one shape across every product:
  *

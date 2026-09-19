@@ -1,6 +1,6 @@
 // Snapshot presentation: shared UI renders authoritative JobSnapshots.
-// Pure and host-neutral (no React, no host globals). This module replaces
-// the controller transition table: instead of walking synthetic preflight,
+// Pure and host-neutral (no React, no host globals). This module is the
+// single presentation contract: instead of walking synthetic preflight,
 // save, and selection events, the UI derives one presentation from the
 // latest snapshot. Every terminal snapshot yields a complete terminal
 // presentation even when the catalog or progress never arrived.
@@ -15,9 +15,50 @@ import type {
   JobState,
   RecoveryAction,
 } from "@dezoomify/app-model";
+import { categoryFor } from "./failure.ts";
 import { renderTransportLabel, splitGapLedger } from "./components.ts";
+import { t, type I18nKey } from "./i18n.ts";
+
+/**
+ * The layered failure shape every product renders through the shared view:
+ * plain headline in `message`, raw engine diagnostics in `detail`, stable
+ * classification, and the optional on-device fetch context. Hosts build it
+ * with `describeFailure`; snapshots project it from the generated ErrorDto.
+ */
+export interface StructuredError {
+  code: string;
+  category: string;
+  retryable: boolean;
+  message: string;
+  /** Raw engine diagnostics (headline-free per-format bullet block); rendered only in the collapsible technical section. */
+  detail?: string;
+  transport?: string;
+  phase?: string;
+  /** Full request URL of the failed fetch; rendered verbatim in on-device details only. */
+  url?: string;
+  /** HTTP status of the failed fetch, when it is an HTTP refusal. */
+  http?: number;
+  /** Bounded single-line server signal captured from an HTTP error body. */
+  preview?: string;
+  /** Host-provided provenance lines (status, origin, resource kind), rendered after the trailing line. */
+  extras?: string[];
+}
 
 export type SnapshotPhase = "idle" | "job" | "display-only" | "completed" | "failed" | "cancelled";
+
+/** Host-reported step names for products that render without a snapshot yet. */
+export type PresentationStatus =
+  | "idle"
+  | "discovering"
+  | "choosing-image"
+  | "choosing-level"
+  | "preflighting"
+  | "downloading"
+  | "saving"
+  | "display-only"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 export interface SnapshotImageOption {
   index: number;
@@ -39,7 +80,7 @@ export type SnapshotSelection =
 
 export interface SnapshotTerminal {
   kind: "completed" | "partial-completed" | "failed" | "cancelled";
-  error?: ErrorDto;
+  error?: StructuredError;
   /** Honest tile account; null when the job never reached tile work. */
   output?: {
     doneTiles: number;
@@ -55,13 +96,19 @@ export interface SnapshotTerminal {
 
 export interface SnapshotPresentation {
   phase: SnapshotPhase;
+  /** Engine job id; null before any job started. */
+  jobId: string | null;
+  /** Engine state name (or host step) for diagnostics; null when idle. */
+  stateLabel: string | null;
   /** i18n key for the headline step line. */
-  headlineKey: string;
+  headlineKey: I18nKey;
   headlineVars?: Record<string, string | number>;
   progress: { current: number; total: number | null } | null;
   paused: boolean;
   selection: SnapshotSelection | null;
   terminal: SnapshotTerminal | null;
+  /** Raw transport code (diagnostics); `transportLabel` carries the display string. */
+  transport: string | null;
   transportLabel: string | null;
   canCancel: boolean;
   canReset: boolean;
@@ -97,7 +144,7 @@ function levelOptionsOf(catalog: CatalogDto | null, image: number | null): Snaps
   }));
 }
 
-function headlineForState(state: JobState): { key: string; vars?: Record<string, string | number> } {
+function headlineForState(state: JobState): { key: I18nKey; vars?: Record<string, string | number> } {
   switch (state) {
     case "Created":
     case "Discovering":
@@ -126,11 +173,29 @@ function headlineForState(state: JobState): { key: string; vars?: Record<string,
   }
 }
 
+/** Project the generated error DTO onto the layered view error. */
+export function structuredErrorOf(error: ErrorDto): StructuredError {
+  const presented: StructuredError = {
+    code: error.code,
+    category: categoryFor(error.code),
+    retryable: error.retryable,
+    message: error.message,
+    phase: error.phase,
+  };
+  if (error.detail) presented.detail = error.detail;
+  if (error.transport) presented.transport = error.transport;
+  if (error.request) presented.url = error.request;
+  if (typeof error.http === "number") presented.http = error.http;
+  if (error.preview) presented.preview = error.preview;
+  if (error.resource_kind) presented.extras = [`Resource: ${error.resource_kind}`];
+  return presented;
+}
+
 function terminalOf(snapshot: JobSnapshot): SnapshotTerminal | null {
   const terminal = snapshot.terminal;
   if (!terminal) return null;
   const presented: SnapshotTerminal = { kind: terminal.kind };
-  if (terminal.error) presented.error = terminal.error;
+  if (terminal.error) presented.error = structuredErrorOf(terminal.error);
   if (snapshot.output) {
     presented.output = {
       doneTiles: snapshot.output.doneTiles,
@@ -147,6 +212,25 @@ function terminalOf(snapshot: JobSnapshot): SnapshotTerminal | null {
     }
   }
   return presented;
+}
+
+function basePresentation(): SnapshotPresentation {
+  return {
+    phase: "job",
+    jobId: null,
+    stateLabel: null,
+    headlineKey: "view.step.working",
+    progress: null,
+    paused: false,
+    selection: null,
+    terminal: null,
+    transport: null,
+    transportLabel: null,
+    canCancel: true,
+    canReset: false,
+    displayOnly: false,
+    partial: false,
+  };
 }
 
 /**
@@ -195,13 +279,17 @@ export function presentSnapshot(
       : null;
 
   return {
+    ...basePresentation(),
     phase,
+    jobId: snapshot.jobId,
+    stateLabel: snapshot.state,
     headlineKey: displayOnly ? "view.display.title" : headline.key,
     ...(headline.vars ? { headlineVars: headline.vars } : {}),
     progress,
     paused: snapshot.paused,
     selection,
     terminal,
+    transport,
     transportLabel: transport === null ? null : renderTransportLabel(transport),
     canCancel: terminal === null && snapshot.state !== "Cancelling",
     canReset: terminal !== null,
@@ -210,19 +298,109 @@ export function presentSnapshot(
   };
 }
 
+/**
+ * Failed presentation for host-local failures that never reached an engine
+ * snapshot (input validation, start rejections). Same contract as a failed
+ * terminal: the layered error drives the view.
+ */
+export function presentFailure(
+  error: StructuredError,
+  transport: string | null,
+): SnapshotPresentation {
+  return {
+    ...basePresentation(),
+    phase: "failed",
+    stateLabel: "Failed",
+    headlineKey: "view.fail.title",
+    terminal: { kind: "failed", error },
+    transport,
+    transportLabel: transport === null ? null : renderTransportLabel(transport),
+    canCancel: false,
+    canReset: true,
+  };
+}
+
+/** Presentation for a host-reported step (products without a snapshot yet). */
+export function presentStatus(
+  status: PresentationStatus,
+  opts?: { transport?: string | null; error?: StructuredError; partial?: boolean },
+): SnapshotPresentation {
+  const transport = opts?.transport ?? null;
+  const headline = headlineForStatus(status);
+  const presentation: SnapshotPresentation = {
+    ...basePresentation(),
+    phase: phaseForStatus(status),
+    stateLabel: status,
+    headlineKey: headline,
+    transport,
+    transportLabel: transport === null ? null : renderTransportLabel(transport),
+  };
+  if (status === "failed") {
+    presentation.terminal = { kind: "failed", error: opts?.error ?? unknownFailure() };
+    presentation.canCancel = false;
+    presentation.canReset = true;
+  } else if (status === "completed" || status === "cancelled" || status === "display-only") {
+    presentation.terminal =
+      status === "completed"
+        ? { kind: opts?.partial === true ? "partial-completed" : "completed" }
+        : status === "cancelled"
+          ? { kind: "cancelled" }
+          : null;
+    presentation.displayOnly = status === "display-only";
+    presentation.partial = status === "completed" && opts?.partial === true;
+    presentation.canCancel = false;
+    presentation.canReset = true;
+  }
+  return presentation;
+}
+
+function unknownFailure(): StructuredError {
+  return { code: "UNKNOWN", category: "unknown", retryable: true, message: t("view.fail.fallback") };
+}
+
+function phaseForStatus(status: PresentationStatus): SnapshotPhase {
+  if (status === "idle") return "idle";
+  if (status === "display-only") return "display-only";
+  if (status === "completed") return "completed";
+  if (status === "failed") return "failed";
+  if (status === "cancelled") return "cancelled";
+  return "job";
+}
+
+function headlineForStatus(status: PresentationStatus): I18nKey {
+  switch (status) {
+    case "idle":
+      return "view.idle.submit";
+    case "discovering":
+      return "view.step.discovering";
+    case "choosing-image":
+      return "view.step.choosingImage";
+    case "choosing-level":
+      return "view.step.choosingLevel";
+    case "preflighting":
+      return "view.step.preflighting";
+    case "downloading":
+      return "view.step.downloading";
+    case "saving":
+      return "view.step.saving";
+    case "display-only":
+      return "view.display.title";
+    case "completed":
+      return "view.done.ready";
+    case "failed":
+      return "view.fail.title";
+    case "cancelled":
+      return "view.cancel.title";
+  }
+}
+
 /** Idle presentation before any job starts. */
 export function presentIdle(): SnapshotPresentation {
   return {
+    ...basePresentation(),
     phase: "idle",
     headlineKey: "view.idle.submit",
-    progress: null,
-    paused: false,
-    selection: null,
-    terminal: null,
-    transportLabel: null,
     canCancel: false,
     canReset: false,
-    displayOnly: false,
-    partial: false,
   };
 }

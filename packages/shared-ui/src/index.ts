@@ -1,4 +1,3 @@
-export * from "./controller.ts";
 export * from "./components.ts";
 export * from "./failure.ts";
 export * from "./i18n.ts";

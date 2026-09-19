@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { act, click } from "./react-dom.mjs";
-import { renderView, getPhaseForStatus } from "../packages/shared-ui/src/view.tsx";
+import { renderView } from "../packages/shared-ui/src/view.tsx";
+import { presentFailure, presentIdle, presentSnapshot, presentStatus } from "../packages/shared-ui/src/snapshot-view.ts";
+import { applyJobEvent, initialSnapshot } from "../packages/app-model/src/index.ts";
 
 function container() {
   const el = globalThis.document.createElement("div");
@@ -9,8 +11,19 @@ function container() {
   return el;
 }
 
-function render(el, state, callbacks, ctx) {
-  act(() => renderView(el, state, callbacks, ctx));
+function render(el, presentation, callbacks, ctx) {
+  act(() => renderView(el, presentation, callbacks, ctx));
+}
+
+function jobPresentation(events = [], transport = "direct") {
+  let now = 0;
+  let snap = initialSnapshot("job:t", ++now);
+  for (const event of events) snap = applyJobEvent(snap, event, ++now);
+  return presentSnapshot(snap, transport);
+}
+
+function failurePresentation(error, transport = "direct") {
+  return presentFailure(error, transport);
 }
 
 const callbacks = {
@@ -20,38 +33,32 @@ const callbacks = {
   onSave: () => {},
 };
 
-test("getPhaseForStatus maps active job statuses to 'job'", () => {
-  assert.equal(getPhaseForStatus("idle"), "idle");
-  assert.equal(getPhaseForStatus("discovering"), "job");
-  assert.equal(getPhaseForStatus("choosing-image"), "job");
-  assert.equal(getPhaseForStatus("choosing-level"), "job");
-  assert.equal(getPhaseForStatus("preflighting"), "job");
-  assert.equal(getPhaseForStatus("downloading"), "job");
-  assert.equal(getPhaseForStatus("saving"), "job");
-  assert.equal(getPhaseForStatus("display-only"), "display-only");
-  assert.equal(getPhaseForStatus("completed"), "completed");
-  assert.equal(getPhaseForStatus("failed"), "failed");
-  assert.equal(getPhaseForStatus("cancelled"), "cancelled");
+test("presentStatus maps host steps onto render phases", () => {
+  assert.equal(presentStatus("idle").phase, "idle");
+  assert.equal(presentStatus("discovering").phase, "job");
+  assert.equal(presentStatus("choosing-image").phase, "job");
+  assert.equal(presentStatus("choosing-level").phase, "job");
+  assert.equal(presentStatus("preflighting").phase, "job");
+  assert.equal(presentStatus("downloading").phase, "job");
+  assert.equal(presentStatus("saving").phase, "job");
+  assert.equal(presentStatus("display-only").phase, "display-only");
+  assert.equal(presentStatus("completed").phase, "completed");
+  assert.equal(presentStatus("failed").phase, "failed");
+  assert.equal(presentStatus("cancelled").phase, "cancelled");
+  assert.equal(presentIdle().phase, "idle");
 });
 
 test("renderView mounts card and updates job section in place without DOM destruction", () => {
   const el = container();
 
   // 1. Initial idle render
-  render(el, { status: "idle", seq: 0, sessionId: "s1", imageCount: 0, transport: null }, callbacks);
+  render(el, presentIdle(), callbacks);
   const card = el.querySelector(".dz-card");
   assert.ok(card, "status card mounted");
   assert.equal(card.dataset.viewPhase, "idle");
   assert.ok(card.querySelector(".dz-form"), "form mounted in idle view");
 
   // 2. Transition to discovering (active job phase)
-  const jobState = {
-    status: "discovering",
-    seq: 1,
-    sessionId: "s1",
-    imageCount: 0,
-    transport: "direct",
-  };
   const ctx = {
     jobActivity: {
       url: "https://museum.example.org/artwork/1",
@@ -61,7 +68,7 @@ test("renderView mounts card and updates job section in place without DOM destru
     },
   };
 
-  render(el, jobState, callbacks, ctx);
+  render(el, jobPresentation([{ type: "job-state", state: "Discovering" }]), callbacks, ctx);
   assert.equal(card.dataset.viewPhase, "job");
   const jobSec = card.querySelector(".dz-job-section");
   assert.ok(jobSec, "job section mounted");
@@ -75,19 +82,24 @@ test("renderView mounts card and updates job section in place without DOM destru
   details.open = true;
 
   // 3. Heartbeat update / progress ticks during job
-  const nextJobState = { ...jobState, status: "downloading", seq: 2 };
-  const nextCtx = {
-    ...ctx,
-    currentProgress: { current: 15, total: 60, message: "Downloading image tiles…" },
-    jobActivity: {
-      ...ctx.jobActivity,
-      stepLabel: "Downloading image tiles…",
-      completedRequests: 15,
-      pendingRequests: 4,
+  render(
+    el,
+    jobPresentation([
+      { type: "job-state", state: "Discovering" },
+      { type: "job-state", state: "AcquiringTiles" },
+      { type: "progress", acquired: 15, total: 60 },
+    ]),
+    callbacks,
+    {
+      ...ctx,
+      jobActivity: {
+        ...ctx.jobActivity,
+        stepLabel: "Downloading image tiles…",
+        completedRequests: 15,
+        pendingRequests: 4,
+      },
     },
-  };
-
-  render(el, nextJobState, callbacks, nextCtx);
+  );
 
   // Card and job section MUST be the exact same DOM node references.
   assert.equal(el.querySelector(".dz-card"), card, "card node preserved across job updates");
@@ -103,11 +115,15 @@ test("renderView mounts card and updates job section in place without DOM destru
   assert.equal(details.open, true, "open details preserved across in-place updates");
 
   // 4. Rapid heartbeat / progress ticks
+  const tickPresentation = jobPresentation([
+    { type: "job-state", state: "AcquiringTiles" },
+    { type: "progress", acquired: 15, total: 60 },
+  ]);
   for (let tick = 1; tick <= 10; tick++) {
-    render(el, nextJobState, callbacks, {
-      ...nextCtx,
+    render(el, tickPresentation, callbacks, {
+      ...ctx,
       jobActivity: {
-        ...nextCtx.jobActivity,
+        ...ctx.jobActivity,
         pendingRequests: tick % 3,
         completedRequests: 15 + tick,
       },
@@ -119,7 +135,7 @@ test("renderView mounts card and updates job section in place without DOM destru
   // 5. Transition to completed
   render(
     el,
-    { status: "completed", seq: 3, sessionId: "s1", imageCount: 1, transport: "direct" },
+    jobPresentation([{ type: "completed" }]),
     callbacks,
     { completedInfo: { width: 4000, height: 3000, mime: "image/png" } },
   );
@@ -128,7 +144,7 @@ test("renderView mounts card and updates job section in place without DOM destru
   assert.ok(card.querySelector(".dz-completed-section"), "completed section mounted");
 
   // 6. Reset back to idle
-  render(el, { status: "idle", seq: 4, sessionId: "s1", imageCount: 0, transport: null }, callbacks);
+  render(el, presentIdle(), callbacks);
   assert.equal(card.dataset.viewPhase, "idle");
   assert.ok(card.querySelector(".dz-form"), "idle form re-mounted after reset");
 });
@@ -145,7 +161,7 @@ test("slow discovery replaces the phase with one waiting status", () => {
       stepLabel: "Finding the zoomable image…",
     },
   };
-  render(el, { status: "discovering", seq: 1, sessionId: "s1", imageCount: 0, transport: "direct" }, callbacks, ctx);
+  render(el, jobPresentation([{ type: "job-state", state: "Discovering" }]), callbacks, ctx);
   const card = el.querySelector(".dz-card");
   const step = card.querySelector("#dz-job-step-text");
   assert.ok(step, "job status shown while stalled");
@@ -155,28 +171,26 @@ test("slow discovery replaces the phase with one waiting status", () => {
 
 test("failed state updates error details in place without destroying error container", () => {
   const el = container();
-  const errState1 = {
-    status: "failed",
-    seq: 1,
-    sessionId: "s2",
-    imageCount: 0,
-    transport: "direct",
-    error: {
-      code: "NO_IMAGE_FOUND",
-      category: "discovery",
-      retryable: false,
-      message: "No zoomable image could be found.",
-    },
-  };
-  render(el, errState1, callbacks);
+  const errPresentation1 = failurePresentation({
+    code: "NO_IMAGE_FOUND",
+    category: "discovery",
+    retryable: false,
+    message: "No zoomable image could be found.",
+  });
+  render(el, errPresentation1, callbacks);
   const card = el.querySelector(".dz-card");
   assert.equal(card.dataset.viewPhase, "failed");
   const errSec = card.querySelector(".dz-error-section");
   assert.ok(errSec, "error section mounted");
   assert.equal(card.querySelector("#dz-error-message").textContent, "No zoomable image could be found.");
 
-  const errState2 = { ...errState1, error: { ...errState1.error, message: "Network timeout contacting server." } };
-  render(el, errState2, callbacks);
+  const errPresentation2 = failurePresentation({
+    code: "NO_IMAGE_FOUND",
+    category: "discovery",
+    retryable: false,
+    message: "Network timeout contacting server.",
+  });
+  render(el, errPresentation2, callbacks);
   assert.equal(card.querySelector(".dz-error-section"), errSec, "error section node preserved");
   assert.equal(card.querySelector("#dz-error-message").textContent, "Network timeout contacting server.");
 });
@@ -186,27 +200,20 @@ test("error layering: plain message prominent, engine diagnostics only in techni
   const engineBlock =
     " - zoomify, iiif, krpano: HTTP 429 fetching this address\n" +
     " - 2 other format(s) did not match this page address";
-  const state = {
-    status: "failed",
-    seq: 1,
-    sessionId: "s3",
-    imageCount: 0,
+  const presentation = failurePresentation({
+    code: "UPSTREAM_RATE_LIMITED",
+    category: "transport",
+    retryable: true,
+    message:
+      "The website hosting this image limits how many pages our server may request from it, and that limit was just reached, so the page could not be opened.",
+    detail: engineBlock,
     transport: "metadata-proxy",
-    error: {
-      code: "UPSTREAM_RATE_LIMITED",
-      category: "transport",
-      retryable: true,
-      message:
-        "The website hosting this image limits how many pages our server may request from it, and that limit was just reached, so the page could not be opened.",
-      detail: engineBlock,
-      transport: "metadata-proxy",
-      phase: "discovery",
-      url: "https://example.test/viewer/tour.xml?sig=abc&lang=fr",
-      http: 429,
-      preview: "Too many requests",
-    },
-  };
-  render(el, state, callbacks);
+    phase: "discovery",
+    url: "https://example.test/viewer/tour.xml?sig=abc&lang=fr",
+    http: 429,
+    preview: "Too many requests",
+  });
+  render(el, presentation, callbacks);
   const card = el.querySelector(".dz-card");
   const prominent = card.querySelector("#dz-error-message").textContent;
   assert.ok(!prominent.includes("zoomify"), "engine block must not be prominent");
@@ -231,19 +238,15 @@ test("error layering: plain message prominent, engine diagnostics only in techni
   assert.ok(!diagnostics.includes("Message:"), "no prominent-message repetition");
   assert.ok(!diagnostics.includes("{"), "no JSON");
   // A fresh failure without url/http/detail renders only the trailing line.
-  const state2 = {
-    ...state,
-    seq: 2,
-    error: {
-      code: "NO_IMAGE_FOUND",
-      category: "discovery",
-      retryable: false,
-      message: "No zoomable image could be found.",
-      transport: "direct",
-      phase: "discovery",
-    },
-  };
-  render(el, state2, callbacks);
+  const fresh = failurePresentation({
+    code: "NO_IMAGE_FOUND",
+    category: "discovery",
+    retryable: false,
+    message: "No zoomable image could be found.",
+    transport: "direct",
+    phase: "discovery",
+  });
+  render(el, fresh, callbacks);
   const diag2 = card.querySelector("#dz-error-diagnostics").textContent;
   assert.equal(
     diag2,
@@ -254,18 +257,16 @@ test("error layering: plain message prominent, engine diagnostics only in techni
 
 test("failed technical details show the activity log below the error diagnostics", () => {
   const el = container();
-  const state = {
-    status: "failed",
-    seq: 1,
-    sessionId: "s4",
-    imageCount: 0,
-    transport: "browser-session",
-    error: { code: "job.partial-discarded", category: "engine", retryable: false, message: "Discarded." },
-  };
+  const presentation = failurePresentation({
+    code: "job.partial-discarded",
+    category: "engine",
+    retryable: false,
+    message: "Discarded.",
+  });
   const ctx = {
     jobActivity: { log: ["[job] engine-start url=https://example.test/a.dzi", "[worker] session-created jobId=job:1"] },
   };
-  render(el, state, callbacks, ctx);
+  render(el, presentation, callbacks, ctx);
   const card = el.querySelector(".dz-card");
   const log = card.querySelector("#dz-error-log");
   assert.ok(log, "log block mounted in failure details");
@@ -276,13 +277,13 @@ test("failed technical details show the activity log below the error diagnostics
   assert.ok(!card.querySelector("#dz-error-diagnostics").textContent.includes("engine-start"));
 
   const empty = container();
-  render(empty, state, callbacks, {});
+  render(empty, presentation, callbacks, {});
   assert.equal(empty.querySelector(".dz-card").querySelector("#dz-error-log"), null, "no log block without logs");
 });
 
 test("job rail keeps integrated stop and diagnostics-copy controls, and header visibility tracks phase", () => {
   const el = container();
-  render(el, { status: "idle", seq: 1, sessionId: "s1", imageCount: 0 }, callbacks);
+  render(el, presentIdle(), callbacks);
   const card = el.querySelector(".dz-card");
   const header = card.querySelector(".dz-header");
   assert.ok(header, "header exists");
@@ -290,9 +291,11 @@ test("job rail keeps integrated stop and diagnostics-copy controls, and header v
 
   render(
     el,
-    { status: "downloading", seq: 2, sessionId: "s1", imageCount: 2, transport: "direct" },
+    jobPresentation([
+      { type: "job-state", state: "AcquiringTiles" },
+      { type: "progress", acquired: 10, total: 50 },
+    ]),
     callbacks,
-    { currentProgress: { current: 10, total: 50 }, imageChoice: { width: 4000, height: 3000, tiles: 50 } },
   );
   assert.equal(header.style.display, "none", "header hidden in job phase");
   const stopBtn = card.querySelector("#dz-btn-cancel");
@@ -303,12 +306,12 @@ test("job rail keeps integrated stop and diagnostics-copy controls, and header v
 
   render(
     el,
-    { status: "failed", seq: 3, sessionId: "s1", imageCount: 0, error: { code: "FAILED", category: "transport", retryable: true, message: "Error" } },
+    failurePresentation({ code: "FAILED", category: "transport", retryable: true, message: "Error" }),
     callbacks,
   );
   assert.equal(header.style.display, "none", "header hidden in failed phase");
 
-  render(el, { status: "idle", seq: 4, sessionId: "s1", imageCount: 0 }, callbacks);
+  render(el, presentIdle(), callbacks);
   assert.equal(header.style.display, "", "header reappears in idle");
 });
 
@@ -316,11 +319,13 @@ test("paused job activity freezes the displayed elapsed time", () => {
   const el = container();
   render(
     el,
-    { status: "downloading", seq: 1, sessionId: "s1", imageCount: 1, transport: "direct" },
+    jobPresentation([
+      { type: "job-state", state: "AcquiringTiles" },
+      { type: "progress", acquired: 3, total: 10 },
+      { type: "paused" },
+    ]),
     { onSubmitUrl: () => {}, onCancel: () => {}, onReset: () => {} },
     {
-      currentProgress: { current: 3, total: 10 },
-      paused: true,
       jobActivity: { startedAt: 1_000, pausedAt: 4_000, now: 12_000, paused: true },
     },
   );
@@ -331,14 +336,12 @@ test("paused job activity freezes the displayed elapsed time", () => {
 
 test("failed view offers retry only for retryable errors and start over only when the host can reset", () => {
   const el = container();
-  const retryable = {
-    status: "failed",
-    seq: 1,
-    sessionId: "s1",
-    imageCount: 0,
-    transport: "direct",
-    error: { code: "transport.network-error", category: "transport", retryable: true, message: "The network failed." },
-  };
+  const retryable = failurePresentation({
+    code: "transport.network-error",
+    category: "transport",
+    retryable: true,
+    message: "The network failed.",
+  });
   let retried = 0;
   let resets = 0;
   const withBoth = { ...callbacks, onReset: () => { resets += 1; }, onRetrySameUrl: () => { retried += 1; } };
@@ -351,7 +354,12 @@ test("failed view offers retry only for retryable errors and start over only whe
   assert.equal(retried, 1, "retry invokes onRetrySameUrl");
   assert.equal(resets, 0, "retry never falls through to reset");
 
-  const nonRetryable = { ...retryable, seq: 2, error: { ...retryable.error, retryable: false } };
+  const nonRetryable = failurePresentation({
+    code: "transport.network-error",
+    category: "transport",
+    retryable: false,
+    message: "The network failed.",
+  });
   render(el, nonRetryable, withBoth);
   assert.equal(card.querySelector("#dz-btn-try-again"), null, "no retry for a non-retryable error");
   assert.ok(card.querySelector("#dz-btn-start-over"), "start over stays available");
@@ -365,4 +373,3 @@ test("failed view offers retry only for retryable errors and start over only whe
   click(card.querySelector("#dz-btn-try-again"));
   assert.equal(retried, 2, "retry stays wired without a reset callback");
 });
-

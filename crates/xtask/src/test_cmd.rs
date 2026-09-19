@@ -54,7 +54,7 @@ fn cargo_test() -> Result<(), String> {
 }
 
 /// `test ui`: shared-UI snapshot presentation plus the product-agnostic view
-/// contract (controller, rendering, a11y, i18n, history, handoff copy).
+/// contract (fold/presentation, rendering, a11y, i18n, history, handoff copy).
 /// No engine, no network, no browsers.
 pub(crate) fn test_ui(args: &[String]) -> Result<(), String> {
     if !args.is_empty() {
@@ -66,7 +66,7 @@ pub(crate) fn test_ui(args: &[String]) -> Result<(), String> {
     super::command::node_test(
         &[
             "test/snapshot-view.test.mjs",
-            "test/controller.test.mjs",
+            "test/presentation.test.mjs",
             "test/view-rendering.test.mjs",
             "test/ui-a11y.test.mjs",
             "test/ui-i18n.test.mjs",

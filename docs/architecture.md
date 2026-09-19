@@ -41,7 +41,7 @@ The typed WASM bridge to core, job, and pure processing code. A session takes co
 
 ### `packages/shared-ui`
 
-One React view (`.tsx`) for discovery, selection, progress, recovery, and output in every graphical app. Hosts mount it with `renderView(container, state, callbacks, ctx)` and keep their own effect layers. Sources are bundled directly by Vite/WXT; no hand-maintained `.js` mirrors exist. Snapshot presentation (`snapshot-view.ts`) derives one renderable view from the latest authoritative `JobSnapshot`; the controller transition table is a non-authoritative view.
+One React view (`.tsx`) for discovery, selection, progress, recovery, and output in every graphical app. Hosts mount it with `renderView(container, presentation, callbacks, ctx)` and keep their own effect layers. Sources are bundled directly by Vite/WXT; no hand-maintained `.js` mirrors exist. Snapshot presentation (`snapshot-view.ts`) derives the one renderable view from the latest authoritative `JobSnapshot` (`presentSnapshot`), a host-local failure (`presentFailure`), or a host step (`presentStatus`); no transition table exists.
 
 ### `packages/app-model`
 
