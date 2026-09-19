@@ -32,8 +32,8 @@ test("desktop quick strip keeps the output size preset", () => {
     Object.defineProperty(size, "value", { configurable: true, value: "3840" });
     size.dispatchEvent(new window.Event("change", { bubbles: true }));
   });
-  assert.equal(current().maxWidth, 3840);
-  assert.equal(current().maxHeight, null);
+  assert.equal(current().max_width, 3840);
+  assert.equal(current().max_height, null);
 });
 
 test("desktop advanced settings open as a labelled dialog and dismiss cleanly", () => {

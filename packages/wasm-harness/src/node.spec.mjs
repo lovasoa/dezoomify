@@ -24,7 +24,7 @@ assert.ok(
 const wasm = createRequire(import.meta.url)(GENERATED);
 
 function start(session, url = "https://example.com/image.dzi") {
-  return session.dispatch({ type: "start", inputs: [{ url }] });
+  return session.command({ type: "start", inputs: [{ url }] });
 }
 
 function discoveryRequest(result) {
@@ -59,7 +59,7 @@ function acquireTiles(session) {
   const request = discoveryRequest(started);
   assert.ok(request);
   const bytes = Array.from(Buffer.from(DZI, "utf8"));
-  const provided = session.dispatch({
+  const provided = session.complete({
     type: "provide-resource",
     request: request.id,
     bytes,
@@ -67,10 +67,10 @@ function acquireTiles(session) {
   assert.equal(provided.status, "ok");
   const catalog = provided.snapshot.selection.catalog;
   assert.ok(catalog, "metadata yields a catalog in the snapshot");
-  const selected = session.dispatch({ type: "select-image", image: 0 });
+  const selected = session.command({ type: "select-image", image: 0 });
   assert.equal(selected.status, "ok");
   const levels = catalog.entries[0].levels.length;
-  const leveled = session.dispatch({ type: "select-level", level: levels - 1 });
+  const leveled = session.command({ type: "select-level", level: levels - 1 });
   assert.equal(leveled.status, "ok");
   const tiles = leveled.messages
     .filter((message) => message.type === "acquire-tile")
@@ -102,7 +102,7 @@ describe("generated typed WASM surface", () => {
     const request = discoveryRequest(start(session));
     assert.ok(request);
     const bytes = Array.from(Buffer.from(DZI, "utf8"));
-    const provided = session.dispatch({
+    const provided = session.complete({
       type: "provide-resource",
       request: request.id,
       bytes,
@@ -118,7 +118,7 @@ describe("generated typed WASM surface", () => {
   it("rejects tile bytes through provide-resource", () => {
     const session = new wasm.Session({});
     const { tiles } = acquireTiles(session);
-    const rejected = session.dispatch({
+    const rejected = session.complete({
       type: "provide-resource",
       request: tiles[0].request,
       bytes: [1, 2, 3, 4],
@@ -131,7 +131,7 @@ describe("generated typed WASM surface", () => {
     const session = new wasm.Session({});
     const request = discoveryRequest(start(session, "https://example.com/info.json"));
     assert.ok(request);
-    const result = session.dispatch({
+    const result = session.complete({
       type: "provide-fetch-failure",
       request: request.id,
       error: {
@@ -156,7 +156,7 @@ describe("generated typed WASM surface", () => {
 
   it("rejects malformed external objects at the generated conversion boundary", () => {
     const session = new wasm.Session({});
-    assert.throws(() => session.dispatch({ type: "provide-fetch-failure" }), /typed ABI conversion failed/);
+    assert.throws(() => session.complete({ type: "provide-fetch-failure" }), /typed ABI conversion failed/);
     session.dispose();
   });
 
@@ -166,7 +166,7 @@ describe("generated typed WASM surface", () => {
     let messageCount = 0;
     let finalized = false;
     for (const { request } of tiles) {
-      const result = session.dispatch({ type: "provide-display-outcome", request });
+      const result = session.complete({ type: "provide-display-outcome", request });
       assert.equal(result.status, "ok");
       messageCount += result.messages.length;
       finalized ||= result.messages.some((message) =>
@@ -182,7 +182,7 @@ describe("generated typed WASM surface", () => {
   it("retries a transient failure after the explicit host wait", () => {
     const session = new wasm.Session({});
     const { tiles } = acquireTiles(session);
-    const failed = session.dispatch({
+    const failed = session.complete({
       type: "provide-fetch-failure",
       request: tiles[0].request,
       error: tileError("TRANSPORT_TIMEOUT"),
@@ -194,7 +194,7 @@ describe("generated typed WASM surface", () => {
     assert.equal(wait.tile, tiles[0].tile);
     assert.equal(wait.attempt, 1);
     assert.ok(wait.delay_ms > 0, "the host waits before retrying");
-    const elapsed = session.dispatch({
+    const elapsed = session.complete({
       type: "retry-timer-elapsed",
       tile: wait.tile,
       attempt: wait.attempt,

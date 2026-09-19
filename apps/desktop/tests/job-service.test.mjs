@@ -229,9 +229,9 @@ test("commands route to typed shell commands; engine-only commands reject", asyn
   await handle.command({ type: "cancel" });
   await handle.command({ type: "select-image", image: 2 });
   await handle.command({ type: "select-level", level: 1 });
-  await handle.command({ type: "recovery-choice", generation: 7, choice: "retry" });
-  await handle.command({ type: "recovery-choice", generation: 7, choice: "keep" });
-  await handle.command({ type: "recovery-choice", generation: 7, choice: "discard" });
+  await handle.command({ type: "answer-partial", generation: 7, decision: "retry" });
+  await handle.command({ type: "answer-partial", generation: 7, decision: "keep" });
+  await handle.command({ type: "answer-partial", generation: 7, decision: "discard" });
   await handle.command({ type: "pause" });
   await handle.command({ type: "resume" });
   const routed = ipc.invokes.slice(1).map((call) => call.args.choice ?? call.cmd);

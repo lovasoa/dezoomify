@@ -189,7 +189,7 @@ test("user commands map onto the session; engine-internal commands reject typed"
   await handle.command({ type: "select-image", image: 2 });
   await handle.command({ type: "follow-deferred", image: 1 });
   await handle.command({ type: "select-level", level: 1 });
-  await handle.command({ type: "recovery-choice", generation: 0, choice: "keep" });
+  await handle.command({ type: "answer-partial", generation: 0, decision: "keep" });
   await handle.command({ type: "pause" });
   await handle.command({ type: "resume" });
   await handle.command({ type: "cancel" });

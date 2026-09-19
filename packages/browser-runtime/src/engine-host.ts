@@ -209,7 +209,7 @@ export function createEngineHost(deps: EngineHostDeps) {
       const abandoned = await sleepWithAbort(effect.delay_ms, ctrl.signal);
       if (tornDown() || abandoned || ctrl.signal.aborted) return;
       log("debug", "effect-retry-elapsed", `tile=${effect.tile} attempt=${effect.attempt}`);
-      sendToEngine({ type: "engine.command", command: { type: "retry-timer-elapsed", tile: effect.tile, attempt: effect.attempt } });
+      sendToEngine({ type: "engine.timer-elapsed", tile: effect.tile, attempt: effect.attempt });
     } finally {
       pendingRetries.delete(ctrl);
     }
@@ -522,17 +522,17 @@ export function createEngineHost(deps: EngineHostDeps) {
       );
     } catch (error) {
       sendToEngine({
-        type: "engine.command",
-        command: { type: "finalization-failed", error: finalizationError(error) },
+        type: "engine.finalize",
+        outcome: { type: "finalization-failed", error: finalizationError(error) },
       });
       return;
     }
     sendToEngine({
-      type: "engine.command",
+      type: "engine.finalize",
       // Honest disposition from the performing host: a tainted canvas was
       // shown without readable bytes, so the engine must present preview
       // instead of claiming a saved file.
-      command: {
+      outcome: {
         type: "finalization-succeeded",
         disposition: deps.assembly.isTainted?.() === true ? "display-only" : "browser-save-initiated",
       },
@@ -620,7 +620,7 @@ export function createEngineHost(deps: EngineHostDeps) {
       sendToEngine({ type: "engine.command", command: { type: "select-level", level } });
     },
     chooseRecovery(generation: number, choice: RecoveryChoice) {
-      sendToEngine({ type: "engine.command", command: { type: "recovery-choice", generation, choice } });
+      sendToEngine({ type: "engine.command", command: { type: "answer-partial", generation, decision: choice } });
     },
     pause() {
       // Pause state arrives back via snapshot.paused; the host keeps no flag.

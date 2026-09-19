@@ -59,9 +59,10 @@ use dezoomify_engine::{
     Update as EngineUpdate, UserCommand as EngineUserCommand,
 };
 use dezoomify_protocol::dto::{
-    ErrorDto, ErrorPhase, ErrorTransport, FetchFailureDto, HeaderDto, HostCompletion, HostEffect, JobCommand,
-    JobState as ProtocolJobState, OutputDispositionDto, PointDto, ProbeOutcome, ProcessingRecipe,
-    RequestDto, RequestPurpose, ResourceKind, SessionConfig, SizeDto, TilePlacementDto,
+    ErrorDto, ErrorPhase, ErrorTransport, FetchFailureDto, HeaderDto, HostCompletion, HostEffect,
+    JobCommand, JobState as ProtocolJobState, OutputDispositionDto, PointDto, ProbeOutcome,
+    ProcessingRecipe, RequestDto, RequestPurpose, ResourceKind, SessionConfig, SizeDto,
+    TilePlacementDto,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -282,7 +283,10 @@ impl Session {
             JobCommand::SelectLevel { level } => {
                 self.run_user_command(EngineUserCommand::SelectLevel { level })
             }
-            JobCommand::AnswerPartial { generation, decision } => {
+            JobCommand::AnswerPartial {
+                generation,
+                decision,
+            } => {
                 // The engine validates the generation against the
                 // outstanding decision; a stale answer fails typed there.
                 self.run_user_command(EngineUserCommand::AnswerPartial {

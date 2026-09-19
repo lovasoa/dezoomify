@@ -148,7 +148,7 @@ test("selection and deferred-follow commands forward typed to the engine", async
     { type: "select-image", image: 2 },
     { type: "follow-deferred", image: 1 },
     { type: "select-level", level: 3 },
-    { type: "recovery-choice", generation: 0, choice: "keep" },
+    { type: "answer-partial", generation: 0, decision: "keep" },
   ]);
 });
 
@@ -163,8 +163,8 @@ test("lifecycle effects run in engine order on one chain", async () => {
   await flush();
   assert.deepEqual(assembly.calls.map(([kind]) => kind), ["finalizeOutput"]);
   assert.deepEqual(assembly.calls[0], ["finalizeOutput", false, "png", { width: 32, height: 32 }]);
-  const finalized = sent.find((message) => message.type === "engine.command");
-  assert.deepEqual(finalized.command, { type: "finalization-succeeded", disposition: "browser-save-initiated" });
+  const finalized = sent.find((message) => message.type === "engine.finalize");
+  assert.deepEqual(finalized.outcome, { type: "finalization-succeeded", disposition: "browser-save-initiated" });
 });
 
 test("cancel-work releases retained resources and cancels fetching", async () => {
@@ -183,9 +183,9 @@ test("a failed awaited output replies typed instead of faking success", async ()
   ]);
   await flush();
   await flush();
-  const finalized = sent.find((message) => message.command?.type === "finalization-failed");
+  const finalized = sent.find((message) => message.outcome?.type === "finalization-failed");
   assert.ok(finalized, "typed finalization failure was sent");
-  assert.equal(finalized.command.error.code, "PLAN_INVALID");
-  assert.equal(finalized.command.error.phase, "output");
+  assert.equal(finalized.outcome.error.code, "PLAN_INVALID");
+  assert.equal(finalized.outcome.error.phase, "output");
   assert.equal(seen.some(([kind]) => kind === "host-failure"), false, "an awaited failure is not a host crash");
 });

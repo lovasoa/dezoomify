@@ -312,8 +312,8 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
         case "select-level":
           activeHost.selectLevel(command.level);
           return;
-        case "recovery-choice":
-          activeHost.chooseRecovery(command.generation, command.choice);
+        case "answer-partial":
+          activeHost.chooseRecovery(command.generation, command.decision);
           return;
         case "pause":
           activeHost.pause();

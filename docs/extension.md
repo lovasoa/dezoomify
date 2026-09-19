@@ -97,8 +97,8 @@ Outcome classes cover document loss, access required, redirect limits, cancellat
 The job tab hosts the full engine (dedicated worker, one WASM `Session`, shared browser-runtime executor) with no second state machine:
 
 - Selection is deterministic (`engine-selection.ts`): largest ready image, largest level fitting the canvas; else the first deferred `ImageRequest` URI with a fresh bounded attempt (`MAX_DEFERRED_FOLLOWS`); else typed failure. `select-image`/`select-level` correlate to the job.
-- Tiles decode during acquisition: undecodable tiles fail the outcome into engine retry/partial handling. The WASM bridge releases its arena copy on settlement.
+- Tiles decode during acquisition: undecodable tiles fail the outcome into engine retry/partial handling. Decoded pixels stay host-side and never re-enter the adapter.
 - `finalize-output` validates dimensions and area, assembles, encodes, saves, releases, and replies once; completion follows the reply.
-- `request-decision` renders keep/discard in the job tab; only the user action sends `recovery-choice`.
+- `request-decision` renders keep/discard in the job tab; only the user action sends `answer-partial{generation, decision}`.
 - Host execution failure is terminal: render, cancel the engine job, fake no later effects.
 - Recipes beyond `none` fail typed (`TILE_PROCESSING_UNAVAILABLE`); those sources need the native app until the engine contract grows processing effects.
