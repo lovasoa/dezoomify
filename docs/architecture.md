@@ -93,6 +93,7 @@ Each adapter translates its host transport to the same relay call, so tests, loc
 
 ## Boundary rules
 
+- Rust visibility keeps the engine's internal commands and state private. Runtime integration tests verify which engine actually performs work; checking runner names, implementation filenames, or the number of structs named `Runner` is not an ownership proof.
 - Core and job stay deterministic and testable without I/O.
 - App-model and shared UI stay host-neutral; app-model is also React-free. Dependencies point inward (products → shared UI → app-model → generated bindings); runtimes never import UI packages.
 - URLs, headers, credentials, bytes, and output destinations cross boundaries only as typed values. Browser code never redeclares Rust contract types.
