@@ -528,9 +528,7 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
             purpose: "probe",
           },
         });
-        const bytes = result.bytes instanceof Uint8Array
-          ? new Uint8Array(result.bytes).slice().buffer as ArrayBuffer
-          : result.bytes as unknown as ArrayBuffer;
+        const bytes = new Uint8Array(result.bytes).slice().buffer as ArrayBuffer;
         return { bytes };
       },
       decode: (bytes: ArrayBuffer) => probeDecoder.decode(bytes),

@@ -24,7 +24,6 @@ function fakeWorker() {
 }
 
 const TILE = {
-  kind: "effect",
   type: "acquire-tile",
   tile: 0,
   request: { id: 1, uri: "https://tiles.test/0.png", headers: [], purpose: "tile" },

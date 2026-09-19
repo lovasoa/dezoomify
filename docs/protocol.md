@@ -15,23 +15,23 @@ sequenceDiagram
     JS->>S: new Session(SessionConfig)
     S-->>JS: validated session
     JS->>S: dispatch(JobCommand)
-    S-->>JS: DispatchResult with ordered HostMessage[]
-    JS->>S: arena put / take (ArenaHandle, BufferHandle)
-    S-->>JS: buffer references
+    S-->>JS: DispatchResult with ordered HostEffect[] + EngineSnapshotDto
+    JS->>S: snapshot()
+    S-->>JS: current EngineSnapshotDto
     JS->>S: dispose()
     S-->>JS: final DispatchResult (repeat-safe)
 ```
 
 - `new Session(SessionConfig)` validates typed quotas;
 - `dispatch(JobCommand)` returns a `DispatchResult` immediately;
-- a successful result contains ordered `HostMessage[]` values;
+- a successful result contains ordered `HostEffect[]` values plus the
+  absolute `EngineSnapshotDto` after the answer;
+- `snapshot()` returns the current `EngineSnapshotDto` without dispatching;
 - `dispose()` returns its final `DispatchResult` and is repeat-safe;
-- arena methods exchange generated `ArenaHandle` and `BufferHandle` objects;
-- `retainedBytes()` reports live arena bytes for quota observation.
 
-Commands, effects, events, config, errors, URLs, and handles cross as plain JavaScript objects (fallible `tsify`/`serde-wasm-bindgen` conversion). Binary bodies stay in the bounded WASM arena. Fixed vocabularies (processing recipes, output formats) are generated string unions, never free text. Present probe observations carry non-zero dimensions; a missing observation is its own union variant.
+Commands, effects, events, config, errors, URLs, and handles cross as plain JavaScript objects (fallible `tsify`/`serde-wasm-bindgen` conversion). Binary bodies cross inside commands; engine quotas bound retained bytes. Fixed vocabularies (processing recipes, output formats) are generated string unions, never free text. Present probe observations carry non-zero dimensions; a missing observation is its own union variant.
 
-## Commands, effects, and events
+## Commands, effects, and snapshots
 
 `JobCommand` carries user intent or answers one correlated effect. `Start` carries ordered discovery roots. Answers carry a job-scoped request number plus a buffer reference or `FetchFailureDto`. Image/level choices are zero-based catalog positions. Recovery choices cross as `recovery-choice{generation, choice}` and the session maps them 1:1 onto the engine `AnswerPartial{generation, decision}`; the wire name stays `recovery-choice` until every product consumer renames together. Deferred metadata travels as `ImageRequest` entries with a follow-up URI the host follows within the same job through `follow-deferred{image}` (bounded follows, cycle-guarded, catalog replaced, no host-created replacement jobs). Discovery failure context travels through the engine `note_metadata_failure` retention; the adapter retains nothing and the engine clears the retention on a winning catalog. The wire enum stays unified while the engine boundary stays split: the session routes user commands to the engine `command` entry point and completions to `complete`/`provide_metadata`, so user commands never supply bytes and never claim publication; bytes travel through `provide_metadata` and publication is reported by the host through the finalize completion. Splitting the wire shape would force a coordinated change across every product consumer, so the split lives at the engine boundary, enforced by the session. A host-reported `RetryTimerElapsed{tile, attempt}` answers one outstanding `wait-retry-timer` effect; stale or duplicate completions are ignored.
 

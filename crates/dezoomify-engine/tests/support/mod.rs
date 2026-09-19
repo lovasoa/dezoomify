@@ -1,42 +1,45 @@
 //! Scripted deterministic host for job workflow tests.
 //!
 //! The host drives [`EngineJob`] through the canonical API and records the
-//! issued effects plus the derived events in deterministic order. It
-//! performs no I/O, clock reads, or randomness during execution.
+//! issued effects in arrival order for correlation. It performs no I/O,
+//! clock reads, or randomness during execution, and it never refolds an
+//! event stream: every query reads the live engine snapshot or the recorded
+//! canonical effects directly.
 //!
-//! Scripted inputs mirror the historical engine command shapes
-//! ([`JobCommand`]) so workflow tests read as engine scenarios; effect
-//! correlation (metadata/tile/probe/timer/finalize ids) is resolved
-//! internally against the canonical per-attempt effect ids.
-
-#![allow(dead_code)]
+//! Scripted inputs are host answers ([`JobCommand`]); effect correlation
+//! (metadata/tile/probe/timer/finalize ids) is resolved internally against
+//! the canonical per-attempt effect ids.
 
 use dezoomify_engine::{
     DiscoveryInput, Effect, EffectId, EffectResult, EngineError, EngineJob, Failure, JobOptions,
     OutputDisposition, RecoveryChoice, ResponseMetadata, SelectionPolicy, Update, UserCommand,
 };
-use dezoomify_protocol::dto::ProbeOutcome;
+use dezoomify_protocol::dto::CatalogEntryDto;
 use dezoomify_protocol::dto::SnapshotTerminalDto;
 use std::collections::{HashMap, HashSet};
 
 /// Recognizable Deep Zoom input URL: the registry's deepzoom candidate
 /// accepts it and asks for the `.dzi` document.
+// Shared helper, used by adversarial.
+#[allow(dead_code)]
 pub const DZI_INPUT_URL: &str = "https://example.test/image.dzi";
 
 /// A real Deep Zoom metadata document: 512x512, 256px tiles, no overlap.
 /// The core parses it into a deepzoom catalog with ten grid levels ordered
 /// ascending by size; the largest (last in the list) carries
 /// four tiles with deterministic `image_files` URIs.
+// Shared helper, used by adversarial and host_effects.
+#[allow(dead_code)]
 pub const DZI: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <Image TileSize="256" Overlap="0" Format="jpg" xmlns="http://schemas.microsoft.com/deepzoom/2008">
   <Size Width="512" Height="512"/>
 </Image>
 "#;
 
-/// Scripted host input: one engine command, completion, or metadata body.
-/// Shapes mirror the historical engine command vocabulary; correlation ids
-/// are resolved against the live canonical effects (metadata request ids
-/// are effect ids; tile/probe/timer answers resolve by tile/attempt).
+/// Scripted host input: one host answer to an outstanding engine effect,
+/// or one user command. Correlation ids are resolved against the live
+/// canonical effects (metadata request ids are effect ids; tile/probe/timer
+/// answers resolve by tile/attempt).
 #[derive(Clone, Debug)]
 pub enum JobCommand {
     /// Supply one metadata body for an outstanding metadata effect.
@@ -45,60 +48,61 @@ pub enum JobCommand {
         bytes: Vec<u8>,
         final_uri: Option<String>,
     },
-    /// Fail one outstanding metadata effect with a typed cause.
-    FetchFailure {
-        request: u32,
-        cause: dezoomify_core::core::discovery::FetchCause,
-    },
     /// Choose a catalog image by position.
     SelectImage { image: u32 },
+    // Shared helper, used by engine_regressions.
+    #[allow(dead_code)]
     /// Follow one still-deferred catalog entry within the same job.
     FollowDeferred { image: u32 },
     /// Choose a level of the chosen image by position.
     SelectLevel { level: u32 },
+    // Shared helper, used by engine_regressions and workflows.
+    #[allow(dead_code)]
     /// One tile acquired and decoded (body-free acknowledgement).
     TileAcquired { tile: u32 },
-    /// One tile shown as an ordinary image (no readable bytes).
-    TileDisplayed { tile: u32 },
+    // Shared helper, used by engine_regressions and workflows.
+    #[allow(dead_code)]
     /// One tile failed with structured facts.
     TileFailed {
         tile: u32,
         failure: dezoomify_engine::retry::TileFailure,
     },
+    // Shared helper, used by engine_regressions.
+    #[allow(dead_code)]
     /// Elapsed retry wait for one outstanding timer.
     RetryTimerElapsed { tile: u32, attempt: u32 },
-    /// Probe observation for one outstanding probe effect.
-    ProbeOutcome { tile: u32, outcome: ProbeOutcome },
+    // Shared helper, used by workflows.
+    #[allow(dead_code)]
     /// Answer the outstanding partial decision.
     RecoveryChoice {
         generation: u32,
         choice: RecoveryChoice,
     },
+    // Shared helper, used by engine_regressions and workflows.
+    #[allow(dead_code)]
     /// The awaited output operation succeeded.
     FinalizationSucceeded,
-    /// The awaited output operation failed.
-    FinalizationFailed { code: String, message: String },
+    // Shared helper, used by adversarial and workflows.
+    #[allow(dead_code)]
     /// Stop new work and release kept resources.
     Cancel,
+    // Shared helper, used by workflows.
+    #[allow(dead_code)]
     /// Stop scheduling new acquisitions; in-flight work settles.
     Pause,
+    // Shared helper, used by workflows.
+    #[allow(dead_code)]
     /// Re-drive pending work.
     Resume,
 }
 
-/// Deterministic host wrapping one [`EngineJob`] plus an ordered transcript.
+/// Deterministic host wrapping one [`EngineJob`] plus its issued effects.
 #[derive(Debug)]
 pub struct ScriptedHost {
     job: Option<EngineJob>,
     pending_options: Option<JobOptions>,
-    /// Effect objects in arrival order (for id extraction in tests).
-    pub effects: Vec<serde_json::Value>,
-    /// Event objects in arrival order (for id extraction in tests).
-    pub events: Vec<serde_json::Value>,
-    /// Record seq (arrival order; deterministic and sorted).
-    next_seq: u64,
-    /// Last recorded lifecycle name.
-    emitted_lifecycle: Option<String>,
+    /// Canonical effect objects in arrival order (for id extraction in tests).
+    pub effects: Vec<Effect>,
     /// Live tile effect per tile ordinal (latest attempt wins).
     tile_effects_live: HashMap<u32, EffectId>,
     /// Live probe effect per tile ordinal.
@@ -114,20 +118,7 @@ pub struct ScriptedHost {
     /// Live decision generations.
     decision_live: Option<u32>,
     /// Outstanding canonical effect ids (issued minus completed).
-    outstanding: HashMap<EffectId, String>,
-    /// Last emitted catalog JSON (re-emitted when a deferred follow
-    /// replaces the catalog).
-    emitted_catalog: Option<serde_json::Value>,
-    /// Last emitted progress pair.
-    emitted_progress: Option<(u64, Option<u64>)>,
-    /// Last emitted decision generation.
-    emitted_decision: Option<u32>,
-    /// Last emitted pause flag.
-    emitted_paused: bool,
-    /// Engine notices already emitted (identity keys).
-    emitted_notice_keys: Vec<String>,
-    /// Whether the terminal event was recorded.
-    emitted_terminal: bool,
+    outstanding: HashSet<EffectId>,
 }
 
 impl ScriptedHost {
@@ -147,6 +138,8 @@ impl ScriptedHost {
         ))
     }
 
+    // Shared helper, used by workflows.
+    #[allow(dead_code)]
     pub fn new_with_inputs(
         inputs: Vec<DiscoveryInput>,
         config: dezoomify_engine::Config,
@@ -160,9 +153,6 @@ impl ScriptedHost {
             job: None,
             pending_options: None,
             effects: Vec::new(),
-            events: Vec::new(),
-            next_seq: 0,
-            emitted_lifecycle: None,
             tile_effects_live: HashMap::new(),
             probe_effects_live: HashMap::new(),
             timer_effects_live: HashMap::new(),
@@ -170,13 +160,7 @@ impl ScriptedHost {
             seen_tiles: HashSet::new(),
             finalize_effect_live: None,
             decision_live: None,
-            outstanding: HashMap::new(),
-            emitted_catalog: None,
-            emitted_progress: None,
-            emitted_decision: None,
-            emitted_paused: false,
-            emitted_notice_keys: Vec::new(),
-            emitted_terminal: false,
+            outstanding: HashSet::new(),
         };
         host.pending_options = Some(options);
         Ok(host)
@@ -204,13 +188,11 @@ impl ScriptedHost {
     pub fn apply(&mut self, response: JobCommand) -> Result<(), EngineError> {
         let revision_before = self.snapshot_revision();
         let effects_before = self.effects.len();
-        let events_before = self.events.len();
         let result = self.apply_inner(response);
         if result.is_err() {
-            // Rejections must not add work: no new effects or events, and
-            // the snapshot revision is unchanged.
+            // Rejections must add no work: no new effects and the snapshot
+            // revision is unchanged.
             debug_assert_eq!(self.effects.len(), effects_before);
-            debug_assert_eq!(self.events.len(), events_before);
             debug_assert_eq!(self.snapshot_revision(), revision_before);
         }
         result
@@ -253,23 +235,6 @@ impl ScriptedHost {
                 self.record(update);
                 Ok(())
             }
-            JobCommand::FetchFailure { request, cause } => {
-                let Some(effect) = self.take_metadata(request) else {
-                    return Ok(());
-                };
-                let update = self.job_mut()?.complete(
-                    effect,
-                    EffectResult::MetadataFailed(Failure {
-                        code: cause.code.to_string(),
-                        http: cause.http,
-                        retry_after_ms: None,
-                        transport: Some(cause.transport),
-                        detail: None,
-                    }),
-                )?;
-                self.record(update);
-                Ok(())
-            }
             JobCommand::SelectImage { image } => {
                 let update = self
                     .job_mut()?
@@ -301,16 +266,6 @@ impl ScriptedHost {
                 self.record(update);
                 Ok(())
             }
-            JobCommand::TileDisplayed { tile } => {
-                let Some(effect) = self.take_tile(tile)? else {
-                    return Ok(());
-                };
-                let update = self
-                    .job_mut()?
-                    .complete(effect, EffectResult::TileDisplayed)?;
-                self.record(update);
-                Ok(())
-            }
             JobCommand::TileFailed { tile, failure } => {
                 let Some(effect) = self.take_tile(tile)? else {
                     return Ok(());
@@ -337,21 +292,6 @@ impl ScriptedHost {
                 let update = self
                     .job_mut()?
                     .complete(effect, EffectResult::TimerElapsed)?;
-                self.record(update);
-                Ok(())
-            }
-            JobCommand::ProbeOutcome { tile, outcome } => {
-                let Some(effect) = self.take_probe(tile)? else {
-                    return Ok(());
-                };
-                let result = match outcome {
-                    ProbeOutcome::Available { width, height } => EffectResult::ProbeAvailable {
-                        width: u32::try_from(width.get()).unwrap_or(u32::MAX),
-                        height: u32::try_from(height.get()).unwrap_or(u32::MAX),
-                    },
-                    ProbeOutcome::Missing => EffectResult::ProbeMissing,
-                };
-                let update = self.job_mut()?.complete(effect, result)?;
                 self.record(update);
                 Ok(())
             }
@@ -386,20 +326,6 @@ impl ScriptedHost {
                 self.record(update);
                 Ok(())
             }
-            JobCommand::FinalizationFailed { code, message } => {
-                let Some(effect) = self.finalize_effect_live.take() else {
-                    return Err(EngineError::new(
-                        "job.invalid-state",
-                        "no output operation is awaited",
-                    ));
-                };
-                self.outstanding.remove(&effect);
-                let update = self
-                    .job_mut()?
-                    .complete(effect, EffectResult::OutputFailed { code, message })?;
-                self.record(update);
-                Ok(())
-            }
             JobCommand::Cancel => {
                 let update = self.job_mut()?.command(UserCommand::Cancel)?;
                 self.record(update);
@@ -420,6 +346,8 @@ impl ScriptedHost {
 
     /// Current job lifecycle name.
     #[must_use]
+    // Shared helper, used by adversarial, engine_regressions and workflows.
+    #[allow(dead_code)]
     pub fn state(&self) -> String {
         self.job
             .as_ref()
@@ -429,6 +357,8 @@ impl ScriptedHost {
 
     /// Whether the job is paused.
     #[must_use]
+    // Shared helper, used by workflows.
+    #[allow(dead_code)]
     pub fn is_paused(&self) -> bool {
         self.job.as_ref().is_some_and(|job| job.snapshot().paused)
     }
@@ -436,6 +366,8 @@ impl ScriptedHost {
     /// Terminal kind (`completed`, `partial-completed`, `failed`,
     /// `cancelled`), once finished.
     #[must_use]
+    // Shared helper, used by workflows.
+    #[allow(dead_code)]
     pub fn terminal_kind(&self) -> Option<String> {
         self.job
             .as_ref()
@@ -452,47 +384,46 @@ impl ScriptedHost {
 
     /// Borrow the inner job for snapshot assertions.
     #[must_use]
+    // Shared helper, used by adversarial.
+    #[allow(dead_code)]
     pub fn job(&self) -> &EngineJob {
         self.job.as_ref().expect("job started")
     }
 
-    /// Positions of the first catalog image and its levels.
+    /// Positions of the first catalog image and its levels, read off the
+    /// live engine snapshot (never a replayed event).
+    // Shared helper, used by engine_regressions, host_effects and workflows.
+    #[allow(dead_code)]
     pub fn catalog(&self) -> Option<(u32, Vec<u32>)> {
-        let event = self
-            .events
-            .iter()
-            .rev()
-            .find(|v| v.get("kind").and_then(serde_json::Value::as_str) == Some("catalog"))?;
-        let image = event.get("entries")?.get(0)?;
-        let levels: Vec<u32> = image
-            .get("levels")?
-            .as_array()?
-            .iter()
-            .enumerate()
-            .filter_map(|(position, _)| u32::try_from(position).ok())
+        let catalog = self.job.as_ref()?.snapshot().selection.catalog?;
+        let (image, level_count) =
+            catalog
+                .entries
+                .iter()
+                .enumerate()
+                .find_map(|(position, entry)| match entry {
+                    CatalogEntryDto::Image(image) => Some((position, image.levels.len())),
+                    CatalogEntryDto::ImageRequest(_) => None,
+                })?;
+        let image = u32::try_from(image).ok()?;
+        let levels = (0..level_count)
+            .filter_map(|level| u32::try_from(level).ok())
             .collect();
-        Some((0, levels))
+        Some((image, levels))
     }
 
-    /// Every `acquire-tile` effect as `(tile id, uri, probe flag)` in seq order.
+    /// Every `acquire-tile` effect as `(tile id, uri, probe flag)` in
+    /// arrival order, read off the recorded canonical effects.
+    // Shared helper, used by engine_regressions, host_effects and workflows.
+    #[allow(dead_code)]
     pub fn tile_effects(&self) -> Vec<(u32, String, bool)> {
         self.effects
             .iter()
-            .filter(|v| v.get("kind").and_then(serde_json::Value::as_str) == Some("acquire-tile"))
-            .map(|v| {
-                (
-                    v.get("tile")
-                        .and_then(serde_json::Value::as_u64)
-                        .and_then(|value| u32::try_from(value).ok())
-                        .unwrap_or(0),
-                    v.get("uri")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("")
-                        .to_string(),
-                    v.get("probe")
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false),
-                )
+            .filter_map(|effect| match effect {
+                Effect::AcquireTile {
+                    tile, uri, probe, ..
+                } => Some((*tile, uri.clone(), *probe)),
+                _ => None,
             })
             .collect()
     }
@@ -541,31 +472,13 @@ impl ScriptedHost {
         }
     }
 
-    fn take_probe(&mut self, tile: u32) -> Result<Option<EffectId>, EngineError> {
-        match self.probe_effects_live.remove(&tile) {
-            Some(effect) => {
-                self.outstanding.remove(&effect);
-                Ok(Some(effect))
-            }
-            None if self.seen_tiles.contains(&tile) => Ok(None),
-            None => Err(EngineError::new(
-                "job.invalid-state",
-                "probe was never issued",
-            )),
-        }
-    }
-
     fn record(&mut self, update: Update) {
-        // Newly issued effects first, in canonical order.
+        // Newly issued effects first, in canonical order. Correlation only:
+        // live ids are tracked so answers resolve, nothing is refolded into
+        // an event stream.
         for effect in &update.effects {
             let id = effect.id();
-            let value = effect_json(self.claim_seq(), effect);
-            let kind = value
-                .get("kind")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            self.outstanding.insert(id, kind);
+            self.outstanding.insert(id);
             match effect {
                 Effect::AcquireMetadata { .. } => {
                     self.metadata_effects_live.insert(id.get(), id);
@@ -589,105 +502,8 @@ impl ScriptedHost {
                 }
                 Effect::CancelRelease { .. } => {}
             }
-            self.effects.push(value);
+            self.effects.push(effect.clone());
         }
-        let snapshot = &update.snapshot;
-        // Lifecycle moves.
-        let state = format!("{:?}", snapshot.lifecycle);
-        if Some(state.clone()) != self.emitted_lifecycle {
-            self.emitted_lifecycle = Some(state.clone());
-            let value =
-                serde_json::json!({"kind":"job-state","seq":self.claim_seq(),"state":state});
-            self.events.push(value);
-        }
-        // The kept catalog (re-emitted when a deferred follow replaces it).
-        if let Some(catalog) = &snapshot.selection.catalog {
-            let entries = serde_json::to_value(&catalog.entries).unwrap_or_default();
-            if self.emitted_catalog.as_ref() != Some(&entries) {
-                self.emitted_catalog = Some(entries.clone());
-                let value =
-                    serde_json::json!({"kind":"catalog","seq":self.claim_seq(),"entries":entries});
-                self.events.push(value);
-            }
-        }
-        // Progress advances.
-        let progress = (snapshot.progress.completed, snapshot.progress.total);
-        if self.emitted_progress != Some(progress) {
-            self.emitted_progress = Some(progress);
-            let value = serde_json::json!({
-                "kind":"progress","seq":self.claim_seq(),
-                "acquired":progress.0,"total":progress.1.unwrap_or(0),
-            });
-            self.events.push(value);
-        }
-        // Pause overlay transitions.
-        if self.emitted_paused != snapshot.paused {
-            self.emitted_paused = snapshot.paused;
-            let kind = if snapshot.paused { "paused" } else { "resumed" };
-            let value = serde_json::json!({"kind":kind,"seq":self.claim_seq()});
-            self.events.push(value);
-        }
-        // Outstanding partial decision: one cue per generation.
-        if let Some(decision) = &snapshot.decision {
-            if self.emitted_decision != Some(decision.generation) {
-                self.emitted_decision = Some(decision.generation);
-                let value = serde_json::json!({
-                    "kind":"recovery-requested","seq":self.claim_seq(),
-                    "generation":decision.generation,
-                });
-                self.events.push(value);
-            }
-        }
-        // Bounded recent engine notices (deduplicated by identity: the
-        // recent log truncates, so a positional skip would miss entries).
-        for notice in &snapshot.notices {
-            let key = format!(
-                "{}:{}:{:?}:{:?}",
-                notice.revision, notice.tile, notice.attempt, notice.missing
-            );
-            if self.emitted_notice_keys.contains(&key) {
-                continue;
-            }
-            self.emitted_notice_keys.push(key);
-            let value = if notice.missing.is_empty() {
-                serde_json::json!({
-                    "kind":"warning","seq":self.claim_seq(),
-                    "tile":notice.tile,"attempt":notice.attempt.unwrap_or(0),
-                })
-            } else {
-                serde_json::json!({
-                    "kind":"missing-work","seq":self.claim_seq(),"failed":notice.missing,
-                })
-            };
-            self.events.push(value);
-        }
-        // Terminal outcome last: exactly one terminal render.
-        if !self.emitted_terminal {
-            if let Some(terminal) = &snapshot.terminal {
-                self.emitted_terminal = true;
-                let value = match terminal {
-                    SnapshotTerminalDto::Completed => {
-                        serde_json::json!({"kind":"completed","seq":self.claim_seq()})
-                    }
-                    SnapshotTerminalDto::PartialCompleted { .. } => {
-                        serde_json::json!({"kind":"partial-completed","seq":self.claim_seq()})
-                    }
-                    SnapshotTerminalDto::Failed { error } => serde_json::json!({
-                        "kind":"failed","seq":self.claim_seq(),"code":error.code,"message":error.message,
-                    }),
-                    SnapshotTerminalDto::Cancelled => {
-                        serde_json::json!({"kind":"cancelled","seq":self.claim_seq()})
-                    }
-                };
-                self.events.push(value);
-            }
-        }
-    }
-
-    fn claim_seq(&mut self) -> u64 {
-        let seq = self.next_seq;
-        self.next_seq += 1;
-        seq
     }
 }
 
@@ -705,70 +521,5 @@ fn job_options_for(inputs: Vec<DiscoveryInput>, config: &dezoomify_engine::Confi
         max_retries: config.max_retries,
         max_bytes: config.max_bytes,
         max_deferred_follows: config.max_deferred_follows,
-    }
-}
-
-fn effect_json(seq: u64, effect: &Effect) -> serde_json::Value {
-    match effect {
-        Effect::AcquireMetadata { id, uri } => serde_json::json!({
-            "kind": "acquire-resource", "seq": seq, "request": id.get(),
-            "uri": uri, "header_names": [], "purpose": "metadata",
-        }),
-        Effect::AcquireTile {
-            id: _,
-            tile,
-            uri,
-            headers,
-            processing,
-            destination,
-            expected_size,
-            canvas,
-            probe,
-            probe_output,
-        } => {
-            let processing = match processing {
-                dezoomify_core::core::model::ProcessingRecipe::None => "none",
-                dezoomify_core::core::model::ProcessingRecipe::GoogleArtsDecrypt => {
-                    "google-arts-decrypt"
-                }
-            };
-            let headers: std::collections::BTreeMap<String, String> = headers
-                .iter()
-                .map(|header| (header.name.clone(), header.value.clone()))
-                .collect();
-            let mut value = serde_json::json!({
-                "kind": "acquire-tile", "seq": seq, "tile": tile, "uri": uri,
-                "headers": headers, "processing": processing,
-                "destination": {"x": destination.x, "y": destination.y},
-                "expected_size": expected_size.map(|v| serde_json::json!({"x": v.width, "y": v.height})),
-                "canvas": canvas.map(|v| serde_json::json!({"x": v.width, "y": v.height})),
-            });
-            if *probe {
-                value["probe"] = serde_json::Value::Bool(true);
-            }
-            if *probe_output {
-                value["probe_output"] = serde_json::Value::Bool(true);
-            }
-            value
-        }
-        Effect::WaitRetryTimer {
-            tile,
-            attempt,
-            delay_ms,
-            ..
-        } => serde_json::json!({
-            "kind":"wait-retry","seq":seq,"tile":tile,"attempt":attempt,"delay_ms":delay_ms,
-        }),
-        Effect::FinalizeOutput {
-            id: _,
-            partial,
-            canvas,
-        } => {
-            serde_json::json!({"kind":"finalize-output","seq":seq,"partial":partial,"format":"png","canvas":canvas.map(|v| serde_json::json!({"x":v.width,"y":v.height}))})
-        }
-        Effect::CancelRelease { .. } => serde_json::json!({"kind":"cancel-work","seq":seq}),
-        Effect::RequestPartialDecision { generation, .. } => serde_json::json!({
-            "kind":"request-decision","seq":seq,"generation":generation,
-        }),
     }
 }

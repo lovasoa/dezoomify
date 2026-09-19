@@ -633,15 +633,6 @@ async function runJob(url: string, origin = url): Promise<void> {
   const onSnapshot = (snapshot: JobSnapshot): void => {
     if (run !== activeRun) return;
     activeSnapshot = snapshot;
-    const like = snapshot as unknown as {
-      catalog?: { entries?: Array<{ kind?: string; title?: unknown; levels?: Array<{ width?: number; height?: number }> }> };
-      selection?: { image?: number | null; deferred?: Array<{ position: number }> };
-      acquired?: number;
-      total?: number | null;
-      progress?: { completed?: number; total?: number | null };
-      terminal?: { kind?: string; type?: string };
-      lifecycle?: string;
-    };
 
     // Auto-selection drives from the authoritative snapshot through the
     // shared pure selection driver: ready images select once, still-deferred
@@ -673,15 +664,15 @@ async function runJob(url: string, origin = url): Promise<void> {
       return;
     }
 
-    const completed = like.progress?.completed ?? like.acquired ?? 0;
-    const total = (like.progress?.total as number | null | undefined) ?? like.total ?? null;
+    const completed = snapshot.progress.completed;
+    const total = snapshot.progress.total ?? null;
     if (completed > 0 || total !== null) {
       reportProgress(completed, total ?? 0, `Saving ${total ?? "?"} tiles…`);
       update();
     }
 
-    const terminalOutcome = like.terminal;
-    const terminalKind = typeof terminalOutcome?.kind === "string" ? terminalOutcome.kind : terminalOutcome?.type;
+    const terminalOutcome = snapshot.terminal;
+    const terminalKind = terminalOutcome?.type;
     if (terminalOutcome && terminalKind) {
       if (activeAssembly?.isTainted() === true) {
         settledOutcome = "done";
@@ -826,9 +817,8 @@ function update(): void {
   // In-flight tile count rides the context; counts come from the snapshot.
   // Telemetry (pending requests, progress text) never gates engine commands.
   const keptMessage = viewCtx.currentProgress?.message;
-  const snapLike = activeSnapshot as unknown as { total?: number | null; acquired?: number; progress?: { completed?: number; total?: number | null } } | null;
-  const snapTotal = snapLike?.progress?.total ?? snapLike?.total ?? null;
-  const snapDone = snapLike?.progress?.completed ?? snapLike?.acquired ?? 0;
+  const snapTotal = activeSnapshot?.progress.total ?? null;
+  const snapDone = activeSnapshot?.progress.completed ?? 0;
   if (presentation.phase === "job" && snapTotal) {
     viewCtx.currentProgress = {
       active: Math.min(

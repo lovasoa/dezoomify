@@ -1117,7 +1117,6 @@ dependencies = [
  "dezoomify-core",
  "dezoomify-protocol",
  "serde",
- "serde_json",
 ]
 
 [[package]]
