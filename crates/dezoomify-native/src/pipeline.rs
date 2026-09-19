@@ -8,7 +8,7 @@
 //! `dezoomify-engine`.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -20,8 +20,7 @@ use dezoomify_core::core::redact_uri;
 use dezoomify_core::Vec2d;
 
 use crate::error::NativeError;
-use crate::http::{FetchLimits, UserHeaders};
-use crate::output::{validate_destination, OutputFormat};
+use crate::http::FetchLimits;
 
 /// Default JPEG quality for `.jpg` output and `iiif-dir` tiles: `100`
 /// minus the default compression 5, matching the reference default.
@@ -400,111 +399,6 @@ pub(crate) fn tiff_compression_for(compression: u8) -> tiff::encoder::compressio
         0..=19 => DeflateLevel::Fast,
         20..=60 => DeflateLevel::Balanced,
         _ => DeflateLevel::Best,
-    }
-}
-
-/// Successful pipeline result for the bytes actually written.
-#[derive(Clone, Debug)]
-pub struct PipelineOutcome {
-    pub output_path: PathBuf,
-    pub tile_count: usize,
-    pub image_size: Vec2d,
-    /// Stable id of the detected format (e.g. `zoomify`, `iiif`).
-    pub format: String,
-    /// True when missing tiles were left blank under [`PartialPolicy::Keep`].
-    pub partial: bool,
-    /// Tile ids left blank in a kept partial (empty for complete saves).
-    /// Redacted ids only, never URLs or paths.
-    pub missing: Vec<String>,
-    /// Honest execution accounting for the shipped pipeline: attempts,
-    /// retries, bytes fetched, retained/encoded/spool peaks, and the
-    /// accounted peak (canvas plus peak retained plus encoded).
-    pub instrumentation: crate::exec::Instrumentation,
-}
-
-fn user_headers_for(input_url: &str, config: &PipelineConfig) -> UserHeaders {
-    let origin_host = url::Url::parse(input_url)
-        .ok()
-        .and_then(|parsed| parsed.host_str().map(str::to_string));
-    UserHeaders::new(config.user_headers.clone(), origin_host)
-}
-
-pub fn run(
-    input_url: &str,
-    output_path: &str,
-    overwrite: bool,
-    config: &PipelineConfig,
-    on_snapshot: &mut dyn FnMut(&dezoomify_engine::JobSnapshot),
-) -> Result<PipelineOutcome, NativeError> {
-    let format = OutputFormat::infer_from_path(std::path::Path::new(output_path))?;
-    validate_destination(std::path::Path::new(output_path), &format, overwrite)?;
-
-    let user = user_headers_for(input_url, config);
-    let result = crate::exec::execute(
-        input_url,
-        &crate::exec::OutputSpec {
-            output_path: PathBuf::from(output_path),
-            overwrite,
-            format,
-            auto_output_dir: None,
-        },
-        config,
-        &user,
-        on_snapshot,
-    )?;
-    Ok(PipelineOutcome {
-        output_path: result.output_path,
-        tile_count: result.tile_count,
-        image_size: result.image_size,
-        format: result.format,
-        partial: result.partial,
-        missing: result.missing,
-        instrumentation: result.instrumentation,
-    })
-}
-
-/// Run a desktop-style job that saves directly to a configured directory.
-/// The native driver derives the final basename from the selected catalog
-/// title and reserves the configured format's extension.
-pub fn run_auto_named(
-    input_url: &str,
-    output_dir: &Path,
-    format: OutputFormat,
-    config: &PipelineConfig,
-    on_snapshot: &mut dyn FnMut(&dezoomify_engine::JobSnapshot),
-) -> Result<PipelineOutcome, NativeError> {
-    let user = user_headers_for(input_url, config);
-    let result = crate::exec::execute(
-        input_url,
-        &crate::exec::OutputSpec {
-            output_path: output_dir.join(format!("dezoomify.{}", output_dir_extension(format))),
-            overwrite: false,
-            format,
-            auto_output_dir: Some(output_dir.to_path_buf()),
-        },
-        config,
-        &user,
-        on_snapshot,
-    )?;
-    Ok(PipelineOutcome {
-        output_path: result.output_path,
-        tile_count: result.tile_count,
-        image_size: result.image_size,
-        format: result.format,
-        partial: result.partial,
-        missing: result.missing,
-        instrumentation: result.instrumentation,
-    })
-}
-
-fn output_dir_extension(format: OutputFormat) -> &'static str {
-    match format {
-        OutputFormat::Png => "png",
-        OutputFormat::Jpeg => "jpg",
-        OutputFormat::Tiff => "tif",
-        OutputFormat::Zif => "zif",
-        OutputFormat::Webp => "webp",
-        OutputFormat::IiifDir => "iiif",
     }
 }
 

@@ -39,6 +39,19 @@ impl OutputFormat {
         }
     }
 
+    /// Preferred filename extension for an automatically named output.
+    #[must_use]
+    pub fn extension(self) -> &'static str {
+        match self {
+            OutputFormat::Png => "png",
+            OutputFormat::Jpeg => "jpg",
+            OutputFormat::Tiff => "tif",
+            OutputFormat::Zif => "zif",
+            OutputFormat::Webp => "webp",
+            OutputFormat::IiifDir => "iiif",
+        }
+    }
+
     /// True for directory destinations (many files); false for single files.
     #[must_use]
     pub fn is_directory(self) -> bool {

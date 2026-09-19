@@ -75,7 +75,7 @@ use crate::transport::NativeTransport;
 const MAX_DEFERRED_FOLLOWS: u32 = 10;
 
 /// Honest execution accounting, reported with every terminal result.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Instrumentation {
     /// Tile/probe/metadata effects attempted.
     pub attempts: u64,
