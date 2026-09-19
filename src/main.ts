@@ -491,7 +491,7 @@ function currentPresentation(): SnapshotPresentation {
 }
 
 function isTerminalNow(): boolean {
-  return hostFailure !== null || (activeSnapshot?.terminal ?? null) !== null || displayOnlyActive;
+  return hostFailure !== null || (activeSnapshot?.terminal ?? null) !== null;
 }
 
 async function runJob(url: string, origin = url): Promise<void> {

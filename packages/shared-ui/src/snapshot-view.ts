@@ -274,9 +274,10 @@ export function presentSnapshot(
   const partial = snapshot.terminal?.type === "partial-completed";
   // Display-only is a host-known output fact (tainted canvas): the assembly
   // reports it explicitly via options until the engine snapshot round-trips
-  // with output.disposition. The host flag never overrides a terminal, but
-  // an engine-reported display-only disposition on a finished job presents
-  // preview: the output was shown, never saved.
+  // with output.disposition. The host flag never overrides a terminal, and
+  // never cuts the live progress short: while the job is still running the
+  // view stays on the progress bar and only switches to the preview message
+  // once the engine reports a display-only disposition on a finished job.
   const engineDisplayOnly = snapshot.output?.disposition === "display-only"
     && (terminal?.kind === "completed" || terminal?.kind === "partial-completed");
   const displayOnly =
@@ -290,11 +291,9 @@ export function presentSnapshot(
     if (terminal.kind === "completed" || terminal.kind === "partial-completed") phase = "completed";
     else if (terminal.kind === "failed") phase = "failed";
     else phase = "cancelled";
-  } else if (displayOnly) {
-    phase = "display-only";
   }
 
-  const lifecycle: JobState = snapshot.lifecycle ?? "Discovering";
+  const lifecycle: JobState = snapshot.lifecycle;
   const catalog = snapshot.selection.catalog ?? null;
   const selectedImage = snapshot.selection.image ?? null;
   const decision = snapshot.decision;
@@ -325,16 +324,16 @@ export function presentSnapshot(
       ? { current: completed, total }
       : null;
 
-  const detailKey = displayOnly ? undefined : headline.detail;
+  const detailKey = engineDisplayOnly ? undefined : headline.detail;
   const detailVars =
-    displayOnly || !headline.detailVars ? undefined : headline.detailVars;
+    engineDisplayOnly || !headline.detailVars ? undefined : headline.detailVars;
   return {
     ...basePresentation(),
     phase,
     // The engine projection carries no job id; products track ownership.
     jobId: null,
     stateLabel: lifecycle,
-    headlineKey: displayOnly ? "view.display.title" : headline.key,
+    headlineKey: engineDisplayOnly ? "view.display.title" : headline.key,
     ...(headline.vars ? { headlineVars: headline.vars } : {}),
     ...(detailKey ? { detailKey } : {}),
     ...(detailVars ? { detailVars } : {}),

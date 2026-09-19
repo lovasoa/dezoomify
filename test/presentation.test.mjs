@@ -44,14 +44,15 @@ test("the latest snapshot presents the terminal exactly once with its progress",
   assert.deepEqual(view.progress, { current: 1, total: 4 });
 });
 
-test("a finished job can still present display-only from the host override", () => {
+test("a tainted canvas keeps progress while dezooming, preview only when done", () => {
   const snap = dto({
     revision: 3,
     lifecycle: "AcquiringTiles",
     progress: { completed: 2, total: 4 },
   });
   const view = presentSnapshot(snap, "browser-session", { displayOnly: true });
-  assert.equal(view.phase, "display-only");
+  assert.equal(view.phase, "job");
+  assert.equal(view.headlineKey, "view.step.downloading");
   assert.equal(view.progress.current, 2);
   const taintedTerminal = presentSnapshot(
     dto({ ...snap, terminal: { type: "completed" } }),
