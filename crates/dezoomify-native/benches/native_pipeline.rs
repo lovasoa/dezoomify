@@ -1,14 +1,18 @@
 //! Native pipeline benchmarks: end-to-end tile throughput on the shipped
 //! exec path and encode time per format.
 //!
-//! The throughput bench runs the real `pipeline::run` over four generated
+//! The throughput bench runs the real `NativeRunner` over four generated
 //! local tiles (no network, no separate pool): it tracks the shipped
 //! fetch/decode/assemble/encode path the driver uses, including the engine
 //! concurrency budget.
 //!
 use criterion::{criterion_group, criterion_main, Criterion};
-use dezoomify_native::pipeline::{self, encode_jpeg, encode_png, encode_tiff, PipelineConfig};
+use dezoomify_native::pipeline::{encode_jpeg, encode_png, encode_tiff};
+use dezoomify_native::{JobOptions, OutputTarget};
 use std::hint::black_box;
+
+#[path = "../tests/support/mod.rs"]
+mod support;
 
 fn sweep_image(width: u32, height: u32) -> image::RgbaImage {
     let mut image = image::RgbaImage::new(width, height);
@@ -41,7 +45,7 @@ fn solid_tile_png() -> Vec<u8> {
     bytes
 }
 
-/// Tile throughput: run the real `pipeline::run` over four generated local
+/// Tile throughput: run the real `NativeRunner` over four generated local
 /// tiles per iteration (fetch is the local fast path; decode, assemble,
 /// and encode are the shipped code). The output reuses one path with
 /// overwrite so every iteration measures the full publish.
@@ -70,19 +74,17 @@ fn bench_tile_throughput(criterion: &mut Criterion) {
     std::fs::write(&manifest, yaml.as_bytes()).expect("write manifest");
     let input = manifest.to_str().expect("utf8 manifest").to_string();
     let output = work.join("bench.png");
-    let output_str = output.to_str().expect("utf8 output").to_string();
-    let config = PipelineConfig::default();
     let mut group = criterion.benchmark_group("tile-throughput");
-    group.bench_function("pipeline-4-tiles", |bencher| {
+    group.bench_function("native-runner-4-tiles", |bencher| {
         bencher.iter(|| {
-            let outcome = pipeline::run(
-                black_box(&input),
-                black_box(&output_str),
-                true,
-                black_box(&config),
-                &mut |_| {},
-            )
-            .expect("pipeline succeeds");
+            let options = JobOptions {
+                input_url: black_box(&input).clone(),
+                output: OutputTarget::File(black_box(&output).to_path_buf()),
+                overwrite: true,
+                ..JobOptions::default()
+            };
+            let outcome =
+                support::run_options_observed(options, |_, _| {}).expect("native runner succeeds");
             black_box(outcome.tile_count)
         });
     });

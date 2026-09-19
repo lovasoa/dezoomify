@@ -10,7 +10,7 @@ use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use dezoomify_native::pipeline::{PartialPolicy, PipelineConfig};
+mod support;
 
 fn http_response(status: &str, content_type: &str, body: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
@@ -133,18 +133,10 @@ fn retries_zero_sends_no_second_request() {
     let input = format!("{base}/pyr.dzi");
     let out_dir = temp_dir("zero");
     let output = out_dir.join("zero.png");
-    let config = PipelineConfig {
-        max_retries: 0,
-        partial_policy: PartialPolicy::Fail,
-        ..Default::default()
-    };
-    let error = dezoomify_native::pipeline::run(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
-        &config,
-        &mut |_| {},
-    )
+    let error = support::run_file(&input, &output, |options| {
+        options.max_retries = 0;
+        options.keep_partial = false;
+    })
     .expect_err("missing tile fails");
     assert_eq!(error.code, "tile.download-failed");
     assert!(!output.exists());

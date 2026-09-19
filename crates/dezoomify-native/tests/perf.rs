@@ -4,10 +4,11 @@
 //! bound on encoded byte sizes versus `perf-baseline.json`.
 
 use dezoomify_native::pipeline::{
-    self, encode_jpeg, encode_png, encode_tiff, exceeds_available_memory, required_memory_bytes,
+    encode_jpeg, encode_png, encode_tiff, exceeds_available_memory, required_memory_bytes,
     PipelineConfig, MAX_CONCURRENT,
 };
 use std::time::Instant;
+mod support;
 
 fn sweep_image() -> image::RgbaImage {
     let mut image = image::RgbaImage::new(32, 32);
@@ -99,7 +100,7 @@ fn exec_bounds_inflight_to_max_concurrent() {
         max_concurrent: 2,
         ..PipelineConfig::default()
     };
-    let outcome = pipeline::run(
+    let outcome = support::run_with_config(
         &input,
         output.to_str().expect("utf8 output"),
         false,
@@ -179,7 +180,7 @@ fn write_local_tiles_grid(work: &std::path::Path, grid: u32, tile_px: u32) -> St
 }
 
 /// Scheduling scaling on the REAL pipeline: 1/16/64/256-tile grids through
-/// the shipped `pipeline::run` (local fetch, decode, assemble, encode).
+/// the shipped NativeRunner path (local fetch, decode, assemble, encode).
 /// In-flight descriptors stay within the engine slot budget at every shape
 /// while completions track the plan exactly (linear by construction).
 #[test]
@@ -203,7 +204,7 @@ fn exec_scales_with_bounded_inflight_across_increasing_tile_counts() {
             ..PipelineConfig::default()
         };
         let start = Instant::now();
-        let outcome = pipeline::run(
+        let outcome = support::run_with_config(
             &input,
             output.to_str().expect("utf8 output"),
             false,

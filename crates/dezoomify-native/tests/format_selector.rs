@@ -1,4 +1,4 @@
-//! Named format selector: `PipelineConfig::format` threads through the job
+//! Named format selector: `JobOptions::format` threads through the job
 //! driver to core registry selection. `None`/`auto` auto-detects;
 //! a named format selects the single program; unknown names fail typed.
 
@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use dezoomify_fixture_server::{router, AppState, RouteTable};
-use dezoomify_native::pipeline::PipelineConfig;
+mod support;
 
 fn start_fixture_server() -> String {
     let scenarios_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/scenarios");
@@ -51,23 +51,13 @@ fn run_with_format(
     input: &str,
     output: &std::path::Path,
     format: Option<String>,
-) -> Result<dezoomify_native::pipeline::PipelineOutcome, dezoomify_native::NativeError> {
-    let config = PipelineConfig {
-        format,
-        ..Default::default()
-    };
-    dezoomify_native::pipeline::run(
-        input,
-        output.to_str().expect("utf8 output"),
-        false,
-        &config,
-        &mut |_snapshot| {},
-    )
+) -> Result<dezoomify_native::OutputSummary, dezoomify_native::NativeError> {
+    support::run_file(input, output, |options| options.format = format)
 }
 
 #[test]
 fn auto_is_the_default() {
-    assert_eq!(PipelineConfig::default().format, None);
+    assert_eq!(dezoomify_native::JobOptions::default().format, None);
 }
 
 #[test]

@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use dezoomify_native::{JobOptions, NativeRunner, OutputTarget};
 use dezoomify_protocol::dto::JobState;
+mod support;
 
 fn http_response(status: &str, content_type: &str, body: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
@@ -298,7 +299,7 @@ fn bounded_concurrency_and_memory_accounting() {
         cache_dir: Some(work.join("tile-cache")),
         ..Default::default()
     };
-    let outcome = dezoomify_native::pipeline::run(
+    let outcome = support::run_with_config(
         &format!("{base}/pyr.dzi"),
         output.to_str().expect("utf8"),
         false,
@@ -460,7 +461,7 @@ fn decode_inflight_bytes_are_bounded_and_accounted() {
         cache_dir: Some(work.join("tile-cache")),
         ..Default::default()
     };
-    let outcome = dezoomify_native::pipeline::run(
+    let outcome = support::run_with_config(
         &format!("{base}/pyr.dzi"),
         output.to_str().expect("utf8"),
         false,

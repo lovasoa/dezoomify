@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use dezoomify_native::pipeline::PipelineConfig;
+mod support;
 
 fn temp_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -56,21 +56,15 @@ fn plain_path_input_with_file_uri_tiles_assembles() {
     let manifest = work.join("tiles.yaml");
     std::fs::write(&manifest, yaml.as_bytes()).expect("write manifest");
     let output = work.join("local.png");
-    let outcome = dezoomify_native::pipeline::run(
-        manifest.to_str().expect("utf8 input"),
-        output.to_str().expect("utf8 output"),
-        false,
-        &PipelineConfig::default(),
-        &mut |_| {},
-    )
-    .unwrap_or_else(|e| {
-        panic!(
-            "plain-path local input succeeds: {} ({})",
-            e.message, e.code
-        )
-    });
+    let outcome = support::run_file(manifest.to_str().expect("utf8 input"), &output, |_| {})
+        .unwrap_or_else(|e| {
+            panic!(
+                "plain-path local input succeeds: {} ({})",
+                e.message, e.code
+            )
+        });
     assert_eq!(outcome.tile_count, 4);
-    assert_eq!((outcome.image_size.x, outcome.image_size.y), (512, 512));
+    assert_eq!((outcome.width, outcome.height), (512, 512));
     assert!(!outcome.partial);
 }
 
@@ -85,30 +79,18 @@ fn file_uri_input_with_plain_path_tiles_assembles() {
     std::fs::write(&manifest, yaml.as_bytes()).expect("write manifest");
     let file_uri = format!("file://{}", manifest.to_str().expect("utf8 input"));
     let output = work.join("local.png");
-    let outcome = dezoomify_native::pipeline::run(
-        &file_uri,
-        output.to_str().expect("utf8 output"),
-        false,
-        &PipelineConfig::default(),
-        &mut |_| {},
-    )
-    .unwrap_or_else(|e| panic!("file:// local input succeeds: {} ({})", e.message, e.code));
+    let outcome = support::run_file(&file_uri, &output, |_| {})
+        .unwrap_or_else(|e| panic!("file:// local input succeeds: {} ({})", e.message, e.code));
     assert_eq!(outcome.tile_count, 4);
-    assert_eq!((outcome.image_size.x, outcome.image_size.y), (512, 512));
+    assert_eq!((outcome.width, outcome.height), (512, 512));
 }
 
 #[test]
 fn file_uri_with_remote_host_is_rejected_typed() {
     let work = temp_dir("remote-file-host");
     let output = work.join("out.png");
-    let error = dezoomify_native::pipeline::run(
-        "file://other.test/tile.png",
-        output.to_str().expect("utf8 output"),
-        false,
-        &PipelineConfig::default(),
-        &mut |_| {},
-    )
-    .expect_err("remote file host must be rejected");
+    let error = support::run_file("file://other.test/tile.png", &output, |_| {})
+        .expect_err("remote file host must be rejected");
     // `Job::new` rejects it as invalid input, mapped to a stable native code.
     assert_eq!(error.code, "discovery.failed");
     assert!(

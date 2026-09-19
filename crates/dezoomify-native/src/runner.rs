@@ -1,7 +1,7 @@
 //! Typed native runner: one real engine job per request.
 //!
 //! [`NativeRunner::start`] validates [`JobOptions`], spawns one background
-//! driver thread running the real engine plus driver (`pipeline::run`), and
+//! driver thread running the real engine plus native effect executor, and
 //! returns a [`RunningJob`] owning three things: the command sender, the
 //! typed snapshot stream, and the join handle that owns completion and
 //! cleanup. CLI, desktop backend, and Native Messaging run the same runner;
@@ -36,8 +36,8 @@ use dezoomify_engine::{JobSnapshot as EngineSnapshot, UserCommand as EngineUserC
 
 use crate::error::NativeError;
 use crate::http::{FetchLimits, TlsPolicy};
-use crate::output::OutputFormat;
-use crate::pipeline::{self, PartialGate, PartialPolicy, PipelineConfig};
+use crate::output::{validate_destination, OutputFormat};
+use crate::pipeline::{PartialGate, PartialPolicy, PipelineConfig};
 
 /// Engine user intent, forwarded verbatim (selection, partial answer with
 /// generation, pause/resume, cancel). Re-exported so all native hosts name
@@ -119,9 +119,9 @@ impl Default for JobOptions {
 }
 
 impl JobOptions {
-    /// Typed pre-flight validation: input shape plus output-format support.
-    /// Destination existence/overwrite stays a finalize-time check (the
-    /// driver owns the commit point), so this never touches the filesystem.
+    /// Typed pre-flight validation: input shape, output-format support, and
+    /// an early destination check. The commit point validates again to close
+    /// races between start and publication.
     fn validate(&self) -> Result<(), NativeError> {
         if self.input_url.is_empty() || self.input_url.len() > 2048 {
             return Err(NativeError::new(
@@ -151,7 +151,8 @@ impl JobOptions {
         }
         match &self.output {
             OutputTarget::File(path) => {
-                OutputFormat::infer_from_path(path)?;
+                let format = OutputFormat::infer_from_path(path)?;
+                validate_destination(path, &format, self.overwrite)?;
             }
             OutputTarget::AutoDir { dir: _, format: _ } => {}
         }
@@ -217,6 +218,8 @@ pub struct OutputSummary {
     pub format: String,
     pub partial: bool,
     pub missing: Vec<String>,
+    /// Honest execution accounting from the native effect executor.
+    pub instrumentation: crate::exec::Instrumentation,
 }
 
 /// One ordered snapshot on the stream: the engine projection verbatim plus
@@ -402,21 +405,33 @@ fn run_job(
             });
         }
     };
-    let result = match &options.output {
-        OutputTarget::File(path) => {
-            let output = path.to_string_lossy().into_owned();
-            pipeline::run(
-                &options.input_url,
-                &output,
-                options.overwrite,
-                config,
-                &mut emit,
-            )
-        }
-        OutputTarget::AutoDir { dir, format } => {
-            pipeline::run_auto_named(&options.input_url, dir, *format, config, &mut emit)
-        }
+    let (output_path, format, overwrite, auto_output_dir) = match &options.output {
+        OutputTarget::File(path) => (
+            path.clone(),
+            OutputFormat::infer_from_path(path)?,
+            options.overwrite,
+            None,
+        ),
+        OutputTarget::AutoDir { dir, format } => (
+            dir.join(format!("dezoomify.{}", format.extension())),
+            *format,
+            false,
+            Some(dir.clone()),
+        ),
     };
+    let output = crate::exec::OutputSpec {
+        output_path,
+        overwrite,
+        format,
+        auto_output_dir,
+    };
+    let user = crate::http::UserHeaders::new(
+        options.headers.clone(),
+        url::Url::parse(&options.input_url)
+            .ok()
+            .and_then(|parsed| parsed.host_str().map(str::to_string)),
+    );
+    let result = crate::exec::execute(&options.input_url, &output, config, &user, &mut emit);
     match result {
         Ok(outcome) => {
             // Publication won the race: report the committed result, never
@@ -431,6 +446,7 @@ fn run_job(
                 format: outcome.format,
                 partial: outcome.partial,
                 missing: outcome.missing,
+                instrumentation: outcome.instrumentation,
             };
             // The terminal snapshot carries the engine terminal verbatim plus
             // the publication. Hosts render `snapshot.terminal` and resolve
