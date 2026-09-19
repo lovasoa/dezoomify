@@ -375,3 +375,32 @@ fn provide_resource_for_tile_request_is_rejected() {
         .unwrap_err();
     assert_eq!(error.code(), dezoomify_wasm::AdapterErrorCode::WrongState);
 }
+
+#[test]
+fn display_only_finalize_reports_display_only_disposition() {
+    use dezoomify_protocol::dto::OutputDispositionDto;
+    let (mut session, tiles) = session_acquiring_tiles();
+    // Ordinary image display: every tile completes body-free, then the host
+    // finalizes with the honest display-only disposition it observed.
+    let mut finalize_seen = false;
+    for (_, request) in &tiles {
+        let (messages, _snapshot) = session
+            .dispatch(JobCommand::ProvideDisplayOutcome { request: *request })
+            .expect("display outcome");
+        finalize_seen |= messages
+            .iter()
+            .any(|message| matches!(message, HostEffect::FinalizeOutput { .. }));
+    }
+    assert!(finalize_seen, "display-only acquisition finalizes");
+    let (_messages, snapshot) = session
+        .dispatch(JobCommand::FinalizationSucceeded {
+            disposition: OutputDispositionDto::DisplayOnly,
+        })
+        .expect("display-only finalize accepted");
+    assert_eq!(
+        snapshot.terminal,
+        Some(dezoomify_protocol::dto::SnapshotTerminalDto::Completed)
+    );
+    let output = snapshot.output.expect("completed job reports output");
+    assert_eq!(output.disposition, Some(OutputDispositionDto::DisplayOnly));
+}

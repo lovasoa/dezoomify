@@ -16,8 +16,8 @@ import {
   createBrowserRunner,
   createCanvasAssembly,
   createProbeSize,
+  createSelectionDriver,
   createTileDecoder,
-  planSelectionDrive,
   saveBlobViaAnchor,
 } from "@dezoomify/browser-runtime";
 import { createExtensionFetcher } from "../runtime/fetch.ts";
@@ -371,9 +371,15 @@ function createAssembly(
  * budget and cycle guards, never a host recursion with a fresh attempt).
  * Reads only the generated DTO shape.
  */
+// One selection driver per attempt: a follow command's own answer snapshot
+// still carries the old catalog, so replays must not resend the follow.
+let selectionDriver = createSelectionDriver();
+
 function driveSnapshot(snapshot: JobSnapshot) {
-  const drive = planSelectionDrive(snapshot);
+  const drive = selectionDriver.drive(snapshot);
   switch (drive.action) {
+    case "already-driven":
+      return;
     case "selected":
     case "waiting":
       return;
@@ -466,6 +472,7 @@ function resetAttemptState() {
  */
 async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
   if (!binding) return;
+  selectionDriver = createSelectionDriver();
   const activeBinding = binding;
   const fetcher = createExtensionFetcher({
     hasPermission: async (origin) => testGrantedOrigins.has(origin) ||

@@ -54,14 +54,14 @@ use dezoomify_core::core::discovery::TransportKind;
 use dezoomify_engine::{
     Effect as EngineEffect, EffectId as EngineEffectId, EffectResult as EngineEffectResult,
     EngineError as EngineJobError, EngineJob, Failure as EngineFailure,
-    JobOptions as EngineOptions, ResponseMetadata as EngineResponseMetadata,
-    SelectionPolicy as EngineSelectionPolicy, Update as EngineUpdate,
-    UserCommand as EngineUserCommand,
+    JobOptions as EngineOptions, OutputDisposition as EngineDisposition,
+    ResponseMetadata as EngineResponseMetadata, SelectionPolicy as EngineSelectionPolicy,
+    Update as EngineUpdate, UserCommand as EngineUserCommand,
 };
 use dezoomify_protocol::dto::{
     ErrorDto, ErrorPhase, ErrorTransport, FetchFailureDto, HeaderDto, HostEffect, JobCommand,
-    JobState as ProtocolJobState, PointDto, ProbeOutcome, ProcessingRecipe, RequestDto,
-    RequestPurpose, ResourceKind, SessionConfig, SizeDto, TilePlacementDto,
+    JobState as ProtocolJobState, OutputDispositionDto, PointDto, ProbeOutcome, ProcessingRecipe,
+    RequestDto, RequestPurpose, ResourceKind, SessionConfig, SizeDto, TilePlacementDto,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -283,7 +283,9 @@ impl Session {
                     decision: choice,
                 })
             }
-            JobCommand::FinalizationSucceeded => self.on_finalize_succeeded(),
+            JobCommand::FinalizationSucceeded { disposition } => {
+                self.on_finalize_succeeded(disposition)
+            }
             JobCommand::FinalizationFailed { error } => self.on_finalize_failed(error),
         }
     }
@@ -524,21 +526,25 @@ impl Session {
         Ok(self.drain_update(update))
     }
 
-    fn on_finalize_succeeded(&mut self) -> Result<Vec<HostEffect>, AdapterError> {
+    fn on_finalize_succeeded(
+        &mut self,
+        disposition: OutputDispositionDto,
+    ) -> Result<Vec<HostEffect>, AdapterError> {
         let Some(effect) = self.live_finalize.take() else {
             return Err(AdapterError::new(
                 AdapterErrorCode::WrongState,
                 "no output operation is awaited",
             ));
         };
+        let disposition = match disposition {
+            OutputDispositionDto::NativePublication => EngineDisposition::NativePublication,
+            OutputDispositionDto::BrowserSaveInitiated => EngineDisposition::BrowserSaveInitiated,
+            OutputDispositionDto::BrowserSaveReady => EngineDisposition::BrowserSaveReady,
+            OutputDispositionDto::DisplayOnly => EngineDisposition::DisplayOnly,
+        };
         let update = self
             .engine_job()?
-            .complete(
-                effect,
-                EngineEffectResult::OutputCommitted {
-                    disposition: dezoomify_engine::OutputDisposition::BrowserSaveInitiated,
-                },
-            )
+            .complete(effect, EngineEffectResult::OutputCommitted { disposition })
             .map_err(Self::engine_error)?;
         Ok(self.drain_update(update))
     }

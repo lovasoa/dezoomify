@@ -126,3 +126,17 @@ test("failure classification derives from codes, never text", () => {
   assert.equal(phaseFor("TILE_FAILED"), "acquisition");
   assert.equal(phaseFor({ code: "OUTPUT_DENIED" }), "acquisition");
 });
+
+test("a completed job with engine display-only disposition presents preview", () => {
+  const snap = dto({
+    revision: 7,
+    lifecycle: "Completed",
+    progress: { completed: 4, total: 4 },
+    terminal: { type: "completed" },
+    output: { canvas: { width: 512, height: 512 }, format: "png", complete: true, missing: [], disposition: "display-only" },
+  });
+  const view = presentSnapshot(snap, "browser-session");
+  assert.equal(view.phase, "display-only");
+  assert.equal(view.displayOnly, true);
+  assert.equal(view.headlineKey, "view.display.title");
+});

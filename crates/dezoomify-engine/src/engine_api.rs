@@ -110,9 +110,10 @@ use dezoomify_core::core::model::ProcessingRecipe as CoreProcessingRecipe;
 use dezoomify_core::Vec2d;
 use dezoomify_protocol::dto::{
     EngineSnapshotDto, ErrorDto as ProtocolErrorDto, ErrorPhase as ProtocolErrorPhase,
-    FailureCategoryDto, JobState, MissingTileDto, OutputFormat as ProtocolOutputFormat,
-    SizeDto as ProtocolSizeDto, SnapshotDecisionDto, SnapshotDeferredDto, SnapshotOutputDto,
-    SnapshotProgressDto, SnapshotSelectionDto, SnapshotTerminalDto, TileFailureDto,
+    FailureCategoryDto, JobState, MissingTileDto, OutputDispositionDto,
+    OutputFormat as ProtocolOutputFormat, SizeDto as ProtocolSizeDto, SnapshotDecisionDto,
+    SnapshotDeferredDto, SnapshotOutputDto, SnapshotProgressDto, SnapshotSelectionDto,
+    SnapshotTerminalDto, TileFailureDto,
 };
 
 use crate::retry::TileFailure as InnerFailure;
@@ -1507,7 +1508,14 @@ impl From<&JobSnapshot> for EngineSnapshotDto {
                 format: ProtocolOutputFormat::Png,
                 complete: output.complete,
                 missing: output.missing.clone(),
-                disposition: None,
+                disposition: output.disposition.map(|disposition| match disposition {
+                    OutputDisposition::NativePublication => OutputDispositionDto::NativePublication,
+                    OutputDisposition::BrowserSaveInitiated => {
+                        OutputDispositionDto::BrowserSaveInitiated
+                    }
+                    OutputDisposition::BrowserSaveReady => OutputDispositionDto::BrowserSaveReady,
+                    OutputDisposition::DisplayOnly => OutputDispositionDto::DisplayOnly,
+                }),
             })
         });
         EngineSnapshotDto {

@@ -160,3 +160,44 @@ export function planSelectionDrive(
   // never fail or select without snapshot facts.
   return { action: "waiting" };
 }
+
+/**
+ * Idempotent driver over {@link planSelectionDrive}: products call
+ * `drive(snapshot)` on every snapshot and send the returned decision at
+ * most once per distinct follow target. The follow command's own answer
+ * snapshot still carries the old catalog while the fetch is in flight, so
+ * without this guard every product would send the same follow twice and
+ * the engine would (correctly) reject the duplicate as wrong-state, which
+ * the runner treats as terminal for the job. One driver per job run;
+ * targets key on catalog position plus entry URI so a replaced catalog may
+ * legitimately defer the same position again.
+ */
+export type DrivenSelection = SelectionDrive | { action: "already-driven" };
+
+export interface SelectionDriver {
+  drive(snapshot: EngineSnapshotDto, limits?: BrowserLimits): DrivenSelection;
+  reset(): void;
+}
+
+export function createSelectionDriver(): SelectionDriver {
+  let followed = new Set<string>();
+  return {
+    drive(snapshot: EngineSnapshotDto, limits: BrowserLimits = BROWSER_LIMITS): DrivenSelection {
+      const drive = planSelectionDrive(snapshot, limits);
+      if (drive.action !== "follow-deferred") return drive;
+      const entries = snapshot.selection.catalog?.entries;
+      const candidate = entries?.[drive.position];
+      const entryUri = candidate?.kind === "image-request" ? candidate.uri : undefined;
+      const deferredUri = snapshot.selection.deferred.find(
+        (entry) => entry.position === drive.position,
+      )?.uri;
+      const key = `${drive.position}:${entryUri ?? deferredUri ?? ""}`;
+      if (followed.has(key)) return { action: "already-driven" };
+      followed.add(key);
+      return drive;
+    },
+    reset(): void {
+      followed = new Set<string>();
+    },
+  };
+}

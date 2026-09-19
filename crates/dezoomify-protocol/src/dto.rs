@@ -289,7 +289,12 @@ pub enum JobCommand {
         generation: u32,
         choice: RecoveryChoice,
     },
-    FinalizationSucceeded,
+    FinalizationSucceeded {
+        /// Honest disposition from the host that performed the save:
+        /// tainted (display-only) canvases report DisplayOnly so every
+        /// product presents preview instead of claiming a saved file.
+        disposition: OutputDispositionDto,
+    },
     FinalizationFailed {
         error: ErrorDto,
     },

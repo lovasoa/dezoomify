@@ -450,88 +450,10 @@ impl ScriptedHost {
             })
     }
 
-    /// Acquisition progress `(completed, total)`.
-    #[must_use]
-    pub fn acquisition_progress(&self) -> (u64, u64) {
-        self.job
-            .as_ref()
-            .map(|job| {
-                let progress = &job.snapshot().progress;
-                (progress.completed, progress.total.unwrap_or(0))
-            })
-            .unwrap_or((0, 0))
-    }
-
-    /// Structured missing-tile detail behind the outstanding decision or
-    /// partial terminal: tile ids with their failure facts.
-    #[must_use]
-    pub fn decision_detail(&self) -> Vec<(u32, Vec<dezoomify_engine::retry::TileFailure>)> {
-        let Some(job) = self.job.as_ref() else {
-            return Vec::new();
-        };
-        let snapshot = job.snapshot();
-        if let Some(decision) = &snapshot.decision {
-            return decision.missing.clone();
-        }
-        Vec::new()
-    }
-
-    /// Missing tiles behind the outstanding decision or partial terminal.
-    #[must_use]
-    pub fn missing_tiles(&self) -> Vec<u32> {
-        let Some(job) = self.job.as_ref() else {
-            return Vec::new();
-        };
-        let snapshot = job.snapshot();
-        if let Some(decision) = &snapshot.decision {
-            return decision.missing.iter().map(|(tile, _)| *tile).collect();
-        }
-        if let Some(SnapshotTerminalDto::PartialCompleted { missing }) = &snapshot.terminal {
-            return missing.clone();
-        }
-        Vec::new()
-    }
-
     /// Borrow the inner job for snapshot assertions.
     #[must_use]
     pub fn job(&self) -> &EngineJob {
         self.job.as_ref().expect("job started")
-    }
-
-    /// Deferred follow-up URI for a wire image id, if still deferred.
-    #[must_use]
-    pub fn deferred_uri_for_test(&self, image: u32) -> Option<String> {
-        self.job.as_ref().and_then(|job| {
-            job.snapshot()
-                .selection
-                .deferred
-                .iter()
-                .find(|entry| entry.position == image)
-                .map(|entry| entry.uri.clone())
-        })
-    }
-
-    /// Outstanding canonical effect ids (issued minus completed).
-    #[must_use]
-    pub fn outstanding_count(&self) -> usize {
-        self.outstanding.len()
-    }
-
-    /// Whether an event of one kind was recorded.
-    #[must_use]
-    pub fn has_event(&self, kind: &str) -> bool {
-        self.events
-            .iter()
-            .any(|event| event.get("kind").and_then(serde_json::Value::as_str) == Some(kind))
-    }
-
-    /// Failed events in arrival order.
-    #[must_use]
-    pub fn failed_events(&self) -> Vec<&serde_json::Value> {
-        self.events
-            .iter()
-            .filter(|event| event.get("kind").and_then(serde_json::Value::as_str) == Some("failed"))
-            .collect()
     }
 
     /// Positions of the first catalog image and its levels.
