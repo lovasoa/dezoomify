@@ -45,10 +45,9 @@ mod transition;
 pub use config::{Config, ConfigError};
 pub use engine_api::{
     DecisionPayload, DeferredEntry, DiscoveryInput, Effect, EffectId, EffectResult, EngineError,
-    EngineJob, EngineNotice, Failure, HeaderPair, JobOptions, JobSnapshot, Lifecycle,
-    OutputDisposition, OutputFormat, OutputSummary, PartialDecision, PartialPolicy, Progress,
-    ResponseMetadata, Selection, SelectionPolicy, Terminal, TilePosition, TileSize, Update,
-    UserCommand,
+    EngineJob, EngineNotice, Failure, HeaderPair, JobOptions, JobSnapshot, OutputDisposition,
+    OutputFormat, OutputSummary, OutstandingKind, PartialPolicy, Progress, RecoveryChoice,
+    ResponseMetadata, Selection, SelectionPolicy, TilePosition, TileSize, Update, UserCommand,
 };
 pub(crate) use job::{Job, JobInput};
 pub use projection::project_catalog;
@@ -57,9 +56,7 @@ pub use retry::{
     MAX_RETRY_AFTER_MS, RETRY_BASE_DELAY_MS, RETRY_MAX_DELAY_MS,
 };
 pub(crate) use state::State;
-pub(crate) use transition::{
-    JobCommand, JobEffect, JobEvent, JobMessageBody, Outcome, RecoveryChoice,
-};
+pub(crate) use transition::{JobCommand, JobEffect, JobEvent, JobMessageBody, Outcome};
 
 /// Command rejection for option validation.
 pub type ValidationError = EngineError;

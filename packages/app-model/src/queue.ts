@@ -3,6 +3,10 @@
 // failed entry is retained with its error while the queue moves on, and
 // cancel-one/all plus retry never disturb other entries. Host-neutral: the
 // queue only speaks the JobService contract plus an injected clock.
+//
+// Entries hold the JobStartRequest only: engine snapshots flow through to
+// advance the queue and are never retained. The terminal DTO settles each
+// entry; progress rendering reads the live stream, not this ledger.
 
 import type {
   ErrorDto,
@@ -12,6 +16,7 @@ import type {
   JobService,
   JobSnapshot,
   JobStartRequest,
+  SnapshotTerminalDto,
 } from "./types.ts";
 import { initialHostStatus } from "./types.ts";
 
@@ -21,7 +26,6 @@ export interface QueueEntry {
   id: string;
   request: JobStartRequest;
   status: QueueEntryStatus;
-  snapshots: JobSnapshot[];
   host: HostStatus;
   error?: ErrorDto;
 }
@@ -46,17 +50,8 @@ export interface QueueOptions {
   now?: () => number;
 }
 
-function isTerminalState(state: string): boolean {
-  return (
-    state === "Completed" ||
-    state === "PartiallyCompleted" ||
-    state === "Failed" ||
-    state === "Cancelled"
-  );
-}
-
-function terminalErrorOf(snapshot: JobSnapshot): ErrorDto | undefined {
-  if (snapshot.terminal?.kind === "failed") return snapshot.terminal.error;
+function terminalErrorOf(terminal: SnapshotTerminalDto): ErrorDto | undefined {
+  if (terminal.type === "failed") return terminal.error;
   return undefined;
 }
 
@@ -95,11 +90,10 @@ export function createJobQueue(service: JobService, opts?: QueueOptions): JobQue
     const observer: JobObserver = {
       snapshot(snapshot: JobSnapshot): void {
         if (disposed || entry.id !== activeId) return;
-        entry.snapshots = [...entry.snapshots, snapshot].slice(-50);
-        if (snapshot.terminal !== null && isTerminalState(snapshot.state)) {
-          finishActive(entry, snapshot);
-        } else if (snapshot.terminal !== null) {
-          finishActive(entry, snapshot);
+        // The engine terminal settles the entry; live snapshots are never
+        // retained. The request above is the only per-entry job data.
+        if (snapshot.terminal != null) {
+          finishActive(entry, snapshot.terminal);
         }
         notify();
       },
@@ -128,14 +122,13 @@ export function createJobQueue(service: JobService, opts?: QueueOptions): JobQue
     }
   }
 
-  function finishActive(entry: QueueEntry, snapshot: JobSnapshot): void {
+  function finishActive(entry: QueueEntry, terminal: SnapshotTerminalDto): void {
     if (entry.id !== activeId) return;
-    const kind = snapshot.terminal?.kind;
-    if (kind === "cancelled") {
+    if (terminal.type === "cancelled") {
       entry.status = "cancelled";
-    } else if (kind === "failed") {
+    } else if (terminal.type === "failed") {
       entry.status = "failed";
-      entry.error = terminalErrorOf(snapshot);
+      entry.error = terminalErrorOf(terminal);
     } else {
       entry.status = "done";
     }
@@ -165,7 +158,6 @@ export function createJobQueue(service: JobService, opts?: QueueOptions): JobQue
       id,
       request,
       status: "queued",
-      snapshots: [],
       host: initialHostStatus(),
     };
     order.push(entry);
@@ -214,17 +206,13 @@ export function createJobQueue(service: JobService, opts?: QueueOptions): JobQue
     if (entry.status !== "failed" && entry.status !== "cancelled" && entry.status !== "done") return;
     entry.status = "queued";
     entry.error = undefined;
-    entry.snapshots = [];
     entry.host = initialHostStatus();
     notify();
     pump();
   }
 
   function entries(): QueueEntry[] {
-    return order.map((entry) => ({
-      ...entry,
-      snapshots: entry.snapshots.slice(),
-    }));
+    return order.map((entry) => ({ ...entry }));
   }
 
   function subscribe(listener: () => void): () => void {

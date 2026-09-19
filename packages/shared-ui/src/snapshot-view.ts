@@ -78,7 +78,8 @@ export type SnapshotSelection =
   | { kind: "level"; options: SnapshotLevelOption[] }
   | { kind: "recovery"; generation: number; actions: RecoveryAction[] };
 
-export interface SnapshotTerminal {
+/** Terminal view model: kind aliases the authoritative outcome; the rest is presentation-only ledger. */
+export type SnapshotTerminal = {
   kind: "completed" | "partial-completed" | "failed" | "cancelled";
   error?: StructuredError;
   /** Honest tile account; null when the job never reached tile work. */
@@ -92,7 +93,7 @@ export interface SnapshotTerminal {
   gapShown?: string;
   gapRest?: number;
   gapCount?: number;
-}
+};
 
 export interface SnapshotPresentation {
   phase: SnapshotPhase;
@@ -199,21 +200,68 @@ export function structuredErrorOf(error: ErrorDto): StructuredError {
   return presented;
 }
 
+type SnapshotLike = JobSnapshot & {
+  state?: JobState;
+  jobId?: string | null;
+  catalog?: CatalogDto | null;
+  acquired?: number;
+  total?: number | null;
+  recovery?: { generation: number; actions: RecoveryAction[] } | null;
+  displayOnly?: boolean;
+  output?: {
+    doneTiles?: number;
+    totalTiles?: number | null;
+    failedTiles?: number;
+    partial?: boolean;
+    missingTiles?: string[];
+    missing?: number[];
+    complete?: boolean;
+    disposition?: string;
+  } | null;
+  terminal?: { kind?: SnapshotTerminal["kind"]; type?: string; error?: ErrorDto } | null;
+  lifecycle?: JobState;
+  progress?: { completed?: number; total?: number };
+  selection?: { image?: number | null; level?: number | null; deferred?: Array<{ position: number; uri: string }> } | null;
+  decision?: { generation?: number; missing?: Array<{ tile: number }> } | null;
+};
+
+function terminalKindOf(raw: SnapshotLike["terminal"]): SnapshotTerminal["kind"] | null {
+  if (!raw) return null;
+  if (typeof raw.kind === "string") return raw.kind;
+  if (typeof raw.type === "string") {
+    if (raw.type === "completed") return "completed";
+    if (raw.type === "partial-completed") return "partial-completed";
+    if (raw.type === "failed") return "failed";
+    if (raw.type === "cancelled") return "cancelled";
+  }
+  return null;
+}
+
 function terminalOf(snapshot: JobSnapshot): SnapshotTerminal | null {
-  const terminal = snapshot.terminal;
-  if (!terminal) return null;
-  const presented: SnapshotTerminal = { kind: terminal.kind };
-  if (terminal.error) presented.error = structuredErrorOf(terminal.error);
-  if (snapshot.output) {
+  const raw = (snapshot as SnapshotLike).terminal;
+  const kind = terminalKindOf(raw);
+  if (!kind) return null;
+  const presented: SnapshotTerminal = { kind };
+  const error = (raw as { error?: ErrorDto } | null)?.error;
+  if (error) presented.error = structuredErrorOf(error);
+  const out = (snapshot as SnapshotLike).output;
+  if (out) {
+    const missingTiles = Array.isArray(out.missingTiles)
+      ? out.missingTiles.slice()
+      : Array.isArray(out.missing)
+        ? out.missing.map((n) => String(n))
+        : [];
+    const progress = (snapshot as SnapshotLike).progress;
+    const acquired = (snapshot as SnapshotLike).acquired;
     presented.output = {
-      doneTiles: snapshot.output.doneTiles,
-      totalTiles: snapshot.output.totalTiles,
-      failedTiles: snapshot.output.failedTiles,
-      partial: snapshot.output.partial,
-      missingTiles: snapshot.output.missingTiles.slice(),
+      doneTiles: typeof out.doneTiles === "number" ? out.doneTiles : (typeof progress?.completed === "number" ? progress.completed : (typeof acquired === "number" ? acquired : 0)),
+      totalTiles: (out.totalTiles as number | null | undefined) ?? (progress?.total as number | null | undefined) ?? (snapshot as SnapshotLike).total ?? null,
+      failedTiles: typeof out.failedTiles === "number" ? out.failedTiles : missingTiles.length,
+      partial: typeof out.partial === "boolean" ? out.partial : kind === "partial-completed",
+      missingTiles,
     };
-    if (snapshot.output.missingTiles.length > 0) {
-      const gap = splitGapLedger(snapshot.output.missingTiles);
+    if (missingTiles.length > 0) {
+      const gap = splitGapLedger(missingTiles);
       presented.gapShown = gap.shown;
       presented.gapRest = gap.rest;
       presented.gapCount = gap.count;
@@ -249,10 +297,22 @@ function basePresentation(): SnapshotPresentation {
 export function presentSnapshot(
   snapshot: JobSnapshot,
   transport: string | null,
+  options?: { displayOnly?: boolean },
 ): SnapshotPresentation {
+  // Render the authoritative snapshot directly: accept both the generated
+  // EngineSnapshotDto shape (lifecycle/progress/decision/terminal.type) and
+  // the previous folded shape (state/acquired/recovery/terminal.kind) so one
+  // step table covers the migration. Snapshot fields drive the view; the
+  // transport argument only labels diagnostics.
+  const like = snapshot as SnapshotLike;
   const terminal = terminalOf(snapshot);
-  const partial = snapshot.terminal?.kind === "partial-completed";
-  const displayOnly = snapshot.displayOnly && terminal === null;
+  const terminalKind = terminalKindOf(like.terminal);
+  const partial = terminalKind === "partial-completed";
+  const outputDisposition = (like.output as { disposition?: unknown } | null | undefined)?.disposition;
+  // Display-only is a host-known output fact (tainted canvas): the assembly
+  // reports it explicitly via options until the engine snapshot round-trips
+  // with output.disposition. It is never folded into the DTO itself.
+  const displayOnly = ((options?.displayOnly === true || like.displayOnly === true || outputDisposition === "display-only") && terminal === null);
   let phase: SnapshotPhase = "job";
   if (terminal) {
     if (terminal.kind === "completed" || terminal.kind === "partial-completed") phase = "completed";
@@ -262,28 +322,36 @@ export function presentSnapshot(
     phase = "display-only";
   }
 
+  const lifecycle: JobState = like.lifecycle ?? like.state ?? "Discovering";
+  const catalog = (like.catalog ?? null) as CatalogDto | null;
+  const selectedImage = like.selection?.image ?? null;
+  const recoveryGeneration = like.recovery?.generation ?? like.decision?.generation;
+  const recoveryActions = like.recovery?.actions ?? [];
+
   let selection: SnapshotSelection | null = null;
   if (!terminal) {
-    if (snapshot.state === "AwaitingImageSelection") {
-      selection = { kind: "image", options: imageOptionsOf(snapshot.catalog) };
-    } else if (snapshot.state === "AwaitingLevelSelection") {
+    if (lifecycle === "AwaitingImageSelection" && catalog) {
+      selection = { kind: "image", options: imageOptionsOf(catalog) };
+    } else if (lifecycle === "AwaitingLevelSelection" && catalog) {
       selection = {
         kind: "level",
-        options: levelOptionsOf(snapshot.catalog, snapshot.selection.image),
+        options: levelOptionsOf(catalog, selectedImage),
       };
-    } else if (snapshot.state === "AwaitingPartialDecision" && snapshot.recovery) {
+    } else if (lifecycle === "AwaitingPartialDecision" && recoveryGeneration !== undefined && recoveryGeneration !== null) {
       selection = {
         kind: "recovery",
-        generation: snapshot.recovery.generation,
-        actions: snapshot.recovery.actions,
+        generation: recoveryGeneration,
+        actions: recoveryActions,
       };
     }
   }
 
-  const headline = headlineForState(snapshot.state);
+  const headline = headlineForState(lifecycle);
+  const completed = like.progress?.completed ?? like.acquired ?? 0;
+  const total = (like.progress?.total as number | null | undefined) ?? like.total ?? null;
   const progress =
-    snapshot.total !== null || snapshot.acquired > 0
-      ? { current: snapshot.acquired, total: snapshot.total }
+    total !== null || completed > 0
+      ? { current: completed, total }
       : null;
 
   const detailKey = displayOnly ? undefined : headline.detail;
@@ -292,19 +360,19 @@ export function presentSnapshot(
   return {
     ...basePresentation(),
     phase,
-    jobId: snapshot.jobId,
-    stateLabel: snapshot.state,
+    jobId: (like.jobId ?? null) as string | null,
+    stateLabel: lifecycle,
     headlineKey: displayOnly ? "view.display.title" : headline.key,
     ...(headline.vars ? { headlineVars: headline.vars } : {}),
     ...(detailKey ? { detailKey } : {}),
     ...(detailVars ? { detailVars } : {}),
     progress,
-    paused: snapshot.paused,
+    paused: like.paused ?? false,
     selection,
     terminal,
     transport,
     transportLabel: transport === null ? null : renderTransportLabel(transport),
-    canCancel: terminal === null && snapshot.state !== "Cancelling",
+    canCancel: terminal === null && lifecycle !== "Cancelling",
     canReset: terminal !== null,
     displayOnly,
     partial,
@@ -333,19 +401,29 @@ export function presentFailure(
   };
 }
 
-/** Presentation for a host-reported step (products without a snapshot yet). */
+/**
+ * Presentation for a host-reported step (products without a snapshot yet).
+ * Headlines come from the single `headlineForState` step table: each host
+ * step maps to its engine state, so copy stays identical without a shadow
+ * taxonomy. `saving` keeps the bare headline (no encoding detail) to
+ * preserve the established pre-snapshot copy.
+ */
 export function presentStatus(
   status: PresentationStatus,
   opts?: { transport?: string | null; error?: StructuredError; partial?: boolean },
 ): SnapshotPresentation {
   const transport = opts?.transport ?? null;
-  const headline = headlineForStatus(status);
+  const state = stateForHostStep(status);
+  const headline = state === null ? hostStepHeadline(status) : headlineForState(state);
+  // `saving` is the pre-snapshot assembly step: same headline as Finalizing
+  // without its encoding detail line.
+  const detailKey = status === "saving" ? undefined : headline.detail;
   const presentation: SnapshotPresentation = {
     ...basePresentation(),
-    phase: phaseForStatus(status),
+    phase: hostStepPhase(status),
     stateLabel: status,
     headlineKey: headline.key,
-    ...(headline.detail ? { detailKey: headline.detail } : {}),
+    ...(detailKey ? { detailKey } : {}),
     transport,
     transportLabel: transport === null ? null : renderTransportLabel(transport),
   };
@@ -372,7 +450,7 @@ function unknownFailure(): StructuredError {
   return { code: "UNKNOWN", category: "unknown", retryable: true, message: t("view.fail.fallback") };
 }
 
-function phaseForStatus(status: PresentationStatus): SnapshotPhase {
+function hostStepPhase(status: PresentationStatus): SnapshotPhase {
   if (status === "idle") return "idle";
   if (status === "display-only") return "display-only";
   if (status === "completed") return "completed";
@@ -381,31 +459,37 @@ function phaseForStatus(status: PresentationStatus): SnapshotPhase {
   return "job";
 }
 
-function headlineForStatus(status: PresentationStatus): { key: I18nKey; detail?: I18nKey } {
+/** Map a host step onto its engine state; null when the step has no engine state (idle, display-only). */
+function stateForHostStep(status: PresentationStatus): JobState | null {
   switch (status) {
-    case "idle":
-      return { key: "view.idle.submit" };
     case "discovering":
-      return { key: "view.step.discovering", detail: "view.step.contactingDetail" };
+      return "Discovering";
     case "choosing-image":
-      return { key: "view.step.choosingImage" };
+      return "AwaitingImageSelection";
     case "choosing-level":
-      return { key: "view.step.choosingLevel" };
+      return "AwaitingLevelSelection";
     case "preflighting":
-      return { key: "view.step.preflighting" };
+      return "Planning";
     case "downloading":
-      return { key: "view.step.downloading" };
+      return "AcquiringTiles";
     case "saving":
-      return { key: "view.step.saving" };
-    case "display-only":
-      return { key: "view.display.title" };
+      return "Finalizing";
     case "completed":
-      return { key: "view.done.ready" };
+      return "Completed";
     case "failed":
-      return { key: "view.fail.title" };
+      return "Failed";
     case "cancelled":
-      return { key: "view.cancel.title" };
+      return "Cancelled";
+    case "idle":
+    case "display-only":
+      return null;
   }
+}
+
+/** Headlines for steps without an engine state; covered by the same keys as the old table. */
+function hostStepHeadline(status: PresentationStatus): { key: I18nKey; detail?: I18nKey } {
+  if (status === "idle") return { key: "view.idle.submit" };
+  return { key: "view.display.title" };
 }
 
 /** Idle presentation before any job starts. */

@@ -1,30 +1,28 @@
-// Host-runner-backed JobService: identity and revision guards at the async
-// subscription boundary. Each start() mints a job id; runner emissions for
-// other jobs, or snapshots whose revision is not newer than the last one the
-// observer saw, are dropped before they reach the UI. dispose() removes the
-// job from the store so late emissions after teardown stay invisible.
+// Host-runner-backed JobService: a stateless forwarder over the engine.
+// Each start() validates the request, mints a job id, and forwards absolute
+// engine snapshots (plus host presentation state) straight to the observer.
+// The service keeps no per-job state: no current snapshot, no settled flag,
+// no DTO revision gate. The engine sequence is authoritative; stale
+// revisions and retired jobs are dropped at the transport edge (the runner)
+// before they ever reach this sink. dispose() delegates to the runner
+// handle; late emissions after teardown stay invisible because the runner
+// drops them at its edge.
 
 import type {
   EngineSnapshotDto,
   HostRunner,
   HostStatus,
-  JobEvent,
   JobHandle,
   JobObserver,
   JobService,
-  JobSnapshot,
   JobStartRequest,
   RunnerHandle,
   RunnerSink,
   UserCommand,
 } from "./types.ts";
 import { initialHostStatus } from "./types.ts";
-import { applyJobEvent, applySnapshotDto, initialSnapshot } from "./snapshot.ts";
-import { createSnapshotStore, type SnapshotStore } from "./store.ts";
 
 export interface ServiceOptions {
-  now?: () => number;
-  store?: SnapshotStore;
   nextId?: () => string;
 }
 
@@ -57,8 +55,6 @@ function validateRequest(request: JobStartRequest): string | null {
 }
 
 export function createJobService(runner: HostRunner, opts?: ServiceOptions): JobService {
-  const now = opts?.now ?? Date.now;
-  const store = opts?.store ?? createSnapshotStore();
   let idSeq = 0;
   const nextId =
     opts?.nextId ??
@@ -79,35 +75,12 @@ export function createJobService(runner: HostRunner, opts?: ServiceOptions): Job
       };
     }
     const id = nextId();
-    let current: JobSnapshot = initialSnapshot(id, now());
-    store.publish(current);
-    observer.snapshot(current);
     observer.hostStatus(initialHostStatus());
 
-    let settled = false;
-    let lastDtoRevision = 0;
-    function publish(folded: JobSnapshot, host: HostStatus | null): void {
-      if (folded === current) return;
-      current = folded;
-      if (store.publish(current)) observer.snapshot(current);
-      if (host) observer.hostStatus(host);
-    }
     const sink: RunnerSink = {
-      event(event: JobEvent, host: HostStatus): void {
-        if (settled) return;
-        publish(applyJobEvent(current, event, now()), host);
-      },
-      snapshot(dto: EngineSnapshotDto): void {
-        if (settled) return;
-        // Terminal snapshots always apply (exactly-once is enforced by
-        // the fold); live snapshots apply only when newer than the last
-        // one folded. DTO revisions live on the engine scale, so they
-        // gate here instead of in the fold.
-        if (!dto.terminal) {
-          if (dto.revision <= lastDtoRevision) return;
-          lastDtoRevision = dto.revision;
-        }
-        publish(applySnapshotDto(current, dto, now()), null);
+      snapshot(dto: EngineSnapshotDto, host?: HostStatus): void {
+        observer.snapshot(dto);
+        if (host) observer.hostStatus(host);
       },
     };
 
@@ -121,8 +94,6 @@ export function createJobService(runner: HostRunner, opts?: ServiceOptions): Job
         ? { resolvePermission: handle.resolvePermission.bind(handle) }
         : {}),
       async dispose(): Promise<void> {
-        settled = true;
-        store.remove(id);
         await handle.dispose();
       },
     };

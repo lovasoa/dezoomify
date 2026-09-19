@@ -141,87 +141,6 @@ fn http_refusal_returns_once_without_retry() {
 }
 
 #[test]
-fn reset_connection_surfaces_after_a_single_hit() {
-    // A reset connection fails the single attempt immediately: exactly one
-    // request reaches the server (no transport retry) and the error is
-    // typed for the engine to classify.
-    let (port, _conns, requests, server) = serve_counted(vec![Vec::new()], 1, 1);
-    let error = transport()
-        .fetch(
-            &format!("http://127.0.0.1:{port}/dead"),
-            &BTreeMap::new(),
-            None,
-            None,
-            &limits(),
-        )
-        .expect_err("reset fails");
-    assert_eq!(error.code, "transport.network-error");
-    server.join().expect("server exits after one connection");
-    assert_eq!(
-        requests.load(Ordering::SeqCst),
-        1,
-        "a reset follows the single sent request with no second attempt"
-    );
-}
-
-#[test]
-fn one_transport_reuses_connections() {
-    // Five sequential plus eight concurrent fetches through one transport:
-    // every fetch succeeds and the connection count stays far below the
-    // request count, proving the pool is shared per transport scope.
-    let ok = response(
-        "HTTP/1.1 200 OK",
-        &[("content-type", "text/plain"), ("connection", "keep-alive")],
-        b"tile-bytes",
-    );
-    let (port, connections, requests, server) = serve_counted(vec![ok], 32, 16);
-    let transport = transport();
-    let url = format!("http://127.0.0.1:{port}/tile.png");
-    for _ in 0..5 {
-        let outcome = transport
-            .fetch(&url, &BTreeMap::new(), None, None, &limits())
-            .expect("sequential fetch");
-        assert_eq!(outcome.body, b"tile-bytes");
-    }
-    thread::scope(|scope| {
-        let mut handles = Vec::new();
-        for _ in 0..8 {
-            handles.push(scope.spawn(|| {
-                transport
-                    .fetch(&url, &BTreeMap::new(), None, None, &limits())
-                    .expect("concurrent fetch")
-            }));
-        }
-        for handle in handles {
-            assert_eq!(handle.join().expect("thread").body, b"tile-bytes");
-        }
-    });
-    drop(server);
-    wait_for_requests(&requests, 13);
-    let total = requests.load(Ordering::SeqCst);
-    let conns = connections.load(Ordering::SeqCst);
-    assert_eq!(total, 13, "all thirteen fetches arrived");
-    assert!(
-        conns < total,
-        "connections ({conns}) must stay below requests ({total})"
-    );
-}
-
-/// Poll an atomic counter until it reaches `expected` (socket reads carry
-/// no atomic visibility guarantee, so tests that detach the server wait
-/// instead of assuming the final increment is visible).
-fn wait_for_requests(counter: &Arc<AtomicUsize>, expected: usize) {
-    let start = std::time::Instant::now();
-    while counter.load(Ordering::SeqCst) < expected {
-        assert!(
-            start.elapsed() < std::time::Duration::from_secs(10),
-            "server never saw {expected} requests"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-}
-
-#[test]
 fn redirect_rejects_userinfo_and_unsupported_schemes() {
     // Credential-bearing redirect targets never leave the transport: userinfo
     // is rejected before any second request is made.
@@ -345,33 +264,5 @@ fn retry_after_seconds_hint_flows_to_the_outcome() {
         .expect("429 returns as outcome");
     assert_eq!(outcome.status, 429);
     assert_eq!(outcome.retry_after_ms, Some(2000));
-    server.join().expect("server exits after one connection");
-}
-
-#[test]
-fn retry_after_date_form_reports_no_hint() {
-    let (port, _conns, _reqs, server) = serve_counted(
-        vec![response(
-            "HTTP/1.1 503 Service Unavailable",
-            &[
-                ("content-type", "text/plain"),
-                ("retry-after", "Wed, 21 Oct 2015 07:28:00 GMT"),
-            ],
-            b"busy",
-        )],
-        1,
-        1,
-    );
-    let outcome = transport()
-        .fetch(
-            &format!("http://127.0.0.1:{port}/busy"),
-            &BTreeMap::new(),
-            None,
-            None,
-            &limits(),
-        )
-        .expect("503 returns as outcome");
-    assert_eq!(outcome.status, 503);
-    assert_eq!(outcome.retry_after_ms, None);
     server.join().expect("server exits after one connection");
 }

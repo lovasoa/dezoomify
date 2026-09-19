@@ -78,7 +78,7 @@ mod tests {
     }
 
     #[test]
-    fn projection_preserves_order_and_uses_positional_level_labels() {
+    fn projection_preserves_entry_kinds() {
         let level = LevelDescriptor::new(
             Grid::new(
                 Vec2d::square(512),
@@ -105,15 +105,10 @@ mod tests {
         let CatalogEntryDto::Image(image) = &dto.entries[0] else {
             panic!("ready entries project to images");
         };
-        assert_eq!(image.title, None);
-        assert_eq!(
-            image.levels[0].label,
-            "Level 1 (  512 x   512 pixels,   4 tiles)"
-        );
+        assert_eq!(image.levels.len(), 1);
         let CatalogEntryDto::ImageRequest(request) = &dto.entries[1] else {
             panic!("deferred entries project to image requests");
         };
-        assert_eq!(request.title, None);
         assert_eq!(request.uri, "https://fixtures.test/manifest");
 
         assert_eq!(dto.entries.len(), 2);

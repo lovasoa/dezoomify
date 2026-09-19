@@ -69,7 +69,7 @@ pub use session::Session;
 pub mod wasm_api {
     use super::session::Session;
     use dezoomify_protocol::dto::{
-        EngineSnapshotDto, ErrorDto, HostMessage, JobCommand, ProcessingRequest, SessionConfig,
+        EngineSnapshotDto, ErrorDto, HostEffect, JobCommand, ProcessingRequest, SessionConfig,
     };
     use serde::Serialize;
     use tsify::{Ts, Tsify};
@@ -79,7 +79,7 @@ pub mod wasm_api {
     #[serde(tag = "status", rename_all = "kebab-case")]
     pub enum DispatchResult {
         Ok {
-            messages: Vec<HostMessage>,
+            messages: Vec<HostEffect>,
             snapshot: EngineSnapshotDto,
         },
         Error {
@@ -88,7 +88,7 @@ pub mod wasm_api {
     }
 
     fn result(
-        value: Result<(Vec<HostMessage>, EngineSnapshotDto), super::AdapterError>,
+        value: Result<(Vec<HostEffect>, EngineSnapshotDto), super::AdapterError>,
     ) -> DispatchResult {
         match value {
             Ok((messages, snapshot)) => DispatchResult::Ok { messages, snapshot },

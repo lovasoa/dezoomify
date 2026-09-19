@@ -337,17 +337,8 @@ pub enum HostEffect {
 }
 
 // ---------------------------------------------------------------------------
-// Events (job -> UI; absolute snapshots, terminal exactly once)
+// Job lifecycle (engine -> hosts; absolute snapshots, terminal exactly once)
 // ---------------------------------------------------------------------------
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum EventKind {
-    Replayable,
-    Transient,
-    DecisionRequesting,
-    Terminal,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
@@ -365,60 +356,6 @@ pub enum JobState {
     PartiallyCompleted,
     Failed,
     Cancelled,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "kebab-case")]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum JobEvent {
-    JobState {
-        state: JobState,
-    },
-    Catalog {
-        catalog: CatalogDto,
-    },
-    Progress {
-        acquired: u64,
-        total: u64,
-    },
-    Warning {
-        error: ErrorDto,
-    },
-    RecoveryRequest {
-        generation: u32,
-        actions: Vec<RecoveryAction>,
-    },
-    Completed,
-    PartialCompleted,
-    Failed {
-        error: ErrorDto,
-    },
-    Cancelled,
-    Paused,
-    Resumed,
-}
-
-impl JobEvent {
-    #[must_use]
-    pub fn kind(&self) -> EventKind {
-        match self {
-            Self::JobState { .. }
-            | Self::Catalog { .. }
-            | Self::Progress { .. }
-            | Self::Paused
-            | Self::Resumed => EventKind::Replayable,
-            Self::Warning { .. } => EventKind::Transient,
-            Self::RecoveryRequest { .. } => EventKind::DecisionRequesting,
-            Self::Completed | Self::PartialCompleted | Self::Failed { .. } | Self::Cancelled => {
-                EventKind::Terminal
-            }
-        }
-    }
-
-    #[must_use]
-    pub fn is_terminal(&self) -> bool {
-        self.kind() == EventKind::Terminal
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -784,14 +721,6 @@ pub struct SessionConfig {
     pub max_retries: Option<u32>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum HostMessage {
-    Effect(HostEffect),
-    Event(JobEvent),
-}
-
 // ---------------------------------------------------------------------------
 // Engine snapshots (authoritative per-job projections for UI rendering)
 // ---------------------------------------------------------------------------
@@ -848,6 +777,9 @@ pub struct SnapshotSelectionDto {
     pub image: Option<u32>,
     pub level: Option<u32>,
     pub level_count: u32,
+    /// The kept catalog with full geometry, once discovered. Replaced when
+    /// a deferred catalog entry is followed within the same job.
+    pub catalog: Option<CatalogDto>,
     pub deferred: Vec<SnapshotDeferredDto>,
 }
 

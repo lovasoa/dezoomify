@@ -6,7 +6,7 @@ import type {
   EngineSnapshotDto,
   ErrorDto,
   FetchFailureDto,
-  HostMessage,
+  HostEffect,
   JobCommand,
   JobInputDto,
   ProcessingRecipe,
@@ -54,7 +54,7 @@ export type WorkerHostMessage =
   | { type: "engine.dispose" };
 
 export type WorkerHostOutput =
-  | { type: "engine.messages"; messages: HostMessage[]; snapshot: EngineSnapshotDto }
+  | { type: "engine.messages"; messages: HostEffect[]; snapshot: EngineSnapshotDto }
   | { type: "engine.processed"; requestId: number; bytes: ArrayBuffer }
   | { type: "engine.process-failed"; requestId: number; error: ErrorDto }
   | { type: "engine.ranked"; requestId: number; urls: string[] }
@@ -76,11 +76,13 @@ export function createJobWorkerHost(deps: {
       deps.postMessage({ type: "engine.error", error: result.error });
       return;
     }
-    const messages: HostMessage[] = result.messages;
+    const messages: HostEffect[] = result.messages;
     const snapshot: EngineSnapshotDto = result.snapshot;
-    if (messages.length === 0) return;
-    const effects = messages.filter((message) => message.kind === "effect").length;
-    log("debug", "messages-returned", `effects=${effects} events=${messages.length - effects} total=${messages.length} revision=${snapshot.revision}`);
+    // Snapshots always cross the worker boundary, even when the dispatch
+    // produced no messages: the snapshot is the only job-state object and
+    // the UI renders it directly. Stale revisions are dropped at the
+    // runner edge, never here.
+    log("debug", "messages-returned", `effects=${messages.length} revision=${snapshot.revision}`);
     deps.postMessage({ type: "engine.messages", messages, snapshot });
   }
 

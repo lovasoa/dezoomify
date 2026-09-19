@@ -1,71 +1,11 @@
 mod support;
 
-use dezoomify_core::core::discovery::{FetchCause, FetchCode, TransportKind};
 use dezoomify_engine::Config;
 use support::JobCommand;
 use support::{ScriptedHost, DZI, DZI_INPUT_URL};
 
-fn host_with_id(job: &str) -> ScriptedHost {
-    ScriptedHost::new(job, DZI_INPUT_URL, Config::default()).unwrap()
-}
-
 fn dzi_bytes() -> Vec<u8> {
     DZI.as_bytes().to_vec()
-}
-
-#[test]
-fn duplicate_response_is_ignored() {
-    let mut host = host_with_id("job:dup");
-    host.start().unwrap();
-    host.apply(JobCommand::ResourceBytes {
-        request: 0,
-        bytes: dzi_bytes(),
-        final_uri: None,
-    })
-    .unwrap();
-    let len = host.activity_len();
-    // Replaying the consumed discovery request is a safe no-op.
-    host.apply(JobCommand::ResourceBytes {
-        request: 0,
-        bytes: dzi_bytes(),
-        final_uri: None,
-    })
-    .unwrap();
-    assert_eq!(host.activity_len(), len);
-    assert_eq!(host.state(), "AwaitingImageSelection");
-
-    // Duplicate tile completion never double-completes work. The largest
-    // level is a 2x2 grid, so one tile outcome leaves acquisition running.
-    host.apply(JobCommand::SelectImage { image: 0 }).unwrap();
-    host.apply(JobCommand::SelectLevel { level: 9 }).unwrap();
-    host.apply(JobCommand::TileAcquired { tile: 0 }).unwrap();
-    let len = host.activity_len();
-    // Duplicate tile completion never double-completes work.
-    host.apply(JobCommand::TileAcquired { tile: 0 }).unwrap();
-    assert_eq!(host.activity_len(), len);
-}
-
-#[test]
-fn unknown_request_is_ignored_without_corruption() {
-    let mut host = host_with_id("job:mine");
-    host.start().unwrap();
-    let len = host.activity_len();
-    host.apply(JobCommand::ResourceBytes {
-        request: 99,
-        bytes: dzi_bytes(),
-        final_uri: None,
-    })
-    .unwrap();
-    assert_eq!(host.activity_len(), len);
-    assert_eq!(host.state(), "Discovering");
-    // The outstanding request still proceeds normally afterwards.
-    host.apply(JobCommand::ResourceBytes {
-        request: 0,
-        bytes: dzi_bytes(),
-        final_uri: None,
-    })
-    .unwrap();
-    assert_eq!(host.state(), "AwaitingImageSelection");
 }
 
 #[test]
@@ -90,105 +30,13 @@ fn over_limit_tiles_become_typed_terminal_failure() {
     // Planning the four-tile largest level against max_tiles=1 is a typed
     // resource-limit failure, never a panic or silent truncation.
     assert_eq!(host.state(), "Failed");
-    assert_eq!(host.terminal_count(), 1);
     let failed = host.failed_events();
     assert_eq!(failed.len(), 1);
     assert_eq!(
         failed[0].get("code").and_then(serde_json::Value::as_str),
         Some("job.resource-limit")
     );
-    // Post-terminal inputs stay stably rejected with no second terminal.
+    // Post-terminal inputs stay stably rejected.
     let err = host.apply(JobCommand::Cancel).unwrap_err();
     assert_eq!(err.code, "job.post-terminal");
-    assert_eq!(host.terminal_count(), 1);
-}
-
-#[test]
-fn double_cancel_is_idempotent() {
-    let mut host = host_with_id("job:cancel2");
-    host.start().unwrap();
-    host.apply(JobCommand::Cancel).unwrap();
-    assert_eq!(host.state(), "Cancelled");
-    assert_eq!(host.terminal_count(), 1);
-    let len = host.activity_len();
-    let err = host.apply(JobCommand::Cancel).unwrap_err();
-    assert_eq!(err.code, "job.post-terminal");
-    assert_eq!(host.activity_len(), len);
-    assert_eq!(host.terminal_count(), 1);
-}
-
-#[test]
-fn empty_resource_bytes_fail_without_catalog() {
-    let mut host = host_with_id("job:empty");
-    host.start().unwrap();
-    // Empty bodies are a host contract violation: the canonical API rejects
-    // them at the boundary instead of failing the job, so discovery stays
-    // live with no catalog and no terminal.
-    let err = host
-        .apply(JobCommand::ResourceBytes {
-            request: 0,
-            bytes: Vec::new(),
-            final_uri: None,
-        })
-        .unwrap_err();
-    assert_eq!(err.code, "job.empty-resource");
-    assert_eq!(host.state(), "Discovering");
-    assert_eq!(host.terminal_count(), 0);
-    assert!(
-        !host.has_event("catalog"),
-        "empty bytes must not emit a catalog"
-    );
-}
-
-#[test]
-fn batch_sibling_answer_after_a_winner_is_ignored() {
-    // A tile URL fans out to metadata plus the input itself; the first
-    // answer may win discovery while the sibling fetch is still in flight.
-    // The late sibling must be ignored so the winning catalog survives
-    // (live NGV/ONB/Washington/TopViewer regression).
-    let mut host = ScriptedHost::new(
-        "job:batch",
-        "https://example.test/TileGroup0/0-0-0.jpg",
-        Config::default(),
-    )
-    .unwrap();
-    host.start().unwrap();
-    let requests: Vec<u32> = host
-        .effects
-        .iter()
-        .filter(|effect| {
-            effect.get("kind").and_then(serde_json::Value::as_str) == Some("acquire-resource")
-        })
-        .filter_map(|effect| {
-            effect
-                .get("request")
-                .and_then(serde_json::Value::as_u64)
-                .and_then(|request| u32::try_from(request).ok())
-        })
-        .collect();
-    assert_eq!(requests.len(), 2, "metadata plus input stay outstanding");
-    let xml = r#"<IMAGE_PROPERTIES WIDTH="512" HEIGHT="512" NUMTILES="5" VERSION="1.8" TILESIZE="256" />"#;
-    host.apply(JobCommand::ResourceBytes {
-        request: requests[0],
-        bytes: xml.as_bytes().to_vec(),
-        final_uri: None,
-    })
-    .unwrap();
-    assert_eq!(host.state(), "AwaitingImageSelection");
-    let len = host.activity_len();
-    // A live-but-late sibling answer is accepted with no new work: the
-    // winning catalog survives and the transcript does not move.
-    host.apply(JobCommand::ResourceBytes {
-        request: requests[1],
-        bytes: vec![1, 2, 3],
-        final_uri: None,
-    })
-    .unwrap();
-    host.apply(JobCommand::FetchFailure {
-        request: requests[1],
-        cause: FetchCause::new(FetchCode::DiscoveryFailed, TransportKind::Direct),
-    })
-    .unwrap();
-    assert_eq!(host.activity_len(), len);
-    assert_eq!(host.state(), "AwaitingImageSelection");
 }

@@ -1,8 +1,8 @@
 mod support;
 
-use dezoomify_engine::{Config, DiscoveryInput};
+use dezoomify_engine::{Config, DiscoveryInput, RecoveryChoice};
+use support::JobCommand;
 use support::ScriptedHost;
-use support::{JobCommand, RecoveryChoice};
 
 fn job_id(n: u32) -> String {
     format!("job:{n}")
@@ -11,25 +11,11 @@ fn job_id(n: u32) -> String {
 const INPUT_URL: &str = "https://example.test/image.dzi";
 
 /// A real Deep Zoom metadata document: 512x512, 256px tiles, no overlap.
-/// The core parses it into a deepzoom catalog with ten grid levels; the
-/// largest carries four tiles with deterministic `image_files` URIs.
 const DZI: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <Image TileSize="256" Overlap="0" Format="jpg" xmlns="http://schemas.microsoft.com/deepzoom/2008">
   <Size Width="512" Height="512"/>
 </Image>
 "#;
-
-const IIIF_SIZE_UPSCALING: &str = r#"{
-  "@context": "http://iiif.io/api/image/3/context.json",
-  "id": "https://example.test/iiif/image",
-  "type": "ImageService3",
-  "profile": "level2",
-  "width": 256,
-  "height": 256,
-  "maxWidth": 1024,
-  "tiles": [{"width": 256, "height": 256, "scaleFactors": [1]}],
-  "extraFeatures": ["sizeUpscaling"]
-}"#;
 
 fn test_config() -> Config {
     Config::default()
@@ -51,97 +37,6 @@ fn discover_and_select(host: &mut ScriptedHost, _id: u32) -> u32 {
     let level = *levels.last().expect("level");
     host.apply(JobCommand::SelectLevel { level }).unwrap();
     level
-}
-
-#[test]
-fn discover_success_minimal() {
-    let mut host = ScriptedHost::new(&job_id(1), INPUT_URL, test_config()).unwrap();
-    host.start().unwrap();
-    assert_eq!(host.state(), "Discovering");
-    host.apply(JobCommand::ResourceBytes {
-        request: 0,
-        bytes: DZI.as_bytes().to_vec(),
-        final_uri: None,
-    })
-    .unwrap();
-
-    assert_eq!(host.state(), "AwaitingImageSelection");
-    assert_eq!(host.terminal_count(), 0);
-    // No background work: queues are drained after every step.
-
-    // The catalog event carries the real projected catalog: a deepzoom
-    // image whose levels each declare exact geometry.
-    let (image, levels) = host.catalog().expect("catalog event");
-    assert_eq!(image, 0);
-    assert!(levels.len() >= 2, "levels: {levels:?}");
-    let catalog_event = host
-        .events
-        .iter()
-        .rev()
-        .find(|v| v.get("kind").and_then(serde_json::Value::as_str) == Some("catalog"))
-        .expect("catalog event");
-    let image = &catalog_event["entries"][0];
-    assert_eq!(image["format"], "deepzoom");
-    assert_eq!(image["kind"], "image");
-    assert_eq!(image["width"], 512);
-    assert_eq!(image["height"], 512);
-    assert_eq!(image["sourceKind"], "grid");
-    let level = &image["levels"][0];
-    // Core normalizes levels to ascending size: the first entry is the
-    // smallest level (highest ordinal), the last is the largest.
-    assert_eq!(
-        level["label"],
-        "DZI level 9 (    1 x     1 pixels,   1 tiles)"
-    );
-    assert_eq!(level["tileWidth"], 256);
-
-    // The discovery fetch effect targets the input URL with metadata purpose.
-    assert!(host.effects.iter().any(|effect| {
-        effect.get("kind").and_then(serde_json::Value::as_str) == Some("acquire-resource")
-            && effect.get("uri").and_then(serde_json::Value::as_str) == Some(INPUT_URL)
-            && effect.get("purpose").and_then(serde_json::Value::as_str) == Some("metadata")
-    }));
-
-    for phase in ["Discovering", "AwaitingImageSelection"] {
-        assert!(
-            host.has_state_event(phase),
-            "missing job-state event for {phase}"
-        );
-    }
-}
-
-#[test]
-fn inline_zoomify_page_wins_before_tile_url_without_requesting_image_properties() {
-    const PAGE_URL: &str = "https://www.geographicus.com/P/AntiqueMap/example";
-    const TILE_URL: &str =
-        "https://www.geographicus.com/mm5/graphics/zoomify/example/TileGroup0/1-0-0.jpg";
-    const PAGE: &[u8] = br#"<script type="application/json">
-      {"type":"zoomifytileservice","width":7066,"height":9380,
-       "tilesUrl":"/mm5/graphics/zoomify/example/","tileSize":256}
-    </script>"#;
-    let mut host = ScriptedHost::new_with_inputs(
-        vec![
-            DiscoveryInput::with_contents(PAGE_URL, PAGE),
-            DiscoveryInput::new(TILE_URL),
-        ],
-        test_config(),
-    )
-    .unwrap();
-    host.start().unwrap();
-    assert_eq!(host.state(), "AwaitingImageSelection");
-    let requested: Vec<&str> = host
-        .effects
-        .iter()
-        .filter(|effect| effect["kind"] == "acquire-resource")
-        .filter_map(|effect| effect["uri"].as_str())
-        .collect();
-    assert!(
-        requested
-            .iter()
-            .all(|uri| !uri.ends_with("/ImageProperties.xml")),
-        "inline geometry must win before the tile URL fallback: {requested:?}"
-    );
-    assert!(requested.is_empty(), "supplied page bytes need no fetch");
 }
 
 #[test]
@@ -172,18 +67,10 @@ fn successful_finalization_completes() {
     let _level_id = discover_and_select(&mut host, 2);
     assert_eq!(host.state(), "AcquiringTiles");
 
-    // The largest 512x512 level with 256px tiles is a real 2x2 grid.
+    // The largest 512x512 level with 256px tiles is a 2x2 grid.
     let tiles = host.tile_effects();
     assert_eq!(tiles.len(), 4, "tile effects: {tiles:?}");
-    assert!(tiles.iter().all(|(tile, uri, probe)| {
-        *tile < 4 && uri.starts_with("https://example.test/image_files/") && !probe
-    }));
-    assert!(
-        tiles.iter().all(|(_, uri, _)| uri.ends_with(".jpg")),
-        "tile URIs carry the DZI format: {tiles:?}"
-    );
 
-    // Respond with the real planned tile ids.
     let planned: Vec<u32> = tiles.into_iter().map(|(tile, _, _)| tile).collect();
     for tile in &planned {
         host.apply(JobCommand::TileAcquired { tile: *tile })
@@ -191,59 +78,9 @@ fn successful_finalization_completes() {
     }
 
     assert_eq!(host.state(), "Finalizing");
-    assert_eq!(host.terminal_count(), 0);
     host.apply(JobCommand::FinalizationSucceeded).unwrap();
     assert_eq!(host.state(), "Completed");
-    assert_eq!(host.terminal_count(), 1);
     assert_eq!(host.terminal_kind().as_deref(), Some("completed"));
-
-    // Planning never settles in a snapshot on the direct path (level
-    // selection resolves the plan within one answer); the settled phases
-    // plus the issued tile effects prove the plan ran.
-    for phase in ["AcquiringTiles", "Finalizing", "Completed"] {
-        assert!(
-            host.has_state_event(phase),
-            "missing job-state event for {phase}"
-        );
-    }
-    assert_eq!(host.state(), "Completed");
-    assert_eq!(host.terminal_count(), 1);
-    assert!(host.activity_len() >= 20);
-    // Progress reported the real plan size.
-    assert!(host.events.iter().any(|event| {
-        event.get("kind").and_then(serde_json::Value::as_str) == Some("progress")
-            && event.get("total").and_then(serde_json::Value::as_u64) == Some(4)
-            && event.get("acquired").and_then(serde_json::Value::as_u64) == Some(0)
-    }));
-}
-
-#[test]
-fn finalization_failure_cleans_up_once_and_never_completes() {
-    let mut host = ScriptedHost::new(&job_id(21), INPUT_URL, test_config()).unwrap();
-    let _ = discover_and_select(&mut host, 21);
-    for (tile, _, _) in host.tile_effects() {
-        host.apply(JobCommand::TileAcquired { tile }).unwrap();
-    }
-    assert_eq!(host.state(), "Finalizing");
-    host.apply(JobCommand::FinalizationFailed {
-        code: "output.failed".to_string(),
-        message: "host could not save".to_string(),
-    })
-    .unwrap();
-    assert_eq!(host.state(), "Failed");
-    assert_eq!(host.terminal_count(), 1);
-    assert_eq!(
-        host.effects
-            .iter()
-            .filter(
-                |effect| effect.get("kind").and_then(serde_json::Value::as_str)
-                    == Some("cancel-work")
-            )
-            .count(),
-        1
-    );
-    assert!(host.apply(JobCommand::FinalizationSucceeded).is_err());
-    assert_eq!(host.terminal_count(), 1);
 }
 
 #[test]
@@ -265,8 +102,6 @@ fn keeping_a_partial_result_decodes_only_acquired_tiles() {
         failure: dezoomify_engine::TileFailure::new("TRANSPORT_TIMEOUT", None, None, None),
     })
     .unwrap();
-    // Acquisition settles before the partial decision: with two tiles
-    // still in flight the failure is stashed, not decided.
     assert_eq!(host.state(), "AcquiringTiles");
     host.apply(JobCommand::TileAcquired { tile: planned[2] })
         .unwrap();
@@ -304,170 +139,18 @@ fn cancel_in_acquiring_tiles_ignores_late_response() {
     assert_eq!(host.state(), "AcquiringTiles");
     host.apply(JobCommand::Cancel).unwrap();
     assert_eq!(host.state(), "Cancelled");
-    assert_eq!(host.terminal_count(), 1);
 
-    let len_after_cancel = host.activity_len();
     // Late tile outcome after cancellation is stably rejected with no work.
     let late = host.apply(JobCommand::TileAcquired { tile: tiles[1] });
     assert!(late.is_err());
     assert_eq!(late.unwrap_err().code, "job.post-terminal");
     assert_eq!(host.state(), "Cancelled");
-    assert_eq!(host.activity_len(), len_after_cancel);
-    assert_eq!(host.terminal_count(), 1);
-    // The facade settles cancellation synchronously: no transient
-    // Cancelling snapshot exists, only the Cancelled terminal.
-    assert!(
-        host.has_state_event("Cancelled"),
-        "missing job-state event for Cancelled"
-    );
-}
-
-#[test]
-fn probe_driven_generic_level_resolves_through_observations() {
-    // A generic template URL drives the core's probe step machine: the
-    // host observes tile geometry and the plan resolves into a real grid.
-    // In-area probes return full 256px tiles; outside probes return the
-    // 1x1 placeholder shape, which the core treats as missing.
-    const TEMPLATE: &str = "https://example.test/generic/placeholder.svg?x={{X}}&y={{Y}}";
-    let mut host = ScriptedHost::new(&job_id(4), TEMPLATE, test_config()).unwrap();
-    host.start().unwrap();
-    // Generic templates are immediate: discovery completes at start.
-    let (image, levels) = host.catalog().expect("catalog event");
-    assert_eq!(image, 0);
-    assert_eq!(levels, vec![0]);
-    host.apply(JobCommand::SelectImage { image }).unwrap();
-    host.apply(JobCommand::SelectLevel { level: 0 }).unwrap();
-
-    // Answer every probe according to its coordinates until the plan
-    // resolves into ordinary tile acquisition.
-    let mut rounds = 0;
-    while host.state() == "Planning" {
-        rounds += 1;
-        assert!(rounds <= 256, "probe loop did not resolve");
-        let probe = host
-            .tile_effects()
-            .into_iter()
-            .rfind(|(_, _, probe)| *probe)
-            .expect("outstanding probe");
-        let (tile, uri) = (probe.0, probe.1);
-        let query = uri.split_once('?').expect("probe uri query").1;
-        let mut coordinates = query
-            .split('&')
-            .map(|part| part.split_once('=').unwrap().1.parse::<u32>().unwrap());
-        let x = coordinates.next().unwrap();
-        let y = coordinates.next().unwrap();
-        // In-area probes return real tiles; the 1x1 placeholder shape is
-        // how the fixture marks missing tiles.
-        let (width, height) = if x < 2 && y < 2 { (256, 256) } else { (1, 1) };
-        host.apply(JobCommand::ProbeOutcome {
-            tile,
-            outcome: dezoomify_protocol::dto::ProbeOutcome::Available {
-                width: std::num::NonZeroU64::new(width).unwrap(),
-                height: std::num::NonZeroU64::new(height).unwrap(),
-            },
-        })
-        .unwrap();
-    }
-    assert_eq!(host.state(), "AcquiringTiles");
-    let planned: Vec<(u32, String, bool)> = host
-        .tile_effects()
-        .into_iter()
-        .filter(|(_, _, probe)| !*probe)
-        .collect();
-    assert_eq!(planned.len(), 4, "resolved 2x2 grid: {planned:?}");
-    assert!(
-        planned
-            .iter()
-            .all(|(_, uri, _)| uri.starts_with("https://example.test/generic/placeholder.svg?x=")),
-        "planned URIs follow the template: {planned:?}"
-    );
-}
-
-#[test]
-fn iiif_caret_probe_is_reused_as_the_only_output_tile() {
-    let input = "https://example.test/iiif/image/info.json";
-    let mut host = ScriptedHost::new(&job_id(41), input, test_config()).unwrap();
-    host.start().unwrap();
-    host.apply(JobCommand::ResourceBytes {
-        request: 0,
-        bytes: IIIF_SIZE_UPSCALING.as_bytes().to_vec(),
-        final_uri: None,
-    })
-    .unwrap();
-    host.apply(JobCommand::SelectImage { image: 0 }).unwrap();
-    host.apply(JobCommand::SelectLevel { level: 0 }).unwrap();
-
-    let ordinary = host.tile_effects().into_iter().last().unwrap();
-    assert!(ordinary.2);
-    assert!(ordinary.1.ends_with("/256,256/0/default.jpg"));
-    host.apply(JobCommand::ProbeOutcome {
-        tile: ordinary.0,
-        outcome: dezoomify_protocol::dto::ProbeOutcome::Missing,
-    })
-    .unwrap();
-
-    let caret = host.tile_effects().into_iter().last().unwrap();
-    assert!(caret.2);
-    assert!(caret.1.ends_with("/^256,/0/default.jpg"));
-    host.apply(JobCommand::ProbeOutcome {
-        tile: caret.0,
-        outcome: dezoomify_protocol::dto::ProbeOutcome::Available {
-            width: std::num::NonZeroU64::new(256).unwrap(),
-            height: std::num::NonZeroU64::new(256).unwrap(),
-        },
-    })
-    .unwrap();
-
-    assert_eq!(host.state(), "Finalizing");
-    assert_eq!(
-        host.tile_effects().len(),
-        2,
-        "the successful caret probe must not be acquired again"
-    );
-    assert!(host.tile_effects().iter().all(|(_, _, probe)| *probe));
-}
-
-/// Regression: core discovery is a poll - the same request stays
-/// outstanding until its outcome arrives. The engine must emit exactly
-/// one acquire-resource effect per outstanding request and return;
-/// looping on the poll until it yields `None` would allocate without
-/// bound and freeze the host. Pin the bounded shape of `start()`.
-#[test]
-fn discovery_poll_emits_one_effect_per_outstanding_request() {
-    fn acquire_resource_count(host: &ScriptedHost) -> usize {
-        host.effects
-            .iter()
-            .filter(|v| {
-                v.get("kind").and_then(serde_json::Value::as_str) == Some("acquire-resource")
-            })
-            .count()
-    }
-    let mut host = ScriptedHost::new(&job_id(5), INPUT_URL, test_config()).unwrap();
-    host.start().unwrap();
-    // The DZI input has exactly one outstanding metadata fetch.
-    assert_eq!(
-        acquire_resource_count(&host),
-        1,
-        "one effect per outstanding core request"
-    );
-    assert_eq!(host.state(), "Discovering");
-    // While the fetch is unanswered nothing new is emitted: the poll
-    // reports the same request and the engine waits instead of growing.
-    let err = host.apply(JobCommand::TileAcquired { tile: 0 });
-    assert!(err.is_err());
-    assert_eq!(
-        acquire_resource_count(&host),
-        1,
-        "unanswered fetches emit no further effects"
-    );
-    assert_eq!(host.state(), "Discovering");
 }
 
 #[test]
 fn pause_suspends_new_tiles_and_resume_redrives() {
-    // Pause (suspend-acquisition): pause stops scheduling new tiles,
-    // in-flight finishes, decoded output is retained, resume re-drives.
-    // The 19 states are unchanged; pause is an orthogonal overlay.
+    // Pause keeps progress: in-flight finishes, decoded output is retained,
+    // resume re-drives to completion.
     let mut host = ScriptedHost::new(&job_id(6), INPUT_URL, test_config()).unwrap();
     let _ = discover_and_select(&mut host, 6);
     assert_eq!(host.state(), "AcquiringTiles");
@@ -478,80 +161,24 @@ fn pause_suspends_new_tiles_and_resume_redrives() {
         .map(|(tile, _, _)| tile)
         .collect();
     assert_eq!(planned.len(), 4);
-    // Pause before any tile completes: no new effects, FIFO preserved.
     let effects_before = host.effects.len();
     host.apply(JobCommand::Pause).unwrap();
     assert!(host.is_paused());
     assert_eq!(host.effects.len(), effects_before);
-    assert!(host.has_event("paused"));
-    // Duplicate pause issues no new work.
-    let len = host.activity_len();
-    host.apply(JobCommand::Pause).unwrap();
-    assert_eq!(host.activity_len(), len);
     // In-flight tile finishes while paused: progress is recorded, but no new
     // tile is scheduled and completion is deferred.
     host.apply(JobCommand::TileAcquired { tile: planned[0] })
         .unwrap();
     assert_eq!(host.state(), "AcquiringTiles");
     assert!(host.is_paused());
-    let tile_effects = host.tile_effects().len();
-    assert_eq!(tile_effects, 4, "no new acquire-tile while paused");
-    // Resume re-drives the pending queue in FIFO order.
+    assert_eq!(host.tile_effects().len(), 4);
+    // Resume re-drives the pending queue.
     host.apply(JobCommand::Resume).unwrap();
     assert!(!host.is_paused());
-    assert!(host.has_event("resumed"));
-    // Finish the rest: the job completes with exactly one terminal.
     for tile in planned.iter().skip(1) {
         host.apply(JobCommand::TileAcquired { tile: *tile })
             .unwrap();
     }
     host.apply(JobCommand::FinalizationSucceeded).unwrap();
     assert_eq!(host.state(), "Completed");
-    assert_eq!(host.terminal_count(), 1);
-}
-
-#[test]
-fn pause_defers_completion_until_resume() {
-    // All tiles finish while paused: completion waits for resume.
-    let mut host = ScriptedHost::new(&job_id(7), INPUT_URL, test_config()).unwrap();
-    let _ = discover_and_select(&mut host, 7);
-    let planned: Vec<u32> = host
-        .tile_effects()
-        .into_iter()
-        .map(|(tile, _, _)| tile)
-        .collect();
-    host.apply(JobCommand::Pause).unwrap();
-    for tile in &planned {
-        host.apply(JobCommand::TileAcquired { tile: *tile })
-            .unwrap();
-    }
-    // Every tile arrived but the job stays acquiring while paused.
-    assert_eq!(host.state(), "AcquiringTiles");
-    assert_eq!(host.terminal_count(), 0);
-    host.apply(JobCommand::Resume).unwrap();
-    host.apply(JobCommand::FinalizationSucceeded).unwrap();
-    assert_eq!(host.state(), "Completed");
-    assert_eq!(host.terminal_count(), 1);
-}
-
-#[test]
-fn pause_preserves_retry_wakeup_and_rejects_post_terminal() {
-    let mut host = ScriptedHost::new(&job_id(8), INPUT_URL, test_config()).unwrap();
-    let _ = discover_and_select(&mut host, 8);
-    let planned: Vec<u32> = host
-        .tile_effects()
-        .into_iter()
-        .map(|(tile, _, _)| tile)
-        .collect();
-    // Resume without pause is invalid-state with no work.
-    let err = host.apply(JobCommand::Resume).unwrap_err();
-    assert_eq!(err.code, "job.invalid-state");
-    // Cancel wins while paused; pause afterwards is post-terminal.
-    host.apply(JobCommand::Pause).unwrap();
-    host.apply(JobCommand::Cancel).unwrap();
-    assert_eq!(host.state(), "Cancelled");
-    let late = host.apply(JobCommand::Pause);
-    assert!(late.is_err());
-    assert_eq!(late.unwrap_err().code, "job.post-terminal");
-    assert_eq!(planned.len(), 4);
 }

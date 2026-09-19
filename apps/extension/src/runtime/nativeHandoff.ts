@@ -369,8 +369,8 @@ function validateJobBinding(job: unknown): job is NativeJobBinding {
     typeof candidate.documentGeneration === "string" && candidate.documentGeneration.length > 0 && candidate.documentGeneration.length <= MAX_TOKEN_LENGTH;
 }
 
-/** Legacy one-shot compatibility path for older callers/native hosts. */
-async function requestNativeHandoffLegacy(args: LegacyArgs) {
+/** Single direct handoff exchange (current protocol only, no version range). */
+async function requestNativeHandoffDirect(args: LegacyArgs) {
   let nativeCalls = 0;
   const fail = (code: string) => ({ ok: false, code, credentialSent: false, nativeCalls });
   const source = validateHandoffSource(args.sourceUrl);
@@ -545,6 +545,6 @@ async function requestNativeHandoffLegacy(args: LegacyArgs) {
 }
 
 export async function requestNativeHandoff(args: LegacyArgs | PortArgs) {
-  if (typeof args?.connectNative === "function") return requestNativeHandoffViaPort(args);
-  return requestNativeHandoffLegacy(args);
+  if (typeof args?.connectNative === "function") return requestNativeHandoffViaPort(args as PortArgs);
+  return requestNativeHandoffDirect(args as LegacyArgs);
 }

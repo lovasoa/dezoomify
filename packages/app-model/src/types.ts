@@ -1,24 +1,23 @@
 // Host-neutral application model: the shared job service contract.
 // React-free and host-global-free: no window, document, fetch, chrome,
 // tauri, localStorage, or canvas access. Hosts inject effects (the
-// HostRunner), storage (HistoryStore), and clocks (`now` callbacks); this
-// package owns identity, revision guards, sequencing, and shared history.
+// HostRunner); this package owns identity, validation, and shared history.
 //
 // Cross-language types are imported from the generated bindings and never
-// redeclared here. JobSnapshot is a client-side fold of generated JobEvents
-// (see snapshot.ts); if the protocol ever publishes a canonical snapshot,
-// this alias switches to it.
+// redeclared here. EngineSnapshotDto is the only job-state object: the
+// engine projects absolute snapshots, hosts forward them, and the shared UI
+// renders the latest one. Nothing here folds events or tracks revisions.
 
 import type {
   CatalogDto,
   EngineSnapshotDto,
   ErrorDto,
   JobCommand,
-  JobEvent,
   JobInputDto,
   JobState,
   RecoveryAction,
   SessionConfig,
+  SnapshotTerminalDto,
 } from "@dezoomify/wasm-bindings";
 
 export type {
@@ -26,11 +25,11 @@ export type {
   EngineSnapshotDto,
   ErrorDto,
   JobCommand,
-  JobEvent,
   JobInputDto,
   JobState,
   RecoveryAction,
   SessionConfig,
+  SnapshotTerminalDto,
 };
 
 // ---------------------------------------------------------------------------
@@ -80,72 +79,14 @@ export interface JobStartRequest {
 // Snapshots (authoritative UI state)
 // ---------------------------------------------------------------------------
 
-/** Current image/level selection; null until the engine offers a choice. */
-export interface JobSelection {
-  image: number | null;
-  level: number | null;
-}
-
-/** Terminal outcome. Set exactly once; late events after it are ignored. */
-export interface TerminalOutcome {
-  kind: "completed" | "partial-completed" | "failed" | "cancelled";
-  error?: ErrorDto;
-}
-
 /**
- * Honest output account. doneTiles counts finalized tiles only; failedTiles
- * counts tiles the engine gave up on; missingTiles names the gaps behind a
- * kept partial. partial is true only for PartiallyCompleted jobs.
- * siblingName is the basename of the `.partial` file actually written
- * (never the granted path), when the host reports one.
+ * Authoritative per-job state. This is the generated engine projection,
+ * unmodified: the shared UI renders the latest snapshot and never
+ * reconstructs phases from event walks. `revision` increases on every
+ * engine transition; stale revisions are dropped at the transport edge
+ * (the runner), never here.
  */
-export interface OutputSummary {
-  doneTiles: number;
-  totalTiles: number | null;
-  failedTiles: number;
-  partial: boolean;
-  format: string | null;
-  width: number | null;
-  height: number | null;
-  missingTiles: string[];
-  siblingName?: string;
-}
-
-/**
- * Outstanding recovery decision. actions are the typed choices the host may
- * offer; missing/failed/total carry the partial ledger when the host
- * reports one (desktop native recovery events).
- */
-export interface RecoveryRequest {
-  generation: number;
-  actions: RecoveryAction[];
-  missing?: string[];
-  failed?: number;
-  total?: number;
-}
-
-/**
- * Authoritative per-job state. Snapshots are absolute: the shared UI renders
- * the latest snapshot and never reconstructs phases from event walks.
- * revision increases on every applied event; observers drop stale revisions.
- */
-export interface JobSnapshot {
-  jobId: string;
-  revision: number;
-  state: JobState;
-  catalog: CatalogDto | null;
-  acquired: number;
-  total: number | null;
-  paused: boolean;
-  selection: JobSelection;
-  warnings: ErrorDto[];
-  recovery: RecoveryRequest | null;
-  terminal: TerminalOutcome | null;
-  output: OutputSummary | null;
-  /** True while tiles render as ordinary image elements with no byte access. */
-  displayOnly: boolean;
-  updatedAt: number;
-}
+export type JobSnapshot = EngineSnapshotDto;
 
 // ---------------------------------------------------------------------------
 // Host status (presentation only, never a phase machine)
@@ -194,9 +135,9 @@ export interface JobService {
 
 /**
  * Host-injected effect layer behind a JobService. start() runs the request,
- * emits ordered JobEvents plus host presentation state, and returns control.
- * The browser assembly and the native runner implement this; the service adds
- * identity and revision guards at the async subscription boundary.
+ * emits absolute engine snapshots plus host presentation state, and returns
+ * control. The browser assembly and the native runner implement this; the
+ * service only adds identity and validation, never state tracking.
  */
 export interface RunnerHandle {
   command(command: UserCommand): Promise<void>;
@@ -209,12 +150,10 @@ export interface HostRunner {
 }
 
 /**
- * Event sink behind a HostRunner: the legacy per-event channel plus the
- * absolute snapshot channel. Hosts consume both through the service fold;
- * the snapshot carries lifecycle, progress, decisions, and terminals, so
- * products render it instead of refolding the event stream.
+ * Snapshot sink behind a HostRunner: the single absolute channel. The DTO
+ * carries lifecycle, progress, decisions, and terminals; host presentation
+ * rides alongside and is never derived from UI state.
  */
 export interface RunnerSink {
-  event(event: JobEvent, host: HostStatus): void;
-  snapshot(snapshot: EngineSnapshotDto): void;
+  snapshot(snapshot: EngineSnapshotDto, host?: HostStatus): void;
 }
