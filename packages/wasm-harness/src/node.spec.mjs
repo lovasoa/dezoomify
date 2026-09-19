@@ -93,7 +93,10 @@ describe("generated typed WASM surface", () => {
     const disposed = session.dispose();
     assert.equal(disposed.status, "ok");
     assert.ok(disposed.messages.some((message) => message.type === "cancelled"));
-    assert.deepEqual(session.dispose(), { status: "ok", messages: [] });
+    assert.equal(disposed.snapshot.terminal.type, "cancelled");
+    const again = session.dispose();
+    assert.equal(again.status, "ok");
+    assert.deepEqual(again.messages, []);
   });
 
   it("carries discovery bodies directly in provide-resource", () => {

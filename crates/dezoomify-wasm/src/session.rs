@@ -165,13 +165,16 @@ impl Session {
         Ok(job.project_dto())
     }
 
-    /// Last projected snapshot (or the idle projection before start).
+    /// Last projected snapshot (or the idle projection before start). The
+    /// retained host failure context patches the terminal error, mirroring
+    /// the Failed event enrichment below, so the absolute snapshot never
+    /// discards what the event stream keeps.
     fn last_snapshot(&self) -> dezoomify_protocol::dto::EngineSnapshotDto {
         use dezoomify_protocol::dto::{
             EngineSnapshotDto, JobState as ProtocolJobState, SnapshotProgressDto,
             SnapshotSelectionDto,
         };
-        match &self.job {
+        let mut dto = match &self.job {
             Some(job) => job.project_dto(),
             None => EngineSnapshotDto {
                 revision: 0,
@@ -191,7 +194,23 @@ impl Session {
                 terminal: None,
                 output: None,
             },
+        };
+        self.patch_terminal_error(&mut dto);
+        dto
+    }
+
+    fn patch_terminal_error(&self, dto: &mut dezoomify_protocol::dto::EngineSnapshotDto) {
+        use dezoomify_protocol::dto::SnapshotTerminalDto;
+        let (Some(enriched), Some(SnapshotTerminalDto::Failed { error })) =
+            (&self.terminal_discovery_error, &mut dto.terminal)
+        else {
+            return;
+        };
+        let mut patched = enriched.clone();
+        if patched.detail.is_none() && patched.message != error.message {
+            patched.detail = Some(error.message.clone());
         }
+        *error = patched;
     }
 
     fn require_live(&self) -> Result<(), AdapterError> {
@@ -961,7 +980,8 @@ impl Session {
             dezoomify_engine::Terminal::Completed => JobEvent::Completed,
             dezoomify_engine::Terminal::PartiallyCompleted { .. } => JobEvent::PartialCompleted,
             dezoomify_engine::Terminal::Failed { code, message } => {
-                let error = if let Some(mut error) = self.terminal_discovery_error.take() {
+                let error = if let Some(enriched) = &self.terminal_discovery_error {
+                    let mut error = enriched.clone();
                     if error.detail.is_none() && error.message != *message {
                         error.detail = Some(message.clone());
                     }

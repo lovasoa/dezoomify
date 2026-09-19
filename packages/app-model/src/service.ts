@@ -85,6 +85,7 @@ export function createJobService(runner: HostRunner, opts?: ServiceOptions): Job
     observer.hostStatus(initialHostStatus());
 
     let settled = false;
+    let lastDtoRevision = 0;
     function publish(folded: JobSnapshot, host: HostStatus | null): void {
       if (folded === current) return;
       current = folded;
@@ -98,6 +99,14 @@ export function createJobService(runner: HostRunner, opts?: ServiceOptions): Job
       },
       snapshot(dto: EngineSnapshotDto): void {
         if (settled) return;
+        // Terminal snapshots always apply (exactly-once is enforced by
+        // the fold); live snapshots apply only when newer than the last
+        // one folded. DTO revisions live on the engine scale, so they
+        // gate here instead of in the fold.
+        if (!dto.terminal) {
+          if (dto.revision <= lastDtoRevision) return;
+          lastDtoRevision = dto.revision;
+        }
         publish(applySnapshotDto(current, dto, now()), null);
       },
     };
