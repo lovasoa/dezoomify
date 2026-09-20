@@ -80,7 +80,6 @@ fn check_protocol_boundaries(root: &Path) -> Result<(), String> {
         "packages/browser-runtime/src/worker-host.ts",
         "packages/browser-runtime/src/engine-host.ts",
         "apps/extension/src/job/index.ts",
-        "apps/extension/src/runtime/nativeHandoff.ts",
         "src/main.ts",
     ] {
         let text =

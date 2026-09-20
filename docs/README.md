@@ -53,6 +53,6 @@ Each fact lives once; every other page links to it:
 - [`crates/dezoomify-protocol`](protocol.md) is the Rust source for the generated TypeScript bindings used across the WASM boundary.
 - One shared [UI](architecture.md#packagesshared-ui) (React TSX) serves the website, desktop app, and extension.
 - Browser and native runtimes implement the same capabilities honestly; unsupported operations are reported before a job starts.
-- Cookies move only from the extension to native after explicit, scoped consent; ordinary handoffs contain no secrets.
+- The extension never transfers browser cookies to another app. Desktop deep links are revalidated and confirmed before they start work.
 - Every user-visible failure has a stable error code and zero or more typed [recovery actions](errors.md#recovery-actions).
 - Contract pages use present tense as invariants and carry no staleness markers. Open work lives in [`plans/`](../plans/), including the [legacy retirement](../plans/legacy-retirement.md) day-of-switch plan.

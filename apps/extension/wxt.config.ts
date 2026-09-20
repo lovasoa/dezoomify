@@ -62,8 +62,7 @@ export default defineConfig({
     },
     name: "Dezoomify",
     optional_host_permissions: ["http://*/*", "https://*/*"],
-    optional_permissions: ["cookies"],
-    permissions: ["activeTab", "scripting", "nativeMessaging"],
+    permissions: ["activeTab", "scripting"],
     minimum_chrome_version: browser === "chrome" ? "140" : undefined,
   }),
   hooks: {

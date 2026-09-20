@@ -1,6 +1,6 @@
 # Releases
 
-One version covers core libraries, generated bindings, website, extension, CLI, and desktop artifacts, plus the Native Messaging range for independently installed extension and desktop builds.
+One version covers core libraries, generated bindings, website, extension, CLI, and desktop artifacts, plus the Native Messaging range for the standalone host and compatible clients.
 
 ```mermaid
 flowchart TD
@@ -14,11 +14,11 @@ flowchart TD
 
 ## Versioning
 
-One version names a tested source revision across all apps. `cargo xtask release version` derives it from Git: `vX.Y.Z` is `X.Y.Z`; each following first-parent commit bumps `Z`. Manifests author no versions; builds receive the derived value as `DEZOOMIFY_VERSION`. Extension-to-desktop Native Messaging versions independently, since those two installed products update at different times. WASM bindings ship with their browser product from the same revision and version nothing on their own.
+One version names a tested source revision across all apps. `cargo xtask release version` derives it from Git: `vX.Y.Z` is `X.Y.Z`; each following first-parent commit bumps `Z`. Manifests author no versions; builds receive the derived value as `DEZOOMIFY_VERSION`. The Native Messaging host version range is independent of app versions because the host and compatible clients may be installed separately. WASM bindings ship with their browser product from the same revision and version nothing on their own.
 
 ## Compatibility
 
-Extension and desktop run the [version check](protocol.md#native-messaging-version-check) before any consent or credential message. An out-of-range peer stops safely with an update action. Handoff input carries its app version; receivers reject unsupported or expired data before confirmation or effects. Only the extension-to-native channel requests scoped-cookie consent.
+The standalone Native Messaging host runs the [version check](protocol.md#native-messaging-version-check) with compatible clients. An out-of-range peer stops safely. Deep-link input carries its app version; receivers reject unsupported or expired data before confirmation or effects. The shipped extension does not send credentials through Native Messaging.
 
 ## Release gates
 
@@ -32,7 +32,7 @@ A release candidate passes:
 - encoder output and large-image boundary tests;
 - website direct-first request-order and classified automatic proxy-fallback tests;
 - proxy public-resource eligibility, credential omission, redirect, and active-transport display audits;
-- extension permission, native cookie-consent, Native Messaging sender-authentication and replay-defense, redaction, and dependency audits.
+- extension permission, Native Messaging sender-authentication, redaction, and dependency audits.
 
 ## Pipeline
 

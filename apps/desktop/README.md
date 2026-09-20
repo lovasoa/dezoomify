@@ -1,15 +1,15 @@
 # Desktop Application (lean shell)
 
 Dezoomify native shell: validated deep links, command registry, job
-lifecycle table, capability manifests, framed Native Messaging handoff
-execution with origin-scoped cookies, and per-user initial registration
+lifecycle table, capability manifests, a standalone framed Native Messaging
+entry point for compatible clients, and per-user initial registration
 (Native Messaging manifests plus the `dezoomify://` protocol handler).
 
 - Shell: lean `src-tauri/` (pure Rust, no Tauri SDK vendored); frontend contract from `packages/shared-ui`.
 - Deep links are validated, bounded, and confirmed before any work starts.
-- Native handoff runs over length-prefixed Native Messaging: handshake,
-  one-use challenge/nonce sessions, explicit consent, single bounded cookie
-  message, sibling isolation, redacted diagnostics. See `src/native_host/`.
+- The shipped browser extension does not connect to Native Messaging. The
+  independently registered host retains its framed protocol for compatible
+  clients. See `src/native_host/`.
 - First-run registration is per-user only: `dezoomify-desktop
   --register-native-host` writes the manifests and protocol handler;
   `--check-native-host` inspects, `--unregister-native-host` cleans up.

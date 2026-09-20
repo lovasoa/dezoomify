@@ -245,9 +245,8 @@ pub fn test_native_messaging(args: &[String]) -> Result<(), String> {
         }
         return Ok(());
     }
-    // Protocol + secret-scope checks via extension unit tests, then real
-    // per-user registration inspection for the named engine. Browser-specific
-    // handshakes need installed browsers; unknown engines fail closed.
+    // Native-host framing and registration checks, then real per-user
+    // registration inspection for the named engine. Unknown engines fail closed.
     if let Some(name) = args.strip_prefix(&["--browser".to_string()]) {
         match name
             .first()
@@ -281,12 +280,5 @@ pub fn test_native_messaging(args: &[String]) -> Result<(), String> {
 }
 
 fn test_native_messaging_units() -> Result<(), String> {
-    super::command::cargo_test(&["-p", "xtask", "native_messaging::tests"])?;
-    super::command::node_test(
-        &[
-            "apps/extension/tests/unit/handoff.test.mjs",
-            "apps/extension/tests/unit/native-handoff.test.mjs",
-        ],
-        false,
-    )
+    super::command::cargo_test(&["-p", "xtask", "native_messaging::tests"])
 }

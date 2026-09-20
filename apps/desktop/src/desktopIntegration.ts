@@ -71,11 +71,6 @@ export interface SaveResult {
   readonly code?: string;
 }
 
-export interface HandoffRequest {
-  readonly sourceUrl: string;
-  readonly provenanceLabel: string;
-}
-
 // Structural counterpart of the shared UI AppIntegration contract:
 // capabilities, save behavior, external links, and handoff requests.
 // Routing and component composition stay shared.
@@ -83,44 +78,8 @@ export interface AppIntegration {
   readonly kind: "desktop";
   getCapabilities(): DesktopCapabilities;
   requestSaveDestination(req: SaveRequest): Promise<SaveResult>;
-  requestHandoff(handoff: HandoffRequest): Promise<{ accepted: boolean; reason: string }>;
   openExternalLink(url: string): Promise<{ opened: boolean; reason: string }>;
   describe(): string;
-}
-
-const SECRET_FRAGMENTS = [
-  "cookie",
-  "authorization",
-  "bearer",
-  "token",
-  "signature",
-  "sig",
-  "auth",
-  "key",
-  "secret",
-  "password",
-  "session",
-];
-
-function hasUserinfo(urlString: string): boolean {
-  try {
-    const u = new URL(urlString);
-    return u.username !== "" || u.password !== "";
-  } catch {
-    return true;
-  }
-}
-
-function hasSecretQuery(urlString: string): boolean {
-  try {
-    const u = new URL(urlString);
-    for (const k of u.searchParams.keys()) {
-      if (SECRET_FRAGMENTS.includes(k.toLowerCase())) return true;
-    }
-    return false;
-  } catch {
-    return true;
-  }
 }
 
 function isValidJobId(jobId: string): boolean {
@@ -225,40 +184,6 @@ export function createDesktopIntegration(opts?: {
     }
   }
 
-  // Handoff request validation: bounded non-secret source only, returning
-  // pending-confirmation. The caller must confirm before starting work;
-  // this function never starts work here.
-  async function requestHandoff(
-    handoff: HandoffRequest,
-  ): Promise<{ accepted: boolean; reason: string }> {
-    const src = handoff.sourceUrl;
-    if (typeof src !== "string" || src.length === 0 || src.length > 2048) {
-      return { accepted: false, reason: "handoff.rejected:oversize" };
-    }
-    let u: URL;
-    try {
-      u = new URL(src);
-    } catch {
-      return { accepted: false, reason: "handoff.rejected:invalid-url" };
-    }
-    if (u.protocol !== "https:" && u.protocol !== "http:") {
-      return { accepted: false, reason: "handoff.rejected:scheme" };
-    }
-    if (hasUserinfo(src)) {
-      return { accepted: false, reason: "handoff.rejected:userinfo" };
-    }
-    if (hasSecretQuery(src)) {
-      return { accepted: false, reason: "handoff.rejected:secret-query" };
-    }
-    const lower = src.toLowerCase();
-    for (const needle of ["cookie", "authorization", "bearer", "file://", "/etc/", "c:\\"]) {
-      if (lower.includes(needle)) {
-        return { accepted: false, reason: `handoff.rejected:${needle}` };
-      }
-    }
-    return { accepted: true, reason: "pending-confirmation" };
-  }
-
   // Only explicit https links leave the app, through the opener plugin.
   // No remote content navigates inside the privileged window. Validation
   // runs first; the Tauri opener is invoked only for valid https URLs and
@@ -295,5 +220,5 @@ export function createDesktopIntegration(opts?: {
     return `desktop native=${String(getCapabilities().nativeAvailable)} protocol=${PROTOCOL_MIN}`;
   }
 
-  return { kind: "desktop", getCapabilities, requestSaveDestination, requestHandoff, openExternalLink, describe };
+  return { kind: "desktop", getCapabilities, requestSaveDestination, openExternalLink, describe };
 }

@@ -51,6 +51,6 @@ The website always tries a direct browser fetch first, with a short 1500 ms
 window. If the direct fetch does not complete in time, it automatically retries
 eligible public metadata (never image tiles) through a same-origin metadata
 proxy. This proxy is visible in the UI and never carries cookies or
-credentials. The extension instead uses
-your browser session under permissions you grant; cookie handoff to the desktop
-app is a separate, explicitly consented step.
+credentials. The extension instead uses your browser session under
+permissions you grant; it does not transfer browser credentials to the
+desktop app.

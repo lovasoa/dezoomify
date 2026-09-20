@@ -2,7 +2,7 @@
   "name": "@dezoomify/extension",
   "private": true,
   "type": "module",
-  "description": "Dezoomify browser extension (Phase 12): finite active-tab scan, browser-session fetch, consented native handoff.",
+  "description": "Dezoomify browser extension: finite active-tab scan and browser-session fetch.",
   "scripts": {
     "test": "node --test-reporter=dot --test \"tests/unit/!(job-worker|manifest-policy).test.mjs\"",
     "test:unit": "node --test-reporter=dot --test \"tests/unit/!(job-worker|manifest-policy).test.mjs\"",

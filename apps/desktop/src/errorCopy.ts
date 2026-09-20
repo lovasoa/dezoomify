@@ -3,23 +3,16 @@
 // Pure: the host string and controller status arrive as parameters, so this
 // module owns no job state. File move, no behavior change.
 import { t } from "@dezoomify/shared-ui";
-
-
-export function isValidInputUrl(url: string): boolean {
-  if (typeof url !== "string") return false;
-  const trimmed = url.trim();
-  if (trimmed.length === 0 || trimmed.length > 2048) return false;
-  let parsed: URL;
-  try {
-    parsed = new URL(trimmed);
-  } catch {
-    return false;
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
-  if (parsed.username !== "" || parsed.password !== "") return false;
-  return true;
-}
-
+import {
+  isValidDeepLinkSource,
+  isValidInputUrl,
+} from "@dezoomify/app-model";
+export {
+  DEEP_LINK_SECRET_QUERY_KEYS,
+  hasSecretQueryParams,
+  isValidDeepLinkSource,
+  isValidInputUrl,
+} from "@dezoomify/app-model";
 
 // Redacted origin (scheme://host[:port]) for diagnostics and bug reports.
 // Never includes userinfo, path, query, or fragment; "" when unparseable.
@@ -137,79 +130,6 @@ export interface ValidatedDeepLink {
   sourceUrl: string;
   hint: string | null;
   version: number;
-}
-
-export const DEEP_LINK_SECRET_QUERY_KEYS = new Set([
-  "access-token",
-  "access_token",
-  "api-key",
-  "api_key",
-  "apikey",
-  "auth",
-  "authorization",
-  "bearer",
-  "code",
-  "cookie",
-  "cookies",
-  "credential",
-  "key",
-  "passwd",
-  "password",
-  "proxy-authorization",
-  "secret",
-  "session",
-  "sessionid",
-  "sessiontoken",
-  "set-cookie",
-  "sid",
-  "sig",
-  "signature",
-  "state",
-  "ticket",
-  "token",
-  "x-api-key",
-]);
-// Single shared vocabulary: mirrors `dezoomify_protocol::dto::SENSITIVE_QUERY_KEYS`,
-// `testdata/redaction-vectors.json`, and the generated Rust bindings.
-// Matching is exact per key (case-insensitive), never substring, so
-// `/cookie-recipe/` stays valid while `?token=secret` is rejected.
-
-export function hasSecretQueryParams(urlString: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(urlString);
-  } catch {
-    return true;
-  }
-  for (const key of parsed.searchParams.keys()) {
-    if (DEEP_LINK_SECRET_QUERY_KEYS.has(key.toLowerCase())) return true;
-  }
-  // Fragments never reach servers but can leak tokens in labels/logs.
-  if (parsed.hash) {
-    const fragment = parsed.hash.slice(1);
-    for (const pair of fragment.split("&")) {
-      const eq = pair.indexOf("=");
-      if (eq > 0) {
-        const key = pair.slice(0, eq).replace(/^[?#]+/, "");
-        if (DEEP_LINK_SECRET_QUERY_KEYS.has(key.toLowerCase())) return true;
-      }
-    }
-  }
-  return false;
-}
-
-// Deep-link source check: the shared input-URL shape plus the deep-link
-// non-secret rule (no secret query keys, no local-file/path markers).
-export function isValidDeepLinkSource(source: unknown): source is string {
-  if (typeof source !== "string") return false;
-  const trimmed = source.trim();
-  if (!isValidInputUrl(trimmed)) return false;
-  if (hasSecretQueryParams(trimmed)) return false;
-  const lower = trimmed.toLowerCase();
-  for (const needle of ["file://", "/etc/", "c:\\"]) {
-    if (lower.includes(needle)) return false;
-  }
-  return true;
 }
 
 export function normalizeDeepLinkHint(hint: unknown): string | null | undefined {

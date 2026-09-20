@@ -70,20 +70,8 @@ and press the Dezoomify toolbar button.
 - It uses your existing browser session, so images behind a sign-in work.
   Your credentials stay in your browser; Dezoomify never stores or sends
   them anywhere else.
-- If you choose to send a job to the desktop app, and that site needs your
-  sign-in there too, the extension asks for your explicit consent first and
-  passes the site's credentials directly to the desktop app on your own
-  computer. They stay in memory only.
-
-## Send to desktop app
-
-Saved results and display-only previews both offer a one-click
-**Send to desktop app** button in the result section. The button names the
-image origin; the approval dialog then names the destination origins, the
-cookie names (never the values), and the job, and notes that nothing is
-sent until confirmation. Declining keeps the job in the extension. Consent
-covers one job only and never carries over. The desktop app confirms again
-before anything runs.
+- Sign-in details stay in the browser. The extension does not transfer them
+  to the desktop app.
 
 ## Next steps
 

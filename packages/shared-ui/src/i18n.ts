@@ -220,14 +220,9 @@ const en = {
   // Display-only section.
   "view.display.title": "Showing preview – not saved yet",
   "view.display.openDesktop": "Open in desktop app",
-  // One-click desktop handoff (todo 5.5): the button names the origin and the
-  // summary names scope/recipient/job memory-only, mirroring the extension
-  // consent pattern (origins, cookie names, job). The desktop app confirms
-  // again before any effect; declining there does nothing.
+  // Desktop handoff uses the ordinary, user-confirmed dezoomify:// link.
   "view.handoff.send": "Send to desktop app",
   "view.handoff.sendOrigin": "Send to desktop app ({origin})",
-  "view.handoff.summary":
-    "Sends {origin} to the desktop app. No sign-in details travel; one job only, kept in memory.",
   "view.handoff.localNote":
     "Local files stay on this computer. Open the desktop app and choose the file there; nothing is sent.",
   "view.display.waysTitle": "Ways to save this artwork",
@@ -532,17 +527,6 @@ const en = {
   "page.tabs.scan": "Scan {label}",
   "page.tabs.hint":
     "Open a page with a zoomable image, then click the Dezoomify toolbar button to scan that tab.",
-  "page.handoff.sendOrigin": "Send to desktop app ({origin})",
-  "page.handoff.stay": "Stay in extension",
-  "page.handoff.send": "Send to desktop app",
-  "page.handoff.title": "Send to desktop app?",
-  "page.handoff.host": "Host: {host}",
-  "page.handoff.origins": "Origins: {list}",
-  "page.handoff.originsNone": "Origins: (none)",
-  "page.handoff.cookies": "Cookies: {list}",
-  "page.handoff.cookiesNone": "Cookies: (none)",
-  "page.handoff.job": "Job: {id}",
-  "page.handoff.note": "Nothing is sent until you confirm. Declining keeps the job in the extension.",
   "page.ui.techDetails": "Technical details & logs",
 } as const;
 

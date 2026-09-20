@@ -119,14 +119,9 @@ export const de = {
   // Display-only section.
   "view.display.title": "Vorschau wird gezeigt, noch nicht gespeichert",
   "view.display.openDesktop": "In der Desktop-App offnen",
-  // One-click desktop handoff (todo 5.5): the button names the origin and the
-  // summary names scope/recipient/job memory-only, mirroring the extension
-  // consent pattern (origins, cookie names, job). The desktop app confirms
-  // again before any effect; declining there does nothing.
+  // Desktop handoff uses the ordinary, user-confirmed dezoomify:// link.
   "view.handoff.send": "An die Desktop-App senden",
   "view.handoff.sendOrigin": "An die Desktop-App senden ({origin})",
-  "view.handoff.summary":
-    "Sendet {origin} an die Desktop-App. Keine Anmeldedaten reisen mit; nur ein Auftrag, nur im Speicher.",
   "view.handoff.localNote":
     "Lokale Dateien bleiben auf diesem Rechner. Offnen Sie die Desktop-App und wahlen Sie dort die Datei; nichts wird gesendet.",
   "view.display.waysTitle": "Wege, dieses Kunstwerk zu speichern",
@@ -431,16 +426,5 @@ export const de = {
   "page.tabs.scan": "{label} lesen",
   "page.tabs.hint":
     "Offnen Sie eine Seite mit einem zoombaren Bild und klicken Sie dann auf die Dezoomify-Schaltflache, um diesen Tab zu lesen.",
-  "page.handoff.sendOrigin": "An die Desktop-App senden ({origin})",
-  "page.handoff.stay": "In der Erweiterung bleiben",
-  "page.handoff.send": "An die Desktop-App senden",
-  "page.handoff.title": "An die Desktop-App senden?",
-  "page.handoff.host": "Rechner: {host}",
-  "page.handoff.origins": "Herkunft: {list}",
-  "page.handoff.originsNone": "Herkunft: (keine)",
-  "page.handoff.cookies": "Cookies: {list}",
-  "page.handoff.cookiesNone": "Cookies: (keine)",
-  "page.handoff.job": "Auftrag: {id}",
-  "page.handoff.note": "Nichts wird gesendet, bis Sie bestatigen. Ablehnen belasst den Auftrag in der Erweiterung.",
   "page.ui.techDetails": "Technische Details und Protokolle",
 } as const;

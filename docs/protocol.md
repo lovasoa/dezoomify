@@ -48,22 +48,20 @@ Adapter faults (bad external input, session misuse) travel the separate `Dispatc
 
 ## Native Messaging version check
 
-The independently installed extension and desktop app perform an explicit version check.
+The standalone Native Messaging host checks protocol versions with compatible clients. The shipped browser extension does not contain a Native Messaging client and does not request the `nativeMessaging` or `cookies` permissions.
 
 ```mermaid
 sequenceDiagram
-    participant E as Extension
+    participant C as Compatible client
     participant N as Native host
-    E->>N: NativeHostRequest (generated)
+    C->>N: NativeHostRequest (generated)
     N->>N: reject unsupported version
-    N-->>E: version reply
-    E->>N: challenge + one-use nonce
-    N-->>E: bound consent session
-    E->>N: scoped cookies (after user consent)
-    N-->>E: job input accepted
+    N-->>C: version reply
+    C->>N: job request
+    N-->>C: accepted or typed rejection
 ```
 
-`NativeHostRequest` is generated from Rust; the native host rejects unsupported versions without translating schemas. Browser allowlisting authenticates the extension sender. Challenge plus one-use nonce bind one consented handoff and block replay. Website and deep-link handoffs are product inputs, not session ABI: validated as untrusted URLs. See [Extension](extension.md#native-handoff) and [Security](security.md).
+`NativeHostRequest` is generated from Rust; the native host rejects unsupported versions without translating schemas. Browser allowlisting authenticates a compatible browser sender. Website and deep-link handoffs are product inputs, not session ABI: the native app validates raw URLs as untrusted input. The current extension uses the ordinary deep-link route where offered and does not send browser cookies or auth headers to the native host. See [Native apps](native-apps.md) and [Security](security.md).
 
 ## Product capabilities
 
@@ -71,4 +69,4 @@ The website baseline reports encoders `[png, jpeg, tiff]`. Values belong to prod
 
 ## Handoff
 
-Handoff moves a job to another app via a bounded, secret-free `dezoomify://` link or allowlisted Native Messaging with explicit consent. Receivers treat handoff input as untrusted and confirm with the user before acting. Only the extension-to-native channel carries scoped cookies, and only after consent naming origins, scope, recipient, and job.
+Handoff moves a job to another app via a `dezoomify://` link or the standalone Native Messaging protocol. Receivers treat handoff input as untrusted and confirm deep-link input with the user before acting. Native Messaging clients provide their own authentication and consent policy; the shipped extension has no Native Messaging client.

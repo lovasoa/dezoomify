@@ -48,7 +48,7 @@ Focused aliases remain available for iteration:
 | `native` | native runtime and CLI Rust suites |
 | `desktop [--e2e-window]` | desktop Rust and Node suites; the option runs the explicit real-window gate instead |
 | `extension` | generated WASM/WXT, all extension units, and Chromium plus Firefox headless E2E |
-| `native-messaging` | framing, consent, scope, registration, and cleanup contracts |
+| `native-messaging` | framing, scope, registration, and cleanup contracts for the standalone host |
 | `scenario` | CLI snapshots and native scenario/loopback integration tests |
 | `perf [--smoke]` | native pipeline performance smoke and tracked benches |
 | `live` | explicit, advisory public compatibility checks |
@@ -104,7 +104,7 @@ The fixture server covers redirects, ranges, compression, cache validation, CORS
 
 Website transport tests pin direct-first: success makes no proxy request. Only classified CORS/network failure or the 1500 ms window activates proxy fallback, with no per-attempt consent; transport states and transitions are pinned too. Auth, ordinary HTTP, parse, and decode failures never activate it. Private, local, signed, token-bearing, or credential-requiring metadata is ineligible; tiles never use the proxy. Proxy tests pin credential stripping and the narrow header allowlist on both legs, plus manual redirect handling revalidating every hop. Canonical policy: [Browser runtime](browser-runtime.md#request-order). Proxy controls: [Security](security.md#proxy-controls).
 
-Extension tests pin narrow grants, no remote code, required CSP, explicit-action scans, finite capped operations, session fetch scope, lifecycle cleanup, and zero side effects after handoff replay/expiry/origin rejection. Chromium covers optional-host, authenticated fetch, and partial flows; both browsers run the packaged end-to-end job. Tainted-display tests keep `<img>` display visible while guarding pixel reads, hashing, `toBlob`, and `toDataURL` without readable bytes. Contract: [Extension](extension.md).
+Extension tests pin narrow grants, no remote code, required CSP, explicit-action scans, finite capped operations, session fetch scope, and lifecycle cleanup. Chromium covers optional-host, authenticated fetch, and partial flows; both browsers run the packaged end-to-end job. Tainted-display tests keep `<img>` display visible while guarding pixel reads, hashing, `toBlob`, and `toDataURL` without readable bytes. Contract: [Extension](extension.md).
 
 Live checks use no private credentials, bounded counts and rates, redacted reports. Memorix demo key: `DEZOOMIFY_MEMORIX_API_KEY`; fixture demo keys need `review:*` sensitivity. Public checks run only via `cargo xtask test live --public`; `cargo xtask test live --dry-run --fixtures` validates the inventory with no network. Quarantined targets stay visible in `crates/xtask/live-quarantine.json` and [Compatibility](compatibility.md), never silent failures or PR blockers. Failure-prone live shapes have deterministic recordings in the corpus. A target leaves only when the site is gone or the format is redesigned, reason in the commit.
 

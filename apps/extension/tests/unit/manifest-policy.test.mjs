@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const output = (browser) => new URL(`../../.output/${browser}-mv3/`, import.meta.url);
 const manifest = (browser) => JSON.parse(readFileSync(new URL("manifest.json", output(browser)), "utf8"));
-const REVIEWED_PERMISSIONS = ["activeTab", "scripting", "nativeMessaging"];
+const REVIEWED_PERMISSIONS = ["activeTab", "scripting"];
 
 for (const browser of ["chrome", "firefox"]) {
   test(`${browser}: WXT emits the reviewed MV3 manifest`, () => {
@@ -15,7 +15,7 @@ for (const browser of ["chrome", "firefox"]) {
     assert.match(value.version, /^\d+\.\d+\.\d+$/);
     assert.notEqual(value.version, "0.0.0");
     assert.deepEqual(value.permissions, REVIEWED_PERMISSIONS);
-    assert.deepEqual(value.optional_permissions, ["cookies"]);
+    assert.ok(value.optional_permissions === undefined || value.optional_permissions.length === 0);
     assert.deepEqual(value.optional_host_permissions, ["http://*/*", "https://*/*"]);
     assert.ok(value.host_permissions === undefined || value.host_permissions.length === 0);
     assert.equal(value.content_scripts, undefined);
