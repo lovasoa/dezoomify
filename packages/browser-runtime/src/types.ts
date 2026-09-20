@@ -107,7 +107,7 @@ export {
   DISPLAY_TRANSPORT_LABEL,
   NATIVE_TRANSPORT_LABEL,
   PROXY_TRANSPORT_LABEL,
-} from "./transport-labels.ts";
+} from "@dezoomify/app-model";
 
 export function saveCapabilityFor(originClean: boolean): SaveCapability {
   if (originClean) return { available: true };

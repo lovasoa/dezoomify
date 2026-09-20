@@ -16,7 +16,7 @@ Core runs as WASM inside the job tab. It evaluates captured DOM bytes before fet
 
 Readable bytes come from a tab-origin fetch under the narrowest grant: `activeTab` for the clicked tab, or an explicitly granted host permission for another origin or redirect target. Same-origin credentials apply, so the page's own session covers its origin while a public metadata server answering `Access-Control-Allow-Origin: *` stays readable. Metadata and requests for the bound source document's own origin try the tab origin first, so referrer- and cookie-protected same-origin tiles look like the viewer; a source-tab failure retries through the independent extension-origin transport, pausing for the grant only when missing. Cross-origin tiles always use the extension origin under a granted host permission. A granted-origin 401/403 fails typed with no re-prompt; grants fix no refusals. Every operation validates URL, method, headers, shape, and byte cap.
 
-The extension never uses the metadata proxy. Ordinary unprocessed tiles without readable bytes fall back to `<img>` display: visible but tainted, no reads or saves. Transport labels live in `packages/browser-runtime/src/transport-labels.ts`.
+The extension never uses the metadata proxy. Ordinary unprocessed tiles without readable bytes fall back to `<img>` display: visible but tainted, no reads or saves. Canonical transport labels and save-name helpers live in `packages/app-model`.
 
 ## Job and save
 

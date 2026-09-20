@@ -3,7 +3,7 @@
 //
 // Single policy module for the website: proxy eligibility, ordinary-image
 // rules, and error transport mapping. Pure, no I/O, no clocks.
-import { DIRECT_TRANSPORT_LABEL } from "./transport-labels.ts";
+import { DIRECT_TRANSPORT_LABEL } from "@dezoomify/app-model";
 import type { ProcessingRecipe } from "@dezoomify/wasm-bindings";
 
 export interface WebFetchRequest {
