@@ -1,5 +1,14 @@
 # Dezoomify architecture simplification: diagnosis and four-agent execution plan
 
+## Current execution constraints
+
+The following decisions supersede the original rollout instructions below:
+
+- Keep the legacy website unchanged at `/`; the new website stays at `/beta`.
+- Each concern has one implementation owner. Remove superseded implementations and their test-only APIs instead of retaining compatibility facades.
+- Automatic selection is an explicit start policy owned by the engine. Existing catalog snapshots and selection commands remain the integration boundary; no dormant picker UI or second manual-selection workflow is added.
+- Commit each complete cleanup independently. The coordinator scopes and reviews changes; Luna handles bounded implementation work.
+
 ## Objective and scope
 
 Replace repeated representations of the same job with one authoritative Rust engine, two execution layers, and a shared UI that renders engine snapshots. Preserve the four products and their useful behavior while removing incidental machinery.
