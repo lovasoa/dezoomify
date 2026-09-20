@@ -28,6 +28,8 @@ pub mod tile_info;
 mod title_tests;
 
 const ROUTES: &[DiscoveryRoute] = &[
+    DiscoveryMatch::UrlPredicate(|uri| image_request_info(uri).is_some())
+        .map_url(|uri| Ok(image_request_info(uri).expect("route matched IIIF image request"))),
     DiscoveryMatch::UrlPredicate(has_manifest_parameter).map_url(manifest_parameter),
     onb::ROUTE,
     contentdm::RECORD_ROUTE,
@@ -137,6 +139,31 @@ static HTML_BASE_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(r#"(?is)<base\s+[^>]*\bhref\s*=\s*["'](?P<base>[^"']*)"#)
         .expect("constant HTML base pattern")
 });
+static IMAGE_REQUEST_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(
+    r"(?i)^(?P<base>https?://[^/?#]+/[^?#]+)/(?:full|square|\d+(?:,\d+){3}|pct:[\d.]+(?:,[\d.]+){3})/(?:\^?(?:max|full|\d+,\d+|\d+,|,\d+|pct:[\d.]+)|\^!?\d+,\d+)/!?\d+(?:\.\d+)?/[\w-]+\.(?:jpe?g|png|tiff?|webp|jp2|gif)(?P<query>\?[^#]*)?(?:#.*)?$",
+).expect("constant IIIF image request pattern")
+});
+
+fn image_request_info(uri: &str) -> Option<Request> {
+    let c = IMAGE_REQUEST_RE.captures(uri)?;
+    Some(Request::new(format!(
+        "{}/info.json{}",
+        &c["base"],
+        c.name("query").map_or("", |q| q.as_str())
+    )))
+}
+
+#[test]
+fn direct_image_request_url_maps_to_info_json() {
+    let uri = "https://img.example/iiif/item.tif/0,0,256,256/256,256/0/default.jpg?v=1";
+    let mut discovery = crate::core::registry_for("iiif").unwrap().start(uri);
+    assert_eq!(
+        discovery.next_priority_need().unwrap().unwrap().request.uri,
+        "https://img.example/iiif/item.tif/info.json?v=1"
+    );
+    assert!(image_request_info("https://img.example/photo.jpg").is_none());
+}
 
 /// At most this many harvested references are ranked; only the best is followed.
 const MAX_HARVESTED_INFO_JSON_URLS: usize = 8;
