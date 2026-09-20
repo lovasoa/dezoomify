@@ -4,6 +4,7 @@
   "type": "module",
   "packageManager": "pnpm@9.12.0",
   "dependencies": {
+    "@dezoomify/app-model": "workspace:*",
     "@dezoomify/wasm-bindings": "workspace:*",
     "markdown-it": "15.0.2",
     "react": "^19",
