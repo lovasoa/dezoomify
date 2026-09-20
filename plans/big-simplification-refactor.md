@@ -44,7 +44,7 @@ Owner: coordinator review, Luna for corrections. Implementation is present in en
 
 ### 3. Finish and commit removal of unreachable handoff code
 
-Owner: Luna, then coordinator review. Implementation is in progress; verify the final agent checkpoint before continuing.
+Owner: Luna, then coordinator review. Edits are paused in a stable checkpoint with no tests running. Fresh validation of the final handoff/dead-code edits has not run.
 
 - Delete the extension handoff/native-session implementations reached only by tests, plus their obsolete tests and unused `nativeMessaging`/cookie permissions. Verify manifest checks and test scripts follow the shipped extension behavior.
 - Preserve the real `dezoomify://` UI, desktop confirmation, and Rust native host. Do not wire a new cookie-transfer flow merely to justify dead code.
@@ -52,6 +52,8 @@ Owner: Luna, then coordinator review. Implementation is in progress; verify the 
 - Remove only unreachable shared-UI consent rendering/localized copy. Keep the working website deep-link button and desktop confirmation.
 - Correct extension, protocol, security, privacy, user, release, and acceptance documentation. Audit capability claims against shipped consumers; regenerate artifacts through their owner if required.
 - Review `xtask` architecture/native-messaging checks so deletion does not silently remove coverage of the shipped Rust host. Run the affected extension, desktop, UI, and handoff checks before committing.
+- Review the removed unused `desktopIntegration` handoff API as part of the same reachability check. Historical plans, frozen scenario descriptions, and protocol/Rust-host comments still need classification; preserve evidence without presenting it as current capability.
+- An earlier desktop lane encountered Rust type/removed-field errors while engine edits were concurrent. Earlier development-server, icon, and smoke checks reported failures without useful diagnostics in the dot output. Rerun on the settled tree with detailed output; these are unresolved validation results, not proven environment-only failures.
 
 ### 4. Commit the smaller browser dead-API cleanup
 
