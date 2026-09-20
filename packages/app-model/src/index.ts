@@ -3,6 +3,7 @@
 // the shared UI renders authoritative snapshots.
 export * from "./types.ts";
 export * from "./snapshot.ts";
+export * from "./sequential-queue.ts";
 export * from "./history.ts";
 export * from "./labels.ts";
 export * from "./service.ts";

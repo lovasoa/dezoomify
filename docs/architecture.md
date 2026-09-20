@@ -45,11 +45,11 @@ One React view (`.tsx`) for discovery, selection, progress, recovery, and output
 
 ### `packages/app-model`
 
-The host-neutral application model: the `JobService` contract, the snapshot predicates, shared history, and the canonical transport labels and save-name helpers. React-free with no host globals; hosts inject effects, storage, and clocks. Queues live in the products' integration layers. See [Application model](app-model.md).
+The host-neutral application model: the `JobService` contract, snapshot predicates, shared FIFO queue semantics, shared history, and canonical transport labels and save-name helpers. React-free with no host globals; hosts inject effects, storage, and clocks. Products own queue input validation, payloads, progress, and presentation metadata. See [Application model](app-model.md).
 
 ### `packages/browser-runtime`
 
-The browser effect layer: workers, fetching, decoding, tile painting, canvases, save surfaces, and an optional bounded cache. The website and the extension job tab share one browser runner (`browser-runner.ts`, `createBrowserRunner`) over the engine host (`engine-host.ts`) and WASM, and differ only in transport and output surface. It owns no job policy. See [Browser runtime](browser-runtime.md).
+The browser effect layer: workers, fetching, decoding, tile painting, canvases, and save surfaces. The website and the extension job tab share one browser runner (`browser-runner.ts`, `createBrowserRunner`) over the engine host (`engine-host.ts`) and WASM, and differ only in transport and output surface. It owns no job policy. See [Browser runtime](browser-runtime.md).
 
 ```mermaid
 flowchart LR
