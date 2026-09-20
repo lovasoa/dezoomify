@@ -9,6 +9,88 @@ The following decisions supersede the original rollout instructions below:
 - Automatic selection is an explicit start policy owned by the engine. Existing catalog snapshots and selection commands remain the integration boundary; no dormant picker UI or second manual-selection workflow is added.
 - Commit each complete cleanup independently. The coordinator scopes and reviews changes; Luna handles bounded implementation work.
 
+## Next session: 2026-09-21
+
+### Constraints and starting point
+
+- Coordinate and review centrally; give Luna a bounded implementation task with explicit file ownership, behavior to preserve, and acceptance checks. Do not start another broad rewrite.
+- Keep `/` unchanged and the new website at `/beta`.
+- One implementation owns each concern. Keep catalog data and the existing selection command boundary usable by a future picker, but add no dormant picker, manual-selection procedure, feature flag, or speculative API.
+- Commit each complete fix separately. Do not stage the entire current working tree: several checkpoints overlap in shared files.
+- Yesterday's pushed CI result is accepted. Validate today's new changes once the tree is stable; do not report the aggregate as passed based on focused tests.
+
+Eight commits are complete, from `3ef2117c` through `4a866561`: removal of the unused desktop URL field; focused format regressions and corrected coverage claims; one tile descriptor owner; Git-based prose inventory; shared naming/labels; one local CI aggregate; shared graphical FIFO queue; and corrected architecture constraints. Pending code below remains uncommitted at this checkpoint.
+
+### 1. Review and commit the browser selection checkpoint
+
+Owner: coordinator review, Luna for corrections. Implementation is present.
+
+- Review `engine_api.rs`, the protocol DTO, WASM mapping, website start request, and extension start request together. Automatic browser selection is an explicit engine policy; the generic browser runner must not silently impose it.
+- Preserve concrete behavior: largest ready image, largest fitting level, smallest fallback, unknown-size probing, same-job deferred discovery, and typed terminal errors for rejected discovery. Check tie behavior and exactly one snapshot revision per public call.
+- Remove the superseded TypeScript selection driver, unused sizing helpers, and ignored engine configuration fields. Generated bindings must come from protocol generation.
+- Verify the real deferred DZI regression chooses level 7 and a 128-pixel canvas, the rejected-deferred regression terminates correctly, and WASM receives the policy. Focused engine/WASM/browser checks and root/extension typechecks have passed; final combined validation remains.
+- Stage this checkpoint separately from handoff changes in `plan-gates.ts` and `docs/extension.md`. Commit after review.
+
+### 2. Review and commit lazy scheduling and the failure-progress fix
+
+Owner: coordinator review, Luna for corrections. Implementation is present in engine `job.rs`, `tests/checklist.rs`, and `docs/job-engine.md`.
+
+- Review the lazy tile cursor, compact status/attempt vectors, retry FIFO, and descriptor lifetime. Keep descriptors only while active, retryable, or needed by retained probes; clear them on terminal cleanup.
+- Confirm completion reports require an issued tile, settled duplicate reports remain harmless, and internal synthetic tests no longer justify impossible production states.
+- Check cancellation, partial recovery, repeated probes, retry exhaustion, and first-window row-major order. The bounded-descriptor test and job lane pass.
+- Review the separate correctness fix: a permanent/exhausted failure fills its freed slot, and a retry timer does not block unrelated pending tiles. The public-engine regression uses concurrency one and four HTTP 403 tiles; all four must issue before the complete partial decision.
+- Prefer a separate scheduler-progress commit if it can be split cleanly from the ledger change; run the focused job lane for each coherent checkpoint.
+- Remaining small simplification: image/level phases still store both a position and an equivalent index. Remove this only after verifying all readers; it was deliberately left untouched at wrap-up.
+
+### 3. Finish and commit removal of unreachable handoff code
+
+Owner: Luna, then coordinator review. Implementation is in progress; verify the final agent checkpoint before continuing.
+
+- Delete the extension handoff/native-session implementations reached only by tests, plus their obsolete tests and unused `nativeMessaging`/cookie permissions. Verify manifest checks and test scripts follow the shipped extension behavior.
+- Preserve the real `dezoomify://` UI, desktop confirmation, and Rust native host. Do not wire a new cookie-transfer flow merely to justify dead code.
+- Use one source-URL validator in app-model for the live deep-link builder and desktop receiver. Check credentials, sensitive query keys, allowed schemes, and ordinary valid source URLs through actual production entry points.
+- Remove only unreachable shared-UI consent rendering/localized copy. Keep the working website deep-link button and desktop confirmation.
+- Correct extension, protocol, security, privacy, user, release, and acceptance documentation. Audit capability claims against shipped consumers; regenerate artifacts through their owner if required.
+- Review `xtask` architecture/native-messaging checks so deletion does not silently remove coverage of the shipped Rust host. Run the affected extension, desktop, UI, and handoff checks before committing.
+
+### 4. Commit the smaller browser dead-API cleanup
+
+Owner: coordinator review, Luna for corrections. Changes are present in browser-runtime `types.ts`, `transport.ts`, their tests, naming tests, and root integration tests.
+
+- Verify tests-only fallback/save-capability APIs and unused types have no production consumers, then remove their tests rather than preserving dead implementations for coverage.
+- Remove label reexports that merely forward app-model ownership; actual consumers import the owner directly.
+- Keep behavioral coverage of real taint/fallback behavior through browser assembly and fetching. The browser lane passed before subsequent engine-only edits; rerun affected checks after integration.
+
+### 5. Move native automatic selection into the engine
+
+Owner: a newly scoped Luna task after the browser policy commit. This work is identified but not implemented.
+
+- In `crates/dezoomify-native/src/exec.rs`, remove `Attempt.catalog` copies, host selection loops, `LevelSelection`, and duplicate `select_image_index`/`select_level_index` policy after their replacement is live.
+- Build the engine's automatic policy from existing native options: image index, zoom level, largest, maximum width, and maximum height. Preserve image/zoom index clamping, explicit zoom precedence, largest bypassing caps, largest-fitting selection, smallest-width fallback, and tie behavior.
+- Follow deferred sources within the same job. Derive selected title/format for output naming from the authoritative snapshot without a second catalog owner.
+- Share policy geometry logic with browser selection where semantics coincide. Do not keep unused policy variants or aliases for hypothetical callers.
+- Retain data and command boundaries needed for future UI selection without implementing a picker now.
+- Add focused production-path native/CLI regressions for option precedence, size limits, naming, and deferred discovery. Update the native and engine contracts in the same commit.
+
+### 6. Close the remaining audit gaps
+
+Owner: coordinator scopes concrete findings; Luna implements one bounded fix at a time.
+
+- Trace exports and call sites after the deletions, including test-only production helpers and compatibility facades. Distinguish intentional public boundaries with real consumers from abandoned implementations.
+- Revisit remaining duplicated state in the native runner after selection migration; do not remove resource/task state merely because the engine also has business state.
+- Reconcile docs with actual code. In particular, `docs/browser-runtime.md` still claims an optional bounded browser cache that the implementation does not provide.
+- Reconcile the original plan below with final ownership. Its historical file paths, four-agent layout, cookie-handoff assumptions, and proposed crate moves are not evidence that those features or rewrites should now be added. Retain crate boundaries only for a concrete distinct concern.
+- Review website `/` versus `/beta`, extension permission use, generated contract ownership, error/recovery typing, queue cancellation, and output publication for regressions from the combined changes.
+- This final reachability/ownership pass and the native-selection migration are not yet complete. Do not claim that every dead API or duplicate has been eliminated before this pass.
+
+### 7. Validate and deliver
+
+- Work from a stable tree with agents paused. Use supported Node 24 or newer; the current `/usr/bin/node` is 22 and an ad hoc run without the configured loader could not import TSX.
+- Run focused checks as fixes land. Then run `cargo xtask ci local`, which now includes `check`, `test all`, WASM portability, and the JavaScript audit once each. Avoid replaying overlapping aggregates without a new failure or change.
+- Diagnose actual failures and commit fixes independently. Report any platform/display prerequisite that prevents a check; do not label an unrun check as green.
+- Review the final diff and Git status, verify generated files are reproducible and documentation matches shipped behavior, then push the completed commits to the existing PR. Report new validation separately from yesterday's already-green CI.
+- Completion means the above pending checkpoints are committed, native selection has one owner, no dormant manual-selection implementation was introduced, the legacy site remains unchanged, and the final checks pass or have an explicit unresolved blocker.
+
 ## Objective and scope
 
 Replace repeated representations of the same job with one authoritative Rust engine, two execution layers, and a shared UI that renders engine snapshots. Preserve the four products and their useful behavior while removing incidental machinery.
