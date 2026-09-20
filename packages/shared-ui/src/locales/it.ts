@@ -119,14 +119,9 @@ export const it = {
   // Display-only section.
   "view.display.title": "Anteprima mostrata, non ancora salvata",
   "view.display.openDesktop": "Apri nell applicazione desktop",
-  // One-click desktop handoff (todo 5.5): the button names the origin and the
-  // summary names scope/recipient/job memory-only, mirroring the extension
-  // consent pattern (origins, cookie names, job). The desktop app confirms
-  // again before any effect; declining there does nothing.
+  // Desktop handoff uses the ordinary, user-confirmed dezoomify:// link.
   "view.handoff.send": "Invia all applicazione desktop",
   "view.handoff.sendOrigin": "Invia all applicazione desktop ({origin})",
-  "view.handoff.summary":
-    "Invia {origin} all applicazione desktop. Nessun dato di accesso viaggia; una sola attivita, solo in memoria.",
   "view.handoff.localNote":
     "I file locali restano su questo computer. Apri l applicazione desktop e scegli li il file; nulla viene inviato.",
   "view.display.waysTitle": "Modi per salvare quest opera",
@@ -431,16 +426,5 @@ export const it = {
   "page.tabs.scan": "Scansiona {label}",
   "page.tabs.hint":
     "Apri una pagina con un immagine zoomabile, poi fai clic sul pulsante Dezoomify per scansionare quella scheda.",
-  "page.handoff.sendOrigin": "Invia all applicazione desktop ({origin})",
-  "page.handoff.stay": "Resta nell estensione",
-  "page.handoff.send": "Invia all applicazione desktop",
-  "page.handoff.title": "Inviare all applicazione desktop?",
-  "page.handoff.host": "Host: {host}",
-  "page.handoff.origins": "Origini: {list}",
-  "page.handoff.originsNone": "Origini: (nessuna)",
-  "page.handoff.cookies": "Cookie: {list}",
-  "page.handoff.cookiesNone": "Cookie: (nessuno)",
-  "page.handoff.job": "Attivita: {id}",
-  "page.handoff.note": "Nulla viene inviato finche non confermi. Rifiutare tiene l attivita nell estensione.",
   "page.ui.techDetails": "Dettagli tecnici e registri",
 } as const;

@@ -1,29 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { handoffOriginFor, isFileHandoffSource } from "../packages/shared-ui/src/view.tsx";
-import { desktopHandoffLink } from "../src/main.ts";
+import { desktopHandoffLink } from "../packages/browser-runtime/src/plan-gates.ts";
+import { validateDeepLinkPayload } from "../apps/desktop/src/errorCopy.ts";
 import { EN, t } from "../packages/shared-ui/src/i18n.ts";
 import { act } from "./react-dom.mjs";
 import { renderView } from "../packages/shared-ui/src/view.tsx";
 import { presentFailure, presentStatus } from "../packages/shared-ui/src/snapshot-view.ts";
-import * as runtimeHandoff from "../apps/extension/src/runtime/nativeHandoff.ts";
-import * as backgroundHandoff from "../apps/extension/src/background/handoff.ts";
 
-test("handoff 5.5: one-click Send copy names origin/scope with memory-only note", () => {
+test("deep-link copy names the destination and source origin", () => {
   for (const key of [
     "view.handoff.send",
     "view.handoff.sendOrigin",
-    "view.handoff.summary",
     "view.handoff.localNote",
   ]) {
     assert.ok(Object.hasOwn(EN, key), `dictionary covers ${key}`);
     assert.ok(String(EN[key]).length > 0, `${key} non-empty`);
   }
-  const summary = t("view.handoff.summary", { origin: "https://example.com/" });
-  assert.ok(summary.includes("https://example.com/"), "summary names the origin");
-  assert.ok(summary.includes("No sign-in details"), "summary names the non-secret scope");
-  assert.ok(summary.includes("one job only"), "summary names single-use scope");
-  assert.ok(summary.includes("memory"), "summary names memory-only");
   const label = t("view.handoff.sendOrigin", { origin: "https://example.com/" });
   assert.ok(label.includes("https://example.com/"), "button names the origin");
 });
@@ -38,12 +31,36 @@ test("handoff 5.5: origin helper is redacted origins-only, file-aware, exact-mat
   assert.equal(isFileHandoffSource("https://example.com/x"), false);
 });
 
-test("handoff 5.5: desktop link carries bounded http(s) only, never file or credentials", () => {
-  const link = desktopHandoffLink("https://example.com/view?page=1");
+test("desktop deep link is accepted by the receiver's actual validator", () => {
+  const source = "https://example.com/view?page=1";
+  const link = desktopHandoffLink(source);
   assert.ok(link.startsWith("dezoomify://open?v=2&src="), "http(s) sources get a deep link");
+  assert.deepEqual(validateDeepLinkPayload({ source_url: link }), {
+    sourceUrl: source,
+    hint: null,
+    version: 2,
+  });
   assert.equal(desktopHandoffLink("file:///tmp/a.dzi"), "", "local files get no deep link");
   assert.equal(desktopHandoffLink("not a url"), "", "unparseable input gets no link");
   assert.equal(desktopHandoffLink("ftp://example.com/x"), "", "non-http(s) gets no link");
+  assert.equal(desktopHandoffLink("https://example.com/item?token=secret"), "", "secret-bearing URLs never reach the OS handler");
+  assert.equal(desktopHandoffLink(`https://example.com/${"x".repeat(2048)}`), "", "oversized sources get no link");
+});
+
+test("desktop deep-link validation rejects sensitive or local sources", () => {
+  for (const sourceUrl of [
+    "https://example.com/item?token=secret",
+    "https://example.com/item?APIKEY=secret",
+    "https://user:pass@example.com/item",
+    "file:///etc/passwd",
+    "https://example.com/item#token=secret",
+  ]) {
+    assert.equal(validateDeepLinkPayload({ source_url: sourceUrl, version: 2 }), null, sourceUrl);
+  }
+  assert.ok(validateDeepLinkPayload({
+    source_url: "https://example.com/cookie-recipe/view?page=1",
+    version: 2,
+  }), "path mentions do not count as sensitive query keys");
 });
 
 function renderContainer() {
@@ -69,7 +86,7 @@ const failedState = presentFailure(
   "direct",
 );
 
-test("handoff 5.5: failed and display-only views offer Send with consent summary", () => {
+test("failed and display-only views offer the desktop deep link", () => {
   const link = desktopHandoffLink("https://example.com/view?page=1");
   assert.ok(link.startsWith("dezoomify://open?v=2&src="), "test precondition: http(s) source links");
 
@@ -82,10 +99,6 @@ test("handoff 5.5: failed and display-only views offer Send with consent summary
   assert.ok(send, "failed view offers Send");
   assert.equal(send.getAttribute("href"), link);
   assert.ok(send.textContent.includes("https://example.com/"), "Send button names the origin");
-  const consent = el.querySelector("#dz-handoff-consent");
-  assert.ok(consent, "consent summary element exists");
-  assert.ok(consent.textContent.includes("https://example.com/"), "consent summary names the origin");
-
   const displayOnly = renderContainer();
   act(() => renderView(displayOnly, presentStatus("display-only", { transport: "browser-session" }), viewCallbacks, {
     sourceUrl: "https://example.com/view?page=1",
@@ -94,7 +107,7 @@ test("handoff 5.5: failed and display-only views offer Send with consent summary
   assert.ok(displayOnly.querySelector("#dz-btn-desktop-handoff"), "display-only (incl. tainted) offers Send");
 });
 
-test("handoff 5.5: local files stay local-only, never a deep link", () => {
+test("local files stay local-only, never a deep link", () => {
   const el = renderContainer();
   act(() => renderView(el, failedState, viewCallbacks, {
     sourceUrl: "file:///tmp/a.dzi",
@@ -102,26 +115,4 @@ test("handoff 5.5: local files stay local-only, never a deep link", () => {
   }));
   assert.equal(el.querySelector("#dz-btn-desktop-handoff"), null, "local files get no Send button");
   assert.ok(el.querySelector("#dz-handoff-local"), "local-only note exists");
-});
-
-test("handoff 5.5: extension validator uses URL parsing plus exact sensitive keys", async () => {
-  const handoff = runtimeHandoff;
-  assert.equal(handoff.validateHandoffSource("https://example.com/cookie-recipe/view?page=1").ok, true, "/cookie-recipe/ stays valid (no substring false positive)");
-  assert.equal(handoff.validateHandoffSource("https://example.com/view?view=1&page=2").ok, true);
-  assert.equal(handoff.validateHandoffSource("https://example.com/item?token=secret").ok, false);
-  assert.equal(handoff.validateHandoffSource("https://example.com/item?APIKEY=secret").ok, false);
-  assert.equal(handoff.validateHandoffSource("https://user:pass@example.com/item").ok, false);
-  assert.equal(handoff.validateHandoffSource("file:///etc/passwd").ok, false);
-  assert.equal(handoff.validateHandoffSource("https://example.com/item#token=secret").ok, false, "sensitive fragment rejected");
-  assert.ok(handoff.SECRET_QUERY_KEYS.includes("access-token"), "single shared vocabulary covers access-token");
-  assert.ok(handoff.SECRET_QUERY_KEYS.includes("x-api-key"), "single shared vocabulary covers x-api-key");
-});
-
-test("handoff 5.5: background envelope rejects secret-bearing source URLs", async () => {
-  const handoff = backgroundHandoff;
-  const allow = { senderOrigin: "https://site.example", isAllowedSender: (o) => o === "https://site.example" };
-  const base = { protocolVersion: 2, sourceUrl: "https://a.example/ImageProperties.xml", requestId: "req-1" };
-  assert.equal(handoff.validateHandoffEnvelope(base, allow).ok, true);
-  assert.equal(handoff.validateHandoffEnvelope({ ...base, sourceUrl: "https://a.example/x?token=secret" }, allow).ok, false);
-  assert.equal(handoff.validateHandoffEnvelope({ ...base, sourceUrl: "https://a.example/cookie-recipe/view?page=1" }, allow).ok, true, "path mentions stay valid");
 });

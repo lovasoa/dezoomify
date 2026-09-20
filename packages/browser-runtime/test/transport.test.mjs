@@ -2,8 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   createDirectTransport,
-  isClassifiedCorsOrNetworkFailure,
-  allowedFallbacksFor,
 } from "../src/transport.ts";
 
 function headersMap(obj) {
@@ -73,7 +71,6 @@ test("classifies fetch rejection as network-error (not http-error)", async () =>
   });
   const r = await t.fetchResource("https://x.test/m");
   assert.equal(r.outcome, "network-error");
-  assert.equal(isClassifiedCorsOrNetworkFailure(r), true);
 });
 
 test("http-error is not a CORS/network failure and carries status", async () => {
@@ -89,7 +86,6 @@ test("http-error is not a CORS/network failure and carries status", async () => 
   assert.equal(r.outcome, "http-error");
   assert.equal(r.status, 404);
   assert.equal(r.preview, "Not found");
-  assert.equal(isClassifiedCorsOrNetworkFailure(r), false);
 });
 
 test("http-error skips the preview for oversized bodies", async () => {
@@ -120,17 +116,4 @@ test("aborted signal yields cancelled", async () => {
   ctrl.abort();
   const r = await t.fetchResource("https://x.test/m", { signal: ctrl.signal });
   assert.equal(r.outcome, "cancelled");
-});
-
-test("fallback policy: only network-error yields host transports", async () => {
-  const host = ["ordinary-image-display", "metadata-proxy"];
-  assert.deepEqual(allowedFallbacksFor({ outcome: "network-error", reason: "x" }, host), host);
-  assert.deepEqual(allowedFallbacksFor({ outcome: "http-error", finalUrl: "u", status: 500, headers: {} }, host), []);
-  assert.deepEqual(allowedFallbacksFor({ outcome: "readable", finalUrl: "u", status: 200, headers: {}, bytes: new ArrayBuffer(1) }, host), []);
-  assert.deepEqual(allowedFallbacksFor({ outcome: "cancelled", reason: "x" }, host), []);
-  assert.deepEqual(allowedFallbacksFor({ outcome: "policy-denied", reason: "x", code: "TRANSPORT_POLICY_DENIED" }, host), []);
-  // Never embeds URLs: only capability ids returned.
-  for (const id of allowedFallbacksFor({ outcome: "network-error", reason: "x" }, host)) {
-    assert.ok(!id.includes("http") && !id.includes("/"));
-  }
 });

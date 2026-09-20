@@ -13,7 +13,7 @@ The following decisions supersede the original rollout instructions below:
 
 ### Constraints and starting point
 
-- Coordinate and review centrally; give Luna a bounded implementation task with explicit file ownership, behavior to preserve, and acceptance checks. Do not start another broad rewrite.
+- Coordinate and review centrally; give subagents a bounded implementation task with explicit file ownership, behavior to preserve, and acceptance checks. Do not start another broad rewrite.
 - Keep `/` unchanged and the new website at `/beta`.
 - One implementation owns each concern. Keep catalog data and the existing selection command boundary usable by a future picker, but add no dormant picker, manual-selection procedure, feature flag, or speculative API.
 - Commit each complete fix separately. Do not stage the entire current working tree: several checkpoints overlap in shared files.

@@ -15,7 +15,7 @@ import {
   createProxyRateLimiter,
   createProxyTransport,
 } from "../src/proxyTransport.ts";
-import { DIRECT_TRANSPORT_LABEL, PROXY_TRANSPORT_LABEL } from "../packages/browser-runtime/src/types.ts";
+import { DIRECT_TRANSPORT_LABEL, PROXY_TRANSPORT_LABEL } from "../packages/app-model/src/labels.ts";
 import { DIRECT_METADATA_TIMEOUT_MS } from "../packages/browser-runtime/src/tile-policy.ts";
 import { drawPlacedTile } from "../packages/browser-runtime/src/tile-draw.ts";
 import { renderSaveGuidance } from "../packages/shared-ui/src/components.ts";

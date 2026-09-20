@@ -83,13 +83,8 @@ ever touches, so they get their own rules:
   receive them.
 - They're never written into the finished image file, into logs, or into
   any report.
-- If you move a job to the desktop app to save a very large picture,
-  cookies come along only after a prompt tells you which sites they're for
-  and where they're going, and you approve it. That approval covers that
-  one job only, and it's never remembered for future jobs. If you decline,
-  the job simply stays in your browser.
-- Transferred cookies aren't kept. Once the job ends, references to them
-  are dropped.
+- Cookies are used by your browser session to request artwork from the
+  site. The extension does not transfer them to the desktop app.
 
 ## Where to learn more
 

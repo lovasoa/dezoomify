@@ -45,9 +45,9 @@ The native baseline reports encoders `[png, jpeg, tiff, zif, webp]`, destination
 
 ## Desktop
 
-The Tauri app hosts the shared UI. Its integration maps protocol commands to Tauri invocations and native events back. A start carries every output setting from the main screen; the driver names output from the catalog title and saves straight into the configured folder, no second dialog. The Native Messaging host (`dezoomify-native-host`) runs the same `JobTable` on the same runner: handoff jobs start with origin-scoped headers and resolve through the same snapshots, partial gate, cancel flag, and publication.
+The Tauri app hosts the shared UI. Its integration maps protocol commands to Tauri invocations and native events back. A start carries every output setting from the main screen; the driver names output from the catalog title and saves straight into the configured folder, no second dialog. The standalone Native Messaging host (`dezoomify-native-host`) runs the same `JobTable` on the same runner for compatible clients. The shipped browser extension does not connect to it.
 
-Website and deep-link [handoffs](protocol.md#handoff) are bounded, secret-free, untrusted input: validated, then user-confirmed, never client-signed. Extension handoff uses allowlisted Native Messaging (browser-enforced extension IDs authenticate the sender); challenge plus one-use nonce bind one session against replay. Cookies transfer only after separate origin-scoped consent and persist nowhere.
+Website and deep-link [handoffs](protocol.md#handoff) are untrusted input: validated, then user-confirmed, never client-signed. The Native Messaging host validates requests from compatible clients against its allowlisted senders and protocol version. The shipped extension does not transfer browser cookies or connect to Native Messaging.
 
 ### Desktop queue
 

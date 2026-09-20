@@ -85,12 +85,11 @@ for the selected format. You can also start the app with the address as an
 argument, or drive it from the terminal; see the
 [command-line guide](./command-line.md).
 
-**Members-only sites:** the desktop app cannot sign in by itself. Get the
-image address with the [browser extension](./browser-extension.md) and send
-the job to the desktop app; the extension asks for your consent before
-passing the site's credentials, which stay in memory only.
+**Members-only sites:** the desktop app cannot reuse your browser sign-in.
+Use the [browser extension](./browser-extension.md) to work with pages that
+require your existing browser session.
 
-**From the website or extension:** the **Send to desktop app** button carries
+**From the website:** the **Send to desktop app** button carries
 only the image address, never passwords or cookies in the link. The app
 validates the link (http(s) only, no userinfo, no sensitive query or
 fragment keys) and shows the source plus provenance for explicit

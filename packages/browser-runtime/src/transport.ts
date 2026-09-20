@@ -1,9 +1,6 @@
 // Direct browser fetch transport with dependency-injected fetch.
 // No DOM, no cookies, no proxy knowledge.
-import type {
-  FallbackCapabilityId,
-  TileResponse,
-} from "./types.ts";
+import type { TileResponse } from "./types.ts";
 import { ERROR_CODES } from "./types.ts";
 import { normalizeErrorPreviewText } from "./fetch-primitives.ts";
 
@@ -199,22 +196,4 @@ export function createDirectTransport(fetchImpl: FetchImpl): DirectTransport {
   }
 
   return { fetchResource };
-}
-
-/** Only a classified network-error (fetch rejection, e.g. CORS) allows fallback. */
-export function isClassifiedCorsOrNetworkFailure(response: TileResponse): boolean {
-  return response.outcome === "network-error";
-}
-
-/**
- * Direct-first fallback policy. Returns host-supplied transports only after a
- * classified CORS/network failure. Never embeds proxy URLs or extension IDs:
- * callers pass opaque capability ids.
- */
-export function allowedFallbacksFor(
-  directOutcome: TileResponse,
-  hostSupplied: FallbackCapabilityId[],
-): FallbackCapabilityId[] {
-  if (directOutcome.outcome === "network-error") return [...hostSupplied];
-  return [];
 }

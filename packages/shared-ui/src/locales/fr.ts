@@ -119,14 +119,9 @@ export const fr = {
   // Display-only section.
   "view.display.title": "Apercu affiche, non enregistre",
   "view.display.openDesktop": "Ouvrir dans l application de bureau",
-  // One-click desktop handoff (todo 5.5): the button names the origin and the
-  // summary names scope/recipient/job memory-only, mirroring the extension
-  // consent pattern (origins, cookie names, job). The desktop app confirms
-  // again before any effect; declining there does nothing.
+  // Desktop handoff uses the ordinary, user-confirmed dezoomify:// link.
   "view.handoff.send": "Envoyer vers l application de bureau",
   "view.handoff.sendOrigin": "Envoyer vers l application de bureau ({origin})",
-  "view.handoff.summary":
-    "Envoie {origin} vers l application de bureau. Aucune donnee de connexion ne voyage ; une seule tache, gardee en memoire.",
   "view.handoff.localNote":
     "Les fichiers locaux restent sur cet ordinateur. Ouvrez l application de bureau et choisissez-y le fichier ; rien n est envoye.",
   "view.display.waysTitle": "Moyens d enregistrer cette oeuvre",
@@ -431,16 +426,5 @@ export const fr = {
   "page.tabs.scan": "Analyser {label}",
   "page.tabs.hint":
     "Ouvrez une page avec une image zoomable, puis cliquez sur le bouton Dezoomify de la barre d outils pour analyser cet onglet.",
-  "page.handoff.sendOrigin": "Envoyer vers l application de bureau ({origin})",
-  "page.handoff.stay": "Rester dans l extension",
-  "page.handoff.send": "Envoyer vers l application de bureau",
-  "page.handoff.title": "Envoyer vers l application de bureau ?",
-  "page.handoff.host": "Hote : {host}",
-  "page.handoff.origins": "Origines : {list}",
-  "page.handoff.originsNone": "Origines : (aucune)",
-  "page.handoff.cookies": "Cookies : {list}",
-  "page.handoff.cookiesNone": "Cookies : (aucun)",
-  "page.handoff.job": "Tache : {id}",
-  "page.handoff.note": "Rien n est envoye avant votre confirmation. Refuser garde la tache dans l extension.",
   "page.ui.techDetails": "Details techniques et journaux",
 } as const;

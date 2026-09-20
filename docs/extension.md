@@ -24,10 +24,6 @@ The job tab discovers, selects, plans, processes, and assembles on a canvas thro
 
 Job failures stay in the job tab. Background failures keep an error badge until the next click or until the source tab leaves the bound page. Retry takes a fresh snapshot and starts a new attempt. No Start over exists: a new job starts at the page's toolbar button.
 
-## Native handoff
-
-Native is reachable only through allowlisted Native Messaging, for huge outputs or local destinations. Challenge plus one-use nonce bind one consent session and block replay; they prove no identity. Cookies pass only after a prompt naming destination origins and scope, and persist nowhere. Version negotiation: [Protocol](protocol.md#native-messaging-version-check). Credential rules: [Security](security.md).
-
 ## Packaging
 
 WXT generates both MV3 manifests from `apps/extension/wxt.config.ts` (Chromium: bundled `background.js` service worker; Firefox: same classic IIFE via `background.scripts`, parsed with `node --check`). The store package ships only the background coordinator, the job tab (workspace shared UI plus browser runtime), icons, and WASM. No content scripts or fallback pages are packaged or tested.
@@ -96,7 +92,7 @@ Outcome classes cover document loss, access required, redirect limits, cancellat
 
 The job tab hosts the full engine (dedicated worker, one WASM `Session`, shared browser-runtime executor) with no second state machine:
 
-- Selection is deterministic (`engine-selection.ts`): largest ready image, largest level fitting the canvas; else the first deferred `ImageRequest` URI with a fresh bounded attempt (`MAX_DEFERRED_FOLLOWS`); else typed failure. `select-image`/`select-level` correlate to the job.
+- The extension start explicitly requests the engine's largest-fitting selection policy with browser width, height, and area limits. The engine chooses the largest ready image and fitting level, follows deferred `ImageRequest` entries on the same job within its existing bound, and returns a typed terminal when no image can be selected. The extension can still send the public `select-image`, `select-level`, and `follow-deferred` commands for manual selection flows.
 - Tiles decode during acquisition: undecodable tiles fail the outcome into engine retry/partial handling. Decoded pixels stay host-side and never re-enter the adapter.
 - `finalize-output` validates dimensions and area, assembles, encodes, saves, releases, and replies once; completion follows the reply.
 - `request-decision` renders keep/discard in the job tab; only the user action sends `answer-partial{generation, decision}`.

@@ -808,11 +808,6 @@ function FailedView({
           </a>
         ) : null}
       </div>
-      {handoffUrl !== "" && !isFile && origin !== "" ? (
-        <p className="dz-notice-message" id="dz-handoff-consent">
-          {t("view.handoff.summary", { origin })}
-        </p>
-      ) : null}
       {isFile ? (
         <p className="dz-notice-message" id="dz-handoff-local">
           {t("view.handoff.localNote")}
@@ -1070,8 +1065,9 @@ export function openLevelPicker(hostDocument: Document, args: LevelPickerArgs): 
 }
 
 /**
- * Explicit confirm/decline dialog (extension handoff consent). Site-influenced
- * lines render as text, never markup. Initial focus fails safe on decline.
+ * Explicit confirm/decline dialog for untrusted incoming deep links.
+ * Site-influenced lines render as text, never markup. Initial focus fails
+ * safe on decline.
  */
 export function openConfirmModal(hostDocument: Document, args: ConfirmModalArgs): Promise<boolean> {
   return new Promise<boolean>((resolve) => {

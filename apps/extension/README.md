@@ -12,8 +12,8 @@ using your browser's own session so logged-in and interactive viewers work.
   tab monitoring. Navigation invalidates the source binding. Detection runs
   in the core wasm; fetching is tab-origin direct fetch with no metadata
   proxy.
-- Cookie handoff to the desktop app is native-only, explicitly consented, and
-  memory-only.
+- The extension uses only `activeTab` and `scripting` permissions plus
+  optional host permissions requested for the active job.
 
 Contributing: narrow manifest permissions, explicit-action scans with cleanup,
 no private signing keys in shipped JS. `cargo xtask test extension` is the full
