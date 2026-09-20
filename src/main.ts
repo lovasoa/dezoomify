@@ -87,7 +87,7 @@ import { loadTileImage } from "../packages/browser-runtime/src/tile-draw.ts";
 import { createJobActivity } from "../packages/browser-runtime/src/job-activity.ts";
 import { createLogger } from "../packages/browser-runtime/src/logging.ts";
 import { createWebFetcher, type WebFetcher } from "../packages/browser-runtime/src/web-fetch.ts";
-import { PROXY_TRANSPORT_LABEL } from "../packages/browser-runtime/src/transport-labels.ts";
+import { PROXY_TRANSPORT_LABEL } from "@dezoomify/app-model";
 import {
   canvasToPngBlob,
   isCanvasTaintError,

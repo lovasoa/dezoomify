@@ -5,7 +5,7 @@
 // blindly. The canvas host is injected so node tests drive the encode path
 // with fakes.
 import { failure } from "./failure.ts";
-import { suggestedNameFor } from "./save-name.ts";
+import { suggestedNameFor } from "@dezoomify/app-model";
 
 /** Warning logged beside every completed browser save (profile stripped). */
 export const BROWSER_SAVE_COLOR_WARNING =

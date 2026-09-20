@@ -21,7 +21,7 @@ import {
 import {
   DIRECT_TRANSPORT_LABEL,
   PROXY_TRANSPORT_LABEL,
-} from "./transport-labels.ts";
+} from "@dezoomify/app-model";
 import { extractErrorSignal } from "./transport.ts";
 
 export interface DirectOutcome {

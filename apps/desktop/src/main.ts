@@ -24,6 +24,7 @@ import {
   loadHistory as loadHistoryStore,
   pushHistory,
   saveHistory as saveHistoryStore,
+  suggestedNameFor,
   toHistoryEntry,
   type HistoryEntry,
   type JobObserver,
@@ -42,7 +43,7 @@ import {
   type StructuredError,
 } from "@dezoomify/shared-ui";
 import type { ViewContext } from "@dezoomify/shared-ui";
-import { createLogger, suggestedNameFor } from "@dezoomify/browser-runtime";
+import { createLogger } from "@dezoomify/browser-runtime";
 import {
   encoderToMime,
   formatMissingSummary,

@@ -1,18 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extensionForSaveFormat, safeTitleStem, suggestedNameFor } from "../src/save-name.ts";
-import { suggestedNameFor as canonicalSuggestedNameFor } from "../../app-model/src/labels.ts";
 import {
+  extensionForSaveFormat,
+  safeTitleStem,
+  suggestedNameFor,
   BROWSER_SESSION_TRANSPORT_LABEL,
   DIRECT_TRANSPORT_LABEL,
   DISPLAY_TRANSPORT_LABEL,
   NATIVE_TRANSPORT_LABEL,
   PROXY_TRANSPORT_LABEL,
-} from "../src/transport-labels.ts";
-import {
-  DIRECT_TRANSPORT_LABEL as typesDirect,
-  PROXY_TRANSPORT_LABEL as typesProxy,
-} from "../src/types.ts";
+} from "../../app-model/src/index.ts";
 import {
   DIRECT_TRANSPORT_LABEL as componentsDirect,
 } from "../../shared-ui/src/components.ts";
@@ -41,17 +38,11 @@ test("suggestedNameFor prefers safe core titles and rejects unsafe stems", () =>
   assert.equal(safeTitleStem("A\u0000B"), "A_B");
 });
 
-test("browser-runtime matches the canonical save-name helper (no fork)", () => {
-  assert.equal(canonicalSuggestedNameFor(4, 4, "png"), suggestedNameFor(4, 4, "png"));
-});
-
 test("transport labels are canonical and distinct", () => {
   assert.equal(DIRECT_TRANSPORT_LABEL, "Direct from your browser");
   assert.equal(PROXY_TRANSPORT_LABEL, "Metadata proxy");
   assert.equal(DISPLAY_TRANSPORT_LABEL, "Display only");
   assert.equal(BROWSER_SESSION_TRANSPORT_LABEL, "Browser session");
   assert.equal(NATIVE_TRANSPORT_LABEL, "Native");
-  assert.equal(typesDirect, DIRECT_TRANSPORT_LABEL);
-  assert.equal(typesProxy, PROXY_TRANSPORT_LABEL);
   assert.equal(componentsDirect, DIRECT_TRANSPORT_LABEL);
 });
