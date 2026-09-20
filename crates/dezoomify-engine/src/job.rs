@@ -5,15 +5,16 @@
 //! explicit [`JobCommand`] inputs and drain the ordered effect queue.
 //! All counters use checked arithmetic.
 
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use dezoomify_core::core::adaptive::{DiscoverableStep, ObservationResult, ProbeContinuation};
 use dezoomify_core::core::discovery::{
     DiscoveryError, DiscoveryOperation, FetchCause, ResourceFailure, ResourceResponse,
 };
-use dezoomify_core::core::model::{CatalogEntry, ImageCatalog, ProcessingRecipe, TileRole, TileSpec};
+use dezoomify_core::core::model::{CatalogEntry, ImageCatalog, TileRole, TileSpec};
 use dezoomify_core::core::registry::{default_registry, registry_for};
 use dezoomify_core::core::tile_plan::TileSource;
+use dezoomify_core::core::tile_plan::TileSourceError;
 use dezoomify_core::Vec2d;
 
 use crate::config::Config;
@@ -143,6 +144,22 @@ struct ActiveProbe {
     output: bool,
 }
 
+type TileCursor = Box<dyn Iterator<Item = Result<TileSpec, TileSourceError>> + Send>;
+
+/// One byte of durable scheduling state per plan position. Full requests
+/// live only while a tile is active or retained for retry.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+enum TileStatus {
+    #[default]
+    Pending,
+    InFlight,
+    RetryWaiting,
+    RetryReady,
+    Acquired,
+    Failed,
+}
+
 /// One end-to-end user request driven synchronously by explicit host inputs.
 pub struct Job {
     inputs: Vec<JobInput>,
@@ -164,23 +181,17 @@ pub struct Job {
     selection: Selection,
     finalization: Finalization,
     cleanup_emitted: bool,
-    planned_tiles: Vec<u32>,
-    /// Plan-order tile set mirroring `planned_tiles` for O(1) membership.
-    planned_set: HashSet<u32>,
-    /// FIFO acquisition queue; pops are O(1) from the front.
-    pending_tiles: VecDeque<u32>,
-    /// Plan-order set mirroring `pending_tiles` for O(1) membership: every
-    /// push and pop goes through `enqueue_front`, `enqueue_back`,
-    /// `dequeue_next`, or `remove_from_pending`, so the queue is never
-    /// scanned on the hot path.
-    pending_set: HashSet<u32>,
-    /// Plan-order index by wire tile id, built once per plan. The partial
-    /// retry round requeues in plan order through this map instead of
-    /// scanning `planned_tiles` per tile.
-    plan_order: HashMap<u32, usize>,
+    /// Lazy row-major plan cursor. It materializes requests only as slots
+    /// become available; the byte ledger tracks not-yet-generated tiles.
+    tile_cursor: Option<TileCursor>,
+    tile_status: Vec<TileStatus>,
+    tile_total: u32,
+    acquired_count: u32,
+    /// Ready retries are the only queued tile IDs; ordinary work comes from
+    /// `tile_cursor` and needs no O(tilecount) queue or set.
+    retry_queue: VecDeque<u32>,
     in_flight: HashSet<u32>,
-    acquired_tiles: HashSet<u32>,
-    tile_attempts: HashMap<u32, u32>,
+    tile_attempts: Vec<u32>,
     /// Complete tile descriptor by wire id (planned, retry, and probe tiles).
     tile_specs: HashMap<u32, TileSpec>,
     /// Declared canvas size for the planned level (`None` while unknown,
@@ -193,8 +204,6 @@ pub struct Job {
     probes_emitted: u32,
     decision: Decision,
     failed_tiles: Vec<u32>,
-    /// Settled-as-failed set mirroring `failed_tiles` for O(1) membership.
-    failed_set: HashSet<u32>,
     /// Planned tiles neither acquired nor settled-as-failed. Drives the
     /// settle check in O(1); incremented only when a retry round requeues.
     unsettled: usize,
@@ -269,14 +278,13 @@ impl Job {
             selection: Selection::AwaitingImage,
             finalization: Finalization::Idle,
             cleanup_emitted: false,
-            planned_tiles: Vec::new(),
-            planned_set: HashSet::new(),
-            pending_tiles: VecDeque::new(),
-            pending_set: HashSet::new(),
-            plan_order: HashMap::new(),
+            tile_cursor: None,
+            tile_status: Vec::new(),
+            tile_total: 0,
+            acquired_count: 0,
+            retry_queue: VecDeque::new(),
             in_flight: HashSet::new(),
-            acquired_tiles: HashSet::new(),
-            tile_attempts: HashMap::new(),
+            tile_attempts: Vec::new(),
             tile_specs: HashMap::new(),
             canvas_size: None,
             probe: None,
@@ -284,7 +292,6 @@ impl Job {
             probes_emitted: 0,
             decision: Decision::None,
             failed_tiles: Vec::new(),
-            failed_set: HashSet::new(),
             unsettled: 0,
             tile_failure_log: HashMap::new(),
             pending_retry_timers: VecDeque::new(),
@@ -336,10 +343,7 @@ impl Job {
     /// Acquisition progress as `(acquired, total)` over the planned tiles.
     #[must_use]
     pub fn acquisition_progress(&self) -> (u64, u64) {
-        (
-            self.acquired_tiles.len() as u64,
-            self.planned_tiles.len() as u64,
-        )
+        (u64::from(self.acquired_count), u64::from(self.tile_total))
     }
 
     /// Selected image position, once chosen.
@@ -718,18 +722,15 @@ impl Job {
             ));
         }
         let index = usize::try_from(image).map_err(|_| JobError::overflow("image position"))?;
-        let level_count = {
-            let selected = self
-                .catalog
-                .as_ref()
-                .and_then(|catalog| catalog.entries().get(index))
-                .ok_or_else(|| JobError::invalid_state("image position is out of range"))?;
-            let CatalogEntry::Ready(selected) = selected else {
-                return Err(JobError::invalid_state(
-                    "image metadata was not fetched; the image cannot be selected",
-                ));
-            };
-            selected.levels.len()
+        let selected = self
+            .catalog
+            .as_ref()
+            .and_then(|catalog| catalog.entries().get(index))
+            .ok_or_else(|| JobError::invalid_state("image position is out of range"))?;
+        let CatalogEntry::Ready(_) = selected else {
+            return Err(JobError::invalid_state(
+                "image metadata was not fetched; the image cannot be selected",
+            ));
         };
         self.selection = Selection::AwaitingLevel {
             image: ImageSelection {
@@ -738,12 +739,6 @@ impl Job {
             },
         };
         self.set_state(State::AwaitingLevelSelection)?;
-        let levels: Vec<u32> = (0..level_count)
-            .map(|position| {
-                u32::try_from(position).map_err(|_| JobError::overflow("level position"))
-            })
-            .collect::<Result<_, _>>()?;
-        let _ = levels;
         Ok(Outcome::Applied)
     }
 
@@ -867,11 +862,13 @@ impl Job {
         match source {
             TileSource::Grid(grid) => {
                 let canvas = Some(grid.image_size());
-                self.plan_from_tiles(grid.tiles_row_major(), canvas)
+                let total = grid.count();
+                self.plan_from_tiles(Box::new(grid.tiles_row_major()), total, canvas)
             }
             TileSource::Positioned(positioned) => {
                 let canvas = positioned.image_size();
-                self.plan_from_tiles(positioned.tiles(), canvas)
+                let total = positioned.count();
+                self.plan_from_tiles(Box::new(positioned.tiles()), total, canvas)
             }
             TileSource::DiscoverableGrid(discoverable) => self.drive_probe(discoverable.start()),
             TileSource::Adaptive(adaptive) => self.drive_probe(adaptive.start()),
@@ -884,41 +881,25 @@ impl Job {
     /// effect so native assembly matches core layout exactly.
     fn plan_from_tiles(
         &mut self,
-        tiles: impl Iterator<
-            Item = Result<
-                dezoomify_core::core::model::TileSpec,
-                dezoomify_core::core::tile_plan::TileSourceError,
-            >,
-        >,
+        tiles: TileCursor,
+        total: u64,
         canvas: Option<Vec2d>,
     ) -> Result<(), JobError> {
-        let mut planned: Vec<u32> = Vec::new();
-        for tile in tiles {
-            let spec = match tile {
-                Ok(spec) => spec,
-                Err(e) => return self.fail_via_cleanup("job.plan-invalid", e.to_string()),
-            };
-            if spec.role == dezoomify_core::core::model::TileRole::Probe {
-                continue;
-            }
-            let ordinal = spec.ordinal;
-            if planned.len() + 1 > self.config.max_tiles as usize {
-                return self.fail_via_cleanup(
-                    "job.resource-limit",
-                    format!("tile plan exceeds max_tiles {}", self.config.max_tiles),
-                );
-            }
-            self.tile_specs.insert(ordinal, spec);
-            planned.push(ordinal);
-        }
-        if planned.is_empty() {
+        if total == 0 {
             return self.fail_via_cleanup(
                 "job.plan-empty",
                 "the selected level has no tiles".to_string(),
             );
         }
+        if total > u64::from(self.config.max_tiles) {
+            return self.fail_via_cleanup(
+                "job.resource-limit",
+                format!("tile plan exceeds max_tiles {}", self.config.max_tiles),
+            );
+        }
+        let total = u32::try_from(total).map_err(|_| JobError::overflow("tile count"))?;
         self.canvas_size = canvas;
-        self.begin_acquisition(planned)
+        self.begin_acquisition(tiles, total)
     }
 
     /// Advance the core probe step machine by one step.
@@ -929,7 +910,13 @@ impl Job {
                 previously_output,
             } => {
                 let canvas = Some(grid.image_size());
-                self.plan_from_tiles_reusing(grid.tiles_row_major(), canvas, &previously_output)
+                let total = grid.count();
+                self.plan_from_tiles_reusing(
+                    Box::new(grid.tiles_row_major()),
+                    total,
+                    canvas,
+                    &previously_output,
+                )
             }
             DiscoverableStep::Empty => self.fail_via_cleanup(
                 "job.plan-empty",
@@ -975,60 +962,47 @@ impl Job {
 
     fn plan_from_tiles_reusing(
         &mut self,
-        tiles: impl Iterator<
-            Item = Result<
-                dezoomify_core::core::model::TileSpec,
-                dezoomify_core::core::tile_plan::TileSourceError,
-            >,
-        >,
+        tiles: TileCursor,
+        total: u64,
         canvas: Option<Vec2d>,
         previously_output: &[Vec2d],
     ) -> Result<(), JobError> {
         self.retained_probe = self
             .retained_probe
             .filter(|(_, destination)| previously_output.contains(destination));
-        self.plan_from_tiles(tiles, canvas)
+        self.plan_from_tiles(tiles, total, canvas)
     }
 
     /// Shared transition from a complete plan into bounded acquisition.
-    fn begin_acquisition(&mut self, planned: Vec<u32>) -> Result<(), JobError> {
-        let total = planned.len() as u64;
-        for wire in planned {
-            self.planned_tiles.push(wire);
-        }
-        self.planned_set = self.planned_tiles.iter().copied().collect();
-        self.plan_order = self
-            .planned_tiles
-            .iter()
-            .enumerate()
-            .map(|(index, tile)| (*tile, index))
-            .collect();
+    fn begin_acquisition(&mut self, tiles: TileCursor, total: u32) -> Result<(), JobError> {
         // Any probe flight ended with the resolved plan: the plan owns the
         // tiles now (a reused `probe_output` tile arrives via `retained_probe`
         // below, never via the probe flight).
+        let retained_id = self.retained_probe.map(|(tile, _)| tile);
         self.probe = None;
-        self.pending_tiles = self.planned_tiles.iter().copied().collect();
-        self.pending_set = self.planned_tiles.iter().copied().collect();
+        self.tile_cursor = Some(tiles);
+        self.tile_status.clear();
+        self.tile_status.resize(total as usize, TileStatus::Pending);
+        self.tile_attempts.clear();
+        self.tile_attempts.resize(total as usize, 0);
+        self.tile_total = total;
+        self.acquired_count = 0;
+        self.retry_queue.clear();
         self.in_flight.clear();
-        self.acquired_tiles.clear();
         self.failed_tiles.clear();
-        self.failed_set.clear();
+        self.tile_specs.retain(|wire, _| Some(*wire) == retained_id);
         if let Some((tile, destination)) = self.retained_probe.take() {
-            if self.planned_set.contains(&tile)
+            if tile < total
                 && self.tile_specs.get(&tile).map(|spec| spec.destination) == Some(destination)
             {
-                self.remove_from_pending(tile);
-                self.acquired_tiles.insert(tile);
+                self.tile_status[tile as usize] = TileStatus::Acquired;
+                self.acquired_count += 1;
             }
+            self.tile_specs.remove(&tile);
         }
-        self.unsettled = self
-            .planned_tiles
-            .len()
-            .saturating_sub(self.acquired_tiles.len());
-        let acquired = self.acquired_tiles.len() as u64;
+        self.unsettled = total.saturating_sub(self.acquired_count) as usize;
         self.set_state(State::AcquiringTiles)?;
-        let _ = (acquired, total);
-        if self.acquired_tiles.len() == self.planned_tiles.len() {
+        if self.unsettled == 0 {
             self.complete_remaining(false)?;
         } else {
             self.emit_pending_tiles()?;
@@ -1055,30 +1029,25 @@ impl Job {
                 "tile success valid only in AcquiringTiles",
             ));
         }
-        if !self.planned_set.contains(&tile) {
+        let Some(status) = self.tile_status.get(tile as usize).copied() else {
             return Err(JobError::invalid_state("tile ordinal is out of range"));
-        }
-        if self.acquired_tiles.contains(&tile) {
+        };
+        if matches!(status, TileStatus::Acquired | TileStatus::Failed) {
+            // A duplicate completion for settled work cannot alter ledger.
             return Ok(Outcome::Ignored);
         }
-        // A success for a settled-as-failed tile is a late duplicate of an
-        // already-recorded attempt outcome: it must not resurrect the tile
-        // or double-decrement the settle accounting.
-        if self.failed_set.contains(&tile) {
-            return Ok(Outcome::Ignored);
+        if status != TileStatus::InFlight {
+            return Err(JobError::invalid_state(
+                "tile success requires an issued acquisition",
+            ));
         }
-        // Flight and queue are disjoint: a tile enters the queue only
-        // when not in flight, so a tile just removed from flight cannot
-        // be queued and the queue is never scanned on the hot path.
-        if !self.in_flight.remove(&tile) {
-            self.remove_from_pending(tile);
-        }
-        self.acquired_tiles.insert(tile);
+        // The status ledger is authoritative for both cursor and retry
+        // work; removing the descriptor releases its request context.
+        self.in_flight.remove(&tile);
+        self.tile_status[tile as usize] = TileStatus::Acquired;
+        self.tile_specs.remove(&tile);
+        self.acquired_count += 1;
         self.unsettled = self.unsettled.saturating_sub(1);
-        let acquired = u64::try_from(self.acquired_tiles.len())
-            .map_err(|_| JobError::overflow("acquired count"))?;
-        let total = self.planned_tiles.len() as u64;
-        let _ = (acquired, total);
         // A success can settle the round when failures are stashed:
         // with every planned tile acquired or settled-as-failed the
         // partial decision carries the complete missing list.
@@ -1125,37 +1094,28 @@ impl Job {
                 "tile failure valid only in AcquiringTiles",
             ));
         }
-        if !self.planned_set.contains(&tile) {
+        let Some(status) = self.tile_status.get(tile as usize).copied() else {
             return Err(JobError::invalid_state("tile ordinal is out of range"));
-        }
-        if self.acquired_tiles.contains(&tile) || self.failed_set.contains(&tile) {
+        };
+        if matches!(status, TileStatus::Acquired | TileStatus::Failed) {
             return Ok(Outcome::Ignored);
         }
-        // No re-acquisition was issued since the recorded failure, so a
-        // second report for this tile is a duplicate: the pending timer (or
-        // parked retry) already owns the next attempt.
-        if self
-            .pending_retry_timers
-            .iter()
-            .any(|pending| pending.tile == tile)
-            || self.ready_retries.iter().any(|(ready, _)| *ready == tile)
-        {
-            return Ok(Outcome::Ignored);
+        if status != TileStatus::InFlight {
+            return Err(JobError::invalid_state(
+                "tile failure requires an issued acquisition",
+            ));
         }
-        let attempt = self
-            .tile_attempts
-            .get(&tile)
-            .copied()
-            .unwrap_or(0)
+        let attempt = self.tile_attempts[tile as usize]
             .checked_add(1)
             .ok_or_else(|| JobError::overflow("tile attempts"))?;
-        self.tile_attempts.insert(tile, attempt);
-        let was_in_flight = self.in_flight.remove(&tile);
+        self.tile_attempts[tile as usize] = attempt;
+        self.in_flight.remove(&tile);
         self.tile_failure_log
             .entry(tile)
             .or_default()
             .push(failure.clone());
         if failure.is_retryable() && attempt <= self.config.max_retries {
+            self.tile_status[tile as usize] = TileStatus::RetryWaiting;
             // Attempts count the initial try: the first failure schedules
             // retry-timer 1, whose completion re-issues the second try.
             let delay_ms = retry_delay_ms(
@@ -1179,10 +1139,16 @@ impl Job {
                     delay_ms,
                 })?;
             }
+            // A retry timer occupies no acquisition slot. Keep the rest of
+            // the lazy plan moving while this tile waits for its retry.
+            self.emit_pending_tiles()?;
             return Ok(Outcome::Applied);
         }
-        self.stash_failed_tile(tile, was_in_flight);
+        self.stash_failed_tile(tile);
         self.maybe_enter_partial_decision()?;
+        if self.state == State::AcquiringTiles {
+            self.emit_pending_tiles()?;
+        }
         Ok(Outcome::Applied)
     }
 
@@ -1204,29 +1170,31 @@ impl Job {
             return Ok(Outcome::Ignored);
         };
         self.pending_retry_timers.remove(position);
-        if self.acquired_tiles.contains(&tile) || self.failed_set.contains(&tile) {
+        if matches!(
+            self.tile_status.get(tile as usize),
+            Some(TileStatus::Acquired | TileStatus::Failed)
+        ) {
             return Ok(Outcome::Applied);
         }
         if self.paused {
+            self.tile_status[tile as usize] = TileStatus::RetryReady;
             if !self.ready_retries.contains(&(tile, attempt)) {
                 self.ready_retries.push((tile, attempt));
             }
             return Ok(Outcome::Applied);
         }
-        self.enqueue_front(tile);
+        self.tile_status[tile as usize] = TileStatus::RetryReady;
+        if self.tile_specs.contains_key(&tile) {
+            self.retry_queue.push_front(tile);
+        }
         self.emit_pending_tiles()?;
         Ok(Outcome::Applied)
     }
 
-    /// Record one tile as settled-as-failed (idempotent). `was_in_flight`
-    /// tells whether the tile just left the flight set: flight and queue
-    /// are disjoint, so only a tile that was not in flight can still be
-    /// queued, and only then is it removed through the membership set.
-    fn stash_failed_tile(&mut self, tile: u32, was_in_flight: bool) {
-        if !was_in_flight {
-            self.remove_from_pending(tile);
-        }
-        if self.failed_set.insert(tile) {
+    /// Record one tile as settled-as-failed (idempotent).
+    fn stash_failed_tile(&mut self, tile: u32) {
+        if self.tile_status[tile as usize] != TileStatus::Failed {
+            self.tile_status[tile as usize] = TileStatus::Failed;
             self.failed_tiles.push(tile);
             self.unsettled = self.unsettled.saturating_sub(1);
         }
@@ -1241,6 +1209,7 @@ impl Job {
         if self.failed_tiles.is_empty()
             || self.unsettled != 0
             || !self.in_flight.is_empty()
+            || !self.retry_queue.is_empty()
             || !self.pending_retry_timers.is_empty()
             || !self.ready_retries.is_empty()
         {
@@ -1291,7 +1260,13 @@ impl Job {
                 .tile_specs
                 .get(&tile)
                 .map_or_else(Vec2d::default, |spec| spec.destination);
-            self.retained_probe = Some((tile, destination));
+            if let Some((previous, _)) = self.retained_probe.replace((tile, destination)) {
+                if previous != tile {
+                    self.tile_specs.remove(&previous);
+                }
+            }
+        } else {
+            self.tile_specs.remove(&tile);
         }
         let Some(flight) = self.probe.take() else {
             return Err(JobError::invalid_state("no probe continuation pending"));
@@ -1339,14 +1314,16 @@ impl Job {
                 // are preserved so success is never re-fetched. Restored
                 // tiles rejoin the unsettled count exactly once each.
                 let mut requeued: Vec<u32> = std::mem::take(&mut self.failed_tiles);
-                self.failed_set.clear();
-                requeued
-                    .sort_by_key(|tile| self.plan_order.get(tile).copied().unwrap_or(usize::MAX));
+                requeued.sort_unstable();
                 let mut restored = 0usize;
                 for tile in requeued {
-                    self.tile_attempts.insert(tile, 0);
+                    self.tile_attempts[tile as usize] = 0;
                     self.tile_failure_log.remove(&tile);
-                    if !self.acquired_tiles.contains(&tile) && self.enqueue_back(tile) {
+                    if self.tile_status[tile as usize] != TileStatus::Acquired {
+                        self.tile_status[tile as usize] = TileStatus::RetryReady;
+                        if self.tile_specs.contains_key(&tile) {
+                            self.retry_queue.push_back(tile);
+                        }
                         restored = restored.saturating_add(1);
                     }
                 }
@@ -1377,7 +1354,9 @@ impl Job {
         // Exactly one idempotent `cancel-work`: the cleanup gate below
         // owns the emission, so cancellation and failure paths converge.
         self.emit_cleanup_once()?;
-        self.emit_cleanup_once()?;
+        self.tile_cursor = None;
+        self.retry_queue.clear();
+        self.tile_specs.clear();
         self.set_state(State::Cancelled)?;
         self.terminal = Some("cancelled".to_string());
         Ok(Outcome::Applied)
@@ -1398,8 +1377,8 @@ impl Job {
 
     /// Resume a paused job (re-drive): clear the overlay and schedule
     /// pending tiles again. If all tiles finished while paused, complete
-    /// now; otherwise emit up to the concurrency gate. FIFO order is
-    /// preserved because `pending_tiles` was never reordered while paused.
+    /// now; otherwise emit up to the concurrency gate. Cursor order and the
+    /// parked retry order are preserved while paused.
     fn apply_resume(&mut self) -> Result<Outcome, JobError> {
         if !self.paused {
             return Err(JobError::invalid_state("resume valid only while paused"));
@@ -1430,13 +1409,17 @@ impl Job {
         // Elapsed-while-paused retries rejoin the queue now, ahead of
         // never-started tiles so the resumed round finishes in order.
         for (tile, _) in std::mem::take(&mut self.ready_retries) {
-            if !self.acquired_tiles.contains(&tile) && !self.failed_set.contains(&tile) {
-                self.enqueue_front(tile);
+            if matches!(
+                self.tile_status.get(tile as usize),
+                Some(TileStatus::RetryReady)
+            ) && self.tile_specs.contains_key(&tile)
+            {
+                self.retry_queue.push_front(tile);
             }
         }
         if self.state == State::AcquiringTiles
-            && self.acquired_tiles.len() == self.planned_tiles.len()
-            && !self.planned_tiles.is_empty()
+            && self.acquired_count == self.tile_total
+            && self.tile_total != 0
         {
             self.complete_remaining(false)?;
         } else if self.state == State::AcquiringTiles {
@@ -1447,6 +1430,9 @@ impl Job {
 
     fn complete_remaining(&mut self, partial: bool) -> Result<(), JobError> {
         self.paused = false;
+        self.tile_cursor = None;
+        self.retry_queue.clear();
+        self.tile_specs.clear();
         self.finalization = Finalization::Pending { partial };
         self.set_state(State::Finalizing)?;
         self.push_effect(JobEffect::FinalizeOutput {
@@ -1497,6 +1483,9 @@ impl Job {
 
     pub(crate) fn fail_via_cleanup(&mut self, code: &str, message: String) -> Result<(), JobError> {
         self.paused = false;
+        self.tile_cursor = None;
+        self.retry_queue.clear();
+        self.tile_specs.clear();
         self.terminal_error = Some((code.to_string(), message.clone()));
         self.emit_cleanup_once()?;
         self.set_state(State::Failed)?;
@@ -1521,56 +1510,78 @@ impl Job {
         let limit = usize::try_from(self.config.max_concurrent_fetches)
             .map_err(|_| JobError::overflow("concurrency"))?;
         while self.in_flight.len() < limit {
-            let Some(next) = self.dequeue_next() else {
+            let Some((next, spec)) = self.next_tile_to_issue()? else {
                 break;
             };
-            if self.acquired_tiles.contains(&next)
-                || self.failed_set.contains(&next)
-                || self.in_flight.contains(&next)
-            {
-                continue;
-            }
+            self.tile_specs.insert(next, spec);
+            self.tile_status[next as usize] = TileStatus::InFlight;
             self.in_flight.insert(next);
             self.push_acquire_tile(next, false, false)?;
         }
         Ok(())
     }
 
-    /// Queue one tile at the front unless already queued. The membership
-    /// set keeps this O(1); the queue itself is never scanned.
-    fn enqueue_front(&mut self, tile: u32) {
-        if self.pending_set.insert(tile) {
-            self.pending_tiles.push_front(tile);
-        }
-    }
+    /// Retry descriptors take priority. Ordinary descriptors are produced
+    /// just in time from the row-major cursor and dropped once settled.
+    fn next_tile_to_issue(&mut self) -> Result<Option<(u32, TileSpec)>, JobError> {
+        loop {
+            if let Some(tile) = self.retry_queue.pop_front() {
+                if self.tile_status.get(tile as usize) != Some(&TileStatus::RetryReady) {
+                    continue;
+                }
+                if let Some(spec) = self.tile_specs.get(&tile).cloned() {
+                    return Ok(Some((tile, spec)));
+                }
+                self.fail_via_cleanup(
+                    "job.plan-invalid",
+                    format!("retry tile {tile} has no retained descriptor"),
+                )?;
+                return Ok(None);
+            }
 
-    /// Queue one tile at the back unless already queued, reporting whether
-    /// it was queued. The membership set keeps this O(1); the queue itself
-    /// is never scanned.
-    fn enqueue_back(&mut self, tile: u32) -> bool {
-        if self.pending_set.insert(tile) {
-            self.pending_tiles.push_back(tile);
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Pop the oldest queued tile, keeping the membership set mirrored.
-    fn dequeue_next(&mut self) -> Option<u32> {
-        let next = self.pending_tiles.pop_front()?;
-        self.pending_set.remove(&next);
-        Some(next)
-    }
-
-    /// Drop one tile from the queue wherever it sits. The set gates the
-    /// scan: absent tiles (the common case, since answered work leaves
-    /// flight first) skip it entirely. Only a still-queued tile pays the
-    /// removal scan, which hosts can only trigger by answering work that
-    /// was never issued.
-    fn remove_from_pending(&mut self, tile: u32) {
-        if self.pending_set.remove(&tile) {
-            self.pending_tiles.retain(|value| *value != tile);
+            let Some(cursor) = self.tile_cursor.as_mut() else {
+                return Ok(None);
+            };
+            let Some(item) = cursor.next() else {
+                self.tile_cursor = None;
+                return Ok(None);
+            };
+            let spec = match item {
+                Ok(spec) => spec,
+                Err(error) => {
+                    self.fail_via_cleanup("job.plan-invalid", error.to_string())?;
+                    return Ok(None);
+                }
+            };
+            if spec.role != TileRole::Output {
+                self.fail_via_cleanup(
+                    "job.plan-invalid",
+                    format!("non-output tile {} entered acquisition plan", spec.ordinal),
+                )?;
+                return Ok(None);
+            }
+            let tile = spec.ordinal;
+            let Some(status) = self.tile_status.get(tile as usize).copied() else {
+                self.fail_via_cleanup(
+                    "job.plan-invalid",
+                    format!("tile ordinal {tile} exceeds declared plan"),
+                )?;
+                return Ok(None);
+            };
+            // A probe can already have painted an output tile before the
+            // resolved grid is available. Its ordinal remains in the
+            // row-major cursor, but acquisition must reuse the painted tile.
+            if status == TileStatus::Acquired {
+                continue;
+            }
+            if status != TileStatus::Pending {
+                self.fail_via_cleanup(
+                    "job.plan-invalid",
+                    format!("tile ordinal {tile} was generated after it left Pending"),
+                )?;
+                return Ok(None);
+            }
+            return Ok(Some((tile, spec)));
         }
     }
 
@@ -1583,19 +1594,18 @@ impl Job {
         probe: bool,
         probe_output: bool,
     ) -> Result<(), JobError> {
-        let spec = self.tile_specs.get(&wire);
-        let uri = spec.map_or_else(String::new, |spec| spec.request.uri.clone());
-        let headers = spec.map_or_else(BTreeMap::new, |spec| spec.request.headers.clone());
-        let processing = spec.map_or(ProcessingRecipe::None, |spec| spec.processing.clone());
-        let destination = spec.map_or_else(Vec2d::default, |spec| spec.destination);
-        let extent = spec.and_then(|spec| spec.expected_size);
+        let Some(spec) = self.tile_specs.get(&wire) else {
+            return Err(JobError::invalid_state(
+                "tile descriptor is not materialized",
+            ));
+        };
         self.push_effect(JobEffect::AcquireTile {
             tile: wire,
-            uri,
-            headers,
-            processing,
-            destination,
-            expected_size: extent,
+            uri: spec.request.uri.clone(),
+            headers: spec.request.headers.clone(),
+            processing: spec.processing,
+            destination: spec.destination,
+            expected_size: spec.expected_size,
             canvas: self.canvas_size,
             probe,
             probe_output,
@@ -1653,4 +1663,109 @@ pub(crate) fn is_valid_input_url(input_url: &str) -> bool {
         return rest.starts_with('/');
     }
     true
+}
+
+#[cfg(test)]
+mod lazy_plan_tests {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    use dezoomify_core::core::adaptive::DiscoverableGrid;
+    use dezoomify_core::core::model::Request;
+    use dezoomify_core::core::tile_plan::{Grid, GridTile};
+    use dezoomify_core::Vec2d;
+
+    use super::{Job, JobInput, State};
+    use crate::config::Config;
+    use crate::transition::JobEffect;
+
+    #[test]
+    fn grid_requests_are_materialized_only_for_open_slots() {
+        let generated = Arc::new(AtomicUsize::new(0));
+        let generated_by_request = Arc::clone(&generated);
+        let grid = Grid::with_requests(
+            Vec2d {
+                x: 256 * 1000,
+                y: 256,
+            },
+            Vec2d::square(256),
+            Vec2d::default(),
+            move |tile: GridTile| {
+                generated_by_request.fetch_add(1, Ordering::Relaxed);
+                Request::new(format!("https://tiles.test/{}", tile.row_major_ordinal))
+            },
+        )
+        .unwrap();
+        let total = grid.count();
+        let config = Config {
+            max_concurrent_fetches: 4,
+            ..Config::default()
+        };
+        let mut job =
+            Job::new_with_inputs(vec![JobInput::new("https://source.test/large")], config).unwrap();
+
+        job.plan_from_tiles(
+            Box::new(grid.tiles_row_major()),
+            total,
+            Some(grid.image_size()),
+        )
+        .unwrap();
+
+        // Each issued tile builds its request and the legacy first-tile
+        // Referer, so the format generator runs twice per materialized spec.
+        assert_eq!(generated.load(Ordering::Relaxed), 8);
+        assert_eq!(job.tile_specs.len(), 4);
+        assert_eq!(job.tile_status.len(), 1000);
+        let issued: Vec<_> = job
+            .effects
+            .iter()
+            .filter_map(|effect| match effect {
+                JobEffect::AcquireTile { tile, uri, .. } => Some((*tile, uri.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            issued,
+            [
+                (0, "https://tiles.test/0"),
+                (1, "https://tiles.test/1"),
+                (2, "https://tiles.test/2"),
+                (3, "https://tiles.test/3")
+            ]
+        );
+
+        job.apply_tile_success(0).unwrap();
+        assert_eq!(generated.load(Ordering::Relaxed), 10);
+        assert_eq!(job.tile_specs.len(), 4);
+        assert!(job.tile_specs.contains_key(&4));
+        assert!(!job.tile_specs.contains_key(&0));
+    }
+
+    #[test]
+    fn completed_probe_descriptors_are_released_before_the_next_probe() {
+        let mut job = Job::new_with_inputs(
+            vec![JobInput::new("https://source.test/generic")],
+            Config::default(),
+        )
+        .unwrap();
+        job.state = State::Planning;
+        job.drive_probe(
+            DiscoverableGrid::new("https://tiles.test/tile?x={{X}}&y={{Y}}".into()).start(),
+        )
+        .unwrap();
+
+        let mut probes = 0;
+        while let Some(flight) = job.probe.as_ref() {
+            let tile = flight.tile;
+            assert_eq!(job.tile_specs.len(), 1, "only the active probe is retained");
+            job.apply_probe_outcome(tile, dezoomify_protocol::dto::ProbeOutcome::Missing)
+                .unwrap();
+            probes += 1;
+            assert!(job.tile_specs.len() <= 1);
+        }
+        assert!(probes > 1, "the generic grid should issue multiple probes");
+        assert!(job.tile_specs.is_empty());
+    }
 }

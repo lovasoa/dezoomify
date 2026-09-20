@@ -277,6 +277,35 @@ fn permanent_failure_settles_after_exactly_one_attempt() {
 }
 
 #[test]
+fn permanent_failure_advances_single_slot_lazy_plan() {
+    let mut options = dzi_options();
+    options.max_concurrent = 1;
+    options.max_retries = 0;
+    let (mut job, update) = EngineJob::start(options).expect("start");
+    let first = metadata_id(&update);
+    job.provide_metadata(first, ResponseMetadata::new(), DZI)
+        .expect("catalog");
+    let mut update = select_largest(&mut job);
+    let mut attempted = Vec::new();
+
+    while job.snapshot().lifecycle == JobState::AcquiringTiles {
+        assert_eq!(tile_ids(&update).len(), 1, "one open slot at a time");
+        let id = tile_ids(&update)[0];
+        attempted.extend(tile_ordinals(&update));
+        update = job
+            .complete(id, EffectResult::TileFailed(permanent_403()))
+            .expect("failed tile advances the plan");
+        if job.snapshot().lifecycle == JobState::AcquiringTiles {
+            assert_eq!(tile_ids(&update).len(), 1, "next tile was issued");
+        }
+    }
+
+    assert_eq!(job.snapshot().lifecycle, JobState::AwaitingPartialDecision);
+    assert_eq!(attempted, vec![0, 1, 2, 3]);
+    assert_eq!(job.snapshot().decision.expect("decision").missing.len(), 4);
+}
+
+#[test]
 fn partial_retry_requeues_exactly_failed_tiles_preserving_good() {
     let mut options = dzi_options();
     options.max_retries = 0;
@@ -585,6 +614,11 @@ fn acquisition_scales_with_bounded_outstanding_across_increasing_tile_counts() {
             .command(dezoomify_engine::UserCommand::SelectLevel { level })
             .expect("select level");
         assert_eq!(update.snapshot.lifecycle, JobState::AcquiringTiles);
+        assert_eq!(
+            tile_ordinals(&update),
+            (0..expected.min(BUDGET)).collect::<Vec<_>>(),
+            "first request window is generated in source order at {edge}px"
+        );
         let mut pending: std::collections::VecDeque<EffectId> =
             tile_ids(&update).into_iter().collect();
         assert_eq!(
