@@ -11,7 +11,7 @@ use dezoomify_core::core::adaptive::{DiscoverableStep, ObservationResult, ProbeC
 use dezoomify_core::core::discovery::{
     DiscoveryError, DiscoveryOperation, FetchCause, ResourceFailure, ResourceResponse,
 };
-use dezoomify_core::core::model::{CatalogEntry, ImageCatalog, ProcessingRecipe, TileRole};
+use dezoomify_core::core::model::{CatalogEntry, ImageCatalog, ProcessingRecipe, TileRole, TileSpec};
 use dezoomify_core::core::registry::{default_registry, registry_for};
 use dezoomify_core::core::tile_plan::TileSource;
 use dezoomify_core::Vec2d;
@@ -181,17 +181,8 @@ pub struct Job {
     in_flight: HashSet<u32>,
     acquired_tiles: HashSet<u32>,
     tile_attempts: HashMap<u32, u32>,
-    /// Tile request URIs by wire tile id (planned and probe tiles).
-    tile_uris: HashMap<u32, String>,
-    /// Core request headers by wire tile id (sent verbatim by native hosts;
-    /// browser hosts ignore them).
-    tile_headers: HashMap<u32, BTreeMap<String, String>>,
-    /// Closed byte-processing recipe by wire tile id.
-    tile_processing: HashMap<u32, ProcessingRecipe>,
-    /// Output destinations by wire tile id.
-    tile_destinations: HashMap<u32, Vec2d>,
-    /// Expected decoded extents by wire tile id (`None` while unknown).
-    tile_extents: HashMap<u32, Option<Vec2d>>,
+    /// Complete tile descriptor by wire id (planned, retry, and probe tiles).
+    tile_specs: HashMap<u32, TileSpec>,
     /// Declared canvas size for the planned level (`None` while unknown,
     /// e.g. mid-probe or custom layouts that derive it from tiles).
     canvas_size: Option<Vec2d>,
@@ -286,11 +277,7 @@ impl Job {
             in_flight: HashSet::new(),
             acquired_tiles: HashSet::new(),
             tile_attempts: HashMap::new(),
-            tile_uris: HashMap::new(),
-            tile_headers: HashMap::new(),
-            tile_processing: HashMap::new(),
-            tile_destinations: HashMap::new(),
-            tile_extents: HashMap::new(),
+            tile_specs: HashMap::new(),
             canvas_size: None,
             probe: None,
             retained_probe: None,
@@ -921,11 +908,7 @@ impl Job {
                     format!("tile plan exceeds max_tiles {}", self.config.max_tiles),
                 );
             }
-            self.tile_uris.insert(ordinal, spec.request.uri);
-            self.tile_headers.insert(ordinal, spec.request.headers);
-            self.tile_processing.insert(ordinal, spec.processing);
-            self.tile_destinations.insert(ordinal, spec.destination);
-            self.tile_extents.insert(ordinal, spec.expected_size);
+            self.tile_specs.insert(ordinal, spec);
             planned.push(ordinal);
         }
         if planned.is_empty() {
@@ -982,11 +965,7 @@ impl Job {
                     tile: wire,
                     output: probe_output,
                 });
-                self.tile_uris.insert(wire, tile.request.uri.clone());
-                self.tile_headers.insert(wire, tile.request.headers.clone());
-                self.tile_processing.insert(wire, tile.processing);
-                self.tile_destinations.insert(wire, tile.destination);
-                self.tile_extents.insert(wire, tile.expected_size);
+                self.tile_specs.insert(wire, tile.clone());
                 self.in_flight.insert(wire);
                 self.push_acquire_tile(wire, true, probe_output)?;
                 Ok(())
@@ -1036,7 +1015,7 @@ impl Job {
         self.failed_set.clear();
         if let Some((tile, destination)) = self.retained_probe.take() {
             if self.planned_set.contains(&tile)
-                && self.tile_destinations.get(&tile) == Some(&destination)
+                && self.tile_specs.get(&tile).map(|spec| spec.destination) == Some(destination)
             {
                 self.remove_from_pending(tile);
                 self.acquired_tiles.insert(tile);
@@ -1309,10 +1288,9 @@ impl Job {
         };
         if available && flight_output {
             let destination = self
-                .tile_destinations
+                .tile_specs
                 .get(&tile)
-                .copied()
-                .unwrap_or_default();
+                .map_or_else(Vec2d::default, |spec| spec.destination);
             self.retained_probe = Some((tile, destination));
         }
         let Some(flight) = self.probe.take() else {
@@ -1517,7 +1495,7 @@ impl Job {
         Ok(Outcome::Applied)
     }
 
-    fn fail_via_cleanup(&mut self, code: &str, message: String) -> Result<(), JobError> {
+    pub(crate) fn fail_via_cleanup(&mut self, code: &str, message: String) -> Result<(), JobError> {
         self.paused = false;
         self.terminal_error = Some((code.to_string(), message.clone()));
         self.emit_cleanup_once()?;
@@ -1605,19 +1583,12 @@ impl Job {
         probe: bool,
         probe_output: bool,
     ) -> Result<(), JobError> {
-        let uri = self.tile_uris.get(&wire).cloned().unwrap_or_default();
-        let headers = self.tile_headers.get(&wire).cloned().unwrap_or_default();
-        let processing = self
-            .tile_processing
-            .get(&wire)
-            .cloned()
-            .unwrap_or(ProcessingRecipe::None);
-        let destination = self
-            .tile_destinations
-            .get(&wire)
-            .copied()
-            .unwrap_or_default();
-        let extent = self.tile_extents.get(&wire).copied().flatten();
+        let spec = self.tile_specs.get(&wire);
+        let uri = spec.map_or_else(String::new, |spec| spec.request.uri.clone());
+        let headers = spec.map_or_else(BTreeMap::new, |spec| spec.request.headers.clone());
+        let processing = spec.map_or(ProcessingRecipe::None, |spec| spec.processing.clone());
+        let destination = spec.map_or_else(Vec2d::default, |spec| spec.destination);
+        let extent = spec.and_then(|spec| spec.expected_size);
         self.push_effect(JobEffect::AcquireTile {
             tile: wire,
             uri,
