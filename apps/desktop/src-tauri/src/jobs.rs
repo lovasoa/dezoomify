@@ -182,8 +182,6 @@ pub enum Choice {
 /// names are shown, never values.
 pub struct JobEntry {
     pub id: String,
-    /// Full input URL the runner fetches (never embedded in emits).
-    pub input_url: String,
     /// Redacted input origin (`scheme://host`) for emit context.
     pub origin: String,
     /// Runner options: settings, handoff headers, and pre-start selections.
@@ -456,7 +454,6 @@ impl JobTable {
             id.clone(),
             JobEntry {
                 id: id.clone(),
-                input_url: input_url.to_string(),
                 origin: origin.clone(),
                 options,
                 runner: None,
