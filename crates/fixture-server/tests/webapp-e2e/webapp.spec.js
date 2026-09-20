@@ -148,9 +148,9 @@ test("metadata proxy failure reaches the error UI with its complete typed contex
   await page.route("**/api/proxy", (route) => {
     if (route.request().method() === "POST") proxyPosts += 1;
     route.fulfill({
-      status: 502,
+      status: 406,
       contentType: "application/json",
-      body: JSON.stringify({ code: "PROXY_ERROR", reason: "origin" }),
+      body: JSON.stringify({ code: "TRANSPORT_HTTP_ERROR" }),
     });
   });
   await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
@@ -161,11 +161,12 @@ test("metadata proxy failure reaches the error UI with its complete typed contex
 
   const diagnostics = await page.locator("#dz-error-diagnostics").textContent();
   assert.ok(diagnostics);
-  assert.match(diagnostics, /code:PROXY_ERROR\b/);
+  assert.match(diagnostics, /code:TRANSPORT_HTTP_ERROR\b/);
   assert.match(diagnostics, /phase:discovery\b/);
   assert.match(diagnostics, /transport:metadata-proxy\b/);
-  assert.match(diagnostics, /http:502\b/);
+  assert.match(diagnostics, /http:406\b/);
   assert.doesNotMatch(diagnostics, /adapter\.|engine\.error/);
+  await expect(page.locator("#app")).toContainText(/The site refused to share this file \(HTTP 406\)/i);
 });
 
 // Production topology of a Google Arts & Culture asset page: no CORS grant
