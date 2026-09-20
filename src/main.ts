@@ -382,7 +382,9 @@ function presentEngineFailure(error: ErrorDto, url: string): void {
   hostFailure = describeFailure({
     code,
     engineDetail: error.detail ?? error.message,
-    message: error.message,
+    // The metadata proxy classifies its own outcome into user copy. Other
+    // engine terminals keep the shared headline selected from their code.
+    ...(error.transport === "metadata-proxy" ? { message: error.message } : {}),
     phase: error.phase,
     retryable: discovery ? discovery.retryable : error.retryable,
     transport: error.transport ?? errorTransportFor(code, webFetcher.getActiveTransport()),
