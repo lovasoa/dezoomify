@@ -1,9 +1,14 @@
 //! Portable format coverage: each implemented format is reachable through
 //! automatic discovery, page adapters follow their metadata, and malformed
-//! metadata is rejected. Exact tile URL spelling lives in E2E, not here.
+//! metadata is rejected. Focused plan assertions pin format-specific geometry
+//! and request behavior without restoring the former broad parity harness.
 
+use dezoomify_core::Vec2d;
 use dezoomify_core::core::discovery::{DiscoveryError, ResourceResponse};
-use dezoomify_core::core::{CatalogEntry, ImageCatalog, Registry, default_registry};
+use dezoomify_core::core::{
+    CatalogEntry, DiscoverableStep, Grid, ImageCatalog, LevelDescriptor, ObservationResult,
+    Registry, TileSource, default_registry,
+};
 
 type Resource<'a> = (&'a str, &'a [u8]);
 
@@ -49,6 +54,115 @@ fn ready_image(catalog: ImageCatalog) -> dezoomify_core::core::ImageDescriptor {
         }
         None => panic!("expected one image"),
     }
+}
+
+fn grid(level: &LevelDescriptor) -> &Grid {
+    match &level.source {
+        TileSource::Grid(grid) => grid,
+        TileSource::Adaptive(source) => source.declared_grid().expect("declared grid"),
+        source => panic!("expected a grid source, got {source:?}"),
+    }
+}
+
+fn tile_urls(level: &LevelDescriptor) -> Vec<String> {
+    grid(level)
+        .tiles_row_major()
+        .map(|tile| tile.expect("grid tile").request.uri)
+        .collect()
+}
+
+#[test]
+fn zoomify_group_boundaries_use_cumulative_tile_counts() {
+    let input = "https://fixtures.test/zoomify/ImageProperties.xml";
+    let metadata = br#"<IMAGE_PROPERTIES WIDTH="4096" HEIGHT="4096" NUMTILES="341" VERSION="1.8" TILESIZE="256" />"#;
+    let image = ready_image(discover(input, &[(input, metadata)]).unwrap());
+    let urls = tile_urls(image.levels.last().unwrap());
+    assert_eq!(urls.len(), 256);
+    assert!(urls[170].ends_with("/TileGroup0/4-10-10.jpg"));
+    assert!(urls[171].ends_with("/TileGroup1/4-11-10.jpg"));
+    assert!(urls[255].ends_with("/TileGroup1/4-15-15.jpg"));
+}
+
+#[test]
+fn deepzoom_overlap_advances_tile_origins_without_gaps() {
+    let input = "https://fixtures.test/deepzoom/overlap.dzi";
+    let metadata = br#"<Image TileSize="256" Overlap="1" Format="jpg"><Size Width="512" Height="512" /></Image>"#;
+    let image = ready_image(discover(input, &[(input, metadata)]).unwrap());
+    let level = image.levels.last().unwrap();
+    assert_eq!(grid(level).overlap(), Vec2d::square(1));
+    assert_eq!(
+        grid(level)
+            .tiles_row_major()
+            .map(|tile| {
+                let tile = tile.unwrap();
+                (tile.destination.x, tile.destination.y)
+            })
+            .collect::<Vec<_>>(),
+        [(0, 0), (255, 0), (0, 255), (255, 255)]
+    );
+}
+
+#[test]
+fn iiif_probe_falls_back_to_caret_size_and_preserves_probe_tile() {
+    let input = "https://fixtures.test/iiif/bruun-rasmussen/info.json";
+    let image = ready_image(
+        discover(
+            input,
+            &[(input, coverage_fixture!("iiif/bruun-rasmussen-info.json"))],
+        )
+        .unwrap(),
+    );
+    let level = image
+        .levels
+        .iter()
+        .find(|level| level.scale_factor == Some(1))
+        .unwrap();
+    let TileSource::Adaptive(source) = &level.source else {
+        panic!("IIIF level must use adaptive probing")
+    };
+    let DiscoverableStep::Probe {
+        tile: first,
+        continuation,
+    } = source.start()
+    else {
+        panic!("probe must start with the ordinary size")
+    };
+    assert!(first.request.uri.ends_with("/256,256/0/default.jpg"));
+    let DiscoverableStep::Probe {
+        tile: fallback,
+        continuation,
+    } = continuation.submit(ObservationResult::Missing).unwrap()
+    else {
+        panic!("missing ordinary tile must trigger caret-size fallback")
+    };
+    assert!(fallback.request.uri.ends_with("/^256,/0/default.jpg"));
+    let DiscoverableStep::Resolved {
+        grid,
+        previously_output,
+    } = continuation
+        .submit(ObservationResult::Available {
+            size: Vec2d::square(256),
+        })
+        .unwrap()
+    else {
+        panic!("available fallback must resolve the grid")
+    };
+    assert_eq!(previously_output, [Vec2d::default()]);
+    assert_eq!(
+        grid.tiles_row_major().next().unwrap().unwrap().request.uri,
+        fallback.request.uri
+    );
+}
+
+#[test]
+fn krpano_explicit_level_expands_tile_coordinates() {
+    let input = "https://fixtures.test/krpano/pano.xml";
+    let metadata = br#"<krpano><image tilesize="256"><level tiledimagewidth="512" tiledimageheight="512"><front url="tiles/l%l/%v_%h.jpg" /></level></image></krpano>"#;
+    let image = ready_image(discover(input, &[(input, metadata)]).unwrap());
+    assert_eq!(
+        tile_urls(image.levels.last().unwrap()).last().unwrap(),
+        "https://fixtures.test/krpano/tiles/l1/2_2.jpg"
+    );
 }
 
 #[test]
