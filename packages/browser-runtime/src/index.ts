@@ -8,7 +8,6 @@ export * from "./web-integration.ts";
 export * from "./tile-decode.ts";
 export * from "./canvas-save.ts";
 export * from "./assembly.ts";
-export * from "./engine-selection.ts";
 export * from "./failure.ts";
 export * from "./job-activity.ts";
 export * from "./logging.ts";

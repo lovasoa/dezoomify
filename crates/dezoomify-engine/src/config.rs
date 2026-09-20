@@ -9,16 +9,12 @@ use serde::{Deserialize, Serialize};
 
 /// Maximum concurrent tile fetches allowed by validation.
 pub const MAX_FETCHES: u32 = 64;
-/// Maximum concurrent decodes allowed by validation.
-pub const MAX_DECODES: u32 = 64;
 /// Maximum tiles allowed by validation (16M scale).
 pub const MAX_TILES_LIMIT: u32 = 16_777_216;
 /// Maximum retries allowed by validation.
 pub const MAX_RETRIES_LIMIT: u32 = 1_024;
 /// Maximum same-job deferred follows allowed by validation.
 pub const MAX_DEFERRED_FOLLOWS_LIMIT: u32 = 64;
-/// Maximum retained buffers allowed by validation.
-pub const MAX_BUFFERS_LIMIT: u32 = 65_536;
 /// Minimum metadata bytes accepted (smaller is a configuration error).
 pub const MIN_BYTES: u64 = 1_024;
 /// Maximum bytes for a single resource allowed by validation (4 GiB).
@@ -52,10 +48,8 @@ impl std::error::Error for ConfigError {}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
     pub max_concurrent_fetches: u32,
-    pub max_concurrent_decodes: u32,
     pub max_tiles: u32,
     pub max_retries: u32,
-    pub max_buffers: u32,
     pub max_bytes: u64,
     /// Maximum same-job deferred catalog follows (0 disables following).
     pub max_deferred_follows: u32,
@@ -69,10 +63,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             max_concurrent_fetches: 4,
-            max_concurrent_decodes: 2,
             max_tiles: 4_096,
             max_retries: 3,
-            max_buffers: 16,
             max_bytes: 67_108_864,
             max_deferred_follows: 8,
             retry_base_delay_ms: crate::retry::RETRY_BASE_DELAY_MS,
@@ -90,12 +82,7 @@ impl Config {
     /// `max_retries`), exceeds its documented maximum, or forms an
     /// unreasonable combination.
     pub fn validate(&self) -> Result<(), ConfigError> {
-        if self.max_concurrent_fetches == 0
-            || self.max_concurrent_decodes == 0
-            || self.max_tiles == 0
-            || self.max_buffers == 0
-            || self.max_bytes == 0
-        {
+        if self.max_concurrent_fetches == 0 || self.max_tiles == 0 || self.max_bytes == 0 {
             return Err(ConfigError::new(
                 "job.invalid-config",
                 "all config bounds except max_retries must be non-zero".to_string(),
@@ -107,15 +94,6 @@ impl Config {
                 format!(
                     "max_concurrent_fetches {} exceeds {MAX_FETCHES}",
                     self.max_concurrent_fetches
-                ),
-            ));
-        }
-        if self.max_concurrent_decodes > MAX_DECODES {
-            return Err(ConfigError::new(
-                "job.resource-limit",
-                format!(
-                    "max_concurrent_decodes {} exceeds {MAX_DECODES}",
-                    self.max_concurrent_decodes
                 ),
             ));
         }
@@ -143,15 +121,6 @@ impl Config {
                 ),
             ));
         }
-        if self.max_buffers > MAX_BUFFERS_LIMIT {
-            return Err(ConfigError::new(
-                "job.resource-limit",
-                format!(
-                    "max_buffers {} exceeds {MAX_BUFFERS_LIMIT}",
-                    self.max_buffers
-                ),
-            ));
-        }
         if self.max_bytes < MIN_BYTES || self.max_bytes > MAX_BYTES_LIMIT {
             return Err(ConfigError::new(
                 "job.resource-limit",
@@ -172,18 +141,6 @@ impl Config {
             return Err(ConfigError::new(
                 "job.invalid-config",
                 "max_concurrent_fetches cannot exceed max_tiles".to_string(),
-            ));
-        }
-        if self.max_concurrent_decodes > self.max_tiles {
-            return Err(ConfigError::new(
-                "job.invalid-config",
-                "max_concurrent_decodes cannot exceed max_tiles".to_string(),
-            ));
-        }
-        if self.max_buffers < self.max_concurrent_fetches {
-            return Err(ConfigError::new(
-                "job.invalid-config",
-                "max_buffers cannot be smaller than max_concurrent_fetches".to_string(),
             ));
         }
         Ok(())

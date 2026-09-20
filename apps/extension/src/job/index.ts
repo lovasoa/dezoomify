@@ -16,8 +16,10 @@ import {
   createBrowserRunner,
   createCanvasAssembly,
   createProbeSize,
-  createSelectionDriver,
   createTileDecoder,
+  BROWSER_MAX_CANVAS_AREA,
+  BROWSER_MAX_PLAN_TILES,
+  BROWSER_MAX_CANVAS_SIDE,
   saveBlobViaAnchor,
 } from "@dezoomify/browser-runtime";
 import { createExtensionFetcher } from "../runtime/fetch.ts";
@@ -364,57 +366,6 @@ function createAssembly(
   });
 }
 
-/**
- * Drive selection and deferred follows from the authoritative snapshot via
- * the shared selection driver. Ready images select once; still-deferred
- * entries follow in the same job through the follow-up command (engine owns
- * budget and cycle guards, never a host recursion with a fresh attempt).
- * Reads only the generated DTO shape.
- */
-// One selection driver per attempt: a follow command's own answer snapshot
-// still carries the old catalog, so replays must not resend the follow.
-let selectionDriver = createSelectionDriver();
-
-function driveSnapshot(snapshot: JobSnapshot) {
-  const drive = selectionDriver.drive(snapshot);
-  switch (drive.action) {
-    case "already-driven":
-      return;
-    case "selected":
-    case "waiting":
-      return;
-    case "select": {
-      const catalog = snapshot.selection.catalog;
-      if (catalog) jobLog.info("selection-catalog", `entries=${catalog.entries.length}`);
-      render(statusForLifecycle(snapshot.lifecycle), { jobActivity: { startedAt: Date.now() } });
-      void jobHandle?.command({ type: "select-image", image: drive.image }).catch(() => {});
-      void jobHandle?.command({ type: "select-level", level: drive.level }).catch(() => {});
-      return;
-    }
-    case "follow-deferred":
-      followDeferredAt(drive.position);
-      return;
-    case "unselectable":
-      onHostFailure(Object.assign(
-        new Error("No downloadable image was found on this page."),
-        { code: "NO_IMAGE_FOUND", retryable: false },
-      ));
-      void jobHandle?.command({ type: "cancel" }).catch(() => {});
-      return;
-  }
-}
-
-function followDeferredAt(image: number) {
-  jobLog.info("deferred-follow", `image=${image}`);
-  render("discovering", { jobActivity: { startedAt: Date.now() } });
-  void jobHandle?.command({ type: "follow-deferred", image }).catch((error) => {
-    onHostFailure(Object.assign(
-      new Error("The image metadata stayed deferred after the resolution limit."),
-      { code: "discovery.deferred", retryable: false, detail: error instanceof Error ? error.message : undefined },
-    ));
-  });
-}
-
 function setup(bound: unknown) {
   if (!isJobBinding(bound) || binding) return;
   // Keep only the four binding fields: the arriving message carries payload
@@ -472,7 +423,6 @@ function resetAttemptState() {
  */
 async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
   if (!binding) return;
-  selectionDriver = createSelectionDriver();
   const activeBinding = binding;
   const fetcher = createExtensionFetcher({
     hasPermission: async (origin) => testGrantedOrigins.has(origin) ||
@@ -581,12 +531,22 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
   const service = createJobService(runner);
   try {
     const handle = await service.start(
-      { inputs, engine: {}, exec: { kind: "browser", sourceUrl: inputs[0]?.url ?? "" } },
+      {
+        inputs,
+        engine: {
+          max_tiles: BROWSER_MAX_PLAN_TILES,
+          browser_selection: {
+            maxWidth: BROWSER_MAX_CANVAS_SIDE,
+            maxHeight: BROWSER_MAX_CANVAS_SIDE,
+            maxArea: BROWSER_MAX_CANVAS_AREA,
+          },
+        },
+        exec: { kind: "browser", sourceUrl: inputs[0]?.url ?? "" },
+      },
       {
         snapshot: (snapshot: JobSnapshot) => {
           if (localFailure) return;
           activeSnapshot = snapshot;
-          driveSnapshot(snapshot);
           renderForSnapshot(snapshot);
         },
         hostStatus: () => {},

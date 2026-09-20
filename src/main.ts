@@ -56,7 +56,6 @@ import {
 import { failure } from "../packages/browser-runtime/src/failure.ts";
 import type { StructuredFailure } from "../packages/browser-runtime/src/failure.ts";
 import {
-  BROWSER_LIMITS,
   BROWSER_MAX_CANVAS_AREA,
   BROWSER_MAX_CANVAS_SIDE,
   BROWSER_MAX_PLAN_TILES,
@@ -66,7 +65,6 @@ import {
   isAllowedSourceUrl,
   isLocalFileUrl,
 } from "../packages/browser-runtime/src/plan-gates.ts";
-import { createSelectionDriver } from "../packages/browser-runtime/src/engine-selection.ts";
 import {
   createWebQueue,
   enqueueWebQueue,
@@ -596,43 +594,20 @@ async function runJob(url: string, origin = url): Promise<void> {
   });
 
   const service = createJobService(runner);
-  // One selection driver per run: a follow command's own answer snapshot
-  // still carries the old catalog, so replays must not resend the follow.
-  const selectionDriver = createSelectionDriver();
-
   const onSnapshot = (snapshot: JobSnapshot): void => {
     if (run !== activeRun) return;
     activeSnapshot = snapshot;
-
-    // Auto-selection drives from the authoritative snapshot through the
-    // shared pure selection driver: ready images select once, still-deferred
-    // entries follow in the same job (the engine owns budget and cycle
-    // guards). Engine commands plus the product side effects (title,
-    // image choice) stay here.
-    const drive = selectionDriver.drive(snapshot, BROWSER_LIMITS);
-    if (drive.action === "already-driven") return;
-    if (drive.action === "select") {
-      const entry = snapshot.selection.catalog?.entries[drive.image];
-      const image = entry && entry.kind === "image" ? entry : null;
-      resultTitle = drive.title ?? (typeof image?.title === "string" ? image.title : undefined);
-      const level = image?.levels?.[drive.level];
-      if (level && typeof level.width === "number" && typeof level.height === "number") viewCtx.imageChoice = { width: level.width, height: level.height, tiles: 0 };
-      update();
-      const handle = jobHandle;
-      if (handle) {
-        void handle.command({ type: "select-image", image: drive.image });
-        void handle.command({ type: "select-level", level: drive.level });
-      }
-      return;
-    }
-    if (drive.action === "follow-deferred") {
-      followDeferredAt(drive.position);
-      return;
-    }
-    if (drive.action === "unselectable") {
-      onHostFailure(failure("CATALOG_UNSELECTABLE", "The image catalog has no level this browser can select.", false));
-      return;
-    }
+    const imageIndex = snapshot.selection.image;
+    const levelIndex = snapshot.selection.level;
+    const selected = imageIndex === null || imageIndex === undefined
+      ? undefined
+      : snapshot.selection.catalog?.entries[imageIndex];
+    const image = selected?.kind === "image" ? selected : undefined;
+    const level = levelIndex === null || levelIndex === undefined ? undefined : image?.levels[levelIndex];
+    resultTitle = typeof image?.title === "string" ? image.title : undefined;
+    viewCtx.imageChoice = level
+      ? { width: level.width, height: level.height, tiles: 0 }
+      : undefined;
 
     const completed = snapshot.progress.completed;
     const total = snapshot.progress.total ?? null;
@@ -668,20 +643,20 @@ async function runJob(url: string, origin = url): Promise<void> {
     }
   };
 
-  function followDeferredAt(image: number): void {
-    webLog.info("deferred-follow", `image=${image} host=${hostOf(origin)}`);
-    const handle = jobHandle;
-    if (handle) {
-      void handle.command({ type: "follow-deferred", image }).catch((error) =>
-        onHostFailure(error instanceof Error ? error : failure("discovery.deferred", "The image metadata stayed deferred after the resolution limit.", false)),
-      );
-    }
-    update();
-  }
-
   try {
     const handle = await service.start(
-      { inputs: [{ url }], engine: {}, exec: { kind: "browser", sourceUrl: origin } },
+      {
+        inputs: [{ url }],
+        engine: {
+          max_tiles: BROWSER_MAX_PLAN_TILES,
+          browser_selection: {
+            maxWidth: BROWSER_MAX_CANVAS_SIDE,
+            maxHeight: BROWSER_MAX_CANVAS_SIDE,
+            maxArea: BROWSER_MAX_CANVAS_AREA,
+          },
+        },
+        exec: { kind: "browser", sourceUrl: origin },
+      },
       { snapshot: onSnapshot, hostStatus: () => {} },
     );
     if (run !== activeRun) {

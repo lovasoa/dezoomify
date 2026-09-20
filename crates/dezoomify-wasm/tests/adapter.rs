@@ -2,10 +2,11 @@
 //! retry round-trip. Exact timer vectors live in E2E, not here.
 
 use dezoomify_protocol::dto::{
-    BlockedReason, ErrorPhase, ErrorTransport, FetchFailureDto, HostCompletion, HostEffect,
-    JobCommand, JobInputDto, JobState, SessionConfig,
+    BlockedReason, BrowserSelectionLimitsDto, ErrorPhase, ErrorTransport, FetchFailureDto,
+    HostCompletion, HostEffect, JobCommand, JobInputDto, JobState, SessionConfig,
 };
 use dezoomify_wasm::Session;
+use std::num::{NonZeroU32, NonZeroU64};
 
 fn session() -> Session {
     Session::new(SessionConfig::default()).expect("typed session")
@@ -114,6 +115,8 @@ fn rejected_empty_metadata_body_keeps_the_effect_answerable() {
         })
         .expect("the same outstanding effect accepts the retry body");
     assert_eq!(snapshot.lifecycle, JobState::AwaitingImageSelection);
+    assert_eq!(snapshot.selection.image, None);
+    assert!(snapshot.selection.catalog.is_some());
 }
 
 #[test]
@@ -208,6 +211,44 @@ fn session_acquiring_tiles() -> (Session, Vec<(u32, u32)>) {
     }
     assert_eq!(tiles.len(), 4, "largest DZI level is a 2x2 grid");
     (session, tiles)
+}
+
+#[test]
+fn browser_selection_is_explicit_and_manual_is_still_the_default() {
+    let mut automatic = Session::new(SessionConfig {
+        browser_selection: Some(BrowserSelectionLimitsDto {
+            max_width: NonZeroU32::new(128).unwrap(),
+            max_height: NonZeroU32::new(128).unwrap(),
+            max_area: NonZeroU64::new(128 * 128).unwrap(),
+        }),
+        ..SessionConfig::default()
+    })
+    .expect("valid browser policy");
+    let (messages, _) = automatic
+        .command(JobCommand::Start {
+            inputs: vec![JobInputDto::new("https://example.com/image.dzi")],
+        })
+        .expect("automatic start");
+    let request = messages
+        .iter()
+        .find_map(|message| match message {
+            HostEffect::AcquireResource { request } => Some(request.id),
+            _ => None,
+        })
+        .expect("metadata request");
+    let (messages, snapshot) = automatic
+        .complete(HostCompletion::ProvideResource {
+            request,
+            bytes: DZI.to_vec(),
+            final_uri: None,
+        })
+        .expect("automatic catalog");
+    assert_eq!(snapshot.lifecycle, JobState::AcquiringTiles);
+    assert_eq!(snapshot.selection.image, Some(0));
+    assert!(snapshot.selection.level.is_some());
+    assert!(messages
+        .iter()
+        .any(|message| matches!(message, HostEffect::AcquireTile { .. })));
 }
 
 fn transient_timeout() -> FetchFailureDto {
