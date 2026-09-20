@@ -27,6 +27,8 @@ It never runs `check`, generates bindings, builds WXT packages, or launches a br
 
 `cargo xtask test all` runs the fast aggregate once, then adds the fresh WASM Node harness, website Chromium Playwright E2E, and remaining extension tests needing generated WASM/WXT packages (Chromium plus Firefox headless E2E). It re-invokes no focused aliases, so it repeats neither the fast Rust nor the Node matrix. It excludes public-network tests and the desktop real-window test.
 
+`cargo xtask ci local` combines `check`, `test all`, the protocol's no-default-features WASM portability check, and the JavaScript dependency audit. It runs the shared suites once instead of replaying the overlapping distributed CI lanes.
+
 `cargo xtask test web --e2e` adds Chromium Playwright to the website suite. `cargo xtask test extension` is the full extension gate: current WASM bindings, Chromium plus Firefox WXT output, all extension units, both browsers headless. The extension package's own `pnpm test` / `pnpm test:unit` run pure units only, needing neither generated output nor browsers.
 
 ## Focused targets

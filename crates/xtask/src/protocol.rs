@@ -117,7 +117,7 @@ pub fn test_protocol() -> Result<(), String> {
     wasm_portability_check()
 }
 
-fn wasm_portability_check() -> Result<(), String> {
+pub(crate) fn wasm_portability_check() -> Result<(), String> {
     super::command::cargo(&[
         "check",
         "--quiet",

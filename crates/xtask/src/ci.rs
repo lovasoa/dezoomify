@@ -19,10 +19,12 @@ const LANES: &[&str] = &[
 pub fn ci(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("local") => {
-            for lane in LANES {
-                ci_lane(lane)?;
-            }
-            Ok(())
+            // Distributed lanes overlap intentionally; the local aggregate
+            // runs their shared Rust/Node suites only once through test_all.
+            super::check::run(&[])?;
+            test_all()?;
+            super::protocol::wasm_portability_check()?;
+            super::supply::audit_js()
         }
         Some("digest") => digest(&args[1..]),
         Some(lane) if LANES.contains(&lane) => ci_lane(lane),
