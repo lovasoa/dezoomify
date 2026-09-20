@@ -109,11 +109,11 @@ use dezoomify_core::core::discovery::{FetchCause, FetchCode, TransportKind};
 use dezoomify_core::core::model::{CatalogEntry, ProcessingRecipe as CoreProcessingRecipe};
 use dezoomify_core::Vec2d;
 use dezoomify_protocol::dto::{
-    EngineSnapshotDto, ErrorDto as ProtocolErrorDto, ErrorPhase as ProtocolErrorPhase,
-    FailureCategoryDto, JobState, MissingTileDto, OutputDispositionDto,
-    OutputFormat as ProtocolOutputFormat, SizeDto as ProtocolSizeDto, SnapshotDecisionDto,
-    SnapshotDeferredDto, SnapshotOutputDto, SnapshotProgressDto, SnapshotSelectionDto,
-    SnapshotTerminalDto, TileFailureDto,
+    CatalogEntryDto, EngineSnapshotDto, ErrorDto as ProtocolErrorDto,
+    ErrorPhase as ProtocolErrorPhase, FailureCategoryDto, JobState, MissingTileDto,
+    OutputDispositionDto, OutputFormat as ProtocolOutputFormat, SizeDto as ProtocolSizeDto,
+    SnapshotDecisionDto, SnapshotDeferredDto, SnapshotOutputDto, SnapshotProgressDto,
+    SnapshotSelectionDto, SnapshotTerminalDto, TileFailureDto,
 };
 
 use crate::retry::TileFailure as InnerFailure;
@@ -171,6 +171,13 @@ pub enum SelectionPolicy {
     Manual,
     /// First image, largest (last) level, no prompting.
     FirstImageLargestLevel,
+    /// Browser policy: choose the ready image with the largest declared
+    /// level, then its largest level within the declared canvas limits.
+    BrowserLargestFitting {
+        max_width: u32,
+        max_height: u32,
+        max_area: u64,
+    },
 }
 
 /// Requested output encoding.
@@ -235,10 +242,8 @@ impl JobOptions {
     fn config(&self) -> Config {
         Config {
             max_concurrent_fetches: self.max_concurrent,
-            max_concurrent_decodes: self.max_concurrent.clamp(1, 64),
             max_tiles: self.max_tiles,
             max_retries: self.max_retries,
-            max_buffers: self.max_concurrent.max(16),
             max_bytes: self.max_bytes,
             max_deferred_follows: self.max_deferred_follows,
             retry_base_delay_ms: self.retry_base_delay_ms,
@@ -687,6 +692,95 @@ pub struct EngineJob {
     disposition: Option<OutputDisposition>,
 }
 
+enum SelectionChoice {
+    Image { image: u32 },
+    FollowDeferred { image: u32 },
+    NoImages,
+}
+
+fn area(width: u64, height: u64) -> Option<u128> {
+    (width > 0 && height > 0).then(|| u128::from(width) * u128::from(height))
+}
+
+fn browser_selection(snapshot: &JobSnapshot) -> Option<SelectionChoice> {
+    let Some(catalog) = snapshot.selection.catalog.as_ref() else {
+        return Some(SelectionChoice::NoImages);
+    };
+    let mut best: Option<(usize, Option<u128>)> = None;
+    for (index, entry) in catalog.entries.iter().enumerate() {
+        let CatalogEntryDto::Image(image) = entry else {
+            continue;
+        };
+        if image.levels.is_empty() {
+            continue;
+        }
+        let image_area = image
+            .levels
+            .iter()
+            .filter_map(|level| area(level.width, level.height))
+            .max();
+        if best.is_none_or(|(_, best_area)| image_area.unwrap_or(0) >= best_area.unwrap_or(0)) {
+            best = Some((index, image_area));
+        }
+    }
+    if let Some((image, _)) = best {
+        return Some(SelectionChoice::Image {
+            image: u32::try_from(image).unwrap_or(u32::MAX),
+        });
+    }
+    if let Some((index, _)) = catalog
+        .entries
+        .iter()
+        .enumerate()
+        .find(|(_, entry)| matches!(entry, CatalogEntryDto::ImageRequest(_)))
+    {
+        return Some(SelectionChoice::FollowDeferred {
+            image: u32::try_from(index).unwrap_or(u32::MAX),
+        });
+    }
+    Some(SelectionChoice::NoImages)
+}
+
+fn browser_level_selection(
+    snapshot: &JobSnapshot,
+    max_width: u32,
+    max_height: u32,
+    max_area: u64,
+) -> Option<u32> {
+    let catalog = snapshot.selection.catalog.as_ref()?;
+    let image_index = usize::try_from(snapshot.selection.image?).ok()?;
+    let CatalogEntryDto::Image(image) = catalog.entries.get(image_index)? else {
+        return None;
+    };
+    let mut fitting: Option<(usize, u128)> = None;
+    let mut smallest: Option<(usize, u128)> = None;
+    for (index, level) in image.levels.iter().enumerate() {
+        let Some(level_area) = area(level.width, level.height) else {
+            continue;
+        };
+        if u128::from(level.width) <= u128::from(max_width)
+            && u128::from(level.height) <= u128::from(max_height)
+            && level_area <= u128::from(max_area)
+            && fitting.is_none_or(|(_, best_area)| level_area >= best_area)
+        {
+            fitting = Some((index, level_area));
+        }
+        if smallest.is_none_or(|(_, smallest_area)| level_area < smallest_area) {
+            smallest = Some((index, level_area));
+        }
+    }
+    fitting
+        .or(smallest)
+        .map(|(index, _)| u32::try_from(index).unwrap_or(u32::MAX))
+        .or_else(|| {
+            image
+                .levels
+                .len()
+                .checked_sub(1)
+                .map(|index| u32::try_from(index).unwrap_or(u32::MAX))
+        })
+}
+
 impl EngineJob {
     /// Validate job options without starting: inputs, budgets, and format.
     ///
@@ -710,6 +804,19 @@ impl EngineJob {
         config
             .validate()
             .map_err(|error| EngineError::new(&error.code, error.message))?;
+        if let SelectionPolicy::BrowserLargestFitting {
+            max_width,
+            max_height,
+            max_area,
+        } = options.selection
+        {
+            if max_width == 0 || max_height == 0 || max_area == 0 {
+                return Err(EngineError::new(
+                    "job.invalid-options",
+                    "browser selection limits must be positive",
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -1098,22 +1205,81 @@ impl EngineJob {
     }
 
     /// Explicit selection/partial policies for headless callers: with an
-    /// auto selection rule the facade selects without prompting, and with
-    /// a fail/keep partial policy it answers the decision in the same
-    /// transition instead of surfacing it.
+    /// auto selection rule the facade selects or follows deferred entries
+    /// without prompting, and with a fail/keep partial policy it answers the
+    /// decision in the same transition instead of surfacing it.
     fn apply_policies(&mut self, mut update: Update) -> Result<Update, EngineError> {
-        if self.options.selection == SelectionPolicy::FirstImageLargestLevel {
-            if update.snapshot.lifecycle == JobState::AwaitingImageSelection {
-                self.apply_command_inner(UserCommand::SelectImage { image: 0 })?;
-                update = self.drain()?;
+        if update.snapshot.lifecycle == JobState::AwaitingImageSelection {
+            let choice = match self.options.selection {
+                SelectionPolicy::Manual => None,
+                SelectionPolicy::FirstImageLargestLevel => {
+                    Some(SelectionChoice::Image { image: 0 })
+                }
+                SelectionPolicy::BrowserLargestFitting { .. } => {
+                    browser_selection(&update.snapshot)
+                }
+            };
+            match choice {
+                Some(SelectionChoice::Image { image }) => {
+                    self.apply_command_inner(UserCommand::SelectImage { image })?;
+                    update.effects.extend(self.drain()?.effects);
+                    update.snapshot = self.project();
+                }
+                Some(SelectionChoice::FollowDeferred { image }) => {
+                    match self.apply_command_inner(UserCommand::FollowDeferred { image }) {
+                        Ok(_) => {
+                            update.effects.extend(self.drain()?.effects);
+                            update.snapshot = self.project();
+                        }
+                        Err(rejection) => {
+                            self.inner
+                                .fail_via_cleanup(
+                                    "discovery.deferred",
+                                    format!(
+                                        "automatic deferred catalog follow rejected ({}): {}",
+                                        rejection.code, rejection.message
+                                    ),
+                                )
+                                .map_err(|error| EngineError::new(&error.code, error.message))?;
+                            update.effects.extend(self.drain()?.effects);
+                            update.snapshot = self.project();
+                        }
+                    }
+                }
+                Some(SelectionChoice::NoImages) => {
+                    self.inner
+                        .fail_via_cleanup(
+                            "job.no-images",
+                            "discovery completed without a selectable image".to_string(),
+                        )
+                        .map_err(|error| EngineError::new(&error.code, error.message))?;
+                    update.effects.extend(self.drain()?.effects);
+                    update.snapshot = self.project();
+                }
+                None => {}
             }
-            if update.snapshot.lifecycle == JobState::AwaitingLevelSelection
-                && update.snapshot.selection.level_count > 0
-            {
-                let level = update.snapshot.selection.level_count - 1;
-                self.apply_command_inner(UserCommand::SelectLevel { level })?;
-                update = self.drain()?;
-            }
+        }
+        if matches!(
+            self.options.selection,
+            SelectionPolicy::FirstImageLargestLevel | SelectionPolicy::BrowserLargestFitting { .. }
+        ) && update.snapshot.lifecycle == JobState::AwaitingLevelSelection
+            && update.snapshot.selection.level_count > 0
+        {
+            let level = match self.options.selection {
+                SelectionPolicy::FirstImageLargestLevel => {
+                    update.snapshot.selection.level_count - 1
+                }
+                SelectionPolicy::BrowserLargestFitting {
+                    max_width,
+                    max_height,
+                    max_area,
+                } => browser_level_selection(&update.snapshot, max_width, max_height, max_area)
+                    .unwrap_or(update.snapshot.selection.level_count - 1),
+                SelectionPolicy::Manual => unreachable!(),
+            };
+            self.apply_command_inner(UserCommand::SelectLevel { level })?;
+            update.effects.extend(self.drain()?.effects);
+            update.snapshot = self.project();
         }
         if update.snapshot.lifecycle == JobState::AwaitingPartialDecision {
             match self.options.partial {
@@ -1129,7 +1295,8 @@ impl EngineJob {
                         generation,
                         decision: RecoveryChoice::Discard,
                     })?;
-                    update = self.drain()?;
+                    update.effects.extend(self.drain()?.effects);
+                    update.snapshot = self.project();
                 }
                 PartialPolicy::Keep => {
                     let generation = update
@@ -1142,7 +1309,8 @@ impl EngineJob {
                         generation,
                         decision: RecoveryChoice::Keep,
                     })?;
-                    update = self.drain()?;
+                    update.effects.extend(self.drain()?.effects);
+                    update.snapshot = self.project();
                 }
             }
         }

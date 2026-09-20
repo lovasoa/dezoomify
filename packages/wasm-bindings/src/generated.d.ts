@@ -180,6 +180,16 @@ export interface SnapshotDecisionDto {
 }
 
 /**
+ * Positive declared-canvas limits used by browser automatic selection.
+ * Non-zero integer types reject invalid limits at the typed boundary.
+ */
+export interface BrowserSelectionLimitsDto {
+    maxWidth: number;
+    maxHeight: number;
+    maxArea: number;
+}
+
+/**
  * Purpose of a resource request (metadata vs tile vs probe).
  */
 export type RequestPurpose = "metadata" | "tile" | "probe";
@@ -290,9 +300,13 @@ export interface RecoveryAction {
 
 export interface SessionConfig {
     max_concurrent_fetches?: number;
-    max_concurrent_decodes?: number;
     max_tiles?: number;
     max_retries?: number;
+    /**
+     * Opt in to browser selection using the largest ready image and the
+     * largest level that fits these declared canvas limits.
+     */
+    browser_selection?: BrowserSelectionLimitsDto;
 }
 
 export type BlockedReason = "access-required" | "blocked-ipv4" | "blocked-ipv6" | "cancelled" | "content-type" | "dns-rebinding" | "dns-rebinding-v6" | "forbidden" | "invalid-url" | "limit-exceeded" | "loopback-host" | "malformed" | "malformed-body" | "method" | "network" | "non-standard-port" | "origin" | "private-host" | "protocol-version" | "redirect-limit" | "redirect-target" | "redirect-unavailable" | "scheme" | "signed-query" | "source-document-lost" | "throttled" | "userinfo";

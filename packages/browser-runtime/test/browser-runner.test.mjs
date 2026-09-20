@@ -168,15 +168,23 @@ test("runner sends one-attempt structured tile failures to the engine", async (t
   }
 });
 
-test("start roots the session at the first input with merged quotas", async () => {
+test("start roots the session at the first input and preserves selection policy", async () => {
   const p = product();
   const runner = createBrowserRunner(p.deps);
-  await runner.start(startRequest({ engine: { max_concurrent_fetches: 3 } }), { snapshot: () => {} });
+  const browserSelection = { maxWidth: 16384, maxHeight: 16384, maxArea: 268435456 };
+  await runner.start(startRequest({ engine: { max_concurrent_fetches: 3, max_tiles: 100_000, browser_selection: browserSelection } }), { snapshot: () => {} });
   const start = p.worker.posted.find((message) => message.type === "engine.start");
   assert.ok(start, "expected engine.start on the worker");
   assert.deepEqual(start.inputs, [{ url: "https://meta.test/info.json" }]);
   assert.equal(start.quotas.max_concurrent_fetches, 3);
+  assert.equal(start.quotas.max_tiles, 100_000);
+  assert.deepEqual(start.quotas.browser_selection, browserSelection);
   assert.equal(p.seen.assemblies, 1);
+
+  const manual = product();
+  await createBrowserRunner(manual.deps).start(startRequest(), { snapshot: () => {} });
+  const manualStart = manual.worker.posted.find((message) => message.type === "engine.start");
+  assert.equal(manualStart.quotas.browser_selection, undefined, "generic runner does not force auto-selection");
 });
 
 test("snapshots pass through with live host status", async () => {

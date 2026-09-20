@@ -12,9 +12,7 @@ fn dzi_bytes() -> Vec<u8> {
 fn over_limit_tiles_become_typed_terminal_failure() {
     let tight = Config {
         max_concurrent_fetches: 1,
-        max_concurrent_decodes: 1,
         max_tiles: 1,
-        max_buffers: 4,
         ..Config::default()
     };
     let mut host = ScriptedHost::new("job:limited", DZI_INPUT_URL, tight).unwrap();

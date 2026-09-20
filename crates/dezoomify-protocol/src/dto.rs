@@ -763,12 +763,27 @@ pub struct SessionConfig {
     pub max_concurrent_fetches: Option<NonZeroU32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "typescript", tsify(type = "number"))]
-    pub max_concurrent_decodes: Option<NonZeroU32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "typescript", tsify(type = "number"))]
     pub max_tiles: Option<NonZeroU32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_retries: Option<u32>,
+    /// Opt in to browser selection using the largest ready image and the
+    /// largest level that fits these declared canvas limits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser_selection: Option<BrowserSelectionLimitsDto>,
+}
+
+/// Positive declared-canvas limits used by browser automatic selection.
+/// Non-zero integer types reject invalid limits at the typed boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct BrowserSelectionLimitsDto {
+    #[cfg_attr(feature = "typescript", tsify(type = "number"))]
+    pub max_width: NonZeroU32,
+    #[cfg_attr(feature = "typescript", tsify(type = "number"))]
+    pub max_height: NonZeroU32,
+    #[cfg_attr(feature = "typescript", tsify(type = "number"))]
+    pub max_area: NonZeroU64,
 }
 
 // ---------------------------------------------------------------------------

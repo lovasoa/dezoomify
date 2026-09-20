@@ -59,10 +59,10 @@ use dezoomify_engine::{
     Update as EngineUpdate, UserCommand as EngineUserCommand,
 };
 use dezoomify_protocol::dto::{
-    ErrorDto, ErrorPhase, ErrorTransport, FetchFailureDto, HeaderDto, HostCompletion, HostEffect,
-    JobCommand, JobState as ProtocolJobState, OutputDispositionDto, PointDto, ProbeOutcome,
-    ProcessingRecipe, RequestDto, RequestPurpose, ResourceKind, SessionConfig, SizeDto,
-    TilePlacementDto,
+    BrowserSelectionLimitsDto, ErrorDto, ErrorPhase, ErrorTransport, FetchFailureDto, HeaderDto,
+    HostCompletion, HostEffect, JobCommand, JobState as ProtocolJobState, OutputDispositionDto,
+    PointDto, ProbeOutcome, ProcessingRecipe, RequestDto, RequestPurpose, ResourceKind,
+    SessionConfig, SizeDto, TilePlacementDto,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -396,8 +396,17 @@ impl Session {
         if let Some(value) = config.max_retries {
             options.max_retries = value;
         }
-        if options.selection != EngineSelectionPolicy::Manual {
-            options.selection = EngineSelectionPolicy::Manual;
+        if let Some(BrowserSelectionLimitsDto {
+            max_width,
+            max_height,
+            max_area,
+        }) = config.browser_selection
+        {
+            options.selection = EngineSelectionPolicy::BrowserLargestFitting {
+                max_width: max_width.get(),
+                max_height: max_height.get(),
+                max_area: max_area.get(),
+            };
         }
         // Start emits the Discovering state plus one metadata effect per
         // outstanding discovery request; nothing here echoes the URL
