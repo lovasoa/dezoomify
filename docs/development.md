@@ -9,7 +9,7 @@ One monorepo: Rust crates, generated WASM bindings, shared UI, hosts, extension 
 - `crates/dezoomify-protocol`: contract source; `packages/wasm-bindings` tracks the emitted declaration.
 - `crates/dezoomify-native`: native effects for CLI and Tauri.
 - `crates/dezoomify-wasm`: core and job behavior for browser hosts.
-- `packages/shared-ui`: shared React UI; `packages/browser-runtime`: browser workers, decoding, canvases, bounded caching.
+- `packages/shared-ui`: shared React UI; `packages/browser-runtime`: browser workers, decoding, canvases, and saving.
 - `crates/fixture-server`: controlled origins; `testdata/scenarios`: shared scenarios; `crates/xtask`: repository tasks.
 
 Dependency direction: [Architecture](architecture.md). Task grammar: [`crates/xtask/README.md`](../crates/xtask/README.md). Test matrix: [Testing](testing.md).
