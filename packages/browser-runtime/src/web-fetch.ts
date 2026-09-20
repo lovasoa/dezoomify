@@ -203,7 +203,7 @@ export function classifyProxyFailure(
         cause: { ...cause, code: "TRANSPORT_HTTP_ERROR" },
       };
     }
-    if (status === 401 || status === 403) {
+    if (status === 401 || status === 403 || status === 406) {
       return {
         code: "TRANSPORT_HTTP_ERROR",
         message:

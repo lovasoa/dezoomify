@@ -382,6 +382,7 @@ function presentEngineFailure(error: ErrorDto, url: string): void {
   hostFailure = describeFailure({
     code,
     engineDetail: error.detail ?? error.message,
+    message: error.message,
     phase: error.phase,
     retryable: discovery ? discovery.retryable : error.retryable,
     transport: error.transport ?? errorTransportFor(code, webFetcher.getActiveTransport()),
