@@ -28,8 +28,9 @@ renders authoritative snapshots.
   never a phase machine; phases come from snapshots. The initial status is
   neutral (no transport, no permission implied, output pending) until the
   first host emission replaces it.
-- Queues live in the products' integration layers (website single-queue,
-  desktop multi-job queue), never here and never in the engine.
+- The shared FIFO queue owns activation, advancement, cancellation, retry, and
+  status totals for products with one active engine job. Products validate
+  inputs and keep their queue payloads, progress, and presentation metadata.
 - Shared history keeps the last 20 jobs with full addresses over an
   injected store. History never leaves the device; only http(s) addresses
   are kept and bad payloads parse to an empty list.
@@ -46,9 +47,11 @@ inventing a local phase or replaying intermediate transitions.
 
 ## Ownership
 
-`packages/app-model` owns the service interface, the snapshot predicates,
-shared history, and the canonical labels. Products own their `HostRunner` (browser assembly,
-native runner, desktop IPC) and mount the shared UI. The architecture
-gate forbids host globals, React, and runtime imports in this package.
+`packages/app-model` owns the service interface, snapshot predicates, shared
+FIFO queue semantics, history, and canonical labels and save-name helpers.
+Products own input validation, queue payloads, progress metadata, their
+`HostRunner` (browser assembly, native runner, desktop IPC), and mount the
+shared UI. The architecture gate forbids host globals, React, and runtime
+imports in this package.
 See [Architecture](architecture.md) and the
 [acceptance matrix](acceptance-matrix.md).

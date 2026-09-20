@@ -20,11 +20,16 @@
 // to answer_choice with generation+choice).
 import {
   HISTORY_KEY_DESKTOP,
+  cancelAllQueueEntries,
+  cancelQueueEntry,
+  finishActiveQueueEntry,
+  humanQueueSummary,
   clearHistory as clearHistoryStore,
   loadHistory as loadHistoryStore,
   pushHistory,
   saveHistory as saveHistoryStore,
   suggestedNameFor,
+  summarizeQueue,
   toHistoryEntry,
   type HistoryEntry,
   type JobObserver,
@@ -75,15 +80,10 @@ import type { NativeFormat } from "./desktopIntegration.ts";
 import { createDesktopJobService } from "./jobService.ts";
 import type { DesktopJobHandle } from "./jobService.ts";
 import {
-  cancelAllDesktop,
-  cancelDesktopEntry,
   createDesktopQueue,
   enqueueDesktopQueue,
-  finishActiveDesktopEntry,
-  humanDesktopQueueSummary,
   recordDesktopProgress,
   retryDesktopEntry,
-  summarizeDesktopQueue,
 } from "./queue.ts";
 import type { DesktopQueue } from "./queue.ts";
 import {
@@ -743,11 +743,11 @@ function settleActiveQueue(
   detail?: { errorCode?: string },
 ): void {
   if (!activeQueueId) return;
-  const finished = finishActiveDesktopEntry(desktopQueue, outcome, detail);
+  const finished = finishActiveQueueEntry(desktopQueue, outcome, detail?.errorCode);
   desktopQueue = finished.queue;
   trimDesktopQueue();
-  const summary = summarizeDesktopQueue(desktopQueue);
-  pushLog(`Queue: ${humanDesktopQueueSummary(summary)}`);
+  const summary = summarizeQueue(desktopQueue);
+  pushLog(`Queue: ${humanQueueSummary(summary)}`);
   activeQueueId = null;
   const next = finished.next;
   if (!next) {
@@ -772,6 +772,7 @@ function trimDesktopQueue(): void {
     entries: desktopQueue.entries.filter((e) => !dropIds.has(e.id)),
     activeId: desktopQueue.activeId,
     nextId: desktopQueue.nextId,
+    idPrefix: desktopQueue.idPrefix,
   };
 }
 
@@ -780,7 +781,7 @@ function handleQueueCancelOne(id: string): void {
     handleCancel();
     return;
   }
-  const res = cancelDesktopEntry(desktopQueue, id);
+  const res = cancelQueueEntry(desktopQueue, id);
   if (res.code !== "ok") return;
   desktopQueue = res.queue;
   pushLog("Queue: entry cancelled");
@@ -789,7 +790,7 @@ function handleQueueCancelOne(id: string): void {
 
 function handleQueueCancelAll(): void {
   const hadActive = activeQueueId !== null;
-  desktopQueue = cancelAllDesktop(desktopQueue);
+  desktopQueue = cancelAllQueueEntries(desktopQueue);
   activeQueueId = null;
   if (hadActive) {
     // Cancel the running native job too; its terminal event finds no active
@@ -841,7 +842,7 @@ function appendDesktopQueuePanel(aux: HTMLElement, doc: Document): void {
   title.className = "dz-notice-title";
   title.textContent = t("desktop.queue.title");
   box.appendChild(title);
-  const summary = summarizeDesktopQueue(desktopQueue);
+  const summary = summarizeQueue(desktopQueue);
   const summaryLine = doc.createElement("p");
   summaryLine.className = "dz-notice-message";
   summaryLine.setAttribute("role", "status");

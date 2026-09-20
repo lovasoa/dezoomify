@@ -11,6 +11,9 @@
 // synthetic controller walk exists.
 import {
   createJobService,
+  cancelAllQueueEntries,
+  finishActiveQueueEntry,
+  summarizeQueue,
   HISTORY_KEY_WEBSITE,
   clearHistory as clearHistoryStore,
   loadHistory as loadHistoryStore,
@@ -65,11 +68,8 @@ import {
 } from "../packages/browser-runtime/src/plan-gates.ts";
 import { createSelectionDriver } from "../packages/browser-runtime/src/engine-selection.ts";
 import {
-  cancelAllWeb,
   createWebQueue,
   enqueueWebQueue,
-  finishActiveWebEntry,
-  summarizeWebQueue,
 } from "../packages/browser-runtime/src/queue.ts";
 import {
   PREVIEW_ZOOM_STEP,
@@ -704,7 +704,7 @@ async function runJob(url: string, origin = url): Promise<void> {
   // Sequential queue: the active entry settles, then the first waiting
   // entry (if any) becomes active and starts. A failed entry never stops
   // the rest. Engine stays single-job throughout.
-  const settled = finishActiveWebEntry(webQueue, queueOutcome);
+  const settled = finishActiveQueueEntry(webQueue, queueOutcome);
   webQueue = settled.queue;
   const next = settled.next;
   if (next) {
@@ -713,7 +713,7 @@ async function runJob(url: string, origin = url): Promise<void> {
       displayOnlyActive = false;
       hostFailure = null;
     }
-    const summary = summarizeWebQueue(webQueue);
+    const summary = summarizeQueue(webQueue);
     webLog.info("queue", `succeeded=${summary.succeeded} failed=${summary.failed} pending=${summary.pending}`);
     void runJob(next.url);
   }
@@ -851,7 +851,7 @@ function update(): void {
         disposeAttempt();
         // Stop returns directly to the initial view. Effects from the retired
         // run finish harmlessly without mutating the replacement job.
-        webQueue = cancelAllWeb(webQueue);
+        webQueue = cancelAllQueueEntries(webQueue);
         webQueue = createWebQueue();
         resetJobViewState();
         webFetcher.resetActiveTransport();
@@ -874,7 +874,7 @@ function update(): void {
         setCanvasVisible(document, false);
         preview.resetTransform(document);
         // Reset clears the whole queue: no new work is issued afterwards.
-        webQueue = cancelAllWeb(webQueue);
+        webQueue = cancelAllQueueEntries(webQueue);
         webQueue = createWebQueue();
         resetJobViewState();
         clearHash();

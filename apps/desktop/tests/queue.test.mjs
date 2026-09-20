@@ -4,19 +4,21 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  activeDesktopEntry,
-  cancelAllDesktop,
-  cancelDesktopEntry,
+  activeQueueEntry as activeDesktopEntry,
+  cancelAllQueueEntries as cancelAllDesktop,
+  cancelQueueEntry as cancelDesktopEntry,
+  finishActiveQueueEntry as finishActiveDesktopEntry,
+  humanQueueSummary as humanDesktopQueueSummary,
+  pendingQueueEntries as pendingDesktopEntries,
+  summarizeQueue as summarizeDesktopQueue,
+} from "@dezoomify/app-model";
+import {
   createDesktopQueue,
   enqueueDesktopQueue,
-  finishActiveDesktopEntry,
-  humanDesktopQueueSummary,
-  machineDesktopQueueSummary,
-  pendingDesktopEntries,
   recordDesktopProgress,
   redactedOriginForQueue,
   retryDesktopEntry,
-  summarizeDesktopQueue,
+  machineDesktopQueueSummary,
 } from "../src/queue.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -68,7 +70,7 @@ test("failed entry does not stop the rest with CLI-parity summary", () => {
   q = enqueueDesktopQueue(q, "https://example.com/a").queue;
   q = enqueueDesktopQueue(q, "https://example.com/b").queue;
   q = enqueueDesktopQueue(q, "https://example.com/c").queue;
-  q = finishActiveDesktopEntry(q, "failed", { errorCode: "tile.download-failed" }).queue;
+  q = finishActiveDesktopEntry(q, "failed", "tile.download-failed").queue;
   assert.equal(activeDesktopEntry(q).inputUrl, "https://example.com/b");
   q = finishActiveDesktopEntry(q, "done").queue;
   assert.equal(activeDesktopEntry(q).inputUrl, "https://example.com/c");
@@ -106,7 +108,7 @@ test("retry failed moves behind the line and reports redacted origins only", () 
   q = enqueueDesktopQueue(q, "https://example.com/a?token=CANARY").queue;
   const active = activeDesktopEntry(q).id;
   assert.equal(redactedOriginForQueue("https://example.com/a?token=CANARY"), "https://example.com");
-  q = finishActiveDesktopEntry(q, "failed", { errorCode: "tile.download-failed" }).queue;
+  q = finishActiveDesktopEntry(q, "failed", "tile.download-failed").queue;
   const retried = retryDesktopEntry(q, active);
   assert.equal(retried.code, "ok");
   q = retried.queue;
@@ -153,7 +155,7 @@ function runQueueScript(doc) {
       assert.ok(active, "finish needs an active entry");
       const detail = {};
       if (step.errorCode) detail.errorCode = step.errorCode;
-      const res = finishActiveDesktopEntry(q, step.outcome, detail);
+      const res = finishActiveDesktopEntry(q, step.outcome, detail.errorCode);
       events.push({
         entry: active.id,
         transition: step.outcome,

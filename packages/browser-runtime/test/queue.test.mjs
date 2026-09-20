@@ -1,16 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  activeWebEntry,
-  cancelAllWeb,
-  cancelWebEntry,
+  activeQueueEntry as activeWebEntry,
+  cancelAllQueueEntries as cancelAllWeb,
+  cancelQueueEntry as cancelWebEntry,
+  finishActiveQueueEntry as finishActiveWebEntry,
+  humanQueueSummary as humanWebQueueSummary,
+  pendingQueueEntries as pendingWebEntries,
+  summarizeQueue as summarizeWebQueue,
+} from "../../app-model/src/index.ts";
+import {
   createWebQueue,
   enqueueWebQueue,
-  finishActiveWebEntry,
-  humanWebQueueSummary,
-  pendingWebEntries,
   retryWebEntry,
-  summarizeWebQueue,
 } from "../src/queue.ts";
 
 test("enqueue while idle activates, further submits wait FIFO", () => {

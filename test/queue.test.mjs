@@ -1,14 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  activeWebEntry,
-  cancelAllWeb,
-  createWebQueue,
-  enqueueWebQueue,
-  finishActiveWebEntry,
-  humanWebQueueSummary,
-  summarizeWebQueue,
-} from "../packages/browser-runtime/src/queue.ts";
+  activeQueueEntry as activeWebEntry,
+  cancelAllQueueEntries as cancelAllWeb,
+  createSequentialQueue,
+  enqueueSequential,
+  finishActiveQueueEntry as finishActiveWebEntry,
+  humanQueueSummary as humanWebQueueSummary,
+  summarizeQueue as summarizeWebQueue,
+} from "../packages/app-model/src/index.ts";
+import { enqueueWebQueue } from "../packages/browser-runtime/src/queue.ts";
 
 // Website single-queue: enqueue while a job runs, sequential over
 // the single-job engine. These tests drive the integration-layer queue the
@@ -16,7 +17,7 @@ import {
 // hash-only-current-URL invariant.
 
 test("enqueue while running waits FIFO and runs sequentially", () => {
-  let q = createWebQueue();
+  let q = createSequentialQueue("webq:");
   q = enqueueWebQueue(q, "https://example.com/first").queue;
   assert.equal(activeWebEntry(q).url, "https://example.com/first");
   // A second submit while the first runs waits instead of cancelling it.
@@ -34,15 +35,15 @@ test("enqueue while running waits FIFO and runs sequentially", () => {
 test("hash stays owned by the active URL only", () => {
   // Models src/main.ts writeHash discipline: only the running job writes the
   // location hash; queued URLs never do until they become active.
-  let q = createWebQueue();
+  let q = createSequentialQueue("webq:");
   let hash = "";
   const writeHash = (url) => {
     hash = `#${url}`;
   };
-  q = enqueueWebQueue(q, "https://example.com/first").queue;
+  q = enqueueSequential(q, (id, status) => ({ id, url: "https://example.com/first", status })).queue;
   writeHash(activeWebEntry(q).url);
   assert.equal(hash, "#https://example.com/first");
-  q = enqueueWebQueue(q, "https://example.com/second").queue;
+  q = enqueueSequential(q, (id, status) => ({ id, url: "https://example.com/second", status })).queue;
   assert.equal(hash, "#https://example.com/first", "queued submit must not touch the hash");
   q = finishActiveWebEntry(q, "done").queue;
   writeHash(activeWebEntry(q).url);
@@ -50,7 +51,7 @@ test("hash stays owned by the active URL only", () => {
 });
 
 test("failed entry never stops the rest with CLI-parity totals", () => {
-  let q = createWebQueue();
+  let q = createSequentialQueue("webq:");
   q = enqueueWebQueue(q, "https://example.com/a").queue;
   q = enqueueWebQueue(q, "https://example.com/b").queue;
   q = enqueueWebQueue(q, "https://example.com/c").queue;
@@ -65,7 +66,7 @@ test("failed entry never stops the rest with CLI-parity totals", () => {
 });
 
 test("cancel-all issues no new work", () => {
-  let q = createWebQueue();
+  let q = createSequentialQueue("webq:");
   q = enqueueWebQueue(q, "https://example.com/a").queue;
   q = enqueueWebQueue(q, "https://example.com/b").queue;
   q = cancelAllWeb(q);
