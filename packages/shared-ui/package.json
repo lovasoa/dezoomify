@@ -9,7 +9,7 @@
     "@dezoomify/app-model": "workspace:*"
   },
   "scripts": {
-    "test": "node --test-reporter=dot --test ../../test/controller.test.mjs",
+    "test": "cargo xtask test ui",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
