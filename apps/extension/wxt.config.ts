@@ -28,8 +28,6 @@ export default defineConfig({
   manifestVersion: 3,
   outDir: ".output",
   imports: false,
-  // WXT's dev worker registers this command before starting our background.
-  dev: { reloadCommand: "Alt+R" },
   zip: {
     name: "dezoomify",
     artifactTemplate: "dezoomify-{{browser}}.zip",
