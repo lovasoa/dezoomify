@@ -15,7 +15,6 @@ import {
   createProxyRateLimiter,
   createProxyTransport,
 } from "../src/proxyTransport.ts";
-import { DIRECT_TRANSPORT_LABEL, PROXY_TRANSPORT_LABEL } from "../packages/app-model/src/labels.ts";
 import { DIRECT_METADATA_TIMEOUT_MS } from "../packages/browser-runtime/src/tile-policy.ts";
 import { drawPlacedTile } from "../packages/browser-runtime/src/tile-draw.ts";
 import { renderSaveGuidance } from "../packages/shared-ui/src/components.ts";
@@ -105,7 +104,7 @@ test("direct is always first; proxy not called on direct success", async () => {
   assert.equal(res.via, "direct");
   assert.equal(direct.calls, 1);
   assert.equal(proxy.calls, 0);
-  assert.equal(fetcher.getActiveTransport(), DIRECT_TRANSPORT_LABEL);
+  assert.equal(fetcher.getActiveTransport(), "direct");
   assert.deepEqual(attempts.map((a) => a.transport), ["direct"]);
 });
 
@@ -118,7 +117,7 @@ test("eligible metadata failure automatically calls proxy without extra user act
   assert.equal(res.via, "proxy");
   assert.equal(direct.calls, 1);
   assert.equal(proxy.calls, 1);
-  assert.equal(fetcher.getActiveTransport(), PROXY_TRANSPORT_LABEL);
+  assert.equal(fetcher.getActiveTransport(), "metadata-proxy");
   assert.deepEqual(attempts.map((a) => a.transport), ["direct", "metadata proxy"]);
 });
 
@@ -357,9 +356,9 @@ test("ordinary display fallback only for unprocessed tiles", () => {
 });
 
 test("tile failures report the direct transport, never the metadata proxy", () => {
-  assert.equal(errorTransportFor("TILE_FAILED", "Metadata proxy"), DIRECT_TRANSPORT_LABEL);
-  assert.equal(errorTransportFor("TILE_FAILED", null), DIRECT_TRANSPORT_LABEL);
-  assert.equal(errorTransportFor("DISCOVERY_FAILED", "Metadata proxy"), "Metadata proxy");
+  assert.equal(errorTransportFor("TILE_FAILED", "metadata-proxy"), "direct");
+  assert.equal(errorTransportFor("TILE_FAILED", null), "direct");
+  assert.equal(errorTransportFor("DISCOVERY_FAILED", "metadata-proxy"), "metadata-proxy");
   assert.equal(errorTransportFor("NO_IMAGE_FOUND", null), "direct");
 });
 
