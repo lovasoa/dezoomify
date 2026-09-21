@@ -65,7 +65,7 @@ sequenceDiagram
 
 ## Product capabilities
 
-The website baseline reports encoders `[png, jpeg, tiff]`. Values belong to product integrations; the engine still validates requested work. Native baselines: [Native apps](native-apps.md#capability-baseline). Canvas budgets: [Compatibility](compatibility.md#canvas-and-save-limits).
+The website baseline reports encoders `[png]`. Values belong to product integrations; the engine still validates requested work. Native baselines: [Native apps](native-apps.md#capability-baseline). Canvas budgets: [Compatibility](compatibility.md#canvas-and-save-limits).
 
 ## Handoff
 
