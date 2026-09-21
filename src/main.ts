@@ -68,9 +68,8 @@ import {
 import {
   createWebQueue,
   enqueueWebQueue,
-} from "../packages/browser-runtime/src/queue.ts";
+} from "./queue.ts";
 import {
-  PREVIEW_ZOOM_STEP,
   createPreviewControls,
   setCanvasVisible,
 } from "../packages/browser-runtime/src/preview.ts";
@@ -92,15 +91,6 @@ import {
   saveBlobViaAnchor,
 } from "../packages/browser-runtime/src/canvas-save.ts";
 import type { ErrorDto, HeaderDto, ProcessingRecipe } from "@dezoomify/wasm-bindings";
-
-// Re-export the shared browser limits for existing website test imports.
-export {
-  BROWSER_MAX_CANVAS_AREA,
-  BROWSER_MAX_CANVAS_SIDE,
-  BROWSER_MAX_PLAN_TILES,
-  desktopHandoffLink,
-  PREVIEW_ZOOM_STEP,
-};
 
 const preview = createPreviewControls();
 

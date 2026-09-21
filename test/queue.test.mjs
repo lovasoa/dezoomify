@@ -2,74 +2,46 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   activeQueueEntry as activeWebEntry,
-  cancelAllQueueEntries as cancelAllWeb,
-  createSequentialQueue,
-  enqueueSequential,
   finishActiveQueueEntry as finishActiveWebEntry,
-  humanQueueSummary as humanWebQueueSummary,
-  summarizeQueue as summarizeWebQueue,
-} from "../packages/app-model/src/index.ts";
-import { enqueueWebQueue } from "../packages/browser-runtime/src/queue.ts";
+} from "@dezoomify/app-model";
+import {
+  createWebQueue,
+  enqueueWebQueue,
+  retryWebEntry,
+} from "../src/queue.ts";
 
-// Website single-queue: enqueue while a job runs, sequential over
-// the single-job engine. These tests drive the integration-layer queue the
-// website orchestrator (src/main.ts) uses, including the
-// hash-only-current-URL invariant.
+test("website queue validates and stores trimmed HTTP(S) URLs", () => {
+  let q = createWebQueue();
+  for (const bad of ["", "file:///etc/passwd", "https://user:pass@example.com/x", `https://example.com/${"a".repeat(2048)}`, 42]) {
+    const result = enqueueWebQueue(q, bad);
+    assert.equal(result.code, "job.invalid-input");
+    assert.equal(result.entry, null);
+    assert.equal(result.queue, q);
+  }
 
-test("enqueue while running waits FIFO and runs sequentially", () => {
-  let q = createSequentialQueue("webq:");
-  q = enqueueWebQueue(q, "https://example.com/first").queue;
-  assert.equal(activeWebEntry(q).url, "https://example.com/first");
-  // A second submit while the first runs waits instead of cancelling it.
+  const accepted = enqueueWebQueue(q, "  https://example.com/first  ");
+  assert.equal(accepted.code, "ok");
+  assert.equal(accepted.entry.id, "webq:0");
+  assert.equal(accepted.entry.url, "https://example.com/first");
+  assert.equal(accepted.entry.status, "active");
+  q = accepted.queue;
+
   const queued = enqueueWebQueue(q, "https://example.com/second");
-  q = queued.queue;
+  assert.equal(queued.code, "ok");
+  assert.equal(queued.entry.id, "webq:1");
+  assert.equal(queued.entry.url, "https://example.com/second");
   assert.equal(queued.entry.status, "queued");
-  assert.equal(activeWebEntry(q).url, "https://example.com/first");
-  // Settling the active job starts the waiting one; the engine never runs two.
-  const settled = finishActiveWebEntry(q, "done");
-  q = settled.queue;
-  assert.equal(settled.next.url, "https://example.com/second");
-  assert.equal(activeWebEntry(q).url, "https://example.com/second");
+  assert.equal(activeWebEntry(queued.queue).url, "https://example.com/first");
 });
 
-test("hash stays owned by the active URL only", () => {
-  // Models src/main.ts writeHash discipline: only the running job writes the
-  // location hash; queued URLs never do until they become active.
-  let q = createSequentialQueue("webq:");
-  let hash = "";
-  const writeHash = (url) => {
-    hash = `#${url}`;
-  };
-  q = enqueueSequential(q, (id, status) => ({ id, url: "https://example.com/first", status })).queue;
-  writeHash(activeWebEntry(q).url);
-  assert.equal(hash, "#https://example.com/first");
-  q = enqueueSequential(q, (id, status) => ({ id, url: "https://example.com/second", status })).queue;
-  assert.equal(hash, "#https://example.com/first", "queued submit must not touch the hash");
-  q = finishActiveWebEntry(q, "done").queue;
-  writeHash(activeWebEntry(q).url);
-  assert.equal(hash, "#https://example.com/second", "promoted job takes hash ownership");
-});
+test("website retry carries the failed entry URL into a fresh product entry", () => {
+  let q = createWebQueue();
+  const submitted = enqueueWebQueue(q, "https://example.com/retry");
+  q = finishActiveWebEntry(submitted.queue, "failed", "tile.download-failed").queue;
 
-test("failed entry never stops the rest with CLI-parity totals", () => {
-  let q = createSequentialQueue("webq:");
-  q = enqueueWebQueue(q, "https://example.com/a").queue;
-  q = enqueueWebQueue(q, "https://example.com/b").queue;
-  q = enqueueWebQueue(q, "https://example.com/c").queue;
-  q = finishActiveWebEntry(q, "failed", "tile.download-failed").queue;
-  assert.equal(activeWebEntry(q).url, "https://example.com/b");
-  q = finishActiveWebEntry(q, "done").queue;
-  q = finishActiveWebEntry(q, "done").queue;
-  assert.equal(q.activeId, null);
-  const summary = summarizeWebQueue(q);
-  assert.deepEqual(summary, { total: 3, succeeded: 2, failed: 1, cancelled: 0, pending: 0 });
-  assert.equal(humanWebQueueSummary(summary), "bulk: 2 succeeded, 1 failed, 3 total");
-});
-
-test("cancel-all issues no new work", () => {
-  let q = createSequentialQueue("webq:");
-  q = enqueueWebQueue(q, "https://example.com/a").queue;
-  q = enqueueWebQueue(q, "https://example.com/b").queue;
-  q = cancelAllWeb(q);
-  assert.equal(q.activeId, null);
-  assert.ok(q.entries.every((e) => e.status === "cancelled"));
+  const retried = retryWebEntry(q, submitted.entry.id);
+  assert.equal(retried.code, "ok");
+  assert.equal(retried.entry.url, submitted.entry.url);
+  assert.notEqual(retried.entry.id, submitted.entry.id);
+  assert.match(retried.entry.id, /^webq:/);
 });

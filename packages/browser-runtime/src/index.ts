@@ -3,7 +3,6 @@ export * from "./types.ts";
 export * from "./transport.ts";
 export * from "./fetch-primitives.ts";
 export * from "./limits.ts";
-export * from "./queue.ts";
 export * from "./web-integration.ts";
 export * from "./tile-decode.ts";
 export * from "./canvas-save.ts";
