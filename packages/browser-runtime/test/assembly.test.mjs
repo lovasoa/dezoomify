@@ -38,7 +38,10 @@ function harness(overrides = {}) {
       events.encoded.push({ width: canvas.width, height: canvas.height });
       return { blob: true, width: canvas.width, height: canvas.height };
     },
-    save: (output, width, height) => { events.saved.push({ output, width, height }); },
+    save: (output, width, height) => {
+      events.saved.push({ output, width, height });
+      return overrides.saveDisposition ?? "browser-save-ready";
+    },
     sourceUrl: "https://example.test/image.dzi",
     log: (line) => events.log.push(line),
     ...overrides,
@@ -69,9 +72,10 @@ test("declared output paints progressively before finalization, then encodes and
   assert.equal(ctx2d.draws.length, 1, "the first tile is visible while acquisition continues");
   await assembly.acquireTile(1, placement(16, 0), bytes16(16));
   assert.equal(ctx2d.draws.length, 2, "each acquired tile paints immediately");
-  await assembly.finalizeOutput(false, "png", { width: 32, height: 32 });
+  const disposition = await assembly.finalizeOutput(false, "png", { width: 32, height: 32 });
   assembly.release();
 
+  assert.equal(disposition, "browser-save-ready");
   assert.deepEqual(events.created, [{ width: 32, height: 32 }]);
   assert.equal(events.encoded.length, 1);
   assert.deepEqual(events.saved, [{ output: { blob: true, width: 32, height: 32 }, width: 32, height: 32 }]);
@@ -80,6 +84,12 @@ test("declared output paints progressively before finalization, then encodes and
   assert.deepEqual(ctx2d.draws[1], { source: ctx2d.draws[1].source, sx: 0, sy: 0, sw: 16, sh: 16, dx: 16, dy: 0, dw: 16, dh: 16 });
   // Deterministic bitmap release after the draw.
   assert.equal(ctx2d.draws.every((draw) => draw.source.closed), true);
+});
+
+test("finalize-output returns the disposition supplied by the product save operation", async () => {
+  const { assembly } = harness({ saveDisposition: "browser-save-initiated" });
+  const disposition = await assembly.finalizeOutput(false, "png", { width: 32, height: 32 });
+  assert.equal(disposition, "browser-save-initiated");
 });
 
 test("a probe held before canvas allocation is painted when the canvas appears", async () => {
@@ -201,10 +211,11 @@ test("display-only output draws ordinary images and skips encoding", async () =>
   assert.equal(local.isTainted(), true);
   assert.equal(displayOnly, 1);
   assert.equal(ctx2d.draws.length, 1, "display-only tiles paint during acquisition");
-  await local.finalizeOutput(false, "png", { width: 32, height: 32 });
+  const disposition = await local.finalizeOutput(false, "png", { width: 32, height: 32 });
   assert.equal(ctx2d.draws.length, 1);
   assert.equal(encoded.length, 0, "a tainted canvas is never encoded");
   assert.equal(saved.length, 0, "a tainted canvas is never saved");
+  assert.equal(disposition, "display-only");
 });
 
 test("release closes retained bitmaps deterministically", async () => {

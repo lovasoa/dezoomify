@@ -361,6 +361,7 @@ function createAssembly(
         // browser never races a slow download start.
         setTimeout(() => URL.revokeObjectURL(url), 60000);
       }
+      return "browser-save-initiated";
     },
     sourceUrl,
   });
