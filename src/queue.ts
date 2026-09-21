@@ -4,6 +4,7 @@
 import {
   createSequentialQueue,
   enqueueSequential,
+  isValidInputUrl,
   retryQueueEntry,
   type QueueEntry,
   type SequentialQueue,
@@ -19,25 +20,12 @@ export function createWebQueue(): WebQueue {
   return createSequentialQueue<WebQueueEntry>("webq:");
 }
 
-function isValidQueueUrl(url: string): boolean {
-  if (typeof url !== "string") return false;
-  const trimmed = url.trim();
-  if (trimmed.length === 0 || trimmed.length > 2048) return false;
-  try {
-    const parsed = new URL(trimmed);
-    return (parsed.protocol === "http:" || parsed.protocol === "https:") &&
-      parsed.username === "" && parsed.password === "";
-  } catch {
-    return false;
-  }
-}
-
 export function enqueueWebQueue(
   queue: WebQueue,
   url: string,
 ): { queue: WebQueue; entry: WebQueueEntry | null; code: string } {
   const trimmed = typeof url === "string" ? url.trim() : "";
-  if (!isValidQueueUrl(trimmed)) return { queue, entry: null, code: "job.invalid-input" };
+  if (!isValidInputUrl(trimmed)) return { queue, entry: null, code: "job.invalid-input" };
   const result = enqueueSequential(queue, (id, status) => ({ id, url: trimmed, status }));
   return { ...result, code: "ok" };
 }
