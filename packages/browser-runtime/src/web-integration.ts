@@ -3,7 +3,6 @@
 //
 // Single policy module for the website: proxy eligibility, ordinary-image
 // rules, and error transport mapping. Pure, no I/O, no clocks.
-import { DIRECT_TRANSPORT_LABEL } from "@dezoomify/app-model";
 import type { ProcessingRecipe } from "@dezoomify/wasm-bindings";
 
 export interface WebFetchRequest {
@@ -100,6 +99,6 @@ export function isOrdinaryImageTile(processing: ProcessingRecipe): boolean {
  * errors report the job's active transport.
  */
 export function errorTransportFor(code: string, activeTransport: string | null): string {
-  if (code === "TILE_FAILED") return DIRECT_TRANSPORT_LABEL;
+  if (code === "TILE_FAILED") return "direct";
   return activeTransport ?? "direct";
 }

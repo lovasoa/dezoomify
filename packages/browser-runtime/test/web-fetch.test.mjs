@@ -119,7 +119,7 @@ test("fetchMetadataFor serves direct bytes without the proxy", async () => {
   const res = await fetcher.fetchMetadataFor("https://a.test/x.json", {});
   assert.equal(res.via, "direct");
   assert.equal(proxyCalls, 0);
-  assert.equal(fetcher.getActiveTransport(), "Direct from your browser");
+  assert.equal(fetcher.getActiveTransport(), "direct");
   assert.deepEqual(attempts.map(({ transport, outcome, bytes }) => ({ transport, outcome, bytes })), [
     { transport: "direct", outcome: "readable", bytes: 2 },
   ]);
@@ -139,7 +139,7 @@ test("fetchMetadataFor falls back to the eligible proxy after a network failure"
   const res = await fetcher.fetchMetadataFor("https://a.test/x.json", {});
   assert.equal(res.via, "proxy");
   assert.equal(res.finalUri, "https://a.test/upstream.json");
-  assert.equal(fetcher.getActiveTransport(), "Metadata proxy");
+  assert.equal(fetcher.getActiveTransport(), "metadata-proxy");
 });
 
 test("fetchMetadataFor never proxies HTTP errors or ineligible targets", async () => {

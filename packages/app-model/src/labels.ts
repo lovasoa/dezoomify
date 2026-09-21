@@ -2,8 +2,7 @@
 // Pure, dependency-free, erasable-syntax-only: every product renders
 // transports and suggested file names through these values, never a local
 // duplicate. Transport codes ("direct", "metadata-proxy", "display-only",
-// "browser-session", "native") come from the protocol ErrorTransport set;
-// raw display labels pass through for back-compat.
+// "browser-session", "native") come from the protocol ErrorTransport set.
 
 export const DIRECT_TRANSPORT_LABEL = "Direct from your browser" as const;
 export const PROXY_TRANSPORT_LABEL = "Metadata proxy" as const;
@@ -12,21 +11,11 @@ export const BROWSER_SESSION_TRANSPORT_LABEL = "Browser session" as const;
 export const NATIVE_TRANSPORT_LABEL = "Native" as const;
 
 export function renderTransportLabel(transport: string): string {
-  if (transport === "direct" || transport === DIRECT_TRANSPORT_LABEL) return DIRECT_TRANSPORT_LABEL;
-  if (
-    transport === "proxy" ||
-    transport === "metadata-proxy" ||
-    transport === PROXY_TRANSPORT_LABEL
-  ) {
-    return PROXY_TRANSPORT_LABEL;
-  }
-  if (transport === "display" || transport === "display-only" || transport === DISPLAY_TRANSPORT_LABEL) {
-    return DISPLAY_TRANSPORT_LABEL;
-  }
-  if (transport === "browser-session" || transport === BROWSER_SESSION_TRANSPORT_LABEL) {
-    return BROWSER_SESSION_TRANSPORT_LABEL;
-  }
-  if (transport === "native" || transport === NATIVE_TRANSPORT_LABEL) return NATIVE_TRANSPORT_LABEL;
+  if (transport === "direct") return DIRECT_TRANSPORT_LABEL;
+  if (transport === "metadata-proxy") return PROXY_TRANSPORT_LABEL;
+  if (transport === "display-only") return DISPLAY_TRANSPORT_LABEL;
+  if (transport === "browser-session") return BROWSER_SESSION_TRANSPORT_LABEL;
+  if (transport === "native") return NATIVE_TRANSPORT_LABEL;
   return transport;
 }
 

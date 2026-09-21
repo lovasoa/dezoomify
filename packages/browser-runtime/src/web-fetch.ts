@@ -18,10 +18,6 @@ import {
   sleep,
   tileFailedError,
 } from "./tile-policy.ts";
-import {
-  DIRECT_TRANSPORT_LABEL,
-  PROXY_TRANSPORT_LABEL,
-} from "@dezoomify/app-model";
 import { extractErrorSignal } from "./transport.ts";
 
 export interface DirectOutcome {
@@ -482,7 +478,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     // A retired job performs no fetch and never falls back to the proxy.
     if (signal?.aborted) throw cancelledFailure(url);
     const target = shortUrl(url);
-    activeTransport = DIRECT_TRANSPORT_LABEL;
+    activeTransport = "direct";
     const directStartedAt = now();
     const direct = await fetchDirect(url, headers, signal, metadataMs);
     hooks.onMetadataAttempt?.({
@@ -508,7 +504,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       !signal?.aborted &&
       deps.isProxyEligible({ url, kind: "metadata", headers }).eligible
     ) {
-      activeTransport = PROXY_TRANSPORT_LABEL;
+      activeTransport = "metadata-proxy";
       via = "proxy";
       let proxyStartedAt = now();
       let proxied = await fetchViaProxy(url, signal);
