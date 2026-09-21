@@ -35,16 +35,6 @@ test("proxy path constant and detection", () => {
   assert.equal(isProxyUrl("https://a.example/img.jpg"), false);
 });
 
-test("authenticated success uses credentials include under granted origin", async () => {
-  const h = makeHarness();
-  h.grant("https://a.example");
-  const f = createExtensionFetcher(h.deps);
-  const res = await f.fetchResource("https://a.example/img.jpg", { userIntent: true });
-  assert.equal(res.bytes.length, 10);
-  assert.equal(h.calls[0].init.credentials, "include");
-  assert.equal(h.calls.filter((c) => c.url && c.url.includes("/api/proxy")).length, 0);
-});
-
 test("explicit intent required; no fetch without it", async () => {
   const h = makeHarness();
   h.grant("https://a.example");
@@ -62,29 +52,6 @@ test("permission denial performs zero fetches", async () => {
     (e) => e.code === "permission-denied"
   );
   assert.equal(h.calls.filter((c) => c.url && !c.permissionRequest).length, 0);
-});
-
-test("automatic redirects are unavailable even when the final host is granted", async () => {
-  const h = makeHarness();
-  h.grant("https://a.example");
-  h.deps.fetchImpl = async (url, init) => {
-    h.calls.push({ url, init });
-    return {
-      status: 200,
-      url: "https://evil.example/img.jpg",
-      headers: { "content-type": "image/jpeg" },
-      bytes: bytes(5),
-      redirectChain: ["https://a.example/start", "https://evil.example/img.jpg"],
-    };
-  };
-  const f = createExtensionFetcher(h.deps);
-  await assert.rejects(
-    () => f.fetchResource("https://a.example/start", { userIntent: true }),
-    /redirect.*permission/i
-  );
-  // A later grant cannot retrospectively validate an automatic redirect.
-  h.grant("https://evil.example");
-  await assert.rejects(() => f.fetchResource("https://a.example/start", { userIntent: true }), /redirect/i);
 });
 
 test("timeout enforced via durationMs", async () => {

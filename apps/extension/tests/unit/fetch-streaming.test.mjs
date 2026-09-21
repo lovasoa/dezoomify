@@ -78,7 +78,3 @@ test("granted-origin refusal never pauses for another grant", async () => {
   );
 });
 
-test("automatic redirects are unavailable, never retrospectively validated", async () => {
-  const f = fetcher(async () => ({ status: 200, url: "https://other.example/a", headers: { "content-type": "image/jpeg" }, bytes: new Uint8Array([1]) }));
-  await assert.rejects(() => f.fetchResource("https://tiles.example/a", { userIntent: true, purpose: "tile" }), (error) => error.category === "redirect-unavailable");
-});

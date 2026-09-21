@@ -11,13 +11,13 @@ Source sites, metadata, tiles, handoff payloads, and output names are all untrus
 - Native apps reach network and filesystem, so they validate protocol input and require user-picked local destinations.
 - Core and job parse and decide without performing effects.
 
-Parsers and decoders cap input, dimensions, tile counts, allocation, recursion, and decompression. URLs normalize before policy checks. Redirects revalidate every hop.
+Parsers and decoders cap input, dimensions, tile counts, allocation, recursion, and decompression. URLs normalize before policy checks. Redirects carrying credentials revalidate every hop.
 
 ## Credentials
 
 Auth headers, cookies, signed URLs, and tokens stay in the runtime that received them. They appear in no analytics, user-visible cache keys, or ordinary handoffs. Error details name the full request URL with a bounded server signal; they sit inert on the device until the user opens the prefilled report link, which warns to strip sign-in details and tokens before submitting. Credentials never enter the prominent message.
 
-Website direct and proxy requests omit cookies and `Authorization`. The proxy also forwards no caller credentials upstream and never fetches credential-bearing resources. Signed or token-bearing URLs are proxy-ineligible. The extension uses the browser session only for origins under active host permissions. The shipped extension does not send browser cookies or other credentials to the Native Messaging host.
+Website direct and proxy requests omit cookies and `Authorization`. The proxy also forwards no caller credentials upstream and never fetches credential-bearing resources. Signed or token-bearing URLs are proxy-ineligible. The extension fetches in the tab origin with the page's session and from the extension origin credential-free, only for origins under active host permissions. The shipped extension does not send browser cookies or other credentials to the Native Messaging host.
 
 ## Proxy controls
 

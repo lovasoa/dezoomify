@@ -14,7 +14,7 @@ import type { FetchFailureCode } from "@dezoomify/wasm-bindings";
 export const PROXY_PATH = "/api/proxy";
 export const MAX_BYTES_DEFAULT = 8 * 1024 * 1024;
 export const DEFAULT_TIMEOUT_MS = 30_000;
-type TransportCategory = "source-document-lost"|"access-required"|"forbidden"|"redirect-unavailable"|"cancelled"|"network"|"throttled"|"malformed"|"limit-exceeded";
+type TransportCategory = "source-document-lost"|"access-required"|"forbidden"|"cancelled"|"network"|"throttled"|"malformed"|"limit-exceeded";
 type Purpose = "metadata" | "tile" | "probe";
 type HeaderSource = Headers | Record<string, string> | Array<{ name?: unknown; value?: unknown }>;
 type FetchResponse = Response & { bytes?: Uint8Array; durationMs?: number };
@@ -26,7 +26,7 @@ type FetchDeps = {
   clearTimeoutFn?: typeof clearTimeout;
 };
 
-/** @typedef {"source-document-lost"|"access-required"|"forbidden"|"redirect-unavailable"|"cancelled"|"network"|"throttled"|"malformed"|"limit-exceeded"} TransportCategory */
+/** @typedef {"source-document-lost"|"access-required"|"forbidden"|"cancelled"|"network"|"throttled"|"malformed"|"limit-exceeded"} TransportCategory */
 
 /** MIME families accepted for bytes intended for an image or metadata parser. */
 export const ALLOWED_MIME_PREFIXES = Object.freeze([
@@ -221,17 +221,18 @@ export function createExtensionFetcher(deps: FetchDeps) {
     const timer = (deps.setTimeoutFn ?? setTimeout)(() => controller.abort(), timeoutMs);
     try {
       if (opts.cancelled?.()) throw transportError("cancelled", "request cancelled");
-      // Manual redirect avoids claiming an automatically followed chain was validated.
+      // Credential-free with browser-native redirect following: no
+      // credentials are attached (CDNs answering
+      // Access-Control-Allow-Origin: * stay readable, which "include"
+      // would fail), and response bytes never return to a redirecting
+      // site, so a redirect can neither misuse the user's session nor
+      // disclose the target's data to the redirecting site.
       const response = await fetchImpl(parsed.href, {
-        credentials: "include", redirect: "manual", signal: controller.signal,
+        credentials: "omit", redirect: "follow", signal: controller.signal,
         headers: forwardCoreHeaders(opts.headers, opts.purpose ?? "metadata"),
       });
-      if (response?.type === "opaqueredirect" || (response?.status >= 300 && response?.status < 400)) {
-        throw transportError("redirect-unavailable", "redirect requires a separately observed destination");
-      }
       if (!response || typeof response.status !== "number") throw transportError("malformed", "malformed fetch response");
       if (typeof response.durationMs === "number" && response.durationMs > timeoutMs) throw transportError("network", "fetch timeout");
-      if (response.url && response.url !== parsed.href) throw transportError("redirect-unavailable", "redirect permission cannot be validated automatically");
       if (response.status === 429) throw transportError("throttled", withSignal("site is throttling requests", await errorSignal(response)), {
         status: response.status,
         retry_after_ms: retryAfterHeaderMs(response.headers),
