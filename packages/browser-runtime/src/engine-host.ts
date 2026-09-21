@@ -60,6 +60,8 @@ export interface EngineHostAssembly {
     canvas?: SizeDto | null,
   ): Promise<BrowserOutputDisposition>;
   release(): void;
+  /** True once an ordinary image tainted the surface (display-only output). */
+  isTainted?(): boolean;
 }
 
 export type AcquireEffect = Extract<HostEffect, { type: "acquire-resource" | "acquire-tile" }>;
