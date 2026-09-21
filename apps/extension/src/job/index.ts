@@ -30,6 +30,35 @@ import { createCoordinatorSourceTransport, createEngineResourceFetcher, engineFa
 import type { JobBinding } from "./transport.ts";
 import type { ProcessingRecipe } from "@dezoomify/wasm-bindings";
 
+// Remove when WXT ships https://github.com/wxt-dev/wxt/pull/2617.
+if (import.meta.env.DEV) {
+  const NativeWorker = globalThis.Worker;
+  globalThis.Worker = class extends NativeWorker {
+    constructor(scriptUrl: string | URL, options?: WorkerOptions) {
+      const url = String(scriptUrl);
+      if (url.startsWith("http://localhost") || url.startsWith("http://127.0.0.1")) {
+        const source = `
+          globalThis.__DEZOOMIFY_DEV_ORIGIN__ = ${JSON.stringify(new URL(url).origin)};
+          const pending = [];
+          const hold = event => pending.push(event);
+          addEventListener("message", hold);
+          import(${JSON.stringify(url)}).then(() => {
+            removeEventListener("message", hold);
+            URL.revokeObjectURL(location.href);
+            for (const event of pending) {
+              dispatchEvent(new MessageEvent("message", { data: event.data, ports: event.ports }));
+            }
+          });
+        `;
+        const shim = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+        super(shim, { ...options, type: "module" });
+      } else {
+        super(scriptUrl, options);
+      }
+    }
+  } as typeof Worker;
+}
+
 const TEST_PERMISSION_MOCK = import.meta.env.MODE === "testing";
 
 type ExtensionApi = {

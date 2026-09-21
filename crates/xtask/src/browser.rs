@@ -519,7 +519,6 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
             &format!("--load-extension={}", staging.display()),
             "--no-first-run",
             "--no-default-browser-check",
-            "http://localhost:3000/dev-source.html",
         ])
         .current_dir(&root)
         .status()

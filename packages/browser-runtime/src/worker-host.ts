@@ -191,7 +191,7 @@ export function createJobWorkerHost(deps: {
         await dispatchTyped(messageHandlers, input);
       } catch (error) {
         const failure = abiFault(error);
-        log("error", "core-error", `code=${failure.code} phase=${failure.phase} message=${failure.message}`);
+        log("error", "core-error", `code=${failure.code} phase=${failure.phase} message=${failure.message} detail=${failure.detail ?? ""}`);
         deps.postMessage({ type: "engine.error", error: failure });
       }
     },

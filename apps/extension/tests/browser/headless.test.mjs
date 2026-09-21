@@ -159,6 +159,10 @@ async function runChromiumJob(base, work, options = {}) {
   const zip = stagePackage("chromium", work, base, options);
   const pkgDir = path.join(work, "pkg");
   spawnSync("python3", ["-m", "zipfile", "-e", zip, pkgDir], { encoding: "utf8" });
+  return runChromiumPackage(base, work, pkgDir, options);
+}
+
+async function runChromiumPackage(base, work, pkgDir, options = {}) {
   const context = await chromium.launchPersistentContext(path.join(work, "profile"), {
     channel: "chromium",
     headless: true,
@@ -172,7 +176,8 @@ async function runChromiumJob(base, work, options = {}) {
     page.on("console", (message) => {
       if (message.type() === "error") diagnostics.push(`console: ${message.text()}`);
     });
-    page.on("pageerror", (error) => diagnostics.push(`pageerror: ${String(error?.stack ?? error)}`));
+    page.on("pageerror", (error) => diagnostics.push(`pageerror: ${String(error?.stack || error?.message || error)}`));
+    page.on("crash", () => diagnostics.push("page crash"));
   };
   for (const page of context.pages()) {
     page.on("download", (download) => downloads.push(download));
@@ -213,6 +218,26 @@ async function runChromiumJob(base, work, options = {}) {
     return readFileSync(output);
   } finally {
     await context.close();
+  }
+}
+
+async function runChromiumDevJob(base, work) {
+  const pkgDir = path.join(EXTENSION_ROOT, ".output/chrome-mv3-testing");
+  rmSync(pkgDir, { recursive: true, force: true });
+  const wxt = spawn("pnpm", ["--dir", EXTENSION_ROOT, "exec", "wxt", "--browser", "chrome", "--mode", "testing"], {
+    cwd: REPO_ROOT,
+    env: { ...process.env, DEZOOMIFY_TEST_HOST_PERMISSIONS: "1", DEZOOMIFY_TEST_ORIGIN: base },
+  });
+  try {
+    const required = ["manifest.json", "background.js", "job.html", "test/driver.html", "wasm/dezoomify-wasm_bg.wasm"];
+    for (let i = 0; i < 300 && !required.every((file) => existsSync(path.join(pkgDir, file))); i++) {
+      if (wxt.exitCode !== null) assert.fail(`WXT dev server exited with ${wxt.exitCode}`);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert.ok(required.every((file) => existsSync(path.join(pkgDir, file))), "WXT dev artifact was not ready");
+    return await runChromiumPackage(base, work, pkgDir);
+  } finally {
+    wxt.kill();
   }
 }
 
@@ -260,6 +285,15 @@ test("chromium: packaged extension runs the job-tab engine flow", { timeout: 180
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-chromium-"));
   try {
     assertPng(await runChromiumJob(fixtureServer.base, work));
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("chromium: WXT dev extension runs the job-tab engine flow", { timeout: 180000 }, async () => {
+  const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-chromium-dev-"));
+  try {
+    assertPng(await runChromiumDevJob(fixtureServer.base, work));
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
