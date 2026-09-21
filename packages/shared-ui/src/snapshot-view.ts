@@ -19,8 +19,9 @@ import type {
   JobSnapshot,
   JobState,
 } from "@dezoomify/app-model";
+import { renderTransportLabel } from "@dezoomify/app-model";
 import { categoryFor } from "./failure.ts";
-import { renderTransportLabel, splitGapLedger } from "./components.ts";
+import { splitGapLedger } from "./components.ts";
 import { t, type I18nKey } from "./i18n.ts";
 
 /**

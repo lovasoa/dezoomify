@@ -9,34 +9,6 @@ export interface AppCapabilities {
   browserCanSave?: boolean;
 }
 
-// Canonical transport labels (single source): the implementation lives in
-// `@dezoomify/app-model` (host-neutral, dependency-free); this module only
-// re-exports it for rendering. Codes ("direct", "metadata-proxy",
-// "display-only", "browser-session", "native") map to these display strings;
-// raw labels pass through for back-compat.
-//
-// The namespace-destructure shape below keeps the same single source and
-// export surface while giving the bundler plain local bindings (a bare
-// import-plus-re-export of the same names miscompiles the local references
-// in the desktop bundle, throwing `DIRECT_TRANSPORT_LABEL` at runtime).
-import * as TransportLabels from "@dezoomify/app-model";
-const {
-  DIRECT_TRANSPORT_LABEL,
-  PROXY_TRANSPORT_LABEL,
-  DISPLAY_TRANSPORT_LABEL,
-  BROWSER_SESSION_TRANSPORT_LABEL,
-  NATIVE_TRANSPORT_LABEL,
-  renderTransportLabel,
-} = TransportLabels;
-export {
-  DIRECT_TRANSPORT_LABEL,
-  PROXY_TRANSPORT_LABEL,
-  DISPLAY_TRANSPORT_LABEL,
-  BROWSER_SESSION_TRANSPORT_LABEL,
-  NATIVE_TRANSPORT_LABEL,
-  renderTransportLabel,
-};
-
 export function renderSaveGuidance(originClean: boolean): string {
   if (originClean) {
     return (
