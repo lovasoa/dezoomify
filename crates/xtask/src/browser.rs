@@ -452,8 +452,8 @@ mod interrupts {
     }
 }
 
-/// Extension development: regenerate the WASM glue, then run WXT's watcher and
-/// load its live-reloading artifact in an isolated Playwright Chromium.
+/// Extension development uses the store-shaped production build in an isolated
+/// Playwright Chromium profile. Rerun after source changes.
 fn dev_extension(args: &[String]) -> Result<(), String> {
     match args {
         [] => {}
@@ -466,6 +466,7 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
     }
     let root = super::repo_root();
     super::extension::build_wasm_glue()?;
+    super::extension::build_wxt("chrome")?;
     let output = Command::new("node")
         .args([
             "--input-type=module",
@@ -479,39 +480,10 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
     if !output.status.success() || !binary.is_file() {
         return Err("Playwright Chromium is not installed; run `pnpm --filter dezoomify-extension-headless exec playwright install chromium`".to_string());
     }
-    let staging = root.join("apps/extension/.output/chrome-mv3-dev");
-    let _ = std::fs::remove_dir_all(&staging);
-    let mut wxt = super::desktop::pnpm_command()?
-        .args([
-            "--dir",
-            "apps/extension",
-            "exec",
-            "wxt",
-            "--browser",
-            "chrome",
-        ])
-        .current_dir(&root)
-        .spawn()
-        .map_err(|e| format!("failed to start WXT development server: {e}"))?;
-    for _ in 0..600 {
-        if staging.join("manifest.json").is_file() {
-            break;
-        }
-        if let Some(status) = wxt
-            .try_wait()
-            .map_err(|e| format!("WXT wait failed: {e}"))?
-        {
-            return Err(format!("WXT development server exited with {status}"));
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    if !staging.join("manifest.json").is_file() {
-        let _ = wxt.kill();
-        return Err("WXT did not produce the unpacked extension within 60 seconds".to_string());
-    }
+    let staging = root.join("apps/extension/.output/chrome-mv3");
     let profile = std::env::temp_dir().join(format!("dz-dev-extension-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&profile);
-    println!("dev extension: WXT live reload in {}", binary.display());
+    println!("dev extension: production build in {}", binary.display());
     let result = Command::new(&binary)
         .args([
             &format!("--user-data-dir={}", profile.display()),
@@ -523,8 +495,6 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
         .current_dir(&root)
         .status()
         .map_err(|e| format!("failed to launch Playwright Chromium: {e}"));
-    let _ = wxt.kill();
-    let _ = wxt.wait();
     let _ = std::fs::remove_dir_all(profile);
     let status = result?;
     status
