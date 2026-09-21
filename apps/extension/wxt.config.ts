@@ -28,7 +28,8 @@ export default defineConfig({
   manifestVersion: 3,
   outDir: ".output",
   imports: false,
-  dev: { reloadCommand: false },
+  // WXT's dev worker registers this command before starting our background.
+  dev: { reloadCommand: "Alt+R" },
   zip: {
     name: "dezoomify",
     artifactTemplate: "dezoomify-{{browser}}.zip",
@@ -85,9 +86,6 @@ export default defineConfig({
       await mkdir(path.join(publicDir, "wasm"), { recursive: true });
       await cp(path.join(wasm, "dezoomify-wasm.js"), path.join(publicDir, "wasm/dezoomify-wasm.js"));
       await cp(path.join(wasm, "dezoomify-wasm_bg.wasm"), path.join(publicDir, "wasm/dezoomify-wasm_bg.wasm"));
-      if (wxt.config.mode === "development") {
-        await writeFile(path.join(publicDir, "dev-source.html"), "<!doctype html><title>Dezoomify development</title><p>Navigate to a zoomable image viewer, then click the Dezoomify toolbar button.</p>\n");
-      }
 
       if (wxt.config.mode === "testing") {
         await cp(path.join(root, "src/test"), path.join(publicDir, "test"), { recursive: true });
