@@ -66,7 +66,7 @@ The TypeScript/TSX sources (`src/*.ts` plus imported shared-UI and browser-runti
 | `ui` | beta app at `/beta` on `http://127.0.0.1:8081/`, for shared-UI iteration |
 | `web` | full site on `http://127.0.0.1:8080/`, exactly as deployed |
 | `desktop` | real Tauri dev app; fails closed naming missing webview packages |
-| `extension` | unpacked load from sources plus Chromium with a throwaway profile; chromium only |
+| `extension` | WXT live reload plus Playwright Chromium with a throwaway profile; chromium only |
 
 Both serve the assembled `dist/` tree through `scripts/dev-server.mjs` (loopback static server plus the same `POST`/`OPTIONS /api/proxy` relay Cloudflare runs; relay core lives once in `src/server/proxy.ts`). `dev web` mirrors the deployed site; `dev ui` opens the beta surface. Nothing extra installs; `cargo xtask dev web` alone gives a working app.
 
