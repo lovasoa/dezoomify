@@ -492,7 +492,6 @@ async function runJob(url: string, origin = url): Promise<void> {
   displayOnlyActive = false;
   hostFailure = null;
   lastEngineFailureKey = null;
-  viewCtx.imageChoice = undefined;
   viewCtx.currentProgress = undefined;
   viewCtx.completedInfo = undefined;
   viewCtx.sourceUrl = undefined;
@@ -602,16 +601,11 @@ async function runJob(url: string, origin = url): Promise<void> {
     if (run !== activeRun) return;
     activeSnapshot = snapshot;
     const imageIndex = snapshot.selection.image;
-    const levelIndex = snapshot.selection.level;
     const selected = imageIndex === null || imageIndex === undefined
       ? undefined
       : snapshot.selection.catalog?.entries[imageIndex];
     const image = selected?.kind === "image" ? selected : undefined;
-    const level = levelIndex === null || levelIndex === undefined ? undefined : image?.levels[levelIndex];
     resultTitle = typeof image?.title === "string" ? image.title : undefined;
-    viewCtx.imageChoice = level
-      ? { width: level.width, height: level.height, tiles: 0 }
-      : undefined;
 
     const completed = snapshot.progress.completed;
     const total = snapshot.progress.total ?? null;
@@ -868,7 +862,6 @@ function update(): void {
         if (!lastUrl || !isAllowedSourceUrl(lastUrl)) return;
         viewCtx.currentProgress = undefined;
         viewCtx.completedInfo = undefined;
-        viewCtx.imageChoice = undefined;
         viewCtx.sourceUrl = undefined;
         viewCtx.desktopHandoffUrl = undefined;
         submitQueuedUrl(lastUrl);
@@ -949,7 +942,6 @@ function resetJobViewState(): void {
   viewCtx.completedInfo = undefined;
   viewCtx.jobActivity = undefined;
   viewCtx.initialUrl = undefined;
-  viewCtx.imageChoice = undefined;
   viewCtx.sourceUrl = undefined;
   viewCtx.desktopHandoffUrl = undefined;
 }

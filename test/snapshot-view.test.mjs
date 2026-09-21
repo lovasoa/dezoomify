@@ -18,35 +18,9 @@ function dto(overrides = {}) {
   };
 }
 
-const catalog = {
-  entries: [
-    {
-      kind: "image",
-      title: "Altarpiece",
-      format: "IIIF",
-      width: 8000,
-      height: 6000,
-      sourceKind: "iiif",
-      levels: [
-        { label: "thumb", width: 800, height: 600, tileWidth: 256, tileHeight: 256 },
-        { label: "full", width: 8000, height: 6000, tileWidth: 512, tileHeight: 512 },
-      ],
-    },
-    {
-      kind: "image",
-      format: "IIIF",
-      width: 4000,
-      height: 3000,
-      sourceKind: "iiif",
-      levels: [{ label: "full", width: 4000, height: 3000, tileWidth: 512, tileHeight: 512 }],
-    },
-  ],
-};
-
 test("idle presentation has no job state", () => {
   const view = presentIdle();
   assert.equal(view.phase, "idle");
-  assert.equal(view.selection, null);
   assert.equal(view.terminal, null);
   assert.equal(view.canCancel, false);
   assert.equal(view.canReset, false);
@@ -63,35 +37,7 @@ test("discovery renders a cancellable job step", () => {
   assert.equal(view.paused, false);
 });
 
-test("image selection offers every ready catalog entry", () => {
-  const snap = dto({
-    revision: 2,
-    lifecycle: "AwaitingImageSelection",
-    selection: { image: undefined, level: undefined, level_count: 2, catalog, deferred: [] },
-  });
-  const view = presentSnapshot(snap, "metadata-proxy");
-  assert.equal(view.phase, "job");
-  assert.equal(view.headlineKey, "view.step.choosingImage");
-  assert.equal(view.transportLabel, "Metadata proxy");
-  assert.equal(view.selection.kind, "image");
-  assert.equal(view.selection.options.length, 2);
-  assert.equal(view.selection.options[0].title, "Altarpiece");
-});
-
-test("level selection follows the chosen image", () => {
-  const snap = dto({
-    revision: 3,
-    lifecycle: "AwaitingLevelSelection",
-    selection: { image: 0, level: undefined, level_count: 2, catalog, deferred: [] },
-  });
-  const view = presentSnapshot(snap, null);
-  assert.equal(view.selection.kind, "level");
-  assert.equal(view.selection.options.length, 2);
-  assert.equal(view.selection.options[1].width, 8000);
-  assert.equal(view.transportLabel, null);
-});
-
-test("pause keeps progress while the partial decision names its gaps", () => {
+test("partial-decision snapshots keep progress and pause state", () => {
   const snap = dto({
     revision: 4,
     lifecycle: "AwaitingPartialDecision",
@@ -106,9 +52,6 @@ test("pause keeps progress while the partial decision names its gaps", () => {
   assert.equal(view.paused, true);
   assert.deepEqual(view.progress, { current: 5, total: 20 });
   assert.equal(view.phase, "job");
-  assert.equal(view.selection.kind, "recovery");
-  assert.equal(view.selection.generation, 2);
-  assert.deepEqual(view.selection.missing, [7]);
 });
 
 test("tainted canvas keeps the progress bar while dezooming", () => {
@@ -145,7 +88,6 @@ test("completed terminal renders honestly even without catalog or progress", () 
   assert.equal(view.canReset, true);
   assert.equal(view.canCancel, false);
   assert.equal(view.terminal.kind, "completed");
-  assert.equal(view.selection, null);
 });
 
 test("kept partials name their gaps", () => {

@@ -2165,7 +2165,7 @@ abbr[title] {
   min-width: 0;
 }
 
-/* Modal dialog body (shared-ui openModal/pickers/confirm). */
+/* Modal dialog body (shared-ui openModal/confirm). */
 .dz-modal-body {
   display: flex;
   flex-direction: column;
