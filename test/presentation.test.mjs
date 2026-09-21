@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { renderTransportLabel } from "@dezoomify/app-model";
 import { presentSnapshot } from "../packages/shared-ui/src/snapshot-view.ts";
 import { renderAppChoice } from "../packages/shared-ui/src/components.ts";
 import {
@@ -8,7 +9,6 @@ import {
   phaseFor,
 } from "../packages/shared-ui/src/failure.ts";
 import {
-  renderTransportLabel,
   renderSaveGuidance,
   renderErrorSummary,
   renderProgress,
