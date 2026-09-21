@@ -20,6 +20,7 @@ import {
   pushHistory,
   saveHistory as saveHistoryStore,
   toHistoryEntry,
+  isValidInputUrl,
 } from "../packages/app-model/src/index.ts";
 import type {
   HistoryEntry,
@@ -62,7 +63,6 @@ import {
 } from "../packages/browser-runtime/src/limits.ts";
 import {
   desktopHandoffLink,
-  isAllowedSourceUrl,
   isLocalFileUrl,
 } from "../packages/browser-runtime/src/plan-gates.ts";
 import {
@@ -782,7 +782,7 @@ function update(): void {
           update();
           return;
         }
-        if (!isAllowedSourceUrl(url)) {
+        if (!isValidInputUrl(url)) {
           hostFailure = {
             code: "INVALID_URL",
             category: "validation",
@@ -849,7 +849,7 @@ function update(): void {
       },
       onRetrySameUrl() {
         const lastUrl = viewCtx.jobActivity?.url ?? viewCtx.initialUrl;
-        if (!lastUrl || !isAllowedSourceUrl(lastUrl)) return;
+        if (!lastUrl || !isValidInputUrl(lastUrl)) return;
         viewCtx.currentProgress = undefined;
         viewCtx.completedInfo = undefined;
         viewCtx.sourceUrl = undefined;
@@ -939,7 +939,7 @@ function resetJobViewState(): void {
 function startFromHash(): void {
   if (typeof window === "undefined") return;
   const raw = parseHash(window.location.hash);
-  if (raw && looksLikeUsableUrl(raw) && isAllowedSourceUrl(raw)) {
+  if (raw && looksLikeUsableUrl(raw) && isValidInputUrl(raw)) {
     viewCtx.initialUrl = raw;
     update();
     runJob(raw);
@@ -966,7 +966,7 @@ if (appContainer) {
     window.addEventListener("hashchange", () => {
       const raw = parseHash(window.location.hash);
       const current = viewCtx.jobActivity?.url;
-      if (raw && raw !== current && looksLikeUsableUrl(raw) && isAllowedSourceUrl(raw)) {
+      if (raw && raw !== current && looksLikeUsableUrl(raw) && isValidInputUrl(raw)) {
         runJob(raw);
       } else if (!raw && !current) {
         viewCtx.initialUrl = undefined;

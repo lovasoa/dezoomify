@@ -31,15 +31,6 @@ export function canvasTooLargeFailure(
   );
 }
 
-export function isAllowedSourceUrl(urlString: string): boolean {
-  try {
-    const u = new URL(urlString);
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
 /** True for `file:` URLs pasted into the website input. The website cannot
  * read local files from the browser, so these are accepted-then-explained
  * (desktop-app handoff) instead of rejected as a silent invalid URL. */
