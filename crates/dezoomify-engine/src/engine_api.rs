@@ -858,81 +858,6 @@ fn native_level_selection(
         .and_then(|(index, _)| u32::try_from(index).ok())
 }
 
-#[cfg(test)]
-mod native_selection_tests {
-    use super::*;
-    use dezoomify_protocol::dto::{CatalogDto, ImageDto, LevelDto};
-
-    fn snapshot_with_levels(levels: &[(u64, u64)]) -> JobSnapshot {
-        let image = ImageDto {
-            title: None,
-            format: "test".to_string(),
-            width: 0,
-            height: 0,
-            source_kind: "test".to_string(),
-            levels: levels
-                .iter()
-                .enumerate()
-                .map(|(index, (width, height))| LevelDto {
-                    label: index.to_string(),
-                    width: *width,
-                    height: *height,
-                    tile_width: 1,
-                    tile_height: 1,
-                })
-                .collect(),
-        };
-        JobSnapshot {
-            revision: 0,
-            lifecycle: JobState::AwaitingLevelSelection,
-            paused: false,
-            progress: Progress {
-                completed: 0,
-                total: None,
-            },
-            selection: Selection {
-                image: Some(0),
-                level: None,
-                level_count: u32::try_from(levels.len()).expect("test level count fits"),
-                catalog: Some(CatalogDto {
-                    entries: vec![CatalogEntryDto::Image(image)],
-                }),
-                deferred: Vec::new(),
-            },
-            decision: None,
-            terminal: None,
-            output: None,
-        }
-    }
-
-    #[test]
-    fn native_largest_and_fitting_area_ties_choose_the_last_level() {
-        let snapshot = snapshot_with_levels(&[(2, 3), (3, 2), (1, 1)]);
-        assert_eq!(
-            native_level_selection(&snapshot, true, None, None, None),
-            Some(1)
-        );
-        assert_eq!(
-            native_level_selection(&snapshot, false, Some(3), Some(3), None),
-            Some(1)
-        );
-    }
-
-    #[test]
-    fn native_width_fallback_keeps_first_tie_and_prefers_known_widths() {
-        let snapshot = snapshot_with_levels(&[(4, 1), (4, 2), (0, 100), (0, 200)]);
-        assert_eq!(
-            native_level_selection(&snapshot, false, Some(0), None, None),
-            Some(0)
-        );
-        let unknown = snapshot_with_levels(&[(0, 1), (0, 2)]);
-        assert_eq!(
-            native_level_selection(&unknown, false, Some(0), None, None),
-            Some(0)
-        );
-    }
-}
-
 impl EngineJob {
     /// Validate job options without starting: inputs, budgets, and format.
     ///
@@ -1849,5 +1774,80 @@ impl From<&JobSnapshot> for EngineSnapshotDto {
             terminal: snapshot.terminal.clone(),
             output,
         }
+    }
+}
+
+#[cfg(test)]
+mod native_selection_tests {
+    use super::*;
+    use dezoomify_protocol::dto::{CatalogDto, ImageDto, LevelDto};
+
+    fn snapshot_with_levels(levels: &[(u64, u64)]) -> JobSnapshot {
+        let image = ImageDto {
+            title: None,
+            format: "test".to_string(),
+            width: 0,
+            height: 0,
+            source_kind: "test".to_string(),
+            levels: levels
+                .iter()
+                .enumerate()
+                .map(|(index, (width, height))| LevelDto {
+                    label: index.to_string(),
+                    width: *width,
+                    height: *height,
+                    tile_width: 1,
+                    tile_height: 1,
+                })
+                .collect(),
+        };
+        JobSnapshot {
+            revision: 0,
+            lifecycle: JobState::AwaitingLevelSelection,
+            paused: false,
+            progress: Progress {
+                completed: 0,
+                total: None,
+            },
+            selection: Selection {
+                image: Some(0),
+                level: None,
+                level_count: u32::try_from(levels.len()).expect("test level count fits"),
+                catalog: Some(CatalogDto {
+                    entries: vec![CatalogEntryDto::Image(image)],
+                }),
+                deferred: Vec::new(),
+            },
+            decision: None,
+            terminal: None,
+            output: None,
+        }
+    }
+
+    #[test]
+    fn native_largest_and_fitting_area_ties_choose_the_last_level() {
+        let snapshot = snapshot_with_levels(&[(2, 3), (3, 2), (1, 1)]);
+        assert_eq!(
+            native_level_selection(&snapshot, true, None, None, None),
+            Some(1)
+        );
+        assert_eq!(
+            native_level_selection(&snapshot, false, Some(3), Some(3), None),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn native_width_fallback_keeps_first_tie_and_prefers_known_widths() {
+        let snapshot = snapshot_with_levels(&[(4, 1), (4, 2), (0, 100), (0, 200)]);
+        assert_eq!(
+            native_level_selection(&snapshot, false, Some(0), None, None),
+            Some(0)
+        );
+        let unknown = snapshot_with_levels(&[(0, 1), (0, 2)]);
+        assert_eq!(
+            native_level_selection(&unknown, false, Some(0), None, None),
+            Some(0)
+        );
     }
 }
