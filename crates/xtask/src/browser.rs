@@ -452,94 +452,86 @@ mod interrupts {
     }
 }
 
-/// Extension development: regenerate the canonical JS mirrors, build WXT's
-/// unpacked artifact, then launch the browser with an isolated throwaway profile.
-/// Unbranded Chromium only; Google Chrome rejects the command-line loading
-/// switches, and other engines fail closed when their binary is not installed.
+/// Extension development: regenerate the WASM glue, then run WXT's watcher and
+/// load its live-reloading artifact in an isolated Playwright Chromium.
 fn dev_extension(args: &[String]) -> Result<(), String> {
-    let mut browser = String::from("chromium");
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--browser" => {
-                i += 1;
-                browser = args.get(i).ok_or("missing --browser <name>")?.clone();
-            }
-            other => return Err(format!("unknown dev extension arg '{other}'")),
-        }
-        i += 1;
-    }
-    if browser != "chromium" && browser != "chrome" {
-        return Err(format!(
+    match args {
+        [] => {}
+        [flag, browser] if flag == "--browser" && ["chromium", "chrome"].contains(&browser.as_str()) => {}
+        [flag] if flag == "--browser" => return Err("missing --browser <name>".to_string()),
+        [flag, browser] if flag == "--browser" => return Err(format!(
             "browser '{browser}' unavailable (only chromium engine dev profiles; firefox/webkit deferred)"
-        ));
+        )),
+        [other, ..] => return Err(format!("unknown dev extension arg '{other}'")),
     }
     let root = super::repo_root();
-    // Development must load bindings generated from the current Rust tree;
-    // a previous gitignored website build is not a valid extension input.
     super::extension::build_wasm_glue()?;
-    super::extension::build_wxt("chrome")?;
-    let staging = root.join("apps/extension/.output/chrome-mv3");
+    let output = Command::new("node")
+        .args([
+            "--input-type=module",
+            "--eval",
+            "import { chromium } from 'playwright'; process.stdout.write(chromium.executablePath())",
+        ])
+        .current_dir(root.join("apps/extension/tests/browser"))
+        .output()
+        .map_err(|e| format!("failed to detect Playwright Chromium: {e}"))?;
+    let binary = std::path::PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    if !output.status.success() || !binary.is_file() {
+        return Err("Playwright Chromium is not installed; run `pnpm --filter dezoomify-extension-headless exec playwright install chromium`".to_string());
+    }
+    let staging = root.join("apps/extension/.output/chrome-mv3-dev");
+    let _ = std::fs::remove_dir_all(&staging);
+    let mut wxt = super::desktop::pnpm_command()?
+        .args([
+            "--dir",
+            "apps/extension",
+            "exec",
+            "wxt",
+            "--browser",
+            "chrome",
+        ])
+        .current_dir(&root)
+        .spawn()
+        .map_err(|e| format!("failed to start WXT development server: {e}"))?;
+    for _ in 0..600 {
+        if staging.join("manifest.json").is_file() {
+            break;
+        }
+        if let Some(status) = wxt
+            .try_wait()
+            .map_err(|e| format!("WXT wait failed: {e}"))?
+        {
+            return Err(format!("WXT development server exited with {status}"));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    if !staging.join("manifest.json").is_file() {
+        let _ = wxt.kill();
+        return Err("WXT did not produce the unpacked extension within 60 seconds".to_string());
+    }
     let profile = std::env::temp_dir().join(format!("dz-dev-extension-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&profile);
-    // Google Chrome 137+ deliberately rejects both command-line extension
-    // switches. Use an unbranded Chromium binary for unpacked development;
-    // silently falling back to google-chrome makes the browser open while
-    // ignoring the extension entirely.
-    let binary = ["chromium", "chromium-browser"]
-        .iter()
-        .find(|name| {
-            Command::new(name)
-                .arg("--version")
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false)
-        })
-        .copied()
-        .ok_or_else(|| {
-            let chrome_installed = ["google-chrome", "google-chrome-stable"]
-                .iter()
-                .any(|name| {
-                    Command::new(name)
-                        .arg("--version")
-                        .output()
-                        .map(|o| o.status.success())
-                        .unwrap_or(false)
-                });
-            if chrome_installed {
-                "Google Chrome is installed, but it rejects --load-extension for unpacked development; install/use an unbranded Chromium binary (chromium or chromium-browser)"
-                    .to_string()
-            } else {
-                "no Chromium browser binary found (chromium, chromium-browser); Google Chrome is not supported for unpacked extension development"
-                    .to_string()
-            }
-        })?;
-    println!(
-        "dev extension: unpacked package staged at {}",
-        staging.display()
-    );
-    println!(
-        "dev extension: launching {binary} with isolated profile {} (Ctrl-C to stop; delete the profile directory afterwards)",
-        profile.display()
-    );
-    let status = Command::new(binary)
+    println!("dev extension: WXT live reload in {}", binary.display());
+    let result = Command::new(&binary)
         .args([
             &format!("--user-data-dir={}", profile.display()),
-            // Keep the development profile's extension set deterministic.
-            // Chromium can otherwise retain an extension-disabled startup
-            // state for a fresh profile and silently omit --load-extension.
             &format!("--disable-extensions-except={}", staging.display()),
             &format!("--load-extension={}", staging.display()),
             "--no-first-run",
             "--no-default-browser-check",
+            "http://localhost:3000/dev-source.html",
         ])
         .current_dir(&root)
         .status()
-        .map_err(|e| format!("failed to launch {binary}: {e}"))?;
+        .map_err(|e| format!("failed to launch Playwright Chromium: {e}"));
+    let _ = wxt.kill();
+    let _ = wxt.wait();
+    let _ = std::fs::remove_dir_all(profile);
+    let status = result?;
     status
         .success()
         .then_some(())
-        .ok_or_else(|| format!("{binary} exited with {status}"))
+        .ok_or_else(|| format!("Playwright Chromium exited with {status}"))
 }
 
 fn dev_desktop() -> Result<(), String> {
