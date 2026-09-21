@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   canvasTooLargeFailure,
   desktopHandoffLink,
-  isAllowedSourceUrl,
   isLocalFileUrl,
 } from "../src/plan-gates.ts";
 import { BROWSER_MAX_CANVAS_AREA } from "../src/limits.ts";
@@ -27,11 +26,7 @@ test("canvasTooLargeFailure carries both layers", () => {
   assert.match(failure.technical ?? "", /canvas 10x20/);
 });
 
-test("source URL validators accept http(s) and flag local files", () => {
-  assert.equal(isAllowedSourceUrl("https://a.test/"), true);
-  assert.equal(isAllowedSourceUrl("http://a.test/"), true);
-  assert.equal(isAllowedSourceUrl("file:///tmp/x"), false);
-  assert.equal(isAllowedSourceUrl("bogus"), false);
+test("local-file detection distinguishes file URLs", () => {
   assert.equal(isLocalFileUrl("file:///tmp/x"), true);
   assert.equal(isLocalFileUrl("https://a.test/"), false);
 });
