@@ -103,7 +103,13 @@ mod tests {
 
     fn auto_select_options(input: DiscoveryInput) -> JobOptions {
         let mut options = JobOptions::new(vec![input]);
-        options.selection = SelectionPolicy::FirstImageLargestLevel;
+        options.selection = SelectionPolicy::NativeAutomatic {
+            image_index: 0,
+            largest: true,
+            max_width: None,
+            max_height: None,
+            zoom_level: None,
+        };
         options
     }
 

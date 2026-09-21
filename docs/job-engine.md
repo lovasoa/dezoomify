@@ -48,7 +48,7 @@ Phase-specific data lives in single-discriminant groups (`Selection`, `Decision`
 
 Discovery, selection, planning, tile acquisition, then one awaited finalization. The engine exposes only phases it observes; codec and save progress are product-local UI events.
 
-Selection is explicit when discovery finds several images or levels. Commands carry zero-based positions into the kept catalog. Headless callers pass a deterministic selection rule up front; the engine never guesses. Discovery also returns still-deferred entries (a IIIF service, a bulk-list entry) as `ImageRequest` items carrying a follow-up URI; the host follows one within the same engine job (`FollowDeferred`, bounded follows, cycle-guarded, catalog replaced, no host-created replacement jobs).
+Selection is explicit when discovery finds several images or levels. Commands carry zero-based positions into the kept catalog. Headless callers pass a deterministic selection rule up front; the engine never guesses. `NativeAutomatic` owns native image-index clamping, same-job following when that entry is deferred, and native level precedence (exact zoom level, largest regardless of caps, largest fitting both optional caps, smallest known width fallback, then largest area by default). Browser selection retains its separate largest-ready-image and canvas-limit policy. Discovery also returns still-deferred entries (a IIIF service, a bulk-list entry) as `ImageRequest` items carrying a follow-up URI; the engine follows one within the same job (`FollowDeferred`, bounded follows, cycle-guarded, catalog replaced, no host-created replacement jobs).
 
 ## Retry and progress
 

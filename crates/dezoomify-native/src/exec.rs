@@ -55,7 +55,7 @@ use dezoomify_engine::{
     UserCommand as EngineUserCommand,
 };
 use dezoomify_protocol::dto::{
-    CatalogDto, CatalogEntryDto, JobState as EngineLifecycle, ProbeOutcome,
+    CatalogEntryDto, JobState as EngineLifecycle, ProbeOutcome,
     SnapshotTerminalDto as EngineTerminal,
 };
 
@@ -211,8 +211,6 @@ struct Attempt<'a> {
     format: OutputFormat,
     auto_output_dir: Option<PathBuf>,
     cache: Option<(PathBuf, String)>,
-    catalog: Vec<CatalogImage>,
-    selected_image: Option<usize>,
     /// Last snapshot (revision, paused) reported to the host (sparse reporting).
     reported: (u32, bool),
     progress_emitted: (u64, Option<u64>),
@@ -337,8 +335,6 @@ fn execute_attempt(
             effective_cache_dir(config),
             crate::cache::job_namespace(input_url),
         )),
-        catalog: Vec::new(),
-        selected_image: None,
         order: Vec::new(),
         settled: HashSet::new(),
         acquired: 0,
@@ -368,74 +364,7 @@ fn execute_attempt(
             apply_update(&mut pump, cancel_job(&mut job)?);
             attempt.cancel_sent = true;
         }
-        fold_snapshot(&mut attempt, &pump.snapshot)?;
-        if pump.snapshot.lifecycle == EngineLifecycle::AwaitingImageSelection
-            && !attempt.catalog.is_empty()
-        {
-            let selected =
-                select_image_index(attempt.catalog.len(), attempt.config.image_index).unwrap_or(0);
-            if attempt.catalog[selected].ready {
-                attempt.selected_image = Some(selected);
-                apply_update(
-                    &mut pump,
-                    job.command(EngineUserCommand::SelectImage {
-                        image: u32::try_from(selected).map_err(|_| {
-                            NativeError::new("native.internal", "image position overflow")
-                        })?,
-                    })
-                    .map_err(|e| {
-                        NativeError::new(
-                            "native.internal",
-                            format!("selection rejected ({}): {}", e.code, e.message),
-                        )
-                    })?,
-                );
-            } else {
-                // Same-job deferred follow: the catalog is replaced in place
-                // with no new job ID (engine-bounded, cycle-guarded). A
-                // rejected follow (cycle, budget exhausted) ends the job with
-                // the stable deferred code the host loop used to own.
-                apply_update(
-                    &mut pump,
-                    job.command(EngineUserCommand::FollowDeferred {
-                        image: u32::try_from(selected).map_err(|_| {
-                            NativeError::new("native.internal", "image position overflow")
-                        })?,
-                    })
-                    .map_err(|e| {
-                        NativeError::new(
-                            "discovery.deferred",
-                            format!("deferred follow rejected ({}): {}", e.code, e.message),
-                        )
-                    })?,
-                );
-            }
-            continue;
-        }
-        if pump.snapshot.lifecycle == EngineLifecycle::AwaitingLevelSelection
-            && !attempt.catalog.is_empty()
-        {
-            let selected = attempt
-                .selected_image
-                .unwrap_or(0)
-                .min(attempt.catalog.len() - 1);
-            let selection = LevelSelection::from_config(attempt.config);
-            let level = select_level_index(&attempt.catalog[selected].levels, &selection)
-                .ok_or_else(|| {
-                    NativeError::new("discovery.no-level", "image has no zoom levels")
-                })?;
-            apply_update(
-                &mut pump,
-                job.command(EngineUserCommand::SelectLevel { level })
-                    .map_err(|e| {
-                        NativeError::new(
-                            "native.internal",
-                            format!("selection rejected ({}): {}", e.code, e.message),
-                        )
-                    })?,
-            );
-            continue;
-        }
+        fold_snapshot(&mut attempt, &pump.snapshot);
         report_snapshot(&mut job, &mut attempt, on_snapshot);
         let effects = pump.take_effects();
         if effects.is_empty() {
@@ -549,10 +478,7 @@ fn execute_attempt(
     finish_sink_stats(&mut attempt, &sink);
     match terminal {
         Terminal::Output(published) => {
-            let format = attempt
-                .selected_image
-                .and_then(|index| attempt.catalog.get(index))
-                .or_else(|| attempt.catalog.first())
+            let format = selected_catalog_image(&pump.snapshot)
                 .map(|image| image.format.clone())
                 .unwrap_or_default();
             Ok(ExecResult {
@@ -748,10 +674,7 @@ fn cancel_job(job: &mut EngineJob) -> Result<EngineUpdate, NativeError> {
 /// monotonic progress, the pending decision ledger, and the terminal
 /// failure facts. Lifecycle moves need no branch: selection and quiescence
 /// read the snapshot directly at the loop top.
-fn fold_snapshot(attempt: &mut Attempt<'_>, snapshot: &EngineSnapshot) -> Result<(), NativeError> {
-    if let Some(catalog) = &snapshot.selection.catalog {
-        attempt.catalog = catalog_entries_of(catalog);
-    }
+fn fold_snapshot(attempt: &mut Attempt<'_>, snapshot: &EngineSnapshot) {
     let (completed, total) = (snapshot.progress.completed, snapshot.progress.total);
     if completed > attempt.progress_emitted.0 || total != attempt.progress_emitted.1 {
         attempt.progress_emitted = (completed, total);
@@ -769,33 +692,15 @@ fn fold_snapshot(attempt: &mut Attempt<'_>, snapshot: &EngineSnapshot) -> Result
     if let Some(EngineTerminal::Failed { error }) = &snapshot.terminal {
         attempt.failure = Some((error.code.clone(), error.message.clone()));
     }
-    Ok(())
 }
 
-/// Project one kept catalog onto the attempt's planning entries.
-fn catalog_entries_of(catalog: &CatalogDto) -> Vec<CatalogImage> {
-    catalog
-        .entries
-        .iter()
-        .map(|entry| match entry {
-            CatalogEntryDto::Image(image) => CatalogImage {
-                ready: true,
-                format: image.format.clone(),
-                title: image.title.clone(),
-                levels: image
-                    .levels
-                    .iter()
-                    .map(|level| (level.width, level.height))
-                    .collect(),
-            },
-            CatalogEntryDto::ImageRequest(request) => CatalogImage {
-                ready: false,
-                format: String::new(),
-                title: request.title.clone(),
-                levels: Vec::new(),
-            },
-        })
-        .collect()
+fn selected_catalog_image(snapshot: &EngineSnapshot) -> Option<&dezoomify_protocol::dto::ImageDto> {
+    let position = usize::try_from(snapshot.selection.image?).ok()?;
+    let catalog = snapshot.selection.catalog.as_ref()?;
+    let CatalogEntryDto::Image(image) = catalog.entries.get(position)? else {
+        return None;
+    };
+    Some(image)
 }
 
 struct TileFetch {
@@ -1482,11 +1387,8 @@ fn finalize_output(
     partial: bool,
 ) -> Result<EngineUpdate, NativeError> {
     if let Some(output_dir) = attempt.auto_output_dir.clone() {
-        let title = attempt
-            .selected_image
-            .and_then(|index| attempt.catalog.get(index))
-            .or_else(|| attempt.catalog.first())
-            .and_then(|image| image.title.as_deref());
+        let snapshot = job.snapshot();
+        let title = selected_catalog_image(&snapshot).and_then(|image| image.title.as_deref());
         attempt.output_path = auto_output_path(&output_dir, title, attempt.format);
     }
     let _ = partial;
@@ -1616,7 +1518,13 @@ fn engine_options_for(
     let max_bytes = config.fetch.max_bytes.clamp(1024, 4_294_967_296);
     let mut options = EngineOptions::new(vec![DiscoveryInput::new(input_url)]);
     options.format = config.format.clone();
-    options.selection = EngineSelectionPolicy::Manual;
+    options.selection = EngineSelectionPolicy::NativeAutomatic {
+        image_index: config.image_index.unwrap_or(0),
+        largest: config.largest,
+        max_width: config.max_width,
+        max_height: config.max_height,
+        zoom_level: config.zoom_level,
+    };
     // The pump owns partial decisions through its gate wait; the facade
     // only surfaces them.
     options.partial = dezoomify_engine::PartialPolicy::Prompt;
@@ -1692,96 +1600,6 @@ fn canonical_failure_code(code: &str) -> &'static str {
 
 fn describe_http_failure(outcome: &FetchOutcome) -> String {
     crate::pipeline::describe_http_failure(outcome)
-}
-
-struct CatalogImage {
-    ready: bool,
-    format: String,
-    title: Option<String>,
-    levels: Vec<(u64, u64)>,
-}
-
-pub(crate) struct LevelSelection {
-    pub largest: bool,
-    pub max_width: Option<u32>,
-    pub max_height: Option<u32>,
-    pub zoom_level: Option<usize>,
-}
-
-impl LevelSelection {
-    fn from_config(config: &PipelineConfig) -> Self {
-        Self {
-            largest: config.largest,
-            max_width: config.max_width,
-            max_height: config.max_height,
-            zoom_level: config.zoom_level,
-        }
-    }
-}
-
-fn max_area_index(levels: &[&(u64, u64)]) -> Option<u32> {
-    levels
-        .iter()
-        .enumerate()
-        .max_by_key(|(_, level)| u128::from(level.0) * u128::from(level.1))
-        .and_then(|(index, _)| u32::try_from(index).ok())
-}
-
-pub(crate) fn select_image_index(count: usize, image_index: Option<usize>) -> Option<usize> {
-    if count == 0 {
-        return None;
-    }
-    Some(image_index.map_or(0, |requested| requested.min(count - 1)))
-}
-
-pub(crate) fn select_level_index(levels: &[(u64, u64)], selection: &LevelSelection) -> Option<u32> {
-    if levels.is_empty() {
-        return None;
-    }
-    if let Some(requested) = selection.zoom_level {
-        let index = requested.min(levels.len() - 1);
-        return u32::try_from(index).ok();
-    }
-    if selection.largest {
-        let refs: Vec<&(u64, u64)> = levels.iter().collect();
-        return max_area_index(&refs);
-    }
-    if selection.max_width.is_some() || selection.max_height.is_some() {
-        const UNKNOWN: u64 = u64::MAX;
-        let width_of = |width: u64| {
-            if width == 0 {
-                UNKNOWN
-            } else {
-                width
-            }
-        };
-        let fitting: Vec<(usize, &(u64, u64))> = levels
-            .iter()
-            .enumerate()
-            .filter(|(_, (width, height))| {
-                let width_ok = selection
-                    .max_width
-                    .is_none_or(|cap| *width != 0 && *width <= u64::from(cap));
-                let height_ok = selection
-                    .max_height
-                    .is_none_or(|cap| *height != 0 && *height <= u64::from(cap));
-                width_ok && height_ok
-            })
-            .collect();
-        if fitting.is_empty() {
-            return levels
-                .iter()
-                .enumerate()
-                .min_by_key(|(_, (width, _))| width_of(*width))
-                .and_then(|(index, _)| u32::try_from(index).ok());
-        }
-        return fitting
-            .into_iter()
-            .max_by_key(|(_, (width, height))| u128::from(*width) * u128::from(*height))
-            .and_then(|(index, _)| u32::try_from(index).ok());
-    }
-    let refs: Vec<&(u64, u64)> = levels.iter().collect();
-    max_area_index(&refs)
 }
 
 fn extension_for(format: OutputFormat) -> &'static str {

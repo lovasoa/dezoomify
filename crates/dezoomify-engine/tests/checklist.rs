@@ -530,7 +530,13 @@ fn engine_policies_replace_host_algorithms() {
     // Auto selection: headless callers name the rule up front; the engine
     // selects without prompting.
     let mut auto = dzi_options();
-    auto.selection = SelectionPolicy::FirstImageLargestLevel;
+    auto.selection = SelectionPolicy::NativeAutomatic {
+        image_index: 0,
+        largest: true,
+        max_width: None,
+        max_height: None,
+        zoom_level: None,
+    };
     let (mut job, update) = EngineJob::start(auto).expect("start");
     let meta = metadata_id(&update);
     let update = job

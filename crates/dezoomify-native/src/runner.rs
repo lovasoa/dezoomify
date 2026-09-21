@@ -619,6 +619,35 @@ mod tests {
     }
 
     #[test]
+    fn auto_dir_output_name_uses_the_engine_selected_image_title() {
+        let work = temp_dir("auto-name");
+        let manifest = write_local_job(&work, &["0_0", "1_0", "0_1", "1_1"]);
+        let output_dir = work.join("output");
+        std::fs::create_dir_all(&output_dir).expect("output directory");
+        let job = NativeRunner::start(JobOptions {
+            input_url: manifest.to_str().expect("utf8").to_string(),
+            output: OutputTarget::AutoDir {
+                dir: output_dir.clone(),
+                format: OutputFormat::Png,
+            },
+            ..Default::default()
+        })
+        .expect("runner starts");
+        let snapshots = drain_until_terminal(&job);
+        let outcome = job.join().expect("local image publishes");
+        let expected = output_dir.join("Runner-tiles.png");
+        assert_eq!(outcome.path, expected);
+        assert!(expected.exists());
+        assert!(
+            snapshots.iter().any(|snapshot| snapshot
+                .published
+                .as_ref()
+                .is_some_and(|published| published.path == expected)),
+            "published path matches the image title"
+        );
+    }
+
+    #[test]
     fn invalid_options_fail_before_any_effect() {
         let bad_input = NativeRunner::start(JobOptions {
             input_url: String::new(),

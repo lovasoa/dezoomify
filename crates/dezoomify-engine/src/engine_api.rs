@@ -169,14 +169,22 @@ pub enum SelectionPolicy {
     /// Every image/level choice arrives as a [`UserCommand`].
     #[default]
     Manual,
-    /// First image, largest (last) level, no prompting.
-    FirstImageLargestLevel,
     /// Browser policy: choose the ready image with the largest declared
     /// level, then its largest level within the declared canvas limits.
     BrowserLargestFitting {
         max_width: u32,
         max_height: u32,
         max_area: u64,
+    },
+    /// Native automatic selection: select the configured catalog position
+    /// (clamped to the last entry), follow it if deferred, then choose its
+    /// level using native precedence and optional caps.
+    NativeAutomatic {
+        image_index: usize,
+        largest: bool,
+        max_width: Option<u32>,
+        max_height: Option<u32>,
+        zoom_level: Option<usize>,
     },
 }
 
@@ -698,8 +706,12 @@ enum SelectionChoice {
     NoImages,
 }
 
-fn area(width: u64, height: u64) -> Option<u128> {
-    (width > 0 && height > 0).then(|| u128::from(width) * u128::from(height))
+fn pixel_area(width: u64, height: u64) -> u128 {
+    u128::from(width) * u128::from(height)
+}
+
+fn browser_area(width: u64, height: u64) -> Option<u128> {
+    (width > 0 && height > 0).then(|| pixel_area(width, height))
 }
 
 fn browser_selection(snapshot: &JobSnapshot) -> Option<SelectionChoice> {
@@ -717,7 +729,7 @@ fn browser_selection(snapshot: &JobSnapshot) -> Option<SelectionChoice> {
         let image_area = image
             .levels
             .iter()
-            .filter_map(|level| area(level.width, level.height))
+            .filter_map(|level| browser_area(level.width, level.height))
             .max();
         if best.is_none_or(|(_, best_area)| image_area.unwrap_or(0) >= best_area.unwrap_or(0)) {
             best = Some((index, image_area));
@@ -755,7 +767,7 @@ fn browser_level_selection(
     let mut fitting: Option<(usize, u128)> = None;
     let mut smallest: Option<(usize, u128)> = None;
     for (index, level) in image.levels.iter().enumerate() {
-        let Some(level_area) = area(level.width, level.height) else {
+        let Some(level_area) = browser_area(level.width, level.height) else {
             continue;
         };
         if u128::from(level.width) <= u128::from(max_width)
@@ -779,6 +791,146 @@ fn browser_level_selection(
                 .checked_sub(1)
                 .map(|index| u32::try_from(index).unwrap_or(u32::MAX))
         })
+}
+
+fn native_image_selection(snapshot: &JobSnapshot, image_index: usize) -> Option<SelectionChoice> {
+    let catalog = snapshot.selection.catalog.as_ref()?;
+    let position = image_index.min(catalog.entries.len().checked_sub(1)?);
+    let image = u32::try_from(position).unwrap_or(u32::MAX);
+    match catalog.entries.get(position)? {
+        CatalogEntryDto::Image(_) => Some(SelectionChoice::Image { image }),
+        CatalogEntryDto::ImageRequest(_) => Some(SelectionChoice::FollowDeferred { image }),
+    }
+}
+
+fn native_level_selection(
+    snapshot: &JobSnapshot,
+    largest: bool,
+    max_width: Option<u32>,
+    max_height: Option<u32>,
+    zoom_level: Option<usize>,
+) -> Option<u32> {
+    let catalog = snapshot.selection.catalog.as_ref()?;
+    let image_index = usize::try_from(snapshot.selection.image?).ok()?;
+    let CatalogEntryDto::Image(image) = catalog.entries.get(image_index)? else {
+        return None;
+    };
+    let levels = &image.levels;
+    if levels.is_empty() {
+        return None;
+    }
+    if let Some(requested) = zoom_level {
+        return u32::try_from(requested.min(levels.len() - 1)).ok();
+    }
+    if largest || (max_width.is_none() && max_height.is_none()) {
+        return levels
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, level)| pixel_area(level.width, level.height))
+            .and_then(|(index, _)| u32::try_from(index).ok());
+    }
+
+    let fits = |width: u64, height: u64| {
+        max_width.is_none_or(|cap| width > 0 && width <= u64::from(cap))
+            && max_height.is_none_or(|cap| height > 0 && height <= u64::from(cap))
+    };
+    if let Some((index, _)) = levels
+        .iter()
+        .enumerate()
+        .filter(|(_, level)| fits(level.width, level.height))
+        .max_by_key(|(_, level)| pixel_area(level.width, level.height))
+    {
+        return u32::try_from(index).ok();
+    }
+
+    // Native fallback treats an unknown width as larger than every known
+    // width; `min_by_key` retains the first level on equal widths.
+    levels
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, level)| {
+            if level.width == 0 {
+                u64::MAX
+            } else {
+                level.width
+            }
+        })
+        .and_then(|(index, _)| u32::try_from(index).ok())
+}
+
+#[cfg(test)]
+mod native_selection_tests {
+    use super::*;
+    use dezoomify_protocol::dto::{CatalogDto, ImageDto, LevelDto};
+
+    fn snapshot_with_levels(levels: &[(u64, u64)]) -> JobSnapshot {
+        let image = ImageDto {
+            title: None,
+            format: "test".to_string(),
+            width: 0,
+            height: 0,
+            source_kind: "test".to_string(),
+            levels: levels
+                .iter()
+                .enumerate()
+                .map(|(index, (width, height))| LevelDto {
+                    label: index.to_string(),
+                    width: *width,
+                    height: *height,
+                    tile_width: 1,
+                    tile_height: 1,
+                })
+                .collect(),
+        };
+        JobSnapshot {
+            revision: 0,
+            lifecycle: JobState::AwaitingLevelSelection,
+            paused: false,
+            progress: Progress {
+                completed: 0,
+                total: None,
+            },
+            selection: Selection {
+                image: Some(0),
+                level: None,
+                level_count: u32::try_from(levels.len()).expect("test level count fits"),
+                catalog: Some(CatalogDto {
+                    entries: vec![CatalogEntryDto::Image(image)],
+                }),
+                deferred: Vec::new(),
+            },
+            decision: None,
+            terminal: None,
+            output: None,
+        }
+    }
+
+    #[test]
+    fn native_largest_and_fitting_area_ties_choose_the_last_level() {
+        let snapshot = snapshot_with_levels(&[(2, 3), (3, 2), (1, 1)]);
+        assert_eq!(
+            native_level_selection(&snapshot, true, None, None, None),
+            Some(1)
+        );
+        assert_eq!(
+            native_level_selection(&snapshot, false, Some(3), Some(3), None),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn native_width_fallback_keeps_first_tie_and_prefers_known_widths() {
+        let snapshot = snapshot_with_levels(&[(4, 1), (4, 2), (0, 100), (0, 200)]);
+        assert_eq!(
+            native_level_selection(&snapshot, false, Some(0), None, None),
+            Some(0)
+        );
+        let unknown = snapshot_with_levels(&[(0, 1), (0, 2)]);
+        assert_eq!(
+            native_level_selection(&unknown, false, Some(0), None, None),
+            Some(0)
+        );
+    }
 }
 
 impl EngineJob {
@@ -1212,12 +1364,13 @@ impl EngineJob {
         if update.snapshot.lifecycle == JobState::AwaitingImageSelection {
             let choice = match self.options.selection {
                 SelectionPolicy::Manual => None,
-                SelectionPolicy::FirstImageLargestLevel => {
-                    Some(SelectionChoice::Image { image: 0 })
-                }
                 SelectionPolicy::BrowserLargestFitting { .. } => {
                     browser_selection(&update.snapshot)
                 }
+                SelectionPolicy::NativeAutomatic { image_index, .. } => Some(
+                    native_image_selection(&update.snapshot, image_index)
+                        .unwrap_or(SelectionChoice::NoImages),
+                ),
             };
             match choice {
                 Some(SelectionChoice::Image { image }) => {
@@ -1259,27 +1412,49 @@ impl EngineJob {
                 None => {}
             }
         }
-        if matches!(
-            self.options.selection,
-            SelectionPolicy::FirstImageLargestLevel | SelectionPolicy::BrowserLargestFitting { .. }
-        ) && update.snapshot.lifecycle == JobState::AwaitingLevelSelection
-            && update.snapshot.selection.level_count > 0
-        {
+        if update.snapshot.lifecycle == JobState::AwaitingLevelSelection {
             let level = match self.options.selection {
-                SelectionPolicy::FirstImageLargestLevel => {
-                    update.snapshot.selection.level_count - 1
-                }
+                SelectionPolicy::Manual => None,
                 SelectionPolicy::BrowserLargestFitting {
                     max_width,
                     max_height,
                     max_area,
-                } => browser_level_selection(&update.snapshot, max_width, max_height, max_area)
-                    .unwrap_or(update.snapshot.selection.level_count - 1),
-                SelectionPolicy::Manual => unreachable!(),
+                } if update.snapshot.selection.level_count > 0 => Some(
+                    browser_level_selection(&update.snapshot, max_width, max_height, max_area)
+                        .unwrap_or(update.snapshot.selection.level_count - 1),
+                ),
+                SelectionPolicy::NativeAutomatic {
+                    largest,
+                    max_width,
+                    max_height,
+                    zoom_level,
+                    ..
+                } => native_level_selection(
+                    &update.snapshot,
+                    largest,
+                    max_width,
+                    max_height,
+                    zoom_level,
+                ),
+                _ => None,
             };
-            self.apply_command_inner(UserCommand::SelectLevel { level })?;
-            update.effects.extend(self.drain()?.effects);
-            update.snapshot = self.project();
+            if let Some(level) = level {
+                self.apply_command_inner(UserCommand::SelectLevel { level })?;
+                update.effects.extend(self.drain()?.effects);
+                update.snapshot = self.project();
+            } else if matches!(
+                self.options.selection,
+                SelectionPolicy::NativeAutomatic { .. }
+            ) {
+                self.inner
+                    .fail_via_cleanup(
+                        "job.plan-empty",
+                        "selected image has no zoom levels".to_string(),
+                    )
+                    .map_err(|error| EngineError::new(&error.code, error.message))?;
+                update.effects.extend(self.drain()?.effects);
+                update.snapshot = self.project();
+            }
         }
         if update.snapshot.lifecycle == JobState::AwaitingPartialDecision {
             match self.options.partial {
