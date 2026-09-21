@@ -1,6 +1,6 @@
 # Browser runtime
 
-`packages/browser-runtime` runs `crates/dezoomify-wasm` in the browser. It owns fetching, workers, decoding, tile painting, canvases, save surfaces, and an optional bounded cache. It contains no UI.
+`packages/browser-runtime` runs `crates/dezoomify-wasm` in the browser. It owns fetching, workers, decoding, tile painting, canvases, and save surfaces. It contains no UI.
 
 ## Engine-effect assembly
 
@@ -33,7 +33,7 @@ Once tainted, the runtime never runs pixel reads, hashing, processing, `toBlob`,
 
 Readable metadata, processed tiles, and clean saves start with direct browser fetch. After a classified CORS or network failure, the website retries only an eligible public, non-credential metadata request through the metadata proxy; tiles never use the proxy, so readable tile bytes on CORS-blocked sources need the extension or desktop app. Bytes go to workers for decode, core-recipe processing, and save assembly. Size limits are checked before allocation.
 
-Object URLs live for one job and are then revoked. The optional browser cache keeps only non-sensitive reusable data within quotas; see [Security](security.md).
+Object URLs live for one job and are then revoked.
 
 ## Request order
 
