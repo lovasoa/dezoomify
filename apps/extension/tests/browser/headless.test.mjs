@@ -313,6 +313,18 @@ test("chromium: packaged extension retains the browser session for protected met
   }
 });
 
+test("chromium: packaged extension follows tile redirects without credentials", { timeout: 180000 }, async () => {
+  const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-tile-redirect-"));
+  try {
+    // Every tile 307s to a signed URL (signed-Zoomify shape). The transport
+    // follows credential-free, so the CORS `*` CDN responses stay readable
+    // and the job still assembles the full image.
+    assertPng(await runChromiumJob(fixtureServer.base, work, { scenario: "tile-redirect" }));
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
 test("firefox: packaged extension runs the job-tab engine flow", { timeout: 180000 }, async () => {
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-firefox-"));
   try {

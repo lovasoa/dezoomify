@@ -18,6 +18,8 @@
         ? "https://fixtures.test/cli/corrupt.dzi"
         : scenario === "permission"
           ? "https://fixtures.test/cli/permission-tiles.yaml"
+          : scenario === "tile-redirect"
+            ? "https://fixtures.test/redirect-tiles/pyramid.dzi"
         : "https://fixtures.test/cli/pyramid.dzi";
       // The permission fixture's metadata is source-tab readable, while its
       // tile URLs deliberately use the equivalent but ungranted localhost
