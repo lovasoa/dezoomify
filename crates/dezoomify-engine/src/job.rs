@@ -57,22 +57,6 @@ struct PendingRetry {
     timer_issued: bool,
 }
 
-/// Image position once chosen: the wire position plus the catalog index.
-/// Both travel together so image selection is never half-recorded.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct ImageSelection {
-    position: u32,
-    index: usize,
-}
-
-/// Level position once chosen: the wire position plus the level index.
-/// Both travel together so level selection is never half-recorded.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct LevelSelection {
-    position: u32,
-    index: usize,
-}
-
 /// Selection phase data. Exactly one variant is live, so an image answer
 /// cannot exist while awaiting an image, a level answer cannot exist
 /// before its image, and decided data cannot leak across phase exits:
@@ -83,27 +67,22 @@ enum Selection {
     #[default]
     AwaitingImage,
     /// Image chosen, level still open (`AwaitingLevelSelection`).
-    AwaitingLevel { image: ImageSelection },
+    AwaitingLevel { image: u32 },
     /// Image and level chosen (planning and everything after).
-    Selected {
-        image: ImageSelection,
-        level: LevelSelection,
-    },
+    Selected { image: u32, level: u32 },
 }
 
 impl Selection {
     fn image_position(&self) -> Option<u32> {
         match *self {
             Selection::AwaitingImage => None,
-            Selection::AwaitingLevel { image } | Selection::Selected { image, .. } => {
-                Some(image.position)
-            }
+            Selection::AwaitingLevel { image } | Selection::Selected { image, .. } => Some(image),
         }
     }
 
     fn level_position(&self) -> Option<u32> {
         match *self {
-            Selection::Selected { level, .. } => Some(level.position),
+            Selection::Selected { level, .. } => Some(level),
             Selection::AwaitingImage | Selection::AwaitingLevel { .. } => None,
         }
     }
@@ -732,12 +711,7 @@ impl Job {
                 "image metadata was not fetched; the image cannot be selected",
             ));
         };
-        self.selection = Selection::AwaitingLevel {
-            image: ImageSelection {
-                position: image,
-                index,
-            },
-        };
+        self.selection = Selection::AwaitingLevel { image };
         self.set_state(State::AwaitingLevelSelection)?;
         Ok(Outcome::Applied)
     }
@@ -813,7 +787,8 @@ impl Job {
         let Selection::AwaitingLevel { image } = self.selection else {
             return Err(JobError::invalid_state("no image selected"));
         };
-        let image_index = image.index;
+        let image_index =
+            usize::try_from(image).map_err(|_| JobError::overflow("image position"))?;
         let level_index =
             usize::try_from(level).map_err(|_| JobError::overflow("level position"))?;
         let in_range = match self
@@ -827,13 +802,7 @@ impl Job {
         if !in_range {
             return Err(JobError::invalid_state("level position is out of range"));
         }
-        self.selection = Selection::Selected {
-            image,
-            level: LevelSelection {
-                position: level,
-                index: level_index,
-            },
-        };
+        self.selection = Selection::Selected { image, level };
         self.set_state(State::Planning)?;
         self.plan_selected_level()?;
         Ok(Outcome::Applied)
@@ -849,15 +818,29 @@ impl Job {
             let Selection::Selected { image, level } = self.selection else {
                 return Err(JobError::invalid_state("no level selected"));
             };
-            let image_index = image.index;
-            let level_index = level.index;
-            let CatalogEntry::Ready(image) = &catalog.entries()[image_index] else {
+            let image_index = usize::try_from(image)
+                .map_err(|_| JobError::overflow("selected image position"))?;
+            let level_index = usize::try_from(level)
+                .map_err(|_| JobError::overflow("selected level position"))?;
+            let Some(entry) = catalog.entries().get(image_index) else {
+                return self.fail_via_cleanup(
+                    "job.plan-invalid",
+                    "selected image position is out of range".to_string(),
+                );
+            };
+            let CatalogEntry::Ready(image) = entry else {
                 return self.fail_via_cleanup(
                     "job.plan-invalid",
                     "selected image metadata was not fetched".to_string(),
                 );
             };
-            image.levels[level_index].source.clone()
+            let Some(selected_level) = image.levels.get(level_index) else {
+                return self.fail_via_cleanup(
+                    "job.plan-invalid",
+                    "selected level position is out of range".to_string(),
+                );
+            };
+            selected_level.source.clone()
         };
         match source {
             TileSource::Grid(grid) => {
