@@ -1,0 +1,13 @@
+{
+  "description": "Extension follows tile redirects credential-free: every tile 307s to a signed URL and the job still assembles",
+  "id": "extension/tile-redirect",
+  "input": {
+    "mode": "explicit",
+    "url": "http://127.0.0.1/target.html?scenario=tile-redirect"
+  },
+  "operation": "extension-browser-session-fetch",
+  "source_evidence": {
+    "path": "apps/extension/tests/browser/headless.test.mjs",
+    "snapshot": "local deterministic fixture"
+  }
+}
