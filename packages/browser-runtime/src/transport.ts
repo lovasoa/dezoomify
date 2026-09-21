@@ -34,15 +34,6 @@ function hasCredentialHeader(headers: Record<string, string> | undefined): strin
   return null;
 }
 
-function hasUserinfo(urlString: string): boolean {
-  try {
-    const u = new URL(urlString);
-    return u.username !== "" || u.password !== "";
-  } catch {
-    return false;
-  }
-}
-
 function toSafeHeaders(input: unknown): Record<string, string> {
   const out: Record<string, string> = {};
   if (!input) return out;
@@ -148,7 +139,6 @@ export function createDirectTransport(fetchImpl: FetchImpl): DirectTransport {
     if (opts?.signal?.aborted) {
       return { outcome: "cancelled", reason: "aborted-before-fetch" };
     }
-    void hasUserinfo;
     let response: {
       url?: string;
       status: number;
