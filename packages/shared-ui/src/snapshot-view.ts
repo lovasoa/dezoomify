@@ -15,7 +15,6 @@
 // `t()`. Counts, labels, and gap ledgers stay literal data.
 
 import type {
-  CatalogDto,
   ErrorDto,
   JobSnapshot,
   JobState,
@@ -65,29 +64,6 @@ export type PresentationStatus =
   | "failed"
   | "cancelled";
 
-export interface SnapshotImageOption {
-  index: number;
-  title?: string;
-  width?: number;
-  height?: number;
-}
-
-export interface SnapshotLevelOption {
-  index: number;
-  width: number;
-  height: number;
-}
-
-export type SnapshotSelection =
-  | { kind: "image"; options: SnapshotImageOption[] }
-  | { kind: "level"; options: SnapshotLevelOption[] }
-  // Outstanding keep/retry/discard choice: the closed answers are the
-  // engine's RecoveryChoice values. The DTO carries no action hints at
-  // decision time, so the projection names the generation plus the honest
-  // missing-tile ledger from decision.missing and nothing else; products
-  // offer the three closed answers directly.
-  | { kind: "recovery"; generation: number; missing: number[] };
-
 /** Terminal view model: kind aliases the authoritative outcome; the rest is presentation-only ledger. */
 export type SnapshotTerminal = {
   kind: "completed" | "partial-completed" | "failed" | "cancelled";
@@ -119,7 +95,6 @@ export interface SnapshotPresentation {
   detailVars?: Record<string, string | number>;
   progress: { current: number; total: number | null } | null;
   paused: boolean;
-  selection: SnapshotSelection | null;
   terminal: SnapshotTerminal | null;
   /** Raw transport code (diagnostics); `transportLabel` carries the display string. */
   transport: string | null;
@@ -130,32 +105,6 @@ export interface SnapshotPresentation {
   displayOnly: boolean;
   /** True for kept partials: finished, but with named gaps. */
   partial: boolean;
-}
-
-function imageOptionsOf(catalog: CatalogDto | null): SnapshotImageOption[] {
-  if (!catalog) return [];
-  const out: SnapshotImageOption[] = [];
-  catalog.entries.forEach((entry, index) => {
-    if (entry.kind === "image") {
-      const option: SnapshotImageOption = { index };
-      if (typeof entry.title === "string" && entry.title !== "") option.title = entry.title;
-      if (entry.width > 0) option.width = entry.width;
-      if (entry.height > 0) option.height = entry.height;
-      out.push(option);
-    }
-  });
-  return out;
-}
-
-function levelOptionsOf(catalog: CatalogDto | null, image: number | null): SnapshotLevelOption[] {
-  if (!catalog || image === null) return [];
-  const entry = catalog.entries[image];
-  if (!entry || entry.kind !== "image") return [];
-  return entry.levels.map((level, index) => ({
-    index,
-    width: level.width,
-    height: level.height,
-  }));
 }
 
 function headlineForState(state: JobState): {
@@ -245,7 +194,6 @@ function basePresentation(): SnapshotPresentation {
     headlineKey: "view.step.working",
     progress: null,
     paused: false,
-    selection: null,
     terminal: null,
     transport: null,
     transportLabel: null,
@@ -294,28 +242,6 @@ export function presentSnapshot(
   }
 
   const lifecycle: JobState = snapshot.lifecycle;
-  const catalog = snapshot.selection.catalog ?? null;
-  const selectedImage = snapshot.selection.image ?? null;
-  const decision = snapshot.decision;
-
-  let selection: SnapshotSelection | null = null;
-  if (!terminal) {
-    if (lifecycle === "AwaitingImageSelection" && catalog) {
-      selection = { kind: "image", options: imageOptionsOf(catalog) };
-    } else if (lifecycle === "AwaitingLevelSelection" && catalog) {
-      selection = {
-        kind: "level",
-        options: levelOptionsOf(catalog, selectedImage),
-      };
-    } else if (lifecycle === "AwaitingPartialDecision" && decision) {
-      selection = {
-        kind: "recovery",
-        generation: decision.generation,
-        missing: decision.missing.map((entry) => entry.tile),
-      };
-    }
-  }
-
   const headline = headlineForState(lifecycle);
   const completed = snapshot.progress.completed;
   const total = snapshot.progress.total ?? null;
@@ -339,7 +265,6 @@ export function presentSnapshot(
     ...(detailVars ? { detailVars } : {}),
     progress,
     paused: snapshot.paused ?? false,
-    selection,
     terminal,
     transport,
     transportLabel: transport === null ? null : renderTransportLabel(transport),

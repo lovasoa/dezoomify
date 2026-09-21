@@ -908,32 +908,6 @@ function appendDesktopQueuePanel(aux: HTMLElement, doc: Document): void {
   aux.appendChild(box);
 }
 
-function handleSelectImage(index: number): void {
-  if (isTerminalNow()) return;
-  pushLog(`Chose image ${index}`);
-  const handle = activeHandle;
-  if (!handle) return;
-  void handle.command({ type: "select-image", image: index }).then(
-    () => update(),
-    (error: unknown) => {
-      failLocally("CHOICE_FAILED", invokeErrorMessage(error, t("desktop.invoke.choiceImage")));
-    },
-  );
-}
-
-function handleSelectLevel(level: number): void {
-  if (isTerminalNow()) return;
-  pushLog(`Chose level ${level}`);
-  const handle = activeHandle;
-  if (!handle) return;
-  void handle.command({ type: "select-level", level }).then(
-    () => update(),
-    (error: unknown) => {
-      failLocally("CHOICE_FAILED", invokeErrorMessage(error, t("desktop.invoke.choiceLevel")));
-    },
-  );
-}
-
 function handleCancel(): void {
   if (isTerminalNow()) return;
   const handle = activeHandle;
@@ -1527,12 +1501,6 @@ function update() {
         if (input) input.value = entry.url;
         update();
         root.querySelector<HTMLInputElement>("#dz-url-input")?.focus();
-      },
-      onSelectImage(index: number) {
-        handleSelectImage(index);
-      },
-      onSelectLevel(level: number) {
-        handleSelectLevel(level);
       },
       onOpenExternalLink(url: string) {
         handleOpenExternalLink(url);

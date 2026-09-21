@@ -18,7 +18,7 @@ import { flushSync } from "react-dom";
 import type { SnapshotPresentation, StructuredError } from "./snapshot-view.ts";
 import type { HistoryEntry } from "@dezoomify/app-model";
 import type {
-  ConfirmModalArgs, ImagePickerArgs, LevelPickerArgs, PlatformHints,
+  ConfirmModalArgs, PlatformHints,
   ViewCallbacks, ViewContext, ViewRenderOptions,
 } from "./view-types.ts";
 import {
@@ -28,8 +28,7 @@ import {
 
 export { DEFAULT_PAGE_TITLE, handoffOriginFor, isActiveJobStatus, isFileHandoffSource, jobPageTitle } from "./view-helpers.ts";
 export type {
-  ConfirmModalArgs, ImagePickerArgs, ImagePickerOption, JobActivity,
-  LevelPickerArgs, LevelPickerOption, PlatformHints, ViewCallbacks,
+  ConfirmModalArgs, JobActivity, PlatformHints, ViewCallbacks,
   ViewContext, ViewPhase, ViewRenderOptions,
 } from "./view-types.ts";
 import { t } from "./i18n.ts";
@@ -996,72 +995,6 @@ export function openModal(
       }
     />
   ));
-}
-
-/** Image picker dialog: explicit choice among discovered images. */
-export function openImagePicker(hostDocument: Document, args: ImagePickerArgs): boolean {
-  mountOverlay(hostDocument, (close) => (
-    <ModalCard
-      title={t("view.pick.imageTitle")}
-      onClose={close}
-      body={
-        <div className="dz-choice-group" role="radiogroup" aria-label={t("view.pick.imageGroup")}>
-          {args.options.map((option) => {
-            const label =
-              option.title ??
-              `Image ${option.index + 1}${option.width && option.height ? ` (${option.width}x${option.height})` : ""}`;
-            return (
-              <button
-                key={option.index}
-                type="button"
-                className="dz-btn-secondary dz-choice-option"
-                aria-label={label}
-                onClick={() => {
-                  close();
-                  args.onPick(option.index);
-                }}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      }
-    />
-  ));
-  return true;
-}
-
-/** Level picker dialog: explicit choice among resolutions. */
-export function openLevelPicker(hostDocument: Document, args: LevelPickerArgs): boolean {
-  mountOverlay(hostDocument, (close) => (
-    <ModalCard
-      title={t("view.pick.levelTitle")}
-      onClose={close}
-      body={
-        <div className="dz-choice-group" role="radiogroup" aria-label={t("view.pick.levelGroup")}>
-          {args.options.map((option) => {
-            const label = `Level ${option.index + 1} (${option.width}x${option.height}, ${option.tiles} tiles${option.fits ? "" : ", too large"})`;
-            return (
-              <button
-                key={option.index}
-                type="button"
-                className="dz-btn-secondary dz-choice-option"
-                aria-label={label}
-                onClick={() => {
-                  close();
-                  args.onPick(option.index);
-                }}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      }
-    />
-  ));
-  return true;
 }
 
 /**

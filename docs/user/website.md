@@ -20,7 +20,9 @@ reading is part of it).
 If a page offers several images, the website saves the largest one it finds.
 It uses the highest resolution that fits in a browser tab.
 There is no list to pick from in the website.
-To choose a different image or the full resolution, use the [desktop app](./desktop-app.md) or the [command-line tool](./command-line.md).
+The desktop app also selects automatically; its size settings can cap the
+resolution. To choose a particular image or level, use the
+[command-line tool](./command-line.md).
 
 You can also paste the address of an image's description file directly,
 for example an `info.json`, `ImageProperties.xml`, or `.dzi` address, when

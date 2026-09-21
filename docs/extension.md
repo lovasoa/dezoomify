@@ -92,7 +92,7 @@ Outcome classes cover document loss, access required, redirect limits, cancellat
 
 The job tab hosts the full engine (dedicated worker, one WASM `Session`, shared browser-runtime executor) with no second state machine:
 
-- The extension start explicitly requests the engine's largest-fitting selection policy with browser width, height, and area limits. The engine chooses the largest ready image and fitting level, follows deferred `ImageRequest` entries on the same job within its existing bound, and returns a typed terminal when no image can be selected. The extension can still send the public `select-image`, `select-level`, and `follow-deferred` commands for manual selection flows.
+- The extension start explicitly requests the engine's largest-fitting selection policy with browser width, height, and area limits. The engine chooses the largest ready image and fitting level, follows deferred `ImageRequest` entries on the same job within its existing bound, and returns a typed terminal when no image can be selected. The job tab renders no manual image or level chooser. Generated catalog snapshots and the public `select-image`, `select-level`, and `follow-deferred` commands remain available at the host integration boundary.
 - Tiles decode during acquisition: undecodable tiles fail the outcome into engine retry/partial handling. Decoded pixels stay host-side and never re-enter the adapter.
 - `finalize-output` validates dimensions and area, assembles, encodes, saves, releases, and replies once; completion follows the reply.
 - `request-decision` renders keep/discard in the job tab; only the user action sends `answer-partial{generation, decision}`.

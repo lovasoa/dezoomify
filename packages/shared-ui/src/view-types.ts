@@ -13,8 +13,6 @@ export interface ViewCallbacks {
   onOpenOutput?(): void;
   onRevealOutput?(): void;
   onHistorySelect?(entry: HistoryEntry): void;
-  onSelectImage?(index: number): void;
-  onSelectLevel?(level: number): void;
   onOpenExternalLink?(url: string): void;
   onCopyDiagnostics?(text: string): void;
   onClearHistory?(): void;
@@ -42,7 +40,6 @@ export interface ViewContext {
   nativeSaved?: { partial: boolean };
   savedOutput?: { name: string; width: number; height: number; doneTiles: number; totalTiles: number; failedTiles: number };
   originClean?: boolean; jobActivity?: JobActivity; initialUrl?: string;
-  imageChoice?: { width?: number; height?: number; tiles?: number };
   sourceUrl?: string; desktopHandoffUrl?: string; history?: HistoryEntry[];
 }
 
@@ -56,9 +53,5 @@ export interface ViewRenderOptions {
 
 export type ViewPhase = SnapshotPresentation["phase"];
 
-export interface ImagePickerOption { index: number; title?: string; width?: number; height?: number; tiles?: number; }
-export interface ImagePickerArgs { options: ImagePickerOption[]; onPick(index: number): void; }
-export interface LevelPickerOption { index: number; width: number; height: number; tiles: number; fits: boolean; }
-export interface LevelPickerArgs { options: LevelPickerOption[]; onPick(index: number): void; }
 export interface ConfirmModalArgs { id?: string; title: string; subtitle?: string; bodyLines: string[]; confirmLabel: string; declineLabel: string; }
 export interface PlatformHints { userAgent?: string; platform?: string; }

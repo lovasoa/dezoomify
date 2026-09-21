@@ -6,8 +6,6 @@ import {
   renderView,
   openModal,
   openConfirmModal,
-  openImagePicker,
-  openLevelPicker,
   showExtensionGuidance,
 } from "../packages/shared-ui/src/view.tsx";
 import { presentFailure, presentIdle, presentSnapshot, presentStatus } from "../packages/shared-ui/src/snapshot-view.ts";
@@ -200,38 +198,6 @@ test("static accessibility contract: modal dialogs are labelled, modal, and dism
   assert.ok(labelledBy, "dialog names its label");
   assert.ok(backdrop.querySelector(`#${labelledBy}`), "dialog label target exists");
   assertButtonsNamed(backdrop, "modal");
-
-  act(() => {
-    openImagePicker(document, {
-      options: [
-        { index: 0, title: "A", width: 10, height: 10, tiles: 1 },
-        { index: 1, title: "B", width: 20, height: 20, tiles: 4 },
-      ],
-      onPick: () => {},
-    });
-  });
-  const picker = document.querySelector(".dz-modal-backdrop");
-  assert.ok(picker, "image picker mounted");
-  assert.equal(picker.getAttribute("role"), "dialog");
-  assert.equal(picker.getAttribute("aria-modal"), "true");
-  const group = picker.querySelector(".dz-choice-group");
-  assert.equal(group.getAttribute("role"), "radiogroup");
-  assert.ok((group.getAttribute("aria-label") || "").length > 0, "radio group is labelled");
-  assertButtonsNamed(picker, "image picker");
-
-  act(() => {
-    openLevelPicker(document, {
-      options: [
-        { index: 0, width: 10, height: 10, tiles: 1, fits: true },
-        { index: 1, width: 20, height: 20, tiles: 4, fits: false },
-      ],
-      onPick: () => {},
-    });
-  });
-  const levels = document.querySelector(".dz-modal-backdrop");
-  assert.ok(levels, "level picker mounted");
-  assert.equal(levels.getAttribute("role"), "dialog");
-  assertButtonsNamed(levels, "level picker");
 });
 
 test("static accessibility contract: extension guidance renders a labelled React dialog", () => {

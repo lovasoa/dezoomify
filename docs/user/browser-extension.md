@@ -48,9 +48,10 @@ Install it from the
 4. The dedicated job tab starts from the source page's retained resource
    entries. Keep both tabs open; a second press of the button, closing a tab,
    or navigating away stops the active job.
-5. Pick the image in the job tab and save it at the highest resolution that
-   fits in a browser tab. There is no list to pick from in the extension.
-   For a different image or the full resolution, use the [desktop app](./desktop-app.md) or the [command-line tool](./command-line.md).
+5. The extension selects the largest image it finds and the highest
+   resolution that fits in a browser tab, then saves it automatically. There
+   is no list to pick from in the extension. To choose a particular image or
+   level, use the [command-line tool](./command-line.md).
 
 ## If something goes wrong
 
