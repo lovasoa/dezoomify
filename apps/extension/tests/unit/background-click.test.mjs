@@ -5,9 +5,9 @@ import { createBackgroundCoordinator } from "../../src/background/coordinator.ts
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const TAB = { id: 7, url: "https://gallery.example/work" };
 
-function fakeBrowser(session = {}, results = []) {
+function fakeBrowser(results = []) {
   const listeners = { click: [], removed: [], updated: [], message: [], permissionsRemoved: [] };
-  const calls = { create: [], update: [], execute: [], send: [], icon: [], badge: [], storage: [] };
+  const calls = { create: [], update: [], execute: [], send: [], icon: [], badge: [] };
   let nextTab = 40;
   const api = {
     action: {
@@ -28,14 +28,10 @@ function fakeBrowser(session = {}, results = []) {
         return Promise.resolve(results.shift() ?? [{ frameId: 0, result: { ok: true, documentUrl: TAB.url, inputs: [{ url: "https://gallery.example/info.json" }], overflow: 0 } }]);
       },
     },
-    storage: { session: {
-      async get(key) { return { [key]: session[key] }; },
-      async set(value) { Object.assign(session, value); calls.storage.push(value); },
-    } },
     permissions: { contains: async () => false, onRemoved: { addListener(fn) { listeners.permissionsRemoved.push(fn); } } },
     runtime: { getURL(path) { return `chrome-extension://test/${path}`; }, onMessage: { addListener(fn) { listeners.message.push(fn); } } },
   };
-  return { api, calls, listeners, session };
+  return { api, calls, listeners };
 }
 
 async function load(fake) {
@@ -67,7 +63,7 @@ test("toolbar opens the dedicated job tab without injection, registration, or re
 });
 
 test("source fetch returns one payload through the job bridge", async () => {
-  const fake = fakeBrowser({}, [
+  const fake = fakeBrowser([
     [{ frameId: 0, result: { ok: true, documentUrl: TAB.url, inputs: [{ url: "https://gallery.example/info.json" }], overflow: 0 } }],
     [{ frameId: 0, result: { ok: true, status: 200, url: "https://gallery.example/info.json", bytes: 3, data: "AQID" } }],
   ]);
@@ -85,7 +81,7 @@ test("source fetch returns one payload through the job bridge", async () => {
 });
 
 test("source fetch failure preserves a typed engine outcome", async () => {
-  const fake = fakeBrowser({}, [
+  const fake = fakeBrowser([
     [{ frameId: 0, result: { ok: true, documentUrl: TAB.url, inputs: [{ url: "https://gallery.example/info.json" }], overflow: 0 } }],
     [{ frameId: 0, result: { ok: false, code: "http-error", status: 403 } }],
   ]);
@@ -133,10 +129,25 @@ test("job-tab closure clears the binding without a source listener or stop hands
   await load(fake);
   await fake.listeners.click[0](TAB);
   await tick();
+  const job = jobId(fake);
   for (const listener of fake.listeners.removed) listener(40);
   await tick();
-  assert.equal(fake.session["dezoomify.sourceBindings.v1"].length, 0);
+  for (const listener of fake.listeners.message) listener({ type: "dz.job.ready", jobId: job, requestId: "closed-job-ready" }, { tab: { id: 40 }, frameId: 0 }, () => {});
+  await tick();
+  assert.equal(fake.calls.execute.length, 0, "closed job has no in-memory binding to resume source work");
   assert.equal(fake.calls.send.some((call) => call.message.type === "dz.source.stop"), false);
+});
+
+test("source-tab closure removes the in-memory job and source binding", async () => {
+  const fake = fakeBrowser();
+  await load(fake);
+  await fake.listeners.click[0](TAB);
+  await tick();
+  const job = jobId(fake);
+  for (const listener of fake.listeners.removed) listener(TAB.id);
+  for (const listener of fake.listeners.message) listener({ type: "dz.job.ready", jobId: job, requestId: "closed-source-ready" }, { tab: { id: 40 }, frameId: 0 }, () => {});
+  await tick();
+  assert.equal(fake.calls.execute.length, 0, "closed source has no in-memory binding to resume source work");
 });
 
 test("explicit retry takes a fresh snapshot and re-sends the already-seen candidate", async () => {
