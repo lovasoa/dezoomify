@@ -26,7 +26,7 @@ type CandidateInput = { url: string; contents?: string };
 type CandidateSnapshot = { ok: true; documentUrl: string; inputs: CandidateInput[]; overflow: number };
 type CandidateBatch = { requestId: string; inputs: CandidateInput[]; overflow: number; documentUrl: string };
 type SourceFetchResult = { ok: boolean; code?: string; status?: number; url?: string; bytes?: number; data?: string };
-type Entry = { jobId: string; tabId: number; frameId: number; documentGeneration: number; attemptGeneration: number; jobTabId: number; sourceUrl: string; sourceValid: boolean; jobActive: boolean; jobReady: boolean; jobRunning: boolean; heldCandidates: Array<{ entry: Entry; candidate: CandidateBatch }>; seenCandidates: Set<string>; snapshotCount: number; grantedOrigins: Set<string>; primary: boolean };
+type Entry = { jobId: string; tabId: number; frameId: number; documentGeneration: number; attemptGeneration: number; jobTabId: number; sourceUrl: string; sourceValid: boolean; jobActive: boolean; jobReady: boolean; jobRunning: boolean; heldCandidates: Array<{ entry: Entry; candidate: CandidateBatch }>; seenCandidates: Set<string>; snapshotCount: number; grantedOrigins: Set<string> };
 /**
  * The coordinator's required slice of WXT's cross-browser API.
  *
@@ -37,14 +37,12 @@ type Entry = { jobId: string; tabId: number; frameId: number; documentGeneration
 export type BrowserApi = {
   action: Pick<WxtBrowser["action"], "setIcon" | "setBadgeText" | "onClicked">;
   tabs: Pick<WxtBrowser["tabs"], "sendMessage" | "update" | "create" | "onRemoved" | "onUpdated">;
-  storage: { session: Pick<WxtBrowser["storage"]["session"], "set" | "get"> };
   permissions: Pick<WxtBrowser["permissions"], "contains" | "onRemoved">;
   scripting: Pick<WxtBrowser["scripting"], "executeScript">;
   runtime: Pick<WxtBrowser["runtime"], "getURL" | "onMessage">;
 };
 export type BrowserTab = { id?: number; url?: string };
 type BrowserSender = { tab?: BrowserTab; frameId?: number };
-const STORAGE_KEY = "dezoomify.sourceBindings.v1";
 const IDLE_ICON = { 16: "icons/icon16-grey.png", 48: "icons/icon48-grey.png", 128: "icons/icon128-grey.png" };
 const ACTIVE_ICON = { 16: "icons/icon16.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
 const HELD_CANDIDATE_LIMIT = 64;
@@ -76,7 +74,6 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
   const jobs = new Map<string, Entry>();
   const sourceBindings = new Map<string, Entry>();
   let wired = false;
-  let restoreStarted = false;
   let jobSequence = 0;
 
   function sourceBindingKey(entry: Entry) { return `${entry.jobId}:${entry.tabId}:${entry.frameId}`; }
@@ -122,43 +119,6 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
     return sendToTab(entry.jobTabId, { type, ...bindingOf(entry), requestId: requestIdValue, ...extra });
   }
 
-  function serializableEntry(entry: Entry) {
-    return {
-      ...bindingOf(entry), jobTabId: entry.jobTabId, sourceUrl: entry.sourceUrl,
-      grantedOrigins: [...entry.grantedOrigins], primary: entry.primary === true,
-    };
-  }
-  async function persistBindings() {
-    try {
-      const entries = [...sourceBindings.values()].map(serializableEntry);
-      await browserApi.storage.session.set({ [STORAGE_KEY]: entries });
-    } catch (error) { backgroundLog("debug", "storage-write-failed", error instanceof Error ? error.message : error); }
-  }
-  async function restoreBindings() {
-    if (restoreStarted) return;
-    restoreStarted = true;
-    try {
-      const stored = await browserApi.storage.session.get(STORAGE_KEY);
-      const entries = Array.isArray(stored?.[STORAGE_KEY]) ? stored[STORAGE_KEY] : [];
-      for (const raw of entries) {
-        if (!raw || typeof raw.jobId !== "string" || typeof raw.tabId !== "number" || typeof raw.frameId !== "number" ||
-          typeof raw.documentGeneration !== "number" || typeof raw.jobTabId !== "number") continue;
-        const entry: Entry = {
-          jobId: raw.jobId, tabId: raw.tabId, frameId: raw.frameId, documentGeneration: raw.documentGeneration,
-          attemptGeneration: 0,
-          jobTabId: raw.jobTabId, sourceUrl: typeof raw.sourceUrl === "string" ? raw.sourceUrl : "",
-          sourceValid: false, jobActive: false, jobReady: false, jobRunning: false, heldCandidates: [],
-          seenCandidates: new Set<string>(), snapshotCount: 0,
-          grantedOrigins: new Set(Array.isArray(raw.grantedOrigins) ? raw.grantedOrigins.filter(isPublicHttpUrl) : []),
-          primary: raw.primary === true,
-        };
-        sourceBindings.set(sourceBindingKey(entry), entry);
-        if (entry.primary || !jobs.has(entry.jobId)) jobs.set(entry.jobId, entry);
-      }
-      if (entries.length) backgroundLog("info", "bindings-restored", `${jobs.size} binding(s), no auto-start`);
-    } catch (error) { backgroundLog("debug", "storage-read-failed", error instanceof Error ? error.message : error); }
-  }
-
   function findJobSender(sender: BrowserSender, message: Message): Entry | null {
     const tabId = sender?.tab?.id;
     const senderFrameId = sender?.frameId;
@@ -173,13 +133,12 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
     return source && senderFrameId === source.frameId && bindingMatches(message, source) ? source : null;
   }
 
-  async function removeJob(entry: Entry, reason: string) {
+  function removeJob(entry: Entry, reason: string) {
     for (const source of [...sourceBindings.values()]) if (source.jobId === entry.jobId) {
       sourceBindings.delete(sourceBindingKey(source));
     }
     jobs.delete(entry.jobId);
     setBadge(entry.tabId, false);
-    await persistBindings();
     backgroundLog("info", "job-removed", `${entry.jobId} ${reason}`);
   }
 
@@ -202,7 +161,6 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
         backgroundLog("info", "job-cancel-requested", `tab=${tabId} jobId=${entry.jobId}`);
         sendToJob(entry, "dz.job.cancel", makeRequestId("toolbar-cancel"), { reason: "toolbar-cancel" });
         setBadge(tabId, false);
-        await persistBindings();
         return;
       }
       if (entry.tabId === tabId && entry.jobReady && typeof entry.jobTabId === "number") {
@@ -226,12 +184,11 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
     const entry: Entry = {
       jobId, tabId, frameId: 0, documentGeneration: 0, attemptGeneration: 0, jobTabId: jobTab.id, sourceUrl: tab.url,
       sourceValid: true, jobActive: true, jobReady: false, jobRunning: false, heldCandidates: [],
-      seenCandidates: new Set<string>(), snapshotCount: 0, grantedOrigins: new Set<string>(), primary: true,
+      seenCandidates: new Set<string>(), snapshotCount: 0, grantedOrigins: new Set<string>(),
     };
     jobs.set(jobId, entry);
     sourceBindings.set(sourceBindingKey(entry), entry);
     setBadge(tabId, true);
-    await persistBindings();
     backgroundLog("info", "job-created", `jobId=${jobId} jobTab=${jobTab.id} sourceTab=${tabId} frame=${entry.frameId} url=${tab.url}`);
   }
 
@@ -294,7 +251,6 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
     if (testing && message.testGrant === true) granted = true;
     else try { granted = Boolean(await browserApi.permissions.contains({ origins: origins.map((origin) => `${origin}/*`) })); } catch {}
     if (granted) for (const origin of origins) entry.grantedOrigins.add(origin);
-    await persistBindings();
     backgroundLog("info", "permission-check", `req=${message.requestId} jobId=${entry.jobId} origins=${origins.length} granted=${granted}`);
     sendToJob(entry, "dz.job.permission-required", message.requestId, { granted, origins });
   }
@@ -305,7 +261,6 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
     entry.jobActive = false;
     entry.heldCandidates.length = 0;
     sendToJob(entry, "dz.job.binding", makeRequestId("source-invalidated"), { sourceValid: false, reason });
-    void persistBindings();
     backgroundLog("info", "source-invalidated", `tab ${entry.tabId} ${reason}`);
   }
 
@@ -410,7 +365,6 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
   function wire() {
     if (wired) return;
     wired = true;
-    void restoreBindings();
     browserApi.action.onClicked.addListener((tab) => { void createJob(tab); });
     browserApi.tabs.onRemoved.addListener((tabId) => {
       for (const entry of [...jobs.values()]) {
@@ -430,7 +384,6 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
         backgroundLog("info", "permission-revoked", `jobId=${entry.jobId} origins=${revoked.length}`);
         sendToJob(entry, "dz.job.permission-required", makeRequestId("permission-revoked"), { granted: false, revoked, code: "permission-revoked" });
       }
-      void persistBindings();
     });
     browserApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (!message || typeof message.type !== "string") return;
@@ -478,7 +431,6 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
           entry.jobRunning = false;
           entry.jobActive = false;
           entry.sourceValid = false;
-          void persistBindings();
         } else if (message.type === "dz.job.closed") {
           void removeJob(entry, "job-closed");
         } else if (message.type === "dz.job.permission-required") {

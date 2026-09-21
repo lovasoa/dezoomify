@@ -4,7 +4,7 @@ MV3 in both browsers from one manifest base: service-worker background on Chromi
 
 ## Discovery
 
-Scanning starts only on toolbar click or on retry of a retryable failure in the job tab. Grey icon while idle, blue with a dot while active. Navigation, tab close, cancellation, or worker restart invalidates the binding. The background never polls or lists tabs. Every attempt takes exactly one bounded snapshot; a retry drops any in-flight snapshot and starts a new engine attempt.
+Scanning starts only on toolbar click or on retry of a retryable failure in the job tab. Grey icon while idle, blue with a dot while active. Navigation, tab close, cancellation, or worker restart invalidates the binding. Bindings live in background memory for the lifetime of the background context; after a worker restart, the user starts a fresh job with the toolbar button. The background never polls or lists tabs. Every attempt takes exactly one bounded snapshot; a retry drops any in-flight snapshot and starts a new engine attempt.
 
 The first batch holds the top document's rendered `outerHTML`, then rendered DOM of readable same-origin iframes, then URL-only references from the tab's performance timeline. Cross-origin iframes are skipped. The background observes no traffic (a permissionless `webRequest` listener hears nothing; `activeTab` grants no observation). No permanent host permissions are declared.
 
@@ -82,7 +82,7 @@ sequenceDiagram
 
 Every source- or job-originated request carries a host-local binding (`job`, browser-verified tab and frame IDs, document generation) plus one request sequence. The coordinator checks sender tab and frame against the stored binding before routing. Navigation bumps `document_generation`; older-generation messages die. A source-tab navigation invalidates only source-context transport; extension-origin transport survives for the same job.
 
-Bindings stored in session storage hold no secrets. A worker restart restores a binding when owners reconnect but starts no new scan or reload. Closing source or job tab cancels in-flight work and releases the binding.
+Bindings and granted-origin state live only in background memory. A worker restart drops them, so the user starts a fresh job with the toolbar button. Closing source or job tab cancels in-flight work and releases the in-memory binding.
 
 `collectCandidates` snapshots rendered `outerHTML` for the document and readable same-origin iframes, then URL-only retained timing entries; cross-origin iframes are skipped. Follow-up snapshots are optional, bounded, and coordinator-deduplicated. No persistent observer exists. Overflow returns as diagnostics, never silent discard.
 

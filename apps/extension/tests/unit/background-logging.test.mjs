@@ -13,7 +13,6 @@ function browser() {
         onRemoved: { addListener() {} }, onUpdated: { addListener() {} },
       },
       scripting: { executeScript: () => Promise.resolve() },
-      storage: { session: { get: async () => ({}), set: async () => {} } },
       permissions: { onRemoved: { addListener() {} } },
       runtime: { getURL: (path) => `chrome-extension://test/${path}`, onMessage: { addListener(fn) { listeners.message.push(fn); } } },
     },
