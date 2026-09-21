@@ -348,6 +348,7 @@ function createAssembly(
       resultBlobUrl = URL.createObjectURL(blob as Blob);
       viewCtx.completedInfo = { width, height, mime: "image/png", blobUrl: resultBlobUrl };
       viewCtx.originClean = true;
+      return "browser-save-ready";
     },
     sourceUrl,
     onDisplayOnly: () => {

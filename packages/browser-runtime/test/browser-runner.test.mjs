@@ -61,7 +61,7 @@ function product(overrides = {}) {
           prepare() {},
           async acquireTile() {},
           acquireDisplayTile() {},
-          async finalizeOutput() {},
+          async finalizeOutput() { return "browser-save-ready"; },
           release() {},
           isTainted: () => tainted,
         };
@@ -331,7 +331,7 @@ test("processing calls transfer their buffer and settle on disposal", async () =
       prepare() {},
       async acquireTile() {},
       acquireDisplayTile() {},
-      async finalizeOutput() {},
+      async finalizeOutput() { return "browser-save-ready"; },
       release() {},
     };
   };

@@ -23,10 +23,17 @@ import { BROWSER_LIMITS, probeLimits, safeArea } from "./limits.ts";
 import type { BrowserLimits } from "./types.ts";
 import { failure } from "./failure.ts";
 import type {
+  OutputDispositionDto,
   OutputFormat,
   ProcessingRecipe,
   TilePlacementDto,
 } from "@dezoomify/wasm-bindings";
+
+export type BrowserSaveDisposition = Extract<
+  OutputDispositionDto,
+  "browser-save-initiated" | "browser-save-ready"
+>;
+export type BrowserOutputDisposition = BrowserSaveDisposition | "display-only";
 
 /** Generated shape of one tile's output placement. */
 export type AssemblyPlacement = TilePlacementDto;
@@ -51,8 +58,8 @@ export interface CanvasAssemblyDeps {
   createCanvas(width: number, height: number): AssemblyCanvas;
   /** Encode the assembled surface (canvas-to-blob on the job tab). */
   encode(canvas: AssemblyCanvas): Promise<unknown>;
-  /** Persist the encoded output (blob-anchor save on the job tab). */
-  save(output: unknown, width: number, height: number): void;
+  /** Perform the product's save operation and return its actual disposition. */
+  save(output: unknown, width: number, height: number): BrowserSaveDisposition;
   /** Job source URL, used for the desktop handoff link in limit failures. */
   sourceUrl?: string;
   /** Limits override for tests; defaults to the browser canvas limits. */
@@ -93,7 +100,7 @@ export interface CanvasAssembly {
     partial: boolean,
     format: OutputFormat,
     canvas?: { width: number; height: number } | null,
-  ): Promise<void>;
+  ): Promise<BrowserOutputDisposition>;
   /** Close every retained tile resource (idempotent). */
   release(): void;
 }
@@ -284,7 +291,7 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
     _partial: boolean,
     _format: OutputFormat,
     declared?: { width: number; height: number } | null,
-  ): Promise<void> {
+  ): Promise<BrowserOutputDisposition> {
     if (finalized) {
       throw failure(
         "OUTPUT_STATE",
@@ -315,7 +322,7 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
     if (tainted) {
       // A tainted canvas can never be read or encoded: the drawn picture
       // stays visible as display-only output and no bytes are produced.
-      return;
+      return "display-only";
     }
     let encoded: unknown;
     try {
@@ -325,11 +332,11 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
       // assembled picture stays visible as display-only instead of failing.
       if (deps.isTaintError?.(error)) {
         markDisplayOnly();
-        return;
+        return "display-only";
       }
       throw error;
     }
-    deps.save(encoded, surface.width, surface.height);
+    return deps.save(encoded, surface.width, surface.height);
   }
 
   function release(): void {

@@ -2,14 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createEngineHost } from "../src/engine-host.ts";
 
-function fakeAssembly() {
+function fakeAssembly(disposition = "browser-save-initiated") {
   const calls = [];
   return {
     calls,
     prepare(canvas) { calls.push(["prepare", canvas]); },
     async acquireTile(tile, placement, bytes) { calls.push(["acquireTile", tile, placement, bytes]); },
     acquireDisplayTile(tile, placement, image) { calls.push(["acquireDisplayTile", tile, placement, image]); },
-    async finalizeOutput(partial, format, canvas) { calls.push(["finalizeOutput", partial, format, canvas]); },
+    async finalizeOutput(partial, format, canvas) { calls.push(["finalizeOutput", partial, format, canvas]); return disposition; },
     release() { calls.push(["release"]); },
   };
 }
@@ -152,19 +152,24 @@ test("selection and deferred-follow commands forward typed to the engine", async
   ]);
 });
 
-test("lifecycle effects run in engine order on one chain", async () => {
-  const { controller, assembly, sent } = harness();
-  // Snapshots (terminals included) ride alongside, never as messages: the
-  // only job-state object always forwards, including after cancel.
-  controller.handleEngineMessages([
-    { type: "finalize-output", effect: 10, partial: false, format: "png", canvas: { width: 32, height: 32 } },
-  ]);
-  await flush();
-  await flush();
-  assert.deepEqual(assembly.calls.map(([kind]) => kind), ["finalizeOutput"]);
-  assert.deepEqual(assembly.calls[0], ["finalizeOutput", false, "png", { width: 32, height: 32 }]);
-  const finalized = sent.find((message) => message.type === "engine.finalize");
-  assert.deepEqual(finalized.outcome, { type: "finalization-succeeded", effect: 10, disposition: "browser-save-initiated" });
+test("finalization forwards the assembly's actual browser output disposition", async (t) => {
+  for (const disposition of ["browser-save-ready", "browser-save-initiated", "display-only"]) {
+    await t.test(disposition, async () => {
+      const assembly = fakeAssembly(disposition);
+      const { controller, sent } = harness({ assembly });
+      // Snapshots (terminals included) ride alongside, never as messages: the
+      // only job-state object always forwards, including after cancel.
+      controller.handleEngineMessages([
+        { type: "finalize-output", effect: 10, partial: false, format: "png", canvas: { width: 32, height: 32 } },
+      ]);
+      await flush();
+      await flush();
+      assert.deepEqual(assembly.calls.map(([kind]) => kind), ["finalizeOutput"]);
+      assert.deepEqual(assembly.calls[0], ["finalizeOutput", false, "png", { width: 32, height: 32 }]);
+      const finalized = sent.find((message) => message.type === "engine.finalize");
+      assert.deepEqual(finalized.outcome, { type: "finalization-succeeded", effect: 10, disposition });
+    });
+  }
 });
 
 test("cancel-work releases retained resources and cancels fetching", async () => {

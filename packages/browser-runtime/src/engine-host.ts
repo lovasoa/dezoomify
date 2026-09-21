@@ -25,6 +25,7 @@
 // ordinary image loads, the tile is held as display-only. The canvas taints
 // on draw, so the job completes as display-only with no programmatic save.
 import type { EngineSnapshotDto } from "@dezoomify/wasm-bindings";
+import type { BrowserOutputDisposition } from "./assembly.ts";
 import { originOfUrl } from "./fetch-primitives.ts";
 import type { TileImageLike } from "./tile-draw.ts";
 import type { ProbeSize } from "./probe.ts";
@@ -57,10 +58,8 @@ export interface EngineHostAssembly {
     partial: boolean,
     format: OutputFormat,
     canvas?: SizeDto | null,
-  ): Promise<void>;
+  ): Promise<BrowserOutputDisposition>;
   release(): void;
-  /** True once an ordinary image tainted the surface (display-only output). */
-  isTainted?(): boolean;
 }
 
 export type AcquireEffect = Extract<HostEffect, { type: "acquire-resource" | "acquire-tile" }>;
@@ -505,8 +504,9 @@ export function createEngineHost(deps: EngineHostDeps) {
    * effect is silently skipped or faked.
    */
   async function finalizeOutput(effect: Extract<EffectMessage, { type: "finalize-output" }>) {
+    let disposition: BrowserOutputDisposition;
     try {
-      await deps.assembly.finalizeOutput(
+      disposition = await deps.assembly.finalizeOutput(
         effect.partial === true,
         effect.format,
         effect.canvas ?? null,
@@ -520,13 +520,10 @@ export function createEngineHost(deps: EngineHostDeps) {
     }
     sendToEngine({
       type: "engine.finalize",
-      // Honest disposition from the performing host: a tainted canvas was
-      // shown without readable bytes, so the engine must present preview
-      // instead of claiming a saved file.
       outcome: {
         type: "finalization-succeeded",
         effect: effect.effect,
-        disposition: deps.assembly.isTainted?.() === true ? "display-only" : "browser-save-initiated",
+        disposition,
       },
     });
   }
