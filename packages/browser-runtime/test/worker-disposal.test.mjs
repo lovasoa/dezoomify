@@ -1,5 +1,5 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import { createJobWorkerHost } from "../src/worker-host.ts";
 
 const IDLE = {
@@ -15,7 +15,9 @@ const IDLE = {
 
 function fakeWasm(calls) {
   class Session {
-    constructor() { calls.push("new-session"); }
+    constructor() {
+      calls.push("new-session");
+    }
     command(command) {
       calls.push(`command:${command.type}`);
       return { status: "ok", messages: [], snapshot: { ...IDLE } };
@@ -24,8 +26,13 @@ function fakeWasm(calls) {
       calls.push(`complete:${completion.type}`);
       return { status: "ok", messages: [], snapshot: { ...IDLE } };
     }
-    applyProcessing() { return new Uint8Array([9]).buffer; }
-    dispose() { calls.push("dispose"); return { status: "ok", messages: [], snapshot: { ...IDLE } }; }
+    applyProcessing() {
+      return new Uint8Array([9]).buffer;
+    }
+    dispose() {
+      calls.push("dispose");
+      return { status: "ok", messages: [], snapshot: { ...IDLE } };
+    }
   }
   return { Session };
 }
@@ -37,7 +44,11 @@ test("a disposed worker drops late bytes and commands; the retired job cannot mu
     postMessage: (message) => sent.push(message),
     wasm: async () => fakeWasm(calls),
   });
-  await host.onMessage({ type: "engine.start", jobId: "job:one", inputs: [{ url: "https://a.test/x.dzi" }] });
+  await host.onMessage({
+    type: "engine.start",
+    jobId: "job:one",
+    inputs: [{ url: "https://a.test/x.dzi" }],
+  });
   assert.ok(calls.includes("command:start"));
   const dispatches = calls.length;
   await host.onMessage({ type: "engine.dispose" });
@@ -50,8 +61,15 @@ test("a disposed worker drops late bytes and commands; the retired job cannot mu
   await host.onMessage({ type: "engine.probe", requestId: 4, outcome: { status: "missing" } });
   await host.onMessage({ type: "engine.display", requestId: 5 });
   await host.onMessage({ type: "engine.acquired", requestId: 6 });
-  assert.equal(calls.length, dispatches + 1, `retired worker dispatched late input: ${JSON.stringify(calls)}`);
-  assert.ok(!sent.slice(sentAfterDispose).some((message) => message.type === "engine.messages"), "retired worker published messages");
+  assert.equal(
+    calls.length,
+    dispatches + 1,
+    `retired worker dispatched late input: ${JSON.stringify(calls)}`,
+  );
+  assert.ok(
+    !sent.slice(sentAfterDispose).some((message) => message.type === "engine.messages"),
+    "retired worker published messages",
+  );
 });
 
 test("worker disposal is repeat-safe and publishes the session dispose result once", async () => {
@@ -61,7 +79,11 @@ test("worker disposal is repeat-safe and publishes the session dispose result on
     postMessage: (message) => sent.push(message),
     wasm: async () => fakeWasm(calls),
   });
-  await host.onMessage({ type: "engine.start", jobId: "job:one", inputs: [{ url: "https://a.test/x.dzi" }] });
+  await host.onMessage({
+    type: "engine.start",
+    jobId: "job:one",
+    inputs: [{ url: "https://a.test/x.dzi" }],
+  });
   await host.onMessage({ type: "engine.dispose" });
   await host.onMessage({ type: "engine.dispose" });
   assert.equal(calls.filter((call) => call === "dispose").length, 1);
@@ -71,35 +93,65 @@ test("byte provide dispatches direct bytes with no arena reservation", async () 
   const dispatched = [];
   const sent = [];
   class Session {
-    command(command) { dispatched.push(command); return { status: "ok", messages: [], snapshot: { ...IDLE } }; }
-    complete(completion) { dispatched.push(completion); return { status: "ok", messages: [], snapshot: { ...IDLE } }; }
-    dispose() { return { status: "ok", messages: [], snapshot: { ...IDLE } }; }
+    command(command) {
+      dispatched.push(command);
+      return { status: "ok", messages: [], snapshot: { ...IDLE } };
+    }
+    complete(completion) {
+      dispatched.push(completion);
+      return { status: "ok", messages: [], snapshot: { ...IDLE } };
+    }
+    dispose() {
+      return { status: "ok", messages: [], snapshot: { ...IDLE } };
+    }
   }
   const host = createJobWorkerHost({
     postMessage: (message) => sent.push(message),
     wasm: async () => ({ Session }),
   });
-  await host.onMessage({ type: "engine.start", jobId: "job:one", inputs: [{ url: "https://a.test/x.dzi" }] });
+  await host.onMessage({
+    type: "engine.start",
+    jobId: "job:one",
+    inputs: [{ url: "https://a.test/x.dzi" }],
+  });
   const bytes = new Uint8Array([1, 2, 3]);
-  await host.onMessage({ type: "engine.bytes", requestId: 9, bytes, finalUri: "https://a.test/final" });
+  await host.onMessage({
+    type: "engine.bytes",
+    requestId: 9,
+    bytes,
+    finalUri: "https://a.test/final",
+  });
   const provide = dispatched.find((command) => command.type === "provide-resource");
   assert.ok(provide, "expected a provide-resource dispatch");
   assert.equal(provide.request, 9);
-  assert.ok(Array.isArray(provide.bytes), "bytes ride inline as a plain array per the generated contract");
+  assert.ok(
+    Array.isArray(provide.bytes),
+    "bytes ride inline as a plain array per the generated contract",
+  );
   assert.deepEqual(provide.bytes, [1, 2, 3]);
   assert.equal(provide.final_uri, "https://a.test/final");
   assert.ok(!("buffer" in provide), "direct-bytes provide carries no arena buffer handle");
-  assert.ok(!sent.some((message) => message.type === "engine.error"), "direct provide must not fault the ABI");
+  assert.ok(
+    !sent.some((message) => message.type === "engine.error"),
+    "direct provide must not fault the ABI",
+  );
 });
 
 test("processed tile bytes transfer ownership to the host instead of copying", async () => {
   const sent = [];
   const transfers = [];
   const host = createJobWorkerHost({
-    postMessage: (message, transfer) => { sent.push(message); transfers.push(transfer ?? []); },
+    postMessage: (message, transfer) => {
+      sent.push(message);
+      transfers.push(transfer ?? []);
+    },
     wasm: async () => fakeWasm([]),
   });
-  await host.onMessage({ type: "engine.start", jobId: "job:one", inputs: [{ url: "https://a.test/x.dzi" }] });
+  await host.onMessage({
+    type: "engine.start",
+    jobId: "job:one",
+    inputs: [{ url: "https://a.test/x.dzi" }],
+  });
   const bytes = new Uint8Array([1, 2, 3]).buffer;
   await host.onMessage({ type: "engine.process", requestId: 7, recipe: "none", bytes });
   const processed = sent.find((message) => message.type === "engine.processed");
@@ -111,15 +163,27 @@ test("processed tile bytes transfer ownership to the host instead of copying", a
 test("acquired tiles acknowledge body-free with a typed outcome", async () => {
   const dispatched = [];
   class Session {
-    command(command) { dispatched.push(command); return { status: "ok", messages: [], snapshot: { ...IDLE } }; }
-    complete(completion) { dispatched.push(completion); return { status: "ok", messages: [], snapshot: { ...IDLE } }; }
-    dispose() { return { status: "ok", messages: [], snapshot: { ...IDLE } }; }
+    command(command) {
+      dispatched.push(command);
+      return { status: "ok", messages: [], snapshot: { ...IDLE } };
+    }
+    complete(completion) {
+      dispatched.push(completion);
+      return { status: "ok", messages: [], snapshot: { ...IDLE } };
+    }
+    dispose() {
+      return { status: "ok", messages: [], snapshot: { ...IDLE } };
+    }
   }
   const host = createJobWorkerHost({
     postMessage() {},
     wasm: async () => ({ Session }),
   });
-  await host.onMessage({ type: "engine.start", jobId: "job:one", inputs: [{ url: "https://a.test/x.dzi" }] });
+  await host.onMessage({
+    type: "engine.start",
+    jobId: "job:one",
+    inputs: [{ url: "https://a.test/x.dzi" }],
+  });
   await host.onMessage({ type: "engine.acquired", requestId: 11 });
   const acquired = dispatched.find((command) => command.type === "tile-acquired");
   assert.ok(acquired, "expected a tile-acquired dispatch");

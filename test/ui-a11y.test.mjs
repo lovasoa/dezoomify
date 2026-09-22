@@ -1,14 +1,19 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import { createElement } from "react";
-import { act, click, document, makeContainer } from "./react-dom.mjs";
 import {
-  renderView,
-  openModal,
+  presentFailure,
+  presentIdle,
+  presentSnapshot,
+  presentStatus,
+} from "../packages/shared-ui/src/snapshot-view.ts";
+import {
   openConfirmModal,
+  openModal,
+  renderView,
   showExtensionGuidance,
 } from "../packages/shared-ui/src/view.tsx";
-import { presentFailure, presentIdle, presentSnapshot, presentStatus } from "../packages/shared-ui/src/snapshot-view.ts";
+import { act, click, document, makeContainer } from "./react-dom.mjs";
 
 const callbacks = {
   onSubmitUrl: () => {},
@@ -22,16 +27,25 @@ function render(el, presentation, cb, ctx, options) {
 }
 
 function progressPresentation(current, total) {
-  return presentSnapshot({
-    revision: 3,
-    lifecycle: "AcquiringTiles",
-    paused: false,
-    progress: { completed: current, total },
-    selection: { image: undefined, level: undefined, level_count: 0, catalog: undefined, deferred: [] },
-    decision: undefined,
-    terminal: undefined,
-    output: undefined,
-  }, "direct");
+  return presentSnapshot(
+    {
+      revision: 3,
+      lifecycle: "AcquiringTiles",
+      paused: false,
+      progress: { completed: current, total },
+      selection: {
+        image: undefined,
+        level: undefined,
+        level_count: 0,
+        catalog: undefined,
+        deferred: [],
+      },
+      decision: undefined,
+      terminal: undefined,
+      output: undefined,
+    },
+    "direct",
+  );
 }
 
 /** Every button must expose a non-empty accessible name (text or aria-label). */
@@ -50,7 +64,10 @@ test("static accessibility contract: idle form controls are labelled and the sub
   const card = el.querySelector(".dz-card");
   const input = card.querySelector("#dz-url-input");
   assert.ok(input, "url input mounted");
-  assert.ok((input.getAttribute("aria-label") || "").length > 0, "url input has an accessible name");
+  assert.ok(
+    (input.getAttribute("aria-label") || "").length > 0,
+    "url input has an accessible name",
+  );
   assert.ok((input.getAttribute("placeholder") || "").length > 0, "url input keeps a visible hint");
   const clear = card.querySelector("#dz-btn-clear");
   assert.ok(clear, "clear control mounted");
@@ -60,14 +77,13 @@ test("static accessibility contract: idle form controls are labelled and the sub
 
 test("static accessibility contract: live job region announces progress with a labelled progressbar", () => {
   const el = makeContainer();
-  render(
-    el,
-    progressPresentation(3, 12),
-    callbacks,
-    {
-      jobActivity: { url: "https://museum.example.org/x", startedAt: Date.now() - 3000, now: Date.now() },
+  render(el, progressPresentation(3, 12), callbacks, {
+    jobActivity: {
+      url: "https://museum.example.org/x",
+      startedAt: Date.now() - 3000,
+      now: Date.now(),
     },
-  );
+  });
   const card = el.querySelector(".dz-card");
   const sec = card.querySelector(".dz-job-section");
   assert.equal(sec.getAttribute("role"), "status");
@@ -78,7 +94,10 @@ test("static accessibility contract: live job region announces progress with a l
   assert.equal(track.getAttribute("aria-valuemax"), "12");
   const now = Number(track.getAttribute("aria-valuenow"));
   assert.ok(Number.isFinite(now) && now >= 0 && now <= 12, "aria-valuenow stays within bounds");
-  assert.ok((track.getAttribute("aria-label") || "").length > 0, "progressbar has an accessible name");
+  assert.ok(
+    (track.getAttribute("aria-label") || "").length > 0,
+    "progressbar has an accessible name",
+  );
   assert.equal(track.getAttribute("aria-valuetext"), "3 done, 0 in progress, 9 remaining");
   assertButtonsNamed(card, "job");
 });
@@ -95,17 +114,29 @@ test("static accessibility contract: failed view layers guidance with named reco
     { sourceUrl: "https://museum.example.org/viewer?page=1" },
   );
   const card = el.querySelector(".dz-card");
-  assert.ok((card.querySelector("#dz-error-message").textContent || "").length > 0, "error message slot is populated");
+  assert.ok(
+    (card.querySelector("#dz-error-message").textContent || "").length > 0,
+    "error message slot is populated",
+  );
   assertButtonsNamed(card, "failed");
   const report = card.querySelector(".dz-diagnostics-report a");
   assert.ok(report, "bug-report path stays reachable from the failed view");
   const href = report.getAttribute("href") || "";
   const parsed = new URL(href);
-  assert.equal(`${parsed.origin}${parsed.pathname}`, "https://github.com/lovasoa/dezoomify/issues/new");
+  assert.equal(
+    `${parsed.origin}${parsed.pathname}`,
+    "https://github.com/lovasoa/dezoomify/issues/new",
+  );
   assert.equal(parsed.searchParams.get("labels"), "new site support,unconfirmed");
-  assert.ok((parsed.searchParams.get("title") || "").startsWith("[new site support]"), "issue title is prefilled");
+  assert.ok(
+    (parsed.searchParams.get("title") || "").startsWith("[new site support]"),
+    "issue title is prefilled",
+  );
   const body = parsed.searchParams.get("body") || "";
-  assert.ok(body.includes("https://museum.example.org/viewer?page=1"), "body carries the source address");
+  assert.ok(
+    body.includes("https://museum.example.org/viewer?page=1"),
+    "body carries the source address",
+  );
   assert.ok(body.includes("No zoomable image could be found."), "body carries the engine error");
   assert.ok(body.includes("code:X"), "body carries the diagnostics code line");
 });
@@ -116,13 +147,19 @@ test("native completion opens saved output without browser save guidance", () =>
     el,
     presentStatus("completed", { transport: "native" }),
     { ...callbacks, onOpenOutput() {}, onRevealOutput() {} },
-    { nativeSaved: { partial: false }, completedInfo: { width: 100, height: 80, mime: "image/png" } },
+    {
+      nativeSaved: { partial: false },
+      completedInfo: { width: 100, height: 80, mime: "image/png" },
+    },
   );
   assert.equal(el.querySelector("#dz-btn-save"), null);
   assert.equal(el.querySelector("#dz-btn-open").textContent.trim(), "Open image");
   assert.equal(el.querySelector("#dz-btn-reveal").textContent.trim(), "Show in folder");
   assert.equal(el.querySelector(".dz-completed-title").textContent.trim(), "Image saved");
-  assert.doesNotMatch(el.querySelector(".dz-completed-guidance").textContent, /browser|color profile/i);
+  assert.doesNotMatch(
+    el.querySelector(".dz-completed-guidance").textContent,
+    /browser|color profile/i,
+  );
 });
 
 test("history rows select a source without submitting it", () => {
@@ -133,7 +170,15 @@ test("history rows select a source without submitting it", () => {
   render(
     el,
     presentIdle(),
-    { ...callbacks, onSubmitUrl() { submitted = true; }, onHistorySelect(value) { selected = value; } },
+    {
+      ...callbacks,
+      onSubmitUrl() {
+        submitted = true;
+      },
+      onHistorySelect(value) {
+        selected = value;
+      },
+    },
     { history: [entry] },
   );
   const button = el.querySelector(".dz-history-main");
@@ -153,43 +198,45 @@ test("idle product content renders between the URL input and recent pictures", (
     { idleBeforeHistory: createElement("section", { id: "product-settings" }) },
   );
   assert.equal(el.querySelector("#product-settings").nextElementSibling.id, "dz-history");
-  assert.ok(el.querySelector("#product-settings").previousElementSibling.querySelector("#dz-url-input"));
+  assert.ok(
+    el.querySelector("#product-settings").previousElementSibling.querySelector("#dz-url-input"),
+  );
 });
 
 test("completion treats saved filenames as text", () => {
   const el = makeContainer();
-  render(
-    el,
-    presentStatus("completed"),
-    callbacks,
-    { savedOutput: { name: "<img src=x onerror=alert(1)>", width: 10, height: 10, doneTiles: 1, totalTiles: 1, failedTiles: 0 } },
-  );
+  render(el, presentStatus("completed"), callbacks, {
+    savedOutput: {
+      name: "<img src=x onerror=alert(1)>",
+      width: 10,
+      height: 10,
+      doneTiles: 1,
+      totalTiles: 1,
+      failedTiles: 0,
+    },
+  });
   assert.equal(el.querySelector(".dz-completed-summary").querySelector("img"), null);
 });
 
 test("static accessibility contract: completed and display-only views keep every action named", () => {
   const done = makeContainer();
-  render(
-    done,
-    presentStatus("completed", { transport: "direct" }),
-    callbacks,
-    { completedInfo: { width: 100, height: 80, mime: "image/png" }, originClean: true },
-  );
+  render(done, presentStatus("completed", { transport: "direct" }), callbacks, {
+    completedInfo: { width: 100, height: 80, mime: "image/png" },
+    originClean: true,
+  });
   assertButtonsNamed(done.querySelector(".dz-card"), "completed");
 
   const preview = makeContainer();
-  render(
-    preview,
-    presentStatus("display-only", { transport: "display" }),
-    callbacks,
-    { originClean: false, desktopHandoffUrl: "dezoomify://open?v=2&src=https%3A%2F%2Fx" },
-  );
+  render(preview, presentStatus("display-only", { transport: "display" }), callbacks, {
+    originClean: false,
+    desktopHandoffUrl: "dezoomify://open?v=2&src=https%3A%2F%2Fx",
+  });
   assertButtonsNamed(preview.querySelector(".dz-card"), "display-only");
 });
 
 test("static accessibility contract: modal dialogs are labelled, modal, and dismissible by name", () => {
   let backdrop;
-  act(() => openModal(document, "Title", "Subtitle", "<p>Body</p>"));
+  act(() => openModal(document, "Title", "Subtitle", "Body"));
   backdrop = document.querySelector(".dz-modal-backdrop");
   assert.ok(backdrop, "modal backdrop mounted");
   assert.equal(backdrop.getAttribute("role"), "dialog");
@@ -254,7 +301,7 @@ function luminance(hex) {
   const c = hex.replace("#", "");
   const channel = (i) => {
     const v = parseInt(c.slice(i, i + 2), 16) / 255;
-    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
   };
   return 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
 }
@@ -277,6 +324,9 @@ test("static accessibility contract: text and link contrast meets AA in both col
     ["#acaf50", "#181615", "dark links"],
   ];
   for (const [fg, bg, label] of pairs) {
-    assert.ok(contrast(fg, bg) >= 4.5, `${label} contrast ${contrast(fg, bg).toFixed(2)} below AA 4.5`);
+    assert.ok(
+      contrast(fg, bg) >= 4.5,
+      `${label} contrast ${contrast(fg, bg).toFixed(2)} below AA 4.5`,
+    );
   }
 });

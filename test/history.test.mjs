@@ -1,9 +1,9 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import {
-  HISTORY_MAX,
-  HISTORY_KEY_WEBSITE,
   clearHistory,
+  HISTORY_KEY_WEBSITE,
+  HISTORY_MAX,
   historyOriginOf,
   loadHistory,
   parseHistoryJson,
@@ -27,7 +27,10 @@ function memoryStore() {
 }
 
 test("history derives origins", () => {
-  assert.equal(historyOriginOf("https://museum.example.org/painting/1?view=2#frag"), "https://museum.example.org");
+  assert.equal(
+    historyOriginOf("https://museum.example.org/painting/1?view=2#frag"),
+    "https://museum.example.org",
+  );
   assert.equal(historyOriginOf("http://localhost:8080/x"), "http://localhost:8080");
   assert.equal(historyOriginOf("https://museum.example.org:443/x"), "https://museum.example.org");
   assert.equal(historyOriginOf("file:///etc/passwd"), "");
@@ -36,7 +39,12 @@ test("history derives origins", () => {
 
 test("history entries keep the full address", () => {
   const clean = "https://museum.example.org/painting/1";
-  const entry = toHistoryEntry(clean, { width: 512, height: 512, format: "png", at: 1700000000000 });
+  const entry = toHistoryEntry(clean, {
+    width: 512,
+    height: 512,
+    format: "png",
+    at: 1700000000000,
+  });
   assert.ok(entry);
   assert.equal(entry.origin, "https://museum.example.org");
   assert.equal(entry.url, clean);

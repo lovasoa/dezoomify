@@ -43,14 +43,17 @@ export function createTileDecoder(host?: TileDecodeHost): TileDecoder {
   let worker: TileDecodeWorkerLike | null = null;
   let seq = 0;
   let unavailable = false;
-  const pending = new Map<number, { resolve: (b: TileBitmap) => void; reject: (e: unknown) => void }>();
+  const pending = new Map<
+    number,
+    { resolve: (b: TileBitmap) => void; reject: (e: unknown) => void }
+  >();
 
   function defaultHostAvailable(): boolean {
     if (h.workerCtor || h.workerUrl) return true;
     try {
       return (
         typeof Worker !== "undefined" &&
-        (h.offscreenCanvasAvailable ?? (typeof OffscreenCanvas !== "undefined")) &&
+        (h.offscreenCanvasAvailable ?? typeof OffscreenCanvas !== "undefined") &&
         typeof createImageBitmap === "function"
       );
     } catch {
@@ -64,9 +67,12 @@ export function createTileDecoder(host?: TileDecodeHost): TileDecoder {
     try {
       const WorkerCtor =
         h.workerCtor ??
-        (typeof Worker !== "undefined" ? (Worker as unknown as new (url: string | URL) => TileDecodeWorkerLike) : undefined);
-      const offscreen =
-        h.offscreenCanvasAvailable ?? (typeof OffscreenCanvas !== "undefined");
+        (typeof Worker !== "undefined"
+          ? (Worker as unknown as new (
+              url: string | URL,
+            ) => TileDecodeWorkerLike)
+          : undefined);
+      const offscreen = h.offscreenCanvasAvailable ?? typeof OffscreenCanvas !== "undefined";
       // The packaged decode module; bundlers resolve and hash it at build
       // time. Tests inject `workerUrl`/`workerCtor` fakes instead.
       const url = h.workerUrl ?? new URL("./tile-decode-worker.ts", import.meta.url);
@@ -76,7 +82,12 @@ export function createTileDecoder(host?: TileDecodeHost): TileDecoder {
       }
       const w: TileDecodeWorkerLike = new WorkerCtor(url);
       w.onmessage = (e: { data?: unknown }) => {
-        const data = (e?.data ?? {}) as { id?: unknown; ok?: unknown; bitmap?: unknown; error?: unknown };
+        const data = (e?.data ?? {}) as {
+          id?: unknown;
+          ok?: unknown;
+          bitmap?: unknown;
+          error?: unknown;
+        };
         const id = typeof data.id === "number" ? data.id : -1;
         const entry = pending.get(id);
         if (!entry) return;
@@ -84,7 +95,9 @@ export function createTileDecoder(host?: TileDecodeHost): TileDecoder {
         if (data.ok === true && data.bitmap) {
           entry.resolve(data.bitmap as TileBitmap);
         } else {
-          entry.reject(new Error(typeof data.error === "string" ? data.error : "tile decode failed"));
+          entry.reject(
+            new Error(typeof data.error === "string" ? data.error : "tile decode failed"),
+          );
         }
       };
       w.onerror = () => {
@@ -113,10 +126,13 @@ export function createTileDecoder(host?: TileDecodeHost): TileDecoder {
   }
 
   function mainThreadDecode(bytes: ArrayBuffer): Promise<TileBitmap> {
-    const rawImpl = h.createImageBitmap ?? (typeof createImageBitmap === "function" ? createImageBitmap : undefined);
+    const rawImpl =
+      h.createImageBitmap ??
+      (typeof createImageBitmap === "function" ? createImageBitmap : undefined);
     const impl = rawImpl as ((blob: unknown) => Promise<unknown>) | undefined;
     const blobCtor = h.blobCtor ?? (typeof Blob !== "undefined" ? Blob : undefined);
-    if (!impl || !blobCtor) return Promise.reject(new Error("tile decode unavailable: no createImageBitmap"));
+    if (!impl || !blobCtor)
+      return Promise.reject(new Error("tile decode unavailable: no createImageBitmap"));
     try {
       return (impl(new blobCtor([bytes])) as Promise<TileBitmap>).catch((e) => {
         throw e;

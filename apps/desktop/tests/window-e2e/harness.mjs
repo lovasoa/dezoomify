@@ -52,9 +52,7 @@ export const APP_BIN = withExe(
 );
 export const FRONTEND_DIST =
   process.env.DEZOOMIFY_WINDOW_E2E_DIST || path.join(REPO_ROOT, "apps/desktop/dist");
-const FIXTURE_SERVER_BIN = withExe(
-  path.join(CARGO_TARGET_DIR, "debug/dezoomify-fixture-server"),
-);
+const FIXTURE_SERVER_BIN = withExe(path.join(CARGO_TARGET_DIR, "debug/dezoomify-fixture-server"));
 
 // Fixed loopback port dictated by the embedded devUrl in `tauri.conf.json`.
 export const FRONTEND_PORT = 1420;
@@ -272,9 +270,12 @@ export async function startFixtureServer(workDir) {
   // Fail closed before the app launches if the harness itself cannot read the
   // gateway; otherwise an app-side discovery failure is hard to attribute.
   try {
-    const response = await fetch(`${base}/fetch?url=${encodeURIComponent("https://fixtures.test/cli/pyramid.dzi")}`, {
-      signal: AbortSignal.timeout(10000),
-    });
+    const response = await fetch(
+      `${base}/fetch?url=${encodeURIComponent("https://fixtures.test/cli/pyramid.dzi")}`,
+      {
+        signal: AbortSignal.timeout(10000),
+      },
+    );
     if (!response.ok) {
       throw new Error(`fixture gateway returned ${response.status}: ${await response.text()}`);
     }
@@ -426,7 +427,9 @@ export function laneAppEnv(home) {
 function requireEnv(name) {
   const value = process.env[name];
   if (!value) {
-    throw new Error(`window E2E: ${name} is unset; run through \`cargo xtask test desktop --e2e-window\``);
+    throw new Error(
+      `window E2E: ${name} is unset; run through \`cargo xtask test desktop --e2e-window\``,
+    );
   }
   return value;
 }

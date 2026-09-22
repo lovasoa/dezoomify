@@ -2,15 +2,16 @@
 // in src/server/security.ts and serves POST /api/proxy through
 // src/server/proxy.ts plus functions/api/proxy.ts, while GET /proxy keeps the
 // legacy policy served from legacy/. Legacy behavior at / stays byte-identical.
-import test from "node:test";
+
 import assert from "node:assert/strict";
+import test from "node:test";
+import * as shim from "../functions/proxy.js";
+import { handleProxyRequest } from "../src/server/proxy.ts";
 import {
   PROXY_MAX_BYTES,
   PROXY_MAX_REDIRECTS,
   stripUpstreamHeaders,
 } from "../src/server/security.ts";
-import { handleProxyRequest } from "../src/server/proxy.ts";
-import * as shim from "../functions/proxy.js";
 
 function hdr(obj) {
   const lower = {};

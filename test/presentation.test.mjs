@@ -1,18 +1,14 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import { renderTransportLabel } from "@dezoomify/app-model";
-import { presentSnapshot } from "../packages/shared-ui/src/snapshot-view.ts";
-import { renderAppChoice } from "../packages/shared-ui/src/components.ts";
 import {
-  categoryFor,
-  describeFailure,
-  phaseFor,
-} from "../packages/shared-ui/src/failure.ts";
-import {
-  renderSaveGuidance,
+  renderAppChoice,
   renderErrorSummary,
   renderProgress,
+  renderSaveGuidance,
 } from "../packages/shared-ui/src/components.ts";
+import { categoryFor, describeFailure, phaseFor } from "../packages/shared-ui/src/failure.ts";
+import { presentSnapshot } from "../packages/shared-ui/src/snapshot-view.ts";
 
 // Authoritative EngineSnapshotDto builder: the latest snapshot renders
 // directly, even when intermediate notifications were skipped.
@@ -22,7 +18,13 @@ function dto(overrides = {}) {
     lifecycle: "Discovering",
     paused: false,
     progress: { completed: 0, total: undefined },
-    selection: { image: undefined, level: undefined, level_count: 0, catalog: undefined, deferred: [] },
+    selection: {
+      image: undefined,
+      level: undefined,
+      level_count: 0,
+      catalog: undefined,
+      deferred: [],
+    },
     decision: undefined,
     terminal: undefined,
     output: undefined,
@@ -64,8 +66,23 @@ test("a tainted canvas keeps progress while dezooming, preview only when done", 
 });
 
 test("app-choice guidance is plain language with no jargon", () => {
-  const banned = ["cors", "origin-clean", "originclean", "wasm", "ssrf", "taint", "metadata proxy", "deep link", "dezoomer"];
-  for (const cap of [{}, { extensionAvailable: true }, { nativeAvailable: true }, { browserCanSave: false }]) {
+  const banned = [
+    "cors",
+    "origin-clean",
+    "originclean",
+    "wasm",
+    "ssrf",
+    "taint",
+    "metadata proxy",
+    "deep link",
+    "dezoomer",
+  ];
+  for (const cap of [
+    {},
+    { extensionAvailable: true },
+    { nativeAvailable: true },
+    { browserCanSave: false },
+  ]) {
     const text = renderAppChoice(cap).toLowerCase();
     for (const b of banned) {
       assert.ok(!text.includes(b), `guidance contains jargon ${b}: ${text.slice(0, 120)}`);
@@ -88,7 +105,12 @@ test("components render transport/save/error/progress plainly", () => {
     renderSaveGuidance(true).includes("Colors may shift"),
     "browser save must warn that the color profile is not preserved",
   );
-  const summary = renderErrorSummary({ code: "X", category: "c", retryable: true, message: "The picture could not be opened." });
+  const summary = renderErrorSummary({
+    code: "X",
+    category: "c",
+    retryable: true,
+    message: "The picture could not be opened.",
+  });
   assert.ok(summary.includes("try again"));
   assert.ok(renderProgress(1, 4).includes("1 of 4"));
 });
@@ -117,7 +139,8 @@ test("failure presenter keeps the engine block out of the headline", () => {
 test("a fetch failure keeps its classified headline", () => {
   const error = describeFailure({
     code: "TRANSPORT_HTTP_ERROR",
-    message: "The site refused to share this file (HTTP 403). It may block shared servers; the browser extension or the desktop app may still work.",
+    message:
+      "The site refused to share this file (HTTP 403). It may block shared servers; the browser extension or the desktop app may still work.",
     retryable: false,
   });
   assert.equal(
@@ -146,7 +169,13 @@ test("a completed job with engine display-only disposition presents preview", ()
     lifecycle: "Completed",
     progress: { completed: 4, total: 4 },
     terminal: { type: "completed" },
-    output: { canvas: { width: 512, height: 512 }, format: "png", complete: true, missing: [], disposition: "display-only" },
+    output: {
+      canvas: { width: 512, height: 512 },
+      format: "png",
+      complete: true,
+      missing: [],
+      disposition: "display-only",
+    },
   });
   const view = presentSnapshot(snap, "browser-session");
   assert.equal(view.phase, "display-only");

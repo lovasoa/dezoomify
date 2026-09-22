@@ -5,8 +5,8 @@ import {
   createSequentialQueue,
   enqueueSequential,
   isValidInputUrl,
-  retryQueueEntry,
   type QueueEntry,
+  retryQueueEntry,
   type SequentialQueue,
 } from "@dezoomify/app-model";
 

@@ -59,7 +59,10 @@ export function toHistoryEntry(url: string, details: HistoryDetails): HistoryEnt
   const entry: HistoryEntry = {
     origin,
     url: trimmed,
-    at: typeof details.at === "number" && Number.isFinite(details.at) ? Math.floor(details.at) : Date.now(),
+    at:
+      typeof details.at === "number" && Number.isFinite(details.at)
+        ? Math.floor(details.at)
+        : Date.now(),
   };
   if (typeof details.width === "number" && Number.isFinite(details.width) && details.width > 0) {
     entry.width = Math.floor(details.width);
@@ -74,7 +77,10 @@ export function toHistoryEntry(url: string, details: HistoryDetails): HistoryEnt
 }
 
 /** Insert one entry at the front, deduped by full address, capped at HISTORY_MAX. */
-export function pushHistory(entries: Array<HistoryEntry>, entry: HistoryEntry): Array<HistoryEntry> {
+export function pushHistory(
+  entries: Array<HistoryEntry>,
+  entry: HistoryEntry,
+): Array<HistoryEntry> {
   const list = Array.isArray(entries) ? entries.slice() : [];
   const kept = list.filter((item) => {
     if (!item || typeof item !== "object") return false;
@@ -104,7 +110,10 @@ function isValidEntry(raw: unknown): raw is HistoryEntry {
   if (typeof entry["at"] !== "number" || !Number.isFinite(entry["at"] as number)) return false;
   for (const key of ["width", "height"] as const) {
     const value = entry[key];
-    if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || (value as number) <= 0)) {
+    if (
+      value !== undefined &&
+      (typeof value !== "number" || !Number.isFinite(value) || (value as number) <= 0)
+    ) {
       return false;
     }
   }
@@ -146,7 +155,10 @@ export function serializeHistory(entries: Array<HistoryEntry>): string {
 }
 
 /** Load validated history from a store. Never throws: storage errors yield an empty list. */
-export function loadHistory(store: HistoryStore | null | undefined, key: string): Array<HistoryEntry> {
+export function loadHistory(
+  store: HistoryStore | null | undefined,
+  key: string,
+): Array<HistoryEntry> {
   if (!store || typeof store.getItem !== "function") return [];
   try {
     return parseHistoryJson(store.getItem(key));

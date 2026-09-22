@@ -30,8 +30,8 @@ import type {
   SessionConfig,
 } from "@dezoomify/wasm-bindings";
 import {
-  createEngineHost,
   type AcquireEffect,
+  createEngineHost,
   type EngineHost,
   type EngineHostAssembly,
   type HostFailure,
@@ -62,8 +62,16 @@ export interface BrowserAssemblyArgs {
 export interface BrowserProduct {
   createWorker(): BrowserWorker;
   /** One-attempt resource fetch feeding the engine retry budget. */
-  fetchResource(effect: AcquireEffect, signal: AbortSignal): Promise<{ bytes: Uint8Array; finalUri?: string }>;
-  probeSize(url: string, headers: Record<string, string>, requestId?: number, signal?: AbortSignal): Promise<ProbeSize>;
+  fetchResource(
+    effect: AcquireEffect,
+    signal: AbortSignal,
+  ): Promise<{ bytes: Uint8Array; finalUri?: string }>;
+  probeSize(
+    url: string,
+    headers: Record<string, string>,
+    requestId?: number,
+    signal?: AbortSignal,
+  ): Promise<ProbeSize>;
   /** Absent: no display fallback (failed acquisitions fail the engine). */
   loadDisplayImage?: (url: string) => Promise<TileImageLike>;
   classifyFailure(error: unknown): HostFailure;
@@ -112,10 +120,7 @@ export interface BrowserRunner extends HostRunner {
 export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
   const log = product.log ?? (() => {});
 
-  async function start(
-    request: JobStartRequest,
-    sink: RunnerSink,
-  ): Promise<BrowserJobHandle> {
+  async function start(request: JobStartRequest, sink: RunnerSink): Promise<BrowserJobHandle> {
     if (!request || typeof request !== "object" || request.exec?.kind !== "browser") {
       throw runnerError("browser.invalid-exec", "The browser runner runs browser jobs only.");
     }
@@ -132,7 +137,10 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
     let host: EngineHost | null = null;
     let assembly: EngineHostAssembly | null = null;
     // Cross-worker processing calls (session.applyProcessing) awaiting a reply.
-    const pendingProcess = new Map<number, { resolve: (bytes: ArrayBuffer) => void; reject: (error: unknown) => void }>();
+    const pendingProcess = new Map<
+      number,
+      { resolve: (bytes: ArrayBuffer) => void; reject: (error: unknown) => void }
+    >();
     let processSeq = 0;
 
     function abortAttempt(): void {
@@ -164,7 +172,9 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
 
     function processTile(recipe: ProcessingRecipe, bytes: ArrayBuffer): Promise<ArrayBuffer> {
       if (disposed) {
-        return Promise.reject(runnerError("browser.job-settled", "The browser job already finished."));
+        return Promise.reject(
+          runnerError("browser.job-settled", "The browser job already finished."),
+        );
       }
       const requestId = ++processSeq;
       return new Promise<ArrayBuffer>((resolve, reject) => {
@@ -199,7 +209,13 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
         lifecycle: "Failed",
         paused: false,
         progress: { completed: 0, total: undefined },
-        selection: { image: undefined, level: undefined, level_count: 0, catalog: undefined, deferred: [] },
+        selection: {
+          image: undefined,
+          level: undefined,
+          level_count: 0,
+          catalog: undefined,
+          deferred: [],
+        },
         decision: undefined,
         terminal: { type: "failed", error },
         output: undefined,
@@ -211,10 +227,14 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
       // project the typed error (codes, phases, transports, previews pass
       // through untouched) so the snapshot still terminates honestly.
       const candidate = error && typeof error === "object" ? (error as Partial<ErrorDto>) : null;
-      const code = typeof candidate?.code === "string" && candidate.code !== "" ? candidate.code : "browser.host-failed";
-      const message = typeof candidate?.message === "string" && candidate.message !== ""
-        ? candidate.message
-        : "The browser could not assemble the image.";
+      const code =
+        typeof candidate?.code === "string" && candidate.code !== ""
+          ? candidate.code
+          : "browser.host-failed";
+      const message =
+        typeof candidate?.message === "string" && candidate.message !== ""
+          ? candidate.message
+          : "The browser could not assemble the image.";
       return {
         code,
         phase: candidate?.phase ?? "output",
@@ -242,7 +262,8 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
       },
       assembly: activeAssembly,
       quotas: { ...product.quotas, ...request.engine },
-      probeSize: (url, headers, requestId) => product.probeSize(url, headers, requestId, attemptSignal.signal),
+      probeSize: (url, headers, requestId) =>
+        product.probeSize(url, headers, requestId, attemptSignal.signal),
       loadDisplayImage: product.loadDisplayImage,
       classifyFailure: (error) => product.classifyFailure(error),
       onPermissionRequired: (detail) => {
@@ -273,8 +294,12 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
         const pending = pendingProcess.get(data.requestId);
         if (!pending) return;
         pendingProcess.delete(data.requestId);
-        if (data.type === "engine.processed" && data.bytes instanceof ArrayBuffer) pending.resolve(data.bytes);
-        else pending.reject(runnerError("browser.processing-failed", "A tile could not be processed."));
+        if (data.type === "engine.processed" && data.bytes instanceof ArrayBuffer)
+          pending.resolve(data.bytes);
+        else
+          pending.reject(
+            runnerError("browser.processing-failed", "A tile could not be processed."),
+          );
         return;
       }
       if (data.type === "engine.log" && typeof data.line === "string") {
@@ -320,7 +345,10 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
           activeHost.cancel();
           return;
         default:
-          throw runnerError("browser.unsupported-command", `The browser runner has no command for ${command.type} yet.`);
+          throw runnerError(
+            "browser.unsupported-command",
+            `The browser runner has no command for ${command.type} yet.`,
+          );
       }
     }
 

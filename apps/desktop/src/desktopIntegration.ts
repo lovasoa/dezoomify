@@ -40,11 +40,11 @@ export const DESKTOP_COMMANDS = [
 
 export type DesktopCommand = (typeof DESKTOP_COMMANDS)[number];
 
+export type { DesktopEventChannel } from "./events.ts";
 // The event channels are owned by apps/desktop/src/events.ts (the IPC
 // redaction guards live there); this module re-exports the single registry
 // so capability checks share one source without an import cycle.
 export { DESKTOP_EVENT_CHANNELS } from "./events.ts";
-export type { DesktopEventChannel } from "./events.ts";
 
 export interface DesktopCapabilities {
   readonly nativeAvailable: true;
@@ -111,8 +111,7 @@ export function createDesktopIntegration(opts?: {
   invoke?: DesktopInvoke;
 }): AppIntegration {
   const extensionAvailable = opts?.extensionAvailable ?? false;
-  const invoke: DesktopInvoke =
-    opts?.invoke ?? ((cmd, args) => publicInvoke(cmd, args));
+  const invoke: DesktopInvoke = opts?.invoke ?? ((cmd, args) => publicInvoke(cmd, args));
 
   function getCapabilities(): DesktopCapabilities {
     return {

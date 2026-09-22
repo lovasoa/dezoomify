@@ -1,11 +1,14 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import { createProcessQueue, drawPlacedTile, loadTileImage } from "../src/tile-draw.ts";
 
 function hooks() {
   let seq = 0;
   return {
-    onRequestStart() { seq += 1; return seq; },
+    onRequestStart() {
+      seq += 1;
+      return seq;
+    },
     onRequestEnd() {},
     onLog() {},
     onUpdate() {},
@@ -22,7 +25,14 @@ function ctx2d(drawn = []) {
 }
 
 function bitmap(w = 256, h = 256) {
-  return { width: w, height: h, closed: false, close() { this.closed = true; } };
+  return {
+    width: w,
+    height: h,
+    closed: false,
+    close() {
+      this.closed = true;
+    },
+  };
 }
 
 test("drawPlacedTile paints readable bytes at the planned extent", () => {
@@ -40,8 +50,14 @@ test("drawPlacedTile does not stretch an undersized tile", () => {
   drawPlacedTile(ctx, bitmap(100, 100), { x: 256, y: 0, w: 256, h: 256 }, (line) => log.push(line));
   assert.equal(ctx.drawn.length, 1);
   assert.deepEqual(ctx.drawn[0], { sw: 100, sh: 100, dx: 256, dy: 0, dw: 100, dh: 100 });
-  assert.ok(log.some((line) => line.includes("A tile size differed from the plan")), "mismatch logged without identifying a tile");
-  assert.ok(log.every((line) => !line.includes("a.test") && !line.includes("256,0")), "mismatch log has no tile URL or coordinates");
+  assert.ok(
+    log.some((line) => line.includes("A tile size differed from the plan")),
+    "mismatch logged without identifying a tile",
+  );
+  assert.ok(
+    log.every((line) => !line.includes("a.test") && !line.includes("256,0")),
+    "mismatch log has no tile URL or coordinates",
+  );
 });
 
 test("drawPlacedTile crops a full-sized padded Google edge tile at 1:1 scale", () => {
@@ -72,9 +88,15 @@ test("createProcessQueue serializes processing while fetching stays parallel", a
 test("loadTileImage resolves on load and rejects on error", async () => {
   const h = hooks();
   class FakeImg {
-    constructor() { this.handlers = {}; }
-    addEventListener(type, fn) { this.handlers[type] = fn; }
-    set src(v) { this.handlers.load?.(); }
+    constructor() {
+      this.handlers = {};
+    }
+    addEventListener(type, fn) {
+      this.handlers[type] = fn;
+    }
+    set src(v) {
+      this.handlers.load?.();
+    }
   }
   const img = await loadTileImage("https://a.test/1.png", {
     imageCtor: FakeImg,
@@ -84,11 +106,18 @@ test("loadTileImage resolves on load and rejects on error", async () => {
   });
   assert.ok(img instanceof FakeImg);
   class BrokenImg {
-    addEventListener(type, fn) { if (type === "error") queueMicrotask(fn); }
+    addEventListener(type, fn) {
+      if (type === "error") queueMicrotask(fn);
+    }
     set src(v) {}
   }
   await assert.rejects(
-    loadTileImage("https://a.test/2.png", { imageCtor: BrokenImg, setTimeoutFn: () => null, clearTimeoutFn: () => {}, hooks: h }),
+    loadTileImage("https://a.test/2.png", {
+      imageCtor: BrokenImg,
+      setTimeoutFn: () => null,
+      clearTimeoutFn: () => {},
+      hooks: h,
+    }),
     /failed to load/,
   );
 });

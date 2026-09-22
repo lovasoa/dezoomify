@@ -39,7 +39,7 @@ expose("Event", document.defaultView?.Event);
 expose("KeyboardEvent", document.defaultView?.KeyboardEvent);
 expose("IS_REACT_ACT_ENVIRONMENT", true);
 
-export { document, act };
+export { act, document };
 
 /** A fresh detached container appended to the document body. */
 export function makeContainer() {

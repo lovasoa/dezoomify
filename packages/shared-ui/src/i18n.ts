@@ -29,8 +29,8 @@
 // This module is erasable-syntax-only TypeScript (type aliases, plain
 // functions) so node can type-strip it directly in tests.
 
-import { fr } from "./locales/fr.ts";
 import { de } from "./locales/de.ts";
+import { fr } from "./locales/fr.ts";
 import { it } from "./locales/it.ts";
 
 export type Locale = "en" | "fr" | "de" | "it";
@@ -56,7 +56,10 @@ export function isSupportedLocaleName(name: string): boolean {
  * fail closed to English.
  */
 export function normalizeLocaleName(tag: string): Locale | null {
-  const base = String(tag ?? "").trim().toLowerCase().split(/[-_]/)[0];
+  const base = String(tag ?? "")
+    .trim()
+    .toLowerCase()
+    .split(/[-_]/)[0];
   if (base === "en" || base === "fr" || base === "de" || base === "it") return base;
   return null;
 }
@@ -77,7 +80,9 @@ export function setLocale(locale: string): boolean {
  */
 export function pickLocale(input: string | ReadonlyArray<string> | null | undefined): Locale {
   if (input === null || input === undefined) return DEFAULT_LOCALE;
-  const tags: Array<string> = Array.isArray(input) ? [...input] : parseAcceptLanguage(String(input));
+  const tags: Array<string> = Array.isArray(input)
+    ? [...input]
+    : parseAcceptLanguage(String(input));
   for (const tag of tags) {
     const match = normalizeLocaleName(tag);
     if (match !== null) return match;
@@ -117,8 +122,10 @@ const en = {
   "desktop.done.saved": "Saved in your chosen folder.",
   "desktop.done.open": "Open image",
   "desktop.done.reveal": "Show in folder",
-  "desktop.done.openError": "Could not open the image. Check that a default image viewer is installed.",
-  "desktop.done.folderError": "Could not open the containing folder. Check that a file manager is installed.",
+  "desktop.done.openError":
+    "Could not open the image. Check that a default image viewer is installed.",
+  "desktop.done.folderError":
+    "Could not open the containing folder. Check that a file manager is installed.",
   "desktop.done.missingError": "The saved image or folder no longer exists.",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Got it",
@@ -135,7 +142,8 @@ const en = {
   "view.desktop.why1Body":
     "A browser tab can only hold a certain amount of picture. The desktop app assembles the image in memory subject to available memory and writes the finished output to disk.",
   "view.desktop.why2Title": "Saves the Finished Picture:",
-  "view.desktop.why2Body": "Each job saves to one output file on your computer. You can queue several jobs; they save one at a time.",
+  "view.desktop.why2Body":
+    "Each job saves to one output file on your computer. You can queue several jobs; they save one at a time.",
   "view.desktop.why3Title": "When the Website Cannot Finish:",
   "view.desktop.why3Body":
     "The website stops the job with an error and points to the desktop app for the full-size image.",
@@ -180,7 +188,7 @@ const en = {
   "view.idle.urlAbbr": "URL",
   "view.idle.urlTitle": "Uniform Resource Locator, the address of a webpage",
   "view.idle.body":
-    "of such an image in the text field below. The image will be saved at maximal resolution. You can then right-click on the image, and choose \"Save As\" in order to save it as a PNG file on your computer. If it doesn't work, read our",
+    'of such an image in the text field below. The image will be saved at maximal resolution. You can then right-click on the image, and choose "Save As" in order to save it as a PNG file on your computer. If it doesn\'t work, read our',
   "view.idle.troubleLink": "troubleshooting guide",
   "view.idle.moreInfo": "If you want more information, read our",
   "view.idle.projectLink": "project page",
@@ -211,7 +219,8 @@ const en = {
   "view.job.techDetails": "Technical details & logs",
   "view.job.oneImage": "1 image",
   "view.job.manyImages": "{count} images",
-  "view.job.autoChoiceFull": "Found {noun}, saving largest that fits ({width}×{height}, {tiles} tiles).",
+  "view.job.autoChoiceFull":
+    "Found {noun}, saving largest that fits ({width}×{height}, {tiles} tiles).",
   "view.job.autoChoiceDims": "Found {noun}, saving largest that fits ({width}×{height}).",
   "view.job.autoChoiceTiles": "Found {noun}, saving largest that fits ({tiles} tiles).",
   "view.job.autoChoiceBare": "Found {noun}, saving largest that fits.",
@@ -230,7 +239,8 @@ const en = {
   "view.display.extDesc":
     "For pages requiring login or session cookies. Automatically detects viewers on active pages.",
   "view.display.deskTitle": "Desktop App Guide",
-  "view.display.deskDescClean": "For a clean full-size save when the browser can only show the image.",
+  "view.display.deskDescClean":
+    "For a clean full-size save when the browser can only show the image.",
   "view.display.startOver": "Start over",
   // Completion section.
   "view.done.ready": "Your image is ready.",
@@ -302,8 +312,10 @@ const en = {
     "That address does not look like a web page address. Enter an address starting with http:// or https://.",
   "desktop.settings.unusable":
     "These download settings cannot be used. Adjust the highlighted settings and try again.",
-  "desktop.settings.invalidSubmit": "These download settings are invalid. Adjust them and try again.",
-  "desktop.output.deniedPick": "The save destination was not accepted. Choose a different file to continue.",
+  "desktop.settings.invalidSubmit":
+    "These download settings are invalid. Adjust them and try again.",
+  "desktop.output.deniedPick":
+    "The save destination was not accepted. Choose a different file to continue.",
   "desktop.output.deniedFallback": "The save destination was denied.",
   "desktop.proto.incompatible":
     "This app version cannot open this picture from {host}. Update the app and try again.",
@@ -335,14 +347,16 @@ const en = {
     "No zoomable image was found at this address. Try a page that contains a zoom viewer, or try the browser extension.",
   "desktop.plan.none":
     "This picture has no usable size to save from {host}. Try a different picture or a smaller Max width.",
-  "desktop.transport.stalled": "Saving stalled while contacting {host}. Check your connection and try again.",
+  "desktop.transport.stalled":
+    "Saving stalled while contacting {host}. Check your connection and try again.",
   "desktop.output.writeFail":
     "Could not write this picture from {host}. Choose a different save destination and try again.",
   "desktop.job.cancelledMsg": "The image save was stopped. Any unfinished file was removed.",
   "desktop.start.failed": "Could not start saving this picture from {host}. Try again.",
   "desktop.choice.failed": "That choice was not accepted. Try again.",
   "view.ext.desynced": "The extension lost sync while reading this image. Start the scan again.",
-  "desktop.save.generic": "Could not save this picture from {host}. Try again with a different address.",
+  "desktop.save.generic":
+    "Could not save this picture from {host}. Try again with a different address.",
   "desktop.internal.error":
     "Something unexpected stopped this save from {host}. Try again, and copy diagnostics if it keeps happening.",
   "desktop.save.fallback": "Could not save this picture from {host}. Try again.",
@@ -353,7 +367,8 @@ const en = {
   "desktop.invoke.destination": "Could not request the save destination.",
   "desktop.invoke.cancel": "Could not cancel the job.",
   "desktop.step.chooseWhere": "Choose where to save…",
-  "desktop.step.chooseWhereDetail": "The save destination needs attention before the job can continue.",
+  "desktop.step.chooseWhereDetail":
+    "The save destination needs attention before the job can continue.",
   "desktop.step.pickOutput": "Pick the output file to continue.",
   "desktop.step.partialTitle": "Some tiles could not be saved…",
   "desktop.step.partialDetail": "Choose whether to keep the partial image, discard it, or retry.",
@@ -365,7 +380,8 @@ const en = {
   "desktop.step.encodingPartial": "Encoding partial image in the native app",
   "desktop.step.discardingPartial": "Discarding partial image",
   "desktop.step.retrying": "Retrying",
-  "desktop.step.appAutoDetail": "The app saves the first image automatically; no picker is offered.",
+  "desktop.step.appAutoDetail":
+    "The app saves the first image automatically; no picker is offered.",
   "desktop.step.foundFits": "Found {noun}, saving largest that fits…",
   "desktop.step.tilesAtFull": "{current} of {total} tiles at full resolution",
   "desktop.step.savedDims": "Saved {width} by {height} pixels",
@@ -445,7 +461,8 @@ const en = {
   "desktop.settings.browseOutput": "Browse for output directory",
   "desktop.settings.browseCache": "Browse for cache directory",
   "desktop.settings.headersAdv": "Advanced: request headers (trusted)",
-  "desktop.settings.headersLabel": "Request headers, one per line as Name: value (optional, trusted)",
+  "desktop.settings.headersLabel":
+    "Request headers, one per line as Name: value (optional, trusted)",
   "desktop.settings.reset": "Reset settings",
   "desktop.quick.folder": "Folder",
   "desktop.quick.askEachTime": "Ask each time",
@@ -467,9 +484,11 @@ const en = {
   "desktop.advanced.jpegQuality": "JPEG quality",
   "desktop.advanced.jpegQualityDesc": "Higher keeps more image detail.",
   "desktop.advanced.compressionEffort": "Compression effort",
-  "desktop.advanced.compressionEffortDesc": "Image quality stays lossless; higher values take longer.",
+  "desktop.advanced.compressionEffortDesc":
+    "Image quality stays lossless; higher values take longer.",
   "desktop.advanced.dimensions": "Custom dimensions",
-  "desktop.advanced.dimensionsDesc": "Leave either value empty to preserve the original proportion.",
+  "desktop.advanced.dimensionsDesc":
+    "Leave either value empty to preserve the original proportion.",
   "desktop.advanced.width": "Width",
   "desktop.advanced.height": "Height",
   "desktop.advanced.retries": "Retries",
@@ -479,7 +498,8 @@ const en = {
   "desktop.advanced.choose": "Choose…",
   "desktop.advanced.change": "Change…",
   "desktop.advanced.headers": "Request headers",
-  "desktop.advanced.headersDesc": "For protected viewers. Sent only to the image origin and never logged.",
+  "desktop.advanced.headersDesc":
+    "For protected viewers. Sent only to the image origin and never logged.",
   // Extension job-tab user copy, rendered through the same `t(key, vars)`
   // shape; log and diagnostics lines stay literal English and never use these
   // keys. `test/ui-i18n.test.mjs` fails when the page renders a key outside
@@ -529,7 +549,9 @@ export function getDictionary(locale: string): Record<string, string> {
  */
 export function t(key: I18nKey, vars?: I18nVars, locale?: string): string {
   const want: string =
-    typeof locale === "string" && locale !== "" ? (normalizeLocaleName(locale) ?? activeLocale) : activeLocale;
+    typeof locale === "string" && locale !== ""
+      ? (normalizeLocaleName(locale) ?? activeLocale)
+      : activeLocale;
   const table: Record<string, string> = dictionaries[want] ?? EN;
   const template: string = table[key as string] ?? EN[key as string] ?? (key as string);
   if (!vars) return template;

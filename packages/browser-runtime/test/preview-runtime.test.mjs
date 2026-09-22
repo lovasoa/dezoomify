@@ -1,10 +1,6 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  PREVIEW_ZOOM_STEP,
-  createPreviewControls,
-  setCanvasVisible,
-} from "../src/preview.ts";
+import test from "node:test";
+import { createPreviewControls, PREVIEW_ZOOM_STEP, setCanvasVisible } from "../src/preview.ts";
 
 function element(dimensions = {}) {
   return {
@@ -13,8 +9,12 @@ function element(dimensions = {}) {
     listeners: {},
     textContent: null,
     hidden: false,
-    addEventListener(type, fn) { this.listeners[type] = fn; },
-    fire(type, event) { this.listeners[type]?.(event); },
+    addEventListener(type, fn) {
+      this.listeners[type] = fn;
+    },
+    fire(type, event) {
+      this.listeners[type]?.(event);
+    },
   };
 }
 
@@ -76,7 +76,9 @@ test("controls wire buttons, wheel, and bounded drag without pixel reads", () =>
   d.ids["canvas-wrapper"].fire("wheel", {
     deltaY: -100,
     preventDefault: () => {},
-    stopPropagation: () => { stopped = true; },
+    stopPropagation: () => {
+      stopped = true;
+    },
   });
   assert.equal(preview.getTransform().scale, 0.625);
   assert.equal(preview.getTransform().tx, 0);

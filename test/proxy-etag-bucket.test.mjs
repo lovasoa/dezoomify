@@ -1,10 +1,8 @@
 // Todo 3.2: proxy ETag-aware revalidation plus per-origin token bucket.
-import test from "node:test";
+
 import assert from "node:assert/strict";
-import {
-  clearProxyOriginBuckets,
-  handleProxyRequest,
-} from "../src/server/proxy.ts";
+import test from "node:test";
+import { clearProxyOriginBuckets, handleProxyRequest } from "../src/server/proxy.ts";
 import { proxyOriginKey, stripUpstreamHeaders } from "../src/server/security.ts";
 
 function hdr(obj) {
@@ -139,10 +137,7 @@ test("per-origin bucket fails closed with 429 without recording URLs", async () 
 });
 
 test("origin keys are redacted origins only", () => {
-  assert.equal(
-    proxyOriginKey("https://public.test/a/b?token=secret#frag"),
-    "https://public.test",
-  );
+  assert.equal(proxyOriginKey("https://public.test/a/b?token=secret#frag"), "https://public.test");
   assert.equal(proxyOriginKey("https://PUBLIC.test:443/x.json"), "https://public.test");
   assert.equal(proxyOriginKey("http://127.0.0.1:8080/x.json"), "http://127.0.0.1:8080");
   assert.equal(proxyOriginKey("not a url"), null);

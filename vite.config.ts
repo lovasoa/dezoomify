@@ -1,5 +1,5 @@
-import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
 
 // New website build. The deployed app serves below /beta/ while the legacy
 // site remains at / (assembled by scripts/build-site.mjs). The app's host

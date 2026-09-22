@@ -4,7 +4,7 @@
 // `node scripts/build-help.mjs` after editing any page (the freshness test
 // in test/help-page.test.mjs fails on drift).
 // Deterministic: same inputs produce byte-identical output.
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import MarkdownIt from "markdown-it";
@@ -18,7 +18,10 @@ const PAGES = [
   { stem: "start-here", blurb: "What Dezoomify does and which app to pick." },
   { stem: "website", blurb: "The website: how to use it and what it cannot do." },
   { stem: "browser-extension", blurb: "Find images while you browse, including signed-in pages." },
-  { stem: "desktop-app", blurb: "Very large images, more file formats, resuming, protected pages." },
+  {
+    stem: "desktop-app",
+    blurb: "Very large images, more file formats, resuming, protected pages.",
+  },
   { stem: "command-line", blurb: "Scripts and downloading many images at once." },
   { stem: "finding-the-image-address", blurb: "What to paste when no image is found." },
   { stem: "troubleshooting", blurb: "Something did not work? Start here." },
@@ -26,7 +29,11 @@ const PAGES = [
 ];
 
 function escapeHtml(s) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function slugify(s) {
@@ -280,7 +287,8 @@ writeFileSync(
   path.join(outDir, "index.html"),
   chrome({
     title: "Help & documentation: Dezoomify",
-    description: "How to download zoomable images with Dezoomify: the website, browser extension, desktop app, troubleshooting, and supported formats.",
+    description:
+      "How to download zoomable images with Dezoomify: the website, browser extension, desktop app, troubleshooting, and supported formats.",
     topicsHtml: topicsNav(null),
     bodyHtml: `<h1>Help &amp; documentation</h1>
 <p>Everything you need to save zoomable images with Dezoomify. New here?

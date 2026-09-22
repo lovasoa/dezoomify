@@ -2,18 +2,12 @@
 // Provenance block plus the clipboard handoff. The snapshot arrives as plain
 // data, so this module owns no job state. File move, no behavior change.
 import { t } from "@dezoomify/shared-ui";
-import {
-  PROTOCOL_MAX,
-  PROTOCOL_MIN,
-  PROTOCOL_VERSION,
-} from "./desktopIntegration.ts";
+import { PROTOCOL_MAX, PROTOCOL_MIN, PROTOCOL_VERSION } from "./desktopIntegration.ts";
 
 declare const __DEZOOMIFY_VERSION__: string;
 
-export const DESKTOP_APP_VERSION = typeof __DEZOOMIFY_VERSION__ === "string"
-  ? __DEZOOMIFY_VERSION__
-  : "0.0.0";
-
+export const DESKTOP_APP_VERSION =
+  typeof __DEZOOMIFY_VERSION__ === "string" ? __DEZOOMIFY_VERSION__ : "0.0.0";
 
 // Copy-diagnostics provenance: job and attempt ids, app and protocol
 // versions, progress, and the redacted source origin only. The typed
@@ -46,18 +40,20 @@ export function buildCopyDiagnostics(snapshot: DiagnosticsSnapshot): string {
     lines.push(`File action: ${snapshot.outputActionError.action}`);
     lines.push(`File action code: ${snapshot.outputActionError.code}`);
   }
-  if (snapshot.progress) lines.push(`Tiles: ${snapshot.progress.current} of ${snapshot.progress.total}`);
+  if (snapshot.progress)
+    lines.push(`Tiles: ${snapshot.progress.current} of ${snapshot.progress.total}`);
   lines.push(`Origin: ${snapshot.origin === "" ? "n/a" : snapshot.origin}`);
   return lines.join("\n");
 }
 
-
 export function handleCopyDiagnostics(buildText: () => string): void {
   const text = buildText();
   const done = () => {
-    const btn = typeof document !== "undefined"
-      ? document.getElementById("dz-btn-copy-diagnostics") ?? document.getElementById("dz-btn-copy-diag")
-      : null;
+    const btn =
+      typeof document !== "undefined"
+        ? (document.getElementById("dz-btn-copy-diagnostics") ??
+          document.getElementById("dz-btn-copy-diag"))
+        : null;
     if (btn) {
       const iconButton = btn.id === "dz-btn-copy-diagnostics";
       if (iconButton) {

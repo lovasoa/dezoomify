@@ -1,5 +1,5 @@
-import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
 
 // Desktop Vite shell for the Tauri app.
 // Tauri development uses a fixed local origin. Production bundles ship

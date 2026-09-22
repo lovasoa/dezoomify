@@ -1,6 +1,11 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import { asFetchFailure, createExtensionFetcher, isProxyUrl, PROXY_PATH } from "../../src/runtime/fetch.ts";
+import test from "node:test";
+import {
+  asFetchFailure,
+  createExtensionFetcher,
+  isProxyUrl,
+  PROXY_PATH,
+} from "../../src/runtime/fetch.ts";
 
 function bytes(n, fill = 1) {
   return new Uint8Array(n).fill(fill);
@@ -15,7 +20,13 @@ function makeHarness({ permissions = {}, fetchBehavior } = {}) {
       fetchImpl: async (url, init) => {
         calls.push({ url, init });
         if (fetchBehavior) return fetchBehavior(url, init);
-        return { status: 200, url, headers: { "content-type": "image/jpeg" }, bytes: bytes(10), redirectChain: [url] };
+        return {
+          status: 200,
+          url,
+          headers: { "content-type": "image/jpeg" },
+          bytes: bytes(10),
+          redirectChain: [url],
+        };
       },
       hasPermission: (origin) => granted.get(origin) ?? false,
       requestPermission: (origin) => {
@@ -39,7 +50,10 @@ test("explicit intent required; no fetch without it", async () => {
   const h = makeHarness();
   h.grant("https://a.example");
   const f = createExtensionFetcher(h.deps);
-  await assert.rejects(() => f.fetchResource("https://a.example/img.jpg", { userIntent: false }), /intent/);
+  await assert.rejects(
+    () => f.fetchResource("https://a.example/img.jpg", { userIntent: false }),
+    /intent/,
+  );
   await assert.rejects(() => f.fetchResource("https://a.example/img.jpg", {}), /intent/);
   assert.equal(h.calls.filter((c) => c.url).length, 0);
 });
@@ -49,7 +63,7 @@ test("permission denial performs zero fetches", async () => {
   const f = createExtensionFetcher(h.deps);
   await assert.rejects(
     () => f.fetchResource("https://a.example/img.jpg", { userIntent: true }),
-    (e) => e.code === "permission-denied"
+    (e) => e.code === "permission-denied",
   );
   assert.equal(h.calls.filter((c) => c.url && !c.permissionRequest).length, 0);
 });
@@ -66,7 +80,10 @@ test("timeout enforced via durationMs", async () => {
     durationMs: 60_000,
   });
   const f = createExtensionFetcher(h.deps);
-  await assert.rejects(() => f.fetchResource("https://a.example/x.jpg", { userIntent: true, timeoutMs: 1000 }), /timeout/);
+  await assert.rejects(
+    () => f.fetchResource("https://a.example/x.jpg", { userIntent: true, timeoutMs: 1000 }),
+    /timeout/,
+  );
 });
 
 test("oversized body rejected", async () => {
@@ -80,7 +97,10 @@ test("oversized body rejected", async () => {
     redirectChain: [url],
   });
   const f = createExtensionFetcher(h.deps);
-  await assert.rejects(() => f.fetchResource("https://a.example/x.jpg", { userIntent: true, maxBytes: 10 }), /oversized/);
+  await assert.rejects(
+    () => f.fetchResource("https://a.example/x.jpg", { userIntent: true, maxBytes: 10 }),
+    /oversized/,
+  );
 });
 
 test("metadata accepts HTML while tiles do not", async () => {
@@ -94,9 +114,15 @@ test("metadata accepts HTML while tiles do not", async () => {
     redirectChain: [url],
   });
   const f = createExtensionFetcher(h.deps);
-  const metadata = await f.fetchResource("https://a.example/x", { userIntent: true, purpose: "metadata" });
+  const metadata = await f.fetchResource("https://a.example/x", {
+    userIntent: true,
+    purpose: "metadata",
+  });
   assert.equal(metadata.bytes.length, 5);
-  await assert.rejects(() => f.fetchResource("https://a.example/x", { userIntent: true, purpose: "tile" }), /unsupported/);
+  await assert.rejects(
+    () => f.fetchResource("https://a.example/x", { userIntent: true, purpose: "tile" }),
+    /unsupported/,
+  );
 });
 
 test("metadata accepts IIIF application/ld+json", async () => {
@@ -105,12 +131,17 @@ test("metadata accepts IIIF application/ld+json", async () => {
   h.deps.fetchImpl = async (url) => ({
     status: 200,
     url,
-    headers: { "content-type": 'application/ld+json;profile="http://iiif.io/api/image/3/context.json"' },
+    headers: {
+      "content-type": 'application/ld+json;profile="http://iiif.io/api/image/3/context.json"',
+    },
     bytes: bytes(5),
     redirectChain: [url],
   });
   const f = createExtensionFetcher(h.deps);
-  const metadata = await f.fetchResource("https://a.example/info.json", { userIntent: true, purpose: "metadata" });
+  const metadata = await f.fetchResource("https://a.example/info.json", {
+    userIntent: true,
+    purpose: "metadata",
+  });
   assert.equal(metadata.bytes.length, 5);
 });
 
@@ -177,7 +208,11 @@ test("proxy URLs never fetched", async () => {
   const h = makeHarness();
   h.grant("https://site.example");
   const f = createExtensionFetcher(h.deps);
-  await assert.rejects(() => f.fetchResource("https://site.example/api/proxy?u=https://a.example/x", { userIntent: true }), /proxy/);
+  await assert.rejects(
+    () =>
+      f.fetchResource("https://site.example/api/proxy?u=https://a.example/x", { userIntent: true }),
+    /proxy/,
+  );
   assert.equal(h.calls.length, 0);
 });
 

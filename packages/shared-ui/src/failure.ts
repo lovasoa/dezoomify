@@ -9,8 +9,9 @@
 //
 // Erasable-syntax-only TypeScript (type aliases, plain functions) so node can
 // type-strip it directly in tests, exactly like `i18n.ts`.
-import type { StructuredError } from "./snapshot-view.ts";
+
 import { t } from "./i18n.ts";
+import type { StructuredError } from "./snapshot-view.ts";
 
 // JPEG addresses at most 65535 px per side (copy interpolation only).
 const JPEG_MAX_SIDE = 65535;
@@ -26,7 +27,8 @@ export function categoryFor(code: unknown): string {
   if (code.indexOf("OUTPUT_") === 0 || code === "OUTPUT_DENIED") return "output";
   if (code === "WORKER_FAILED" || code === "PLAN_INVALID") return "internal";
   const lower = code.toLowerCase();
-  if (lower.indexOf("protocol.incompatible") === 0 || lower.indexOf("handoff.rejected") === 0) return "validation";
+  if (lower.indexOf("protocol.incompatible") === 0 || lower.indexOf("handoff.rejected") === 0)
+    return "validation";
   if (lower.indexOf("discovery.") === 0 || lower.indexOf("job.discovery") >= 0) return "discovery";
   if (lower.indexOf("output.") === 0) return "output";
   if (lower.indexOf("internal") >= 0 || lower === "native.internal") return "internal";
@@ -46,8 +48,20 @@ export function phaseFor(code: unknown): string {
   if (lower === "tile.processing-failed") return "processing";
   if (lower.indexOf("output.") === 0) return "output";
   if (lower === "job.cancelled") return "cleanup";
-  if (lower.indexOf("job.resource") === 0 || lower.indexOf("job.plan") === 0 || lower.indexOf("job.probe") === 0) return "acquisition";
-  if (lower.indexOf("command.") === 0 || lower.indexOf("job.invalid") >= 0 || lower.indexOf("job.post-terminal") >= 0 || lower.indexOf("job.unknown") >= 0 || lower.indexOf("job.stale") >= 0) return "validation";
+  if (
+    lower.indexOf("job.resource") === 0 ||
+    lower.indexOf("job.plan") === 0 ||
+    lower.indexOf("job.probe") === 0
+  )
+    return "acquisition";
+  if (
+    lower.indexOf("command.") === 0 ||
+    lower.indexOf("job.invalid") >= 0 ||
+    lower.indexOf("job.post-terminal") >= 0 ||
+    lower.indexOf("job.unknown") >= 0 ||
+    lower.indexOf("job.stale") >= 0
+  )
+    return "validation";
   return "acquisition";
 }
 
@@ -93,13 +107,19 @@ export function plainMessageFor(code: string, engineMessage: string, host: strin
   if (lowerCode === "output.destination-denied" || lowerCode === "output.unsupported-extension") {
     return t("desktop.output.destDenied", { host });
   }
-  if (lowerCode === "job.post-terminal" || lowerCode === "job.unknown" || lowerCode === "job.stale") {
+  if (
+    lowerCode === "job.post-terminal" ||
+    lowerCode === "job.unknown" ||
+    lowerCode === "job.stale"
+  ) {
     return t("desktop.job.gone", { host });
   }
   if (lowerCode === "output.canvas-limit" || lowerCode.indexOf("canvas-limit") >= 0) {
     const dim = engine.match(/(\d+)\s*x\s*(\d+)/);
     const needMatch = engine.match(/needs\s+([0-9.]+\s*GiB[^,;]*|[0-9,]+\s*bytes[^,;]*)/i);
-    const dims = dim ? t("desktop.msg.dimsPixels", { a: dim[1], b: dim[2] }) : t("desktop.msg.thisPicture");
+    const dims = dim
+      ? t("desktop.msg.dimsPixels", { a: dim[1], b: dim[2] })
+      : t("desktop.msg.thisPicture");
     const need = needMatch ? t("desktop.msg.needAbout", { need: needMatch[1].trim() }) : "";
     const availableMatch = engine.match(/only\s+([^;]+)\s+is currently available/i);
     return t("desktop.output.canvasLimit", {
@@ -112,7 +132,9 @@ export function plainMessageFor(code: string, engineMessage: string, host: strin
   }
   if (lowerCode === "output.encode-failed" && /65535|jpeg/i.test(engine)) {
     const dim = engine.match(/(\d+)\s*x\s*(\d+)/);
-    const dims = dim ? t("desktop.msg.dimsPixels", { a: dim[1], b: dim[2] }) : t("desktop.msg.thisPicture");
+    const dims = dim
+      ? t("desktop.msg.dimsPixels", { a: dim[1], b: dim[2] })
+      : t("desktop.msg.thisPicture");
     return t("desktop.output.jpegLimit", { dims, jpegMax: JPEG_MAX_SIDE, host });
   }
   if (

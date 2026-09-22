@@ -1,8 +1,6 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  createDirectTransport,
-} from "../src/transport.ts";
+import test from "node:test";
+import { createDirectTransport } from "../src/transport.ts";
 
 function headersMap(obj) {
   return {
@@ -46,7 +44,11 @@ test("rejects Cookie and Authorization inputs without calling fetch", async () =
     called += 1;
     throw new Error("should not be called");
   });
-  for (const h of [{ Cookie: "a=b" }, { authorization: "Bearer x" }, { "Proxy-Authorization": "x" }]) {
+  for (const h of [
+    { Cookie: "a=b" },
+    { authorization: "Bearer x" },
+    { "Proxy-Authorization": "x" },
+  ]) {
     const r = await t.fetchResource("https://x.test/m", { headers: h });
     assert.equal(r.outcome, "policy-denied");
     assert.match(r.reason, /credential-header-rejected/);

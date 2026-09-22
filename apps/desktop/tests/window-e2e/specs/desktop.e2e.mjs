@@ -9,8 +9,6 @@ import path from "node:path";
 import { after, afterEach, before, describe, it } from "node:test";
 import { Builder, By } from "selenium-webdriver";
 import {
-  SCENARIOS_DIR,
-  WEBDRIVER_URL,
   closeFrontendServer,
   createRunDirs,
   deepLinkArgv,
@@ -20,11 +18,13 @@ import {
   laneAppEnv,
   outputFiles,
   runOutputDir,
+  SCENARIOS_DIR,
   startFixtureServer,
   startFrontendServer,
   startWindowApp,
   stopFixtureServer,
   stopWindowApp,
+  WEBDRIVER_URL,
 } from "../harness.mjs";
 import { assertSavedPyramid } from "../png-assert.mjs";
 
@@ -84,9 +84,18 @@ async function waitForDefaultOutputDirectory(driver) {
         const panel = document.querySelector("#dz-desktop-settings");
         const folder = panel?.querySelector(".dz-quick-button");
         if (!panel || !folder) {
-          return { ok: false, reason: "settings-not-mounted", hasPanel: !!panel, hasFolder: !!folder };
+          return {
+            ok: false,
+            reason: "settings-not-mounted",
+            hasPanel: !!panel,
+            hasFolder: !!folder,
+          };
         }
-        return { ok: folder.textContent.trim() === expectedFolder, reason: "done", value: folder.textContent.trim() };
+        return {
+          ok: folder.textContent.trim() === expectedFolder,
+          reason: "done",
+          value: folder.textContent.trim(),
+        };
       }, directory);
     } catch (error) {
       // The webview can still be settling right after session creation on a
@@ -221,7 +230,11 @@ describe("Dezoomify desktop window", () => {
     );
 
     const terminal = await snapshot(driver);
-    assert.equal(terminal.error, false, `the save completes without a UI error: ${errorDetail(terminal)}`);
+    assert.equal(
+      terminal.error,
+      false,
+      `the save completes without a UI error: ${errorDetail(terminal)}`,
+    );
     assert.equal(terminal.completed, true, "the completion view is shown");
     const outputs = outputFiles(runOutputDir());
     assert.equal(outputs.length, 1, "automatic save writes exactly one PNG");
@@ -263,7 +276,11 @@ describe("Dezoomify desktop window", () => {
 
     const pending = await snapshot(driver);
     assert.equal(pending.job, false, "the link does not start before confirmation");
-    assert.equal(outputFiles(runOutputDir()).length, 0, "the link does not save before confirmation");
+    assert.equal(
+      outputFiles(runOutputDir()).length,
+      0,
+      "the link does not save before confirmation",
+    );
 
     const confirmed = await driver.executeScript(() => {
       const button = Array.from(document.querySelectorAll("#dz-deep-link-confirm button")).find(
@@ -285,7 +302,11 @@ describe("Dezoomify desktop window", () => {
       "deep-link save terminal",
     );
     const terminal = await snapshot(driver);
-    assert.equal(terminal.error, false, `the confirmed deep link completes: ${errorDetail(terminal)}`);
+    assert.equal(
+      terminal.error,
+      false,
+      `the confirmed deep link completes: ${errorDetail(terminal)}`,
+    );
     const outputs = outputFiles(runOutputDir());
     assert.equal(outputs.length, 1, "the deep link writes exactly one PNG");
     assertSavedPyramid(readFileSync(outputs[0]));
@@ -305,7 +326,11 @@ describe("Dezoomify desktop window", () => {
     );
 
     const terminal = await snapshot(driver);
-    assert.equal(terminal.error, false, `a kept partial is not a hard error: ${errorDetail(terminal)}`);
+    assert.equal(
+      terminal.error,
+      false,
+      `a kept partial is not a hard error: ${errorDetail(terminal)}`,
+    );
     assert.ok(terminal.partialNote, "the completion view reports missing tiles");
     const outputs = outputFiles(runOutputDir());
     assert.equal(outputs.length, 1, "exactly one partial output is published");

@@ -33,7 +33,13 @@ export interface PreviewElementLike {
 }
 
 export interface PreviewDocumentLike {
-  getElementById(id: string): (PreviewElementLike & { hidden?: unknown; textContent?: string | null; isConnected?: boolean }) | null;
+  getElementById(id: string):
+    | (PreviewElementLike & {
+        hidden?: unknown;
+        textContent?: string | null;
+        isConnected?: boolean;
+      })
+    | null;
 }
 
 export interface PreviewControls {
@@ -113,7 +119,10 @@ export function createPreviewControls(): PreviewControls {
 
   function zoomBy(factor: unknown, doc?: PreviewDocumentLike | null): PreviewTransform {
     const value = typeof factor === "number" ? factor : Number(factor);
-    const next = Math.max(fitScale(doc), Math.min(1, transform.scale * (Number.isFinite(value) ? value : 1)));
+    const next = Math.max(
+      fitScale(doc),
+      Math.min(1, transform.scale * (Number.isFinite(value) ? value : 1)),
+    );
     transform = { ...transform, scale: next };
     clampTranslation(doc);
     applyTransform(doc);
@@ -145,8 +154,12 @@ export function createPreviewControls(): PreviewControls {
       wired = true;
       resetTransform(doc);
 
-      doc.getElementById("preview-zoom-in")?.addEventListener("click", () => zoomBy(PREVIEW_ZOOM_STEP, doc));
-      doc.getElementById("preview-zoom-out")?.addEventListener("click", () => zoomBy(1 / PREVIEW_ZOOM_STEP, doc));
+      doc
+        .getElementById("preview-zoom-in")
+        ?.addEventListener("click", () => zoomBy(PREVIEW_ZOOM_STEP, doc));
+      doc
+        .getElementById("preview-zoom-out")
+        ?.addEventListener("click", () => zoomBy(1 / PREVIEW_ZOOM_STEP, doc));
       doc.getElementById("preview-zoom-fit")?.addEventListener("click", () => resetTransform(doc));
       doc.getElementById("preview-zoom-100")?.addEventListener("click", () => setScale(1, doc));
 
@@ -162,8 +175,11 @@ export function createPreviewControls(): PreviewControls {
           if (!Number.isFinite(delta) || delta === 0) return;
           // Use a continuous curve so high-frequency trackpad events do not
           // apply a full button-sized zoom step each time.
-          const boundedDelta = Math.max(-PREVIEW_WHEEL_STEP_PIXELS, Math.min(PREVIEW_WHEEL_STEP_PIXELS, delta));
-          const factor = Math.pow(PREVIEW_ZOOM_STEP, -boundedDelta / PREVIEW_WHEEL_STEP_PIXELS);
+          const boundedDelta = Math.max(
+            -PREVIEW_WHEEL_STEP_PIXELS,
+            Math.min(PREVIEW_WHEEL_STEP_PIXELS, delta),
+          );
+          const factor = PREVIEW_ZOOM_STEP ** (-boundedDelta / PREVIEW_WHEEL_STEP_PIXELS);
           zoomBy(factor, doc);
         },
         { passive: false },
@@ -178,7 +194,9 @@ export function createPreviewControls(): PreviewControls {
         lastX = (event as { clientX?: number }).clientX ?? 0;
         lastY = (event as { clientY?: number }).clientY ?? 0;
         try {
-          (canvas as PreviewElementLike).setPointerCapture?.((event as { pointerId?: number }).pointerId ?? 0);
+          (canvas as PreviewElementLike).setPointerCapture?.(
+            (event as { pointerId?: number }).pointerId ?? 0,
+          );
         } catch {
           // Pointer capture is best-effort.
         }
@@ -207,7 +225,10 @@ export function createPreviewControls(): PreviewControls {
 }
 
 /** Show or hide the assembled canvas plus its preview toolbar. */
-export function setCanvasVisible(doc: PreviewDocumentLike | null | undefined, visible: boolean): void {
+export function setCanvasVisible(
+  doc: PreviewDocumentLike | null | undefined,
+  visible: boolean,
+): void {
   if (!doc) return;
   try {
     const wrapper = doc.getElementById("canvas-wrapper");

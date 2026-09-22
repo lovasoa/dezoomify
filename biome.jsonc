@@ -1,0 +1,180 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "includes": [
+      "src/**",
+      "functions/**",
+      "scripts/**",
+      "test/**",
+      "packages/**",
+      "apps/**",
+      "*.js",
+      "*.mjs",
+      "*.cjs",
+      "*.ts",
+      "*.tsx",
+      "*.json",
+      "*.jsonc",
+      "*.css",
+      "!packages/wasm-bindings/src/generated.d.ts",
+      "!apps/desktop/src-tauri/tauri.conf.json",
+      "!apps/desktop/src-tauri/capabilities/generated.json",
+      "!apps/desktop/src-tauri/dezoomify.json",
+      "!apps/**/dist",
+      "!apps/extension/.wxt",
+      "!apps/extension/.output*"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all"
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "domains": {
+      "project": "recommended",
+      "types": "recommended",
+      "react": "recommended",
+      "test": "recommended",
+      "playwright": "recommended"
+    },
+    "rules": {
+      "preset": "recommended"
+    }
+  },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["packages/shared-ui/src/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "window": "The shared UI is host-neutral; inject browser effects through its integration.",
+                  "fetch": "The shared UI is host-neutral; inject fetching through its integration.",
+                  "chrome": "The shared UI must not depend on extension globals.",
+                  "tauri": "The shared UI must not depend on desktop globals."
+                }
+              }
+            },
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["*browser-runtime*"],
+                    "message": "The shared UI depends inward on app-model, never on a host runtime."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/app-model/src/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "window": "app-model is host-neutral.",
+                  "document": "app-model is host-neutral.",
+                  "fetch": "app-model is host-neutral.",
+                  "chrome": "app-model is host-neutral.",
+                  "tauri": "app-model is host-neutral.",
+                  "localStorage": "Inject storage into app-model instead of using a host global."
+                }
+              }
+            },
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "*browser-runtime*",
+                      "*shared-ui*",
+                      "react",
+                      "react/*",
+                      "react-dom",
+                      "react-dom/*",
+                      "*@tauri*"
+                    ],
+                    "message": "app-model imports generated bindings and local siblings only."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/browser-runtime/src/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["*shared-ui*"],
+                    "message": "A browser runtime never imports the shared UI."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["apps/desktop/src/jobService.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "__TAURI_INTERNALS__": "Use the public @tauri-apps/api modules.",
+                  "__TAURI_EVENT__": "Use the public @tauri-apps/api modules.",
+                  "__TAURI__": "Use the public @tauri-apps/api modules."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

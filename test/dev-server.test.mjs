@@ -2,12 +2,13 @@
 // routes /api/proxy to the real relay. Requests are made with node:http
 // (not fetch) so tests can stub the relay's upstream `fetch` without
 // disturbing their own HTTP client.
-import test from "node:test";
+
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import test from "node:test";
 import { createDevServerHandler } from "../scripts/dev-server.mjs";
 
 async function withServer(t, handler) {

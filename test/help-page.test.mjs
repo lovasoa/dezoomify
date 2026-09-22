@@ -1,11 +1,11 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { act } from "./react-dom.mjs";
 import { presentFailure } from "../packages/shared-ui/src/snapshot-view.ts";
 import { renderView } from "../packages/shared-ui/src/view.tsx";
+import { act } from "./react-dom.mjs";
 
 const webDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const srcDir = path.join(webDir, "docs", "user");
@@ -95,15 +95,21 @@ test("app pages link the in-app docs instead of legacy doc sites", () => {
 test("failure guidance links the in-app image-address guide", () => {
   const el = globalThis.document.createElement("div");
   globalThis.document.body.appendChild(el);
-  act(() => renderView(el, presentFailure(
-    {
-      code: "NO_IMAGE_FOUND",
-      category: "discovery",
-      retryable: false,
-      message: "No zoomable image could be found.",
-    },
-    "direct",
-  ), { onSubmitUrl: () => {}, onCancel: () => {}, onReset: () => {}, onSave: () => {} }));
+  act(() =>
+    renderView(
+      el,
+      presentFailure(
+        {
+          code: "NO_IMAGE_FOUND",
+          category: "discovery",
+          retryable: false,
+          message: "No zoomable image could be found.",
+        },
+        "direct",
+      ),
+      { onSubmitUrl: () => {}, onCancel: () => {}, onReset: () => {}, onSave: () => {} },
+    ),
+  );
   assert.ok(
     el.querySelector('a[href="./help/finding-the-image-address.html"]'),
     "failures point at the in-app image-address guide",

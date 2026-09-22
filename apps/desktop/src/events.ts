@@ -115,7 +115,14 @@ function redactValue(key: string, value: unknown): unknown {
   }
   if (typeof value === "string") {
     let out = value;
-    for (const needle of ["apiKey=", "api_key=", "token=", "session=", "cookie=", "Authorization:"]) {
+    for (const needle of [
+      "apiKey=",
+      "api_key=",
+      "token=",
+      "session=",
+      "cookie=",
+      "Authorization:",
+    ]) {
       let from = 0;
       while (true) {
         const at = out.indexOf(needle, from);

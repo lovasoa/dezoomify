@@ -9,24 +9,66 @@
 // view renders presentSnapshot of the latest snapshot. Host-local failures
 // (invalid input, host rejections) render through presentFailure. No
 // synthetic controller walk exists.
+
+import { PROXY_TRANSPORT_LABEL } from "@dezoomify/app-model";
+import type { ErrorDto, HeaderDto, ProcessingRecipe } from "@dezoomify/wasm-bindings";
+import type { HistoryEntry, JobHandle, JobSnapshot } from "../packages/app-model/src/index.ts";
 import {
-  createJobService,
   cancelAllQueueEntries,
-  finishActiveQueueEntry,
-  summarizeQueue,
-  HISTORY_KEY_WEBSITE,
   clearHistory as clearHistoryStore,
+  createJobService,
+  finishActiveQueueEntry,
+  HISTORY_KEY_WEBSITE,
+  isValidInputUrl,
   loadHistory as loadHistoryStore,
   pushHistory,
   saveHistory as saveHistoryStore,
+  summarizeQueue,
   toHistoryEntry,
-  isValidInputUrl,
 } from "../packages/app-model/src/index.ts";
+import {
+  canvasToPngBlob,
+  isCanvasTaintError,
+  saveBlobViaAnchor,
+} from "../packages/browser-runtime/src/canvas-save.ts";
+import type { StructuredFailure } from "../packages/browser-runtime/src/failure.ts";
+import { failure } from "../packages/browser-runtime/src/failure.ts";
+import {
+  type BrowserJobHandle,
+  createBrowserRunner,
+  createCanvasAssembly,
+  createProbeSize,
+} from "../packages/browser-runtime/src/index.ts";
+import { createJobActivity } from "../packages/browser-runtime/src/job-activity.ts";
+import {
+  BROWSER_MAX_CANVAS_AREA,
+  BROWSER_MAX_CANVAS_SIDE,
+  BROWSER_MAX_PLAN_TILES,
+} from "../packages/browser-runtime/src/limits.ts";
+import { createLogger } from "../packages/browser-runtime/src/logging.ts";
+import { desktopHandoffLink, isLocalFileUrl } from "../packages/browser-runtime/src/plan-gates.ts";
+import {
+  createPreviewControls,
+  setCanvasVisible,
+} from "../packages/browser-runtime/src/preview.ts";
+import { createTileDecoder } from "../packages/browser-runtime/src/tile-decode.ts";
+import { loadTileImage } from "../packages/browser-runtime/src/tile-draw.ts";
+import {
+  createTileThrottle,
+  hostOf,
+  REQUEST_TIMEOUT_MS,
+  websiteTileConcurrency,
+} from "../packages/browser-runtime/src/tile-policy.ts";
+import { createWebFetcher, type WebFetcher } from "../packages/browser-runtime/src/web-fetch.ts";
+import {
+  errorTransportFor,
+  isProxyEligible,
+} from "../packages/browser-runtime/src/web-integration.ts";
 import type {
-  HistoryEntry,
-  JobHandle,
-  JobSnapshot,
-} from "../packages/app-model/src/index.ts";
+  SnapshotPresentation,
+  StructuredError,
+  ViewContext,
+} from "../packages/shared-ui/src/index.ts";
 import {
   describeFailure,
   presentFailure,
@@ -37,60 +79,20 @@ import {
   showExtensionGuidance,
   t,
 } from "../packages/shared-ui/src/index.ts";
-import type { SnapshotPresentation, StructuredError, ViewContext } from "../packages/shared-ui/src/index.ts";
-import { DEFAULT_PAGE_TITLE, isActiveJobStatus, jobPageTitle } from "../packages/shared-ui/src/view-helpers.ts";
 import {
-  RATE_LIMITED_BY_SITE_MESSAGE,
-  SITE_BUSY_MESSAGE,
+  DEFAULT_PAGE_TITLE,
+  isActiveJobStatus,
+  jobPageTitle,
+} from "../packages/shared-ui/src/view-helpers.ts";
+import {
   classifyReadableBytes,
   noImageFoundError,
+  RATE_LIMITED_BY_SITE_MESSAGE,
+  SITE_BUSY_MESSAGE,
 } from "./discovery.ts";
 import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.ts";
-import { errorTransportFor, isProxyEligible } from "../packages/browser-runtime/src/web-integration.ts";
 import { createProxyTransport, PROXY_METADATA_MAX_BYTES } from "./proxyTransport.ts";
-import {
-  createBrowserRunner,
-  createCanvasAssembly,
-  createProbeSize,
-  type BrowserJobHandle,
-} from "../packages/browser-runtime/src/index.ts";
-import { failure } from "../packages/browser-runtime/src/failure.ts";
-import type { StructuredFailure } from "../packages/browser-runtime/src/failure.ts";
-import {
-  BROWSER_MAX_CANVAS_AREA,
-  BROWSER_MAX_CANVAS_SIDE,
-  BROWSER_MAX_PLAN_TILES,
-} from "../packages/browser-runtime/src/limits.ts";
-import {
-  desktopHandoffLink,
-  isLocalFileUrl,
-} from "../packages/browser-runtime/src/plan-gates.ts";
-import {
-  createWebQueue,
-  enqueueWebQueue,
-} from "./queue.ts";
-import {
-  createPreviewControls,
-  setCanvasVisible,
-} from "../packages/browser-runtime/src/preview.ts";
-import {
-  REQUEST_TIMEOUT_MS,
-  createTileThrottle,
-  hostOf,
-  websiteTileConcurrency,
-} from "../packages/browser-runtime/src/tile-policy.ts";
-import { createTileDecoder } from "../packages/browser-runtime/src/tile-decode.ts";
-import { loadTileImage } from "../packages/browser-runtime/src/tile-draw.ts";
-import { createJobActivity } from "../packages/browser-runtime/src/job-activity.ts";
-import { createLogger } from "../packages/browser-runtime/src/logging.ts";
-import { createWebFetcher, type WebFetcher } from "../packages/browser-runtime/src/web-fetch.ts";
-import { PROXY_TRANSPORT_LABEL } from "@dezoomify/app-model";
-import {
-  canvasToPngBlob,
-  isCanvasTaintError,
-  saveBlobViaAnchor,
-} from "../packages/browser-runtime/src/canvas-save.ts";
-import type { ErrorDto, HeaderDto, ProcessingRecipe } from "@dezoomify/wasm-bindings";
+import { createWebQueue, enqueueWebQueue } from "./queue.ts";
 
 const preview = createPreviewControls();
 
@@ -177,7 +179,14 @@ const jobActivity = createJobActivity({ onUpdate: update });
 const webLog = createLogger("web", { defaultContext: "web" });
 webLog.addSink((entry) => jobActivity.pushLog(entry.line));
 let tileAttempts = 0;
-const metadataAttempts: Array<{ at: number; transport: string; target: string; outcome: string; durationMs: number; bytes?: number }> = [];
+const metadataAttempts: Array<{
+  at: number;
+  transport: string;
+  target: string;
+  outcome: string;
+  durationMs: number;
+  bytes?: number;
+}> = [];
 
 function resetActivity(url: string): void {
   tileAttempts = 0;
@@ -194,7 +203,8 @@ function refreshDiagnostics(): void {
   if (metadataAttempts.length > 0) {
     lines.push("Metadata requests");
     for (const attempt of metadataAttempts) {
-      const size = attempt.bytes === undefined ? "" : ` · ${Math.max(1, Math.round(attempt.bytes / 1024))} KB`;
+      const size =
+        attempt.bytes === undefined ? "" : ` · ${Math.max(1, Math.round(attempt.bytes / 1024))} KB`;
       lines.push(
         `+${(attempt.at / 1000).toFixed(1)} s  ${attempt.target}  ${attempt.transport}  ${attempt.outcome}  ${attempt.durationMs} ms${size}`,
       );
@@ -262,15 +272,12 @@ const webFetcher: WebFetcher = createWebFetcher({
   messages: {
     rateLimitedBySite: RATE_LIMITED_BY_SITE_MESSAGE,
     siteBusy: SITE_BUSY_MESSAGE,
-    discoveryFailed: (_via) => noImageFoundError().message ?? "No zoomable image was found at this address.",
+    discoveryFailed: (_via) =>
+      noImageFoundError().message ?? "No zoomable image was found at this address.",
   },
   throttle: (url) => tileThrottle.throttle(url),
 });
-async function probeSizeFor(
-  url: string,
-  headers: Record<string, string>,
-  signal?: AbortSignal,
-) {
+async function probeSizeFor(url: string, headers: Record<string, string>, signal?: AbortSignal) {
   const probe = createProbeSize({
     fetchTile: (probeUrl, probeHeaders) => webFetcher.fetchTileFor(probeUrl, probeHeaders, signal),
     decode: (bytes) => tileDecoder.decode(bytes),
@@ -298,7 +305,9 @@ function disposeAttempt(): void {
   jobHandle = null;
   try {
     void handle?.dispose();
-  } catch { /* teardown is best effort */ }
+  } catch {
+    /* teardown is best effort */
+  }
 }
 
 /** Normalize generated request headers for `fetch`. */
@@ -317,19 +326,29 @@ function createAssembly(
     decode: (bytes: ArrayBuffer) => decoder.decode(bytes),
     processTile,
     createCanvas: (width: number, height: number) => {
-      const element = (document.getElementById("rendering-canvas") as HTMLCanvasElement | null)
-        ?? document.createElement("canvas");
+      const element =
+        (document.getElementById("rendering-canvas") as HTMLCanvasElement | null) ??
+        document.createElement("canvas");
       element.width = width;
       element.height = height;
       const ctx2d = element.getContext("2d");
       if (!ctx2d) {
-        throw failure("OUTPUT_SURFACE_UNAVAILABLE", "This browser could not create the output surface.", false);
+        throw failure(
+          "OUTPUT_SURFACE_UNAVAILABLE",
+          "This browser could not create the output surface.",
+          false,
+        );
       }
       // Reveal the canvas before drawing (legacy parity): the picture stays
       // visible and right-clickable while the job finishes.
       setCanvasVisible(document, true);
       preview.resetTransform(document);
-      return { width, height, ctx2d, toBlob: (cb: BlobCallback, mime?: string) => element.toBlob(cb, mime) };
+      return {
+        width,
+        height,
+        ctx2d,
+        toBlob: (cb: BlobCallback, mime?: string) => element.toBlob(cb, mime),
+      };
     },
     encode: (canvas) =>
       canvasToPngBlob(canvas as unknown as { toBlob(cb: BlobCallback, mime?: string): void }),
@@ -464,7 +483,10 @@ function currentPresentation(): SnapshotPresentation {
   // that never reached a snapshot. Display-only rides an explicit host flag.
   if (hostFailure && !activeSnapshot) return presentFailure(hostFailure, activeTransport());
   if (!activeSnapshot) return presentIdle();
-  return failurePresentationOf(activeSnapshot) ?? presentSnapshot(activeSnapshot, activeTransport(), { displayOnly: displayOnlyActive });
+  return (
+    failurePresentationOf(activeSnapshot) ??
+    presentSnapshot(activeSnapshot, activeTransport(), { displayOnly: displayOnlyActive })
+  );
 }
 
 function isTerminalNow(): boolean {
@@ -495,13 +517,20 @@ async function runJob(url: string, origin = url): Promise<void> {
   update();
 
   let settle: () => void = () => {};
-  const finished = new Promise<void>((resolve) => { settle = resolve; });
+  const finished = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
   let settledOutcome: "done" | "failed" | "cancelled" = "done";
 
   const onHostFailure = (error: unknown): void => {
     if (run !== activeRun) return;
     if (hostFailure || activeSnapshot?.terminal) return;
-    const structured = error as { code?: unknown; message?: unknown; detail?: unknown; retryable?: unknown };
+    const structured = error as {
+      code?: unknown;
+      message?: unknown;
+      detail?: unknown;
+      retryable?: unknown;
+    };
     const code = typeof structured?.code === "string" ? structured.code : "OUTPUT_FAILED";
     webLog.error("host-failure", `code=${code} message=${String(structured?.message ?? code)}`);
     hostFailure = describeFailure({
@@ -528,16 +557,27 @@ async function runJob(url: string, origin = url): Promise<void> {
     fetchResource: async (effect, signal) => {
       const request = effect.request;
       if (request.purpose === "metadata") {
-        const result = await webFetcher.fetchMetadataFor(request.uri, headerRecord(request.headers), signal);
+        const result = await webFetcher.fetchMetadataFor(
+          request.uri,
+          headerRecord(request.headers),
+          signal,
+        );
         return {
           bytes: new Uint8Array(result.bytes),
-          ...(typeof result.finalUri === "string" && result.finalUri !== "" ? { finalUri: result.finalUri } : {}),
+          ...(typeof result.finalUri === "string" && result.finalUri !== ""
+            ? { finalUri: result.finalUri }
+            : {}),
         };
       }
-      const result = await webFetcher.fetchTileFor(request.uri, headerRecord(request.headers), signal);
+      const result = await webFetcher.fetchTileFor(
+        request.uri,
+        headerRecord(request.headers),
+        signal,
+      );
       return { bytes: new Uint8Array(result.bytes) };
     },
-    probeSize: (probeUrl, probeHeaders, requestId, signal) => probeSizeFor(probeUrl, probeHeaders, signal),
+    probeSize: (probeUrl, probeHeaders, requestId, signal) =>
+      probeSizeFor(probeUrl, probeHeaders, signal),
     loadDisplayImage: (tileUrl: string) =>
       loadTileImage(tileUrl, {
         hooks: {
@@ -557,7 +597,9 @@ async function runJob(url: string, origin = url): Promise<void> {
         ...(reason ? { blocked_reason: reason } : {}),
         transport: transport ?? "direct",
         ...(typeof structured.http === "number" ? { http: structured.http } : {}),
-        ...(typeof structured.retry_after_ms === "number" ? { retry_after_ms: structured.retry_after_ms } : {}),
+        ...(typeof structured.retry_after_ms === "number"
+          ? { retry_after_ms: structured.retry_after_ms }
+          : {}),
         ...(typeof structured.cause?.http === "number" ? { http: structured.cause.http } : {}),
         ...(structured.preview ? { preview: structured.preview } : {}),
         ...(structured.detail ? { detail: structured.detail } : {}),
@@ -591,9 +633,10 @@ async function runJob(url: string, origin = url): Promise<void> {
     if (run !== activeRun) return;
     activeSnapshot = snapshot;
     const imageIndex = snapshot.selection.image;
-    const selected = imageIndex === null || imageIndex === undefined
-      ? undefined
-      : snapshot.selection.catalog?.entries[imageIndex];
+    const selected =
+      imageIndex === null || imageIndex === undefined
+        ? undefined
+        : snapshot.selection.catalog?.entries[imageIndex];
     const image = selected?.kind === "image" ? selected : undefined;
     resultTitle = typeof image?.title === "string" ? image.title : undefined;
 
@@ -613,7 +656,12 @@ async function runJob(url: string, origin = url): Promise<void> {
         return;
       }
       if (terminalKind === "completed" || terminalKind === "partial-completed") {
-        recordWebHistory(origin, viewCtx.completedInfo?.width ?? 0, viewCtx.completedInfo?.height ?? 0, "png");
+        recordWebHistory(
+          origin,
+          viewCtx.completedInfo?.width ?? 0,
+          viewCtx.completedInfo?.height ?? 0,
+          "png",
+        );
         settledOutcome = "done";
         update();
         settle();
@@ -677,7 +725,10 @@ async function runJob(url: string, origin = url): Promise<void> {
       hostFailure = null;
     }
     const summary = summarizeQueue(webQueue);
-    webLog.info("queue", `succeeded=${summary.succeeded} failed=${summary.failed} pending=${summary.pending}`);
+    webLog.info(
+      "queue",
+      `succeeded=${summary.succeeded} failed=${summary.failed} pending=${summary.pending}`,
+    );
     void runJob(next.url);
   }
 }
@@ -708,7 +759,7 @@ function submitQueuedUrl(url: string): void {
 
 const appContainer = typeof document !== "undefined" ? document.getElementById("app") : null;
 
-let viewCtx: ViewContext = {
+const viewCtx: ViewContext = {
   capabilities: {
     extensionAvailable: false,
     nativeAvailable: false,
@@ -748,10 +799,7 @@ function update(): void {
   const snapDone = activeSnapshot?.progress.completed ?? 0;
   if (presentation.phase === "job" && snapTotal) {
     viewCtx.currentProgress = {
-      active: Math.min(
-        jobActivity.state.pendingRequests ?? 0,
-        Math.max(0, snapTotal - snapDone),
-      ),
+      active: Math.min(jobActivity.state.pendingRequests ?? 0, Math.max(0, snapTotal - snapDone)),
       ...(keptMessage ? { message: keptMessage } : {}),
     };
   } else if (keptMessage && presentation.phase === "job") {
@@ -774,7 +822,8 @@ function update(): void {
             code: "INVALID_URL",
             category: "validation",
             retryable: false,
-            message: "Local files cannot be opened on this website. Use the desktop app for files on your computer.",
+            message:
+              "Local files cannot be opened on this website. Use the desktop app for files on your computer.",
             transport: "direct",
             phase: "discovery",
             detail: "Local file: open the desktop app and choose the file there; nothing is sent.",
@@ -957,11 +1006,15 @@ if (appContainer) {
       // Preview wiring must never break the job.
     }
   }
-  document.getElementById("dz-nav-btn-extension")?.addEventListener("click", () => showExtensionGuidance(document));
-  document.getElementById("dz-nav-btn-desktop")?.addEventListener("click", () => showDesktopAppGuidance(document, {
-    userAgent: navigator.userAgent,
-    platform: (navigator as unknown as { platform?: string }).platform,
-  }));
+  document
+    .getElementById("dz-nav-btn-extension")
+    ?.addEventListener("click", () => showExtensionGuidance(document));
+  document.getElementById("dz-nav-btn-desktop")?.addEventListener("click", () =>
+    showDesktopAppGuidance(document, {
+      userAgent: navigator.userAgent,
+      platform: (navigator as unknown as { platform?: string }).platform,
+    }),
+  );
   if (typeof window !== "undefined") {
     window.addEventListener("hashchange", () => {
       const raw = parseHash(window.location.hash);
@@ -978,4 +1031,4 @@ if (appContainer) {
   update();
 }
 
-export { update, currentPresentation };
+export { currentPresentation, update };

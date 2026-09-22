@@ -16,8 +16,10 @@ export const it = {
   "desktop.done.saved": "Salvata nella cartella scelta.",
   "desktop.done.open": "Apri immagine",
   "desktop.done.reveal": "Mostra nella cartella",
-  "desktop.done.openError": "Impossibile aprire l’immagine. Verifica che sia installato un visualizzatore predefinito.",
-  "desktop.done.folderError": "Impossibile aprire la cartella. Verifica che sia installato un gestore di file.",
+  "desktop.done.openError":
+    "Impossibile aprire l’immagine. Verifica che sia installato un visualizzatore predefinito.",
+  "desktop.done.folderError":
+    "Impossibile aprire la cartella. Verifica che sia installato un gestore di file.",
   "desktop.done.missingError": "L’immagine o la cartella non esiste più.",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Capito",
@@ -34,14 +36,16 @@ export const it = {
   "view.desktop.why1Body":
     "Una scheda del browser puo contenere solo una certa quantita di immagine. L applicazione desktop compone l immagine in memoria in base alla memoria disponibile e scrive il risultato sul disco.",
   "view.desktop.why2Title": "Salva l immagine finita:",
-  "view.desktop.why2Body": "Ogni attivita viene salvata in un solo file di uscita sul tuo computer. Puoi accodare piu attivita; vengono salvate una alla volta.",
+  "view.desktop.why2Body":
+    "Ogni attivita viene salvata in un solo file di uscita sul tuo computer. Puoi accodare piu attivita; vengono salvate una alla volta.",
   "view.desktop.why3Title": "Quando il sito non riesce a finire:",
   "view.desktop.why3Body":
     "Il sito interrompe l attivita con un errore e rimanda all applicazione desktop per l immagine a piena dimensione.",
   "view.desktop.howTitle": "Come usarla",
   "view.desktop.step1":
     "Scarica l’{installer} non firmato per {platform} dalla nostra pagina GitHub Releases, quindi installalo. Non sono disponibili aggiornamenti automatici.",
-  "view.desktop.step2": "Avvia Dezoomify e incolla l indirizzo della tua immagine zoomabile o del manifesto.",
+  "view.desktop.step2":
+    "Avvia Dezoomify e incolla l indirizzo della tua immagine zoomabile o del manifesto.",
   "view.desktop.step3":
     "Scegli la risoluzione desiderata e la cartella di destinazione per salvare l immagine completa composta.",
   "view.desktop.cliTitle": "Serve automazione? Prova Dezoomify CLI",
@@ -110,7 +114,8 @@ export const it = {
   "view.job.techDetails": "Dettagli tecnici e registri",
   "view.job.oneImage": "1 immagine",
   "view.job.manyImages": "{count} immagini",
-  "view.job.autoChoiceFull": "{noun} trovata, salvo la piu grande possibile ({width}×{height}, {tiles} riquadri).",
+  "view.job.autoChoiceFull":
+    "{noun} trovata, salvo la piu grande possibile ({width}×{height}, {tiles} riquadri).",
   "view.job.autoChoiceDims": "{noun} trovata, salvo la piu grande possibile ({width}×{height}).",
   "view.job.autoChoiceTiles": "{noun} trovata, salvo la piu grande possibile ({tiles} riquadri).",
   "view.job.autoChoiceBare": "{noun} trovata, salvo la piu grande possibile.",
@@ -129,7 +134,8 @@ export const it = {
   "view.display.extDesc":
     "Per pagine che richiedono accesso o cookie di sessione. Rileva in automatico i visori nelle pagine attive.",
   "view.display.deskTitle": "Guida all applicazione desktop",
-  "view.display.deskDescClean": "Per un salvataggio pulito a piena dimensione quando il browser puo solo mostrare l immagine.",
+  "view.display.deskDescClean":
+    "Per un salvataggio pulito a piena dimensione quando il browser puo solo mostrare l immagine.",
   "view.display.startOver": "Ricomincia",
   // Completion section.
   "view.done.ready": "La tua immagine e pronta.",
@@ -152,7 +158,8 @@ export const it = {
   "view.done.gapMap": "Riquadri mancanti ({failed} su {total}): {shown}{rest}.",
   "view.done.gapMapMore": ", e altri {n}",
   // Failure section.
-  "view.fail.fallback": "Dezoomify non ha potuto trovare o salvare l immagine zoomabile a questo indirizzo.",
+  "view.fail.fallback":
+    "Dezoomify non ha potuto trovare o salvare l immagine zoomabile a questo indirizzo.",
   "view.fail.title": "Impossibile dezoomificare l immagine",
   "view.fail.deskDescLimits":
     "Per immagini oltre i limiti di memoria del browser, in base alla memoria disponibile. Elaborate in nativo sul tuo computer.",
@@ -201,8 +208,10 @@ export const it = {
     "Questo indirizzo non sembra una pagina web. Inserisci un indirizzo che inizi con http:// o https://.",
   "desktop.settings.unusable":
     "Queste impostazioni di scaricamento non si possono usare. Regola le impostazioni evidenziate e riprova.",
-  "desktop.settings.invalidSubmit": "Queste impostazioni di scaricamento non sono valide. Regolale e riprova.",
-  "desktop.output.deniedPick": "La destinazione di salvataggio non e stata accettata. Scegli un altro file per continuare.",
+  "desktop.settings.invalidSubmit":
+    "Queste impostazioni di scaricamento non sono valide. Regolale e riprova.",
+  "desktop.output.deniedPick":
+    "La destinazione di salvataggio non e stata accettata. Scegli un altro file per continuare.",
   "desktop.output.deniedFallback": "La destinazione di salvataggio e stata rifiutata.",
   "desktop.proto.incompatible":
     "Questa versione dell applicazione non puo aprire questa immagine da {host}. Aggiorna l applicazione e riprova.",
@@ -216,7 +225,8 @@ export const it = {
     "Esiste gia un file nella destinazione di salvataggio da {host}. Scegli un altro file o conferma la sovrascrittura per continuare.",
   "desktop.output.destDenied":
     "La destinazione di salvataggio non e stata accettata da {host}. Scegli un altro file per continuare.",
-  "desktop.job.gone": "Questa attivita non e piu attiva da {host}. Ricomincia con un indirizzo nuovo.",
+  "desktop.job.gone":
+    "Questa attivita non e piu attiva da {host}. Ricomincia con un indirizzo nuovo.",
   "desktop.msg.thisPicture": "questa immagine",
   "desktop.msg.dimsPixels": "{a} per {b} pixel",
   "desktop.msg.needAbout": " Serve circa {need} di memoria",
@@ -234,14 +244,18 @@ export const it = {
     "Nessuna immagine zoomabile trovata a questo indirizzo. Prova una pagina con un visualizzatore o l estensione del browser.",
   "desktop.plan.none":
     "Questa immagine non ha dimensioni utili da salvare da {host}. Prova un altra immagine o una Larghezza max minore.",
-  "desktop.transport.stalled": "Salvataggio fermo durante il contatto con {host}. Controlla la connessione e riprova.",
+  "desktop.transport.stalled":
+    "Salvataggio fermo durante il contatto con {host}. Controlla la connessione e riprova.",
   "desktop.output.writeFail":
     "Impossibile scrivere questa immagine da {host}. Scegli un altra destinazione e riprova.",
-  "desktop.job.cancelledMsg": "Il salvataggio dell immagine e stato interrotto. Ogni file incompleto e stato rimosso.",
-  "desktop.start.failed": "Impossibile avviare il salvataggio di questa immagine da {host}. Riprova.",
+  "desktop.job.cancelledMsg":
+    "Il salvataggio dell immagine e stato interrotto. Ogni file incompleto e stato rimosso.",
+  "desktop.start.failed":
+    "Impossibile avviare il salvataggio di questa immagine da {host}. Riprova.",
   "desktop.choice.failed": "Questa scelta non e stata accettata. Riprova.",
   "view.ext.desynced": "L estensione ha perso la sincronizzazione. Riavvia la scansione.",
-  "desktop.save.generic": "Impossibile salvare questa immagine da {host}. Riprova con un altro indirizzo.",
+  "desktop.save.generic":
+    "Impossibile salvare questa immagine da {host}. Riprova con un altro indirizzo.",
   "desktop.internal.error":
     "Un problema imprevisto ha interrotto questo salvataggio da {host}. Riprova e copia la diagnostica se ricapita.",
   "desktop.save.fallback": "Impossibile salvare questa immagine da {host}. Riprova.",
@@ -252,7 +266,8 @@ export const it = {
   "desktop.invoke.destination": "Impossibile richiedere la destinazione di salvataggio.",
   "desktop.invoke.cancel": "Impossibile annullare l attivita.",
   "desktop.step.chooseWhere": "Scegli dove salvare…",
-  "desktop.step.chooseWhereDetail": "La destinazione di salvataggio richiede attenzione prima di continuare.",
+  "desktop.step.chooseWhereDetail":
+    "La destinazione di salvataggio richiede attenzione prima di continuare.",
   "desktop.step.pickOutput": "Scegli il file di uscita per continuare.",
   "desktop.step.partialTitle": "Alcuni riquadri non si sono potuti salvare…",
   "desktop.step.partialDetail": "Scegli se conservare l immagine parziale, scartarla o riprovare.",
@@ -264,7 +279,8 @@ export const it = {
   "desktop.step.encodingPartial": "Codifica dell immagine parziale nell applicazione nativa",
   "desktop.step.discardingPartial": "Scarto dell immagine parziale",
   "desktop.step.retrying": "Nuovo tentativo",
-  "desktop.step.appAutoDetail": "L applicazione salva da sola la prima immagine; nessun selettore offerto.",
+  "desktop.step.appAutoDetail":
+    "L applicazione salva da sola la prima immagine; nessun selettore offerto.",
   "desktop.step.foundFits": "{noun} trovata, salvo la piu grande possibile…",
   "desktop.step.tilesAtFull": "{current} riquadri su {total} a piena risoluzione",
   "desktop.step.savedDims": "{width} per {height} pixel salvati",
@@ -344,7 +360,8 @@ export const it = {
   "desktop.settings.browseOutput": "Scegli la cartella di uscita",
   "desktop.settings.browseCache": "Scegli la cartella di cache",
   "desktop.settings.headersAdv": "Avanzate: intestazioni di richiesta (fidate)",
-  "desktop.settings.headersLabel": "Intestazioni di richiesta, una per riga come Nome: valore (facoltative, fidate)",
+  "desktop.settings.headersLabel":
+    "Intestazioni di richiesta, una per riga come Nome: valore (facoltative, fidate)",
   "desktop.settings.reset": "Reimposta le impostazioni",
   "desktop.quick.folder": "Cartella",
   "desktop.quick.askEachTime": "Chiedi ogni volta",
@@ -366,19 +383,23 @@ export const it = {
   "desktop.advanced.jpegQuality": "Qualita JPEG",
   "desktop.advanced.jpegQualityDesc": "Un valore maggiore conserva piu dettagli dell immagine.",
   "desktop.advanced.compressionEffort": "Impegno di compressione",
-  "desktop.advanced.compressionEffortDesc": "La qualita resta senza perdita; valori maggiori richiedono piu tempo.",
+  "desktop.advanced.compressionEffortDesc":
+    "La qualita resta senza perdita; valori maggiori richiedono piu tempo.",
   "desktop.advanced.dimensions": "Dimensioni personalizzate",
-  "desktop.advanced.dimensionsDesc": "Lascia vuoto un valore per mantenere le proporzioni originali.",
+  "desktop.advanced.dimensionsDesc":
+    "Lascia vuoto un valore per mantenere le proporzioni originali.",
   "desktop.advanced.width": "Larghezza",
   "desktop.advanced.height": "Altezza",
   "desktop.advanced.retries": "Tentativi",
-  "desktop.advanced.retriesDesc": "Riprova le tessere non riuscite prima di conservare un risultato parziale.",
+  "desktop.advanced.retriesDesc":
+    "Riprova le tessere non riuscite prima di conservare un risultato parziale.",
   "desktop.advanced.resumeCache": "Cache di ripresa",
   "desktop.advanced.resumeCacheDesc": "Riutilizza le tessere dopo un salvataggio interrotto.",
   "desktop.advanced.choose": "Scegli…",
   "desktop.advanced.change": "Modifica…",
   "desktop.advanced.headers": "Intestazioni della richiesta",
-  "desktop.advanced.headersDesc": "Per i visori protetti. Inviate solo all origine dell immagine e mai registrate.",
+  "desktop.advanced.headersDesc":
+    "Per i visori protetti. Inviate solo all origine dell immagine e mai registrate.",
   // Extension job-tab user copy, rendered through the same `t(key, vars)`
   // shape; log and diagnostics lines stay literal English and never use these
   // keys. `test/ui-i18n.test.mjs` fails when the page renders a key outside

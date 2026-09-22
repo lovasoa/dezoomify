@@ -1,11 +1,11 @@
 // Restricted metadata fetch relay (pure, no server framework).
 import {
-  PROXY_MAX_BYTES,
-  PROXY_MAX_REDIRECTS,
   buildProxyCorsHeaders,
   cacheControlForProxy,
   createProxyRequestId,
   isAllowedMetadataContentType,
+  PROXY_MAX_BYTES,
+  PROXY_MAX_REDIRECTS,
   proxyOriginKey,
   stripUpstreamHeaders,
   validateProxyTarget,
@@ -147,19 +147,43 @@ export async function handleProxyRequest(
 
   // Incoming must be POST (same-origin /api/proxy with JSON body).
   if (req.method.toUpperCase() !== "POST") {
-    return { status: 405, headers: baseHeaders, code: "PROXY_POLICY_DENIED", reason: "method", requestId };
+    return {
+      status: 405,
+      headers: baseHeaders,
+      code: "PROXY_POLICY_DENIED",
+      reason: "method",
+      requestId,
+    };
   }
   if (!Number.isInteger(req.protocolVersion) || req.protocolVersion < 1) {
-    return { status: 422, headers: baseHeaders, code: "PROXY_POLICY_DENIED", reason: "protocol-version", requestId };
+    return {
+      status: 422,
+      headers: baseHeaders,
+      code: "PROXY_POLICY_DENIED",
+      reason: "protocol-version",
+      requestId,
+    };
   }
   const first = validateProxyTarget(req.targetUrl, { resolveHost: deps.resolveHost });
   if (!first.ok) {
-    return { status: 403, headers: baseHeaders, code: "PROXY_POLICY_DENIED", reason: first.reason ?? "denied", requestId };
+    return {
+      status: 403,
+      headers: baseHeaders,
+      code: "PROXY_POLICY_DENIED",
+      reason: first.reason ?? "denied",
+      requestId,
+    };
   }
   if (!deps.disableOriginBucket) {
     const key = proxyOriginKey(req.targetUrl);
     if (key === null) {
-      return { status: 403, headers: baseHeaders, code: "PROXY_POLICY_DENIED", reason: "origin", requestId };
+      return {
+        status: 403,
+        headers: baseHeaders,
+        code: "PROXY_POLICY_DENIED",
+        reason: "origin",
+        requestId,
+      };
     }
     const nowMs = deps.nowMs?.() ?? Date.now();
     if (!takeOriginToken(key, nowMs)) {
@@ -228,17 +252,35 @@ export async function handleProxyRequest(
       }
       hops += 1;
       if (hops > maxRedirects) {
-        return { status: 508, headers: baseHeaders, code: "PROXY_POLICY_DENIED", reason: "redirect-limit", requestId };
+        return {
+          status: 508,
+          headers: baseHeaders,
+          code: "PROXY_POLICY_DENIED",
+          reason: "redirect-limit",
+          requestId,
+        };
       }
       let next: string;
       try {
         next = new URL(loc, current).toString();
       } catch {
-        return { status: 502, headers: baseHeaders, code: "PROXY_POLICY_DENIED", reason: "redirect-target", requestId };
+        return {
+          status: 502,
+          headers: baseHeaders,
+          code: "PROXY_POLICY_DENIED",
+          reason: "redirect-target",
+          requestId,
+        };
       }
       const hopCheck = validateProxyTarget(next, { resolveHost: deps.resolveHost });
       if (!hopCheck.ok) {
-        return { status: 403, headers: baseHeaders, code: "PROXY_POLICY_DENIED", reason: hopCheck.reason ?? "redirect-target", requestId };
+        return {
+          status: 403,
+          headers: baseHeaders,
+          code: "PROXY_POLICY_DENIED",
+          reason: hopCheck.reason ?? "redirect-target",
+          requestId,
+        };
       }
       current = next;
       continue;
@@ -249,7 +291,13 @@ export async function handleProxyRequest(
     }
     const contentType = res.headers.get("content-type");
     if (!isAllowedMetadataContentType(contentType)) {
-      return { status: 415, headers: baseHeaders, code: "PROXY_POLICY_DENIED", reason: "content-type", requestId };
+      return {
+        status: 415,
+        headers: baseHeaders,
+        code: "PROXY_POLICY_DENIED",
+        reason: "content-type",
+        requestId,
+      };
     }
     const declared = res.headers.get("content-length");
     if (declared !== null && declared !== undefined && declared !== "") {

@@ -1,5 +1,5 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import { createBrowserRunner } from "../src/browser-runner.ts";
 import { createWebFetcher } from "../src/web-fetch.ts";
 
@@ -17,7 +17,9 @@ function fakeWorker() {
       assert.equal(type, "message");
       listeners.push(listener);
     },
-    terminate() { this.terminated = true; },
+    terminate() {
+      this.terminated = true;
+    },
     receive(data) {
       for (const listener of listeners) listener({ data });
     },
@@ -40,8 +42,12 @@ function product(overrides = {}) {
   return {
     worker,
     seen,
-    setTainted(value) { tainted = value; },
-    setPermissionPending(value) { permissionPending = value; },
+    setTainted(value) {
+      tainted = value;
+    },
+    setPermissionPending(value) {
+      permissionPending = value;
+    },
     deps: {
       createWorker: () => worker,
       fetchResource: async () => {
@@ -61,7 +67,9 @@ function product(overrides = {}) {
           prepare() {},
           async acquireTile() {},
           acquireDisplayTile() {},
-          async finalizeOutput() { return "browser-save-ready"; },
+          async finalizeOutput() {
+            return "browser-save-ready";
+          },
           release() {},
           isTainted: () => tainted,
         };
@@ -93,7 +101,13 @@ function snap(revision, overrides = {}) {
     lifecycle: "AcquiringTiles",
     paused: false,
     progress: { completed: 0, total: undefined },
-    selection: { image: undefined, level: undefined, level_count: 0, catalog: undefined, deferred: [] },
+    selection: {
+      image: undefined,
+      level: undefined,
+      level_count: 0,
+      catalog: undefined,
+      deferred: [],
+    },
     decision: undefined,
     terminal: undefined,
     output: undefined,
@@ -112,43 +126,89 @@ function sink(emitted) {
 test("non-browser exec and empty inputs reject typed before any worker exists", async () => {
   const p = product();
   const runner = createBrowserRunner(p.deps);
-  await assert.rejects(() => runner.start(startRequest({ exec: { kind: "native", destination: {} } }), { snapshot: () => {} }), (error) => {
-    assert.equal(error.code, "browser.invalid-exec");
-    return true;
-  });
-  await assert.rejects(() => runner.start(startRequest({ inputs: [] }), { snapshot: () => {} }), (error) => {
-    assert.equal(error.code, "browser.invalid-source");
-    return true;
-  });
+  await assert.rejects(
+    () =>
+      runner.start(startRequest({ exec: { kind: "native", destination: {} } }), {
+        snapshot: () => {},
+      }),
+    (error) => {
+      assert.equal(error.code, "browser.invalid-exec");
+      return true;
+    },
+  );
+  await assert.rejects(
+    () => runner.start(startRequest({ inputs: [] }), { snapshot: () => {} }),
+    (error) => {
+      assert.equal(error.code, "browser.invalid-source");
+      return true;
+    },
+  );
 });
 
 test("runner sends one-attempt structured tile failures to the engine", async (t) => {
   for (const fixture of [
-    { name: "HTTP 403", status: 403, expectedCode: "TRANSPORT_HTTP_ERROR", retryable: false,
-      fetchImpl: async () => ({ status: 403, headers: {}, arrayBuffer: async () => new ArrayBuffer(0) }) },
-    { name: "transient network error", expectedCode: "TRANSPORT_NETWORK_ERROR", retryable: true,
-      fetchImpl: async () => { throw new Error("connection reset"); } },
-    { name: "HTTP 429 Retry-After", status: 429, expectedCode: "TRANSPORT_HTTP_ERROR", retryable: true, retryAfterMs: 3000,
-      fetchImpl: async () => ({ status: 429, headers: { get: (name) => name === "retry-after" ? "3" : null }, arrayBuffer: async () => new ArrayBuffer(0) }) },
+    {
+      name: "HTTP 403",
+      status: 403,
+      expectedCode: "TRANSPORT_HTTP_ERROR",
+      retryable: false,
+      fetchImpl: async () => ({
+        status: 403,
+        headers: {},
+        arrayBuffer: async () => new ArrayBuffer(0),
+      }),
+    },
+    {
+      name: "transient network error",
+      expectedCode: "TRANSPORT_NETWORK_ERROR",
+      retryable: true,
+      fetchImpl: async () => {
+        throw new Error("connection reset");
+      },
+    },
+    {
+      name: "HTTP 429 Retry-After",
+      status: 429,
+      expectedCode: "TRANSPORT_HTTP_ERROR",
+      retryable: true,
+      retryAfterMs: 3000,
+      fetchImpl: async () => ({
+        status: 429,
+        headers: { get: (name) => (name === "retry-after" ? "3" : null) },
+        arrayBuffer: async () => new ArrayBuffer(0),
+      }),
+    },
   ]) {
     await t.test(fixture.name, async () => {
       let calls = 0;
       const fetcher = createWebFetcher({
-        fetchImpl: async (...args) => { calls += 1; return fixture.fetchImpl(...args); },
+        fetchImpl: async (...args) => {
+          calls += 1;
+          return fixture.fetchImpl(...args);
+        },
         isProxyEligible: () => ({ eligible: false, reason: "tile" }),
         hooks: { onRequestStart: () => 1, onRequestEnd() {}, onLog() {}, onUpdate() {} },
-        messages: { rateLimitedBySite: "limited", siteBusy: "busy", discoveryFailed: () => "missing" },
+        messages: {
+          rateLimitedBySite: "limited",
+          siteBusy: "busy",
+          discoveryFailed: () => "missing",
+        },
         throttle: async () => {},
       });
       const p = product({
-        fetchResource: (effect, signal) => fetcher.fetchTileFor(effect.request.uri, {}, signal).then((result) => ({ bytes: new Uint8Array(result.bytes) })),
+        fetchResource: (effect, signal) =>
+          fetcher
+            .fetchTileFor(effect.request.uri, {}, signal)
+            .then((result) => ({ bytes: new Uint8Array(result.bytes) })),
         classifyFailure: (error) => ({
           code: error.cause?.code ?? error.code,
           retryable: error.retryable,
           message: error.message,
           transport: error.cause?.transport ?? "direct",
           ...(typeof error.http === "number" ? { http: error.http } : {}),
-          ...(typeof error.retry_after_ms === "number" ? { retry_after_ms: error.retry_after_ms } : {}),
+          ...(typeof error.retry_after_ms === "number"
+            ? { retry_after_ms: error.retry_after_ms }
+            : {}),
         }),
       });
       const runner = createBrowserRunner(p.deps);
@@ -156,13 +216,16 @@ test("runner sends one-attempt structured tile failures to the engine", async (t
       p.worker.receive(received(snap(1), [TILE]));
       await new Promise((resolve) => setImmediate(resolve));
       assert.equal(calls, 1);
-      const failureMessage = p.worker.posted.find((message) => message.type === "engine.failure" && message.requestId === TILE.request.id);
+      const failureMessage = p.worker.posted.find(
+        (message) => message.type === "engine.failure" && message.requestId === TILE.request.id,
+      );
       assert.ok(failureMessage);
       assert.equal(failureMessage.error.code, fixture.expectedCode);
       assert.equal(failureMessage.error.retryable, fixture.retryable);
       assert.equal(failureMessage.error.transport, "direct");
       if (fixture.status) assert.equal(failureMessage.error.http, fixture.status);
-      if (fixture.retryAfterMs) assert.equal(failureMessage.error.retry_after_ms, fixture.retryAfterMs);
+      if (fixture.retryAfterMs)
+        assert.equal(failureMessage.error.retry_after_ms, fixture.retryAfterMs);
       await handle.dispose();
     });
   }
@@ -172,7 +235,16 @@ test("start roots the session at the first input and preserves selection policy"
   const p = product();
   const runner = createBrowserRunner(p.deps);
   const browserSelection = { maxWidth: 16384, maxHeight: 16384, maxArea: 268435456 };
-  await runner.start(startRequest({ engine: { max_concurrent_fetches: 3, max_tiles: 100_000, browser_selection: browserSelection } }), { snapshot: () => {} });
+  await runner.start(
+    startRequest({
+      engine: {
+        max_concurrent_fetches: 3,
+        max_tiles: 100_000,
+        browser_selection: browserSelection,
+      },
+    }),
+    { snapshot: () => {} },
+  );
   const start = p.worker.posted.find((message) => message.type === "engine.start");
   assert.ok(start, "expected engine.start on the worker");
   assert.deepEqual(start.inputs, [{ url: "https://meta.test/info.json" }]);
@@ -184,7 +256,11 @@ test("start roots the session at the first input and preserves selection policy"
   const manual = product();
   await createBrowserRunner(manual.deps).start(startRequest(), { snapshot: () => {} });
   const manualStart = manual.worker.posted.find((message) => message.type === "engine.start");
-  assert.equal(manualStart.quotas.browser_selection, undefined, "generic runner does not force auto-selection");
+  assert.equal(
+    manualStart.quotas.browser_selection,
+    undefined,
+    "generic runner does not force auto-selection",
+  );
 });
 
 test("snapshots pass through with live host status", async () => {
@@ -196,7 +272,11 @@ test("snapshots pass through with live host status", async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(emitted.length, 1);
   assert.equal(emitted[0][0].progress.completed, 1);
-  assert.deepEqual(emitted[0][1], { transport: "direct", permission: "granted", output: "pending" });
+  assert.deepEqual(emitted[0][1], {
+    transport: "direct",
+    permission: "granted",
+    output: "pending",
+  });
   p.setTainted(true);
   p.worker.receive(received(snap(2, { progress: { completed: 2, total: 4 } })));
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -217,7 +297,9 @@ test("a missing grant suspends as pending host status, not a phase machine", asy
     }),
   });
   let permissionDetail = null;
-  p.deps.onPermissionRequired = (detail) => { permissionDetail = detail; };
+  p.deps.onPermissionRequired = (detail) => {
+    permissionDetail = detail;
+  };
   const runner = createBrowserRunner(p.deps);
   const emitted = [];
   const handle = await runner.start(startRequest(), sink(emitted));
@@ -253,10 +335,13 @@ test("user commands map onto the session; engine-internal commands reject typed"
   assert.ok(kinds.includes("engine.command"));
   const follow = p.worker.posted.find((message) => message.command?.type === "follow-deferred");
   assert.deepEqual(follow?.command, { type: "follow-deferred", image: 1 });
-  await assert.rejects(() => handle.command({ type: "start", inputs: [] }), (error) => {
-    assert.equal(error.code, "browser.unsupported-command");
-    return true;
-  });
+  await assert.rejects(
+    () => handle.command({ type: "start", inputs: [] }),
+    (error) => {
+      assert.equal(error.code, "browser.unsupported-command");
+      return true;
+    },
+  );
 });
 
 test("a terminal snapshot settles the UI; stale live snapshots never emit", async () => {
@@ -276,10 +361,13 @@ test("a terminal snapshot settles the UI; stale live snapshots never emit", asyn
   await handle.command({ type: "pause" });
   assert.ok(p.worker.posted.some((message) => message.type === "engine.command"));
   await handle.dispose();
-  await assert.rejects(() => handle.command({ type: "pause" }), (error) => {
-    assert.equal(error.code, "browser.job-settled");
-    return true;
-  });
+  await assert.rejects(
+    () => handle.command({ type: "pause" }),
+    (error) => {
+      assert.equal(error.code, "browser.job-settled");
+      return true;
+    },
+  );
 });
 
 test("an adapter error projects to a terminal failed snapshot, not a hang", async () => {
@@ -331,7 +419,9 @@ test("processing calls transfer their buffer and settle on disposal", async () =
       prepare() {},
       async acquireTile() {},
       acquireDisplayTile() {},
-      async finalizeOutput() { return "browser-save-ready"; },
+      async finalizeOutput() {
+        return "browser-save-ready";
+      },
       release() {},
     };
   };
@@ -344,8 +434,11 @@ test("processing calls transfer their buffer and settle on disposal", async () =
   assert.ok(processCall, "expected the processing call on the worker");
   assert.equal(p.worker.transfers.flat().length, 1, "processing bytes must transfer, not copy");
   await handle.dispose();
-  await assert.rejects(() => pending, (error) => {
-    assert.equal(error.code, "browser.job-settled");
-    return true;
-  });
+  await assert.rejects(
+    () => pending,
+    (error) => {
+      assert.equal(error.code, "browser.job-settled");
+      return true;
+    },
+  );
 });

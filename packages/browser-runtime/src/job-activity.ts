@@ -64,8 +64,7 @@ export function createJobActivity(hooks: ActivityHooks): JobActivity {
         setTimeout(cb, 0);
       }
     });
-  const every =
-    hooks.setIntervalFn ?? ((cb: () => void, ms: number) => setInterval(cb, ms));
+  const every = hooks.setIntervalFn ?? ((cb: () => void, ms: number) => setInterval(cb, ms));
   const clearEvery =
     hooks.clearIntervalFn ?? ((t: unknown) => clearTimeout(t as ReturnType<typeof setInterval>));
 
@@ -100,7 +99,8 @@ export function createJobActivity(hooks: ActivityHooks): JobActivity {
 
   /** Delta key for the heartbeat: only a real change schedules a paint. */
   function heartbeatKey(at?: number): string {
-    const longest = typeof state.longestPendingMs === "number" ? Math.floor(state.longestPendingMs / 250) : 0;
+    const longest =
+      typeof state.longestPendingMs === "number" ? Math.floor(state.longestPendingMs / 250) : 0;
     return `${pendingStarts.size}:${completedRequests}:${failedRequests}:${longest}:${Math.floor((at ?? now()) / 1000)}`;
   }
 

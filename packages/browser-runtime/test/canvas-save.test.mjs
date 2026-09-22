@@ -1,5 +1,5 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import {
   BROWSER_SAVE_COLOR_WARNING,
   canvasToPngBlob,
@@ -9,24 +9,43 @@ import {
 import { stableErrorCode } from "../src/failure.ts";
 
 test("canvasToPngBlob resolves the encoded blob", async () => {
-  const blob = await canvasToPngBlob({ toBlob: (cb) => cb({ kind: "png" }), });
+  const blob = await canvasToPngBlob({ toBlob: (cb) => cb({ kind: "png" }) });
   assert.deepEqual(blob, { kind: "png" });
 });
 
 test("canvasToPngBlob maps null and throws to OUTPUT_ENCODE_FAILED", async () => {
-  await assert.rejects(() => canvasToPngBlob({ toBlob: (cb) => cb(null) }), (e) => {
-    assert.equal(e.code, "OUTPUT_ENCODE_FAILED");
-    return true;
-  });
-  await assert.rejects(() => canvasToPngBlob({ toBlob: () => { throw new Error("tainted"); } }), (e) => {
-    assert.equal(e.code, "OUTPUT_ENCODE_FAILED");
-    return true;
-  });
+  await assert.rejects(
+    () => canvasToPngBlob({ toBlob: (cb) => cb(null) }),
+    (e) => {
+      assert.equal(e.code, "OUTPUT_ENCODE_FAILED");
+      return true;
+    },
+  );
+  await assert.rejects(
+    () =>
+      canvasToPngBlob({
+        toBlob: () => {
+          throw new Error("tainted");
+        },
+      }),
+    (e) => {
+      assert.equal(e.code, "OUTPUT_ENCODE_FAILED");
+      return true;
+    },
+  );
 });
 
 test("canvasToPngBlob preserves a taint SecurityError for display-only fallback", async () => {
   const taint = Object.assign(new Error("tainted"), { name: "SecurityError", code: 18 });
-  await assert.rejects(() => canvasToPngBlob({ toBlob: () => { throw taint; } }), (e) => e === taint);
+  await assert.rejects(
+    () =>
+      canvasToPngBlob({
+        toBlob: () => {
+          throw taint;
+        },
+      }),
+    (e) => e === taint,
+  );
   assert.equal(isCanvasTaintError(taint), true);
 });
 
@@ -38,7 +57,15 @@ test("stableErrorCode ignores browser exception numeric codes", () => {
 
 test("saveBlobViaAnchor downloads the core title or suggested WxH fallback", () => {
   const appended = [];
-  const anchor = { href: "", download: "", clicked: false, click() { this.clicked = true; }, remove() {} };
+  const anchor = {
+    href: "",
+    download: "",
+    clicked: false,
+    click() {
+      this.clicked = true;
+    },
+    remove() {},
+  };
   const doc = { createElement: () => anchor, body: { appendChild: (el) => appended.push(el) } };
   saveBlobViaAnchor(doc, "blob:abc", 800, 600, "An image");
   assert.equal(anchor.href, "blob:abc");

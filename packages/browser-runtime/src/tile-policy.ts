@@ -4,8 +4,9 @@
 // the adaptive concurrency picker, combined timeout signal, and proxy
 // rate-limit delay. Tile retries belong to the engine. Pure and dependency
 // injected where the host clock is involved, so node tests use fakes.
-import { failure } from "./failure.ts";
+
 import type { StructuredFailure } from "./failure.ts";
+import { failure } from "./failure.ts";
 
 /** Per-request timeout applied to every individual HTTP request (30 s). */
 export const REQUEST_TIMEOUT_MS = 30000;
@@ -121,7 +122,11 @@ export function websiteTileConcurrency(host?: HostConcurrencyHints): number {
   } catch {
     // Host globals are best-effort; defaults keep the floor.
   }
-  return pickTileConcurrency({ hardwareConcurrency: cores, rttMs: rtt, capabilityCap: BROWSER_CAPABILITY_MAX_CONCURRENCY });
+  return pickTileConcurrency({
+    hardwareConcurrency: cores,
+    rttMs: rtt,
+    capabilityCap: BROWSER_CAPABILITY_MAX_CONCURRENCY,
+  });
 }
 
 export function tileHostOf(url: string): string {
@@ -209,7 +214,10 @@ export interface TimeoutCombined {
  * Combine a caller signal with the per-request timeout.
  * Uses AbortSignal.any/timeout when available, manual wiring otherwise.
  */
-export function combineTimeout(parentSignal?: AbortSignal, ms: number = REQUEST_TIMEOUT_MS): TimeoutCombined {
+export function combineTimeout(
+  parentSignal?: AbortSignal,
+  ms: number = REQUEST_TIMEOUT_MS,
+): TimeoutCombined {
   const AS = AbortSignal as unknown as {
     timeout?: (ms: number) => AbortSignal;
     any?: (signals: AbortSignal[]) => AbortSignal;
@@ -217,7 +225,10 @@ export function combineTimeout(parentSignal?: AbortSignal, ms: number = REQUEST_
   if (typeof AbortSignal !== "undefined" && typeof AS.timeout === "function") {
     const timeout = (AS.timeout as (ms: number) => AbortSignal)(ms);
     if (parentSignal && typeof AS.any === "function") {
-      return { signal: (AS.any as (s: AbortSignal[]) => AbortSignal)([parentSignal, timeout]), cleanup() {} };
+      return {
+        signal: (AS.any as (s: AbortSignal[]) => AbortSignal)([parentSignal, timeout]),
+        cleanup() {},
+      };
     }
     if (!parentSignal) return { signal: timeout, cleanup() {} };
   }

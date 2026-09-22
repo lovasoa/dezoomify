@@ -15,19 +15,20 @@
 //
 // All host constructors are injected so node tests drive the full path with
 // fakes.
-import { createProcessQueue, drawPlacedTile } from "./tile-draw.ts";
-import type { Canvas2DLike, PlacedTileGeometry, TileImageLike } from "./tile-draw.ts";
-import type { TileBitmap } from "./tile-decode.ts";
-import { canvasTooLargeFailure } from "./plan-gates.ts";
-import { BROWSER_LIMITS, probeLimits, safeArea } from "./limits.ts";
-import type { BrowserLimits } from "./types.ts";
-import { failure } from "./failure.ts";
+
 import type {
   OutputDispositionDto,
   OutputFormat,
   ProcessingRecipe,
   TilePlacementDto,
 } from "@dezoomify/wasm-bindings";
+import { failure } from "./failure.ts";
+import { BROWSER_LIMITS, probeLimits, safeArea } from "./limits.ts";
+import { canvasTooLargeFailure } from "./plan-gates.ts";
+import type { TileBitmap } from "./tile-decode.ts";
+import type { Canvas2DLike, PlacedTileGeometry, TileImageLike } from "./tile-draw.ts";
+import { createProcessQueue, drawPlacedTile } from "./tile-draw.ts";
+import type { BrowserLimits } from "./types.ts";
 
 export type BrowserSaveDisposition = Extract<
   OutputDispositionDto,
@@ -262,14 +263,8 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
     for (const [tile, placement] of placements) {
       const bitmap = bitmaps.get(tile);
       const image = displayImages.get(tile);
-      const w = placement.expected_size?.width
-        ?? bitmap?.width
-        ?? image?.naturalWidth
-        ?? 0;
-      const h = placement.expected_size?.height
-        ?? bitmap?.height
-        ?? image?.naturalHeight
-        ?? 0;
+      const w = placement.expected_size?.width ?? bitmap?.width ?? image?.naturalWidth ?? 0;
+      const h = placement.expected_size?.height ?? bitmap?.height ?? image?.naturalHeight ?? 0;
       width = Math.max(width, placement.position.x + (w > 0 ? w : 0));
       height = Math.max(height, placement.position.y + (h > 0 ? h : 0));
     }

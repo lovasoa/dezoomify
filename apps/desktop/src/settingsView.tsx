@@ -1,13 +1,13 @@
-import { useEffect, useRef, useState } from "react";
-import type { ReactElement, ReactNode } from "react";
 import { t } from "@dezoomify/shared-ui";
+import type { ReactElement, ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { DesktopOutputFormat, DesktopSettings, NetworkProfile } from "./settings.ts";
 import {
   headersToEditableText,
   parseHeadersText,
   pickDirectory,
   validateSettings,
 } from "./settings.ts";
-import type { DesktopOutputFormat, DesktopSettings, NetworkProfile } from "./settings.ts";
 
 interface Props {
   settings: DesktopSettings;
@@ -43,10 +43,10 @@ function folderName(path: string | null): string {
 
 function QuickOption({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="dz-quick-option">
+    <div className="dz-quick-option">
       <span>{label}</span>
       {children}
-    </label>
+    </div>
   );
 }
 
@@ -111,7 +111,8 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
   };
 
   const jpeg = settings.output_format === "jpeg";
-  const showCompression = settings.output_format !== "webp" && settings.output_format !== "iiif-dir";
+  const showCompression =
+    settings.output_format !== "webp" && settings.output_format !== "iiif-dir";
   const compressionValue = jpeg ? 100 - settings.compression : settings.compression;
   const compressionLabel = jpeg
     ? t("desktop.advanced.jpegQuality")
@@ -144,7 +145,9 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
             }
           >
             {formats.map((format) => (
-              <option key={format.value} value={format.value}>{format.label}</option>
+              <option key={format.value} value={format.value}>
+                {format.label}
+              </option>
             ))}
           </select>
         </QuickOption>
@@ -246,7 +249,9 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
                 aria-label={t("desktop.advanced.width")}
                 value={settings.max_width ?? ""}
                 onChange={(event) =>
-                  commit({ max_width: event.currentTarget.value ? Number(event.currentTarget.value) : null })
+                  commit({
+                    max_width: event.currentTarget.value ? Number(event.currentTarget.value) : null,
+                  })
                 }
               />
               <span aria-hidden="true">×</span>
@@ -258,7 +263,11 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
                 aria-label={t("desktop.advanced.height")}
                 value={settings.max_height ?? ""}
                 onChange={(event) =>
-                  commit({ max_height: event.currentTarget.value ? Number(event.currentTarget.value) : null })
+                  commit({
+                    max_height: event.currentTarget.value
+                      ? Number(event.currentTarget.value)
+                      : null,
+                  })
                 }
               />
             </div>
@@ -309,7 +318,11 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
             />
           </details>
 
-          {error ? <p id="dz-settings-error" role="alert">{error}</p> : null}
+          {error ? (
+            <p id="dz-settings-error" role="alert">
+              {error}
+            </p>
+          ) : null}
           <button type="button" className="dz-settings-reset" onClick={onReset}>
             {t("desktop.settings.reset")}
           </button>

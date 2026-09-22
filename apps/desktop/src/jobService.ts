@@ -21,8 +21,6 @@
 // Remaining engine-internal commands have no shell command and reject
 // with desktop.unsupported-command.
 
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import type {
   JobHandle,
   JobObserver,
@@ -31,13 +29,15 @@ import type {
   JobStartRequest,
   UserCommand,
 } from "@dezoomify/app-model";
-import {
-  DESKTOP_EVENT_CHANNELS,
-  assertNoTileBytes,
-  eventJobId,
-  type DesktopEventChannel,
-} from "./events.ts";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { DESKTOP_COMMANDS, NATIVE_FORMATS } from "./desktopIntegration.ts";
+import {
+  assertNoTileBytes,
+  DESKTOP_EVENT_CHANNELS,
+  type DesktopEventChannel,
+  eventJobId,
+} from "./events.ts";
 
 // Keep erasable syntax only so node type-stripping can read this file.
 
@@ -53,10 +53,7 @@ export type AnswerChoice =
 
 export interface DesktopIpc {
   invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown>;
-  listen(
-    channel: string,
-    handler: (event: { payload: unknown }) => void,
-  ): Promise<unknown>;
+  listen(channel: string, handler: (event: { payload: unknown }) => void): Promise<unknown>;
 }
 
 export interface DesktopJobServiceDeps {
@@ -239,7 +236,8 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
   }
 
   function ensureListening(): Promise<void> {
-    return listening ??= (async () => {
+    if (listening) return listening;
+    listening = (async () => {
       try {
         for (const channel of DESKTOP_EVENT_CHANNELS) {
           const maybe = await ipc.listen(channel, (event) => {
@@ -258,6 +256,7 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
         );
       }
     })();
+    return listening;
   }
 
   function validateStart(request: JobStartRequest): { url: string } {
@@ -457,7 +456,10 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
       : [];
     for (const name of commands) {
       if (!(DESKTOP_COMMANDS as readonly string[]).includes(name)) {
-        throw serviceError("desktop.capability-mismatch", "The desktop host offers unknown commands.");
+        throw serviceError(
+          "desktop.capability-mismatch",
+          "The desktop host offers unknown commands.",
+        );
       }
     }
     return {

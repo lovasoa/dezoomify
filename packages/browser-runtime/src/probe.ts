@@ -9,14 +9,14 @@
 export type ProbeSize =
   | { status: "missing" }
   | {
-  status: "available";
-  width: number;
-  height: number;
-  /** Readable bytes retained when the probe can also satisfy output. */
-  bytes?: ArrayBuffer;
-  /** Plain image retained when probing succeeded through display fallback. */
-  image?: ProbeImage;
-};
+      status: "available";
+      width: number;
+      height: number;
+      /** Readable bytes retained when the probe can also satisfy output. */
+      bytes?: ArrayBuffer;
+      /** Plain image retained when probing succeeded through display fallback. */
+      image?: ProbeImage;
+    };
 
 export interface ProbeImage {
   naturalWidth: number;
@@ -31,13 +31,15 @@ export interface ProbeBitmap {
 
 export interface ProbeSizeDeps {
   /** Fetch one tile as readable bytes. The engine request id lets a host route the probe without colliding with tile requests. */
-  fetchTile(url: string, headers: Record<string, string>, requestId?: number): Promise<{ bytes: ArrayBuffer }>;
+  fetchTile(
+    url: string,
+    headers: Record<string, string>,
+    requestId?: number,
+  ): Promise<{ bytes: ArrayBuffer }>;
   /** Decode fetched bytes far enough to report dimensions. */
   decode(bytes: ArrayBuffer): Promise<ProbeBitmap>;
   /** Measure dimensions without byte access (plain <img> fallback). */
-  loadImage?: (
-    url: string,
-  ) => Promise<{ width: number; height: number; image?: ProbeImage }>;
+  loadImage?: (url: string) => Promise<{ width: number; height: number; image?: ProbeImage }>;
 }
 
 function observedSize(
@@ -50,8 +52,14 @@ function observedSize(
     : { status: "missing" };
 }
 
-export function createProbeSize(deps: ProbeSizeDeps): (url: string, headers: Record<string, string>, requestId?: number) => Promise<ProbeSize> {
-  return async (url: string, headers: Record<string, string>, requestId?: number): Promise<ProbeSize> => {
+export function createProbeSize(
+  deps: ProbeSizeDeps,
+): (url: string, headers: Record<string, string>, requestId?: number) => Promise<ProbeSize> {
+  return async (
+    url: string,
+    headers: Record<string, string>,
+    requestId?: number,
+  ): Promise<ProbeSize> => {
     let bytes: ArrayBuffer;
     try {
       ({ bytes } = await deps.fetchTile(url, headers, requestId));

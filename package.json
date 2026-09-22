@@ -11,6 +11,7 @@
     "react-dom": "^19"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.14",
     "@types/node": "26.5.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
@@ -30,7 +31,9 @@
     }
   },
   "scripts": {
-    "lint": "pnpm -r lint",
+    "lint": "biome lint .",
+    "format": "biome check --write .",
+    "check:biome": "biome check .",
     "typecheck": "tsc --noEmit && pnpm -r typecheck",
     "build": "vite build",
     "test": "node scripts/build-help.mjs && node --import ./test/tsx-loader.mjs --test-reporter=dot --test \"test/*.test.mjs\""

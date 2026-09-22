@@ -19,7 +19,8 @@ function testHostPermissions(isTestPackage: boolean): string[] {
   // The permission E2E declares its loopback tile origin so Chromium may
   // transport fixture bytes. The test package's job view still treats it as
   // ungranted until its native-permission boundary mock is clicked.
-  if (process.env.DEZOOMIFY_TEST_SOURCE_HOST_ONLY === "1") return [`${testOrigin}/*`, "http://localhost/*"];
+  if (process.env.DEZOOMIFY_TEST_SOURCE_HOST_ONLY === "1")
+    return [`${testOrigin}/*`, "http://localhost/*"];
   return ["http://127.0.0.1/*", "http://localhost/*", `${testOrigin}/*`];
 }
 
@@ -43,16 +44,20 @@ export default defineConfig({
         128: "icons/icon128-grey.png",
       },
     },
-    browser_specific_settings: browser === "firefox" ? {
-      gecko: {
-        id: "{14074c89-8a5f-4813-98df-a7117f062871}",
-        strict_min_version: "133.0",
-      },
-    } : undefined,
+    browser_specific_settings:
+      browser === "firefox"
+        ? {
+            gecko: {
+              id: "{14074c89-8a5f-4813-98df-a7117f062871}",
+              strict_min_version: "133.0",
+            },
+          }
+        : undefined,
     content_security_policy: {
       extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; base-uri 'none'",
     },
-    description: "Click to find zoomable images on the current page and rebuild them at full resolution. No background monitoring.",
+    description:
+      "Click to find zoomable images on the current page and rebuild them at full resolution. No background monitoring.",
     host_permissions: testHostPermissions(mode === "testing"),
     icons: {
       16: "icons/icon16.png",
@@ -82,15 +87,21 @@ export default defineConfig({
       await mkdir(publicDir, { recursive: true });
       await cp(path.join(root, "src/icons"), path.join(publicDir, "icons"), { recursive: true });
       await mkdir(path.join(publicDir, "wasm"), { recursive: true });
-      await cp(path.join(wasm, "dezoomify-wasm.js"), path.join(publicDir, "wasm/dezoomify-wasm.js"));
-      await cp(path.join(wasm, "dezoomify-wasm_bg.wasm"), path.join(publicDir, "wasm/dezoomify-wasm_bg.wasm"));
+      await cp(
+        path.join(wasm, "dezoomify-wasm.js"),
+        path.join(publicDir, "wasm/dezoomify-wasm.js"),
+      );
+      await cp(
+        path.join(wasm, "dezoomify-wasm_bg.wasm"),
+        path.join(publicDir, "wasm/dezoomify-wasm_bg.wasm"),
+      );
 
       if (wxt.config.mode === "testing") {
         await cp(path.join(root, "src/test"), path.join(publicDir, "test"), { recursive: true });
         await writeFile(
           path.join(publicDir, "test/config.js"),
           `globalThis.__DEZOOMIFY_TEST_ORIGIN__ = ${JSON.stringify(testOrigin)};\n` +
-          `globalThis.__DEZOOMIFY_TEST_SCENARIO__ = ${JSON.stringify(testScenario)};\n`,
+            `globalThis.__DEZOOMIFY_TEST_SCENARIO__ = ${JSON.stringify(testScenario)};\n`,
         );
       }
     },

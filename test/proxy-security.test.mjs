@@ -1,17 +1,17 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
+import { handleProxyRequest } from "../src/server/proxy.ts";
 import {
-  parseIPv4,
-  isBlockedIPv4Value,
-  isBlockedIPv6,
-  validateProxyTarget,
-  validateUpstreamMethod,
-  isAllowedMetadataContentType,
-  stripUpstreamHeaders,
   buildProxyCorsHeaders,
   createProxyRequestId,
+  isAllowedMetadataContentType,
+  isBlockedIPv4Value,
+  isBlockedIPv6,
+  parseIPv4,
+  stripUpstreamHeaders,
+  validateProxyTarget,
+  validateUpstreamMethod,
 } from "../src/server/security.ts";
-import { handleProxyRequest } from "../src/server/proxy.ts";
 
 function hdr(obj) {
   const lower = {};
@@ -38,7 +38,15 @@ test("IPv4 notations: decimal/octal/hex loopback all blocked", () => {
     assert.equal(r.ok, false, h);
   }
   // Private + link-local + metadata + multicast.
-  for (const h of ["10.0.0.1", "172.16.5.4", "172.31.255.1", "192.168.1.1", "169.254.169.254", "224.0.0.1", "0.0.0.0"]) {
+  for (const h of [
+    "10.0.0.1",
+    "172.16.5.4",
+    "172.31.255.1",
+    "192.168.1.1",
+    "169.254.169.254",
+    "224.0.0.1",
+    "0.0.0.0",
+  ]) {
     const v = parseIPv4(h);
     assert.ok(v !== null && isBlockedIPv4Value(v), h);
     assert.equal(validateProxyTarget(`https://${h}/x`).ok, false, h);
@@ -81,7 +89,10 @@ test("userinfo, ports, scheme, signed query rejected", () => {
 
 test("DNS rebinding double-check blocks private resolution", () => {
   const resolve = (h) => (h === "public.test" ? ["93.184.216.34"] : ["127.0.0.1"]);
-  assert.equal(validateProxyTarget("https://public.test/x.json", { resolveHost: resolve }).ok, true);
+  assert.equal(
+    validateProxyTarget("https://public.test/x.json", { resolveHost: resolve }).ok,
+    true,
+  );
   assert.equal(validateProxyTarget("https://evil.test/x.json", { resolveHost: resolve }).ok, false);
 });
 
@@ -106,7 +117,9 @@ test("header stripping + restrictive CORS + request ids", () => {
     Accept: "application/json",
     "X-Custom": "drop",
   });
-  assert.ok(!("cookie" in stripped) && !("authorization" in stripped) && !("connection" in stripped));
+  assert.ok(
+    !("cookie" in stripped) && !("authorization" in stripped) && !("connection" in stripped),
+  );
   assert.equal(stripped.accept, "application/json");
   assert.ok(!("x-custom" in stripped));
   const cors = buildProxyCorsHeaders("https://site.test", "https://site.test");
@@ -130,7 +143,10 @@ test("relay: valid public metadata succeeds; tiles rejected by content-type", as
     }),
     websiteOrigin: "https://site.test",
   };
-  const ok = await handleProxyRequest({ method: "POST", targetUrl: "https://public.test/x.json", protocolVersion: 1 }, okDeps);
+  const ok = await handleProxyRequest(
+    { method: "POST", targetUrl: "https://public.test/x.json", protocolVersion: 1 },
+    okDeps,
+  );
   assert.equal(ok.status, 200);
   assert.ok(ok.body instanceof ArrayBuffer);
   assert.equal(ok.headers["access-control-allow-origin"], "https://site.test");
@@ -157,13 +173,23 @@ test("relay: method, private target, redirect-to-private, oversize", async () =>
   const base = { websiteOrigin: "https://site.test" };
   const badMethod = await handleProxyRequest(
     { method: "GET", targetUrl: "https://public.test/x.json", protocolVersion: 1 },
-    { ...base, fetchUpstream: async () => { throw new Error("must not fetch"); } },
+    {
+      ...base,
+      fetchUpstream: async () => {
+        throw new Error("must not fetch");
+      },
+    },
   );
   assert.equal(badMethod.status, 405);
 
   const privateT = await handleProxyRequest(
     { method: "POST", targetUrl: "http://127.0.0.1/x.json", protocolVersion: 1 },
-    { ...base, fetchUpstream: async () => { throw new Error("must not fetch"); } },
+    {
+      ...base,
+      fetchUpstream: async () => {
+        throw new Error("must not fetch");
+      },
+    },
   );
   assert.equal(privateT.status, 403);
 

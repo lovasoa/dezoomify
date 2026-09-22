@@ -123,7 +123,8 @@ function toUint8(bytes: unknown): Uint8Array | null {
       const view = bytes as { buffer: ArrayBuffer; byteOffset?: number; byteLength?: number };
       if (view.buffer instanceof ArrayBuffer) {
         const off = typeof view.byteOffset === "number" ? view.byteOffset : 0;
-        const len = typeof view.byteLength === "number" ? view.byteLength : view.buffer.byteLength - off;
+        const len =
+          typeof view.byteLength === "number" ? view.byteLength : view.buffer.byteLength - off;
         return new Uint8Array(view.buffer, off, len);
       }
     } catch {
@@ -237,7 +238,13 @@ export function looksLikeZoomableJson(text: string): boolean {
           if (v.includes("iiif")) return true;
         }
         if (lk === "tiles" || lk === "tile" || lk === "profile" || lk === "@id" || lk === "@type") {
-          seen.push(lk + ":" + String(obj[k] ?? "").toLowerCase().slice(0, 120));
+          seen.push(
+            lk +
+              ":" +
+              String(obj[k] ?? "")
+                .toLowerCase()
+                .slice(0, 120),
+          );
         } else if (seen.length < 200) {
           seen.push(lk);
         }
@@ -247,7 +254,10 @@ export function looksLikeZoomableJson(text: string): boolean {
       const hasId = "id" in obj || "@id" in obj;
       const hasDims = "width" in obj && "height" in obj;
       const hasTiles = "tiles" in obj || "tile" in obj || "profile" in obj;
-      if ((hasId && hasDims && hasTiles) || (hasDims && hasTiles && seen.join(" ").includes("iiif"))) {
+      if (
+        (hasId && hasDims && hasTiles) ||
+        (hasDims && hasTiles && seen.join(" ").includes("iiif"))
+      ) {
         return true;
       }
       // IIIF presentation shape: sequences/items with canvases.
@@ -283,7 +293,8 @@ export function looksLikeZoomableXml(text: string): boolean {
       // DZI needs structural confirmation, not just "<image" (which every
       // SVG-bearing page contains). Require tilesize/overlap/format clues.
       if (m === "<image") {
-        if (lower.includes("tilesize") || lower.includes("overlap") || lower.includes("dzi")) return true;
+        if (lower.includes("tilesize") || lower.includes("overlap") || lower.includes("dzi"))
+          return true;
         continue;
       }
       return true;

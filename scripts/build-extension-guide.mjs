@@ -2,7 +2,7 @@
 // Build the extension's first-run guide from the canonical user documentation.
 // The extension displays this fragment inside its own page; the Markdown in
 // docs/user remains the only source of user-facing guidance.
-import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 

@@ -2,9 +2,10 @@
 // exact same pure relay as the Cloudflare Pages Function. These tests mirror
 // test/proxy-function.test.mjs but go through handleNodeProxyRequest with
 // Node IncomingMessage/ServerResponse doubles instead of Request/Response.
-import test from "node:test";
+
 import assert from "node:assert/strict";
 import { Readable } from "node:stream";
+import test from "node:test";
 import { handleNodeProxyRequest } from "../src/server/proxy-node.ts";
 
 function nodeRequest({ method = "POST", headers = {}, body = "" } = {}) {
@@ -75,7 +76,10 @@ test("redirect hops are revalidated by the relay, not followed by fetch", async 
   const calls = t.mock.method(globalThis, "fetch", () =>
     Promise.resolve({
       status: 302,
-      headers: { get: (name) => (name.toLowerCase() === "location" ? "http://169.254.169.254/latest/meta-data" : null) },
+      headers: {
+        get: (name) =>
+          name.toLowerCase() === "location" ? "http://169.254.169.254/latest/meta-data" : null,
+      },
       arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
     }),
   );
@@ -139,10 +143,7 @@ test("blocked loopback target -> 403 without upstream call", async (t) => {
 });
 
 test("tile-like image content type -> 415 (metadata only)", async (t) => {
-  mockUpstream(
-    () => ({ status: 200, headers: { "content-type": "image/jpeg" }, body: "jpeg" }),
-    t,
-  );
+  mockUpstream(() => ({ status: 200, headers: { "content-type": "image/jpeg" }, body: "jpeg" }), t);
   const res = captureResponse();
   await handleNodeProxyRequest(
     nodeRequest({
@@ -185,7 +186,10 @@ test("OPTIONS preflight: same origin allowed, cross origin refused", async () =>
 
   const denied = captureResponse();
   await handleNodeProxyRequest(
-    nodeRequest({ method: "OPTIONS", headers: { ...SAME_ORIGIN_HEADERS, origin: "http://evil.example" } }),
+    nodeRequest({
+      method: "OPTIONS",
+      headers: { ...SAME_ORIGIN_HEADERS, origin: "http://evil.example" },
+    }),
     denied,
   );
   assert.equal(denied.status, 403);
@@ -193,9 +197,6 @@ test("OPTIONS preflight: same origin allowed, cross origin refused", async () =>
 
 test("non-POST method -> 405", async () => {
   const res = captureResponse();
-  await handleNodeProxyRequest(
-    nodeRequest({ method: "GET", headers: SAME_ORIGIN_HEADERS }),
-    res,
-  );
+  await handleNodeProxyRequest(nodeRequest({ method: "GET", headers: SAME_ORIGIN_HEADERS }), res);
   assert.equal(res.status, 405);
 });

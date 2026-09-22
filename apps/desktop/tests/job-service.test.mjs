@@ -1,7 +1,7 @@
-import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createDesktopJobService } from "../src/jobService.ts";
 
@@ -11,7 +11,10 @@ function nativeRequest(url = "https://museum.example.org/iiif/1/manifest.json") 
   return {
     inputs: [{ url }],
     engine: {},
-    exec: { kind: "native", destination: { kind: "file", suggestedName: "dezoomify-800x600.png", format: "png" } },
+    exec: {
+      kind: "native",
+      destination: { kind: "file", suggestedName: "dezoomify-800x600.png", format: "png" },
+    },
   };
 }
 
@@ -63,7 +66,16 @@ function emit(ipc, channel, payload) {
 }
 
 function observer() {
-  return { snapshots: [], hosts: [], snapshot(s) { this.snapshots.push(s); }, hostStatus(h) { this.hosts.push(h); } };
+  return {
+    snapshots: [],
+    hosts: [],
+    snapshot(s) {
+      this.snapshots.push(s);
+    },
+    hostStatus(h) {
+      this.hosts.push(h);
+    },
+  };
 }
 
 // Canonical EngineSnapshotDto plus the host job/jobId routing aliases.
@@ -138,7 +150,9 @@ test("concurrent starts await all event subscriptions", async () => {
   const ipc = fakeIpc();
   const listen = ipc.listen;
   let release;
-  const ready = new Promise(resolve => { release = resolve; });
+  const ready = new Promise((resolve) => {
+    release = resolve;
+  });
   ipc.listen = async (...args) => {
     await ready;
     return listen(...args);
@@ -146,7 +160,7 @@ test("concurrent starts await all event subscriptions", async () => {
   const service = createDesktopJobService({ ipc });
   const first = service.start(nativeRequest(), observer());
   const second = service.start(nativeRequest(), observer());
-  await new Promise(resolve => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(ipc.invokes.length, 0);
   release();
   await Promise.all([first, second]);
@@ -156,10 +170,15 @@ test("concurrent starts await all event subscriptions", async () => {
 
 test("subscription failures reject every start without invoking jobs", async () => {
   const ipc = fakeIpc();
-  ipc.listen = async () => { throw new Error("no host"); };
+  ipc.listen = async () => {
+    throw new Error("no host");
+  };
   const service = createDesktopJobService({ ipc });
   for (let i = 0; i < 2; i += 1) {
-    await assert.rejects(service.start(nativeRequest(), observer()), error => error.code === "desktop.host-unavailable");
+    await assert.rejects(
+      service.start(nativeRequest(), observer()),
+      (error) => error.code === "desktop.host-unavailable",
+    );
   }
   assert.equal(ipc.invokes.length, 0);
   await service.dispose();
@@ -169,20 +188,39 @@ test("start validates source, exec, and destination before invoking", async () =
   const ipc = fakeIpc();
   const service = createDesktopJobService({ ipc });
   const obs = observer();
-  await assert.rejects(service.start(nativeRequest("not a url"), obs), (error) => error.code === "desktop.invalid-source");
-  await assert.rejects(service.start(nativeRequest("ftp://x/y"), obs), (error) => error.code === "desktop.invalid-source");
+  await assert.rejects(
+    service.start(nativeRequest("not a url"), obs),
+    (error) => error.code === "desktop.invalid-source",
+  );
+  await assert.rejects(
+    service.start(nativeRequest("ftp://x/y"), obs),
+    (error) => error.code === "desktop.invalid-source",
+  );
   await assert.rejects(
     service.start(nativeRequest("https://user:pw@x.example.org/y"), obs),
     (error) => error.code === "desktop.invalid-source",
   );
-  const browserExec = { inputs: [{ url: "https://x.example.org/y" }], engine: {}, exec: { kind: "browser" } };
-  await assert.rejects(service.start(browserExec, obs), (error) => error.code === "desktop.invalid-exec");
+  const browserExec = {
+    inputs: [{ url: "https://x.example.org/y" }],
+    engine: {},
+    exec: { kind: "browser" },
+  };
+  await assert.rejects(
+    service.start(browserExec, obs),
+    (error) => error.code === "desktop.invalid-exec",
+  );
   const badFormat = nativeRequest();
   badFormat.exec.destination = { kind: "file", suggestedName: "a.bmp", format: "bmp" };
-  await assert.rejects(service.start(badFormat, obs), (error) => error.code === "desktop.invalid-destination");
+  await assert.rejects(
+    service.start(badFormat, obs),
+    (error) => error.code === "desktop.invalid-destination",
+  );
   const badExt = nativeRequest();
   badExt.exec.destination = { kind: "file", suggestedName: "a.jpg", format: "png" };
-  await assert.rejects(service.start(badExt, obs), (error) => error.code === "desktop.invalid-destination");
+  await assert.rejects(
+    service.start(badExt, obs),
+    (error) => error.code === "desktop.invalid-destination",
+  );
   assert.equal(ipc.invokes.length, 0);
   await service.dispose();
 });
@@ -210,11 +248,15 @@ test("snapshots forward verbatim per job with identity guard only", async () => 
   // reaches the observer until the backend emits its first verbatim
   // snapshot. The local revision-0 scale never competes with the engine's.
   assert.equal(obs.snapshots.length, 0);
-  emit(ipc, "dezoomify://job-snapshot", snapshotPayload({
-    revision: 0,
-    lifecycle: "Created",
-    progress: { completed: 0, total: null },
-  }));
+  emit(
+    ipc,
+    "dezoomify://job-snapshot",
+    snapshotPayload({
+      revision: 0,
+      lifecycle: "Created",
+      progress: { completed: 0, total: null },
+    }),
+  );
   assert.equal(obs.snapshots.length, 1);
   assert.equal(obs.snapshots[0].lifecycle, "Created");
   assert.equal(obs.snapshots[0].revision, 0);
@@ -227,21 +269,29 @@ test("snapshots forward verbatim per job with identity guard only", async () => 
   // shell owns monotonicity and exactly-once); other jobs stay ignored.
   emit(ipc, "dezoomify://job-snapshot", snapshotPayload({ revision: 2 }));
   assert.equal(obs.snapshots[obs.snapshots.length - 1].progress.completed, 3);
-  emit(ipc, "dezoomify://job-snapshot", snapshotPayload({
-    job: "job:other",
-    jobId: "job:other",
-    revision: 3,
-    progress: { completed: 9, total: 10 },
-  }));
+  emit(
+    ipc,
+    "dezoomify://job-snapshot",
+    snapshotPayload({
+      job: "job:other",
+      jobId: "job:other",
+      revision: 3,
+      progress: { completed: 9, total: 10 },
+    }),
+  );
   assert.equal(obs.snapshots[obs.snapshots.length - 1].progress.completed, 3);
 
-  emit(ipc, "dezoomify://job-snapshot", snapshotPayload({
-    revision: 3,
-    lifecycle: "Completed",
-    progress: { completed: 10, total: 10 },
-    terminal: { type: "completed" },
-    output: completedOutput(),
-  }));
+  emit(
+    ipc,
+    "dezoomify://job-snapshot",
+    snapshotPayload({
+      revision: 3,
+      lifecycle: "Completed",
+      progress: { completed: 10, total: 10 },
+      terminal: { type: "completed" },
+      output: completedOutput(),
+    }),
+  );
   const terminal = obs.snapshots[obs.snapshots.length - 1];
   assert.equal(terminal.lifecycle, "Completed");
   assert.equal(terminal.terminal.type, "completed");
@@ -257,13 +307,17 @@ test("partial terminal never reads as completed and failures stay typed", async 
   const service = createDesktopJobService({ ipc });
   const obs = observer();
   await service.start(nativeRequest(), obs);
-  emit(ipc, "dezoomify://job-snapshot", snapshotPayload({
-    revision: 4,
-    lifecycle: "PartiallyCompleted",
-    progress: { completed: 9, total: 12 },
-    terminal: { type: "partial-completed", missing: [10] },
-    output: completedOutput({ complete: false, missing: [10] }),
-  }));
+  emit(
+    ipc,
+    "dezoomify://job-snapshot",
+    snapshotPayload({
+      revision: 4,
+      lifecycle: "PartiallyCompleted",
+      progress: { completed: 9, total: 12 },
+      terminal: { type: "partial-completed", missing: [10] },
+      output: completedOutput({ complete: false, missing: [10] }),
+    }),
+  );
   const partial = obs.snapshots[obs.snapshots.length - 1];
   assert.equal(partial.lifecycle, "PartiallyCompleted");
   assert.equal(partial.terminal.type, "partial-completed");
@@ -274,11 +328,25 @@ test("partial terminal never reads as completed and failures stay typed", async 
   const ipc2 = fakeIpc();
   const service2 = createDesktopJobService({ ipc: ipc2 });
   await service2.start(nativeRequest(), obs2);
-  emit(ipc2, "dezoomify://job-snapshot", snapshotPayload({
-    revision: 5,
-    lifecycle: "Failed",
-    terminal: { type: "failed", error: { code: "tile.download-failed", phase: "acquisition", retryable: true, message: "tile failed", recovery: [], transport: "native" } },
-  }));
+  emit(
+    ipc2,
+    "dezoomify://job-snapshot",
+    snapshotPayload({
+      revision: 5,
+      lifecycle: "Failed",
+      terminal: {
+        type: "failed",
+        error: {
+          code: "tile.download-failed",
+          phase: "acquisition",
+          retryable: true,
+          message: "tile failed",
+          recovery: [],
+          transport: "native",
+        },
+      },
+    }),
+  );
   const failed = obs2.snapshots[obs2.snapshots.length - 1];
   assert.equal(failed.lifecycle, "Failed");
   assert.equal(failed.terminal.error.code, "tile.download-failed");
@@ -315,7 +383,10 @@ test("commands route to typed shell commands; engine-only commands reject", asyn
   assert.deepEqual(pauseCall.args, { job: "job:native-1" });
   assert.deepEqual(resumeCall.args, { job: "job:native-1" });
   // Engine-internal commands with no shell command still reject typed.
-  await assert.rejects(handle.command({ type: "tile-acquired", request: 0 }), (error) => error.code === "desktop.unsupported-command");
+  await assert.rejects(
+    handle.command({ type: "tile-acquired", request: 0 }),
+    (error) => error.code === "desktop.unsupported-command",
+  );
   await handle.dispose();
   await service.dispose();
 });
@@ -347,8 +418,16 @@ test("capabilities reject unknown shell commands", async () => {
   const caps = await service.queryCapabilities();
   assert.equal(caps.protocolMin, "2.0");
   assert.equal(caps.commands.length, 8);
-  ipc.invoke = (cmd) => Promise.resolve({ protocol_min: "2.0", protocol_max: "2.0", commands: ["start_job", "bogus_cmd"] });
-  await assert.rejects(service.queryCapabilities(), (error) => error.code === "desktop.capability-mismatch");
+  ipc.invoke = (cmd) =>
+    Promise.resolve({
+      protocol_min: "2.0",
+      protocol_max: "2.0",
+      commands: ["start_job", "bogus_cmd"],
+    });
+  await assert.rejects(
+    service.queryCapabilities(),
+    (error) => error.code === "desktop.capability-mismatch",
+  );
   await service.dispose();
 });
 
@@ -371,12 +450,47 @@ test("legacy folded payloads never reach an observer", async () => {
   // Legacy folds: state/acquired/total/seq/kind/jobSnapshot/recovery without
   // the canonical revision/lifecycle/progress/selection shape.
   for (const legacy of [
-    { job: "job:native-1", jobId: "job:native-1", seq: 2, kind: "snapshot", state: "AcquiringTiles", acquired: 3, total: 10 },
-    { job: "job:native-1", jobId: "job:native-1", revision: 2, state: "AcquiringTiles", acquired: 3 },
-    { job: "job:native-1", jobId: "job:native-1", lifecycle: "AcquiringTiles", acquired: 3, total: 10 },
+    {
+      job: "job:native-1",
+      jobId: "job:native-1",
+      seq: 2,
+      kind: "snapshot",
+      state: "AcquiringTiles",
+      acquired: 3,
+      total: 10,
+    },
+    {
+      job: "job:native-1",
+      jobId: "job:native-1",
+      revision: 2,
+      state: "AcquiringTiles",
+      acquired: 3,
+    },
+    {
+      job: "job:native-1",
+      jobId: "job:native-1",
+      lifecycle: "AcquiringTiles",
+      acquired: 3,
+      total: 10,
+    },
     { job: "job:native-1", jobId: "job:native-1", revision: 2, lifecycle: "AcquiringTiles" },
-    { job: "job:native-1", jobId: "job:native-1", revision: 2, lifecycle: "Nope", progress: { completed: 1, total: 2 }, selection: { level_count: 0, deferred: [] } },
-    { job: "job:native-1", jobId: "job:native-1", revision: 2, lifecycle: "AcquiringTiles", progress: { completed: 1, total: 2 }, selection: { level_count: 0, deferred: [] }, terminal: { kind: "completed" } },
+    {
+      job: "job:native-1",
+      jobId: "job:native-1",
+      revision: 2,
+      lifecycle: "Nope",
+      progress: { completed: 1, total: 2 },
+      selection: { level_count: 0, deferred: [] },
+    },
+    {
+      job: "job:native-1",
+      jobId: "job:native-1",
+      revision: 2,
+      lifecycle: "AcquiringTiles",
+      progress: { completed: 1, total: 2 },
+      selection: { level_count: 0, deferred: [] },
+      terminal: { kind: "completed" },
+    },
   ]) {
     emit(ipc, "dezoomify://job-snapshot", legacy);
   }

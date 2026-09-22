@@ -1,5 +1,5 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import {
   decodeBase64Payload,
   forwardCoreHeaders,
@@ -16,7 +16,15 @@ import {
 test("public URL check accepts http(s) and rejects the rest", () => {
   assert.equal(isPublicHttpUrl("https://gallery.example/info.json"), true);
   assert.equal(isPublicHttpUrl("http://127.0.0.1:9/tile.png"), true);
-  for (const bad of ["ftp://gallery.example/f", "data:text/plain,x", "chrome-extension://id/page", "", null, 42, "https://exa mple.com/"]) {
+  for (const bad of [
+    "ftp://gallery.example/f",
+    "data:text/plain,x",
+    "chrome-extension://id/page",
+    "",
+    null,
+    42,
+    "https://exa mple.com/",
+  ]) {
     assert.equal(isPublicHttpUrl(bad), false, String(bad));
   }
 });
@@ -41,10 +49,9 @@ test("method normalization defaults, uppercases, and rejects", () => {
 });
 
 test("engine header validation accepts well-formed pairs and rejects the rest", () => {
-  assert.deepEqual(
-    validateEngineHeaders([{ name: "Accept", value: "application/json" }]),
-    [{ name: "Accept", value: "application/json" }],
-  );
+  assert.deepEqual(validateEngineHeaders([{ name: "Accept", value: "application/json" }]), [
+    { name: "Accept", value: "application/json" },
+  ]);
   assert.equal(validateEngineHeaders([]).length, 0);
   assert.equal(validateEngineHeaders([{ name: "", value: "x" }]), null);
   assert.equal(validateEngineHeaders([{ name: "A", value: "b\rc" }]), null);
@@ -66,11 +73,15 @@ test("core header forwarding keeps the allowlist and drops credentials", () => {
     { name: "Referer", value: "https://gallery.example/" },
     { name: "X-Custom", value: "yes" },
   ];
-  assert.deepEqual(forwardCoreHeaders(supplied, "tile"), { accept: "application/xml", range: "bytes=0-4" });
-  assert.deepEqual(
-    forwardCoreHeaders(supplied, "metadata"),
-    { accept: "application/xml", range: "bytes=0-4", "if-none-match": "etag" },
-  );
+  assert.deepEqual(forwardCoreHeaders(supplied, "tile"), {
+    accept: "application/xml",
+    range: "bytes=0-4",
+  });
+  assert.deepEqual(forwardCoreHeaders(supplied, "metadata"), {
+    accept: "application/xml",
+    range: "bytes=0-4",
+    "if-none-match": "etag",
+  });
   assert.deepEqual(forwardCoreHeaders({ Accept: "text/html" }, "tile"), { accept: "text/html" });
   assert.deepEqual(forwardCoreHeaders(null, "tile"), {});
 });
@@ -78,7 +89,8 @@ test("core header forwarding keeps the allowlist and drops credentials", () => {
 test("HTTP success is an integer 200-299", () => {
   assert.equal(isHttpSuccessStatus(200), true);
   assert.equal(isHttpSuccessStatus(299), true);
-  for (const bad of [199, 300, 404, 200.5, "200", null]) assert.equal(isHttpSuccessStatus(bad), false, String(bad));
+  for (const bad of [199, 300, 404, 200.5, "200", null])
+    assert.equal(isHttpSuccessStatus(bad), false, String(bad));
 });
 
 test("base64 payload decoding round-trips and enforces bounds", () => {
@@ -105,7 +117,10 @@ test("base64 decoding falls back without the native codec", () => {
 });
 
 test("error preview text strips markup, collapses, truncates, and rejects binary", () => {
-  assert.equal(normalizeErrorPreviewText("<html><body>  Access   Denied  </body></html>", 300), "Access Denied");
+  assert.equal(
+    normalizeErrorPreviewText("<html><body>  Access   Denied  </body></html>", 300),
+    "Access Denied",
+  );
   assert.equal(normalizeErrorPreviewText("a\0b", 300), "");
   assert.equal(normalizeErrorPreviewText("", 300), "");
   assert.equal(normalizeErrorPreviewText("x".repeat(400), 300).length, 300);

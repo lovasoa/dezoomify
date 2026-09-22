@@ -156,5 +156,12 @@ export async function handleNodeProxyRequest(
     res.end(bytes);
     return;
   }
-  sendJson(res, result.status, result.headers, result.code ?? "PROXY_ERROR", result.requestId, result.reason);
+  sendJson(
+    res,
+    result.status,
+    result.headers,
+    result.code ?? "PROXY_ERROR",
+    result.requestId,
+    result.reason,
+  );
 }

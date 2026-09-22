@@ -1,6 +1,7 @@
 // Desktop settings state helpers. Rendering lives in settingsView.tsx.
-import { loadSettings, saveSettings, validateSettings } from "./settings.ts";
+
 import type { DesktopSettings } from "./settings.ts";
+import { loadSettings, saveSettings, validateSettings } from "./settings.ts";
 
 export function getEffectiveSettings(fallback: DesktopSettings) {
   const validated = validateSettings(fallback);

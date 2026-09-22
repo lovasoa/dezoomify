@@ -1,6 +1,7 @@
 /* Dezoomify Theme - Authentic Parchment Aesthetic, Spacious Layout & Tactile Controls */
 :root {
-  --dz-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --dz-font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --dz-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
   /* Authentic Dezoomify Palette (Light Theme - Warm Parchment & Cultural Heritage) */
@@ -115,7 +116,9 @@
   }
 }
 
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
@@ -144,7 +147,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
   background-image:
     radial-gradient(circle at 18% 0%, rgba(60, 123, 255, 0.055), transparent 34rem),
-    linear-gradient(180deg, rgba(255,255,255,0.42), transparent 22rem);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.42), transparent 22rem);
   background-attachment: fixed;
 }
 
@@ -154,7 +157,9 @@ a {
   text-decoration: underline;
   text-underline-offset: 3px;
   text-decoration-thickness: 1px;
-  transition: color 0.15s ease, text-decoration-color 0.15s ease;
+  transition:
+    color 0.15s ease,
+    text-decoration-color 0.15s ease;
 }
 
 a:visited {
@@ -230,7 +235,9 @@ abbr[title] {
   border: 1px solid transparent;
   background: transparent;
   cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
@@ -382,7 +389,9 @@ abbr[title] {
   margin: 0 0 1.6rem;
 }
 
-.dz-description p { margin: 0; }
+.dz-description p {
+  margin: 0;
+}
 
 .dz-description strong {
   font-weight: 700;
@@ -546,7 +555,9 @@ abbr[title] {
   border: 1.5px solid transparent;
   border-radius: var(--dz-radius);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -746,7 +757,10 @@ abbr[title] {
   border-radius: var(--dz-radius);
   cursor: pointer;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.05s ease;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -796,7 +810,10 @@ abbr[title] {
   border: 1px solid var(--dz-btn-secondary-border);
   border-radius: var(--dz-radius);
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -848,7 +865,9 @@ abbr[title] {
   text-decoration-thickness: 1px;
   cursor: pointer;
   vertical-align: baseline;
-  transition: color 0.15s ease, text-decoration-thickness 0.15s ease;
+  transition:
+    color 0.15s ease,
+    text-decoration-thickness 0.15s ease;
 }
 
 .dz-btn-link:hover,
@@ -982,14 +1001,26 @@ abbr[title] {
 }
 
 @keyframes dzJobIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dz-fade-in { animation: none; }
-  .dz-pulse { animation: none !important; }
-  .dz-indeterminate .dz-progress-done { animation: none !important; }
+  .dz-fade-in {
+    animation: none;
+  }
+  .dz-pulse {
+    animation: none !important;
+  }
+  .dz-indeterminate .dz-progress-done {
+    animation: none !important;
+  }
 }
 
 .dz-job-source-row {
@@ -1042,8 +1073,13 @@ abbr[title] {
 }
 
 @keyframes dzPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.25; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
 }
 
 .dz-indeterminate .dz-progress-done {
@@ -1051,8 +1087,12 @@ abbr[title] {
 }
 
 @keyframes dzSlide {
-  from { margin-left: 0; }
-  to { margin-left: calc(100% - 35%); }
+  from {
+    margin-left: 0;
+  }
+  to {
+    margin-left: calc(100% - 35%);
+  }
 }
 
 .dz-progress-rail {
@@ -1663,15 +1703,21 @@ abbr[title] {
 }
 
 @keyframes dzFadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .dz-modal-card {
   background: var(--dz-surface-gradient);
   border: 1px solid var(--dz-surface-border);
   border-radius: var(--dz-radius);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35), var(--dz-surface-shadow);
+  box-shadow:
+    0 16px 40px rgba(0, 0, 0, 0.35),
+    var(--dz-surface-shadow);
   width: min(100%, 640px);
   max-height: 88vh;
   overflow-y: auto;
@@ -1682,8 +1728,12 @@ abbr[title] {
 }
 
 @keyframes dzSlideUp {
-  from { transform: translateY(10px) scale(0.99); }
-  to { transform: translateY(0) scale(1); }
+  from {
+    transform: translateY(10px) scale(0.99);
+  }
+  to {
+    transform: translateY(0) scale(1);
+  }
 }
 
 .dz-modal-close {
@@ -1701,7 +1751,9 @@ abbr[title] {
   display: grid;
   place-content: center;
   cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .dz-modal-close:hover {
@@ -1812,7 +1864,9 @@ abbr[title] {
   border-radius: var(--dz-radius);
   color: var(--dz-text-primary);
   text-decoration: none;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -1849,7 +1903,9 @@ abbr[title] {
   font-weight: 700;
   text-decoration: none;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
   min-width: 260px;
 }
 
@@ -1993,7 +2049,7 @@ abbr[title] {
   body {
     background-image:
       radial-gradient(circle at 16% 0%, rgba(172, 175, 80, 0.055), transparent 34rem),
-      linear-gradient(180deg, rgba(255,255,255,0.012), transparent 24rem);
+      linear-gradient(180deg, rgba(255, 255, 255, 0.012), transparent 24rem);
   }
 }
 

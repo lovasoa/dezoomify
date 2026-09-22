@@ -17,8 +17,8 @@
 // Keep erasable syntax only so node type-stripping can read this file. No
 // imports from apps/web, apps/extension, or browser-runtime. No fetch/XHR.
 
-import { downloadDir } from "@tauri-apps/api/path";
 import { invoke } from "@tauri-apps/api/core";
+import { downloadDir } from "@tauri-apps/api/path";
 
 export interface DesktopSettings {
   readonly output_dir: string | null;
@@ -49,7 +49,11 @@ export const DEFAULT_OUTPUT_FORMAT: DesktopOutputFormat = "png" as const;
 export const DEFAULT_COMPRESSION = 5 as const;
 export const DEFAULT_RETRIES = 3 as const;
 export type NetworkProfile = "maximum" | "balanced" | "gentle";
-export const NETWORK_PROFILES: ReadonlyArray<NetworkProfile> = ["maximum", "balanced", "gentle"] as const;
+export const NETWORK_PROFILES: ReadonlyArray<NetworkProfile> = [
+  "maximum",
+  "balanced",
+  "gentle",
+] as const;
 export const DEFAULT_NETWORK_PROFILE: NetworkProfile = "maximum";
 export const MAX_RETRIES = 100 as const;
 export const MAX_DIMENSION = 1000000 as const;
@@ -153,7 +157,11 @@ export interface SettingsValidation {
   readonly errors: Array<string>;
 }
 
-function parseOptionalDir(raw: unknown, field: string, errors: Array<string>): string | null | undefined {
+function parseOptionalDir(
+  raw: unknown,
+  field: string,
+  errors: Array<string>,
+): string | null | undefined {
   if (raw === undefined || raw === null) return null;
   if (typeof raw !== "string") {
     errors.push(`${field} must be a string path`);
@@ -252,7 +260,10 @@ function parseNetworkProfile(raw: unknown, errors: Array<string>): NetworkProfil
   return undefined;
 }
 
-function parseHeadersValue(raw: unknown, errors: Array<string>): Record<string, string> | undefined {
+function parseHeadersValue(
+  raw: unknown,
+  errors: Array<string>,
+): Record<string, string> | undefined {
   if (raw === undefined || raw === null) return {};
   if (typeof raw === "string") {
     const parsed = parseHeadersText(raw);
@@ -261,9 +272,7 @@ function parseHeadersValue(raw: unknown, errors: Array<string>): Record<string, 
     return parsed.headers;
   }
   if (Array.isArray(raw)) {
-    const parsed = parseHeadersText(
-      raw.filter((v) => typeof v === "string").join("\n"),
-    );
+    const parsed = parseHeadersText(raw.filter((v) => typeof v === "string").join("\n"));
     if (raw.some((v) => typeof v !== "string")) {
       errors.push("headers must be Name: value lines");
       return undefined;
@@ -285,7 +294,12 @@ function parseHeadersValue(raw: unknown, errors: Array<string>): Record<string, 
         return undefined;
       }
       const value = val.trim();
-      if (value.length > 4096 || value.includes("\r") || value.includes("\n") || value.includes("\0")) {
+      if (
+        value.length > 4096 ||
+        value.includes("\r") ||
+        value.includes("\n") ||
+        value.includes("\0")
+      ) {
         errors.push("invalid header: bad value");
         return undefined;
       }
@@ -320,11 +334,7 @@ export function validateSettings(raw: unknown): SettingsValidation {
   const max_width = parseOptionalDimension(obj["max_width"], "max-width", errors);
   const max_height = parseOptionalDimension(obj["max_height"], "max-height", errors);
   const output_dir = parseOptionalDir(obj["output_dir"], "output dir", errors);
-  const cache_dir = parseOptionalDir(
-    obj["cache_dir"],
-    "cache dir",
-    errors,
-  );
+  const cache_dir = parseOptionalDir(obj["cache_dir"], "cache dir", errors);
   const headers = parseHeadersValue(obj["headers"], errors);
   if (
     output_format === undefined ||

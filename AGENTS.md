@@ -12,7 +12,7 @@ graphical apps; `packages/browser-runtime` integrates it with the browser.
 Run from the repository root:
 
 ```sh
-cargo xtask check          # fmt + clippy + fixture/protocol artifact validation
+cargo xtask check          # fmt + clippy + Biome + fixture/protocol artifact validation
 cargo xtask test           # one Rust workspace run + one combined Node unit run
 cargo xtask test <target>  # core|protocol|job|wasm|browser|ui|web|native|desktop|extension|native-messaging|scenario|all
 cargo xtask build <target> # wasm|web|cli|desktop|extension
@@ -56,8 +56,8 @@ compilation. Use `--profile dev-debug` only when a diagnosis needs symbols.
 - **Boundaries:** dependencies point inward (core → job → runtimes); core is
   pure and deterministic (no I/O, clocks, or tasks); apps never import each
   other; shared UI never touches host globals directly. Enforced by
-  `cargo xtask check`; add an architecture test whenever a boundary can be
-  enforced mechanically.
+  Biome's scoped restrictions in `biome.jsonc` through `cargo xtask check`;
+  add an architecture test whenever a boundary can be enforced mechanically.
 - **Contracts:** cross-language types are defined once in `crates/dezoomify-protocol`;
   `packages/wasm-bindings` is emitted by the real WASM build via
   `cargo xtask protocol generate` and never hand-edited. Browser boundary

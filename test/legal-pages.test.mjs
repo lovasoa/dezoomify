@@ -1,8 +1,8 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 const webDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -16,10 +16,7 @@ test("privacy and terms pages exist and are linked", () => {
   for (const page of ["privacy.html", "terms.html"]) {
     const text = readFileSync(path.join(webDir, page), "utf8");
     assert.ok(text.includes("./index.html"), `${page} links back to app`);
-    assert.ok(
-      text.includes("github.com/lovasoa/dezoomify"),
-      `${page} names a contact`,
-    );
+    assert.ok(text.includes("github.com/lovasoa/dezoomify"), `${page} names a contact`);
   }
 });
 

@@ -99,7 +99,9 @@ export function cancelQueueEntry<E extends QueueEntry>(
   return { queue: nextQueue, next: activeQueueEntry(nextQueue), code: "ok" };
 }
 
-export function cancelAllQueueEntries<E extends QueueEntry>(queue: SequentialQueue<E>): SequentialQueue<E> {
+export function cancelAllQueueEntries<E extends QueueEntry>(
+  queue: SequentialQueue<E>,
+): SequentialQueue<E> {
   const entries = queue.entries.map((entry) =>
     entry.status === "queued" || entry.status === "active"
       ? ({ ...entry, status: "cancelled" } as E)
@@ -147,6 +149,10 @@ export function summarizeQueue<E extends QueueEntry>(queue: SequentialQueue<E>):
   return { total: queue.entries.length, succeeded, failed, cancelled, pending };
 }
 
-export function humanQueueSummary(summary: { succeeded: number; failed: number; total: number }): string {
+export function humanQueueSummary(summary: {
+  succeeded: number;
+  failed: number;
+  total: number;
+}): string {
   return `bulk: ${summary.succeeded} succeeded, ${summary.failed} failed, ${summary.total} total`;
 }

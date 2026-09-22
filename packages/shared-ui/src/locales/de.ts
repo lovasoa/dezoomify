@@ -16,8 +16,10 @@ export const de = {
   "desktop.done.saved": "Im gewählten Ordner gespeichert.",
   "desktop.done.open": "Bild öffnen",
   "desktop.done.reveal": "Im Ordner anzeigen",
-  "desktop.done.openError": "Das Bild konnte nicht geöffnet werden. Prüfen Sie, ob ein Standard-Bildbetrachter installiert ist.",
-  "desktop.done.folderError": "Der Ordner konnte nicht geöffnet werden. Prüfen Sie, ob ein Dateimanager installiert ist.",
+  "desktop.done.openError":
+    "Das Bild konnte nicht geöffnet werden. Prüfen Sie, ob ein Standard-Bildbetrachter installiert ist.",
+  "desktop.done.folderError":
+    "Der Ordner konnte nicht geöffnet werden. Prüfen Sie, ob ein Dateimanager installiert ist.",
   "desktop.done.missingError": "Das gespeicherte Bild oder der Ordner ist nicht mehr vorhanden.",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Verstanden",
@@ -34,14 +36,16 @@ export const de = {
   "view.desktop.why1Body":
     "Ein Browser-Tab kann nur eine begrenzte Bildmenge halten. Die Desktop-App setzt das Bild im Speicher zusammen, soweit Speicher verfuegbar ist, und schreibt das fertige Ergebnis auf die Festplatte.",
   "view.desktop.why2Title": "Speichert das fertige Bild:",
-  "view.desktop.why2Body": "Jeder Auftrag wird in genau eine Ausgabedatei auf Ihrem Rechner gespeichert. Sie konnen mehrere Auftrage einreihen; sie werden nacheinander gespeichert.",
+  "view.desktop.why2Body":
+    "Jeder Auftrag wird in genau eine Ausgabedatei auf Ihrem Rechner gespeichert. Sie konnen mehrere Auftrage einreihen; sie werden nacheinander gespeichert.",
   "view.desktop.why3Title": "Wenn die Website nicht fertig wird:",
   "view.desktop.why3Body":
     "Die Website bricht den Auftrag mit einem Fehler ab und verweist fuer das vollstandige Bild auf die Desktop-App.",
   "view.desktop.howTitle": "So verwenden Sie sie",
   "view.desktop.step1":
     "Laden Sie das unsignierte {installer} fuer {platform} von unserer GitHub-Releases-Seite herunter und installieren Sie es. Es gibt keine automatischen Updates.",
-  "view.desktop.step2": "Starten Sie Dezoomify und fuegen Sie die Adresse Ihres zoombaren Bildes oder Manifests ein.",
+  "view.desktop.step2":
+    "Starten Sie Dezoomify und fuegen Sie die Adresse Ihres zoombaren Bildes oder Manifests ein.",
   "view.desktop.step3":
     "Wahlen Sie die gewuenschte Auflosung und den Zielordner, um das vollstandige zusammengesetzte Bild zu speichern.",
   "view.desktop.cliTitle": "Automatisierung gesucht? Nutzen Sie Dezoomify CLI",
@@ -66,7 +70,8 @@ export const de = {
   "view.ext.why3Body":
     "Sie betrachtet nur die Seite, auf die Sie gezeigt haben, und erst nachdem Sie die Schaltflache gedrueckt haben. Sie beobachtet Ihr Surfen nicht im Hintergrund.",
   "view.ext.howTitle": "So verwenden Sie sie in 3 Schritten",
-  "view.ext.step1": "Installieren Sie die Erweiterung aus dem Chrome Web Store oder von Firefox Browser Add-ons.",
+  "view.ext.step1":
+    "Installieren Sie die Erweiterung aus dem Chrome Web Store oder von Firefox Browser Add-ons.",
   "view.ext.step2":
     "Offnen Sie die Museums- oder Bibliotheksseite mit Ihrem Kunstwerk und melden Sie sich bei Bedarf an.",
   "view.ext.step3":
@@ -74,7 +79,8 @@ export const de = {
   // Idle input section.
   "view.idle.intro": "ermoglicht das Speichern",
   "view.idle.zoomable": "zoombarer Bilder",
-  "view.idle.zoomableTitle": "Grosse Bilder, in denen man innerhalb einer Webseite navigieren kann.",
+  "view.idle.zoomableTitle":
+    "Grosse Bilder, in denen man innerhalb einer Webseite navigieren kann.",
   "view.idle.enterThe": "Geben Sie die",
   "view.idle.urlAbbr": "URL",
   "view.idle.urlTitle": "Uniform Resource Locator, die Adresse einer Webseite",
@@ -86,7 +92,8 @@ export const de = {
   "view.idle.license1": "Dieses Skript erscheint unter der",
   "view.idle.gplLink": "GPL",
   "view.idle.sourceLink": "Quellcode ansehen",
-  "view.idle.termsLink": "Wir lehnen jede Verantwortung fuer eine rechtswidrige Nutzung dieser Software ab",
+  "view.idle.termsLink":
+    "Wir lehnen jede Verantwortung fuer eine rechtswidrige Nutzung dieser Software ab",
   "view.idle.urlPlaceholder": "URL der Webseite mit Ihrem Bild",
   "view.idle.urlAria": "URL der Webseite mit Ihrem zoombaren Bild",
   "view.idle.clearTitle": "Eingabe loschen",
@@ -110,9 +117,12 @@ export const de = {
   "view.job.techDetails": "Technische Details und Protokolle",
   "view.job.oneImage": "1 Bild",
   "view.job.manyImages": "{count} Bilder",
-  "view.job.autoChoiceFull": "{noun} gefunden, grosste passende wird gespeichert ({width}×{height}, {tiles} Kacheln).",
-  "view.job.autoChoiceDims": "{noun} gefunden, grosste passende wird gespeichert ({width}×{height}).",
-  "view.job.autoChoiceTiles": "{noun} gefunden, grosste passende wird gespeichert ({tiles} Kacheln).",
+  "view.job.autoChoiceFull":
+    "{noun} gefunden, grosste passende wird gespeichert ({width}×{height}, {tiles} Kacheln).",
+  "view.job.autoChoiceDims":
+    "{noun} gefunden, grosste passende wird gespeichert ({width}×{height}).",
+  "view.job.autoChoiceTiles":
+    "{noun} gefunden, grosste passende wird gespeichert ({tiles} Kacheln).",
   "view.job.autoChoiceBare": "{noun} gefunden, grosste passende wird gespeichert.",
   "view.job.stalled":
     "Lauft noch, {host} antwortet langsam. Sie konnen warten oder abbrechen und es spater erneut versuchen.",
@@ -129,7 +139,8 @@ export const de = {
   "view.display.extDesc":
     "Fuer Seiten mit Anmeldung oder Sitzungs-Cookies. Erkennt Viewer auf aktiven Seiten automatisch.",
   "view.display.deskTitle": "Anleitung zur Desktop-App",
-  "view.display.deskDescClean": "Fuer ein sauberes Speichern in voller Grosse, wenn der Browser das Bild nur zeigen kann.",
+  "view.display.deskDescClean":
+    "Fuer ein sauberes Speichern in voller Grosse, wenn der Browser das Bild nur zeigen kann.",
   "view.display.startOver": "Von vorn beginnen",
   // Completion section.
   "view.done.ready": "Ihr Bild ist bereit.",
@@ -152,7 +163,8 @@ export const de = {
   "view.done.gapMap": "Fehlende Kacheln ({failed} von {total}): {shown}{rest}.",
   "view.done.gapMapMore": ", und {n} weitere",
   // Failure section.
-  "view.fail.fallback": "Dezoomify konnte das zoombare Bild unter dieser Adresse nicht finden oder speichern.",
+  "view.fail.fallback":
+    "Dezoomify konnte das zoombare Bild unter dieser Adresse nicht finden oder speichern.",
   "view.fail.title": "Bild konnte nicht dezoomifiziert werden",
   "view.fail.deskDescLimits":
     "Fuer Bilder, die die Speichergrenzen des Browsers sprengen, soweit Speicher verfuegbar ist. Wird nativ auf Ihrem Rechner verarbeitet.",
@@ -171,7 +183,8 @@ export const de = {
   "view.generic.status": "Status:",
   "view.generic.reset": "Zuruecksetzen",
   // Job section and share chrome.
-  "view.job.shareTitle": "Kopiert die Seitenadresse fuer diesen Auftrag, nicht die Bilddatei selbst",
+  "view.job.shareTitle":
+    "Kopiert die Seitenadresse fuer diesen Auftrag, nicht die Bilddatei selbst",
   "view.job.shareLink": "Link zu diesem Auftrag kopieren",
   "view.job.countsFull": "{current} von {total} Kacheln",
   "view.job.countsElapsed": "{current} von {total} Kacheln · {elapsed} vergangen",
@@ -196,13 +209,16 @@ export const de = {
     "Die Website, die dieses Bild hostet, erhalt gerade zu viele Anfragen von Ihrer eigenen Verbindung. Wenige Minuten Wartezeit klaren dies meist, und Erweiterung oder Desktop-App sehen bis dahin dasselbe Besetztzeichen.",
   // Desktop app user copy (apps/desktop/src/main.tsx). Logs and technical
   // diagnostics stay literal English and never use these keys.
-  "desktop.url.invalid": "Bitte geben Sie eine gueltige Webadresse ein, die mit http:// oder https:// beginnt",
+  "desktop.url.invalid":
+    "Bitte geben Sie eine gueltige Webadresse ein, die mit http:// oder https:// beginnt",
   "desktop.url.notWebPage":
     "Diese Adresse sieht nicht wie eine Webseitenadresse aus. Geben Sie eine Adresse ein, die mit http:// oder https:// beginnt.",
   "desktop.settings.unusable":
     "Diese Download-Einstellungen konnen nicht verwendet werden. Passen Sie die markierten Einstellungen an und versuchen Sie es erneut.",
-  "desktop.settings.invalidSubmit": "Diese Download-Einstellungen sind ungueltig. Passen Sie sie an und versuchen Sie es erneut.",
-  "desktop.output.deniedPick": "Das Speicherziel wurde nicht angenommen. Wahlen Sie eine andere Datei, um fortzufahren.",
+  "desktop.settings.invalidSubmit":
+    "Diese Download-Einstellungen sind ungueltig. Passen Sie sie an und versuchen Sie es erneut.",
+  "desktop.output.deniedPick":
+    "Das Speicherziel wurde nicht angenommen. Wahlen Sie eine andere Datei, um fortzufahren.",
   "desktop.output.deniedFallback": "Das Speicherziel wurde verweigert.",
   "desktop.proto.incompatible":
     "Diese App-Version kann dieses Bild von {host} nicht offnen. Aktualisieren Sie die App und versuchen Sie es erneut.",
@@ -216,7 +232,8 @@ export const de = {
     "Am Speicherziel von {host} existiert bereits eine Datei. Wahlen Sie eine andere Datei oder bestatigen Sie das Ueberschreiben, um fortzufahren.",
   "desktop.output.destDenied":
     "Das Speicherziel wurde von {host} aus nicht angenommen. Wahlen Sie eine andere Datei, um fortzufahren.",
-  "desktop.job.gone": "Dieser Auftrag ist von {host} aus nicht mehr aktiv. Beginnen Sie erneut mit einer frischen Adresse.",
+  "desktop.job.gone":
+    "Dieser Auftrag ist von {host} aus nicht mehr aktiv. Beginnen Sie erneut mit einer frischen Adresse.",
   "desktop.msg.thisPicture": "dieses Bild",
   "desktop.msg.dimsPixels": "{a} mal {b} Pixel",
   "desktop.msg.needAbout": " Es braucht etwa {need} Speicher",
@@ -234,17 +251,23 @@ export const de = {
     "Unter dieser Adresse wurde kein zoombares Bild gefunden. Versuchen Sie eine Seite mit Betrachter oder die Browsererweiterung.",
   "desktop.plan.none":
     "Dieses Bild hat von {host} aus keine speicherbare Grosse. Versuchen Sie ein anderes Bild oder eine kleinere Max. Breite.",
-  "desktop.transport.stalled": "Speichern stockt beim Kontakt mit {host}. Pruefen Sie Ihre Verbindung und versuchen Sie es erneut.",
+  "desktop.transport.stalled":
+    "Speichern stockt beim Kontakt mit {host}. Pruefen Sie Ihre Verbindung und versuchen Sie es erneut.",
   "desktop.output.writeFail":
     "Dieses Bild von {host} konnte nicht geschrieben werden. Wahlen Sie ein anderes Speicherziel und versuchen Sie es erneut.",
-  "desktop.job.cancelledMsg": "Das Speichern des Bildes wurde gestoppt. Jede unfertige Datei wurde entfernt.",
-  "desktop.start.failed": "Das Speichern dieses Bildes von {host} konnte nicht gestartet werden. Versuchen Sie es erneut.",
+  "desktop.job.cancelledMsg":
+    "Das Speichern des Bildes wurde gestoppt. Jede unfertige Datei wurde entfernt.",
+  "desktop.start.failed":
+    "Das Speichern dieses Bildes von {host} konnte nicht gestartet werden. Versuchen Sie es erneut.",
   "desktop.choice.failed": "Diese Wahl wurde nicht angenommen. Versuchen Sie es erneut.",
-  "view.ext.desynced": "Die Erweiterung hat die Synchronisierung verloren. Starten Sie den Scan erneut.",
-  "desktop.save.generic": "Dieses Bild von {host} konnte nicht gespeichert werden. Versuchen Sie es mit einer anderen Adresse erneut.",
+  "view.ext.desynced":
+    "Die Erweiterung hat die Synchronisierung verloren. Starten Sie den Scan erneut.",
+  "desktop.save.generic":
+    "Dieses Bild von {host} konnte nicht gespeichert werden. Versuchen Sie es mit einer anderen Adresse erneut.",
   "desktop.internal.error":
     "Etwas Unerwartetes hat dieses Speichern von {host} gestoppt. Versuchen Sie es erneut und kopieren Sie die Diagnose, falls es erneut geschieht.",
-  "desktop.save.fallback": "Dieses Bild von {host} konnte nicht gespeichert werden. Versuchen Sie es erneut.",
+  "desktop.save.fallback":
+    "Dieses Bild von {host} konnte nicht gespeichert werden. Versuchen Sie es erneut.",
   "desktop.job.failedFallback": "Der Auftrag ist fehlgeschlagen.",
   "desktop.invoke.startFallback": "Der Auftrag konnte nicht gestartet werden.",
   "desktop.invoke.retry": "Die Wiederholungsanfrage wurde abgelehnt.",
@@ -252,10 +275,12 @@ export const de = {
   "desktop.invoke.destination": "Das Speicherziel konnte nicht angefragt werden.",
   "desktop.invoke.cancel": "Der Auftrag konnte nicht abgebrochen werden.",
   "desktop.step.chooseWhere": "Wahlen Sie, wo gespeichert wird…",
-  "desktop.step.chooseWhereDetail": "Das Speicherziel braucht Aufmerksamkeit, bevor der Auftrag fortfahren kann.",
+  "desktop.step.chooseWhereDetail":
+    "Das Speicherziel braucht Aufmerksamkeit, bevor der Auftrag fortfahren kann.",
   "desktop.step.pickOutput": "Wahlen Sie die Ausgabedatei, um fortzufahren.",
   "desktop.step.partialTitle": "Einige Kacheln konnten nicht gespeichert werden…",
-  "desktop.step.partialDetail": "Wahlen Sie, ob Sie das Teilbild behalten, verwerfen oder erneut versuchen.",
+  "desktop.step.partialDetail":
+    "Wahlen Sie, ob Sie das Teilbild behalten, verwerfen oder erneut versuchen.",
   "desktop.step.displayPreview": "Nur Anzeige…",
   "desktop.step.displayDetail": "Dieses Bild kann hier nur betrachtet werden.",
   "desktop.step.cleanupDetail": "Raeumt auf… unfertige Datei wird entfernt…",
@@ -264,7 +289,8 @@ export const de = {
   "desktop.step.encodingPartial": "Teilbild wird in der nativen App kodiert",
   "desktop.step.discardingPartial": "Teilbild wird verworfen",
   "desktop.step.retrying": "Wird erneut versucht",
-  "desktop.step.appAutoDetail": "Die App speichert automatisch das erste Bild; keine Auswahl wird angeboten.",
+  "desktop.step.appAutoDetail":
+    "Die App speichert automatisch das erste Bild; keine Auswahl wird angeboten.",
   "desktop.step.foundFits": "{noun} gefunden, grosste passende wird gespeichert…",
   "desktop.step.tilesAtFull": "{current} von {total} Kacheln in voller Auflosung",
   "desktop.step.savedDims": "{width} mal {height} Pixel gespeichert",
@@ -299,7 +325,8 @@ export const de = {
   "desktop.done.partialTitle": "Teilbild gespeichert",
   "desktop.done.partialDesc":
     "Diese Datei ist als Teilbild markiert: {summary} Fehlende Flachen bleiben leer. So unterscheidet sie sich von einem vollstandigen Speichern.",
-  "desktop.cancel.note": "Speichern abgebrochen. Aufgeraeumt, und jede unfertige Datei wurde entfernt.",
+  "desktop.cancel.note":
+    "Speichern abgebrochen. Aufgeraeumt, und jede unfertige Datei wurde entfernt.",
   "desktop.copy.diagnostics": "Diagnose kopieren",
   "desktop.copy.copied": "Kopiert!",
   // Multi-job queue panel (desktop integration queue, todo 5.3). Jobs save
@@ -344,7 +371,8 @@ export const de = {
   "desktop.settings.browseOutput": "Ausgabeordner wahlen",
   "desktop.settings.browseCache": "Cache-Ordner wahlen",
   "desktop.settings.headersAdv": "Erweitert: Anfragekopfzeilen (vertrauenswuerdig)",
-  "desktop.settings.headersLabel": "Anfragekopfzeilen, eine je Zeile als Name: Wert (optional, vertrauenswuerdig)",
+  "desktop.settings.headersLabel":
+    "Anfragekopfzeilen, eine je Zeile als Name: Wert (optional, vertrauenswuerdig)",
   "desktop.settings.reset": "Einstellungen zuruecksetzen",
   "desktop.quick.folder": "Ordner",
   "desktop.quick.askEachTime": "Jedes Mal fragen",
@@ -366,19 +394,24 @@ export const de = {
   "desktop.advanced.jpegQuality": "JPEG-Qualitaet",
   "desktop.advanced.jpegQualityDesc": "Hoehere Werte erhalten mehr Bilddetails.",
   "desktop.advanced.compressionEffort": "Kompressionsaufwand",
-  "desktop.advanced.compressionEffortDesc": "Die Bildqualitaet bleibt verlustfrei; hoehere Werte dauern laenger.",
+  "desktop.advanced.compressionEffortDesc":
+    "Die Bildqualitaet bleibt verlustfrei; hoehere Werte dauern laenger.",
   "desktop.advanced.dimensions": "Eigene Abmessungen",
-  "desktop.advanced.dimensionsDesc": "Einen Wert leer lassen, um das Originalverhaeltnis zu bewahren.",
+  "desktop.advanced.dimensionsDesc":
+    "Einen Wert leer lassen, um das Originalverhaeltnis zu bewahren.",
   "desktop.advanced.width": "Breite",
   "desktop.advanced.height": "Hoehe",
   "desktop.advanced.retries": "Versuche",
-  "desktop.advanced.retriesDesc": "Fehlgeschlagene Bildkacheln erneut versuchen, bevor ein Teilergebnis bleibt.",
+  "desktop.advanced.retriesDesc":
+    "Fehlgeschlagene Bildkacheln erneut versuchen, bevor ein Teilergebnis bleibt.",
   "desktop.advanced.resumeCache": "Fortsetzungs-Cache",
-  "desktop.advanced.resumeCacheDesc": "Kacheln nach einem unterbrochenen Speichern wiederverwenden.",
+  "desktop.advanced.resumeCacheDesc":
+    "Kacheln nach einem unterbrochenen Speichern wiederverwenden.",
   "desktop.advanced.choose": "Auswaehlen…",
   "desktop.advanced.change": "Aendern…",
   "desktop.advanced.headers": "Anfragekopfzeilen",
-  "desktop.advanced.headersDesc": "Fuer geschuetzte Viewer. Nur an den Bildursprung gesendet und nie protokolliert.",
+  "desktop.advanced.headersDesc":
+    "Fuer geschuetzte Viewer. Nur an den Bildursprung gesendet und nie protokolliert.",
   // Extension job-tab user copy, rendered through the same `t(key, vars)`
   // shape; log and diagnostics lines stay literal English and never use these
   // keys. `test/ui-i18n.test.mjs` fails when the page renders a key outside

@@ -8,25 +8,69 @@
  * injected dependency. Stateless helpers and limits stay at module scope.
  */
 
-import { collectCandidates, fetchSource } from "./source-operations.ts";
-import { LOG_LEVELS, LOG_MAX_CHARS, createLogger } from "@dezoomify/browser-runtime/logging";
-import type { WxtBrowser } from "wxt/browser";
 import {
-  SOURCE_FETCH_BYTE_LIMIT,
   decodeBase64Payload,
   isPublicHttpUrl,
   normalizeFetchMethod,
   originOfPublicUrl,
+  SOURCE_FETCH_BYTE_LIMIT,
   validateEngineHeaders,
 } from "@dezoomify/browser-runtime";
+import { createLogger, type LOG_LEVELS, LOG_MAX_CHARS } from "@dezoomify/browser-runtime/logging";
+import type { WxtBrowser } from "wxt/browser";
+import { collectCandidates, fetchSource } from "./source-operations.ts";
 
 type LogLevel = keyof typeof LOG_LEVELS;
-type Message = Record<string, unknown> & { type?: string; requestId?: string; jobId?: string; tabId?: number; frameId?: number; documentGeneration?: number; url?: string; method?: string; headers?: unknown; origins?: unknown };
+type Message = Record<string, unknown> & {
+  type?: string;
+  requestId?: string;
+  jobId?: string;
+  tabId?: number;
+  frameId?: number;
+  documentGeneration?: number;
+  url?: string;
+  method?: string;
+  headers?: unknown;
+  origins?: unknown;
+};
 type CandidateInput = { url: string; contents?: string };
-type CandidateSnapshot = { ok: true; documentUrl: string; inputs: CandidateInput[]; overflow: number };
-type CandidateBatch = { requestId: string; inputs: CandidateInput[]; overflow: number; documentUrl: string };
-type SourceFetchResult = { ok: boolean; code?: string; status?: number; url?: string; bytes?: number; data?: string };
-type Entry = { jobId: string; tabId: number; frameId: number; documentGeneration: number; attemptGeneration: number; jobTabId: number; sourceUrl: string; sourceValid: boolean; jobActive: boolean; jobReady: boolean; jobRunning: boolean; heldCandidates: Array<{ entry: Entry; candidate: CandidateBatch }>; seenCandidates: Set<string>; snapshotCount: number; grantedOrigins: Set<string> };
+type CandidateSnapshot = {
+  ok: true;
+  documentUrl: string;
+  inputs: CandidateInput[];
+  overflow: number;
+};
+type CandidateBatch = {
+  requestId: string;
+  inputs: CandidateInput[];
+  overflow: number;
+  documentUrl: string;
+};
+type SourceFetchResult = {
+  ok: boolean;
+  code?: string;
+  status?: number;
+  url?: string;
+  bytes?: number;
+  data?: string;
+};
+type Entry = {
+  jobId: string;
+  tabId: number;
+  frameId: number;
+  documentGeneration: number;
+  attemptGeneration: number;
+  jobTabId: number;
+  sourceUrl: string;
+  sourceValid: boolean;
+  jobActive: boolean;
+  jobReady: boolean;
+  jobRunning: boolean;
+  heldCandidates: Array<{ entry: Entry; candidate: CandidateBatch }>;
+  seenCandidates: Set<string>;
+  snapshotCount: number;
+  grantedOrigins: Set<string>;
+};
 /**
  * The coordinator's required slice of WXT's cross-browser API.
  *
@@ -43,7 +87,11 @@ export type BrowserApi = {
 };
 export type BrowserTab = { id?: number; url?: string };
 type BrowserSender = { tab?: BrowserTab; frameId?: number };
-const IDLE_ICON = { 16: "icons/icon16-grey.png", 48: "icons/icon48-grey.png", 128: "icons/icon128-grey.png" };
+const IDLE_ICON = {
+  16: "icons/icon16-grey.png",
+  48: "icons/icon48-grey.png",
+  128: "icons/icon128-grey.png",
+};
 const ACTIVE_ICON = { 16: "icons/icon16.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
 const HELD_CANDIDATE_LIMIT = 64;
 const MAX_SNAPSHOTS = 4;
@@ -58,40 +106,76 @@ export const BACKGROUND_LOG_MAX_CHARS = LOG_MAX_CHARS;
 
 function sameDocumentUrl(a: string, b: string): boolean {
   try {
-    const left = new URL(a); const right = new URL(b);
-    left.hash = ""; right.hash = "";
+    const left = new URL(a);
+    const right = new URL(b);
+    left.hash = "";
+    right.hash = "";
     return left.href === right.href;
-  } catch { return a === b; }
+  } catch {
+    return a === b;
+  }
 }
 
-export function createBackgroundCoordinator({ browserApi, testing = false }: { browserApi: BrowserApi; testing?: boolean }) {
+export function createBackgroundCoordinator({
+  browserApi,
+  testing = false,
+}: {
+  browserApi: BrowserApi;
+  testing?: boolean;
+}) {
   const backgroundLogger = createLogger("background");
 
-  function setBackgroundLogLevel(level: string | number) { backgroundLogger.setLevel(level); }
-  function setBackgroundLogSink(sink: unknown) { backgroundLogger.setSink(sink); }
-  function backgroundLog(level: LogLevel, code: string, detail: unknown = "") { backgroundLogger.log(level, code, detail); }
+  function setBackgroundLogLevel(level: string | number) {
+    backgroundLogger.setLevel(level);
+  }
+  function setBackgroundLogSink(sink: unknown) {
+    backgroundLogger.setSink(sink);
+  }
+  function backgroundLog(level: LogLevel, code: string, detail: unknown = "") {
+    backgroundLogger.log(level, code, detail);
+  }
 
   const jobs = new Map<string, Entry>();
   const sourceBindings = new Map<string, Entry>();
   let wired = false;
   let jobSequence = 0;
 
-  function sourceBindingKey(entry: Entry) { return `${entry.jobId}:${entry.tabId}:${entry.frameId}`; }
+  function sourceBindingKey(entry: Entry) {
+    return `${entry.jobId}:${entry.tabId}:${entry.frameId}`;
+  }
   function bindingOf(entry: Entry) {
     return {
-      jobId: entry.jobId, tabId: entry.tabId, frameId: entry.frameId,
+      jobId: entry.jobId,
+      tabId: entry.tabId,
+      frameId: entry.frameId,
       documentGeneration: entry.documentGeneration,
     };
   }
   function bindingMatches(message: Message, entry: Entry) {
     const binding = bindingOf(entry);
-    return Boolean(message && message.jobId === binding.jobId && message.tabId === binding.tabId &&
-      message.frameId === binding.frameId && message.documentGeneration === binding.documentGeneration);
+    return Boolean(
+      message &&
+        message.jobId === binding.jobId &&
+        message.tabId === binding.tabId &&
+        message.frameId === binding.frameId &&
+        message.documentGeneration === binding.documentGeneration,
+    );
   }
-  function requestId(message: Message) { return typeof message?.requestId === "string" && message.requestId.length > 0 && message.requestId.length <= 200; }
-  function makeRequestId(prefix: string) { jobSequence += 1; return `${prefix}-${Date.now().toString(36)}-${jobSequence}`; }
+  function requestId(message: Message) {
+    return (
+      typeof message?.requestId === "string" &&
+      message.requestId.length > 0 &&
+      message.requestId.length <= 200
+    );
+  }
+  function makeRequestId(prefix: string) {
+    jobSequence += 1;
+    return `${prefix}-${Date.now().toString(36)}-${jobSequence}`;
+  }
   function makeJobId() {
-    try { if (globalThis.crypto?.randomUUID) return `job:${globalThis.crypto.randomUUID()}`; } catch {}
+    try {
+      if (globalThis.crypto?.randomUUID) return `job:${globalThis.crypto.randomUUID()}`;
+    } catch {}
     return makeRequestId("job").replace("job-", "job:");
   }
 
@@ -99,7 +183,10 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
     try {
       const icon = browserApi.action.setIcon({ tabId, path: active ? ACTIVE_ICON : IDLE_ICON });
       icon.catch(() => {});
-      const badge = browserApi.action.setBadgeText({ tabId, text: active ? (failed ? "!" : "•") : "" });
+      const badge = browserApi.action.setBadgeText({
+        tabId,
+        text: active ? (failed ? "!" : "•") : "",
+      });
       badge.catch(() => {});
     } catch {}
   }
@@ -107,16 +194,35 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
   function sendToTab(tabId: number, message: unknown, frameId?: number) {
     try {
       const options = typeof frameId === "number" ? { frameId } : undefined;
-      const pending = options === undefined ? browserApi.tabs.sendMessage(tabId, message) : browserApi.tabs.sendMessage(tabId, message, options);
+      const pending =
+        options === undefined
+          ? browserApi.tabs.sendMessage(tabId, message)
+          : browserApi.tabs.sendMessage(tabId, message, options);
       pending.catch(() => {});
       return pending;
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }
-  function sendToJob(entry: Entry, type: string, requestIdValue: string | undefined, extra: Record<string, unknown> = {}) {
+  function sendToJob(
+    entry: Entry,
+    type: string,
+    requestIdValue: string | undefined,
+    extra: Record<string, unknown> = {},
+  ) {
     if (!requestIdValue) return null;
     if (typeof entry.jobTabId !== "number") return null;
-    backgroundLog("debug", "job-message-sent", `type=${type} request=${requestIdValue} tab=${entry.jobTabId}`);
-    return sendToTab(entry.jobTabId, { type, ...bindingOf(entry), requestId: requestIdValue, ...extra });
+    backgroundLog(
+      "debug",
+      "job-message-sent",
+      `type=${type} request=${requestIdValue} tab=${entry.jobTabId}`,
+    );
+    return sendToTab(entry.jobTabId, {
+      type,
+      ...bindingOf(entry),
+      requestId: requestIdValue,
+      ...extra,
+    });
   }
 
   function findJobSender(sender: BrowserSender, message: Message): Entry | null {
@@ -130,13 +236,16 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
     // placed in its extension URL. It cannot yet include a source binding.
     if (message?.type === "dz.job.ready") return senderFrameId === 0 ? job : null;
     const source = sourceBindings.get(`${message.jobId}:${message.tabId}:${message.frameId}`);
-    return source && senderFrameId === source.frameId && bindingMatches(message, source) ? source : null;
+    return source && senderFrameId === source.frameId && bindingMatches(message, source)
+      ? source
+      : null;
   }
 
   function removeJob(entry: Entry, reason: string) {
-    for (const source of [...sourceBindings.values()]) if (source.jobId === entry.jobId) {
-      sourceBindings.delete(sourceBindingKey(source));
-    }
+    for (const source of [...sourceBindings.values()])
+      if (source.jobId === entry.jobId) {
+        sourceBindings.delete(sourceBindingKey(source));
+      }
     jobs.delete(entry.jobId);
     setBadge(entry.tabId, false);
     backgroundLog("info", "job-removed", `${entry.jobId} ${reason}`);
@@ -152,29 +261,42 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
     for (const entry of jobs.values()) {
       if (entry.tabId === tabId && entry.jobRunning && typeof entry.jobTabId === "number") {
         backgroundLog("info", "job-focus", `tab=${tabId} jobTab=${entry.jobTabId} reason=running`);
-        try { await browserApi.tabs.update(entry.jobTabId, { active: true }); } catch {}
+        try {
+          await browserApi.tabs.update(entry.jobTabId, { active: true });
+        } catch {}
         return;
       }
       if (entry.tabId === tabId && entry.jobActive) {
         entry.jobActive = false;
         entry.sourceValid = false;
         backgroundLog("info", "job-cancel-requested", `tab=${tabId} jobId=${entry.jobId}`);
-        sendToJob(entry, "dz.job.cancel", makeRequestId("toolbar-cancel"), { reason: "toolbar-cancel" });
+        sendToJob(entry, "dz.job.cancel", makeRequestId("toolbar-cancel"), {
+          reason: "toolbar-cancel",
+        });
         setBadge(tabId, false);
         return;
       }
       if (entry.tabId === tabId && entry.jobReady && typeof entry.jobTabId === "number") {
         backgroundLog("info", "job-focus", `tab=${tabId} jobTab=${entry.jobTabId} reason=ready`);
-        try { await browserApi.tabs.update(entry.jobTabId, { active: true }); } catch {}
+        try {
+          await browserApi.tabs.update(entry.jobTabId, { active: true });
+        } catch {}
         return;
       }
     }
     const jobId = makeJobId();
-    let jobTab;
+    let jobTab: BrowserTab;
     try {
-      jobTab = await browserApi.tabs.create({ url: browserApi.runtime.getURL(`/job.html#jobId=${encodeURIComponent(jobId)}`), active: true });
+      jobTab = await browserApi.tabs.create({
+        url: browserApi.runtime.getURL(`/job.html#jobId=${encodeURIComponent(jobId)}`),
+        active: true,
+      });
     } catch (error) {
-      backgroundLog("error", "job-tab-create-failed", error instanceof Error ? error.message : error);
+      backgroundLog(
+        "error",
+        "job-tab-create-failed",
+        error instanceof Error ? error.message : error,
+      );
       return;
     }
     if (typeof jobTab?.id !== "number") {
@@ -182,38 +304,76 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
       return;
     }
     const entry: Entry = {
-      jobId, tabId, frameId: 0, documentGeneration: 0, attemptGeneration: 0, jobTabId: jobTab.id, sourceUrl: tab.url,
-      sourceValid: true, jobActive: true, jobReady: false, jobRunning: false, heldCandidates: [],
-      seenCandidates: new Set<string>(), snapshotCount: 0, grantedOrigins: new Set<string>(),
+      jobId,
+      tabId,
+      frameId: 0,
+      documentGeneration: 0,
+      attemptGeneration: 0,
+      jobTabId: jobTab.id,
+      sourceUrl: tab.url,
+      sourceValid: true,
+      jobActive: true,
+      jobReady: false,
+      jobRunning: false,
+      heldCandidates: [],
+      seenCandidates: new Set<string>(),
+      snapshotCount: 0,
+      grantedOrigins: new Set<string>(),
     };
     jobs.set(jobId, entry);
     sourceBindings.set(sourceBindingKey(entry), entry);
     setBadge(tabId, true);
-    backgroundLog("info", "job-created", `jobId=${jobId} jobTab=${jobTab.id} sourceTab=${tabId} frame=${entry.frameId} url=${tab.url}`);
+    backgroundLog(
+      "info",
+      "job-created",
+      `jobId=${jobId} jobTab=${jobTab.id} sourceTab=${tabId} frame=${entry.frameId} url=${tab.url}`,
+    );
   }
 
   function sourceOperationAllowed(entry: Entry) {
-    return entry?.jobActive === true && entry.sourceValid === true && isPublicHttpUrl(entry.sourceUrl) &&
-      sourceBindings.get(sourceBindingKey(entry)) === entry;
+    return (
+      entry?.jobActive === true &&
+      entry.sourceValid === true &&
+      isPublicHttpUrl(entry.sourceUrl) &&
+      sourceBindings.get(sourceBindingKey(entry)) === entry
+    );
   }
 
-  async function executeSourceOperation<Args extends unknown[], Result>(entry: Entry, func: (...args: Args) => Result, args: Args, op = "source"): Promise<unknown> {
+  async function executeSourceOperation<Args extends unknown[], Result>(
+    entry: Entry,
+    func: (...args: Args) => Result,
+    args: Args,
+    op = "source",
+  ): Promise<unknown> {
     if (!sourceOperationAllowed(entry)) {
-      backgroundLog("debug", "active-tab-op-skipped", `op=${op} tab=${entry.tabId} frame=${entry.frameId} reason=binding-invalid`);
+      backgroundLog(
+        "debug",
+        "active-tab-op-skipped",
+        `op=${op} tab=${entry.tabId} frame=${entry.frameId} reason=binding-invalid`,
+      );
       return null;
     }
     const generation = entry.documentGeneration;
-    backgroundLog("info", "active-tab-op-start", `op=${op} tab=${entry.tabId} frame=${entry.frameId} gen=${generation}`);
+    backgroundLog(
+      "info",
+      "active-tab-op-start",
+      `op=${op} tab=${entry.tabId} frame=${entry.frameId} gen=${generation}`,
+    );
     const results = await browserApi.scripting.executeScript({
       target: { tabId: entry.tabId, frameIds: [entry.frameId] },
       func,
       args,
     });
     if (!sourceOperationAllowed(entry) || entry.documentGeneration !== generation) {
-      backgroundLog("debug", "active-tab-op-discarded", `op=${op} tab=${entry.tabId} reason=binding-lost`);
+      backgroundLog(
+        "debug",
+        "active-tab-op-discarded",
+        `op=${op} tab=${entry.tabId} reason=binding-lost`,
+      );
       return null;
     }
-    if (!Array.isArray(results) || results.length !== 1 || results[0]?.frameId !== entry.frameId) throw new Error("invalid-source-operation-result");
+    if (!Array.isArray(results) || results.length !== 1 || results[0]?.frameId !== entry.frameId)
+      throw new Error("invalid-source-operation-result");
     return results[0].result;
   }
 
@@ -225,11 +385,21 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
       entry.seenCandidates.add(input.url);
       inputs.push(input);
     }
-    const candidate = { requestId: makeRequestId("candidates"), inputs, overflow: snapshot.overflow, documentUrl: snapshot.documentUrl };
-    backgroundLog("debug", "candidates-forwarded", `jobId=${entry.jobId} added=${inputs.length} overflow=${snapshot.overflow} ready=${job.jobReady} held=${job.heldCandidates.length}`);
+    const candidate = {
+      requestId: makeRequestId("candidates"),
+      inputs,
+      overflow: snapshot.overflow,
+      documentUrl: snapshot.documentUrl,
+    };
+    backgroundLog(
+      "debug",
+      "candidates-forwarded",
+      `jobId=${entry.jobId} added=${inputs.length} overflow=${snapshot.overflow} ready=${job.jobReady} held=${job.heldCandidates.length}`,
+    );
     if (!inputs.length && !candidate.overflow) return;
     if (job.jobReady) sendToJob(entry, "dz.job.candidates", candidate.requestId, candidate);
-    else if (job.heldCandidates.length < HELD_CANDIDATE_LIMIT) job.heldCandidates.push({ entry, candidate });
+    else if (job.heldCandidates.length < HELD_CANDIDATE_LIMIT)
+      job.heldCandidates.push({ entry, candidate });
   }
   function flushHeldCandidates(entry: Entry) {
     while (entry.jobReady && entry.heldCandidates.length) {
@@ -241,17 +411,38 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
 
   async function handlePermission(entry: Entry, message: Message) {
     const origins = Array.isArray(message.origins)
-      ? [...new Set(message.origins.map(originOfPublicUrl).filter((origin): origin is string => origin !== null))]
+      ? [
+          ...new Set(
+            message.origins
+              .map(originOfPublicUrl)
+              .filter((origin): origin is string => origin !== null),
+          ),
+        ]
       : [];
-    if (!origins.length) return sendToJob(entry, "dz.job.permission-required", message.requestId, { granted: false, code: "invalid-origins" });
+    if (!origins.length)
+      return sendToJob(entry, "dz.job.permission-required", message.requestId, {
+        granted: false,
+        code: "invalid-origins",
+      });
     let granted = false;
     // The job page owns `permissions.request()` because it retains the user
     // activation from its Allow button. The coordinator verifies that grant
     // before resuming a paused acquisition.
     if (testing && message.testGrant === true) granted = true;
-    else try { granted = Boolean(await browserApi.permissions.contains({ origins: origins.map((origin) => `${origin}/*`) })); } catch {}
+    else
+      try {
+        granted = Boolean(
+          await browserApi.permissions.contains({
+            origins: origins.map((origin) => `${origin}/*`),
+          }),
+        );
+      } catch {}
     if (granted) for (const origin of origins) entry.grantedOrigins.add(origin);
-    backgroundLog("info", "permission-check", `req=${message.requestId} jobId=${entry.jobId} origins=${origins.length} granted=${granted}`);
+    backgroundLog(
+      "info",
+      "permission-check",
+      `req=${message.requestId} jobId=${entry.jobId} origins=${origins.length} granted=${granted}`,
+    );
     sendToJob(entry, "dz.job.permission-required", message.requestId, { granted, origins });
   }
 
@@ -260,7 +451,10 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
     entry.sourceValid = false;
     entry.jobActive = false;
     entry.heldCandidates.length = 0;
-    sendToJob(entry, "dz.job.binding", makeRequestId("source-invalidated"), { sourceValid: false, reason });
+    sendToJob(entry, "dz.job.binding", makeRequestId("source-invalidated"), {
+      sourceValid: false,
+      reason,
+    });
     backgroundLog("info", "source-invalidated", `tab ${entry.tabId} ${reason}`);
   }
 
@@ -276,7 +470,11 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
     entry.jobRunning = false;
     entry.seenCandidates.clear();
     entry.snapshotCount = 0;
-    backgroundLog("info", "attempt-started", `jobId=${entry.jobId} attempt=${entry.attemptGeneration}`);
+    backgroundLog(
+      "info",
+      "attempt-started",
+      `jobId=${entry.jobId} attempt=${entry.attemptGeneration}`,
+    );
     void requestCandidateSnapshot(entry);
   }
 
@@ -285,49 +483,94 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
     entry.snapshotCount += 1;
     const attempt = entry.attemptGeneration;
     try {
-      const snapshot = await executeSourceOperation(entry, collectCandidates, [], "collect") as CandidateSnapshot | null;
+      const snapshot = (await executeSourceOperation(
+        entry,
+        collectCandidates,
+        [],
+        "collect",
+      )) as CandidateSnapshot | null;
       if (!sourceOperationAllowed(entry) || entry.attemptGeneration !== attempt) return;
-      if (!snapshot || snapshot.ok !== true || !Array.isArray(snapshot.inputs) ||
-        typeof snapshot.documentUrl !== "string" || !isPublicHttpUrl(snapshot.documentUrl) ||
-        !Number.isSafeInteger(snapshot.overflow) || snapshot.overflow < 0 ||
+      if (
+        !snapshot ||
+        snapshot.ok !== true ||
+        !Array.isArray(snapshot.inputs) ||
+        typeof snapshot.documentUrl !== "string" ||
+        !isPublicHttpUrl(snapshot.documentUrl) ||
+        !Number.isSafeInteger(snapshot.overflow) ||
+        snapshot.overflow < 0 ||
         snapshot.inputs.length > MAX_CANDIDATES ||
-        snapshot.inputs.some((input) => !input || typeof input !== "object" || typeof input.url !== "string" ||
-          input.url.length > MAX_URL_LENGTH || !isPublicHttpUrl(input.url) ||
-          (input.contents !== undefined && typeof input.contents !== "string"))) {
+        snapshot.inputs.some(
+          (input) =>
+            !input ||
+            typeof input !== "object" ||
+            typeof input.url !== "string" ||
+            input.url.length > MAX_URL_LENGTH ||
+            !isPublicHttpUrl(input.url) ||
+            (input.contents !== undefined && typeof input.contents !== "string"),
+        )
+      ) {
         throw new Error("invalid-candidate-snapshot");
       }
       if (!sameDocumentUrl(snapshot.documentUrl, entry.sourceUrl)) {
         invalidateSourceDocument(entry, "snapshot-document-mismatch");
         return;
       }
-      backgroundLog("info", "active-tab-op-result", `op=collect tab=${entry.tabId} candidates=${snapshot.inputs.length} overflow=${snapshot.overflow} doc=${snapshot.documentUrl}`);
+      backgroundLog(
+        "info",
+        "active-tab-op-result",
+        `op=collect tab=${entry.tabId} candidates=${snapshot.inputs.length} overflow=${snapshot.overflow} doc=${snapshot.documentUrl}`,
+      );
       forwardCandidates(entry, snapshot);
     } catch (error) {
       if (!sourceOperationAllowed(entry) || entry.attemptGeneration !== attempt) return;
       entry.sourceValid = false;
       setBadge(entry.tabId, true, true);
-      sendToJob(entry, "dz.job.binding", makeRequestId("source-snapshot-failed"), { sourceValid: false, code: "source-snapshot-failed" });
-      backgroundLog("error", "source-snapshot-failed", `tab=${entry.tabId} ${error instanceof Error ? error.message : "operation-rejected"}`);
+      sendToJob(entry, "dz.job.binding", makeRequestId("source-snapshot-failed"), {
+        sourceValid: false,
+        code: "source-snapshot-failed",
+      });
+      backgroundLog(
+        "error",
+        "source-snapshot-failed",
+        `tab=${entry.tabId} ${error instanceof Error ? error.message : "operation-rejected"}`,
+      );
     }
   }
 
   async function dispatchSourceFetch(entry: Entry, message: Message) {
     const method = normalizeFetchMethod(message.method);
     const headers = validateEngineHeaders(message.headers);
-    backgroundLog("info", "source-fetch-request", `req=${message.requestId} tab=${entry.tabId} method=${method ?? String(message.method)} purpose=${String(message.purpose ?? "unknown")} url=${String(message.url ?? "")}`);
+    backgroundLog(
+      "info",
+      "source-fetch-request",
+      `req=${message.requestId} tab=${entry.tabId} method=${method ?? String(message.method)} purpose=${String(message.purpose ?? "unknown")} url=${String(message.url ?? "")}`,
+    );
     const reject = (code: string, extra: Record<string, unknown> = {}) => {
       backgroundLog("warn", "source-fetch-rejected", `req=${message.requestId} code=${code}`);
       sendToJob(entry, "dz.job.fetch", message.requestId, {
-        sourceType: "dz.source.fetch-complete", ok: false, code, ...extra,
+        sourceType: "dz.source.fetch-complete",
+        ok: false,
+        code,
+        ...extra,
       });
     };
-    if (!isPublicHttpUrl(message.url) || message.url.length > MAX_URL_LENGTH || !method || !headers) {
+    if (
+      !isPublicHttpUrl(message.url) ||
+      message.url.length > MAX_URL_LENGTH ||
+      !method ||
+      !headers
+    ) {
       reject("invalid-source-request");
       return;
     }
     let result: SourceFetchResult | null;
     try {
-      result = await executeSourceOperation(entry, fetchSource, [{ url: message.url, method, headers }], "fetch") as SourceFetchResult | null;
+      result = (await executeSourceOperation(
+        entry,
+        fetchSource,
+        [{ url: message.url, method, headers }],
+        "fetch",
+      )) as SourceFetchResult | null;
     } catch {
       reject("source-operation-failed");
       return;
@@ -341,13 +584,27 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
       return;
     }
     if (!result.ok) {
-      const code = typeof result.code === "string" && /^[a-z0-9-]{1,64}$/.test(result.code) ? result.code : "source-fetch-failed";
+      const code =
+        typeof result.code === "string" && /^[a-z0-9-]{1,64}$/.test(result.code)
+          ? result.code
+          : "source-fetch-failed";
       reject(code, Number.isInteger(result.status) ? { status: result.status } : {});
       return;
     }
-    if (typeof result.data !== "string" || result.data.length === 0 || result.data.length > MAX_SOURCE_DATA_CHARS ||
-      typeof result.bytes !== "number" || !Number.isSafeInteger(result.bytes) || result.bytes < 0 || result.bytes > SOURCE_FETCH_BYTE_LIMIT ||
-      typeof result.status !== "number" || !Number.isInteger(result.status) || result.status < 200 || result.status >= 300 || !isPublicHttpUrl(result.url)) {
+    if (
+      typeof result.data !== "string" ||
+      result.data.length === 0 ||
+      result.data.length > MAX_SOURCE_DATA_CHARS ||
+      typeof result.bytes !== "number" ||
+      !Number.isSafeInteger(result.bytes) ||
+      result.bytes < 0 ||
+      result.bytes > SOURCE_FETCH_BYTE_LIMIT ||
+      typeof result.status !== "number" ||
+      !Number.isInteger(result.status) ||
+      result.status < 200 ||
+      result.status >= 300 ||
+      !isPublicHttpUrl(result.url)
+    ) {
       reject("invalid-source-fetch-result");
       return;
     }
@@ -356,33 +613,61 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
       reject("invalid-source-fetch-result");
       return;
     }
-    backgroundLog("info", "source-fetch-complete", `req=${message.requestId} tab=${entry.tabId} status=${result.status} bytes=${result.bytes} url=${result.url}`);
+    backgroundLog(
+      "info",
+      "source-fetch-complete",
+      `req=${message.requestId} tab=${entry.tabId} status=${result.status} bytes=${result.bytes} url=${result.url}`,
+    );
     sendToJob(entry, "dz.job.fetch", message.requestId, {
-      sourceType: "dz.source.fetch-complete", ok: true, status: result.status, url: result.url, bytes: result.bytes, data: result.data,
+      sourceType: "dz.source.fetch-complete",
+      ok: true,
+      status: result.status,
+      url: result.url,
+      bytes: result.bytes,
+      data: result.data,
     });
   }
 
   function wire() {
     if (wired) return;
     wired = true;
-    browserApi.action.onClicked.addListener((tab) => { void createJob(tab); });
+    browserApi.action.onClicked.addListener((tab) => {
+      void createJob(tab);
+    });
     browserApi.tabs.onRemoved.addListener((tabId) => {
       for (const entry of [...jobs.values()]) {
-        if (entry.tabId === tabId || entry.jobTabId === tabId) void removeJob(entry, entry.tabId === tabId ? "source-tab-closed" : "job-tab-closed");
+        if (entry.tabId === tabId || entry.jobTabId === tabId)
+          void removeJob(entry, entry.tabId === tabId ? "source-tab-closed" : "job-tab-closed");
       }
     });
     browserApi.tabs.onUpdated.addListener((tabId, changeInfo) => {
       if (typeof changeInfo?.url !== "string") return;
-      for (const entry of sourceBindings.values()) if (entry.tabId === tabId && entry.sourceValid && !sameDocumentUrl(changeInfo.url, entry.sourceUrl)) invalidateSourceDocument(entry, "navigation");
+      for (const entry of sourceBindings.values())
+        if (
+          entry.tabId === tabId &&
+          entry.sourceValid &&
+          !sameDocumentUrl(changeInfo.url, entry.sourceUrl)
+        )
+          invalidateSourceDocument(entry, "navigation");
     });
     browserApi.permissions.onRemoved.addListener((removed) => {
-      const removedOrigins = new Set((removed?.origins ?? []).map((origin) => origin.replace(/\/\*$/, "")));
+      const removedOrigins = new Set(
+        (removed?.origins ?? []).map((origin) => origin.replace(/\/\*$/, "")),
+      );
       for (const entry of jobs.values()) {
         const revoked = [...entry.grantedOrigins].filter((origin) => removedOrigins.has(origin));
         if (!revoked.length) continue;
         for (const origin of revoked) entry.grantedOrigins.delete(origin);
-        backgroundLog("info", "permission-revoked", `jobId=${entry.jobId} origins=${revoked.length}`);
-        sendToJob(entry, "dz.job.permission-required", makeRequestId("permission-revoked"), { granted: false, revoked, code: "permission-revoked" });
+        backgroundLog(
+          "info",
+          "permission-revoked",
+          `jobId=${entry.jobId} origins=${revoked.length}`,
+        );
+        sendToJob(entry, "dz.job.permission-required", makeRequestId("permission-revoked"), {
+          granted: false,
+          revoked,
+          code: "permission-revoked",
+        });
       }
     });
     browserApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -395,29 +680,54 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
       if (message.type === "dezoomify-test-start-job") {
         if (!testing || typeof message.tabId !== "number" || !isPublicHttpUrl(message.url)) return;
         void createJob({ id: message.tabId, url: message.url });
-        try { sendResponse?.({ ok: true }); } catch {}
+        try {
+          sendResponse?.({ ok: true });
+        } catch {}
         return true;
       }
       if (message.type.startsWith("dz.job.")) {
-        backgroundLog("debug", "job-message-received", `type=${message.type} request=${message.requestId} tab=${sender?.tab?.id} frame=${sender?.frameId}`);
+        backgroundLog(
+          "debug",
+          "job-message-received",
+          `type=${message.type} request=${message.requestId} tab=${sender?.tab?.id} frame=${sender?.frameId}`,
+        );
         const entry = findJobSender(sender, message);
         if (!entry) {
-          backgroundLog("debug", "job-message-rejected", `type=${message.type} tab=${sender?.tab?.id} frame=${sender?.frameId} reason=unknown-sender`);
+          backgroundLog(
+            "debug",
+            "job-message-rejected",
+            `type=${message.type} tab=${sender?.tab?.id} frame=${sender?.frameId} reason=unknown-sender`,
+          );
           return;
         }
         if (message.type === "dz.job.ready") {
           const job = jobs.get(entry.jobId) ?? entry;
           job.jobReady = true;
-          backgroundLog("info", "binding-ready", `jobId=${entry.jobId} sourceValid=${entry.sourceValid} tab=${entry.tabId} frame=${entry.frameId} gen=${entry.documentGeneration}`);
-          sendToJob(entry, "dz.job.binding", message.requestId, { sourceValid: entry.sourceValid, documentUrl: entry.sourceUrl });
+          backgroundLog(
+            "info",
+            "binding-ready",
+            `jobId=${entry.jobId} sourceValid=${entry.sourceValid} tab=${entry.tabId} frame=${entry.frameId} gen=${entry.documentGeneration}`,
+          );
+          sendToJob(entry, "dz.job.binding", message.requestId, {
+            sourceValid: entry.sourceValid,
+            documentUrl: entry.sourceUrl,
+          });
           flushHeldCandidates(job);
           startAttempt(job);
         } else if (message.type === "dz.job.fetch" && entry.sourceValid && entry.jobActive) {
           (jobs.get(entry.jobId) ?? entry).jobRunning = true;
           void dispatchSourceFetch(entry, message);
         } else if (message.type === "dz.job.fetch") {
-          backgroundLog("debug", "job-message-rejected", `type=${message.type} request=${message.requestId} reason=inactive-source`);
-        } else if (message.type === "dz.job.candidates-more" && entry.sourceValid && entry.jobActive) {
+          backgroundLog(
+            "debug",
+            "job-message-rejected",
+            `type=${message.type} request=${message.requestId} reason=inactive-source`,
+          );
+        } else if (
+          message.type === "dz.job.candidates-more" &&
+          entry.sourceValid &&
+          entry.jobActive
+        ) {
           void requestCandidateSnapshot(entry);
         } else if (message.type === "dz.job.retry" && entry.sourceValid && entry.jobActive) {
           // Explicit user retry of a retryable failure: take one fresh bounded
@@ -425,7 +735,11 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
           backgroundLog("info", "job-retry", `jobId=${entry.jobId} tab=${entry.tabId}`);
           startAttempt(jobs.get(entry.jobId) ?? entry);
         } else if (message.type === "dz.job.retry") {
-          backgroundLog("debug", "job-message-rejected", `type=${message.type} reason=inactive-source`);
+          backgroundLog(
+            "debug",
+            "job-message-rejected",
+            `type=${message.type} reason=inactive-source`,
+          );
         } else if (message.type === "dz.job.cancel") {
           backgroundLog("info", "job-cancelled", `jobId=${entry.jobId} tab=${entry.tabId}`);
           entry.jobRunning = false;
@@ -436,14 +750,20 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
         } else if (message.type === "dz.job.permission-required") {
           void handlePermission(entry, message);
         }
-        try { sendResponse?.({ ok: true }); } catch {}
+        try {
+          sendResponse?.({ ok: true });
+        } catch {}
         return true;
       }
     });
   }
 
   function startBackground() {
-    try { wire(); } catch (error) { backgroundLog("error", "wire-failed", error instanceof Error ? error.message : error); }
+    try {
+      wire();
+    } catch (error) {
+      backgroundLog("error", "wire-failed", error instanceof Error ? error.message : error);
+    }
   }
 
   return {

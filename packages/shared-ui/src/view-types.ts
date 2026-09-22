@@ -1,7 +1,7 @@
-import type { AppCapabilities } from "./components.ts";
-import type { SnapshotPresentation } from "./snapshot-view.ts";
 import type { HistoryEntry } from "@dezoomify/app-model";
 import type { ReactElement, ReactNode } from "react";
+import type { AppCapabilities } from "./components.ts";
+import type { SnapshotPresentation } from "./snapshot-view.ts";
 
 /** Effects supplied by the graphical product that hosts the shared UI. */
 export interface ViewCallbacks {
@@ -21,10 +21,21 @@ export interface ViewCallbacks {
 }
 
 export interface JobActivity {
-  url?: string; startedAt?: number; now?: number; stepLabel?: string; detail?: string;
-  pendingRequests?: number; completedRequests?: number; failedRequests?: number;
-  longestPendingMs?: number; timeoutMs?: number; lastProgressAt?: number;
-  log?: string[]; diagnostics?: string; paused?: boolean; pausedAt?: number;
+  url?: string;
+  startedAt?: number;
+  now?: number;
+  stepLabel?: string;
+  detail?: string;
+  pendingRequests?: number;
+  completedRequests?: number;
+  failedRequests?: number;
+  longestPendingMs?: number;
+  timeoutMs?: number;
+  lastProgressAt?: number;
+  log?: string[];
+  diagnostics?: string;
+  paused?: boolean;
+  pausedAt?: number;
   pausedDurationMs?: number;
 }
 
@@ -35,12 +46,28 @@ export interface JobActivity {
  */
 export interface ViewContext {
   capabilities?: AppCapabilities;
-  currentProgress?: { active?: number; retrying?: number; estimatedTotalMs?: number; message?: string };
+  currentProgress?: {
+    active?: number;
+    retrying?: number;
+    estimatedTotalMs?: number;
+    message?: string;
+  };
   completedInfo?: { width: number; height: number; mime: string; blobUrl?: string };
   nativeSaved?: { partial: boolean };
-  savedOutput?: { name: string; width: number; height: number; doneTiles: number; totalTiles: number; failedTiles: number };
-  originClean?: boolean; jobActivity?: JobActivity; initialUrl?: string;
-  sourceUrl?: string; desktopHandoffUrl?: string; history?: HistoryEntry[];
+  savedOutput?: {
+    name: string;
+    width: number;
+    height: number;
+    doneTiles: number;
+    totalTiles: number;
+    failedTiles: number;
+  };
+  originClean?: boolean;
+  jobActivity?: JobActivity;
+  initialUrl?: string;
+  sourceUrl?: string;
+  desktopHandoffUrl?: string;
+  history?: HistoryEntry[];
 }
 
 /** Host-owned React content rendered inside or instead of the generic card. */
@@ -53,5 +80,15 @@ export interface ViewRenderOptions {
 
 export type ViewPhase = SnapshotPresentation["phase"];
 
-export interface ConfirmModalArgs { id?: string; title: string; subtitle?: string; bodyLines: string[]; confirmLabel: string; declineLabel: string; }
-export interface PlatformHints { userAgent?: string; platform?: string; }
+export interface ConfirmModalArgs {
+  id?: string;
+  title: string;
+  subtitle?: string;
+  bodyLines: string[];
+  confirmLabel: string;
+  declineLabel: string;
+}
+export interface PlatformHints {
+  userAgent?: string;
+  platform?: string;
+}

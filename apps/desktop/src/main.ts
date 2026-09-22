@@ -19,23 +19,25 @@
 // carries generation plus missing tiles (partial keep/discard/retry wired
 // to answer_choice with generation+choice).
 import {
-  HISTORY_KEY_DESKTOP,
   cancelAllQueueEntries,
   cancelQueueEntry,
-  finishActiveQueueEntry,
-  humanQueueSummary,
   clearHistory as clearHistoryStore,
+  finishActiveQueueEntry,
+  HISTORY_KEY_DESKTOP,
+  type HistoryEntry,
+  humanQueueSummary,
+  type JobObserver,
+  type JobSnapshot,
+  type JobStartRequest,
   loadHistory as loadHistoryStore,
   pushHistory,
   saveHistory as saveHistoryStore,
   suggestedNameFor,
   summarizeQueue,
   toHistoryEntry,
-  type HistoryEntry,
-  type JobObserver,
-  type JobSnapshot,
-  type JobStartRequest,
 } from "@dezoomify/app-model";
+import { createLogger } from "@dezoomify/browser-runtime";
+import type { ViewContext } from "@dezoomify/shared-ui";
 import {
   describeFailure,
   openConfirmModal,
@@ -43,12 +45,20 @@ import {
   presentIdle,
   presentSnapshot,
   renderView,
-  t,
   type SnapshotPresentation,
   type StructuredError,
+  t,
 } from "@dezoomify/shared-ui";
-import type { ViewContext } from "@dezoomify/shared-ui";
-import { createLogger } from "@dezoomify/browser-runtime";
+import { createElement } from "react";
+import type { NativeFormat } from "./desktopIntegration.ts";
+import {
+  createDesktopIntegration,
+  NATIVE_FORMATS,
+  PROTOCOL_MAX,
+  PROTOCOL_MIN,
+} from "./desktopIntegration.ts";
+import { buildCopyDiagnostics, handleCopyDiagnostics } from "./diagnostics.ts";
+import type { ValidatedDeepLink } from "./errorCopy.ts";
 import {
   encoderToMime,
   formatMissingSummary,
@@ -59,33 +69,16 @@ import {
   trimTechnical,
   validateDeepLinkPayload,
 } from "./errorCopy.ts";
-import type { ValidatedDeepLink } from "./errorCopy.ts";
-import {
-  buildCopyDiagnostics,
-  handleCopyDiagnostics,
-} from "./diagnostics.ts";
-import {
-  getEffectiveSettings,
-  resetDesktopSettings,
-} from "./settingsPanel.ts";
-import { DesktopSettingsView } from "./settingsView.tsx";
-import { createElement } from "react";
-import {
-  createDesktopIntegration,
-  NATIVE_FORMATS,
-  PROTOCOL_MAX,
-  PROTOCOL_MIN,
-} from "./desktopIntegration.ts";
-import type { NativeFormat } from "./desktopIntegration.ts";
-import { createDesktopJobService } from "./jobService.ts";
 import type { DesktopJobHandle } from "./jobService.ts";
+import { createDesktopJobService } from "./jobService.ts";
+import type { DesktopQueue } from "./queue.ts";
 import {
   createDesktopQueue,
   enqueueDesktopQueue,
   recordDesktopProgress,
   retryDesktopEntry,
 } from "./queue.ts";
-import type { DesktopQueue } from "./queue.ts";
+import type { DesktopSettings } from "./settings.ts";
 import {
   defaultOutputDirectory,
   describeSettingsForLog,
@@ -93,7 +86,8 @@ import {
   saveSettings,
   settingsToInvokeArgs,
 } from "./settings.ts";
-import type { DesktopSettings } from "./settings.ts";
+import { getEffectiveSettings, resetDesktopSettings } from "./settingsPanel.ts";
+import { DesktopSettingsView } from "./settingsView.tsx";
 
 const root = typeof document !== "undefined" ? document.getElementById("root") : null;
 const integration = createDesktopIntegration();
@@ -202,18 +196,18 @@ const desktopHistoryStore = {
     desktopMemoryFallback.delete(key);
   },
 };
-let desktopHistory: Array<HistoryEntry> = loadHistoryStore(desktopHistoryStore, HISTORY_KEY_DESKTOP);
+let desktopHistory: Array<HistoryEntry> = loadHistoryStore(
+  desktopHistoryStore,
+  HISTORY_KEY_DESKTOP,
+);
 
 function recordDesktopHistory(url: string, width?: number, height?: number, format?: string): void {
-  const entry = toHistoryEntry(
-    url,
-    {
-      ...(typeof width === "number" ? { width } : {}),
-      ...(typeof height === "number" ? { height } : {}),
-      ...(typeof format === "string" ? { format } : {}),
-      at: Date.now(),
-    },
-  );
+  const entry = toHistoryEntry(url, {
+    ...(typeof width === "number" ? { width } : {}),
+    ...(typeof height === "number" ? { height } : {}),
+    ...(typeof format === "string" ? { format } : {}),
+    at: Date.now(),
+  });
   if (!entry) return;
   desktopHistory = pushHistory(desktopHistory, entry);
   saveHistoryStore(desktopHistoryStore, HISTORY_KEY_DESKTOP, desktopHistory);
@@ -259,7 +253,8 @@ interface PendingDecision {
 function pendingDecisionOf(): PendingDecision | null {
   if (localFailure) return null;
   const snapshot = currentSnapshot;
-  if (!snapshot || snapshot.terminal || snapshot.lifecycle !== "AwaitingPartialDecision") return null;
+  if (!snapshot || snapshot.terminal || snapshot.lifecycle !== "AwaitingPartialDecision")
+    return null;
   const decision = snapshot.decision;
   if (!decision) return null;
   const missingTiles = decision.missing.map((entry) => entry.tile);
@@ -428,7 +423,10 @@ function appendActivityLog(line: string): void {
 
 // The shared logger owns formatting and level gating; the desktop sink feeds
 // the job view's log, so failed jobs show the same trace in technical details.
-const appLog = createLogger("app", { defaultContext: "app", sink: (entry) => appendActivityLog(entry.line) });
+const appLog = createLogger("app", {
+  defaultContext: "app",
+  sink: (entry) => appendActivityLog(entry.line),
+});
 
 function noteProgress(current: number, total: number): void {
   const a = activity();
@@ -485,7 +483,10 @@ function invokeErrorMessage(error: unknown, fallback: string): string {
     ? error.message
     : typeof error === "string"
       ? error
-      : error && typeof error === "object" && "message" in error && typeof error.message === "string"
+      : error &&
+          typeof error === "object" &&
+          "message" in error &&
+          typeof error.message === "string"
         ? error.message
         : fallback;
 }
@@ -528,8 +529,12 @@ function diagnosticsSnapshot() {
     sessionId: NATIVE_TRANSPORT,
     nativeTransport: NATIVE_TRANSPORT,
     progress:
-      currentSnapshot && (currentSnapshot.progress.total !== undefined || currentSnapshot.progress.completed > 0)
-        ? { current: currentSnapshot.progress.completed, total: currentSnapshot.progress.total ?? 0 }
+      currentSnapshot &&
+      (currentSnapshot.progress.total !== undefined || currentSnapshot.progress.completed > 0)
+        ? {
+            current: currentSnapshot.progress.completed,
+            total: currentSnapshot.progress.total ?? 0,
+          }
         : undefined,
     origin: redactedOriginOnly(lastInputUrl),
     outputActionError,
@@ -562,7 +567,9 @@ function failurePresentationOf(snapshot: JobSnapshot): SnapshotPresentation | nu
 function currentPresentation(): SnapshotPresentation {
   if (localFailure) return presentFailure(localFailure, NATIVE_TRANSPORT);
   if (!currentSnapshot) return presentIdle();
-  return failurePresentationOf(currentSnapshot) ?? presentSnapshot(currentSnapshot, NATIVE_TRANSPORT);
+  return (
+    failurePresentationOf(currentSnapshot) ?? presentSnapshot(currentSnapshot, NATIVE_TRANSPORT)
+  );
 }
 
 function clearJobViewState(): void {
@@ -720,7 +727,12 @@ function onSnapshotSideEffects(snapshot: JobSnapshot): void {
   if (typeof total === "number" && total > 0) {
     noteProgress(snapshot.progress.completed, total);
     if (activeQueueId) {
-      const res = recordDesktopProgress(desktopQueue, activeQueueId, snapshot.progress.completed, total);
+      const res = recordDesktopProgress(
+        desktopQueue,
+        activeQueueId,
+        snapshot.progress.completed,
+        total,
+      );
       desktopQueue = res.queue;
     }
   }
@@ -764,7 +776,9 @@ function settleActiveQueue(
 // Keep the panel bounded: at most 20 settled entries ride alongside live ones.
 function trimDesktopQueue(): void {
   if (desktopQueue.entries.length <= 24) return;
-  const settled = desktopQueue.entries.filter((e) => e.status !== "queued" && e.status !== "active");
+  const settled = desktopQueue.entries.filter(
+    (e) => e.status !== "queued" && e.status !== "active",
+  );
   const drop = settled.length - 20;
   if (drop <= 0) return;
   const dropIds = new Set(settled.slice(0, drop).map((e) => e.id));
@@ -956,8 +970,10 @@ async function handleOpenOutput(reveal: boolean): Promise<void> {
   } catch (error) {
     if (handle !== activeHandle) return;
     const rawCode = error && typeof error === "object" && "code" in error ? error.code : null;
-    const code = typeof rawCode === "string" && /^output\.[a-z-]+$/.test(rawCode)
-      ? rawCode : "output.invoke-failed";
+    const code =
+      typeof rawCode === "string" && /^output\.[a-z-]+$/.test(rawCode)
+        ? rawCode
+        : "output.invoke-failed";
     outputActionError = { action: reveal ? "folder" : "open", code };
     pushLog(`File action ${outputActionError.action} failed (${code})`);
     const section = root?.querySelector(".dz-completed-section");
@@ -978,15 +994,17 @@ function handleRecoveryRetry(): void {
   const handle = activeHandle;
   if (!decision || !handle || isTerminalNow()) return;
   pushLog("Retry requested (partial)");
-  void handle.command({ type: "answer-partial", generation: decision.generation, decision: "retry" }).then(
-    () => {
-      touchProgress();
-      update();
-    },
-    (error: unknown) => {
-      failLocally("CHOICE_FAILED", invokeErrorMessage(error, t("desktop.invoke.retry")));
-    },
-  );
+  void handle
+    .command({ type: "answer-partial", generation: decision.generation, decision: "retry" })
+    .then(
+      () => {
+        touchProgress();
+        update();
+      },
+      (error: unknown) => {
+        failLocally("CHOICE_FAILED", invokeErrorMessage(error, t("desktop.invoke.retry")));
+      },
+    );
 }
 
 // Recovery: keep or discard a partial result. Wired to the typed shell
@@ -999,15 +1017,21 @@ function handlePartialChoice(keep: boolean): void {
   if (!decision || !handle) return;
   if (isTerminalNow()) return;
   pushLog(keep ? "Keeping partial image…" : "Discarding partial image…");
-  void handle.command({ type: "answer-partial", generation: decision.generation, decision: keep ? "keep" : "discard" }).then(
-    () => {
-      touchProgress();
-      update();
-    },
-    (error: unknown) => {
-      failLocally("CHOICE_FAILED", invokeErrorMessage(error, t("desktop.invoke.partial")));
-    },
-  );
+  void handle
+    .command({
+      type: "answer-partial",
+      generation: decision.generation,
+      decision: keep ? "keep" : "discard",
+    })
+    .then(
+      () => {
+        touchProgress();
+        update();
+      },
+      (error: unknown) => {
+        failLocally("CHOICE_FAILED", invokeErrorMessage(error, t("desktop.invoke.partial")));
+      },
+    );
 }
 
 function handleReset(): void {
@@ -1041,7 +1065,6 @@ function handleOpenExternalLink(url: string): void {
 function grantedMime(): string {
   return encoderToMime(grantedFormat, "image/png");
 }
-
 
 function dismissDeepLinkConfirm(restore = true): void {
   // Shared UI owns modal lifetime. Opening another modal supersedes this one.
@@ -1086,7 +1109,16 @@ function queryCapabilitiesAtBoot(): void {
   void service.queryCapabilities().then(
     (caps) => {
       const commands = [...caps.commands].sort();
-      const expected = ["answer_choice", "cancel_job", "open_saved_output", "pause_job", "query_capabilities", "request_destination", "resume_job", "start_job"];
+      const expected = [
+        "answer_choice",
+        "cancel_job",
+        "open_saved_output",
+        "pause_job",
+        "query_capabilities",
+        "request_destination",
+        "resume_job",
+        "start_job",
+      ];
       const mismatch =
         caps.protocolMin !== PROTOCOL_MIN ||
         caps.protocolMax !== PROTOCOL_MAX ||
@@ -1161,12 +1193,10 @@ function ensureDesktopAuxPanel(): void {
   const decisionKey = recoveryKeyFor(decision);
   const prevKey = lastRecoveryKey;
   const existing = doc.getElementById("dz-desktop-aux");
-  const focusedInside = existing && existing.contains(doc.activeElement)
-    ? (doc.activeElement as HTMLElement)
-    : null;
-  const focusedLabel = focusedInside && focusedInside instanceof HTMLButtonElement
-    ? focusedInside.textContent
-    : null;
+  const focusedInside =
+    existing && existing.contains(doc.activeElement) ? (doc.activeElement as HTMLElement) : null;
+  const focusedLabel =
+    focusedInside && focusedInside instanceof HTMLButtonElement ? focusedInside.textContent : null;
   if (decisionKey && decisionKey !== prevKey && !recoveryReturnFocus) {
     const opener = activeElementOf(doc);
     recoveryReturnFocus = opener && existing?.contains(opener) ? null : opener;
@@ -1304,7 +1334,10 @@ function ensureDesktopAuxPanel(): void {
       const list = doc.createElement("p");
       list.className = "dz-notice-message dz-missing-list";
       const shown = completedMissing.slice(0, 20).join(", ");
-      const rest = completedMissing.length > 20 ? t("desktop.rec.more", { n: completedMissing.length - 20 }) : "";
+      const rest =
+        completedMissing.length > 20
+          ? t("desktop.rec.more", { n: completedMissing.length - 20 })
+          : "";
       list.textContent = t("desktop.rec.missing", { shown, rest });
       doneBox.appendChild(list);
     }
@@ -1321,7 +1354,8 @@ function ensureDesktopAuxPanel(): void {
     aux.appendChild(note);
   }
 
-  if (presentation.phase !== "completed" && desktopQueue.entries.length > 1) appendDesktopQueuePanel(aux, doc);
+  if (presentation.phase !== "completed" && desktopQueue.entries.length > 1)
+    appendDesktopQueuePanel(aux, doc);
 
   card.appendChild(aux);
   if (decisionKey && decisionKey !== prevKey) {
@@ -1365,11 +1399,7 @@ function resolveDesktopExternalUrl(href: string): string | null {
   if (raw === "") return null;
   if (raw.startsWith("#")) return null;
   const lower = raw.toLowerCase();
-  if (
-    lower.startsWith("javascript:") ||
-    lower.startsWith("data:") ||
-    lower.startsWith("blob:")
-  ) {
+  if (lower.startsWith("javascript:") || lower.startsWith("data:") || lower.startsWith("blob:")) {
     return null;
   }
   if (raw.startsWith("https://")) return raw;
@@ -1491,10 +1521,16 @@ function update() {
       onReset() {
         handleReset();
       },
-      ...(presentation.phase === "completed" ? {
-        onOpenOutput: () => { void handleOpenOutput(false); },
-        onRevealOutput: () => { void handleOpenOutput(true); },
-      } : {}),
+      ...(presentation.phase === "completed"
+        ? {
+            onOpenOutput: () => {
+              void handleOpenOutput(false);
+            },
+            onRevealOutput: () => {
+              void handleOpenOutput(true);
+            },
+          }
+        : {}),
       onHistorySelect(entry: HistoryEntry) {
         viewCtx.initialUrl = entry.url;
         const input = root.querySelector<HTMLInputElement>("#dz-url-input");
@@ -1518,24 +1554,28 @@ function update() {
         browserCanSave: caps.browserCanSave,
         proxyAllowed: caps.proxyAllowed,
       },
-      ...(presentation.phase === "completed" ? { nativeSaved: { partial: presentation.partial } } : {}),
+      ...(presentation.phase === "completed"
+        ? { nativeSaved: { partial: presentation.partial } }
+        : {}),
       ...(viewCtx.jobActivity ? { jobActivity: viewCtx.jobActivity } : {}),
       ...(viewCtx.initialUrl ? { initialUrl: viewCtx.initialUrl } : {}),
       ...(viewCtx.completedInfo ? { completedInfo: viewCtx.completedInfo } : {}),
       history: [...desktopHistory],
     },
-    presentation.phase === "idle" ? {
-      idleBeforeHistory: createElement(DesktopSettingsView, {
-        settings: desktopSettings,
-        error: settingsError,
-        onChange: (settings: DesktopSettings) => {
-          desktopSettings = settings;
-          grantedFormat = normalizeNativeFormat(settings.output_format);
-          runPersistSettingsFromPanel();
-        },
-        onReset: runResetDesktopSettings,
-      }),
-    } : undefined,
+    presentation.phase === "idle"
+      ? {
+          idleBeforeHistory: createElement(DesktopSettingsView, {
+            settings: desktopSettings,
+            error: settingsError,
+            onChange: (settings: DesktopSettings) => {
+              desktopSettings = settings;
+              grantedFormat = normalizeNativeFormat(settings.output_format);
+              runPersistSettingsFromPanel();
+            },
+            onReset: runResetDesktopSettings,
+          }),
+        }
+      : undefined,
   );
   ensureDesktopAuxPanel();
   ensureDesktopExternalNav();
@@ -1559,14 +1599,14 @@ function getCurrentJobId(): string | null {
 }
 
 export {
-  integration,
-  service,
-  update,
+  buildCopyDiagnostics,
+  dismissDeepLinkConfirm,
   getCurrentJobId,
   getEffectiveSettings,
-  buildCopyDiagnostics,
   handleCopyDiagnostics,
-  validateDeepLinkPayload,
+  integration,
+  service,
   showDeepLinkConfirm,
-  dismissDeepLinkConfirm,
+  update,
+  validateDeepLinkPayload,
 };

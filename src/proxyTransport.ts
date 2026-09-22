@@ -44,7 +44,12 @@ function safeHeaders(input: unknown): Record<string, string> {
       forEach?: (cb: (v: string, k: string) => void) => void;
     };
     if (typeof h.get === "function") {
-      for (const k of ["content-type", "content-length", "retry-after", PROXY_UPSTREAM_URL_HEADER]) {
+      for (const k of [
+        "content-type",
+        "content-length",
+        "retry-after",
+        PROXY_UPSTREAM_URL_HEADER,
+      ]) {
         const v = h.get(k);
         if (v !== null && v !== undefined) out[k] = String(v);
       }
@@ -222,7 +227,11 @@ export function createProxyRateLimiter(clock?: ProxyRateClock): ProxyRateLimiter
   async function acquire(signal?: AbortSignal): Promise<(() => void) | null> {
     if (signal?.aborted) return null;
     for (;;) {
-      type Step = { kind: "admit" } | { kind: "abort" } | { kind: "wait-rate"; ms: number } | { kind: "wait-inflight" };
+      type Step =
+        | { kind: "admit" }
+        | { kind: "abort" }
+        | { kind: "wait-rate"; ms: number }
+        | { kind: "wait-inflight" };
       const step: Step = await withMutex((): Step => {
         if (signal?.aborted) return { kind: "abort" };
         const now = nowFn();
@@ -320,10 +329,7 @@ export function createProxyTransport(
     rateLimiter?: ProxyRateLimiter;
   },
 ): {
-  fetchViaProxy(
-    targetUrl: string,
-    callOpts?: { signal?: AbortSignal },
-  ): Promise<ProxyFetchResult>;
+  fetchViaProxy(targetUrl: string, callOpts?: { signal?: AbortSignal }): Promise<ProxyFetchResult>;
 } {
   const proxyPath = opts.proxyPath ?? "/api/proxy";
   const limiter = opts.rateLimiter ?? globalLimiter();
