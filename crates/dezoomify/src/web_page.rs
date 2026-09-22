@@ -4,6 +4,10 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
+use crate::core::{
+    DiscoveryContext, DiscoveryError, DiscoveryResource, DiscoveryStep, Request, resolve_relative,
+};
+
 static META_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?is)<meta\b[^>]*>").expect("constant meta tag pattern"));
 static TITLE_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -33,6 +37,19 @@ pub fn iframe_source(bytes: &[u8]) -> Option<String> {
         .captures(bytes)
         .and_then(|captures| captures.name("src"))
         .map(|capture| String::from_utf8_lossy(capture.as_bytes()).replace("&amp;", "&"))
+}
+
+/// Follow the first iframe source relative to the page's final URI.
+pub fn follow_iframe(
+    _: &DiscoveryContext<'_>,
+    resource: DiscoveryResource<'_>,
+) -> Result<DiscoveryStep, DiscoveryError> {
+    let src = iframe_source(resource.bytes())
+        .ok_or_else(|| DiscoveryError::Session("page iframe has no source".into()))?;
+    Ok(DiscoveryStep::Follow(Request::new(resolve_relative(
+        resource.final_uri(),
+        &src,
+    ))))
 }
 
 /// Best-effort human-readable title of an HTML page.
