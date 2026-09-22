@@ -70,19 +70,6 @@ export interface DesktopCapabilities {
   commands: string[];
 }
 
-export interface DestinationRequest {
-  format: string;
-  suggestedName: string;
-}
-
-export type DestinationOutcome = "granted" | "denied" | "cancelled";
-
-export interface DestinationResult {
-  outcome: DestinationOutcome;
-  reason?: string;
-  code?: string;
-}
-
 function publicIpc(): DesktopIpc {
   return {
     invoke: (cmd, args) => invoke(cmd, args),
@@ -105,8 +92,6 @@ function extensionFor(format: string): string | null {
 }
 
 export interface DesktopJobHandle extends JobHandle {
-  /** Ask the shell for a save destination; resolves the grant dialog. */
-  requestDestination(req: DestinationRequest): Promise<DestinationResult>;
   /** Open the saved output (or reveal it) through the retained job ref. */
   openOutput(reveal: boolean): Promise<void>;
 }
@@ -318,52 +303,6 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
       );
     }
 
-    async function requestDestination(req: DestinationRequest): Promise<DestinationResult> {
-      if (!NATIVE_FORMATS.includes(req.format as (typeof NATIVE_FORMATS)[number])) {
-        return { outcome: "denied", reason: "unsupported-format" };
-      }
-      const wanted = extensionFor(req.format);
-      if (!wanted || !req.suggestedName.toLowerCase().endsWith(wanted)) {
-        return { outcome: "denied", reason: "invalid-extension" };
-      }
-      if (req.suggestedName.includes("\0") || req.suggestedName.includes("..")) {
-        return { outcome: "denied", reason: "invalid-path" };
-      }
-      let rawResult: unknown;
-      try {
-        rawResult = await ipc.invoke("request_destination", {
-          job: id,
-          format: req.format,
-          suggestedName: req.suggestedName,
-        });
-      } catch (error) {
-        return {
-          outcome: "denied",
-          reason: error instanceof Error ? error.message : "destination-failed",
-        };
-      }
-      if (!rawResult || typeof rawResult !== "object") {
-        return { outcome: "denied", reason: "destination-failed" };
-      }
-      const table = rawResult as Record<string, unknown>;
-      if (table["outcome"] === "granted") return { outcome: "granted" };
-      if (table["outcome"] === "cancelled") {
-        return {
-          outcome: "cancelled",
-          reason: typeof table["reason"] === "string" ? table["reason"] : "user-cancelled",
-        };
-      }
-      if (table["outcome"] === "denied") {
-        const result: DestinationResult = {
-          outcome: "denied",
-          reason: typeof table["reason"] === "string" ? table["reason"] : "destination-denied",
-        };
-        if (typeof table["code"] === "string" && table["code"] !== "") result.code = table["code"];
-        return result;
-      }
-      return { outcome: "denied", reason: "destination-failed" };
-    }
-
     async function openOutput(reveal: boolean): Promise<void> {
       await ipc.invoke("open_saved_output", { job: id, reveal });
     }
@@ -372,7 +311,7 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
       observers.delete(id);
     }
 
-    return { id, command, dispose, requestDestination, openOutput };
+    return { id, command, dispose, openOutput };
   }
 
   async function queryCapabilities(): Promise<DesktopCapabilities> {

@@ -39,10 +39,10 @@
 //! * Same-job deferred follow-up (bounded follow/cycle, no host recursive
 //!   replacement jobs) executes through [`UserCommand::FollowDeferred`]:
 //!   the catalog is replaced in place with no new job ID.
-//! * Output bytes/commit race finalization and cleanup acknowledgements
-//!   are accepted and idempotent: a `CleanupAcknowledged` completion for a
-//!   release effect refreshes the projection without touching terminal
-//!   state.
+//! * Output bytes/commit race finalization is correlated through one
+//!   outstanding effect. Decision and cleanup effects are notifications:
+//!   decisions are answered by [`UserCommand::AnswerPartial`] and cleanup
+//!   needs no acknowledgement.
 //!
 //! ```rust
 //! use dezoomify_engine::engine_api::*;
@@ -333,8 +333,9 @@ fn tile_size_of(size: Vec2d) -> TileSize {
     }
 }
 
-/// One unit of work the host must carry out. Each effect completes exactly
-/// once through `complete` (or `provide_metadata` for metadata bodies).
+/// One unit of work the host must carry out. Acquisition, timer, and output
+/// effects complete exactly once through `complete` (or `provide_metadata`
+/// for metadata bodies); decision and cleanup notifications do not.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Effect {
     /// Acquire one metadata resource.
@@ -469,8 +470,6 @@ pub enum EffectResult {
     OutputCommitted { disposition: OutputDisposition },
     /// The awaited output operation failed.
     OutputFailed { code: String, message: String },
-    /// Kept resources released after cancellation or failure.
-    CleanupAcknowledged,
 }
 
 /// Outstanding partial decision payload.
@@ -568,13 +567,11 @@ pub type CompletionError = EngineError;
 /// Outstanding engine-minted effect awaiting its host completion.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Outstanding {
-    Metadata { request: u32 },
+    Metadata { request: u32, uri: String },
     Tile { tile: u32 },
     Probe { tile: u32 },
     Timer { tile: u32, attempt: u32 },
     Finalize,
-    Decision { generation: u32 },
-    Cancel,
 }
 
 /// Which outstanding engine effect an adapter correlation id names. Adapters
@@ -599,9 +596,6 @@ pub struct EngineJob {
     revision: u32,
     next_effect: u32,
     outstanding: HashMap<EffectId, Outstanding>,
-    /// Request URIs by outstanding effect id, so host failure context can
-    /// name the request it came from without any adapter-side retention.
-    effect_uris: HashMap<EffectId, String>,
     /// Host failure context behind the latest metadata failure, retained so
     /// the terminal `Failed` error and snapshot keep the observed facts
     /// (code, transport, HTTP status). Cleared when a catalog wins, exactly
@@ -825,7 +819,6 @@ impl EngineJob {
             revision: 0,
             next_effect: 0,
             outstanding: HashMap::new(),
-            effect_uris: HashMap::new(),
             discovery_failure: None,
             disposition: None,
         };
@@ -895,18 +888,6 @@ impl EngineJob {
                 format!("{effect} is unknown or already settled"),
             )
         })?;
-        // Cleanup acknowledgements are accepted idempotently with no inner
-        // input: the inner machine already rests terminal, so the ack only
-        // refreshes the projection. Wrong-kind and validation rejections
-        // leave the outstanding effect live so the host can still answer it
-        // with the correct kind; only accepted completions settle it.
-        if matches!(outstanding, Outstanding::Cancel)
-            && matches!(result, EffectResult::CleanupAcknowledged)
-        {
-            self.outstanding.remove(&effect);
-            self.effect_uris.remove(&effect);
-            return self.drain();
-        }
         let (inner, disposition) = self.translate_completion(effect, outstanding, result)?;
         let applied = match self.inner.on_command(inner) {
             Ok(Outcome::Ignored) => {
@@ -914,12 +895,10 @@ impl EngineJob {
                 // effect was live when issued, so the completion is
                 // accepted but changes nothing further.
                 self.outstanding.remove(&effect);
-                self.effect_uris.remove(&effect);
                 false
             }
             Ok(Outcome::Applied) => {
                 self.outstanding.remove(&effect);
-                self.effect_uris.remove(&effect);
                 // Publication is claimed only once the inner machine accepts
                 // the finalize completion: rejected `OutputCommitted` answers
                 // leave the disposition unset.
@@ -960,7 +939,7 @@ impl EngineJob {
                 format!("{effect} is unknown or already settled"),
             )
         })?;
-        let Outstanding::Metadata { request } = outstanding else {
+        let Outstanding::Metadata { request, .. } = outstanding else {
             return Err(EngineError::new(
                 "job.wrong-result-kind",
                 format!("{effect} is not a metadata effect"),
@@ -983,12 +962,10 @@ impl EngineJob {
         }) {
             Ok(outcome) => {
                 self.outstanding.remove(&effect);
-                self.effect_uris.remove(&effect);
                 outcome
             }
             Err(error) => {
                 self.outstanding.remove(&effect);
-                self.effect_uris.remove(&effect);
                 return Err(error);
             }
         };
@@ -1076,15 +1053,10 @@ impl EngineJob {
     /// without retaining it themselves. Calls for unknown or non-metadata
     /// effects are ignored; a winning catalog clears the retention.
     pub fn note_metadata_failure(&mut self, effect: EffectId, mut error: ProtocolErrorDto) {
-        if !matches!(
-            self.outstanding.get(&effect),
-            Some(Outstanding::Metadata { .. })
-        ) {
+        let Some(Outstanding::Metadata { uri, .. }) = self.outstanding.get(&effect) else {
             return;
-        }
-        if let Some(uri) = self.effect_uris.get(&effect) {
-            error.request = Some(uri.clone());
-        }
+        };
+        error.request = Some(uri.clone());
         self.discovery_failure = Some(error);
     }
 
@@ -1153,7 +1125,7 @@ impl EngineJob {
                 },
                 None,
             )),
-            (Outstanding::Metadata { request }, EffectResult::MetadataFailed(failure)) => {
+            (Outstanding::Metadata { request, .. }, EffectResult::MetadataFailed(failure)) => {
                 let transport = failure.transport.unwrap_or(TransportKind::Direct);
                 let cause = FetchCause {
                     code: FetchCode::from_string(failure.code.clone()),
@@ -1348,9 +1320,13 @@ impl EngineJob {
         let id = self.mint_effect()?;
         match effect {
             InnerEffect::AcquireResource { request, uri, .. } => {
-                self.outstanding
-                    .insert(id, Outstanding::Metadata { request });
-                self.effect_uris.insert(id, uri.clone());
+                self.outstanding.insert(
+                    id,
+                    Outstanding::Metadata {
+                        request,
+                        uri: uri.clone(),
+                    },
+                );
                 Ok(Some(Effect::AcquireMetadata { id, uri }))
             }
             InnerEffect::AcquireTile {
@@ -1410,10 +1386,7 @@ impl EngineJob {
                     delay_ms,
                 }))
             }
-            InnerEffect::CancelWork => {
-                self.outstanding.insert(id, Outstanding::Cancel);
-                Ok(Some(Effect::CancelRelease { id }))
-            }
+            InnerEffect::CancelWork => Ok(Some(Effect::CancelRelease { id })),
             InnerEffect::RequestDecision { generation } => {
                 let missing = self
                     .inner
@@ -1421,8 +1394,6 @@ impl EngineJob {
                     .iter()
                     .map(|(tile, _)| *tile)
                     .collect();
-                self.outstanding
-                    .insert(id, Outstanding::Decision { generation });
                 Ok(Some(Effect::RequestPartialDecision {
                     id,
                     generation,

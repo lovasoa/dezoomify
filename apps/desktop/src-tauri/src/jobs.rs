@@ -59,44 +59,6 @@ const FORBIDDEN_IPC_SUBSTRINGS: &[&str] = &[
     "imagedata",
 ];
 
-/// Stable phase for a native error code. Single boundary projection: delegates
-/// to `dezoomify_native::error` so every host failure maps once by stable
-/// code, never by display strings.
-pub fn error_phase(code: &str) -> &'static str {
-    dezoomify_native::error::error_phase(code)
-}
-
-/// Whether a native error code is retryable without user edits. True only
-/// for transient transport/service failures; never for auth,
-/// invalid-metadata, deterministic decode, limits, output, validation,
-/// security, or internal errors.
-pub fn error_retryable(code: &str) -> bool {
-    dezoomify_native::error::error_retryable(code)
-}
-
-/// Typed recovery hint for a native error code. The frontend surfaces
-/// typed choices from this (never by parsing messages). Security failures
-/// never offer a weakening recovery.
-pub fn error_recovery(code: &str) -> &'static str {
-    dezoomify_native::error::error_recovery(code)
-}
-
-/// Attempted transport for a native error code (`native` on this runtime).
-pub fn error_transport(code: &str) -> &'static str {
-    dezoomify_native::error::error_transport(code)
-}
-
-/// Affected resource kind for a native error code, when safe to name.
-pub fn error_resource_kind(code: &str) -> Option<&'static str> {
-    dezoomify_native::error::error_resource_kind(code)
-}
-
-/// Redact credential-bearing text from messages before emit, using the
-/// protocol redactor (case-insensitive key match, values replaced).
-pub fn redact_message(text: &str) -> String {
-    dezoomify_protocol::dto::redact_error_text(text)
-}
-
 /// Redacted job origin: scheme + host (+ port if non-default), never the
 /// path, query, or fragment, which may carry credentials or tokens.
 /// Pure string parsing (no network); `unknown-origin` on malformed input.
@@ -1455,111 +1417,8 @@ mod tests {
         assert_no_folded_keys(&payload);
         assert!(!payload.to_string().contains("/item"));
         assert!(!payload_has_forbidden_keys(&payload));
-        // Phase/retryable mapping is by code, never display strings.
-        assert_eq!(error_phase("discovery.failed"), "discovery");
-        assert_eq!(error_phase("output.canvas-limit"), "output");
-        assert!(!error_retryable("output.canvas-limit"));
-        assert!(error_retryable("tile.http-error"));
-        assert_eq!(error_recovery("output.canvas-limit"), "choose-output");
         // New boundary fields reach the snapshot.
         assert_eq!(error["resource_kind"], serde_json::json!("tile"));
-    }
-
-    #[test]
-    fn error_mapping_covers_stable_codes_once_by_code() {
-        // Failure-code remaps from `exec::map_failure_code` stay stable.
-        for (code, phase) in [
-            ("discovery.failed", "discovery"),
-            ("discovery.no-image", "discovery"),
-            ("tile.limit", "acquisition"),
-            ("discovery.tile-plan", "discovery"),
-            ("discovery.no-level", "discovery"),
-            ("tile.download-failed", "acquisition"),
-        ] {
-            assert_eq!(error_phase(code), phase, "phase for {code}");
-            assert_eq!(error_transport(code), "native", "transport for {code}");
-            assert!(
-                error_resource_kind(code).is_some(),
-                "resource-kind for {code}"
-            );
-        }
-        // Canvas-limit carries required memory plus max-width hint; JPEG
-        // side-limit falls back to PNG. Both are output, non-retryable,
-        // choose-output.
-        for code in ["output.canvas-limit", "output.encode-failed"] {
-            assert_eq!(error_phase(code), "output");
-            assert!(!error_retryable(code));
-            assert_eq!(error_recovery(code), "choose-output");
-            assert_eq!(error_resource_kind(code), Some("output"));
-        }
-        // Output exists and destination denied recover via choose-output.
-        for code in [
-            "output.exists",
-            "output.destination-denied",
-            "output.unsupported-extension",
-            "output.write-failed",
-        ] {
-            assert_eq!(error_phase(code), "output", "phase for {code}");
-            assert!(!error_retryable(code), "retryable for {code}");
-            assert_eq!(error_recovery(code), "choose-output", "recovery for {code}");
-        }
-        // Protocol and handoff map once by code.
-        assert_eq!(error_phase("protocol.incompatible"), "handshake");
-        assert!(!error_retryable("protocol.incompatible"));
-        assert_eq!(error_phase("handoff.rejected"), "validation");
-        assert!(!error_retryable("handoff.rejected"));
-        // Lifecycle rejections map to validation without retry.
-        for code in ["job.post-terminal", "job.unknown", "job.stale"] {
-            assert_eq!(error_phase(code), "validation", "phase for {code}");
-            assert!(!error_retryable(code), "retryable for {code}");
-            assert_eq!(error_recovery(code), "edit-input", "recovery for {code}");
-        }
-        // Retryable only for transient transport/service.
-        for code in [
-            "transport.network-error",
-            "transport.timeout",
-            "tile.http-error",
-            "tile.download-failed",
-        ] {
-            assert!(error_retryable(code), "{code} must be retryable");
-        }
-        for code in [
-            "auth.too-many-cookies",
-            "auth.forbidden-header",
-            "transport.tls",
-            "transport.bad-url",
-            "discovery.failed",
-            "discovery.no-image",
-            "tile.decode-failed",
-            "tile.processing-failed",
-            "output.canvas-limit",
-            "handoff.rejected",
-            "protocol.incompatible",
-            "job.post-terminal",
-            "native.internal",
-        ] {
-            assert!(!error_retryable(code), "{code} must not be retryable");
-        }
-        // Partial policy only after retries: the terminal tile failure stays
-        // retryable for a user retry, while decode-deterministic never is.
-        assert!(error_retryable("tile.download-failed"));
-        assert!(!error_retryable("tile.decode-failed"));
-        // Security failures never offer a weakening recovery.
-        for code in [
-            "auth.too-many-cookies",
-            "auth.forbidden-header",
-            "transport.tls",
-            "handoff.rejected",
-            "protocol.incompatible",
-        ] {
-            let recovery = error_recovery(code);
-            assert!(
-                recovery != "change-transport"
-                    && recovery != "grant-permission"
-                    && recovery != "retry",
-                "{code} must not weaken via {recovery}"
-            );
-        }
     }
 
     #[test]

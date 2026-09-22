@@ -385,16 +385,10 @@ test("commands route to typed shell commands; engine-only commands reject", asyn
   await service.dispose();
 });
 
-test("destination and output actions use the retained job ref", async () => {
+test("output actions use the retained job ref", async () => {
   const ipc = fakeIpc();
   const service = createDesktopJobService({ ipc });
   const handle = await service.start(nativeRequest(), observer());
-  const denied = await handle.requestDestination({ format: "bmp", suggestedName: "a.bmp" });
-  assert.equal(denied.outcome, "denied");
-  const mismatch = await handle.requestDestination({ format: "png", suggestedName: "a.jpg" });
-  assert.equal(mismatch.outcome, "denied");
-  const granted = await handle.requestDestination({ format: "png", suggestedName: "a.png" });
-  assert.equal(granted.outcome, "granted");
   await handle.openOutput(false);
   await handle.openOutput(true);
   const outputCalls = ipc.invokes.filter((call) => call.cmd === "open_saved_output");
@@ -412,7 +406,7 @@ test("capabilities reject unknown shell commands", async () => {
   const caps = await service.queryCapabilities();
   assert.equal(caps.protocolMin, "2.0");
   assert.equal(caps.commands.length, 8);
-  ipc.invoke = (cmd) =>
+  ipc.invoke = (_cmd) =>
     Promise.resolve({
       protocol_min: "2.0",
       protocol_max: "2.0",
