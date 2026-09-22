@@ -28,6 +28,7 @@ pub(crate) enum TileProgramStart {
 
 /// Shared behavior implemented by every concrete tile program.
 trait TileProgram {
+    fn kind_name(&self) -> &'static str;
     fn image_size(&self) -> Option<Vec2d>;
     fn tile_size(&self) -> Option<Vec2d>;
     fn overlap(&self) -> Option<Vec2d>;
@@ -409,6 +410,10 @@ impl Iterator for PositionedTiles {
 }
 
 impl TileProgram for Grid {
+    fn kind_name(&self) -> &'static str {
+        "grid"
+    }
+
     fn image_size(&self) -> Option<Vec2d> {
         Some(self.image_size())
     }
@@ -435,6 +440,10 @@ impl TileProgram for Grid {
 }
 
 impl TileProgram for Positioned {
+    fn kind_name(&self) -> &'static str {
+        "positioned"
+    }
+
     fn image_size(&self) -> Option<Vec2d> {
         self.image_size()
     }
@@ -461,6 +470,10 @@ impl TileProgram for Positioned {
 }
 
 impl TileProgram for DiscoverableGrid {
+    fn kind_name(&self) -> &'static str {
+        "discoverable-grid"
+    }
+
     fn image_size(&self) -> Option<Vec2d> {
         None
     }
@@ -483,6 +496,10 @@ impl TileProgram for DiscoverableGrid {
 }
 
 impl TileProgram for AdaptiveSource {
+    fn kind_name(&self) -> &'static str {
+        "adaptive"
+    }
+
     fn image_size(&self) -> Option<Vec2d> {
         self.declared_grid().map(Grid::image_size)
     }
@@ -528,13 +545,8 @@ impl TileSource {
 
     /// Stable public source-kind vocabulary for catalog presentation.
     #[must_use]
-    pub const fn kind_name(&self) -> &'static str {
-        match self {
-            Self::Grid(_) => "grid",
-            Self::Positioned(_) => "positioned",
-            Self::DiscoverableGrid(_) => "discoverable-grid",
-            Self::Adaptive(_) => "adaptive",
-        }
+    pub fn kind_name(&self) -> &'static str {
+        self.program().kind_name()
     }
 
     #[must_use]

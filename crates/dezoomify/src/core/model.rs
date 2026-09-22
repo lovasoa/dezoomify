@@ -210,7 +210,7 @@ impl DiscoveredEntry {
 
 #[derive(Clone, Debug, Default)]
 #[doc(hidden)]
-pub struct DiscoveryCatalog(pub Vec<DiscoveredEntry>);
+pub struct DiscoveryCatalog(Vec<DiscoveredEntry>);
 
 /// Floor a fractional tile coordinate, rejecting non-finite or out-of-range
 /// values. `format` names the site format in the error message.
@@ -230,7 +230,20 @@ pub(crate) fn floor_index(value: f64, format: &str) -> Result<i64, DiscoveryErro
 impl DiscoveryCatalog {
     #[must_use]
     pub fn new(entries: impl IntoIterator<Item = DiscoveredEntry>) -> Self {
-        Self(entries.into_iter().collect())
+        let mut entries: Vec<_> = entries.into_iter().collect();
+        for entry in &mut entries {
+            if let DiscoveredEntry::Ready(image) = entry
+                && image
+                    .levels
+                    .iter()
+                    .all(|level| level.source.image_size().is_some())
+            {
+                image.levels.sort_by_key(|level| {
+                    level.source.image_size().expect("all sizes checked").area()
+                });
+            }
+        }
+        Self(entries)
     }
 
     /// Compile one ready image into a catalog using the canonical image-plan
@@ -327,24 +340,6 @@ impl DiscoveryCatalog {
     pub fn into_entries(self) -> Vec<DiscoveredEntry> {
         self.0
     }
-
-    /// Enforce deterministic level ordering before the catalog is published.
-    #[must_use]
-    pub fn normalize(mut self) -> Self {
-        for entry in &mut self.0 {
-            if let DiscoveredEntry::Ready(image) = entry
-                && image
-                    .levels
-                    .iter()
-                    .all(|level| level.source.image_size().is_some())
-            {
-                image.levels.sort_by_key(|level| {
-                    level.source.image_size().expect("all sizes checked").area()
-                });
-            }
-        }
-        self
-    }
 }
 
 #[cfg(test)]
@@ -397,8 +392,7 @@ mod tests {
             format: "test",
             levels: vec![level(300), level(100)],
             warnings: Vec::new(),
-        })])
-        .normalize();
+        })]);
         let DiscoveredEntry::Ready(image) = &catalog.entries()[0] else {
             unreachable!()
         };
