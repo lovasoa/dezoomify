@@ -40,6 +40,8 @@ renders authoritative snapshots.
   settings forms) stays in the product. It is never a job phase.
 
 Desktop startup waits for all event subscriptions before invoking the host.
+Desktop snapshot events use one `{ job, snapshot }` envelope: `job` is the
+sole routing identity and `snapshot` is the unmodified `EngineSnapshotDto`.
 While a start reply is pending, the service keeps the latest absolute host
 snapshot per job and delivers it once the reply supplies that job's ID.
 This covers jobs that fail or finish before the IPC reply arrives without

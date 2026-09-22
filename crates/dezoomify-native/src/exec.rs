@@ -63,8 +63,8 @@ use crate::error::NativeError;
 use crate::http::{FetchOutcome, UserHeaders};
 use crate::output::OutputFormat;
 use crate::pipeline::{
-    effective_cache_dir, load_image_with_metadata, merge_headers, DecodedTile, PartialGate,
-    PartialPolicy, PartialRequest, PipelineConfig,
+    effective_cache_dir, load_image_with_metadata, merge_headers, DecodedTile, PartialPolicy,
+    PipelineConfig,
 };
 use crate::sink::{Published, Sink};
 use crate::transport::NativeTransport;
@@ -114,19 +114,20 @@ pub struct Instrumentation {
     pub accounted_peak_bytes: u64,
 }
 
-/// Successful execution: the honest published record plus accounting.
-pub struct ExecResult {
-    pub output_path: PathBuf,
+/// Honest native publication record: what was actually written.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutputSummary {
+    pub path: PathBuf,
     pub tile_count: usize,
-    pub image_size: Vec2d,
+    pub width: u32,
+    pub height: u32,
     pub format: String,
     pub partial: bool,
     pub missing: Vec<String>,
     pub instrumentation: Instrumentation,
 }
 
-/// Output destination for one attempt.
-pub struct OutputSpec {
+pub(crate) struct OutputSpec {
     pub output_path: PathBuf,
     pub overwrite: bool,
     pub format: OutputFormat,
@@ -136,13 +137,13 @@ pub struct OutputSpec {
 /// Drive one input URL end to end on the authoritative engine. Deferred
 /// catalog entries resolve in place via `FollowDeferred` on the same job
 /// (engine-bounded, no host recursive replacement jobs).
-pub fn execute(
+pub(crate) fn execute(
     input_url: &str,
-    output: &OutputSpec,
+    output: OutputSpec,
     config: &PipelineConfig,
     user: &UserHeaders,
     on_snapshot: &mut dyn FnMut(&EngineSnapshot),
-) -> Result<ExecResult, NativeError> {
+) -> Result<OutputSummary, NativeError> {
     execute_attempt(input_url, output, config, user, on_snapshot)
 }
 
@@ -223,7 +224,6 @@ struct Attempt<'a> {
     failure: Option<(String, String)>,
     published: Option<Published>,
     cancel_sent: bool,
-    partial_gate: Option<Arc<PartialGate>>,
     pending_missing: Vec<String>,
     command_rx: Option<Arc<Mutex<mpsc::Receiver<EngineUserCommand>>>>,
     instrumentation: Instrumentation,
@@ -313,11 +313,11 @@ impl<'a> Attempt<'a> {
 
 fn execute_attempt(
     input_url: &str,
-    output: &OutputSpec,
+    output: OutputSpec,
     config: &PipelineConfig,
     user: &UserHeaders,
     on_snapshot: &mut dyn FnMut(&EngineSnapshot),
-) -> Result<ExecResult, NativeError> {
+) -> Result<OutputSummary, NativeError> {
     let options = engine_options_for(input_url, config)?;
     let (mut job, update) = EngineJob::start(options).map_err(map_setup_error)?;
     let transport = Arc::new(NativeTransport::new(&config.fetch)?);
@@ -327,10 +327,10 @@ fn execute_attempt(
         config,
         user,
         transport,
-        output_path: output.output_path.clone(),
+        output_path: output.output_path,
         overwrite: output.overwrite,
         format: output.format,
-        auto_output_dir: output.auto_output_dir.clone(),
+        auto_output_dir: output.auto_output_dir,
         cache: Some((
             effective_cache_dir(config),
             crate::cache::job_namespace(input_url),
@@ -344,7 +344,6 @@ fn execute_attempt(
         failure: None,
         published: None,
         cancel_sent: false,
-        partial_gate: config.partial_gate.clone(),
         pending_missing: Vec::new(),
         command_rx: config.exec_command_rx.clone(),
         instrumentation: Instrumentation::default(),
@@ -481,10 +480,11 @@ fn execute_attempt(
             let format = selected_catalog_image(&pump.snapshot)
                 .map(|image| image.format.clone())
                 .unwrap_or_default();
-            Ok(ExecResult {
-                output_path: published.output_path,
+            Ok(OutputSummary {
+                path: published.output_path,
                 tile_count: published.tile_count,
-                image_size: published.image_size,
+                width: published.image_size.x,
+                height: published.image_size.y,
                 format,
                 partial: published.partial,
                 missing: published.missing,
@@ -582,7 +582,8 @@ fn drain_commands(job: &mut EngineJob, pump: &mut Pump, attempt: &mut Attempt<'_
         if pump.snapshot.terminal.is_some() {
             break;
         }
-        // Cancel/AnswerPartial never arrive here (flag/gate own them).
+        // Cancel uses the shared flag; partial answers are consumed only
+        // while the matching decision effect is pending.
         if matches!(
             command,
             EngineUserCommand::Cancel | EngineUserCommand::AnswerPartial { .. }
@@ -843,9 +844,6 @@ fn execute_effects(
                 let Some((answered_generation, decision)) =
                     await_partial_choice(attempt, generation)
                 else {
-                    if let Some(gate) = attempt.partial_gate.clone() {
-                        gate.clear_pending();
-                    }
                     let update = cancel_job(job)?;
                     apply_update(pump, update);
                     attempt.cancel_sent = true;
@@ -855,11 +853,8 @@ fn execute_effects(
                 if choice == EnginePartialDecision::Retry {
                     attempt.pending_missing.clear();
                 }
-                if let Some(gate) = attempt.partial_gate.clone() {
-                    gate.clear_pending();
-                }
-                // The answering generation comes from the host through the
-                // gate, never re-applied from this effect: a stale host
+                // The answering generation comes from the host command,
+                // never re-applied from this effect: a stale host
                 // answer is engine-rejected at the boundary (invalid-state)
                 // instead of being consumed in order.
                 let update = job
@@ -1451,30 +1446,13 @@ fn finalize_output(
     }
 }
 
-/// Interactive partial choice: announce the missing ledger for the host
-/// dialog, wait up to 60s for [`PartialGate::answer`], fail-closed to
-/// [`PartialPolicy`]. Returns the answering generation with the decision,
-/// or `None` only when cancelled while waiting. The generation is the
-/// host's answer carried through the gate (falling back to the live effect
-/// generation only for the non-interactive policy path); the engine
-/// rejects a stale one at the boundary. Decisions use the canonical
-/// [`RecoveryChoice`] vocabulary verbatim.
+/// Wait for the canonical command channel's partial answer, falling back to
+/// the configured non-interactive policy after 60 seconds. Cancellation uses
+/// the shared flag so it remains prompt while no command is arriving.
 fn await_partial_choice(
     attempt: &mut Attempt<'_>,
     generation: u32,
 ) -> Option<(u32, EnginePartialDecision)> {
-    let mut missing: Vec<String> = attempt.pending_missing.clone();
-    if missing.is_empty() {
-        for tile in &attempt.order {
-            if !attempt.settled.contains(tile) {
-                missing.push(tile.clone());
-            }
-        }
-    }
-    missing.sort();
-    missing.dedup();
-    let total = attempt.order.len();
-    let failed = missing.len().max(1);
     let policy = || {
         if attempt.config.partial_policy == PartialPolicy::Keep {
             EnginePartialDecision::Keep
@@ -1482,24 +1460,36 @@ fn await_partial_choice(
             EnginePartialDecision::Discard
         }
     };
-    let Some(gate) = attempt.partial_gate.clone() else {
+    let Some(rx) = attempt.command_rx.clone() else {
         return Some((generation, policy()));
     };
-    gate.announce(PartialRequest {
-        missing,
-        failed,
-        total,
-    });
-    const WAIT: Duration = Duration::from_secs(60);
-    if let Some((answered_generation, decision)) =
-        gate.wait_for_decision(WAIT, &attempt.config.cancel_flag)
-    {
-        return Some((answered_generation, decision));
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        if attempt.config.cancel_flag.load(Ordering::SeqCst) {
+            return None;
+        }
+        let wait = deadline.saturating_duration_since(Instant::now());
+        if wait.is_zero() {
+            return Some((generation, policy()));
+        }
+        let command = match rx.lock() {
+            Ok(guard) => guard.recv_timeout(wait.min(Duration::from_millis(20))),
+            Err(poisoned) => poisoned
+                .into_inner()
+                .recv_timeout(wait.min(Duration::from_millis(20))),
+        };
+        match command {
+            Ok(EngineUserCommand::AnswerPartial {
+                generation,
+                decision,
+            }) => return Some((generation, decision)),
+            Ok(EngineUserCommand::Cancel) => return None,
+            Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Some((generation, policy()));
+            }
+        }
     }
-    if attempt.config.cancel_flag.load(Ordering::SeqCst) {
-        return None;
-    }
-    Some((generation, policy()))
 }
 
 /// Map pipeline bounds onto validated canonical job options. Transport

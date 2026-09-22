@@ -18,33 +18,10 @@ use dezoomify_core::core::tile_plan::TileSourceError;
 use dezoomify_core::Vec2d;
 
 use crate::config::Config;
+use crate::engine_api::DiscoveryInput;
 use crate::retry::{retry_delay_ms, TileFailure};
 use crate::state::State;
 use crate::transition::{JobCommand, JobEffect, JobError, Outcome, RecoveryChoice};
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct JobInput {
-    pub url: String,
-    pub contents: Option<Vec<u8>>,
-}
-
-impl JobInput {
-    #[must_use]
-    pub fn new(url: impl Into<String>) -> Self {
-        Self {
-            url: url.into(),
-            contents: None,
-        }
-    }
-
-    #[must_use]
-    pub fn with_contents(url: impl Into<String>, contents: impl Into<Vec<u8>>) -> Self {
-        Self {
-            url: url.into(),
-            contents: Some(contents.into()),
-        }
-    }
-}
 
 /// One scheduled tile retry: the engine-minted attempt number plus the
 /// explicit host wait. The host owns the clock and reports the elapsed
@@ -141,7 +118,7 @@ enum TileStatus {
 
 /// One end-to-end user request driven synchronously by explicit host inputs.
 pub struct Job {
-    inputs: Vec<JobInput>,
+    inputs: Vec<DiscoveryInput>,
     input_index: usize,
     config: Config,
     /// Format selector: `None` auto-detects via `default_registry`;
@@ -232,19 +209,9 @@ impl std::fmt::Debug for Job {
 }
 
 impl Job {
-    pub fn new_with_inputs(inputs: Vec<JobInput>, config: Config) -> Result<Self, JobError> {
-        if inputs.is_empty() || inputs.iter().any(|input| !is_valid_input_url(&input.url)) {
-            return Err(JobError::new(
-                "job.invalid-input",
-                "inputs must contain valid http(s) URLs, file:// URIs, or local paths up to 2048 bytes"
-                    .to_string(),
-            ));
-        }
-        if let Err(e) = config.validate() {
-            return Err(JobError::new(&e.code, e.message));
-        }
+    pub fn new(inputs: Vec<DiscoveryInput>, config: Config) -> Self {
         let visited_uris: HashSet<String> = inputs.iter().map(|input| input.url.clone()).collect();
-        Ok(Self {
+        Self {
             inputs,
             input_index: 0,
             config,
@@ -284,7 +251,7 @@ impl Job {
             next_request: 0,
             next_decision: 0,
             next_probe: 0,
-        })
+        }
     }
 
     /// Current state.
@@ -1660,8 +1627,9 @@ mod lazy_plan_tests {
     use dezoomify_core::core::tile_plan::{Grid, GridTile};
     use dezoomify_core::Vec2d;
 
-    use super::{Job, JobInput, State};
+    use super::{Job, State};
     use crate::config::Config;
+    use crate::engine_api::DiscoveryInput;
     use crate::transition::JobEffect;
 
     #[test]
@@ -1686,8 +1654,10 @@ mod lazy_plan_tests {
             max_concurrent_fetches: 4,
             ..Config::default()
         };
-        let mut job =
-            Job::new_with_inputs(vec![JobInput::new("https://source.test/large")], config).unwrap();
+        let mut job = Job::new(
+            vec![DiscoveryInput::new("https://source.test/large")],
+            config,
+        );
 
         job.plan_from_tiles(
             Box::new(grid.tiles_row_major()),
@@ -1728,11 +1698,10 @@ mod lazy_plan_tests {
 
     #[test]
     fn completed_probe_descriptors_are_released_before_the_next_probe() {
-        let mut job = Job::new_with_inputs(
-            vec![JobInput::new("https://source.test/generic")],
+        let mut job = Job::new(
+            vec![DiscoveryInput::new("https://source.test/generic")],
             Config::default(),
-        )
-        .unwrap();
+        );
         job.state = State::Planning;
         job.drive_probe(
             DiscoverableGrid::new("https://tiles.test/tile?x={{X}}&y={{Y}}".into()).start(),

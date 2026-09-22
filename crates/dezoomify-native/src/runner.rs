@@ -35,9 +35,10 @@ use std::time::Duration;
 use dezoomify_engine::{JobSnapshot as EngineSnapshot, UserCommand as EngineUserCommand};
 
 use crate::error::NativeError;
+pub use crate::exec::OutputSummary;
 use crate::http::{FetchLimits, TlsPolicy};
 use crate::output::{validate_destination, OutputFormat};
-use crate::pipeline::{PartialGate, PartialPolicy, PipelineConfig};
+use crate::pipeline::{PartialPolicy, PipelineConfig};
 
 /// Engine user intent, forwarded verbatim (selection, partial answer with
 /// generation, pause/resume, cancel). Re-exported so all native hosts name
@@ -162,7 +163,6 @@ impl JobOptions {
     fn pipeline_config(
         &self,
         cancel_flag: Arc<AtomicBool>,
-        partial_gate: Arc<PartialGate>,
         exec_commands: Arc<Mutex<mpsc::Receiver<EngineUserCommand>>>,
     ) -> PipelineConfig {
         PipelineConfig {
@@ -198,28 +198,11 @@ impl JobOptions {
             } else {
                 PartialPolicy::Fail
             },
-            partial_gate: Some(partial_gate),
             cancel_flag,
             exec_command_rx: Some(exec_commands),
             ..PipelineConfig::default()
         }
     }
-}
-
-/// Honest native publication record: what was actually written. Present only
-/// on the terminal snapshot after the commit point won the cancel race.
-/// Partial publications name the `.partial` sibling, never the granted path.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct OutputSummary {
-    pub path: PathBuf,
-    pub tile_count: usize,
-    pub width: u32,
-    pub height: u32,
-    pub format: String,
-    pub partial: bool,
-    pub missing: Vec<String>,
-    /// Honest execution accounting from the native effect executor.
-    pub instrumentation: crate::exec::Instrumentation,
 }
 
 /// One ordered snapshot on the stream: the engine projection verbatim plus
@@ -253,14 +236,9 @@ impl NativeRunner {
         options.validate()?;
         let id = format!("job:native-{}", NEXT_JOB.fetch_add(1, Ordering::SeqCst));
         let cancel_flag = Arc::new(AtomicBool::new(false));
-        let partial_gate = Arc::new(PartialGate::new());
         let (command_tx, command_rx) = mpsc::channel::<EngineUserCommand>();
         let exec_commands = Arc::new(Mutex::new(command_rx));
-        let config = options.pipeline_config(
-            Arc::clone(&cancel_flag),
-            Arc::clone(&partial_gate),
-            Arc::clone(&exec_commands),
-        );
+        let config = options.pipeline_config(Arc::clone(&cancel_flag), exec_commands);
         let (snapshot_tx, snapshot_rx) = mpsc::channel();
         let worker_id = id.clone();
         let worker_options = options.clone();
@@ -276,7 +254,6 @@ impl NativeRunner {
             alive,
             snapshot_rx,
             cancel_flag,
-            partial_gate,
             command_tx,
             join: Some(handle),
         })
@@ -293,7 +270,6 @@ pub struct RunningJob {
     alive: Arc<AtomicBool>,
     snapshot_rx: mpsc::Receiver<JobSnapshot>,
     cancel_flag: Arc<AtomicBool>,
-    partial_gate: Arc<PartialGate>,
     command_tx: mpsc::Sender<EngineUserCommand>,
     join: Option<std::thread::JoinHandle<Result<OutputSummary, NativeError>>>,
 }
@@ -314,9 +290,8 @@ impl std::fmt::Debug for RunningJob {
 
 impl RunningJob {
     /// Send one engine [`UserCommand`]. Cancel sets the shared flag the driver
-    /// polls at every effect boundary; partial answers wake the driver's
-    /// bounded wait; selection and pause/resume travel on the live command
-    /// channel drained at every effect boundary. Fails closed with `job.stale`
+    /// polls at every effect boundary; every other command travels on the
+    /// live channel. Fails closed with `job.stale`
     /// once the driver has exited (post-terminal commands are rejected, never
     /// applied to a later job). Commands never supply bytes and never claim
     /// publication.
@@ -328,17 +303,8 @@ impl RunningJob {
             EngineUserCommand::Cancel => {
                 self.cancel_flag.store(true, Ordering::SeqCst);
             }
-            EngineUserCommand::AnswerPartial {
-                generation,
-                decision,
-            } => {
-                // The host generation travels with the decision: the driver
-                // answers with exactly this generation, so a stale answer is
-                // engine-rejected at the boundary instead of consumed in
-                // order.
-                self.partial_gate.answer(generation, decision);
-            }
-            EngineUserCommand::Pause
+            EngineUserCommand::AnswerPartial { .. }
+            | EngineUserCommand::Pause
             | EngineUserCommand::Resume
             | EngineUserCommand::SelectImage { .. }
             | EngineUserCommand::FollowDeferred { .. }
@@ -360,7 +326,7 @@ impl RunningJob {
     }
 
     /// Wait for quiescence and take the publication. Joins the driver thread,
-    /// so cleanup (uncommitted temp files, gate state) is owned here. `Ok` is
+    /// so cleanup of uncommitted temp files is owned here. `Ok` is
     /// a native publication that won the cancel race; `Err(job.cancelled)` is
     /// quiescence with nothing published; other `Err` is a typed failure.
     pub fn join(mut self) -> Result<OutputSummary, NativeError> {
@@ -419,35 +385,25 @@ fn run_job(
             Some(dir.clone()),
         ),
     };
-    let output = crate::exec::OutputSpec {
-        output_path,
-        overwrite,
-        format,
-        auto_output_dir,
-    };
     let user = crate::http::UserHeaders::new(
         options.headers.clone(),
         url::Url::parse(&options.input_url)
             .ok()
             .and_then(|parsed| parsed.host_str().map(str::to_string)),
     );
-    let result = crate::exec::execute(&options.input_url, &output, config, &user, &mut emit);
+    let output = crate::exec::OutputSpec {
+        output_path,
+        overwrite,
+        format,
+        auto_output_dir,
+    };
+    let result = crate::exec::execute(&options.input_url, output, config, &user, &mut emit);
     match result {
-        Ok(outcome) => {
+        Ok(published) => {
             // Publication won the race: report the committed result, never
             // a cancellation (the commit point already refuses to publish
             // once cancellation was requested, so reaching here with the
             // flag set means the bytes were committed first).
-            let published = OutputSummary {
-                path: outcome.output_path,
-                tile_count: outcome.tile_count,
-                width: outcome.image_size.x,
-                height: outcome.image_size.y,
-                format: outcome.format,
-                partial: outcome.partial,
-                missing: outcome.missing,
-                instrumentation: outcome.instrumentation,
-            };
             // The terminal snapshot carries the engine terminal verbatim plus
             // the publication. Hosts render `snapshot.terminal` and resolve
             // open/reveal from `published.path`.

@@ -322,34 +322,10 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
       if (disposed) {
         throw runnerError("browser.job-settled", "The browser job already finished.");
       }
-      switch (command.type) {
-        case "select-image":
-          activeHost.selectImage(command.image);
-          return;
-        case "follow-deferred":
-          activeHost.followDeferred(command.image);
-          return;
-        case "select-level":
-          activeHost.selectLevel(command.level);
-          return;
-        case "answer-partial":
-          activeHost.chooseRecovery(command.generation, command.decision);
-          return;
-        case "pause":
-          activeHost.pause();
-          return;
-        case "resume":
-          activeHost.resume();
-          return;
-        case "cancel":
-          activeHost.cancel();
-          return;
-        default:
-          throw runnerError(
-            "browser.unsupported-command",
-            `The browser runner has no command for ${command.type} yet.`,
-          );
+      if (command.type === "start") {
+        throw runnerError("browser.unsupported-command", "A running browser job cannot restart.");
       }
+      activeHost.command(command);
     }
 
     async function dispose(): Promise<void> {

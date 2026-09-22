@@ -54,9 +54,9 @@ use dezoomify_core::core::discovery::TransportKind;
 use dezoomify_engine::{
     Effect as EngineEffect, EffectId as EngineEffectId, EffectResult as EngineEffectResult,
     EngineError as EngineJobError, EngineJob, Failure as EngineFailure,
-    JobOptions as EngineOptions, OutputDisposition as EngineDisposition,
-    ResponseMetadata as EngineResponseMetadata, SelectionPolicy as EngineSelectionPolicy,
-    Update as EngineUpdate, UserCommand as EngineUserCommand,
+    JobOptions as EngineOptions, OutstandingKind, ResponseMetadata as EngineResponseMetadata,
+    SelectionPolicy as EngineSelectionPolicy, Update as EngineUpdate,
+    UserCommand as EngineUserCommand,
 };
 use dezoomify_protocol::dto::{
     BrowserSelectionLimitsDto, ErrorDto, ErrorPhase, ErrorTransport, FetchFailureDto, HeaderDto,
@@ -64,7 +64,6 @@ use dezoomify_protocol::dto::{
     PointDto, ProbeOutcome, ProcessingRecipe, RequestDto, RequestPurpose, ResourceKind,
     SessionConfig, SizeDto, TilePlacementDto,
 };
-use std::collections::{HashMap, HashSet};
 
 /// One adapter session: exactly one engine job plus its request correlation.
 ///
@@ -80,15 +79,6 @@ pub struct Session {
     job: Option<EngineJob>,
     session_config: SessionConfig,
     disposed: bool,
-    /// Outstanding metadata effect ids (adapter request id == effect id).
-    live_discovery_requests: HashSet<u32>,
-    /// Adapter tile/probe request id -> engine tile id.
-    outstanding_tile_requests: HashMap<u32, u32>,
-    /// Complete adapter-emitted request context, keyed by its correlation id.
-    request_context: HashMap<u32, RequestDto>,
-    /// Adapter-minted probe request ids (subset of tile requests emitted
-    /// while planning probe-driven levels).
-    probe_requests: HashSet<u32>,
 }
 
 impl Session {
@@ -102,10 +92,6 @@ impl Session {
             job: None,
             session_config: config,
             disposed: false,
-            live_discovery_requests: HashSet::new(),
-            outstanding_tile_requests: HashMap::new(),
-            request_context: HashMap::new(),
-            probe_requests: HashSet::new(),
         })
     }
 
@@ -135,31 +121,9 @@ impl Session {
     /// failure context, so the absolute snapshot never discards what the
     /// engine groups away.
     fn last_snapshot(&self) -> dezoomify_protocol::dto::EngineSnapshotDto {
-        use dezoomify_protocol::dto::{
-            EngineSnapshotDto, JobState as ProtocolJobState, SnapshotProgressDto,
-            SnapshotSelectionDto,
-        };
         match &self.job {
             Some(job) => job.project_dto(),
-            None => EngineSnapshotDto {
-                revision: 0,
-                lifecycle: ProtocolJobState::Created,
-                paused: false,
-                progress: SnapshotProgressDto {
-                    completed: 0,
-                    total: Some(0),
-                },
-                selection: SnapshotSelectionDto {
-                    image: None,
-                    level: None,
-                    level_count: 0,
-                    catalog: None,
-                    deferred: Vec::new(),
-                },
-                decision: None,
-                terminal: None,
-                output: None,
-            },
+            None => dezoomify_protocol::dto::EngineSnapshotDto::default(),
         }
     }
 
@@ -424,17 +388,20 @@ impl Session {
     ) -> Result<Vec<HostEffect>, AdapterError> {
         // Correlate before touching any state: unknown request ids are
         // atomic rejections.
-        if self.outstanding_tile_requests.contains_key(&request) {
-            return Err(AdapterError::new(
-                AdapterErrorCode::WrongState,
-                "tile requests are answered with provide-display-outcome or provide-fetch-failure, not provide-resource",
-            ));
-        }
-        if !self.live_discovery_requests.contains(&request) {
-            return Err(AdapterError::new(
-                AdapterErrorCode::WrongState,
-                "resource does not match an outstanding request",
-            ));
+        match self.engine_job()?.outstanding_kind(EngineEffectId(request)) {
+            Some(OutstandingKind::Metadata) => {}
+            Some(OutstandingKind::Tile | OutstandingKind::Probe) => {
+                return Err(AdapterError::new(
+                    AdapterErrorCode::WrongState,
+                    "tile requests are answered with provide-display-outcome or provide-fetch-failure, not provide-resource",
+                ));
+            }
+            None => {
+                return Err(AdapterError::new(
+                    AdapterErrorCode::WrongState,
+                    "resource does not match an outstanding request",
+                ));
+            }
         }
         // Discovery is intentionally concurrent. A sibling metadata
         // fetch may finish after another candidate has already
@@ -455,12 +422,6 @@ impl Session {
                 &bytes,
             )
             .map_err(Self::engine_error)?;
-        // The engine keeps an outstanding metadata effect live when it
-        // rejects an empty body, so only settle the bridge correlation after
-        // the engine accepted this completion. Otherwise a host cannot retry
-        // the same effect with the body it subsequently obtained.
-        self.live_discovery_requests.remove(&request);
-        self.request_context.remove(&request);
         Ok(self.drain_update(update))
     }
 
@@ -469,24 +430,14 @@ impl Session {
         request: u32,
         outcome: ProbeOutcome,
     ) -> Result<Vec<HostEffect>, AdapterError> {
-        let _tile_id = match self.outstanding_tile_requests.get(&request) {
-            Some(tile_id) => *tile_id,
-            None => {
-                return Err(AdapterError::new(
-                    AdapterErrorCode::WrongState,
-                    "probe outcome does not match an outstanding request",
-                ));
-            }
-        };
-        if !self.probe_requests.contains(&request) {
+        if self.engine_job()?.outstanding_kind(EngineEffectId(request))
+            != Some(OutstandingKind::Probe)
+        {
             return Err(AdapterError::new(
                 AdapterErrorCode::WrongState,
-                "probe outcome matches a tile request, not a probe request",
+                "probe outcome does not match an outstanding probe request",
             ));
         }
-        self.outstanding_tile_requests.remove(&request);
-        self.probe_requests.remove(&request);
-        self.request_context.remove(&request);
         let result = match outcome {
             ProbeOutcome::Available { width, height } => EngineEffectResult::ProbeAvailable {
                 width: u32::try_from(width.get()).unwrap_or(u32::MAX),
@@ -506,20 +457,14 @@ impl Session {
     /// a typed display success; the tainted canvas completes as
     /// display-only downstream.
     fn on_display_outcome(&mut self, request: u32) -> Result<Vec<HostEffect>, AdapterError> {
-        if !self.outstanding_tile_requests.contains_key(&request) {
+        if self.engine_job()?.outstanding_kind(EngineEffectId(request))
+            != Some(OutstandingKind::Tile)
+        {
             return Err(AdapterError::new(
                 AdapterErrorCode::WrongState,
                 "display outcome does not match an outstanding request",
             ));
         }
-        if self.probe_requests.contains(&request) {
-            return Err(AdapterError::new(
-                AdapterErrorCode::WrongState,
-                "probe requests are answered with provide-probe-outcome, not provide-display-outcome",
-            ));
-        }
-        self.outstanding_tile_requests.remove(&request);
-        self.request_context.remove(&request);
         let update = self
             .engine_job()?
             .complete(EngineEffectId(request), EngineEffectResult::TileDisplayed)
@@ -531,20 +476,14 @@ impl Session {
     /// already fetched, decoded, and placed the tile, so the outcome carries
     /// no body. Mirrors `on_display_outcome` correlation exactly.
     fn on_tile_acquired(&mut self, request: u32) -> Result<Vec<HostEffect>, AdapterError> {
-        if !self.outstanding_tile_requests.contains_key(&request) {
+        if self.engine_job()?.outstanding_kind(EngineEffectId(request))
+            != Some(OutstandingKind::Tile)
+        {
             return Err(AdapterError::new(
                 AdapterErrorCode::WrongState,
                 "tile acquisition does not match an outstanding request",
             ));
         }
-        if self.probe_requests.contains(&request) {
-            return Err(AdapterError::new(
-                AdapterErrorCode::WrongState,
-                "probe requests are answered with provide-probe-outcome, not tile-acquired",
-            ));
-        }
-        self.outstanding_tile_requests.remove(&request);
-        self.request_context.remove(&request);
         let update = self
             .engine_job()?
             .complete(EngineEffectId(request), EngineEffectResult::TileAcquired)
@@ -567,12 +506,6 @@ impl Session {
         effect: u32,
         disposition: OutputDispositionDto,
     ) -> Result<Vec<HostEffect>, AdapterError> {
-        let disposition = match disposition {
-            OutputDispositionDto::NativePublication => EngineDisposition::NativePublication,
-            OutputDispositionDto::BrowserSaveInitiated => EngineDisposition::BrowserSaveInitiated,
-            OutputDispositionDto::BrowserSaveReady => EngineDisposition::BrowserSaveReady,
-            OutputDispositionDto::DisplayOnly => EngineDisposition::DisplayOnly,
-        };
         let update = self
             .engine_job()?
             .complete(
@@ -606,36 +539,24 @@ impl Session {
         request: u32,
         failure: FetchFailureDto,
     ) -> Result<Vec<HostEffect>, AdapterError> {
-        let context = self.request_context.get(&request).cloned().ok_or_else(|| {
-            AdapterError::new(
-                AdapterErrorCode::WrongState,
-                "failure does not match an outstanding request",
-            )
-        })?;
-        let tile = if let Some(tile_id) = self.outstanding_tile_requests.get(&request) {
-            Some(*tile_id)
-        } else if self.live_discovery_requests.contains(&request) {
-            None
-        } else {
-            return Err(AdapterError::new(
-                AdapterErrorCode::WrongState,
-                "failure does not match an outstanding request",
-            ));
-        };
-        match tile {
-            Some(_tile_id) => {
-                if self.probe_requests.contains(&request) {
-                    self.outstanding_tile_requests.remove(&request);
-                    self.probe_requests.remove(&request);
-                    self.request_context.remove(&request);
-                    let update = self
-                        .engine_job()?
-                        .complete(EngineEffectId(request), EngineEffectResult::ProbeMissing)
-                        .map_err(Self::engine_error)?;
-                    return Ok(self.drain_update(update));
-                }
-                self.outstanding_tile_requests.remove(&request);
-                self.request_context.remove(&request);
+        let kind = self
+            .engine_job()?
+            .outstanding_kind(EngineEffectId(request))
+            .ok_or_else(|| {
+                AdapterError::new(
+                    AdapterErrorCode::WrongState,
+                    "failure does not match an outstanding request",
+                )
+            })?;
+        match kind {
+            OutstandingKind::Probe => {
+                let update = self
+                    .engine_job()?
+                    .complete(EngineEffectId(request), EngineEffectResult::ProbeMissing)
+                    .map_err(Self::engine_error)?;
+                Ok(self.drain_update(update))
+            }
+            OutstandingKind::Tile => {
                 // The bridge forwards the observed facts into a typed engine
                 // failure: the HTTP status decides retryability (permanent
                 // refusals such as HTTP 403 settle after exactly one
@@ -657,9 +578,7 @@ impl Session {
                     .map_err(Self::engine_error)?;
                 Ok(self.drain_update(update))
             }
-            None => {
-                self.live_discovery_requests.remove(&request);
-                self.request_context.remove(&request);
+            OutstandingKind::Metadata => {
                 // A late sibling failure is also a normal consequence of
                 // concurrent discovery after another candidate has won.
                 if !self.is_discovering() {
@@ -685,7 +604,7 @@ impl Session {
                         retryable: failure.retryable,
                         message: failure.message.clone(),
                         recovery: failure.recovery.clone(),
-                        request: Some(context.uri),
+                        request: None,
                         transport: Some(failure.transport),
                         blocked_reason: failure.blocked_reason,
                         resource_kind: Some(ResourceKind::Metadata),
@@ -743,14 +662,12 @@ impl Session {
         match effect {
             EngineEffect::AcquireMetadata { id, uri } => {
                 let request = id.get();
-                self.live_discovery_requests.insert(request);
                 let request_dto = RequestDto {
                     id: request,
                     uri: uri.clone(),
                     headers: Vec::new(),
                     purpose: RequestPurpose::Metadata,
                 };
-                self.request_context.insert(request, request_dto.clone());
                 Some(HostEffect::AcquireResource {
                     request: request_dto,
                 })
@@ -768,10 +685,6 @@ impl Session {
                 probe_output,
             } => {
                 let request = id.get();
-                self.outstanding_tile_requests.insert(request, *tile);
-                if *probe {
-                    self.probe_requests.insert(request);
-                }
                 let request_dto = RequestDto {
                     id: request,
                     uri: uri.clone(),
@@ -788,7 +701,6 @@ impl Session {
                         RequestPurpose::Tile
                     },
                 };
-                self.request_context.insert(request, request_dto.clone());
                 Some(HostEffect::AcquireTile {
                     request: request_dto,
                     tile: *tile,

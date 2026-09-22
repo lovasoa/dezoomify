@@ -3,8 +3,8 @@
 // Snapshot-only transport: the `dezoomify://job-snapshot` channel is the
 // only job-state transport. Every emit is the canonical
 // `EngineSnapshotDto` verbatim (revision, lifecycle, paused, progress,
-// selection with catalog, decision, terminal, output) plus the `job`/`jobId`
-// routing aliases, which the frontend forwards untouched to its observer.
+// selection with catalog, decision, terminal, output) wrapped with one `job`
+// routing identity, which the frontend forwards untouched to its observer.
 // No transcript is stored, no legacy `job-state`/`job-progress`/
 // `job-output`/`job-error` lines exist, and no per-job lifecycle, seq,
 // progress, output, or terminal mirrors live here: the DTO is serialized,
@@ -223,7 +223,7 @@ impl std::fmt::Debug for JobEntry {
 }
 
 /// One projected IPC emit: always the snapshot channel plus the
-/// self-describing `JobSnapshot` payload. `seq` is the payload revision
+/// self-describing `{ job, snapshot }` payload. `seq` is the snapshot revision
 /// (verbatim runner seq; 0/1 for synchronous host transitions).
 #[derive(Debug, Clone)]
 pub struct SnapshotEmit {
@@ -259,28 +259,13 @@ impl Default for JobTable {
     }
 }
 
-/// Serialize one canonical engine DTO verbatim plus the host routing
-/// aliases. The payload is exactly the DTO fields (`revision`, `lifecycle`,
-/// `paused`, `progress`, `selection`, `decision`, `terminal`, `output`) plus
-/// `job`/`jobId`; the DTO carries no job identity, so the aliases are the
-/// only host addition. Nothing is rebuilt: the engine catalog rides
+/// Wrap one canonical engine DTO with its host routing identity. Nothing is
+/// rebuilt: the engine catalog rides
 /// `selection.catalog` untouched and missing-tile ids stay engine ordinals.
 /// The native publication never enters the payload; it only feeds the
 /// retained `saved_path` handle for explicit open/reveal.
 fn verbatim_payload(job: &str, dto: &EngineSnapshotDto) -> serde_json::Value {
-    let mut value = match serde_json::to_value(dto) {
-        Ok(value) => value,
-        Err(_) => serde_json::Value::Null,
-    };
-    if let Some(map) = value.as_object_mut() {
-        map.insert("job".to_string(), serde_json::json!(job));
-        map.insert("jobId".to_string(), serde_json::json!(job));
-    } else {
-        // Serialization of the DTO is infallible in practice; this keeps the
-        // routing aliases on even a degenerate value so the frontend guard
-        // still drops it fail-closed instead of misrouting it.
-        value = serde_json::json!({"job": job, "jobId": job});
-    }
+    let value = serde_json::json!({ "job": job, "snapshot": dto });
     debug_assert!(!payload_has_forbidden_keys(&value));
     value
 }
@@ -960,6 +945,8 @@ mod tests {
 
     fn snapshot_revision(payload: &serde_json::Value) -> u64 {
         payload
+            .get("snapshot")
+            .unwrap_or(payload)
             .get("revision")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(u64::MAX)
@@ -967,6 +954,8 @@ mod tests {
 
     fn snapshot_lifecycle(payload: &serde_json::Value) -> String {
         payload
+            .get("snapshot")
+            .unwrap_or(payload)
             .get("lifecycle")
             .and_then(|v| v.as_str())
             .unwrap_or("")
@@ -975,6 +964,8 @@ mod tests {
 
     fn terminal_type(payload: &serde_json::Value) -> Option<String> {
         payload
+            .get("snapshot")
+            .unwrap_or(payload)
             .get("terminal")?
             .get("type")?
             .as_str()
@@ -983,6 +974,8 @@ mod tests {
 
     fn decision_tiles(payload: &serde_json::Value) -> Vec<u32> {
         payload
+            .get("snapshot")
+            .unwrap_or(payload)
             .get("decision")
             .and_then(|d| d.get("missing"))
             .and_then(|m| m.as_array())
@@ -1034,23 +1027,23 @@ mod tests {
         assert_eq!(initial.channel, CHANNEL_JOB_SNAPSHOT);
         assert_eq!(snapshot_revision(&initial.payload), 0);
         assert_eq!(snapshot_lifecycle(&initial.payload), "Created");
-        assert_eq!(initial.payload["paused"], serde_json::json!(false));
+        let snapshot = &initial.payload["snapshot"];
+        assert_eq!(snapshot["paused"], serde_json::json!(false));
         assert_eq!(
-            initial.payload["progress"],
+            snapshot["progress"],
             serde_json::json!({"completed": 0, "total": null})
         );
         assert_eq!(
-            initial.payload["selection"],
+            snapshot["selection"],
             serde_json::json!({
                 "image": null, "level": null, "level_count": 0,
                 "catalog": null, "deferred": [],
             })
         );
-        assert!(initial.payload["decision"].is_null());
-        assert!(initial.payload["terminal"].is_null());
-        assert!(initial.payload["output"].is_null());
+        assert!(snapshot["decision"].is_null());
+        assert!(snapshot["terminal"].is_null());
+        assert!(snapshot["output"].is_null());
         assert_no_folded_keys(&initial.payload);
-        assert_eq!(initial.payload["jobId"], serde_json::json!(id));
         assert_eq!(initial.payload["job"], serde_json::json!(id));
     }
 
@@ -1065,7 +1058,7 @@ mod tests {
             .unwrap();
 
         // Automatic saves carry no decision either: the runner owns the save.
-        assert!(initial.payload["decision"].is_null());
+        assert!(initial.payload["snapshot"]["decision"].is_null());
         assert!(table.has_runner(&id), "the runner starts automatically");
         let _ = table.cancel_job(&id);
     }
@@ -1304,7 +1297,6 @@ mod tests {
         // on a `Finalizing` snapshot does not rewrite the lifecycle.
         assert_eq!(snapshot_lifecycle(&emit.payload), "Finalizing");
         assert_eq!(emit.payload["job"], serde_json::json!(id));
-        assert_eq!(emit.payload["jobId"], serde_json::json!(id));
         assert_no_folded_keys(&emit.payload);
         assert!(table.is_settled(&id));
         assert_eq!(
@@ -1340,8 +1332,11 @@ mod tests {
         );
         let dto = EngineSnapshotDto::from(&snapshot.snapshot);
         let payload = verbatim_payload("job:1", &dto);
-        assert!(payload["progress"]["total"].is_null());
-        assert_eq!(payload["progress"]["completed"], serde_json::json!(1u64));
+        assert!(payload["snapshot"]["progress"]["total"].is_null());
+        assert_eq!(
+            payload["snapshot"]["progress"]["completed"],
+            serde_json::json!(1u64)
+        );
         assert_eq!(snapshot_lifecycle(&payload), "AcquiringTiles");
         assert_no_folded_keys(&payload);
         assert!(!payload_has_forbidden_keys(&payload));
@@ -1374,7 +1369,7 @@ mod tests {
         assert_eq!(terminal_type(&payload).as_deref(), Some("completed"));
         assert_eq!(snapshot_lifecycle(&payload), "Finalizing");
         assert_eq!(
-            payload["output"],
+            payload["snapshot"]["output"],
             serde_json::json!({
                 "canvas": {"width": 800, "height": 600},
                 "format": "png",
@@ -1420,7 +1415,7 @@ mod tests {
         });
         let dto = EngineSnapshotDto::from(&snapshot.snapshot);
         let payload = verbatim_payload("job:1", &dto);
-        let catalog = &payload["selection"]["catalog"];
+        let catalog = &payload["snapshot"]["selection"]["catalog"];
         assert!(catalog.is_object(), "catalog must ride selection");
         // `CatalogEntryDto` is internally tagged (`kind: image`), with the
         // image fields flattened alongside the tag.
@@ -1451,7 +1446,7 @@ mod tests {
         let payload = verbatim_payload("job:1", &dto);
         assert_eq!(terminal_type(&payload).as_deref(), Some("failed"));
         assert_eq!(snapshot_lifecycle(&payload), "AcquiringTiles");
-        let error = &payload["terminal"]["error"];
+        let error = &payload["snapshot"]["terminal"]["error"];
         assert_eq!(error["code"], serde_json::json!("tile.download-failed"));
         assert_eq!(error["phase"], serde_json::json!("acquisition"));
         assert_eq!(error["retryable"], serde_json::json!(true));
@@ -1576,20 +1571,18 @@ mod tests {
         assert!(payload_has_forbidden_keys(&bad));
         let bad2 = serde_json::json!({"pixels": "abc"});
         assert!(payload_has_forbidden_keys(&bad2));
-        // Real emits never contain them and carry both job aliases.
+        // Real emits never contain them and carry one job identity.
         let mut table = JobTable::new();
         let (id, initial) = table.start_job("https://example.com/item").unwrap();
         assert_eq!(initial.channel, CHANNEL_JOB_SNAPSHOT);
         assert_eq!(initial.job, id);
-        assert_eq!(initial.payload["jobId"], serde_json::json!(id));
         assert_eq!(initial.payload["job"], serde_json::json!(id));
         assert!(!payload_has_forbidden_keys(&initial.payload));
     }
 
     #[test]
     fn snapshot_emit_is_self_describing_and_typed() {
-        // The payload is the canonical DTO plus routing aliases: revision,
-        // lifecycle, paused, progress, selection, decision, terminal, output.
+        // The payload wraps the canonical DTO with one routing id.
         let progress = runner_snapshot(
             "job:test",
             2,
@@ -1602,16 +1595,16 @@ mod tests {
         let dto = EngineSnapshotDto::from(&progress.snapshot);
         let payload = verbatim_payload("job:1", &dto);
         assert_eq!(snapshot_revision(&payload), 2);
-        assert_eq!(payload["lifecycle"], serde_json::json!("AcquiringTiles"));
-        assert_eq!(payload["paused"], serde_json::json!(false));
+        let body = &payload["snapshot"];
+        assert_eq!(body["lifecycle"], serde_json::json!("AcquiringTiles"));
+        assert_eq!(body["paused"], serde_json::json!(false));
         assert_eq!(
-            payload["progress"],
+            body["progress"],
             serde_json::json!({"completed": 3, "total": 10})
         );
-        assert!(payload["terminal"].is_null());
-        assert!(payload["decision"].is_null());
+        assert!(body["terminal"].is_null());
+        assert!(body["decision"].is_null());
         assert_eq!(payload["job"], serde_json::json!("job:1"));
-        assert_eq!(payload["jobId"], serde_json::json!("job:1"));
         assert_no_folded_keys(&payload);
         // The outstanding partial decision rides `decision` with engine
         // ordinal tile ids, never legacy `tile:N` labels.
@@ -1631,7 +1624,7 @@ mod tests {
             "AwaitingPartialDecision"
         );
         assert_eq!(
-            decision_payload["decision"]["generation"],
+            decision_payload["snapshot"]["decision"]["generation"],
             serde_json::json!(1u32)
         );
         assert_eq!(decision_tiles(&decision_payload), vec![1u32]);
@@ -1971,10 +1964,13 @@ mod tests {
         let dto = EngineSnapshotDto::from(&snapshot.snapshot);
         let payload = verbatim_payload("job:1", &dto);
         assert_eq!(snapshot_lifecycle(&payload), "AwaitingPartialDecision");
-        assert_eq!(payload["decision"]["generation"], serde_json::json!(1u32));
+        assert_eq!(
+            payload["snapshot"]["decision"]["generation"],
+            serde_json::json!(1u32)
+        );
         assert_eq!(decision_tiles(&payload), vec![1u32, 2u32]);
         assert_eq!(
-            payload["progress"],
+            payload["snapshot"]["progress"],
             serde_json::json!({"completed": 2, "total": 4})
         );
         assert_no_folded_keys(&payload);
@@ -2076,9 +2072,18 @@ mod tests {
             terminal_type(&payload).as_deref(),
             Some("partial-completed")
         );
-        assert_eq!(payload["terminal"]["missing"], serde_json::json!([1u32]));
-        assert_eq!(payload["output"]["complete"], serde_json::json!(false));
-        assert_eq!(payload["output"]["missing"], serde_json::json!([1u32]));
+        assert_eq!(
+            payload["snapshot"]["terminal"]["missing"],
+            serde_json::json!([1u32])
+        );
+        assert_eq!(
+            payload["snapshot"]["output"]["complete"],
+            serde_json::json!(false)
+        );
+        assert_eq!(
+            payload["snapshot"]["output"]["missing"],
+            serde_json::json!([1u32])
+        );
         assert_no_folded_keys(&payload);
         assert!(!payload.to_string().contains("/tmp"));
         assert!(!payload_has_forbidden_keys(&payload));
@@ -2101,7 +2106,7 @@ mod tests {
         let dto = EngineSnapshotDto::from(&snapshot.snapshot);
         let payload = verbatim_payload("job:1", &dto);
         assert_eq!(terminal_type(&payload).as_deref(), Some("failed"));
-        assert!(payload["output"].is_null());
+        assert!(payload["snapshot"]["output"].is_null());
     }
 
     #[test]
@@ -2121,7 +2126,7 @@ mod tests {
         for _ in 0..200 {
             for emit in table.poll_drivers() {
                 assert_eq!(emit.channel, CHANNEL_JOB_SNAPSHOT);
-                if emit.payload["terminal"].is_object() {
+                if emit.payload["snapshot"]["terminal"].is_object() {
                     terminal = Some(emit);
                     break;
                 }
@@ -2133,7 +2138,7 @@ mod tests {
         }
         let terminal = terminal.expect("runner terminal must forward");
         assert_eq!(terminal_type(&terminal.payload).as_deref(), Some("failed"));
-        let code = terminal.payload["terminal"]["error"]["code"]
+        let code = terminal.payload["snapshot"]["terminal"]["error"]["code"]
             .as_str()
             .unwrap_or("")
             .to_string();

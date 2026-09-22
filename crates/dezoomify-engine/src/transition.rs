@@ -19,10 +19,10 @@ pub struct JobError {
 
 impl JobError {
     #[must_use]
-    pub fn new(code: &str, message: String) -> Self {
+    pub fn new(code: &str, message: impl Into<String>) -> Self {
         Self {
             code: code.to_string(),
-            message,
+            message: message.into(),
         }
     }
 

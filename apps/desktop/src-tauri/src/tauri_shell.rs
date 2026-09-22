@@ -200,10 +200,7 @@ struct CapabilitySnapshot {
 }
 
 /// Projected IPC payload shape. Every job emit is the canonical
-/// `EngineSnapshotDto` verbatim (`revision`, `lifecycle`, `paused`,
-/// `progress`, `selection` with catalog, `decision`, `terminal`, `output`)
-/// plus the `job` + `jobId` routing aliases the frontend identity guard
-/// reads. No folded `state`/`acquired`/`recovery`/`origin` fields exist.
+/// `{ job, snapshot }`, where `snapshot` is the `EngineSnapshotDto` verbatim.
 ///
 /// Only the DTO crosses IPC; tile bytes, pixels, paths, full URLs, and
 /// secrets never do.
