@@ -7,7 +7,7 @@ use std::sync::{Arc, LazyLock};
 use serde::{Deserialize, Deserializer};
 
 use crate::json_utils::all_json;
-use crate::web_page::{has_iframe, iframe_source};
+use crate::web_page::{follow_iframe, has_iframe};
 use image_properties::ImageProperties;
 use regex::{Regex, bytes::Regex as BytesRegex};
 
@@ -358,18 +358,6 @@ fn extract_openlayers_catalog(
     Ok(DiscoveryStep::Follow(Request::new(append_path_component(
         &image_uri,
         "ImageProperties.xml",
-    ))))
-}
-
-fn follow_iframe(
-    _: &DiscoveryContext<'_>,
-    resource: crate::core::DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
-    let src = iframe_source(resource.bytes())
-        .ok_or_else(|| DiscoveryError::Session("page iframe has no source".into()))?;
-    Ok(DiscoveryStep::Follow(Request::new(resolve_relative(
-        resource.final_uri(),
-        &src,
     ))))
 }
 

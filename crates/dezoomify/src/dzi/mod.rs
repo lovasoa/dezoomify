@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, LazyLock};
 
-use crate::web_page::{has_iframe, iframe_source};
+use crate::web_page::{follow_iframe, has_iframe};
 use dzi_file::DziFile;
 use regex::{Regex, bytes::Regex as BytesRegex};
 
@@ -128,18 +128,6 @@ fn follow_wdl_template(
     Ok(DiscoveryStep::Follow(Request::new(resolve_relative(
         resource.final_uri(),
         &url,
-    ))))
-}
-
-fn follow_iframe(
-    _: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
-    let src = iframe_source(resource.bytes())
-        .ok_or_else(|| DiscoveryError::Session("page iframe has no source".into()))?;
-    Ok(DiscoveryStep::Follow(Request::new(resolve_relative(
-        resource.final_uri(),
-        &src,
     ))))
 }
 
