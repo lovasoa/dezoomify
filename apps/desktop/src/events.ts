@@ -1,8 +1,8 @@
 // Desktop Tauri event channels and IPC redaction guards.
 //
 // The desktop job keeps pixels in the native runtime. Only the
-// self-describing `job-snapshot` (the canonical `EngineSnapshotDto` the
-// service forwards verbatim to its observer, plus host routing aliases)
+// self-describing `job-snapshot` (one routing id plus the canonical
+// `EngineSnapshotDto` the service forwards verbatim to its observer)
 // crosses the IPC boundary; tile bytes never do.
 // This module names the allowed channels and guards their payloads.
 
@@ -21,13 +21,12 @@ export type DesktopEventChannel = (typeof DESKTOP_EVENT_CHANNELS)[number];
 /// for every runner snapshot the shell forwards verbatim. The payload is
 /// the authoritative `EngineSnapshotDto`: revision, lifecycle, paused,
 /// progress, selection (with catalog), decision, terminal, and output.
-/// `job`/`jobId` are host routing aliases only: the DTO carries no job
-/// identity. No legacy `job-state`/`job-progress`/`job-output`/`job-error`
-/// channels exist.
-export type JobSnapshotPayload = EngineSnapshotDto & {
+/// The DTO carries no job identity, so the host wraps it once instead of
+/// mutating it with routing aliases.
+export interface JobSnapshotPayload {
   job: string;
-  jobId: string;
-};
+  snapshot: EngineSnapshotDto;
+}
 
 const FORBIDDEN_IPC_KEYS = new Set([
   "tilebytes",
@@ -57,19 +56,6 @@ const SECRET_KEY_FRAGMENTS = [
 
 export function isDesktopEventChannel(value: string): value is DesktopEventChannel {
   return (DESKTOP_EVENT_CHANNELS as readonly string[]).includes(value);
-}
-
-// Canonical IPC identity: the Rust shell emits every snapshot with both
-// `job` and `jobId` aliases plus a numeric `revision`/`seq` (verbatim
-// runner seq). Readers take `job` first and accept `jobId`; anything else
-// (job_id, seqNo, string seqs) is rejected, so speculative spellings fail
-// closed instead of matching unrelated fields.
-export function eventJobId(payload: Record<string, unknown>): string | null {
-  for (const key of ["job", "jobId"]) {
-    const value = payload[key];
-    if (typeof value === "string" && value.length > 0) return value;
-  }
-  return null;
 }
 
 function containsForbiddenKey(value: unknown, seen: Set<unknown>): boolean {

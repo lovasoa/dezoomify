@@ -55,7 +55,7 @@ pub use engine_api::{
     OutputSummary, OutstandingKind, PartialPolicy, Progress, RecoveryChoice, ResponseMetadata,
     Selection, SelectionPolicy, TilePosition, TileSize, Update, UserCommand,
 };
-pub(crate) use job::{Job, JobInput};
+pub(crate) use job::Job;
 pub use projection::project_catalog;
 pub use retry::{
     classify_tile_failure, retry_delay_ms, FailureCategory, TileFailure, MAX_FAILURE_DETAIL_CHARS,

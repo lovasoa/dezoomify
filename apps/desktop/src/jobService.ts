@@ -6,7 +6,7 @@
 // observer entry keyed by its snapshot identity.
 //
 // Snapshot-only transport: the shell emits `dezoomify://job-snapshot`
-// `EngineSnapshotDto` payloads verbatim from the runner (revision,
+// `{ job, snapshot }` payloads with the runner's `EngineSnapshotDto` verbatim (revision,
 // lifecycle, paused, progress, selection with catalog, decision, terminal,
 // output). The service forwards each canonical snapshot directly to its
 // observer: no channel/kind fold, no seq guard, no settled mirror.
@@ -36,7 +36,7 @@ import {
   assertNoTileBytes,
   DESKTOP_EVENT_CHANNELS,
   type DesktopEventChannel,
-  eventJobId,
+  type JobSnapshotPayload,
 } from "./events.ts";
 
 // Keep erasable syntax only so node type-stripping can read this file.
@@ -58,7 +58,6 @@ export interface DesktopIpc {
 
 export interface DesktopJobServiceDeps {
   ipc?: DesktopIpc;
-  now?: () => number;
   /** Extra start_job settings (output preferences); default omits the key. */
   settings?: () => Record<string, unknown>;
   /** Product-level deep-link confirmations stay in the product shell. */
@@ -119,7 +118,6 @@ export interface DesktopJobService extends JobService {
 }
 
 interface TrackedObserver {
-  nativeId: string;
   observer: JobObserver;
 }
 
@@ -127,69 +125,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-// Closed engine lifecycles (the `JobState` union): anything else is not a
-// canonical snapshot and is dropped at the boundary.
-const ENGINE_LIFECYCLES = new Set([
-  "Created",
-  "Discovering",
-  "AwaitingImageSelection",
-  "AwaitingLevelSelection",
-  "Planning",
-  "AcquiringTiles",
-  "AwaitingPartialDecision",
-  "Finalizing",
-  "Cancelling",
-  "Completed",
-  "PartiallyCompleted",
-  "Failed",
-  "Cancelled",
-]);
-
-// Closed terminal outcomes (the `SnapshotTerminalDto` type tag).
-const TERMINAL_TYPES = new Set(["completed", "partial-completed", "failed", "cancelled"]);
-
-/** Canonical DTO guard: revision/lifecycle/progress/selection are required;
- * decision/terminal/output ride only in their generated shapes. Legacy
- * folded payloads (state/acquired/recovery/terminal.kind/...) fail here
- * and never reach an observer. */
-function isSnapshotPayload(value: unknown): value is JobSnapshot {
-  if (!isRecord(value)) return false;
-  if (typeof value["revision"] !== "number") return false;
-  const lifecycle = value["lifecycle"];
-  if (typeof lifecycle !== "string" || !ENGINE_LIFECYCLES.has(lifecycle)) return false;
-  if (value["paused"] !== undefined && typeof value["paused"] !== "boolean") return false;
-  const progress = value["progress"];
-  if (!isRecord(progress) || typeof progress["completed"] !== "number") return false;
-  const total = progress["total"];
-  if (total !== undefined && total !== null && typeof total !== "number") return false;
-  const selection = value["selection"];
-  if (!isRecord(selection)) return false;
-  if (typeof selection["level_count"] !== "number") return false;
-  if (!Array.isArray(selection["deferred"])) return false;
-  const decision = value["decision"];
-  if (decision !== undefined && decision !== null) {
-    if (!isRecord(decision)) return false;
-    if (typeof decision["generation"] !== "number") return false;
-    if (!Array.isArray(decision["missing"])) return false;
-  }
-  const terminal = value["terminal"];
-  if (terminal !== undefined && terminal !== null) {
-    if (!isRecord(terminal)) return false;
-    if (typeof terminal["type"] !== "string" || !TERMINAL_TYPES.has(terminal["type"])) return false;
-    if (terminal["type"] === "failed" && !isRecord(terminal["error"])) return false;
-  }
-  const output = value["output"];
-  if (output !== undefined && output !== null) {
-    if (!isRecord(output)) return false;
-    if (typeof output["complete"] !== "boolean") return false;
-    if (!Array.isArray(output["missing"])) return false;
-  }
-  return true;
-}
-
 export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJobService {
   const ipc = deps?.ipc ?? publicIpc();
-  const now = deps?.now ?? Date.now;
   const settingsOf = deps?.settings;
   const onDeepLink = deps?.onDeepLink;
   const observers = new Map<string, TrackedObserver>();
@@ -212,11 +149,9 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
       return;
     }
     if (channel !== "dezoomify://job-snapshot") return;
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
-    const payload = raw as Record<string, unknown>;
-    const id = eventJobId(payload);
-    if (!id) return;
-    if (!isSnapshotPayload(payload)) return;
+    if (!isRecord(raw) || typeof raw.job !== "string" || !isRecord(raw.snapshot)) return;
+    const payload = raw as unknown as JobSnapshotPayload;
+    const id = payload.job;
     try {
       assertNoTileBytes(payload);
     } catch {
@@ -224,14 +159,14 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
     }
     const tracked = observers.get(id);
     if (!tracked) {
-      if (pendingStarts > 0) startingSnapshots.set(id, payload);
+      if (pendingStarts > 0) startingSnapshots.set(id, payload.snapshot);
       return;
     }
     // Verbatim forward: the snapshot is already authoritative (shell
     // guarantees exactly-once terminals, monotonic counts, honest
     // partials, typed codes, redacted context), so no fold, no seq guard,
     // and no settled mirror live here.
-    tracked.observer.snapshot(payload as unknown as JobSnapshot);
+    tracked.observer.snapshot(payload.snapshot);
     tracked.observer.hostStatus(hostStatus() as never);
   }
 
@@ -319,7 +254,7 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
     const id: string = nativeId;
     const existing = observers.get(id);
     if (existing) observers.delete(id);
-    observers.set(id, { nativeId: id, observer });
+    observers.set(id, { observer });
     const startingSnapshot = startingSnapshots.get(id);
     startingSnapshots.delete(id);
     pendingStarts -= 1;

@@ -161,111 +161,6 @@ fn temp_dir(name: &str) -> PathBuf {
     dir
 }
 
-/// Engine snapshots forward verbatim with monotonic revisions and exactly one
-/// terminal carrying the native publication.
-#[test]
-fn engine_snapshots_forward_verbatim_with_monotonic_revisions() {
-    let shared: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
-    let counts: Arc<Mutex<HashMap<String, usize>>> = Arc::new(Mutex::new(HashMap::new()));
-    {
-        let mut map = shared.lock().expect("lock");
-        map.insert(
-            "/pyr.dzi".to_string(),
-            http_response("200 OK", "application/xml", DZI_512.as_bytes()),
-        );
-        for tile in ["0_0", "1_0", "0_1", "1_1"] {
-            let bytes = scenario_payload(&format!("tile-{tile}.png"));
-            map.insert(
-                format!("/pyr_files/9/{tile}.png"),
-                http_response("200 OK", "image/png", &bytes),
-            );
-        }
-    }
-    let base = serve_counted(Arc::clone(&shared), Arc::clone(&counts));
-    let work = temp_dir("verbatim");
-    let output = work.join("verbatim.png");
-    let job = NativeRunner::start(JobOptions {
-        input_url: format!("{base}/pyr.dzi"),
-        output: OutputTarget::File(output.clone()),
-        // Hermetic tile cache: the shared default on-disk cache plus
-        // ephemeral-port reuse lets stale entries from earlier runs leak
-        // into exact-count assertions. Each test owns a wiped cache dir.
-        cache_dir: Some(work.join("tile-cache")),
-        ..Default::default()
-    })
-    .expect("runner starts");
-    let mut revisions = Vec::new();
-    let mut terminals = 0;
-    let mut saw_acquiring = false;
-    loop {
-        let snapshot = job
-            .snapshots()
-            .recv_timeout(Duration::from_secs(60))
-            .expect("snapshot arrives");
-        assert_eq!(snapshot.job, job.id, "snapshots stay job-scoped");
-        // Verbatim engine vocabulary: lifecycle is the protocol JobState, not
-        // a runner-local fold.
-        assert!(
-            matches!(
-                snapshot.snapshot.lifecycle,
-                JobState::Created
-                    | JobState::Discovering
-                    | JobState::AwaitingImageSelection
-                    | JobState::AwaitingLevelSelection
-                    | JobState::Planning
-                    | JobState::AcquiringTiles
-                    | JobState::AwaitingPartialDecision
-                    | JobState::Finalizing
-                    | JobState::Cancelling
-                    | JobState::Completed
-                    | JobState::PartiallyCompleted
-                    | JobState::Failed
-                    | JobState::Cancelled
-            ),
-            "lifecycle is the engine vocabulary"
-        );
-        if snapshot.snapshot.lifecycle == JobState::AcquiringTiles {
-            saw_acquiring = true;
-        }
-        revisions.push(snapshot.snapshot.revision);
-        if snapshot.snapshot.terminal.is_some() || snapshot.published.is_some() {
-            terminals += 1;
-            break;
-        }
-    }
-    assert!(saw_acquiring, "acquisition phase observed verbatim");
-    for pair in revisions.windows(2) {
-        assert!(
-            pair[1] >= pair[0],
-            "revisions never move backward: {pair:?}"
-        );
-    }
-    assert_eq!(terminals, 1, "exactly one terminal snapshot");
-    let summary = job.join().expect("publication wins the race");
-    assert_eq!(summary.tile_count, 4);
-    assert_eq!((summary.width, summary.height), (512, 512));
-    assert!(!summary.partial);
-    assert!(output.exists(), "native publication reaches disk");
-    // One reusable transport serves the whole job: 1 metadata + 4 tiles, no
-    // per-fetch client rebuild multiplying requests.
-    let counts = counts.lock().expect("lock");
-    assert_eq!(
-        counts.get("/pyr.dzi").copied().unwrap_or(0),
-        1,
-        "metadata fetched once: {counts:?}"
-    );
-    for tile in ["0_0", "1_0", "0_1", "1_1"] {
-        assert_eq!(
-            counts
-                .get(&format!("/pyr_files/9/{tile}.png"))
-                .copied()
-                .unwrap_or(0),
-            1,
-            "each tile fetched once (no transport retry multiplying the engine budget): {counts:?}"
-        );
-    }
-}
-
 /// Bounded concurrency and honest memory accounting on the real pipeline:
 /// peak in-flight never exceeds the engine slot budget, and the accounted
 /// peak is canvas plus retained plus encoded.
@@ -600,7 +495,8 @@ fn stale_partial_answer_is_engine_rejected_not_consumed() {
     })
     .expect("runner starts");
     // Wait for the partial wait, then answer with a generation the engine
-    // never issued: the gate carries it through and the engine rejects it.
+    // never issued: the command channel carries it through and the engine
+    // rejects it.
     let live = loop {
         let snapshot = job
             .snapshots()

@@ -32,9 +32,9 @@ import type {
   FetchFailureCode,
   FetchFailureDto,
   HostEffect,
+  JobCommand,
   JobInputDto,
   OutputFormat,
-  RecoveryChoice,
   RequestDto,
   SessionConfig,
   SizeDto,
@@ -106,7 +106,7 @@ export interface EngineHostDeps {
   log?(level: "debug" | "info" | "warn" | "error", code: string, detail?: unknown): void;
 }
 
-export type { RecoveryChoice };
+type EngineCommand = Exclude<JobCommand, { type: "start" }>;
 
 export function createEngineHost(deps: EngineHostDeps) {
   const log: NonNullable<EngineHostDeps["log"]> = deps.log ?? (() => {});
@@ -680,37 +680,17 @@ export function createEngineHost(deps: EngineHostDeps) {
         ...(deps.quotas ? { quotas: deps.quotas } : {}),
       });
     },
-    selectImage(image: number) {
-      sendToEngine({ type: "engine.command", command: { type: "select-image", image } });
-    },
-    followDeferred(image: number) {
-      sendToEngine({ type: "engine.command", command: { type: "follow-deferred", image } });
-    },
-    selectLevel(level: number) {
-      sendToEngine({ type: "engine.command", command: { type: "select-level", level } });
-    },
-    chooseRecovery(generation: number, choice: RecoveryChoice) {
-      sendToEngine({
-        type: "engine.command",
-        command: { type: "answer-partial", generation, decision: choice },
-      });
-    },
-    pause() {
-      // Pause state arrives back via snapshot.paused; the host keeps no flag.
-      sendToEngine({ type: "engine.command", command: { type: "pause" } });
-    },
-    resume() {
-      sendToEngine({ type: "engine.command", command: { type: "resume" } });
+    command(command: EngineCommand) {
+      if (command.type === "cancel") {
+        if (disposed || lifetime.signal.aborted) return;
+        log("debug", "controller-cancel", "");
+        abortInFlight();
+      }
+      sendToEngine({ type: "engine.command", command });
     },
     resolvePermission(granted: boolean) {
       // Release the held effects; each resumes (grant) or fails typed (denial).
       releaseGates(granted);
-    },
-    cancel() {
-      if (disposed || lifetime.signal.aborted) return;
-      log("debug", "controller-cancel", "");
-      abortInFlight();
-      sendToEngine({ type: "engine.command", command: { type: "cancel" } });
     },
     dispose() {
       if (disposed) return;

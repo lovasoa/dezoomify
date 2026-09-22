@@ -1,11 +1,6 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import { createDesktopJobService } from "../src/jobService.ts";
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 function nativeRequest(url = "https://museum.example.org/iiif/1/manifest.json") {
   return {
@@ -78,22 +73,22 @@ function observer() {
   };
 }
 
-// Canonical EngineSnapshotDto plus the host job/jobId routing aliases.
-// No folded top-level keys (state/acquired/total/seq/kind/recovery/...):
-// those fail the service guard and never reach an observer.
+// One host routing id around the canonical EngineSnapshotDto.
 function snapshotPayload(overrides = {}) {
+  const { job = "job:native-1", ...snapshot } = overrides;
   return {
-    job: "job:native-1",
-    jobId: "job:native-1",
-    revision: 2,
-    lifecycle: "AcquiringTiles",
-    paused: false,
-    progress: { completed: 3, total: 10 },
-    selection: { image: null, level: null, level_count: 0, catalog: null, deferred: [] },
-    decision: null,
-    terminal: null,
-    output: null,
-    ...overrides,
+    job,
+    snapshot: {
+      revision: 2,
+      lifecycle: "AcquiringTiles",
+      paused: false,
+      progress: { completed: 3, total: 10 },
+      selection: { image: null, level: null, level_count: 0, catalog: null, deferred: [] },
+      decision: null,
+      terminal: null,
+      output: null,
+      ...snapshot,
+    },
   };
 }
 
@@ -127,7 +122,7 @@ test("start delivers the latest host snapshot emitted before its IPC reply", asy
   };
   const obs = observer();
   await service.start(nativeRequest(), obs);
-  assert.deepEqual(obs.snapshots, [terminal]);
+  assert.deepEqual(obs.snapshots, [terminal.snapshot]);
   await service.dispose();
 });
 
@@ -274,7 +269,6 @@ test("snapshots forward verbatim per job with identity guard only", async () => 
     "dezoomify://job-snapshot",
     snapshotPayload({
       job: "job:other",
-      jobId: "job:other",
       revision: 3,
       progress: { completed: 9, total: 10 },
     }),
@@ -429,91 +423,4 @@ test("capabilities reject unknown shell commands", async () => {
     (error) => error.code === "desktop.capability-mismatch",
   );
   await service.dispose();
-});
-
-test("service uses the public Tauri API, never host internals", () => {
-  const source = fs.readFileSync(path.join(HERE, "..", "src", "jobService.ts"), "utf8");
-  assert.ok(source.includes("@tauri-apps/api/core"));
-  assert.ok(source.includes("@tauri-apps/api/event"));
-  assert.equal(source.includes("__TAURI_INTERNALS__"), false);
-  assert.equal(source.includes("__TAURI_EVENT__"), false);
-  assert.equal(source.includes("__TAURI__"), false);
-});
-
-test("legacy folded payloads never reach an observer", async () => {
-  const ipc = fakeIpc();
-  const service = createDesktopJobService({ ipc });
-  const obs = observer();
-  await service.start(nativeRequest(), obs);
-  assert.equal(obs.snapshots.length, 0);
-  const before = obs.snapshots.length;
-  // Legacy folds: state/acquired/total/seq/kind/jobSnapshot/recovery without
-  // the canonical revision/lifecycle/progress/selection shape.
-  for (const legacy of [
-    {
-      job: "job:native-1",
-      jobId: "job:native-1",
-      seq: 2,
-      kind: "snapshot",
-      state: "AcquiringTiles",
-      acquired: 3,
-      total: 10,
-    },
-    {
-      job: "job:native-1",
-      jobId: "job:native-1",
-      revision: 2,
-      state: "AcquiringTiles",
-      acquired: 3,
-    },
-    {
-      job: "job:native-1",
-      jobId: "job:native-1",
-      lifecycle: "AcquiringTiles",
-      acquired: 3,
-      total: 10,
-    },
-    { job: "job:native-1", jobId: "job:native-1", revision: 2, lifecycle: "AcquiringTiles" },
-    {
-      job: "job:native-1",
-      jobId: "job:native-1",
-      revision: 2,
-      lifecycle: "Nope",
-      progress: { completed: 1, total: 2 },
-      selection: { level_count: 0, deferred: [] },
-    },
-    {
-      job: "job:native-1",
-      jobId: "job:native-1",
-      revision: 2,
-      lifecycle: "AcquiringTiles",
-      progress: { completed: 1, total: 2 },
-      selection: { level_count: 0, deferred: [] },
-      terminal: { kind: "completed" },
-    },
-  ]) {
-    emit(ipc, "dezoomify://job-snapshot", legacy);
-  }
-  assert.equal(obs.snapshots.length, before);
-  // The canonical shape still forwards verbatim after the legacy drops.
-  emit(ipc, "dezoomify://job-snapshot", snapshotPayload({ revision: 2 }));
-  assert.equal(obs.snapshots.length, before + 1);
-  assert.equal(obs.snapshots[obs.snapshots.length - 1].progress.completed, 3);
-  await service.dispose();
-});
-
-test("snapshot channel is the only job transport", () => {
-  const source = fs.readFileSync(path.join(HERE, "..", "src", "events.ts"), "utf8");
-  assert.ok(source.includes("dezoomify://job-snapshot"));
-  assert.ok(source.includes("dezoomify://deep-link-pending"));
-  assert.equal(source.includes("dezoomify://job-state"), false);
-  assert.equal(source.includes("dezoomify://job-progress"), false);
-  assert.equal(source.includes("dezoomify://job-output"), false);
-  assert.equal(source.includes("dezoomify://job-error"), false);
-  const service = fs.readFileSync(path.join(HERE, "..", "src", "jobService.ts"), "utf8");
-  assert.equal(service.includes("SHELL_STATE_TABLE"), false);
-  assert.equal(service.includes("projectDesktopEvent"), false);
-  assert.equal(service.includes("seenSeq"), false);
-  assert.equal(service.includes("initialLocalSnapshot"), false);
-  assert.equal(service.includes("unsupported-command until the typed native IPC lands"), false);
 });

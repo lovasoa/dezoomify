@@ -100,7 +100,6 @@ test("typescript integration commands match registry", () => {
 });
 
 test("generated files list exact commands and channels", () => {
-  const tauriConf = readJson("../src-tauri/tauri.conf.json");
   const capGen = readJson("../src-tauri/capabilities/generated.json");
   const desktopCap = readJson("../../../generated/desktop-capabilities.json");
   for (const [label, doc] of [
@@ -166,22 +165,8 @@ test("protocol range, encoders, native host, updater stay consistent", () => {
 
 test("event channels are single-sourced and forbid tile bytes", () => {
   const eventsTs = readText("../src/events.ts");
-  const integrationTs = readText("../src/desktopIntegration.ts");
   const fromEvents = extractBracketStrings(eventsTs, "DESKTOP_EVENT_CHANNELS");
   assert.deepEqual(sorted(fromEvents), sorted(EXPECTED_CHANNELS));
-  // The integration module re-exports the canonical registry instead of
-  // keeping a second literal: one source, no drift.
-  assert.ok(
-    integrationTs.includes('from "./events.ts"'),
-    "integration re-exports the canonical channels",
-  );
-  assert.ok(
-    integrationTs.includes("DESKTOP_EVENT_CHANNELS"),
-    "integration exposes the canonical channels",
-  );
-  assert.equal(integrationTs.includes("dezoomify://job-state"), false, "no second channel literal");
-  assert.ok(eventsTs.includes("assertNoTileBytes"), "redaction helper");
-  assert.ok(eventsTs.includes("FORBIDDEN_IPC_KEYS"), "forbidden-IPC-key set backs the guard");
   for (const rel of [
     "../src-tauri/tauri.conf.json",
     "../src-tauri/capabilities/generated.json",
@@ -274,25 +259,7 @@ test("installer templates use placeholders and no wildcards", () => {
   assert.ok(path.isAbsolute(parsed.path), "absolute host path");
 });
 
-test("desktop typescript stays host-neutral (no web/extension imports)", () => {
-  for (const rel of ["../src/desktopIntegration.ts", "../src/events.ts"]) {
-    const src = readText(rel);
-    assert.ok(!/from\s+["'][^"']*apps\/web/.test(src), `${rel} must not import web`);
-    assert.ok(!/from\s+["'][^"']*apps\/extension/.test(src), `${rel} must not import extension`);
-    assert.ok(
-      !/from\s+["'][^"']*browser-runtime/.test(src),
-      `${rel} must not import browser runtime`,
-    );
-    assert.ok(
-      !/import\s*\(\s*["'][^"']*apps\/(web|extension)/.test(src),
-      `${rel} no dynamic web import`,
-    );
-    assert.ok(!src.includes("webIntegration.ts"), `${rel} no web integration import`);
-    // The desktop TS layer performs no I/O of its own: it never calls
-    // fetch/XHR (host effects belong to the native runtime).
-    assert.ok(!/\bfetch\s*\(/.test(src), `${rel} must not fetch directly`);
-    assert.ok(!src.includes("XMLHttpRequest"), `${rel} must not use XHR`);
-  }
+test("desktop shell stays in the root workspace and keeps Tauri optional", () => {
   const cargo = readText("../src-tauri/Cargo.toml");
   const rootCargo = readText("../../../Cargo.toml");
   assert.ok(

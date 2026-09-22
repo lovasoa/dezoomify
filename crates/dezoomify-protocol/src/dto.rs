@@ -102,10 +102,11 @@ pub struct ProcessingRequest {
 }
 
 /// The browser output representation requested by the job engine.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum OutputFormat {
+    #[default]
     Png,
 }
 
@@ -364,9 +365,10 @@ pub enum HostEffect {
 // Job lifecycle (engine -> hosts; absolute snapshots, terminal exactly once)
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum JobState {
+    #[default]
     Created,
     Discovering,
     AwaitingImageSelection,
@@ -827,6 +829,15 @@ pub struct SnapshotProgressDto {
     pub total: Option<u64>,
 }
 
+impl Default for SnapshotProgressDto {
+    fn default() -> Self {
+        Self {
+            completed: 0,
+            total: Some(0),
+        }
+    }
+}
+
 /// One still-deferred catalog entry: position plus follow-up URI.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
@@ -836,7 +847,7 @@ pub struct SnapshotDeferredDto {
 }
 
 /// Current selection state (positions into the kept catalog).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct SnapshotSelectionDto {
     pub image: Option<u32>,
@@ -900,7 +911,7 @@ pub struct SnapshotOutputDto {
 /// Authoritative per-job projection. Snapshots are absolute: UIs render
 /// the latest snapshot and never reconstruct phases from event walks.
 /// `revision` increases on every transition; observers drop stale ones.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct EngineSnapshotDto {
     pub revision: u32,

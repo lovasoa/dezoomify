@@ -111,14 +111,18 @@ use dezoomify_core::Vec2d;
 use dezoomify_protocol::dto::{
     CatalogEntryDto, EngineSnapshotDto, ErrorDto as ProtocolErrorDto,
     ErrorPhase as ProtocolErrorPhase, FailureCategoryDto, JobState, MissingTileDto,
-    OutputDispositionDto, OutputFormat as ProtocolOutputFormat, SizeDto as ProtocolSizeDto,
-    SnapshotDecisionDto, SnapshotDeferredDto, SnapshotOutputDto, SnapshotProgressDto,
-    SnapshotSelectionDto, SnapshotTerminalDto, TileFailureDto,
+    SizeDto as ProtocolSizeDto, SnapshotDecisionDto, SnapshotOutputDto, SnapshotTerminalDto,
+    TileFailureDto,
 };
 
 use crate::retry::TileFailure as InnerFailure;
+pub use crate::transition::JobError as EngineError;
 use crate::{Config, Job, JobCommand as InnerCommand, JobEffect as InnerEffect, Outcome};
-pub use dezoomify_protocol::dto::RecoveryChoice;
+pub use dezoomify_protocol::dto::{
+    HeaderDto as HeaderPair, OutputDispositionDto as OutputDisposition, OutputFormat,
+    RecoveryChoice, SnapshotDeferredDto as DeferredEntry, SnapshotProgressDto as Progress,
+    SnapshotSelectionDto as Selection,
+};
 
 /// One ordered discovery root: a URL the host can fetch, or inline bytes
 /// the engine evaluates directly.
@@ -186,14 +190,6 @@ pub enum SelectionPolicy {
         max_height: Option<u32>,
         zoom_level: Option<usize>,
     },
-}
-
-/// Requested output encoding.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum OutputFormat {
-    /// PNG encoding.
-    #[default]
-    Png,
 }
 
 /// Fixed input intent for one job: ordered discovery inputs, format
@@ -303,15 +299,6 @@ impl std::fmt::Display for EffectId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "effect:{}", self.0)
     }
-}
-
-/// One request header the host sends with a tile fetch.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HeaderPair {
-    /// Header name.
-    pub name: String,
-    /// Header value.
-    pub value: String,
 }
 
 /// Pixel position of one tile's top-left corner in the output image.
@@ -459,19 +446,6 @@ impl Failure {
     }
 }
 
-/// Honest output disposition reported by the host that performed the save.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OutputDisposition {
-    /// A native host published output files.
-    NativePublication,
-    /// A browser host initiated the save.
-    BrowserSaveInitiated,
-    /// A browser host has the output ready to save.
-    BrowserSaveReady,
-    /// Tiles were shown without readable bytes; no output exists.
-    DisplayOnly,
-}
-
 /// Host completion for one outstanding effect. Tile success carries no
 /// body: acquired tiles are recorded by ID, displayed tiles complete
 /// without readable bytes, and failures carry structured [`Failure`]s.
@@ -497,43 +471,6 @@ pub enum EffectResult {
     OutputFailed { code: String, message: String },
     /// Kept resources released after cancellation or failure.
     CleanupAcknowledged,
-}
-
-/// Unit progress for the active phase (never moves backward; totals stay
-/// unknown until the plan resolves).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Progress {
-    /// Work units finished.
-    pub completed: u64,
-    /// Work units known, when the plan declares a total.
-    pub total: Option<u64>,
-}
-
-/// Current selection state (positions into the kept catalog).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Selection {
-    /// Chosen image position, once selected.
-    pub image: Option<u32>,
-    /// Chosen level position, once selected.
-    pub level: Option<u32>,
-    /// Selectable level positions for the chosen image.
-    pub level_count: u32,
-    /// The kept catalog with full geometry, once discovered. Replaced when
-    /// a deferred catalog entry is followed within the same job.
-    pub catalog: Option<dezoomify_protocol::dto::CatalogDto>,
-    /// Still-deferred catalog entries: position plus follow-up URI. The
-    /// host follows one within the same job; the entries are reported,
-    /// never silently replaced by host-side recursion.
-    pub deferred: Vec<DeferredEntry>,
-}
-
-/// One still-deferred catalog entry.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DeferredEntry {
-    /// Catalog position.
-    pub position: u32,
-    /// Follow-up URI to resolve within the same job.
-    pub uri: String,
 }
 
 /// Outstanding partial decision payload.
@@ -620,33 +557,6 @@ impl Update {
             .collect()
     }
 }
-
-/// Rejection with a stable code and message.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EngineError {
-    /// Stable namespaced code (never a display string).
-    pub code: String,
-    /// Human-readable detail.
-    pub message: String,
-}
-
-impl EngineError {
-    /// Stable rejection with a code and message.
-    pub fn new(code: &str, message: impl Into<String>) -> Self {
-        Self {
-            code: code.into(),
-            message: message.into(),
-        }
-    }
-}
-
-impl std::fmt::Display for EngineError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.code, self.message)
-    }
-}
-
-impl std::error::Error for EngineError {}
 
 /// Option validation failure.
 pub type ValidationError = EngineError;
@@ -905,16 +815,7 @@ impl EngineJob {
     /// format name is unknown, or a budget fails validation.
     pub fn start(options: JobOptions) -> Result<(Self, Update), ValidationError> {
         Self::validate_options(&options)?;
-        let inner_inputs: Vec<crate::JobInput> = options
-            .inputs
-            .iter()
-            .map(|input| match input.contents.clone() {
-                Some(bytes) => crate::JobInput::with_contents(input.url.clone(), bytes),
-                None => crate::JobInput::new(input.url.clone()),
-            })
-            .collect();
-        let mut inner = Job::new_with_inputs(inner_inputs, options.config())
-            .map_err(|error| EngineError::new(&error.code, error.message))?;
+        let mut inner = Job::new(options.inputs.clone(), options.config());
         if let Some(name) = options.format.clone() {
             inner.set_format(Some(name));
         }
@@ -928,9 +829,7 @@ impl EngineJob {
             discovery_failure: None,
             disposition: None,
         };
-        job.inner
-            .start()
-            .map_err(|error| EngineError::new(&error.code, error.message))?;
+        job.inner.start()?;
         job.bump_revision()?;
         let update = job.drain()?;
         let update = job.apply_policies(update)?;
@@ -969,9 +868,7 @@ impl EngineJob {
             UserCommand::Resume => InnerCommand::Resume,
             UserCommand::Cancel => InnerCommand::Cancel,
         };
-        self.inner
-            .on_command(inner)
-            .map_err(|error| EngineError::new(&error.code, error.message))
+        self.inner.on_command(inner)
     }
 
     /// Complete one outstanding effect with a body-free result. Metadata
@@ -1031,9 +928,7 @@ impl EngineJob {
                 }
                 true
             }
-            Err(error) => {
-                return Err(EngineError::new(&error.code, error.message));
-            }
+            Err(error) => return Err(error),
         };
         if applied {
             self.bump_revision()?;
@@ -1094,7 +989,7 @@ impl EngineJob {
             Err(error) => {
                 self.outstanding.remove(&effect);
                 self.effect_uris.remove(&effect);
-                return Err(EngineError::new(&error.code, error.message));
+                return Err(error);
             }
         };
         if outcome == Outcome::Applied {
@@ -1310,27 +1205,23 @@ impl EngineJob {
                             update.snapshot = self.project();
                         }
                         Err(rejection) => {
-                            self.inner
-                                .fail_via_cleanup(
-                                    "discovery.deferred",
-                                    format!(
-                                        "automatic deferred catalog follow rejected ({}): {}",
-                                        rejection.code, rejection.message
-                                    ),
-                                )
-                                .map_err(|error| EngineError::new(&error.code, error.message))?;
+                            self.inner.fail_via_cleanup(
+                                "discovery.deferred",
+                                format!(
+                                    "automatic deferred catalog follow rejected ({}): {}",
+                                    rejection.code, rejection.message
+                                ),
+                            )?;
                             update.effects.extend(self.drain()?.effects);
                             update.snapshot = self.project();
                         }
                     }
                 }
                 Some(SelectionChoice::NoImages) => {
-                    self.inner
-                        .fail_via_cleanup(
-                            "job.no-images",
-                            "discovery completed without a selectable image".to_string(),
-                        )
-                        .map_err(|error| EngineError::new(&error.code, error.message))?;
+                    self.inner.fail_via_cleanup(
+                        "job.no-images",
+                        "discovery completed without a selectable image".to_string(),
+                    )?;
                     update.effects.extend(self.drain()?.effects);
                     update.snapshot = self.project();
                 }
@@ -1371,12 +1262,10 @@ impl EngineJob {
                 self.options.selection,
                 SelectionPolicy::NativeAutomatic { .. }
             ) {
-                self.inner
-                    .fail_via_cleanup(
-                        "job.plan-empty",
-                        "selected image has no zoom levels".to_string(),
-                    )
-                    .map_err(|error| EngineError::new(&error.code, error.message))?;
+                self.inner.fail_via_cleanup(
+                    "job.plan-empty",
+                    "selected image has no zoom levels".to_string(),
+                )?;
                 update.effects.extend(self.drain()?.effects);
                 update.snapshot = self.project();
             }
@@ -1705,42 +1594,18 @@ impl From<&JobSnapshot> for EngineSnapshotDto {
             }
             Some(SnapshotOutputDto {
                 canvas,
-                format: ProtocolOutputFormat::Png,
+                format: output.format,
                 complete: output.complete,
                 missing: output.missing.clone(),
-                disposition: output.disposition.map(|disposition| match disposition {
-                    OutputDisposition::NativePublication => OutputDispositionDto::NativePublication,
-                    OutputDisposition::BrowserSaveInitiated => {
-                        OutputDispositionDto::BrowserSaveInitiated
-                    }
-                    OutputDisposition::BrowserSaveReady => OutputDispositionDto::BrowserSaveReady,
-                    OutputDisposition::DisplayOnly => OutputDispositionDto::DisplayOnly,
-                }),
+                disposition: output.disposition,
             })
         });
         EngineSnapshotDto {
             revision: snapshot.revision,
             lifecycle: snapshot.lifecycle,
             paused: snapshot.paused,
-            progress: SnapshotProgressDto {
-                completed: snapshot.progress.completed,
-                total: snapshot.progress.total,
-            },
-            selection: SnapshotSelectionDto {
-                image: snapshot.selection.image,
-                level: snapshot.selection.level,
-                level_count: snapshot.selection.level_count,
-                catalog: snapshot.selection.catalog.clone(),
-                deferred: snapshot
-                    .selection
-                    .deferred
-                    .iter()
-                    .map(|entry| SnapshotDeferredDto {
-                        position: entry.position,
-                        uri: entry.uri.clone(),
-                    })
-                    .collect(),
-            },
+            progress: snapshot.progress,
+            selection: snapshot.selection.clone(),
             decision: snapshot
                 .decision
                 .as_ref()

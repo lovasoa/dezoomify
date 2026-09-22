@@ -9,11 +9,8 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
-};
-use std::time::{Duration, Instant};
+use std::sync::{atomic::AtomicBool, Arc};
+use std::time::Duration;
 
 use dezoomify_core::core::model::Request;
 use dezoomify_core::core::redact_uri;
@@ -92,140 +89,6 @@ pub enum PartialPolicy {
     Keep,
 }
 
-/// Pending partial request announced by the driver while it waits for an
-/// interactive choice. Tile ids only, never URLs or paths.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PartialRequest {
-    pub missing: Vec<String>,
-    pub failed: usize,
-    pub total: usize,
-}
-
-#[derive(Debug, Default)]
-struct PartialGateInner {
-    pending: Option<PartialRequest>,
-    decision: Option<AnsweredDecision>,
-}
-
-/// One answered partial decision carrying the engine generation it answers.
-/// The generation travels with the decision (never re-applied from the
-/// current engine effect), so a stale host answer is engine-rejected at the
-/// boundary instead of being consumed in order.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct AnsweredDecision {
-    generation: u32,
-    decision: dezoomify_protocol::dto::RecoveryChoice,
-}
-
-/// Interactive partial gate shared between the background driver and the
-/// host shell. The driver announces the missing ledger and waits up to 60s
-/// for the host answer; the host answers via [`PartialGate::answer`] with
-/// the generation from its snapshot. Fail-closed: timeout, cancellation,
-/// or no gate falls back to [`PartialPolicy`]. Early answers survive
-/// (stored before the wait starts) and each wait consumes exactly one
-/// decision so a retry can ask again.
-#[derive(Debug, Default)]
-pub struct PartialGate {
-    inner: Mutex<PartialGateInner>,
-}
-
-impl PartialGate {
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Announce a pending request for the host to display. Never carries
-    /// URLs, paths, or secrets: tile ids and counts only.
-    pub fn announce(&self, request: PartialRequest) {
-        match self.inner.lock() {
-            Ok(mut guard) => {
-                guard.pending = Some(request);
-            }
-            Err(poisoned) => {
-                poisoned.into_inner().pending = Some(request);
-            }
-        }
-    }
-
-    /// Answer the pending request with the generation from the host's
-    /// snapshot. Wakes a waiting driver; an early answer is stored for the
-    /// next wait. The generation is carried through to the engine answer,
-    /// so a stale answer is engine-rejected instead of consumed in order.
-    pub fn answer(&self, generation: u32, decision: dezoomify_protocol::dto::RecoveryChoice) {
-        let answered = AnsweredDecision {
-            generation,
-            decision,
-        };
-        match self.inner.lock() {
-            Ok(mut guard) => {
-                guard.decision = Some(answered);
-            }
-            Err(poisoned) => {
-                poisoned.into_inner().decision = Some(answered);
-            }
-        }
-    }
-
-    /// Non-blocking take of a stored decision, if any.
-    pub(crate) fn take_decision(&self) -> Option<(u32, dezoomify_protocol::dto::RecoveryChoice)> {
-        let answered = match self.inner.lock() {
-            Ok(mut guard) => guard.decision.take(),
-            Err(poisoned) => poisoned.into_inner().decision.take(),
-        };
-        answered.map(|answered| (answered.generation, answered.decision))
-    }
-
-    /// Snapshot of the pending request, if any.
-    #[must_use]
-    pub fn pending_request(&self) -> Option<PartialRequest> {
-        match self.inner.lock() {
-            Ok(guard) => guard.pending.clone(),
-            Err(poisoned) => poisoned.into_inner().pending.clone(),
-        }
-    }
-
-    /// Wait up to `timeout` for an interactive answer, polling so
-    /// cancellation stays prompt. Returns the answering generation with
-    /// the decision, or `None` on timeout or when `cancel_flag` is set
-    /// (fail-closed to policy at the caller).
-    pub fn wait_for_decision(
-        &self,
-        timeout: Duration,
-        cancel_flag: &AtomicBool,
-    ) -> Option<(u32, dezoomify_protocol::dto::RecoveryChoice)> {
-        if let Some(decision) = self.take_decision() {
-            return Some(decision);
-        }
-        let start = Instant::now();
-        loop {
-            if cancel_flag.load(Ordering::SeqCst) {
-                return None;
-            }
-            if start.elapsed() >= timeout {
-                return self.take_decision();
-            }
-            std::thread::sleep(Duration::from_millis(20));
-            if let Some(decision) = self.take_decision() {
-                return Some(decision);
-            }
-        }
-    }
-
-    /// Clear a stale pending request after the decision was consumed.
-    /// Kept separate so a retry can announce again.
-    pub fn clear_pending(&self) {
-        match self.inner.lock() {
-            Ok(mut guard) => {
-                guard.pending = None;
-            }
-            Err(poisoned) => {
-                poisoned.into_inner().pending = None;
-            }
-        }
-    }
-}
-
 /// Pipeline configuration: fetch limits, tile bounds, concurrency.
 #[derive(Clone, Debug)]
 pub struct PipelineConfig {
@@ -294,12 +157,6 @@ pub struct PipelineConfig {
     /// Default `Keep` matches the reference `PartialDownload` file behavior
     /// (partial output kept, blank regions, `partial: true`).
     pub partial_policy: PartialPolicy,
-    /// Interactive partial gate for hosts that ask the user (desktop).
-    /// `None` (CLI default) answers partial decisions from
-    /// [`PartialPolicy`] with no wait. `Some` announces the missing ledger
-    /// via `recovery-requested`/`missing-work` events and waits up to 60s
-    /// for [`PartialGate::answer`], fail-closed to the policy.
-    pub partial_gate: Option<Arc<PartialGate>>,
     /// Cooperative cancellation: when set, the driver stops issuing new
     /// work at the next effect boundary, cleans up, and reports
     /// `job.cancelled` without writing output. Clones share the flag.
@@ -313,8 +170,8 @@ pub struct PipelineConfig {
     /// is removed on commit/rollback, never the destination.
     pub output_spool_cap: u64,
     /// External live commands for hosts with a handle (the typed runner):
-    /// selection (image/level/deferred follow), pause/resume. Cancel travels
-    /// on the shared flag, partial answers on the gate. `None` disables
+    /// selection, partial answers, and pause/resume. Cancel travels on the
+    /// shared flag so it can also abort in-flight work. `None` disables
     /// remote commands; the engine overlay itself stays available through
     /// pre-start options.
     pub exec_command_rx:
@@ -340,7 +197,6 @@ impl Default for PipelineConfig {
             largest: false,
             format: None,
             partial_policy: PartialPolicy::Keep,
-            partial_gate: None,
             cancel_flag: Arc::new(AtomicBool::new(false)),
             output_retain_cap: 512 << 20,
             output_spool_cap: 1 << 30,
@@ -1035,71 +891,5 @@ mod tests {
         let plain_back = load_image_with_metadata(&plain_png).expect("decodes");
         assert_eq!(plain_back.icc_profile, None);
         assert_eq!(plain_back.exif_metadata, None);
-    }
-
-    #[test]
-    fn partial_gate_early_answer_survives_wait() {
-        use dezoomify_protocol::dto::RecoveryChoice;
-        let gate = PartialGate::new();
-        gate.announce(PartialRequest {
-            missing: vec!["tile:1".to_string()],
-            failed: 1,
-            total: 4,
-        });
-        assert_eq!(
-            gate.pending_request().expect("pending").missing,
-            vec!["tile:1".to_string()]
-        );
-        gate.answer(7, RecoveryChoice::Keep);
-        let flag = AtomicBool::new(false);
-        assert_eq!(
-            gate.wait_for_decision(Duration::from_secs(5), &flag),
-            Some((7, RecoveryChoice::Keep))
-        );
-        // Each wait consumes exactly one decision so a retry can ask again.
-        assert_eq!(gate.take_decision(), None);
-    }
-
-    #[test]
-    fn partial_gate_carries_generations_in_order() {
-        use dezoomify_protocol::dto::RecoveryChoice;
-        let gate = PartialGate::new();
-        // Each wait consumes exactly one answered generation, so a stale
-        // host answer reaches the engine with its own generation and is
-        // rejected there instead of consumed in order.
-        let flag = AtomicBool::new(false);
-        gate.answer(3, RecoveryChoice::Keep);
-        assert_eq!(
-            gate.wait_for_decision(Duration::from_secs(5), &flag),
-            Some((3, RecoveryChoice::Keep))
-        );
-        gate.answer(4, RecoveryChoice::Discard);
-        assert_eq!(
-            gate.wait_for_decision(Duration::from_secs(5), &flag),
-            Some((4, RecoveryChoice::Discard))
-        );
-        assert_eq!(gate.take_decision(), None);
-    }
-
-    #[test]
-    fn partial_gate_timeout_fails_closed() {
-        let gate = PartialGate::new();
-        let flag = AtomicBool::new(false);
-        assert_eq!(
-            gate.wait_for_decision(Duration::from_millis(50), &flag),
-            None,
-            "timeout leaves the policy fallback to the caller"
-        );
-    }
-
-    #[test]
-    fn partial_gate_cancel_returns_promptly() {
-        let gate = PartialGate::new();
-        let flag = AtomicBool::new(true);
-        assert_eq!(
-            gate.wait_for_decision(Duration::from_secs(60), &flag),
-            None,
-            "cancellation never blocks the driver"
-        );
     }
 }
