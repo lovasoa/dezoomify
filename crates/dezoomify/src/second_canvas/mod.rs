@@ -150,7 +150,7 @@ fn catalog(_: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
             ))
         })
         .collect::<Result<Vec<_>, DiscoveryError>>()?;
-    Ok(DiscoveryCatalog::new(entries).normalize())
+    Ok(DiscoveryCatalog::new(entries))
 }
 
 fn layer_size(size: Size, normal_level: u32, layer_level: u32) -> Result<Vec2d, DiscoveryError> {

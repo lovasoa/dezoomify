@@ -548,7 +548,6 @@ impl Job {
             Ok(catalog) => catalog,
             Err(e) => return self.discovery_failed(e),
         };
-        let catalog = catalog.normalize();
         if catalog.is_empty() {
             return self
                 .fail_via_cleanup("job.no-images", "discovery produced no images".to_string());

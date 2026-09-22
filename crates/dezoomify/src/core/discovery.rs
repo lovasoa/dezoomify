@@ -1066,7 +1066,7 @@ impl DiscoveryOperation {
                 }
             }
             DiscoveryStep::Complete(catalog) => {
-                self.catalog = Some(catalog.normalize());
+                self.catalog = Some(catalog);
             }
         }
         Ok(())
