@@ -7,8 +7,7 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveredEntry, DiscoveryCatalog, DiscoveryError, DiscoveryMatch, FormatSpec, Grid, Request,
-    ResolvedImage, ResolvedLevel,
+    DiscoveryCatalog, DiscoveryError, DiscoveryMatch, FormatSpec, Grid, Request, ResolvedLevel,
 };
 use crate::web_page::page_title;
 
@@ -100,14 +99,11 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> 
         move |tile| Request::new(format!("{base}/{}/{}", tile.coord.column, tile.coord.row)),
     )
     .map_err(|error| DiscoveryError::Session(format!("invalid VLS grid: {error}")))?;
-    Ok(DiscoveryCatalog::new([DiscoveredEntry::Ready(
-        ResolvedImage {
-            title: page_title(&page),
-            format: "vls",
-            levels: vec![ResolvedLevel::new(source)],
-            ..Default::default()
-        },
-    )]))
+    Ok(DiscoveryCatalog::ready(
+        "vls",
+        page_title(&page),
+        vec![ResolvedLevel::new(source)],
+    ))
 }
 
 fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {

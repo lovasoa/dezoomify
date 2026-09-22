@@ -9,9 +9,8 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveredEntry, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, Request, ResolvedImage,
-    ResolvedLevel, image_title,
+    DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, Request, ResolvedLevel, image_title,
 };
 
 static LAYER_URL_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -149,14 +148,11 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> 
         },
     )
     .map_err(|error| DiscoveryError::Session(format!("invalid Hungaricana grid: {error}")))?;
-    Ok(DiscoveryCatalog::new([DiscoveredEntry::Ready(
-        ResolvedImage {
-            title: image_title(&path),
-            format: "hungaricana",
-            levels: vec![ResolvedLevel::new(source)],
-            ..Default::default()
-        },
-    )]))
+    Ok(DiscoveryCatalog::ready(
+        "hungaricana",
+        image_title(&path),
+        vec![ResolvedLevel::new(source)],
+    ))
 }
 
 #[derive(Debug, Deserialize)]

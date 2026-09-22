@@ -8,9 +8,9 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveredEntry, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, Request, ResolvedImage,
-    ResolvedLevel, resolve_relative, resolve_url_template,
+    DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, Request, ResolvedLevel, resolve_relative,
+    resolve_url_template,
 };
 use crate::web_page::decode_html_entities;
 
@@ -282,14 +282,11 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> 
         },
     )
     .map_err(|error| DiscoveryError::Session(format!("invalid TopViewer grid: {error}")))?;
-    Ok(DiscoveryCatalog::new([DiscoveredEntry::Ready(
-        ResolvedImage {
-            title: filepath.and_then(image_title),
-            format: "topviewer",
-            levels: vec![ResolvedLevel::new(source)],
-            ..Default::default()
-        },
-    )]))
+    Ok(DiscoveryCatalog::ready(
+        "topviewer",
+        filepath.and_then(image_title),
+        vec![ResolvedLevel::new(source)],
+    ))
 }
 
 fn image_title(filepath: &str) -> Option<String> {

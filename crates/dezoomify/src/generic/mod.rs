@@ -1,9 +1,7 @@
 //! Generic URL-template discovery backed by core's executable adaptive plan.
 
 use crate::core::adaptive::is_generic_template;
-use crate::core::{
-    DiscoverableGrid, DiscoveredEntry, DiscoveryCatalog, FormatSpec, ResolvedImage, ResolvedLevel,
-};
+use crate::core::{DiscoverableGrid, DiscoveryCatalog, FormatSpec, ResolvedLevel};
 
 pub const SPEC: FormatSpec = FormatSpec::immediate("generic", |template| Ok(catalog(template)))
     .with_display_name("Generic format")
@@ -11,14 +9,13 @@ pub const SPEC: FormatSpec = FormatSpec::immediate("generic", |template| Ok(cata
     .preferring(|uri| uri.contains("{{"));
 
 fn catalog(template: &str) -> DiscoveryCatalog {
-    DiscoveryCatalog::new([DiscoveredEntry::Ready(ResolvedImage {
-        title: Some(template.to_owned()),
-        format: "generic",
-        levels: vec![ResolvedLevel::new(DiscoverableGrid::new(
+    DiscoveryCatalog::ready(
+        "generic",
+        Some(template.to_owned()),
+        vec![ResolvedLevel::new(DiscoverableGrid::new(
             template.to_owned(),
         ))],
-        ..Default::default()
-    })])
+    )
 }
 
 #[test]

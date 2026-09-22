@@ -28,7 +28,11 @@ processing recipes; `engine` owns job lifecycle policy. It never fetches
 anything and touches no network, filesystem, clock, UI, or codecs. Formats
 register in one ordered registry; registry order sets automatic precedence.
 Catalog and level order freezes before publication; selection uses array
-positions.
+positions. Formats compile conventional ready images through the shared catalog
+constructor. Grid, positioned, generic-template, and adaptive tile sources all
+implement one crate-private tile-program contract; the public source variants
+remain a compatibility facade, and the engine starts work without dispatching
+on those variants.
 
 #### `dezoomify::engine`
 

@@ -6,8 +6,8 @@ use serde::Deserialize;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveredEntry, DiscoveryCatalog, DiscoveryError, DiscoveryMatch, DiscoveryRoute, FormatSpec,
-    Grid, Request, ResolvedImage, ResolvedLevel,
+    DiscoveryCatalog, DiscoveryError, DiscoveryMatch, DiscoveryRoute, FormatSpec, Grid, Request,
+    ResolvedLevel,
 };
 
 const INFO_QUERY: &str = "cmd=info";
@@ -55,14 +55,7 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> 
     let levels = build_levels(&metadata, &origin)?;
     let title = image_title(&origin);
 
-    Ok(DiscoveryCatalog::new([DiscoveredEntry::Ready(
-        ResolvedImage {
-            title,
-            format: "xlimage",
-            levels,
-            ..Default::default()
-        },
-    )]))
+    Ok(DiscoveryCatalog::ready("xlimage", title, levels))
 }
 
 fn image_title(origin: &str) -> Option<String> {

@@ -10,7 +10,7 @@ use crate::core::{
     AdaptiveProgram, AdaptiveSource, DeferredResource, DiscoverableStep, DiscoveredEntry,
     DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
     DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, GridRequests, GridTile, ObservationResult,
-    ProbeContinuation, Request, ResolvedImage, ResolvedLevel, TileRole, TileSourceError, TileSpec,
+    ProbeContinuation, Request, ResolvedLevel, TileRole, TileSourceError, TileSpec,
     resolve_relative,
 };
 use crate::iiif::tile_info::TileSizeFormat;
@@ -321,14 +321,9 @@ fn catalog_from_info(url: &str, raw_info: &[u8]) -> Result<DiscoveryCatalog, Dis
             }
         }
     }
-    Ok(DiscoveryCatalog::new([DiscoveredEntry::Ready(
-        ResolvedImage {
-            format: "iiif",
-            levels,
-            warnings,
-            ..Default::default()
-        },
-    )]))
+    Ok(DiscoveryCatalog::ready_with_warnings(
+        "iiif", None, levels, warnings,
+    ))
 }
 
 fn manifest_type_warning(contents: &[u8]) -> Option<String> {

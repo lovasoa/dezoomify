@@ -6,8 +6,34 @@ use std::sync::Arc;
 
 use crate::Vec2d;
 
-use super::adaptive::{AdaptiveSource, DiscoverableGrid};
+use super::adaptive::{AdaptiveSource, DiscoverableGrid, DiscoverableStep};
 use super::model::{ProcessingRecipe, Request, TileRole, TileSpec};
+
+pub(crate) type TileProgramCursor =
+    Box<dyn Iterator<Item = Result<TileSpec, TileSourceError>> + Send>;
+
+/// The single engine-facing start state for every built-in tile program.
+///
+/// Concrete source variants remain available as a compatibility facade, but
+/// the job engine consumes only this contract. Resolved programs enumerate
+/// lazily; observation-driven programs continue through `DiscoverableStep`.
+pub(crate) enum TileProgramStart {
+    Planned {
+        tiles: TileProgramCursor,
+        total: u64,
+        canvas: Option<Vec2d>,
+    },
+    Discovering(DiscoverableStep),
+}
+
+/// Shared behavior implemented by every concrete tile program.
+trait TileProgram {
+    fn image_size(&self) -> Option<Vec2d>;
+    fn tile_size(&self) -> Option<Vec2d>;
+    fn overlap(&self) -> Option<Vec2d>;
+    fn count(&self) -> Option<u64>;
+    fn start(&self) -> TileProgramStart;
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TileSourceError {
@@ -382,6 +408,102 @@ impl Iterator for PositionedTiles {
     }
 }
 
+impl TileProgram for Grid {
+    fn image_size(&self) -> Option<Vec2d> {
+        Some(self.image_size())
+    }
+
+    fn tile_size(&self) -> Option<Vec2d> {
+        Some(self.tile_size())
+    }
+
+    fn overlap(&self) -> Option<Vec2d> {
+        Some(self.overlap())
+    }
+
+    fn count(&self) -> Option<u64> {
+        Some(self.count())
+    }
+
+    fn start(&self) -> TileProgramStart {
+        TileProgramStart::Planned {
+            tiles: Box::new(self.tiles_row_major()),
+            total: self.count(),
+            canvas: Some(self.image_size()),
+        }
+    }
+}
+
+impl TileProgram for Positioned {
+    fn image_size(&self) -> Option<Vec2d> {
+        self.image_size()
+    }
+
+    fn tile_size(&self) -> Option<Vec2d> {
+        None
+    }
+
+    fn overlap(&self) -> Option<Vec2d> {
+        None
+    }
+
+    fn count(&self) -> Option<u64> {
+        Some(self.count())
+    }
+
+    fn start(&self) -> TileProgramStart {
+        TileProgramStart::Planned {
+            tiles: Box::new(self.tiles()),
+            total: self.count(),
+            canvas: self.image_size(),
+        }
+    }
+}
+
+impl TileProgram for DiscoverableGrid {
+    fn image_size(&self) -> Option<Vec2d> {
+        None
+    }
+
+    fn tile_size(&self) -> Option<Vec2d> {
+        None
+    }
+
+    fn overlap(&self) -> Option<Vec2d> {
+        None
+    }
+
+    fn count(&self) -> Option<u64> {
+        None
+    }
+
+    fn start(&self) -> TileProgramStart {
+        TileProgramStart::Discovering(self.clone().start())
+    }
+}
+
+impl TileProgram for AdaptiveSource {
+    fn image_size(&self) -> Option<Vec2d> {
+        self.declared_grid().map(Grid::image_size)
+    }
+
+    fn tile_size(&self) -> Option<Vec2d> {
+        self.declared_grid().map(Grid::tile_size)
+    }
+
+    fn overlap(&self) -> Option<Vec2d> {
+        self.declared_grid().map(Grid::overlap)
+    }
+
+    fn count(&self) -> Option<u64> {
+        self.declared_grid().map(Grid::count)
+    }
+
+    fn start(&self) -> TileProgramStart {
+        TileProgramStart::Discovering(self.start())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum TileSource {
     Grid(Grid),
@@ -391,6 +513,19 @@ pub enum TileSource {
 }
 
 impl TileSource {
+    fn program(&self) -> &dyn TileProgram {
+        match self {
+            Self::Grid(program) => program,
+            Self::Positioned(program) => program,
+            Self::DiscoverableGrid(program) => program,
+            Self::Adaptive(program) => program,
+        }
+    }
+
+    pub(crate) fn start(&self) -> TileProgramStart {
+        self.program().start()
+    }
+
     /// Stable public source-kind vocabulary for catalog presentation.
     #[must_use]
     pub const fn kind_name(&self) -> &'static str {
@@ -404,40 +539,22 @@ impl TileSource {
 
     #[must_use]
     pub fn image_size(&self) -> Option<Vec2d> {
-        match self {
-            Self::Grid(grid) => Some(grid.image_size()),
-            Self::Positioned(positioned) => positioned.image_size(),
-            Self::Adaptive(adaptive) => adaptive.declared_grid().map(Grid::image_size),
-            Self::DiscoverableGrid(_) => None,
-        }
+        self.program().image_size()
     }
 
     #[must_use]
     pub fn tile_size(&self) -> Option<Vec2d> {
-        match self {
-            Self::Grid(grid) => Some(grid.tile_size()),
-            Self::Adaptive(adaptive) => adaptive.declared_grid().map(Grid::tile_size),
-            Self::Positioned(_) | Self::DiscoverableGrid(_) => None,
-        }
+        self.program().tile_size()
     }
 
     #[must_use]
     pub fn overlap(&self) -> Option<Vec2d> {
-        match self {
-            Self::Grid(grid) => Some(grid.overlap()),
-            Self::Adaptive(adaptive) => adaptive.declared_grid().map(Grid::overlap),
-            Self::Positioned(_) | Self::DiscoverableGrid(_) => None,
-        }
+        self.program().overlap()
     }
 
     #[must_use]
     pub fn count(&self) -> Option<u64> {
-        match self {
-            Self::Grid(grid) => Some(grid.count()),
-            Self::Positioned(positioned) => Some(positioned.count()),
-            Self::Adaptive(adaptive) => adaptive.declared_grid().map(Grid::count),
-            Self::DiscoverableGrid(_) => None,
-        }
+        self.program().count()
     }
 }
 

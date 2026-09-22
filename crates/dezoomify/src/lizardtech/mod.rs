@@ -7,8 +7,8 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveredEntry, DiscoveryCatalog, DiscoveryError, DiscoveryMatch, FormatSpec, Grid, Request,
-    ResolvedImage, ResolvedLevel, image_title,
+    DiscoveryCatalog, DiscoveryError, DiscoveryMatch, FormatSpec, Grid, Request, ResolvedLevel,
+    image_title,
 };
 
 static SERVER_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -88,14 +88,7 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> 
         .ok_or_else(|| DiscoveryError::Session("LizardTech XML has no image item".into()))?;
     let title = image_title(&item);
     let levels = build_levels(width, height, &origin, &catalog_name, &item)?;
-    Ok(DiscoveryCatalog::new([DiscoveredEntry::Ready(
-        ResolvedImage {
-            title,
-            format: "lizardtech",
-            levels,
-            ..Default::default()
-        },
-    )]))
+    Ok(DiscoveryCatalog::ready("lizardtech", title, levels))
 }
 
 fn build_levels(

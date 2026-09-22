@@ -14,8 +14,7 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 use crate::Vec2d;
 use crate::core::{
     DiscoveredEntry, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, Request, ResolvedImage, ResolvedLevel,
-    resolve_relative,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, Request, ResolvedLevel, resolve_relative,
 };
 
 mod image_properties;
@@ -555,21 +554,16 @@ fn catalog_from_properties(
         .next()
         .filter(|name| !name.is_empty())
         .map(str::to_owned);
-    Ok(DiscoveryCatalog::new([DiscoveredEntry::Ready(
-        ResolvedImage {
-            title,
-            format: "zoomify",
-            levels,
-            warnings,
-        },
-    )]))
+    Ok(DiscoveryCatalog::ready_with_warnings(
+        "zoomify", title, levels, warnings,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::discovery::DiscoveryOperation;
-    use crate::core::{ResourceResponse, TileSource};
+    use crate::core::{ResolvedImage, ResourceResponse, TileSource};
 
     const XML: &[u8] = br#"<IMAGE_PROPERTIES WIDTH="512" HEIGHT="256" NUMTILES="2" NUMIMAGES="1" VERSION="1.8" TILESIZE="256"/>"#;
 
