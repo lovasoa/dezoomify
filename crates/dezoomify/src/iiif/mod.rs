@@ -7,11 +7,10 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    AdaptiveProgram, AdaptiveSource, DeferredResource, DiscoverableStep, DiscoveredEntry,
-    DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
-    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, GridRequests, GridTile, ObservationResult,
-    ProbeContinuation, Request, ResolvedLevel, TileRole, TileSourceError, TileSpec,
-    resolve_relative,
+    AdaptiveProgram, AdaptiveSource, DiscoverableStep, DiscoveredEntry, DiscoveryCatalog,
+    DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
+    DiscoveryStep, FormatSpec, Grid, GridRequests, GridTile, ObservationResult, ProbeContinuation,
+    Request, ResolvedLevel, TileRole, TileSourceError, TileSpec, resolve_relative,
 };
 use crate::iiif::tile_info::TileSizeFormat;
 use crate::json_utils::all_json;
@@ -301,11 +300,7 @@ fn catalog_from_manifest_info(
         .into_iter()
         .map(|image_info| {
             let title = determine_title(&image_info);
-            DiscoveredEntry::Deferred(DeferredResource {
-                uri: image_info.image_uri,
-                title,
-                warnings: warnings.clone(),
-            })
+            DiscoveredEntry::deferred(image_info.image_uri, title, warnings.clone())
         })
         .collect();
     DiscoveryCatalog::new(entries)

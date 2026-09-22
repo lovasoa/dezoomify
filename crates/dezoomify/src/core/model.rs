@@ -196,6 +196,16 @@ impl DiscoveredEntry {
             warnings,
         })
     }
+
+    /// Compile one deferred resource into a catalog entry.
+    #[must_use]
+    pub fn deferred(uri: impl Into<String>, title: Option<String>, warnings: Vec<String>) -> Self {
+        Self::Deferred(DeferredResource {
+            uri: uri.into(),
+            title,
+            warnings,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Default)]
