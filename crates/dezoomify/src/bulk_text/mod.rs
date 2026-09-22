@@ -1,8 +1,6 @@
 //! Pure discovery for text files containing deferred image URLs.
 
-use crate::core::{
-    DeferredResource, DiscoveredEntry, DiscoveryCatalog, DiscoveryError, DiscoveryMatch, FormatSpec,
-};
+use crate::core::{DiscoveredEntry, DiscoveryCatalog, DiscoveryError, DiscoveryMatch, FormatSpec};
 
 pub const SPEC: FormatSpec = FormatSpec::new("bulk_text", &[DiscoveryMatch::Any.extract(catalog)])
     .with_display_name("Bulk text")
@@ -19,11 +17,7 @@ fn catalog(uri: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> 
         ));
     }
     Ok(DiscoveryCatalog::new(images.into_iter().map(|image| {
-        DiscoveredEntry::Deferred(DeferredResource {
-            uri: image.uri,
-            title: image.title,
-            warnings: Vec::new(),
-        })
+        DiscoveredEntry::deferred(image.uri, image.title, Vec::new())
     })))
 }
 
@@ -124,6 +118,7 @@ fn validate_uri(input: &str, line: usize) -> Result<(), DiscoveryError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::DeferredResource;
 
     fn complete(uri: &str, content: &str) -> Result<DiscoveryCatalog, DiscoveryError> {
         catalog(uri, content.as_bytes())
