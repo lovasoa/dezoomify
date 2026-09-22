@@ -6,8 +6,8 @@ A new format ships five parts: pure core parser, `registry.rs` entry, shared sce
 
 Complete when all hold in one pull request:
 
-- `crates/dezoomify-core` parses metadata and plans tiles from supplied bytes only (no network, filesystem, clock, or tasks), per [Architecture](architecture.md).
-- `crates/dezoomify-core/src/core/registry.rs` registers a stable id plus user-visible display name in precedence order.
+- `crates/dezoomify` parses metadata and plans tiles from supplied bytes only (no network, filesystem, clock, or tasks), per [Architecture](architecture.md).
+- `crates/dezoomify/src/core/registry.rs` registers a stable id plus user-visible display name in precedence order.
 - `testdata/scenarios/<id>/` holds redacted `routes.json`, payloads, `scenario.json`, per `testdata/scenarios/README.md`.
 - `cargo xtask fixtures verify` passes.
 - `cargo xtask test core --parity` passes.
@@ -41,7 +41,7 @@ Confirm no secret, token, cookie, or personal string remains. Insert the printed
 
 ### 3. Add the core parser and register it
 
-Implement the format beside neighboring format modules: recognize URL shape and metadata bytes, describe the catalog, plan the tile grid. Pure and deterministic: fixed parsing, no network, stable ordering. Register the stable id in precedence order in `crates/dezoomify-core/src/core/registry.rs`; cover with unit cases plus the parity suite.
+Implement the format beside neighboring format modules: recognize URL shape and metadata bytes, describe the catalog, plan the tile grid. Pure and deterministic: fixed parsing, no network, stable ordering. Register the stable id in precedence order in `crates/dezoomify/src/core/registry.rs`; cover with unit cases plus the parity suite.
 
 ### 4. Save the expected output
 

@@ -1,9 +1,0 @@
-{
-  "name": "dev.ophir.dezoomify.native_host",
-  "description": "Dezoomify native host",
-  "path": "@HOST_PATH@",
-  "type": "stdio",
-  "allowed_extensions": [
-    "@EXTENSION_ID@"
-  ]
-}

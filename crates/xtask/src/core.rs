@@ -25,13 +25,13 @@ pub fn run(args: &[String]) -> Result<(), String> {
     if parity {
         return parity_only();
     }
-    super::command::cargo_test(&["-p", "dezoomify-core"])
+    super::command::cargo_test(&["-p", "dezoomify"])
 }
 
 fn purity_only() -> Result<(), String> {
-    super::command::cargo_test(&["-p", "dezoomify-core", "--test", "purity"])
+    super::command::cargo_test(&["-p", "dezoomify", "--test", "core_purity"])
 }
 
 fn parity_only() -> Result<(), String> {
-    super::command::cargo_test(&["-p", "dezoomify-core", "--test", "parity"])
+    super::command::cargo_test(&["-p", "dezoomify", "--test", "core_parity"])
 }

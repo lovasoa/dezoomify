@@ -103,7 +103,7 @@ fn file_uri_with_remote_host_is_rejected_typed() {
 
 #[test]
 fn job_validation_accepts_local_but_rejects_remote_file_hosts() {
-    use dezoomify_engine::{DiscoveryInput, EngineJob, JobOptions};
+    use dezoomify::engine::{DiscoveryInput, EngineJob, JobOptions};
     fn valid(url: &str) -> bool {
         EngineJob::validate_options(&JobOptions::new(vec![DiscoveryInput::new(url)])).is_ok()
     }

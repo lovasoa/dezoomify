@@ -5,8 +5,9 @@
 
 use dezoomify_native::pipeline::{
     encode_jpeg, encode_png, encode_tiff, exceeds_available_memory, required_memory_bytes,
-    PipelineConfig, MAX_CONCURRENT,
+    MAX_CONCURRENT,
 };
+use dezoomify_native::JobOptions;
 use std::time::Instant;
 mod support;
 
@@ -32,7 +33,7 @@ fn baseline() -> serde_json::Value {
 #[test]
 fn pool_width_is_unified_at_sixteen() {
     assert_eq!(MAX_CONCURRENT, 16);
-    assert_eq!(PipelineConfig::default().max_concurrent, 16);
+    assert_eq!(JobOptions::default().max_concurrent, 16);
 }
 
 #[test]
@@ -50,7 +51,7 @@ fn available_memory_gate_is_deterministic() {
 }
 
 /// Four generated tiles plus a `tiles.yaml` manifest: the same local-input
-/// shape the runner tests use, so the concurrency bound is measured on the
+/// shape the job-service tests use, so the concurrency bound is measured on the
 /// shipped fetch/decode/place path instead of a throwaway pool.
 fn write_local_tiles(work: &std::path::Path) -> String {
     for name in ["tile-0_0", "tile-1_0", "tile-0_1", "tile-1_1"] {
@@ -96,11 +97,11 @@ fn exec_bounds_inflight_to_max_concurrent() {
     std::fs::create_dir_all(&work).expect("temp dir");
     let input = write_local_tiles(&work);
     let output = work.join("perf.png");
-    let config = PipelineConfig {
+    let config = JobOptions {
         max_concurrent: 2,
-        ..PipelineConfig::default()
+        ..JobOptions::default()
     };
-    let outcome = support::run_with_config(
+    let outcome = support::run_with_options(
         &input,
         output.to_str().expect("utf8 output"),
         false,
@@ -131,7 +132,7 @@ fn exec_bounds_inflight_to_max_concurrent() {
 }
 
 /// Grid-shaped local inputs for the scaling test: `grid` by `grid` tiles of
-/// `tile_px`, the same local-input shape the runner tests use, so scaling is
+/// `tile_px`, the same local-input shape the job-service tests use, so scaling is
 /// measured on the shipped fetch/decode/place path.
 fn write_local_tiles_grid(work: &std::path::Path, grid: u32, tile_px: u32) -> String {
     for x in 0..grid {
@@ -180,7 +181,7 @@ fn write_local_tiles_grid(work: &std::path::Path, grid: u32, tile_px: u32) -> St
 }
 
 /// Scheduling scaling on the REAL pipeline: 1/16/64/256-tile grids through
-/// the shipped NativeRunner path (local fetch, decode, assemble, encode).
+/// the shipped start_job path (local fetch, decode, assemble, encode).
 /// In-flight descriptors stay within the engine slot budget at every shape
 /// while completions track the plan exactly (linear by construction).
 #[test]
@@ -199,12 +200,12 @@ fn exec_scales_with_bounded_inflight_across_increasing_tile_counts() {
         std::fs::create_dir_all(&shape).expect("shape dir");
         let input = write_local_tiles_grid(&shape, grid, 64);
         let output = work.join(format!("scale-{grid}.png"));
-        let config = PipelineConfig {
+        let config = JobOptions {
             max_concurrent: BUDGET,
-            ..PipelineConfig::default()
+            ..JobOptions::default()
         };
         let start = Instant::now();
-        let outcome = support::run_with_config(
+        let outcome = support::run_with_options(
             &input,
             output.to_str().expect("utf8 output"),
             false,

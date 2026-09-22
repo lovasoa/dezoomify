@@ -1,6 +1,5 @@
-//! `cargo xtask build extension`, `dev extension`, `test extension`,
-//! `test native-messaging [--browser <name>|--cleanup-only]`: extension and
-//! Native Messaging gates. `test extension` runs the Node unit suites plus a
+//! `cargo xtask build extension`, `dev extension`, and `test extension`.
+//! `test extension` runs the Node unit suites plus a
 //! headless browser gate (real store packages loaded in headless Chromium and
 //! Firefox; requires browsers, see apps/extension/tests/browser).
 
@@ -220,65 +219,4 @@ fn test_headless_browser() -> Result<(), String> {
     status.success().then_some(()).ok_or_else(|| {
         "extension headless browser tests failed (run `cargo xtask setup` first)".to_string()
     })
-}
-
-pub fn test_native_messaging(args: &[String]) -> Result<(), String> {
-    if args.first().map(String::as_str) == Some("--cleanup-only") {
-        // Real cleanup: remove our per-user registrations (profile manifest
-        // files and, on Windows, HKCU registry values). The unit gate never
-        // registers anything in-process, so a clean report afterwards proves
-        // no residual registration.
-        if args.len() > 1 {
-            return Err(format!(
-                "unknown test native-messaging --cleanup-only argument(s): {}",
-                args[1..].join(" ")
-            ));
-        }
-        let removed =
-            super::native_messaging::cleanup(&super::native_messaging::known_registrations())?;
-        if removed.is_empty() {
-            println!("test native-messaging --cleanup-only: ok (no registrations present)");
-        } else {
-            for entry in &removed {
-                println!("test native-messaging --cleanup-only: removed {entry}");
-            }
-        }
-        return Ok(());
-    }
-    // Native-host framing and registration checks, then real per-user
-    // registration inspection for the named engine. Unknown engines fail closed.
-    if let Some(name) = args.strip_prefix(&["--browser".to_string()]) {
-        match name
-            .first()
-            .and_then(|n| super::native_messaging::normalize_engine(n))
-        {
-            Some(engine) => {
-                if name.len() > 1 {
-                    return Err(format!(
-                        "unknown test native-messaging argument(s): {}",
-                        name[1..].join(" ")
-                    ));
-                }
-                test_native_messaging_units()?;
-                let found = super::native_messaging::inspect_and_report(Some(engine))?;
-                println!(
-                    "test native-messaging --browser {engine}: ok ({} registration(s) found)",
-                    found
-                );
-                return Ok(());
-            }
-            None => {
-                let offered = name.first().map(String::as_str).unwrap_or("");
-                return Err(format!(
-                    "browser '{offered}' unavailable (engines: chromium, chrome, firefox)"
-                ));
-            }
-        }
-    }
-    super::reject_unknown_args("test native-messaging", args)?;
-    test_native_messaging_units()
-}
-
-fn test_native_messaging_units() -> Result<(), String> {
-    super::command::cargo_test(&["-p", "xtask", "native_messaging::tests"])
 }

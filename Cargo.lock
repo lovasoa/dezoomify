@@ -1052,20 +1052,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "dezoomify-cli"
-version = "0.0.0"
-dependencies = [
- "axum",
- "dezoomify-core",
- "dezoomify-fixture-server",
- "dezoomify-native",
- "dezoomify-protocol",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "dezoomify-core"
+name = "dezoomify"
 version = "3.0.0"
 dependencies = [
  "aes",
@@ -1088,17 +1075,29 @@ dependencies = [
  "serde_yaml",
  "sha1",
  "thiserror 2.0.20",
+ "tsify",
  "url",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "dezoomify-cli"
+version = "0.0.0"
+dependencies = [
+ "axum",
+ "dezoomify",
+ "dezoomify-fixture-server",
+ "dezoomify-native",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
 name = "dezoomify-desktop"
 version = "0.0.0"
 dependencies = [
- "dezoomify-core",
- "dezoomify-engine",
+ "dezoomify",
  "dezoomify-native",
- "dezoomify-protocol",
  "open",
  "serde",
  "serde_json",
@@ -1108,15 +1107,6 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-wdio-webdriver",
-]
-
-[[package]]
-name = "dezoomify-engine"
-version = "0.1.0"
-dependencies = [
- "dezoomify-core",
- "dezoomify-protocol",
- "serde",
 ]
 
 [[package]]
@@ -1142,10 +1132,8 @@ version = "1.0.0"
 dependencies = [
  "axum",
  "criterion",
- "dezoomify-core",
- "dezoomify-engine",
+ "dezoomify",
  "dezoomify-fixture-server",
- "dezoomify-protocol",
  "image",
  "reqwest 0.12.28",
  "rustls",
@@ -1160,21 +1148,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "dezoomify-protocol"
-version = "2.0.0"
-dependencies = [
- "serde",
- "tsify",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "dezoomify-wasm"
 version = "0.1.0"
 dependencies = [
- "dezoomify-core",
- "dezoomify-engine",
- "dezoomify-protocol",
+ "dezoomify",
  "serde",
  "serde-wasm-bindgen",
  "tsify",

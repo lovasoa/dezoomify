@@ -11,9 +11,8 @@ name = "dezoomify-cli"
 path = "src/main.rs"
 
 [dependencies]
-dezoomify-core = { path = "../../crates/dezoomify-core" }
+dezoomify = { path = "../../crates/dezoomify" }
 dezoomify-native = { path = "../../crates/dezoomify-native" }
-dezoomify-protocol = { path = "../../crates/dezoomify-protocol" }
 serde_json.workspace = true
 
 [dev-dependencies]

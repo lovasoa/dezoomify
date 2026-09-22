@@ -6,7 +6,7 @@ function nativeRequest(url = "https://museum.example.org/iiif/1/manifest.json") 
   return {
     inputs: [{ url }],
     engine: {},
-    exec: {
+    host: {
       kind: "native",
       destination: { kind: "file", suggestedName: "dezoomify-800x600.png", format: "png" },
     },
@@ -73,7 +73,7 @@ function observer() {
   };
 }
 
-// One host routing id around the canonical EngineSnapshotDto.
+// One host routing id around the canonical Snapshot.
 function snapshotPayload(overrides = {}) {
   const { job = "job:native-1", ...snapshot } = overrides;
   return {
@@ -198,20 +198,20 @@ test("start validates source, exec, and destination before invoking", async () =
   const browserExec = {
     inputs: [{ url: "https://x.example.org/y" }],
     engine: {},
-    exec: { kind: "browser" },
+    host: { kind: "browser" },
   };
   await assert.rejects(
     service.start(browserExec, obs),
     (error) => error.code === "desktop.invalid-exec",
   );
   const badFormat = nativeRequest();
-  badFormat.exec.destination = { kind: "file", suggestedName: "a.bmp", format: "bmp" };
+  badFormat.host.destination = { kind: "file", suggestedName: "a.bmp", format: "bmp" };
   await assert.rejects(
     service.start(badFormat, obs),
     (error) => error.code === "desktop.invalid-destination",
   );
   const badExt = nativeRequest();
-  badExt.exec.destination = { kind: "file", suggestedName: "a.jpg", format: "png" };
+  badExt.host.destination = { kind: "file", suggestedName: "a.jpg", format: "png" };
   await assert.rejects(
     service.start(badExt, obs),
     (error) => error.code === "desktop.invalid-destination",

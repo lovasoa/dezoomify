@@ -1,23 +1,20 @@
-//! Native download pipeline: one [`dezoomify_engine::EngineJob`] owns discovery,
+//! Native download pipeline: one [`dezoomify::engine::EngineJob`] owns discovery,
 //! selection, planning, retry, and lifecycle policy; this module executes its
 //! effects with real HTTP, decode, assemble, encode, and atomic-write fns.
 //!
 //! All network I/O goes through [`crate::transport::NativeTransport`] (one
 //! reusable reqwest client per job scope, single-attempt fetches); all format
-//! logic stays in `dezoomify-core`; all lifecycle policy stays in
-//! `dezoomify-engine`.
+//! logic stays in `dezoomify::formats`; all lifecycle policy stays in
+//! `dezoomify::engine`.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::{atomic::AtomicBool, Arc};
-use std::time::Duration;
 
-use dezoomify_core::core::model::Request;
-use dezoomify_core::core::redact_uri;
-use dezoomify_core::Vec2d;
+use dezoomify::core::model::Request;
+use dezoomify::core::redact_uri;
+use dezoomify::Vec2d;
 
 use crate::error::NativeError;
-use crate::http::FetchLimits;
 
 /// Default JPEG quality for `.jpg` output and `iiif-dir` tiles: `100`
 /// minus the default compression 5, matching the reference default.
@@ -89,122 +86,6 @@ pub enum PartialPolicy {
     Keep,
 }
 
-/// Pipeline configuration: fetch limits, tile bounds, concurrency.
-#[derive(Clone, Debug)]
-pub struct PipelineConfig {
-    /// Trusted user headers (`-H`). May carry cookies; sent to the input
-    /// origin and same-host redirects only. Never persisted or logged.
-    pub user_headers: BTreeMap<String, String>,
-    pub fetch: FetchLimits,
-    pub max_tiles: usize,
-    /// Max concurrent tile fetches (scoped-thread equivalent of the
-    /// reference async `buffer_unordered(parallelism)`; default 16).
-    pub max_concurrent: usize,
-    /// Tile retry budget owned by the job engine. `0` means no retries:
-    /// the first failure fails the tile (generic-probing parity).
-    pub max_retries: u32,
-    /// Base retry wait in milliseconds, owned by the job engine (attempt
-    /// `n` waits this value doubled `n-1` times, capped by the backoff
-    /// ceiling; an observed `retry-after` still overrides upward).
-    pub retry_base_delay_ms: u64,
-    /// Minimum interval between tile request starts (per-tile throttle).
-    /// `ZERO` disables the sleep (the CLI default); the reference default
-    /// is 50ms. Applied as start staggering, not as a post-completion wait.
-    pub min_interval: Duration,
-    /// Output compression, 0 is less, 100 is more (reference `--compression`,
-    /// default 5). JPEG quality is `100 - compression` (see
-    /// [`PipelineConfig::jpeg_quality`]); PNG and TIFF deflate tiers map
-    /// below (see [`PipelineConfig::png_compression`] and
-    /// [`tiff_compression_for`]). TIFF stays lossless at every level:
-    /// higher compression only trades slower encodes for smaller files,
-    /// never quality.
-    pub compression: u8,
-    /// Tile resume cache: tile response bodies persist under
-    /// `<cache_dir>/<job>/<key>` (see [`crate::cache`]) and a later run of
-    /// the same job skips the fetch when the stored bytes still decode.
-    /// `None` selects the default on-disk cache
-    /// ([`default_tile_cache_dir`]); the cache is on by default for retries
-    /// and resume. Pass an explicit temp dir per run only to isolate a job.
-    pub cache_dir: Option<PathBuf>,
-    /// Legacy parity: cap the output width. The largest level whose width
-    /// fits is downloaded; when none fits, the smallest level is used.
-    /// `None` (including `--largest` or bulk-implied largest mapped to
-    /// uncapped width by the CLI) downloads the largest level.
-    pub max_width: Option<u32>,
-    /// Legacy parity: cap the output height, combined with [`Self::max_width`]
-    /// as a width+height filter (largest fitting area wins). Unknown (0)
-    /// extents never satisfy a cap. Parsed by the CLI; `None` disables.
-    pub max_height: Option<u32>,
-    /// Legacy parity: exact level index, 0 is the smallest level (catalog
-    /// order); out-of-range uses the last level. Wins over
-    /// [`Self::largest`] and the size caps, mirroring `choose_level`.
-    pub zoom_level: Option<usize>,
-    /// Legacy parity: 0-based image selection when several are found;
-    /// out-of-range uses the last image. `None` keeps the first entry
-    /// (bulk auto-first parity).
-    pub image_index: Option<usize>,
-    /// Legacy parity: select the largest level regardless of the size caps.
-    /// The CLI also sets this implicitly in bulk mode when no
-    /// level-specifying arg was given (`should_use_largest`); uncapped width
-    /// already selects the largest level emergently.
-    pub largest: bool,
-    /// Format selector (`--format`): `None` auto-detects via
-    /// `default_registry`; `Some(name)` selects the single named program via
-    /// `registry_for` (case-insensitive, `auto` also means auto-detect).
-    /// Unknown names fail with typed `discovery.unknown-format`.
-    pub format: Option<String>,
-    /// What to do when required tiles still fail after retries.
-    /// Default `Keep` matches the reference `PartialDownload` file behavior
-    /// (partial output kept, blank regions, `partial: true`).
-    pub partial_policy: PartialPolicy,
-    /// Cooperative cancellation: when set, the driver stops issuing new
-    /// work at the next effect boundary, cleans up, and reports
-    /// `job.cancelled` without writing output. Clones share the flag.
-    pub cancel_flag: Arc<AtomicBool>,
-    /// Bound on retained (overlapping, unpainted) tile bytes in the output
-    /// sink. Beyond it the job fails `output.canvas-limit` instead of
-    /// growing without bound.
-    pub output_retain_cap: u64,
-    /// Bound on job-owned temp spool bytes for unknown-dimension assembly.
-    /// Beyond it the job fails `output.canvas-limit`; the spool directory
-    /// is removed on commit/rollback, never the destination.
-    pub output_spool_cap: u64,
-    /// External live commands for hosts with a handle (the typed runner):
-    /// selection, partial answers, and pause/resume. Cancel travels on the
-    /// shared flag so it can also abort in-flight work. `None` disables
-    /// remote commands; the engine overlay itself stays available through
-    /// pre-start options.
-    pub exec_command_rx:
-        Option<Arc<std::sync::Mutex<std::sync::mpsc::Receiver<dezoomify_engine::UserCommand>>>>,
-}
-
-impl Default for PipelineConfig {
-    fn default() -> Self {
-        Self {
-            user_headers: BTreeMap::new(),
-            fetch: FetchLimits::default(),
-            max_tiles: 1 << 20,
-            max_concurrent: 16,
-            max_retries: 3,
-            retry_base_delay_ms: dezoomify_engine::retry::RETRY_BASE_DELAY_MS,
-            min_interval: Duration::ZERO,
-            compression: 5,
-            cache_dir: Some(default_tile_cache_dir()),
-            max_width: None,
-            max_height: None,
-            zoom_level: None,
-            image_index: None,
-            largest: false,
-            format: None,
-            partial_policy: PartialPolicy::Keep,
-            cancel_flag: Arc::new(AtomicBool::new(false)),
-            output_retain_cap: 512 << 20,
-            output_spool_cap: 1 << 30,
-            exec_command_rx: None,
-        }
-    }
-}
-
 /// Default on-disk tile-cache root: `<tmp>/dezoomify-tile-cache`. The cache
 /// holds response bodies only (never headers or credentials) under a
 /// versioned per-job namespace; a corrupt entry falls back to a fresh fetch.
@@ -216,23 +97,6 @@ pub fn default_tile_cache_dir() -> PathBuf {
 /// Effective cache directory: the configured dir, or the default on-disk
 /// cache when `cache_dir` is `None`. The tile cache is on by default.
 #[must_use]
-pub fn effective_cache_dir(config: &PipelineConfig) -> PathBuf {
-    config
-        .cache_dir
-        .clone()
-        .unwrap_or_else(default_tile_cache_dir)
-}
-
-impl PipelineConfig {
-    /// Effective JPEG quality for `.jpg` output and `iiif-dir` tiles:
-    /// `100 - compression` (reference `encoder/mod.rs:60`; default 5 maps
-    /// to [`JPEG_QUALITY`]).
-    #[must_use]
-    pub fn jpeg_quality(&self) -> u8 {
-        100u8.saturating_sub(self.compression)
-    }
-}
-
 /// PNG deflate tier for a `--compression` value (reference
 /// `png_encoder.rs:30-34`).
 pub(crate) fn png_compression_for(compression: u8) -> image::codecs::png::CompressionType {
@@ -263,12 +127,12 @@ pub(crate) fn tiff_compression_for(compression: u8) -> tiff::encoder::compressio
 // ---------------------------------------------------------------------------
 
 pub(crate) fn merge_headers(request: &Request) -> BTreeMap<String, String> {
-    let mut merged: BTreeMap<String, String> = dezoomify_core::default_headers()
+    let mut merged: BTreeMap<String, String> = dezoomify::default_headers()
         .into_iter()
         .map(|(name, value)| (name.to_ascii_lowercase(), value))
         .collect();
-    for (name, value) in &request.headers {
-        merged.insert(name.to_ascii_lowercase(), value.clone());
+    for header in &request.headers {
+        merged.insert(header.name.to_ascii_lowercase(), header.value.clone());
     }
     merged
 }
@@ -689,12 +553,8 @@ mod tests {
     fn compression_maps_to_jpeg_quality_and_png_tiers() {
         use image::codecs::png::CompressionType;
         use tiff::encoder::compression::DeflateLevel;
-        let config = PipelineConfig {
-            compression: 5,
-            ..Default::default()
-        };
-        assert_eq!(config.jpeg_quality(), 95);
-        assert_eq!(config.jpeg_quality(), JPEG_QUALITY);
+        assert_eq!(100u8.saturating_sub(5), 95);
+        assert_eq!(100u8.saturating_sub(5), JPEG_QUALITY);
         assert_eq!(png_compression_for(0), CompressionType::Fast);
         assert_eq!(png_compression_for(19), CompressionType::Fast);
         assert_eq!(png_compression_for(20), CompressionType::Default);
@@ -709,11 +569,7 @@ mod tests {
         assert_eq!(tiff_compression_for(60), DeflateLevel::Balanced);
         assert_eq!(tiff_compression_for(61), DeflateLevel::Best);
         assert_eq!(tiff_compression_for(100), DeflateLevel::Best);
-        let max = PipelineConfig {
-            compression: 100,
-            ..Default::default()
-        };
-        assert_eq!(max.jpeg_quality(), 0);
+        assert_eq!(100u8.saturating_sub(100), 0);
     }
 
     #[test]

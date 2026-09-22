@@ -3,16 +3,16 @@
 // generated typed WASM ABI.
 import type {
   DispatchResult,
-  EngineSnapshotDto,
-  ErrorDto,
-  FetchFailureDto,
+  Error as EngineError,
+  FetchFailure,
   HostCompletion,
   HostEffect,
   JobCommand,
-  JobInputDto,
+  JobInput,
   ProbeOutcome,
   ProcessingRecipe,
   SessionConfig,
+  Snapshot,
   Session as WasmSession,
 } from "@dezoomify/wasm-bindings";
 import type { DispatchTable } from "./typed-dispatch.ts";
@@ -24,7 +24,7 @@ export type WorkerHostLog = (
   detail?: unknown,
 ) => void;
 
-function abiFault(error: unknown): ErrorDto {
+function abiFault(error: unknown): EngineError {
   const detail = error instanceof Error ? error.message : String(error);
   return {
     code: "adapter.abi",
@@ -43,7 +43,7 @@ export interface WorkerHostWasm {
 }
 
 export type WorkerHostMessage =
-  | { type: "engine.start"; jobId: string; inputs: JobInputDto[]; quotas?: SessionConfig }
+  | { type: "engine.start"; jobId: string; inputs: JobInput[]; quotas?: SessionConfig }
   | { type: "engine.bytes"; requestId: number; bytes: Uint8Array; finalUri?: string }
   | { type: "engine.probe"; requestId: number; outcome: ProbeOutcome }
   | { type: "engine.display"; requestId: number }
@@ -55,7 +55,7 @@ export type WorkerHostMessage =
       bytes: Uint8Array | ArrayBuffer;
     }
   | { type: "engine.rank"; requestId: number; urls: string[] }
-  | { type: "engine.failure"; requestId: number; error: FetchFailureDto }
+  | { type: "engine.failure"; requestId: number; error: FetchFailure }
   | { type: "engine.timer-elapsed"; effect: number }
   | { type: "engine.command"; command: JobCommand }
   | {
@@ -68,11 +68,11 @@ export type WorkerHostMessage =
   | { type: "engine.dispose" };
 
 export type WorkerHostOutput =
-  | { type: "engine.messages"; messages: HostEffect[]; snapshot: EngineSnapshotDto }
+  | { type: "engine.messages"; messages: HostEffect[]; snapshot: Snapshot }
   | { type: "engine.processed"; requestId: number; bytes: ArrayBuffer }
-  | { type: "engine.process-failed"; requestId: number; error: ErrorDto }
+  | { type: "engine.process-failed"; requestId: number; error: EngineError }
   | { type: "engine.ranked"; requestId: number; urls: string[] }
-  | { type: "engine.error"; error: ErrorDto }
+  | { type: "engine.error"; error: EngineError }
   | { type: "engine.log"; line: string };
 
 export function createJobWorkerHost(deps: {
@@ -95,7 +95,7 @@ export function createJobWorkerHost(deps: {
       return;
     }
     const messages: HostEffect[] = result.messages;
-    const snapshot: EngineSnapshotDto = result.snapshot;
+    const snapshot: Snapshot = result.snapshot;
     // Snapshots always cross the worker boundary, even when the dispatch
     // produced no messages: the snapshot is the only job-state object and
     // the UI renders it directly. Stale revisions are dropped at the

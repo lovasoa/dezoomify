@@ -144,9 +144,9 @@ impl From<String> for NativeError {
     }
 }
 
-impl From<dezoomify_core::core::discovery::DiscoveryError> for NativeError {
-    fn from(error: dezoomify_core::core::discovery::DiscoveryError) -> Self {
-        use dezoomify_core::core::discovery::DiscoveryError as E;
+impl From<dezoomify::core::discovery::DiscoveryError> for NativeError {
+    fn from(error: dezoomify::core::discovery::DiscoveryError) -> Self {
+        use dezoomify::core::discovery::DiscoveryError as E;
         match &error {
             // The aggregate carries the headline-free bullet block: the
             // host renders its own prominent message and never repeats
@@ -163,14 +163,14 @@ impl From<dezoomify_core::core::discovery::DiscoveryError> for NativeError {
     }
 }
 
-impl From<dezoomify_core::core::tile_plan::TileSourceError> for NativeError {
-    fn from(error: dezoomify_core::core::tile_plan::TileSourceError) -> Self {
+impl From<dezoomify::core::tile_plan::TileSourceError> for NativeError {
+    fn from(error: dezoomify::core::tile_plan::TileSourceError) -> Self {
         Self::new("discovery.tile-plan", error.to_string())
     }
 }
 
-impl From<dezoomify_core::core::processing::ProcessingError> for NativeError {
-    fn from(error: dezoomify_core::core::processing::ProcessingError) -> Self {
+impl From<dezoomify::core::processing::ProcessingError> for NativeError {
+    fn from(error: dezoomify::core::processing::ProcessingError) -> Self {
         Self::new("tile.processing-failed", error.to_string())
     }
 }
@@ -364,7 +364,7 @@ pub fn error_resource_kind(code: &str) -> Option<&'static str> {
 }
 
 fn redact(input: &str) -> String {
-    dezoomify_protocol::dto::redact_error_text(input)
+    dezoomify::model::redact_error_text(input)
 }
 
 #[cfg(test)]
@@ -554,7 +554,7 @@ mod tests {
 
     #[test]
     fn discovery_error_variants_map_to_stable_codes() {
-        use dezoomify_core::core::discovery::DiscoveryError as E;
+        use dezoomify::core::discovery::DiscoveryError as E;
         let no_image: NativeError = E::NoCandidateAccepted {
             diagnostics: Vec::new(),
         }

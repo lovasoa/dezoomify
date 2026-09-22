@@ -3,13 +3,11 @@ import test from "node:test";
 import {
   BROWSER_SESSION_TRANSPORT_LABEL,
   clearHistory,
-  createJobService,
   DIRECT_TRANSPORT_LABEL,
   DISPLAY_TRANSPORT_LABEL,
   extensionForSaveFormat,
   HISTORY_MAX,
   historyOriginOf,
-  initialHostStatus,
   isActiveSnapshot,
   isTerminalSnapshot,
   loadHistory,
@@ -22,6 +20,7 @@ import {
   saveHistory,
   suggestedNameFor,
   toHistoryEntry,
+  validateJobStartRequest,
 } from "../packages/app-model/src/index.ts";
 
 function memoryStore() {
@@ -38,14 +37,14 @@ function memoryStore() {
 }
 
 function browserRequest(url = "https://museum.example.org/iiif/1/manifest.json") {
-  return { inputs: [{ url }], engine: {}, exec: { kind: "browser", sourceUrl: url } };
+  return { inputs: [{ url }], engine: {}, host: { kind: "browser", sourceUrl: url } };
 }
 
 // ---------------------------------------------------------------------------
 // Snapshots: absolute engine projections, predicates read the terminal only
 // ---------------------------------------------------------------------------
 
-// Authoritative EngineSnapshotDto builder: the engine owns all job state;
+// Authoritative Snapshot builder: the engine owns all job state;
 // nothing here folds events or assigns revisions.
 function dto(overrides = {}) {
   return {
@@ -92,106 +91,32 @@ test("snapshot predicates read the terminal only", () => {
   assert.equal(failed.terminal.error.code, "boom");
 });
 
-// ---------------------------------------------------------------------------
-// Service: async subscription boundary
-// ---------------------------------------------------------------------------
-
-function fakeRunner(log) {
-  const runners = [];
-  return {
-    runners,
-    runner: {
-      start(request, sink) {
-        const index = runners.length;
-        const record = { request, sink, commands: [], disposed: false };
-        runners.push(record);
-        log.push(`start:${index}`);
-        return Promise.resolve({
-          command: (cmd) => {
-            record.commands.push(cmd);
-            return Promise.resolve();
-          },
-          dispose: () => {
-            record.disposed = true;
-            return Promise.resolve();
-          },
-        });
-      },
-    },
-  };
-}
-
-test("service routes absolute snapshots to the owning observer only", async () => {
-  const log = [];
-  const { runner, runners } = fakeRunner(log);
-  const service = createJobService(runner);
-  const seenA = [];
-  const seenB = [];
-  const statusA = [];
-  const handleA = await service.start(browserRequest("https://a.example.org/1"), {
-    snapshot: (s) => seenA.push(s),
-    hostStatus: (s) => statusA.push(s),
-  });
-  const handleB = await service.start(browserRequest("https://b.example.org/2"), {
-    snapshot: (s) => seenB.push(s),
-    hostStatus: () => {},
-  });
-  assert.notEqual(handleA.id, handleB.id);
-  assert.equal(log.join(","), "start:0,start:1");
-
-  runners[0].sink.snapshot(
-    dto({ revision: 1, lifecycle: "AcquiringTiles", progress: { completed: 1, total: 4 } }),
-    initialHostStatus(),
+test("job request validation returns stable boundary codes", () => {
+  assert.equal(
+    validateJobStartRequest({
+      inputs: [],
+      engine: {},
+      host: { kind: "browser", sourceUrl: "https://x.example.org/y" },
+    }),
+    "validation.empty-inputs",
   );
-  runners[1].sink.snapshot(
-    dto({ revision: 1, lifecycle: "AcquiringTiles", progress: { completed: 2, total: 8 } }),
-    initialHostStatus(),
+  assert.equal(
+    validateJobStartRequest({
+      inputs: [{ url: "ftp://x/y" }],
+      engine: {},
+      host: { kind: "mars" },
+    }),
+    "validation.bad-exec-kind",
   );
-  assert.equal(seenA[seenA.length - 1].progress.completed, 1);
-  assert.equal(seenB[seenB.length - 1].progress.completed, 2);
-  // One neutral status on start plus the runner-forwarded one.
-  assert.equal(statusA.length, 2);
-
-  await handleA.command({ type: "cancel" });
-  assert.deepEqual(runners[0].commands, [{ type: "cancel" }]);
-
-  // Dispose delegates to the runner handle; late emissions after teardown
-  // stay invisible because the runner drops them at its edge.
-  await handleA.dispose();
-  assert.ok(runners[0].disposed);
-});
-
-test("service rejects invalid requests with stable validation codes", async () => {
-  const { runner } = fakeRunner([]);
-  const service = createJobService(runner);
-  const observer = { snapshot: () => {}, hostStatus: () => {} };
-  await assert.rejects(
-    service
-      .start(
-        { inputs: [], engine: {}, exec: { kind: "browser", sourceUrl: "https://x.example.org/y" } },
-        observer,
-      )
-      .then(
-        () => {
-          throw new Error("should reject");
-        },
-        (error) => {
-          assert.equal(error.code, "validation.empty-inputs");
-          throw error;
-        },
-      ),
+  assert.equal(
+    validateJobStartRequest({
+      inputs: [{ url: "https://x.example.org/y" }],
+      engine: {},
+      host: { kind: "browser" },
+    }),
+    "validation.bad-exec-source",
   );
-  await assert.rejects(
-    service.start({ inputs: [{ url: "ftp://x/y" }], engine: {}, exec: { kind: "mars" } }, observer),
-    /./,
-  );
-  await assert.rejects(
-    service.start(
-      { inputs: [{ url: "https://x.example.org/y" }], engine: {}, exec: { kind: "browser" } },
-      observer,
-    ),
-    (error) => error.code === "validation.bad-exec-source",
-  );
+  assert.equal(validateJobStartRequest(browserRequest()), null);
 });
 
 // ---------------------------------------------------------------------------

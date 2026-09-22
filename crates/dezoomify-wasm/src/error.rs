@@ -1,6 +1,6 @@
-//! Stable adapter errors convertible to canonical protocol [`ErrorDto`][dto].
+//! Stable adapter errors convertible to canonical protocol [`Error`][error_value].
 //!
-//! [dto]: dezoomify_protocol::dto::ErrorDto
+//! [error_value]: dezoomify::model::Error
 //!
 //! Every failure in this crate returns [`AdapterError`] (never panics on
 //! host input). Codes are stable strings:
@@ -12,14 +12,14 @@
 //! | `wrong-state` | valid message in the wrong lifecycle phase (dispatch vs job state) |
 //! | `disposed` | any session use after [`Session::dispose`][crate::session::Session] |
 //!
-//! [`AdapterError::to_error_dto`] maps these to protocol `ErrorDto` values
+//! [`AdapterError::to_error`] maps these to protocol `Error` values
 //! with code `adapter.{code}` so they cannot collide with core/protocol
 //! codes. All messages are redacted at construction: credential-bearing
 //! query values (`apiKey=`, `token=`, `auth=`, `password=`, `secret=`,
 //! `session=`, `cookie=`, `Authorization:`) are replaced with `REDACTED`,
-//! extending [`dezoomify_protocol::dto::redact_error_text`].
+//! extending [`dezoomify::model::redact_error_text`].
 
-use dezoomify_protocol::dto::{redact_error_text, ErrorDto, ErrorPhase};
+use dezoomify::model::{redact_error_text, Error, ErrorPhase};
 
 /// Stable machine-readable adapter failure code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -84,14 +84,14 @@ impl AdapterError {
 
     /// Convert to a canonical protocol error (`adapter.{code}`, never retryable).
     #[must_use]
-    pub fn to_error_dto(&self) -> ErrorDto {
+    pub fn to_error(&self) -> Error {
         let phase = match self.code {
             AdapterErrorCode::Disposed => ErrorPhase::Cleanup,
             AdapterErrorCode::Malformed
             | AdapterErrorCode::LimitExceeded
             | AdapterErrorCode::WrongState => ErrorPhase::Validation,
         };
-        ErrorDto::new(
+        Error::new(
             format!("adapter.{}", self.code.as_str()),
             phase,
             self.message.clone(),
@@ -153,10 +153,10 @@ mod tests {
     }
 
     #[test]
-    fn converts_to_protocol_error_dto() {
+    fn converts_to_protocol_error() {
         let error = AdapterError::new(AdapterErrorCode::WrongState, "gone");
-        let dto = error.to_error_dto();
-        assert_eq!(dto.code, "adapter.wrong-state");
-        assert!(!dto.retryable);
+        let error_value = error.to_error();
+        assert_eq!(error_value.code, "adapter.wrong-state");
+        assert!(!error_value.retryable);
     }
 }

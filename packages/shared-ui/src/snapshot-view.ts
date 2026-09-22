@@ -5,7 +5,7 @@
 // latest snapshot. Every terminal snapshot yields a complete terminal
 // presentation even when the catalog or progress never arrived.
 //
-// JobSnapshot is the generated EngineSnapshotDto verbatim: lifecycle,
+// JobSnapshot is the generated Snapshot verbatim: lifecycle,
 // progress, selection, decision, terminal, and output are read exactly as
 // the engine projected them. No legacy folded fields are accepted here;
 // unknown job ids and stale revisions are dropped at the subscription
@@ -14,7 +14,7 @@
 // User copy travels as i18n keys plus vars; the view renders them through
 // `t()`. Counts, labels, and gap ledgers stay literal data.
 
-import type { ErrorDto, JobSnapshot, JobState } from "@dezoomify/app-model";
+import type { Error as EngineError, JobSnapshot, JobState } from "@dezoomify/app-model";
 import { renderTransportLabel } from "@dezoomify/app-model";
 import { splitGapLedger } from "./components.ts";
 import { categoryFor } from "./failure.ts";
@@ -24,7 +24,7 @@ import { type I18nKey, t } from "./i18n.ts";
  * The layered failure shape every product renders through the shared view:
  * plain headline in `message`, raw engine diagnostics in `detail`, stable
  * classification, and the optional on-device fetch context. Hosts build it
- * with `describeFailure`; snapshots project it from the generated ErrorDto.
+ * with `describeFailure`; snapshots project it from the generated Error.
  */
 export interface StructuredError {
   code: string;
@@ -139,7 +139,7 @@ function headlineForState(state: JobState): {
 }
 
 /** Project the generated error DTO onto the layered view error. */
-export function structuredErrorOf(error: ErrorDto): StructuredError {
+export function structuredErrorOf(error: EngineError): StructuredError {
   const presented: StructuredError = {
     code: error.code,
     category: categoryFor(error.code),
@@ -212,7 +212,7 @@ export function presentSnapshot(
   options?: { displayOnly?: boolean },
 ): SnapshotPresentation {
   // Render the authoritative snapshot directly: every field below is the
-  // generated EngineSnapshotDto shape (lifecycle/progress/decision with
+  // generated Snapshot shape (lifecycle/progress/decision with
   // generation+missing/terminal.type/output with missing+disposition). The
   // transport argument only labels diagnostics.
   const terminal = terminalOf(snapshot);

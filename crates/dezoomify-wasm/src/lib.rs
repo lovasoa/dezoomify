@@ -1,9 +1,9 @@
-//! Narrow deterministic adapter from portable core/engine/protocol types to
+//! Narrow deterministic adapter from the portable Dezoomify domain to
 //! JavaScript (`crates/dezoomify-wasm`).
 //!
 //! This crate is adapter-only: it performs no network or filesystem I/O,
 //! decodes no images, touches no DOM/canvas/storage/workers/timers, encodes
-//! no output, and depends only on `dezoomify-core`, `dezoomify-protocol`,
+//! no output, and depends only on the pure `dezoomify` crate,
 //! `serde`, `tsify`, `serde-wasm-bindgen`, and `wasm-bindgen`. It stays free of `web-sys`
 //! (Window/Document/fetch/Canvas/storage/worker features), `reqwest`,
 //! `tokio`, and image codecs; the future browser runtime owns all host
@@ -38,21 +38,21 @@
 //!   repeat. A JS finalizer is only a leak fallback, never semantic
 //!   cancellation.
 //! * Errors: every failure is a stable [`AdapterError`] code convertible to
-//!   a protocol `ErrorDto`; panics never cross the boundary (the crate
+//!   a protocol `Error`; panics never cross the boundary (the crate
 //!   forbids `unsafe_code` and checks every index and length).
 //!
 //! ## Adapter scope
 //!
-//! * [`session`] delegates its whole lifecycle to `dezoomify-engine`; the
-//!   adapter projects engine effects/events onto typed protocol messages.
-//!   Discovery and planning are format-aware through `dezoomify-core`:
+//! * [`session`] delegates its whole lifecycle to `dezoomify::engine`; host
+//!   effects and snapshots already use the canonical model unchanged.
+//!   Discovery and planning are format-aware through `dezoomify`:
 //!   metadata bytes parse into real catalogs and real per-level tile plans.
 //! * Node conformance runs against the generated bindings:
 //!   `packages/wasm-harness` drives the emitted JavaScript surface.
 
 #![forbid(unsafe_code)]
 // Shipped adapter code maps failures to typed `AdapterError`s instead of
-// panicking (see the crate-root comment in `dezoomify-protocol` for how
+// panicking (see the pure crate's model policy for how
 // tests stay exempt).
 #![deny(clippy::unwrap_used)]
 
@@ -68,9 +68,8 @@ pub use session::Session;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm_api {
     use super::session::Session;
-    use dezoomify_protocol::dto::{
-        EngineSnapshotDto, ErrorDto, HostCompletion, HostEffect, JobCommand, ProcessingRequest,
-        SessionConfig,
+    use dezoomify::model::{
+        Error, HostCompletion, HostEffect, JobCommand, ProcessingRequest, SessionConfig, Snapshot,
     };
     use serde::Serialize;
     use tsify::{Ts, Tsify};
@@ -81,20 +80,18 @@ pub mod wasm_api {
     pub enum DispatchResult {
         Ok {
             messages: Vec<HostEffect>,
-            snapshot: EngineSnapshotDto,
+            snapshot: Snapshot,
         },
         Error {
-            error: ErrorDto,
+            error: Error,
         },
     }
 
-    fn result(
-        value: Result<(Vec<HostEffect>, EngineSnapshotDto), super::AdapterError>,
-    ) -> DispatchResult {
+    fn result(value: Result<(Vec<HostEffect>, Snapshot), super::AdapterError>) -> DispatchResult {
         match value {
             Ok((messages, snapshot)) => DispatchResult::Ok { messages, snapshot },
             Err(error) => DispatchResult::Error {
-                error: error.to_error_dto(),
+                error: error.to_error(),
             },
         }
     }
@@ -163,7 +160,7 @@ pub mod wasm_api {
         /// Project the canonical engine snapshot for the active job.
         /// Absolute state for UI rendering; issues no work.
         #[wasm_bindgen(js_name = "snapshot")]
-        pub fn snapshot(&self) -> Result<Ts<EngineSnapshotDto>, JsError> {
+        pub fn snapshot(&self) -> Result<Ts<Snapshot>, JsError> {
             self.inner
                 .snapshot()
                 .map_err(|error| JsError::new(&error.to_string()))?

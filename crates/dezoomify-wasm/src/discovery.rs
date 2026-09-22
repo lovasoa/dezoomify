@@ -1,8 +1,7 @@
 //! Pure support for browser-host tile byte-processing recipes. Discovery and
 //! planning live in the job-engine session.
 
-use dezoomify_core::core::model::ProcessingRecipe as CoreProcessingRecipe;
-use dezoomify_protocol::dto::ProcessingRecipe;
+use dezoomify::model::ProcessingRecipe;
 
 use crate::error::{AdapterError, AdapterErrorCode};
 
@@ -19,10 +18,6 @@ pub fn apply_processing_recipe(
     recipe: ProcessingRecipe,
     bytes: Vec<u8>,
 ) -> Result<Vec<u8>, AdapterError> {
-    let recipe = match recipe {
-        ProcessingRecipe::None => CoreProcessingRecipe::None,
-        ProcessingRecipe::GoogleArtsDecrypt => CoreProcessingRecipe::GoogleArtsDecrypt,
-    };
     recipe.apply(bytes).map_err(|e| malformed(e.to_string()))
 }
 

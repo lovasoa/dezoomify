@@ -2,8 +2,8 @@
 
 `packages/app-model` is the host-neutral application model for Dezoomify
 jobs. It is React-free and host-global-free: no `window`, `document`,
-`fetch`, `chrome`, `tauri`, storage, or canvas access. Hosts inject effects
-(a `HostRunner`), storage (a `HistoryStore`), and clocks; the shared UI
+`fetch`, `chrome`, `tauri`, storage, or canvas access. Products implement
+`JobService` and inject storage (a `HistoryStore`) and clocks; the shared UI
 renders authoritative snapshots.
 
 ## Contract
@@ -12,8 +12,12 @@ renders authoritative snapshots.
   `start(request, observer)` returns a window-owned `JobHandle` with
   `command(UserCommand)` and `dispose()`. `UserCommand` is the generated
   `JobCommand` type, never a redeclared copy.
+- Concrete runtimes implement `JobService` directly when they own the full
+  start boundary. The browser service validates requests, assigns job identity,
+  emits the neutral initial host status, and forwards snapshots without a
+  second service wrapper.
 - `JobStartRequest` composes engine options (`SessionConfig`) with the
-  discriminated product-local `ExecSpec`: `browser` for host assembly from
+  discriminated product-local `HostSpec`: `browser` for host assembly from
   readable bytes, `native` with a validated destination for host-written
   output. The discriminated shape is fixed: `browser` carries
   the `sourceUrl` data field, `native` carries the validated destination.
@@ -41,7 +45,7 @@ renders authoritative snapshots.
 
 Desktop startup waits for all event subscriptions before invoking the host.
 Desktop snapshot events use one `{ job, snapshot }` envelope: `job` is the
-sole routing identity and `snapshot` is the unmodified `EngineSnapshotDto`.
+sole routing identity and `snapshot` is the unmodified `Snapshot`.
 While a start reply is pending, the service keeps the latest absolute host
 snapshot per job and delivers it once the reply supplies that job's ID.
 This covers jobs that fail or finish before the IPC reply arrives without
@@ -51,9 +55,9 @@ inventing a local phase or replaying intermediate transitions.
 
 `packages/app-model` owns the service interface, snapshot predicates, shared
 FIFO queue semantics, history, and canonical labels and save-name helpers.
-Products own input validation, queue payloads, progress metadata, their
-`HostRunner` (browser assembly, native runner, desktop IPC), and mount the
-shared UI. The architecture gate forbids host globals, React, and runtime
+Products own their concrete `JobService`, input validation, queue payloads,
+progress metadata, and shared UI mount. The architecture gate forbids host
+globals, React, and runtime
 imports in this package.
 See [Architecture](architecture.md) and the
 [acceptance matrix](acceptance-matrix.md).

@@ -1,13 +1,12 @@
 /** Dedicated extension job-tab integration. No webpage postMessage bridge. */
 
-import type { ErrorDto, JobHandle, JobSnapshot, JobState } from "@dezoomify/app-model";
-import { createJobService } from "@dezoomify/app-model";
+import type { Error as EngineError, JobHandle, JobSnapshot, JobState } from "@dezoomify/app-model";
 import {
   BROWSER_MAX_CANVAS_AREA,
   BROWSER_MAX_CANVAS_SIDE,
   BROWSER_MAX_PLAN_TILES,
   canvasToPngBlob,
-  createBrowserRunner,
+  createBrowserJobService,
   createCanvasAssembly,
   createProbeSize,
   createTileDecoder,
@@ -79,13 +78,13 @@ let binding: JobBinding | null = null;
 let siteOrigin = "";
 /** Fallback request ids for probes that arrive without an engine request id. Start clear of the engine's small sequential ids. */
 let probeSeq = 1 << 30;
-// One shared browser runner attempt. The runner owns the worker, the WASM
+// One shared browser job service attempt. The service owns the worker, the WASM
 // session, cross-worker processing calls, the abort scope, and disposal;
 // this tab keeps binding, transport, assembly, and view wiring. The single
 // authoritative snapshot renders directly; no derived mirrors.
 let jobHandle: JobHandle | null = null;
 let sourceTransport: ReturnType<typeof createCoordinatorSourceTransport> | null = null;
-/** Runner abort signal of the live attempt (drives the cancelled() transport view). */
+/** Service abort signal of the live attempt (drives the cancelled() transport view). */
 let attemptSignal: AbortSignal | null = null;
 /** @type {ReturnType<typeof createCanvasAssembly> | null} */
 let assembly: ReturnType<typeof createCanvasAssembly> | null = null;
@@ -359,9 +358,9 @@ function sourceHost(): string {
  * `message`, the engine's raw per-format aggregate moves to `detail`, and the
  * stable category/phase/retryable are derived from the code. The extension
  * never renders the raw engine block as the first message. Every field is
- * typed from the terminal ErrorDto; nothing is read off untyped shapes.
+ * typed from the terminal Error; nothing is read off untyped shapes.
  */
-function presentEngineFailure(error: ErrorDto): StructuredError {
+function presentEngineFailure(error: EngineError): StructuredError {
   return describeFailure({
     code: error.code,
     engineDetail: error.detail ?? error.message,
@@ -494,7 +493,7 @@ function setup(bound: unknown) {
 
 /**
  * Tear down the current attempt. The durable source binding survives; the
- * runner attempt (worker, WASM session, output assembly, fetch state) does
+ * service attempt (worker, WASM session, output assembly, fetch state) does
  * not. Called before every attempt so a retry can never reuse a terminal
  * engine session or a stale request ledger.
  */
@@ -527,12 +526,12 @@ function resetAttemptState() {
 }
 
 /**
- * Begin one discovery-and-fetch attempt behind the shared browser runner.
+ * Begin one discovery-and-fetch attempt behind the shared browser job service.
  * The extension injects its source-bound transport (tab-origin fetch under
  * the narrowest grant plus extension-origin fallback), its output assembly
  * (page canvas, anchor save), and its product actions (explicit permission
  * prompt, keep/discard recovery). Retries, partials, and ordering stay in
- * the engine; the abort scope and disposal live in the runner attempt.
+ * the engine; the abort scope and disposal live in the service attempt.
  */
 async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
   if (!binding) return;
@@ -592,7 +591,7 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
       ),
   });
   const probeDecoder = createTileDecoder();
-  const runner = createBrowserRunner({
+  const service = createBrowserJobService({
     createWorker: () => new Worker(new URL("./worker.js", import.meta.url), { type: "module" }),
     fetchResource: (effect, signal) => {
       attemptSignal = signal;
@@ -673,7 +672,6 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
       }
     },
   });
-  const service = createJobService(runner);
   try {
     const handle = await service.start(
       {
@@ -686,7 +684,7 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
             maxArea: BROWSER_MAX_CANVAS_AREA,
           },
         },
-        exec: { kind: "browser", sourceUrl: inputs[0]?.url ?? "" },
+        host: { kind: "browser", sourceUrl: inputs[0]?.url ?? "" },
       },
       {
         snapshot: (snapshot: JobSnapshot) => {
@@ -771,8 +769,8 @@ function retryJob() {
 /**
  * Prepare one attempt slot. The first attempt follows the job tab's
  * readiness announcement; a retry follows an explicit user action and a
- * fresh coordinator snapshot. The runner starts once image candidates
- * arrive (`beginAttempt`); either way the attempt gets a fresh runner so no
+ * fresh coordinator snapshot. The service starts once image candidates
+ * arrive (`beginAttempt`); either way the attempt gets a fresh service so no
  * state leaks between attempts.
  */
 function startAttempt() {

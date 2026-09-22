@@ -2,7 +2,7 @@
 //
 // Snapshot-only transport: the `dezoomify://job-snapshot` channel is the
 // only job-state transport. Every emit is the canonical
-// `EngineSnapshotDto` verbatim (revision, lifecycle, paused, progress,
+// `Snapshot` verbatim (revision, lifecycle, paused, progress,
 // selection with catalog, decision, terminal, output) wrapped with one `job`
 // routing identity, which the frontend forwards untouched to its observer.
 // No transcript is stored, no legacy `job-state`/`job-progress`/
@@ -29,15 +29,14 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
-use dezoomify_native::output::{validate_destination, OutputFormat};
-use dezoomify_native::runner::{
-    JobOptions, JobSnapshot as RunnerSnapshot, NativeRunner, OutputTarget, RunningJob,
+use dezoomify::model::{
+    JobState as ProtocolState, Progress, RecoveryChoice, Selection, Snapshot, Terminal,
+};
+use dezoomify_native::job_service::{
+    start_job, JobOptions, JobSnapshot as RunnerSnapshot, OutputTarget, RunningJob,
     UserCommand as RunnerCommand,
 };
-use dezoomify_protocol::dto::{
-    EngineSnapshotDto, JobState as ProtocolState, SnapshotProgressDto, SnapshotSelectionDto,
-    SnapshotTerminalDto,
-};
+use dezoomify_native::output::{validate_destination, OutputFormat};
 
 use crate::settings::{job_options_for, DesktopSettings};
 
@@ -124,7 +123,7 @@ pub enum Choice {
     /// engine generation when known (`generation` omitted answers the latest
     /// pending decision; stale generations are rejected by the engine).
     Partial {
-        decision: dezoomify_protocol::dto::RecoveryChoice,
+        decision: RecoveryChoice,
         #[serde(default)]
         generation: Option<u32>,
     },
@@ -226,7 +225,7 @@ impl Default for JobTable {
 /// `selection.catalog` untouched and missing-tile ids stay engine ordinals.
 /// The native publication never enters the payload; it only feeds the
 /// retained `saved_path` handle for explicit open/reveal.
-fn verbatim_payload(job: &str, dto: &EngineSnapshotDto) -> serde_json::Value {
+fn verbatim_payload(job: &str, dto: &Snapshot) -> serde_json::Value {
     let value = serde_json::json!({ "job": job, "snapshot": dto });
     debug_assert!(!payload_has_forbidden_keys(&value));
     value
@@ -234,8 +233,8 @@ fn verbatim_payload(job: &str, dto: &EngineSnapshotDto) -> serde_json::Value {
 
 /// Empty canonical selection: nothing chosen, no catalog yet, no deferred
 /// entries. Shared by the synchronous host snapshots below.
-fn empty_selection() -> SnapshotSelectionDto {
-    SnapshotSelectionDto {
+fn empty_selection() -> Selection {
+    Selection {
         image: None,
         level: None,
         level_count: 0,
@@ -249,12 +248,12 @@ fn empty_selection() -> SnapshotSelectionDto {
 /// same snapshot; the destination grant gates the runner start, never the
 /// payload, so there is no `choose-output` cue and no `AwaitingDestination`
 /// state anywhere.
-fn initial_dto() -> EngineSnapshotDto {
-    EngineSnapshotDto {
+fn initial_dto() -> Snapshot {
+    Snapshot {
         revision: 0,
         lifecycle: ProtocolState::Created,
         paused: false,
-        progress: SnapshotProgressDto {
+        progress: Progress {
             completed: 0,
             total: None,
         },
@@ -269,18 +268,18 @@ fn initial_dto() -> EngineSnapshotDto {
 /// `Cancelled` lifecycle plus its terminal. The runner path never produces
 /// this; a live runner's cancelled terminal arrives on the snapshot stream
 /// and is forwarded verbatim.
-fn cancelled_dto() -> EngineSnapshotDto {
-    EngineSnapshotDto {
+fn cancelled_dto() -> Snapshot {
+    Snapshot {
         revision: 1,
         lifecycle: ProtocolState::Cancelled,
         paused: false,
-        progress: SnapshotProgressDto {
+        progress: Progress {
             completed: 0,
             total: None,
         },
         selection: empty_selection(),
         decision: None,
-        terminal: Some(SnapshotTerminalDto::Cancelled),
+        terminal: Some(Terminal::Cancelled),
         output: None,
     }
 }
@@ -439,7 +438,7 @@ impl JobTable {
     /// job's runner options RAM only: never logged (see the redacted `Debug`
     /// above), never written to disk, and never inserted into the tile cache
     /// (bodies only). Origin scoping itself is enforced by the caller
-    /// (`native_host::host`) before this call and by the native `UserHeaders`
+    /// before this call and by the native `UserHeaders`
     /// layer at fetch time (credentials only to the input host).
     pub fn start_job_with_user_headers(
         &mut self,
@@ -483,7 +482,7 @@ impl JobTable {
         // A startup failure is a command failure, before a runner exists or
         // an engine snapshot can be authoritative. Remove the unannounced
         // registry entry so a later command cannot observe a stale phantom.
-        let runner = match NativeRunner::start(options.clone()) {
+        let runner = match start_job(options.clone()) {
             Ok(runner) => runner,
             Err(error) => {
                 self.jobs.remove(&id);
@@ -577,7 +576,7 @@ impl JobTable {
                 decision,
                 generation,
             } => {
-                use dezoomify_protocol::dto::RecoveryChoice as WireDecision;
+                use dezoomify::model::RecoveryChoice as WireDecision;
                 let generation = generation.or_else(|| {
                     self.jobs
                         .get(job)
@@ -687,7 +686,7 @@ impl JobTable {
         // Do not update the registry until the runner accepted the options:
         // a startup validation failure stays a command error and the job can
         // still receive a corrected destination grant.
-        let runner = NativeRunner::start(options.clone()).map_err(|error| error.to_string())?;
+        let runner = start_job(options.clone()).map_err(|error| error.to_string())?;
         if let Some(record) = self.jobs.get_mut(job) {
             record.destination = Some(path.to_path_buf());
             record.options = options;
@@ -768,8 +767,7 @@ impl JobTable {
         // ordinal missing tiles, terminal, output). The native publication
         // only feeds the retained `saved_path` handle below, never the
         // payload.
-        let dto = EngineSnapshotDto::from(&snapshot.snapshot);
-        let payload = verbatim_payload(job, &dto);
+        let payload = verbatim_payload(job, &snapshot.snapshot);
         let seq = u64::from(snapshot.snapshot.revision);
         if let Some(decision) = snapshot.snapshot.decision.as_ref() {
             if let Some(record) = self.jobs.get_mut(job) {
@@ -815,7 +813,7 @@ fn output_format_for_id(format: &str) -> Option<OutputFormat> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dezoomify_native::runner::OutputSummary;
+    use dezoomify_native::job_service::OutputSummary;
 
     /// Build one verbatim engine snapshot for forwarder tests (no I/O).
     fn engine_snapshot(
@@ -823,17 +821,17 @@ mod tests {
         lifecycle: ProtocolState,
         acquired: u64,
         total: Option<u64>,
-        terminal: Option<SnapshotTerminalDto>,
-    ) -> dezoomify_engine::JobSnapshot {
-        dezoomify_engine::JobSnapshot {
+        terminal: Option<Terminal>,
+    ) -> dezoomify::model::Snapshot {
+        dezoomify::model::Snapshot {
             revision,
             lifecycle,
             paused: false,
-            progress: dezoomify_engine::Progress {
+            progress: dezoomify::model::Progress {
                 completed: acquired,
                 total,
             },
-            selection: dezoomify_engine::Selection {
+            selection: dezoomify::model::Selection {
                 image: None,
                 level: None,
                 level_count: 0,
@@ -852,7 +850,7 @@ mod tests {
         lifecycle: ProtocolState,
         acquired: u64,
         total: Option<u64>,
-        terminal: Option<SnapshotTerminalDto>,
+        terminal: Option<Terminal>,
         published: Option<OutputSummary>,
     ) -> RunnerSnapshot {
         RunnerSnapshot {
@@ -872,11 +870,14 @@ mod tests {
         missing_tiles: &[u32],
     ) -> RunnerSnapshot {
         let mut snapshot = engine_snapshot(revision, lifecycle, acquired, total, None);
-        snapshot.decision = Some(dezoomify_engine::DecisionPayload {
+        snapshot.decision = Some(dezoomify::model::Decision {
             generation,
             missing: missing_tiles
                 .iter()
-                .map(|tile| (*tile, Vec::new()))
+                .map(|tile| dezoomify::model::MissingTile {
+                    tile: *tile,
+                    failures: Vec::new(),
+                })
                 .collect(),
         });
         RunnerSnapshot {
@@ -886,18 +887,18 @@ mod tests {
         }
     }
 
-    fn failed_terminal(code: &str, message: &str) -> SnapshotTerminalDto {
-        SnapshotTerminalDto::Failed {
-            error: dezoomify_protocol::dto::ErrorDto {
+    fn failed_terminal(code: &str, message: &str) -> Terminal {
+        Terminal::Failed {
+            error: dezoomify::model::Error {
                 code: code.to_string(),
-                phase: dezoomify_protocol::dto::ErrorPhase::Acquisition,
+                phase: dezoomify::model::ErrorPhase::Acquisition,
                 retryable: true,
                 message: message.to_string(),
                 recovery: Vec::new(),
                 request: None,
-                transport: Some(dezoomify_protocol::dto::ErrorTransport::Native),
+                transport: Some(dezoomify::model::ErrorTransport::Native),
                 blocked_reason: None,
-                resource_kind: Some(dezoomify_protocol::dto::ResourceKind::Tile),
+                resource_kind: Some(dezoomify::model::ResourceKind::Tile),
                 http: None,
                 preview: None,
                 detail: None,
@@ -1151,7 +1152,7 @@ mod tests {
         let mut table = JobTable::new();
         let (id, _) = table.start_job("https://example.com/item").unwrap();
         // Simulate an invalid option reaching the otherwise validated
-        // boundary. NativeRunner rejects it before spawning any work.
+        // boundary. start_job rejects it before spawning any work.
         table.jobs.get_mut(&id).unwrap().options.input_url.clear();
         let path = scratch_path("runner-start-failure", "out.png");
         let error = table
@@ -1246,7 +1247,7 @@ mod tests {
             ProtocolState::Finalizing,
             2,
             Some(2),
-            Some(SnapshotTerminalDto::Completed),
+            Some(Terminal::Completed),
             Some(published("png", 4, 4, 1)),
         );
         let emit = table
@@ -1292,7 +1293,7 @@ mod tests {
             None,
             None,
         );
-        let dto = EngineSnapshotDto::from(&snapshot.snapshot);
+        let dto = snapshot.snapshot.clone();
         let payload = verbatim_payload("job:1", &dto);
         assert!(payload["snapshot"]["progress"]["total"].is_null());
         assert_eq!(
@@ -1316,17 +1317,20 @@ mod tests {
             ProtocolState::Finalizing,
             12,
             Some(12),
-            Some(SnapshotTerminalDto::Completed),
+            Some(Terminal::Completed),
             Some(published("png", 800, 600, 12)),
         );
-        snapshot.snapshot.output = Some(dezoomify_engine::OutputSummary {
-            canvas: Some((800, 600)),
-            format: dezoomify_engine::OutputFormat::Png,
+        snapshot.snapshot.output = Some(dezoomify::model::OutputSummary {
+            canvas: Some(dezoomify::model::Size {
+                width: 800,
+                height: 600,
+            }),
+            format: dezoomify::model::OutputFormat::Png,
             complete: true,
             missing: Vec::new(),
             disposition: None,
         });
-        let dto = EngineSnapshotDto::from(&snapshot.snapshot);
+        let dto = snapshot.snapshot.clone();
         let payload = verbatim_payload("job:1", &dto);
         assert_eq!(terminal_type(&payload).as_deref(), Some("completed"));
         assert_eq!(snapshot_lifecycle(&payload), "Finalizing");
@@ -1357,34 +1361,40 @@ mod tests {
             None,
             None,
         );
-        snapshot.snapshot.selection.catalog = Some(dezoomify_protocol::dto::CatalogDto {
-            entries: vec![dezoomify_protocol::dto::CatalogEntryDto::Image(
-                dezoomify_protocol::dto::ImageDto {
+        snapshot.snapshot.selection.catalog = Some(dezoomify::model::Catalog {
+            entries: vec![dezoomify::model::CatalogEntry::Image(
+                dezoomify::model::Image {
                     title: Some("plate".to_string()),
                     format: "iiif".to_string(),
-                    width: 800,
-                    height: 600,
-                    source_kind: "iiif".to_string(),
-                    levels: vec![dezoomify_protocol::dto::LevelDto {
-                        label: "full".to_string(),
+                    size: Some(dezoomify::model::Size {
                         width: 800,
                         height: 600,
-                        tile_width: 256,
-                        tile_height: 256,
+                    }),
+                    source_kind: "iiif".to_string(),
+                    levels: vec![dezoomify::model::Level {
+                        label: "full".to_string(),
+                        size: Some(dezoomify::model::Size {
+                            width: 800,
+                            height: 600,
+                        }),
+                        tile_size: Some(dezoomify::model::Size {
+                            width: 256,
+                            height: 256,
+                        }),
                     }],
                 },
             )],
         });
-        let dto = EngineSnapshotDto::from(&snapshot.snapshot);
+        let dto = snapshot.snapshot.clone();
         let payload = verbatim_payload("job:1", &dto);
         let catalog = &payload["snapshot"]["selection"]["catalog"];
         assert!(catalog.is_object(), "catalog must ride selection");
-        // `CatalogEntryDto` is internally tagged (`kind: image`), with the
+        // `CatalogEntry` is internally tagged (`kind: image`), with the
         // image fields flattened alongside the tag.
         assert_eq!(catalog["entries"][0]["kind"], serde_json::json!("image"));
         assert_eq!(catalog["entries"][0]["title"], serde_json::json!("plate"));
         assert_eq!(
-            catalog["entries"][0]["levels"][0]["width"],
+            catalog["entries"][0]["levels"][0]["size"]["width"],
             serde_json::json!(800u64)
         );
         assert_no_folded_keys(&payload);
@@ -1404,7 +1414,7 @@ mod tests {
             Some(failed_terminal("tile.download-failed", "3 tiles failed")),
             None,
         );
-        let dto = EngineSnapshotDto::from(&snapshot.snapshot);
+        let dto = snapshot.snapshot.clone();
         let payload = verbatim_payload("job:1", &dto);
         assert_eq!(terminal_type(&payload).as_deref(), Some("failed"));
         assert_eq!(snapshot_lifecycle(&payload), "AcquiringTiles");
@@ -1451,7 +1461,7 @@ mod tests {
             None,
             None,
         );
-        let dto = EngineSnapshotDto::from(&progress.snapshot);
+        let dto = progress.snapshot.clone();
         let payload = verbatim_payload("job:1", &dto);
         assert_eq!(snapshot_revision(&payload), 2);
         let body = &payload["snapshot"];
@@ -1476,7 +1486,7 @@ mod tests {
             1,
             &[1],
         );
-        let dto = EngineSnapshotDto::from(&decision_snapshot.snapshot);
+        let dto = decision_snapshot.snapshot.clone();
         let decision_payload = verbatim_payload("job:1", &dto);
         assert_eq!(
             snapshot_lifecycle(&decision_payload),
@@ -1500,7 +1510,7 @@ mod tests {
             ProtocolState::Finalizing,
             ProtocolState::AwaitingPartialDecision,
         ] {
-            let dto = EngineSnapshotDto::from(&engine_snapshot(0, lifecycle, 0, None, None));
+            let dto = engine_snapshot(0, lifecycle, 0, None, None);
             let payload = verbatim_payload("job:1", &dto);
             assert_eq!(
                 snapshot_lifecycle(&payload),
@@ -1557,7 +1567,7 @@ mod tests {
                         ProtocolState::Finalizing,
                         2,
                         Some(2),
-                        Some(SnapshotTerminalDto::Completed),
+                        Some(Terminal::Completed),
                         Some(published("png", 8, 6, 2)),
                     );
                     table.forward_runner_snapshot(&id, &snapshot);
@@ -1572,7 +1582,7 @@ mod tests {
                         ProtocolState::Finalizing,
                         1,
                         Some(2),
-                        Some(SnapshotTerminalDto::PartialCompleted { missing: vec![1] }),
+                        Some(Terminal::PartialCompleted { missing: vec![1] }),
                         Some(published_partial(
                             "png",
                             8,
@@ -1675,7 +1685,7 @@ mod tests {
                 ProtocolState::Finalizing,
                 2,
                 Some(2),
-                Some(SnapshotTerminalDto::Completed),
+                Some(Terminal::Completed),
                 Some(published("png", 4, 4, 2)),
             );
             let emit = table.forward_runner_snapshot(&id, &snapshot).unwrap();
@@ -1699,7 +1709,7 @@ mod tests {
                 ProtocolState::Finalizing,
                 1,
                 Some(2),
-                Some(SnapshotTerminalDto::PartialCompleted { missing: vec![1] }),
+                Some(Terminal::PartialCompleted { missing: vec![1] }),
                 Some(published_partial(
                     "png",
                     2,
@@ -1747,7 +1757,7 @@ mod tests {
     }
 
     /// Wrong-state shell inputs are rejected without work (engine wrong-state
-    /// coverage lives in `dezoomify-engine` tests; this backend never drives
+    /// coverage lives in `dezoomify::engine` tests; this backend never drives
     /// a transient engine).
     #[test]
     fn wrong_state_shell_ids_are_safe() {
@@ -1820,7 +1830,7 @@ mod tests {
             1,
             &[1, 2],
         );
-        let dto = EngineSnapshotDto::from(&snapshot.snapshot);
+        let dto = snapshot.snapshot.clone();
         let payload = verbatim_payload("job:1", &dto);
         assert_eq!(snapshot_lifecycle(&payload), "AwaitingPartialDecision");
         assert_eq!(
@@ -1849,7 +1859,7 @@ mod tests {
             .answer_choice(
                 &id,
                 &Choice::Partial {
-                    decision: dezoomify_protocol::dto::RecoveryChoice::Keep,
+                    decision: dezoomify::model::RecoveryChoice::Keep,
                     generation: Some(1),
                 },
             )
@@ -1864,7 +1874,7 @@ mod tests {
             .answer_choice(
                 &id2,
                 &Choice::Partial {
-                    decision: dezoomify_protocol::dto::RecoveryChoice::Discard,
+                    decision: dezoomify::model::RecoveryChoice::Discard,
                     generation: Some(1),
                 },
             )
@@ -1879,7 +1889,7 @@ mod tests {
             .answer_choice(
                 &id3,
                 &Choice::Partial {
-                    decision: dezoomify_protocol::dto::RecoveryChoice::Retry,
+                    decision: dezoomify::model::RecoveryChoice::Retry,
                     generation: Some(1),
                 },
             )
@@ -1907,7 +1917,7 @@ mod tests {
             ProtocolState::Finalizing,
             3,
             Some(4),
-            Some(SnapshotTerminalDto::PartialCompleted { missing: vec![1] }),
+            Some(Terminal::PartialCompleted { missing: vec![1] }),
             Some(published_partial(
                 "png",
                 512,
@@ -1917,14 +1927,17 @@ mod tests {
                 "saved.partial.png",
             )),
         );
-        snapshot.snapshot.output = Some(dezoomify_engine::OutputSummary {
-            canvas: Some((512, 512)),
-            format: dezoomify_engine::OutputFormat::Png,
+        snapshot.snapshot.output = Some(dezoomify::model::OutputSummary {
+            canvas: Some(dezoomify::model::Size {
+                width: 512,
+                height: 512,
+            }),
+            format: dezoomify::model::OutputFormat::Png,
             complete: false,
             missing: vec![1],
             disposition: None,
         });
-        let dto = EngineSnapshotDto::from(&snapshot.snapshot);
+        let dto = snapshot.snapshot.clone();
         let payload = verbatim_payload("job:1", &dto);
         assert_eq!(snapshot_lifecycle(&payload), "Finalizing");
         assert_eq!(
@@ -1962,7 +1975,7 @@ mod tests {
             )),
             None,
         );
-        let dto = EngineSnapshotDto::from(&snapshot.snapshot);
+        let dto = snapshot.snapshot.clone();
         let payload = verbatim_payload("job:1", &dto);
         assert_eq!(terminal_type(&payload).as_deref(), Some("failed"));
         assert!(payload["snapshot"]["output"].is_null());

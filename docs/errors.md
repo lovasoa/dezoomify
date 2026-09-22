@@ -16,7 +16,7 @@ Each error includes:
 
 Codes are stable API; messages improve freely. Secrets, cookies, auth headers, signed query values, and local paths are redacted before logging or serialization.
 
-Hosts keep their own error chains internally; only the typed shape crosses the contract. Browser code classifies a fetch failure once into `FetchFailureDto` (host-observed facts only). The Rust session adds the correlated request: metadata failures are `discovery`, tile/probe failures are `acquisition`, request URI and kind come from the emitted effect. Product code adds no context of its own. Output failures use phase `output`. Never branch on display strings.
+Hosts keep their own error chains internally; only the typed shape crosses the contract. Browser code classifies a fetch failure once into `FetchFailure` (host-observed facts only). The Rust session adds the correlated request: metadata failures are `discovery`, tile/probe failures are `acquisition`, request URI and kind come from the emitted effect. Product code adds no context of its own. Output failures use phase `output`. Never branch on display strings.
 
 Adapter faults (bad external objects, bad session use) are not job failures. They return the `DispatchResult` error branch and a contract-failure screen, and replace no accepted transport failure.
 
@@ -55,4 +55,4 @@ Messages follow the layered rules in [Product](product.md#progressive-disclosure
 
 Transient transport and service errors follow the [retry policy](job-engine.md#retry-and-progress). Proxy-ineligible, auth, and ordinary HTTP failures never take the proxy route. Invalid metadata and deterministic decode failures stop at once. A tile failure reaches partial handling only after retries run out.
 
-Internal errors offer a safe fallback. Native Messaging mismatch stops before job creation. Security-policy failures never offer a recovery that weakens the policy; see [Security](security.md).
+Internal errors offer a safe fallback. Security-policy failures never offer a recovery that weakens the policy; see [Security](security.md).

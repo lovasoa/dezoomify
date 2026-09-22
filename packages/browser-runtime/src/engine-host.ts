@@ -26,19 +26,19 @@
 // on draw, so the job completes as display-only with no programmatic save.
 import type {
   BlockedReason,
-  EngineSnapshotDto,
-  ErrorDto,
+  Error as EngineError,
   ErrorTransport,
+  FetchFailure,
   FetchFailureCode,
-  FetchFailureDto,
   HostEffect,
   JobCommand,
-  JobInputDto,
+  JobInput,
   OutputFormat,
-  RequestDto,
+  ResourceRequest,
   SessionConfig,
-  SizeDto,
-  TilePlacementDto,
+  Size,
+  Snapshot,
+  TilePlacement,
 } from "@dezoomify/wasm-bindings";
 import type { BrowserOutputDisposition } from "./assembly.ts";
 import { originOfUrl } from "./fetch-primitives.ts";
@@ -50,14 +50,14 @@ import type { WorkerHostMessage } from "./worker-host.ts";
 
 export interface EngineHostAssembly {
   /** Reveal the declared output surface before the first tile fetch. */
-  prepare(canvas?: SizeDto | null): void;
-  acquireTile(tile: number, placement: TilePlacementDto, bytes: ArrayBuffer): Promise<void>;
-  acquireDisplayTile(tile: number, placement: TilePlacementDto, image: TileImageLike): void;
+  prepare(canvas?: Size | null): void;
+  acquireTile(tile: number, placement: TilePlacement, bytes: ArrayBuffer): Promise<void>;
+  acquireDisplayTile(tile: number, placement: TilePlacement, image: TileImageLike): void;
   /** The one awaited output operation (draw, encode, save / display-only). */
   finalizeOutput(
     partial: boolean,
     format: OutputFormat,
-    canvas?: SizeDto | null,
+    canvas?: Size | null,
   ): Promise<BrowserOutputDisposition>;
   release(): void;
   /** True once an ordinary image tainted the surface (display-only output). */
@@ -102,7 +102,7 @@ export interface EngineHostDeps {
   onRecoveryRequested(generation: number): void;
   onHostFailure(error: unknown): void;
   /** Absolute engine snapshot for the UI. The only job-state object. */
-  onSnapshot?(snapshot: EngineSnapshotDto): void;
+  onSnapshot?(snapshot: Snapshot): void;
   log?(level: "debug" | "info" | "warn" | "error", code: string, detail?: unknown): void;
 }
 
@@ -254,14 +254,14 @@ export function createEngineHost(deps: EngineHostDeps) {
 
   /**
    * Normalize generated request headers to the record `fetch` accepts. The contract
-   * shape is `HeaderDto[]` (`{name, value}`); hosts and `fetch` expect a
+   * shape is `Header[]` (`{name, value}`); hosts and `fetch` expect a
    * plain object.
    */
-  function headerRecord(headers: RequestDto["headers"]): Record<string, string> {
+  function headerRecord(headers: ResourceRequest["headers"]): Record<string, string> {
     return Object.fromEntries((headers ?? []).map(({ name, value }) => [name, value]));
   }
 
-  function plainRecipe(placement: TilePlacementDto): boolean {
+  function plainRecipe(placement: TilePlacement): boolean {
     return placement.processing === "none";
   }
 
@@ -299,7 +299,7 @@ export function createEngineHost(deps: EngineHostDeps) {
     }
   }
 
-  function fetchFailure(failure: HostFailure): FetchFailureDto {
+  function fetchFailure(failure: HostFailure): FetchFailure {
     return {
       code: failure.code,
       retryable: failure.retryable,
@@ -548,10 +548,10 @@ export function createEngineHost(deps: EngineHostDeps) {
   }
 
   /**
-   * Build the protocol `ErrorDto` for a failed awaited output operation.
+   * Build the protocol `Error` for a failed awaited output operation.
    * The engine records typed success or failure, never rendered text.
    */
-  function finalizationError(error: unknown): ErrorDto {
+  function finalizationError(error: unknown): EngineError {
     const failure = deps.classifyFailure(error);
     return {
       code: `${failure.code}`,
@@ -654,7 +654,7 @@ export function createEngineHost(deps: EngineHostDeps) {
       }),
   } satisfies DispatchTable<EffectMessage, void>;
 
-  function handleEngineMessages(messages: HostEffect[], snapshot?: EngineSnapshotDto) {
+  function handleEngineMessages(messages: HostEffect[], snapshot?: Snapshot) {
     // The snapshot is the only job-state object: it always forwards,
     // including after cancel. Engine events carry no state host-side
     // (pause, terminals, and progress all ride the snapshot) and are only
@@ -672,7 +672,7 @@ export function createEngineHost(deps: EngineHostDeps) {
 
   return {
     handleEngineMessages,
-    start(inputs: JobInputDto[]) {
+    start(inputs: JobInput[]) {
       sendToEngine({
         type: "engine.start",
         jobId: deps.jobId(),

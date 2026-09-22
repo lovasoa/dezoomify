@@ -4,7 +4,14 @@
 
 ## Engine-effect assembly
 
-The website and the extension job tab share one engine host (`engine-host.ts`) over the WASM session and differ only in transport and output surface. The runtime owns no job policy (retries, cancellation, partials, ordering stay in the engine). Effect meanings are defined in the [host-effect contract](job-engine.md#host-effect-contract); browser execution only below.
+The website and the extension job tab share one browser `JobService`
+(`browser-job-service.ts`) and engine host (`engine-host.ts`) over the WASM session;
+they differ only in transport and output surface. The runner owns validation,
+job identity, observer forwarding, and disposal directly, without an
+app-model forwarding wrapper. The runtime owns no job policy (retries,
+cancellation, partials, ordering stay in the engine). Effect meanings are
+defined in the [host-effect contract](job-engine.md#host-effect-contract);
+browser execution only below.
 
 The shared runtime calls the product's tile fetch callback once per engine acquisition. The website callback performs one direct fetch; the extension retains its source-to-extension fallback, with each selected route attempted once. Typed failures preserve the stable transport code, HTTP status, route, and any `Retry-After` hint in milliseconds; the engine alone decides whether and when to retry. Metadata keeps its direct-first fetch and eligible proxy fallback policy below, including its bounded proxy rate-limit retry.
 
@@ -13,15 +20,15 @@ The shared runtime calls the product's tile fetch callback once per engine acqui
 - Tiles draw at planned placement, 1:1 scale. Pixels past the planned edge crop from right and bottom (padded edge tiles); short tiles leave the gap empty. Each bitmap closes right after painting.
 - A clean output reports its actual product disposition; the extension starts an anchor save during finalization, while the website readies a blob URL for its later save click. The extension uses no `downloads` permission. Resources then release and one typed reply goes back. A tainted display-only canvas skips encoding.
 
-Tiles the browser reads as bytes take the WASM `applyProcessing` path per the core recipe. Ordinary unprocessed tiles without readable bytes fall back to plain `<img>` (display-only): the canvas taints, no bytes result, the job ends display-only. Only the first tile per origin tries readable bytes; later tiles go straight to `<img>`. Website and extension starts explicitly request the engine's largest-fitting selection policy with the browser's width, height, and area limits. The engine chooses the ready image and level, or follows deferred catalog entries on the same job within its existing bound. The shared UI has no manual image or level chooser. Generic browser-runner and WASM sessions that omit the automatic policy can still use generated catalog snapshots and the public `select-image`, `select-level`, and `follow-deferred` commands; a host that starts such a session supplies its own interaction policy.
+Tiles the browser reads as bytes take the WASM `applyProcessing` path per the core recipe. Ordinary unprocessed tiles without readable bytes fall back to plain `<img>` (display-only): the canvas taints, no bytes result, the job ends display-only. Only the first tile per origin tries readable bytes; later tiles go straight to `<img>`. Website and extension starts explicitly request the engine's largest-fitting selection policy with the browser's width, height, and area limits. The engine chooses the ready image and level, or follows deferred catalog entries on the same job within its existing bound. The shared UI has no manual image or level chooser. Generic browser-job-service and WASM sessions that omit the automatic policy can still use generated catalog snapshots and the public `select-image`, `select-level`, and `follow-deferred` commands; a host that starts such a session supplies its own interaction policy.
 
 ## Generated WASM boundary
 
-`worker-host.ts` imports session and message types from `@dezoomify/wasm-bindings` and declares no Rust contract types in parallel. `engine-host.ts` handles generated effects through one exhaustive typed table; each product does the same for events. It is the single browser conversion from closed `HostFailure` to `FetchFailureDto`; the Rust session adds its correlated request to build `ErrorDto`. See [Protocol](protocol.md#wasm-session-abi).
+`worker-host.ts` imports session and message types from `@dezoomify/wasm-bindings` and declares no Rust contract types in parallel. `engine-host.ts` handles generated effects through one exhaustive typed table; each product does the same for events. It is the single browser conversion from closed `HostFailure` to `FetchFailure`; the Rust session adds its correlated request to build `Error`. See [Protocol](protocol.md#wasm-session-abi).
 
 ## Catalog boundary
 
-Hosts consume the ordered generated `CatalogDto` as is. `Image` entries carry selectable geometry and levels; `ImageRequest` entries carry the follow-up `uri` of deferred metadata (a IIIF service, a bulk-list entry) for a fresh bounded attempt. Hosts define no catalog DTOs of their own.
+Hosts consume the ordered generated `Catalog` as is. `Image` entries carry optional `size` and selectable levels with optional `size` and `tileSize`; absent geometry stays unknown. `ImageRequest` entries carry the follow-up `uri` of deferred metadata (a IIIF service, a bulk-list entry) for a fresh bounded attempt. Hosts define no catalog types of their own.
 
 ## Ordinary image display
 

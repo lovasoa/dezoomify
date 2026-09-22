@@ -75,7 +75,7 @@ impl std::fmt::Display for DeepLinkError {
 impl std::error::Error for DeepLinkError {}
 
 /// Single shared credential-query vocabulary. Mirrors the canonical
-/// `dezoomify_protocol::dto::SENSITIVE_QUERY_KEYS` plus the shared vectors in
+/// `dezoomify::model::SENSITIVE_QUERY_KEYS` plus the shared vectors in
 /// `testdata/redaction-vectors.json` and the generated Rust bindings.
 /// Matching is case-insensitive exact (never substring) so `/cookie-recipe/`
 /// stays valid while `?token=secret` is rejected. This file stays std-only by
@@ -150,7 +150,7 @@ fn percent_decode(input: &str) -> Result<String, String> {
                         "bad escape %{}{}",
                         bytes[i + 1] as char,
                         bytes[i + 2] as char
-                    ))
+                    ));
                 }
             }
         } else if bytes[i] == b'+' {
@@ -254,7 +254,7 @@ pub fn parse_deep_link(url: &str) -> Result<DeepLink, DeepLinkError> {
             None => {
                 return Err(DeepLinkError::MalformedEncoding(format!(
                     "pair without =: {pair}"
-                )))
+                )));
             }
         };
         // Field names are literal; encoded names are rejected as malformed.

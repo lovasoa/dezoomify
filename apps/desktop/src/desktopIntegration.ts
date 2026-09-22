@@ -11,7 +11,6 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 export const PROTOCOL_MIN = "2.0" as const;
 export const PROTOCOL_MAX = "2.0" as const;
 export const PROTOCOL_VERSION = "2.0" as const;
-export const NATIVE_HOST_NAME = "dev.ophir.dezoomify.native_host" as const;
 export const APP_IDENTIFIER = "dev.ophir.dezoomify" as const;
 
 export const NATIVE_ENCODERS = ["png", "jpeg", "tiff", "zif", "webp"] as const;

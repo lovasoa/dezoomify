@@ -14,7 +14,7 @@ Run from the repository root:
 ```sh
 cargo xtask check          # fmt + clippy + Biome + fixture/protocol artifact validation
 cargo xtask test           # one Rust workspace run + one combined Node unit run
-cargo xtask test <target>  # core|protocol|job|wasm|browser|ui|web|native|desktop|extension|native-messaging|scenario|all
+cargo xtask test <target>  # core|protocol|job|wasm|browser|ui|web|native|desktop|extension|scenario|all
 cargo xtask build <target> # wasm|web|cli|desktop|extension
 cargo xtask dev <target>   # ui|web|desktop|extension
 cargo xtask release version|plan|build|sign|verify|publish
@@ -42,7 +42,7 @@ compilation. Use `--profile dev-debug` only when a diagnosis needs symbols.
 | Job engine (phases, retries, cancellation) | [`docs/job-engine.md`](docs/job-engine.md) |
 | Browser runtime, transports, tainted canvas | [`docs/browser-runtime.md`](docs/browser-runtime.md) |
 | Extension behavior, packaging, source binding | [`docs/extension.md`](docs/extension.md) |
-| CLI, desktop app, native messaging | [`docs/native-apps.md`](docs/native-apps.md) |
+| CLI and desktop app | [`docs/native-apps.md`](docs/native-apps.md) |
 | Protocol (commands, events, handoff) | [`docs/protocol.md`](docs/protocol.md) |
 | Errors and typed recovery | [`docs/errors.md`](docs/errors.md) |
 | Security and credential rules | [`docs/security.md`](docs/security.md) |
@@ -53,12 +53,13 @@ compilation. Use `--profile dev-debug` only when a diagnosis needs symbols.
 
 ## Hard rules
 
-- **Boundaries:** dependencies point inward (core → job → runtimes); core is
-  pure and deterministic (no I/O, clocks, or tasks); apps never import each
+- **Boundaries:** dependencies point inward (`model` → formats → `engine` →
+  runtimes); the `dezoomify` domain crate is pure and deterministic (no I/O,
+  clocks, or tasks); apps never import each
   other; shared UI never touches host globals directly. Enforced by
   Biome's scoped restrictions in `biome.jsonc` through `cargo xtask check`;
   add an architecture test whenever a boundary can be enforced mechanically.
-- **Contracts:** cross-language types are defined once in `crates/dezoomify-protocol`;
+- **Contracts:** cross-language types are defined once in `crates/dezoomify/src/model.rs`;
   `packages/wasm-bindings` is emitted by the real WASM build via
   `cargo xtask protocol generate` and never hand-edited. Browser boundary
   modules import it and never redeclare Rust contract types. Errors carry stable codes and typed recovery actions;
@@ -91,6 +92,7 @@ Use these terms consistently in docs, code, and user-facing copy.
 | shared UI | The host-neutral UI (`packages/shared-ui`). |
 | runtime | The effect layer inside an app (browser or native). Internal term. |
 | host | Whatever executes a job's effects. |
+| job service | The product-facing boundary that starts and controls jobs. Do not call this boundary a "runner". |
 | shared UI integration | An app's typed shared-UI↔runtime wiring. Never "adapter". |
 | WASM adapter | The role of `crates/dezoomify-wasm`. The only sanctioned "adapter". |
 | direct browser fetch | The website's credential-free readable fetch, always tried first. |

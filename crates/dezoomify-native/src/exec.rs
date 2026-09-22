@@ -1,6 +1,6 @@
 //! Completion-driven native execution: one engine, bounded async tasks.
 //!
-//! This module drives one [`dezoomify_engine::EngineJob`] to its terminal without
+//! This module drives one [`dezoomify::engine::EngineJob`] to its terminal without
 //! batch scopes: every engine effect spawns exactly one bounded task whose
 //! single completion is fed back to the engine. There is no competing
 //! retry loop, no scheduler, and no per-batch thread pool:
@@ -43,36 +43,45 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use dezoomify_core::core::discovery::{FetchCause, FetchCode, TransportKind};
-use dezoomify_core::core::model::{ProcessingRecipe, Request};
-use dezoomify_core::Vec2d;
-use dezoomify_engine::{
-    DiscoveryInput, Effect as EngineEffect, EffectId as EngineEffectId,
-    EffectResult as EngineEffectResult, EngineError as EngineJobError, EngineJob,
-    JobOptions as EngineOptions, JobSnapshot as EngineSnapshot, OutputDisposition,
-    RecoveryChoice as EnginePartialDecision, ResponseMetadata as EngineResponseMetadata,
-    SelectionPolicy as EngineSelectionPolicy, Update as EngineUpdate,
-    UserCommand as EngineUserCommand,
+use dezoomify::core::discovery::{FetchCause, FetchCode, TransportKind};
+use dezoomify::core::model::{ProcessingRecipe, Request};
+use dezoomify::engine::{
+    EffectId as EngineEffectId, EffectResult as EngineEffectResult, EngineError as EngineJobError,
+    EngineJob, JobOptions as EngineOptions, ResponseMetadata as EngineResponseMetadata,
+    Update as EngineUpdate, UserCommand as EngineUserCommand,
 };
-use dezoomify_protocol::dto::{
-    CatalogEntryDto, JobState as EngineLifecycle, ProbeOutcome,
-    SnapshotTerminalDto as EngineTerminal,
+use dezoomify::model::{
+    CatalogEntry, HostEffect as EngineEffect, JobState as EngineLifecycle, OutputDisposition,
+    ProbeOutcome, RecoveryChoice as EnginePartialDecision, RequestPurpose,
+    Snapshot as EngineSnapshot, Terminal as EngineTerminal,
 };
+use dezoomify::Vec2d;
 
 use crate::error::NativeError;
-use crate::http::{FetchOutcome, UserHeaders};
+use crate::http::{FetchLimits, FetchOutcome, UserHeaders};
 use crate::output::OutputFormat;
-use crate::pipeline::{
-    effective_cache_dir, load_image_with_metadata, merge_headers, DecodedTile, PartialPolicy,
-    PipelineConfig,
-};
-use crate::sink::{Published, Sink};
+use crate::pipeline::{load_image_with_metadata, merge_headers, DecodedTile, PartialPolicy};
+use crate::sink::{Published, Sink, SinkOptions};
 use crate::transport::NativeTransport;
 
-/// Deferred-resolution bound for same-job follows, owned by the engine
-/// (`JobOptions::max_deferred_follows`). The host never spawns replacement
-/// jobs: deferred entries resolve via `FollowDeferred` on the same job.
-const MAX_DEFERRED_FOLLOWS: u32 = 10;
+/// Native-only settings consumed by the effect executor. Engine policy is
+/// passed separately as canonical `dezoomify::engine::JobOptions`.
+#[derive(Clone, Debug)]
+pub(crate) struct NativeHostSettings {
+    pub fetch: FetchLimits,
+    pub min_interval: Duration,
+    pub cache_dir: PathBuf,
+    pub partial_policy: PartialPolicy,
+    pub max_retries: u32,
+    pub sink: SinkOptions,
+}
+
+/// Per-run control handles. These are process-local capabilities and never
+/// enter the serializable domain model.
+pub(crate) struct JobControl {
+    pub cancel: Arc<std::sync::atomic::AtomicBool>,
+    pub commands: Arc<Mutex<mpsc::Receiver<EngineUserCommand>>>,
+}
 
 /// Honest execution accounting, reported with every terminal result.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -138,13 +147,23 @@ pub(crate) struct OutputSpec {
 /// catalog entries resolve in place via `FollowDeferred` on the same job
 /// (engine-bounded, no host recursive replacement jobs).
 pub(crate) fn execute(
+    engine_options: EngineOptions,
     input_url: &str,
     output: OutputSpec,
-    config: &PipelineConfig,
+    settings: &NativeHostSettings,
+    control: JobControl,
     user: &UserHeaders,
     on_snapshot: &mut dyn FnMut(&EngineSnapshot),
 ) -> Result<OutputSummary, NativeError> {
-    execute_attempt(input_url, output, config, user, on_snapshot)
+    execute_attempt(
+        engine_options,
+        input_url,
+        output,
+        settings,
+        control,
+        user,
+        on_snapshot,
+    )
 }
 
 /// Completions from spawned tasks back to the pump. Each settles exactly
@@ -204,7 +223,8 @@ impl TileAttemptFailure {
 }
 
 struct Attempt<'a> {
-    config: &'a PipelineConfig,
+    settings: &'a NativeHostSettings,
+    cancel: Arc<std::sync::atomic::AtomicBool>,
     user: &'a UserHeaders,
     transport: Arc<NativeTransport>,
     output_path: PathBuf,
@@ -312,19 +332,21 @@ impl<'a> Attempt<'a> {
 }
 
 fn execute_attempt(
+    engine_options: EngineOptions,
     input_url: &str,
     output: OutputSpec,
-    config: &PipelineConfig,
+    settings: &NativeHostSettings,
+    control: JobControl,
     user: &UserHeaders,
     on_snapshot: &mut dyn FnMut(&EngineSnapshot),
 ) -> Result<OutputSummary, NativeError> {
-    let options = engine_options_for(input_url, config)?;
-    let (mut job, update) = EngineJob::start(options).map_err(map_setup_error)?;
-    let transport = Arc::new(NativeTransport::new(&config.fetch)?);
+    let (mut job, update) = EngineJob::start(engine_options).map_err(map_setup_error)?;
+    let transport = Arc::new(NativeTransport::new(&settings.fetch)?);
     let (completion_tx, completion_rx) = mpsc::channel::<Completion>();
     let mut handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
     let mut attempt = Attempt {
-        config,
+        settings,
+        cancel: control.cancel,
         user,
         transport,
         output_path: output.output_path,
@@ -332,7 +354,7 @@ fn execute_attempt(
         format: output.format,
         auto_output_dir: output.auto_output_dir,
         cache: Some((
-            effective_cache_dir(config),
+            settings.cache_dir.clone(),
             crate::cache::job_namespace(input_url),
         )),
         order: Vec::new(),
@@ -345,18 +367,18 @@ fn execute_attempt(
         published: None,
         cancel_sent: false,
         pending_missing: Vec::new(),
-        command_rx: config.exec_command_rx.clone(),
+        command_rx: Some(control.commands),
         instrumentation: Instrumentation::default(),
         in_flight: 0,
         decode_tails: Arc::new(DecodeTails::default()),
     };
-    let mut sink = Sink::new(config, output.format);
+    let mut sink = Sink::new(&settings.sink, output.format);
     let mut pump = Pump::new(update);
 
     loop {
         drain_commands(&mut job, &mut pump, &mut attempt);
         report_snapshot(&mut job, &mut attempt, on_snapshot);
-        if attempt.config.cancel_flag.load(Ordering::SeqCst)
+        if attempt.cancel.load(Ordering::SeqCst)
             && pump.snapshot.terminal.is_none()
             && !attempt.cancel_sent
         {
@@ -627,7 +649,7 @@ fn failure_error(attempt: &Attempt<'_>) -> NativeError {
                 "tile.download-failed",
                 format!(
                     "{} tile(s) still failing after {} retries",
-                    unacquired, attempt.config.max_retries,
+                    unacquired, attempt.settings.max_retries,
                 ),
             );
         }
@@ -684,7 +706,7 @@ fn fold_snapshot(attempt: &mut Attempt<'_>, snapshot: &EngineSnapshot) {
         let missing: Vec<String> = decision
             .missing
             .iter()
-            .map(|(tile, _)| tile.to_string())
+            .map(|missing| missing.tile.to_string())
             .collect();
         if !missing.is_empty() {
             attempt.pending_missing = missing;
@@ -695,10 +717,10 @@ fn fold_snapshot(attempt: &mut Attempt<'_>, snapshot: &EngineSnapshot) {
     }
 }
 
-fn selected_catalog_image(snapshot: &EngineSnapshot) -> Option<&dezoomify_protocol::dto::ImageDto> {
+fn selected_catalog_image(snapshot: &EngineSnapshot) -> Option<&dezoomify::model::Image> {
     let position = usize::try_from(snapshot.selection.image?).ok()?;
     let catalog = snapshot.selection.catalog.as_ref()?;
-    let CatalogEntryDto::Image(image) = catalog.entries.get(position)? else {
+    let CatalogEntry::Image(image) = catalog.entries.get(position)? else {
         return None;
     };
     Some(image)
@@ -726,39 +748,38 @@ fn execute_effects(
 ) -> Result<(), NativeError> {
     for effect in effects {
         match effect {
-            EngineEffect::AcquireMetadata { id, uri } => {
+            EngineEffect::AcquireResource { request } => {
                 if pump.snapshot.lifecycle != EngineLifecycle::Discovering {
                     continue;
                 }
+                let id = EngineEffectId(request.id);
+                let uri = request.uri;
                 let merged = merge_headers(&Request::new(&uri));
                 attempt.instrumentation.attempts += 1;
                 spawn_metadata(attempt, completion_tx, handles, id, uri, merged);
             }
             EngineEffect::AcquireTile {
-                id,
+                request,
                 tile,
-                uri,
-                headers,
-                processing,
-                destination,
-                expected_size,
-                canvas,
-                probe,
-                probe_output,
+                placement,
             } => {
-                let headers = headers
+                let id = EngineEffectId(request.id);
+                let uri = request.uri;
+                let probe = request.purpose == RequestPurpose::Probe;
+                let headers = request
+                    .headers
                     .into_iter()
                     .map(|header| (header.name.to_ascii_lowercase(), header.value))
                     .collect::<BTreeMap<_, _>>();
                 let destination = Vec2d {
-                    x: destination.x,
-                    y: destination.y,
+                    x: placement.position.x,
+                    y: placement.position.y,
                 };
-                let expected_size = expected_size.map(|size| Vec2d {
+                let expected_size = placement.expected_size.map(|size| Vec2d {
                     x: size.width,
                     y: size.height,
                 });
-                let canvas = canvas.map(|size| Vec2d {
+                let canvas = placement.canvas.map(|size| Vec2d {
                     x: size.width,
                     y: size.height,
                 });
@@ -772,11 +793,11 @@ fn execute_effects(
                         tile,
                         uri,
                         headers,
-                        processing,
+                        placement.processing,
                         destination,
                         expected_size,
                         canvas,
-                        probe_output,
+                        placement.probe_output,
                     );
                     continue;
                 }
@@ -789,9 +810,9 @@ fn execute_effects(
                 // throttle); ZERO disables the sleep entirely.
                 // (The attempt counter bumped once above covers both
                 // ordinary and probe acquisitions.)
-                if !attempt.config.min_interval.is_zero() {
+                if !attempt.settings.min_interval.is_zero() {
                     if let Some(last) = attempt.throttle_last {
-                        let next = last + attempt.config.min_interval;
+                        let next = last + attempt.settings.min_interval;
                         let now = Instant::now();
                         if next > now {
                             std::thread::sleep(next - now);
@@ -809,14 +830,14 @@ fn execute_effects(
                         tile: tile_id,
                         uri,
                         headers,
-                        processing,
+                        processing: placement.processing,
                         destination,
                         extent: expected_size,
                     },
                 );
             }
             EngineEffect::WaitRetryTimer {
-                id,
+                effect,
                 tile,
                 attempt: retry_attempt,
                 delay_ms,
@@ -827,20 +848,22 @@ fn execute_effects(
                     attempt,
                     completion_tx,
                     handles,
-                    id,
+                    EngineEffectId(effect),
                     tile,
                     retry_attempt,
                     delay_ms,
                 );
             }
-            EngineEffect::FinalizeOutput { id, partial, .. } => {
+            EngineEffect::FinalizeOutput {
+                effect, partial, ..
+            } => {
                 // The engine awaits finalization only after every free slot
                 // settled; defensively drain any straggler first so the
                 // commit below observes the full canvas.
-                let update = finalize_output(job, attempt, sink, id, partial)?;
+                let update = finalize_output(job, attempt, sink, EngineEffectId(effect), partial)?;
                 apply_update(pump, update);
             }
-            EngineEffect::RequestPartialDecision { generation, .. } => {
+            EngineEffect::RequestDecision { generation } => {
                 let Some((answered_generation, decision)) =
                     await_partial_choice(attempt, generation)
                 else {
@@ -870,7 +893,7 @@ fn execute_effects(
                     })?;
                 apply_update(pump, update);
             }
-            EngineEffect::CancelRelease { .. } => sink.release(),
+            EngineEffect::CancelWork => sink.release(),
         }
     }
     Ok(())
@@ -889,9 +912,9 @@ fn spawn_metadata(
     let transport = Arc::clone(&attempt.transport);
     let task_transport = Arc::clone(&transport);
     let user = attempt.user.clone();
-    let limits = attempt.config.fetch.clone();
+    let limits = attempt.settings.fetch.clone();
     let tx = completion_tx.clone();
-    let cancel = Arc::clone(&attempt.config.cancel_flag);
+    let cancel = Arc::clone(&attempt.cancel);
     attempt.note_flight();
     handles.push(transport.spawn(async move {
         // A cancelled wait still delivers: the pump settles every tracked
@@ -945,13 +968,16 @@ fn spawn_probe(
     let transport = Arc::clone(&attempt.transport);
     let task_transport = Arc::clone(&transport);
     let user = attempt.user.clone();
-    let limits = attempt.config.fetch.clone();
+    let limits = attempt.settings.fetch.clone();
     let tx = completion_tx.clone();
     let tails = Arc::clone(&attempt.decode_tails);
     attempt.note_flight();
     handles.push(transport.spawn(async move {
         let mut request = Request::new(&uri);
-        request.headers = headers;
+        request.headers = headers
+            .into_iter()
+            .map(|(name, value)| dezoomify::model::Header { name, value })
+            .collect();
         let merged = merge_headers(&request);
         let fetched = task_transport
             .fetch_async(&uri, &merged, Some(&user), None, &limits)
@@ -1033,7 +1059,7 @@ fn spawn_tile(
     let transport = Arc::clone(&attempt.transport);
     let task_transport = Arc::clone(&transport);
     let user = attempt.user.clone();
-    let config_fetch = attempt.config.fetch.clone();
+    let config_fetch = attempt.settings.fetch.clone();
     let cache = attempt.cache.clone();
     let tx = completion_tx.clone();
     let tails = Arc::clone(&attempt.decode_tails);
@@ -1102,7 +1128,14 @@ async fn fetch_and_decode(
         }
     }
     let mut request = Request::new(&need.uri);
-    request.headers = need.headers.clone();
+    request.headers = need
+        .headers
+        .iter()
+        .map(|(name, value)| dezoomify::model::Header {
+            name: name.clone(),
+            value: value.clone(),
+        })
+        .collect();
     let merged = merge_headers(&request);
     let outcome = transport
         .fetch_async(&need.uri, &merged, Some(user), None, fetch_limits)
@@ -1225,7 +1258,7 @@ fn feed_completion(
     // never painted, never replied -- exactly like late host responses. The
     // loop-top Cancel owns the transition and the commit point refuses
     // publication once set, so dropping is always honest.
-    if attempt.config.cancel_flag.load(Ordering::SeqCst) || job.snapshot().terminal.is_some() {
+    if attempt.cancel.load(Ordering::SeqCst) || job.snapshot().terminal.is_some() {
         return Ok(job.snapshot_update());
     }
     match completion {
@@ -1253,7 +1286,7 @@ fn feed_completion(
                 Err(cause) => complete_effect(
                     job,
                     effect,
-                    EngineEffectResult::MetadataFailed(dezoomify_engine::Failure {
+                    EngineEffectResult::MetadataFailed(dezoomify::engine::Failure {
                         code: cause.code.to_string(),
                         http: cause.http,
                         retry_after_ms: None,
@@ -1327,7 +1360,7 @@ fn feed_completion(
                     complete_effect(job, effect, EngineEffectResult::TileAcquired)
                 }
                 Err(failure) => {
-                    let tile_failure = dezoomify_engine::retry::TileFailure::new(
+                    let tile_failure = dezoomify::engine::retry::TileFailure::new(
                         canonical_failure_code(&failure.error.code),
                         failure.http,
                         failure.retry_after_ms,
@@ -1341,7 +1374,7 @@ fn feed_completion(
                     complete_effect(
                         job,
                         effect,
-                        EngineEffectResult::TileFailed(dezoomify_engine::Failure {
+                        EngineEffectResult::TileFailed(dezoomify::engine::Failure {
                             code: canonical_failure_code(&failure.error.code).to_string(),
                             http: failure.http,
                             retry_after_ms: failure.retry_after_ms,
@@ -1363,7 +1396,7 @@ fn feed_completion(
             // Stale-safe: a cancelled wait delivers nothing (the task
             // checks the flag), and a terminal race resolves inside the
             // engine rather than failing the pump.
-            if attempt.config.cancel_flag.load(Ordering::SeqCst) {
+            if attempt.cancel.load(Ordering::SeqCst) {
                 return Ok(job.snapshot_update());
             }
             match job.complete(effect, EngineEffectResult::TimerElapsed) {
@@ -1390,7 +1423,7 @@ fn finalize_output(
     let dest = attempt.output_path.clone();
     let overwrite = attempt.overwrite;
     let format = attempt.format;
-    let cancel = Arc::clone(&attempt.config.cancel_flag);
+    let cancel = Arc::clone(&attempt.cancel);
     let (image_size, partial, mut missing) =
         sink.assemble(&attempt.order, &|id| attempt.settled.contains(id))?;
     // Union with the engine ledger when it names the same holes; the
@@ -1454,7 +1487,7 @@ fn await_partial_choice(
     generation: u32,
 ) -> Option<(u32, EnginePartialDecision)> {
     let policy = || {
-        if attempt.config.partial_policy == PartialPolicy::Keep {
+        if attempt.settings.partial_policy == PartialPolicy::Keep {
             EnginePartialDecision::Keep
         } else {
             EnginePartialDecision::Discard
@@ -1465,7 +1498,7 @@ fn await_partial_choice(
     };
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
-        if attempt.config.cancel_flag.load(Ordering::SeqCst) {
+        if attempt.cancel.load(Ordering::SeqCst) {
             return None;
         }
         let wait = deadline.saturating_duration_since(Instant::now());
@@ -1490,50 +1523,6 @@ fn await_partial_choice(
             }
         }
     }
-}
-
-/// Map pipeline bounds onto validated canonical job options. Transport
-/// byte limits stay identical on both sides so the fetch layer, not the
-/// engine, reports oversize resources.
-fn engine_options_for(
-    input_url: &str,
-    config: &PipelineConfig,
-) -> Result<EngineOptions, NativeError> {
-    let tiles = config.max_tiles.clamp(1, 16_777_216) as u32;
-    let fetches = (config.max_concurrent.clamp(1, 64) as u32).min(tiles);
-    let retries = config.max_retries.clamp(0, 1024);
-    let retry_base_delay_ms = config
-        .retry_base_delay_ms
-        .clamp(0, dezoomify_engine::retry::MAX_RETRY_AFTER_MS);
-    let max_bytes = config.fetch.max_bytes.clamp(1024, 4_294_967_296);
-    let mut options = EngineOptions::new(vec![DiscoveryInput::new(input_url)]);
-    options.format = config.format.clone();
-    options.selection = EngineSelectionPolicy::NativeAutomatic {
-        image_index: config.image_index.unwrap_or(0),
-        largest: config.largest,
-        max_width: config.max_width,
-        max_height: config.max_height,
-        zoom_level: config.zoom_level,
-    };
-    // The pump owns partial decisions through its gate wait; the facade
-    // only surfaces them.
-    options.partial = dezoomify_engine::PartialPolicy::Prompt;
-    options.max_concurrent = fetches;
-    options.max_tiles = tiles;
-    options.max_retries = retries;
-    options.retry_base_delay_ms = retry_base_delay_ms;
-    options.max_bytes = max_bytes;
-    options.max_deferred_follows = MAX_DEFERRED_FOLLOWS;
-    // Bounds and inputs validated by the canonical start; oversize budgets
-    // fail typed through the same mapping below.
-    EngineJob::validate_options(&options).map_err(|e| match e.code.as_str() {
-        "job.invalid-input" => map_setup_error(e),
-        _ => NativeError::new(
-            "tile.limit",
-            format!("native bounds exceed job limits: {}", e.message),
-        ),
-    })?;
-    Ok(options)
 }
 
 fn map_setup_error(error: EngineJobError) -> NativeError {

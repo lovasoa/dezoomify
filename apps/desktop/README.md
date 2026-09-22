@@ -1,23 +1,14 @@
 # Desktop Application (lean shell)
 
-Dezoomify native shell: validated deep links, command registry, job
-lifecycle table, capability manifests, a standalone framed Native Messaging
-entry point for compatible clients, and per-user initial registration
-(Native Messaging manifests plus the `dezoomify://` protocol handler).
+Dezoomify native shell: validated deep links, command registry, job lifecycle
+table, capability manifests, and per-user `dezoomify://` protocol-handler
+registration.
 
 - Shell: lean `src-tauri/` (pure Rust, no Tauri SDK vendored); frontend contract from `packages/shared-ui`.
 - Deep links are validated, bounded, and confirmed before any work starts.
-- The shipped browser extension does not connect to Native Messaging. The
-  independently registered host retains its framed protocol for compatible
-  clients. See `src/native_host/`.
-- First-run registration is per-user only: `dezoomify-desktop
-  --register-native-host` writes the manifests and protocol handler;
-  `--check-native-host` inspects, `--unregister-native-host` cleans up.
-- Installers ship unsigned (no paid Apple/Azure signing in this free project);
-  automatic updates are disabled, so check GitHub Releases manually.
-
-- Shell: lean `src-tauri/` (no Tauri SDK vendored); frontend contract from `packages/shared-ui`.
-- Deep links are validated, bounded, and confirmed before any work starts.
+- First-run protocol registration is per-user only. The lean shell exposes
+  `--register-protocol-handler` and `--unregister-protocol-handler`; the Tauri
+  app registers the handler best-effort when it starts.
 - Installers ship unsigned (no paid Apple/Azure signing in this free project);
   automatic updates are disabled, so check GitHub Releases manually.
 

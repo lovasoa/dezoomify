@@ -412,7 +412,7 @@ fn take_value(
 }
 
 /// Known `--format` names, mirroring the core registry order
-/// (`dezoomify-core/src/core/registry.rs` snapshot). `auto` is the
+/// (`dezoomify::formats` registry snapshot). `auto` is the
 /// pseudo-name for automatic detection and is always accepted.
 #[must_use]
 pub fn known_formats() -> &'static [&'static str] {

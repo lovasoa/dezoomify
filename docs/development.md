@@ -4,9 +4,10 @@ One monorepo: Rust crates, generated WASM bindings, shared UI, hosts, extension 
 
 ## Working areas
 
-- `crates/dezoomify-core`: pure discovery, catalogs, tile plans, processing recipes.
-- `crates/dezoomify-engine`: pure state machine through finalization and cleanup.
-- `crates/dezoomify-protocol`: contract source; `packages/wasm-bindings` tracks the emitted declaration.
+- `crates/dezoomify`: pure domain crate. `model` owns canonical public values,
+  formats own discovery/planning, and `engine` owns lifecycle policy.
+- `crates/dezoomify/src/model.rs`: contract source;
+  `packages/wasm-bindings` tracks the emitted declaration.
 - `crates/dezoomify-native`: native effects for CLI and Tauri.
 - `crates/dezoomify-wasm`: core and job behavior for browser hosts.
 - `packages/shared-ui`: shared React UI; `packages/browser-runtime`: browser workers, decoding, canvases, and saving.

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { presentIdle, presentSnapshot } from "../packages/shared-ui/src/snapshot-view.ts";
 
-// Authoritative EngineSnapshotDto builder: tests render the latest snapshot
+// Authoritative Snapshot builder: tests render the latest snapshot
 // directly, never a folded event walk.
 function dto(overrides = {}) {
   return {

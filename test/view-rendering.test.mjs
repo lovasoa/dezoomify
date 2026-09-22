@@ -9,7 +9,7 @@ import {
 import { renderView } from "../packages/shared-ui/src/view.tsx";
 import { act, click } from "./react-dom.mjs";
 
-// Authoritative EngineSnapshotDto builder: each presentation renders one
+// Authoritative Snapshot builder: each presentation renders one
 // latest snapshot, never a folded event walk.
 function dto(overrides = {}) {
   return {
