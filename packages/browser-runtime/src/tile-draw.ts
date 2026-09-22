@@ -98,7 +98,8 @@ export function loadTileImage(
     setTimeoutFn?: (cb: () => void, ms: number) => unknown;
     clearTimeoutFn?: (t: unknown) => void;
     ms?: number;
-    hooks?: Pick<TileDrawHooks, "onRequestStart" | "onRequestEnd" | "onUpdate">;
+    hooks?: Pick<TileDrawHooks, "onRequestStart" | "onRequestEnd" | "onUpdate"> &
+      Partial<Pick<TileDrawHooks, "onLog">>;
   } = {},
 ): Promise<TileImageElementLike> {
   const ms = deps.ms ?? 30000;
@@ -123,10 +124,16 @@ export function loadTileImage(
       deps.clearTimeoutFn ?? ((t: unknown) => clearTimeout(t as ReturnType<typeof setTimeout>));
     const img = Ctor ? new Ctor() : new Image();
     let timer: unknown = null;
+    let settled = false;
     const done = (ok: boolean, value: TileImageElementLike | Error) => {
+      if (settled) return;
+      settled = true;
       if (timer) clearTimer(timer);
       timer = null;
       if (hooks) {
+        hooks.onLog?.(
+          `fetch img ${ok ? `loaded ${img.naturalWidth}x${img.naturalHeight}` : (value as Error).message} (HTTP status unavailable) url=${url}`,
+        );
         hooks.onRequestEnd(reqId, ok);
         hooks.onUpdate();
       }
@@ -138,12 +145,12 @@ export function loadTileImage(
       once: true,
     });
     timer = setTimer(() => {
+      done(false, new Error(`tile image timed out after ${ms / 1000}s`));
       try {
         img.src = "";
       } catch {
         // Cancelling a hung load must never throw.
       }
-      done(false, new Error(`tile image timed out after ${ms / 1000}s`));
     }, ms);
     // Let the browser choose its ordinary image-request referrer behavior.
     img.referrerPolicy = "no-referrer";

@@ -416,11 +416,13 @@ test("an adapter error projects to a terminal failed snapshot, not a hang", asyn
 
 test("dispose aborts in-flight fetches, terminates the worker, and settles pending work", async () => {
   let sawAbortedSignal = false;
+  const logs = [];
   const p = product({
+    log: (level, code, detail) => logs.push({ level, code, detail }),
     fetchResource: async (effect, signal) => {
       await new Promise((resolve) => setTimeout(resolve, 20));
       sawAbortedSignal = signal.aborted;
-      return { bytes: new Uint8Array([1]) };
+      throw new Error("aborted");
     },
   });
   const service = createBrowserJobService(p.deps);
@@ -433,6 +435,7 @@ test("dispose aborts in-flight fetches, terminates the worker, and settles pendi
   assert.equal(p.worker.terminated, true);
   assert.equal(sawAbortedSignal, true, "in-flight fetch never observed the abort");
   assert.equal(emitted.length, emittedBeforeDispose, "disposed attempt emitted after teardown");
+  assert.ok(!logs.some(({ code }) => code === "effect-failed"));
 });
 
 test("processing calls transfer their buffer and settle on disposal", async () => {

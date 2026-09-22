@@ -42,6 +42,16 @@ Readable metadata, processed tiles, and clean saves start with direct browser fe
 
 Object URLs live for one job and are then revoked.
 
+The website activity log records one result per transport attempt with the
+requested URL, route, HTTP status when readable, and byte count on success.
+Direct fetches include content type and a bounded server-body signal on HTTP
+errors; proxy failures include their code and policy reason. Redirects include
+the final URL when available. Network/CORS failures and ordinary image loads
+explicitly identify unavailable responses or HTTP status; they never invent a
+server response. Cancelled fetches and disposed engine effects add no failure
+noise. Engine bookkeeping stays at debug level, outside the default activity
+log. These diagnostics remain local under the [credential rules](security.md#credentials).
+
 ## Request order
 
 This order is canonical; all other pages link here instead of restating it.

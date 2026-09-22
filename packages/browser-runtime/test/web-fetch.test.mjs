@@ -71,6 +71,9 @@ test("fetchDirect reports readable bodies with content type", async () => {
   assert.equal(res.contentType, "application/json");
   assert.deepEqual(h.starts, ["direct"]);
   assert.deepEqual(h.ends, [[1, true]]);
+  assert.deepEqual(h.log, [
+    "fetch direct HTTP 200 bytes=2 type=application/json url=https://a.test/x.json final=https://a.test/final.json",
+  ]);
 });
 
 test("fetchDirect maps HTTP errors and rejections", async () => {
@@ -99,6 +102,10 @@ test("fetchDirect maps HTTP errors and rejections", async () => {
   });
   const net = await failing.fetchDirect("https://a.test/x");
   assert.equal(net.outcome, "network-error");
+  assert.deepEqual(h.log, [
+    "fetch direct HTTP 404 url=https://a.test/x",
+    "fetch direct network/CORS error (no readable response) url=https://a.test/x",
+  ]);
 });
 
 test("fetchDirect honors caller cancellation", async () => {
@@ -126,6 +133,71 @@ test("fetchDirect honors caller cancellation", async () => {
   ctrl.abort();
   const res = await fetcher.fetchDirect("https://a.test/x", {}, ctrl.signal);
   assert.equal(res.outcome, "cancelled");
+  assert.deepEqual(h.log, []);
+});
+
+test("tile HTTP failures log their URL and a bounded single-line server response", async () => {
+  const h = hooks();
+  const fetcher = createWebFetcher({
+    fetchImpl: async () => ({
+      status: 403,
+      arrayBuffer: async () =>
+        new TextEncoder().encode(`<h1>Forbidden</h1>\n${"x".repeat(8000)}`).buffer,
+    }),
+    isProxyEligible: () => ({ eligible: false, reason: "test" }),
+    hooks: h,
+    messages,
+  });
+  await assert.rejects(fetcher.fetchTileFor("https://a.test/0/0_0.jpg", {}));
+  assert.equal(h.log.length, 1);
+  assert.match(h.log[0], /HTTP 403 response="Forbidden x/);
+  assert.match(h.log[0], /url=https:\/\/a.test\/0\/0_0.jpg$/);
+  assert.ok(h.log[0].length < 500);
+  assert.ok(!h.log[0].includes("\n"));
+});
+
+test("metadata fallback logs each actual route and preserves proxy status and reason", async () => {
+  const h = hooks();
+  const fetcher = createWebFetcher({
+    fetchImpl: async () => {
+      throw new TypeError("Failed to fetch");
+    },
+    proxyTransport: {
+      fetchViaProxy: async () => ({
+        ok: false,
+        status: 403,
+        code: "PROXY_POLICY_DENIED",
+        reason: "content-type",
+      }),
+    },
+    isProxyEligible: () => ({ eligible: true, reason: "public" }),
+    hooks: h,
+    messages,
+  });
+  await assert.rejects(fetcher.fetchMetadataFor("https://a.test/info", {}));
+  assert.deepEqual(h.log, [
+    "fetch direct network/CORS error (no readable response) url=https://a.test/info",
+    "fetch metadata-proxy HTTP 403 code=PROXY_POLICY_DENIED reason=content-type url=https://a.test/info",
+  ]);
+});
+
+test("body-read failures retain the received HTTP status", async () => {
+  const h = hooks();
+  const fetcher = createWebFetcher({
+    fetchImpl: async () => ({
+      status: 200,
+      arrayBuffer: async () => {
+        throw new Error("broken stream");
+      },
+    }),
+    isProxyEligible: () => ({ eligible: false, reason: "test" }),
+    hooks: h,
+    messages,
+  });
+  await fetcher.fetchDirect("https://a.test/tile");
+  assert.equal(h.log.length, 1);
+  assert.match(h.log[0], /HTTP 200 body-read-failed/);
+  assert.match(h.log[0], /url=https:\/\/a.test\/tile$/);
 });
 
 test("fetchMetadataFor serves direct bytes without the proxy", async () => {

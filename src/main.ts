@@ -283,6 +283,9 @@ async function probeSizeFor(url: string, headers: Record<string, string>, signal
     loadImage: async (probeUrl) => {
       const img = await loadTileImage(probeUrl, {
         hooks: {
+          onLog: (line) => {
+            if (!signal?.aborted) webLog.info("runtime", line);
+          },
           onRequestStart: (label) => jobActivity.noteRequestStart(label),
           onRequestEnd: (id, ok) => jobActivity.noteRequestEnd(id, ok),
           onUpdate: update,
@@ -580,6 +583,9 @@ async function runJob(url: string, origin = url): Promise<void> {
     loadDisplayImage: (tileUrl: string) =>
       loadTileImage(tileUrl, {
         hooks: {
+          onLog: (line) => {
+            if (run === activeRun && jobHandle) webLog.info("runtime", line);
+          },
           onRequestStart: (label) => jobActivity.noteRequestStart(label),
           onRequestEnd: (id, ok) => jobActivity.noteRequestEnd(id, ok),
           onUpdate: update,
@@ -621,9 +627,7 @@ async function runJob(url: string, origin = url): Promise<void> {
       void jobHandle?.command({ type: "answer-partial", generation, decision: "discard" });
     },
     log: (level, code, detail) => {
-      if (level === "error") webLog.error(code, detail);
-      else if (level === "warn") webLog.warn(code, detail);
-      else webLog.info(code, detail);
+      webLog.log(level, code, detail);
     },
   });
 

@@ -72,6 +72,43 @@ test("drawPlacedTile measures ordinary image elements by natural size", () => {
   assert.deepEqual(ctx.drawn[0], { sw: 256, sh: 128, dx: 0, dy: 0, dw: 256, dh: 128 });
 });
 
+test("image timeout logs once even when clearing src fires an error", async () => {
+  const log = [];
+  let timeout;
+  let completions = 0;
+  class Image {
+    handlers = {};
+    addEventListener(type, fn) {
+      this.handlers[type] = fn;
+    }
+    set src(value) {
+      if (value === "") this.handlers.error();
+    }
+  }
+  const pending = loadTileImage("https://a.test/slow.jpg", {
+    imageCtor: Image,
+    ms: 100,
+    setTimeoutFn: (fn) => {
+      timeout = fn;
+      return 1;
+    },
+    clearTimeoutFn: () => {},
+    hooks: {
+      ...hooks(),
+      onRequestEnd: () => {
+        completions += 1;
+      },
+      onLog: (line) => log.push(line),
+    },
+  });
+  timeout();
+  await assert.rejects(pending, /timed out/);
+  assert.equal(completions, 1);
+  assert.deepEqual(log, [
+    "fetch img tile image timed out after 0.1s (HTTP status unavailable) url=https://a.test/slow.jpg",
+  ]);
+});
+
 test("createProcessQueue serializes processing while fetching stays parallel", async () => {
   const order = [];
   const run = createProcessQueue(async (recipe, bytes) => {
@@ -87,6 +124,8 @@ test("createProcessQueue serializes processing while fetching stays parallel", a
 
 test("loadTileImage resolves on load and rejects on error", async () => {
   const h = hooks();
+  const log = [];
+  h.onLog = (line) => log.push(line);
   class FakeImg {
     constructor() {
       this.handlers = {};
@@ -119,5 +158,10 @@ test("loadTileImage resolves on load and rejects on error", async () => {
       hooks: h,
     }),
     /failed to load/,
+  );
+  assert.equal(log.length, 2);
+  assert.match(
+    log[1],
+    /fetch img tile image failed to load \(HTTP status unavailable\) url=https:\/\/a.test\/2.png/,
   );
 });
