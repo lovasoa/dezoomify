@@ -7,8 +7,8 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveredEntry, DiscoveryCatalog, DiscoveryError, DiscoveryMatch, FormatSpec, Grid, Request,
-    ResolvedImage, ResolvedLevel, floor_index,
+    DiscoveryCatalog, DiscoveryError, DiscoveryMatch, FormatSpec, Grid, Request, ResolvedLevel,
+    floor_index,
 };
 
 pub const SPEC: FormatSpec = FormatSpec::new(
@@ -107,14 +107,7 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> 
             "ArcGIS MapServer has no LODs".into(),
         ));
     }
-    Ok(DiscoveryCatalog::new([DiscoveredEntry::Ready(
-        ResolvedImage {
-            title,
-            format: "arcgis",
-            levels,
-            ..Default::default()
-        },
-    )]))
+    Ok(DiscoveryCatalog::ready("arcgis", title, levels))
 }
 
 fn validate_metadata(metadata: Metadata) -> Result<(TileInfo, Extent), DiscoveryError> {

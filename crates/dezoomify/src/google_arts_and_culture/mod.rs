@@ -2,9 +2,8 @@
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveredEntry, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ProcessingRecipe, Request,
-    ResolvedImage, ResolvedLevel,
+    DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ProcessingRecipe, Request, ResolvedLevel,
 };
 use std::sync::Arc;
 use tile_info::{PageInfo, TileInfo};
@@ -90,19 +89,16 @@ fn catalog(page: &Arc<PageInfo>, bytes: &[u8]) -> Result<DiscoveryCatalog, Disco
         })
         .collect::<Result<Vec<_>, DiscoveryError>>()?;
     levels.sort_by_key(|level| level.source.image_size().map_or(0, Vec2d::area));
-    Ok(DiscoveryCatalog::new([DiscoveredEntry::Ready(
-        ResolvedImage {
-            title: Some(page.name.clone()),
-            format: "google_arts_and_culture",
-            levels,
-            ..Default::default()
-        },
-    )]))
+    Ok(DiscoveryCatalog::ready(
+        "google_arts_and_culture",
+        Some(page.name.clone()),
+        levels,
+    ))
 }
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{ResourceResponse, TileSource};
+    use crate::core::{DiscoveredEntry, ResourceResponse, TileSource};
 
     fn fixture_catalog() -> DiscoveryCatalog {
         let mut registry = crate::core::Registry::new();

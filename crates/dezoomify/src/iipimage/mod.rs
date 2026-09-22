@@ -5,8 +5,7 @@ use std::sync::Arc;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveredEntry, DiscoveryCatalog, DiscoveryError, DiscoveryMatch, FormatSpec, Grid, Request,
-    ResolvedImage, ResolvedLevel,
+    DiscoveryCatalog, DiscoveryError, DiscoveryMatch, FormatSpec, Grid, Request, ResolvedLevel,
 };
 
 const META: &str = "&OBJ=Max-size&OBJ=Tile-size&OBJ=Resolution-number";
@@ -59,13 +58,7 @@ fn catalog(uri: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> 
         })
         .collect::<Result<Vec<_>, DiscoveryError>>()?;
     levels.sort_by_key(|level| level.source.image_size().map_or(0, Vec2d::area));
-    Ok(DiscoveryCatalog::new([DiscoveredEntry::Ready(
-        ResolvedImage {
-            format: "iipimage",
-            levels,
-            ..Default::default()
-        },
-    )]))
+    Ok(DiscoveryCatalog::ready("iipimage", None, levels))
 }
 
 #[derive(Clone, Debug)]
@@ -123,7 +116,7 @@ impl TryFrom<&[u8]> for Metadata {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::TileSource;
+    use crate::core::{DiscoveredEntry, TileSource};
 
     #[test]
     fn lowercase_fif_urls_request_canonical_metadata() {

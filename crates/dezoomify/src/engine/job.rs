@@ -14,8 +14,7 @@ use crate::core::discovery::{
 };
 use crate::core::model::{DiscoveredEntry, DiscoveryCatalog, TileRole, TileSpec};
 use crate::core::registry::{default_registry, registry_for};
-use crate::core::tile_plan::TileSource;
-use crate::core::tile_plan::TileSourceError;
+use crate::core::tile_plan::{TileProgramStart, TileSourceError};
 
 use crate::engine::config::Config;
 use crate::engine::engine_api::DiscoveryInput;
@@ -817,19 +816,13 @@ impl Job {
             };
             selected_level.source.clone()
         };
-        match source {
-            TileSource::Grid(grid) => {
-                let canvas = Some(grid.image_size());
-                let total = grid.count();
-                self.plan_from_tiles(Box::new(grid.tiles_row_major()), total, canvas)
-            }
-            TileSource::Positioned(positioned) => {
-                let canvas = positioned.image_size();
-                let total = positioned.count();
-                self.plan_from_tiles(Box::new(positioned.tiles()), total, canvas)
-            }
-            TileSource::DiscoverableGrid(discoverable) => self.drive_probe(discoverable.start()),
-            TileSource::Adaptive(adaptive) => self.drive_probe(adaptive.start()),
+        match source.start() {
+            TileProgramStart::Planned {
+                tiles,
+                total,
+                canvas,
+            } => self.plan_from_tiles(tiles, total, canvas),
+            TileProgramStart::Discovering(step) => self.drive_probe(step),
         }
     }
 

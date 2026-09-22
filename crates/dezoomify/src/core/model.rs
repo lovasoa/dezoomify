@@ -205,6 +205,30 @@ impl DiscoveryCatalog {
         Self(entries.into_iter().collect())
     }
 
+    /// Compile one ready image into a catalog using the canonical image-plan
+    /// shape. Formats supply identity, optional title, and their level
+    /// programs; catalog publication owns the remaining defaults.
+    #[must_use]
+    pub fn ready(format: &'static str, title: Option<String>, levels: Vec<ResolvedLevel>) -> Self {
+        Self::ready_with_warnings(format, title, levels, Vec::new())
+    }
+
+    /// Compile one ready image whose decoder produced image-wide warnings.
+    #[must_use]
+    pub fn ready_with_warnings(
+        format: &'static str,
+        title: Option<String>,
+        levels: Vec<ResolvedLevel>,
+        warnings: Vec<String>,
+    ) -> Self {
+        Self::new([DiscoveredEntry::Ready(ResolvedImage {
+            title,
+            format,
+            levels,
+            warnings,
+        })])
+    }
+
     /// Canonical public catalog paired with this catalog's private tile
     /// programs. Array positions are preserved exactly.
     #[must_use]

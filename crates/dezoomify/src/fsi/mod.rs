@@ -6,9 +6,9 @@ use regex::Regex;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveredEntry, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, Request, ResolvedImage,
-    ResolvedLevel, image_title, resolve_relative,
+    DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, Request, ResolvedLevel, image_title,
+    resolve_relative,
 };
 
 static SOURCE_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -115,14 +115,11 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> 
         },
     )
     .map_err(|error| DiscoveryError::Session(format!("invalid FSI grid: {error}")))?;
-    Ok(DiscoveryCatalog::new([DiscoveredEntry::Ready(
-        ResolvedImage {
-            title,
-            format: "fsi",
-            levels: vec![ResolvedLevel::new(source)],
-            ..Default::default()
-        },
-    )]))
+    Ok(DiscoveryCatalog::ready(
+        "fsi",
+        title,
+        vec![ResolvedLevel::new(source)],
+    ))
 }
 
 fn number(regex: &Regex, bytes: &[u8], name: &str) -> Result<u32, DiscoveryError> {

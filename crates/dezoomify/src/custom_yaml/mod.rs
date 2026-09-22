@@ -6,8 +6,8 @@ use serde::Deserialize;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveredEntry, DiscoveryCatalog, DiscoveryError, DiscoveryMatch, FormatSpec, Positioned,
-    ProcessingRecipe, Request, ResolvedImage, ResolvedLevel, TileSourceError,
+    DiscoveryCatalog, DiscoveryError, DiscoveryMatch, FormatSpec, Positioned, ProcessingRecipe,
+    Request, ResolvedLevel, TileSourceError,
 };
 use crate::default_headers;
 use crate::model::Header;
@@ -54,20 +54,17 @@ fn catalog_from_yaml(bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
         .len()
         .map_err(|error| DiscoveryError::Session(format!("invalid tiles.yaml: {error}")))?;
     let size = yaml.width.zip(yaml.height).map(|(x, y)| Vec2d { x, y });
-    Ok(DiscoveryCatalog::new([DiscoveredEntry::Ready(
-        ResolvedImage {
-            title: yaml.title,
-            format: "custom",
-            levels: vec![ResolvedLevel::new(Positioned::from_generator(
-                size,
-                CustomTiles {
-                    tile_set: yaml.tile_set,
-                    headers,
-                },
-            ))],
-            ..Default::default()
-        },
-    )]))
+    Ok(DiscoveryCatalog::ready(
+        "custom",
+        yaml.title,
+        vec![ResolvedLevel::new(Positioned::from_generator(
+            size,
+            CustomTiles {
+                tile_set: yaml.tile_set,
+                headers,
+            },
+        ))],
+    ))
 }
 
 #[derive(Clone, Debug)]
@@ -103,7 +100,7 @@ impl crate::core::tile_plan::PositionedGenerator for CustomTiles {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{TileRole, TileSource};
+    use crate::core::{DiscoveredEntry, TileRole, TileSource};
 
     #[test]
     fn parses_bundled_example_headers() {

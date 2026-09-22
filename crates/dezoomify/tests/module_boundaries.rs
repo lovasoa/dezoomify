@@ -48,3 +48,12 @@ fn formats_never_depend_on_engine() {
         );
     }
 }
+
+#[test]
+fn engine_uses_the_shared_tile_program_contract() {
+    let source = fs::read_to_string("src/engine/job.rs").expect("read job engine");
+    assert!(
+        !source.contains("TileSource::"),
+        "the engine must start tile work through TileProgramStart, not concrete source variants"
+    );
+}
