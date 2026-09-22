@@ -10,7 +10,7 @@ use crate::Vec2d;
 use crate::core::{
     DiscoveredEntry, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch,
     DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, Positioned, PositionedTile,
-    ProcessingRecipe, Request, ResolvedLevel, TileSourceError, resolve_relative,
+    ProcessingRecipe, Request, ResolvedLevel, TileSourceError,
 };
 
 const ROUTES: &[DiscoveryRoute] = &[
@@ -71,10 +71,7 @@ fn follow_iframe(
         .and_then(|captures| captures.name("src"))
         .map(|src| String::from_utf8_lossy(src.as_bytes()).replace("&amp;", "&"))
         .ok_or_else(|| DiscoveryError::Session("Second Canvas iframe has no source".into()))?;
-    Ok(DiscoveryStep::Follow(Request::new(resolve_relative(
-        resource.final_uri(),
-        &src,
-    ))))
+    Ok(resource.follow_relative(&src))
 }
 
 fn viewer_config_uri(viewer_uri: &str, viewer_bytes: &[u8]) -> Result<String, DiscoveryError> {

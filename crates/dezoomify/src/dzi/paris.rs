@@ -4,7 +4,7 @@ use regex::bytes::Regex as BytesRegex;
 
 use crate::core::{
     DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
-    DiscoveryStep, Request, resolve_relative,
+    DiscoveryStep, Request,
 };
 
 static DEEPZOOM_MANIFEST: LazyLock<BytesRegex> = LazyLock::new(|| {
@@ -60,8 +60,5 @@ pub(super) fn follow_manifest(
         .ok_or_else(|| {
             DiscoveryError::Session("Paris page lacks a Deep Zoom manifest URL".into())
         })?;
-    Ok(DiscoveryStep::Follow(Request::new(resolve_relative(
-        resource.final_uri(),
-        metadata,
-    ))))
+    Ok(resource.follow_relative(metadata))
 }

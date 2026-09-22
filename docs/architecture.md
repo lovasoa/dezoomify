@@ -34,6 +34,9 @@ generic-template, and adaptive tile sources all implement one crate-private
 tile-program contract, including declared geometry and stable source-kind
 metadata; the public source variants remain a compatibility facade, and the
 engine starts work without dispatching on those variants.
+Discovery handlers follow extracted references through `DiscoveryResource`,
+which resolves them against the post-redirect URI before issuing the next pure
+request.
 
 #### `dezoomify::engine`
 

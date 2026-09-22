@@ -4,9 +4,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::core::{
-    DiscoveryContext, DiscoveryError, DiscoveryResource, DiscoveryStep, Request, resolve_relative,
-};
+use crate::core::{DiscoveryContext, DiscoveryError, DiscoveryResource, DiscoveryStep};
 
 static META_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?is)<meta\b[^>]*>").expect("constant meta tag pattern"));
@@ -46,10 +44,7 @@ pub fn follow_iframe(
 ) -> Result<DiscoveryStep, DiscoveryError> {
     let src = iframe_source(resource.bytes())
         .ok_or_else(|| DiscoveryError::Session("page iframe has no source".into()))?;
-    Ok(DiscoveryStep::Follow(Request::new(resolve_relative(
-        resource.final_uri(),
-        &src,
-    ))))
+    Ok(resource.follow_relative(&src))
 }
 
 /// Best-effort human-readable title of an HTML page.
