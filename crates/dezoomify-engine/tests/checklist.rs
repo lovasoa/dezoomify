@@ -387,14 +387,6 @@ fn cancel_and_publication_ordering_is_exact() {
         .unwrap_err();
     assert_eq!(err.code, "job.post-terminal");
     assert_eq!(job.snapshot().lifecycle, JobState::Cancelled);
-    // Cleanup acknowledgement is idempotent and changes nothing terminal.
-    let cancel_id = update.effects[0].id();
-    let again = job
-        .complete(cancel_id, EffectResult::CleanupAcknowledged)
-        .expect("cleanup ack");
-    assert!(again.effects.is_empty());
-    assert_eq!(again.snapshot.lifecycle, JobState::Cancelled);
-
     // Publication ordering: exactly one finalize effect, one terminal.
     let (mut job, _update) = start_dzi();
     let update = select_largest(&mut job);

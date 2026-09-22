@@ -4,7 +4,6 @@
 // No imports from apps/web, apps/extension, browser-session fetch, or the
 // metadata CORS proxy. The desktop app uses native effects only.
 
-import { invoke as publicInvoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 // Keep erasable syntax only so node type-stripping can read this file.
@@ -22,7 +21,6 @@ export type NativeEncoder = (typeof NATIVE_ENCODERS)[number];
 // encoders plus the IIIF directory output exposed by the desktop picker.
 export type NativeFormat = NativeEncoder | "iiif-dir";
 export const NATIVE_FORMATS: readonly NativeFormat[] = [...NATIVE_ENCODERS, "iiif-dir"];
-const SUPPORTED_SAVE_FORMATS: readonly NativeFormat[] = NATIVE_FORMATS;
 
 // Exact Tauri command registry. Must match
 // apps/desktop/src-tauri/src/commands.rs COMMANDS and the generated
@@ -57,61 +55,18 @@ export interface DesktopCapabilities {
   readonly bulkSupported: true;
 }
 
-export interface SaveRequest {
-  readonly jobId: string;
-  readonly suggestedName: string;
-  readonly format: NativeFormat;
-}
-
-export type SaveOutcome = "granted" | "denied" | "cancelled";
-
-export interface SaveResult {
-  readonly outcome: SaveOutcome;
-  readonly reason?: string;
-  readonly code?: string;
-}
-
 // Structural counterpart of the shared UI AppIntegration contract:
-// capabilities, save behavior, external links, and handoff requests.
+// capabilities, external links, and handoff requests.
 // Routing and component composition stay shared.
 export interface AppIntegration {
   readonly kind: "desktop";
   getCapabilities(): DesktopCapabilities;
-  requestSaveDestination(req: SaveRequest): Promise<SaveResult>;
   openExternalLink(url: string): Promise<{ opened: boolean; reason: string }>;
   describe(): string;
 }
 
-function isValidJobId(jobId: string): boolean {
-  return jobId.startsWith("job:") && jobId.length > 4 && jobId.length <= 128;
-}
-
-function extensionFor(format: NativeFormat): string {
-  if (format === "png") return ".png";
-  if (format === "jpeg") return ".jpg";
-  if (format === "iiif-dir") return ".iiif";
-  if (format === "tiff") return ".tif";
-  if (format === "zif") return ".zif";
-  return ".webp";
-}
-
-// Tauri IPC access goes through the public guest binding only. Tests inject
-// an explicit `invoke` double; the default calls the real host and reports
-// typed denials when the host is unreachable. No host globals are read here.
-export type DesktopInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-
-interface DestinationCommandResult {
-  readonly outcome: SaveOutcome;
-  readonly reason?: string;
-  readonly code?: string;
-}
-
-export function createDesktopIntegration(opts?: {
-  extensionAvailable?: boolean;
-  invoke?: DesktopInvoke;
-}): AppIntegration {
+export function createDesktopIntegration(opts?: { extensionAvailable?: boolean }): AppIntegration {
   const extensionAvailable = opts?.extensionAvailable ?? false;
-  const invoke: DesktopInvoke = opts?.invoke ?? ((cmd, args) => publicInvoke(cmd, args));
 
   function getCapabilities(): DesktopCapabilities {
     return {
@@ -128,59 +83,6 @@ export function createDesktopIntegration(opts?: {
       // request on its own; the flag only gates the controls.
       bulkSupported: true,
     };
-  }
-
-  // Native save path: validate the request, then route through the real
-  // Tauri command, which shows the native save dialog, grants the
-  // destination through the validated dispatch, and reports completion only
-  // after atomic output finalization. Unreachable hosts report a typed
-  // denial; validation runs before any IPC.
-  async function requestSaveDestination(req: SaveRequest): Promise<SaveResult> {
-    if (!isValidJobId(req.jobId)) {
-      return { outcome: "denied", reason: "invalid-job-id" };
-    }
-    if (!SUPPORTED_SAVE_FORMATS.includes(req.format)) {
-      return { outcome: "denied", reason: "unsupported-format" };
-    }
-    const wanted = extensionFor(req.format);
-    if (!req.suggestedName.toLowerCase().endsWith(wanted)) {
-      return { outcome: "denied", reason: "invalid-extension" };
-    }
-    if (req.suggestedName.includes("\0") || req.suggestedName.includes("..")) {
-      return { outcome: "denied", reason: "invalid-path" };
-    }
-    try {
-      const raw = (await invoke("request_destination", {
-        job: req.jobId,
-        format: req.format,
-        suggestedName: req.suggestedName,
-      })) as DestinationCommandResult | null;
-      if (!raw || typeof raw !== "object") {
-        return { outcome: "denied", reason: "destination-failed" };
-      }
-      if (raw.outcome === "granted") {
-        return { outcome: "granted" };
-      }
-      if (raw.outcome === "cancelled") {
-        return {
-          outcome: "cancelled",
-          reason: typeof raw.reason === "string" ? raw.reason : "user-cancelled",
-        };
-      }
-      if (raw.outcome === "denied") {
-        return {
-          outcome: "denied",
-          reason: typeof raw.reason === "string" ? raw.reason : "destination-denied",
-          ...(typeof raw.code === "string" && raw.code.length > 0 ? { code: raw.code } : {}),
-        };
-      }
-      return { outcome: "denied", reason: "destination-failed" };
-    } catch (error) {
-      return {
-        outcome: "denied",
-        reason: error instanceof Error ? error.message : "destination-failed",
-      };
-    }
   }
 
   // Only explicit https links leave the app, through the opener plugin.
@@ -219,5 +121,5 @@ export function createDesktopIntegration(opts?: {
     return `desktop native=${String(getCapabilities().nativeAvailable)} protocol=${PROTOCOL_MIN}`;
   }
 
-  return { kind: "desktop", getCapabilities, requestSaveDestination, openExternalLink, describe };
+  return { kind: "desktop", getCapabilities, openExternalLink, describe };
 }
