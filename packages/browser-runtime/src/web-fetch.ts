@@ -111,7 +111,6 @@ export interface WebFetcher {
     headers?: Record<string, string>,
     signal?: AbortSignal,
     ms?: number,
-    logTimeout?: boolean,
   ): Promise<DirectOutcome>;
   fetchViaProxy(
     targetUrl: string,
@@ -393,17 +392,28 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     headers?: Record<string, string>,
     signal?: AbortSignal,
     ms: number = requestMs,
-    logTimeout: boolean = true,
   ): Promise<DirectOutcome> {
     if (!fetchImpl) return { outcome: "network-error" };
     const reqId = hooks.onRequestStart("direct");
     const combined = combineTimeout(signal, ms);
+    let responseStatus: number | undefined;
+    const report = (result: string, finalUrl?: string) => {
+      if (!signal?.aborted)
+        hooks.onLog(
+          `fetch direct ${result} url=${url}${finalUrl && finalUrl !== url ? ` final=${finalUrl}` : ""}`,
+        );
+    };
     try {
       const res = await fetchImpl(url, { headers, signal: combined.signal });
+      responseStatus = res.status;
       if (!(res.status >= 200 && res.status <= 299)) {
         hooks.onRequestEnd(reqId, false);
         const preview = await readErrorPreview(res);
         const retryAfterMs = parseRetryAfterMs(res.headers, now());
+        report(
+          `HTTP ${res.status}${preview ? ` response=${JSON.stringify(preview)}` : ""}`,
+          res.url,
+        );
         return {
           outcome: "http-error",
           finalUrl: typeof res.url === "string" ? res.url : url,
@@ -422,6 +432,10 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       } catch {
         // A missing/unreadable header must never break the readable path.
       }
+      report(
+        `HTTP ${res.status} bytes=${bytes.byteLength}${contentType ? ` type=${contentType}` : ""}`,
+        res.url,
+      );
       return {
         outcome: "readable",
         finalUrl: typeof res.url === "string" && res.url !== "" ? res.url : url,
@@ -433,11 +447,13 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       hooks.onRequestEnd(reqId, false);
       if (signal?.aborted) return { outcome: "cancelled" };
       const name = (e as { name?: string })?.name;
+      const received =
+        responseStatus === undefined ? "" : `HTTP ${responseStatus} body-read-failed; `;
       if (name === "TimeoutError" || (combined.timedOut && combined.timedOut())) {
-        if (logTimeout)
-          hooks.onLog(`Direct metadata fetch did not complete within ${ms} ms: ${shortUrl(url)}`);
+        report(`${received}timeout after ${ms} ms`);
         return { outcome: "network-error" };
       }
+      report(`${received}network/CORS error (no readable response)`);
       return { outcome: "network-error" };
     } finally {
       combined.cleanup();
@@ -466,6 +482,10 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     const combined = combineTimeout(signal, requestMs);
     try {
       const res = await deps.proxyTransport.fetchViaProxy(targetUrl, { signal: combined.signal });
+      if (!signal?.aborted && res.code !== "TRANSPORT_CANCELLED")
+        hooks.onLog(
+          `fetch metadata-proxy ${res.status > 0 ? `HTTP ${res.status}` : "no response"}${res.ok ? ` bytes=${res.bytes?.byteLength ?? 0}` : ` code=${res.code ?? "PROXY_ERROR"}${res.reason ? ` reason=${res.reason}` : ""}`} url=${targetUrl}${res.finalUrl && res.finalUrl !== targetUrl ? ` final=${res.finalUrl}` : ""}`,
+        );
       if (!res.ok) {
         hooks.onRequestEnd(reqId, false);
         return {
@@ -492,9 +512,10 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         (e as { name?: string })?.name === "TimeoutError" ||
         (combined.timedOut && combined.timedOut())
       ) {
-        hooks.onLog("Metadata proxy request timed out after 30 s.");
+        hooks.onLog(`fetch metadata-proxy timeout after ${requestMs} ms url=${targetUrl}`);
         return { ok: false, status: 502, code: "PROXY_NETWORK_ERROR" };
       }
+      hooks.onLog(`fetch metadata-proxy network error (no response) url=${targetUrl}`);
       return { ok: false, status: 502, code: "PROXY_NETWORK_ERROR" };
     } finally {
       combined.cleanup();
@@ -683,7 +704,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       }
     }
     if (signal?.aborted) throw cancelledFailure(url);
-    const direct = await fetchDirect(url, headers, signal, requestMs, false);
+    const direct = await fetchDirect(url, headers, signal, requestMs);
     if (direct.outcome === "readable" && direct.bytes) return { bytes: direct.bytes };
     if (direct.outcome === "cancelled" || signal?.aborted) throw cancelledFailure(url);
     throw tileFailedError(direct.outcome, direct.status, url, direct.retryAfterMs);

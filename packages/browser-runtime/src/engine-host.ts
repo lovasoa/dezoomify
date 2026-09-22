@@ -377,11 +377,12 @@ export function createEngineHost(deps: EngineHostDeps) {
         }
         return;
       } catch (error) {
+        if (tornDown()) return;
         const failure = deps.classifyFailure(error);
         log(
-          "warn",
+          "debug",
           "effect-failed",
-          `type=${effect.type} request=${request.id} code=${String(failure.code ?? failure.blocked_reason ?? "unknown")} retryable=${failure.retryable === true}`,
+          `request=${request.id} code=${failure.code} transport=${failure.transport}${failure.http ? ` HTTP ${failure.http}` : ""} url=${request.uri}`,
         );
         if (grantable(error, failure)) {
           const granted = await holdForPermission(request.id, error);
@@ -509,11 +510,12 @@ export function createEngineHost(deps: EngineHostDeps) {
         });
         return;
       } catch (error) {
+        if (tornDown()) return;
         const failure = deps.classifyFailure(error);
         log(
-          "warn",
+          "debug",
           "effect-failed",
-          `type=${effect.type} request=${request.id} code=${String(failure.code ?? failure.blocked_reason ?? "unknown")} retryable=${failure.retryable === true}`,
+          `request=${request.id} code=${failure.code} transport=${failure.transport}${failure.http ? ` HTTP ${failure.http}` : ""} url=${request.uri}`,
         );
         if (grantable(error, failure)) {
           // A visible, explicit user action may grant this host. Hold the
