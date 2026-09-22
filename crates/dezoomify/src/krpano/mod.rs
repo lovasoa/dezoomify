@@ -20,7 +20,7 @@ use crate::core::resolve_relative;
 use crate::core::{
     DiscoveredEntry, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch,
     DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, GridRequests, GridTile,
-    Request, ResolvedImage, ResolvedLevel,
+    Request, ResolvedLevel,
 };
 use crate::krpano::krpano_metadata::{ImageInfo, LevelDesc};
 use crate::template::Template;
@@ -478,12 +478,12 @@ fn load_catalog(url: &str, contents: &[u8]) -> Result<DiscoveryCatalog, Discover
             }
         }
 
-        entries.push(DiscoveredEntry::Ready(ResolvedImage {
-            title: image_title,
-            format: "krpano",
+        entries.push(DiscoveredEntry::ready(
+            "krpano",
+            image_title,
             levels,
             warnings,
-        }));
+        ));
     }
     if entries.is_empty() {
         return Err(DiscoveryError::Session(
@@ -554,7 +554,7 @@ mod tests {
         DiscoveryError, DiscoveryOperation, FetchCause, FetchCode, RejectionKind, ResourceFailure,
         ResourceNeed, TransportKind,
     };
-    use crate::core::{ResourceResponse, TileSource};
+    use crate::core::{ResolvedImage, ResourceResponse, TileSource};
 
     fn image(catalog: DiscoveryCatalog) -> ResolvedImage {
         match catalog.into_entries().into_iter().next().unwrap() {

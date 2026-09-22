@@ -180,6 +180,24 @@ pub enum DiscoveredEntry {
     Deferred(DeferredResource),
 }
 
+impl DiscoveredEntry {
+    /// Compile one format-owned image plan into a ready catalog entry.
+    #[must_use]
+    pub fn ready(
+        format: &'static str,
+        title: Option<String>,
+        levels: Vec<ResolvedLevel>,
+        warnings: Vec<String>,
+    ) -> Self {
+        Self::Ready(ResolvedImage {
+            title,
+            format,
+            levels,
+            warnings,
+        })
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 #[doc(hidden)]
 pub struct DiscoveryCatalog(pub Vec<DiscoveredEntry>);
@@ -221,12 +239,7 @@ impl DiscoveryCatalog {
         levels: Vec<ResolvedLevel>,
         warnings: Vec<String>,
     ) -> Self {
-        Self::new([DiscoveredEntry::Ready(ResolvedImage {
-            title,
-            format,
-            levels,
-            warnings,
-        })])
+        Self::new([DiscoveredEntry::ready(format, title, levels, warnings)])
     }
 
     /// Canonical public catalog paired with this catalog's private tile
