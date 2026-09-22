@@ -52,6 +52,30 @@ const ALLOWED_METADATA_TYPES = [
   "text/html",
 ];
 
+// The client headers the relay forwards upstream. Everything else the
+// client sends (cookies, authorization, referer, origin, hop-by-hop) is
+// dropped by stripUpstreamHeaders below.
+const FORWARDED_CLIENT_HEADERS = ["user-agent", "accept-language", "accept"] as const;
+
+export function forwardedClientHeaders(
+  headers: Record<string, string | string[] | undefined>,
+): Record<string, string> {
+  const lower: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    const first = Array.isArray(value) ? value[0] : value;
+    if (typeof first === "string" && first !== "") {
+      const key = name.toLowerCase();
+      if (lower[key] === undefined) lower[key] = first;
+    }
+  }
+  const out: Record<string, string> = {};
+  for (const name of FORWARDED_CLIENT_HEADERS) {
+    const found = lower[name];
+    if (found !== undefined) out[name] = found;
+  }
+  return out;
+}
+
 function parseNumericPart(part: string): number | null {
   if (part.length === 0) return null;
   let base = 10;

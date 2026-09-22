@@ -4,7 +4,7 @@
 // so that every file under it is a real route (legacy/functions/proxy.js owns
 // the /proxy route for the legacy site).
 import { handleProxyRequest } from "../../src/server/proxy.ts";
-import { buildProxyCorsHeaders } from "../../src/server/security.ts";
+import { buildProxyCorsHeaders, forwardedClientHeaders } from "../../src/server/security.ts";
 
 const MAX_REQUEST_BODY_BYTES = 64 * 1024;
 
@@ -60,6 +60,7 @@ export async function onRequestPost(context: { request: Request }): Promise<Resp
       targetUrl: body.targetUrl,
       protocolVersion: body.protocolVersion,
       origin: request.headers.get("origin") ?? undefined,
+      headers: forwardedClientHeaders(Object.fromEntries(request.headers)),
     },
     {
       // redirect: "manual" is required so every 3xx hop surfaces back through

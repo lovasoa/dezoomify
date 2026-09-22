@@ -14,7 +14,7 @@
 // writes the relay's result back over Node's HTTP types.
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { handleProxyRequest } from "./proxy.ts";
-import { buildProxyCorsHeaders } from "./security.ts";
+import { buildProxyCorsHeaders, forwardedClientHeaders } from "./security.ts";
 
 const MAX_REQUEST_BODY_BYTES = 64 * 1024;
 
@@ -134,6 +134,7 @@ export async function handleNodeProxyRequest(
       targetUrl: body.targetUrl,
       protocolVersion: body.protocolVersion,
       origin: req.headers.origin,
+      headers: forwardedClientHeaders(req.headers),
     },
     {
       fetchUpstream:
