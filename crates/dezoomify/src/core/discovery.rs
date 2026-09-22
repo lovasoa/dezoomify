@@ -10,6 +10,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::model::{DiscoveryCatalog, Request};
+use super::uri::resolve_relative;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct RequestId(pub usize);
@@ -354,6 +355,12 @@ impl<'a> DiscoveryResource<'a> {
     #[must_use]
     pub fn text_lossy(self) -> Cow<'a, str> {
         String::from_utf8_lossy(self.bytes)
+    }
+
+    /// Follow a resource reference against this response's post-redirect URI.
+    #[must_use]
+    pub fn follow_relative(self, reference: &str) -> DiscoveryStep {
+        DiscoveryStep::Follow(Request::new(resolve_relative(self.final_uri, reference)))
     }
 }
 pub struct DiscoveryContext<'a> {

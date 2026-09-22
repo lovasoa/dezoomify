@@ -9,8 +9,7 @@ use url::Url;
 use crate::Vec2d;
 use crate::core::{
     DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
-    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, Request, ResolvedLevel, resolve_relative,
-    resolve_url_template,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, Request, ResolvedLevel, resolve_url_template,
 };
 use crate::web_page::decode_html_entities;
 
@@ -226,10 +225,7 @@ fn follow_media(
         .ok_or_else(|| {
             DiscoveryError::Session("no zoomable image found in TopViewer response".into())
         })?;
-    Ok(DiscoveryStep::Follow(Request::new(resolve_relative(
-        resource.final_uri(),
-        asset,
-    ))))
+    Ok(resource.follow_relative(asset))
 }
 
 fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {

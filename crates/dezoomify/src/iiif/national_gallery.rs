@@ -1,6 +1,4 @@
-use crate::core::{
-    DiscoveryContext, DiscoveryError, DiscoveryResource, DiscoveryStep, Request, resolve_relative,
-};
+use crate::core::{DiscoveryContext, DiscoveryError, DiscoveryResource, DiscoveryStep};
 use regex::bytes::Regex as BytesRegex;
 use std::sync::LazyLock;
 static IMAGE: LazyLock<BytesRegex> = LazyLock::new(|| {
@@ -27,8 +25,5 @@ pub(super) fn follow_image(
         .rsplit_once("/full/")
         .map(|(service, _)| format!("{service}/info.json"))
         .ok_or_else(|| DiscoveryError::Session("invalid National Gallery IIIF image URL".into()))?;
-    Ok(DiscoveryStep::Follow(Request::new(resolve_relative(
-        resource.final_uri(),
-        &metadata,
-    ))))
+    Ok(resource.follow_relative(&metadata))
 }

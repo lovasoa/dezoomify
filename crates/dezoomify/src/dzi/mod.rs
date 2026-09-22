@@ -10,7 +10,6 @@ use crate::Vec2d;
 use crate::core::{
     DiscoveredEntry, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch,
     DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, Request, ResolvedLevel,
-    resolve_relative,
 };
 use crate::json_utils::all_json;
 
@@ -79,10 +78,7 @@ fn follow_dzi_link(
         .find(resource.bytes())
         .map(|capture| String::from_utf8_lossy(capture.as_bytes()).into_owned())
         .ok_or_else(|| DiscoveryError::Session("page links no DZI metadata".into()))?;
-    Ok(DiscoveryStep::Follow(Request::new(resolve_relative(
-        resource.final_uri(),
-        link.trim(),
-    ))))
+    Ok(resource.follow_relative(link.trim()))
 }
 
 fn has_dzi_attribute(bytes: &[u8]) -> bool {
@@ -98,10 +94,7 @@ fn follow_dzi_attribute(
         .and_then(|captures| captures.name("url"))
         .map(|capture| String::from_utf8_lossy(capture.as_bytes()).into_owned())
         .ok_or_else(|| DiscoveryError::Session("page declares no DZI attribute URL".into()))?;
-    Ok(DiscoveryStep::Follow(Request::new(resolve_relative(
-        resource.final_uri(),
-        url.trim(),
-    ))))
+    Ok(resource.follow_relative(url.trim()))
 }
 
 fn has_wdl_template(bytes: &[u8]) -> bool {
@@ -125,10 +118,7 @@ fn follow_wdl_template(
     let url = template
         .replace("{group}", &view[1])
         .replace("{index}", &view[2]);
-    Ok(DiscoveryStep::Follow(Request::new(resolve_relative(
-        resource.final_uri(),
-        &url,
-    ))))
+    Ok(resource.follow_relative(&url))
 }
 
 fn tile_metadata(input: &str) -> Result<Request, DiscoveryError> {
@@ -239,10 +229,7 @@ fn follow_seadragon_embed(
         .transpose()
         .map_err(|_| DiscoveryError::Session("Seadragon metadata URL is not UTF-8".into()))?
         .ok_or_else(|| DiscoveryError::Session("Seadragon embed lacks a metadata URL".into()))?;
-    Ok(DiscoveryStep::Follow(Request::new(resolve_relative(
-        resource.final_uri(),
-        metadata,
-    ))))
+    Ok(resource.follow_relative(metadata))
 }
 
 mod paris;
