@@ -1,27 +1,27 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import {
+  BROWSER_SESSION_TRANSPORT_LABEL,
+  clearHistory,
   createJobService,
+  DIRECT_TRANSPORT_LABEL,
+  DISPLAY_TRANSPORT_LABEL,
+  extensionForSaveFormat,
+  HISTORY_MAX,
+  historyOriginOf,
   initialHostStatus,
   isActiveSnapshot,
   isTerminalSnapshot,
-  extensionForSaveFormat,
-  safeTitleStem,
-  suggestedNameFor,
-  renderTransportLabel,
-  DIRECT_TRANSPORT_LABEL,
-  PROXY_TRANSPORT_LABEL,
-  DISPLAY_TRANSPORT_LABEL,
-  BROWSER_SESSION_TRANSPORT_LABEL,
-  NATIVE_TRANSPORT_LABEL,
-  historyOriginOf,
-  toHistoryEntry,
-  pushHistory,
-  parseHistoryJson,
   loadHistory,
+  NATIVE_TRANSPORT_LABEL,
+  PROXY_TRANSPORT_LABEL,
+  parseHistoryJson,
+  pushHistory,
+  renderTransportLabel,
+  safeTitleStem,
   saveHistory,
-  clearHistory,
-  HISTORY_MAX,
+  suggestedNameFor,
+  toHistoryEntry,
 } from "../packages/app-model/src/index.ts";
 
 function memoryStore() {
@@ -53,7 +53,13 @@ function dto(overrides = {}) {
     lifecycle: "Discovering",
     paused: false,
     progress: { completed: 0, total: undefined },
-    selection: { image: undefined, level: undefined, level_count: 0, catalog: undefined, deferred: [] },
+    selection: {
+      image: undefined,
+      level: undefined,
+      level_count: 0,
+      catalog: undefined,
+      deferred: [],
+    },
     decision: undefined,
     terminal: undefined,
     output: undefined,
@@ -62,7 +68,11 @@ function dto(overrides = {}) {
 }
 
 test("snapshot predicates read the terminal only", () => {
-  const live = dto({ revision: 3, lifecycle: "AcquiringTiles", progress: { completed: 3, total: 12 } });
+  const live = dto({
+    revision: 3,
+    lifecycle: "AcquiringTiles",
+    progress: { completed: 3, total: 12 },
+  });
   assert.ok(isActiveSnapshot(live));
   assert.ok(!isTerminalSnapshot(live));
 
@@ -155,15 +165,22 @@ test("service rejects invalid requests with stable validation codes", async () =
   const { runner } = fakeRunner([]);
   const service = createJobService(runner);
   const observer = { snapshot: () => {}, hostStatus: () => {} };
-  await assert.rejects(service.start({ inputs: [], engine: {}, exec: { kind: "browser", sourceUrl: "https://x.example.org/y" } }, observer).then(
-    () => {
-      throw new Error("should reject");
-    },
-    (error) => {
-      assert.equal(error.code, "validation.empty-inputs");
-      throw error;
-    },
-  ));
+  await assert.rejects(
+    service
+      .start(
+        { inputs: [], engine: {}, exec: { kind: "browser", sourceUrl: "https://x.example.org/y" } },
+        observer,
+      )
+      .then(
+        () => {
+          throw new Error("should reject");
+        },
+        (error) => {
+          assert.equal(error.code, "validation.empty-inputs");
+          throw error;
+        },
+      ),
+  );
   await assert.rejects(
     service.start({ inputs: [{ url: "ftp://x/y" }], engine: {}, exec: { kind: "mars" } }, observer),
     /./,
@@ -182,16 +199,28 @@ test("service rejects invalid requests with stable validation codes", async () =
 // ---------------------------------------------------------------------------
 
 test("history keeps full addresses with origins, capped and fail-closed", () => {
-  assert.equal(historyOriginOf("https://museum.example.org/painting/1?view=2#frag"), "https://museum.example.org");
+  assert.equal(
+    historyOriginOf("https://museum.example.org/painting/1?view=2#frag"),
+    "https://museum.example.org",
+  );
   assert.equal(historyOriginOf("http://host:8080/a"), "http://host:8080");
   assert.equal(historyOriginOf("file:///tmp/a"), "");
-  const entry = toHistoryEntry("https://museum.example.org/a", { width: 100, height: 50, format: "PNG", at: 42 });
+  const entry = toHistoryEntry("https://museum.example.org/a", {
+    width: 100,
+    height: 50,
+    format: "PNG",
+    at: 42,
+  });
   assert.equal(entry.url, "https://museum.example.org/a");
   assert.equal(entry.at, 42);
   assert.equal(toHistoryEntry("not a url", {}), null);
   let list = [];
   for (let n = 0; n < HISTORY_MAX + 5; n++) {
-    list = pushHistory(list, { origin: "https://x.example.org", url: `https://x.example.org/${n}`, at: n });
+    list = pushHistory(list, {
+      origin: "https://x.example.org",
+      url: `https://x.example.org/${n}`,
+      at: n,
+    });
   }
   assert.equal(list.length, HISTORY_MAX);
   assert.equal(list[0].url, `https://x.example.org/${HISTORY_MAX + 4}`);

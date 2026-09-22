@@ -6,7 +6,6 @@
 // policy note).
 #![deny(clippy::unwrap_used)]
 
-mod architecture;
 mod browser;
 mod check;
 mod ci;

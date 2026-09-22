@@ -1,12 +1,17 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import { buildCopyDiagnostics } from "../src/diagnostics.ts";
 
 test("completed-job diagnostics retain file-action failures and tile counts", () => {
   const text = buildCopyDiagnostics({
-    status: "completed", transport: "native", nativeTransport: "native",
-    jobId: "job:2", sessionId: "sess:desktop", attempt: undefined,
-    progress: { current: 4, total: 4 }, origin: "https://krpano.com",
+    status: "completed",
+    transport: "native",
+    nativeTransport: "native",
+    jobId: "job:2",
+    sessionId: "sess:desktop",
+    attempt: undefined,
+    progress: { current: 4, total: 4 },
+    origin: "https://krpano.com",
     outputActionError: { action: "folder", code: "output.launch-failed" },
   });
   assert.match(text, /Status: completed/);

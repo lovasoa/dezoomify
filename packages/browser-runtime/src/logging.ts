@@ -32,7 +32,11 @@ export type LogSink = (entry: LogEntry) => void;
 function formatDetail(detail: unknown): string {
   if (detail === undefined || detail === null) return "";
   if (typeof detail === "string") return detail;
-  try { if (typeof detail === "object") return JSON.stringify(detail) ?? ""; } catch { /* fall through */ }
+  try {
+    if (typeof detail === "object") return JSON.stringify(detail) ?? "";
+  } catch {
+    /* fall through */
+  }
   return String(detail);
 }
 
@@ -61,9 +65,16 @@ export function createLogger(context: string, options: LoggerOptions = {}): Logg
   const safeContext = typeof context === "string" && context ? context : "app";
   const defaultContext = options.defaultContext ?? DEFAULT_LOG_CONTEXT;
   const prefix = safeContext === defaultContext ? "" : `[${safeContext}]`;
-  let level = typeof options.level === "number" ? options.level : LOG_LEVELS[options.level ?? "info"];
+  let level =
+    typeof options.level === "number" ? options.level : LOG_LEVELS[options.level ?? "info"];
   const consoleSink: LogSink = (entry) => {
-    try { (globalThis.console as unknown as Record<string, ((line: string) => void) | undefined>)?.[entry.level]?.(entry.line); } catch { /* console unavailable */ }
+    try {
+      (globalThis.console as unknown as Record<string, ((line: string) => void) | undefined>)?.[
+        entry.level
+      ]?.(entry.line);
+    } catch {
+      /* console unavailable */
+    }
   };
   let sinks: LogSink[] = typeof options.sink === "function" ? [options.sink] : [consoleSink];
 
@@ -71,8 +82,12 @@ export function createLogger(context: string, options: LoggerOptions = {}): Logg
     if (typeof next === "string" && next in LOG_LEVELS) level = LOG_LEVELS[next as LogLevel];
     else if (typeof next === "number" && Number.isFinite(next)) level = next;
   }
-  function setSink(next: unknown) { sinks = typeof next === "function" ? [next as LogSink] : [consoleSink]; }
-  function addSink(next: LogSink) { if (typeof next === "function") sinks.push(next); }
+  function setSink(next: unknown) {
+    sinks = typeof next === "function" ? [next as LogSink] : [consoleSink];
+  }
+  function addSink(next: LogSink) {
+    if (typeof next === "function") sinks.push(next);
+  }
 
   function log(levelName: LogLevel, code: string | undefined, detail: unknown = "") {
     try {
@@ -82,11 +97,23 @@ export function createLogger(context: string, options: LoggerOptions = {}): Logg
       let text = formatDetail(detail);
       if (text.length > LOG_MAX_CHARS) text = text.slice(0, LOG_MAX_CHARS) + "…";
       const line = [prefix, safeCode, text].filter(Boolean).join(" ");
-      const entry: LogEntry = { context: safeContext, level: safeLevel, code: safeCode, detail: text, line };
+      const entry: LogEntry = {
+        context: safeContext,
+        level: safeLevel,
+        code: safeCode,
+        detail: text,
+        line,
+      };
       for (const sink of sinks) {
-        try { sink(entry); } catch { /* one sink must not stop the others */ }
+        try {
+          sink(entry);
+        } catch {
+          /* one sink must not stop the others */
+        }
       }
-    } catch { /* logging must never break the caller */ }
+    } catch {
+      /* logging must never break the caller */
+    }
   }
 
   return {

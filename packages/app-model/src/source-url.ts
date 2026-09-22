@@ -8,8 +8,11 @@ export function isValidInputUrl(url: string): boolean {
   if (trimmed.length === 0 || trimmed.length > 2048) return false;
   try {
     const parsed = new URL(trimmed);
-    return (parsed.protocol === "http:" || parsed.protocol === "https:") &&
-      parsed.username === "" && parsed.password === "";
+    return (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      parsed.username === "" &&
+      parsed.password === ""
+    );
   } catch {
     return false;
   }

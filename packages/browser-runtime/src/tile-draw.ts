@@ -109,8 +109,7 @@ export function loadTileImage(
     // the host Image constructor directly (never a CORS opt-in, so no grant
     // is needed and the canvas taints on draw).
     const Ctor =
-      deps.imageCtor ??
-      (globalThis as unknown as { Image?: new () => TileImageElementLike }).Image;
+      deps.imageCtor ?? (globalThis as unknown as { Image?: new () => TileImageElementLike }).Image;
     if (!Ctor && typeof Image === "undefined") {
       if (hooks) {
         hooks.onRequestEnd(reqId, false);
@@ -119,8 +118,7 @@ export function loadTileImage(
       reject(new Error("tile image unavailable without an image host"));
       return;
     }
-    const setTimer =
-      deps.setTimeoutFn ?? ((cb: () => void, t: number) => setTimeout(cb, t));
+    const setTimer = deps.setTimeoutFn ?? ((cb: () => void, t: number) => setTimeout(cb, t));
     const clearTimer =
       deps.clearTimeoutFn ?? ((t: unknown) => clearTimeout(t as ReturnType<typeof setTimeout>));
     const img = Ctor ? new Ctor() : new Image();
@@ -136,11 +134,9 @@ export function loadTileImage(
       else reject(value);
     };
     img.addEventListener("load", () => done(true, img), { once: true });
-    img.addEventListener(
-      "error",
-      () => done(false, new Error("tile image failed to load")),
-      { once: true },
-    );
+    img.addEventListener("error", () => done(false, new Error("tile image failed to load")), {
+      once: true,
+    });
     timer = setTimer(() => {
       try {
         img.src = "";

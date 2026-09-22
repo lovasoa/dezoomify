@@ -73,7 +73,7 @@ Use the narrowest owning target first. Targets reject unknown options instead of
 
 | Lane | Scope |
 |---|---|
-| `check` | formatting, clippy, TypeScript compilation, architecture, generated artifacts, content, Cargo policy, and other static contracts |
+| `check` | Rust formatting, Clippy, Biome, TypeScript compilation, architecture, generated artifacts, content, Cargo policy, and other static contracts |
 | `rust` | one `cargo test --workspace` run |
 | `wasm` | generated WASM Node harness |
 | `browser` | browser-runtime Node suite |

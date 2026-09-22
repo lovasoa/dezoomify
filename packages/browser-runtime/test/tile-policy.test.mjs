@@ -1,20 +1,20 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import {
   BROWSER_CAPABILITY_MAX_CONCURRENCY,
+  createTileThrottle,
   DIRECT_METADATA_TIMEOUT_MS,
+  hostOf,
+  pickTileConcurrency,
+  proxyRateLimitDelayMs,
   REQUEST_TIMEOUT_MS,
+  shortUrl,
   TILE_CONCURRENCY_CAP,
   TILE_CONCURRENCY_FLOOR,
   TILE_CONCURRENCY_MAX,
   TILE_CONCURRENCY_MIN,
   TILE_MAX_REQUESTS_PER_SECOND,
   TILE_MIN_INTERVAL_MS,
-  createTileThrottle,
-  hostOf,
-  pickTileConcurrency,
-  proxyRateLimitDelayMs,
-  shortUrl,
   tileFailedError,
   websiteTileConcurrency,
 } from "../src/tile-policy.ts";
@@ -62,7 +62,13 @@ test("proxyRateLimitDelayMs honors Retry-After within the UX budget", () => {
 test("createTileThrottle staggers starts per host", async () => {
   let at = 1000;
   const slept = [];
-  const throttle = createTileThrottle({ now: () => at, sleep: async (ms) => { slept.push(ms); at += ms; } });
+  const throttle = createTileThrottle({
+    now: () => at,
+    sleep: async (ms) => {
+      slept.push(ms);
+      at += ms;
+    },
+  });
   await throttle.throttle("https://a.test/1.png");
   assert.deepEqual(slept, []);
   await throttle.throttle("https://a.test/2.png");
@@ -79,7 +85,11 @@ test("createTileThrottle staggers starts per host", async () => {
 test("shortUrl and hostOf stay readable", () => {
   assert.equal(hostOf("https://example.test/x"), "example.test");
   assert.equal(hostOf("bogus"), "the server");
-  assert.ok(shortUrl("https://example.test/a-very-long-path-name-that-keeps-going-forever-and-ever/x.png").startsWith("example.test"));
+  assert.ok(
+    shortUrl(
+      "https://example.test/a-very-long-path-name-that-keeps-going-forever-and-ever/x.png",
+    ).startsWith("example.test"),
+  );
   assert.equal(shortUrl("bogus"), "bogus");
 });
 

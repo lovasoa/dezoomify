@@ -1,17 +1,17 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
+import { createWebFetcher } from "../packages/browser-runtime/src/web-fetch.ts";
+import * as discoveryJs from "../src/discovery.ts";
 import {
+  bytesToTextPreview,
   classifyReadableBytes,
+  hasZoomableContentMarker,
   isZoomableContent,
   looksLikeZoomableJson,
   looksLikeZoomableXml,
-  hasZoomableContentMarker,
-  bytesToTextPreview,
-  textToBytes,
   noImageFoundError,
+  textToBytes,
 } from "../src/discovery.ts";
-import * as discoveryJs from "../src/discovery.ts";
-import { createWebFetcher } from "../packages/browser-runtime/src/web-fetch.ts";
 
 const ANTHROPIC_LIKE_HTML = `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><title>Formalizing Fermat's Last Theorem</title>
@@ -98,7 +98,11 @@ test("negative: empty, prose, PWA manifest, schema.org JSON-LD, SVG image tag ar
     // XML-shaped document for these markers.
     ["prose-tileinfo", "The article mentions tileinfo and pyramid_level.", "text/html"],
     // Bare <image> in SVG must not count without DZI structure.
-    ["svg-image", `<svg xmlns="http://www.w3.org/2000/svg"><image href="/a.jpg" width="10" height="10"/></svg>`, "image/svg+xml"],
+    [
+      "svg-image",
+      `<svg xmlns="http://www.w3.org/2000/svg"><image href="/a.jpg" width="10" height="10"/></svg>`,
+      "image/svg+xml",
+    ],
   ]) {
     const res = hint(input, contentType);
     assert.equal(res.found, false, name);
@@ -132,7 +136,11 @@ test("positive: DZI, Zoomify, IIIF, Google Arts tile info, and viewer embeds are
     ["iiif-manifest", IIIF_MANIFEST_SNIPPET, "application/json"],
     ["openseadragon-html", OPENSEADRAGON_HTML, "text/html"],
     ["zoomify-page", ZOOMIFY_PAGE_HTML, "text/html"],
-    ["krpano-html", `<html><body><div id="pano" data-xml="tiles.xml"></div><script src="krpano.js"></script></body></html>`, "text/html"],
+    [
+      "krpano-html",
+      `<html><body><div id="pano" data-xml="tiles.xml"></div><script src="krpano.js"></script></body></html>`,
+      "text/html",
+    ],
     // Google Arts & Culture tile information, served at "<base_url>=g" and
     // fetched as the second discovery resource. Without this marker the
     // webapp rejected real Google Arts tile XML with NO_IMAGE_FOUND.
@@ -173,7 +181,7 @@ const LITERAL_FREE_HEADS = {
     '<!doctype html><html><head><title>Tour</title><script src="/tour/viewer.js"></script></head>' +
     '<body><div id="pano"></div><script>embedViewer({xml:"tour.xml"})</script></body></html>',
   "iiif-info-link-head":
-    '<!doctype html><html><head><title>Scan</title></head>' +
+    "<!doctype html><html><head><title>Scan</title></head>" +
     '<body><a href="https://example.test/image/42/info.json">view</a></body></html>',
 };
 

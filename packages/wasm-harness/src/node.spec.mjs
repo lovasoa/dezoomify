@@ -1,20 +1,22 @@
 // Node conformance for the generated object ABI. The declarations and runtime
 // module are emitted by the same WASM build immediately before this file runs.
-import { describe, it } from "node:test";
+
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
-import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..", "..", "..");
-const TARGET_DIR = JSON.parse(execFileSync(
-  "cargo",
-  ["metadata", "--format-version", "1", "--no-deps"],
-  { cwd: ROOT, encoding: "utf8" },
-)).target_directory;
+const TARGET_DIR = JSON.parse(
+  execFileSync("cargo", ["metadata", "--format-version", "1", "--no-deps"], {
+    cwd: ROOT,
+    encoding: "utf8",
+  }),
+).target_directory;
 const GENERATED = path.join(TARGET_DIR, "wasm-node-harness", "dezoomify_wasm.js");
 
 assert.ok(
@@ -29,9 +31,7 @@ function start(session, url = "https://example.com/image.dzi") {
 
 function discoveryRequest(result) {
   assert.equal(result.status, "ok");
-  return result.messages.find((message) =>
-    message.type === "acquire-resource"
-  )?.request;
+  return result.messages.find((message) => message.type === "acquire-resource")?.request;
 }
 
 const DZI = `<?xml version="1.0" encoding="UTF-8"?>
@@ -108,10 +108,7 @@ describe("generated typed WASM surface", () => {
       bytes,
     });
     assert.equal(provided.status, "ok");
-    assert.ok(
-      provided.snapshot.selection.catalog,
-      "direct bytes yield a catalog in the snapshot",
-    );
+    assert.ok(provided.snapshot.selection.catalog, "direct bytes yield a catalog in the snapshot");
     session.dispose();
   });
 
@@ -156,7 +153,10 @@ describe("generated typed WASM surface", () => {
 
   it("rejects malformed external objects at the generated conversion boundary", () => {
     const session = new wasm.Session({});
-    assert.throws(() => session.complete({ type: "provide-fetch-failure" }), /typed ABI conversion failed/);
+    assert.throws(
+      () => session.complete({ type: "provide-fetch-failure" }),
+      /typed ABI conversion failed/,
+    );
     session.dispose();
   });
 
@@ -169,9 +169,7 @@ describe("generated typed WASM surface", () => {
       const result = session.complete({ type: "provide-display-outcome", request });
       assert.equal(result.status, "ok");
       messageCount += result.messages.length;
-      finalized ||= result.messages.some((message) =>
-        message.type === "finalize-output"
-      );
+      finalized ||= result.messages.some((message) => message.type === "finalize-output");
     }
     assert.ok(finalized, "display-only acquisition still finalizes");
     // eslint-disable-next-line no-console
@@ -188,9 +186,7 @@ describe("generated typed WASM surface", () => {
       error: tileError("TRANSPORT_TIMEOUT"),
     });
     assert.equal(failed.status, "ok");
-    const wait = failed.messages.find((message) =>
-      message.type === "wait-retry-timer"
-    );
+    const wait = failed.messages.find((message) => message.type === "wait-retry-timer");
     assert.equal(wait.tile, tiles[0].tile);
     assert.equal(wait.attempt, 1);
     assert.ok(wait.delay_ms > 0, "the host waits before retrying");
@@ -199,8 +195,8 @@ describe("generated typed WASM surface", () => {
       effect: wait.effect,
     });
     assert.equal(elapsed.status, "ok");
-    const reacquired = elapsed.messages.filter((message) =>
-      message.type === "acquire-tile" && message.tile === wait.tile
+    const reacquired = elapsed.messages.filter(
+      (message) => message.type === "acquire-tile" && message.tile === wait.tile,
     );
     assert.equal(reacquired.length, 1, "the timer completion issues exactly one re-acquisition");
     session.dispose();

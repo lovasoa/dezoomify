@@ -1,11 +1,14 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import { createWebFetcher } from "../src/web-fetch.ts";
 
 function hooks() {
   let seq = 0;
   return {
-    onRequestStart(label) { seq += 1; return seq; },
+    onRequestStart(label) {
+      seq += 1;
+      return seq;
+    },
     onRequestEnd() {},
     onLog() {},
     onUpdate() {},
@@ -46,10 +49,13 @@ function httpErrorFetch(status) {
 test("a refused tile (HTTP 403) costs exactly one direct attempt; the engine owns retries", async () => {
   const { fetchImpl, calls } = httpErrorFetch(403);
   const fetcher = createWebFetcher(baseDeps({ fetchImpl }));
-  await assert.rejects(() => fetcher.fetchTileFor("https://tiles.test/0/0.png", {}), (error) => {
-    assert.equal(error.code, "TILE_FAILED");
-    return true;
-  });
+  await assert.rejects(
+    () => fetcher.fetchTileFor("https://tiles.test/0/0.png", {}),
+    (error) => {
+      assert.equal(error.code, "TILE_FAILED");
+      return true;
+    },
+  );
   assert.equal(calls(), 1, `403 retried at the route: ${calls()} direct attempts`);
 });
 
@@ -76,64 +82,87 @@ test("a throttled tile (HTTP 429) costs exactly one direct attempt", async () =>
 
 test("a tile Retry-After hint survives the one-attempt fetch for engine scheduling", async () => {
   let calls = 0;
-  const fetcher = createWebFetcher(baseDeps({
-    nowFn: () => 1000,
-    fetchImpl: async () => {
-      calls += 1;
-      return {
-        url: "https://tiles.test/0/0.png",
-        status: 429,
-        headers: { get: (name) => name === "retry-after" ? "3" : null },
-        arrayBuffer: async () => new ArrayBuffer(0),
-      };
+  const fetcher = createWebFetcher(
+    baseDeps({
+      nowFn: () => 1000,
+      fetchImpl: async () => {
+        calls += 1;
+        return {
+          url: "https://tiles.test/0/0.png",
+          status: 429,
+          headers: { get: (name) => (name === "retry-after" ? "3" : null) },
+          arrayBuffer: async () => new ArrayBuffer(0),
+        };
+      },
+    }),
+  );
+  await assert.rejects(
+    () => fetcher.fetchTileFor("https://tiles.test/0/0.png", {}),
+    (error) => {
+      assert.equal(error.retry_after_ms, 3000);
+      return true;
     },
-  }));
-  await assert.rejects(() => fetcher.fetchTileFor("https://tiles.test/0/0.png", {}), (error) => {
-    assert.equal(error.retry_after_ms, 3000);
-    return true;
-  });
+  );
   assert.equal(calls, 1);
 });
 
 test("a transient network failure costs one direct attempt; the engine owns retries", async () => {
   let calls = 0;
-  const fetcher = createWebFetcher(baseDeps({
-    fetchImpl: async () => { calls += 1; throw new Error("connection reset"); },
-  }));
-  await assert.rejects(() => fetcher.fetchTileFor("https://tiles.test/0/0.png", {}), (error) => {
-    assert.equal(error.code, "TILE_FAILED");
-    return true;
-  });
+  const fetcher = createWebFetcher(
+    baseDeps({
+      fetchImpl: async () => {
+        calls += 1;
+        throw new Error("connection reset");
+      },
+    }),
+  );
+  await assert.rejects(
+    () => fetcher.fetchTileFor("https://tiles.test/0/0.png", {}),
+    (error) => {
+      assert.equal(error.code, "TILE_FAILED");
+      return true;
+    },
+  );
   assert.equal(calls, 1);
 });
 
 test("a transient failure is returned to the engine for retry", async () => {
   let calls = 0;
-  const fetcher = createWebFetcher(baseDeps({
-    fetchImpl: async () => {
-      calls += 1;
-      if (calls === 1) throw new Error("flaky");
-      return {
-        url: "https://tiles.test/0/0.png",
-        status: 200,
-        headers: {},
-        arrayBuffer: async () => new Uint8Array([7]).buffer,
-      };
+  const fetcher = createWebFetcher(
+    baseDeps({
+      fetchImpl: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error("flaky");
+        return {
+          url: "https://tiles.test/0/0.png",
+          status: 200,
+          headers: {},
+          arrayBuffer: async () => new Uint8Array([7]).buffer,
+        };
+      },
+    }),
+  );
+  await assert.rejects(
+    () => fetcher.fetchTileFor("https://tiles.test/0/0.png", {}),
+    (error) => {
+      assert.equal(error.code, "TILE_FAILED");
+      assert.equal(error.retryable, true);
+      return true;
     },
-  }));
-  await assert.rejects(() => fetcher.fetchTileFor("https://tiles.test/0/0.png", {}), (error) => {
-    assert.equal(error.code, "TILE_FAILED");
-    assert.equal(error.retryable, true);
-    return true;
-  });
+  );
   assert.equal(calls, 1);
 });
 
 test("a pre-aborted job signal prevents a tile attempt", async () => {
   let calls = 0;
-  const fetcher = createWebFetcher(baseDeps({
-    fetchImpl: async () => { calls += 1; throw new Error("flaky"); },
-  }));
+  const fetcher = createWebFetcher(
+    baseDeps({
+      fetchImpl: async () => {
+        calls += 1;
+        throw new Error("flaky");
+      },
+    }),
+  );
   const controller = new AbortController();
   controller.abort();
   await assert.rejects(
@@ -148,17 +177,19 @@ test("a pre-aborted job signal prevents a tile attempt", async () => {
 
 test("a pre-aborted job signal performs no metadata fetch", async () => {
   let calls = 0;
-  const fetcher = createWebFetcher(baseDeps({
-    fetchImpl: async () => {
-      calls += 1;
-      return {
-        url: "https://meta.test/info.json",
-        status: 200,
-        headers: {},
-        arrayBuffer: async () => new Uint8Array([1]).buffer,
-      };
-    },
-  }));
+  const fetcher = createWebFetcher(
+    baseDeps({
+      fetchImpl: async () => {
+        calls += 1;
+        return {
+          url: "https://meta.test/info.json",
+          status: 200,
+          headers: {},
+          arrayBuffer: async () => new Uint8Array([1]).buffer,
+        };
+      },
+    }),
+  );
   const controller = new AbortController();
   controller.abort();
   await assert.rejects(
@@ -173,18 +204,23 @@ test("a pre-aborted job signal performs no metadata fetch", async () => {
 
 test("a metadata fetch aborted mid-flight never falls back to the proxy", async () => {
   let proxyCalls = 0;
-  const fetcher = createWebFetcher(baseDeps({
-    fetchImpl: async (input, init) => {
-      init?.signal?.addEventListener?.("abort", () => {}, { once: true });
-      const error = new Error("aborted");
-      error.name = "AbortError";
-      throw error;
-    },
-    proxyTransport: {
-      fetchViaProxy: async () => { proxyCalls += 1; return { ok: true, status: 200, bytes: new ArrayBuffer(2) }; },
-    },
-    isProxyEligible: () => ({ eligible: true, reason: "public" }),
-  }));
+  const fetcher = createWebFetcher(
+    baseDeps({
+      fetchImpl: async (input, init) => {
+        init?.signal?.addEventListener?.("abort", () => {}, { once: true });
+        const error = new Error("aborted");
+        error.name = "AbortError";
+        throw error;
+      },
+      proxyTransport: {
+        fetchViaProxy: async () => {
+          proxyCalls += 1;
+          return { ok: true, status: 200, bytes: new ArrayBuffer(2) };
+        },
+      },
+      isProxyEligible: () => ({ eligible: true, reason: "public" }),
+    }),
+  );
   const controller = new AbortController();
   controller.abort();
   await assert.rejects(

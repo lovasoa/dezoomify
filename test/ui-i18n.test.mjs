@@ -1,21 +1,21 @@
-import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
-  t,
+  DE,
+  DEFAULT_LOCALE,
   EN,
   FR,
-  DE,
-  IT,
-  getLocale,
-  setLocale,
-  pickLocale,
-  normalizeLocaleName,
   getDictionary,
+  getLocale,
+  IT,
+  normalizeLocaleName,
+  pickLocale,
   SUPPORTED_LOCALES,
-  DEFAULT_LOCALE,
+  setLocale,
+  t,
 } from "../packages/shared-ui/src/i18n.ts";
 
 const rootDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -28,15 +28,19 @@ function read(rel) {
 function tRefs(source) {
   const out = new Set();
   const re = /(?<![A-Za-z])t\("([^"]+)"(?=[,)])/g;
-  let m;
-  while ((m = re.exec(source)) !== null) out.add(m[1]);
+  for (let match = re.exec(source); match !== null; match = re.exec(source)) {
+    out.add(match[1]);
+  }
   return out;
 }
 
 const LOCALES = { en: EN, fr: FR, de: DE, it: IT };
 
 function placeholdersOf(template) {
-  return [...template.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(",");
+  return [...template.matchAll(/\{(\w+)\}/g)]
+    .map((m) => m[1])
+    .sort()
+    .join(",");
 }
 
 test("i18n: English table is namespaced, complete, and well-formed", () => {
@@ -74,7 +78,10 @@ test("i18n: fr/de/it mirror the English key set with identical placeholders", ()
       `${label} ships exactly the English key set (no orphans, nothing missing)`,
     );
     for (const key of enKeys) {
-      assert.ok(typeof table[key] === "string" && table[key].length > 0, `${label} value is non-empty: ${key}`);
+      assert.ok(
+        typeof table[key] === "string" && table[key].length > 0,
+        `${label} value is non-empty: ${key}`,
+      );
       assert.equal(
         placeholdersOf(table[key]),
         placeholdersOf(EN[key]),
@@ -97,7 +104,14 @@ test("i18n: substitution renders per locale and degrades safely", () => {
     assert.equal(t("view.job.manyImages", { count: 3 }), "3 images");
     assert.equal(t("view.job.countsFull", { current: 2, total: 9 }), "2 of 9 tiles");
     assert.equal(
-      t("view.done.savedPartial", { name: "dezoomify-4x4.png", w: 4, h: 4, done: 14, total: 16, failed: 2 }),
+      t("view.done.savedPartial", {
+        name: "dezoomify-4x4.png",
+        w: 4,
+        h: 4,
+        done: 14,
+        total: 16,
+        failed: 2,
+      }),
       "Saved dezoomify-4x4.png (4x4, 14 of 16 tiles; 2 tile(s) missing).",
     );
     // Per-locale rendering through the same keys.
@@ -204,7 +218,10 @@ function readDesktop() {
 
 test("i18n: every desktop t() reference resolves in all four locales", () => {
   const desktopRefs = tRefs(readDesktop());
-  assert.ok(desktopRefs.size > 40, `desktop src renders through the dictionary (saw ${desktopRefs.size} keys)`);
+  assert.ok(
+    desktopRefs.size > 40,
+    `desktop src renders through the dictionary (saw ${desktopRefs.size} keys)`,
+  );
   for (const key of desktopRefs) {
     for (const [label, table] of Object.entries(LOCALES)) {
       assert.ok(Object.hasOwn(table, key), `${label} covers desktop key: ${key}`);

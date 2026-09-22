@@ -24,16 +24,9 @@
 // Display fallback (website): when readable bytes are unavailable but an
 // ordinary image loads, the tile is held as display-only. The canvas taints
 // on draw, so the job completes as display-only with no programmatic save.
-import type { EngineSnapshotDto } from "@dezoomify/wasm-bindings";
-import type { BrowserOutputDisposition } from "./assembly.ts";
-import { originOfUrl } from "./fetch-primitives.ts";
-import type { TileImageLike } from "./tile-draw.ts";
-import type { ProbeSize } from "./probe.ts";
-import type { WorkerHostMessage } from "./worker-host.ts";
-import { dispatchTyped } from "./typed-dispatch.ts";
-import type { DispatchTable } from "./typed-dispatch.ts";
 import type {
   BlockedReason,
+  EngineSnapshotDto,
   ErrorDto,
   ErrorTransport,
   FetchFailureCode,
@@ -47,6 +40,13 @@ import type {
   SizeDto,
   TilePlacementDto,
 } from "@dezoomify/wasm-bindings";
+import type { BrowserOutputDisposition } from "./assembly.ts";
+import { originOfUrl } from "./fetch-primitives.ts";
+import type { ProbeSize } from "./probe.ts";
+import type { TileImageLike } from "./tile-draw.ts";
+import type { DispatchTable } from "./typed-dispatch.ts";
+import { dispatchTyped } from "./typed-dispatch.ts";
+import type { WorkerHostMessage } from "./worker-host.ts";
 
 export interface EngineHostAssembly {
   /** Reveal the declared output surface before the first tile fetch. */
@@ -198,11 +198,17 @@ export function createEngineHost(deps: EngineHostDeps) {
    * as this effect handling; the engine ignores stale duplicates, so no
    * pause parking is kept host-side.
    */
-  async function waitRetryTimer(effect: Extract<EffectMessage, { type: "wait-retry-timer" }>): Promise<void> {
+  async function waitRetryTimer(
+    effect: Extract<EffectMessage, { type: "wait-retry-timer" }>,
+  ): Promise<void> {
     const ctrl = new AbortController();
     pendingRetries.add(ctrl);
     try {
-      log("debug", "effect-retry-wait", `tile=${effect.tile} attempt=${effect.attempt} delay_ms=${effect.delay_ms}`);
+      log(
+        "debug",
+        "effect-retry-wait",
+        `tile=${effect.tile} attempt=${effect.attempt} delay_ms=${effect.delay_ms}`,
+      );
       const abandoned = await sleepWithAbort(effect.delay_ms, ctrl.signal);
       if (tornDown() || abandoned || ctrl.signal.aborted) return;
       log("debug", "effect-retry-elapsed", `tile=${effect.tile} attempt=${effect.attempt}`);
@@ -221,7 +227,12 @@ export function createEngineHost(deps: EngineHostDeps) {
   }
 
   function hostsOf(error: unknown): string[] {
-    if (error !== null && typeof error === "object" && "hosts" in error && Array.isArray(error.hosts)) {
+    if (
+      error !== null &&
+      typeof error === "object" &&
+      "hosts" in error &&
+      Array.isArray(error.hosts)
+    ) {
       return error.hosts.filter((host): host is string => typeof host === "string");
     }
     return [];
@@ -233,9 +244,12 @@ export function createEngineHost(deps: EngineHostDeps) {
    * (missing user intent) fail directly; re-prompting cannot fix them.
    */
   function grantable(error: unknown, failure: HostFailure): boolean {
-    return failure.blocked_reason === "access-required"
-      && error !== null && typeof error === "object"
-      && (error as { code?: unknown }).code === "permission-denied";
+    return (
+      failure.blocked_reason === "access-required" &&
+      error !== null &&
+      typeof error === "object" &&
+      (error as { code?: unknown }).code === "permission-denied"
+    );
   }
 
   /**
@@ -251,10 +265,7 @@ export function createEngineHost(deps: EngineHostDeps) {
     return placement.processing === "none";
   }
 
-  async function displayFallback(
-    effect: AcquireEffect,
-    requestId: number,
-  ): Promise<boolean> {
+  async function displayFallback(effect: AcquireEffect, requestId: number): Promise<boolean> {
     if (!deps.loadDisplayImage || effect.type !== "acquire-tile") {
       return false;
     }
@@ -274,7 +285,11 @@ export function createEngineHost(deps: EngineHostDeps) {
       // bytes and load directly through `<img>`.
       const origin = originOfUrl(uri);
       if (origin !== "") displayOnlyOrigins.add(origin);
-      log("debug", "effect-outcome", `type=${effect.type} request=${requestId} display=true size=${width}x${height}`);
+      log(
+        "debug",
+        "effect-outcome",
+        `type=${effect.type} request=${requestId} display=true size=${width}x${height}`,
+      );
       if (!tornDown()) {
         sendToEngine({ type: "engine.display", requestId });
       }
@@ -293,7 +308,9 @@ export function createEngineHost(deps: EngineHostDeps) {
       transport: failure.transport,
       ...(failure.blocked_reason ? { blocked_reason: failure.blocked_reason } : {}),
       ...(typeof failure.http === "number" ? { http: failure.http } : {}),
-      ...(typeof failure.retry_after_ms === "number" ? { retry_after_ms: failure.retry_after_ms } : {}),
+      ...(typeof failure.retry_after_ms === "number"
+        ? { retry_after_ms: failure.retry_after_ms }
+        : {}),
       ...(failure.preview ? { preview: failure.preview } : {}),
       ...(failure.detail ? { detail: failure.detail } : {}),
     };
@@ -318,7 +335,11 @@ export function createEngineHost(deps: EngineHostDeps) {
     // retain the successful tile so the resolved plan does not fetch it again.
     for (;;) {
       if (tornDown()) return;
-      log("debug", "effect-fetch", `type=${effect.type} request=${request.id} purpose=probe route=probe`);
+      log(
+        "debug",
+        "effect-fetch",
+        `type=${effect.type} request=${request.id} purpose=probe route=probe`,
+      );
       try {
         if (effect.type === "acquire-tile" && effect.placement.probe_output === true) {
           // A probe retained as output participates in the visible assembly;
@@ -327,10 +348,12 @@ export function createEngineHost(deps: EngineHostDeps) {
         }
         const size = await deps.probeSize(request.uri, headerRecord(request.headers), request.id);
         if (tornDown()) return;
-        const probeOutput = effect.type === "acquire-tile" && effect.placement.probe_output === true;
-        let outcome = size.status === "available"
-          ? { status: "available" as const, width: size.width, height: size.height }
-          : { status: "missing" as const };
+        const probeOutput =
+          effect.type === "acquire-tile" && effect.placement.probe_output === true;
+        let outcome =
+          size.status === "available"
+            ? { status: "available" as const, width: size.width, height: size.height }
+            : { status: "missing" as const };
         if (size.status === "available" && probeOutput) {
           if (size.bytes) {
             await deps.assembly.acquireTile(effect.tile, effect.placement, size.bytes);
@@ -342,21 +365,34 @@ export function createEngineHost(deps: EngineHostDeps) {
             outcome = { status: "missing" };
           }
         }
-        const dimensions = outcome.status === "available" ? `${outcome.width}x${outcome.height}` : "missing";
-        log("debug", "effect-outcome", `type=${effect.type} request=${request.id} probe=${dimensions}`);
+        const dimensions =
+          outcome.status === "available" ? `${outcome.width}x${outcome.height}` : "missing";
+        log(
+          "debug",
+          "effect-outcome",
+          `type=${effect.type} request=${request.id} probe=${dimensions}`,
+        );
         if (!tornDown()) {
           sendToEngine({ type: "engine.probe", requestId: request.id, outcome });
         }
         return;
       } catch (error) {
         const failure = deps.classifyFailure(error);
-        log("warn", "effect-failed", `type=${effect.type} request=${request.id} code=${String(failure.code ?? failure.blocked_reason ?? "unknown")} retryable=${failure.retryable === true}`);
+        log(
+          "warn",
+          "effect-failed",
+          `type=${effect.type} request=${request.id} code=${String(failure.code ?? failure.blocked_reason ?? "unknown")} retryable=${failure.retryable === true}`,
+        );
         if (grantable(error, failure)) {
           const granted = await holdForPermission(request.id, error);
           permissionGates.delete(request.id);
           if (!granted) {
             if (tornDown()) return;
-            sendToEngine({ type: "engine.failure", requestId: request.id, error: fetchFailure(failure) });
+            sendToEngine({
+              type: "engine.failure",
+              requestId: request.id,
+              error: fetchFailure(failure),
+            });
             return;
           }
           continue;
@@ -364,7 +400,11 @@ export function createEngineHost(deps: EngineHostDeps) {
         // A failed probe fetch is a missing observation, never a tile
         // failure: the adapter maps it to ProbeOutcome{available:false}.
         if (tornDown()) return;
-        sendToEngine({ type: "engine.failure", requestId: request.id, error: fetchFailure(failure) });
+        sendToEngine({
+          type: "engine.failure",
+          requestId: request.id,
+          error: fetchFailure(failure),
+        });
         return;
       }
     }
@@ -422,7 +462,11 @@ export function createEngineHost(deps: EngineHostDeps) {
 
   async function acquireAttempt(effect: AcquireEffect, settle?: (displayOnly: boolean) => void) {
     const request = effect.request;
-    log("debug", "effect-fetch", `type=${effect.type} request=${request.id} purpose=${request.purpose}`);
+    log(
+      "debug",
+      "effect-fetch",
+      `type=${effect.type} request=${request.id} purpose=${request.purpose}`,
+    );
     for (;;) {
       if (tornDown()) return;
       try {
@@ -434,12 +478,20 @@ export function createEngineHost(deps: EngineHostDeps) {
         // Readable bytes for this origin: it is not display-only.
         settle?.(false);
         if (tornDown()) return;
-        log("debug", "effect-outcome", `type=${effect.type} request=${request.id} bytes=${result.bytes.byteLength}`);
+        log(
+          "debug",
+          "effect-outcome",
+          `type=${effect.type} request=${request.id} bytes=${result.bytes.byteLength}`,
+        );
         if (effect.type === "acquire-tile") {
           // Decode-at-acquisition: the placement is recorded and the bitmap is
           // held before the outcome settles, so assembly never depends on a
           // later bytes hand-off and decode failures retry honestly.
-          await deps.assembly.acquireTile(effect.tile, effect.placement, asArrayBuffer(result.bytes));
+          await deps.assembly.acquireTile(
+            effect.tile,
+            effect.placement,
+            asArrayBuffer(result.bytes),
+          );
         }
         if (tornDown()) return;
         if (effect.type === "acquire-tile") {
@@ -458,7 +510,11 @@ export function createEngineHost(deps: EngineHostDeps) {
         return;
       } catch (error) {
         const failure = deps.classifyFailure(error);
-        log("warn", "effect-failed", `type=${effect.type} request=${request.id} code=${String(failure.code ?? failure.blocked_reason ?? "unknown")} retryable=${failure.retryable === true}`);
+        log(
+          "warn",
+          "effect-failed",
+          `type=${effect.type} request=${request.id} code=${String(failure.code ?? failure.blocked_reason ?? "unknown")} retryable=${failure.retryable === true}`,
+        );
         if (grantable(error, failure)) {
           // A visible, explicit user action may grant this host. Hold the
           // effect so the same acquisition resumes after a grant.
@@ -466,7 +522,11 @@ export function createEngineHost(deps: EngineHostDeps) {
           permissionGates.delete(request.id);
           if (!granted) {
             if (tornDown()) return;
-            sendToEngine({ type: "engine.failure", requestId: request.id, error: fetchFailure(failure) });
+            sendToEngine({
+              type: "engine.failure",
+              requestId: request.id,
+              error: fetchFailure(failure),
+            });
             return;
           }
           continue;
@@ -477,7 +537,11 @@ export function createEngineHost(deps: EngineHostDeps) {
           if (fellBack) return;
         }
         if (tornDown()) return;
-        sendToEngine({ type: "engine.failure", requestId: request.id, error: fetchFailure(failure) });
+        sendToEngine({
+          type: "engine.failure",
+          requestId: request.id,
+          error: fetchFailure(failure),
+        });
         return;
       }
     }
@@ -516,7 +580,11 @@ export function createEngineHost(deps: EngineHostDeps) {
     } catch (error) {
       sendToEngine({
         type: "engine.finalize",
-        outcome: { type: "finalization-failed", effect: effect.effect, error: finalizationError(error) },
+        outcome: {
+          type: "finalization-failed",
+          effect: effect.effect,
+          error: finalizationError(error),
+        },
       });
       return;
     }
@@ -560,10 +628,16 @@ export function createEngineHost(deps: EngineHostDeps) {
   }
 
   const effectHandlers = {
-    "acquire-resource": (effect) => { void acquire(effect); },
-    "acquire-tile": (effect) => { void acquire(effect); },
+    "acquire-resource": (effect) => {
+      void acquire(effect);
+    },
+    "acquire-tile": (effect) => {
+      void acquire(effect);
+    },
     "finalize-output": (effect) => enqueue(() => finalizeOutput(effect)),
-    "wait-retry-timer": (effect) => { void waitRetryTimer(effect); },
+    "wait-retry-timer": (effect) => {
+      void waitRetryTimer(effect);
+    },
     "cancel-work": () => {
       abortPendingRetries();
       releaseGates(false);
@@ -574,9 +648,10 @@ export function createEngineHost(deps: EngineHostDeps) {
       }
       deps.assembly.release();
     },
-    "request-decision": (effect) => enqueue(() => {
-      deps.onRecoveryRequested(effect.generation);
-    }),
+    "request-decision": (effect) =>
+      enqueue(() => {
+        deps.onRecoveryRequested(effect.generation);
+      }),
   } satisfies DispatchTable<EffectMessage, void>;
 
   function handleEngineMessages(messages: HostEffect[], snapshot?: EngineSnapshotDto) {
@@ -586,7 +661,11 @@ export function createEngineHost(deps: EngineHostDeps) {
     // logged here, never refolded.
     if (snapshot) deps.onSnapshot?.(snapshot);
     for (const message of messages) {
-      log("debug", "effect-received", `type=${message.type}${"tile" in message ? ` tile=${message.tile}` : ""}`);
+      log(
+        "debug",
+        "effect-received",
+        `type=${message.type}${"tile" in message ? ` tile=${message.tile}` : ""}`,
+      );
       dispatchTyped(effectHandlers, message);
     }
   }
@@ -611,7 +690,10 @@ export function createEngineHost(deps: EngineHostDeps) {
       sendToEngine({ type: "engine.command", command: { type: "select-level", level } });
     },
     chooseRecovery(generation: number, choice: RecoveryChoice) {
-      sendToEngine({ type: "engine.command", command: { type: "answer-partial", generation, decision: choice } });
+      sendToEngine({
+        type: "engine.command",
+        command: { type: "answer-partial", generation, decision: choice },
+      });
     },
     pause() {
       // Pause state arrives back via snapshot.paused; the host keeps no flag.

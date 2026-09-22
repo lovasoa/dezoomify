@@ -1,8 +1,9 @@
 // Direct browser fetch transport with dependency-injected fetch.
 // No DOM, no cookies, no proxy knowledge.
+
+import { normalizeErrorPreviewText } from "./fetch-primitives.ts";
 import type { TileResponse } from "./types.ts";
 import { ERROR_CODES } from "./types.ts";
-import { normalizeErrorPreviewText } from "./fetch-primitives.ts";
 
 export interface DirectTransportOptions {
   headers?: Record<string, string>;
@@ -73,7 +74,8 @@ const ERROR_PREVIEW_MAX_CHARS = 300;
  * through otherwise unchanged.
  */
 export function extractErrorSignal(bytes: Uint8Array): string {
-  const slice = bytes.length > ERROR_PREVIEW_MAX_BYTES ? bytes.subarray(0, ERROR_PREVIEW_MAX_BYTES) : bytes;
+  const slice =
+    bytes.length > ERROR_PREVIEW_MAX_BYTES ? bytes.subarray(0, ERROR_PREVIEW_MAX_BYTES) : bytes;
   let text = "";
   try {
     text = new TextDecoder("utf-8", { fatal: false }).decode(slice);

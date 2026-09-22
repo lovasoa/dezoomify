@@ -185,10 +185,7 @@ export function isBlockedIPv6(host: string): boolean {
   // ff00::/8 multicast
   if ((groups[0] & 0xff00) === 0xff00) return true;
   // ::ffff:0:0/96 (IPv4-mapped): check embedded v4
-  if (
-    groups.slice(0, 5).every((g) => g === 0) &&
-    groups[5] === 0xffff
-  ) {
+  if (groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff) {
     const v4 = ((groups[6] << 16) + groups[7]) >>> 0;
     return isBlockedIPv4Value(v4);
   }

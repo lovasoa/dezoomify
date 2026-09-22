@@ -1,7 +1,7 @@
-import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   activeQueueEntry as activeDesktopEntry,
@@ -15,10 +15,10 @@ import {
 import {
   createDesktopQueue,
   enqueueDesktopQueue,
+  machineDesktopQueueSummary,
   recordDesktopProgress,
   redactedOriginForQueue,
   retryDesktopEntry,
-  machineDesktopQueueSummary,
 } from "../src/queue.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -42,7 +42,12 @@ test("enqueue validates and runs one active job at a time", () => {
     pendingDesktopEntries(q).map((e) => e.inputUrl),
     ["https://example.com/b"],
   );
-  for (const bad of ["", "file:///etc/passwd", "https://user:pass@example.com/x", `https://example.com/${"a".repeat(2048)}`]) {
+  for (const bad of [
+    "",
+    "file:///etc/passwd",
+    "https://user:pass@example.com/x",
+    `https://example.com/${"a".repeat(2048)}`,
+  ]) {
     const before = q.entries.length;
     const res = enqueueDesktopQueue(q, bad);
     assert.equal(res.code, "job.invalid-input");
@@ -197,7 +202,11 @@ for (const id of ["queue-basic", "queue-retry"]) {
     const summary = summarizeDesktopQueue(q);
     assert.deepEqual(summary, doc.golden.summary, "totals");
     assert.equal(humanDesktopQueueSummary(summary), doc.golden.human, "human totals line");
-    assert.deepEqual(JSON.parse(machineDesktopQueueSummary(summary)), doc.golden.machine, "machine totals");
+    assert.deepEqual(
+      JSON.parse(machineDesktopQueueSummary(summary)),
+      doc.golden.machine,
+      "machine totals",
+    );
     if (doc.golden.retriedIdDiffers) {
       const failedId = byIndex[1];
       const retried = q.entries.find((e) => e.status === "done" && e.id !== byIndex[0]);

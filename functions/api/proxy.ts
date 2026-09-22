@@ -16,7 +16,11 @@ function websiteOriginOf(url: string): string {
   }
 }
 
-function policyJsonResponse(status: number, cors: Record<string, string>, reason?: string): Response {
+function policyJsonResponse(
+  status: number,
+  cors: Record<string, string>,
+  reason?: string,
+): Response {
   return Response.json(
     { code: "PROXY_POLICY_DENIED", ...(reason !== undefined ? { reason } : {}) },
     { status, headers: { ...cors, "cache-control": "no-store" } },

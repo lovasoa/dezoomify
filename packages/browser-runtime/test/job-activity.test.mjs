@@ -1,5 +1,5 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import { ACTIVITY_MAX_LOG_LINES, createJobActivity } from "../src/job-activity.ts";
 
 function tracker(now = { at: 1000 }) {
@@ -7,13 +7,28 @@ function tracker(now = { at: 1000 }) {
   const intervals = [];
   let updates = 0;
   const activity = createJobActivity({
-    onUpdate: () => { updates += 1; },
-    requestFrame: (cb) => { frames.push(cb); },
-    setIntervalFn: (cb) => { intervals.push(cb); return intervals.length; },
+    onUpdate: () => {
+      updates += 1;
+    },
+    requestFrame: (cb) => {
+      frames.push(cb);
+    },
+    setIntervalFn: (cb) => {
+      intervals.push(cb);
+      return intervals.length;
+    },
     clearIntervalFn: () => {},
     nowFn: () => now.at,
   });
-  return { activity, frames, intervals, now, get updates() { return updates; } };
+  return {
+    activity,
+    frames,
+    intervals,
+    now,
+    get updates() {
+      return updates;
+    },
+  };
 }
 
 test("reset initializes the job view state", () => {

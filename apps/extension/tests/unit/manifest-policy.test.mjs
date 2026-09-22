@@ -1,11 +1,12 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const output = (browser) => new URL(`../../.output/${browser}-mv3/`, import.meta.url);
-const manifest = (browser) => JSON.parse(readFileSync(new URL("manifest.json", output(browser)), "utf8"));
+const manifest = (browser) =>
+  JSON.parse(readFileSync(new URL("manifest.json", output(browser)), "utf8"));
 const REVIEWED_PERMISSIONS = ["activeTab", "scripting"];
 
 for (const browser of ["chrome", "firefox"]) {
@@ -22,9 +23,15 @@ for (const browser of ["chrome", "firefox"]) {
     assert.equal(value.web_accessible_resources, undefined);
     assert.equal(value.offscreen, undefined);
     for (const forbidden of ["tabs", "downloads", "cookies"]) {
-      assert.ok(!value.permissions.includes(forbidden), `${browser} must not permanently request ${forbidden}`);
+      assert.ok(
+        !value.permissions.includes(forbidden),
+        `${browser} must not permanently request ${forbidden}`,
+      );
     }
-    assert.equal(value.content_security_policy.extension_pages, "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; base-uri 'none'");
+    assert.equal(
+      value.content_security_policy.extension_pages,
+      "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; base-uri 'none'",
+    );
     assert.deepEqual(value.action.default_icon, {
       16: "icons/icon16-grey.png",
       48: "icons/icon48-grey.png",
@@ -50,12 +57,20 @@ test("WXT emits Firefox's required classic MV3 background script", () => {
   assert.deepEqual(value.background?.scripts, ["background.js"]);
   assert.equal(value.background?.service_worker, undefined);
   assert.equal(value.background?.type, undefined);
-  assert.equal(value.browser_specific_settings?.gecko?.id, "{14074c89-8a5f-4813-98df-a7117f062871}");
+  assert.equal(
+    value.browser_specific_settings?.gecko?.id,
+    "{14074c89-8a5f-4813-98df-a7117f062871}",
+  );
   assert.equal(value.browser_specific_settings?.gecko?.strict_min_version, "133.0");
   const background = new URL("background.js", output("firefox"));
-  const parsed = spawnSync(process.execPath, ["--check", fileURLToPath(background)], { encoding: "utf8" });
+  const parsed = spawnSync(process.execPath, ["--check", fileURLToPath(background)], {
+    encoding: "utf8",
+  });
   assert.equal(parsed.status, 0, `Firefox classic script failed node --check:\n${parsed.stderr}`);
-  assert.ok(!readFileSync(background, "utf8").match(/^\s*(import|export)\s/m), "Firefox background must be classic");
+  assert.ok(
+    !readFileSync(background, "utf8").match(/^\s*(import|export)\s/m),
+    "Firefox background must be classic",
+  );
 });
 
 test("WXT configuration is the only extension builder and manifest source", () => {

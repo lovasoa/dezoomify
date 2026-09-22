@@ -5,10 +5,11 @@
 // fast enough for the default desktop lane, does not need a webview, and
 // catches startup/entrypoint/stylesheet regressions before a native window
 // is involved.
-import test from "node:test";
+
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
+import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -82,13 +83,12 @@ function stopFrontend(child) {
 
 async function waitForExit(child, timeoutMs = 2000) {
   if (child.exitCode !== null) return;
-  await Promise.race([
-    new Promise((resolve) => child.once("exit", resolve)),
-    delay(timeoutMs),
-  ]);
+  await Promise.race([new Promise((resolve) => child.once("exit", resolve)), delay(timeoutMs)]);
 }
 
-test("desktop dev server serves the real entrypoint and shared theme", { timeout: 30000 }, async () => {
+test("desktop dev server serves the real entrypoint and shared theme", {
+  timeout: 30000,
+}, async () => {
   const { child, getStderr, getSpawnError } = startFrontend();
   let response;
   let lastError;
@@ -99,7 +99,9 @@ test("desktop dev server serves the real entrypoint and shared theme", { timeout
         assert.fail(`could not start the desktop frontend: ${getSpawnError().message}`);
       }
       if (child.exitCode !== null) {
-        assert.fail(`desktop frontend exited before becoming ready (${child.exitCode}):\n${getStderr()}`);
+        assert.fail(
+          `desktop frontend exited before becoming ready (${child.exitCode}):\n${getStderr()}`,
+        );
       }
       try {
         response = await fetchWithTimeout(DEV_URL);
@@ -123,7 +125,11 @@ test("desktop dev server serves the real entrypoint and shared theme", { timeout
     const main = await fetchWithTimeout(new URL("/src/main.ts", DEV_URL));
     assert.equal(main.status, 200, "Vite serves the desktop entrypoint");
     assert.match(html, /src\/theme\.css/, "desktop document links the shared theme");
-    assert.match(html, /src\/desktop\.css/, "desktop document links its native controls stylesheet");
+    assert.match(
+      html,
+      /src\/desktop\.css/,
+      "desktop document links its native controls stylesheet",
+    );
 
     const theme = await fetchWithTimeout(new URL("/src/theme.css", DEV_URL));
     assert.equal(theme.status, 200, "Vite serves the imported shared theme");

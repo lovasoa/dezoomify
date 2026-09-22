@@ -6,14 +6,15 @@
 // classifier live in the caller too (`src/discovery.ts`) and arrive as plain
 // data, so this module never imports app layers. Progress and log hooks
 // drive the caller's live job view. Keep erasable-syntax-only.
-import { blockedReason, fetchFailure } from "./failure.ts";
-import type { FetchCause, StructuredFailure } from "./failure.ts";
+
 import type { FetchFailureCode } from "@dezoomify/wasm-bindings";
+import type { FetchCause, StructuredFailure } from "./failure.ts";
+import { blockedReason, fetchFailure } from "./failure.ts";
 import {
-  DIRECT_METADATA_TIMEOUT_MS,
-  REQUEST_TIMEOUT_MS,
   combineTimeout,
+  DIRECT_METADATA_TIMEOUT_MS,
   proxyRateLimitDelayMs,
+  REQUEST_TIMEOUT_MS,
   shortUrl,
   sleep,
   tileFailedError,
@@ -31,14 +32,15 @@ export interface DirectOutcome {
   preview?: string;
 }
 
-export interface FetchImplLike {
-  (input: string, init?: Record<string, unknown>): Promise<{
-    url?: string;
-    status: number;
-    headers?: unknown;
-    arrayBuffer(): Promise<ArrayBuffer>;
-  }>;
-}
+export type FetchImplLike = (
+  input: string,
+  init?: Record<string, unknown>,
+) => Promise<{
+  url?: string;
+  status: number;
+  headers?: unknown;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}>;
 
 export interface ProxyTransportLike {
   fetchViaProxy(
@@ -86,8 +88,15 @@ export interface WebFetchMessages {
 export interface WebFetchDeps {
   fetchImpl?: FetchImplLike;
   proxyTransport?: ProxyTransportLike;
-  isProxyEligible(req: { url: string; kind: "metadata" | "tile"; headers?: Record<string, string> }): ProxyEligibility;
-  classifyHint?: (bytes: ArrayBuffer, info: { via: string; contentType?: string }) => { found: boolean };
+  isProxyEligible(req: {
+    url: string;
+    kind: "metadata" | "tile";
+    headers?: Record<string, string>;
+  }): ProxyEligibility;
+  classifyHint?: (
+    bytes: ArrayBuffer,
+    info: { via: string; contentType?: string },
+  ) => { found: boolean };
   hooks: WebFetchHooks;
   messages: WebFetchMessages;
   sleepFn?: (ms: number) => Promise<void>;
@@ -97,8 +106,17 @@ export interface WebFetchDeps {
 }
 
 export interface WebFetcher {
-  fetchDirect(url: string, headers?: Record<string, string>, signal?: AbortSignal, ms?: number, logTimeout?: boolean): Promise<DirectOutcome>;
-  fetchViaProxy(targetUrl: string, signal?: AbortSignal): Promise<{
+  fetchDirect(
+    url: string,
+    headers?: Record<string, string>,
+    signal?: AbortSignal,
+    ms?: number,
+    logTimeout?: boolean,
+  ): Promise<DirectOutcome>;
+  fetchViaProxy(
+    targetUrl: string,
+    signal?: AbortSignal,
+  ): Promise<{
     ok: boolean;
     status: number;
     bytes?: ArrayBuffer;
@@ -107,8 +125,16 @@ export interface WebFetcher {
     finalUrl?: string;
     retryAfterMs?: number;
   }>;
-  fetchMetadataFor(url: string, headers: Record<string, string>, signal?: AbortSignal): Promise<{ bytes: ArrayBuffer; finalUri?: string; via: string }>;
-  fetchTileFor(url: string, headers: Record<string, string>, signal?: AbortSignal): Promise<{ bytes: ArrayBuffer }>;
+  fetchMetadataFor(
+    url: string,
+    headers: Record<string, string>,
+    signal?: AbortSignal,
+  ): Promise<{ bytes: ArrayBuffer; finalUri?: string; via: string }>;
+  fetchTileFor(
+    url: string,
+    headers: Record<string, string>,
+    signal?: AbortSignal,
+  ): Promise<{ bytes: ArrayBuffer }>;
   getActiveTransport(): string | null;
   resetActiveTransport(): void;
 }
@@ -162,9 +188,11 @@ export interface ClassifiedProxyFailure {
  * they never share a message or a retryable flag. The exact relay `reason`
  * travels inside the cause, never as free text.
  */
-export function classifyProxyFailure(
-  proxied: { status: number; code?: string; reason?: string },
-): ClassifiedProxyFailure {
+export function classifyProxyFailure(proxied: {
+  status: number;
+  code?: string;
+  reason?: string;
+}): ClassifiedProxyFailure {
   const code = proxied.code ?? "PROXY_ERROR";
   const status = proxied.status || 0;
   const cause: FetchCause = { code, transport: "metadata-proxy" };
@@ -226,7 +254,11 @@ export function classifyProxyFailure(
       };
     }
   }
-  if (code === "TRANSPORT_NETWORK_ERROR" || code === "PROXY_NETWORK_ERROR" || code === "PROXY_ERROR") {
+  if (
+    code === "TRANSPORT_NETWORK_ERROR" ||
+    code === "PROXY_NETWORK_ERROR" ||
+    code === "PROXY_ERROR"
+  ) {
     return {
       code: "PROXY_ERROR",
       message: "The metadata proxy could not fetch this address. Try again shortly.",
@@ -263,10 +295,14 @@ async function readErrorPreview(res: {
 
 function parseRetryAfterMs(headers: unknown, at: number): number | undefined {
   try {
-    const value = headers as { get?: (name: string) => string | null; [name: string]: unknown } | null;
-    const raw = typeof value?.get === "function"
-      ? value.get("retry-after")
-      : value?.["retry-after"] ?? value?.["Retry-After"];
+    const value = headers as {
+      get?: (name: string) => string | null;
+      [name: string]: unknown;
+    } | null;
+    const raw =
+      typeof value?.get === "function"
+        ? value.get("retry-after")
+        : (value?.["retry-after"] ?? value?.["Retry-After"]);
     if (typeof raw !== "string" || raw.trim() === "") return undefined;
     const seconds = Number(raw);
     if (Number.isFinite(seconds) && seconds >= 0) return Math.floor(seconds * 1000);
@@ -325,12 +361,17 @@ function defaultFetchImpl(): FetchImplLike | null {
     const impl = (globalThis as unknown as { fetch?: unknown }).fetch;
     if (typeof impl === "function") {
       return (input: string, init?: Record<string, unknown>) =>
-        (impl as (i: string, o?: unknown) => Promise<{
-          url?: string;
-          status: number;
-          headers?: unknown;
-          arrayBuffer(): Promise<ArrayBuffer>;
-        }>)(input, { ...(init ?? {}), credentials: "omit" });
+        (
+          impl as (
+            i: string,
+            o?: unknown,
+          ) => Promise<{
+            url?: string;
+            status: number;
+            headers?: unknown;
+            arrayBuffer(): Promise<ArrayBuffer>;
+          }>
+        )(input, { ...(init ?? {}), credentials: "omit" });
     }
   } catch {
     // No host fetch available; the caller must inject one.
@@ -393,7 +434,8 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       if (signal?.aborted) return { outcome: "cancelled" };
       const name = (e as { name?: string })?.name;
       if (name === "TimeoutError" || (combined.timedOut && combined.timedOut())) {
-        if (logTimeout) hooks.onLog(`Direct metadata fetch did not complete within ${ms} ms: ${shortUrl(url)}`);
+        if (logTimeout)
+          hooks.onLog(`Direct metadata fetch did not complete within ${ms} ms: ${shortUrl(url)}`);
         return { outcome: "network-error" };
       }
       return { outcome: "network-error" };
@@ -406,7 +448,15 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
   async function fetchViaProxy(
     targetUrl: string,
     signal?: AbortSignal,
-  ): Promise<{ ok: boolean; status: number; bytes?: ArrayBuffer; code?: string; reason?: string; finalUrl?: string; retryAfterMs?: number }> {
+  ): Promise<{
+    ok: boolean;
+    status: number;
+    bytes?: ArrayBuffer;
+    code?: string;
+    reason?: string;
+    finalUrl?: string;
+    retryAfterMs?: number;
+  }> {
     if (!deps.proxyTransport) return { ok: false, status: 502, code: "PROXY_ERROR" };
     if (signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
     // Proxy admission budget lives in exactly one owner: the injected
@@ -438,7 +488,10 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     } catch (e) {
       hooks.onRequestEnd(reqId, false);
       if (signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
-      if (((e as { name?: string })?.name === "TimeoutError") || (combined.timedOut && combined.timedOut())) {
+      if (
+        (e as { name?: string })?.name === "TimeoutError" ||
+        (combined.timedOut && combined.timedOut())
+      ) {
         hooks.onLog("Metadata proxy request timed out after 30 s.");
         return { ok: false, status: 502, code: "PROXY_NETWORK_ERROR" };
       }
@@ -498,7 +551,8 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     if (direct.outcome === "readable" && direct.bytes) {
       bytes = direct.bytes;
       if (typeof direct.finalUrl === "string" && direct.finalUrl !== "") finalUri = direct.finalUrl;
-      if (typeof direct.contentType === "string" && direct.contentType !== "") contentType = direct.contentType;
+      if (typeof direct.contentType === "string" && direct.contentType !== "")
+        contentType = direct.contentType;
     } else if (
       direct.outcome === "network-error" &&
       !signal?.aborted &&
@@ -512,7 +566,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         startedAt: proxyStartedAt,
         transport: "metadata proxy",
         target,
-        outcome: proxied.ok ? `HTTP ${proxied.status}` : proxied.code ?? `HTTP ${proxied.status}`,
+        outcome: proxied.ok ? `HTTP ${proxied.status}` : (proxied.code ?? `HTTP ${proxied.status}`),
         ...(proxied.bytes ? { bytes: proxied.bytes.byteLength } : {}),
       });
       // Retry-After + backoff: one bounded retry converts a transient
@@ -530,7 +584,9 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
             startedAt: proxyStartedAt,
             transport: "metadata proxy",
             target,
-            outcome: proxied.ok ? `HTTP ${proxied.status}` : proxied.code ?? `HTTP ${proxied.status}`,
+            outcome: proxied.ok
+              ? `HTTP ${proxied.status}`
+              : (proxied.code ?? `HTTP ${proxied.status}`),
             ...(proxied.bytes ? { bytes: proxied.bytes.byteLength } : {}),
           });
         }
@@ -553,7 +609,8 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         });
       }
       bytes = proxied.bytes;
-      if (typeof proxied.finalUrl === "string" && proxied.finalUrl !== "") finalUri = proxied.finalUrl;
+      if (typeof proxied.finalUrl === "string" && proxied.finalUrl !== "")
+        finalUri = proxied.finalUrl;
     } else if (direct.outcome === "cancelled" || signal?.aborted) {
       // A retired job never falls back to the proxy and never reports a
       // retryable discovery failure for its own cancellation.
@@ -573,21 +630,17 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
           transportKind: "direct",
         });
       }
-      throw fetchFailure(
-        "This page could not be opened. Check the address and try again.",
-        false,
-        {
-          cause: {
-            code: "DISCOVERY_HTTP_ERROR",
-            ...(direct.status ? { http: direct.status } : {}),
-            transport: "direct",
-          },
+      throw fetchFailure("This page could not be opened. Check the address and try again.", false, {
+        cause: {
           code: "DISCOVERY_HTTP_ERROR",
-          url,
-          preview: direct.preview,
-          transportKind: "direct",
+          ...(direct.status ? { http: direct.status } : {}),
+          transport: "direct",
         },
-      );
+        code: "DISCOVERY_HTTP_ERROR",
+        url,
+        preview: direct.preview,
+        transportKind: "direct",
+      });
     } else {
       throw fetchFailure(deps.messages.discoveryFailed(via), true, {
         cause: { code: "DISCOVERY_FAILED", transport: "direct" },
@@ -607,7 +660,9 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         found = true;
       }
       if (!found) {
-        hooks.onLog(`content hint: no zoomable marker in first bytes (${via}); running full discovery…`);
+        hooks.onLog(
+          `content hint: no zoomable marker in first bytes (${via}); running full discovery…`,
+        );
       }
     }
     return { bytes: bytes as ArrayBuffer, finalUri, via };
@@ -642,5 +697,12 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     activeTransport = null;
   }
 
-  return { fetchDirect, fetchViaProxy, fetchMetadataFor, fetchTileFor, getActiveTransport, resetActiveTransport };
+  return {
+    fetchDirect,
+    fetchViaProxy,
+    fetchMetadataFor,
+    fetchTileFor,
+    getActiveTransport,
+    resetActiveTransport,
+  };
 }

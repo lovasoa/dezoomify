@@ -1,18 +1,20 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import {
   activeQueueEntry as activeWebEntry,
   finishActiveQueueEntry as finishActiveWebEntry,
 } from "@dezoomify/app-model";
-import {
-  createWebQueue,
-  enqueueWebQueue,
-  retryWebEntry,
-} from "../src/queue.ts";
+import { createWebQueue, enqueueWebQueue, retryWebEntry } from "../src/queue.ts";
 
 test("website queue validates and stores trimmed HTTP(S) URLs", () => {
   let q = createWebQueue();
-  for (const bad of ["", "file:///etc/passwd", "https://user:pass@example.com/x", `https://example.com/${"a".repeat(2048)}`, 42]) {
+  for (const bad of [
+    "",
+    "file:///etc/passwd",
+    "https://user:pass@example.com/x",
+    `https://example.com/${"a".repeat(2048)}`,
+    42,
+  ]) {
     const result = enqueueWebQueue(q, bad);
     assert.equal(result.code, "job.invalid-input");
     assert.equal(result.entry, null);

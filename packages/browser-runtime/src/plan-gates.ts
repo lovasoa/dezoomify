@@ -1,7 +1,8 @@
 // Browser canvas failure and source URL helpers.
-import { failure } from "./failure.ts";
+
 import { isValidDeepLinkSource } from "@dezoomify/app-model";
 import type { StructuredFailure } from "./failure.ts";
+import { failure } from "./failure.ts";
 
 /** Desktop handoff link for images beyond the browser tab (`dezoomify://`).
  * Returns "" for non-http(s) sources (for example local `file:` URLs): the

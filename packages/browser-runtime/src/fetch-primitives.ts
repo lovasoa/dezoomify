@@ -44,7 +44,11 @@ export const ENGINE_HEADER_LIMITS = Object.freeze({
 
 /** Headers the core may safely ask a browser fetch to forward. */
 export const CORE_REQUEST_HEADERS: readonly string[] = Object.freeze([
-  "accept", "accept-language", "if-modified-since", "if-none-match", "range",
+  "accept",
+  "accept-language",
+  "if-modified-since",
+  "if-none-match",
+  "range",
 ]);
 
 /** @param {unknown} value */
@@ -86,7 +90,13 @@ export function originOfPublicUrl(value: unknown): string | null {
  */
 export function normalizeFetchMethod(method: unknown): string | null {
   if (method === undefined) return "GET";
-  if (typeof method !== "string" || method.length === 0 || method.length > 16 || !/^[A-Za-z]+$/.test(method)) return null;
+  if (
+    typeof method !== "string" ||
+    method.length === 0 ||
+    method.length > 16 ||
+    !/^[A-Za-z]+$/.test(method)
+  )
+    return null;
   const normalized = method.toUpperCase();
   return (FETCH_METHODS as readonly string[]).includes(normalized) ? normalized : null;
 }
@@ -100,9 +110,16 @@ export function sanitizeHeaderPair(
   value: unknown,
   limits: { maxName: number; maxValue: number } = ENGINE_HEADER_LIMITS,
 ): { name: string; value: string } | null {
-  if (typeof name !== "string" || typeof value !== "string" ||
-    name.length === 0 || name.length > limits.maxName || value.length > limits.maxValue ||
-    /[\r\n]/.test(name) || /[\r\n]/.test(value)) return null;
+  if (
+    typeof name !== "string" ||
+    typeof value !== "string" ||
+    name.length === 0 ||
+    name.length > limits.maxName ||
+    value.length > limits.maxValue ||
+    /[\r\n]/.test(name) ||
+    /[\r\n]/.test(value)
+  )
+    return null;
   return { name, value };
 }
 
@@ -132,7 +149,10 @@ export function validateEngineHeaders(
  * Reduce engine-declared headers to the core forwarding allowlist.
  * @param {unknown} headers @param {RequestPurpose} purpose
  */
-export function forwardCoreHeaders(headers: unknown, purpose: RequestPurpose): Record<string, string> {
+export function forwardCoreHeaders(
+  headers: unknown,
+  purpose: RequestPurpose,
+): Record<string, string> {
   const out: Record<string, string> = {};
   const pairs = Array.isArray(headers)
     ? headers.map((header) => [header?.name, header?.value])
@@ -140,8 +160,10 @@ export function forwardCoreHeaders(headers: unknown, purpose: RequestPurpose): R
   for (const [rawName, rawValue] of pairs) {
     if (typeof rawName !== "string" || typeof rawValue !== "string") continue;
     const name = rawName.toLowerCase();
-    if (!CORE_REQUEST_HEADERS.includes(name) || /\r|\n/.test(rawName) || /\r|\n/.test(rawValue)) continue;
-    if ((name === "if-modified-since" || name === "if-none-match") && purpose !== "metadata") continue;
+    if (!CORE_REQUEST_HEADERS.includes(name) || /\r|\n/.test(rawName) || /\r|\n/.test(rawValue))
+      continue;
+    if ((name === "if-modified-since" || name === "if-none-match") && purpose !== "metadata")
+      continue;
     out[name] = rawValue;
   }
   return out;
@@ -159,12 +181,14 @@ export function isHttpSuccessStatus(status: unknown): status is number {
  * @param {unknown} data
  */
 export function decodeBase64Payload(data: unknown, maxBytes: number): Uint8Array | null {
-  if (typeof data !== "string" || data.length === 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) return null;
+  if (typeof data !== "string" || data.length === 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data))
+    return null;
   let bytes: Uint8Array;
   try {
-    bytes = typeof Uint8Array.fromBase64 === "function"
-      ? Uint8Array.fromBase64(data)
-      : decodeBase64Legacy(data);
+    bytes =
+      typeof Uint8Array.fromBase64 === "function"
+        ? Uint8Array.fromBase64(data)
+        : decodeBase64Legacy(data);
   } catch {
     return null;
   }
@@ -188,6 +212,7 @@ export function normalizeErrorPreviewText(text: string, maxChars: number): strin
   if (!text || text.includes("\0")) return "";
   const flat = text
     .replace(/<[^>]{0,512}>/g, " ")
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: C0 controls and DEL are precisely the unsafe server bytes removed here.
     .replace(/[\x00-\x1F\x7F]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();

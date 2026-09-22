@@ -1,7 +1,8 @@
 // Wiring tests: the Pages Function adapter must expose the pure relay at /api/proxy.
-import test from "node:test";
+
 import assert from "node:assert/strict";
-import { onRequestPost, onRequestOptions } from "../functions/api/proxy.ts";
+import test from "node:test";
+import { onRequestOptions, onRequestPost } from "../functions/api/proxy.ts";
 import { handleProxyRequest } from "../src/server/proxy.ts";
 
 const SITE_URL = "https://dezoomify.ophir.dev/api/proxy";
@@ -54,7 +55,10 @@ test("redirect hops are revalidated by the relay, not followed by fetch", async 
   const calls = t.mock.method(globalThis, "fetch", () =>
     Promise.resolve({
       status: 302,
-      headers: { get: (name) => (name.toLowerCase() === "location" ? "http://169.254.169.254/latest/meta-data" : null) },
+      headers: {
+        get: (name) =>
+          name.toLowerCase() === "location" ? "http://169.254.169.254/latest/meta-data" : null,
+      },
       arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
     }),
   );
@@ -113,10 +117,7 @@ test("oversized declared body -> 413 budget", async (t) => {
 });
 
 test("tile-like image content type -> 415 (metadata only)", async (t) => {
-  mockUpstream(
-    () => ({ status: 200, headers: { "content-type": "image/jpeg" }, body: "jpeg" }),
-    t,
-  );
+  mockUpstream(() => ({ status: 200, headers: { "content-type": "image/jpeg" }, body: "jpeg" }), t);
   const res = await onRequestPost({
     request: postRequest('{"targetUrl":"https://public.test/tile.jpg","protocolVersion":1}'),
   });
@@ -216,9 +217,12 @@ test("relay exposes the post-redirect upstream URL for relative tile bases", asy
     t,
   );
   const res = await onRequestPost({
-    request: postRequest('{"targetUrl":"https://public.test/galleria_04.xml","protocolVersion":1}', {
-      origin: "https://dezoomify.ophir.dev",
-    }),
+    request: postRequest(
+      '{"targetUrl":"https://public.test/galleria_04.xml","protocolVersion":1}',
+      {
+        origin: "https://dezoomify.ophir.dev",
+      },
+    ),
   });
   assert.equal(res.status, 200);
   // Relative tile URLs (krpano galleria_04.tiles/*) resolve against this;
@@ -236,12 +240,12 @@ test("OPTIONS preflight: same origin allowed, cross origin refused", async (t) =
     }),
   });
   assert.equal(ok.status, 204);
-  assert.equal(
-    ok.headers.get("access-control-allow-origin"),
-    "https://dezoomify.ophir.dev",
-  );
+  assert.equal(ok.headers.get("access-control-allow-origin"), "https://dezoomify.ophir.dev");
   const denied = await onRequestOptions({
-    request: new Request(SITE_URL, { method: "OPTIONS", headers: { origin: "https://evil.example" } }),
+    request: new Request(SITE_URL, {
+      method: "OPTIONS",
+      headers: { origin: "https://evil.example" },
+    }),
   });
   assert.equal(denied.status, 403);
 });

@@ -14,15 +14,11 @@
 // User copy travels as i18n keys plus vars; the view renders them through
 // `t()`. Counts, labels, and gap ledgers stay literal data.
 
-import type {
-  ErrorDto,
-  JobSnapshot,
-  JobState,
-} from "@dezoomify/app-model";
+import type { ErrorDto, JobSnapshot, JobState } from "@dezoomify/app-model";
 import { renderTransportLabel } from "@dezoomify/app-model";
-import { categoryFor } from "./failure.ts";
 import { splitGapLedger } from "./components.ts";
-import { t, type I18nKey } from "./i18n.ts";
+import { categoryFor } from "./failure.ts";
+import { type I18nKey, t } from "./i18n.ts";
 
 /**
  * The layered failure shape every product renders through the shared view:
@@ -227,12 +223,13 @@ export function presentSnapshot(
   // never cuts the live progress short: while the job is still running the
   // view stays on the progress bar and only switches to the preview message
   // once the engine reports a display-only disposition on a finished job.
-  const engineDisplayOnly = snapshot.output?.disposition === "display-only"
-    && (terminal?.kind === "completed" || terminal?.kind === "partial-completed");
+  const engineDisplayOnly =
+    snapshot.output?.disposition === "display-only" &&
+    (terminal?.kind === "completed" || terminal?.kind === "partial-completed");
   const displayOnly =
     ((options?.displayOnly === true || snapshot.output?.disposition === "display-only") &&
-      terminal === null)
-    || engineDisplayOnly;
+      terminal === null) ||
+    engineDisplayOnly;
   let phase: SnapshotPhase = "job";
   if (engineDisplayOnly) {
     phase = "display-only";
@@ -246,14 +243,10 @@ export function presentSnapshot(
   const headline = headlineForState(lifecycle);
   const completed = snapshot.progress.completed;
   const total = snapshot.progress.total ?? null;
-  const progress =
-    total !== null || completed > 0
-      ? { current: completed, total }
-      : null;
+  const progress = total !== null || completed > 0 ? { current: completed, total } : null;
 
   const detailKey = engineDisplayOnly ? undefined : headline.detail;
-  const detailVars =
-    engineDisplayOnly || !headline.detailVars ? undefined : headline.detailVars;
+  const detailVars = engineDisplayOnly || !headline.detailVars ? undefined : headline.detailVars;
   return {
     ...basePresentation(),
     phase,
@@ -344,7 +337,12 @@ export function presentStatus(
 }
 
 function unknownFailure(): StructuredError {
-  return { code: "UNKNOWN", category: "unknown", retryable: true, message: t("view.fail.fallback") };
+  return {
+    code: "UNKNOWN",
+    category: "unknown",
+    retryable: true,
+    message: t("view.fail.fallback"),
+  };
 }
 
 function hostStepPhase(status: PresentationStatus): SnapshotPhase {

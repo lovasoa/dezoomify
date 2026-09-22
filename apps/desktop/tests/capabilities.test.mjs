@@ -1,7 +1,7 @@
-import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -49,11 +49,17 @@ function assertNoTrailingSpaces(content, label) {
   }
 }
 
-const EXPECTED_COMMANDS = ["answer_choice", "cancel_job", "open_saved_output", "pause_job", "query_capabilities", "request_destination", "resume_job", "start_job"];
-const EXPECTED_CHANNELS = [
-  "dezoomify://job-snapshot",
-  "dezoomify://deep-link-pending",
+const EXPECTED_COMMANDS = [
+  "answer_choice",
+  "cancel_job",
+  "open_saved_output",
+  "pause_job",
+  "query_capabilities",
+  "request_destination",
+  "resume_job",
+  "start_job",
 ];
+const EXPECTED_CHANNELS = ["dezoomify://job-snapshot", "dezoomify://deep-link-pending"];
 const EXPECTED_ENCODERS = ["png", "jpeg", "tiff", "zif", "webp"];
 const NATIVE_HOST = "dev.ophir.dezoomify.native_host";
 
@@ -74,8 +80,16 @@ test("rust command registry lists exact commands", () => {
   }
   const build = readText("../src-tauri/build.rs");
   const shell = readText("../src-tauri/src/tauri_shell.rs");
-  assert.match(build, /desktop_commands!\(command_names\)/, "Tauri permissions consume canonical registry");
-  assert.match(shell, /desktop_commands!\(command_handler\)/, "real handler consumes canonical registry");
+  assert.match(
+    build,
+    /desktop_commands!\(command_names\)/,
+    "Tauri permissions consume canonical registry",
+  );
+  assert.match(
+    shell,
+    /desktop_commands!\(command_handler\)/,
+    "real handler consumes canonical registry",
+  );
   assert.doesNotMatch(shell, /generate_handler!\[\s*start_job/, "handler list is not duplicated");
 });
 
@@ -104,7 +118,15 @@ test("generated files list exact commands and channels", () => {
   const a = DESKTOP_META;
   const b = xdezoomify(capGen);
   const c = xdezoomify(desktopCap);
-  for (const field of ["commands", "eventChannels", "encoders", "decoders", "protocol", "nativeHost", "updater"]) {
+  for (const field of [
+    "commands",
+    "eventChannels",
+    "encoders",
+    "decoders",
+    "protocol",
+    "nativeHost",
+    "updater",
+  ]) {
     assert.deepEqual(a[field], b[field], `tauri vs capabilities field ${field}`);
     assert.deepEqual(a[field], c[field], `tauri vs desktop-capabilities field ${field}`);
   }
@@ -127,10 +149,16 @@ test("protocol range, encoders, native host, updater stay consistent", () => {
     assert.equal(x.updater.httpsOnly, true);
     assert.equal(x.updater.requiresUserConfirm, true);
     assert.deepEqual(x.updater.allowlist ?? [], [], "disabled updater ships an empty allowlist");
-    assert.ok((x.updater.allowlist ?? []).every((u) => u.startsWith("https://")), "https allowlist");
+    assert.ok(
+      (x.updater.allowlist ?? []).every((u) => u.startsWith("https://")),
+      "https allowlist",
+    );
   }
   assert.ok(lib.includes(NATIVE_HOST), "lib native host");
-  assert.ok(integration.includes('"2.0"') && integration.includes(NATIVE_HOST), "integration protocol/host");
+  assert.ok(
+    integration.includes('"2.0"') && integration.includes(NATIVE_HOST),
+    "integration protocol/host",
+  );
   const hostSrc = readText("../src-tauri/src/bin/dezoomify-native-host.rs");
   assert.ok(hostSrc.includes(NATIVE_HOST), "native host binary name");
   assert.ok(hostSrc.includes("capability.unavailable"), "fail-closed rejection");
@@ -143,14 +171,27 @@ test("event channels are single-sourced and forbid tile bytes", () => {
   assert.deepEqual(sorted(fromEvents), sorted(EXPECTED_CHANNELS));
   // The integration module re-exports the canonical registry instead of
   // keeping a second literal: one source, no drift.
-  assert.ok(integrationTs.includes('from "./events.ts"'), "integration re-exports the canonical channels");
-  assert.ok(integrationTs.includes("DESKTOP_EVENT_CHANNELS"), "integration exposes the canonical channels");
+  assert.ok(
+    integrationTs.includes('from "./events.ts"'),
+    "integration re-exports the canonical channels",
+  );
+  assert.ok(
+    integrationTs.includes("DESKTOP_EVENT_CHANNELS"),
+    "integration exposes the canonical channels",
+  );
   assert.equal(integrationTs.includes("dezoomify://job-state"), false, "no second channel literal");
   assert.ok(eventsTs.includes("assertNoTileBytes"), "redaction helper");
   assert.ok(eventsTs.includes("FORBIDDEN_IPC_KEYS"), "forbidden-IPC-key set backs the guard");
-  for (const rel of ["../src-tauri/tauri.conf.json", "../src-tauri/capabilities/generated.json", "../../../generated/desktop-capabilities.json"]) {
+  for (const rel of [
+    "../src-tauri/tauri.conf.json",
+    "../src-tauri/capabilities/generated.json",
+    "../../../generated/desktop-capabilities.json",
+  ]) {
     const raw = readText(rel);
-    assert.ok(!raw.includes("tileBytes") && !raw.includes("tile_bytes"), `${rel} must not carry tile bytes`);
+    assert.ok(
+      !raw.includes("tileBytes") && !raw.includes("tile_bytes"),
+      `${rel} must not carry tile bytes`,
+    );
   }
 });
 
@@ -173,9 +214,21 @@ test("desktop footer is a compact external-link bar, not a disclosure", () => {
   assert.ok(!main.includes("ensureDesktopHelpAbout"), "no large collapsible footer duplicate");
   assert.match(css, /\.dz-site-footer \{[\s\S]*?min-height: 30px;/, "thin footer bar");
   assert.ok(!css.includes(".dz-site-footer { display: none; }"), "footer stays visible");
-  assert.match(main, /handleOpenExternalLink\(resolved\)/, "footer links route through external navigation");
-  assert.match(integration, /import \{ openUrl \} from "@tauri-apps\/plugin-opener"/, "uses Tauri's opener binding");
-  assert.match(integration, /await openUrl\(url\)/, "external navigation opens the URL through Tauri");
+  assert.match(
+    main,
+    /handleOpenExternalLink\(resolved\)/,
+    "footer links route through external navigation",
+  );
+  assert.match(
+    integration,
+    /import \{ openUrl \} from "@tauri-apps\/plugin-opener"/,
+    "uses Tauri's opener binding",
+  );
+  assert.match(
+    integration,
+    /await openUrl\(url\)/,
+    "external navigation opens the URL through Tauri",
+  );
 });
 
 test("generated files are canonical bytes (LF, pretty, no drift)", () => {
@@ -205,12 +258,17 @@ test("installer templates use placeholders and no wildcards", () => {
     assert.ok(!content.includes("*"), `${label} no wildcards`);
     assert.ok(content.includes(NATIVE_HOST), `${label} host name`);
   }
-  assert.ok(chromium.includes("allowed_origins") && chromium.includes("chrome-extension://"), "chromium origins");
+  assert.ok(
+    chromium.includes("allowed_origins") && chromium.includes("chrome-extension://"),
+    "chromium origins",
+  );
   assert.ok(firefox.includes("allowed_extensions"), "firefox extensions");
   // Templates stay valid once placeholders are substituted.
   const fakeHost = "/opt/dezoomify/dezoomify-native-host";
   const fakeId = "abcdefghijklmnopqrstuvwxyzabcdef";
-  const expandedChromium = chromium.replaceAll("@HOST_PATH@", fakeHost).replaceAll("@EXTENSION_ID@", fakeId);
+  const expandedChromium = chromium
+    .replaceAll("@HOST_PATH@", fakeHost)
+    .replaceAll("@EXTENSION_ID@", fakeId);
   const parsed = JSON.parse(expandedChromium);
   assert.ok(parsed.allowed_origins[0].includes(fakeId));
   assert.ok(path.isAbsolute(parsed.path), "absolute host path");
@@ -221,8 +279,14 @@ test("desktop typescript stays host-neutral (no web/extension imports)", () => {
     const src = readText(rel);
     assert.ok(!/from\s+["'][^"']*apps\/web/.test(src), `${rel} must not import web`);
     assert.ok(!/from\s+["'][^"']*apps\/extension/.test(src), `${rel} must not import extension`);
-    assert.ok(!/from\s+["'][^"']*browser-runtime/.test(src), `${rel} must not import browser runtime`);
-    assert.ok(!/import\s*\(\s*["'][^"']*apps\/(web|extension)/.test(src), `${rel} no dynamic web import`);
+    assert.ok(
+      !/from\s+["'][^"']*browser-runtime/.test(src),
+      `${rel} must not import browser runtime`,
+    );
+    assert.ok(
+      !/import\s*\(\s*["'][^"']*apps\/(web|extension)/.test(src),
+      `${rel} no dynamic web import`,
+    );
     assert.ok(!src.includes("webIntegration.ts"), `${rel} no web integration import`);
     // The desktop TS layer performs no I/O of its own: it never calls
     // fetch/XHR (host effects belong to the native runtime).
@@ -231,13 +295,22 @@ test("desktop typescript stays host-neutral (no web/extension imports)", () => {
   }
   const cargo = readText("../src-tauri/Cargo.toml");
   const rootCargo = readText("../../../Cargo.toml");
-  assert.ok(rootCargo.includes("apps/desktop/src-tauri"), "desktop shell is a root workspace member");
-  assert.ok(!cargo.includes("[workspace]"), "desktop shell shares the root workspace (no detached [workspace])");
+  assert.ok(
+    rootCargo.includes("apps/desktop/src-tauri"),
+    "desktop shell is a root workspace member",
+  );
+  assert.ok(
+    !cargo.includes("[workspace]"),
+    "desktop shell shares the root workspace (no detached [workspace])",
+  );
   // The real window shell is opt-in: the Tauri SDK stays an optional
   // dependency pulled only by the `tauri` feature, so the default build
   // keeps no SDK and no webview system requirements.
   assert.ok(/^\s*tauri\s*=\s*\{[^}]*optional\s*=\s*true/m.test(cargo), "tauri stays optional");
-  assert.ok(/^\s*tauri-plugin-dialog\s*=\s*\{[^}]*optional\s*=\s*true/m.test(cargo), "dialog plugin stays optional");
+  assert.ok(
+    /^\s*tauri-plugin-dialog\s*=\s*\{[^}]*optional\s*=\s*true/m.test(cargo),
+    "dialog plugin stays optional",
+  );
   assert.ok(/default\s*=\s*\[\]/m.test(cargo), "default features stay lean");
 });
 

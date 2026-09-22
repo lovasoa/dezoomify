@@ -2,11 +2,10 @@
 // Layered presentation helpers plus the payload/deep-link validators.
 // Pure: the host string and controller status arrive as parameters, so this
 // module owns no job state. File move, no behavior change.
+
+import { isValidDeepLinkSource, isValidInputUrl } from "@dezoomify/app-model";
 import { t } from "@dezoomify/shared-ui";
-import {
-  isValidDeepLinkSource,
-  isValidInputUrl,
-} from "@dezoomify/app-model";
+
 export {
   DEEP_LINK_SECRET_QUERY_KEYS,
   hasSecretQueryParams,
@@ -30,7 +29,6 @@ export function redactedOriginOnly(url: string): string {
   }
 }
 
-
 export function hostOf(url: string): string {
   const origin = redactedOriginOnly(url);
   if (origin) {
@@ -39,7 +37,6 @@ export function hostOf(url: string): string {
   }
   return "the server";
 }
-
 
 // Idle prefill: read an initial URL from the launch location without ever
 // treating it as a started job. Supports ?url=/ ?src= and legacy #url= or
@@ -87,7 +84,6 @@ export function readInitialUrl(): string | null {
   return null;
 }
 
-
 // Bound free-form technical text. Credentials are already redacted by the
 // backend (`redact_error_text`); the full request URL is deliberately kept
 // verbatim in the on-device details (the shared renderer places it on its
@@ -96,7 +92,6 @@ export function trimTechnical(text: string, max = 2000): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max)}…`;
 }
-
 
 export function formatMissingSummary(missing: Array<string>, failedCount?: number): string {
   const count = missing.length > 0 ? missing.length : (failedCount ?? 0);
@@ -107,7 +102,6 @@ export function formatMissingSummary(missing: Array<string>, failedCount?: numbe
   const rest = missing.length > 20 ? t("desktop.rec.more", { n: missing.length - 20 }) : "";
   return t("desktop.rec.missingList", { n: missing.length, plural, shown, rest });
 }
-
 
 export function encoderToMime(value: string | undefined, fallback: string): string {
   if (!value) return fallback;
@@ -124,7 +118,6 @@ export function encoderToMime(value: string | undefined, fallback: string): stri
   if (lower === "iiif" || lower === "iiif-dir") return "application/json";
   return fallback;
 }
-
 
 export interface ValidatedDeepLink {
   sourceUrl: string;
@@ -228,7 +221,9 @@ export function parseRawDeepLinkUrl(raw: string): ValidatedDeepLink | null {
 // `{source_url, hint, version}` triple emitted by the Rust shell, or a raw
 // `dezoomify://open` URL value re-validated strictly below.
 // Null means reject (no-op).
-export function validateDeepLinkPayload(payload: Record<string, unknown>): ValidatedDeepLink | null {
+export function validateDeepLinkPayload(
+  payload: Record<string, unknown>,
+): ValidatedDeepLink | null {
   const sourceRaw = payload["source_url"];
   if (typeof sourceRaw === "string" && sourceRaw.trim().startsWith("dezoomify://")) {
     return parseRawDeepLinkUrl(sourceRaw);

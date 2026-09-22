@@ -1,8 +1,6 @@
 /** Exhaustive handler table for a generated discriminated union. */
 export type DispatchTable<Union extends { type: string }, Result> = {
-  [Type in Union["type"]]: (
-    value: Extract<Union, { type: Type }>,
-  ) => Result;
+  [Type in Union["type"]]: (value: Extract<Union, { type: Type }>) => Result;
 };
 
 /**

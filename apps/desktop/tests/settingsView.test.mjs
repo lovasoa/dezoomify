@@ -1,10 +1,10 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import { createElement, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { act, click, makeContainer } from "../../../test/react-dom.mjs";
-import { DesktopSettingsView } from "../src/settingsView.tsx";
 import { defaultSettings } from "../src/settings.ts";
+import { DesktopSettingsView } from "../src/settingsView.tsx";
 
 function renderSettings() {
   let currentSettings = defaultSettings();

@@ -10,9 +10,9 @@
 import {
   createSequentialQueue,
   enqueueSequential,
-  retryQueueEntry,
   type QueueEntry,
   type QueueSummary,
+  retryQueueEntry,
   type SequentialQueue,
 } from "@dezoomify/app-model";
 

@@ -8,13 +8,20 @@ export function truncateMiddle(value: string, max = 90): string {
 }
 
 export function displaySourceUrl(value: string): string {
-  try { const url = new URL(value); return truncateMiddle(`${url.host}${url.pathname}`, 90); }
-  catch { return "source unavailable"; }
+  try {
+    const url = new URL(value);
+    return truncateMiddle(`${url.host}${url.pathname}`, 90);
+  } catch {
+    return "source unavailable";
+  }
 }
 
 export function hostFromUrl(url?: string): string {
-  try { return new URL(url ?? "").host; }
-  catch { return "the server"; }
+  try {
+    return new URL(url ?? "").host;
+  } catch {
+    return "the server";
+  }
 }
 
 /** Base document title for browser products when no job is active. */
@@ -50,23 +57,35 @@ export function isActiveJobStatus(status: string): boolean {
 export function handoffOriginFor(handoffUrl?: string, sourceUrl?: string): string {
   const candidates = [sourceUrl];
   try {
-    const src = handoffUrl?.split("?")[1]?.split("#")[0]?.split("&").find((part) => part.startsWith("src="));
+    const src = handoffUrl
+      ?.split("?")[1]
+      ?.split("#")[0]
+      ?.split("&")
+      .find((part) => part.startsWith("src="));
     if (src) candidates.push(decodeURIComponent(src.slice(4).replace(/\+/g, " ")));
-  } catch { /* malformed handoff links have no origin summary */ }
+  } catch {
+    /* malformed handoff links have no origin summary */
+  }
   for (const candidate of candidates) {
     try {
       if (!candidate) continue;
       if (candidate.trim().toLowerCase().startsWith("file:")) return "";
       const url = new URL(candidate.trim());
-      if (url.protocol === "http:" || url.protocol === "https:") return `${url.protocol}//${url.host}/`;
-    } catch { /* try the next candidate */ }
+      if (url.protocol === "http:" || url.protocol === "https:")
+        return `${url.protocol}//${url.host}/`;
+    } catch {
+      /* try the next candidate */
+    }
   }
   return "";
 }
 
 export function isFileHandoffSource(sourceUrl?: string): boolean {
-  try { return new URL(String(sourceUrl ?? "").trim()).protocol === "file:"; }
-  catch { return false; }
+  try {
+    return new URL(String(sourceUrl ?? "").trim()).protocol === "file:";
+  } catch {
+    return false;
+  }
 }
 /**
  * Technical-details text, one shape across every product:
@@ -115,8 +134,17 @@ const REPORT_LABELS = "new site support,unconfirmed";
  */
 const MAX_REPORT_BODY = 4000;
 
-function assembleReportBody(host: string, url: string, error: StructuredError, log: string): string {
-  const sourceLines = [`### Site name and description`, host, url !== "" ? url : "(address unavailable)"];
+function assembleReportBody(
+  host: string,
+  url: string,
+  error: StructuredError,
+  log: string,
+): string {
+  const sourceLines = [
+    `### Site name and description`,
+    host,
+    url !== "" ? url : "(address unavailable)",
+  ];
   sourceLines.push("", "### Example URLs", url !== "" ? url : "(address unavailable)");
   sourceLines.push("", "### Current error message", error.message);
   sourceLines.push("", "### Technical details", errorDiagnosticsText(error));

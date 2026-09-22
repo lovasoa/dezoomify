@@ -16,8 +16,10 @@ export const fr = {
   "desktop.done.saved": "Enregistrée dans le dossier choisi.",
   "desktop.done.open": "Ouvrir l’image",
   "desktop.done.reveal": "Afficher dans le dossier",
-  "desktop.done.openError": "Impossible d’ouvrir l’image. Vérifiez qu’une visionneuse par défaut est installée.",
-  "desktop.done.folderError": "Impossible d’ouvrir le dossier. Vérifiez qu’un gestionnaire de fichiers est installé.",
+  "desktop.done.openError":
+    "Impossible d’ouvrir l’image. Vérifiez qu’une visionneuse par défaut est installée.",
+  "desktop.done.folderError":
+    "Impossible d’ouvrir le dossier. Vérifiez qu’un gestionnaire de fichiers est installé.",
   "desktop.done.missingError": "L’image ou le dossier n’existe plus.",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Compris",
@@ -34,14 +36,16 @@ export const fr = {
   "view.desktop.why1Body":
     "Un onglet de navigateur ne peut contenir qu une certaine quantite d image. L application de bureau assemble l image en memoire (jusqu a sa limite de canevas de 8 Gio, avec la memoire libre correspondante) et ecrit le resultat sur le disque.",
   "view.desktop.why2Title": "Enregistre l image terminee :",
-  "view.desktop.why2Body": "Chaque tache est enregistree dans un fichier de sortie sur votre ordinateur. Vous pouvez mettre plusieurs taches en file ; elles sont enregistrees une par une.",
+  "view.desktop.why2Body":
+    "Chaque tache est enregistree dans un fichier de sortie sur votre ordinateur. Vous pouvez mettre plusieurs taches en file ; elles sont enregistrees une par une.",
   "view.desktop.why3Title": "Quand le site web ne peut pas terminer :",
   "view.desktop.why3Body":
     "Le site web interrompt la tache avec une erreur et renvoie vers l application de bureau pour l image en pleine taille.",
   "view.desktop.howTitle": "Comment l utiliser",
   "view.desktop.step1":
     "Téléchargez l’{installer} non signé pour {platform} depuis notre page GitHub Releases, puis installez-le. Il n’y a pas de mise à jour automatique.",
-  "view.desktop.step2": "Lancez Dezoomify et collez l adresse de votre image zoomable ou de votre manifeste.",
+  "view.desktop.step2":
+    "Lancez Dezoomify et collez l adresse de votre image zoomable ou de votre manifeste.",
   "view.desktop.step3":
     "Choisissez la resolution souhaitee et le dossier de destination pour enregistrer l image complete assemblee.",
   "view.desktop.cliTitle": "Besoin d automatiser ? Essayez Dezoomify CLI",
@@ -74,7 +78,8 @@ export const fr = {
   // Idle input section.
   "view.idle.intro": "permet d enregistrer",
   "view.idle.zoomable": "des images zoomables",
-  "view.idle.zoomableTitle": "De grandes images dans lesquelles on peut naviguer a l interieur d une page web.",
+  "view.idle.zoomableTitle":
+    "De grandes images dans lesquelles on peut naviguer a l interieur d une page web.",
   "view.idle.enterThe": "Saisissez l",
   "view.idle.urlAbbr": "URL",
   "view.idle.urlTitle": "Uniform Resource Locator, l adresse d une page web",
@@ -86,7 +91,8 @@ export const fr = {
   "view.idle.license1": "Ce script est publie sous",
   "view.idle.gplLink": "GPL",
   "view.idle.sourceLink": "Voir le code source",
-  "view.idle.termsLink": "Nous declinons toute responsabilite en cas d usage illegal de ce logiciel",
+  "view.idle.termsLink":
+    "Nous declinons toute responsabilite en cas d usage illegal de ce logiciel",
   "view.idle.urlPlaceholder": "URL de la page contenant votre image",
   "view.idle.urlAria": "URL de la page contenant votre image zoomable",
   "view.idle.clearTitle": "Effacer la saisie",
@@ -110,9 +116,12 @@ export const fr = {
   "view.job.techDetails": "Details techniques et journaux",
   "view.job.oneImage": "1 image",
   "view.job.manyImages": "{count} images",
-  "view.job.autoChoiceFull": "{noun} trouvee, enregistrement de la plus grande possible ({width}×{height}, {tiles} tuiles).",
-  "view.job.autoChoiceDims": "{noun} trouvee, enregistrement de la plus grande possible ({width}×{height}).",
-  "view.job.autoChoiceTiles": "{noun} trouvee, enregistrement de la plus grande possible ({tiles} tuiles).",
+  "view.job.autoChoiceFull":
+    "{noun} trouvee, enregistrement de la plus grande possible ({width}×{height}, {tiles} tuiles).",
+  "view.job.autoChoiceDims":
+    "{noun} trouvee, enregistrement de la plus grande possible ({width}×{height}).",
+  "view.job.autoChoiceTiles":
+    "{noun} trouvee, enregistrement de la plus grande possible ({tiles} tuiles).",
   "view.job.autoChoiceBare": "{noun} trouvee, enregistrement de la plus grande possible.",
   "view.job.stalled":
     "Toujours en cours, {host} tarde a repondre. Vous pouvez attendre, ou annuler et reessayer plus tard.",
@@ -129,7 +138,8 @@ export const fr = {
   "view.display.extDesc":
     "Pour les pages demandant une connexion ou des cookies de session. Detecte automatiquement les visionneuses sur les pages actives.",
   "view.display.deskTitle": "Guide de l application de bureau",
-  "view.display.deskDescClean": "Pour un enregistrement propre en pleine taille quand le navigateur peut seulement montrer l image.",
+  "view.display.deskDescClean":
+    "Pour un enregistrement propre en pleine taille quand le navigateur peut seulement montrer l image.",
   "view.display.startOver": "Recommencer",
   // Completion section.
   "view.done.ready": "Votre image est prete.",
@@ -152,7 +162,8 @@ export const fr = {
   "view.done.gapMap": "Tuiles manquantes ({failed} sur {total}) : {shown}{rest}.",
   "view.done.gapMapMore": ", et {n} de plus",
   // Failure section.
-  "view.fail.fallback": "Dezoomify n a pas pu trouver ni enregistrer l image zoomable a cette adresse.",
+  "view.fail.fallback":
+    "Dezoomify n a pas pu trouver ni enregistrer l image zoomable a cette adresse.",
   "view.fail.title": "Impossible de dezoomifier l image",
   "view.fail.deskDescLimits":
     "Pour les images qui depassent les limites memoire du navigateur, dans la limite de canevas de 8 Gio (avec la memoire libre correspondante). Traitees en natif sur votre ordinateur.",
@@ -171,14 +182,16 @@ export const fr = {
   "view.generic.status": "Etat :",
   "view.generic.reset": "Reinitialiser",
   // Job section and share chrome.
-  "view.job.shareTitle": "Copie l adresse de la page pour cette tache, pas le fichier image lui-meme",
+  "view.job.shareTitle":
+    "Copie l adresse de la page pour cette tache, pas le fichier image lui-meme",
   "view.job.shareLink": "Copier le lien vers cette tache",
   "view.job.countsFull": "{current} tuiles sur {total}",
   "view.job.countsElapsed": "{current} tuiles sur {total} · {elapsed} ecoulees",
   "view.job.elapsedOnly": "{elapsed} ecoulees",
   // Recent-jobs history (todo 5.2): local-only ledger.
   "view.history.title": "Images recentes",
-  "view.history.empty": "Aucune image recente pour le moment. Les images enregistrees apparaissent ici.",
+  "view.history.empty":
+    "Aucune image recente pour le moment. Les images enregistrees apparaissent ici.",
   "view.history.localOnly": "Conserve uniquement sur cet appareil.",
   "view.history.open": "Rouvrir",
   "view.history.clear": "Effacer l historique",
@@ -196,13 +209,16 @@ export const fr = {
     "Le site qui heberge cette image recoit actuellement trop de demandes depuis votre propre connexion. Attendre quelques minutes suffit generalement, et l extension de navigateur ou l application de bureau verront le meme signal d encombrement jusque-la.",
   // Desktop app user copy (apps/desktop/src/main.tsx). Logs and technical
   // diagnostics stay literal English and never use these keys.
-  "desktop.url.invalid": "Veuillez saisir une adresse web valide commencant par http:// ou https://",
+  "desktop.url.invalid":
+    "Veuillez saisir une adresse web valide commencant par http:// ou https://",
   "desktop.url.notWebPage":
     "Cette adresse ne ressemble pas a une adresse de page web. Saisissez une adresse commencant par http:// ou https://.",
   "desktop.settings.unusable":
     "Ces parametres de telechargement ne peuvent pas etre utilises. Ajustez les parametres surlignes et reessayez.",
-  "desktop.settings.invalidSubmit": "Ces parametres de telechargement sont invalides. Ajustez-les et reessayez.",
-  "desktop.output.deniedPick": "La destination d enregistrement n a pas ete acceptee. Choisissez un autre fichier pour continuer.",
+  "desktop.settings.invalidSubmit":
+    "Ces parametres de telechargement sont invalides. Ajustez-les et reessayez.",
+  "desktop.output.deniedPick":
+    "La destination d enregistrement n a pas ete acceptee. Choisissez un autre fichier pour continuer.",
   "desktop.output.deniedFallback": "La destination d enregistrement a ete refusee.",
   "desktop.proto.incompatible":
     "Cette version de l application ne peut pas ouvrir cette image depuis {host}. Mettez l application a jour et reessayez.",
@@ -216,7 +232,8 @@ export const fr = {
     "Un fichier existe deja a la destination d enregistrement depuis {host}. Choisissez un autre fichier ou confirmez l ecrasement pour continuer.",
   "desktop.output.destDenied":
     "La destination d enregistrement n a pas ete acceptee depuis {host}. Choisissez un autre fichier pour continuer.",
-  "desktop.job.gone": "Cette tache n est plus active depuis {host}. Recommencez avec une adresse recente.",
+  "desktop.job.gone":
+    "Cette tache n est plus active depuis {host}. Recommencez avec une adresse recente.",
   "desktop.msg.thisPicture": "cette image",
   "desktop.msg.dimsPixels": "{a} par {b} pixels",
   "desktop.msg.needAbout": " Elle a besoin d environ {need} de memoire",
@@ -234,14 +251,19 @@ export const fr = {
     "Aucune image zoomable trouvee a cette adresse. Essayez une page avec un visualiseur, ou essayez l extension.",
   "desktop.plan.none":
     "Cette image n a aucune taille utilisable a enregistrer depuis {host}. Essayez une autre image ou une Largeur max plus petite.",
-  "desktop.transport.stalled": "Enregistrement bloque lors du contact avec {host}. Verifiez votre connexion et reessayez.",
+  "desktop.transport.stalled":
+    "Enregistrement bloque lors du contact avec {host}. Verifiez votre connexion et reessayez.",
   "desktop.output.writeFail":
     "Impossible d ecrire cette image depuis {host}. Choisissez une autre destination et reessayez.",
-  "desktop.job.cancelledMsg": "L enregistrement de l image a ete interrompu. Tout fichier inacheve a ete supprime.",
-  "desktop.start.failed": "Impossible de demarrer l enregistrement de cette image depuis {host}. Reessayez.",
+  "desktop.job.cancelledMsg":
+    "L enregistrement de l image a ete interrompu. Tout fichier inacheve a ete supprime.",
+  "desktop.start.failed":
+    "Impossible de demarrer l enregistrement de cette image depuis {host}. Reessayez.",
   "desktop.choice.failed": "Ce choix n a pas ete accepte. Reessayez.",
-  "view.ext.desynced": "L extension a perdu la synchronisation pendant la lecture. Relancez l analyse.",
-  "desktop.save.generic": "Impossible d enregistrer cette image depuis {host}. Reessayez avec une autre adresse.",
+  "view.ext.desynced":
+    "L extension a perdu la synchronisation pendant la lecture. Relancez l analyse.",
+  "desktop.save.generic":
+    "Impossible d enregistrer cette image depuis {host}. Reessayez avec une autre adresse.",
   "desktop.internal.error":
     "Un probleme inattendu a interrompu cet enregistrement depuis {host}. Reessayez, et copiez les diagnostics si cela se reproduit.",
   "desktop.save.fallback": "Impossible d enregistrer cette image depuis {host}. Reessayez.",
@@ -252,10 +274,12 @@ export const fr = {
   "desktop.invoke.destination": "Impossible de demander la destination d enregistrement.",
   "desktop.invoke.cancel": "Impossible d annuler la tache.",
   "desktop.step.chooseWhere": "Choisissez ou enregistrer…",
-  "desktop.step.chooseWhereDetail": "La destination d enregistrement demande votre attention avant de continuer.",
+  "desktop.step.chooseWhereDetail":
+    "La destination d enregistrement demande votre attention avant de continuer.",
   "desktop.step.pickOutput": "Choisissez le fichier de sortie pour continuer.",
   "desktop.step.partialTitle": "Certaines tuiles n ont pas pu etre enregistrees…",
-  "desktop.step.partialDetail": "Choisissez de conserver l image partielle, de l abandonner ou de reessayer.",
+  "desktop.step.partialDetail":
+    "Choisissez de conserver l image partielle, de l abandonner ou de reessayer.",
   "desktop.step.displayPreview": "Apercu seul…",
   "desktop.step.displayDetail": "Cette image peut seulement etre vue ici.",
   "desktop.step.cleanupDetail": "Nettoyage… suppression du fichier inacheve…",
@@ -264,7 +288,8 @@ export const fr = {
   "desktop.step.encodingPartial": "Encodage de l image partielle dans l application native",
   "desktop.step.discardingPartial": "Abandon de l image partielle",
   "desktop.step.retrying": "Nouvel essai",
-  "desktop.step.appAutoDetail": "L application enregistre automatiquement la premiere image ; aucun selecteur n est propose.",
+  "desktop.step.appAutoDetail":
+    "L application enregistre automatiquement la premiere image ; aucun selecteur n est propose.",
   "desktop.step.foundFits": "{noun} trouvee, enregistrement de la plus grande possible…",
   "desktop.step.tilesAtFull": "{current} tuiles sur {total} en pleine resolution",
   "desktop.step.savedDims": "{width} par {height} pixels enregistres",
@@ -299,7 +324,8 @@ export const fr = {
   "desktop.done.partialTitle": "Image partielle enregistree",
   "desktop.done.partialDesc":
     "Ce fichier est marque comme partiel : {summary} Les zones manquantes restent vides. Cela le distingue d un enregistrement complet.",
-  "desktop.cancel.note": "Enregistrement annule. Le nettoyage est termine et tout fichier inacheve a ete supprime.",
+  "desktop.cancel.note":
+    "Enregistrement annule. Le nettoyage est termine et tout fichier inacheve a ete supprime.",
   "desktop.copy.diagnostics": "Copier les diagnostics",
   "desktop.copy.copied": "Copie !",
   // Multi-job queue panel (desktop integration queue, todo 5.3). Jobs save
@@ -344,7 +370,8 @@ export const fr = {
   "desktop.settings.browseOutput": "Choisir le dossier de sortie",
   "desktop.settings.browseCache": "Choisir le dossier de cache",
   "desktop.settings.headersAdv": "Avance : entetes de requete (de confiance)",
-  "desktop.settings.headersLabel": "Entetes de requete, un par ligne sous la forme Nom : valeur (facultatif, de confiance)",
+  "desktop.settings.headersLabel":
+    "Entetes de requete, un par ligne sous la forme Nom : valeur (facultatif, de confiance)",
   "desktop.settings.reset": "Reinitialiser les parametres",
   "desktop.quick.folder": "Dossier",
   "desktop.quick.askEachTime": "Demander a chaque fois",
@@ -366,19 +393,23 @@ export const fr = {
   "desktop.advanced.jpegQuality": "Qualite JPEG",
   "desktop.advanced.jpegQualityDesc": "Une valeur plus elevee conserve davantage de details.",
   "desktop.advanced.compressionEffort": "Effort de compression",
-  "desktop.advanced.compressionEffortDesc": "La qualite reste sans perte ; une valeur plus elevee prend plus de temps.",
+  "desktop.advanced.compressionEffortDesc":
+    "La qualite reste sans perte ; une valeur plus elevee prend plus de temps.",
   "desktop.advanced.dimensions": "Dimensions personnalisees",
-  "desktop.advanced.dimensionsDesc": "Laissez une valeur vide pour conserver les proportions originales.",
+  "desktop.advanced.dimensionsDesc":
+    "Laissez une valeur vide pour conserver les proportions originales.",
   "desktop.advanced.width": "Largeur",
   "desktop.advanced.height": "Hauteur",
   "desktop.advanced.retries": "Essais",
-  "desktop.advanced.retriesDesc": "Reessayer les tuiles echouees avant de conserver un resultat partiel.",
+  "desktop.advanced.retriesDesc":
+    "Reessayer les tuiles echouees avant de conserver un resultat partiel.",
   "desktop.advanced.resumeCache": "Cache de reprise",
   "desktop.advanced.resumeCacheDesc": "Reutiliser les tuiles apres un enregistrement interrompu.",
   "desktop.advanced.choose": "Choisir…",
   "desktop.advanced.change": "Modifier…",
   "desktop.advanced.headers": "Entetes de requete",
-  "desktop.advanced.headersDesc": "Pour les visionneuses protegees. Envoyees seulement a l origine de l image et jamais journalisees.",
+  "desktop.advanced.headersDesc":
+    "Pour les visionneuses protegees. Envoyees seulement a l origine de l image et jamais journalisees.",
   // Extension job-tab user copy, rendered through the same `t(key, vars)`
   // shape; log and diagnostics lines stay literal English and never use these
   // keys. `test/ui-i18n.test.mjs` fails when the page renders a key outside

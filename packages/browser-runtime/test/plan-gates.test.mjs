@@ -1,11 +1,7 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  canvasTooLargeFailure,
-  desktopHandoffLink,
-  isLocalFileUrl,
-} from "../src/plan-gates.ts";
+import test from "node:test";
 import { BROWSER_MAX_CANVAS_AREA } from "../src/limits.ts";
+import { canvasTooLargeFailure, desktopHandoffLink, isLocalFileUrl } from "../src/plan-gates.ts";
 
 test("desktopHandoffLink encodes the source", () => {
   assert.equal(

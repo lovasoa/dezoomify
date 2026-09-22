@@ -51,7 +51,7 @@ const STEM_CONTROL_CLASS = new RegExp(
 export function safeTitleStem(title: unknown): string | undefined {
   if (typeof title !== "string") return undefined;
   const cleaned = title
-    .replace(/[<>:\"/\\|?*]/g, "_")
+    .replace(/[<>:"/\\|?*]/g, "_")
     .replace(STEM_CONTROL_CLASS, "_")
     .trim()
     .replace(/[. ]+$/g, "")
@@ -59,9 +59,13 @@ export function safeTitleStem(title: unknown): string | undefined {
   if (cleaned === "" || cleaned === "." || cleaned === "..") return undefined;
   const deviceStem = cleaned.split(".", 1)[0]?.toLowerCase();
   if (
-    deviceStem === "con" || deviceStem === "prn" || deviceStem === "aux" || deviceStem === "nul" ||
+    deviceStem === "con" ||
+    deviceStem === "prn" ||
+    deviceStem === "aux" ||
+    deviceStem === "nul" ||
     /^(com|lpt)[1-9]$/.test(deviceStem ?? "")
-  ) return undefined;
+  )
+    return undefined;
   return cleaned;
 }
 

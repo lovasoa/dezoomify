@@ -46,15 +46,21 @@ export interface FetchCause {
 
 export function errorTransport(value: unknown): ErrorTransport | undefined {
   switch (value) {
-    case "direct": return "direct";
+    case "direct":
+      return "direct";
     case "metadata-proxy":
     case "metadata proxy":
-    case "proxy": return "metadata-proxy";
+    case "proxy":
+      return "metadata-proxy";
     case "browser-session":
-    case "extension-origin": return "browser-session";
-    case "native": return "native";
-    case "display-only": return "display-only";
-    default: return undefined;
+    case "extension-origin":
+      return "browser-session";
+    case "native":
+      return "native";
+    case "display-only":
+      return "display-only";
+    default:
+      return undefined;
   }
 }
 
@@ -86,8 +92,10 @@ export function blockedReason(value: unknown): BlockedReason | undefined {
     case "signed-query":
     case "source-document-lost":
     case "throttled":
-    case "userinfo": return value;
-    default: return undefined;
+    case "userinfo":
+      return value;
+    default:
+      return undefined;
   }
 }
 

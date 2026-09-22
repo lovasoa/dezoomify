@@ -9,7 +9,10 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
     throw new Error("extension E2E driver is not configured");
   }
 
-  const targetUrl = scenario === "" ? `${origin}/target.html` : `${origin}/target.html?scenario=${encodeURIComponent(scenario)}`;
+  const targetUrl =
+    scenario === ""
+      ? `${origin}/target.html`
+      : `${origin}/target.html?scenario=${encodeURIComponent(scenario)}`;
   const target = await api.tabs.create({ url: targetUrl, active: true });
   if (typeof target?.id !== "number") throw new Error("extension E2E source tab did not open");
 

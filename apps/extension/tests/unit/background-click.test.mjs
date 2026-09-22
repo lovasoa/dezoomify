@@ -1,5 +1,5 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import { createBackgroundCoordinator } from "../../src/background/coordinator.ts";
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -11,25 +11,80 @@ function fakeBrowser(results = []) {
   let nextTab = 40;
   const api = {
     action: {
-      onClicked: { addListener(fn) { listeners.click.push(fn); } },
-      setIcon(value) { calls.icon.push(value); return Promise.resolve(); },
-      setBadgeText(value) { calls.badge.push(value); return Promise.resolve(); },
+      onClicked: {
+        addListener(fn) {
+          listeners.click.push(fn);
+        },
+      },
+      setIcon(value) {
+        calls.icon.push(value);
+        return Promise.resolve();
+      },
+      setBadgeText(value) {
+        calls.badge.push(value);
+        return Promise.resolve();
+      },
     },
     tabs: {
-      create(value) { calls.create.push(value); return Promise.resolve({ id: nextTab++ }); },
-      update(id, value) { calls.update.push({ id, value }); return Promise.resolve(); },
-      sendMessage(tabId, message, options) { calls.send.push({ tabId, message, options }); return Promise.resolve(); },
-      onRemoved: { addListener(fn) { listeners.removed.push(fn); } },
-      onUpdated: { addListener(fn) { listeners.updated.push(fn); } },
+      create(value) {
+        calls.create.push(value);
+        return Promise.resolve({ id: nextTab++ });
+      },
+      update(id, value) {
+        calls.update.push({ id, value });
+        return Promise.resolve();
+      },
+      sendMessage(tabId, message, options) {
+        calls.send.push({ tabId, message, options });
+        return Promise.resolve();
+      },
+      onRemoved: {
+        addListener(fn) {
+          listeners.removed.push(fn);
+        },
+      },
+      onUpdated: {
+        addListener(fn) {
+          listeners.updated.push(fn);
+        },
+      },
     },
     scripting: {
       executeScript(value) {
         calls.execute.push(value);
-        return Promise.resolve(results.shift() ?? [{ frameId: 0, result: { ok: true, documentUrl: TAB.url, inputs: [{ url: "https://gallery.example/info.json" }], overflow: 0 } }]);
+        return Promise.resolve(
+          results.shift() ?? [
+            {
+              frameId: 0,
+              result: {
+                ok: true,
+                documentUrl: TAB.url,
+                inputs: [{ url: "https://gallery.example/info.json" }],
+                overflow: 0,
+              },
+            },
+          ],
+        );
       },
     },
-    permissions: { contains: async () => false, onRemoved: { addListener(fn) { listeners.permissionsRemoved.push(fn); } } },
-    runtime: { getURL(path) { return `chrome-extension://test/${path}`; }, onMessage: { addListener(fn) { listeners.message.push(fn); } } },
+    permissions: {
+      contains: async () => false,
+      onRemoved: {
+        addListener(fn) {
+          listeners.permissionsRemoved.push(fn);
+        },
+      },
+    },
+    runtime: {
+      getURL(path) {
+        return `chrome-extension://test/${path}`;
+      },
+      onMessage: {
+        addListener(fn) {
+          listeners.message.push(fn);
+        },
+      },
+    },
   };
   return { api, calls, listeners };
 }
@@ -39,10 +94,19 @@ async function load(fake) {
   mod.startBackground();
 }
 
-function jobId(fake) { return decodeURIComponent(fake.calls.create[0].url.split("#jobId=")[1]); }
-function sourceBinding(fake) { return fake.calls.send.find((call) => call.message.type === "dz.job.binding")?.message; }
+function jobId(fake) {
+  return decodeURIComponent(fake.calls.create[0].url.split("#jobId=")[1]);
+}
+function sourceBinding(fake) {
+  return fake.calls.send.find((call) => call.message.type === "dz.job.binding")?.message;
+}
 async function ready(fake) {
-  for (const listener of fake.listeners.message) listener({ type: "dz.job.ready", jobId: jobId(fake), requestId: "job-ready" }, { tab: { id: 40 }, frameId: 0 }, () => {});
+  for (const listener of fake.listeners.message)
+    listener(
+      { type: "dz.job.ready", jobId: jobId(fake), requestId: "job-ready" },
+      { tab: { id: 40 }, frameId: 0 },
+      () => {},
+    );
   await tick();
   await tick();
 }
@@ -64,17 +128,55 @@ test("toolbar opens the dedicated job tab without injection, registration, or re
 
 test("source fetch returns one payload through the job bridge", async () => {
   const fake = fakeBrowser([
-    [{ frameId: 0, result: { ok: true, documentUrl: TAB.url, inputs: [{ url: "https://gallery.example/info.json" }], overflow: 0 } }],
-    [{ frameId: 0, result: { ok: true, status: 200, url: "https://gallery.example/info.json", bytes: 3, data: "AQID" } }],
+    [
+      {
+        frameId: 0,
+        result: {
+          ok: true,
+          documentUrl: TAB.url,
+          inputs: [{ url: "https://gallery.example/info.json" }],
+          overflow: 0,
+        },
+      },
+    ],
+    [
+      {
+        frameId: 0,
+        result: {
+          ok: true,
+          status: 200,
+          url: "https://gallery.example/info.json",
+          bytes: 3,
+          data: "AQID",
+        },
+      },
+    ],
   ]);
   await load(fake);
   await fake.listeners.click[0](TAB);
   await ready(fake);
   const binding = sourceBinding(fake);
-  for (const listener of fake.listeners.message) listener({ ...binding, type: "dz.job.fetch", requestId: "req:source", url: "https://gallery.example/info.json", method: "GET", headers: [] }, { tab: { id: 40 }, frameId: 0 }, () => {});
+  for (const listener of fake.listeners.message)
+    listener(
+      {
+        ...binding,
+        type: "dz.job.fetch",
+        requestId: "req:source",
+        url: "https://gallery.example/info.json",
+        method: "GET",
+        headers: [],
+      },
+      { tab: { id: 40 }, frameId: 0 },
+      () => {},
+    );
   await tick();
-  const forwarded = fake.calls.send.filter((call) => call.message.type === "dz.job.fetch").map((call) => call.message);
-  assert.deepEqual(forwarded.map((message) => message.sourceType), ["dz.source.fetch-complete"]);
+  const forwarded = fake.calls.send
+    .filter((call) => call.message.type === "dz.job.fetch")
+    .map((call) => call.message);
+  assert.deepEqual(
+    forwarded.map((message) => message.sourceType),
+    ["dz.source.fetch-complete"],
+  );
   assert.equal(forwarded[0].ok, true);
   assert.equal(forwarded[0].data, "AQID");
   assert.equal(forwarded[0].bytes, 3);
@@ -82,16 +184,39 @@ test("source fetch returns one payload through the job bridge", async () => {
 
 test("source fetch failure preserves a typed engine outcome", async () => {
   const fake = fakeBrowser([
-    [{ frameId: 0, result: { ok: true, documentUrl: TAB.url, inputs: [{ url: "https://gallery.example/info.json" }], overflow: 0 } }],
+    [
+      {
+        frameId: 0,
+        result: {
+          ok: true,
+          documentUrl: TAB.url,
+          inputs: [{ url: "https://gallery.example/info.json" }],
+          overflow: 0,
+        },
+      },
+    ],
     [{ frameId: 0, result: { ok: false, code: "http-error", status: 403 } }],
   ]);
   await load(fake);
   await fake.listeners.click[0](TAB);
   await ready(fake);
   const binding = sourceBinding(fake);
-  for (const listener of fake.listeners.message) listener({ ...binding, type: "dz.job.fetch", requestId: "req:failure", url: "https://gallery.example/info.json", headers: [] }, { tab: { id: 40 }, frameId: 0 }, () => {});
+  for (const listener of fake.listeners.message)
+    listener(
+      {
+        ...binding,
+        type: "dz.job.fetch",
+        requestId: "req:failure",
+        url: "https://gallery.example/info.json",
+        headers: [],
+      },
+      { tab: { id: 40 }, frameId: 0 },
+      () => {},
+    );
   await tick();
-  const failure = fake.calls.send.map((call) => call.message).find((message) => message.type === "dz.job.fetch" && message.requestId === "req:failure");
+  const failure = fake.calls.send
+    .map((call) => call.message)
+    .find((message) => message.type === "dz.job.fetch" && message.requestId === "req:failure");
   assert.equal(failure?.sourceType, "dz.source.fetch-complete");
   assert.equal(failure?.code, "http-error");
   assert.equal(failure?.status, 403);
@@ -103,13 +228,29 @@ test("navigation invalidates the binding and prevents later source operations", 
   await fake.listeners.click[0](TAB);
   await ready(fake);
   const before = fake.calls.execute.length;
-  for (const listener of fake.listeners.updated) listener(TAB.id, { url: "https://gallery.example/next" });
+  for (const listener of fake.listeners.updated)
+    listener(TAB.id, { url: "https://gallery.example/next" });
   await tick();
   const binding = sourceBinding(fake);
-  for (const listener of fake.listeners.message) listener({ ...binding, type: "dz.job.fetch", requestId: "req:stale", url: "https://gallery.example/info.json", headers: [] }, { tab: { id: 40 }, frameId: 0 }, () => {});
+  for (const listener of fake.listeners.message)
+    listener(
+      {
+        ...binding,
+        type: "dz.job.fetch",
+        requestId: "req:stale",
+        url: "https://gallery.example/info.json",
+        headers: [],
+      },
+      { tab: { id: 40 }, frameId: 0 },
+      () => {},
+    );
   await tick();
   assert.equal(fake.calls.execute.length, before);
-  assert.ok(fake.calls.send.some((call) => call.message.type === "dz.job.binding" && call.message.sourceValid === false));
+  assert.ok(
+    fake.calls.send.some(
+      (call) => call.message.type === "dz.job.binding" && call.message.sourceValid === false,
+    ),
+  );
 });
 
 test("wrong job-tab frames cannot dispatch source operations", async () => {
@@ -119,7 +260,18 @@ test("wrong job-tab frames cannot dispatch source operations", async () => {
   await ready(fake);
   const binding = sourceBinding(fake);
   const before = fake.calls.execute.length;
-  for (const listener of fake.listeners.message) listener({ ...binding, type: "dz.job.fetch", requestId: "req:wrong-frame", url: "https://gallery.example/info.json", headers: [] }, { tab: { id: 40 }, frameId: 1 }, () => {});
+  for (const listener of fake.listeners.message)
+    listener(
+      {
+        ...binding,
+        type: "dz.job.fetch",
+        requestId: "req:wrong-frame",
+        url: "https://gallery.example/info.json",
+        headers: [],
+      },
+      { tab: { id: 40 }, frameId: 1 },
+      () => {},
+    );
   await tick();
   assert.equal(fake.calls.execute.length, before);
 });
@@ -132,10 +284,22 @@ test("job-tab closure clears the binding without a source listener or stop hands
   const job = jobId(fake);
   for (const listener of fake.listeners.removed) listener(40);
   await tick();
-  for (const listener of fake.listeners.message) listener({ type: "dz.job.ready", jobId: job, requestId: "closed-job-ready" }, { tab: { id: 40 }, frameId: 0 }, () => {});
+  for (const listener of fake.listeners.message)
+    listener(
+      { type: "dz.job.ready", jobId: job, requestId: "closed-job-ready" },
+      { tab: { id: 40 }, frameId: 0 },
+      () => {},
+    );
   await tick();
-  assert.equal(fake.calls.execute.length, 0, "closed job has no in-memory binding to resume source work");
-  assert.equal(fake.calls.send.some((call) => call.message.type === "dz.source.stop"), false);
+  assert.equal(
+    fake.calls.execute.length,
+    0,
+    "closed job has no in-memory binding to resume source work",
+  );
+  assert.equal(
+    fake.calls.send.some((call) => call.message.type === "dz.source.stop"),
+    false,
+  );
 });
 
 test("source-tab closure removes the in-memory job and source binding", async () => {
@@ -145,9 +309,18 @@ test("source-tab closure removes the in-memory job and source binding", async ()
   await tick();
   const job = jobId(fake);
   for (const listener of fake.listeners.removed) listener(TAB.id);
-  for (const listener of fake.listeners.message) listener({ type: "dz.job.ready", jobId: job, requestId: "closed-source-ready" }, { tab: { id: 40 }, frameId: 0 }, () => {});
+  for (const listener of fake.listeners.message)
+    listener(
+      { type: "dz.job.ready", jobId: job, requestId: "closed-source-ready" },
+      { tab: { id: 40 }, frameId: 0 },
+      () => {},
+    );
   await tick();
-  assert.equal(fake.calls.execute.length, 0, "closed source has no in-memory binding to resume source work");
+  assert.equal(
+    fake.calls.execute.length,
+    0,
+    "closed source has no in-memory binding to resume source work",
+  );
 });
 
 test("explicit retry takes a fresh snapshot and re-sends the already-seen candidate", async () => {
@@ -157,9 +330,13 @@ test("explicit retry takes a fresh snapshot and re-sends the already-seen candid
   await ready(fake);
   const binding = sourceBinding(fake);
   assert.equal(fake.calls.execute.length, 1, "ready triggers one discovery snapshot");
-  assert.equal(fake.calls.send.filter((call) => call.message.type === "dz.job.candidates").length, 1);
+  assert.equal(
+    fake.calls.send.filter((call) => call.message.type === "dz.job.candidates").length,
+    1,
+  );
 
-  for (const listener of fake.listeners.message) listener({ ...binding, type: "dz.job.retry" }, { tab: { id: 40 }, frameId: 0 }, () => {});
+  for (const listener of fake.listeners.message)
+    listener({ ...binding, type: "dz.job.retry" }, { tab: { id: 40 }, frameId: 0 }, () => {});
   await tick();
   await tick();
   assert.equal(fake.calls.execute.length, 2, "retry takes a fresh bounded snapshot");
@@ -176,10 +353,12 @@ test("retry is rejected once the source binding is invalidated", async () => {
   await fake.listeners.click[0](TAB);
   await ready(fake);
   const binding = sourceBinding(fake);
-  for (const listener of fake.listeners.updated) listener(TAB.id, { url: "https://gallery.example/next" });
+  for (const listener of fake.listeners.updated)
+    listener(TAB.id, { url: "https://gallery.example/next" });
   await tick();
   const before = fake.calls.execute.length;
-  for (const listener of fake.listeners.message) listener({ ...binding, type: "dz.job.retry" }, { tab: { id: 40 }, frameId: 0 }, () => {});
+  for (const listener of fake.listeners.message)
+    listener({ ...binding, type: "dz.job.retry" }, { tab: { id: 40 }, frameId: 0 }, () => {});
   await tick();
   assert.equal(fake.calls.execute.length, before, "an invalidated source is never rearmed");
 });

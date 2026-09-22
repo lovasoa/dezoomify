@@ -10,34 +10,48 @@
 // The rendered class names, ids, roles, and visible text are part of the
 // product contract (theme CSS, E2E selectors); keep them stable.
 
-import { useEffect, useLayoutEffect, useRef } from "react";
-import type { ReactElement, ReactNode } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
-import { flushSync } from "react-dom";
-import type { SnapshotPresentation, StructuredError } from "./snapshot-view.ts";
 import type { HistoryEntry } from "@dezoomify/app-model";
-import type {
-  ConfirmModalArgs, PlatformHints,
-  ViewCallbacks, ViewContext, ViewRenderOptions,
-} from "./view-types.ts";
+import type { ReactElement, ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
+import { flushSync } from "react-dom";
+import type { Root } from "react-dom/client";
+import { createRoot } from "react-dom/client";
+import type { SnapshotPresentation, StructuredError } from "./snapshot-view.ts";
 import {
-  displaySourceUrl, errorDiagnosticsText, handoffOriginFor,
-  hostFromUrl, isFileHandoffSource, reportIssueUrl,
+  displaySourceUrl,
+  errorDiagnosticsText,
+  handoffOriginFor,
+  hostFromUrl,
+  isFileHandoffSource,
+  reportIssueUrl,
 } from "./view-helpers.ts";
-
-export { DEFAULT_PAGE_TITLE, handoffOriginFor, isActiveJobStatus, isFileHandoffSource, jobPageTitle } from "./view-helpers.ts";
-export type {
-  ConfirmModalArgs, JobActivity, PlatformHints, ViewCallbacks,
-  ViewContext, ViewPhase, ViewRenderOptions,
+import type {
+  ConfirmModalArgs,
+  PlatformHints,
+  ViewCallbacks,
+  ViewContext,
+  ViewRenderOptions,
 } from "./view-types.ts";
+
+export {
+  DEFAULT_PAGE_TITLE,
+  handoffOriginFor,
+  isActiveJobStatus,
+  isFileHandoffSource,
+  jobPageTitle,
+} from "./view-helpers.ts";
+export type {
+  ConfirmModalArgs,
+  JobActivity,
+  PlatformHints,
+  ViewCallbacks,
+  ViewContext,
+  ViewPhase,
+  ViewRenderOptions,
+} from "./view-types.ts";
+
+import { formatElapsed, renderCompletion, renderSaveGuidance } from "./components.ts";
 import { t } from "./i18n.ts";
-import {
-  renderSaveGuidance,
-  renderCompletion,
-  formatElapsed,
-  getDezoomifyLogoSvg,
-} from "./components.ts";
 import { UrlInput } from "./url-input.tsx";
 
 // ---------------------------------------------------------------------------
@@ -109,7 +123,23 @@ function activityLogText(ctx?: ViewContext): string {
 function Logo() {
   return (
     <h1 className="dz-product-mark">
-      <span dangerouslySetInnerHTML={{ __html: getDezoomifyLogoSvg(30) }} />
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 355 355"
+        width="30"
+        height="30"
+        aria-hidden="true"
+        style={{ verticalAlign: "middle", display: "inline-block" }}
+      >
+        <path
+          fill="#ff8080"
+          d="m154.32 21.09v100.89h108.07c-5.77-36.22-27.73-67.85-59.66-85.92-14.89-8.36-31.39-13.47-48.41-14.97Zm-30 .9C88.2 27.78 56.66 49.67 38.6 81.48c-7.1 12.55-11.88 26.27-14.14 40.51h99.86ZM23.55 151.99c3.58 39.19 26.07 74.17 60.24 93.69l.57.32c12.4 6.94 25.93 11.62 39.96 13.85V151.99Z"
+        />
+        <path
+          fill="#3c7bff"
+          d="M140.35 8.62C56.27 8.37-10.24 100.62 17.73 180.42c20.33 74.84 112.26 114.12 180.86 82.56 26.63 26.51 53.02 53.26 79.79 79.61 11.7 10.23 29.36 5.26 37.98-6.38 9.17-9.19 21.97-19.07 18.38-33.87-3.55-13.67-16.72-21.27-25.5-31.5l-55.2-55.2c51.79-70.29 10.74-182.01-74.22-202.1a134.2 134.2 0 0 0-39.47-4.92Zm9.36 16.85a115.05 115.05 0 0 1 51.43 14.79 115.05 115.05 0 0 1 43.58 156.65 115.05 115.05 0 0 1-156.59 43.79l-.54-.31A115.05 115.05 0 0 1 44.43 83.63 115.05 115.05 0 0 1 149.71 25.47Z"
+        />
+      </svg>
       <span>Dezoomify</span>
     </h1>
   );
@@ -188,13 +218,7 @@ function DesktopGuideButton({ onOpen, description }: { onOpen(): void; descripti
 // Input / history.
 // ---------------------------------------------------------------------------
 
-function HistorySection({
-  callbacks,
-  ctx,
-}: {
-  callbacks: ViewCallbacks;
-  ctx?: ViewContext;
-}) {
+function HistorySection({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: ViewContext }) {
   const entries = ctx?.history;
   if (!Array.isArray(entries)) return <div className="dz-history-section" id="dz-history" />;
   return (
@@ -205,7 +229,7 @@ function HistorySection({
         <p className="dz-history-empty">{t("view.history.empty")}</p>
       ) : (
         <ul className="dz-history-list">
-          {entries.slice(0, 20).map((entry, i) => {
+          {entries.slice(0, 20).map((entry) => {
             const parts = [entry.url || entry.origin];
             const dims = historyDimsLabel(entry);
             const date = historyDateLabel(entry.at);
@@ -213,7 +237,7 @@ function HistorySection({
             if (typeof entry.format === "string" && entry.format !== "") parts.push(entry.format);
             if (date !== "") parts.push(date);
             return (
-              <li className="dz-history-item" key={`${entry.url}-${i}`}>
+              <li className="dz-history-item" key={`${entry.at}-${entry.url}`}>
                 {callbacks.onHistorySelect ? (
                   <button
                     type="button"
@@ -315,11 +339,11 @@ function deriveJob(presentation: SnapshotPresentation, ctx?: ViewContext): JobDe
         ? `Waiting for ${hostFromUrl(activity.url)}…`
         : t(presentation.headlineKey, presentation.headlineVars);
   const sourceUrl = activity.url ? displaySourceUrl(activity.url) : "";
-  const estimatedTotalMs = ctx?.currentProgress?.estimatedTotalMs ?? (
-    determinate && current >= 2 && elapsedMs >= 2000
+  const estimatedTotalMs =
+    ctx?.currentProgress?.estimatedTotalMs ??
+    (determinate && current >= 2 && elapsedMs >= 2000
       ? Math.round((elapsedMs / current) * total)
-      : undefined
-  );
+      : undefined);
   const timeText = elapsed
     ? `${elapsed}${typeof estimatedTotalMs === "number" && estimatedTotalMs > elapsedMs ? ` / ~${formatElapsed(estimatedTotalMs)}` : ""}`
     : "";
@@ -328,7 +352,8 @@ function deriveJob(presentation: SnapshotPresentation, ctx?: ViewContext): JobDe
     : "";
   const diagText = diagnosticsText(presentation, ctx, elapsedMs, timeoutMs);
   const logText = activityLogText(ctx);
-  const copiedLog = activity.log && activity.log.length > 0 ? `\n\nEvents\n${activity.log.join("\n")}` : "";
+  const copiedLog =
+    activity.log && activity.log.length > 0 ? `\n\nEvents\n${activity.log.join("\n")}` : "";
   const copied = `${diagText}${activity.diagnostics ? `\n\n${activity.diagnostics}` : ""}${copiedLog}`;
   return {
     paused,
@@ -453,7 +478,11 @@ function JobView({
               : d.step
           }
         >
-          <div className="dz-progress-done" id="dz-job-bar" style={{ width: d.determinate ? `${d.donePct}%` : "35%" }} />
+          <div
+            className="dz-progress-done"
+            id="dz-job-bar"
+            style={{ width: d.determinate ? `${d.donePct}%` : "35%" }}
+          />
           <div
             className="dz-progress-active"
             id="dz-job-active"
@@ -508,7 +537,9 @@ function DisplayOnlyView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: V
   const handoffSource = typeof ctx?.sourceUrl === "string" ? ctx.sourceUrl : "";
   const handoffOrigin = handoffOriginFor(handoffUrl, handoffSource);
   const handoffLabel =
-    handoffOrigin !== "" ? t("view.handoff.sendOrigin", { origin: handoffOrigin }) : t("view.handoff.send");
+    handoffOrigin !== ""
+      ? t("view.handoff.sendOrigin", { origin: handoffOrigin })
+      : t("view.handoff.send");
   const hostDoc = globalThis.document;
   return (
     <div className="dz-view-body dz-notice-section dz-fade-in">
@@ -542,7 +573,12 @@ function DisplayOnlyView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: V
       </div>
       <div className="dz-actions-row">
         {callbacks.onReset ? (
-          <button type="button" className="dz-btn-secondary" id="dz-btn-reset" onClick={() => callbacks.onReset?.()}>
+          <button
+            type="button"
+            className="dz-btn-secondary"
+            id="dz-btn-reset"
+            onClick={() => callbacks.onReset?.()}
+          >
             {t("view.display.startOver")}
           </button>
         ) : null}
@@ -596,7 +632,11 @@ function CompletedView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: Vie
       : t("desktop.done.saved");
     showSaveButton = false;
   }
-  const guidance = ctx?.nativeSaved ? t("desktop.done.saved") : saved ? "" : renderSaveGuidance(isClean);
+  const guidance = ctx?.nativeSaved
+    ? t("desktop.done.saved")
+    : saved
+      ? ""
+      : renderSaveGuidance(isClean);
   return (
     <div className="dz-view-body dz-completed-section dz-fade-in">
       <div className="dz-completed-header">
@@ -621,7 +661,12 @@ function CompletedView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: Vie
       <p className="dz-completed-guidance">{guidance}</p>
       <div className="dz-actions-row">
         {callbacks.onOpenOutput ? (
-          <button type="button" className="dz-btn-tactile" id="dz-btn-open" onClick={() => callbacks.onOpenOutput?.()}>
+          <button
+            type="button"
+            className="dz-btn-tactile"
+            id="dz-btn-open"
+            onClick={() => callbacks.onOpenOutput?.()}
+          >
             {t("desktop.done.open")}
           </button>
         ) : null}
@@ -662,7 +707,12 @@ function CompletedView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: Vie
           </button>
         ) : null}
         {callbacks.onReset ? (
-          <button type="button" className="dz-btn-secondary" id="dz-btn-another" onClick={() => callbacks.onReset?.()}>
+          <button
+            type="button"
+            className="dz-btn-secondary"
+            id="dz-btn-another"
+            onClick={() => callbacks.onReset?.()}
+          >
             {t("view.done.another")}
           </button>
         ) : null}
@@ -687,9 +737,12 @@ function FailedView({
     message: t("view.fail.fallback"),
   };
   const handoffUrl = typeof ctx?.desktopHandoffUrl === "string" ? ctx.desktopHandoffUrl : "";
-  const source = typeof ctx?.sourceUrl === "string"
-    ? ctx.sourceUrl
-    : (typeof ctx?.jobActivity?.url === "string" ? ctx.jobActivity.url : "");
+  const source =
+    typeof ctx?.sourceUrl === "string"
+      ? ctx.sourceUrl
+      : typeof ctx?.jobActivity?.url === "string"
+        ? ctx.jobActivity.url
+        : "";
   const isFile = isFileHandoffSource(source);
   const origin = isFile ? "" : handoffOriginFor(handoffUrl, source);
   const label = origin !== "" ? t("view.handoff.sendOrigin", { origin }) : t("view.handoff.send");
@@ -728,7 +781,12 @@ function FailedView({
             onOpen={() => showDesktopAppGuidance(hostDoc)}
             description={t("view.fail.deskDescLimits")}
           />
-          <a className="dz-guidance-item" href="./help/finding-the-image-address.html" target="_blank" rel="noopener">
+          <a
+            className="dz-guidance-item"
+            href="./help/finding-the-image-address.html"
+            target="_blank"
+            rel="noopener"
+          >
             <div className="dz-guidance-item-header">
               <svg
                 className="dz-guidance-icon"
@@ -764,11 +822,7 @@ function FailedView({
           </div>
         ) : null}
         <div className="dz-diagnostics-report">
-          <a
-            href={reportHref}
-            target="_blank"
-            rel="noopener"
-          >
+          <a href={reportHref} target="_blank" rel="noopener">
             {t("view.fail.reportBug")}
           </a>
         </div>
@@ -786,7 +840,12 @@ function FailedView({
           </button>
         ) : null}
         {callbacks.onReset ? (
-          <button type="button" className="dz-btn-secondary" id="dz-btn-start-over" onClick={() => callbacks.onReset?.()}>
+          <button
+            type="button"
+            className="dz-btn-secondary"
+            id="dz-btn-start-over"
+            onClick={() => callbacks.onReset?.()}
+          >
             {t("view.display.startOver")}
           </button>
         ) : null}
@@ -825,7 +884,12 @@ function CancelledView({ callbacks }: { callbacks: ViewCallbacks }) {
       <p className="dz-notice-message">{t("view.cancel.message")}</p>
       <div className="dz-actions-row">
         {callbacks.onReset ? (
-          <button type="button" className="dz-btn-secondary" id="dz-btn-reset" onClick={() => callbacks.onReset?.()}>
+          <button
+            type="button"
+            className="dz-btn-secondary"
+            id="dz-btn-reset"
+            onClick={() => callbacks.onReset?.()}
+          >
             {t("view.display.startOver")}
           </button>
         ) : null}
@@ -859,10 +923,14 @@ function SharedView({
       {phase === "idle" ? <IdleView callbacks={callbacks} ctx={ctx} /> : null}
       {phase === "idle" ? options?.idleBeforeHistory : null}
       {phase === "idle" ? <HistorySection callbacks={callbacks} ctx={ctx} /> : null}
-      {phase === "job" ? <JobView presentation={presentation} callbacks={callbacks} ctx={ctx} /> : null}
+      {phase === "job" ? (
+        <JobView presentation={presentation} callbacks={callbacks} ctx={ctx} />
+      ) : null}
       {phase === "display-only" ? <DisplayOnlyView callbacks={callbacks} ctx={ctx} /> : null}
       {phase === "completed" ? <CompletedView callbacks={callbacks} ctx={ctx} /> : null}
-      {phase === "failed" ? <FailedView presentation={presentation} callbacks={callbacks} ctx={ctx} /> : null}
+      {phase === "failed" ? (
+        <FailedView presentation={presentation} callbacks={callbacks} ctx={ctx} />
+      ) : null}
       {phase === "cancelled" ? <CancelledView callbacks={callbacks} /> : null}
       {options?.after}
     </div>
@@ -887,7 +955,10 @@ export function renderView(
   ctx?: ViewContext,
   options?: ViewRenderOptions,
 ): void {
-  renderInto(container, <SharedView presentation={presentation} callbacks={callbacks} ctx={ctx} options={options} />);
+  renderInto(
+    container,
+    <SharedView presentation={presentation} callbacks={callbacks} ctx={ctx} options={options} />,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -925,9 +996,6 @@ function ModalCard({
       role="dialog"
       aria-modal="true"
       aria-labelledby="dz-modal-title"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
     >
       <div className="dz-modal-card">
         {showClose ? (
@@ -954,7 +1022,10 @@ function ModalCard({
 
 let activeOverlay: { close(): void } | null = null;
 
-function mountOverlay(hostDocument: Document, render: (close: () => void) => ReactElement): { close(): void } {
+function mountOverlay(
+  hostDocument: Document,
+  render: (close: () => void) => ReactElement,
+): { close(): void } {
   activeOverlay?.close();
   const host = hostDocument.createElement("div");
   hostDocument.body.appendChild(host);
@@ -980,16 +1051,21 @@ export function openModal(
   hostDocument: Document,
   title: string,
   subtitle: string,
-  contentHtml: string,
+  content: ReactNode,
 ): void {
   mountOverlay(hostDocument, (close) => (
     <ModalCard
       title={title}
       subtitle={subtitle}
       onClose={close}
-      body={<div dangerouslySetInnerHTML={{ __html: contentHtml }} />}
+      body={<div>{content}</div>}
       actions={
-        <button type="button" className="dz-btn-tactile dz-modal-ok" style={{ minWidth: "100px" }} onClick={close}>
+        <button
+          type="button"
+          className="dz-btn-tactile dz-modal-ok"
+          style={{ minWidth: "100px" }}
+          onClick={close}
+        >
           {t("view.modal.ok")}
         </button>
       }
@@ -1036,8 +1112,8 @@ function ConfirmDialog({
       onClose={() => decide(false)}
       body={
         <>
-          {args.bodyLines.map((line, i) => (
-            <p key={i}>{line}</p>
+          {args.bodyLines.map((line) => (
+            <p key={line}>{line}</p>
           ))}
         </>
       }
@@ -1071,9 +1147,12 @@ function ConfirmDialog({
 function detectPlatform(hints?: PlatformHints): { name: string; installer: string } {
   const ua = (hints?.userAgent ?? "").toLowerCase();
   const platform = (hints?.platform ?? "").toLowerCase();
-  if (ua.includes("win") || platform.includes("win")) return { name: "Windows", installer: ".msi installer" };
-  if (ua.includes("mac") || platform.includes("mac")) return { name: "macOS", installer: "Apple silicon .dmg" };
-  if (ua.includes("linux") || platform.includes("linux")) return { name: "Linux", installer: ".deb installer" };
+  if (ua.includes("win") || platform.includes("win"))
+    return { name: "Windows", installer: ".msi installer" };
+  if (ua.includes("mac") || platform.includes("mac"))
+    return { name: "macOS", installer: "Apple silicon .dmg" };
+  if (ua.includes("linux") || platform.includes("linux"))
+    return { name: "Linux", installer: ".deb installer" };
   return { name: "your platform", installer: "installer" };
 }
 
@@ -1088,8 +1167,8 @@ export function showDesktopAppGuidance(hostDocument: Document, hints?: PlatformH
   );
   const downloadNote = (
     <>
-      {t("view.desktop.installer", { platform: p.name, installer: p.installer })} {releases}. No auto-update;
-      check Releases manually.
+      {t("view.desktop.installer", { platform: p.name, installer: p.installer })} {releases}. No
+      auto-update; check Releases manually.
     </>
   );
   const stepOne = t("view.desktop.step1", { platform: p.name, installer: p.installer });
@@ -1259,5 +1338,10 @@ export function showExtensionGuidance(hostDocument: Document): void {
   ));
 }
 
-const storeLabelStyle = { fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.04em", opacity: 0.8 } as const;
+const storeLabelStyle = {
+  fontSize: "0.72rem",
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
+  opacity: 0.8,
+} as const;
 const storeNameStyle = { fontWeight: 700, fontSize: "0.98rem" } as const;

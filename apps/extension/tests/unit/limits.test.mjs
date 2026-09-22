@@ -1,5 +1,5 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import * as ext from "../../../../packages/browser-runtime/src/limits.ts";
 
 // The extension imports the canonical browser-runtime limits directly through

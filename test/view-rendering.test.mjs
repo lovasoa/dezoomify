@@ -1,8 +1,13 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import { act, click } from "./react-dom.mjs";
+import test from "node:test";
+import {
+  presentFailure,
+  presentIdle,
+  presentSnapshot,
+  presentStatus,
+} from "../packages/shared-ui/src/snapshot-view.ts";
 import { renderView } from "../packages/shared-ui/src/view.tsx";
-import { presentFailure, presentIdle, presentSnapshot, presentStatus } from "../packages/shared-ui/src/snapshot-view.ts";
+import { act, click } from "./react-dom.mjs";
 
 // Authoritative EngineSnapshotDto builder: each presentation renders one
 // latest snapshot, never a folded event walk.
@@ -12,7 +17,13 @@ function dto(overrides = {}) {
     lifecycle: "Discovering",
     paused: false,
     progress: { completed: 0, total: undefined },
-    selection: { image: undefined, level: undefined, level_count: 0, catalog: undefined, deferred: [] },
+    selection: {
+      image: undefined,
+      level: undefined,
+      level_count: 0,
+      catalog: undefined,
+      deferred: [],
+    },
     decision: undefined,
     terminal: undefined,
     output: undefined,
@@ -94,11 +105,13 @@ test("renderView mounts card and updates job section in place without DOM destru
   // 3. Heartbeat update / progress ticks during job
   render(
     el,
-    jobPresentation(dto({
-      revision: 3,
-      lifecycle: "AcquiringTiles",
-      progress: { completed: 15, total: 60 },
-    })),
+    jobPresentation(
+      dto({
+        revision: 3,
+        lifecycle: "AcquiringTiles",
+        progress: { completed: 15, total: 60 },
+      }),
+    ),
     callbacks,
     {
       ...ctx,
@@ -112,7 +125,11 @@ test("renderView mounts card and updates job section in place without DOM destru
 
   // Card and job section MUST be the exact same DOM node references.
   assert.equal(el.querySelector(".dz-card"), card, "card node preserved across job updates");
-  assert.equal(card.querySelector(".dz-job-section"), jobSec, "job section node preserved across job updates");
+  assert.equal(
+    card.querySelector(".dz-job-section"),
+    jobSec,
+    "job section node preserved across job updates",
+  );
 
   // The step line renders the presentation headline, never host copy.
   assert.equal(stepTextEl.textContent, "Saving image tiles…");
@@ -125,11 +142,13 @@ test("renderView mounts card and updates job section in place without DOM destru
   assert.equal(details.open, true, "open details preserved across in-place updates");
 
   // 4. Rapid heartbeat / progress ticks
-  const tickPresentation = jobPresentation(dto({
-    revision: 3,
-    lifecycle: "AcquiringTiles",
-    progress: { completed: 15, total: 60 },
-  }));
+  const tickPresentation = jobPresentation(
+    dto({
+      revision: 3,
+      lifecycle: "AcquiringTiles",
+      progress: { completed: 15, total: 60 },
+    }),
+  );
   for (let tick = 1; tick <= 10; tick++) {
     render(el, tickPresentation, callbacks, {
       ...ctx,
@@ -139,7 +158,11 @@ test("renderView mounts card and updates job section in place without DOM destru
         completedRequests: 15 + tick,
       },
     });
-    assert.equal(card.querySelector(".dz-job-section"), jobSec, `tick ${tick}: DOM reference must stay identical`);
+    assert.equal(
+      card.querySelector(".dz-job-section"),
+      jobSec,
+      `tick ${tick}: DOM reference must stay identical`,
+    );
     assert.equal(details.open, true, `tick ${tick}: open details must never close`);
   }
 
@@ -192,7 +215,10 @@ test("failed state updates error details in place without destroying error conta
   assert.equal(card.dataset.viewPhase, "failed");
   const errSec = card.querySelector(".dz-error-section");
   assert.ok(errSec, "error section mounted");
-  assert.equal(card.querySelector("#dz-error-message").textContent, "No zoomable image could be found.");
+  assert.equal(
+    card.querySelector("#dz-error-message").textContent,
+    "No zoomable image could be found.",
+  );
 
   const errPresentation2 = failurePresentation({
     code: "NO_IMAGE_FOUND",
@@ -202,7 +228,10 @@ test("failed state updates error details in place without destroying error conta
   });
   render(el, errPresentation2, callbacks);
   assert.equal(card.querySelector(".dz-error-section"), errSec, "error section node preserved");
-  assert.equal(card.querySelector("#dz-error-message").textContent, "Network timeout contacting server.");
+  assert.equal(
+    card.querySelector("#dz-error-message").textContent,
+    "Network timeout contacting server.",
+  );
 });
 
 test("error layering: plain message prominent, engine diagnostics only in technical details", () => {
@@ -274,7 +303,12 @@ test("failed technical details show the activity log below the error diagnostics
     message: "Discarded.",
   });
   const ctx = {
-    jobActivity: { log: ["[job] engine-start url=https://example.test/a.dzi", "[worker] session-created jobId=job:1"] },
+    jobActivity: {
+      log: [
+        "[job] engine-start url=https://example.test/a.dzi",
+        "[worker] session-created jobId=job:1",
+      ],
+    },
   };
   render(el, presentation, callbacks, ctx);
   const card = el.querySelector(".dz-card");
@@ -288,7 +322,11 @@ test("failed technical details show the activity log below the error diagnostics
 
   const empty = container();
   render(empty, presentation, callbacks, {});
-  assert.equal(empty.querySelector(".dz-card").querySelector("#dz-error-log"), null, "no log block without logs");
+  assert.equal(
+    empty.querySelector(".dz-card").querySelector("#dz-error-log"),
+    null,
+    "no log block without logs",
+  );
 });
 
 test("job rail keeps integrated stop and diagnostics-copy controls, and header visibility tracks phase", () => {
@@ -301,23 +339,33 @@ test("job rail keeps integrated stop and diagnostics-copy controls, and header v
 
   render(
     el,
-    jobPresentation(dto({
-      revision: 2,
-      lifecycle: "AcquiringTiles",
-      progress: { completed: 10, total: 50 },
-    })),
+    jobPresentation(
+      dto({
+        revision: 2,
+        lifecycle: "AcquiringTiles",
+        progress: { completed: 10, total: 50 },
+      }),
+    ),
     callbacks,
   );
   assert.equal(header.style.display, "none", "header hidden in job phase");
   const stopBtn = card.querySelector("#dz-btn-cancel");
   assert.ok(stopBtn, "stop button exists on the progress rail");
-  assert.ok(stopBtn.classList.contains("dz-progress-control"), "stop button uses compact rail-control styling");
+  assert.ok(
+    stopBtn.classList.contains("dz-progress-control"),
+    "stop button uses compact rail-control styling",
+  );
   const copyBtn = card.querySelector("#dz-btn-copy-diagnostics");
   assert.ok(copyBtn, "technical details include a diagnostics copy control");
 
   render(
     el,
-    failurePresentation({ code: "FAILED", category: "transport", retryable: true, message: "Error" }),
+    failurePresentation({
+      code: "FAILED",
+      category: "transport",
+      retryable: true,
+      message: "Error",
+    }),
     callbacks,
   );
   assert.equal(header.style.display, "none", "header hidden in failed phase");
@@ -330,12 +378,14 @@ test("paused job activity freezes the displayed elapsed time", () => {
   const el = container();
   render(
     el,
-    jobPresentation(dto({
-      revision: 2,
-      lifecycle: "AcquiringTiles",
-      paused: true,
-      progress: { completed: 3, total: 10 },
-    })),
+    jobPresentation(
+      dto({
+        revision: 2,
+        lifecycle: "AcquiringTiles",
+        paused: true,
+        progress: { completed: 3, total: 10 },
+      }),
+    ),
     { onSubmitUrl: () => {}, onCancel: () => {}, onReset: () => {} },
     {
       jobActivity: { startedAt: 1_000, pausedAt: 4_000, now: 12_000, paused: true },
@@ -356,12 +406,23 @@ test("failed view offers retry only for retryable errors and start over only whe
   });
   let retried = 0;
   let resets = 0;
-  const withBoth = { ...callbacks, onReset: () => { resets += 1; }, onRetrySameUrl: () => { retried += 1; } };
+  const withBoth = {
+    ...callbacks,
+    onReset: () => {
+      resets += 1;
+    },
+    onRetrySameUrl: () => {
+      retried += 1;
+    },
+  };
   render(el, retryable, withBoth);
   const card = el.querySelector(".dz-card");
   const retry = card.querySelector("#dz-btn-try-again");
   assert.ok(retry, "retry offered for a retryable error");
-  assert.ok(card.querySelector("#dz-btn-start-over"), "start over offered when the host provides a reset");
+  assert.ok(
+    card.querySelector("#dz-btn-start-over"),
+    "start over offered when the host provides a reset",
+  );
   click(retry);
   assert.equal(retried, 1, "retry invokes onRetrySameUrl");
   assert.equal(resets, 0, "retry never falls through to reset");
@@ -376,12 +437,26 @@ test("failed view offers retry only for retryable errors and start over only whe
   assert.equal(card.querySelector("#dz-btn-try-again"), null, "no retry for a non-retryable error");
   assert.ok(card.querySelector("#dz-btn-start-over"), "start over stays available");
 
-  const noReset = { onSubmitUrl: () => {}, onCancel: () => {}, onRetrySameUrl: () => { retried += 1; } };
+  const noReset = {
+    onSubmitUrl: () => {},
+    onCancel: () => {},
+    onRetrySameUrl: () => {
+      retried += 1;
+    },
+  };
   render(el, nonRetryable, noReset);
   assert.equal(card.querySelector("#dz-btn-try-again"), null);
-  assert.equal(card.querySelector("#dz-btn-start-over"), null, "no start over when the host cannot reset");
+  assert.equal(
+    card.querySelector("#dz-btn-start-over"),
+    null,
+    "no start over when the host cannot reset",
+  );
   render(el, retryable, noReset);
-  assert.equal(card.querySelector("#dz-btn-start-over"), null, "retry-only host never shows start over");
+  assert.equal(
+    card.querySelector("#dz-btn-start-over"),
+    null,
+    "retry-only host never shows start over",
+  );
   click(card.querySelector("#dz-btn-try-again"));
   assert.equal(retried, 2, "retry stays wired without a reset callback");
 });

@@ -25,7 +25,11 @@ body {
 body {
   min-height: 100vh;
   text-align: left;
-  background-image: radial-gradient(circle at 50% -15rem, rgba(127, 169, 236, 0.09), transparent 38rem);
+  background-image: radial-gradient(
+    circle at 50% -15rem,
+    rgba(127, 169, 236, 0.09),
+    transparent 38rem
+  );
 }
 
 .dz-desktop-bar {
@@ -330,7 +334,7 @@ body {
   border: 0;
   border-left: 1px solid color-mix(in srgb, var(--dz-surface-border) 78%, transparent);
   border-radius: 0;
-  font: 550 0.74rem/1 var(--dz-font-sans);
+  font: 550 0.74rem / 1 var(--dz-font-sans);
   letter-spacing: 0;
   text-align: left;
   text-overflow: ellipsis;
@@ -398,7 +402,7 @@ body {
   background: var(--dz-surface-gradient);
   border: 1px solid var(--dz-surface-border);
   border-radius: var(--dz-radius-large);
-  box-shadow: 0 24px 70px rgba(0,0,0,.5);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
 }
 
 #dz-desktop-settings .dz-settings-dialog::backdrop {
@@ -442,7 +446,7 @@ body {
   background: var(--dz-btn-secondary-bg);
   border: 1px solid var(--dz-btn-secondary-border);
   border-radius: var(--dz-radius);
-  font: 600 0.8rem/1 var(--dz-font-sans);
+  font: 600 0.8rem / 1 var(--dz-font-sans);
   cursor: pointer;
 }
 
@@ -569,11 +573,22 @@ body {
 }
 
 @media (max-width: 680px) {
-  .dz-desktop-bar { padding: 0 1rem; }
-  .dz-desktop-local { display: none; }
-  #root.dz-main { width: min(100% - 2rem, 1080px); margin-top: 2rem; }
-  #root .dz-form { padding: 0.4rem; }
-  #dz-desktop-settings .dz-settings-summary-value { display: none; }
+  .dz-desktop-bar {
+    padding: 0 1rem;
+  }
+  .dz-desktop-local {
+    display: none;
+  }
+  #root.dz-main {
+    width: min(100% - 2rem, 1080px);
+    margin-top: 2rem;
+  }
+  #root .dz-form {
+    padding: 0.4rem;
+  }
+  #dz-desktop-settings .dz-settings-summary-value {
+    display: none;
+  }
 }
 
 /* Recovery dialog wrapper: flat flow, never a nested bordered box. The

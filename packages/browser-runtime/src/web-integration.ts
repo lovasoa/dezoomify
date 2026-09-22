@@ -61,9 +61,7 @@ function isPrivateOrLocalHostname(hostname: string): boolean {
   return false;
 }
 
-export function isProxyEligible(
-  req: WebFetchRequest,
-): { eligible: boolean; reason: string } {
+export function isProxyEligible(req: WebFetchRequest): { eligible: boolean; reason: string } {
   if (req.kind === "tile") return { eligible: false, reason: "tile-never-proxied" };
   if (req.requiresCookies) return { eligible: false, reason: "cookie-requiring" };
   if (req.requiresAuth) return { eligible: false, reason: "auth-dependent" };
@@ -76,8 +74,10 @@ export function isProxyEligible(
   }
   if (u.username !== "" || u.password !== "") return { eligible: false, reason: "url-userinfo" };
   if (hasSignedQuery(req.url)) return { eligible: false, reason: "signed-query" };
-  if (isPrivateOrLocalHostname(u.hostname)) return { eligible: false, reason: "private-local-target" };
-  if (u.protocol !== "http:" && u.protocol !== "https:") return { eligible: false, reason: "scheme" };
+  if (isPrivateOrLocalHostname(u.hostname))
+    return { eligible: false, reason: "private-local-target" };
+  if (u.protocol !== "http:" && u.protocol !== "https:")
+    return { eligible: false, reason: "scheme" };
   return { eligible: true, reason: "public-non-credential-metadata" };
 }
 

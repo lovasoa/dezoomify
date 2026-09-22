@@ -1,19 +1,40 @@
-import { asFetchFailure } from "../runtime/fetch.ts";
-import { decodeBase64Payload, originOfUrl, SOURCE_FETCH_BYTE_LIMIT } from "@dezoomify/browser-runtime";
 import type { AcquireEffect } from "@dezoomify/browser-runtime";
+import {
+  decodeBase64Payload,
+  originOfUrl,
+  SOURCE_FETCH_BYTE_LIMIT,
+} from "@dezoomify/browser-runtime";
+import { asFetchFailure } from "../runtime/fetch.ts";
 
 /** @typedef {{ jobId: string, tabId: number, frameId: number, documentGeneration: number }} JobBinding */
 
 /** @param {unknown} value @returns {value is JobBinding} */
-export interface JobBinding { jobId: string; tabId: number; frameId: number; documentGeneration: number }
-interface SourceReply { bytes: Uint8Array }
-interface PendingSource { resolve(value: SourceReply): void; reject(reason: unknown): void }
+export interface JobBinding {
+  jobId: string;
+  tabId: number;
+  frameId: number;
+  documentGeneration: number;
+}
+interface SourceReply {
+  bytes: Uint8Array;
+}
+interface PendingSource {
+  resolve(value: SourceReply): void;
+  reject(reason: unknown): void;
+}
 
 export function isJobBinding(value: unknown): value is JobBinding {
   const binding = value as Partial<JobBinding> | null;
-  return !!binding && typeof binding.jobId === "string" && binding.jobId.startsWith("job:") &&
-    Number.isInteger(binding.tabId) && Number.isInteger(binding.frameId) &&
-    typeof binding.documentGeneration === "number" && Number.isInteger(binding.documentGeneration) && binding.documentGeneration >= 0;
+  return (
+    !!binding &&
+    typeof binding.jobId === "string" &&
+    binding.jobId.startsWith("job:") &&
+    Number.isInteger(binding.tabId) &&
+    Number.isInteger(binding.frameId) &&
+    typeof binding.documentGeneration === "number" &&
+    Number.isInteger(binding.documentGeneration) &&
+    binding.documentGeneration >= 0
+  );
 }
 
 /**
@@ -25,12 +46,25 @@ export function isJobBinding(value: unknown): value is JobBinding {
  * request. The reply carries one base64 payload; the coordinator owns the
  * request lifecycle.
  */
-export function createCoordinatorSourceTransport(deps: { sendMessage(message: unknown): Promise<unknown> }) {
+export function createCoordinatorSourceTransport(deps: {
+  sendMessage(message: unknown): Promise<unknown>;
+}) {
   const pending = new Map<string, PendingSource>();
   return {
     /** @param {{ binding: JobBinding, requestId: number, uri: string, method?: string, headers: unknown, purpose: string }} request */
-    async fetchResource(request: { binding: JobBinding; requestId: number; uri: string; method?: string; headers: unknown; purpose: string }): Promise<SourceReply> {
-      if (!isJobBinding(request.binding) || !Number.isSafeInteger(request.requestId) || request.requestId < 0) {
+    async fetchResource(request: {
+      binding: JobBinding;
+      requestId: number;
+      uri: string;
+      method?: string;
+      headers: unknown;
+      purpose: string;
+    }): Promise<SourceReply> {
+      if (
+        !isJobBinding(request.binding) ||
+        !Number.isSafeInteger(request.requestId) ||
+        request.requestId < 0
+      ) {
         throw Object.assign(new Error("invalid source fetch binding"), { category: "malformed" });
       }
       const token = `req:${request.requestId}`;
@@ -43,24 +77,37 @@ export function createCoordinatorSourceTransport(deps: { sendMessage(message: un
         headers: request.headers,
         purpose: request.purpose,
       });
-      return await new Promise<SourceReply>((resolve, reject) => pending.set(token, { resolve, reject }));
+      return await new Promise<SourceReply>((resolve, reject) =>
+        pending.set(token, { resolve, reject }),
+      );
     },
     /** Receive a coordinator-routed `dz.source.fetch-complete` message. */
-    handleMessage(message: { requestId?: string; sourceType?: string; ok?: boolean; code?: string; status?: number; data?: unknown }): boolean {
+    handleMessage(message: {
+      requestId?: string;
+      sourceType?: string;
+      ok?: boolean;
+      code?: string;
+      status?: number;
+      data?: unknown;
+    }): boolean {
       if (typeof message?.requestId !== "string") return false;
       const state = pending.get(message?.requestId);
       if (!state || message.sourceType !== "dz.source.fetch-complete") return false;
       pending.delete(message.requestId);
       if (!message.ok) {
-        state.reject(Object.assign(new Error(`source request failed with HTTP ${message.status ?? 0}`), {
-          category: "network",
-          sourceDefinitive: message.code === "http-error",
-        }));
+        state.reject(
+          Object.assign(new Error(`source request failed with HTTP ${message.status ?? 0}`), {
+            category: "network",
+            sourceDefinitive: message.code === "http-error",
+          }),
+        );
         return true;
       }
       const bytes = decodeBase64Payload(message.data, SOURCE_FETCH_BYTE_LIMIT);
       if (!bytes) {
-        state.reject(Object.assign(new Error("malformed source payload"), { category: "malformed" }));
+        state.reject(
+          Object.assign(new Error("malformed source payload"), { category: "malformed" }),
+        );
         return true;
       }
       state.resolve({ bytes });
@@ -91,7 +138,9 @@ export function createEngineResourceFetcher(deps: {
   binding(): JobBinding;
   siteOrigin(): string;
   sourceTransport: { fetchResource(request: unknown): Promise<{ bytes: Uint8Array }> };
-  extensionTransport: { fetchResource(url: string, opts?: unknown): Promise<{ bytes: Uint8Array }> };
+  extensionTransport: {
+    fetchResource(url: string, opts?: unknown): Promise<{ bytes: Uint8Array }>;
+  };
   cancelled(): boolean;
   onSourceFailure?(cause: { code?: unknown; blocked_reason?: unknown }): void;
 }): (effect: Pick<AcquireEffect, "request">) => Promise<{ bytes: Uint8Array }> {
@@ -109,7 +158,12 @@ export function createEngineResourceFetcher(deps: {
         });
         return { bytes: result.bytes };
       } catch (sourceError) {
-        if (sourceError && typeof sourceError === "object" && (sourceError as { sourceDefinitive?: unknown }).sourceDefinitive === true) throw sourceError;
+        if (
+          sourceError &&
+          typeof sourceError === "object" &&
+          (sourceError as { sourceDefinitive?: unknown }).sourceDefinitive === true
+        )
+          throw sourceError;
         deps.onSourceFailure?.(asFetchFailure(sourceError));
       }
     }

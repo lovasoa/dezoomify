@@ -1,5 +1,5 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import { presentIdle, presentSnapshot } from "../packages/shared-ui/src/snapshot-view.ts";
 
 // Authoritative EngineSnapshotDto builder: tests render the latest snapshot
@@ -10,7 +10,13 @@ function dto(overrides = {}) {
     lifecycle: "Discovering",
     paused: false,
     progress: { completed: 0, total: undefined },
-    selection: { image: undefined, level: undefined, level_count: 0, catalog: undefined, deferred: [] },
+    selection: {
+      image: undefined,
+      level: undefined,
+      level_count: 0,
+      catalog: undefined,
+      deferred: [],
+    },
     decision: undefined,
     terminal: undefined,
     output: undefined,
@@ -73,7 +79,13 @@ test("display-only round-trips through output disposition only when finished", (
     revision: 6,
     lifecycle: "AcquiringTiles",
     progress: { completed: 2, total: 8 },
-    output: { canvas: undefined, format: "png", complete: false, missing: [], disposition: "display-only" },
+    output: {
+      canvas: undefined,
+      format: "png",
+      complete: false,
+      missing: [],
+      disposition: "display-only",
+    },
   });
   const view = presentSnapshot(snap, "display-only");
   assert.equal(view.phase, "job");
@@ -96,7 +108,13 @@ test("kept partials name their gaps", () => {
     lifecycle: "PartiallyCompleted",
     progress: { completed: 9, total: 12 },
     terminal: { type: "partial-completed", missing: [10, 11, 12] },
-    output: { canvas: undefined, format: "png", complete: false, missing: [10, 11, 12], disposition: undefined },
+    output: {
+      canvas: undefined,
+      format: "png",
+      complete: false,
+      missing: [10, 11, 12],
+      disposition: undefined,
+    },
   });
   const view = presentSnapshot(snap, "native");
   assert.equal(view.phase, "completed");

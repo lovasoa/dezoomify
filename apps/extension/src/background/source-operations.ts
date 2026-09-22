@@ -13,10 +13,19 @@
  * resource URLs. Same-origin iframe DOM is readable here; cross-origin frames
  * throw on access and are skipped.
  */
-type SourceRequest = { url: string; method?: string; headers: Array<{ name: string; value: string }> };
+type SourceRequest = {
+  url: string;
+  method?: string;
+  headers: Array<{ name: string; value: string }>;
+};
 type FetchFailure = { ok: false; code: string; status?: number };
 
-export function collectCandidates(): { ok: true; documentUrl: string; inputs: Array<{ url: string; contents?: string }>; overflow: number } {
+export function collectCandidates(): {
+  ok: true;
+  documentUrl: string;
+  inputs: Array<{ url: string; contents?: string }>;
+  overflow: number;
+} {
   const MAX_URL_LENGTH = 2048;
   const MAX_CANDIDATES = 100;
   const MAX_DOM_BYTES = 8 * 1024 * 1024;
@@ -26,26 +35,41 @@ export function collectCandidates(): { ok: true; documentUrl: string; inputs: Ar
   let overflow = 0;
   const append = (value: unknown, contents?: unknown) => {
     if (typeof value !== "string" || value.length === 0 || value.length > MAX_URL_LENGTH) return;
-    let parsed;
-    try { parsed = new URL(value); } catch { return; }
+    let parsed: URL;
+    try {
+      parsed = new URL(value);
+    } catch {
+      return;
+    }
     if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || seen.has(value)) return;
     seen.add(value);
-    if (inputs.length >= MAX_CANDIDATES) { overflow += 1; return; }
+    if (inputs.length >= MAX_CANDIDATES) {
+      overflow += 1;
+      return;
+    }
     let readableContents: string | undefined;
     if (typeof contents === "string" && contents.length > 0) {
       try {
-        if (new TextEncoder().encode(contents).byteLength <= MAX_DOM_BYTES) readableContents = contents;
+        if (new TextEncoder().encode(contents).byteLength <= MAX_DOM_BYTES)
+          readableContents = contents;
       } catch {}
     }
-    inputs.push({ url: value, ...(readableContents !== undefined ? { contents: readableContents } : {}) });
+    inputs.push({
+      url: value,
+      ...(readableContents !== undefined ? { contents: readableContents } : {}),
+    });
   };
 
   const visit = (doc: Document, url: string) => {
     let html = "";
-    try { html = String(doc.documentElement?.outerHTML ?? ""); } catch {}
+    try {
+      html = String(doc.documentElement?.outerHTML ?? "");
+    } catch {}
     append(url, html);
     let frames: Element[] = [];
-    try { frames = Array.from(doc.querySelectorAll?.("iframe") ?? []); } catch {}
+    try {
+      frames = Array.from(doc.querySelectorAll?.("iframe") ?? []);
+    } catch {}
     for (const element of frames) {
       try {
         const frame = element as HTMLIFrameElement;
@@ -54,7 +78,11 @@ export function collectCandidates(): { ok: true; documentUrl: string; inputs: Ar
       } catch {}
     }
   };
-  try { visit(globalThis.document, documentUrl); } catch { append(documentUrl); }
+  try {
+    visit(globalThis.document, documentUrl);
+  } catch {
+    append(documentUrl);
+  }
 
   try {
     for (const entry of globalThis.performance?.getEntriesByType?.("resource") ?? []) {
@@ -77,19 +105,30 @@ export function collectCandidates(): { ok: true; documentUrl: string; inputs: Ar
  * coordinator retries a failed source request through the extension-origin
  * transport. Cookies/session credentials are never part of this result.
  */
-export async function fetchSource(request: SourceRequest): Promise<FetchFailure | { ok: true; status: number; url: string; bytes: number; data: string }> {
+export async function fetchSource(
+  request: SourceRequest,
+): Promise<FetchFailure | { ok: true; status: number; url: string; bytes: number; data: string }> {
   const MAX_SOURCE_FETCH_BYTES = 8 * 1024 * 1024;
-  const fail = (code: string, status?: number): FetchFailure => ({ ok: false, code, ...(Number.isInteger(status) ? { status } : {}) });
+  const fail = (code: string, status?: number): FetchFailure => ({
+    ok: false,
+    code,
+    ...(Number.isInteger(status) ? { status } : {}),
+  });
 
   const headers: Record<string, string> = {};
   for (const header of request.headers) headers[header.name] = header.value;
 
   const controller = typeof AbortController === "function" ? new AbortController() : null;
   try {
-    const response = await fetch(request.url, { method: request.method ?? "GET", headers, signal: controller?.signal });
+    const response = await fetch(request.url, {
+      method: request.method ?? "GET",
+      headers,
+      signal: controller?.signal,
+    });
     if (!response || typeof response.status !== "number") return fail("invalid-response");
     if (!response.ok) return fail("http-error", response.status);
-    const responseUrl = typeof response.url === "string" && response.url !== "" ? response.url : request.url;
+    const responseUrl =
+      typeof response.url === "string" && response.url !== "" ? response.url : request.url;
 
     const parts: Uint8Array[] = [];
     let total = 0;
@@ -97,14 +136,17 @@ export async function fetchSource(request: SourceRequest): Promise<FetchFailure 
       const value = part instanceof Uint8Array ? part : new Uint8Array(part ?? []);
       total += value.byteLength;
       if (total > MAX_SOURCE_FETCH_BYTES) {
-        try { controller?.abort?.(); } catch {}
+        try {
+          controller?.abort?.();
+        } catch {}
         throw Object.assign(new Error("source response exceeds limit"), { code: "too-large" });
       }
       parts.push(value);
     };
 
     const declared = Number(response.headers?.get?.("content-length"));
-    if (Number.isSafeInteger(declared) && declared > MAX_SOURCE_FETCH_BYTES) return fail("too-large");
+    if (Number.isSafeInteger(declared) && declared > MAX_SOURCE_FETCH_BYTES)
+      return fail("too-large");
     const reader = response.body?.getReader?.();
     if (reader) {
       for (;;) {
@@ -117,8 +159,17 @@ export async function fetchSource(request: SourceRequest): Promise<FetchFailure 
     }
     const bytes = new Uint8Array(total);
     let offset = 0;
-    for (const part of parts) { bytes.set(part, offset); offset += part.byteLength; }
-    return { ok: true, status: response.status, url: responseUrl, bytes: total, data: bytes.toBase64() };
+    for (const part of parts) {
+      bytes.set(part, offset);
+      offset += part.byteLength;
+    }
+    return {
+      ok: true,
+      status: response.status,
+      url: responseUrl,
+      bytes: total,
+      data: bytes.toBase64(),
+    };
   } catch (error) {
     const caught = error as { code?: unknown; name?: unknown };
     if (caught?.code === "too-large") return fail("too-large");

@@ -1,7 +1,7 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import { buildHash, looksLikeUsableUrl, parseHash } from "../src/hash.ts";
+import test from "node:test";
 import { formatElapsed, formatRemaining } from "../packages/shared-ui/src/components.ts";
+import { buildHash, looksLikeUsableUrl, parseHash } from "../src/hash.ts";
 
 test("legacy hash round-trips raw URLs", () => {
   const url = "https://example.com/viewer?id=42";

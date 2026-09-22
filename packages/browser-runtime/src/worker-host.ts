@@ -10,13 +10,13 @@ import type {
   HostEffect,
   JobCommand,
   JobInputDto,
-  ProcessingRecipe,
   ProbeOutcome,
-  Session as WasmSession,
+  ProcessingRecipe,
   SessionConfig,
+  Session as WasmSession,
 } from "@dezoomify/wasm-bindings";
-import { dispatchTyped } from "./typed-dispatch.ts";
 import type { DispatchTable } from "./typed-dispatch.ts";
+import { dispatchTyped } from "./typed-dispatch.ts";
 
 export type WorkerHostLog = (
   level: "debug" | "info" | "warn" | "error",
@@ -48,12 +48,23 @@ export type WorkerHostMessage =
   | { type: "engine.probe"; requestId: number; outcome: ProbeOutcome }
   | { type: "engine.display"; requestId: number }
   | { type: "engine.acquired"; requestId: number }
-  | { type: "engine.process"; requestId: number; recipe: ProcessingRecipe; bytes: Uint8Array | ArrayBuffer }
+  | {
+      type: "engine.process";
+      requestId: number;
+      recipe: ProcessingRecipe;
+      bytes: Uint8Array | ArrayBuffer;
+    }
   | { type: "engine.rank"; requestId: number; urls: string[] }
   | { type: "engine.failure"; requestId: number; error: FetchFailureDto }
   | { type: "engine.timer-elapsed"; effect: number }
   | { type: "engine.command"; command: JobCommand }
-  | { type: "engine.finalize"; outcome: Extract<HostCompletion, { type: "finalization-succeeded" } | { type: "finalization-failed" }> }
+  | {
+      type: "engine.finalize";
+      outcome: Extract<
+        HostCompletion,
+        { type: "finalization-succeeded" } | { type: "finalization-failed" }
+      >;
+    }
   | { type: "engine.dispose" };
 
 export type WorkerHostOutput =
@@ -75,7 +86,11 @@ export function createJobWorkerHost(deps: {
 
   function publish(result: DispatchResult): void {
     if (result.status === "error") {
-      log("error", "core-error", `code=${result.error.code} phase=${result.error.phase} message=${result.error.message}`);
+      log(
+        "error",
+        "core-error",
+        `code=${result.error.code} phase=${result.error.phase} message=${result.error.message}`,
+      );
       deps.postMessage({ type: "engine.error", error: result.error });
       return;
     }
@@ -98,11 +113,17 @@ export function createJobWorkerHost(deps: {
   function complete(completion: HostCompletion): void {
     if (!session || disposed) return;
     const request = "request" in completion ? completion.request : undefined;
-    log("debug", "completion-dispatched", `completion=${completion.type}${request === undefined ? "" : ` request=${request}`}`);
+    log(
+      "debug",
+      "completion-dispatched",
+      `completion=${completion.type}${request === undefined ? "" : ` request=${request}`}`,
+    );
     publish(session.complete(completion));
   }
 
-  async function start(message: Extract<WorkerHostMessage, { type: "engine.start" }>): Promise<void> {
+  async function start(
+    message: Extract<WorkerHostMessage, { type: "engine.start" }>,
+  ): Promise<void> {
     const wasm = await deps.wasm();
     if (disposed) return;
     await wasm.default?.();
@@ -128,7 +149,11 @@ export function createJobWorkerHost(deps: {
   }
 
   function provideProbe(message: Extract<WorkerHostMessage, { type: "engine.probe" }>): void {
-    complete({ type: "provide-probe-outcome", request: message.requestId, outcome: message.outcome });
+    complete({
+      type: "provide-probe-outcome",
+      request: message.requestId,
+      outcome: message.outcome,
+    });
   }
 
   function provideDisplay(message: Extract<WorkerHostMessage, { type: "engine.display" }>): void {
@@ -143,14 +168,22 @@ export function createJobWorkerHost(deps: {
 
   function processTile(message: Extract<WorkerHostMessage, { type: "engine.process" }>): void {
     if (!session || disposed) return;
-    const bytes = message.bytes instanceof Uint8Array
-      ? message.bytes
-      : new Uint8Array(message.bytes);
+    const bytes =
+      message.bytes instanceof Uint8Array ? message.bytes : new Uint8Array(message.bytes);
     try {
-      const out = new Uint8Array(session.applyProcessing({ recipe: message.recipe }, bytes)).slice();
-      deps.postMessage({ type: "engine.processed", requestId: message.requestId, bytes: out.buffer }, [out.buffer]);
+      const out = new Uint8Array(
+        session.applyProcessing({ recipe: message.recipe }, bytes),
+      ).slice();
+      deps.postMessage(
+        { type: "engine.processed", requestId: message.requestId, bytes: out.buffer },
+        [out.buffer],
+      );
     } catch (error) {
-      deps.postMessage({ type: "engine.process-failed", requestId: message.requestId, error: abiFault(error) });
+      deps.postMessage({
+        type: "engine.process-failed",
+        requestId: message.requestId,
+        error: abiFault(error),
+      });
     }
   }
 
@@ -191,7 +224,11 @@ export function createJobWorkerHost(deps: {
         await dispatchTyped(messageHandlers, input);
       } catch (error) {
         const failure = abiFault(error);
-        log("error", "core-error", `code=${failure.code} phase=${failure.phase} message=${failure.message} detail=${failure.detail ?? ""}`);
+        log(
+          "error",
+          "core-error",
+          `code=${failure.code} phase=${failure.phase} message=${failure.message} detail=${failure.detail ?? ""}`,
+        );
         deps.postMessage({ type: "engine.error", error: failure });
       }
     },

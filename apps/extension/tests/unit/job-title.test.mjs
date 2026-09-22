@@ -1,6 +1,10 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_PAGE_TITLE, isActiveJobStatus, jobPageTitle } from "../../../../packages/shared-ui/src/view-helpers.ts";
+import test from "node:test";
+import {
+  DEFAULT_PAGE_TITLE,
+  isActiveJobStatus,
+  jobPageTitle,
+} from "../../../../packages/shared-ui/src/view-helpers.ts";
 
 test("extension job tab shares the Dezoomify <host> title shape", () => {
   assert.equal(DEFAULT_PAGE_TITLE, "Dezoomify");

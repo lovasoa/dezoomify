@@ -1,7 +1,7 @@
-import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const rootDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -32,8 +32,14 @@ test("mobile: extension job page links the canonical theme with no inline fork",
   const entry = read("apps/extension/entrypoints/job/job.ts");
   assert.match(entry, /styles\/theme\.css/, "job page links the canonical theme");
   const styles = [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join("\n");
-  assert.ok(!styles.includes(".dz-"), "page ships no inline theme subset (theme owns all dz-* geometry)");
-  assert.ok(!styles.includes("@media"), "page ships no breakpoint fork (theme owns every breakpoint)");
+  assert.ok(
+    !styles.includes(".dz-"),
+    "page ships no inline theme subset (theme owns all dz-* geometry)",
+  );
+  assert.ok(
+    !styles.includes("@media"),
+    "page ships no breakpoint fork (theme owns every breakpoint)",
+  );
 });
 
 test("mobile CSS contract: 360px rules avoid known reachability blockers", () => {
@@ -41,7 +47,11 @@ test("mobile CSS contract: 360px rules avoid known reachability blockers", () =>
   // the canonical theme; the static shell only adds the scan tab list.
   const css = read("packages/shared-ui/src/styles/theme.css");
   const html = read("apps/extension/entrypoints/job/index.html");
-  assert.match(html, /name="viewport"[^>]*width=device-width[^>]*initial-scale=1/, "viewport stays device-width");
+  assert.match(
+    html,
+    /name="viewport"[^>]*width=device-width[^>]*initial-scale=1/,
+    "viewport stays device-width",
+  );
 
   // No fixed-width layout container wider than a 360px phone.
   for (const m of css.matchAll(/(?:^|[{};])\s*(?:min-width|width)\s*:\s*([0-9.]+)px/gi)) {
@@ -74,7 +84,11 @@ test("mobile CSS contract: 360px rules avoid known reachability blockers", () =>
   // The card clips instead of scrolling sideways, and the fluid main
   // column stays within the viewport at every breakpoint.
   assert.match(css, /\.dz-card\s*\{[^}]*overflow:\s*hidden;/, "card never scrolls sideways");
-  assert.match(css, /\.dz-main\s*\{[^}]*width:\s*min\(9[24]%,\s*960px\);/, "main column stays fluid");
+  assert.match(
+    css,
+    /\.dz-main\s*\{[^}]*width:\s*min\(9[24]%,\s*960px\);/,
+    "main column stays fluid",
+  );
   // The job shell only hosts the shared-UI mount; interactive job actions
   // are rendered by the shared UI and covered by the rules above.
   assert.match(html, /id="dz-job-app"/, "shared-UI mount stays present");
