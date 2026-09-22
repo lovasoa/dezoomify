@@ -9,8 +9,8 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 use crate::Vec2d;
 use crate::core::{
     DiscoveredEntry, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, Request, ResolvedImage,
-    ResolvedLevel, resolve_relative,
+    DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, Request, ResolvedLevel,
+    resolve_relative,
 };
 use crate::json_utils::all_json;
 
@@ -326,12 +326,12 @@ fn catalog_from_dzi(
             .rsplit('/')
             .next()
             .map(|s| s.trim_end_matches("_files").to_owned());
-        entries.push(DiscoveredEntry::Ready(ResolvedImage {
+        entries.push(DiscoveredEntry::ready(
+            "deepzoom",
             title,
-            format: "deepzoom",
             levels,
-            ..Default::default()
-        }));
+            Vec::new(),
+        ));
     }
     Ok(DiscoveryCatalog::new(entries))
 }
@@ -339,7 +339,7 @@ fn catalog_from_dzi(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::TileSource;
+    use crate::core::{ResolvedImage, TileSource};
 
     fn ready_image(catalog: DiscoveryCatalog) -> ResolvedImage {
         match catalog.into_entries().pop().unwrap() {

@@ -10,7 +10,7 @@ use crate::Vec2d;
 use crate::core::{
     DiscoveredEntry, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch,
     DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, Positioned, PositionedTile,
-    ProcessingRecipe, Request, ResolvedImage, ResolvedLevel, TileSourceError, resolve_relative,
+    ProcessingRecipe, Request, ResolvedLevel, TileSourceError, resolve_relative,
 };
 
 const ROUTES: &[DiscoveryRoute] = &[
@@ -134,8 +134,9 @@ fn catalog(_: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
             let image_size = layer_size(gigapixel.size, normal_level, layer.level)?;
             let levels = build_levels(&gigapixel, &layer, image_size)?;
             let layer_title = layer.title();
-            Ok(DiscoveredEntry::Ready(ResolvedImage {
-                title: document.title.clone().map(|title| {
+            Ok(DiscoveredEntry::ready(
+                "second_canvas",
+                document.title.clone().map(|title| {
                     if layer.is_normal() {
                         title
                     } else {
@@ -144,10 +145,9 @@ fn catalog(_: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
                         })
                     }
                 }),
-                format: "second_canvas",
                 levels,
-                ..Default::default()
-            }))
+                Vec::new(),
+            ))
         })
         .collect::<Result<Vec<_>, DiscoveryError>>()?;
     Ok(DiscoveryCatalog::new(entries).normalize())
