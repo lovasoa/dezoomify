@@ -3,6 +3,7 @@ import {
   buildProxyCorsHeaders,
   cacheControlForProxy,
   createProxyRequestId,
+  forwardedClientHeaders,
   isAllowedMetadataContentType,
   PROXY_MAX_BYTES,
   PROXY_MAX_REDIRECTS,
@@ -197,9 +198,12 @@ export async function handleProxyRequest(
     if (deps.signal?.aborted) {
       return { status: 499, headers: baseHeaders, code: "TRANSPORT_CANCELLED", requestId };
     }
-    const upstreamHeaders = stripUpstreamHeaders({
-      accept: headerCase(req.headers ?? {}, "accept") ?? "application/json",
-    });
+    // The client's actual headers, filtered to the narrow safe set
+    // (cookies, auth, and caller referer/origin never flow upstream).
+    // Referer is always the target (legacy /proxy parity).
+    const upstreamHeaders = stripUpstreamHeaders(forwardedClientHeaders(req.headers ?? {}));
+    if (upstreamHeaders["accept"] === undefined) upstreamHeaders["accept"] = "application/json";
+    upstreamHeaders["referer"] = req.targetUrl;
     const ifNoneMatch = req.ifNoneMatch ?? headerCase(req.headers ?? {}, "if-none-match");
     if (ifNoneMatch) upstreamHeaders["if-none-match"] = ifNoneMatch;
     const ifModifiedSince =
