@@ -5,7 +5,7 @@
 //! surface must carry only redacted transport diagnostics, never the
 //! credential-bearing query.
 
-use dezoomify_native::{JobOptions, NativeRunner, OutputTarget};
+use dezoomify_native::{start_job, JobOptions, OutputTarget};
 use std::time::Duration;
 
 #[test]
@@ -13,7 +13,7 @@ fn canaries_never_appear_in_snapshots_or_terminals() {
     let work = std::env::temp_dir().join(format!("dz-redact-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work).expect("temp dir");
-    let job = NativeRunner::start(JobOptions {
+    let job = start_job(JobOptions {
         input_url: "http://127.0.0.1:9/item?token=CANARY-TOKEN".into(),
         output: OutputTarget::File(work.join("out.png")),
         ..Default::default()

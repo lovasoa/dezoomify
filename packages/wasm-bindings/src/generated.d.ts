@@ -8,7 +8,7 @@ export type ProcessingRecipe = "none" | "google-arts-decrypt";
 /**
  * A pixel size (output canvas or planned tile extent).
  */
-export interface SizeDto {
+export interface Size {
     width: number;
     height: number;
 }
@@ -16,7 +16,7 @@ export interface SizeDto {
 /**
  * A position in the output image, in pixels from the top-left corner.
  */
-export interface PointDto {
+export interface Point {
     x: number;
     y: number;
 }
@@ -24,20 +24,19 @@ export interface PointDto {
 /**
  * A resolved image: declared geometry and selectable levels.
  */
-export interface ImageDto {
+export interface Image {
     title?: string;
     format: string;
-    width: number;
-    height: number;
+    size?: Size;
     sourceKind: string;
-    levels: LevelDto[];
+    levels: Level[];
 }
 
 /**
  * A still-deferred catalog entry: the resource to acquire before an image
  * can be planned. The host follows `uri` with a fresh bounded attempt.
  */
-export interface ImageRequestDto {
+export interface ImageRequest {
     title?: string;
     uri: string;
 }
@@ -47,26 +46,26 @@ export interface ImageRequestDto {
  * the latest snapshot and never reconstruct phases from event walks.
  * `revision` increases on every transition; observers drop stale ones.
  */
-export interface EngineSnapshotDto {
+export interface Snapshot {
     revision: number;
     lifecycle: JobState;
     paused: boolean;
-    progress: SnapshotProgressDto;
-    selection: SnapshotSelectionDto;
-    decision: SnapshotDecisionDto | undefined;
-    terminal: SnapshotTerminalDto | undefined;
-    output: SnapshotOutputDto | undefined;
+    progress: Progress;
+    selection: Selection;
+    decision: Decision | undefined;
+    terminal: Terminal | undefined;
+    output: OutputSummary | undefined;
 }
 
 /**
  * Closed retry category for one classified tile failure.
  */
-export type FailureCategoryDto = "permanent" | "transient";
+export type FailureCategory = "permanent" | "transient";
 
 /**
  * Current selection state (positions into the kept catalog).
  */
-export interface SnapshotSelectionDto {
+export interface Selection {
     image: number | undefined;
     level: number | undefined;
     level_count: number;
@@ -74,20 +73,14 @@ export interface SnapshotSelectionDto {
      * The kept catalog with full geometry, once discovered. Replaced when
      * a deferred catalog entry is followed within the same job.
      */
-    catalog: CatalogDto | undefined;
-    deferred: SnapshotDeferredDto[];
+    catalog: Catalog | undefined;
+    deferred: DeferredEntry[];
 }
-
-/**
- * Extension-to-native messages. Browser manifest enforcement authenticates
- * the sender; challenges and nonces provide session binding and replay defense.
- */
-export type NativeHostRequest = { kind: "handshake"; protocol?: string | undefined; clientVersion?: number | undefined } | { kind: "negotiate"; clientVersion: number; jobId: string; extensionId?: string | undefined } | { kind: "consent"; challenge: string; nonce: string; jobId: string; origins: string[]; cookieNames?: string[]; confirmed: boolean } | { kind: "credential"; challenge: string; nonce: string; jobId: string; sourceUrl: string; origins: string[]; cookies?: NativeCookie[] } | { kind: "decline"; challenge: string };
 
 /**
  * Honest output disposition reported by the host that performed the save.
  */
-export type OutputDispositionDto = "native-publication" | "browser-save-initiated" | "browser-save-ready" | "display-only";
+export type OutputDisposition = "native-publication" | "browser-save-initiated" | "browser-save-ready" | "display-only";
 
 /**
  * Host-neutral placement of one tile in the output image, projected from
@@ -98,10 +91,10 @@ export type OutputDispositionDto = "native-publication" | "browser-save-initiate
  * the host must apply to the acquired bytes before decoding. Native
  * assembly and browser canvas hosts consume the same values.
  */
-export interface TilePlacementDto {
-    position: PointDto;
-    expected_size: SizeDto | undefined;
-    canvas: SizeDto | undefined;
+export interface TilePlacement {
+    position: Point;
+    expected_size: Size | undefined;
+    canvas: Size | undefined;
     processing: ProcessingRecipe;
     /**
      * Whether a successful probe is also part of the final output plan.
@@ -110,24 +103,15 @@ export interface TilePlacementDto {
 }
 
 /**
- * One cookie transferred after explicit, origin-scoped consent.
- */
-export interface NativeCookie {
-    name: string;
-    value: string;
-    origin: string;
-}
-
-/**
  * One ordered catalog slot: a ready image or a request to resolve one.
  */
-export type CatalogEntryDto = ({ kind: "image" } & ImageDto) | ({ kind: "image-request" } & ImageRequestDto);
+export type CatalogEntry = ({ kind: "image" } & Image) | ({ kind: "image-request" } & ImageRequest);
 
 /**
  * One ordered discovery root. `contents` is omitted when the host only has
  * a reference and discovery should acquire it normally.
  */
-export interface JobInputDto {
+export interface JobInput {
     url: string;
     contents?: string;
 }
@@ -137,17 +121,17 @@ export interface JobInputDto {
  * the core's approved normalization; secret headers are never carried here
  * (hosts attach scoped authorization out-of-band and redact logs).
  */
-export interface RequestDto {
+export interface ResourceRequest {
     id: number;
     uri: string;
-    headers?: HeaderDto[];
+    headers?: Header[];
     purpose: RequestPurpose;
 }
 
 /**
  * One still-deferred catalog entry: position plus follow-up URI.
  */
-export interface SnapshotDeferredDto {
+export interface DeferredEntry {
     position: number;
     uri: string;
 }
@@ -155,35 +139,35 @@ export interface SnapshotDeferredDto {
 /**
  * One tile settled as missing, with its full structured detail.
  */
-export interface MissingTileDto {
+export interface MissingTile {
     tile: number;
-    failures: TileFailureDto[];
+    failures: TileFailure[];
 }
 
 /**
  * Output summary: geometry, completeness, and the honest disposition.
  */
-export interface SnapshotOutputDto {
-    canvas: SizeDto | undefined;
+export interface OutputSummary {
+    canvas: Size | undefined;
     format: OutputFormat;
     complete: boolean;
     missing: number[];
-    disposition: OutputDispositionDto | undefined;
+    disposition: OutputDisposition | undefined;
 }
 
 /**
  * Outstanding partial decision payload.
  */
-export interface SnapshotDecisionDto {
+export interface Decision {
     generation: number;
-    missing: MissingTileDto[];
+    missing: MissingTile[];
 }
 
 /**
  * Positive declared-canvas limits used by browser automatic selection.
  * Non-zero integer types reject invalid limits at the typed boundary.
  */
-export interface BrowserSelectionLimitsDto {
+export interface BrowserSelectionLimits {
     maxWidth: number;
     maxHeight: number;
     maxArea: number;
@@ -205,16 +189,16 @@ export type FetchFailureCode = "TRANSPORT_HTTP_ERROR" | "DISCOVERY_HTTP_ERROR" |
 /**
  * Stable ordered catalog projection (never exposes private core enums).
  */
-export interface CatalogDto {
-    entries: CatalogEntryDto[];
+export interface Catalog {
+    entries: CatalogEntry[];
 }
 
 /**
  * Structured facts for one failed tile attempt (bounded diagnostics).
  */
-export interface TileFailureDto {
+export interface TileFailure {
     code: string;
-    category: FailureCategoryDto;
+    category: FailureCategory;
     http?: number;
     retry_after_ms?: number;
     detail?: string;
@@ -223,7 +207,7 @@ export interface TileFailureDto {
 /**
  * Terminal outcome, set exactly once.
  */
-export type SnapshotTerminalDto = { type: "completed" } | { type: "partial-completed"; missing: number[] } | { type: "failed"; error: ErrorDto } | { type: "cancelled" };
+export type Terminal = { type: "completed" } | { type: "partial-completed"; missing: number[] } | { type: "failed"; error: Error } | { type: "cancelled" };
 
 /**
  * The browser output representation requested by the job engine.
@@ -241,12 +225,12 @@ export interface ProcessingRequest {
  * Unit progress for the active phase (totals stay unknown until the plan
  * resolves).
  */
-export interface SnapshotProgressDto {
+export interface Progress {
     completed: number;
     total: number | undefined;
 }
 
-export interface ErrorDto {
+export interface Error {
     code: string;
     phase: ErrorPhase;
     retryable: boolean;
@@ -261,7 +245,7 @@ export interface ErrorDto {
     detail?: string;
 }
 
-export interface FetchFailureDto {
+export interface FetchFailure {
     code: FetchFailureCode;
     retryable: boolean;
     message: string;
@@ -278,17 +262,15 @@ export interface FetchFailureDto {
     detail?: string;
 }
 
-export interface HeaderDto {
+export interface Header {
     name: string;
     value: string;
 }
 
-export interface LevelDto {
+export interface Level {
     label: string;
-    width: number;
-    height: number;
-    tileWidth: number;
-    tileHeight: number;
+    size?: Size;
+    tileSize?: Size;
 }
 
 export interface RecoveryAction {
@@ -306,22 +288,22 @@ export interface SessionConfig {
      * Opt in to browser selection using the largest ready image and the
      * largest level that fits these declared canvas limits.
      */
-    browser_selection?: BrowserSelectionLimitsDto;
+    browser_selection?: BrowserSelectionLimits;
 }
 
 export type BlockedReason = "access-required" | "blocked-ipv4" | "blocked-ipv6" | "cancelled" | "content-type" | "dns-rebinding" | "dns-rebinding-v6" | "forbidden" | "invalid-url" | "limit-exceeded" | "loopback-host" | "malformed" | "malformed-body" | "method" | "network" | "non-standard-port" | "origin" | "private-host" | "protocol-version" | "redirect-limit" | "redirect-target" | "redirect-unavailable" | "scheme" | "signed-query" | "source-document-lost" | "throttled" | "userinfo";
 
-export type DispatchResult = { status: "ok"; messages: HostEffect[]; snapshot: EngineSnapshotDto } | { status: "error"; error: ErrorDto };
+export type DispatchResult = { status: "ok"; messages: HostEffect[]; snapshot: Snapshot } | { status: "error"; error: Error };
 
 export type ErrorPhase = "handshake" | "validation" | "discovery" | "acquisition" | "decode" | "processing" | "output" | "publication" | "cleanup";
 
 export type ErrorTransport = "direct" | "metadata-proxy" | "browser-session" | "native" | "display-only";
 
-export type HostCompletion = { type: "provide-resource"; request: number; bytes: number[]; final_uri?: string } | { type: "provide-fetch-failure"; request: number; error: FetchFailureDto } | { type: "provide-probe-outcome"; request: number; outcome: ProbeOutcome } | { type: "provide-display-outcome"; request: number } | { type: "tile-acquired"; request: number } | { type: "retry-timer-elapsed"; effect: number } | { type: "finalization-succeeded"; effect: number; disposition: OutputDispositionDto } | { type: "finalization-failed"; effect: number; error: ErrorDto };
+export type HostCompletion = { type: "provide-resource"; request: number; bytes: number[]; final_uri?: string } | { type: "provide-fetch-failure"; request: number; error: FetchFailure } | { type: "provide-probe-outcome"; request: number; outcome: ProbeOutcome } | { type: "provide-display-outcome"; request: number } | { type: "tile-acquired"; request: number } | { type: "retry-timer-elapsed"; effect: number } | { type: "finalization-succeeded"; effect: number; disposition: OutputDisposition } | { type: "finalization-failed"; effect: number; error: Error };
 
-export type HostEffect = { type: "acquire-resource"; request: RequestDto } | { type: "acquire-tile"; request: RequestDto; tile: number; placement: TilePlacementDto } | { type: "finalize-output"; effect: number; partial: boolean; format: OutputFormat; canvas: SizeDto | undefined } | { type: "wait-retry-timer"; effect: number; tile: number; attempt: number; delay_ms: number } | { type: "cancel-work" } | { type: "request-decision"; generation: number };
+export type HostEffect = { type: "acquire-resource"; request: ResourceRequest } | { type: "acquire-tile"; request: ResourceRequest; tile: number; placement: TilePlacement } | { type: "finalize-output"; effect: number; partial: boolean; format: OutputFormat; canvas: Size | undefined } | { type: "wait-retry-timer"; effect: number; tile: number; attempt: number; delay_ms: number } | { type: "cancel-work" } | { type: "request-decision"; generation: number };
 
-export type JobCommand = { type: "start"; inputs: JobInputDto[] } | { type: "select-image"; image: number } | { type: "follow-deferred"; image: number } | { type: "select-level"; level: number } | { type: "answer-partial"; generation: number; decision: RecoveryChoice } | { type: "cancel" } | { type: "pause" } | { type: "resume" };
+export type JobCommand = { type: "start"; inputs: JobInput[] } | { type: "select-image"; image: number } | { type: "follow-deferred"; image: number } | { type: "select-level"; level: number } | { type: "answer-partial"; generation: number; decision: RecoveryChoice } | { type: "cancel" } | { type: "pause" } | { type: "resume" };
 
 export type JobState = "Created" | "Discovering" | "AwaitingImageSelection" | "AwaitingLevelSelection" | "Planning" | "AcquiringTiles" | "AwaitingPartialDecision" | "Finalizing" | "Cancelling" | "Completed" | "PartiallyCompleted" | "Failed" | "Cancelled";
 
@@ -370,7 +352,7 @@ export class Session {
      * Project the canonical engine snapshot for the active job.
      * Absolute state for UI rendering; issues no work.
      */
-    snapshot(): EngineSnapshotDto;
+    snapshot(): Snapshot;
 }
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;

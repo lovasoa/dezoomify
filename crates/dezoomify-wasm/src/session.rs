@@ -3,7 +3,7 @@
 //!
 //! ## Canonical engine delegation
 //!
-//! [`Session`] owns a [`dezoomify_engine::EngineJob`] and drives the whole
+//! [`Session`] owns a [`dezoomify::engine::EngineJob`] and drives the whole
 //! lifecycle through the canonical API (`start`, `command`, `complete`,
 //! `provide_metadata`). Each answer returns the newly issued effects plus
 //! the current snapshot; the adapter projects the new effects onto the
@@ -50,19 +50,17 @@
 //! (`job.empty-resource`); nothing here can fake completion.
 
 use crate::error::{AdapterError, AdapterErrorCode};
-use dezoomify_core::core::discovery::TransportKind;
-use dezoomify_engine::{
-    Effect as EngineEffect, EffectId as EngineEffectId, EffectResult as EngineEffectResult,
-    EngineError as EngineJobError, EngineJob, Failure as EngineFailure,
-    JobOptions as EngineOptions, OutstandingKind, ResponseMetadata as EngineResponseMetadata,
-    SelectionPolicy as EngineSelectionPolicy, Update as EngineUpdate,
-    UserCommand as EngineUserCommand,
+use dezoomify::core::discovery::TransportKind;
+use dezoomify::engine::{
+    EffectId as EngineEffectId, EffectResult as EngineEffectResult, EngineError as EngineJobError,
+    EngineJob, Failure as EngineFailure, JobOptions as EngineOptions, OutstandingKind,
+    ResponseMetadata as EngineResponseMetadata, SelectionPolicy as EngineSelectionPolicy,
+    Update as EngineUpdate, UserCommand as EngineUserCommand,
 };
-use dezoomify_protocol::dto::{
-    BrowserSelectionLimitsDto, ErrorDto, ErrorPhase, ErrorTransport, FetchFailureDto, HeaderDto,
-    HostCompletion, HostEffect, JobCommand, JobState as ProtocolJobState, OutputDispositionDto,
-    PointDto, ProbeOutcome, ProcessingRecipe, RequestDto, RequestPurpose, ResourceKind,
-    SessionConfig, SizeDto, TilePlacementDto,
+use dezoomify::model::{
+    BrowserSelectionLimits, Error, ErrorPhase, ErrorTransport, FetchFailure, HostCompletion,
+    HostEffect, JobCommand, JobState as ProtocolJobState, OutputDisposition, ProbeOutcome,
+    ProcessingRecipe, ResourceKind, SessionConfig,
 };
 
 /// One adapter session: exactly one engine job plus its request correlation.
@@ -108,22 +106,22 @@ impl Session {
     /// # Errors
     ///
     /// `disposed` after disposal; `wrong-state` before `Start` creates the job.
-    pub fn snapshot(&self) -> Result<dezoomify_protocol::dto::EngineSnapshotDto, AdapterError> {
+    pub fn snapshot(&self) -> Result<dezoomify::model::Snapshot, AdapterError> {
         self.require_live()?;
         let job = self.job.as_ref().ok_or_else(|| {
             AdapterError::new(AdapterErrorCode::WrongState, "session has no active job")
         })?;
-        Ok(job.project_dto())
+        Ok(job.snapshot())
     }
 
     /// Last projected snapshot (or the idle projection before start).
     /// The engine patches the terminal error from the retained host
     /// failure context, so the absolute snapshot never discards what the
     /// engine groups away.
-    fn last_snapshot(&self) -> dezoomify_protocol::dto::EngineSnapshotDto {
+    fn last_snapshot(&self) -> dezoomify::model::Snapshot {
         match &self.job {
-            Some(job) => job.project_dto(),
-            None => dezoomify_protocol::dto::EngineSnapshotDto::default(),
+            Some(job) => job.snapshot(),
+            None => dezoomify::model::Snapshot::default(),
         }
     }
 
@@ -150,7 +148,7 @@ impl Session {
     pub fn command(
         &mut self,
         command: JobCommand,
-    ) -> Result<(Vec<HostEffect>, dezoomify_protocol::dto::EngineSnapshotDto), AdapterError> {
+    ) -> Result<(Vec<HostEffect>, dezoomify::model::Snapshot), AdapterError> {
         self.require_live()?;
         let messages = self.dispatch_command(command)?;
         let snapshot = self.last_snapshot();
@@ -169,7 +167,7 @@ impl Session {
     pub fn complete(
         &mut self,
         completion: HostCompletion,
-    ) -> Result<(Vec<HostEffect>, dezoomify_protocol::dto::EngineSnapshotDto), AdapterError> {
+    ) -> Result<(Vec<HostEffect>, dezoomify::model::Snapshot), AdapterError> {
         self.require_live()?;
         let messages = self.dispatch_completion(completion)?;
         let snapshot = self.last_snapshot();
@@ -183,7 +181,7 @@ impl Session {
     /// the Cancelled terminal; no event is synthesized.
     pub fn dispose(
         &mut self,
-    ) -> Result<(Vec<HostEffect>, dezoomify_protocol::dto::EngineSnapshotDto), AdapterError> {
+    ) -> Result<(Vec<HostEffect>, dezoomify::model::Snapshot), AdapterError> {
         if self.disposed {
             return Ok((Vec::new(), self.last_snapshot()));
         }
@@ -314,7 +312,7 @@ impl Session {
 
     fn on_start(
         &mut self,
-        inputs: Vec<dezoomify_protocol::dto::JobInputDto>,
+        inputs: Vec<dezoomify::model::JobInput>,
     ) -> Result<Vec<HostEffect>, AdapterError> {
         if self.job.is_some() {
             return Err(AdapterError::new(
@@ -340,11 +338,11 @@ impl Session {
             inputs
                 .into_iter()
                 .map(|input| match input.contents {
-                    Some(contents) => dezoomify_engine::DiscoveryInput::with_contents(
+                    Some(contents) => dezoomify::engine::DiscoveryInput::with_contents(
                         input.url,
                         contents.into_bytes(),
                     ),
-                    None => dezoomify_engine::DiscoveryInput::new(input.url),
+                    None => dezoomify::engine::DiscoveryInput::new(input.url),
                 })
                 .collect(),
         );
@@ -360,7 +358,7 @@ impl Session {
         if let Some(value) = config.max_retries {
             options.max_retries = value;
         }
-        if let Some(BrowserSelectionLimitsDto {
+        if let Some(BrowserSelectionLimits {
             max_width,
             max_height,
             max_area,
@@ -504,7 +502,7 @@ impl Session {
     fn on_finalize_succeeded(
         &mut self,
         effect: u32,
-        disposition: OutputDispositionDto,
+        disposition: OutputDisposition,
     ) -> Result<Vec<HostEffect>, AdapterError> {
         let update = self
             .engine_job()?
@@ -519,7 +517,7 @@ impl Session {
     fn on_finalize_failed(
         &mut self,
         effect: u32,
-        error: ErrorDto,
+        error: Error,
     ) -> Result<Vec<HostEffect>, AdapterError> {
         let update = self
             .engine_job()?
@@ -537,7 +535,7 @@ impl Session {
     fn on_fetch_failure(
         &mut self,
         request: u32,
-        failure: FetchFailureDto,
+        failure: FetchFailure,
     ) -> Result<Vec<HostEffect>, AdapterError> {
         let kind = self
             .engine_job()?
@@ -598,7 +596,7 @@ impl Session {
                 };
                 self.engine_job()?.note_metadata_failure(
                     EngineEffectId(request),
-                    ErrorDto {
+                    Error {
                         code: format!("{:?}", failure.code),
                         phase: ErrorPhase::Discovery,
                         retryable: failure.retryable,
@@ -651,114 +649,6 @@ impl Session {
     /// snapshot the dispatch returns alongside; hosts render it directly
     /// and never refold a message stream.
     fn drain_update(&mut self, update: EngineUpdate) -> Vec<HostEffect> {
-        update
-            .effects
-            .iter()
-            .filter_map(|effect| self.project_effect(effect))
-            .collect()
-    }
-
-    fn project_effect(&mut self, effect: &EngineEffect) -> Option<HostEffect> {
-        match effect {
-            EngineEffect::AcquireMetadata { id, uri } => {
-                let request = id.get();
-                let request_dto = RequestDto {
-                    id: request,
-                    uri: uri.clone(),
-                    headers: Vec::new(),
-                    purpose: RequestPurpose::Metadata,
-                };
-                Some(HostEffect::AcquireResource {
-                    request: request_dto,
-                })
-            }
-            EngineEffect::AcquireTile {
-                id,
-                tile,
-                uri,
-                headers,
-                processing,
-                destination,
-                expected_size,
-                canvas,
-                probe,
-                probe_output,
-            } => {
-                let request = id.get();
-                let request_dto = RequestDto {
-                    id: request,
-                    uri: uri.clone(),
-                    headers: headers
-                        .iter()
-                        .map(|header| HeaderDto {
-                            name: header.name.clone(),
-                            value: header.value.clone(),
-                        })
-                        .collect(),
-                    purpose: if *probe {
-                        RequestPurpose::Probe
-                    } else {
-                        RequestPurpose::Tile
-                    },
-                };
-                Some(HostEffect::AcquireTile {
-                    request: request_dto,
-                    tile: *tile,
-                    placement: TilePlacementDto {
-                        position: PointDto {
-                            x: u64::from(destination.x),
-                            y: u64::from(destination.y),
-                        },
-                        expected_size: expected_size.map(|size| SizeDto {
-                            width: u64::from(size.width),
-                            height: u64::from(size.height),
-                        }),
-                        canvas: canvas.map(|size| SizeDto {
-                            width: u64::from(size.width),
-                            height: u64::from(size.height),
-                        }),
-                        processing: match processing {
-                            dezoomify_core::core::model::ProcessingRecipe::None => {
-                                ProcessingRecipe::None
-                            }
-                            dezoomify_core::core::model::ProcessingRecipe::GoogleArtsDecrypt => {
-                                ProcessingRecipe::GoogleArtsDecrypt
-                            }
-                        },
-                        probe_output: *probe_output,
-                    },
-                })
-            }
-            EngineEffect::WaitRetryTimer {
-                id,
-                tile,
-                attempt,
-                delay_ms,
-            } => Some(HostEffect::WaitRetryTimer {
-                effect: id.get(),
-                tile: *tile,
-                attempt: *attempt,
-                delay_ms: *delay_ms,
-            }),
-            EngineEffect::FinalizeOutput {
-                id,
-                partial,
-                canvas,
-            } => Some(HostEffect::FinalizeOutput {
-                effect: id.get(),
-                partial: *partial,
-                format: dezoomify_protocol::dto::OutputFormat::Png,
-                canvas: canvas.map(|size| SizeDto {
-                    width: u64::from(size.width),
-                    height: u64::from(size.height),
-                }),
-            }),
-            EngineEffect::RequestPartialDecision {
-                id: _, generation, ..
-            } => Some(HostEffect::RequestDecision {
-                generation: *generation,
-            }),
-            EngineEffect::CancelRelease { .. } => Some(HostEffect::CancelWork),
-        }
+        update.effects
     }
 }

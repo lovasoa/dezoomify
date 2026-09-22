@@ -1,0 +1,43 @@
+[package]
+name = "dezoomify"
+version = "3.0.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "Pure domain model, discovery formats, and deterministic job engine for Dezoomify."
+repository = "https://github.com/lovasoa/dezoomify"
+keywords = ["image", "download"]
+
+[dependencies]
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+serde-xml-rs.workspace = true
+quick-xml.workspace = true
+json5.workspace = true
+url.workspace = true
+regex.workspace = true
+memchr.workspace = true
+custom_error.workspace = true
+evalexpr.workspace = true
+itertools.workspace = true
+krpano-decrypt.workspace = true
+base64.workspace = true
+hmac.workspace = true
+sha1.workspace = true
+aes.workspace = true
+cbc.workspace = true
+thiserror.workspace = true
+html-escape.workspace = true
+tsify = { workspace = true, optional = true }
+wasm-bindgen = { workspace = true, optional = true }
+
+[features]
+typescript = ["dep:tsify", "dep:wasm-bindgen"]
+
+[lints.rust]
+missing_docs = "allow"
+
+[lints.clippy]
+pedantic = "allow"
+unwrap_used = "allow"

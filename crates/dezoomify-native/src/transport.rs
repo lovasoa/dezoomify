@@ -265,7 +265,7 @@ async fn fetch_once(
 /// with its redacted form (sensitive query keys, userinfo, and fragments
 /// never reach logs, events, or error messages).
 fn redact_url_from_error(error: &impl std::fmt::Display, uri: &str) -> String {
-    let redacted = dezoomify_core::core::redact_uri(uri);
+    let redacted = dezoomify::core::redact_uri(uri);
     if redacted == uri {
         return error.to_string();
     }

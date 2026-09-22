@@ -4,19 +4,18 @@
 // with automatic eligible metadata-proxy fallback -> tile acquisition -> canvas
 // assembly -> real PNG save. Nothing here fabricates progress or completion.
 //
-// The browser job service (packages/app-model service over the shared
-// browser runner) folds engine events into authoritative JobSnapshots; the
+// The shared browser service implements the job service and forwards engine
+// events as authoritative JobSnapshots; the
 // view renders presentSnapshot of the latest snapshot. Host-local failures
 // (invalid input, host rejections) render through presentFailure. No
 // synthetic controller walk exists.
 
 import { PROXY_TRANSPORT_LABEL } from "@dezoomify/app-model";
-import type { ErrorDto, HeaderDto, ProcessingRecipe } from "@dezoomify/wasm-bindings";
+import type { Error as EngineError, Header, ProcessingRecipe } from "@dezoomify/wasm-bindings";
 import type { HistoryEntry, JobHandle, JobSnapshot } from "../packages/app-model/src/index.ts";
 import {
   cancelAllQueueEntries,
   clearHistory as clearHistoryStore,
-  createJobService,
   finishActiveQueueEntry,
   HISTORY_KEY_WEBSITE,
   isValidInputUrl,
@@ -35,7 +34,7 @@ import type { StructuredFailure } from "../packages/browser-runtime/src/failure.
 import { failure } from "../packages/browser-runtime/src/failure.ts";
 import {
   type BrowserJobHandle,
-  createBrowserRunner,
+  createBrowserJobService,
   createCanvasAssembly,
   createProbeSize,
 } from "../packages/browser-runtime/src/index.ts";
@@ -96,8 +95,8 @@ import { createWebQueue, enqueueWebQueue } from "./queue.ts";
 
 const preview = createPreviewControls();
 
-// One browser runner attempt (worker, session, abort scope, disposal). The
-// runner owns the engine host; product code here keeps URL input, transport
+// One browser service attempt (worker, session, abort scope, disposal). The
+// service owns the engine host; product code here keeps URL input, transport
 // product actions, history, queue, and view wiring only.
 let jobHandle: JobHandle | null = null;
 let activeRun = 0;
@@ -299,7 +298,7 @@ async function probeSizeFor(url: string, headers: Record<string, string>, signal
   return probe(url, headers);
 }
 
-/** Tear down the active runner attempt: worker, session, assembly, buffers. */
+/** Tear down the active service attempt: worker, session, assembly, buffers. */
 function disposeAttempt(): void {
   const handle = jobHandle;
   jobHandle = null;
@@ -311,7 +310,7 @@ function disposeAttempt(): void {
 }
 
 /** Normalize generated request headers for `fetch`. */
-function headerRecord(headers: HeaderDto[] | undefined): Record<string, string> {
+function headerRecord(headers: Header[] | undefined): Record<string, string> {
   return Object.fromEntries((headers ?? []).map(({ name, value }) => [name, value]));
 }
 
@@ -378,7 +377,7 @@ function createAssembly(
 }
 
 /** Shared presenter for engine failures: headline plus stable classification. */
-function presentEngineFailure(error: ErrorDto, url: string): void {
+function presentEngineFailure(error: EngineError, url: string): void {
   const code = error.code;
   webLog.error("failed", `code=${code} message=${error.message}`);
   if (code === "PLAN_INVALID" || code === "job.resource-limit") {
@@ -546,13 +545,13 @@ async function runJob(url: string, origin = url): Promise<void> {
     settle();
   };
 
-  // One shared browser runner: the website injects its transport (direct
+  // One shared browser service: the website injects its transport (direct
   // first with automatic eligible metadata-proxy fallback) and its output
   // assembly (visible page canvas, anchor save). Retries, partials, and
   // ordering stay in the engine; the abort scope and disposal live here.
-  // The app-model job service folds the runner's events into authoritative
-  // snapshots; the observer below renders and drives product side effects.
-  const runner = createBrowserRunner({
+  // The service is the browser JobService; the observer below renders and
+  // drives product side effects.
+  const service = createBrowserJobService({
     createWorker: () => new Worker(new URL("./worker.js", import.meta.url), { type: "module" }),
     fetchResource: async (effect, signal) => {
       const request = effect.request;
@@ -628,7 +627,6 @@ async function runJob(url: string, origin = url): Promise<void> {
     },
   });
 
-  const service = createJobService(runner);
   const onSnapshot = (snapshot: JobSnapshot): void => {
     if (run !== activeRun) return;
     activeSnapshot = snapshot;
@@ -691,7 +689,7 @@ async function runJob(url: string, origin = url): Promise<void> {
             maxArea: BROWSER_MAX_CANVAS_AREA,
           },
         },
-        exec: { kind: "browser", sourceUrl: origin },
+        host: { kind: "browser", sourceUrl: origin },
       },
       { snapshot: onSnapshot, hostStatus: () => {} },
     );

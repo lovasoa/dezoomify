@@ -200,7 +200,7 @@ struct CapabilitySnapshot {
 }
 
 /// Projected IPC payload shape. Every job emit is the canonical
-/// `{ job, snapshot }`, where `snapshot` is the `EngineSnapshotDto` verbatim.
+/// `{ job, snapshot }`, where `snapshot` is the `Snapshot` verbatim.
 ///
 /// Only the DTO crosses IPC; tile bytes, pixels, paths, full URLs, and
 /// secrets never do.

@@ -33,14 +33,11 @@ pub fn run(args: &[String]) -> Result<(), String> {
             Some("desktop") => return super::desktop::test_desktop(&args[1..]),
             Some("extension") => return super::extension::test_extension(&args[1..]),
             Some("perf") => return super::perf::run(&args[1..]),
-            Some("native-messaging") => {
-                return super::extension::test_native_messaging(&args[1..]);
-            }
             Some("all") => return super::ci::test_all(),
             _ => {}
         }
         return Err(format!(
-            "unknown test arguments (targets: core, protocol, job, wasm, browser, ui, app-model, web, native, scenario, desktop, extension, perf, native-messaging, all, live): {}",
+            "unknown test arguments (targets: core, protocol, job, wasm, browser, ui, app-model, web, native, scenario, desktop, extension, perf, all, live): {}",
             args.join(" ")
         ));
     }

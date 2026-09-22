@@ -22,7 +22,6 @@ pub mod commands;
 pub mod deep_link;
 pub mod install_integration;
 pub mod jobs;
-pub mod native_host;
 pub mod settings;
 
 // The real window shell is behind the `tauri` feature; the default build
@@ -30,7 +29,5 @@ pub mod settings;
 #[cfg(feature = "tauri")]
 pub mod tauri_shell;
 
-/// Native Messaging host name shared by manifests and capabilities.
-pub const NATIVE_HOST_NAME: &str = "dev.ophir.dezoomify.native_host";
 /// Deep-link protocol scheme.
 pub const PROTOCOL_SCHEME: &str = "dezoomify";

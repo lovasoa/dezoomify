@@ -25,9 +25,6 @@
     "dezoomify://job-snapshot",
     "dezoomify://deep-link-pending"
   ],
-  "nativeHost": {
-    "name": "dev.ophir.dezoomify.native_host"
-  },
   "protocol": {
     "max": "2.0",
     "min": "2.0",

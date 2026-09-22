@@ -10,9 +10,7 @@ repository = "https://github.com/lovasoa/dezoomify"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-dezoomify-core = { path = "../dezoomify-core" }
-dezoomify-protocol = { path = "../dezoomify-protocol", features = ["typescript"] }
-dezoomify-engine = { path = "../dezoomify-engine" }
+dezoomify = { path = "../dezoomify", features = ["typescript"] }
 serde.workspace = true
 wasm-bindgen.workspace = true
 serde-wasm-bindgen.workspace = true

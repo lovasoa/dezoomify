@@ -12,6 +12,27 @@ pub fn run(args: &[String]) -> Result<(), String> {
         "--",
         "-D",
         "warnings",
+        "-A",
+        "clippy::disallowed-methods",
+        "-A",
+        "clippy::disallowed-types",
+    ])?;
+    // The disallowed API catalog lives in the workspace-level Clippy config,
+    // but only the pure domain crate is subject to it. Run its production
+    // library separately so semantic resolution catches aliases and re-exports
+    // without forbidding host capabilities in the effect-owning crates.
+    super::command::cargo(&[
+        "clippy",
+        "-p",
+        "dezoomify",
+        "--lib",
+        "--",
+        "-D",
+        "warnings",
+        "-D",
+        "clippy::disallowed-methods",
+        "-D",
+        "clippy::disallowed-types",
     ])?;
     run_biome()?;
     run_typecheck()?;

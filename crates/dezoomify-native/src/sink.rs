@@ -36,15 +36,23 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use dezoomify_core::Vec2d;
+use dezoomify::Vec2d;
 use image::RgbaImage;
 
 use crate::error::NativeError;
 use crate::output::{partial_path_for, validate_destination, write_iiif_dir, OutputFormat};
 use crate::pipeline::{
     blit_onto, encode_jpeg, encode_png, encode_tiff, encode_webp, encode_zif_pyramid,
-    render_iiif_dir, DecodedTile, PipelineConfig,
+    render_iiif_dir, DecodedTile,
 };
+
+/// Encoder and buffering settings owned by the output sink.
+#[derive(Clone, Debug)]
+pub(crate) struct SinkOptions {
+    pub compression: u8,
+    pub retain_cap_bytes: u64,
+    pub spool_cap_bytes: u64,
+}
 
 /// First-seen ICC profile plus EXIF metadata bytes per tile ordinal.
 type TileMetadata = (Option<Vec<u8>>, Option<Vec<u8>>);
@@ -148,12 +156,12 @@ pub struct Sink {
 impl Sink {
     /// Create an empty sink. No allocation happens here; the canvas
     /// allocates on [`Sink::ensure_canvas`] after the memory pre-check.
-    pub fn new(config: &PipelineConfig, _format: OutputFormat) -> Self {
+    pub(crate) fn new(options: &SinkOptions, _format: OutputFormat) -> Self {
         Self {
-            compression: config.compression,
-            jpeg_quality: config.jpeg_quality(),
-            retain_cap_bytes: config.output_retain_cap,
-            spool_cap_bytes: config.output_spool_cap,
+            compression: options.compression,
+            jpeg_quality: 100u8.saturating_sub(options.compression),
+            retain_cap_bytes: options.retain_cap_bytes,
+            spool_cap_bytes: options.spool_cap_bytes,
             canvas: None,
             width: 0,
             height: 0,

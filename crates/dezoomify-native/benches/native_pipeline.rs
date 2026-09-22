@@ -1,7 +1,7 @@
 //! Native pipeline benchmarks: end-to-end tile throughput on the shipped
 //! exec path and encode time per format.
 //!
-//! The throughput bench runs the real `NativeRunner` over four generated
+//! The throughput bench runs the real `start_job` over four generated
 //! local tiles (no network, no separate pool): it tracks the shipped
 //! fetch/decode/assemble/encode path the driver uses, including the engine
 //! concurrency budget.
@@ -45,7 +45,7 @@ fn solid_tile_png() -> Vec<u8> {
     bytes
 }
 
-/// Tile throughput: run the real `NativeRunner` over four generated local
+/// Tile throughput: run the real `start_job` over four generated local
 /// tiles per iteration (fetch is the local fast path; decode, assemble,
 /// and encode are the shipped code). The output reuses one path with
 /// overwrite so every iteration measures the full publish.
@@ -83,8 +83,8 @@ fn bench_tile_throughput(criterion: &mut Criterion) {
                 overwrite: true,
                 ..JobOptions::default()
             };
-            let outcome =
-                support::run_options_observed(options, |_, _| {}).expect("native runner succeeds");
+            let outcome = support::run_options_observed(options, |_, _| {})
+                .expect("native job service succeeds");
             black_box(outcome.tile_count)
         });
     });

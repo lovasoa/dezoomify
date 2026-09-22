@@ -2,25 +2,25 @@
 
 Host-neutral application model for Dezoomify jobs. React-free and
 host-global-free: no `window`, `document`, `fetch`, `chrome`, `tauri`,
-`localStorage`, or canvas access. Hosts inject effects (a `HostRunner`),
-storage (a `HistoryStore`), and clocks; the shared UI renders authoritative
+`localStorage`, or canvas access. Products implement `JobService` and inject
+storage (a `HistoryStore`) and clocks; the shared UI renders authoritative
 snapshots.
 
 ## Contents
 
 - `types.ts`: the frozen service contract: `JobService`, `JobHandle`,
   `JobObserver`, `JobStartRequest` (engine options plus the discriminated
-  product-local `ExecSpec`), `JobSnapshot`, `HostStatus`, and `HostRunner`.
+  product-local `HostSpec`), `JobSnapshot`, and `HostStatus`.
   Cross-language types come from `@dezoomify/wasm-bindings` and are never
   redeclared here.
-- `snapshot.ts`: pure predicates over the authoritative `EngineSnapshotDto`
+- `snapshot.ts`: pure predicates over the authoritative `Snapshot`
   (`isTerminalSnapshot`/`isActiveSnapshot`). The engine owns all job state;
   nothing here folds events or assigns revisions.
 - `history.ts`: shared last-20 job history ledger over an injected store.
 - `labels.ts`: canonical transport labels and save-name helpers (lowest
   layer; every product renders through these, never a local duplicate).
-- `service.ts`: `createJobService(runner)`: the `JobService` with identity
-  and revision guards at the async subscription boundary.
+- `service.ts`: shared request validation for concrete `JobService`
+  implementations. Transport-edge services own identity and revision guards.
 
 ## Rules
 

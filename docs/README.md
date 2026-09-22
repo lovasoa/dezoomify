@@ -27,7 +27,7 @@ dezoomify discovers zoomable images, lets a user choose an image and level, down
 - **host**: whatever runs a job's side effects (browser tab, desktop shell, CLI process).
 - **runtime**: the effect layer inside an app (browser or native code doing fetch, decode, save).
 - **transport**: how bytes reach the app (direct fetch, proxy, browser session).
-- **handoff**: moving a job to another app through a `dezoomify://` link or Native Messaging.
+- **handoff**: moving a job to the desktop app through a `dezoomify://` link.
 - **scenario**: a deterministic test unit under `testdata/scenarios`.
 
 The full vocabulary rules live in the root `AGENTS.md`.
@@ -39,9 +39,9 @@ Each fact lives once; every other page links to it:
 | Fact | Canonical home |
 |---|---|
 | Transport policy (direct browser fetch first, automatic metadata proxy fallback) | [Browser runtime](browser-runtime.md#request-order) |
-| Metadata window constant (`METADATA_WINDOW_MS`) | `crates/dezoomify-protocol/src/dto.rs` and its generated TypeScript projection |
+| Metadata window constant (`METADATA_WINDOW_MS`) | `crates/dezoomify/src/model.rs` and its generated TypeScript projection |
 | Native output formats and encoder behavior | [Native apps](native-apps.md#native-runtime) |
-| Capability baselines | `crates/dezoomify-protocol/src/dto.rs` and manifests under `generated/` |
+| Capability baselines | `crates/dezoomify/src/model.rs` and manifests under `generated/` |
 | Canvas and save limits | [Compatibility](compatibility.md#canvas-and-save-limits) |
 | User-facing copy | [User documentation](user/README.md) |
 | Task grammar (`xtask`) | [`crates/xtask/README.md`](../crates/xtask/README.md) |
@@ -49,8 +49,8 @@ Each fact lives once; every other page links to it:
 
 ## System invariants
 
-- [`crates/dezoomify-core`](architecture.md#cratesdezoomify-core) and [`crates/dezoomify-engine`](job-engine.md) are pure Rust libraries with no network, filesystem, clock, UI, or image-codec access.
-- [`crates/dezoomify-protocol`](protocol.md) is the Rust source for the generated TypeScript bindings used across the WASM boundary.
+- [`crates/dezoomify`](architecture.md#cratesdezoomify) is the pure Rust domain library with no network, filesystem, clock, UI, or image-codec access.
+- [`dezoomify::model`](protocol.md) is the Rust source for the generated TypeScript bindings used across the WASM boundary.
 - One shared [UI](architecture.md#packagesshared-ui) (React TSX) serves the website, desktop app, and extension.
 - Browser and native runtimes implement the same capabilities honestly; unsupported operations are reported before a job starts.
 - The extension never transfers browser cookies to another app. Desktop deep links are revalidated and confirmed before they start work.

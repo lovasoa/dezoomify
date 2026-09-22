@@ -103,7 +103,7 @@ fn compare(generated: &Path, tracked: &Path) -> Result<(), String> {
 fn check(args: &[String]) -> Result<(), String> {
     super::reject_unknown_args("protocol check", args)?;
     generate(&["--check".to_string()])?;
-    super::command::cargo_test(&["-p", "dezoomify-protocol"])?;
+    super::command::cargo_test(&["-p", "dezoomify"])?;
     typecheck_binding()?;
     wasm_portability_check()?;
     println!("protocol check: ok");
@@ -112,7 +112,7 @@ fn check(args: &[String]) -> Result<(), String> {
 
 pub fn test_protocol() -> Result<(), String> {
     generate(&["--check".to_string()])?;
-    super::command::cargo_test(&["-p", "dezoomify-protocol"])?;
+    super::command::cargo_test(&["-p", "dezoomify"])?;
     typecheck_binding()?;
     wasm_portability_check()
 }
@@ -122,7 +122,7 @@ pub(crate) fn wasm_portability_check() -> Result<(), String> {
         "check",
         "--quiet",
         "-p",
-        "dezoomify-protocol",
+        "dezoomify",
         "--target",
         "wasm32-unknown-unknown",
         "--no-default-features",

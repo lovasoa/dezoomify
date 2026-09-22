@@ -48,7 +48,6 @@ Focused aliases remain available for iteration:
 | `native` | native runtime and CLI Rust suites |
 | `desktop [--e2e-window]` | desktop Rust and Node suites; the option runs the explicit real-window gate instead |
 | `extension` | generated WASM/WXT, all extension units, and Chromium plus Firefox headless E2E |
-| `native-messaging` | framing, scope, registration, and cleanup contracts for the standalone host |
 | `scenario` | CLI snapshots and native scenario/loopback integration tests |
 | `perf [--smoke]` | native pipeline performance smoke and tracked benches |
 | `live` | explicit, advisory public compatibility checks |

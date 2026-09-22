@@ -6,3 +6,71 @@
 #   must map failures to typed errors (`JobError`, `NativeError`,
 #   `AdapterError`, `handoff.rejected` / `protocol.*`) instead of panicking.
 allow-unwrap-in-tests = true
+
+# The pure domain crate denies these semantic Clippy lints in non-test builds.
+# Clippy resolves aliases and re-exports before comparing paths, unlike the
+# retired source-text purity scanners. `cargo xtask check` allows these two
+# lints during its general workspace pass, then runs a dedicated strict Clippy
+# pass over the `dezoomify` production library. Effect-owning host crates may
+# therefore use these capabilities while the domain boundary stays enforced.
+disallowed-methods = [
+  { path = "std::env::args", reason = "hosts supply all input explicitly" },
+  { path = "std::env::args_os", reason = "hosts supply all input explicitly" },
+  { path = "std::env::current_dir", reason = "the domain crate has no process environment" },
+  { path = "std::env::current_exe", reason = "the domain crate has no process environment" },
+  { path = "std::env::remove_var", reason = "the domain crate has no process environment" },
+  { path = "std::env::set_current_dir", reason = "the domain crate has no process environment" },
+  { path = "std::env::set_var", reason = "the domain crate has no process environment" },
+  { path = "std::env::temp_dir", reason = "hosts own temporary storage" },
+  { path = "std::env::var", reason = "hosts supply all input explicitly" },
+  { path = "std::env::var_os", reason = "hosts supply all input explicitly" },
+  { path = "std::fs::canonicalize", reason = "hosts own filesystem access" },
+  { path = "std::fs::copy", reason = "hosts own filesystem access" },
+  { path = "std::fs::create_dir", reason = "hosts own filesystem access" },
+  { path = "std::fs::create_dir_all", reason = "hosts own filesystem access" },
+  { path = "std::fs::hard_link", reason = "hosts own filesystem access" },
+  { path = "std::fs::metadata", reason = "hosts own filesystem access" },
+  { path = "std::fs::read", reason = "hosts provide resource bytes" },
+  { path = "std::fs::read_dir", reason = "hosts own filesystem access" },
+  { path = "std::fs::read_to_string", reason = "hosts provide resource bytes" },
+  { path = "std::fs::remove_dir", reason = "hosts own filesystem access" },
+  { path = "std::fs::remove_dir_all", reason = "hosts own filesystem access" },
+  { path = "std::fs::remove_file", reason = "hosts own filesystem access" },
+  { path = "std::fs::rename", reason = "hosts own filesystem access" },
+  { path = "std::fs::set_permissions", reason = "hosts own filesystem access" },
+  { path = "std::fs::symlink_metadata", reason = "hosts own filesystem access" },
+  { path = "std::fs::write", reason = "hosts own filesystem access" },
+  { path = "std::io::stderr", reason = "hosts own diagnostics" },
+  { path = "std::io::stdin", reason = "hosts supply all input explicitly" },
+  { path = "std::io::stdout", reason = "hosts own diagnostics" },
+  { path = "std::net::TcpListener::bind", reason = "hosts own networking" },
+  { path = "std::net::TcpStream::connect", reason = "hosts own networking" },
+  { path = "std::net::UdpSocket::bind", reason = "hosts own networking" },
+  { path = "std::process::Command::new", reason = "hosts own subprocesses" },
+  { path = "std::process::exit", reason = "the domain crate returns typed errors" },
+  { path = "std::thread::park", reason = "hosts own scheduling" },
+  { path = "std::thread::sleep", reason = "hosts own clocks and scheduling" },
+  { path = "std::thread::spawn", reason = "hosts own scheduling" },
+  { path = "std::thread::yield_now", reason = "hosts own scheduling" },
+  { path = "std::time::Instant::now", reason = "hosts own clocks" },
+  { path = "std::time::SystemTime::now", reason = "hosts own clocks" },
+]
+
+disallowed-types = [
+  { path = "std::fs::DirEntry", reason = "hosts own filesystem access" },
+  { path = "std::fs::File", reason = "hosts own filesystem access" },
+  { path = "std::fs::OpenOptions", reason = "hosts own filesystem access" },
+  { path = "std::fs::ReadDir", reason = "hosts own filesystem access" },
+  { path = "std::net::TcpListener", reason = "hosts own networking" },
+  { path = "std::net::TcpStream", reason = "hosts own networking" },
+  { path = "std::net::UdpSocket", reason = "hosts own networking" },
+  { path = "std::process::Child", reason = "hosts own subprocesses" },
+  { path = "std::process::Command", reason = "hosts own subprocesses" },
+  { path = "std::process::Stdio", reason = "hosts own subprocesses" },
+  { path = "std::sync::Mutex", reason = "the deterministic engine has no locks" },
+  { path = "std::sync::RwLock", reason = "the deterministic engine has no locks" },
+  { path = "std::thread::Builder", reason = "hosts own scheduling" },
+  { path = "std::thread::JoinHandle", reason = "hosts own scheduling" },
+  { path = "std::time::Instant", reason = "hosts own clocks" },
+  { path = "std::time::SystemTime", reason = "hosts own clocks" },
+]

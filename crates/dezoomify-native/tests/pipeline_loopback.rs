@@ -1,4 +1,4 @@
-//! C2 acceptance: the native runner downloads, decodes, assembles, encodes,
+//! C2 acceptance: the native job service downloads, decodes, assembles, encodes,
 //! and writes real output over loopback sockets against `dezoomify-fixture-server`
 //! scenarios. Expected results (including the real output digest) are pinned
 //! in `testdata/scenarios/native/*/expected/result.json`.
@@ -14,7 +14,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use dezoomify_fixture_server::{router, AppState, RouteTable};
-use dezoomify_native::pipeline::{self, PartialPolicy, PipelineConfig};
+use dezoomify_native::pipeline;
+use dezoomify_native::JobOptions;
 mod support;
 
 fn start_fixture_server() -> String {
@@ -64,11 +65,11 @@ fn assembles_dzi_pyramid_from_fixture_scenario() {
     let out_dir = temp_dir("dzi");
     let output = out_dir.join("pyramid.png");
     let mut events = 0usize;
-    let outcome = support::run_with_config(
+    let outcome = support::run_with_options(
         &input,
         output.to_str().expect("utf8 output"),
         false,
-        &PipelineConfig::default(),
+        &JobOptions::default(),
         &mut |_| events += 1,
     )
     .expect("pipeline succeeds");
@@ -115,11 +116,11 @@ fn tile_failure_fails_honestly_without_output() {
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/broken.dzi");
     let out_dir = temp_dir("failure");
     let output = out_dir.join("broken.png");
-    let config = PipelineConfig {
-        partial_policy: PartialPolicy::Fail,
+    let config = JobOptions {
+        keep_partial: false,
         ..Default::default()
     };
-    let error = support::run_with_config(
+    let error = support::run_with_options(
         &input,
         output.to_str().expect("utf8 output"),
         false,
@@ -153,12 +154,12 @@ fn retries_zero_fails_without_a_second_attempt() {
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/broken.dzi");
     let out_dir = temp_dir("retries-zero");
     let output = out_dir.join("broken.png");
-    let config = PipelineConfig {
+    let config = JobOptions {
         max_retries: 0,
-        partial_policy: PartialPolicy::Fail,
+        keep_partial: false,
         ..Default::default()
     };
-    let error = support::run_with_config(
+    let error = support::run_with_options(
         &input,
         output.to_str().expect("utf8 output"),
         false,
@@ -204,11 +205,11 @@ fn file_uri_tiles_assemble_from_a_remote_manifest() {
         http_response("200 OK", "text/yaml", yaml.as_bytes()),
     );
     let output = work.join("local.png");
-    let outcome = support::run_with_config(
+    let outcome = support::run_with_options(
         &format!("{base}/local-tiles.yaml"),
         output.to_str().expect("utf8 output"),
         false,
-        &PipelineConfig::default(),
+        &JobOptions::default(),
         &mut |_| {},
     )
     .unwrap_or_else(|e| panic!("file-uri tiles succeed: {} ({})", e.message, e.code));
@@ -240,11 +241,11 @@ fn corrupt_tile_fails_like_a_missing_tile() {
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/corrupt.dzi");
     let out_dir = temp_dir("corrupt");
     let output = out_dir.join("corrupt.png");
-    let config = PipelineConfig {
-        partial_policy: PartialPolicy::Fail,
+    let config = JobOptions {
+        keep_partial: false,
         ..Default::default()
     };
-    let error = support::run_with_config(
+    let error = support::run_with_options(
         &input,
         output.to_str().expect("utf8 output"),
         false,
@@ -265,16 +266,13 @@ fn corrupt_tile_fails_like_a_missing_tile() {
 fn partial_keep_policy_encodes_acquired_tiles() {
     // The default policy keeps partial output (reference `PartialDownload`
     // file behavior): missing regions stay blank, `partial` is true.
-    assert_eq!(
-        PipelineConfig::default().partial_policy,
-        PartialPolicy::Keep
-    );
+    assert!(JobOptions::default().keep_partial);
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/corrupt.dzi");
     let out_dir = temp_dir("partial");
     let output = out_dir.join("partial.png");
-    let config = PipelineConfig::default();
-    let outcome = support::run_with_config(
+    let config = JobOptions::default();
+    let outcome = support::run_with_options(
         &input,
         output.to_str().expect("utf8 output"),
         false,
@@ -319,11 +317,11 @@ fn max_width_selects_the_largest_fitting_level() {
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("max-width");
     let output = out_dir.join("narrow.png");
-    let config = PipelineConfig {
+    let config = JobOptions {
         max_width: Some(300),
         ..Default::default()
     };
-    let outcome = support::run_with_config(
+    let outcome = support::run_with_options(
         &input,
         output.to_str().expect("utf8 output"),
         false,
@@ -346,11 +344,11 @@ fn probe_planned_grid_matches_the_fixed_grid_output() {
     let input = format!("{origin}/fetch?url=https://fixtures.test/probe/{{{{X}}}}/{{{{Y}}}}.png");
     let out_dir = temp_dir("probe");
     let output = out_dir.join("probe.png");
-    let outcome = support::run_with_config(
+    let outcome = support::run_with_options(
         &input,
         output.to_str().expect("utf8 output"),
         false,
-        &PipelineConfig::default(),
+        &JobOptions::default(),
         &mut |_| {},
     )
     .expect("probe-driven pipeline succeeds");
@@ -368,11 +366,11 @@ fn existing_output_without_overwrite_is_refused() {
     let output = out_dir.join("exists.png");
     std::fs::write(&output, b"previous bytes").expect("pre-existing output");
     let mut events = 0usize;
-    let error = support::run_with_config(
+    let error = support::run_with_options(
         &input,
         output.to_str().expect("utf8 output"),
         false,
-        &PipelineConfig::default(),
+        &JobOptions::default(),
         &mut |_| events += 1,
     )
     .expect_err("overwrite refusal fails");
@@ -393,11 +391,11 @@ fn jpg_output_decodes_at_full_size() {
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("jpg");
     let output = out_dir.join("pyramid.jpg");
-    let outcome = support::run_with_config(
+    let outcome = support::run_with_options(
         &input,
         output.to_str().expect("utf8 output"),
         false,
-        &PipelineConfig::default(),
+        &JobOptions::default(),
         &mut |_| {},
     )
     .expect("jpeg pipeline succeeds");
@@ -421,11 +419,11 @@ fn tiff_output_decodes_losslessly() {
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("tiff");
     let output = out_dir.join("pyramid.tif");
-    let outcome = support::run_with_config(
+    let outcome = support::run_with_options(
         &input,
         output.to_str().expect("utf8 output"),
         false,
-        &PipelineConfig::default(),
+        &JobOptions::default(),
         &mut |_| {},
     )
     .expect("tiff pipeline succeeds");
@@ -457,11 +455,11 @@ fn zif_output_writes_tiff_pyramid() {
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("zif");
     let output = out_dir.join("pyramid.zif");
-    let outcome = support::run_with_config(
+    let outcome = support::run_with_options(
         &input,
         output.to_str().expect("utf8 output"),
         false,
-        &PipelineConfig::default(),
+        &JobOptions::default(),
         &mut |_| {},
     )
     .expect("zif pipeline succeeds");
@@ -496,11 +494,11 @@ fn webp_output_decodes_losslessly() {
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("webp");
     let output = out_dir.join("pyramid.webp");
-    let outcome = support::run_with_config(
+    let outcome = support::run_with_options(
         &input,
         output.to_str().expect("utf8 output"),
         false,
-        &PipelineConfig::default(),
+        &JobOptions::default(),
         &mut |_| {},
     )
     .expect("webp pipeline succeeds");
@@ -527,11 +525,11 @@ fn iiif_extension_writes_a_directory_at_that_path() {
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("iiif-ext");
     let output = out_dir.join("pyramid.iiif");
-    let outcome = support::run_with_config(
+    let outcome = support::run_with_options(
         &input,
         output.to_str().expect("utf8 output"),
         false,
-        &PipelineConfig::default(),
+        &JobOptions::default(),
         &mut |_| {},
     )
     .expect("iiif pipeline succeeds");
@@ -551,11 +549,11 @@ fn iiif_dir_writes_manifest_and_addressable_tiles() {
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("iiif-dir");
     let output = out_dir.join("pyramid");
-    let outcome = support::run_with_config(
+    let outcome = support::run_with_options(
         &input,
         output.to_str().expect("utf8 output"),
         false,
-        &PipelineConfig::default(),
+        &JobOptions::default(),
         &mut |_| {},
     )
     .expect("iiif-dir pipeline succeeds");
@@ -611,12 +609,12 @@ fn tile_cache_reuses_tiles_after_the_server_loses_them() {
     let input = format!("{base}/pyr.dzi");
     let out_dir = temp_dir("tile-cache");
     let cache_dir = out_dir.join("cache");
-    let config = PipelineConfig {
+    let config = JobOptions {
         cache_dir: Some(cache_dir.clone()),
         ..Default::default()
     };
     let first = out_dir.join("first.png");
-    let _outcome = support::run_with_config(
+    let _outcome = support::run_with_options(
         &input,
         first.to_str().expect("utf8 output"),
         false,
@@ -637,7 +635,7 @@ fn tile_cache_reuses_tiles_after_the_server_loses_them() {
         }
     }
     let second = out_dir.join("second.png");
-    let resumed = support::run_with_config(
+    let resumed = support::run_with_options(
         &input,
         second.to_str().expect("utf8 output"),
         false,
@@ -656,19 +654,25 @@ fn resume_cache_is_on_by_default() {
     // on-disk cache, so interrupted CLI/desktop jobs resume without
     // re-fetching completed tiles.
     let default_dir = pipeline::default_tile_cache_dir();
-    let config = PipelineConfig::default();
-    assert_eq!(config.cache_dir, Some(default_dir.clone()));
-    let explicit_none = PipelineConfig {
+    let config = JobOptions::default();
+    assert_eq!(config.cache_dir, None);
+    let explicit_none = JobOptions {
         cache_dir: None,
         ..Default::default()
     };
     assert_eq!(
-        pipeline::effective_cache_dir(&explicit_none),
+        explicit_none
+            .cache_dir
+            .clone()
+            .unwrap_or_else(pipeline::default_tile_cache_dir),
         default_dir,
         "explicit None still resolves to the default on-disk cache"
     );
     assert_eq!(
-        pipeline::effective_cache_dir(&config),
+        config
+            .cache_dir
+            .clone()
+            .unwrap_or_else(pipeline::default_tile_cache_dir),
         default_dir,
         "default config resolves to the default on-disk cache"
     );
@@ -705,13 +709,13 @@ fn interrupted_job_resumes_without_refetching_completed_tiles() {
     let input = format!("{base}/resume.dzi");
     let out_dir = temp_dir("resume-interrupted");
     let cache_dir = out_dir.join("cache");
-    let failing = PipelineConfig {
+    let failing = JobOptions {
         cache_dir: Some(cache_dir.clone()),
-        partial_policy: PartialPolicy::Fail,
+        keep_partial: false,
         ..Default::default()
     };
     let first_output = out_dir.join("first.png");
-    let error = support::run_with_config(
+    let error = support::run_with_options(
         &input,
         first_output.to_str().expect("utf8 output"),
         false,
@@ -750,11 +754,11 @@ fn interrupted_job_resumes_without_refetching_completed_tiles() {
         );
     }
     let second_output = out_dir.join("second.png");
-    let resumed = support::run_with_config(
+    let resumed = support::run_with_options(
         &input,
         second_output.to_str().expect("utf8 output"),
         false,
-        &PipelineConfig {
+        &JobOptions {
             cache_dir: Some(cache_dir.clone()),
             ..Default::default()
         },
@@ -774,11 +778,11 @@ fn resume_scenario_matches_the_pinned_golden() {
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/resume/pyramid.dzi");
     let out_dir = temp_dir("resume-scenario");
     let output = out_dir.join("resume.png");
-    let outcome = support::run_with_config(
+    let outcome = support::run_with_options(
         &input,
         output.to_str().expect("utf8 output"),
         false,
-        &PipelineConfig::default(),
+        &JobOptions::default(),
         &mut |_| {},
     )
     .expect("resume scenario succeeds");
@@ -796,14 +800,14 @@ fn cancellation_before_publish_writes_nothing() {
     let out_dir = temp_dir("cancel");
     let output = out_dir.join("cancelled.png");
     let mut cancelled = false;
-    let error = support::run_with_config_observed(
+    let error = support::run_with_options_observed(
         &input,
         output.to_str().expect("utf8 output"),
         false,
-        &PipelineConfig::default(),
+        &JobOptions::default(),
         |job, snapshot| {
             if !cancelled
-                && snapshot.snapshot.lifecycle == dezoomify_protocol::dto::JobState::AcquiringTiles
+                && snapshot.snapshot.lifecycle == dezoomify::model::JobState::AcquiringTiles
             {
                 cancelled = true;
                 assert_eq!(
@@ -964,11 +968,11 @@ fn iiif_size_rounding_bug_falls_back_to_caret_width_without_refetching() {
 
     let out_dir = temp_dir("iiif-size-rounding");
     let output = out_dir.join("result.png");
-    let outcome = support::run_with_config(
+    let outcome = support::run_with_options(
         &format!("{base}/iiif/info.json"),
         output.to_str().expect("utf8 output"),
         false,
-        &PipelineConfig::default(),
+        &JobOptions::default(),
         &mut |_| {},
     )
     .expect("caret-width fallback succeeds");
@@ -1009,11 +1013,11 @@ fn deferred_bulk_entry_resolves_to_identical_output() {
 
     let out_dir = temp_dir("deferred");
     let output = out_dir.join("deferred.png");
-    let outcome = support::run_with_config(
+    let outcome = support::run_with_options(
         &format!("{base}/list.txt"),
         output.to_str().expect("utf8 output"),
         false,
-        &PipelineConfig::default(),
+        &JobOptions::default(),
         &mut |_| {},
     )
     .expect("deferred follow succeeds");
@@ -1037,11 +1041,11 @@ fn self_referential_deferred_list_hits_the_resolution_limit() {
 
     let out_dir = temp_dir("deferred-limit");
     let output = out_dir.join("loop.png");
-    let error = support::run_with_config(
+    let error = support::run_with_options(
         &format!("{base}/self.txt"),
         output.to_str().expect("utf8 output"),
         false,
-        &PipelineConfig::default(),
+        &JobOptions::default(),
         &mut |_| {},
     )
     .expect_err("self-deferral exhausts the bound");
@@ -1089,11 +1093,11 @@ fn first_catalog_entry_wins_with_two_deferred_images() {
 
     let out_dir = temp_dir("multi-image");
     let output = out_dir.join("first.png");
-    let outcome = support::run_with_config(
+    let outcome = support::run_with_options(
         &format!("{base}/two.txt"),
         output.to_str().expect("utf8 output"),
         false,
-        &PipelineConfig::default(),
+        &JobOptions::default(),
         &mut |_| {},
     )
     .expect("first entry resolves");

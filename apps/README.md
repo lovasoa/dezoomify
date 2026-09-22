@@ -8,8 +8,7 @@ no app imports another app, and reusable logic lives below, not in apps.
   the image (the web app lives at the root, not in this directory).
 - [`extension/`](extension/): browser extension, a one-shot active-tab scan
   using your browser session.
-- [`desktop/`](desktop/): Tauri desktop app for local files, deep links, and
-  the native messaging host.
+- [`desktop/`](desktop/): Tauri desktop app for local files and deep links.
 - [`cli/`](cli/): the `dezoomify` command for scripting, six output formats
   (PNG, JPEG, TIFF, ZIF, WebP, IIIF tile trees), and exit codes.
 

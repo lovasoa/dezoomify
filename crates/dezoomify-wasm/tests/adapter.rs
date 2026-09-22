@@ -1,9 +1,9 @@
 //! Typed session boundary tests: start, validation, completion, and one
 //! retry round-trip. Exact timer vectors live in E2E, not here.
 
-use dezoomify_protocol::dto::{
-    BlockedReason, BrowserSelectionLimitsDto, ErrorPhase, ErrorTransport, FetchFailureDto,
-    HostCompletion, HostEffect, JobCommand, JobInputDto, JobState, SessionConfig,
+use dezoomify::model::{
+    BlockedReason, BrowserSelectionLimits, ErrorPhase, ErrorTransport, FetchFailure,
+    HostCompletion, HostEffect, JobCommand, JobInput, JobState, SessionConfig,
 };
 use dezoomify_wasm::Session;
 use std::num::{NonZeroU32, NonZeroU64};
@@ -12,10 +12,10 @@ fn session() -> Session {
     Session::new(SessionConfig::default()).expect("typed session")
 }
 
-fn start(session: &mut Session) -> (Vec<HostEffect>, dezoomify_protocol::dto::EngineSnapshotDto) {
+fn start(session: &mut Session) -> (Vec<HostEffect>, dezoomify::model::Snapshot) {
     session
         .command(JobCommand::Start {
-            inputs: vec![JobInputDto::new("https://example.com/image.dzi")],
+            inputs: vec![JobInput::new("https://example.com/image.dzi")],
         })
         .expect("typed start")
 }
@@ -28,10 +28,7 @@ fn start_messages(session: &mut Session) -> Vec<HostEffect> {
 #[test]
 fn start_returns_effects_with_a_discovering_snapshot() {
     let (messages, snapshot) = start(&mut session());
-    assert_eq!(
-        snapshot.lifecycle,
-        dezoomify_protocol::dto::JobState::Discovering
-    );
+    assert_eq!(snapshot.lifecycle, dezoomify::model::JobState::Discovering);
     assert!(snapshot.terminal.is_none());
     assert!(!messages.is_empty());
     assert!(messages.iter().all(|message| matches!(
@@ -56,8 +53,8 @@ fn typed_fetch_error_requires_and_preserves_context() {
             _ => None,
         })
         .expect("discovery request");
-    let error = FetchFailureDto {
-        code: dezoomify_protocol::dto::FetchFailureCode::PROXY_ERROR,
+    let error = FetchFailure {
+        code: dezoomify::model::FetchFailureCode::PROXY_ERROR,
         retryable: true,
         message: "The metadata proxy failed.".into(),
         recovery: Vec::new(),
@@ -77,7 +74,7 @@ fn typed_fetch_error_requires_and_preserves_context() {
         .iter()
         .all(|message| matches!(message, HostEffect::CancelWork)));
     let failed = match snapshot.terminal {
-        Some(dezoomify_protocol::dto::SnapshotTerminalDto::Failed { error }) => error,
+        Some(dezoomify::model::Terminal::Failed { error }) => error,
         ref terminal => panic!("expected failed terminal, got {terminal:?}"),
     };
     assert_eq!(failed.code, "PROXY_ERROR");
@@ -128,7 +125,7 @@ fn typed_config_budgets_are_validated_by_the_engine() {
     .expect("construction defers budget validation to the engine");
     let error = session
         .command(JobCommand::Start {
-            inputs: vec![JobInputDto::new("https://example.com/image.dzi")],
+            inputs: vec![JobInput::new("https://example.com/image.dzi")],
         })
         .unwrap_err();
     assert_eq!(
@@ -153,7 +150,7 @@ fn dispose_returns_typed_cancellation_once() {
     )));
     assert_eq!(
         snapshot.terminal,
-        Some(dezoomify_protocol::dto::SnapshotTerminalDto::Cancelled)
+        Some(dezoomify::model::Terminal::Cancelled)
     );
     let (repeat_messages, _repeat_snapshot) = session.dispose().expect("repeat dispose");
     assert!(repeat_messages.is_empty());
@@ -173,7 +170,7 @@ fn session_acquiring_tiles() -> (Session, Vec<(u32, u32)>) {
     let mut session = session();
     let (messages, _snapshot) = session
         .command(JobCommand::Start {
-            inputs: vec![JobInputDto::new("https://example.com/image.dzi")],
+            inputs: vec![JobInput::new("https://example.com/image.dzi")],
         })
         .expect("typed start");
     let request = messages
@@ -216,7 +213,7 @@ fn session_acquiring_tiles() -> (Session, Vec<(u32, u32)>) {
 #[test]
 fn browser_selection_is_explicit_and_manual_is_still_the_default() {
     let mut automatic = Session::new(SessionConfig {
-        browser_selection: Some(BrowserSelectionLimitsDto {
+        browser_selection: Some(BrowserSelectionLimits {
             max_width: NonZeroU32::new(128).unwrap(),
             max_height: NonZeroU32::new(128).unwrap(),
             max_area: NonZeroU64::new(128 * 128).unwrap(),
@@ -226,7 +223,7 @@ fn browser_selection_is_explicit_and_manual_is_still_the_default() {
     .expect("valid browser policy");
     let (messages, _) = automatic
         .command(JobCommand::Start {
-            inputs: vec![JobInputDto::new("https://example.com/image.dzi")],
+            inputs: vec![JobInput::new("https://example.com/image.dzi")],
         })
         .expect("automatic start");
     let request = messages
@@ -251,9 +248,9 @@ fn browser_selection_is_explicit_and_manual_is_still_the_default() {
         .any(|message| matches!(message, HostEffect::AcquireTile { .. })));
 }
 
-fn transient_timeout() -> FetchFailureDto {
-    FetchFailureDto {
-        code: dezoomify_protocol::dto::FetchFailureCode::TRANSPORT_TIMEOUT,
+fn transient_timeout() -> FetchFailure {
+    FetchFailure {
+        code: dezoomify::model::FetchFailureCode::TRANSPORT_TIMEOUT,
         retryable: true,
         message: "tile fetch timed out".into(),
         recovery: Vec::new(),
@@ -296,7 +293,7 @@ fn follow_deferred_continues_same_job_with_replaced_catalog() {
     let mut session = session();
     let (messages, _snapshot) = session
         .command(JobCommand::Start {
-            inputs: vec![JobInputDto::new("https://example.test/list.txt")],
+            inputs: vec![JobInput::new("https://example.test/list.txt")],
         })
         .expect("typed start");
     let request = messages
@@ -325,7 +322,7 @@ fn follow_deferred_continues_same_job_with_replaced_catalog() {
     assert_eq!(catalog.entries.len(), 2);
     assert!(matches!(
         catalog.entries[0],
-        dezoomify_protocol::dto::CatalogEntryDto::ImageRequest(_)
+        dezoomify::model::CatalogEntry::ImageRequest(_)
     ));
 
     // Ready images cannot be selected while entries stay deferred.
@@ -451,7 +448,7 @@ fn provide_resource_for_tile_request_is_rejected() {
 
 #[test]
 fn display_only_finalize_reports_display_only_disposition() {
-    use dezoomify_protocol::dto::OutputDispositionDto;
+    use dezoomify::model::OutputDisposition;
     let (mut session, tiles) = session_acquiring_tiles();
     // Ordinary image display: every tile completes body-free, then the host
     // finalizes with the honest display-only disposition it observed.
@@ -469,13 +466,13 @@ fn display_only_finalize_reports_display_only_disposition() {
     let (_messages, snapshot) = session
         .complete(HostCompletion::FinalizationSucceeded {
             effect: finalize_effect,
-            disposition: OutputDispositionDto::DisplayOnly,
+            disposition: OutputDisposition::DisplayOnly,
         })
         .expect("display-only finalize accepted");
     assert_eq!(
         snapshot.terminal,
-        Some(dezoomify_protocol::dto::SnapshotTerminalDto::Completed)
+        Some(dezoomify::model::Terminal::Completed)
     );
     let output = snapshot.output.expect("completed job reports output");
-    assert_eq!(output.disposition, Some(OutputDispositionDto::DisplayOnly));
+    assert_eq!(output.disposition, Some(OutputDisposition::DisplayOnly));
 }

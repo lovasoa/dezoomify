@@ -10,7 +10,7 @@ import {
 import { categoryFor, describeFailure, phaseFor } from "../packages/shared-ui/src/failure.ts";
 import { presentSnapshot } from "../packages/shared-ui/src/snapshot-view.ts";
 
-// Authoritative EngineSnapshotDto builder: the latest snapshot renders
+// Authoritative Snapshot builder: the latest snapshot renders
 // directly, even when intermediate notifications were skipped.
 function dto(overrides = {}) {
   return {

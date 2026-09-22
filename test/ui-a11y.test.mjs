@@ -269,7 +269,7 @@ test("static accessibility contract: confirm dialog names its actions and focuse
     act(() => {
       pending = openConfirmModal(document, {
         title: "Send to desktop app?",
-        subtitle: "Host: dev.ophir.dezoomify.native_host",
+        subtitle: "Destination: Dezoomify desktop app",
         bodyLines: [
           "Origins: https://museum.example/",
           "Cookies: <img src=x>",

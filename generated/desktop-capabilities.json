@@ -31,9 +31,6 @@
     "dezoomify://deep-link-pending"
   ],
   "generator": "phase-11 lean shell (canonical: crates/dezoomify-protocol/src/dto.rs)",
-  "nativeHost": {
-    "name": "dev.ophir.dezoomify.native_host"
-  },
   "protocol": {
     "max": "2.0",
     "min": "2.0",

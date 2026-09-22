@@ -6,7 +6,7 @@
 // observer entry keyed by its snapshot identity.
 //
 // Snapshot-only transport: the shell emits `dezoomify://job-snapshot`
-// `{ job, snapshot }` payloads with the runner's `EngineSnapshotDto` verbatim (revision,
+// `{ job, snapshot }` payloads with the runner's `Snapshot` verbatim (revision,
 // lifecycle, paused, progress, selection with catalog, decision, terminal,
 // output). The service forwards each canonical snapshot directly to its
 // observer: no channel/kind fold, no seq guard, no settled mirror.
@@ -196,10 +196,10 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
     if (parsed.username !== "" || parsed.password !== "") {
       throw serviceError("desktop.invalid-source", "Addresses with sign-in details are rejected.");
     }
-    if (request.exec?.kind !== "native") {
+    if (request.host?.kind !== "native") {
       throw serviceError("desktop.invalid-exec", "The desktop service runs native jobs only.");
     }
-    const dest = request.exec.destination;
+    const dest = request.host.destination;
     if (!NATIVE_FORMATS.includes(dest.format as (typeof NATIVE_FORMATS)[number])) {
       throw serviceError("desktop.invalid-destination", "The output format is not supported.");
     }

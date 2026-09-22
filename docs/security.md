@@ -17,7 +17,7 @@ Parsers and decoders cap input, dimensions, tile counts, allocation, recursion, 
 
 Auth headers, cookies, signed URLs, and tokens stay in the runtime that received them. They appear in no analytics, user-visible cache keys, or ordinary handoffs. Error details name the full request URL with a bounded server signal; they sit inert on the device until the user opens the prefilled report link, which warns to strip sign-in details and tokens before submitting. Credentials never enter the prominent message.
 
-Website direct and proxy requests omit cookies and `Authorization`. The proxy also forwards no caller credentials upstream and never fetches credential-bearing resources. Signed or token-bearing URLs are proxy-ineligible. The extension fetches in the tab origin with the page's session and from the extension origin credential-free, only for origins under active host permissions. The shipped extension does not send browser cookies or other credentials to the Native Messaging host.
+Website direct and proxy requests omit cookies and `Authorization`. The proxy also forwards no caller credentials upstream and never fetches credential-bearing resources. Signed or token-bearing URLs are proxy-ineligible. The extension fetches in the tab origin with the page's session and from the extension origin credential-free, only for origins under active host permissions. It does not send browser cookies or other credentials to another product.
 
 ## Proxy controls
 
@@ -29,4 +29,4 @@ The proxy allows only supported methods and serves metadata only, never tiles. I
 
 Extension behavior is defined once in [Extension](extension.md): explicit-action scans on the clicked tab, finite snapshots and tab-origin fetches, no content scripts, no `<all_urls>`, no metadata proxy. Source operations accept only validated engine headers, return one bounded payload, never cookies or auth values. Tauri exposes an allowlisted command surface and opaque file handles instead of raw paths where practical. The desktop declares only permissions its shipped code uses; the frontend calls `query_capabilities` once at boot so grants track live negotiation, and external links leave only through `opener:allow-open-url` for valid `https` URLs.
 
-Website deep links are untrusted input for native validation plus user confirmation; no client-side signing. The Native Messaging host remains a separate protocol entry point for compatible clients. Browser enforcement of allowed extension IDs authenticates those clients; challenge plus one-use nonce bind one session against replay but prove no identity. The shipped extension does not use Native Messaging. Security regressions are covered in [Testing](testing.md).
+Website deep links are untrusted input for native validation plus user confirmation; no client-side signing. They contain bounded non-secret job input and never transfer browser credentials. Security regressions are covered in [Testing](testing.md).

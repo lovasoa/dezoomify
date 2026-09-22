@@ -21,10 +21,6 @@ path = "src/lib.rs"
 name = "dezoomify-desktop"
 path = "src/main.rs"
 
-[[bin]]
-name = "dezoomify-native-host"
-path = "src/bin/dezoomify-native-host.rs"
-
 # Known debt: shell docs pending.
 [lints.rust]
 missing_docs = "allow"
@@ -36,12 +32,9 @@ pedantic = "allow"
 # Engine deps (inward only: core -> engine -> native runtime + protocol DTOs).
 # All pure Rust via dezoomify-native (reqwest/rustls/image/url/sha2); no webview
 # system packages, so the lean offline default still builds anywhere.
-dezoomify-core = { path = "../../../crates/dezoomify-core" }
-dezoomify-engine = { path = "../../../crates/dezoomify-engine" }
+dezoomify = { path = "../../../crates/dezoomify" }
 dezoomify-native = { path = "../../../crates/dezoomify-native" }
-dezoomify-protocol = { path = "../../../crates/dezoomify-protocol" }
 # Lean offline shell: pure Rust only (no webview system packages).
-# serde/serde_json provide the Native Messaging wire JSON (framed, bounded).
 serde = { workspace = true }
 serde_json = { workspace = true }
 # Real window shell (optional; see the `tauri` feature below).

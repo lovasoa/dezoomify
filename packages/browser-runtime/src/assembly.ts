@@ -17,10 +17,10 @@
 // fakes.
 
 import type {
-  OutputDispositionDto,
+  OutputDisposition,
   OutputFormat,
   ProcessingRecipe,
-  TilePlacementDto,
+  TilePlacement,
 } from "@dezoomify/wasm-bindings";
 import { failure } from "./failure.ts";
 import { BROWSER_LIMITS, probeLimits, safeArea } from "./limits.ts";
@@ -31,13 +31,13 @@ import { createProcessQueue, drawPlacedTile } from "./tile-draw.ts";
 import type { BrowserLimits } from "./types.ts";
 
 export type BrowserSaveDisposition = Extract<
-  OutputDispositionDto,
+  OutputDisposition,
   "browser-save-initiated" | "browser-save-ready"
 >;
 export type BrowserOutputDisposition = BrowserSaveDisposition | "display-only";
 
 /** Generated shape of one tile's output placement. */
-export type AssemblyPlacement = TilePlacementDto;
+export type AssemblyPlacement = TilePlacement;
 
 /** Allocated output surface: geometry plus a 2D drawing context. */
 export interface AssemblyCanvas {

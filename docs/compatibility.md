@@ -2,7 +2,7 @@
 
 ## Installed extension and desktop versions
 
-The Native Messaging host is installed independently and checks its protocol range with compatible clients. The shipped browser extension does not connect to it. Deep-link input remains untrusted and needs validation and confirmation before effects. Release automation verifies the Native Messaging range and this matrix (see [Releases](releases.md)).
+Deep-link input remains untrusted and needs validation and confirmation before effects. Release automation verifies the handoff protocol range and this matrix (see [Releases](releases.md)).
 
 ## Browsers and operating systems
 
@@ -34,12 +34,12 @@ Unprocessed ordinary tiles render through plain `<img>` and draw into a canvas e
 
 ## Format support
 
-One shared core (`crates/dezoomify-core`): every app recognizes the same formats in the same precedence order, automatically. Apps differ in reach (auth), saving (tainted display vs clean bytes), and bulk (below). Paste guide: [Supported formats](user/supported-formats.md); no matrix duplicated here.
+One shared domain crate (`crates/dezoomify`): every app recognizes the same formats in the same precedence order, automatically. Apps differ in reach (auth), saving (tainted display vs clean bytes), and bulk (below). Paste guide: [Supported formats](user/supported-formats.md); no matrix duplicated here.
 
 ### Authentication
 
 - Website: never signs in. Direct and proxy requests omit cookies, `Authorization`, credentials. Only eligible public, non-credential metadata falls back to the proxy (never tiles); signed/token URLs are ineligible. Members-only collections need the extension. Order: [Browser runtime](browser-runtime.md#request-order).
-- Extension: works inside the browser session, only for origins under granted host permissions (activeTab on the scanned tab, or explicit host grants). It does not transfer browser cookies or credentials to the native host. See [Extension](extension.md), [Security](security.md).
+- Extension: works inside the browser session, only for origins under granted host permissions (activeTab on the scanned tab, or explicit host grants). It does not transfer browser cookies or credentials to another product. See [Extension](extension.md), [Security](security.md).
 - Desktop/CLI: accept user-supplied headers such as `Referer` for self-viewer-only sites; read local paths and `file://` URIs. Resume cache keeps tile bytes only, never headers, cookies, credentials. See [Native apps](native-apps.md).
 
 ### Tainted canvas

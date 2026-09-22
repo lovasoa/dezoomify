@@ -413,8 +413,8 @@ mod tests {
     /// verbatim forwarder (no I/O): the terminal itself is hand-built,
     /// everything after it is production behavior.
     fn fold_test_terminal(table: &mut JobTable, id: &str, terminal: TestTerminal) {
-        use dezoomify_native::runner::OutputSummary;
-        use dezoomify_protocol::dto::{JobState, SnapshotTerminalDto};
+        use dezoomify::model::{JobState, Terminal};
+        use dezoomify_native::job_service::OutputSummary;
         fn summary(partial: bool) -> OutputSummary {
             OutputSummary {
                 path: std::path::PathBuf::from("/tmp/dz-published.png"),
@@ -428,18 +428,18 @@ mod tests {
             }
         }
         let (engine_terminal, published) = match terminal {
-            TestTerminal::Completed => (SnapshotTerminalDto::Completed, Some(summary(false))),
+            TestTerminal::Completed => (Terminal::Completed, Some(summary(false))),
             TestTerminal::Partial => (
-                SnapshotTerminalDto::PartialCompleted {
+                Terminal::PartialCompleted {
                     missing: Vec::new(),
                 },
                 Some(summary(true)),
             ),
             TestTerminal::Failed => (
-                SnapshotTerminalDto::Failed {
-                    error: dezoomify_protocol::dto::ErrorDto {
+                Terminal::Failed {
+                    error: dezoomify::model::Error {
                         code: "tile.download-failed".to_string(),
-                        phase: dezoomify_protocol::dto::ErrorPhase::Acquisition,
+                        phase: dezoomify::model::ErrorPhase::Acquisition,
                         retryable: true,
                         message: "boom".to_string(),
                         recovery: Vec::new(),
@@ -462,17 +462,17 @@ mod tests {
         let _ = table.request_destination(id, &path, "png", false);
         table.inject_runner_snapshot(
             id,
-            &dezoomify_native::runner::JobSnapshot {
+            &dezoomify_native::job_service::JobSnapshot {
                 job: id.to_string(),
-                snapshot: dezoomify_engine::JobSnapshot {
+                snapshot: dezoomify::model::Snapshot {
                     revision: 2,
                     lifecycle: JobState::Finalizing,
                     paused: false,
-                    progress: dezoomify_engine::Progress {
+                    progress: dezoomify::model::Progress {
                         completed: 0,
                         total: Some(0),
                     },
-                    selection: dezoomify_engine::Selection {
+                    selection: dezoomify::model::Selection {
                         image: None,
                         level: None,
                         level_count: 0,

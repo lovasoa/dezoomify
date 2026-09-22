@@ -285,8 +285,8 @@ fn jpeg_and_tiff_encode_and_decode_round_trip() {
 #[test]
 fn transport_and_concurrency_defaults_match_reference_tuning() {
     use dezoomify_native::http::FetchLimits;
-    use dezoomify_native::pipeline::PipelineConfig;
-    let config = PipelineConfig::default();
+    use dezoomify_native::JobOptions;
+    let config = JobOptions::default();
     assert_eq!(config.max_concurrent, 16);
     assert_eq!(config.max_retries, 3);
     // Retry timing is engine-owned (explicit WaitForRetry timers); no

@@ -1,35 +1,35 @@
 // Host-neutral application model: the shared job service contract.
 // React-free and host-global-free: no window, document, fetch, chrome,
 // tauri, localStorage, or canvas access. Hosts inject effects (the
-// HostRunner); this package owns identity, validation, and shared history.
+// JobService); this package owns shared contracts, validation, and history.
 //
 // Cross-language types are imported from the generated bindings and never
-// redeclared here. EngineSnapshotDto is the only job-state object: the
+// redeclared here. Snapshot is the only job-state object: the
 // engine projects absolute snapshots, hosts forward them, and the shared UI
 // renders the latest one. Nothing here folds events or tracks revisions.
 
 import type {
-  CatalogDto,
-  EngineSnapshotDto,
-  ErrorDto,
+  Catalog,
+  Error as EngineError,
   JobCommand,
-  JobInputDto,
+  JobInput,
   JobState,
   RecoveryAction,
   SessionConfig,
-  SnapshotTerminalDto,
+  Snapshot,
+  Terminal,
 } from "@dezoomify/wasm-bindings";
 
 export type {
-  CatalogDto,
-  EngineSnapshotDto,
-  ErrorDto,
+  Catalog,
+  EngineError as Error,
   JobCommand,
-  JobInputDto,
+  JobInput,
   JobState,
   RecoveryAction,
   SessionConfig,
-  SnapshotTerminalDto,
+  Snapshot,
+  Terminal,
 };
 
 // ---------------------------------------------------------------------------
@@ -42,9 +42,9 @@ export type UserCommand = JobCommand;
 /**
  * Browser execution: the host assembles output from readable bytes.
  * sourceUrl names the data source the host fetches (mirrors inputs[0].url);
- * the exec spec carries it so hosts never re-derive data from UI state.
+ * the host spec carries it so hosts never re-derive data from UI state.
  */
-export interface BrowserExecSpec {
+export interface BrowserHostSpec {
   kind: "browser";
   sourceUrl: string;
 }
@@ -57,22 +57,22 @@ export interface NativeDestination {
 }
 
 /** Native execution: the host runs the engine and writes the output. */
-export interface NativeExecSpec {
+export interface NativeHostSpec {
   kind: "native";
   destination: NativeDestination;
 }
 
 /**
- * Product-local execution spec. The browser assembly and the native
+ * Product-local host spec. The browser assembly and the native
  * destination are distinct variants; the engine options stay shared.
  */
-export type ExecSpec = BrowserExecSpec | NativeExecSpec;
+export type HostSpec = BrowserHostSpec | NativeHostSpec;
 
 /** One end-to-end user request: engine options plus the product-local spec. */
 export interface JobStartRequest {
-  inputs: JobInputDto[];
+  inputs: JobInput[];
   engine: SessionConfig;
-  exec: ExecSpec;
+  host: HostSpec;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,7 +86,7 @@ export interface JobStartRequest {
  * engine transition; stale revisions are dropped at the transport edge
  * (the runner), never here.
  */
-export type JobSnapshot = EngineSnapshotDto;
+export type JobSnapshot = Snapshot;
 
 // ---------------------------------------------------------------------------
 // Host status (presentation only, never a phase machine)
@@ -131,29 +131,4 @@ export interface JobHandle {
 /** Host-neutral job service. Products inject effects; UI consumes snapshots. */
 export interface JobService {
   start(request: JobStartRequest, observer: JobObserver): Promise<JobHandle>;
-}
-
-/**
- * Host-injected effect layer behind a JobService. start() runs the request,
- * emits absolute engine snapshots plus host presentation state, and returns
- * control. The browser assembly and the native runner implement this; the
- * service only adds identity and validation, never state tracking.
- */
-export interface RunnerHandle {
-  command(command: UserCommand): Promise<void>;
-  dispose(): Promise<void>;
-  resolvePermission?(granted: boolean): void;
-}
-
-export interface HostRunner {
-  start(request: JobStartRequest, sink: RunnerSink): Promise<RunnerHandle>;
-}
-
-/**
- * Snapshot sink behind a HostRunner: the single absolute channel. The DTO
- * carries lifecycle, progress, decisions, and terminals; host presentation
- * rides alongside and is never derived from UI state.
- */
-export interface RunnerSink {
-  snapshot(snapshot: EngineSnapshotDto, host?: HostStatus): void;
 }

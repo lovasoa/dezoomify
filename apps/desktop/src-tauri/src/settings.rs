@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use dezoomify_native::runner::JobOptions;
+use dezoomify_native::job_service::JobOptions;
 
 /// Default compression (reference `--compression`, JPEG quality 100-5 = 95).
 pub const DEFAULT_COMPRESSION: u8 = 5;
@@ -89,7 +89,7 @@ impl DesktopSettings {
     }
 }
 
-/// Build the native runner options with CLI parity: fixed transport
+/// Build the native job service options with CLI parity: fixed transport
 /// (parallelism 16, timeout 30s, connect 6s, max_idle 32, max_tiles 1M,
 /// available-memory canvas preflight) plus the validated settings-mapped fields. No implicit
 /// Referer is added: only explicit user headers are sent (origin-scoped by

@@ -2,9 +2,8 @@
 
 Status: implemented through Phases 1, 2, 3, and 5. The extension job tab now
 renders through the React shared UI and the vendored mirrors, modal, and
-generated website JS are gone. Phase 4.3-4.5 (a job-tab native-handoff action
-built on `connectNative`) remains as the one follow-up; the runtime and
-background handoff code stays in place meanwhile.
+generated website JS are gone. Desktop handoff uses bounded, non-secret deep
+links.
 
 ## Grounding
 
@@ -24,7 +23,7 @@ background handoff code stays in place meanwhile.
   is enforced by `apps/extension/tests/unit/manifest-policy.test.mjs`.
 - The extension's dedicated WXT job page is the shipped graphical extension
   flow. `apps/extension/src/modal/` is dormant code, but it currently contains
-  the only product wiring for native handoff.
+  superseded desktop-handoff wiring.
 
 ## Non-negotiable contracts
 
@@ -34,15 +33,12 @@ background handoff code stays in place meanwhile.
   website. Keep browser-session fetch in the extension.
 - Preserve normal image display versus readable bytes: a tainted canvas stays
   display-only and is never pixel-read or serialized afterward.
-- Keep extension permissions limited to `activeTab`, `scripting`, and
-  `nativeMessaging`, with `cookies` and HTTP(S) hosts optional. Do not add
+- Keep extension permissions limited to `activeTab` and `scripting`, with
+  HTTP(S) hosts optional. Do not add
   `tabs`, `downloads`, content scripts, offscreen documents, permanent hosts,
   or web-accessible resources.
-- Native handoff is a shipped extension job-tab feature. It uses one
-  `runtime.connectNative` port bound to the active job; consent names only
-  origins and cookie names, precedes optional-cookie permission and reads, and
-  never persists credentials. Decline and typed failures leave the extension
-  job cookieless.
+- Desktop handoff uses a bounded `dezoomify://` link and transfers no browser
+  credentials. The desktop app validates and confirms it before any effect.
 - Nothing generated for the website is committed. Remove generated mirrors
   only once Vite and WXT no longer consume them.
 
@@ -106,7 +102,7 @@ background handoff code stays in place meanwhile.
 4. Update desktop unit and real-window E2E coverage for settings, output
    actions, recovery choices, deep-link confirmation, and external link policy.
 
-## Phase 4: Extension job-tab React and native handoff
+## Phase 4: Extension job-tab React and desktop handoff
 
 1. Keep `apps/extension/entrypoints/background.ts`, `wxt.config.ts`, and the
    existing WXT manifest/package checks. Convert only the WXT job page and its
@@ -116,19 +112,12 @@ background handoff code stays in place meanwhile.
    components. Preserve coordinator binding validation, source-operation
    transport, worker startup, permission flow, canvas assembly, and Blob-anchor
    save behavior.
-3. Add a job-tab native-handoff action to completed and display-only results.
-   Use `requestNativeHandoff` with `connectNative` and the current
-   `{ jobId, tabId, frameId, documentGeneration }` binding; do not port the
-   modal's legacy `sendNativeMessage` path.
-4. Render consent in React. Consent shows the native host, exact origins,
-   cookie names, and job ID, initially focuses the decline action, traps focus,
-   and treats Escape/backdrop dismissal as decline. Optional `cookies` and
-   host permissions are requested only from the explicit action.
-5. Extend native-handoff tests for persistent-port messages from the real job
-   binding, no cookie read before consent, scope isolation, typed disconnect
-   failures, and one credential message at most. Extend packaged Chromium and
-   Firefox coverage for the exposed action where the native host test harness
-   can be installed deterministically.
+3. Keep the job-tab desktop-handoff action on completed and display-only
+   results, producing only bounded non-secret deep-link input.
+4. Render confirmation in React. It initially focuses the decline action,
+   traps focus, and treats Escape/backdrop dismissal as decline.
+5. Extend handoff tests for source binding, scope isolation, typed failures,
+   and the absence of credentials in the payload.
 
 ## Phase 5: Remove superseded paths
 
@@ -143,14 +132,13 @@ After replacement tests are green, remove in the same change series:
 - `apps/extension/src/app/extensionIntegration.ts`, `src/app/messages.ts`, and
   their tests if the final reachability audit confirms no shipped consumer.
 
-Do not remove `apps/extension/src/runtime/nativeHandoff.ts`, native-host code,
-or native-messaging tests: they support the shipped job-tab handoff feature.
+Keep the deep-link handoff behavior covered while removing superseded UI paths.
 
 ## Verification and completion
 
 1. Run focused `cargo xtask test ui`, `cargo xtask test web`,
-   `cargo xtask test desktop`, `cargo xtask test extension`, and
-   `cargo xtask test native-messaging` after their respective phases.
+   `cargo xtask test desktop`, and `cargo xtask test extension` after their
+   respective phases.
 2. Confirm the deployed tree still serves legacy at `/` and Vite React at
    `/beta`, including help, both proxy routes, and strict WASM MIME checks.
 3. Confirm both WXT store packages retain manifest parity, no dead payload

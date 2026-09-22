@@ -61,7 +61,6 @@ const EXPECTED_COMMANDS = [
 ];
 const EXPECTED_CHANNELS = ["dezoomify://job-snapshot", "dezoomify://deep-link-pending"];
 const EXPECTED_ENCODERS = ["png", "jpeg", "tiff", "zif", "webp"];
-const NATIVE_HOST = "dev.ophir.dezoomify.native_host";
 
 const DESKTOP_META = readJson("../src-tauri/dezoomify.json");
 const registrySource = readText("../src-tauri/desktop_commands.rs");
@@ -123,7 +122,6 @@ test("generated files list exact commands and channels", () => {
     "encoders",
     "decoders",
     "protocol",
-    "nativeHost",
     "updater",
   ]) {
     assert.deepEqual(a[field], b[field], `tauri vs capabilities field ${field}`);
@@ -131,10 +129,9 @@ test("generated files list exact commands and channels", () => {
   }
 });
 
-test("protocol range, encoders, native host, updater stay consistent", () => {
+test("protocol range, encoders, and updater stay consistent", () => {
   const tauriConf = readJson("../src-tauri/tauri.conf.json");
   const desktopCap = readJson("../../../generated/desktop-capabilities.json");
-  const lib = readText("../src-tauri/src/lib.rs");
   const integration = readText("../src/desktopIntegration.ts");
   // The bundle identifier and deep-link scheme live in the tauri config.
   assert.equal(tauriConf.identifier, "dev.ophir.dezoomify");
@@ -143,7 +140,6 @@ test("protocol range, encoders, native host, updater stay consistent", () => {
     const x = xdezoomify(doc);
     assert.deepEqual(x.protocol, { max: "2.0", min: "2.0", version: "2.0" });
     assert.deepEqual(sorted(x.encoders), sorted(EXPECTED_ENCODERS));
-    assert.equal(x.nativeHost.name, NATIVE_HOST);
     assert.equal(x.updater.enabled, false);
     assert.equal(x.updater.httpsOnly, true);
     assert.equal(x.updater.requiresUserConfirm, true);
@@ -153,14 +149,7 @@ test("protocol range, encoders, native host, updater stay consistent", () => {
       "https allowlist",
     );
   }
-  assert.ok(lib.includes(NATIVE_HOST), "lib native host");
-  assert.ok(
-    integration.includes('"2.0"') && integration.includes(NATIVE_HOST),
-    "integration protocol/host",
-  );
-  const hostSrc = readText("../src-tauri/src/bin/dezoomify-native-host.rs");
-  assert.ok(hostSrc.includes(NATIVE_HOST), "native host binary name");
-  assert.ok(hostSrc.includes("capability.unavailable"), "fail-closed rejection");
+  assert.ok(integration.includes('"2.0"'), "integration protocol version");
 });
 
 test("event channels are single-sourced and forbid tile bytes", () => {
@@ -229,34 +218,6 @@ test("generated files are canonical bytes (LF, pretty, no drift)", () => {
     const canonical = JSON.stringify(JSON.parse(raw), null, 2) + "\n";
     assert.equal(raw, canonical, `${rel} not canonical 2-space JSON`);
   }
-});
-
-test("installer templates use placeholders and no wildcards", () => {
-  const chromium = readText("../../../installer/native-messaging/chromium.json.in");
-  const firefox = readText("../../../installer/native-messaging/firefox.json.in");
-  for (const [label, content] of [
-    ["chromium", chromium],
-    ["firefox", firefox],
-  ]) {
-    assert.ok(content.includes("@HOST_PATH@"), `${label} host placeholder`);
-    assert.ok(content.includes("@EXTENSION_ID@"), `${label} extension placeholder`);
-    assert.ok(!content.includes("*"), `${label} no wildcards`);
-    assert.ok(content.includes(NATIVE_HOST), `${label} host name`);
-  }
-  assert.ok(
-    chromium.includes("allowed_origins") && chromium.includes("chrome-extension://"),
-    "chromium origins",
-  );
-  assert.ok(firefox.includes("allowed_extensions"), "firefox extensions");
-  // Templates stay valid once placeholders are substituted.
-  const fakeHost = "/opt/dezoomify/dezoomify-native-host";
-  const fakeId = "abcdefghijklmnopqrstuvwxyzabcdef";
-  const expandedChromium = chromium
-    .replaceAll("@HOST_PATH@", fakeHost)
-    .replaceAll("@EXTENSION_ID@", fakeId);
-  const parsed = JSON.parse(expandedChromium);
-  assert.ok(parsed.allowed_origins[0].includes(fakeId));
-  assert.ok(path.isAbsolute(parsed.path), "absolute host path");
 });
 
 test("desktop shell stays in the root workspace and keeps Tauri optional", () => {

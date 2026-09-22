@@ -7,7 +7,7 @@
 // lifecycle over the public Tauri API: start_job, answer_choice, cancel_job,
 // pause_job, resume_job, request_destination, open_saved_output, and
 // query_capabilities. It subscribes to the single dezoomify://job-snapshot
-// channel, forwards each canonical EngineSnapshotDto verbatim, and publishes
+// channel, forwards each canonical Snapshot verbatim, and publishes
 // authoritative JobSnapshots;
 // this file renders them through presentSnapshot and keeps only product
 // wiring: queue, history, settings, recovery actions, deep links, and the
@@ -652,7 +652,7 @@ function launchNativeJob(trimmed: string, token: number): void {
   const request: JobStartRequest = {
     inputs: [{ url: trimmed }],
     engine: {},
-    exec: {
+    host: {
       kind: "native",
       destination: {
         kind: "file",

@@ -1,7 +1,7 @@
 //! CLI entry point: argument parsing, real download pipeline, honest events.
 
 // 6.1 unwrap policy: failures map to stderr diagnostics and exit codes
-// instead of panicking (see `dezoomify-protocol` crate root for the policy).
+// instead of panicking (see `dezoomify::model` for the shared contract policy).
 #![deny(clippy::unwrap_used)]
 
 mod arguments;
@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use arguments::Args;
-use dezoomify_native::{JobOptions, NativeRunner, OutputTarget};
+use dezoomify_native::{start_job, JobOptions, OutputTarget};
 
 /// Minimum-interval pacing between bulk images. Ports the reference
 /// `Throttler` idea synchronously for bulk image pacing; per-tile request
@@ -239,7 +239,7 @@ fn prompt_line(prompt: &str) -> Option<String> {
 
 /// Map CLI args onto one validated [`JobOptions`] for the shared native
 /// runner. Hosts map their own args/settings onto this struct; validation is
-/// typed and happens in [`NativeRunner::start`] before any effect.
+/// typed and happens in [`start_job`] before any effect.
 fn job_options_for(parsed: &Args, input: &str, output: &Path) -> JobOptions {
     let mut user_headers = parsed.headers.clone();
     if let Some(referer) = parsed.request_referer() {
@@ -290,6 +290,7 @@ fn job_options_for(parsed: &Args, input: &str, output: &Path) -> JobOptions {
         accept_invalid_certs: parsed.accept_invalid_certs,
         max_concurrent: parsed.parallelism,
         min_interval: parsed.min_interval,
+        ..JobOptions::default()
     }
 }
 
@@ -325,7 +326,7 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
     emit_verbose_diagnostics(level, parsed);
     let json = parsed.json;
     let keep_partial = parsed.keep_partial;
-    let job = match NativeRunner::start(job_options_for(parsed, input, output)) {
+    let job = match start_job(job_options_for(parsed, input, output)) {
         Ok(job) => job,
         Err(error) => {
             eprintln!("error: {} ({})", error.message, error.code);
@@ -353,7 +354,7 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
         // Auto-answer partial decisions from policy before printing: the
         // engine waits for `AnswerPartial`, and the CLI is non-interactive.
         if let Some(decision) = snapshot.snapshot.decision.as_ref() {
-            use dezoomify_protocol::dto::RecoveryChoice;
+            use dezoomify::model::RecoveryChoice;
             let generation = decision.generation;
             let choice = if keep_partial {
                 RecoveryChoice::Keep
@@ -467,8 +468,8 @@ fn progress_view(
 }
 
 /// Project an engine lifecycle onto the stable CLI event kind.
-fn snapshot_kind(lifecycle: &dezoomify_protocol::dto::JobState) -> &'static str {
-    use dezoomify_protocol::dto::JobState;
+fn snapshot_kind(lifecycle: &dezoomify::model::JobState) -> &'static str {
+    use dezoomify::model::JobState;
     match lifecycle {
         JobState::Created
         | JobState::Discovering
@@ -634,7 +635,7 @@ fn run_one_bulk_image(
     // bulk-item lines on stdout, so event details never pollute JSON.
     let show = !parsed.json;
     let logging = parsed.logging.clone();
-    let job = match NativeRunner::start(job_options_for(parsed, url, Path::new(output))) {
+    let job = match start_job(job_options_for(parsed, url, Path::new(output))) {
         Ok(job) => job,
         Err(error) => return Err((error.code, error.message)),
     };
@@ -652,7 +653,7 @@ fn run_one_bulk_image(
             }
         };
         if let Some(decision) = snapshot.snapshot.decision.as_ref() {
-            use dezoomify_protocol::dto::RecoveryChoice;
+            use dezoomify::model::RecoveryChoice;
             let generation = decision.generation;
             let choice = if parsed.keep_partial {
                 RecoveryChoice::Keep
