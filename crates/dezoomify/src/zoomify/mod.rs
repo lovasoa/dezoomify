@@ -14,7 +14,7 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 use crate::Vec2d;
 use crate::core::{
     DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryRoute,
-    DiscoveryStep, FormatSpec, Grid, ImagePlan, Request, ResolvedLevel, resolve_relative,
+    DiscoveryStep, FormatSpec, ImagePlan, Request, ResolvedLevel, resolve_relative,
 };
 
 mod image_properties;
@@ -510,7 +510,7 @@ fn plan_from_properties(
             let size = info.size;
             let tile_size = info.tile_size;
             let base_url = Arc::clone(&base_url);
-            let source = Grid::with_requests(size, tile_size, Vec2d::default(), move |tile| {
+            let level = ResolvedLevel::grid(size, tile_size, move |tile| {
                 let cell: Vec2d = tile.coord.into();
                 // Some producers declare only the full-resolution tile
                 // count and consequently store every level in TileGroup0.
@@ -523,9 +523,8 @@ fn plan_from_properties(
                     "{base_url}/TileGroup{tile_group}/{index}-{}-{}.jpg",
                     cell.x, cell.y
                 ))
-            })
-            .map_err(|error| DiscoveryError::Session(format!("invalid Zoomify grid: {error}")))?;
-            Ok(ResolvedLevel::new(source).with_title(Some(match base_name {
+            })?;
+            Ok(level.with_title(Some(match base_name {
                 Some(base_name) => format!("{base_name} Zoomify level {index}"),
                 None => format!("Zoomify level {index}"),
             })))

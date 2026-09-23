@@ -7,8 +7,7 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveryError, DiscoveryMatch, FormatSpec, Grid, ImagePlan, Request, ResolvedLevel,
-    image_title,
+    DiscoveryError, DiscoveryMatch, FormatSpec, ImagePlan, Request, ResolvedLevel, image_title,
 };
 
 static SERVER_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -132,10 +131,9 @@ fn build_levels(
                 .strip_suffix("/calcrgn")
                 .unwrap_or(origin.as_ref())
                 .into();
-            let source = Grid::with_requests(
+            let level = ResolvedLevel::grid(
                 Vec2d { x: width, y: height },
                 Vec2d::square(512),
-                Vec2d::default(),
                 move |tile| {
                     let column = f64::from(tile.coord.column);
                     let row = f64::from(tile.coord.row);
@@ -147,9 +145,8 @@ fn build_levels(
                         encode_component(&item),
                     ))
                 },
-            )
-            .map_err(|error| DiscoveryError::Session(format!("invalid LizardTech grid: {error}")))?;
-            Ok(ResolvedLevel::new(source).with_title(Some(format!(
+            )?;
+            Ok(level.with_title(Some(format!(
                 "LizardTech level {ordinal}"
             ))))
         })

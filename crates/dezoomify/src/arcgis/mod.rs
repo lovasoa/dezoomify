@@ -7,8 +7,7 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveryError, DiscoveryMatch, FormatSpec, Grid, ImagePlan, Request, ResolvedLevel,
-    floor_index,
+    DiscoveryError, DiscoveryMatch, FormatSpec, ImagePlan, Request, ResolvedLevel, floor_index,
 };
 
 pub const SPEC: FormatSpec = FormatSpec::new(
@@ -193,27 +192,25 @@ fn build_levels(
                 })?;
             let service = Arc::clone(service);
             let parameters = Arc::clone(parameters);
-            let level = lod.level;
-            let source = Grid::with_requests(
+            let level_id = lod.level;
+            let level = ResolvedLevel::grid(
                 Vec2d {
                     x: width,
                     y: height,
                 },
                 Vec2d::square(tile_width),
-                Vec2d::default(),
                 move |tile| {
                     let column = min_column + i64::from(tile.coord.column);
                     let row = min_row + i64::from(tile.coord.row);
-                    let uri = format!("{service}/tile/{level}/{row}/{column}");
+                    let uri = format!("{service}/tile/{level_id}/{row}/{column}");
                     if parameters.is_empty() {
                         Request::new(uri)
                     } else {
                         Request::new(format!("{uri}?{parameters}"))
                     }
                 },
-            )
-            .map_err(|error| DiscoveryError::Session(format!("invalid ArcGIS grid: {error}")))?;
-            Ok(ResolvedLevel::new(source).with_title(Some(format!("ArcGIS level {level}"))))
+            )?;
+            Ok(level.with_title(Some(format!("ArcGIS level {level_id}"))))
         })
         .collect()
 }

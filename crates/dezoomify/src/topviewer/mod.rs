@@ -9,7 +9,7 @@ use url::Url;
 use crate::Vec2d;
 use crate::core::{
     DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
-    DiscoveryStep, FormatSpec, Grid, ImagePlan, Request, ResolvedLevel, resolve_url_template,
+    DiscoveryStep, FormatSpec, ImagePlan, Request, ResolvedLevel, resolve_url_template,
 };
 use crate::web_page::decode_html_entities;
 
@@ -263,25 +263,20 @@ fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
         .replace("{file}", filepath.unwrap_or("image"))
         .replace("{extension}", "jpg");
     let template: Arc<str> = template.into();
-    let source = Grid::with_requests(
+    let level = ResolvedLevel::grid(
         Vec2d {
             x: width,
             y: height,
         },
         Vec2d::square(tile_size),
-        Vec2d::default(),
         move |tile| {
             let tile_number = u64::from(first_tile)
                 + u64::from(tile.coord.column)
                 + u64::from(tile.coord.row) * u64::from(columns);
             Request::new(template.replace("{tile}", &tile_number.to_string()))
         },
-    )
-    .map_err(|error| DiscoveryError::Session(format!("invalid TopViewer grid: {error}")))?;
-    Ok(ImagePlan::new(
-        filepath.and_then(image_title),
-        vec![ResolvedLevel::new(source)],
-    ))
+    )?;
+    Ok(ImagePlan::new(filepath.and_then(image_title), vec![level]))
 }
 
 fn image_title(filepath: &str) -> Option<String> {

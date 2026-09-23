@@ -6,8 +6,7 @@ use serde::Deserialize;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveryError, DiscoveryMatch, DiscoveryRoute, FormatSpec, Grid, ImagePlan, Request,
-    ResolvedLevel,
+    DiscoveryError, DiscoveryMatch, DiscoveryRoute, FormatSpec, ImagePlan, Request, ResolvedLevel,
 };
 
 const INFO_QUERY: &str = "cmd=info";
@@ -79,13 +78,12 @@ fn build_levels(
         let width = metadata.width.div_ceil(zoom);
         let height = metadata.height.div_ceil(zoom);
         let origin = Arc::clone(origin);
-        let source = Grid::with_requests(
+        let level = ResolvedLevel::grid(
             Vec2d {
                 x: width,
                 y: height,
             },
             Vec2d::square(metadata.tileside),
-            Vec2d::default(),
             move |tile| {
                 let coord: Vec2d = tile.coord.into();
                 Request::new(format!(
@@ -93,10 +91,9 @@ fn build_levels(
                     coord.x, coord.y
                 ))
             },
-        )
-        .map_err(|error| DiscoveryError::Session(format!("invalid XLimage grid: {error}")))?;
+        )?;
         levels.push(
-            ResolvedLevel::new(source)
+            level
                 .with_scale_factor(Some(zoom))
                 .with_title(Some(format!("XLimage level {zoom}"))),
         );
