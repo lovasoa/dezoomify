@@ -5,6 +5,7 @@
 use std::sync::{Arc, LazyLock};
 
 use serde::{Deserialize, Deserializer};
+use url::Url;
 
 use crate::json_utils::all_json;
 use crate::web_page::{follow_iframe, has_iframe};
@@ -377,13 +378,10 @@ fn extract_ete_catalog(
 
 /// Scheme + authority of a URI for site-root service URLs.
 fn origin_of(uri: &str) -> String {
-    match uri.split_once("://") {
-        Some((scheme, rest)) => {
-            let authority = rest.split('/').next().unwrap_or(rest);
-            format!("{scheme}://{authority}")
-        }
-        None => uri.to_string(),
-    }
+    Url::parse(uri)
+        .ok()
+        .filter(Url::has_host)
+        .map_or_else(|| uri.to_owned(), |url| url.origin().ascii_serialization())
 }
 
 mod ngv;
@@ -548,6 +546,14 @@ mod tests {
     use crate::core::{DiscoveredEntry, ResolvedImage, ResourceResponse, TileSource};
 
     const XML: &[u8] = br#"<IMAGE_PROPERTIES WIDTH="512" HEIGHT="256" NUMTILES="2" NUMIMAGES="1" VERSION="1.8" TILESIZE="256"/>"#;
+
+    #[test]
+    fn broker_origin_excludes_page_credentials_and_query() {
+        assert_eq!(
+            origin_of("https://user:password@fixtures.test:8443/viewer?token=secret"),
+            "https://fixtures.test:8443"
+        );
+    }
 
     fn operation(uri: &str) -> DiscoveryOperation {
         let mut registry = crate::core::Registry::new();
