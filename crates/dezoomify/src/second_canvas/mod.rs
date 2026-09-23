@@ -16,7 +16,7 @@ use crate::core::{
 const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::ContentPredicate(contains_gigapixel).extract(catalog),
     DiscoveryMatch::ContentPredicate(contains_viewer_script).then(follow_viewer_config),
-    DiscoveryMatch::ContentPredicate(contains_second_canvas_iframe).then(follow_iframe),
+    DiscoveryRoute::html_relative_capture(&SECOND_CANVAS_IFRAME_RE, "src"),
 ];
 
 pub const SPEC: FormatSpec =
@@ -48,10 +48,6 @@ static EMBEDDED_CONFIG_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     .expect("constant Second Canvas embedded configuration pattern")
 });
 
-fn contains_second_canvas_iframe(bytes: &[u8]) -> bool {
-    SECOND_CANVAS_IFRAME_RE.is_match(bytes)
-}
-
 fn follow_viewer_config(
     _: &DiscoveryContext<'_>,
     resource: DiscoveryResource<'_>,
@@ -60,18 +56,6 @@ fn follow_viewer_config(
         resource.final_uri(),
         resource.bytes(),
     )?)))
-}
-
-fn follow_iframe(
-    _: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
-    let src = SECOND_CANVAS_IFRAME_RE
-        .captures(resource.bytes())
-        .and_then(|captures| captures.name("src"))
-        .map(|src| String::from_utf8_lossy(src.as_bytes()).replace("&amp;", "&"))
-        .ok_or_else(|| DiscoveryError::Session("Second Canvas iframe has no source".into()))?;
-    Ok(resource.follow_relative(&src))
 }
 
 fn viewer_config_uri(viewer_uri: &str, viewer_bytes: &[u8]) -> Result<String, DiscoveryError> {
