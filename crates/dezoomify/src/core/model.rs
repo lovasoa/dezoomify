@@ -179,7 +179,7 @@ impl ImagePlan {
         self
     }
 
-    pub fn compile(self, format: &'static str) -> Result<DiscoveryCatalog, DiscoveryError> {
+    pub fn compile_entry(self, format: &'static str) -> Result<DiscoveredEntry, DiscoveryError> {
         if self.levels.is_empty() {
             return Err(DiscoveryError::Session(format!(
                 "{format} image has no levels"
@@ -195,12 +195,16 @@ impl ImagePlan {
                 "{format} tile count exceeds supported ordinals"
             )));
         }
-        Ok(DiscoveryCatalog::ready_with_warnings(
+        Ok(DiscoveredEntry::ready(
             format,
             self.title,
             self.levels,
             self.warnings,
         ))
+    }
+
+    pub fn compile(self, format: &'static str) -> Result<DiscoveryCatalog, DiscoveryError> {
+        Ok(DiscoveryCatalog::new([self.compile_entry(format)?]))
     }
 }
 

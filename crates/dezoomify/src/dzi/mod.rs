@@ -9,7 +9,8 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 use crate::Vec2d;
 use crate::core::{
     DiscoveredEntry, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, Request, ResolvedLevel,
+    DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImagePlan, Request,
+    ResolvedLevel,
 };
 use crate::json_utils::all_json;
 
@@ -301,12 +302,7 @@ fn catalog_from_dzi(
             .rsplit('/')
             .next()
             .map(|s| s.trim_end_matches("_files").to_owned());
-        entries.push(DiscoveredEntry::ready(
-            "deepzoom",
-            title,
-            levels,
-            Vec::new(),
-        ));
+        entries.push(ImagePlan::new(title, levels).compile_entry("deepzoom")?);
     }
     Ok(DiscoveryCatalog::new(entries))
 }
