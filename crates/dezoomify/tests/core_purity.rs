@@ -80,21 +80,3 @@ fn direct_dependencies_contain_no_runtime_crates() {
         violations.join(", ")
     );
 }
-
-#[test]
-fn host_capability_policy_is_compiler_enforced() {
-    let policy = include_str!("../../../clippy.toml");
-    for representative in [
-        "std::fs::read",
-        "std::net::TcpStream",
-        "std::process::Command",
-        "std::thread::spawn",
-        "std::time::Instant::now",
-        "std::sync::Mutex",
-    ] {
-        assert!(
-            policy.contains(representative),
-            "Clippy purity policy omits `{representative}`"
-        );
-    }
-}

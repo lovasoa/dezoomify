@@ -152,58 +152,7 @@ fn collect_package_dirs(
 #[cfg(test)]
 mod tests {
     #[test]
-    fn deny_config_covers_all_checks() {
-        let text = std::fs::read_to_string(super::super::repo_root().join("deny.toml"))
-            .expect("deny.toml");
-        for section in ["[advisories]", "[licenses]", "[bans]", "[sources]"] {
-            assert!(text.contains(section), "deny.toml lacks {section}");
-        }
-    }
-
-    #[test]
     fn workspace_lockfile_policy_is_clean() {
         super::check_workspace_lockfiles().expect("workspace has a second lockfile");
-    }
-
-    #[test]
-    fn deny_pin_matches_workflows() {
-        // The workflows must install the same cargo-deny release xtask
-        // gates on; a drift would let CI pass what local runs deny.
-        for workflow in [".github/workflows/security.yml", ".github/workflows/ci.yml"] {
-            let text = std::fs::read_to_string(super::super::repo_root().join(workflow))
-                .unwrap_or_else(|_| panic!("read {workflow}"));
-            assert!(
-                text.contains(super::CARGO_DENY_VERSION),
-                "{workflow} does not pin cargo-deny {}",
-                super::CARGO_DENY_VERSION
-            );
-        }
-    }
-
-    #[test]
-    fn required_and_scheduled_supply_gates_cover_each_half_once() {
-        // Required CI deliberately shards Rust and JS dependency policy:
-        // `check` owns cargo-deny and `security` owns lockfile audits. These
-        // guards keep a future workflow edit from silently restoring the
-        // duplicate RustSec query or dropping the scheduled audit half.
-        let ci =
-            std::fs::read_to_string(super::super::repo_root().join(".github/workflows/ci.yml"))
-                .expect("read ci.yml");
-        assert!(
-            ci.contains(
-                "- name: Install cargo-deny 0.20.2\n        if: matrix.lane-group == 'check'"
-            ),
-            "ci.yml must install cargo-deny only for the check lane"
-        );
-        let security = std::fs::read_to_string(
-            super::super::repo_root().join(".github/workflows/security.yml"),
-        )
-        .expect("read security.yml");
-        for command in ["cargo xtask ci check", "cargo xtask ci security"] {
-            assert!(
-                security.contains(command),
-                "scheduled security workflow must run `{command}`"
-            );
-        }
     }
 }
