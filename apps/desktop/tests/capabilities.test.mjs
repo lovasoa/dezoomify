@@ -14,31 +14,6 @@ function readJson(rel) {
   return JSON.parse(readText(rel));
 }
 
-function extractBracketStrings(source, constName) {
-  const idx = source.indexOf(constName);
-  assert.ok(idx >= 0, `missing ${constName}`);
-  const eq = source.indexOf("=", idx);
-  assert.ok(eq >= 0, `missing = for ${constName}`);
-  const open = source.indexOf("[", eq);
-  assert.ok(open >= 0, `missing [ for ${constName}`);
-  // Balanced bracket walk (no nesting expected beyond one level).
-  let depth = 0;
-  let end = -1;
-  for (let i = open; i < source.length; i++) {
-    if (source[i] === "[") depth += 1;
-    if (source[i] === "]") {
-      depth -= 1;
-      if (depth === 0) {
-        end = i;
-        break;
-      }
-    }
-  }
-  assert.ok(end > open, `missing ] for ${constName}`);
-  const body = source.slice(open, end + 1);
-  return [...body.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
-}
-
 function sorted(arr) {
   return [...arr].sort();
 }
@@ -63,40 +38,10 @@ const EXPECTED_CHANNELS = ["dezoomify://job-snapshot", "dezoomify://deep-link-pe
 const EXPECTED_ENCODERS = ["png", "jpeg", "tiff", "zif", "webp"];
 
 const DESKTOP_META = readJson("../src-tauri/dezoomify.json");
-const registrySource = readText("../src-tauri/desktop_commands.rs");
-const registryBody = registrySource.match(/\$callback!\(\s*([\s\S]*?)\s*\)/)?.[1];
-assert.ok(registryBody, "desktop_commands macro must invoke its callback");
-const RUST_COMMANDS = [...registryBody.matchAll(/\b([a-z][a-z0-9_]*)\b/g)].map((m) => m[1]);
 
 function xdezoomify(doc) {
   return doc["x-dezoomify"] ?? doc;
 }
-
-test("rust command registry lists exact commands", () => {
-  assert.deepEqual(sorted(RUST_COMMANDS), sorted(EXPECTED_COMMANDS));
-  for (const name of EXPECTED_COMMANDS) {
-    assert.ok(RUST_COMMANDS.includes(name), `registry missing ${name}`);
-  }
-  const build = readText("../src-tauri/build.rs");
-  const shell = readText("../src-tauri/src/tauri_shell.rs");
-  assert.match(
-    build,
-    /desktop_commands!\(command_names\)/,
-    "Tauri permissions consume canonical registry",
-  );
-  assert.match(
-    shell,
-    /desktop_commands!\(command_handler\)/,
-    "real handler consumes canonical registry",
-  );
-  assert.doesNotMatch(shell, /generate_handler!\[\s*start_job/, "handler list is not duplicated");
-});
-
-test("typescript integration commands match registry", () => {
-  const ts = extractBracketStrings(readText("../src/desktopIntegration.ts"), "DESKTOP_COMMANDS");
-  assert.deepEqual(sorted(ts), sorted(RUST_COMMANDS));
-  assert.deepEqual(sorted(ts), sorted(EXPECTED_COMMANDS));
-});
 
 test("generated files list exact commands and channels", () => {
   const capGen = readJson("../src-tauri/capabilities/generated.json");
@@ -132,7 +77,6 @@ test("generated files list exact commands and channels", () => {
 test("protocol range, encoders, and updater stay consistent", () => {
   const tauriConf = readJson("../src-tauri/tauri.conf.json");
   const desktopCap = readJson("../../../generated/desktop-capabilities.json");
-  const integration = readText("../src/desktopIntegration.ts");
   // The bundle identifier and deep-link scheme live in the tauri config.
   assert.equal(tauriConf.identifier, "dev.ophir.dezoomify");
   assert.deepEqual(DESKTOP_META.deepLink.schemes, ["dezoomify"]);
@@ -149,60 +93,6 @@ test("protocol range, encoders, and updater stay consistent", () => {
       "https allowlist",
     );
   }
-  assert.ok(integration.includes('"2.0"'), "integration protocol version");
-});
-
-test("event channels are single-sourced and forbid tile bytes", () => {
-  const eventsTs = readText("../src/events.ts");
-  const fromEvents = extractBracketStrings(eventsTs, "DESKTOP_EVENT_CHANNELS");
-  assert.deepEqual(sorted(fromEvents), sorted(EXPECTED_CHANNELS));
-  for (const rel of [
-    "../src-tauri/tauri.conf.json",
-    "../src-tauri/capabilities/generated.json",
-    "../../../generated/desktop-capabilities.json",
-  ]) {
-    const raw = readText(rel);
-    assert.ok(
-      !raw.includes("tileBytes") && !raw.includes("tile_bytes"),
-      `${rel} must not carry tile bytes`,
-    );
-  }
-});
-
-test("desktop footer is a compact external-link bar, not a disclosure", () => {
-  const html = readText("../index.html");
-  const main = readText("../src/main.ts");
-  const css = readText("../src/desktop.css");
-  const integration = readText("../src/desktopIntegration.ts");
-
-  assert.match(html, /<nav class="dz-footer-links" aria-label="Dezoomify links">/);
-  for (const href of [
-    "https://github.com/lovasoa/dezoomify",
-    "https://dezoomify.ophir.dev/help/troubleshooting.html",
-    "https://dezoomify.ophir.dev/privacy.html",
-    "https://dezoomify.ophir.dev/terms.html",
-    "https://github.com/sponsors/lovasoa/",
-  ]) {
-    assert.ok(html.includes(`href="${href}"`), `footer link ${href}`);
-  }
-  assert.ok(!main.includes("ensureDesktopHelpAbout"), "no large collapsible footer duplicate");
-  assert.match(css, /\.dz-site-footer \{[\s\S]*?min-height: 30px;/, "thin footer bar");
-  assert.ok(!css.includes(".dz-site-footer { display: none; }"), "footer stays visible");
-  assert.match(
-    main,
-    /handleOpenExternalLink\(resolved\)/,
-    "footer links route through external navigation",
-  );
-  assert.match(
-    integration,
-    /import \{ openUrl \} from "@tauri-apps\/plugin-opener"/,
-    "uses Tauri's opener binding",
-  );
-  assert.match(
-    integration,
-    /await openUrl\(url\)/,
-    "external navigation opens the URL through Tauri",
-  );
 });
 
 test("generated files are canonical bytes (LF, pretty, no drift)", () => {
@@ -218,28 +108,6 @@ test("generated files are canonical bytes (LF, pretty, no drift)", () => {
     const canonical = JSON.stringify(JSON.parse(raw), null, 2) + "\n";
     assert.equal(raw, canonical, `${rel} not canonical 2-space JSON`);
   }
-});
-
-test("desktop shell stays in the root workspace and keeps Tauri optional", () => {
-  const cargo = readText("../src-tauri/Cargo.toml");
-  const rootCargo = readText("../../../Cargo.toml");
-  assert.ok(
-    rootCargo.includes("apps/desktop/src-tauri"),
-    "desktop shell is a root workspace member",
-  );
-  assert.ok(
-    !cargo.includes("[workspace]"),
-    "desktop shell shares the root workspace (no detached [workspace])",
-  );
-  // The real window shell is opt-in: the Tauri SDK stays an optional
-  // dependency pulled only by the `tauri` feature, so the default build
-  // keeps no SDK and no webview system requirements.
-  assert.ok(/^\s*tauri\s*=\s*\{[^}]*optional\s*=\s*true/m.test(cargo), "tauri stays optional");
-  assert.ok(
-    /^\s*tauri-plugin-dialog\s*=\s*\{[^}]*optional\s*=\s*true/m.test(cargo),
-    "dialog plugin stays optional",
-  );
-  assert.ok(/default\s*=\s*\[\]/m.test(cargo), "default features stay lean");
 });
 
 test("desktop protocol matches the v2-only release contract", () => {

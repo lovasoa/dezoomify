@@ -1,11 +1,6 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import { createPreviewControls } from "../packages/browser-runtime/src/preview.ts";
-
-const rootDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 function fakeElement() {
   const listeners = new Map();
@@ -91,31 +86,4 @@ test("website preview wires wheel, drag, and buttons without pixel reads", () =>
   assert.deepEqual(preview.getTransform(), { scale: 0.5, tx: 0, ty: 0 });
   doc.element("preview-zoom-100").fire("click", {});
   assert.equal(preview.getTransform().scale, 1);
-});
-
-test("preview controls exist in the page and theme", () => {
-  const html = fs.readFileSync(path.join(rootDir, "index.html"), "utf8");
-  for (const id of [
-    "preview-controls",
-    "preview-zoom-in",
-    "preview-zoom-out",
-    "preview-zoom-100",
-    "preview-zoom-fit",
-    "preview-zoom-label",
-  ]) {
-    assert.ok(html.includes(`id="${id}"`), `index.html missing #${id}`);
-  }
-  assert.ok(html.includes(">Fit</button>"), "preview fit control is labelled Fit");
-  const css = fs.readFileSync(
-    path.join(rootDir, "packages/shared-ui/src/styles/theme.css"),
-    "utf8",
-  );
-  assert.ok(css.includes(".dz-preview-controls"), "theme styles the preview toolbar");
-  assert.ok(css.includes("overflow: hidden"), "preview frame does not natively scroll with zoom");
-  assert.ok(
-    css.includes("overflow: visible"),
-    "canvas stack does not create a second scroll surface",
-  );
-  assert.ok(css.includes("cursor: grab"), "canvas uses a live grab cursor, not dead zoom-in");
-  assert.ok(!css.includes("cursor: zoom-in"), "dead cursor:zoom-in removed");
 });

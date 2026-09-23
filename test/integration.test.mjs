@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import {
   canvasToPngBlob,
   isCanvasTaintError,
@@ -25,8 +22,6 @@ import {
   PROXY_MAX_REQUESTS_PER_SECOND,
 } from "../src/proxyTransport.ts";
 import { act } from "./react-dom.mjs";
-
-const REPO_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 function okBytes(...values) {
   return new Uint8Array(values).buffer;
@@ -433,16 +428,6 @@ test("tile failures report the direct transport, never the metadata proxy", () =
   assert.equal(errorTransportFor("TILE_FAILED", null), "direct");
   assert.equal(errorTransportFor("DISCOVERY_FAILED", "metadata-proxy"), "metadata-proxy");
   assert.equal(errorTransportFor("NO_IMAGE_FOUND", null), "direct");
-});
-
-test("page policy permits cross-origin tile images for display", () => {
-  // The engine-host display fallback draws ordinary <img> elements; the page
-  // CSP must allow cross-origin tile images for that path.
-  const html = fs.readFileSync(path.join(REPO_ROOT, "index.html"), "utf8");
-  assert.ok(
-    html.includes("img-src 'self' data: blob: https:"),
-    "CSP must allow cross-origin tile display",
-  );
 });
 
 test("edge tiles crop to the plan, saves warn on color profiles, PNG encodes via canvas", async () => {

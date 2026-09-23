@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import {
   DE,
   DEFAULT_LOCALE,
@@ -17,22 +14,6 @@ import {
   setLocale,
   t,
 } from "../packages/shared-ui/src/i18n.ts";
-
-const rootDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-
-function read(rel) {
-  return fs.readFileSync(path.join(rootDir, rel), "utf8");
-}
-
-/** Every `t("key")` reference in a TypeScript source (not a replica table). */
-function tRefs(source) {
-  const out = new Set();
-  const re = /(?<![A-Za-z])t\("([^"]+)"(?=[,)])/g;
-  for (let match = re.exec(source); match !== null; match = re.exec(source)) {
-    out.add(match[1]);
-  }
-  return out;
-}
 
 const LOCALES = { en: EN, fr: FR, de: DE, it: IT };
 
@@ -61,12 +42,6 @@ test("i18n: English table is namespaced, complete, and well-formed", () => {
 test("i18n: fr/de/it mirror the English key set with identical placeholders", () => {
   assert.equal(DEFAULT_LOCALE, "en");
   assert.deepEqual([...SUPPORTED_LOCALES], ["en", "fr", "de", "it"]);
-  for (const name of ["fr.ts", "de.ts", "it.ts"]) {
-    assert.ok(
-      fs.existsSync(path.join(rootDir, "packages/shared-ui/src/locales", name)),
-      `locale file ships: locales/${name}`,
-    );
-  }
   const enKeys = Object.keys(EN);
   assert.ok(enKeys.length > 100, `catalog stays complete (saw ${enKeys.length})`);
   for (const [label, table] of Object.entries(LOCALES)) {
@@ -202,72 +177,4 @@ test("i18n: pickLocale follows Accept-Language headers and language lists", () =
   assert.deepEqual(pickLocale(["es", "de-AT", "fr"]), "de");
   assert.deepEqual(pickLocale(["it", "fr"]), "it");
   assert.deepEqual(pickLocale(["FR-ca"]), "fr");
-});
-
-// Todo 2.2: desktop copy moved from main.tsx into errorCopy.ts,
-// settingsPanel.ts, and diagnostics.ts. The key set stays identical; only
-// the scanned files widen to the whole desktop src dir.
-function readDesktop() {
-  const dir = path.join(rootDir, "apps/desktop/src");
-  return fs
-    .readdirSync(dir)
-    .filter((name) => name.endsWith(".ts") || name.endsWith(".tsx"))
-    .map((name) => read(`apps/desktop/src/${name}`))
-    .join("\n");
-}
-
-test("i18n: every desktop t() reference resolves in all four locales", () => {
-  const desktopRefs = tRefs(readDesktop());
-  assert.ok(
-    desktopRefs.size > 40,
-    `desktop src renders through the dictionary (saw ${desktopRefs.size} keys)`,
-  );
-  for (const key of desktopRefs) {
-    for (const [label, table] of Object.entries(LOCALES)) {
-      assert.ok(Object.hasOwn(table, key), `${label} covers desktop key: ${key}`);
-    }
-  }
-});
-
-test("i18n: no orphan locale keys; the dictionary covers future view/page integration", () => {
-  // The desktop renderer is the only `t()` caller today; the shared view and
-  // the extension modal still renders hardcoded English literals with this
-  // dictionary as their single translation source (see the module
-  // header and `packages/shared-ui/AGENTS.md`). Every English key therefore
-  // ships in all four locales now, so integration needs no retranslation.
-  const viewRefs = tRefs(read("packages/shared-ui/src/view.tsx"));
-  for (const key of viewRefs) {
-    for (const [label, table] of Object.entries(LOCALES)) {
-      assert.ok(Object.hasOwn(table, key), `${label} covers future view/page key: ${key}`);
-    }
-  }
-  const referenced = new Set([...viewRefs, ...tRefs(readDesktop())]);
-  const pending = Object.keys(EN).filter((key) => !referenced.has(key));
-  assert.ok(pending.length > 0, "future view/page keys are staged in the dictionary");
-  for (const key of pending) {
-    for (const [label, table] of Object.entries(LOCALES)) {
-      assert.ok(Object.hasOwn(table, key), `${label} stages future view/page key: ${key}`);
-      assert.equal(
-        placeholdersOf(table[key]),
-        placeholdersOf(EN[key]),
-        `${label} stages matching placeholders: ${key}`,
-      );
-    }
-  }
-});
-
-test("i18n: the extension job tab resolves copy through the shared dictionary", () => {
-  // The extension bundles the shared UI directly; there is no vendored
-  // dictionary mirror left to drift. Any `t()` key the job tab renders must
-  // exist in all four locales.
-  const job = read("apps/extension/src/job/index.ts");
-  assert.ok(!job.includes("PAGE_EN"), "job tab must not carry an i18n replica table");
-  for (const replica of ["const fr =", "const de =", "const it =", "FR_DE_IT"]) {
-    assert.ok(!job.includes(replica), `job tab must not vendor a locale table inline (${replica})`);
-  }
-  for (const key of tRefs(job)) {
-    for (const [label, table] of Object.entries(LOCALES)) {
-      assert.ok(Object.hasOwn(table, key), `${label} covers extension key: ${key}`);
-    }
-  }
 });

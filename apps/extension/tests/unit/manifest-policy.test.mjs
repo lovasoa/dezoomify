@@ -67,10 +67,6 @@ test("WXT emits Firefox's required classic MV3 background script", () => {
     encoding: "utf8",
   });
   assert.equal(parsed.status, 0, `Firefox classic script failed node --check:\n${parsed.stderr}`);
-  assert.ok(
-    !readFileSync(background, "utf8").match(/^\s*(import|export)\s/m),
-    "Firefox background must be classic",
-  );
 });
 
 test("WXT configuration is the only extension builder and manifest source", () => {

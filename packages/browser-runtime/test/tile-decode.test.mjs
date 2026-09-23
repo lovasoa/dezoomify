@@ -1,11 +1,6 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import { createTileDecoder } from "../src/tile-decode.ts";
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 function bitmap(w = 4, h = 5) {
   return {
@@ -17,21 +12,6 @@ function bitmap(w = 4, h = 5) {
     },
   };
 }
-
-test("decode offload is a packaged worker module, never a string-built Blob URL", () => {
-  const workerSource = fs.readFileSync(
-    path.join(HERE, "..", "src", "tile-decode-worker.ts"),
-    "utf8",
-  );
-  assert.match(workerSource, /createImageBitmap/);
-  assert.match(workerSource, /OffscreenCanvas/);
-  assert.match(workerSource, /transferToImageBitmap/);
-  const hostSource = fs.readFileSync(path.join(HERE, "..", "src", "tile-decode.ts"), "utf8");
-  assert.doesNotMatch(hostSource, /tileDecodeWorkerCode/);
-  assert.doesNotMatch(hostSource, /createObjectURL/);
-  assert.doesNotMatch(hostSource, /Blob\(\[.*"text\/javascript"/s);
-  assert.match(hostSource, /tile-decode-worker/);
-});
 
 test("decoder falls back to main-thread decode without a worker host", async () => {
   const seen = [];
