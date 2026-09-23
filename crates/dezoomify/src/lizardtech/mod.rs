@@ -7,7 +7,7 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveryCatalog, DiscoveryError, DiscoveryMatch, FormatSpec, Grid, Request, ResolvedLevel,
+    DiscoveryError, DiscoveryMatch, FormatSpec, Grid, ImagePlan, Request, ResolvedLevel,
     image_title,
 };
 
@@ -29,7 +29,7 @@ static ATTRIBUTE_RE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("constant XML attribute pattern")
 });
 
-pub const SPEC: FormatSpec = FormatSpec::new("lizardtech", &[DiscoveryMatch::Any.extract(catalog)])
+pub const SPEC: FormatSpec = FormatSpec::new("lizardtech", &[DiscoveryMatch::Any.decode(decode)])
     .with_display_name("LizardTech ImageServer")
     .recognizing(is_lizardtech_url, "not a LizardTech ImageServer URL")
     .preferring(|uri| uri.to_ascii_lowercase().contains("/lizardtech/iserv/"));
@@ -38,7 +38,7 @@ fn is_lizardtech_url(uri: &str) -> bool {
     uri.to_ascii_lowercase().contains("/lizardtech/iserv/")
 }
 
-fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
+fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
     let source_text = std::str::from_utf8(bytes)
         .map_err(|error| DiscoveryError::Session(format!("invalid LizardTech XML: {error}")))?;
     let server = SERVER_RE
@@ -88,7 +88,7 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> 
         .ok_or_else(|| DiscoveryError::Session("LizardTech XML has no image item".into()))?;
     let title = image_title(&item);
     let levels = build_levels(width, height, &origin, &catalog_name, &item)?;
-    Ok(DiscoveryCatalog::ready("lizardtech", title, levels))
+    Ok(ImagePlan::new(title, levels))
 }
 
 fn build_levels(

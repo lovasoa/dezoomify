@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveryCatalog, DiscoveryError, DiscoveryMatch, FormatSpec, Grid, Request, ResolvedLevel,
+    DiscoveryError, DiscoveryMatch, FormatSpec, Grid, ImagePlan, Request, ResolvedLevel,
 };
 
 const META: &str = "&OBJ=Max-size&OBJ=Tile-size&OBJ=Resolution-number";
@@ -14,7 +14,7 @@ pub const SPEC: FormatSpec = FormatSpec::new(
     "iipimage",
     &[
         DiscoveryMatch::UrlPredicate(needs_metadata).map_url(metadata_url),
-        DiscoveryMatch::Any.extract(catalog),
+        DiscoveryMatch::Any.decode(decode),
     ],
 )
 .with_display_name("IIPImage")
@@ -41,7 +41,7 @@ fn metadata_url(input: &str) -> Result<Request, DiscoveryError> {
     )))
 }
 
-fn catalog(uri: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
+fn decode(uri: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
     let metadata = Arc::new(Metadata::try_from(bytes)?);
     let base: Arc<str> = uri.trim_end_matches(META).into();
     let mut levels: Vec<_> = (0..metadata.levels)
@@ -58,7 +58,7 @@ fn catalog(uri: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> 
         })
         .collect::<Result<Vec<_>, DiscoveryError>>()?;
     levels.sort_by_key(|level| level.source.image_size().map_or(0, Vec2d::area));
-    Ok(DiscoveryCatalog::ready("iipimage", None, levels))
+    Ok(ImagePlan::new(None, levels))
 }
 
 #[derive(Clone, Debug)]
@@ -130,10 +130,12 @@ mod tests {
     #[test]
     fn parses_metadata_levels_and_iip_tile_geometry() {
         let metadata = b"Max-size:512 512\nTile-size:256 256\nResolution-number:2";
-        let catalog = catalog(
+        let catalog = decode(
             "http://test.com/&OBJ=Max-size&OBJ=Tile-size&OBJ=Resolution-number",
             metadata,
         )
+        .unwrap()
+        .compile("iipimage")
         .unwrap();
         let DiscoveredEntry::Ready(image) = catalog.into_entries().pop().unwrap() else {
             panic!("IIP metadata did not produce an image")

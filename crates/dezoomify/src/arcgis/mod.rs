@@ -7,7 +7,7 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveryCatalog, DiscoveryError, DiscoveryMatch, FormatSpec, Grid, Request, ResolvedLevel,
+    DiscoveryError, DiscoveryMatch, FormatSpec, Grid, ImagePlan, Request, ResolvedLevel,
     floor_index,
 };
 
@@ -15,7 +15,7 @@ pub const SPEC: FormatSpec = FormatSpec::new(
     "arcgis",
     &[
         DiscoveryMatch::UrlPredicate(is_arcgis_url).map_url(metadata_url),
-        DiscoveryMatch::Any.extract(catalog),
+        DiscoveryMatch::Any.decode(decode),
     ],
 )
 .recognizing(is_arcgis_url, "not an ArcGIS MapServer URL")
@@ -87,7 +87,7 @@ fn tile_parameters(input: &str) -> Result<String, DiscoveryError> {
     Ok(serializer.finish())
 }
 
-fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
+fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
     let mut metadata: Metadata = serde_json::from_slice(bytes).map_err(|error| {
         DiscoveryError::Session(format!(
             "unable to parse ArcGIS MapServer metadata: {error}"
@@ -107,7 +107,7 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> 
             "ArcGIS MapServer has no LODs".into(),
         ));
     }
-    Ok(DiscoveryCatalog::ready("arcgis", title, levels))
+    Ok(ImagePlan::new(title, levels))
 }
 
 fn validate_metadata(metadata: Metadata) -> Result<(TileInfo, Extent), DiscoveryError> {

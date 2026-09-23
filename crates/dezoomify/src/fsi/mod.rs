@@ -6,8 +6,8 @@ use regex::Regex;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
-    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, Request, ResolvedLevel, image_title,
+    DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
+    DiscoveryStep, FormatSpec, Grid, ImagePlan, Request, ResolvedLevel, image_title,
     resolve_relative,
 };
 
@@ -27,7 +27,7 @@ static HEIGHT_RE: LazyLock<Regex> = LazyLock::new(|| {
 const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::UrlPredicate(is_server_url).map_url(metadata_url),
     DiscoveryMatch::ContentPredicate(contains_server).then(follow_page_server),
-    DiscoveryMatch::Any.extract(catalog),
+    DiscoveryMatch::Any.decode(decode),
 ];
 
 pub const SPEC: FormatSpec = FormatSpec::new("fsi", ROUTES)
@@ -73,7 +73,7 @@ fn follow_page_server(
     metadata_url(&server).map(DiscoveryStep::Follow)
 }
 
-fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
+fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
     let width = number(&WIDTH_RE, bytes, "width")?;
     let height = number(&HEIGHT_RE, bytes, "height")?;
     let source = SOURCE_RE
@@ -115,11 +115,7 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> 
         },
     )
     .map_err(|error| DiscoveryError::Session(format!("invalid FSI grid: {error}")))?;
-    Ok(DiscoveryCatalog::ready(
-        "fsi",
-        title,
-        vec![ResolvedLevel::new(source)],
-    ))
+    Ok(ImagePlan::new(title, vec![ResolvedLevel::new(source)]))
 }
 
 fn number(regex: &Regex, bytes: &[u8], name: &str) -> Result<u32, DiscoveryError> {
