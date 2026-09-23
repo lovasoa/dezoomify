@@ -76,9 +76,6 @@ pub struct ResolvedLevel {
     pub title: Option<String>,
     pub scale_factor: Option<u32>,
     pub source: TileSource,
-    /// Canonical public geometry constructed together with the private tile
-    /// program. The display label is filled after level ordering is frozen.
-    pub public: Level,
     pub warnings: Vec<String>,
 }
 
@@ -86,23 +83,10 @@ impl ResolvedLevel {
     #[must_use]
     pub fn new(source: impl Into<TileSource>) -> Self {
         let source = source.into();
-        let size = source.image_size().map(|value| Size {
-            width: value.x,
-            height: value.y,
-        });
-        let tile_size = source.tile_size().map(|value| Size {
-            width: value.x,
-            height: value.y,
-        });
         Self {
             title: None,
             scale_factor: None,
             source,
-            public: Level {
-                label: String::new(),
-                size,
-                tile_size,
-            },
             warnings: Vec::new(),
         }
     }
@@ -297,10 +281,16 @@ impl DiscoveryCatalog {
                             .levels
                             .iter()
                             .enumerate()
-                            .map(|(position, level)| {
-                                let mut public = level.public.clone();
-                                public.label = level.display_label(position);
-                                public
+                            .map(|(position, level)| Level {
+                                label: level.display_label(position),
+                                size: level.source.image_size().map(|value| Size {
+                                    width: value.x,
+                                    height: value.y,
+                                }),
+                                tile_size: level.source.tile_size().map(|value| Size {
+                                    width: value.x,
+                                    height: value.y,
+                                }),
                             })
                             .collect();
                         let size = levels.iter().filter_map(|level| level.size.as_ref()).fold(
