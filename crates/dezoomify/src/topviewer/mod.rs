@@ -8,8 +8,8 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
-    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, Request, ResolvedLevel, resolve_url_template,
+    DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
+    DiscoveryStep, FormatSpec, Grid, ImagePlan, Request, ResolvedLevel, resolve_url_template,
 };
 use crate::web_page::decode_html_entities;
 
@@ -42,7 +42,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::ContentPredicate(contains_mediabank).then(follow_mediabank),
     DiscoveryMatch::ContentPredicate(contains_thumbnail).then(follow_thumbnail),
     DiscoveryMatch::UrlPredicate(is_media_api).then(follow_media),
-    DiscoveryMatch::ContentPredicate(contains_topviews).extract(catalog),
+    DiscoveryMatch::ContentPredicate(contains_topviews).decode(decode),
 ];
 
 /// Institution URL prefixes and their Memorix image servers. Institution
@@ -228,7 +228,7 @@ fn follow_media(
     Ok(resource.follow_relative(asset))
 }
 
-fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
+fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
     let value: Value = serde_json::from_slice(bytes).map_err(|error| {
         DiscoveryError::Session(format!("unable to parse TopViewer metadata: {error}"))
     })?;
@@ -278,8 +278,7 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> 
         },
     )
     .map_err(|error| DiscoveryError::Session(format!("invalid TopViewer grid: {error}")))?;
-    Ok(DiscoveryCatalog::ready(
-        "topviewer",
+    Ok(ImagePlan::new(
         filepath.and_then(image_title),
         vec![ResolvedLevel::new(source)],
     ))

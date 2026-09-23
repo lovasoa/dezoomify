@@ -2,8 +2,8 @@
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
-    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ProcessingRecipe, Request, ResolvedLevel,
+    DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
+    DiscoveryStep, FormatSpec, Grid, ImagePlan, ProcessingRecipe, Request, ResolvedLevel,
 };
 use std::sync::Arc;
 use tile_info::{PageInfo, TileInfo};
@@ -47,10 +47,12 @@ fn parse_tile_information(
         .find_map(|source| source.parse::<PageInfo>().ok())
         .map(Arc::new)
         .ok_or_else(|| DiscoveryError::Session("Google Arts page metadata is missing".into()))?;
-    catalog(&page, resource.bytes()).map(DiscoveryStep::Complete)
+    decode(&page, resource.bytes())?
+        .compile("google_arts_and_culture")
+        .map(DiscoveryStep::Complete)
 }
 
-fn catalog(page: &Arc<PageInfo>, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
+fn decode(page: &Arc<PageInfo>, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
     let TileInfo {
         tile_width,
         tile_height,
@@ -59,7 +61,7 @@ fn catalog(page: &Arc<PageInfo>, bytes: &[u8]) -> Result<DiscoveryCatalog, Disco
     } = serde_xml_rs::from_reader(bytes).map_err(|error| {
         DiscoveryError::Session(format!("invalid Google Arts tile XML: {error}"))
     })?;
-    let mut levels: Vec<_> = pyramid_level
+    let levels: Vec<_> = pyramid_level
         .into_iter()
         .enumerate()
         .map(|(z, level)| {
@@ -88,17 +90,12 @@ fn catalog(page: &Arc<PageInfo>, bytes: &[u8]) -> Result<DiscoveryCatalog, Disco
             Ok(ResolvedLevel::new(source).with_title(Some(page.name.clone())))
         })
         .collect::<Result<Vec<_>, DiscoveryError>>()?;
-    levels.sort_by_key(|level| level.source.image_size().map_or(0, Vec2d::area));
-    Ok(DiscoveryCatalog::ready(
-        "google_arts_and_culture",
-        Some(page.name.clone()),
-        levels,
-    ))
+    Ok(ImagePlan::new(Some(page.name.clone()), levels))
 }
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{DiscoveredEntry, ResourceResponse, TileSource};
+    use crate::core::{DiscoveredEntry, DiscoveryCatalog, ResourceResponse, TileSource};
 
     fn fixture_catalog() -> DiscoveryCatalog {
         let mut registry = crate::core::Registry::new();
