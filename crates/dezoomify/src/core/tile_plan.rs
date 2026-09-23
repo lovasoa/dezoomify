@@ -628,6 +628,12 @@ impl From<AdaptiveSource> for TileSource {
     }
 }
 
+impl From<DiscoverableGrid> for TileSource {
+    fn from(value: DiscoverableGrid) -> Self {
+        Self::custom(value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
