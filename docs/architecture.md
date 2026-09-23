@@ -31,7 +31,9 @@ Catalog construction owns canonical level ordering, which freezes before
 publication; selection uses array positions. Formats compile conventional ready
 images through `ImagePlan`, which rejects images lacking both levels and warnings
 and tile counts beyond the engine's ordinal range before assigning the format
-identity. Regular non-overlapping levels use `ResolvedLevel::grid`; formats with
+identity. A metadata file that declares multiple images uses `CatalogPlan` to
+collect ready images or deferred image links; single-image formats never need
+that type. Regular non-overlapping levels use `ResolvedLevel::grid`; formats with
 overlap or unusual requests can supply a `Grid` directly. Padded grid tiles use
 positioned output backed by the same validated grid geometry. Public level
 geometry is derived from each tile program when the

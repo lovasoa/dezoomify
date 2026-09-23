@@ -1,12 +1,13 @@
 //! Pure discovery for text files containing deferred image URLs.
 
-use crate::core::{DiscoveredEntry, DiscoveryCatalog, DiscoveryError, DiscoveryMatch, FormatSpec};
+use crate::core::{CatalogPlan, DeferredResource, DiscoveryError, DiscoveryMatch, FormatSpec};
 
-pub const SPEC: FormatSpec = FormatSpec::new("bulk_text", &[DiscoveryMatch::Any.extract(catalog)])
-    .with_display_name("Bulk text")
-    .recognizing(is_bulk_file, "not a bulk URL-list file");
+pub const SPEC: FormatSpec =
+    FormatSpec::new("bulk_text", &[DiscoveryMatch::Any.catalog(decode_catalog)])
+        .with_display_name("Bulk text")
+        .recognizing(is_bulk_file, "not a bulk URL-list file");
 
-fn catalog(uri: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
+fn decode_catalog(uri: &str, bytes: &[u8]) -> Result<CatalogPlan, DiscoveryError> {
     let text = std::str::from_utf8(bytes).map_err(|error| {
         DiscoveryError::Session(format!("failed to parse bulk list as UTF-8: {error}"))
     })?;
@@ -16,9 +17,18 @@ fn catalog(uri: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> 
             "no valid URLs found in text file".into(),
         ));
     }
-    Ok(DiscoveryCatalog::new(images.into_iter().map(|image| {
-        DiscoveredEntry::deferred(image.uri, image.title, Vec::new())
+    Ok(CatalogPlan::deferred(images.into_iter().map(|image| {
+        DeferredResource {
+            uri: image.uri,
+            title: image.title,
+            warnings: Vec::new(),
+        }
     })))
+}
+
+#[cfg(test)]
+fn catalog(uri: &str, bytes: &[u8]) -> Result<crate::core::DiscoveryCatalog, DiscoveryError> {
+    decode_catalog(uri, bytes)?.compile("bulk_text")
 }
 
 fn is_bulk_file(uri: &str) -> bool {
@@ -118,7 +128,7 @@ fn validate_uri(input: &str, line: usize) -> Result<(), DiscoveryError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::DeferredResource;
+    use crate::core::{DiscoveredEntry, DiscoveryCatalog};
 
     fn complete(uri: &str, content: &str) -> Result<DiscoveryCatalog, DiscoveryError> {
         catalog(uri, content.as_bytes())

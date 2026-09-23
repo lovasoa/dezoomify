@@ -8,7 +8,7 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
+    CatalogPlan, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
     DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImagePlan, Request, ResolvedLevel,
 };
 use crate::json_utils::all_json;
@@ -37,7 +37,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryRoute::relative_capture(&DZI_LINK_RE, "url"),
     DiscoveryRoute::relative_capture(&DZI_ATTR_RE, "url"),
     DiscoveryMatch::ContentPredicate(has_iframe).then(follow_iframe),
-    DiscoveryMatch::Any.extract(load_catalog),
+    DiscoveryMatch::Any.catalog(decode_catalog),
 ];
 
 pub const SPEC: FormatSpec = FormatSpec::new("deepzoom", ROUTES)
@@ -203,7 +203,7 @@ fn follow_seadragon_embed(
 
 mod paris;
 
-fn load_catalog(url: &str, contents: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
+fn decode_catalog(url: &str, contents: &[u8]) -> Result<CatalogPlan, DiscoveryError> {
     let xml_result = serde_xml_rs::from_reader::<'_, DziFile, _>(contents);
     let xml_err = xml_result.as_ref().err().map(ToString::to_string);
     let parsed = xml_result
@@ -223,8 +223,8 @@ fn load_catalog(url: &str, contents: &[u8]) -> Result<DiscoveryCatalog, Discover
 fn catalog_from_dzi(
     url: &str,
     images: impl IntoIterator<Item = DziFile>,
-) -> Result<DiscoveryCatalog, DiscoveryError> {
-    let mut entries = Vec::new();
+) -> Result<CatalogPlan, DiscoveryError> {
+    let mut plans = Vec::new();
     for image in images {
         if image.tile_size == 0 {
             return Err(DiscoveryError::Session("invalid DZI zero tile size".into()));
@@ -270,15 +270,23 @@ fn catalog_from_dzi(
             .rsplit('/')
             .next()
             .map(|s| s.trim_end_matches("_files").to_owned());
-        entries.push(ImagePlan::new(title, levels).compile_entry("deepzoom")?);
+        plans.push(ImagePlan::new(title, levels));
     }
-    Ok(DiscoveryCatalog::new(entries))
+    Ok(CatalogPlan::images(plans))
+}
+
+#[cfg(test)]
+fn load_catalog(
+    url: &str,
+    contents: &[u8],
+) -> Result<crate::core::DiscoveryCatalog, DiscoveryError> {
+    decode_catalog(url, contents)?.compile("deepzoom")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{DiscoveredEntry, ResolvedImage, TileSource};
+    use crate::core::{DiscoveredEntry, DiscoveryCatalog, ResolvedImage, TileSource};
 
     fn ready_image(catalog: DiscoveryCatalog) -> ResolvedImage {
         match catalog.into_entries().pop().unwrap() {

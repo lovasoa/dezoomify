@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 use regex::bytes::Regex as BytesRegex;
 use serde::{Deserialize, Serialize};
 
-use super::model::{DiscoveryCatalog, ImagePlan, Request};
+use super::model::{CatalogPlan, DiscoveryCatalog, ImagePlan, Request};
 use super::tile_plan::TileSourceError;
 use super::uri::resolve_relative;
 
@@ -409,6 +409,7 @@ type RouteHandler = for<'a> fn(
     DiscoveryResource<'a>,
 ) -> Result<DiscoveryStep, DiscoveryError>;
 type CatalogExtractor = fn(&str, &[u8]) -> Result<DiscoveryCatalog, DiscoveryError>;
+type CatalogDecoder = fn(&str, &[u8]) -> Result<CatalogPlan, DiscoveryError>;
 type PlanDecoder = fn(&str, &[u8]) -> Result<ImagePlan, DiscoveryError>;
 type FailureHandler = for<'a> fn(
     &DiscoveryContext<'a>,
@@ -436,6 +437,10 @@ impl DiscoveryMatch {
     #[must_use]
     pub const fn extract(self, extractor: CatalogExtractor) -> DiscoveryRoute {
         self.route(RouteAction::Extract(extractor))
+    }
+    #[must_use]
+    pub const fn catalog(self, decoder: CatalogDecoder) -> DiscoveryRoute {
+        self.route(RouteAction::Catalog(decoder))
     }
     #[must_use]
     pub const fn decode(self, decoder: PlanDecoder) -> DiscoveryRoute {
@@ -532,6 +537,7 @@ impl DiscoveryRoute {
 enum RouteAction {
     Then(RouteHandler),
     Extract(CatalogExtractor),
+    Catalog(CatalogDecoder),
     Decode(PlanDecoder),
     MapUrl(UrlMapper),
     FollowCapture {
@@ -564,6 +570,9 @@ fn dispatch_resource(
             RouteAction::Extract(extractor) => {
                 extractor(resource.final_uri(), resource.bytes()).map(DiscoveryStep::Complete)
             }
+            RouteAction::Catalog(decoder) => decoder(resource.final_uri(), resource.bytes())
+                .and_then(|plan| plan.compile(format))
+                .map(DiscoveryStep::Complete),
             RouteAction::Decode(decoder) => decoder(resource.final_uri(), resource.bytes())
                 .and_then(|plan| plan.compile(format))
                 .map(DiscoveryStep::Complete),
