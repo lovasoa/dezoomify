@@ -481,9 +481,11 @@ impl DiscoveryRoute {
     ) -> Self {
         Self {
             matcher: DiscoveryMatch::ContentRegex(regex),
-            handler: RouteAction::FollowRelativeCapture {
+            handler: RouteAction::FollowCapture {
                 capture,
                 html_entities: false,
+                prefix: "",
+                suffix: "",
             },
         }
     }
@@ -496,9 +498,30 @@ impl DiscoveryRoute {
     ) -> Self {
         Self {
             matcher: DiscoveryMatch::ContentRegex(regex),
-            handler: RouteAction::FollowRelativeCapture {
+            handler: RouteAction::FollowCapture {
                 capture,
                 html_entities: true,
+                prefix: "",
+                suffix: "",
+            },
+        }
+    }
+
+    /// Insert a named regex capture into a resource URL.
+    #[must_use]
+    pub const fn capture_url(
+        regex: &'static LazyLock<BytesRegex>,
+        capture: &'static str,
+        prefix: &'static str,
+        suffix: &'static str,
+    ) -> Self {
+        Self {
+            matcher: DiscoveryMatch::ContentRegex(regex),
+            handler: RouteAction::FollowCapture {
+                capture,
+                html_entities: false,
+                prefix,
+                suffix,
             },
         }
     }
@@ -510,9 +533,11 @@ enum RouteAction {
     Extract(CatalogExtractor),
     Decode(PlanDecoder),
     MapUrl(UrlMapper),
-    FollowRelativeCapture {
+    FollowCapture {
         capture: &'static str,
         html_entities: bool,
+        prefix: &'static str,
+        suffix: &'static str,
     },
 }
 
@@ -541,9 +566,11 @@ fn dispatch_resource(
             RouteAction::Decode(decoder) => decoder(resource.final_uri(), resource.bytes())
                 .and_then(|plan| plan.compile(format))
                 .map(DiscoveryStep::Complete),
-            RouteAction::FollowRelativeCapture {
+            RouteAction::FollowCapture {
                 capture,
                 html_entities,
+                prefix,
+                suffix,
             } => {
                 let DiscoveryMatch::ContentRegex(regex) = route.matcher else {
                     unreachable!("capture routes require a regex matcher")
@@ -560,7 +587,7 @@ fn dispatch_resource(
                 } else {
                     link
                 };
-                Ok(resource.follow_relative(link.trim()))
+                Ok(resource.follow_relative(&format!("{prefix}{}{suffix}", link.trim())))
             }
             RouteAction::MapUrl(_) => continue,
         };
@@ -1227,6 +1254,13 @@ mod tests {
         DiscoveryRoute::html_relative_capture(&LINK_RE, "link"),
         DiscoveryMatch::Any.extract(catalog),
     ];
+    static ID_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+        BytesRegex::new(r#"id="(?P<id>[A-Za-z0-9]+)""#).expect("constant test ID pattern")
+    });
+    const FOLLOW_ID: &[DiscoveryRoute] = &[
+        DiscoveryRoute::capture_url(&ID_RE, "id", "https://tiles.test/", "/info.json"),
+        DiscoveryMatch::Any.extract(catalog),
+    ];
 
     fn provide(operation: &mut DiscoveryOperation, bytes: &[u8]) {
         let need = operation.missing_resources().unwrap().pop().unwrap();
@@ -1291,6 +1325,16 @@ mod tests {
             .provide(ResourceResponse::new(second.id, b"metadata"))
             .unwrap();
         assert!(operation.finish().unwrap().is_empty());
+    }
+
+    #[test]
+    fn captured_id_fills_a_resource_url() {
+        let mut registry = Registry::new();
+        registry.register(FormatSpec::new("capture-id", FOLLOW_ID));
+        let mut operation = registry.start("https://example.test/viewer");
+        provide(&mut operation, br#"<viewer id="Ab12">"#);
+        let next = operation.missing_resources().unwrap().pop().unwrap();
+        assert_eq!(next.request.uri, "https://tiles.test/Ab12/info.json");
     }
 
     #[test]

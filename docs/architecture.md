@@ -39,8 +39,8 @@ source-kind metadata; the public source variants remain a compatibility facade, 
 engine starts work without dispatching on those variants.
 Discovery handlers follow extracted references through `DiscoveryResource`,
 which resolves them against the post-redirect URI before issuing the next pure
-request. Named regex captures can use a shared route that resolves the link
-and optionally decodes HTML entities before following it.
+request. Named regex captures can use shared routes to resolve links, decode
+HTML entities, or fill a fixed resource URL before following it.
 
 #### `dezoomify::engine`
 

@@ -2,10 +2,7 @@ use std::sync::LazyLock;
 
 use regex::bytes::Regex as BytesRegex;
 
-use crate::core::{
-    DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
-    DiscoveryStep, Request,
-};
+use crate::core::{DiscoveryError, DiscoveryMatch, DiscoveryRoute, Request};
 
 static DEEPZOOM_MANIFEST: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(
@@ -16,7 +13,7 @@ static DEEPZOOM_MANIFEST: LazyLock<BytesRegex> = LazyLock::new(|| {
 
 pub(super) const ARK_ROUTE: DiscoveryRoute = DiscoveryMatch::UrlPredicate(is_ark).map_url(reader);
 pub(super) const MANIFEST_ROUTE: DiscoveryRoute =
-    DiscoveryMatch::ContentPredicate(contains_manifest).then(follow_manifest);
+    DiscoveryRoute::relative_capture(&DEEPZOOM_MANIFEST, "metadata");
 
 pub(super) fn prefers(uri: &str) -> bool {
     is_ark(uri)
@@ -41,24 +38,4 @@ pub(super) fn reader(uri: &str) -> Result<Request, DiscoveryError> {
     Ok(Request::new(format!(
         "https://bibliotheques-specialisees.paris.fr/in/imageReader.xhtml?id=ark:{prefix}&updateUrl=updateUrl1653&ark={ark}&selectedTab=otherdocs"
     )))
-}
-
-pub(super) fn contains_manifest(contents: &[u8]) -> bool {
-    DEEPZOOM_MANIFEST.is_match(contents)
-}
-
-pub(super) fn follow_manifest(
-    _: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
-    let metadata = DEEPZOOM_MANIFEST
-        .captures(resource.bytes())
-        .and_then(|captures| captures.name("metadata"))
-        .map(|capture| std::str::from_utf8(capture.as_bytes()))
-        .transpose()
-        .map_err(|_| DiscoveryError::Session("Paris Deep Zoom manifest URL is not UTF-8".into()))?
-        .ok_or_else(|| {
-            DiscoveryError::Session("Paris page lacks a Deep Zoom manifest URL".into())
-        })?;
-    Ok(resource.follow_relative(metadata))
 }
