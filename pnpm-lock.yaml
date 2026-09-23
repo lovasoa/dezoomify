@@ -110,8 +110,8 @@ importers:
   apps/desktop/tests/window-e2e:
     devDependencies:
       selenium-webdriver:
-        specifier: ^4.48.0
-        version: 4.48.0
+        specifier: ^4.49.0
+        version: 4.49.0
 
   apps/extension:
     dependencies:
@@ -162,8 +162,8 @@ importers:
         specifier: ^7.0.0
         version: 7.0.0
       selenium-webdriver:
-        specifier: ^4.48.0
-        version: 4.48.0
+        specifier: ^4.49.0
+        version: 4.49.0
 
   crates/fixture-server/tests/webapp-e2e:
     devDependencies:
@@ -1762,8 +1762,8 @@ packages:
   scule@1.3.0:
     resolution: {integrity: sha512-6FtHJEvt+pVMIB9IBY+IcCJ6Z5f1iQnytgyfKMhDKgmzYG+TeH/wx1y3l27rshSbLiSanrR9ffZDrEsmjlQF2g==}
 
-  selenium-webdriver@4.48.0:
-    resolution: {integrity: sha512-rKM9uXFRWcF9aThrZQDNQH2/9Et/WvMZbg3/x1rnSYWoXiwJuShYeH0IAli8Cuw+c3lEV0UWPfUz88H+fvW9Hg==}
+  selenium-webdriver@4.49.0:
+    resolution: {integrity: sha512-16XqeOEMj+4+p+pzLLyvNWmF5jCY05EKIl3e1anZBgv4+zq7PUTtiNjKtQhMpwosZ0wIMKDFAQ2xdyogOHD4DA==}
     engines: {node: '>= 22.0.0'}
 
   semver@7.8.5:
@@ -3226,7 +3226,7 @@ snapshots:
 
   scule@1.3.0: {}
 
-  selenium-webdriver@4.48.0:
+  selenium-webdriver@4.49.0:
     dependencies:
       '@bazel/runfiles': 6.5.0
       jszip: 3.10.2

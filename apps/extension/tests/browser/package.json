@@ -10,7 +10,7 @@
     "geckodriver": "^6.1.1",
     "playwright": "1.63.0",
     "pngjs": "^7.0.0",
-    "selenium-webdriver": "^4.48.0"
+    "selenium-webdriver": "^4.49.0"
   },
   "license": "GPL-3.0-or-later"
 }
