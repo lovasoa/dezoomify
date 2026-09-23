@@ -1,4 +1,4 @@
-//! Closed tile-source descriptions used by every zoom level.
+//! Tile-source descriptions used by every zoom level.
 
 use std::error::Error;
 use std::fmt;
@@ -535,7 +535,6 @@ impl CustomTileSource {
 pub enum TileSource {
     Grid(Grid),
     Positioned(Positioned),
-    DiscoverableGrid(DiscoverableGrid),
     Adaptive(AdaptiveSource),
     Custom(CustomTileSource),
 }
@@ -545,7 +544,6 @@ impl TileSource {
         match self {
             Self::Grid(program) => program,
             Self::Positioned(program) => program,
-            Self::DiscoverableGrid(program) => program,
             Self::Adaptive(program) => program,
             Self::Custom(program) => program.0.as_ref(),
         }
@@ -595,12 +593,6 @@ impl From<Grid> for TileSource {
 impl From<Positioned> for TileSource {
     fn from(value: Positioned) -> Self {
         Self::Positioned(value)
-    }
-}
-
-impl From<DiscoverableGrid> for TileSource {
-    fn from(value: DiscoverableGrid) -> Self {
-        Self::DiscoverableGrid(value)
     }
 }
 
