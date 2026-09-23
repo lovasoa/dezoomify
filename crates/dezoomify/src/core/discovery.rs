@@ -6,7 +6,9 @@
 
 use std::borrow::Cow;
 use std::fmt;
+use std::sync::LazyLock;
 
+use regex::bytes::Regex as BytesRegex;
 use serde::{Deserialize, Serialize};
 
 use super::model::{DiscoveryCatalog, ImagePlan, Request};
@@ -422,6 +424,7 @@ pub enum DiscoveryMatch {
     UrlSuffix(&'static str),
     UrlPredicate(UrlPredicate),
     ContentPredicate(ContentPredicate),
+    ContentRegex(&'static LazyLock<BytesRegex>),
 }
 
 impl DiscoveryMatch {
@@ -458,6 +461,7 @@ impl DiscoveryMatch {
                 .ends_with(suffix),
             Self::UrlPredicate(predicate) => predicate(uri),
             Self::ContentPredicate(predicate) => bytes.is_some_and(predicate),
+            Self::ContentRegex(regex) => bytes.is_some_and(|bytes| regex.is_match(bytes)),
         }
     }
 }
@@ -468,12 +472,48 @@ pub struct DiscoveryRoute {
     handler: RouteAction,
 }
 
+impl DiscoveryRoute {
+    /// Follow a named regex capture against the resource's final URI.
+    #[must_use]
+    pub const fn relative_capture(
+        regex: &'static LazyLock<BytesRegex>,
+        capture: &'static str,
+    ) -> Self {
+        Self {
+            matcher: DiscoveryMatch::ContentRegex(regex),
+            handler: RouteAction::FollowRelativeCapture {
+                capture,
+                html_entities: false,
+            },
+        }
+    }
+
+    /// Decode HTML entities before resolving an embedded link.
+    #[must_use]
+    pub const fn html_relative_capture(
+        regex: &'static LazyLock<BytesRegex>,
+        capture: &'static str,
+    ) -> Self {
+        Self {
+            matcher: DiscoveryMatch::ContentRegex(regex),
+            handler: RouteAction::FollowRelativeCapture {
+                capture,
+                html_entities: true,
+            },
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 enum RouteAction {
     Then(RouteHandler),
     Extract(CatalogExtractor),
     Decode(PlanDecoder),
     MapUrl(UrlMapper),
+    FollowRelativeCapture {
+        capture: &'static str,
+        html_entities: bool,
+    },
 }
 
 fn dispatch_resource(
@@ -501,6 +541,27 @@ fn dispatch_resource(
             RouteAction::Decode(decoder) => decoder(resource.final_uri(), resource.bytes())
                 .and_then(|plan| plan.compile(format))
                 .map(DiscoveryStep::Complete),
+            RouteAction::FollowRelativeCapture {
+                capture,
+                html_entities,
+            } => {
+                let DiscoveryMatch::ContentRegex(regex) = route.matcher else {
+                    unreachable!("capture routes require a regex matcher")
+                };
+                let link = regex
+                    .captures(resource.bytes())
+                    .and_then(|captures| captures.name(capture))
+                    .ok_or_else(|| {
+                        DiscoveryError::Session("resource has no matching link".into())
+                    })?;
+                let link = String::from_utf8_lossy(link.as_bytes());
+                let link = if html_entities {
+                    html_escape::decode_html_entities(&link)
+                } else {
+                    link
+                };
+                Ok(resource.follow_relative(link.trim()))
+            }
             RouteAction::MapUrl(_) => continue,
         };
     }
@@ -1170,6 +1231,13 @@ mod tests {
 
     const COMPLETE: &[DiscoveryRoute] = &[DiscoveryMatch::Any.extract(catalog)];
     const REJECT: &[DiscoveryRoute] = &[DiscoveryMatch::Any.then(reject)];
+    static LINK_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+        BytesRegex::new(r#"href="(?P<link>[^"]+)""#).expect("constant test link pattern")
+    });
+    const FOLLOW_CAPTURE: &[DiscoveryRoute] = &[
+        DiscoveryRoute::html_relative_capture(&LINK_RE, "link"),
+        DiscoveryMatch::Any.extract(catalog),
+    ];
 
     fn provide(operation: &mut DiscoveryOperation, bytes: &[u8]) {
         let need = operation.missing_resources().unwrap().pop().unwrap();
@@ -1211,6 +1279,29 @@ mod tests {
             image.title.as_deref(),
             Some("https://cdn.example.test/info.xml")
         );
+    }
+
+    #[test]
+    fn captured_links_resolve_after_redirects_and_decode_html_entities() {
+        let mut registry = Registry::new();
+        registry.register(FormatSpec::new("capture", FOLLOW_CAPTURE));
+        let mut operation = registry.start("https://example.test/old/page");
+        let first = operation.missing_resources().unwrap().pop().unwrap();
+        operation
+            .provide(
+                ResourceResponse::new(first.id, br#"<a href="tiles/one.xml?x=1&amp;y=2">"#)
+                    .with_final_uri("https://cdn.example.test/new/page"),
+            )
+            .unwrap();
+        let second = operation.missing_resources().unwrap().pop().unwrap();
+        assert_eq!(
+            second.request.uri,
+            "https://cdn.example.test/new/tiles/one.xml?x=1&y=2"
+        );
+        operation
+            .provide(ResourceResponse::new(second.id, b"metadata"))
+            .unwrap();
+        assert!(operation.finish().unwrap().is_empty());
     }
 
     #[test]

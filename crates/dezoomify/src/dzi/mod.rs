@@ -34,8 +34,8 @@ const ROUTES: &[DiscoveryRoute] = &[
     paris::MANIFEST_ROUTE,
     DiscoveryMatch::ContentPredicate(contains_seadragon_embed).then(follow_seadragon_embed),
     DiscoveryMatch::ContentPredicate(has_wdl_template).then(follow_wdl_template),
-    DiscoveryMatch::ContentPredicate(has_dzi_link).then(follow_dzi_link),
-    DiscoveryMatch::ContentPredicate(has_dzi_attribute).then(follow_dzi_attribute),
+    DiscoveryRoute::relative_capture(&DZI_LINK_RE, "url"),
+    DiscoveryRoute::relative_capture(&DZI_ATTR_RE, "url"),
     DiscoveryMatch::ContentPredicate(has_iframe).then(follow_iframe),
     DiscoveryMatch::Any.extract(load_catalog),
 ];
@@ -52,7 +52,7 @@ static POLONA_ITEM_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"polona\.pl/item/\d+/").expect("constant Polona item pattern"));
 
 static DZI_LINK_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r#"(?i)[^"'()<>]+\.(?:xml|dzi)"#).expect("constant DZI link pattern")
+    BytesRegex::new(r#"(?i)(?P<url>[^"'()<>]+\.(?:xml|dzi))"#).expect("constant DZI link pattern")
 });
 
 static DZI_ATTR_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
@@ -65,37 +65,6 @@ static WDL_TEMPLATE_RE: LazyLock<BytesRegex> =
 
 static WDL_VIEW_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"view/(\d+)/(\d+)").expect("constant WDL view pattern"));
-
-fn has_dzi_link(bytes: &[u8]) -> bool {
-    DZI_LINK_RE.is_match(bytes)
-}
-
-fn follow_dzi_link(
-    _: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
-    let link = DZI_LINK_RE
-        .find(resource.bytes())
-        .map(|capture| String::from_utf8_lossy(capture.as_bytes()).into_owned())
-        .ok_or_else(|| DiscoveryError::Session("page links no DZI metadata".into()))?;
-    Ok(resource.follow_relative(link.trim()))
-}
-
-fn has_dzi_attribute(bytes: &[u8]) -> bool {
-    DZI_ATTR_RE.is_match(bytes)
-}
-
-fn follow_dzi_attribute(
-    _: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
-    let url = DZI_ATTR_RE
-        .captures(resource.bytes())
-        .and_then(|captures| captures.name("url"))
-        .map(|capture| String::from_utf8_lossy(capture.as_bytes()).into_owned())
-        .ok_or_else(|| DiscoveryError::Session("page declares no DZI attribute URL".into()))?;
-    Ok(resource.follow_relative(url.trim()))
-}
 
 fn has_wdl_template(bytes: &[u8]) -> bool {
     bytes
