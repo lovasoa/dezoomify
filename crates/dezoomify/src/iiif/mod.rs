@@ -37,8 +37,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     micrio::ROUTE,
     DiscoveryMatch::ContentPredicate(national_gallery::contains_image)
         .then(national_gallery::follow_image),
-    DiscoveryMatch::ContentPredicate(philadelphia::contains_micrio)
-        .then(philadelphia::follow_micrio),
+    philadelphia::ROUTE,
     DiscoveryMatch::ContentPredicate(has_info_json_url).then(follow_info_json_url),
     DiscoveryMatch::Any.extract(catalog),
 ];
