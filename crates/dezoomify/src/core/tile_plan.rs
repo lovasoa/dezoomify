@@ -363,6 +363,12 @@ impl Positioned {
         }
     }
 
+    /// Keep grid placement, but leave decoded edge-tile sizes unspecified.
+    /// Padded tiles must be cropped at the canvas edge instead of scaled.
+    pub(crate) fn from_padded_grid(grid: Grid) -> Self {
+        Self::from_generator(Some(grid.image_size()), PaddedGrid { grid })
+    }
+
     #[must_use]
     pub const fn image_size(&self) -> Option<Vec2d> {
         self.canvas_size
@@ -379,6 +385,26 @@ impl Positioned {
             source: self.clone(),
             next: 0,
         }
+    }
+}
+
+#[derive(Debug)]
+struct PaddedGrid {
+    grid: Grid,
+}
+
+impl PositionedGenerator for PaddedGrid {
+    fn count(&self) -> u64 {
+        self.grid.count()
+    }
+
+    fn tile(&self, ordinal: u64) -> Result<PositionedTile, TileSourceError> {
+        let tile = self.grid.grid_tile(ordinal);
+        Ok(PositionedTile {
+            request: self.grid.requests.request(tile),
+            destination: tile.destination,
+            processing: self.grid.requests.processing(),
+        })
     }
 }
 

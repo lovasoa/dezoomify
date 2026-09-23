@@ -9,8 +9,7 @@ use url::Url;
 use crate::Vec2d;
 use crate::core::{
     DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
-    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImagePlan, Positioned, PositionedTile,
-    ProcessingRecipe, Request, ResolvedLevel, TileSourceError,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImagePlan, Positioned, Request, ResolvedLevel,
 };
 
 const ROUTES: &[DiscoveryRoute] = &[
@@ -159,80 +158,28 @@ fn build_levels(
                 x: image_size.x.div_ceil(downscale),
                 y: image_size.y.div_ceil(downscale),
             };
-            let validation_origin = Arc::clone(&origin);
-            let validation_pattern = Arc::clone(&pattern);
-            let validation = Grid::with_requests(
+            let tile_origin = Arc::clone(&origin);
+            let tile_pattern = Arc::clone(&pattern);
+            let grid = Grid::with_requests(
                 level_size,
                 Vec2d::square(gigapixel.tile),
                 Vec2d::default(),
                 move |tile| {
                     Request::new(format!(
-                        "{validation_origin}{validation_pattern}{level}_{}_{}.jpg",
+                        "{tile_origin}{tile_pattern}{level}_{}_{}.jpg",
                         tile.coord.column, tile.coord.row
                     ))
                 },
-            )
-            .map_err(|error| {
-                DiscoveryError::Session(format!("invalid Second Canvas grid: {error}"))
-            })?;
+            )?;
             // Second Canvas serves full-sized padded JPEGs for edge cells.
             // Keep their decoded size and let the declared canvas crop padding
             // instead of scaling edge pixels down in browser runtimes.
-            let source = Positioned::from_generator(
-                Some(level_size),
-                SecondCanvasTiles {
-                    origin: Arc::clone(&origin),
-                    pattern: Arc::clone(&pattern),
-                    level,
-                    tile_size: gigapixel.tile,
-                    shape: validation.shape(),
-                    count: validation.count(),
-                },
-            );
+            let source = Positioned::from_padded_grid(grid);
             Ok(ResolvedLevel::new(source)
                 .with_scale_factor(Some(downscale))
                 .with_title(Some(format!("Second Canvas level {level}"))))
         })
         .collect()
-}
-
-#[derive(Clone, Debug)]
-struct SecondCanvasTiles {
-    origin: Arc<str>,
-    pattern: Arc<str>,
-    level: u32,
-    tile_size: u32,
-    shape: Vec2d,
-    count: u64,
-}
-
-impl crate::core::tile_plan::PositionedGenerator for SecondCanvasTiles {
-    fn count(&self) -> u64 {
-        self.count
-    }
-
-    fn tile(&self, ordinal: u64) -> Result<PositionedTile, TileSourceError> {
-        let column = u32::try_from(ordinal % u64::from(self.shape.x))
-            .map_err(|_| TileSourceError::ArithmeticOverflow)?;
-        let row = u32::try_from(ordinal / u64::from(self.shape.x))
-            .map_err(|_| TileSourceError::ArithmeticOverflow)?;
-        let destination = Vec2d {
-            x: column
-                .checked_mul(self.tile_size)
-                .ok_or(TileSourceError::ArithmeticOverflow)?,
-            y: row
-                .checked_mul(self.tile_size)
-                .ok_or(TileSourceError::ArithmeticOverflow)?,
-        };
-        Ok(PositionedTile {
-            request: Request::new(format!(
-                "{}{}{}_{}_{}.jpg",
-                self.origin, self.pattern, self.level, column, row
-            )),
-            destination,
-            processing: ProcessingRecipe::None,
-        })
-    }
 }
 
 #[derive(Deserialize)]
@@ -399,6 +346,7 @@ mod tests {
         let last = tiles.tiles().last().unwrap().unwrap();
         assert_eq!(last.destination, Vec2d { x: 1024, y: 512 });
         assert_eq!(last.expected_size, None, "padded edge tiles are clipped");
+        assert!(last.request.headers.is_empty());
     }
 
     #[test]
