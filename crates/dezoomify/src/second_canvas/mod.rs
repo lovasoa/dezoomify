@@ -8,8 +8,8 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveredEntry, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, Positioned, PositionedTile,
+    DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImagePlan, Positioned, PositionedTile,
     ProcessingRecipe, Request, ResolvedLevel, TileSourceError,
 };
 
@@ -131,8 +131,7 @@ fn catalog(_: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
             let image_size = layer_size(gigapixel.size, normal_level, layer.level)?;
             let levels = build_levels(&gigapixel, &layer, image_size)?;
             let layer_title = layer.title();
-            Ok(DiscoveredEntry::ready(
-                "second_canvas",
+            ImagePlan::new(
                 document.title.clone().map(|title| {
                     if layer.is_normal() {
                         title
@@ -143,8 +142,8 @@ fn catalog(_: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
                     }
                 }),
                 levels,
-                Vec::new(),
-            ))
+            )
+            .compile_entry("second_canvas")
         })
         .collect::<Result<Vec<_>, DiscoveryError>>()?;
     Ok(DiscoveryCatalog::new(entries))
@@ -360,7 +359,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::TileSource;
+    use crate::core::{DiscoveredEntry, TileSource};
 
     fn fixture(name: &str) -> &'static [u8] {
         match name {
