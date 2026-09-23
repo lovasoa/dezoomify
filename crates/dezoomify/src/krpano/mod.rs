@@ -18,9 +18,9 @@ use crate::core::discovery::ResourceFailure;
 use crate::core::redact_uri;
 use crate::core::resolve_relative;
 use crate::core::{
-    DiscoveredEntry, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, GridRequests, GridTile,
-    Request, ResolvedLevel,
+    DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, GridRequests, GridTile, ImagePlan, Request,
+    ResolvedLevel,
 };
 use crate::krpano::krpano_metadata::{ImageInfo, LevelDesc};
 use crate::template::Template;
@@ -478,12 +478,11 @@ fn load_catalog(url: &str, contents: &[u8]) -> Result<DiscoveryCatalog, Discover
             }
         }
 
-        entries.push(DiscoveredEntry::ready(
-            "krpano",
-            image_title,
-            levels,
-            warnings,
-        ));
+        entries.push(
+            ImagePlan::new(image_title, levels)
+                .with_warnings(warnings)
+                .compile_entry("krpano")?,
+        );
     }
     if entries.is_empty() {
         return Err(DiscoveryError::Session(
@@ -550,6 +549,7 @@ impl GridRequests for KrpanoLevel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::DiscoveredEntry;
     use crate::core::discovery::{
         DiscoveryError, DiscoveryOperation, FetchCause, FetchCode, RejectionKind, ResourceFailure,
         ResourceNeed, TransportKind,
