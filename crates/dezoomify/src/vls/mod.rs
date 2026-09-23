@@ -7,7 +7,7 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveryCatalog, DiscoveryError, DiscoveryMatch, FormatSpec, Grid, Request, ResolvedLevel,
+    DiscoveryError, DiscoveryMatch, FormatSpec, Grid, ImagePlan, Request, ResolvedLevel,
 };
 use crate::web_page::page_title;
 
@@ -33,7 +33,7 @@ pub const SPEC: FormatSpec = FormatSpec::new(
     "vls",
     &[
         DiscoveryMatch::UrlPredicate(is_view_url).map_url(normalize_url),
-        DiscoveryMatch::Any.extract(catalog),
+        DiscoveryMatch::Any.decode(decode),
     ],
 )
 .recognizing(is_view_url, "not a VLS viewer URL")
@@ -51,7 +51,7 @@ fn normalize_url(uri: &str) -> Result<Request, DiscoveryError> {
     ))
 }
 
-fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
+fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
     let page = String::from_utf8_lossy(bytes);
     let map = MAP_RE
         .captures(&page)
@@ -99,8 +99,7 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> 
         move |tile| Request::new(format!("{base}/{}/{}", tile.coord.column, tile.coord.row)),
     )
     .map_err(|error| DiscoveryError::Session(format!("invalid VLS grid: {error}")))?;
-    Ok(DiscoveryCatalog::ready(
-        "vls",
+    Ok(ImagePlan::new(
         page_title(&page),
         vec![ResolvedLevel::new(source)],
     ))
@@ -121,7 +120,7 @@ fn positive_attribute(tag: &str, name: &str) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{catalog, normalize_url};
+    use super::{decode, normalize_url};
 
     #[test]
     fn viewer_path_normalization_is_case_insensitive() {
@@ -140,6 +139,6 @@ mod tests {
                 <var id="zoomTileSize" value="1024">"#,
             u32::MAX
         );
-        assert!(catalog("https://example.test/pageview/1", page.as_bytes()).is_err());
+        assert!(decode("https://example.test/pageview/1", page.as_bytes()).is_err());
     }
 }

@@ -155,6 +155,55 @@ impl ResolvedLevel {
     }
 }
 
+/// A decoded image before its format identity and public catalog are assigned.
+/// Format decoders supply only image data; publication is centralized here.
+pub struct ImagePlan {
+    pub title: Option<String>,
+    pub levels: Vec<ResolvedLevel>,
+    pub warnings: Vec<String>,
+}
+
+impl ImagePlan {
+    #[must_use]
+    pub fn new(title: Option<String>, levels: Vec<ResolvedLevel>) -> Self {
+        Self {
+            title,
+            levels,
+            warnings: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_warnings(mut self, warnings: Vec<String>) -> Self {
+        self.warnings = warnings;
+        self
+    }
+
+    pub fn compile(self, format: &'static str) -> Result<DiscoveryCatalog, DiscoveryError> {
+        if self.levels.is_empty() {
+            return Err(DiscoveryError::Session(format!(
+                "{format} image has no levels"
+            )));
+        }
+        if self.levels.iter().any(|level| {
+            level
+                .source
+                .count()
+                .is_some_and(|count| count > u64::from(u32::MAX))
+        }) {
+            return Err(DiscoveryError::Session(format!(
+                "{format} tile count exceeds supported ordinals"
+            )));
+        }
+        Ok(DiscoveryCatalog::ready_with_warnings(
+            format,
+            self.title,
+            self.levels,
+            self.warnings,
+        ))
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 #[doc(hidden)]
 pub struct ResolvedImage {
@@ -400,5 +449,24 @@ mod tests {
             image.levels[0].source.image_size(),
             Some(Vec2d::square(100))
         );
+    }
+
+    #[test]
+    fn image_plan_compiler_rejects_unusable_tile_ordinals() {
+        let oversized = Grid::new(
+            Vec2d::square(65_536),
+            Vec2d::square(1),
+            Vec2d::default(),
+            TestSource,
+        )
+        .unwrap();
+        assert!(
+            ImagePlan::new(None, vec![ResolvedLevel::new(oversized)])
+                .compile("test")
+                .unwrap_err()
+                .to_string()
+                .contains("tile count")
+        );
+        assert!(ImagePlan::new(None, Vec::new()).compile("test").is_err());
     }
 }

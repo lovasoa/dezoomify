@@ -9,7 +9,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use super::model::{DiscoveryCatalog, Request};
+use super::model::{DiscoveryCatalog, ImagePlan, Request};
 use super::uri::resolve_relative;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -406,6 +406,7 @@ type RouteHandler = for<'a> fn(
     DiscoveryResource<'a>,
 ) -> Result<DiscoveryStep, DiscoveryError>;
 type CatalogExtractor = fn(&str, &[u8]) -> Result<DiscoveryCatalog, DiscoveryError>;
+type PlanDecoder = fn(&str, &[u8]) -> Result<ImagePlan, DiscoveryError>;
 type FailureHandler = for<'a> fn(
     &DiscoveryContext<'a>,
     &'a Request,
@@ -431,6 +432,10 @@ impl DiscoveryMatch {
     #[must_use]
     pub const fn extract(self, extractor: CatalogExtractor) -> DiscoveryRoute {
         self.route(RouteAction::Extract(extractor))
+    }
+    #[must_use]
+    pub const fn decode(self, decoder: PlanDecoder) -> DiscoveryRoute {
+        self.route(RouteAction::Decode(decoder))
     }
     #[must_use]
     pub const fn map_url(self, mapper: UrlMapper) -> DiscoveryRoute {
@@ -467,10 +472,12 @@ pub struct DiscoveryRoute {
 enum RouteAction {
     Then(RouteHandler),
     Extract(CatalogExtractor),
+    Decode(PlanDecoder),
     MapUrl(UrlMapper),
 }
 
 fn dispatch_resource(
+    format: &'static str,
     routes: &[DiscoveryRoute],
     context: &DiscoveryContext<'_>,
     resource: DiscoveryResource<'_>,
@@ -491,6 +498,9 @@ fn dispatch_resource(
             RouteAction::Extract(extractor) => {
                 extractor(resource.final_uri(), resource.bytes()).map(DiscoveryStep::Complete)
             }
+            RouteAction::Decode(decoder) => decoder(resource.final_uri(), resource.bytes())
+                .and_then(|plan| plan.compile(format))
+                .map(DiscoveryStep::Complete),
             RouteAction::MapUrl(_) => continue,
         };
     }
@@ -1021,6 +1031,7 @@ impl DiscoveryOperation {
         };
         match outcome {
             ResourceOutcome::Response(response) => dispatch_resource(
+                candidate.spec.name,
                 routes,
                 &context,
                 DiscoveryResource {
