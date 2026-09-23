@@ -31,9 +31,9 @@ Catalog construction owns canonical level ordering, which freezes before
 publication; selection uses array positions. Formats compile conventional ready
 images through `ImagePlan`, which rejects empty images and tile counts beyond
 the engine's ordinal range before assigning the format identity. Grid, positioned,
-generic-template, and adaptive tile sources all implement one crate-private
-tile-program contract, including declared geometry and stable source-kind
-metadata; the public source variants remain a compatibility facade, and the
+generic-template, adaptive, and format-owned tile sources implement one
+crate-private tile-program contract, including declared geometry and stable
+source-kind metadata; the public source variants remain a compatibility facade, and the
 engine starts work without dispatching on those variants.
 Discovery handlers follow extracted references through `DiscoveryResource`,
 which resolves them against the post-redirect URI before issuing the next pure

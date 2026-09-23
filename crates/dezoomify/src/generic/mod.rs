@@ -1,7 +1,9 @@
 //! Generic URL-template discovery backed by core's executable adaptive plan.
 
 use crate::core::adaptive::is_generic_template;
-use crate::core::{DiscoverableGrid, DiscoveryError, FormatSpec, ImagePlan, ResolvedLevel};
+use crate::core::{
+    DiscoverableGrid, DiscoveryError, FormatSpec, ImagePlan, ResolvedLevel, TileSource,
+};
 
 pub const SPEC: FormatSpec = FormatSpec::immediate_plan("generic", decode)
     .with_display_name("Generic format")
@@ -11,8 +13,8 @@ pub const SPEC: FormatSpec = FormatSpec::immediate_plan("generic", decode)
 fn decode(template: &str) -> Result<ImagePlan, DiscoveryError> {
     Ok(ImagePlan::new(
         Some(template.to_owned()),
-        vec![ResolvedLevel::new(DiscoverableGrid::new(
-            template.to_owned(),
+        vec![ResolvedLevel::new(TileSource::custom(
+            DiscoverableGrid::new(template.to_owned()),
         ))],
     ))
 }
