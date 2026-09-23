@@ -1,5 +1,5 @@
 {
-  "description": "Extension follows tile redirects credential-free: every tile 307s to a signed URL and the job still assembles",
+  "description": "Extension follows signed-proxy redirects credential-free: the Zoomify metadata and every tile 307 to a signed URL and the job still assembles",
   "id": "extension/tile-redirect",
   "input": {
     "mode": "explicit",
