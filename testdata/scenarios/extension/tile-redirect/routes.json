@@ -1,10 +1,21 @@
 {
   "routes": [
     {
+      "route_id": "tile-redirect-metadata",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/redirect-tiles/ImageProperties.xml",
+      "status": 307,
+      "headers": {
+        "Location": "/fetch?url=https%3A%2F%2Ffixtures.test%2Fredirect-tiles%2Fsigned%2FImageProperties.xml%3Fv%3D2"
+      },
+      "payload": "payloads/fixtures.test/redirect-tiles/empty.txt"
+    },
+    {
       "route_id": "tile-redirect-0-0",
       "method": "GET",
       "host": "fixtures.test",
-      "path": "/redirect-tiles/pyramid_files/9/0_0.png",
+      "path": "/redirect-tiles/TileGroup0/0-0-0.jpg",
       "status": 307,
       "headers": {
         "Location": "/fetch?url=https%3A%2F%2Ffixtures.test%2Fredirect-tiles%2Fsigned%2F0_0.png%3Fv%3D2"
@@ -15,7 +26,7 @@
       "route_id": "tile-redirect-1-0",
       "method": "GET",
       "host": "fixtures.test",
-      "path": "/redirect-tiles/pyramid_files/9/1_0.png",
+      "path": "/redirect-tiles/TileGroup0/0-1-0.jpg",
       "status": 307,
       "headers": {
         "Location": "/fetch?url=https%3A%2F%2Ffixtures.test%2Fredirect-tiles%2Fsigned%2F1_0.png%3Fv%3D2"
@@ -26,7 +37,7 @@
       "route_id": "tile-redirect-0-1",
       "method": "GET",
       "host": "fixtures.test",
-      "path": "/redirect-tiles/pyramid_files/9/0_1.png",
+      "path": "/redirect-tiles/TileGroup0/0-0-1.jpg",
       "status": 307,
       "headers": {
         "Location": "/fetch?url=https%3A%2F%2Ffixtures.test%2Fredirect-tiles%2Fsigned%2F0_1.png%3Fv%3D2"
@@ -37,7 +48,7 @@
       "route_id": "tile-redirect-1-1",
       "method": "GET",
       "host": "fixtures.test",
-      "path": "/redirect-tiles/pyramid_files/9/1_1.png",
+      "path": "/redirect-tiles/TileGroup0/0-1-1.jpg",
       "status": 307,
       "headers": {
         "Location": "/fetch?url=https%3A%2F%2Ffixtures.test%2Fredirect-tiles%2Fsigned%2F1_1.png%3Fv%3D2"

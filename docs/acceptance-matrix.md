@@ -39,6 +39,7 @@ sites; `cargo xtask test live --public` stays opt-in and advisory.
 |---|---|---|
 | Metadata trace, deferred catalog, 403 handling | `testdata/scenarios/native/cli-deferred`, `testdata/scenarios/native/cli-deferred-limit`, `testdata/scenarios/web/iiif-discovery` | `cargo xtask test scenario`, `cargo xtask test web` |
 | Transient retry, timers, partial in-flight accounting | `testdata/scenarios/native/edge-throttle-429`, `testdata/scenarios/native/cli-partial-keep` | `cargo xtask test scenario` |
+| Signed-proxy redirects keep the requested tile base (metadata and per-tile 307) | `crates/dezoomify/src/zoomify` unit tests, `testdata/scenarios/extension/tile-redirect` | `cargo xtask test core`, `cargo xtask test extension` |
 | Permission-gated and display-only paths | `testdata/scenarios/extension/cookie-session`, `testdata/scenarios/web/assembly` | `cargo xtask test extension`, `cargo xtask test web` |
 | Protocol error terminals and handshake | `crates/dezoomify` model tests, `crates/dezoomify-wasm/tests/adapter.rs` terminal cases, `packages/wasm-harness/src/node.spec.mjs` | `cargo xtask test protocol`, `cargo xtask test wasm` |
 | Scheduling scales with bounded in-flight slots (1/4/16/64/256-tile plans) | `crates/dezoomify/tests/engine_checklist.rs` (acquisition scaling), `crates/dezoomify-native/tests/perf.rs` (pipeline scaling) | `cargo xtask test job`, `cargo xtask test perf` |
