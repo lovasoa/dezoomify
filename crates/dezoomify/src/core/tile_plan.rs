@@ -27,7 +27,7 @@ pub(crate) enum TileProgramStart {
 }
 
 /// Shared behavior implemented by every concrete tile program.
-trait TileProgram {
+pub(crate) trait TileProgram: fmt::Debug + Send + Sync {
     fn kind_name(&self) -> &'static str;
     fn image_size(&self) -> Option<Vec2d>;
     fn tile_size(&self) -> Option<Vec2d>;
@@ -521,12 +521,23 @@ impl TileProgram for AdaptiveSource {
     }
 }
 
+/// A format-owned program using the same contract as the shared sources.
+#[derive(Clone, Debug)]
+pub struct CustomTileSource(Arc<dyn TileProgram>);
+
+impl CustomTileSource {
+    pub(crate) fn new(program: impl TileProgram + 'static) -> Self {
+        Self(Arc::new(program))
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum TileSource {
     Grid(Grid),
     Positioned(Positioned),
     DiscoverableGrid(DiscoverableGrid),
     Adaptive(AdaptiveSource),
+    Custom(CustomTileSource),
 }
 
 impl TileSource {
@@ -536,7 +547,12 @@ impl TileSource {
             Self::Positioned(program) => program,
             Self::DiscoverableGrid(program) => program,
             Self::Adaptive(program) => program,
+            Self::Custom(program) => program.0.as_ref(),
         }
+    }
+
+    pub(crate) fn custom(program: impl TileProgram + 'static) -> Self {
+        Self::Custom(CustomTileSource::new(program))
     }
 
     pub(crate) fn start(&self) -> TileProgramStart {
@@ -597,6 +613,62 @@ impl From<AdaptiveSource> for TileSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Debug)]
+    struct OneTileProgram;
+
+    impl TileProgram for OneTileProgram {
+        fn kind_name(&self) -> &'static str {
+            "toy"
+        }
+
+        fn image_size(&self) -> Option<Vec2d> {
+            Some(Vec2d::square(2))
+        }
+
+        fn tile_size(&self) -> Option<Vec2d> {
+            Some(Vec2d::square(2))
+        }
+
+        fn overlap(&self) -> Option<Vec2d> {
+            Some(Vec2d::default())
+        }
+
+        fn count(&self) -> Option<u64> {
+            Some(1)
+        }
+
+        fn start(&self) -> TileProgramStart {
+            TileProgramStart::Planned {
+                tiles: Box::new(std::iter::once(Ok(TileSpec {
+                    ordinal: 0,
+                    request: Request::new("memory://toy"),
+                    destination: Vec2d::default(),
+                    expected_size: Some(Vec2d::square(2)),
+                    processing: ProcessingRecipe::None,
+                    role: TileRole::Output,
+                }))),
+                total: 1,
+                canvas: Some(Vec2d::square(2)),
+            }
+        }
+    }
+
+    #[test]
+    fn format_owned_program_uses_the_shared_start_contract() {
+        let source = TileSource::custom(OneTileProgram);
+        assert_eq!(source.kind_name(), "toy");
+        assert_eq!(source.image_size(), Some(Vec2d::square(2)));
+        let TileProgramStart::Planned {
+            mut tiles, total, ..
+        } = source.start()
+        else {
+            panic!("toy program should be planned")
+        };
+        assert_eq!(total, 1);
+        assert_eq!(tiles.next().unwrap().unwrap().request.uri, "memory://toy");
+        assert!(tiles.next().is_none());
+    }
 
     #[derive(Debug)]
     struct Requests;
