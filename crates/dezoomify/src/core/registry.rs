@@ -113,6 +113,45 @@ pub fn registry_for(name: &str) -> Option<Registry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Vec2d;
+    use crate::core::discovery::{DiscoveryMatch, ResourceResponse};
+    use crate::core::{DiscoveredEntry, ImagePlan, Request, ResolvedLevel, TileSource};
+
+    #[test]
+    fn a_regular_format_needs_only_a_decoder_and_tile_address() {
+        fn decode(_: &str, bytes: &[u8]) -> Result<ImagePlan, super::super::DiscoveryError> {
+            let width = u32::from(*bytes.first().unwrap());
+            let level = ResolvedLevel::grid(Vec2d { x: width, y: 2 }, Vec2d::square(2), |tile| {
+                Request::new(format!(
+                    "memory://tile/{}/{}",
+                    tile.coord.column, tile.coord.row
+                ))
+            })?;
+            Ok(ImagePlan::new(Some("Toy image".into()), vec![level]))
+        }
+
+        const TOY: FormatSpec = FormatSpec::new("toy", &[DiscoveryMatch::Any.decode(decode)]);
+        let mut registry = Registry::new();
+        registry.register(TOY);
+        let mut operation = registry.start("memory://metadata");
+        let resource = operation.missing_resources().unwrap().remove(0);
+        operation
+            .provide(ResourceResponse::new(resource.id, [4]))
+            .unwrap();
+        let catalog = operation.finish().unwrap();
+        let [DiscoveredEntry::Ready(image)] = catalog.entries() else {
+            panic!("toy decoder must publish an image")
+        };
+        assert_eq!(image.format, "toy");
+        let TileSource::Grid(grid) = &image.levels[0].source else {
+            panic!("toy level must be a grid")
+        };
+        assert_eq!(grid.count(), 2);
+        assert_eq!(
+            grid.tiles_row_major().last().unwrap().unwrap().request.uri,
+            "memory://tile/1/0"
+        );
+    }
 
     #[test]
     fn registry_snapshot_lists_ids_and_display_names() {
