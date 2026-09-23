@@ -9,8 +9,9 @@ use crate::Vec2d;
 use crate::core::{
     AdaptiveProgram, AdaptiveSource, DiscoverableStep, DiscoveredEntry, DiscoveryCatalog,
     DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
-    DiscoveryStep, FormatSpec, Grid, GridRequests, GridTile, ObservationResult, ProbeContinuation,
-    Request, ResolvedLevel, TileRole, TileSourceError, TileSpec, resolve_relative,
+    DiscoveryStep, FormatSpec, Grid, GridRequests, GridTile, ImagePlan, ObservationResult,
+    ProbeContinuation, Request, ResolvedLevel, TileRole, TileSourceError, TileSpec,
+    resolve_relative,
 };
 use crate::iiif::tile_info::TileSizeFormat;
 use crate::json_utils::all_json;
@@ -316,9 +317,9 @@ fn catalog_from_info(url: &str, raw_info: &[u8]) -> Result<DiscoveryCatalog, Dis
             }
         }
     }
-    Ok(DiscoveryCatalog::ready_with_warnings(
-        "iiif", None, levels, warnings,
-    ))
+    ImagePlan::new(None, levels)
+        .with_warnings(warnings)
+        .compile("iiif")
 }
 
 fn manifest_type_warning(contents: &[u8]) -> Option<String> {

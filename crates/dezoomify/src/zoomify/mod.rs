@@ -13,8 +13,8 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveredEntry, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, Request, ResolvedLevel, resolve_relative,
+    DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryRoute,
+    DiscoveryStep, FormatSpec, Grid, ImagePlan, Request, ResolvedLevel, resolve_relative,
 };
 
 mod image_properties;
@@ -256,17 +256,11 @@ fn extract_inline_catalog(
             tile_size: service.tile_size,
             num_tiles: pyramid_tile_count(service.width, service.height, service.tile_size),
         };
-        let mut produced = catalog_from_properties(&service.tiles_url, &properties)
-            .map_err(|_| DiscoveryError::Session("invalid inline Zoomify geometry".into()))?
-            .into_entries();
-        match produced.pop() {
-            Some(DiscoveredEntry::Ready(image)) => entries.push(DiscoveredEntry::Ready(image)),
-            _ => {
-                return Err(DiscoveryError::Session(
-                    "invalid inline Zoomify geometry".into(),
-                ));
-            }
-        }
+        entries.push(
+            plan_from_properties(&service.tiles_url, &properties)
+                .and_then(|plan| plan.compile_entry("zoomify"))
+                .map_err(|_| DiscoveryError::Session("invalid inline Zoomify geometry".into()))?,
+        );
     }
     Ok(DiscoveryStep::Complete(DiscoveryCatalog::new(entries)))
 }
@@ -490,16 +484,17 @@ fn load_catalog(url: &str, contents: &[u8]) -> Result<DiscoveryCatalog, Discover
             "Zoomify XML must declare positive WIDTH, HEIGHT, and TILESIZE values".into(),
         ));
     }
-    catalog_from_properties(
+    plan_from_properties(
         url.split("/ImageProperties.xml").next().unwrap_or(url),
         &properties,
-    )
+    )?
+    .compile("zoomify")
 }
 
-fn catalog_from_properties(
+fn plan_from_properties(
     base_url: &str,
     properties: &ImageProperties,
-) -> Result<DiscoveryCatalog, DiscoveryError> {
+) -> Result<ImagePlan, DiscoveryError> {
     let base_url: Arc<str> = base_url.into();
     let base_name = base_url
         .trim_end_matches('/')
@@ -542,16 +537,14 @@ fn catalog_from_properties(
         .next()
         .filter(|name| !name.is_empty())
         .map(str::to_owned);
-    Ok(DiscoveryCatalog::ready_with_warnings(
-        "zoomify", title, levels, warnings,
-    ))
+    Ok(ImagePlan::new(title, levels).with_warnings(warnings))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::discovery::DiscoveryOperation;
-    use crate::core::{ResolvedImage, ResourceResponse, TileSource};
+    use crate::core::{DiscoveredEntry, ResolvedImage, ResourceResponse, TileSource};
 
     const XML: &[u8] = br#"<IMAGE_PROPERTIES WIDTH="512" HEIGHT="256" NUMTILES="2" NUMIMAGES="1" VERSION="1.8" TILESIZE="256"/>"#;
 
