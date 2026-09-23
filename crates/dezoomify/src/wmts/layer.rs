@@ -15,9 +15,7 @@ use super::tilematrix::{
 };
 use super::tilematrix::{METRES_PER_PIXEL, count_between};
 use crate::Vec2d;
-use crate::core::{
-    DiscoveryError, Grid, Request, ResolvedLevel, floor_index, resolve_url_template,
-};
+use crate::core::{DiscoveryError, Request, ResolvedLevel, floor_index, resolve_url_template};
 
 pub(crate) struct WmtsContext {
     pub(crate) layer_name: String,
@@ -175,13 +173,12 @@ pub(crate) fn build_levels(context: &WmtsContext) -> Result<Vec<ResolvedLevel>, 
             let matrix_set = context.matrix_set_name.clone();
             let matrix_identifier = matrix.identifier.clone();
             let style = context.style.clone();
-            let source = Grid::with_requests(
+            let level = ResolvedLevel::grid(
                 Vec2d {
                     x: width,
                     y: height,
                 },
                 matrix.tile_size,
-                Vec2d::default(),
                 move |tile| {
                     render_template(
                         &template,
@@ -192,10 +189,8 @@ pub(crate) fn build_levels(context: &WmtsContext) -> Result<Vec<ResolvedLevel>, 
                         min_row + tile.coord.row,
                     )
                 },
-            )
-            .map_err(|error| DiscoveryError::Session(format!("invalid WMTS grid: {error}")))?;
-            Ok(ResolvedLevel::new(source)
-                .with_title(Some(format!("WMTS matrix {}", matrix.identifier))))
+            )?;
+            Ok(level.with_title(Some(format!("WMTS matrix {}", matrix.identifier))))
         })
         .collect()
 }

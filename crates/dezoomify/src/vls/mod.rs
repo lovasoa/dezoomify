@@ -6,9 +6,7 @@ use regex::Regex;
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::{
-    DiscoveryError, DiscoveryMatch, FormatSpec, Grid, ImagePlan, Request, ResolvedLevel,
-};
+use crate::core::{DiscoveryError, DiscoveryMatch, FormatSpec, ImagePlan, Request, ResolvedLevel};
 use crate::web_page::page_title;
 
 static VIEW_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -89,20 +87,15 @@ fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
     base.set_query(None);
     base.set_fragment(None);
     let base: Arc<str> = base.to_string().trim_end_matches('/').into();
-    let source = Grid::with_requests(
+    let level = ResolvedLevel::grid(
         Vec2d {
             x: width,
             y: height,
         },
         Vec2d::square(1024),
-        Vec2d::default(),
         move |tile| Request::new(format!("{base}/{}/{}", tile.coord.column, tile.coord.row)),
-    )
-    .map_err(|error| DiscoveryError::Session(format!("invalid VLS grid: {error}")))?;
-    Ok(ImagePlan::new(
-        page_title(&page),
-        vec![ResolvedLevel::new(source)],
-    ))
+    )?;
+    Ok(ImagePlan::new(page_title(&page), vec![level]))
 }
 
 fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {

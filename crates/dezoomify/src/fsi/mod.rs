@@ -7,8 +7,7 @@ use regex::Regex;
 use crate::Vec2d;
 use crate::core::{
     DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
-    DiscoveryStep, FormatSpec, Grid, ImagePlan, Request, ResolvedLevel, image_title,
-    resolve_relative,
+    DiscoveryStep, FormatSpec, ImagePlan, Request, ResolvedLevel, image_title, resolve_relative,
 };
 
 static SOURCE_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -87,13 +86,12 @@ fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
         .map_or(url, |(origin, _)| origin)
         .to_owned();
     let title = image_title(&source);
-    let source = Grid::with_requests(
+    let level = ResolvedLevel::grid(
         Vec2d {
             x: width,
             y: height,
         },
         Vec2d::square(512),
-        Vec2d::default(),
         move |tile| {
             let position = Vec2d {
                 x: tile.coord.column * 512,
@@ -113,9 +111,8 @@ fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
                 ratio(size.y, height),
             ))
         },
-    )
-    .map_err(|error| DiscoveryError::Session(format!("invalid FSI grid: {error}")))?;
-    Ok(ImagePlan::new(title, vec![ResolvedLevel::new(source)]))
+    )?;
+    Ok(ImagePlan::new(title, vec![level]))
 }
 
 fn number(regex: &Regex, bytes: &[u8], name: &str) -> Result<u32, DiscoveryError> {

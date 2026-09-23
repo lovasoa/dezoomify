@@ -10,7 +10,7 @@ use url::Url;
 use crate::Vec2d;
 use crate::core::{
     DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
-    DiscoveryStep, FormatSpec, Grid, ImagePlan, Request, ResolvedLevel, image_title,
+    DiscoveryStep, FormatSpec, ImagePlan, Request, ResolvedLevel, image_title,
 };
 
 static LAYER_URL_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -135,23 +135,18 @@ fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
     let origin: Arc<str> = origin.into();
     let tile_path: Arc<str> = path.clone().into();
     let zoom = max_zoom(metadata.width.max(metadata.height), 512);
-    let source = Grid::with_requests(
+    let level = ResolvedLevel::grid(
         Vec2d {
             x: metadata.width,
             y: metadata.height,
         },
         Vec2d::square(512),
-        Vec2d::default(),
         move |tile| {
             let hash = tile_hash(tile.coord.column, tile.coord.row, zoom, &tile_path);
             Request::new(format!("{origin}{hash}"))
         },
-    )
-    .map_err(|error| DiscoveryError::Session(format!("invalid Hungaricana grid: {error}")))?;
-    Ok(ImagePlan::new(
-        image_title(&path),
-        vec![ResolvedLevel::new(source)],
-    ))
+    )?;
+    Ok(ImagePlan::new(image_title(&path), vec![level]))
 }
 
 #[derive(Debug, Deserialize)]

@@ -8,7 +8,7 @@ use crate::model::{
 };
 
 use super::discovery::DiscoveryError;
-use super::tile_plan::TileSource;
+use super::tile_plan::{Grid, GridTile, TileSource, TileSourceError};
 
 /// One portable resource description, used for both metadata and tiles.
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -89,6 +89,21 @@ impl ResolvedLevel {
             source,
             warnings: Vec::new(),
         }
+    }
+
+    /// A regular, non-overlapping level. Formats with overlap, custom tile
+    /// placement, or observation can still supply their own tile program.
+    pub fn grid(
+        image_size: Vec2d,
+        tile_size: Vec2d,
+        request: impl Fn(GridTile) -> Request + Send + Sync + 'static,
+    ) -> Result<Self, TileSourceError> {
+        Ok(Self::new(Grid::with_requests(
+            image_size,
+            tile_size,
+            Vec2d::default(),
+            request,
+        )?))
     }
 
     #[must_use]

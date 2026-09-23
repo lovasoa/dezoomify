@@ -12,6 +12,7 @@ use regex::bytes::Regex as BytesRegex;
 use serde::{Deserialize, Serialize};
 
 use super::model::{DiscoveryCatalog, ImagePlan, Request};
+use super::tile_plan::TileSourceError;
 use super::uri::resolve_relative;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -748,6 +749,12 @@ pub enum DiscoveryError {
     Session(String),
     TransitionLimitExceeded,
     MetadataSizeLimitExceeded,
+}
+
+impl From<TileSourceError> for DiscoveryError {
+    fn from(error: TileSourceError) -> Self {
+        Self::Session(format!("invalid tile grid: {error}"))
+    }
 }
 
 impl DiscoveryError {

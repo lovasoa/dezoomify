@@ -4,9 +4,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use crate::Vec2d;
-use crate::core::{
-    DiscoveryError, DiscoveryMatch, FormatSpec, Grid, ImagePlan, Request, ResolvedLevel,
-};
+use crate::core::{DiscoveryError, DiscoveryMatch, FormatSpec, ImagePlan, Request, ResolvedLevel};
 
 const META: &str = "&OBJ=Max-size&OBJ=Tile-size&OBJ=Resolution-number";
 
@@ -49,12 +47,10 @@ fn decode(uri: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
             let reverse = metadata.levels - index - 1;
             let size = metadata.size / 2_u32.pow(reverse);
             let base = Arc::clone(&base);
-            let source =
-                Grid::with_requests(size, metadata.tile_size, Vec2d::default(), move |tile| {
-                    Request::new(format!("{base}&JTL={index},{}", tile.row_major_ordinal))
-                })
-                .map_err(|error| DiscoveryError::Session(format!("invalid IIP grid: {error}")))?;
-            Ok(ResolvedLevel::new(source).with_title(Some(format!("IIP level {index}"))))
+            Ok(ResolvedLevel::grid(size, metadata.tile_size, move |tile| {
+                Request::new(format!("{base}&JTL={index},{}", tile.row_major_ordinal))
+            })?
+            .with_title(Some(format!("IIP level {index}"))))
         })
         .collect::<Result<Vec<_>, DiscoveryError>>()?;
     Ok(ImagePlan::new(None, levels))
