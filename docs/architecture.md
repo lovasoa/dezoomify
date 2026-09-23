@@ -45,6 +45,15 @@ which resolves them against the post-redirect URI before issuing the next pure
 request. Named regex captures can use shared routes to resolve links, decode
 HTML entities, or fill a fixed resource URL before following it.
 
+To add a conventional format, define one `FormatSpec` with a metadata decoder,
+return an `ImagePlan` whose levels use `ResolvedLevel::grid`, and register the
+spec in `core::registry`. The decoder supplies image dimensions and a tile
+request function; catalog identity, ordering, geometry, and validation belong
+to the shared compiler. Compose discovery routes for multi-resource formats.
+Formats with overlap, padded tiles, probes, or custom placement keep that
+behavior in their tile program while using the same plan and registry.
+The small format in `core::registry` tests exercises this path end to end.
+
 #### `dezoomify::engine`
 
 Pure state machine: owns discovery, selection, planning, acquisition, recovery choices, and finalization. Hosts send typed commands and carry out the effects it emits. It keeps no routing identifiers; integrations keep opaque job tokens outside it. See [Job engine](job-engine.md).
