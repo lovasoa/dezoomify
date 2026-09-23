@@ -48,6 +48,7 @@ pub mod model;
 pub mod engine;
 
 mod json_utils;
+mod markup;
 mod template;
 mod web_page;
 

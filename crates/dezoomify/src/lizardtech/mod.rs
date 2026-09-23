@@ -9,6 +9,7 @@ use crate::Vec2d;
 use crate::core::{
     DiscoveryError, DiscoveryMatch, FormatSpec, ImagePlan, Request, ResolvedLevel, image_title,
 };
+use crate::markup::attribute;
 
 static SERVER_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?is)<ImageServer\b([^>]*)>").expect("constant LizardTech server pattern")
@@ -23,11 +24,6 @@ static PARAMETER_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?is)<Parameter\b([^>]*)>(.*?)</Parameter>")
         .expect("constant LizardTech parameter pattern")
 });
-static ATTRIBUTE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)([A-Za-z_:][A-Za-z0-9_.:-]*)\s*=\s*[\"']([^\"']*)[\"']"#)
-        .expect("constant XML attribute pattern")
-});
-
 pub const SPEC: FormatSpec = FormatSpec::new("lizardtech", &[DiscoveryMatch::Any.decode(decode)])
     .with_display_name("LizardTech ImageServer")
     .recognizing(is_lizardtech_url, "not a LizardTech ImageServer URL")
@@ -151,13 +147,6 @@ fn build_levels(
             ))))
         })
         .collect()
-}
-
-fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
-    ATTRIBUTE_RE.captures_iter(tag).find_map(|captures| {
-        (captures.get(1)?.as_str().eq_ignore_ascii_case(name))
-            .then(|| captures.get(2).expect("attribute value capture").as_str())
-    })
 }
 
 fn parameter(xml: &str, name: &str) -> Option<String> {

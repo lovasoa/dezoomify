@@ -5,17 +5,13 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use crate::core::{DiscoveryContext, DiscoveryError, DiscoveryResource, DiscoveryStep};
+use crate::markup::attribute;
 
 static META_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?is)<meta\b[^>]*>").expect("constant meta tag pattern"));
 static TITLE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?is)<title\b[^>]*>([^<]*)</title>").expect("constant title pattern")
 });
-static ATTRIBUTE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)([A-Za-z_:][A-Za-z0-9_.:-]*)\s*=\s*["']([^"']*)["']"#)
-        .expect("constant attribute pattern")
-});
-
 static IFRAME_RE: LazyLock<regex::bytes::Regex> = LazyLock::new(|| {
     regex::bytes::Regex::new(r#"(?i)<iframe[^>]*\bsrc\s*=\s*["'](?P<src>[^"']*)"#)
         .expect("constant iframe source pattern")
@@ -76,13 +72,6 @@ pub fn page_title(page: &str) -> Option<String> {
                 (!title.is_empty()).then(|| title.to_owned())
             })
         })
-}
-
-fn attribute<'a>(tag: &'a str, wanted: &str) -> Option<&'a str> {
-    ATTRIBUTE_RE.captures_iter(tag).find_map(|captures| {
-        (captures.get(1)?.as_str().eq_ignore_ascii_case(wanted))
-            .then(|| captures.get(2).expect("attribute value capture").as_str())
-    })
 }
 
 /// Replace the HTML entities found in `text` by the characters they encode.

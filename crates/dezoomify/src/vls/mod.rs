@@ -7,6 +7,7 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{DiscoveryError, DiscoveryMatch, FormatSpec, ImagePlan, Request, ResolvedLevel};
+use crate::markup::attribute;
 use crate::web_page::page_title;
 
 static VIEW_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -22,11 +23,6 @@ static MAP_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?is)<(?:map|div)\b([^>]*\bid\s*=\s*[\"']map[\"'][^>]*)>"#)
         .expect("constant VLS map pattern")
 });
-static ATTRIBUTE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)([A-Za-z_:][A-Za-z0-9_.:-]*)\s*=\s*[\"']([^\"']*)[\"']"#)
-        .expect("constant VLS attribute pattern")
-});
-
 pub const SPEC: FormatSpec = FormatSpec::new(
     "vls",
     &[
@@ -96,13 +92,6 @@ fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
         move |tile| Request::new(format!("{base}/{}/{}", tile.coord.column, tile.coord.row)),
     )?;
     Ok(ImagePlan::new(page_title(&page), vec![level]))
-}
-
-fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
-    ATTRIBUTE_RE.captures_iter(tag).find_map(|captures| {
-        (captures.get(1)?.as_str().eq_ignore_ascii_case(name))
-            .then(|| captures.get(2).expect("attribute value capture").as_str())
-    })
 }
 
 fn positive_attribute(tag: &str, name: &str) -> Option<u32> {
