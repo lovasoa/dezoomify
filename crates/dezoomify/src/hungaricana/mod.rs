@@ -9,8 +9,8 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
-    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, Request, ResolvedLevel, image_title,
+    DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
+    DiscoveryStep, FormatSpec, Grid, ImagePlan, Request, ResolvedLevel, image_title,
 };
 
 static LAYER_URL_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -27,9 +27,9 @@ static FILES_ARRAY_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 const ROUTES: &[DiscoveryRoute] = &[
-    DiscoveryMatch::UrlPredicate(is_ecw_url).extract(catalog),
+    DiscoveryMatch::UrlPredicate(is_ecw_url).decode(decode),
     DiscoveryMatch::ContentPredicate(contains_layer).then(follow_layer),
-    DiscoveryMatch::Any.extract(catalog),
+    DiscoveryMatch::Any.decode(decode),
 ];
 
 pub const SPEC: FormatSpec = FormatSpec::new("hungaricana", ROUTES)
@@ -111,7 +111,7 @@ fn image_index(uri: &str) -> usize {
         .unwrap_or(0)
 }
 
-fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
+fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
     let metadata: Metadata = serde_json::from_slice(bytes).map_err(|error| {
         DiscoveryError::Session(format!(
             "unable to parse Hungaricana image metadata: {error}"
@@ -148,8 +148,7 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> 
         },
     )
     .map_err(|error| DiscoveryError::Session(format!("invalid Hungaricana grid: {error}")))?;
-    Ok(DiscoveryCatalog::ready(
-        "hungaricana",
+    Ok(ImagePlan::new(
         image_title(&path),
         vec![ResolvedLevel::new(source)],
     ))
