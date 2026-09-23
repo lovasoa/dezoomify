@@ -29,8 +29,9 @@ anything and touches no network, filesystem, clock, UI, or codecs. Formats
 register in one ordered registry; registry order sets automatic precedence.
 Catalog construction owns canonical level ordering, which freezes before
 publication; selection uses array positions. Formats compile conventional ready
-images through `ImagePlan`, which rejects empty images and tile counts beyond
-the engine's ordinal range before assigning the format identity. Grid, positioned,
+images through `ImagePlan`, which rejects images lacking both levels and warnings
+and tile counts beyond the engine's ordinal range before assigning the format
+identity. Grid, positioned,
 generic-template, adaptive, and format-owned tile sources implement one
 crate-private tile-program contract, including declared geometry and stable
 source-kind metadata; the public source variants remain a compatibility facade, and the

@@ -180,7 +180,7 @@ impl ImagePlan {
     }
 
     pub fn compile_entry(self, format: &'static str) -> Result<DiscoveredEntry, DiscoveryError> {
-        if self.levels.is_empty() {
+        if self.levels.is_empty() && self.warnings.is_empty() {
             return Err(DiscoveryError::Session(format!(
                 "{format} image has no levels"
             )));
@@ -195,12 +195,12 @@ impl ImagePlan {
                 "{format} tile count exceeds supported ordinals"
             )));
         }
-        Ok(DiscoveredEntry::ready(
+        Ok(DiscoveredEntry::Ready(ResolvedImage {
+            title: self.title,
             format,
-            self.title,
-            self.levels,
-            self.warnings,
-        ))
+            levels: self.levels,
+            warnings: self.warnings,
+        }))
     }
 
     pub fn compile(self, format: &'static str) -> Result<DiscoveryCatalog, DiscoveryError> {
@@ -234,22 +234,6 @@ pub enum DiscoveredEntry {
 }
 
 impl DiscoveredEntry {
-    /// Compile one format-owned image plan into a ready catalog entry.
-    #[must_use]
-    pub fn ready(
-        format: &'static str,
-        title: Option<String>,
-        levels: Vec<ResolvedLevel>,
-        warnings: Vec<String>,
-    ) -> Self {
-        Self::Ready(ResolvedImage {
-            title,
-            format,
-            levels,
-            warnings,
-        })
-    }
-
     /// Compile one deferred resource into a catalog entry.
     #[must_use]
     pub fn deferred(uri: impl Into<String>, title: Option<String>, warnings: Vec<String>) -> Self {
@@ -297,25 +281,6 @@ impl DiscoveryCatalog {
             }
         }
         Self(entries)
-    }
-
-    /// Compile one ready image into a catalog using the canonical image-plan
-    /// shape. Formats supply identity, optional title, and their level
-    /// programs; catalog publication owns the remaining defaults.
-    #[must_use]
-    pub fn ready(format: &'static str, title: Option<String>, levels: Vec<ResolvedLevel>) -> Self {
-        Self::ready_with_warnings(format, title, levels, Vec::new())
-    }
-
-    /// Compile one ready image whose decoder produced image-wide warnings.
-    #[must_use]
-    pub fn ready_with_warnings(
-        format: &'static str,
-        title: Option<String>,
-        levels: Vec<ResolvedLevel>,
-        warnings: Vec<String>,
-    ) -> Self {
-        Self::new([DiscoveredEntry::ready(format, title, levels, warnings)])
     }
 
     /// Canonical public catalog paired with this catalog's private tile
@@ -472,5 +437,14 @@ mod tests {
                 .contains("tile count")
         );
         assert!(ImagePlan::new(None, Vec::new()).compile("test").is_err());
+        let diagnostics_only = ImagePlan::new(None, Vec::new())
+            .with_warnings(vec!["invalid scene".into()])
+            .compile("test")
+            .unwrap();
+        let DiscoveredEntry::Ready(image) = &diagnostics_only.entries()[0] else {
+            unreachable!()
+        };
+        assert!(image.levels.is_empty());
+        assert_eq!(image.warnings, ["invalid scene"]);
     }
 }
