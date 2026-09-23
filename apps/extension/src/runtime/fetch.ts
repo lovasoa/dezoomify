@@ -104,13 +104,11 @@ export function asFetchFailure(error: unknown): HostFailure {
             ? "TRANSPORT_POLICY_DENIED"
             : category === "network"
               ? "TRANSPORT_NETWORK_ERROR"
-              : category === "redirect-unavailable"
-                ? "TRANSPORT_BAD_REDIRECT"
-                : category === "limit-exceeded"
-                  ? "TRANSPORT_SIZE_LIMIT"
-                  : category === "malformed"
-                    ? "TRANSPORT_BAD_URL"
-                    : "DISCOVERY_FAILED";
+              : category === "limit-exceeded"
+                ? "TRANSPORT_SIZE_LIMIT"
+                : category === "malformed"
+                  ? "TRANSPORT_BAD_URL"
+                  : "DISCOVERY_FAILED";
   return {
     code,
     retryable: category === "network" || category === "throttled",

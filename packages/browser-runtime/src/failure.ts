@@ -87,7 +87,6 @@ export function blockedReason(value: unknown): BlockedReason | undefined {
     case "protocol-version":
     case "redirect-limit":
     case "redirect-target":
-    case "redirect-unavailable":
     case "scheme":
     case "signed-query":
     case "source-document-lost":
