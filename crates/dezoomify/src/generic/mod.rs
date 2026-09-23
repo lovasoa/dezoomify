@@ -1,21 +1,20 @@
 //! Generic URL-template discovery backed by core's executable adaptive plan.
 
 use crate::core::adaptive::is_generic_template;
-use crate::core::{DiscoverableGrid, DiscoveryCatalog, FormatSpec, ResolvedLevel};
+use crate::core::{DiscoverableGrid, DiscoveryError, FormatSpec, ImagePlan, ResolvedLevel};
 
-pub const SPEC: FormatSpec = FormatSpec::immediate("generic", |template| Ok(catalog(template)))
+pub const SPEC: FormatSpec = FormatSpec::immediate_plan("generic", decode)
     .with_display_name("Generic format")
     .recognizing(is_generic_template, "not a generic X/Y tile template")
     .preferring(|uri| uri.contains("{{"));
 
-fn catalog(template: &str) -> DiscoveryCatalog {
-    DiscoveryCatalog::ready(
-        "generic",
+fn decode(template: &str) -> Result<ImagePlan, DiscoveryError> {
+    Ok(ImagePlan::new(
         Some(template.to_owned()),
         vec![ResolvedLevel::new(DiscoverableGrid::new(
             template.to_owned(),
         ))],
-    )
+    ))
 }
 
 #[test]

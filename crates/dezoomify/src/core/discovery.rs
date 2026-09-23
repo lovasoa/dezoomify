@@ -524,6 +524,7 @@ fn map_url(routes: &[DiscoveryRoute], request: Request) -> Result<Request, Disco
 #[derive(Clone, Copy, Debug)]
 enum DiscoveryProgram {
     Immediate(fn(&str) -> Result<DiscoveryCatalog, DiscoveryError>),
+    ImmediatePlan(fn(&str) -> Result<ImagePlan, DiscoveryError>),
     Rules(&'static [DiscoveryRoute], Option<FailureHandler>),
 }
 
@@ -548,6 +549,13 @@ impl FormatSpec {
         complete: fn(&str) -> Result<DiscoveryCatalog, DiscoveryError>,
     ) -> Self {
         Self::from_program(name, DiscoveryProgram::Immediate(complete))
+    }
+    #[must_use]
+    pub const fn immediate_plan(
+        name: &'static str,
+        decode: fn(&str) -> Result<ImagePlan, DiscoveryError>,
+    ) -> Self {
+        Self::from_program(name, DiscoveryProgram::ImmediatePlan(decode))
     }
     #[must_use]
     pub const fn on_failure(mut self, handler: FailureHandler) -> Self {
@@ -993,6 +1001,9 @@ impl DiscoveryOperation {
                 DiscoveryProgram::Immediate(complete) => {
                     complete(&self.input).map(DiscoveryStep::Complete)
                 }
+                DiscoveryProgram::ImmediatePlan(decode) => decode(&self.input)?
+                    .compile(candidate.spec.name)
+                    .map(DiscoveryStep::Complete),
                 DiscoveryProgram::Rules(..) => {
                     Ok(DiscoveryStep::Follow(Request::new(self.input.clone())))
                 }
@@ -1060,7 +1071,7 @@ impl DiscoveryOperation {
             DiscoveryStep::Follow(request) => {
                 let request = match self.candidates[index].spec.program {
                     DiscoveryProgram::Rules(routes, ..) => map_url(routes, request)?,
-                    DiscoveryProgram::Immediate(_) => request,
+                    DiscoveryProgram::Immediate(_) | DiscoveryProgram::ImmediatePlan(_) => request,
                 };
                 let Some(id) = self.register_request(request) else {
                     self.reject_candidate(
