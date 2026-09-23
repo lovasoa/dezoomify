@@ -7,9 +7,9 @@ use serde::Deserialize;
 
 use crate::Vec2d;
 use crate::core::{
-    AdaptiveProgram, AdaptiveSource, DiscoverableStep, DiscoveryCatalog, DiscoveryContext,
-    DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec,
-    Grid, ObservationResult, ProbeContinuation, Request, ResolvedLevel, TileRole, TileSourceError,
+    AdaptiveProgram, AdaptiveSource, DiscoverableStep, DiscoveryContext, DiscoveryError,
+    DiscoveryMatch, DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImagePlan,
+    ObservationResult, ProbeContinuation, Request, ResolvedLevel, TileRole, TileSourceError,
     TileSpec, resolve_relative,
 };
 use crate::web_page::page_title;
@@ -116,11 +116,9 @@ fn complete_from_json(
         width: metadata.width,
         height: metadata.height,
     });
-    Ok(DiscoveryStep::Complete(DiscoveryCatalog::ready(
-        "pnav",
-        title,
-        vec![ResolvedLevel::new(source)],
-    )))
+    ImagePlan::new(title, vec![ResolvedLevel::new(source)])
+        .compile("pnav")
+        .map(DiscoveryStep::Complete)
 }
 
 fn json_url(image: &str) -> Result<String, DiscoveryError> {

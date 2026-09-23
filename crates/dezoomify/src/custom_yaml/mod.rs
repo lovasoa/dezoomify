@@ -6,8 +6,8 @@ use serde::Deserialize;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveryCatalog, DiscoveryError, DiscoveryMatch, FormatSpec, Positioned, ProcessingRecipe,
-    Request, ResolvedLevel, TileSourceError,
+    DiscoveryError, DiscoveryMatch, FormatSpec, ImagePlan, Positioned, ProcessingRecipe, Request,
+    ResolvedLevel, TileSourceError,
 };
 use crate::default_headers;
 use crate::model::Header;
@@ -15,7 +15,7 @@ use crate::model::Header;
 mod tile_set;
 mod variable;
 
-pub const SPEC: FormatSpec = FormatSpec::new("custom", &[DiscoveryMatch::Any.extract(catalog)])
+pub const SPEC: FormatSpec = FormatSpec::new("custom", &[DiscoveryMatch::Any.decode(decode)])
     .with_display_name("Custom tiles")
     .recognizing(is_tiles_yaml, "not a tiles.yaml file")
     .preferring(is_tiles_yaml);
@@ -26,8 +26,8 @@ fn is_tiles_yaml(uri: &str) -> bool {
         .is_some_and(|path| path.ends_with("tiles.yaml"))
 }
 
-fn catalog(_: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
-    catalog_from_yaml(bytes)
+fn decode(_: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
+    decode_yaml(bytes)
 }
 
 #[derive(Deserialize)]
@@ -41,7 +41,7 @@ struct CustomYamlTiles {
     height: Option<u32>,
 }
 
-fn catalog_from_yaml(bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
+fn decode_yaml(bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
     let yaml: CustomYamlTiles = serde_yaml::from_slice(bytes)
         .map_err(|error| DiscoveryError::Session(format!("invalid tiles.yaml: {error}")))?;
     let mut headers: Vec<_> = yaml
@@ -54,8 +54,7 @@ fn catalog_from_yaml(bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
         .len()
         .map_err(|error| DiscoveryError::Session(format!("invalid tiles.yaml: {error}")))?;
     let size = yaml.width.zip(yaml.height).map(|(x, y)| Vec2d { x, y });
-    Ok(DiscoveryCatalog::ready(
-        "custom",
+    Ok(ImagePlan::new(
         yaml.title,
         vec![ResolvedLevel::new(Positioned::from_generator(
             size,
@@ -65,6 +64,11 @@ fn catalog_from_yaml(bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
             },
         ))],
     ))
+}
+
+#[cfg(test)]
+fn catalog_from_yaml(bytes: &[u8]) -> Result<crate::core::DiscoveryCatalog, DiscoveryError> {
+    decode_yaml(bytes)?.compile("custom")
 }
 
 #[derive(Clone, Debug)]

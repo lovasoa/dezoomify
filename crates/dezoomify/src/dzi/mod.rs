@@ -8,9 +8,8 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveredEntry, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImagePlan, Request,
-    ResolvedLevel,
+    DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImagePlan, Request, ResolvedLevel,
 };
 use crate::json_utils::all_json;
 
@@ -310,7 +309,7 @@ fn catalog_from_dzi(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{ResolvedImage, TileSource};
+    use crate::core::{DiscoveredEntry, ResolvedImage, TileSource};
 
     fn ready_image(catalog: DiscoveryCatalog) -> ResolvedImage {
         match catalog.into_entries().pop().unwrap() {
