@@ -1,6 +1,7 @@
 //! Source-level dependency-direction checks for the consolidated pure crate.
 #![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -56,4 +57,49 @@ fn engine_uses_the_shared_tile_program_contract() {
         !source.contains("TileSource::"),
         "the engine must start tile work through TileProgramStart, not concrete source variants"
     );
+}
+
+#[test]
+fn every_rust_source_is_in_the_module_tree() {
+    let root = Path::new("src");
+    let mut all = Vec::new();
+    rust_files(root, &mut all);
+    let all: BTreeSet<_> = all.into_iter().collect();
+    let mut reachable = BTreeSet::new();
+    let mut pending = vec![root.join("lib.rs")];
+
+    while let Some(path) = pending.pop() {
+        assert!(
+            all.contains(&path),
+            "missing module source: {}",
+            path.display()
+        );
+        if !reachable.insert(path.clone()) {
+            continue;
+        }
+        let source = fs::read_to_string(&path).expect("read module source");
+        let module_dir = if matches!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some("lib.rs" | "mod.rs")
+        ) {
+            path.parent().expect("module has a parent").to_path_buf()
+        } else {
+            path.with_extension("")
+        };
+        for line in source.lines().map(str::trim) {
+            let declaration = line
+                .strip_prefix("pub(crate) mod ")
+                .or_else(|| line.strip_prefix("pub(super) mod "))
+                .or_else(|| line.strip_prefix("pub mod "))
+                .or_else(|| line.strip_prefix("mod "));
+            let Some(name) = declaration.and_then(|value| value.strip_suffix(';')) else {
+                continue;
+            };
+            let file = module_dir.join(format!("{name}.rs"));
+            let nested = module_dir.join(name).join("mod.rs");
+            pending.push(if file.exists() { file } else { nested });
+        }
+    }
+
+    assert_eq!(reachable, all, "Rust source is unreachable from lib.rs");
 }
