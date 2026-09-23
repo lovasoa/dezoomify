@@ -368,7 +368,7 @@ fn levels_from_info(url: &str, mut image_info: ImageInfo) -> Result<Vec<Resolved
     let tiles = img.tiles();
     let base_url: Arc<str> = service_base_url(url).into();
 
-    let mut levels: Vec<_> = tiles
+    let levels: Vec<_> = tiles
         .iter()
         .enumerate()
         .flat_map(|(tile_ordinal, tile_info)| {
@@ -440,7 +440,6 @@ fn levels_from_info(url: &str, mut image_info: ImageInfo) -> Result<Vec<Resolved
             })
         })
         .collect::<Result<Vec<_>, IIIFError>>()?;
-    levels.sort_by_key(|level| level.source.image_size().map_or(0, Vec2d::area));
     Ok(levels)
 }
 

@@ -44,7 +44,7 @@ fn metadata_url(input: &str) -> Result<Request, DiscoveryError> {
 fn decode(uri: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
     let metadata = Arc::new(Metadata::try_from(bytes)?);
     let base: Arc<str> = uri.trim_end_matches(META).into();
-    let mut levels: Vec<_> = (0..metadata.levels)
+    let levels: Vec<_> = (0..metadata.levels)
         .map(|index| {
             let reverse = metadata.levels - index - 1;
             let size = metadata.size / 2_u32.pow(reverse);
@@ -57,7 +57,6 @@ fn decode(uri: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
             Ok(ResolvedLevel::new(source).with_title(Some(format!("IIP level {index}"))))
         })
         .collect::<Result<Vec<_>, DiscoveryError>>()?;
-    levels.sort_by_key(|level| level.source.image_size().map_or(0, Vec2d::area));
     Ok(ImagePlan::new(None, levels))
 }
 
