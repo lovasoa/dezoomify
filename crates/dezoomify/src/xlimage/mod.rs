@@ -6,13 +6,13 @@ use serde::Deserialize;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveryCatalog, DiscoveryError, DiscoveryMatch, DiscoveryRoute, FormatSpec, Grid, Request,
+    DiscoveryError, DiscoveryMatch, DiscoveryRoute, FormatSpec, Grid, ImagePlan, Request,
     ResolvedLevel,
 };
 
 const INFO_QUERY: &str = "cmd=info";
 
-const ROUTES: &[DiscoveryRoute] = &[DiscoveryMatch::Any.extract(catalog)];
+const ROUTES: &[DiscoveryRoute] = &[DiscoveryMatch::Any.decode(decode)];
 
 pub const SPEC: FormatSpec = FormatSpec::new("xlimage", ROUTES)
     .with_display_name("XLimage")
@@ -38,7 +38,7 @@ fn image_origin(url: &str) -> String {
         .to_owned()
 }
 
-fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
+fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
     let metadata: Metadata = serde_xml_rs::from_reader(bytes).map_err(|error| {
         DiscoveryError::Session(format!("unable to parse XLimage metadata: {error}"))
     })?;
@@ -55,7 +55,7 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> 
     let levels = build_levels(&metadata, &origin)?;
     let title = image_title(&origin);
 
-    Ok(DiscoveryCatalog::ready("xlimage", title, levels))
+    Ok(ImagePlan::new(title, levels))
 }
 
 fn image_title(origin: &str) -> Option<String> {

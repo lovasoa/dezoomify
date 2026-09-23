@@ -23,8 +23,8 @@ pub use discovery::{
 pub use discovery::{RequestId, ResourceResponse};
 pub(crate) use model::floor_index;
 pub use model::{
-    DeferredResource, DiscoveredEntry, DiscoveryCatalog, ProcessingRecipe, Request, ResolvedImage,
-    ResolvedLevel, TileRole, TileSpec,
+    DeferredResource, DiscoveredEntry, DiscoveryCatalog, ImagePlan, ProcessingRecipe, Request,
+    ResolvedImage, ResolvedLevel, TileRole, TileSpec,
 };
 pub use processing::ProcessingError;
 pub use registry::{Registry, builtin_names, default_registry, registry_for};
