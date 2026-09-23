@@ -12,16 +12,12 @@ use crate::core::{
     ObservationResult, ProbeContinuation, Request, ResolvedLevel, TileRole, TileSourceError,
     TileSpec, resolve_relative,
 };
+use crate::markup::attribute;
 use crate::web_page::page_title;
 
 const TILE_SIZE: u32 = 512;
 static META_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?is)<meta\b[^>]*>").expect("constant pnav meta tag pattern"));
-static ATTRIBUTE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)([A-Za-z_:][A-Za-z0-9_.:-]*)\s*=\s*[\"']([^\"']*)[\"']"#)
-        .expect("constant pnav attribute pattern")
-});
-
 const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::ContentPredicate(contains_image_meta).then(follow_image_json),
     DiscoveryMatch::UrlPredicate(is_image_json).then(complete_from_json),
@@ -134,13 +130,6 @@ fn json_url(image: &str) -> Result<String, DiscoveryError> {
     Ok(format!("{}.json{suffix}", &path[..dot]))
 }
 
-fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
-    ATTRIBUTE_RE.captures_iter(tag).find_map(|captures| {
-        (captures.get(1)?.as_str().eq_ignore_ascii_case(name))
-            .then(|| captures.get(2).expect("attribute value capture").as_str())
-    })
-}
-
 #[derive(Clone, Debug)]
 struct PnavProgram {
     image_url: String,
@@ -156,7 +145,7 @@ impl AdaptiveProgram for PnavProgram {
             request: Request::new(program.probe_url()),
             destination: Vec2d::default(),
             expected_size: None,
-            processing: dezoomify_processing_none(),
+            processing: crate::core::ProcessingRecipe::None,
             role: TileRole::ProbeAndOutput,
         };
         DiscoverableStep::Probe {
@@ -237,10 +226,6 @@ fn rounded_scale(value: u32, natural_size: u32) -> Result<u32, TileSourceError> 
 
 fn scaled_ceil(value: u32, natural_size: u32) -> u32 {
     value.saturating_mul(natural_size).div_ceil(TILE_SIZE)
-}
-
-fn dezoomify_processing_none() -> crate::core::ProcessingRecipe {
-    crate::core::ProcessingRecipe::None
 }
 
 #[derive(Debug, Deserialize)]
