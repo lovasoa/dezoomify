@@ -207,6 +207,39 @@ impl ImagePlan {
     }
 }
 
+enum CatalogItem {
+    Image(ImagePlan),
+    Deferred(DeferredResource),
+}
+
+/// A metadata file that declares several images or deferred image links.
+/// Single-image formats return `ImagePlan` directly and need no catalog code.
+pub struct CatalogPlan(Vec<CatalogItem>);
+
+impl CatalogPlan {
+    #[must_use]
+    pub fn images(images: impl IntoIterator<Item = ImagePlan>) -> Self {
+        Self(images.into_iter().map(CatalogItem::Image).collect())
+    }
+
+    #[must_use]
+    pub fn deferred(resources: impl IntoIterator<Item = DeferredResource>) -> Self {
+        Self(resources.into_iter().map(CatalogItem::Deferred).collect())
+    }
+
+    pub fn compile(self, format: &'static str) -> Result<DiscoveryCatalog, DiscoveryError> {
+        let entries = self
+            .0
+            .into_iter()
+            .map(|entry| match entry {
+                CatalogItem::Image(plan) => plan.compile_entry(format),
+                CatalogItem::Deferred(resource) => Ok(DiscoveredEntry::Deferred(resource)),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(DiscoveryCatalog::new(entries))
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 #[doc(hidden)]
 pub struct ResolvedImage {

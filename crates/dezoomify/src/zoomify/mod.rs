@@ -13,8 +13,8 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryRoute,
-    DiscoveryStep, FormatSpec, ImagePlan, Request, ResolvedLevel, resolve_relative,
+    CatalogPlan, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, ImagePlan, Request, ResolvedLevel, resolve_relative,
 };
 
 mod image_properties;
@@ -248,7 +248,7 @@ fn extract_inline_catalog(
             "Zoomify viewer page declares no inline image geometry".into(),
         ));
     }
-    let mut entries = Vec::with_capacity(services.len());
+    let mut images = Vec::with_capacity(services.len());
     for service in &services {
         let properties = ImageProperties {
             width: service.width,
@@ -256,13 +256,15 @@ fn extract_inline_catalog(
             tile_size: service.tile_size,
             num_tiles: pyramid_tile_count(service.width, service.height, service.tile_size),
         };
-        entries.push(
+        images.push(
             plan_from_properties(&service.tiles_url, &properties)
-                .and_then(|plan| plan.compile_entry("zoomify"))
                 .map_err(|_| DiscoveryError::Session("invalid inline Zoomify geometry".into()))?,
         );
     }
-    Ok(DiscoveryStep::Complete(DiscoveryCatalog::new(entries)))
+    let catalog = CatalogPlan::images(images)
+        .compile("zoomify")
+        .map_err(|_| DiscoveryError::Session("invalid inline Zoomify geometry".into()))?;
+    Ok(DiscoveryStep::Complete(catalog))
 }
 
 fn extract_catalog(

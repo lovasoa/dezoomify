@@ -7,14 +7,17 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    AdaptiveProgram, AdaptiveSource, DiscoverableStep, DiscoveredEntry, DiscoveryCatalog,
-    DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
-    DiscoveryStep, FormatSpec, Grid, GridRequests, GridTile, ImagePlan, ObservationResult,
-    ProbeContinuation, Request, ResolvedLevel, TileRole, TileSourceError, TileSpec,
-    resolve_relative,
+    AdaptiveProgram, AdaptiveSource, CatalogPlan, DeferredResource, DiscoverableStep,
+    DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, GridRequests, GridTile, ImagePlan,
+    ObservationResult, ProbeContinuation, Request, ResolvedLevel, TileRole, TileSourceError,
+    TileSpec, resolve_relative,
 };
 use crate::iiif::tile_info::TileSizeFormat;
 use crate::json_utils::all_json;
+
+#[cfg(test)]
+use crate::core::DiscoveredEntry;
 
 mod contentdm;
 pub mod manifest_types;
@@ -250,7 +253,7 @@ fn catalog(uri: &str, contents: &[u8]) -> Result<DiscoveryCatalog, DiscoveryErro
                 // This is clearly a manifest, try parsing it as such
                 match parse_iiif_manifest_from_bytes(contents, uri) {
                     Ok(image_infos) if !image_infos.is_empty() => {
-                        return Ok(catalog_from_manifest_info(image_infos, None));
+                        return catalog_from_manifest_info(image_infos, None).compile("iiif");
                     }
                     Ok(_) => {
                         // Empty image_infos, fall through to heuristic approach
@@ -279,7 +282,7 @@ fn catalog(uri: &str, contents: &[u8]) -> Result<DiscoveryCatalog, DiscoveryErro
     match parse_iiif_manifest_from_bytes(contents, uri) {
         Ok(image_infos) if !image_infos.is_empty() => {
             // Successfully parsed as manifest with images
-            Ok(catalog_from_manifest_info(image_infos, manifest_warning))
+            catalog_from_manifest_info(image_infos, manifest_warning).compile("iiif")
         }
         _ => {
             // Not a manifest or failed to parse as manifest, try as info.json
@@ -294,16 +297,17 @@ fn catalog(uri: &str, contents: &[u8]) -> Result<DiscoveryCatalog, DiscoveryErro
 fn catalog_from_manifest_info(
     image_infos: Vec<manifest_types::ExtractedImageInfo>,
     warning: Option<String>,
-) -> DiscoveryCatalog {
+) -> CatalogPlan {
     let warnings: Vec<String> = warning.into_iter().collect();
-    let entries: Vec<_> = image_infos
-        .into_iter()
-        .map(|image_info| {
-            let title = determine_title(&image_info);
-            DiscoveredEntry::deferred(image_info.image_uri, title, warnings.clone())
-        })
-        .collect();
-    DiscoveryCatalog::new(entries)
+    let resources = image_infos.into_iter().map(|image_info| {
+        let title = determine_title(&image_info);
+        DeferredResource {
+            uri: image_info.image_uri,
+            title,
+            warnings: warnings.clone(),
+        }
+    });
+    CatalogPlan::deferred(resources)
 }
 
 fn catalog_from_info(url: &str, raw_info: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {

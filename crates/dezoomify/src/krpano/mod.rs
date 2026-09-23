@@ -18,9 +18,9 @@ use crate::core::discovery::ResourceFailure;
 use crate::core::redact_uri;
 use crate::core::resolve_relative;
 use crate::core::{
-    DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
-    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, GridRequests, GridTile, ImagePlan, Request,
-    ResolvedLevel,
+    CatalogPlan, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch,
+    DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, GridRequests, GridTile,
+    ImagePlan, Request, ResolvedLevel,
 };
 use crate::krpano::krpano_metadata::{ImageInfo, LevelDesc};
 use crate::template::Template;
@@ -422,10 +422,14 @@ fn is_common_non_viewer_script(value: &str) -> bool {
 }
 
 fn load_catalog(url: &str, contents: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
+    decode_catalog(url, contents)?.compile("krpano")
+}
+
+fn decode_catalog(url: &str, contents: &[u8]) -> Result<CatalogPlan, DiscoveryError> {
     let metadata = KrpanoMetadata::from_bytes(contents)
         .map_err(|error| DiscoveryError::Session(format!("unable to parse krpano XML: {error}")))?;
     let global_title = metadata.get_title().unwrap_or_default().to_owned();
-    let mut entries = Vec::new();
+    let mut images = Vec::new();
 
     for ImageInfo { image, name } in metadata.into_image_iter() {
         let root_tile_size = image.tilesize.map(Vec2d::square);
@@ -478,18 +482,14 @@ fn load_catalog(url: &str, contents: &[u8]) -> Result<DiscoveryCatalog, Discover
             }
         }
 
-        entries.push(
-            ImagePlan::new(image_title, levels)
-                .with_warnings(warnings)
-                .compile_entry("krpano")?,
-        );
+        images.push(ImagePlan::new(image_title, levels).with_warnings(warnings));
     }
-    if entries.is_empty() {
+    if images.is_empty() {
         return Err(DiscoveryError::Session(
             "krpano XML contains no tiled images".into(),
         ));
     }
-    Ok(DiscoveryCatalog::new(entries))
+    Ok(CatalogPlan::images(images))
 }
 
 fn joined_nonempty<'a>(parts: impl IntoIterator<Item = &'a str>) -> Option<String> {

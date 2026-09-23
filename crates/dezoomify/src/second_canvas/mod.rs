@@ -8,12 +8,12 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
+    CatalogPlan, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
     DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImagePlan, Positioned, Request, ResolvedLevel,
 };
 
 const ROUTES: &[DiscoveryRoute] = &[
-    DiscoveryMatch::ContentPredicate(contains_gigapixel).extract(catalog),
+    DiscoveryMatch::ContentPredicate(contains_gigapixel).catalog(decode_catalog),
     DiscoveryMatch::ContentPredicate(contains_viewer_script).then(follow_viewer_config),
     DiscoveryRoute::html_relative_capture(&SECOND_CANVAS_IFRAME_RE, "src"),
 ];
@@ -84,7 +84,7 @@ fn viewer_config_uri(viewer_uri: &str, viewer_bytes: &[u8]) -> Result<String, Di
     Ok(config.into())
 }
 
-fn catalog(_: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
+fn decode_catalog(_: &str, bytes: &[u8]) -> Result<CatalogPlan, DiscoveryError> {
     let document: Document = serde_json::from_slice(bytes).map_err(|error| {
         DiscoveryError::Session(format!("unable to parse Second Canvas metadata: {error}"))
     })?;
@@ -108,13 +108,13 @@ fn catalog(_: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
             DiscoveryError::Session("Second Canvas metadata has no image layers".into())
         })?;
 
-    let entries = layers
+    let images = layers
         .into_iter()
         .map(|layer| {
             let image_size = layer_size(gigapixel.size, normal_level, layer.level)?;
             let levels = build_levels(&gigapixel, &layer, image_size)?;
             let layer_title = layer.title();
-            ImagePlan::new(
+            Ok(ImagePlan::new(
                 document.title.clone().map(|title| {
                     if layer.is_normal() {
                         title
@@ -125,11 +125,15 @@ fn catalog(_: &str, bytes: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
                     }
                 }),
                 levels,
-            )
-            .compile_entry("second_canvas")
+            ))
         })
         .collect::<Result<Vec<_>, DiscoveryError>>()?;
-    Ok(DiscoveryCatalog::new(entries))
+    Ok(CatalogPlan::images(images))
+}
+
+#[cfg(test)]
+fn catalog(uri: &str, bytes: &[u8]) -> Result<crate::core::DiscoveryCatalog, DiscoveryError> {
+    decode_catalog(uri, bytes)?.compile("second_canvas")
 }
 
 fn layer_size(size: Size, normal_level: u32, layer_level: u32) -> Result<Vec2d, DiscoveryError> {
