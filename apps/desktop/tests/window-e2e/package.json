@@ -8,7 +8,7 @@
     "test": "node --test-reporter=dot --test specs/desktop.e2e.mjs"
   },
   "devDependencies": {
-    "selenium-webdriver": "^4.48.0"
+    "selenium-webdriver": "^4.49.0"
   },
   "license": "GPL-3.0-or-later"
 }
