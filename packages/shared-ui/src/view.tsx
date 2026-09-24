@@ -12,7 +12,7 @@
 
 import type { HistoryEntry } from "@dezoomify/app-model";
 import type { ReactElement, ReactNode } from "react";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
@@ -718,6 +718,28 @@ function CompletedView({
   callbacks: ViewCallbacks;
   ctx?: ViewContext;
 }) {
+  const [outputAction, setOutputAction] = useState<"open" | "folder" | null>(null);
+  const [outputError, setOutputError] = useState<{
+    action: "open" | "folder";
+    code: string;
+  } | null>(null);
+  async function runOutputAction(action: "open" | "folder", callback?: () => Promise<void>) {
+    if (!callback || outputAction) return;
+    setOutputError(null);
+    setOutputAction(action);
+    try {
+      await callback();
+    } catch (error) {
+      const rawCode = error && typeof error === "object" && "code" in error ? error.code : null;
+      const code =
+        typeof rawCode === "string" && /^output\.[a-z-]+$/.test(rawCode)
+          ? rawCode
+          : "output.invoke-failed";
+      setOutputError({ action, code });
+    } finally {
+      setOutputAction(null);
+    }
+  }
   const info = ctx?.completedInfo;
   const saved = ctx?.savedOutput;
   const isClean = ctx?.originClean ?? true;
@@ -780,7 +802,8 @@ function CompletedView({
             type="button"
             className="dz-btn-tactile"
             id="dz-btn-open"
-            onClick={() => callbacks.onOpenOutput?.()}
+            disabled={outputAction !== null}
+            onClick={() => void runOutputAction("open", callbacks.onOpenOutput)}
           >
             {t("desktop.done.open")}
           </button>
@@ -790,7 +813,8 @@ function CompletedView({
             type="button"
             className="dz-btn-secondary"
             id="dz-btn-reveal"
-            onClick={() => callbacks.onRevealOutput?.()}
+            disabled={outputAction !== null}
+            onClick={() => void runOutputAction("folder", callbacks.onRevealOutput)}
           >
             {t("desktop.done.reveal")}
           </button>
@@ -832,6 +856,18 @@ function CompletedView({
           </button>
         ) : null}
       </div>
+      {outputError ? (
+        <p id="dz-open-error" role="alert">
+          {t(
+            outputError.code === "output.not-found"
+              ? "desktop.done.missingError"
+              : outputError.action === "folder"
+                ? "desktop.done.folderError"
+                : "desktop.done.openError",
+          )}{" "}
+          ({outputError.code})
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -1043,7 +1079,12 @@ function SharedView({
       ) : null}
       {phase === "display-only" ? <DisplayOnlyView callbacks={callbacks} ctx={ctx} /> : null}
       {phase === "completed" ? (
-        <CompletedView presentation={presentation} callbacks={callbacks} ctx={ctx} />
+        <CompletedView
+          key={ctx?.outputKey}
+          presentation={presentation}
+          callbacks={callbacks}
+          ctx={ctx}
+        />
       ) : null}
       {phase === "failed" ? (
         <FailedView presentation={presentation} callbacks={callbacks} ctx={ctx} />

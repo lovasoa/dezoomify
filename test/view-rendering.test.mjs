@@ -183,6 +183,20 @@ test("renderView mounts card and updates job section in place without DOM destru
   assert.ok(card.querySelector(".dz-form"), "idle form re-mounted after reset");
 });
 
+test("output actions belong to their completed result", async () => {
+  const el = container();
+  const old = Promise.withResolvers();
+  const done = jobPresentation(dto({ lifecycle: "Completed", terminal: { type: "completed" } }));
+  render(el, done, { ...callbacks, onOpenOutput: () => old.promise }, { outputKey: "old" });
+  click(el.querySelector("#dz-btn-open"));
+  assert.equal(el.querySelector("#dz-btn-open").disabled, true);
+
+  render(el, done, { ...callbacks, onOpenOutput: async () => {} }, { outputKey: "new" });
+  await act(async () => old.reject({ code: "output.not-found" }));
+  assert.equal(el.querySelector("#dz-open-error"), null);
+  assert.equal(el.querySelector("#dz-btn-open").disabled, false);
+});
+
 test("slow discovery replaces the phase with one waiting status", () => {
   const el = container();
   const now = Date.now();

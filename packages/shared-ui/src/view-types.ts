@@ -12,8 +12,8 @@ export interface ViewCallbacks {
   /** Restart the job at the maximum known resolution (browser products). */
   onTryMaximum?(): void;
   onSave?(): void;
-  onOpenOutput?(): void;
-  onRevealOutput?(): void;
+  onOpenOutput?(): Promise<void>;
+  onRevealOutput?(): Promise<void>;
   onHistorySelect?(entry: HistoryEntry): void;
   onOpenExternalLink?(url: string): void;
   onCopyDiagnostics?(text: string): void;
@@ -56,6 +56,8 @@ export interface ViewContext {
   };
   completedInfo?: { width: number; height: number; mime: string; blobUrl?: string };
   nativeSaved?: { partial: boolean };
+  /** Stable identity of the completed result; resets pending output actions. */
+  outputKey?: string;
   savedOutput?: {
     name: string;
     width: number;

@@ -985,29 +985,23 @@ function handleResume(): void {
   );
 }
 
-async function handleOpenOutput(reveal: boolean): Promise<void> {
-  const handle = currentAttempt.activeHandle;
+async function handleOpenOutput(attempt: DesktopAttempt, reveal: boolean): Promise<void> {
+  if (!owns(attempt)) return;
+  const handle = attempt.activeHandle;
   if (!handle) return;
-  currentAttempt.outputActionError = undefined;
-  root?.querySelector("#dz-open-error")?.remove();
+  attempt.outputActionError = undefined;
   try {
     await handle.openOutput(reveal);
   } catch (error) {
-    if (handle !== currentAttempt.activeHandle) return;
+    if (!owns(attempt) || handle !== attempt.activeHandle) return;
     const rawCode = error && typeof error === "object" && "code" in error ? error.code : null;
     const code =
       typeof rawCode === "string" && /^output\.[a-z-]+$/.test(rawCode)
         ? rawCode
         : "output.invoke-failed";
-    currentAttempt.outputActionError = { action: reveal ? "folder" : "open", code };
-    pushLog(`File action ${currentAttempt.outputActionError.action} failed (${code})`);
-    const section = root?.querySelector(".dz-completed-section");
-    if (!section) return;
-    const note = section.ownerDocument.createElement("p");
-    note.id = "dz-open-error";
-    note.setAttribute("role", "alert");
-    note.textContent = `${t(code === "output.not-found" ? "desktop.done.missingError" : reveal ? "desktop.done.folderError" : "desktop.done.openError")} (${code})`;
-    section.appendChild(note);
+    attempt.outputActionError = { action: reveal ? "folder" : "open", code };
+    pushLog(`File action ${attempt.outputActionError.action} failed (${code})`);
+    throw error;
   }
 }
 
@@ -1559,12 +1553,8 @@ function update() {
       },
       ...(presentation.phase === "completed"
         ? {
-            onOpenOutput: () => {
-              void handleOpenOutput(false);
-            },
-            onRevealOutput: () => {
-              void handleOpenOutput(true);
-            },
+            onOpenOutput: () => handleOpenOutput(attempt, false),
+            onRevealOutput: () => handleOpenOutput(attempt, true),
           }
         : {}),
       onHistorySelect(entry: HistoryEntry) {
@@ -1591,7 +1581,7 @@ function update() {
         proxyAllowed: caps.proxyAllowed,
       },
       ...(presentation.phase === "completed"
-        ? { nativeSaved: { partial: presentation.partial } }
+        ? { nativeSaved: { partial: presentation.partial }, outputKey: attempt.activeHandle?.id }
         : {}),
       ...(currentAttempt.viewCtx.jobActivity
         ? { jobActivity: currentAttempt.viewCtx.jobActivity }
