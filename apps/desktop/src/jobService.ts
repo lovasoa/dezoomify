@@ -26,18 +26,24 @@ import type {
   JobObserver,
   JobService,
   JobSnapshot,
-  JobStartRequest,
   UserCommand,
 } from "@dezoomify/app-model";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { DESKTOP_COMMANDS, NATIVE_FORMATS } from "./desktopIntegration.ts";
+import { DESKTOP_COMMANDS } from "./desktopIntegration.ts";
 import {
   assertNoTileBytes,
   DESKTOP_EVENT_CHANNELS,
   type DesktopEventChannel,
   type JobSnapshotPayload,
 } from "./events.ts";
+
+import { type DesktopSettings, settingsToInvokeArgs, validateSettings } from "./settings.ts";
+
+export interface DesktopJobStartRequest {
+  inputUrl: string;
+  settings: DesktopSettings;
+}
 
 // Keep erasable syntax only so node type-stripping can read this file.
 
@@ -58,8 +64,6 @@ export interface DesktopIpc {
 
 export interface DesktopJobServiceDeps {
   ipc?: DesktopIpc;
-  /** Extra start_job settings (output preferences); default omits the key. */
-  settings?: () => Record<string, unknown>;
   /** Product-level deep-link confirmations stay in the product shell. */
   onDeepLink?: (payload: Record<string, unknown>) => void;
 }
@@ -81,23 +85,13 @@ function serviceError(code: string, message: string): { code: string; message: s
   return { code, message };
 }
 
-function extensionFor(format: string): string | null {
-  if (format === "png") return ".png";
-  if (format === "jpeg") return ".jpg";
-  if (format === "iiif-dir") return ".iiif";
-  if (format === "tiff") return ".tif";
-  if (format === "zif") return ".zif";
-  if (format === "webp") return ".webp";
-  return null;
-}
-
 export interface DesktopJobHandle extends JobHandle {
   /** Open the saved output (or reveal it) through the retained job ref. */
   openOutput(reveal: boolean): Promise<void>;
 }
 
-export interface DesktopJobService extends JobService {
-  start(request: JobStartRequest, observer: JobObserver): Promise<DesktopJobHandle>;
+export interface DesktopJobService extends JobService<DesktopJobStartRequest, DesktopJobHandle> {
+  start(request: DesktopJobStartRequest, observer: JobObserver): Promise<DesktopJobHandle>;
   queryCapabilities(): Promise<DesktopCapabilities>;
   dispose(): Promise<void>;
 }
@@ -112,7 +106,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJobService {
   const ipc = deps?.ipc ?? publicIpc();
-  const settingsOf = deps?.settings;
   const onDeepLink = deps?.onDeepLink;
   const observers = new Map<string, TrackedObserver>();
   // IPC events can arrive before start_job returns its routing identity.
@@ -121,10 +114,6 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
   let pendingStarts = 0;
   const unlistens: Array<() => void> = [];
   let listening: Promise<void> | null = null;
-
-  function hostStatus(): { transport: string; permission: string; output: string } {
-    return { transport: "native", permission: "granted", output: "writable" };
-  }
 
   function route(channel: DesktopEventChannel, raw: unknown): void {
     if (channel === "dezoomify://deep-link-pending") {
@@ -152,7 +141,6 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
     // partials, typed codes, redacted context), so no fold, no seq guard,
     // and no settled mirror live here.
     tracked.observer.snapshot(payload.snapshot);
-    tracked.observer.hostStatus(hostStatus() as never);
   }
 
   function ensureListening(): Promise<void> {
@@ -179,8 +167,8 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
     return listening;
   }
 
-  function validateStart(request: JobStartRequest): { url: string } {
-    const raw = request.inputs?.[0]?.url;
+  function validateStart(request: DesktopJobStartRequest): { url: string } {
+    const raw = request.inputUrl;
     if (typeof raw !== "string" || raw.trim() === "" || raw.length > 2048) {
       throw serviceError("desktop.invalid-source", "The image address is not usable.");
     }
@@ -196,25 +184,20 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
     if (parsed.username !== "" || parsed.password !== "") {
       throw serviceError("desktop.invalid-source", "Addresses with sign-in details are rejected.");
     }
-    if (request.host?.kind !== "native") {
-      throw serviceError("desktop.invalid-exec", "The desktop service runs native jobs only.");
-    }
-    const dest = request.host.destination;
-    if (!NATIVE_FORMATS.includes(dest.format as (typeof NATIVE_FORMATS)[number])) {
-      throw serviceError("desktop.invalid-destination", "The output format is not supported.");
-    }
-    const wanted = extensionFor(dest.format);
-    if (!wanted || !dest.suggestedName.toLowerCase().endsWith(wanted)) {
-      throw serviceError("desktop.invalid-destination", "The file name does not match its format.");
+    const checked = validateSettings(request.settings);
+    if (!checked.ok || !checked.settings) {
+      throw serviceError("desktop.invalid-settings", "The output settings are not valid.");
     }
     return { url: raw.trim() };
   }
 
-  async function start(request: JobStartRequest, observer: JobObserver): Promise<DesktopJobHandle> {
+  async function start(
+    request: DesktopJobStartRequest,
+    observer: JobObserver,
+  ): Promise<DesktopJobHandle> {
     const { url } = validateStart(request);
+    const args = { inputUrl: url, settings: settingsToInvokeArgs(request.settings) };
     await ensureListening();
-    const args: Record<string, unknown> = { inputUrl: url };
-    if (settingsOf) args["settings"] = settingsOf();
     let raw: unknown;
     pendingStarts += 1;
     try {
@@ -245,7 +228,6 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
     pendingStarts -= 1;
     if (pendingStarts === 0) startingSnapshots.clear();
     if (startingSnapshot) observer.snapshot(startingSnapshot);
-    observer.hostStatus(hostStatus() as never);
 
     async function command(command: UserCommand): Promise<void> {
       const live = observers.get(id);

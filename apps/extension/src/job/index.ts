@@ -1,8 +1,9 @@
 /** Dedicated extension job-tab integration. No webpage postMessage bridge. */
 
-import type { Error as EngineError, JobHandle, JobSnapshot, JobState } from "@dezoomify/app-model";
+import type { Error as EngineError, JobSnapshot, JobState } from "@dezoomify/app-model";
 import {
   BROWSER_MAX_PLAN_TILES,
+  type BrowserJobHandle,
   browserLimitsFor,
   type ClientHints,
   canvasAllocationFailure,
@@ -75,12 +76,11 @@ let probeSeq = 1 << 30;
 // session, cross-worker processing calls, the abort scope, and disposal;
 // this tab owns source access, transport, assembly, and view wiring. The single
 // authoritative snapshot renders directly; no derived mirrors.
-let jobHandle: JobHandle | null = null;
+let jobHandle: BrowserJobHandle | null = null;
 /** Service abort signal of the live attempt (drives the cancelled() transport view). */
 let attemptSignal: AbortSignal | null = null;
 let discoveryGeneration = 0;
 let assembly: ReturnType<typeof createCanvasAssembly> | null = null;
-let saveCompleted = false;
 /** Single authoritative snapshot: render it directly, never a derived copy. */
 let activeSnapshot: JobSnapshot | null = null;
 let localFailure: StructuredError | null = null;
@@ -472,7 +472,6 @@ function createAssembly(
       const url = URL.createObjectURL(blob);
       try {
         saveBlobViaAnchor(document, url, width, height, activeTitle());
-        saveCompleted = true;
       } finally {
         // The anchor save reads the URL synchronously; revoke lazily so the
         // browser never races a slow download start.
@@ -557,7 +556,6 @@ function stopAttempt() {
     /* bitmap cleanup is best effort */
   }
   assembly = null;
-  saveCompleted = false;
 }
 
 /** Reset data owned by the previous engine attempt. */
@@ -678,10 +676,6 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
     // Browser session baseline: 6 concurrent tile fetches (matches the
     // website). The engine validates the budget at job creation.
     quotas: { max_concurrent_fetches: 6 },
-    sessionId: () => sessionId,
-    getTransport: () => "browser-session",
-    isPermissionPending: () => pendingPermission !== null,
-    getOutputState: () => (saveCompleted ? "writable" : "pending"),
     onPermissionRequired: (detail) => {
       showAccessRequired(detail);
     },
@@ -711,7 +705,6 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
           max_tiles: BROWSER_MAX_PLAN_TILES,
           browser_selection: selection,
         },
-        host: { kind: "browser", sourceUrl: inputs[0]?.url ?? "" },
       },
       {
         snapshot: (snapshot: JobSnapshot) => {
@@ -719,7 +712,7 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
           activeSnapshot = snapshot;
           renderForSnapshot(snapshot);
         },
-        hostStatus: () => {},
+        failure: onHostFailure,
       },
     );
     if (generation !== discoveryGeneration) {

@@ -20,7 +20,7 @@ import {
   saveHistory,
   suggestedNameFor,
   toHistoryEntry,
-  validateJobStartRequest,
+  validateEngineStartRequest,
 } from "../packages/app-model/src/index.ts";
 
 function memoryStore() {
@@ -37,7 +37,7 @@ function memoryStore() {
 }
 
 function browserRequest(url = "https://museum.example.org/iiif/1/manifest.json") {
-  return { inputs: [{ url }], engine: {}, host: { kind: "browser", sourceUrl: url } };
+  return { inputs: [{ url }], engine: {} };
 }
 
 // ---------------------------------------------------------------------------
@@ -91,32 +91,17 @@ test("snapshot predicates read the terminal only", () => {
   assert.equal(failed.terminal.error.code, "boom");
 });
 
-test("job request validation returns stable boundary codes", () => {
+test("engine start validation rejects missing inputs and options", () => {
+  assert.equal(validateEngineStartRequest({ inputs: [], engine: {} }), "validation.empty-inputs");
   assert.equal(
-    validateJobStartRequest({
-      inputs: [],
-      engine: {},
-      host: { kind: "browser", sourceUrl: "https://x.example.org/y" },
-    }),
-    "validation.empty-inputs",
+    validateEngineStartRequest({ inputs: [{ url: "" }], engine: {} }),
+    "validation.bad-input-url",
   );
   assert.equal(
-    validateJobStartRequest({
-      inputs: [{ url: "ftp://x/y" }],
-      engine: {},
-      host: { kind: "mars" },
-    }),
-    "validation.bad-exec-kind",
+    validateEngineStartRequest({ inputs: [{ url: "https://x.test" }] }),
+    "validation.bad-engine",
   );
-  assert.equal(
-    validateJobStartRequest({
-      inputs: [{ url: "https://x.example.org/y" }],
-      engine: {},
-      host: { kind: "browser" },
-    }),
-    "validation.bad-exec-source",
-  );
-  assert.equal(validateJobStartRequest(browserRequest()), null);
+  assert.equal(validateEngineStartRequest(browserRequest()), null);
 });
 
 // ---------------------------------------------------------------------------
