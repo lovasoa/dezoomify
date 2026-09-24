@@ -13,8 +13,10 @@ using your browser's own session so logged-in and interactive viewers work.
   tab monitoring. The job page owns each job and invalidates its source access
   on navigation. Detection runs in the core wasm; source reads use direct
   `executeScript()` calls with no metadata proxy.
-- The extension uses only `activeTab` and `scripting` permissions plus
-  optional host permissions requested for the active job.
+- The extension uses `activeTab`, `scripting`, `downloads`, and
+  `downloads.open`, plus optional host permissions requested for the active
+  job. It saves the finished image automatically and provides **Open image**
+  and **Show in folder** actions for the completed file.
 
 Contributing: narrow manifest permissions, explicit-action scans with cleanup,
 no private signing keys in shipped JS. `cargo xtask test extension` is the full

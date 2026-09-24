@@ -60,7 +60,11 @@ export interface CanvasAssemblyDeps {
   /** Encode the assembled surface (canvas-to-blob on the job tab). */
   encode(canvas: AssemblyCanvas): Promise<unknown>;
   /** Perform the product's save operation and return its actual disposition. */
-  save(output: unknown, width: number, height: number): BrowserSaveDisposition;
+  save(
+    output: unknown,
+    width: number,
+    height: number,
+  ): BrowserSaveDisposition | Promise<BrowserSaveDisposition>;
   /** Job source URL, used for the desktop handoff link in limit failures. */
   sourceUrl?: string;
   /** Limits override for tests; defaults to the browser canvas limits. */
@@ -331,7 +335,7 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
       }
       throw error;
     }
-    return deps.save(encoded, surface.width, surface.height);
+    return await deps.save(encoded, surface.width, surface.height);
   }
 
   function release(): void {

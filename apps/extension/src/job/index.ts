@@ -1,6 +1,7 @@
 /** Dedicated extension job-tab integration. No webpage postMessage bridge. */
 
 import type { Error as EngineError, JobHandle, JobSnapshot, JobState } from "@dezoomify/app-model";
+import { suggestedNameFor } from "@dezoomify/app-model";
 import {
   BROWSER_MAX_PLAN_TILES,
   browserLimitsFor,
@@ -15,7 +16,6 @@ import {
   desktopHandoffLink,
   MAXIMUM_SELECTION_LIMITS,
   originOfUrl,
-  saveBlobViaAnchor,
   selectionLimitsFor,
   wantsDesktopHandoff,
 } from "@dezoomify/browser-runtime";
@@ -34,11 +34,13 @@ import {
   presentSnapshot,
   presentStatus,
   renderView,
+  t,
 } from "@dezoomify/shared-ui";
 import type { ProcessingRecipe } from "@dezoomify/wasm-bindings";
 import { createElement } from "react";
 import type { WxtBrowser } from "wxt/browser";
 import { asFetchFailure, createExtensionFetcher } from "../runtime/fetch.ts";
+import { actOnDownload, downloadAndWait } from "./downloads.ts";
 import { createSourceAccess } from "./source-access.ts";
 import { createEngineResourceFetcher } from "./transport.ts";
 import { AccessRequestView, PartialOutputActions } from "./view.tsx";
@@ -46,7 +48,7 @@ import { AccessRequestView, PartialOutputActions } from "./view.tsx";
 const TEST_PERMISSION_MOCK = import.meta.env.MODE === "testing";
 
 type ExtensionApi = Partial<
-  Pick<WxtBrowser, "action" | "runtime" | "permissions" | "tabs" | "scripting">
+  Pick<WxtBrowser, "action" | "runtime" | "permissions" | "tabs" | "scripting" | "downloads">
 >;
 type ViewContext = SharedViewContext & { failure?: StructuredError };
 
@@ -80,7 +82,8 @@ let jobHandle: JobHandle | null = null;
 let attemptSignal: AbortSignal | null = null;
 let discoveryGeneration = 0;
 let assembly: ReturnType<typeof createCanvasAssembly> | null = null;
-let saveCompleted = false;
+let savedDownloadId: number | null = null;
+let savedDownloadName: string | undefined;
 /** Single authoritative snapshot: render it directly, never a derived copy. */
 let activeSnapshot: JobSnapshot | null = null;
 let localFailure: StructuredError | null = null;
@@ -211,6 +214,10 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
     ...(uiLogLines.length ? { log: uiLogLines.slice() } : {}),
   };
   const presentation = presentFor(status, ctx);
+  const savedOutput =
+    status === "completed" && savedDownloadId !== null
+      ? completedDownloadSummary(presentation)
+      : undefined;
   // Outstanding partial decision, read off the DTO only: the closed
   // keep/retry/discard answers are the engine's RecoveryChoice values, never
   // fabricated actions.
@@ -228,9 +235,16 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
       onRetrySameUrl: retryJob,
       onTryMaximum: tryMaximum,
       onSave: () => {},
+      ...(status === "completed" && savedDownloadId !== null
+        ? {
+            onOpenOutput: () => handleDownloadAction("open"),
+            onRevealOutput: () => handleDownloadAction("reveal"),
+          }
+        : {}),
     },
     {
       ...ctx,
+      ...(savedOutput ? { savedOutput } : {}),
       ...(Object.keys(viewActivity).length ? { jobActivity: viewActivity } : {}),
     },
     {
@@ -305,6 +319,42 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
   );
   syncExtensionJobTitle(status, siteOrigin);
   syncExtensionJobIndicator(status);
+}
+
+function completedDownloadSummary(
+  presentation: SnapshotPresentation,
+): SharedViewContext["savedOutput"] {
+  const canvas = activeSnapshot?.output?.canvas;
+  if (!canvas || !savedDownloadName) return undefined;
+  const tiles = presentation.terminal?.output;
+  const doneTiles = tiles?.doneTiles ?? 0;
+  const failedTiles = tiles?.failedTiles ?? 0;
+  return {
+    name: savedDownloadName,
+    width: canvas.width,
+    height: canvas.height,
+    doneTiles,
+    totalTiles: tiles?.totalTiles ?? doneTiles + failedTiles,
+    failedTiles,
+  };
+}
+
+function handleDownloadAction(action: "open" | "reveal") {
+  const downloads = api?.downloads;
+  const downloadId = savedDownloadId;
+  if (!downloads || downloadId === null) return;
+  root()?.querySelector("#dz-output-action-error")?.remove();
+  void actOnDownload(downloads, downloadId, action).catch(() => {
+    const code = action === "open" ? "output.open-failed" : "output.folder-failed";
+    jobLog.error("output-action-failed", `jobId=${sessionId} code=${code}`);
+    const section = root()?.querySelector(".dz-completed-section");
+    if (!section) return;
+    const note = section.ownerDocument.createElement("p");
+    note.id = "dz-output-action-error";
+    note.setAttribute("role", "alert");
+    note.textContent = t(action === "open" ? "desktop.done.openError" : "desktop.done.folderError");
+    section.appendChild(note);
+  });
 }
 
 /** The job page owns the toolbar status; the background only opens this page. */
@@ -467,18 +517,27 @@ function createAssembly(
     },
     encode: (canvas) =>
       canvasToPngBlob(canvas as unknown as { toBlob(cb: BlobCallback, mime?: string): void }),
-    save: (blob: unknown, width: number, height: number) => {
+    save: async (blob: unknown, width: number, height: number) => {
       if (!(blob instanceof Blob)) throw new TypeError("encoded output is not a Blob");
+      const downloads = api?.downloads;
+      if (!downloads) {
+        throw Object.assign(new Error("The browser download API is unavailable."), {
+          code: "OUTPUT_SAVE_FAILED",
+          retryable: false,
+        });
+      }
       const url = URL.createObjectURL(blob);
       try {
-        saveBlobViaAnchor(document, url, width, height, activeTitle());
-        saveCompleted = true;
+        const filename = suggestedNameFor(width, height, "png", activeTitle());
+        jobLog.info("output-save-start", `jobId=${sessionId}`);
+        const item = await downloadAndWait(downloads, url, filename);
+        savedDownloadId = item.id;
+        savedDownloadName = item.filename?.split(/[\\/]/).pop() || filename;
+        jobLog.info("output-save-complete", `jobId=${sessionId}`);
       } finally {
-        // The anchor save reads the URL synchronously; revoke lazily so the
-        // browser never races a slow download start.
-        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        URL.revokeObjectURL(url);
       }
-      return "browser-save-initiated";
+      return "browser-save-ready" as const;
     },
     sourceUrl,
     limits: browserLimitsFor(clientHints()),
@@ -557,7 +616,8 @@ function stopAttempt() {
     /* bitmap cleanup is best effort */
   }
   assembly = null;
-  saveCompleted = false;
+  savedDownloadId = null;
+  savedDownloadName = undefined;
 }
 
 /** Reset data owned by the previous engine attempt. */
@@ -565,6 +625,8 @@ function resetAttemptState() {
   activeSnapshot = null;
   localFailure = null;
   pendingPermission = null;
+  savedDownloadId = null;
+  savedDownloadName = undefined;
 }
 
 /** Start one WASM-backed attempt with source-tab access and extension-origin fallback. */
@@ -681,7 +743,7 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
     sessionId: () => sessionId,
     getTransport: () => "browser-session",
     isPermissionPending: () => pendingPermission !== null,
-    getOutputState: () => (saveCompleted ? "writable" : "pending"),
+    getOutputState: () => (savedDownloadId !== null ? "writable" : "pending"),
     onPermissionRequired: (detail) => {
       showAccessRequired(detail);
     },
