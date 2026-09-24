@@ -502,7 +502,7 @@ function activeTransport(): string | null {
 function currentPresentation(): SnapshotPresentation {
   // Render the authoritative snapshot directly; hostFailure covers failures
   // that never reached a snapshot. Display-only rides an explicit host flag.
-  if (hostFailure && !activeSnapshot) return presentFailure(hostFailure, activeTransport());
+  if (hostFailure) return presentFailure(hostFailure, activeTransport());
   if (!activeSnapshot) return presentIdle();
   return (
     failurePresentationOf(activeSnapshot) ??
