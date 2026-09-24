@@ -1,6 +1,6 @@
 import { browser } from "wxt/browser";
 import { defineBackground } from "wxt/utils/define-background";
-import { createBackgroundCoordinator } from "../src/background/coordinator.ts";
+import { createBackgroundLauncher } from "../src/background/launcher.ts";
 
 export default defineBackground({
   // Leaving `type` unset makes WXT emit one IIFE. Firefox MV3 therefore gets
@@ -8,7 +8,7 @@ export default defineBackground({
   // as its service worker.
   main() {
     const testing = import.meta.env.MODE === "testing";
-    createBackgroundCoordinator({ browserApi: browser, testing }).startBackground();
+    createBackgroundLauncher({ browserApi: browser, testing }).startBackground();
     if (!testing) return;
     browser.runtime.onInstalled.addListener(() => {
       void browser.tabs.create({ url: browser.runtime.getURL("/test/driver.html") });

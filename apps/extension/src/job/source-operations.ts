@@ -1,11 +1,11 @@
 /**
- * Self-contained functions passed to scripting.executeScript().
+ * Source-page functions passed to scripting.executeScript() by the job page.
  *
  * These functions deliberately have no imports, closures, listeners, or
  * document state. Firefox and Chromium receive the same operation and the
  * complete structured-cloneable result is returned before the invocation
- * ends, while fetch still returns a single bounded payload for the
- * coordinator to forward to the dedicated job tab.
+ * ends, while fetch returns a single bounded payload to the privileged job
+ * page that invoked it.
  */
 
 /**
@@ -17,8 +17,9 @@ type SourceRequest = {
   url: string;
   method?: string;
   headers: Array<{ name: string; value: string }>;
+  operationId?: string;
 };
-type FetchFailure = { ok: false; code: string; status?: number };
+type FetchFailure = { ok: false; code: string; status?: number; documentUrl: string };
 
 export function collectCandidates(): {
   ok: true;
@@ -93,32 +94,46 @@ export function collectCandidates(): {
 }
 
 /**
- * Fetch one coordinator-approved source request in the source tab's origin
- * and return only bounded, structured-cloneable data. The caller owns all
- * validation (url, method, headers); this unit performs only tab-side I/O,
- * so it stays free of validation branches. Credentials default to
+ * Fetch one source request in the source tab's origin and return only
+ * bounded, structured-cloneable data. The job page validates URL, method,
+ * and headers before injection; this function performs tab-side I/O.
+ * Credentials default to
  * same-origin: the page's session applies to its own origin, while public
  * cross-origin metadata uses ordinary CORS instead of credentialed CORS.
  * The body travels as one base64 payload via the native codec (the
  * extension minimums guarantee it): execution results must stay
  * JSON-serializable in Chrome, so typed arrays are not used. The
- * coordinator retries a failed source request through the extension-origin
+ * job page retries an eligible source failure through the extension-origin
  * transport. Cookies/session credentials are never part of this result.
  */
 export async function fetchSource(
   request: SourceRequest,
-): Promise<FetchFailure | { ok: true; status: number; url: string; bytes: number; data: string }> {
+): Promise<
+  | FetchFailure
+  | { ok: true; status: number; url: string; bytes: number; data: string; documentUrl: string }
+> {
   const MAX_SOURCE_FETCH_BYTES = 8 * 1024 * 1024;
+  const documentUrl = String(globalThis.location?.href ?? "");
+  const world = globalThis as typeof globalThis & {
+    __dezoomifySourceFetches?: Map<string, AbortController>;
+  };
+  let controllers = world.__dezoomifySourceFetches;
+  if (!controllers) {
+    controllers = new Map();
+    world.__dezoomifySourceFetches = controllers;
+  }
   const fail = (code: string, status?: number): FetchFailure => ({
     ok: false,
     code,
     ...(Number.isInteger(status) ? { status } : {}),
+    documentUrl,
   });
 
   const headers: Record<string, string> = {};
   for (const header of request.headers) headers[header.name] = header.value;
 
   const controller = typeof AbortController === "function" ? new AbortController() : null;
+  if (controller && request.operationId) controllers.set(request.operationId, controller);
   try {
     const response = await fetch(request.url, {
       method: request.method ?? "GET",
@@ -169,10 +184,21 @@ export async function fetchSource(
       url: responseUrl,
       bytes: total,
       data: bytes.toBase64(),
+      documentUrl,
     };
   } catch (error) {
     const caught = error as { code?: unknown; name?: unknown };
     if (caught?.code === "too-large") return fail("too-large");
     return fail(caught?.name === "AbortError" ? "cancelled" : "network");
+  } finally {
+    if (request.operationId) controllers.delete(request.operationId);
   }
+}
+
+/** Cancel a live fetch in this extension's isolated world for this document. */
+export function cancelSourceFetch(operationId: string): void {
+  const world = globalThis as typeof globalThis & {
+    __dezoomifySourceFetches?: Map<string, AbortController>;
+  };
+  world.__dezoomifySourceFetches?.get(operationId)?.abort();
 }

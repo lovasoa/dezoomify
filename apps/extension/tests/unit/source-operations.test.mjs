@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { collectCandidates, fetchSource } from "../../src/background/source-operations.ts";
+import { collectCandidates, fetchSource } from "../../src/job/source-operations.ts";
 
 // Test-only polyfill: the pinned Node 24 toolchain predates
 // Uint8Array.prototype.toBase64 (Baseline 2025), while the extension
@@ -161,6 +161,7 @@ test("source fetch classifies failures without returning response details", asyn
       ok: false,
       code: "http-error",
       status: 403,
+      documentUrl: "",
     });
   } finally {
     globalThis.fetch = oldFetch;

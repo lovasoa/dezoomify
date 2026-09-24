@@ -2,9 +2,9 @@
  * Bounded readable-byte transport for the extension job tab.
  *
  * This module deliberately has no permission prompt. A job tab can inspect a
- * missing host grant and ask the coordinator to show an explicit UI action,
+ * missing host grant and ask the job page to show an explicit UI action,
  * but it must never turn a background fetch into a surprise browser prompt.
- * Source-document requests are owned by the coordinator/source script; this
+ * Source-document requests are owned by the job page/source script; this
  * transport is only for extension-origin requests with an existing host grant.
  */
 

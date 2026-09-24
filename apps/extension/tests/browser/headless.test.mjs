@@ -55,7 +55,7 @@ function stagePackage(
   browser,
   dir,
   origin,
-  { grantHostPermissions = true, sourceHostOnly = false, scenario } = {},
+  { grantHostPermissions = true, sourceHostOnly = false, scenario, restartBackground = false } = {},
 ) {
   const zip = path.join(dir, `dezoomify-${browser}.zip`);
   const wxtBrowser = browser === "chromium" ? "chrome" : browser;
@@ -71,6 +71,7 @@ function stagePackage(
         ...(sourceHostOnly ? { DEZOOMIFY_TEST_SOURCE_HOST_ONLY: "1" } : {}),
         DEZOOMIFY_TEST_ORIGIN: origin,
         ...(scenario ? { DEZOOMIFY_TEST_SCENARIO: scenario } : {}),
+        ...(restartBackground ? { DEZOOMIFY_TEST_RESTART_BACKGROUND: "1" } : {}),
       },
     },
   );
@@ -171,10 +172,37 @@ async function readCompletedPng(outputDir, deadline) {
   throw new Error(`Firefox saved an incomplete PNG: ${lastError}`);
 }
 
+function newFixtureEvents(logFile, offset) {
+  if (!existsSync(logFile)) return [];
+  return readFileSync(logFile, "utf8")
+    .slice(offset)
+    .split("\n")
+    .filter(Boolean)
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line)];
+      } catch {
+        return [];
+      }
+    });
+}
+
+async function waitForFixtureEvent(logFile, offset, predicate, label) {
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    const event = newFixtureEvents(logFile, offset).find(predicate);
+    if (event) return event;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`fixture did not record ${label}`);
+}
+
 async function waitForJobPage(context) {
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
-    const page = context.pages().find((candidate) => candidate.url().includes("/job.html#jobId="));
+    const page = context
+      .pages()
+      .find((candidate) => candidate.url().includes("/job.html#sourceTabId="));
     if (page) return page;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
@@ -272,6 +300,41 @@ async function runChromiumJob(base, work, options = {}) {
       );
     }
     const output = path.join(work, "saved-chromium.png");
+    if (options.restartBackground) {
+      await waitForVisible(jobPage, ".dz-completed-section", "completed job before worker restart");
+      const cdp = await context.browser().newBrowserCDPSession();
+      const { targetInfos } = await cdp.send("Target.getTargets");
+      const workerTarget = targetInfos.find(
+        (target) => target.type === "service_worker" && target.url === serviceWorker.url(),
+      );
+      assert.ok(workerTarget, "background service worker target is active");
+      const closed = await cdp.send("Target.closeTarget", { targetId: workerTarget.targetId });
+      assert.equal(closed.success, true, "background service worker target closed");
+      await cdp.detach();
+      const restarted = await jobPage.evaluate(async () => {
+        return (globalThis.browser ?? globalThis.chrome).runtime.sendMessage({
+          type: "dezoomify-test-wake-background",
+        });
+      });
+      assert.deepEqual(restarted, { ok: true }, "closed background worker restarted for a message");
+      const directResult = await jobPage.evaluate(async () => {
+        const access = globalThis.__DEZOOMIFY_TEST_SOURCE_ACCESS__;
+        if (!access) throw new Error("job page direct source access is missing");
+        const scanned = await access.scan();
+        const fetched = await access.fetch(scanned.firstUrl);
+        return { count: scanned.count, byteLength: fetched.byteLength };
+      });
+      assert.ok(directResult.count > 0, "source scan still works after worker restart");
+      assert.ok(directResult.byteLength > 0, "source fetch still works after worker restart");
+      await driverPage.evaluate(() => globalThis.__DEZOOMIFY_TEST_RELEASE__?.());
+    }
+    const navigationResult = await driverPage.evaluate(() =>
+      globalThis.__DEZOOMIFY_TEST_AFTER_JOB__.then(
+        () => ({ ok: true }),
+        (error) => ({ ok: false, error: String(error?.message ?? error) }),
+      ),
+    );
+    assert.deepEqual(navigationResult, { ok: true }, "source navigation invalidates direct access");
     await download.saveAs(output);
     return readFileSync(output);
   } finally {
@@ -287,25 +350,28 @@ function findFirefoxBinary() {
   return null;
 }
 
-async function runFirefoxJob(base, work) {
-  const zip = stagePackage("firefox", work, base);
+async function runFirefoxJob(base, work, runOptions = {}) {
+  const logOffset = existsSync(fixtureServer.logFile)
+    ? readFileSync(fixtureServer.logFile, "utf8").length
+    : 0;
+  const zip = stagePackage("firefox", work, base, runOptions);
   const binary = findFirefoxBinary();
   assert.ok(binary, "no Firefox binary found; set DEZOOMIFY_FIREFOX_BIN");
   const downloadsDir = path.join(work, "downloads");
   mkdirSync(downloadsDir);
-  const options = new firefox.Options();
-  options.addArguments("-headless");
-  options.setPageLoadStrategy("eager");
-  options.setBinary(binary);
-  options.setPreference("browser.download.dir", downloadsDir);
-  options.setPreference("browser.download.folderList", 2);
-  options.setPreference("browser.download.useDownloadDir", true);
-  options.setPreference("browser.helperApps.neverAsk.saveToDisk", "image/png");
+  const browserOptions = new firefox.Options();
+  browserOptions.addArguments("-headless");
+  browserOptions.setPageLoadStrategy("eager");
+  browserOptions.setBinary(binary);
+  browserOptions.setPreference("browser.download.dir", downloadsDir);
+  browserOptions.setPreference("browser.download.folderList", 2);
+  browserOptions.setPreference("browser.download.useDownloadDir", true);
+  browserOptions.setPreference("browser.helperApps.neverAsk.saveToDisk", "image/png");
   assert.ok(existsSync(GECKODRIVER), "the pinned geckodriver package is not installed");
   const service = new firefox.ServiceBuilder(GECKODRIVER);
   const driver = await new webdriver.Builder()
     .forBrowser("firefox")
-    .setFirefoxOptions(options)
+    .setFirefoxOptions(browserOptions)
     .setFirefoxService(service)
     .build();
   try {
@@ -313,7 +379,22 @@ async function runFirefoxJob(base, work) {
     const addonId = await driver.installAddon(zip, true);
     assert.equal(addonId, GECKO_ID, `unexpected add-on id ${addonId}`);
     const deadline = Date.now() + 90000;
-    return await readCompletedPng(downloadsDir, deadline);
+    const output = await readCompletedPng(downloadsDir, deadline);
+    if (runOptions.scenario === "cookie-session") {
+      await waitForFixtureEvent(
+        fixtureServer.logFile,
+        logOffset,
+        (event) => event.route === "extension-source-access-proof" && event.status === 200,
+        "the authenticated direct job-page fetch",
+      );
+    }
+    await waitForFixtureEvent(
+      fixtureServer.logFile,
+      logOffset,
+      (event) => event.path === "/target.html" && event.query === "after-navigation=1",
+      "the source-tab navigation invalidation",
+    );
+    return output;
   } finally {
     await driver.quit();
   }
@@ -390,6 +471,22 @@ test("chromium: packaged extension retains the browser session for protected met
   }
 });
 
+test("chromium: job-page source access survives a background service-worker restart", {
+  timeout: 180000,
+}, async () => {
+  const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-background-restart-"));
+  try {
+    assertPng(
+      await runChromiumJob(fixtureServer.base, work, {
+        scenario: "cookie-session",
+        restartBackground: true,
+      }),
+    );
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
 test("chromium: packaged extension follows tile redirects without credentials", {
   timeout: 180000,
 }, async () => {
@@ -408,6 +505,17 @@ test("firefox: packaged extension runs the job-tab engine flow", { timeout: 1800
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-firefox-"));
   try {
     assertPng(await runFirefoxJob(fixtureServer.base, work));
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("firefox: job page directly fetches authenticated source data and rejects navigation", {
+  timeout: 180000,
+}, async () => {
+  const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-firefox-source-access-"));
+  try {
+    assertPng(await runFirefoxJob(fixtureServer.base, work, { scenario: "cookie-session" }));
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

@@ -45,9 +45,11 @@ Install it from the
    at the tab you pointed it at, never at all your browsing. If the image
    or its tiles live on other addresses, the browser may ask for permission
    to look at those too; approve it to continue.
-4. The dedicated job tab starts from the source page's retained resource
-   entries. Keep both tabs open; a second press of the button, closing a tab,
-   or navigating away stops the active job.
+4. The dedicated job tab takes one bounded snapshot of the source page and
+   runs the job there. Pressing the button again focuses that job tab. Close
+   the job tab to stop the job. If you navigate the source tab, Dezoomify
+   stops reading the old page; it can continue only with image data it has
+   already found and can fetch through the browser's extension transport.
 5. The extension selects the largest image it finds and the highest
    resolution that fits in a browser tab, then saves it automatically. When
    the highest resolution would not fit, the save continues at the largest
@@ -68,10 +70,9 @@ and press the Dezoomify toolbar button.
 ## What the extension does with your data
 
 - It only looks at the page you pointed it at, only after you pressed the
-  button. It does not watch your browsing in the background. Each press
-  takes one bounded snapshot and stops by itself when it finds an image,
-  when you press the button again, or when you close the tab or leave the
-  page; it never restarts itself.
+  button. It does not watch your browsing in the background. Each job takes
+  one bounded snapshot per attempt and stops by itself when it finds an image
+  or when you close its job tab; a retry is always explicit.
 - It uses your existing browser session, so images behind a sign-in work.
   Your credentials stay in your browser; Dezoomify never stores or sends
   them anywhere else.
