@@ -230,8 +230,8 @@ async function runChromiumJob(base, work, options = {}) {
     headless: true,
     args: [`--disable-extensions-except=${pkgDir}`, `--load-extension=${pkgDir}`],
   });
-  // Downloads are tracked from context level: the job tab saves via a blob
-  // anchor, which can fire before a page-level listener attaches.
+  // Track downloads at context level so the test sees the extension API's
+  // Blob download regardless of which page initiated it.
   const downloads = [];
   const diagnostics = [];
   const observe = (page) => {
@@ -257,11 +257,24 @@ async function runChromiumJob(base, work, options = {}) {
       (await context.waitForEvent("serviceworker", { timeout: 15000 }));
     assert.ok(serviceWorker, "background service worker did not start");
     // Chromium may finish installing the unpacked package before Playwright
-    // can observe the onInstalled-opened page. Navigating to the same
-    // packaged driver is deterministic and does not inject privileged code.
+    // can observe the onInstalled-opened page. Reuse that page when it exists
+    // so its test driver starts only one job; create a page only as fallback.
     const extensionId = new URL(serviceWorker.url()).hostname;
-    const driverPage = await context.newPage();
-    await driverPage.goto(`chrome-extension://${extensionId}/test/driver.html`);
+    const driverUrl = `chrome-extension://${extensionId}/test/driver.html`;
+    let driverPage = context.pages().find((page) => page.url() === driverUrl);
+    const driverDeadline = Date.now() + 5000;
+    while (!driverPage && Date.now() < driverDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      driverPage = context.pages().find((page) => page.url() === driverUrl);
+    }
+    if (!driverPage) {
+      driverPage = await context.newPage();
+      await driverPage.goto(driverUrl);
+    }
+    await driverPage.waitForFunction(
+      () => typeof globalThis.__DEZOOMIFY_TEST_RUN__?.then === "function",
+      { timeout: 15000 },
+    );
     const driverResult = await driverPage.evaluate(() =>
       globalThis.__DEZOOMIFY_TEST_RUN__.then(
         () => ({ ok: true }),
@@ -299,6 +312,20 @@ async function runChromiumJob(base, work, options = {}) {
         `the job tab did not save the assembled image in time\njob page: ${jobText}\nbrowser diagnostics: ${diagnostics.join("\n") || "<none>"}\nfixture requests: ${fixtureLog || "<none>"}`,
       );
     }
+    await waitForVisible(jobPage, "#dz-btn-open", "open saved image action");
+    await waitForVisible(jobPage, "#dz-btn-reveal", "show containing folder action");
+    assert.equal(await jobPage.locator("#dz-btn-save").count(), 0, "no second save action");
+    assert.match(
+      download.suggestedFilename(),
+      /\.png$/i,
+      "the generated PNG filename keeps its extension",
+    );
+    assert.equal(
+      downloads.length,
+      1,
+      `the job starts exactly one image download: ${JSON.stringify(downloads.map((item) => ({ url: item.url(), filename: item.suggestedFilename() })))}\n${diagnostics.join("\n")}`,
+    );
+    if (options.afterSave) await options.afterSave(jobPage);
     const output = path.join(work, "saved-chromium.png");
     if (options.restartBackground) {
       await waitForVisible(jobPage, ".dz-completed-section", "completed job before worker restart");
@@ -380,6 +407,27 @@ async function runFirefoxJob(base, work, runOptions = {}) {
     assert.equal(addonId, GECKO_ID, `unexpected add-on id ${addonId}`);
     const deadline = Date.now() + 90000;
     const output = await readCompletedPng(downloadsDir, deadline);
+    const handles = await driver.getAllWindowHandles();
+    let jobTab;
+    for (const handle of handles) {
+      await driver.switchTo().window(handle);
+      if ((await driver.getCurrentUrl()).includes("/job.html#sourceTabId=")) {
+        jobTab = handle;
+        break;
+      }
+    }
+    assert.ok(jobTab, "Firefox job tab remains available after saving");
+    const { By } = webdriver;
+    await driver.wait(
+      async () => (await driver.findElements(By.css("#dz-btn-open"))).length === 1,
+      15000,
+    );
+    assert.equal((await driver.findElements(By.css("#dz-btn-reveal"))).length, 1);
+    assert.equal(
+      (await driver.findElements(By.css("#dz-btn-save"))).length,
+      0,
+      "no second save action",
+    );
     if (runOptions.scenario === "cookie-session") {
       await waitForFixtureEvent(
         fixtureServer.logFile,
@@ -403,7 +451,34 @@ async function runFirefoxJob(base, work, runOptions = {}) {
 test("chromium: packaged extension runs the job-tab engine flow", { timeout: 180000 }, async () => {
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-chromium-"));
   try {
-    assertPng(await runChromiumJob(fixtureServer.base, work));
+    assertPng(
+      await runChromiumJob(fixtureServer.base, work, {
+        async afterSave(jobPage) {
+          const downloadId = await jobPage.evaluate(async () => {
+            const downloads = (globalThis.browser ?? globalThis.chrome).downloads;
+            const items = await downloads.search({ state: "complete" });
+            if (items.length !== 1) throw new Error("expected one completed save");
+            globalThis.outputActions = [];
+            downloads.open = async (id) => {
+              globalThis.outputActions.push(["open", id]);
+              throw new Error("viewer unavailable");
+            };
+            downloads.show = async (id) => {
+              globalThis.outputActions.push(["show", id]);
+            };
+            return items[0].id;
+          });
+          await jobPage.locator("#dz-btn-open").click();
+          await waitForVisible(jobPage, ".dz-completed-section [role=alert]", "open action error");
+          await jobPage.locator("#dz-btn-reveal").click();
+          await jobPage.locator(".dz-completed-section [role=alert]").waitFor({ state: "hidden" });
+          assert.deepEqual(await jobPage.evaluate(() => globalThis.outputActions), [
+            ["open", downloadId],
+            ["show", downloadId],
+          ]);
+        },
+      }),
+    );
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

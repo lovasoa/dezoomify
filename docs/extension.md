@@ -46,6 +46,8 @@ Extension-origin requests attach no cookies or `Authorization` header and follow
 
 The job page hosts the shared [engine-effect assembly](browser-runtime.md#engine-effect-assembly): worker, WASM session, transport, decode, canvas, save, and shared UI. It selects the largest image and fitting level. The engine owns retries, partial decisions, and ordering. A clean canvas is saved from a Blob URL through the browser download manager; the engine completes only after the manager confirms the file. Cancellation and failed status lookups cancel an unfinished download before releasing its Blob URL. The URL stays valid until a terminal event or the cancellation request settles. A tainted output remains display-only. Product actions stay in the job page.
 
+The confirmed download ID drives the shared **Open image** and **Show in folder** actions through `downloads.open` and `downloads.show`. Opening the saved file uses the `downloads.open` permission. The shared UI handles pending actions and errors; tainted output has no file actions.
+
 Failures and retry actions stay in the job page. A retry takes another bounded source snapshot only if the original source document is still live. No Start over exists; a new job starts from the toolbar on the source page.
 
 ## Packaging and tests
