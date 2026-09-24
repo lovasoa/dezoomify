@@ -390,14 +390,15 @@ test("chromium: packaged extension retains the browser session for protected met
   }
 });
 
-test("chromium: packaged extension follows tile redirects without credentials", {
+test("chromium: packaged extension follows signed metadata and tile redirects without credentials", {
   timeout: 180000,
 }, async () => {
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-tile-redirect-"));
   try {
-    // Every tile 307s to a signed URL (signed-Zoomify shape). The transport
-    // follows credential-free, so the CORS `*` CDN responses stay readable
-    // and the job still assembles the full image.
+    // Signed-Zoomify shape: the Zoomify metadata and every tile 307 to a
+    // signed URL. Tile URLs keep the requested base although the metadata
+    // redirected, and the transport follows credential-free, so the CORS
+    // `*` responses stay readable and the job still assembles the image.
     assertPng(await runChromiumJob(fixtureServer.base, work, { scenario: "tile-redirect" }));
   } finally {
     rmSync(work, { recursive: true, force: true });

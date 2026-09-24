@@ -410,13 +410,13 @@
     },
     {
       "content_type": "application/xml",
-      "id": "extension/tile-redirect/payloads/fixtures.test/redirect-tiles/pyramid.dzi",
+      "id": "extension/tile-redirect/payloads/fixtures.test/redirect-tiles/signed/ImageProperties.xml",
       "license_provenance": "local test fixture (generated, no third-party material)",
-      "path": "extension/tile-redirect/payloads/fixtures.test/redirect-tiles/pyramid.dzi",
+      "path": "extension/tile-redirect/payloads/fixtures.test/redirect-tiles/signed/ImageProperties.xml",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "8de32193b73b668f41d4568a8f16409e70c4ee72f2bfa3a58e2a51016ec8dae8",
-      "size": 182,
+      "sha256": "1315ee30ad4dbe1e55d79b869532c0e3a41898cdda71c30c712b8f10f4b9afff",
+      "size": 101,
       "source_path": "apps/extension/tests/browser/headless.test.mjs",
       "source_snapshot": "local deterministic fixture"
     },
