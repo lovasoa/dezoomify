@@ -30,6 +30,10 @@ renders authoritative snapshots.
 - `JobObserver.failure(Error)` settles a runtime fault separately from engine
   snapshots. Runtime failures never manufacture an engine revision or terminal.
   Products own transport, permission, and output presentation directly.
+- Each graphical product owns one current attempt. Its observer, asynchronous
+  actions, activity timer, and cleanup check that ownership before changing the
+  view, history, or queue. A retired attempt disposes late handles; a completed
+  result keeps its output access until the result itself is retired.
 - The shared FIFO queue owns activation, advancement, cancellation, retry, and
   status totals for products with one active engine job. Products validate
   inputs and keep their queue payloads, progress, and presentation metadata.
