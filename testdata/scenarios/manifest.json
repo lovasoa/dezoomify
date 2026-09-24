@@ -481,6 +481,18 @@
       "source_snapshot": "local deterministic fixture"
     },
     {
+      "content_type": "text/plain",
+      "id": "extension/cookie-session/payloads/127.0.0.1/source-access-proof.txt",
+      "license_provenance": "local test fixture (generated, no third-party material)",
+      "path": "extension/cookie-session/payloads/127.0.0.1/source-access-proof.txt",
+      "sensitive": false,
+      "served_urls": [],
+      "sha256": "1b05e10bfce006bd493258f1493527b46ad2114b78e0828c3ed8054bf389d26d",
+      "size": 37,
+      "source_path": "apps/extension/tests/browser/headless.test.mjs",
+      "source_snapshot": "local deterministic fixture"
+    },
+    {
       "content_type": "text/html",
       "id": "extension/cookie-session/payloads/127.0.0.1/target.html",
       "license_provenance": "local test fixture (generated, no third-party material)",
@@ -499,8 +511,8 @@
       "path": "extension/cookie-session/routes.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "8f7d8c57c7552f68c4aafd5ab626b8a6a236fc44e3d1fb3248a4c666244c9f7e",
-      "size": 2204,
+      "sha256": "6f1c418a2a82c613d838131c40805e2e601bd242ac76f439866ec099cf654065",
+      "size": 2558,
       "source_path": "apps/extension/tests/browser/headless.test.mjs",
       "source_snapshot": "local deterministic fixture"
     },
