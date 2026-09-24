@@ -138,6 +138,28 @@ impl Default for JobOptions {
 }
 
 impl JobOptions {
+    /// Normalize product options once before configuring the engine and transport.
+    fn normalized(mut self) -> Self {
+        self.max_tiles = self.max_tiles.clamp(1, 16_777_216);
+        self.max_concurrent = self
+            .max_concurrent
+            .clamp(1, 64)
+            .min(self.max_tiles as usize);
+        self.max_retries = self.max_retries.min(1024);
+        self.max_bytes = self.max_bytes.clamp(1024, 4_294_967_296);
+        self.compression = self.compression.min(100);
+        if self
+            .format
+            .as_ref()
+            .is_some_and(|value| value.eq_ignore_ascii_case("auto"))
+        {
+            self.format = None;
+        }
+        self.cache_dir
+            .get_or_insert_with(crate::pipeline::default_tile_cache_dir);
+        self
+    }
+
     /// Typed pre-flight validation: input shape, output-format support, and
     /// an early destination check. The commit point validates again to close
     /// races between start and publication.
@@ -179,7 +201,7 @@ impl JobOptions {
     }
 
     fn engine_options(&self) -> Result<EngineOptions, NativeError> {
-        let tiles = self.max_tiles.clamp(1, 16_777_216) as u32;
+        let tiles = self.max_tiles as u32;
         let mut options = EngineOptions::new(vec![DiscoveryInput::new(&self.input_url)]);
         options.format = self.format.clone();
         options.selection = EngineSelectionPolicy::NativeAutomatic {
@@ -190,13 +212,13 @@ impl JobOptions {
             zoom_level: self.zoom_level,
         };
         options.partial = dezoomify::engine::PartialPolicy::Prompt;
-        options.max_concurrent = (self.max_concurrent.clamp(1, 64) as u32).min(tiles);
+        options.max_concurrent = self.max_concurrent as u32;
         options.max_tiles = tiles;
-        options.max_retries = self.max_retries.min(1024);
+        options.max_retries = self.max_retries;
         options.retry_base_delay_ms = u64::try_from(self.retry_base_delay.as_millis())
             .unwrap_or(u64::MAX)
             .min(dezoomify::engine::retry::MAX_RETRY_AFTER_MS);
-        options.max_bytes = self.max_bytes.clamp(1024, 4_294_967_296);
+        options.max_bytes = self.max_bytes;
         options.max_deferred_follows = MAX_DEFERRED_FOLLOWS;
         EngineJob::validate_options(&options).map_err(|error| match error.code.as_str() {
             "job.unknown-format" => NativeError::new("discovery.unknown-format", error.message),
@@ -212,7 +234,7 @@ impl JobOptions {
     fn host_settings(&self) -> crate::exec::NativeHostSettings {
         crate::exec::NativeHostSettings {
             fetch: FetchLimits {
-                max_bytes: self.max_bytes.clamp(1024, 4_294_967_296),
+                max_bytes: self.max_bytes,
                 timeout: self.timeout,
                 connect_timeout: self.connect_timeout,
                 max_idle_per_host: self.max_idle_per_host,
@@ -221,7 +243,7 @@ impl JobOptions {
                 },
                 ..FetchLimits::default()
             },
-            max_retries: self.max_retries.min(1024),
+            max_retries: self.max_retries,
             min_interval: self.min_interval,
             cache_dir: self
                 .cache_dir
@@ -233,7 +255,7 @@ impl JobOptions {
                 PartialPolicy::Fail
             },
             sink: SinkOptions {
-                compression: self.compression.min(100),
+                compression: self.compression,
                 retain_cap_bytes: self.output_retain_cap,
                 spool_cap_bytes: self.output_spool_cap,
             },
@@ -265,6 +287,7 @@ static NEXT_JOB: AtomicU64 = AtomicU64::new(1);
 /// validation. The function holds no state; each job owns its thread,
 /// transport, temporary files, and completion.
 pub fn start_job(options: JobOptions) -> Result<RunningJob, NativeError> {
+    let options = options.normalized();
     options.validate()?;
     let engine_options = options.engine_options()?;
     let id = format!("job:native-{}", NEXT_JOB.fetch_add(1, Ordering::SeqCst));

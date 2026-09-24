@@ -100,6 +100,25 @@ impl NativeTransport {
             .block_on(self.fetch_async(uri, extra_headers, user, auth, limits))
     }
 
+    /// Engine acquisition keeps its generated request intact until this HTTP boundary.
+    pub async fn fetch_resource(
+        &self,
+        request: &dezoomify::model::ResourceRequest,
+        user: Option<&UserHeaders>,
+        auth: Option<&EphemeralAuthorization>,
+        limits: &FetchLimits,
+    ) -> Result<FetchOutcome, NativeError> {
+        let mut headers: BTreeMap<String, String> = dezoomify::default_headers()
+            .into_iter()
+            .map(|(name, value)| (name.to_ascii_lowercase(), value))
+            .collect();
+        for header in &request.headers {
+            headers.insert(header.name.to_ascii_lowercase(), header.value.clone());
+        }
+        self.fetch_async(&request.uri, &headers, user, auth, limits)
+            .await
+    }
+
     /// Async fetch core: identical semantics to [`NativeTransport::fetch`]
     /// without blocking. Task-spawned by the completion-driven executor so
     /// one slow tile never blocks unrelated tiles.

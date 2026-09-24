@@ -7,13 +7,11 @@
     "dialog:allow-open",
     "dialog:allow-save",
     "opener:allow-open-url",
-    "dezoomify:allow-answer-choice",
-    "dezoomify:allow-cancel-job",
-    "dezoomify:allow-pause-job",
     "dezoomify:allow-query-capabilities",
     "dezoomify:allow-open-saved-output",
+    "dezoomify:allow-job-command",
+    "dezoomify:allow-release-job",
     "dezoomify:allow-request-destination",
-    "dezoomify:allow-resume-job",
     "dezoomify:allow-start-job"
   ],
   "windows": [
@@ -21,13 +19,11 @@
   ],
   "x-dezoomify": {
     "commands": [
-      "answer_choice",
-      "cancel_job",
+      "job_command",
       "open_saved_output",
-      "pause_job",
+      "release_job",
       "query_capabilities",
       "request_destination",
-      "resume_job",
       "start_job"
     ],
     "decoders": [

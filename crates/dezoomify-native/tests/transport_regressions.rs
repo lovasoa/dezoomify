@@ -28,6 +28,63 @@ fn transport() -> NativeTransport {
     NativeTransport::new(&limits()).expect("transport builds")
 }
 
+#[test]
+fn generated_requests_keep_headers_and_redirect_results_for_every_purpose() {
+    use dezoomify::model::{Header, RequestPurpose, ResourceRequest};
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        for hop in 0..6 {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(std::time::Duration::from_secs(3)))
+                .unwrap();
+            let mut head = Vec::new();
+            while !head.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                socket.read_exact(&mut byte).unwrap();
+                head.push(byte[0]);
+            }
+            assert!(String::from_utf8(head)
+                .unwrap()
+                .to_lowercase()
+                .contains("accept: application/xml"));
+            let reply = if hop % 2 == 0 {
+                response(
+                    "HTTP/1.1 302 Found",
+                    &[("location", "/final"), ("connection", "close")],
+                    b"",
+                )
+            } else {
+                response("HTTP/1.1 200 OK", &[("connection", "close")], b"resource")
+            };
+            socket.write_all(&reply).unwrap();
+        }
+    });
+    let transport = transport();
+    for purpose in [
+        RequestPurpose::Metadata,
+        RequestPurpose::Tile,
+        RequestPurpose::Probe,
+    ] {
+        let request = ResourceRequest {
+            id: 42,
+            uri: format!("{origin}/start"),
+            purpose,
+            headers: vec![Header {
+                name: "Accept".into(),
+                value: "application/xml".into(),
+            }],
+        };
+        let result = transport
+            .block_on(transport.fetch_resource(&request, None, None, &limits()))
+            .unwrap();
+        assert_eq!(result.final_uri, format!("{origin}/final"));
+        assert_eq!(result.body, b"resource");
+    }
+    server.join().unwrap();
+}
+
 fn response(status_line: &str, headers: &[(&str, &str)], body: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(status_line.as_bytes());
