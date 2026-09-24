@@ -50,7 +50,6 @@ function product(overrides = {}) {
         seen.fetches += 1;
         return { bytes: new Uint8Array([9, 9]) };
       },
-      probeSize: async () => ({ status: "missing" }),
       classifyFailure: (error) => ({
         code: "browser.network",
         retryable: true,
@@ -189,9 +188,9 @@ test("service sends one-attempt structured tile failures to the engine", async (
         throttle: async () => {},
       });
       const p = product({
-        fetchResource: (effect, signal) =>
+        fetchResource: (request, signal) =>
           fetcher
-            .fetchTileFor(effect.request.uri, {}, signal)
+            .fetchTileFor(request.uri, {}, signal)
             .then((result) => ({ bytes: new Uint8Array(result.bytes) })),
         classifyFailure: (error) => ({
           code: error.cause?.code ?? error.code,

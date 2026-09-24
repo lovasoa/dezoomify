@@ -28,16 +28,17 @@ import type {
   Error as EngineError,
   JobInput,
   ProcessingRecipe,
+  ResourceRequest,
   SessionConfig,
 } from "@dezoomify/wasm-bindings";
 import {
-  type AcquireEffect,
   createEngineHost,
   type EngineHost,
   type EngineHostAssembly,
   type HostFailure,
 } from "./engine-host.ts";
-import type { ProbeSize } from "./probe.ts";
+import { createProbeSize } from "./probe.ts";
+import { createTileDecoder } from "./tile-decode.ts";
 import type { TileImageLike } from "./tile-draw.ts";
 import type { WorkerHostMessage, WorkerHostOutput } from "./worker-host.ts";
 
@@ -64,17 +65,11 @@ export interface BrowserProduct {
   createWorker(): BrowserWorker;
   /** One-attempt resource fetch feeding the engine retry budget. */
   fetchResource(
-    effect: AcquireEffect,
+    request: ResourceRequest,
     signal: AbortSignal,
   ): Promise<{ bytes: Uint8Array; finalUri?: string }>;
-  probeSize(
-    url: string,
-    headers: Record<string, string>,
-    requestId?: number,
-    signal?: AbortSignal,
-  ): Promise<ProbeSize>;
   /** Absent: no display fallback (failed acquisitions fail the engine). */
-  loadDisplayImage?: (url: string) => Promise<TileImageLike>;
+  loadDisplayImage?: (url: string, signal: AbortSignal) => Promise<TileImageLike>;
   classifyFailure(error: unknown): HostFailure;
   createAssembly(args: BrowserAssemblyArgs): EngineHostAssembly;
   /** Budget defaults; the request engine options win per job. */
@@ -145,6 +140,17 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
       { resolve: (bytes: ArrayBuffer) => void; reject: (error: unknown) => void }
     >();
     let processSeq = 0;
+    const decoder = createTileDecoder();
+    const probeSize = createProbeSize({
+      fetchResource: product.fetchResource,
+      decode: (bytes) => decoder.decode(bytes),
+      loadImage: product.loadDisplayImage
+        ? async (url, signal) => {
+            const image = await product.loadDisplayImage!(url, signal);
+            return { width: image.naturalWidth, height: image.naturalHeight, image };
+          }
+        : undefined,
+    });
 
     function abortAttempt(): void {
       try {
@@ -228,15 +234,16 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
     host = createEngineHost({
       worker: { postMessage: (message) => worker.postMessage(message) },
       jobId: () => id,
-      fetchResource: (effect) => product.fetchResource(effect, attemptSignal.signal),
+      fetchResource: (request) => product.fetchResource(request, attemptSignal.signal),
       cancelFetch: () => {
         abortAttempt();
       },
       assembly: activeAssembly,
       quotas: { ...product.quotas, ...request.engine },
-      probeSize: (url, headers, requestId) =>
-        product.probeSize(url, headers, requestId, attemptSignal.signal),
-      loadDisplayImage: product.loadDisplayImage,
+      probeSize: (request) => probeSize(request, attemptSignal.signal),
+      loadDisplayImage: product.loadDisplayImage
+        ? (url) => product.loadDisplayImage!(url, attemptSignal.signal)
+        : undefined,
       classifyFailure: (error) => product.classifyFailure(error),
       onPermissionRequired: (detail) => {
         product.onPermissionRequired?.(detail);
@@ -308,6 +315,7 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
         reject(serviceError("browser.job-settled", "The browser job already finished."));
       }
       pendingProcess.clear();
+      decoder.dispose();
       try {
         activeHost.dispose();
       } catch {

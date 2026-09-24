@@ -13,10 +13,12 @@ import {
   blockedReason,
   forwardCoreHeaders,
   isPublicHttpUrl,
-  normalizeErrorPreviewText,
   originOfUrl,
+  readErrorPreview,
+  readResponseBytes,
+  retryAfterMs,
 } from "@dezoomify/browser-runtime";
-import type { FetchFailureCode } from "@dezoomify/wasm-bindings";
+import type { FetchFailureCode, ResourceRequest } from "@dezoomify/wasm-bindings";
 
 export const PROXY_PATH = "/api/proxy";
 export const MAX_BYTES_DEFAULT = 8 * 1024 * 1024;
@@ -30,20 +32,10 @@ type TransportCategory =
   | "throttled"
   | "malformed"
   | "limit-exceeded";
-type Purpose = "metadata" | "tile" | "probe";
-type HeaderSource = Headers | Record<string, string> | Array<{ name?: unknown; value?: unknown }>;
-type FetchResponse = Response & { bytes?: Uint8Array; durationMs?: number };
-type FetchOptions = {
-  requestId?: number;
-  purpose?: Purpose;
-  headers?: HeaderSource;
+type FetchDeps = {
   maxBytes?: number;
   timeoutMs?: number;
-  cancelled?: () => boolean;
-  userIntent?: boolean;
-};
-type FetchDeps = {
-  fetchImpl?: (url: string, init: RequestInit) => Promise<FetchResponse>;
+  fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
   hasPermission: (origin: string) => boolean | Promise<boolean>;
   setTimeoutFn?: typeof setTimeout;
   clearTimeoutFn?: typeof clearTimeout;
@@ -125,138 +117,6 @@ export function asFetchFailure(error: unknown): HostFailure {
   };
 }
 
-function retryAfterHeaderMs(headers: unknown, at = Date.now()): number | undefined {
-  try {
-    const value = headers as {
-      get?: (name: string) => string | null;
-      [name: string]: unknown;
-    } | null;
-    const raw =
-      typeof value?.get === "function"
-        ? value.get("retry-after")
-        : (value?.["retry-after"] ?? value?.["Retry-After"]);
-    if (typeof raw !== "string" || raw.trim() === "") return undefined;
-    const seconds = Number(raw);
-    if (Number.isFinite(seconds) && seconds >= 0) return Math.floor(seconds * 1000);
-    const date = Date.parse(raw);
-    return Number.isFinite(date) ? Math.max(0, date - at) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/** @param {unknown} value */
-function headerValue(value: unknown): string {
-  const headers = value as { get?: (name: string) => string | null; [key: string]: unknown } | null;
-  if (!value) return "";
-  if (typeof headers?.get === "function") return String(headers.get("content-type") ?? "");
-  if (headers) return String(headers["content-type"] ?? headers["Content-Type"] ?? "");
-  return "";
-}
-
-/** @param {unknown} value */
-function contentLength(value: unknown): number | null {
-  const headers = value as { get?: (name: string) => string | null; [key: string]: unknown } | null;
-  if (!value) return null;
-  const raw =
-    typeof headers?.get === "function"
-      ? headers.get("content-length")
-      : (headers?.["content-length"] ?? headers?.["Content-Length"]);
-  const number = Number(raw);
-  return Number.isSafeInteger(number) && number >= 0 ? number : null;
-}
-
-/**
- * Consume a Fetch body while the controller remains live. `arrayBuffer()` is
- * intentionally not used: it would retain an unbounded body before the cap.
- * @param {any} response
- * @param {{ maxBytes: number, controller: AbortController, cancelled?: () => boolean }} opts
- */
-export async function readResponseBytes(
-  response: FetchResponse,
-  opts: { maxBytes: number; controller: AbortController; cancelled?: () => boolean },
-): Promise<Uint8Array> {
-  const declared = contentLength(response?.headers);
-  if (declared !== null && declared > opts.maxBytes) {
-    opts.controller.abort();
-    throw transportError("limit-exceeded", `response exceeds ${opts.maxBytes} byte limit`);
-  }
-  // Older focused fakes supply bytes directly. Production responses stream.
-  if (response?.bytes instanceof Uint8Array) {
-    if (response.bytes.byteLength > opts.maxBytes) {
-      opts.controller.abort();
-      throw transportError(
-        "limit-exceeded",
-        `oversized response exceeds ${opts.maxBytes} byte limit`,
-      );
-    }
-    return response.bytes;
-  }
-  const reader = response?.body?.getReader?.();
-  if (!reader) throw transportError("malformed", "response has no readable body");
-  /** @type {Uint8Array[]} */
-  const chunks = [];
-  let length = 0;
-  try {
-    for (;;) {
-      if (opts.cancelled?.() || opts.controller.signal.aborted)
-        throw transportError("cancelled", "request cancelled");
-      const next = await reader.read();
-      if (next.done) break;
-      const value = next.value instanceof Uint8Array ? next.value : new Uint8Array(next.value ?? 0);
-      if (value.byteLength > opts.maxBytes - length) {
-        opts.controller.abort();
-        throw transportError(
-          "limit-exceeded",
-          `oversized response exceeds ${opts.maxBytes} byte limit`,
-        );
-      }
-      length += value.byteLength;
-      chunks.push(value);
-    }
-  } catch (error) {
-    if (error && typeof error === "object" && "category" in error) throw error;
-    if (opts.cancelled?.() || opts.controller.signal.aborted)
-      throw transportError("cancelled", "request cancelled");
-    throw error;
-  } finally {
-    try {
-      await reader.cancel();
-    } catch {
-      /* stream cleanup is best effort */
-    }
-  }
-  const bytes = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
-}
-
-const ERROR_SNIPPET_MAX_CHARS = 300;
-
-/**
- * Bounded server signal from an HTTP error body. Reads a small text body,
- * strips markup, collapses to one line, truncates. Never throws; returns ""
- * when nothing usable remains. Local-only diagnostics content.
- */
-async function errorSignal(response: FetchResponse): Promise<string> {
-  try {
-    const headers = response?.headers as { get?: (name: string) => string | null } | null;
-    const declared = Number(headers?.get?.("content-length"));
-    if (Number.isSafeInteger(declared) && declared > 16 * 1024) return "";
-    const text =
-      typeof (response as { text?: unknown }).text === "function"
-        ? await (response as unknown as { text(): Promise<string> }).text()
-        : "";
-    return normalizeErrorPreviewText(text, ERROR_SNIPPET_MAX_CHARS);
-  } catch {
-    return "";
-  }
-}
-
 /** Append a bounded server signal to a transport message (ASCII punctuation only). */
 function withSignal(message: string, signal: string): string {
   return signal ? `${message}. Server said: "${signal}"` : message;
@@ -280,19 +140,12 @@ function checkedUrl(url: string): URL {
  * @param {{ fetchImpl?: (url: string, init: RequestInit) => Promise<any>, hasPermission: (origin: string) => boolean | Promise<boolean>, setTimeoutFn?: typeof setTimeout, clearTimeoutFn?: typeof clearTimeout }} deps
  */
 export function createExtensionFetcher(deps: FetchDeps) {
-  const fetchImpl: (url: string, init: RequestInit) => Promise<FetchResponse> =
-    deps.fetchImpl ?? (fetch as (url: string, init: RequestInit) => Promise<FetchResponse>);
-  /** @type {Set<AbortController>} */
-  const active = new Set<AbortController>();
-
-  /** @param {string} url @param {{ requestId?: number, purpose?: "metadata"|"tile"|"probe", headers?: unknown, maxBytes?: number, timeoutMs?: number, cancelled?: () => boolean }} [opts] */
-  async function fetchResource(url: string, opts: FetchOptions = {}) {
-    const parsed = checkedUrl(url);
+  const fetchImpl: (url: string, init: RequestInit) => Promise<Response> =
+    deps.fetchImpl ?? (fetch as (url: string, init: RequestInit) => Promise<Response>);
+  async function fetchResource(request: ResourceRequest, signal: AbortSignal) {
+    signal.throwIfAborted();
+    const parsed = checkedUrl(request.uri);
     const origin = originOfUrl(parsed.href);
-    if (!opts.userIntent)
-      throw transportError("access-required", "explicit user intent is required", {
-        code: "intent-required",
-      });
     if (!(await deps.hasPermission(origin))) {
       throw transportError("access-required", `Access to ${origin} requires an explicit action`, {
         hosts: [origin],
@@ -300,11 +153,17 @@ export function createExtensionFetcher(deps: FetchDeps) {
       });
     }
     const controller = new AbortController();
-    active.add(controller);
-    const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    const timer = (deps.setTimeoutFn ?? setTimeout)(() => controller.abort(), timeoutMs);
+    const abort = () => controller.abort(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    let timedOut = false;
+    const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const timer = (deps.setTimeoutFn ?? setTimeout)(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
     try {
-      if (opts.cancelled?.()) throw transportError("cancelled", "request cancelled");
+      if (signal.aborted) throw transportError("cancelled", "request cancelled");
       // Credential-free with browser-native redirect following: no
       // credentials are attached (CDNs answering
       // Access-Control-Allow-Origin: * stay readable, which "include"
@@ -315,19 +174,20 @@ export function createExtensionFetcher(deps: FetchDeps) {
         credentials: "omit",
         redirect: "follow",
         signal: controller.signal,
-        headers: forwardCoreHeaders(opts.headers, opts.purpose ?? "metadata"),
+        headers: forwardCoreHeaders(request.headers, request.purpose ?? "metadata"),
       });
       if (!response || typeof response.status !== "number")
         throw transportError("malformed", "malformed fetch response");
-      if (typeof response.durationMs === "number" && response.durationMs > timeoutMs)
-        throw transportError("network", "fetch timeout");
       if (response.status === 429)
         throw transportError(
           "throttled",
-          withSignal("site is throttling requests", await errorSignal(response)),
+          withSignal(
+            "site is throttling requests",
+            await readErrorPreview(response, controller.signal),
+          ),
           {
             status: response.status,
-            retry_after_ms: retryAfterHeaderMs(response.headers),
+            retry_after_ms: retryAfterMs(response.headers.get("retry-after")),
           },
         );
       if (response.status === 401 || response.status === 403) {
@@ -340,7 +200,7 @@ export function createExtensionFetcher(deps: FetchDeps) {
             response.status === 401
               ? "unauthorized; the site refused this file"
               : "forbidden; the site refused this file",
-            await errorSignal(response),
+            await readErrorPreview(response, controller.signal),
           ),
           { hosts: [origin], status: response.status },
         );
@@ -348,30 +208,45 @@ export function createExtensionFetcher(deps: FetchDeps) {
       if (response.status < 200 || response.status >= 300)
         throw transportError(
           "network",
-          withSignal(`request failed with HTTP ${response.status}`, await errorSignal(response)),
+          withSignal(
+            `request failed with HTTP ${response.status}`,
+            await readErrorPreview(response, controller.signal),
+          ),
           { status: response.status },
         );
-      const contentType = headerValue(response.headers);
+      const contentType = response.headers.get("content-type") ?? "";
       const accepted =
-        opts.purpose === "metadata"
+        request.purpose === "metadata"
           ? ALLOWED_MIME_PREFIXES
           : ALLOWED_MIME_PREFIXES.filter((mime) => mime !== "text/html");
       if (contentType && !accepted.some((prefix) => contentType.toLowerCase().startsWith(prefix)))
         throw transportError("malformed", `unsupported response type ${contentType}`);
-      const bytes = await readResponseBytes(response, {
-        maxBytes: opts.maxBytes ?? MAX_BYTES_DEFAULT,
-        controller,
-        cancelled: opts.cancelled,
-      });
+      const bytes = await readResponseBytes(
+        response,
+        deps.maxBytes ?? MAX_BYTES_DEFAULT,
+        controller.signal,
+      );
       return {
         bytes,
-        finalUrl: response.url || parsed.href,
+        finalUri: response.url || parsed.href,
         contentType,
-        requestId: opts.requestId,
       };
     } catch (error) {
       if (error && typeof error === "object" && "category" in error) throw error;
-      if (opts.cancelled?.() || controller.signal.aborted)
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === "TRANSPORT_SIZE_LIMIT"
+      ) {
+        controller.abort();
+        throw transportError(
+          "limit-exceeded",
+          error instanceof Error ? error.message : "response exceeds byte limit",
+        );
+      }
+      if (timedOut && !signal.aborted) throw transportError("network", "fetch timeout");
+      if (signal.aborted || controller.signal.aborted)
         throw transportError("cancelled", "request cancelled");
       throw transportError(
         "network",
@@ -379,12 +254,8 @@ export function createExtensionFetcher(deps: FetchDeps) {
       );
     } finally {
       (deps.clearTimeoutFn ?? clearTimeout)(timer);
-      active.delete(controller);
+      signal.removeEventListener("abort", abort);
     }
   }
-  function cancel() {
-    for (const controller of active) controller.abort();
-    active.clear();
-  }
-  return { fetchResource, cancel };
+  return { fetchResource };
 }
