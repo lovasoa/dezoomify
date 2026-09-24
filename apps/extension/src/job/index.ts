@@ -214,6 +214,8 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
     ...(attempt.uiLogLines.length ? { log: attempt.uiLogLines.slice() } : {}),
   };
   const presentation = presentFor(status, ctx);
+  const downloadId = presentation.phase === "completed" ? attempt.savedDownloadId : null;
+  const canvas = attempt.activeSnapshot?.output?.canvas;
   // Outstanding partial decision, read off the DTO only: the closed
   // keep/retry/discard answers are the engine's RecoveryChoice values, never
   // fabricated actions.
@@ -236,10 +238,28 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
       onTryMaximum: () => {
         if (owns(attempt)) tryMaximum();
       },
-      onSave: () => {},
+      ...(downloadId !== null
+        ? {
+            onOpenOutput: async () => {
+              if (owns(attempt)) await api.downloads.open(downloadId);
+            },
+            onRevealOutput: async () => {
+              if (owns(attempt)) await api.downloads.show(downloadId);
+            },
+          }
+        : {}),
     },
     {
       ...ctx,
+      ...(downloadId !== null
+        ? {
+            nativeSaved: { partial: presentation.partial },
+            outputKey: String(downloadId),
+            ...(canvas
+              ? { completedInfo: { width: canvas.width, height: canvas.height, mime: "image/png" } }
+              : {}),
+          }
+        : {}),
       ...(Object.keys(viewActivity).length ? { jobActivity: viewActivity } : {}),
     },
     {

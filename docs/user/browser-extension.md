@@ -62,6 +62,8 @@ Install it from the
 
 The job finishes when your browser confirms the saved file. If saving fails,
 the job tab shows an error. Stopping the job also cancels an unfinished save.
+Once saving finishes, choose **Open image** or **Show in folder** to access
+the saved file.
 
 ## If something goes wrong
 

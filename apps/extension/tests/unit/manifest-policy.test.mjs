@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const output = (browser) => new URL(`../../.output/${browser}-mv3/`, import.meta.url);
 const manifest = (browser) =>
   JSON.parse(readFileSync(new URL("manifest.json", output(browser)), "utf8"));
-const REVIEWED_PERMISSIONS = ["activeTab", "downloads", "scripting"];
+const REVIEWED_PERMISSIONS = ["activeTab", "downloads", "downloads.open", "scripting"];
 
 for (const browser of ["chrome", "firefox"]) {
   test(`${browser}: WXT emits the reviewed MV3 manifest`, () => {
