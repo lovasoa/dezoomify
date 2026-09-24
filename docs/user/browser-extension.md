@@ -46,8 +46,9 @@ Install it from the
    or its tiles live on other addresses, the browser may ask for permission
    to look at those too; approve it to continue.
 4. The dedicated job tab takes one bounded snapshot of the source page and
-   runs the job there. Pressing the button again focuses that job tab. Close
-   the job tab to stop the job. If you navigate the source tab, Dezoomify
+   runs the job there. Pressing the button again focuses that job tab and
+   cancels an active job. Close the job tab to stop the job. If you navigate
+   the source tab, Dezoomify
    stops reading the old page; it can continue only with image data it has
    already found and can fetch through the browser's extension transport.
 5. The extension selects the largest image it finds and the highest

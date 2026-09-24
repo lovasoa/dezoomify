@@ -13,7 +13,7 @@ flowchart LR
 
 ## Background launcher
 
-The background opens `job.html#sourceTabId=<id>` for the clicked tab. A repeated click focuses the existing job tab and sends one `dz.toolbar-click` event; the job page decides how to respond. Closing either tab removes the directory entry. The background does not scan, fetch, prompt for permissions, maintain job state, or relay engine messages. A background restart does not stop a job already owned by its tab.
+The background opens `job.html#sourceTabId=<id>` for the clicked tab. A repeated click focuses the existing job tab and sends one `dz.toolbar-click` event; the job page cancels an active job and leaves a completed job available. Closing either tab removes the directory entry. The background does not scan, fetch, prompt for permissions, maintain job state, or relay engine messages. A background restart does not stop a job already owned by its tab.
 
 The launcher uses only the toolbar click and tab APIs needed to open and focus the job. The test-only runtime messages are absent from production behavior. The package declares no permanent host permissions or content scripts.
 

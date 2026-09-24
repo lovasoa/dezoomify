@@ -324,6 +324,7 @@ function syncExtensionJobIndicator(status: PresentationStatus) {
 }
 
 function closeJob() {
+  discoveryGeneration += 1;
   jobLog.info("job-cancelled", `jobId=${sessionId}`);
   const handle = jobHandle;
   void handle?.command({ type: "cancel" }).catch(() => {});
@@ -816,6 +817,15 @@ api?.runtime?.onMessage?.addListener((message) => {
       "toolbar-click-forwarded",
       `jobId=${sessionId} state=${activeSnapshot?.lifecycle ?? "starting"}`,
     );
+    const terminal = activeSnapshot?.terminal?.type;
+    if (
+      !localFailure &&
+      terminal !== "completed" &&
+      terminal !== "partial-completed" &&
+      terminal !== "failed" &&
+      terminal !== "cancelled"
+    )
+      closeJob();
     return;
   }
   if (!TEST_PERMISSION_MOCK) return;
