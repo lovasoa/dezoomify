@@ -1,4 +1,3 @@
-import { createTileDecoder } from "../packages/browser-runtime/src/tile-decode.ts";
 // Web application entry point (single source of truth; Vite bundles this
 // file directly, there is no hand-maintained `.js` mirror).
 // Real pipeline: worker-hosted wasm core discovery -> direct-first transport
@@ -12,7 +11,7 @@ import { createTileDecoder } from "../packages/browser-runtime/src/tile-decode.t
 // synthetic controller walk exists.
 
 import { PROXY_TRANSPORT_LABEL } from "@dezoomify/app-model";
-import type { Error as EngineError, Header, ProcessingRecipe } from "@dezoomify/wasm-bindings";
+import type { Error as EngineError, Header } from "@dezoomify/wasm-bindings";
 import type { HistoryEntry, JobHandle, JobSnapshot } from "../packages/app-model/src/index.ts";
 import {
   cancelAllQueueEntries,
@@ -26,16 +25,12 @@ import {
   summarizeQueue,
   toHistoryEntry,
 } from "../packages/app-model/src/index.ts";
-import {
-  canvasToPngBlob,
-  isCanvasTaintError,
-  saveBlobViaAnchor,
-} from "../packages/browser-runtime/src/canvas-save.ts";
+import { saveBlobViaAnchor } from "../packages/browser-runtime/src/canvas-save.ts";
 import type { StructuredFailure } from "../packages/browser-runtime/src/failure.ts";
 import {
-  type BrowserJobHandle,
+  type BrowserAssemblyArgs,
+  createBrowserAssembly,
   createBrowserJobService,
-  createCanvasAssembly,
 } from "../packages/browser-runtime/src/index.ts";
 import { createJobActivity } from "../packages/browser-runtime/src/job-activity.ts";
 import {
@@ -47,8 +42,6 @@ import {
 } from "../packages/browser-runtime/src/limits.ts";
 import { createLogger } from "../packages/browser-runtime/src/logging.ts";
 import {
-  canvasAllocationFailure,
-  canvasSurfaceFailure,
   desktopHandoffLink,
   isLocalFileUrl,
   wantsDesktopHandoff,
@@ -297,7 +290,7 @@ function headerRecord(headers: Header[] | undefined): Record<string, string> {
   return Object.fromEntries((headers ?? []).map(({ name, value }) => [name, value]));
 }
 
-let activeAssembly: ReturnType<typeof createCanvasAssembly> | null = null;
+let activeAssembly: ReturnType<typeof createBrowserAssembly> | null = null;
 
 /** Device limit tier inputs: client hints where available, else the UA. */
 function clientHints(): ClientHints {
@@ -309,50 +302,26 @@ let tryMaximumNext = false;
 
 function createAssembly(
   sourceUrl: string,
-  processTile: (recipe: ProcessingRecipe, bytes: ArrayBuffer) => Promise<ArrayBuffer>,
-): ReturnType<typeof createCanvasAssembly> {
-  const decoder = createTileDecoder();
-  return createCanvasAssembly({
-    decode: (bytes: ArrayBuffer) => decoder.decode(bytes),
-    processTile,
-    createCanvas: (width: number, height: number) => {
-      const element =
-        (document.getElementById("rendering-canvas") as HTMLCanvasElement | null) ??
-        document.createElement("canvas");
-      try {
-        element.width = width;
-        element.height = height;
-      } catch {
-        throw canvasAllocationFailure(width, height, sourceUrl);
-      }
-      if (element.width !== width || element.height !== height) {
-        throw canvasAllocationFailure(width, height, sourceUrl);
-      }
-      const ctx2d = element.getContext("2d");
-      if (!ctx2d) {
-        throw canvasSurfaceFailure(width, height, sourceUrl);
-      }
-      // Reveal the canvas before drawing (legacy parity): the picture stays
-      // visible and right-clickable while the job finishes.
+  args: BrowserAssemblyArgs,
+): ReturnType<typeof createBrowserAssembly> {
+  return createBrowserAssembly({
+    ...args,
+    sourceUrl,
+    canvas: () => {
+      const existing = document.getElementById("rendering-canvas");
+      return existing instanceof HTMLCanvasElement ? existing : document.createElement("canvas");
+    },
+    showCanvas: () => {
       setCanvasVisible(document, true);
       preview.resetTransform(document);
-      return {
-        width,
-        height,
-        ctx2d,
-        toBlob: (cb: BlobCallback, mime?: string) => element.toBlob(cb, mime),
-      };
     },
-    encode: (canvas) =>
-      canvasToPngBlob(canvas as unknown as { toBlob(cb: BlobCallback, mime?: string): void }),
     save: (blob, width, height) => {
       if (resultBlobUrl) URL.revokeObjectURL(resultBlobUrl);
-      resultBlobUrl = URL.createObjectURL(blob as Blob);
+      resultBlobUrl = URL.createObjectURL(blob);
       viewCtx.completedInfo = { width, height, mime: "image/png", blobUrl: resultBlobUrl };
       viewCtx.originClean = true;
       return "browser-save-ready";
     },
-    sourceUrl,
     limits: browserLimitsFor(clientHints()),
     onDisplayOnly: () => {
       if (viewCtx.originClean === false) return;
@@ -366,7 +335,6 @@ function createAssembly(
       recordWebHistory(sourceUrl, dims?.width ?? 0, dims?.height ?? 0, "display");
       update();
     },
-    isTaintError: (error) => isCanvasTaintError(error),
     log: (line) => webLog.info("runtime", line),
   });
 }
@@ -607,8 +575,8 @@ async function runJob(url: string, origin = url): Promise<void> {
         ...(structured.detail ? { detail: structured.detail } : {}),
       };
     },
-    createAssembly: ({ processTile }) => {
-      const assembly = createAssembly(origin, processTile);
+    createAssembly: (args) => {
+      const assembly = createAssembly(origin, args);
       activeAssembly = assembly;
       return assembly;
     },
