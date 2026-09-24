@@ -63,7 +63,7 @@ No catalog notice, no display-only branch on the native path. The engine owns na
 
 ### Desktop partial-output honesty
 
-Default policy is `Keep`. Kept partials publish to the `.partial` sibling; the granted destination stays untouched, so partials never masquerade as complete; `--no-partial`/`Fail` writes nothing (`tile.download-failed`). The driver answers `request-decision{partial}` from policy itself, so the shell shows no partial dialog (`answer_choice` markers still map onto policy pre-grant). The pump retains partial flag, missing ledger, and published path. Kept partials end `PartiallyCompleted` with a distinct label; open/reveal resolve the sibling, never the untouched destination.
+Default policy is `Keep`. Kept partials publish to the `.partial` sibling; the granted destination stays untouched, so partials never masquerade as complete; `--no-partial`/`Fail` writes nothing (`tile.download-failed`). The driver waits up to 60 seconds for the generated partial decision; the desktop presents keep, discard, and retry actions. Without an answer the configured default keeps the partial sibling. The pump retains partial flag, missing ledger, and published path. Kept partials end `PartiallyCompleted` with a distinct label; open/reveal resolve the sibling, never the untouched destination.
 
 ### Desktop updater
 

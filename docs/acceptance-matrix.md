@@ -48,7 +48,18 @@ sites; `cargo xtask test live --public` stays opt-in and advisory.
 
 | Behavior | Corpus | Lane |
 |---|---|---|
-| Legacy site serves `/`, the new app serves `/beta`, both proxies stay bound | `test/website-deploy.test.mjs` | `cargo xtask test web` |
+| Legacy site serves `/` byte-identically, the new app serves `/beta`, both proxies stay bound | `crates/fixture-server/tests/webapp-e2e/webapp.spec.js` | `cargo xtask test web --e2e` |
+
+## Job boundaries
+
+| Behavior | Coverage | Lane |
+|---|---|---|
+| Redirects preserve final metadata URI and relative discovery | browser transport tests and real website discovery | `cargo xtask test web --e2e` |
+| Grants, source navigation, and cancellation stay with the owning job | packaged extension source-session journeys | `cargo xtask test extension` |
+| Snapshots arriving before a desktop start reply reach its observer | desktop job-service tests | `cargo xtask test desktop` |
+| Partial decisions retain missing tiles and default to kept sibling output on desktop | real-window partial journey | `cargo xtask test desktop --e2e-window` |
+| CLI arguments, interactive prompts, machine records, exit classes, and output naming stay compatible | CLI integration tests and native scenario corpus | `cargo xtask test native` |
+| Cancellation quiesces work before native publication; committed files survive cleanup | native job-service and pipeline scenarios | `cargo xtask test native` |
 
 ## Reading the matrix
 
