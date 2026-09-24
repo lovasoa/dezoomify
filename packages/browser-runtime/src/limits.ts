@@ -9,17 +9,78 @@ export interface LimitDecision {
   area: number | null;
 }
 
-/** Largest canvas a browser tab can hold (16384 x 16384). */
-export const BROWSER_MAX_CANVAS_AREA = 268435456;
+/**
+ * Client hints used to pick the device limit tier. `userAgentData.mobile`
+ * (User-Agent Client Hints) decides where the browser reports it; the
+ * `userAgent` string is the iOS/Android fallback.
+ */
+export interface ClientHints {
+  userAgentData?: { mobile?: boolean } | null;
+  userAgent?: string;
+}
 
-/** Browser canvas side limit: 16384 px per side, no policy widening. */
-export const BROWSER_MAX_CANVAS_SIDE = 16384;
+// Tested on Chrome 153: saved 32768×8192 but failed at 32768×8193.
+// WebKit CanvasBase.cpp caps desktop area at 16384² and iOS at 8192²;
+// IOSurface.mm caps sides at 32768 on macOS and 8192 on iOS.
+// The values are a reasonable tradeoff between image size and failure rate
+export const BROWSER_MAX_CANVAS_AREA = 268435456;
+export const BROWSER_MAX_CANVAS_SIDE = 32768;
+export const BROWSER_MOBILE_MAX_CANVAS_AREA = 67108864;
+export const BROWSER_MOBILE_MAX_CANVAS_SIDE = 8192;
 
 export const BROWSER_LIMITS: BrowserLimits = {
   maxWidth: BROWSER_MAX_CANVAS_SIDE,
   maxHeight: BROWSER_MAX_CANVAS_SIDE,
   maxArea: BROWSER_MAX_CANVAS_AREA,
   maxBytes: BROWSER_MAX_CANVAS_AREA * 4,
+};
+
+export const BROWSER_MOBILE_LIMITS: BrowserLimits = {
+  maxWidth: BROWSER_MOBILE_MAX_CANVAS_SIDE,
+  maxHeight: BROWSER_MOBILE_MAX_CANVAS_SIDE,
+  maxArea: BROWSER_MOBILE_MAX_CANVAS_AREA,
+  maxBytes: BROWSER_MOBILE_MAX_CANVAS_AREA * 4,
+};
+
+/** Automatic selection caps (`SessionConfig.browser_selection`). */
+export interface SelectionLimits {
+  maxWidth: number;
+  maxHeight: number;
+  maxArea: number;
+}
+
+/** True on phones and tablets: client-hints flag first, UA fallback after. */
+export function isMobileClient(hints?: ClientHints | null): boolean {
+  const flag = hints?.userAgentData?.mobile;
+  if (typeof flag === "boolean") return flag;
+  const ua = String(hints?.userAgent ?? "").toLowerCase();
+  return /iphone|ipad|ipod|android/.test(ua);
+}
+
+/** Canvas limits for this client (mobile tier on mobile, desktop otherwise). */
+export function browserLimitsFor(hints?: ClientHints | null): BrowserLimits {
+  return isMobileClient(hints) ? BROWSER_MOBILE_LIMITS : BROWSER_LIMITS;
+}
+
+/** Automatic selection limits for this client, shaped for `browser_selection`. */
+export function selectionLimitsFor(hints?: ClientHints | null): SelectionLimits {
+  const limits = browserLimitsFor(hints);
+  return {
+    maxWidth: limits.maxWidth,
+    maxHeight: limits.maxHeight,
+    maxArea: limits.maxArea,
+  };
+}
+
+/**
+ * Selection caps for a "Try maximum" attempt: unbounded, so the engine takes
+ * the largest known level and the canvas gate reports what cannot work
+ * (allocation, context, or PNG encoding) with a desktop-app action.
+ */
+export const MAXIMUM_SELECTION_LIMITS: SelectionLimits = {
+  maxWidth: 4294967295,
+  maxHeight: 4294967295,
+  maxArea: Number.MAX_SAFE_INTEGER,
 };
 
 /** Upper bound on tiles materialized into one website plan (allocation guard). */

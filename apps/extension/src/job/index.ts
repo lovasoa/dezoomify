@@ -2,16 +2,22 @@
 
 import type { Error as EngineError, JobHandle, JobSnapshot, JobState } from "@dezoomify/app-model";
 import {
-  BROWSER_MAX_CANVAS_AREA,
-  BROWSER_MAX_CANVAS_SIDE,
   BROWSER_MAX_PLAN_TILES,
+  browserLimitsFor,
+  type ClientHints,
+  canvasAllocationFailure,
+  canvasSurfaceFailure,
   canvasToPngBlob,
   createBrowserJobService,
   createCanvasAssembly,
   createProbeSize,
   createTileDecoder,
+  desktopHandoffLink,
+  MAXIMUM_SELECTION_LIMITS,
   originOfUrl,
   saveBlobViaAnchor,
+  selectionLimitsFor,
+  wantsDesktopHandoff,
 } from "@dezoomify/browser-runtime";
 import { createLogger } from "@dezoomify/browser-runtime/logging";
 import type {
@@ -96,6 +102,10 @@ let localFailure: StructuredError | null = null;
 let pendingPermission: { hosts: string[]; requesting: boolean } | null = null;
 const testGrantedOrigins = new Set<string>();
 const bootstrapJobId = new URLSearchParams(location.hash.slice(1)).get("jobId");
+/** True when the next attempt must target the maximum known resolution. */
+let tryMaximumNext = false;
+/** Source URL of the live attempt (desktop handoff link for canvas failures). */
+let attemptSourceUrl = "";
 
 function requestId(prefix: string) {
   return `${prefix}-${crypto.randomUUID?.() ?? Date.now().toString(36)}`;
@@ -218,6 +228,7 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
       onCancel: closeJob,
       onCopyDiagnostics: copyDiagnostics,
       onRetrySameUrl: retryJob,
+      onTryMaximum: tryMaximum,
       onSave: () => {},
     },
     {
@@ -354,6 +365,21 @@ function sourceHost(): string {
 }
 
 /**
+ * Desktop handoff action beside a failure report: canvas and size failures
+ * (allocation, context, PNG encoding) are recovered in the desktop app.
+ */
+function failureHandoffCtx(code: string): Partial<ViewContext> {
+  if (!wantsDesktopHandoff(code)) return {};
+  const link = desktopHandoffLink(attemptSourceUrl);
+  return link !== "" ? { sourceUrl: attemptSourceUrl, desktopHandoffUrl: link } : {};
+}
+
+/** Device limit tier inputs: client hints where available, else the UA. */
+function clientHints(): ClientHints {
+  return navigator as unknown as ClientHints;
+}
+
+/**
  * One shared presenter for engine failures: the plain headline goes in
  * `message`, the engine's raw per-format aggregate moves to `detail`, and the
  * stable category/phase/retryable are derived from the code. The extension
@@ -417,7 +443,10 @@ function onHostFailure(error: unknown) {
     transport: typeof candidate?.transport === "string" ? candidate.transport : undefined,
     host: sourceHost(),
   });
-  render("failed", { jobActivity: { startedAt: Date.now() } });
+  render("failed", {
+    jobActivity: { startedAt: Date.now() },
+    ...failureHandoffCtx(code),
+  });
 }
 
 function createAssembly(
@@ -430,14 +459,18 @@ function createAssembly(
     processTile,
     createCanvas: (width: number, height: number) => {
       const element = document.createElement("canvas");
-      element.width = width;
-      element.height = height;
+      try {
+        element.width = width;
+        element.height = height;
+      } catch {
+        throw canvasAllocationFailure(width, height, sourceUrl);
+      }
+      if (element.width !== width || element.height !== height) {
+        throw canvasAllocationFailure(width, height, sourceUrl);
+      }
       const ctx2d = element.getContext("2d");
       if (!ctx2d) {
-        throw Object.assign(new Error("This browser could not create the output surface."), {
-          code: "OUTPUT_SURFACE_UNAVAILABLE",
-          retryable: false,
-        });
+        throw canvasSurfaceFailure(width, height, sourceUrl);
       }
       // The executor draws through ctx2d and encodes through toBlob: expose
       // both on one surface object.
@@ -464,6 +497,7 @@ function createAssembly(
       return "browser-save-initiated";
     },
     sourceUrl,
+    limits: browserLimitsFor(clientHints()),
   });
 }
 
@@ -536,6 +570,7 @@ function resetAttemptState() {
 async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
   if (!binding) return;
   const activeBinding = binding;
+  attemptSourceUrl = inputs[0]?.url ?? "";
   const fetcher = createExtensionFetcher({
     hasPermission: async (origin) =>
       testGrantedOrigins.has(origin) ||
@@ -673,16 +708,16 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
     },
   });
   try {
+    // A "Try maximum" attempt takes the largest known level; the canvas gate
+    // reports what cannot work (allocation, context, or PNG encoding).
+    const selection = tryMaximumNext ? MAXIMUM_SELECTION_LIMITS : selectionLimitsFor(clientHints());
+    tryMaximumNext = false;
     const handle = await service.start(
       {
         inputs,
         engine: {
           max_tiles: BROWSER_MAX_PLAN_TILES,
-          browser_selection: {
-            maxWidth: BROWSER_MAX_CANVAS_SIDE,
-            maxHeight: BROWSER_MAX_CANVAS_SIDE,
-            maxArea: BROWSER_MAX_CANVAS_AREA,
-          },
+          browser_selection: selection,
         },
         host: { kind: "browser", sourceUrl: inputs[0]?.url ?? "" },
       },
@@ -707,7 +742,10 @@ function renderForSnapshot(snapshot: JobSnapshot) {
   if (terminal?.type === "failed") {
     jobLog.error("engine-terminal", `type=failed code=${terminal.error.code}`);
     localFailure = presentEngineFailure(terminal.error);
-    render("failed", { jobActivity: { startedAt: Date.now() } });
+    render("failed", {
+      jobActivity: { startedAt: Date.now() },
+      ...failureHandoffCtx(terminal.error.code),
+    });
     return;
   }
   if (terminal?.type === "cancelled") {
@@ -764,6 +802,13 @@ function retryJob() {
       }),
     ),
   );
+}
+
+/** Restart the bound job targeting the maximum known resolution. */
+function tryMaximum() {
+  jobLog.info("maximum-requested", `jobId=${binding?.jobId ?? bootstrapJobId ?? "unknown"}`);
+  tryMaximumNext = true;
+  retryJob();
 }
 
 /**

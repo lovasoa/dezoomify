@@ -83,6 +83,17 @@ export function retryableFor(code: unknown): boolean {
 export function plainMessageFor(code: string, engineMessage: string, host: string): string {
   const engine = String(engineMessage ?? "");
   const lowerCode = String(code ?? "").toLowerCase();
+  // Browser canvas failure family (allocation, 2D context, PNG encoding):
+  // the plain sentence names the desktop app before any generic branch.
+  if (code === "PLAN_INVALID" || code === "OUTPUT_ALLOCATION_FAILED") {
+    return t("view.fail.canvasAllocation");
+  }
+  if (code === "OUTPUT_SURFACE_UNAVAILABLE") {
+    return t("view.fail.canvasContext");
+  }
+  if (code === "OUTPUT_ENCODE_FAILED") {
+    return t("view.fail.canvasEncode");
+  }
   if (code === "INVALID_URL") {
     return t("desktop.url.notWebPage");
   }

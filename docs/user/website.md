@@ -18,7 +18,12 @@ reading is part of it).
    image and choose *Save image as…*). The file is saved as a PNG.
 
 If a page offers several images, the website saves the largest one it finds.
-It uses the highest resolution that fits in a browser tab.
+It uses the highest resolution that fits in a browser tab. When the highest
+resolution would not fit, the save continues at the largest one that does and
+a message shows the resolution being saved and the maximum available. The
+message offers the desktop app, **Try maximum** to restart at the maximum
+resolution, and **Stop** to end the save; after the smaller save completes,
+the offer stays without **Stop**.
 There is no list to pick from in the website.
 The desktop app also selects automatically; its size settings can cap the
 resolution. To choose a particular image or level, use the
@@ -62,10 +67,12 @@ computer:
   session to any site, so it can only reach images that anyone can open.
   For members-only collections, use the
   [browser extension](./browser-extension.md).
-- **Size limits.** A browser tab can only hold a certain amount of picture.
-  With very large images, the picture may appear blank, or the browser may
-  refuse to save it. The website stops the job with an error and points to
-  the [desktop app](./desktop-app.md) for the full-size image. To save a
+- **Size limits.** A browser tab can only hold about 1 GiB of picture on a
+  computer (about 256 MiB on phones and tablets). The website saves the
+  largest resolution that fits and names the chosen and maximum resolutions.
+  **Try maximum** attempts the maximum resolution anyway; when the browser
+  cannot hold it, the job stops with an error that points to the
+  [desktop app](./desktop-app.md) for the full-size image. To save a
   smaller copy, use the [command-line tool](./command-line.md) with
   `--max-width`.
 - **Some sites refuse visitors.** A few image servers only answer to their

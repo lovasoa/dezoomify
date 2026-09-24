@@ -31,7 +31,6 @@ import {
   saveBlobViaAnchor,
 } from "../packages/browser-runtime/src/canvas-save.ts";
 import type { StructuredFailure } from "../packages/browser-runtime/src/failure.ts";
-import { failure } from "../packages/browser-runtime/src/failure.ts";
 import {
   type BrowserJobHandle,
   createBrowserJobService,
@@ -40,12 +39,20 @@ import {
 } from "../packages/browser-runtime/src/index.ts";
 import { createJobActivity } from "../packages/browser-runtime/src/job-activity.ts";
 import {
-  BROWSER_MAX_CANVAS_AREA,
-  BROWSER_MAX_CANVAS_SIDE,
   BROWSER_MAX_PLAN_TILES,
+  browserLimitsFor,
+  type ClientHints,
+  MAXIMUM_SELECTION_LIMITS,
+  selectionLimitsFor,
 } from "../packages/browser-runtime/src/limits.ts";
 import { createLogger } from "../packages/browser-runtime/src/logging.ts";
-import { desktopHandoffLink, isLocalFileUrl } from "../packages/browser-runtime/src/plan-gates.ts";
+import {
+  canvasAllocationFailure,
+  canvasSurfaceFailure,
+  desktopHandoffLink,
+  isLocalFileUrl,
+  wantsDesktopHandoff,
+} from "../packages/browser-runtime/src/plan-gates.ts";
 import {
   createPreviewControls,
   setCanvasVisible,
@@ -319,6 +326,14 @@ function headerRecord(headers: Header[] | undefined): Record<string, string> {
 
 let activeAssembly: ReturnType<typeof createCanvasAssembly> | null = null;
 
+/** Device limit tier inputs: client hints where available, else the UA. */
+function clientHints(): ClientHints {
+  return navigator as unknown as ClientHints;
+}
+
+/** True when the next attempt must target the maximum known resolution. */
+let tryMaximumNext = false;
+
 function createAssembly(
   sourceUrl: string,
   processTile: (recipe: ProcessingRecipe, bytes: ArrayBuffer) => Promise<ArrayBuffer>,
@@ -331,15 +346,18 @@ function createAssembly(
       const element =
         (document.getElementById("rendering-canvas") as HTMLCanvasElement | null) ??
         document.createElement("canvas");
-      element.width = width;
-      element.height = height;
+      try {
+        element.width = width;
+        element.height = height;
+      } catch {
+        throw canvasAllocationFailure(width, height, sourceUrl);
+      }
+      if (element.width !== width || element.height !== height) {
+        throw canvasAllocationFailure(width, height, sourceUrl);
+      }
       const ctx2d = element.getContext("2d");
       if (!ctx2d) {
-        throw failure(
-          "OUTPUT_SURFACE_UNAVAILABLE",
-          "This browser could not create the output surface.",
-          false,
-        );
+        throw canvasSurfaceFailure(width, height, sourceUrl);
       }
       // Reveal the canvas before drawing (legacy parity): the picture stays
       // visible and right-clickable while the job finishes.
@@ -362,6 +380,7 @@ function createAssembly(
       return "browser-save-ready";
     },
     sourceUrl,
+    limits: browserLimitsFor(clientHints()),
     onDisplayOnly: () => {
       if (viewCtx.originClean === false) return;
       viewCtx.originClean = false;
@@ -383,7 +402,7 @@ function createAssembly(
 function presentEngineFailure(error: EngineError, url: string): void {
   const code = error.code;
   webLog.error("failed", `code=${code} message=${error.message}`);
-  if (code === "PLAN_INVALID" || code === "job.resource-limit") {
+  if (wantsDesktopHandoff(code)) {
     const link = desktopHandoffLink(url);
     if (link !== "") {
       viewCtx.sourceUrl = url;
@@ -535,6 +554,13 @@ async function runJob(url: string, origin = url): Promise<void> {
     };
     const code = typeof structured?.code === "string" ? structured.code : "OUTPUT_FAILED";
     webLog.error("host-failure", `code=${code} message=${String(structured?.message ?? code)}`);
+    if (wantsDesktopHandoff(code)) {
+      const link = desktopHandoffLink(origin);
+      if (link !== "") {
+        viewCtx.sourceUrl = origin;
+        viewCtx.desktopHandoffUrl = link;
+      }
+    }
     hostFailure = describeFailure({
       code,
       engineDetail: typeof structured?.detail === "string" ? structured.detail : undefined,
@@ -682,16 +708,16 @@ async function runJob(url: string, origin = url): Promise<void> {
   };
 
   try {
+    // A "Try maximum" attempt takes the largest known level; the canvas gate
+    // reports what cannot work (allocation, context, or PNG encoding).
+    const selection = tryMaximumNext ? MAXIMUM_SELECTION_LIMITS : selectionLimitsFor(clientHints());
+    tryMaximumNext = false;
     const handle = await service.start(
       {
         inputs: [{ url }],
         engine: {
           max_tiles: BROWSER_MAX_PLAN_TILES,
-          browser_selection: {
-            maxWidth: BROWSER_MAX_CANVAS_SIDE,
-            maxHeight: BROWSER_MAX_CANVAS_SIDE,
-            maxArea: BROWSER_MAX_CANVAS_AREA,
-          },
+          browser_selection: selection,
         },
         host: { kind: "browser", sourceUrl: origin },
       },
@@ -860,43 +886,23 @@ function update(): void {
         update();
       },
       onCancel() {
-        activeRun += 1;
-        jobActivity.stopHeartbeat();
-        disposeAttempt();
         // Stop returns directly to the initial view. Effects from the retired
         // run finish harmlessly without mutating the replacement job.
-        webQueue = cancelAllQueueEntries(webQueue);
-        webQueue = createWebQueue();
-        resetJobViewState();
-        webFetcher.resetActiveTransport();
-        tileThrottle.reset();
-        setCanvasVisible(document, false);
-        preview.resetTransform(document);
-        clearHash();
-        if (resultBlobUrl) {
-          URL.revokeObjectURL(resultBlobUrl);
-          resultBlobUrl = null;
-        }
+        stopActiveJob();
         update();
       },
       onReset() {
-        activeRun += 1;
-        jobActivity.stopHeartbeat();
-        disposeAttempt();
-        webFetcher.resetActiveTransport();
-        tileThrottle.reset();
-        setCanvasVisible(document, false);
-        preview.resetTransform(document);
-        // Reset clears the whole queue: no new work is issued afterwards.
-        webQueue = cancelAllQueueEntries(webQueue);
-        webQueue = createWebQueue();
-        resetJobViewState();
-        clearHash();
-        if (resultBlobUrl) {
-          URL.revokeObjectURL(resultBlobUrl);
-          resultBlobUrl = null;
-        }
+        stopActiveJob();
         update();
+      },
+      onTryMaximum() {
+        // Replace the current attempt with one targeting the maximum known
+        // resolution; failures report with the desktop-app action.
+        const lastUrl = viewCtx.jobActivity?.url ?? viewCtx.initialUrl;
+        if (!lastUrl || !isValidInputUrl(lastUrl)) return;
+        stopActiveJob();
+        tryMaximumNext = true;
+        submitQueuedUrl(lastUrl);
       },
       onRetrySameUrl() {
         const lastUrl = viewCtx.jobActivity?.url ?? viewCtx.initialUrl;
@@ -985,6 +991,26 @@ function resetJobViewState(): void {
   viewCtx.initialUrl = undefined;
   viewCtx.sourceUrl = undefined;
   viewCtx.desktopHandoffUrl = undefined;
+}
+
+/** Retire the active run and every queued entry; the view returns to idle. */
+function stopActiveJob(): void {
+  activeRun += 1;
+  jobActivity.stopHeartbeat();
+  disposeAttempt();
+  webFetcher.resetActiveTransport();
+  tileThrottle.reset();
+  setCanvasVisible(document, false);
+  preview.resetTransform(document);
+  // Reset clears the whole queue: no new work is issued afterwards.
+  webQueue = cancelAllQueueEntries(webQueue);
+  webQueue = createWebQueue();
+  resetJobViewState();
+  clearHash();
+  if (resultBlobUrl) {
+    URL.revokeObjectURL(resultBlobUrl);
+    resultBlobUrl = null;
+  }
 }
 
 function startFromHash(): void {

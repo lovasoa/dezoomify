@@ -16,6 +16,7 @@ sites; `cargo xtask test live --public` stays opt-in and advisory.
 | Display-only vs readable-bytes distinction | `test/snapshot-view.test.mjs`, `testdata/scenarios/post-cutover/taint` | `cargo xtask test ui`, `cargo xtask test scenario` |
 | Pause stops new work, keeps progress | `testdata/scenarios/job/pause-resume` | `cargo xtask test scenario` |
 | Cancel before/after finalization settles after quiescence | `testdata/scenarios/job/cancel-midway` | `cargo xtask test scenario` |
+| Resolution downgrade notice names selected/maximum resolutions; maximum retry reports the large canvas with the desktop action | `test/presentation.test.mjs`, `test/view-rendering.test.mjs`, `packages/browser-runtime/test/limits.test.mjs`, `crates/fixture-server/tests/webapp-e2e/webapp.spec.js` | `cargo xtask test ui`, `cargo xtask test browser`, `cargo xtask test web` |
 
 ## Service, queue, history
 

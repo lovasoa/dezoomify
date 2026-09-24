@@ -142,6 +142,12 @@ export const de = {
   "view.display.deskDescClean":
     "Fuer ein sauberes Speichern in voller Grosse, wenn der Browser das Bild nur zeigen kann.",
   "view.display.startOver": "Von vorn beginnen",
+  "view.resolution.notice":
+    "Wegen Browser-Beschränkungen wird nicht in maximaler Auflösung geladen. Die Desktop-App entfernt diese Beschränkungen.",
+  "view.resolution.sizes": "Speichert mit {selected} Pixeln statt des Maximums {maximum} Pixel.",
+  "view.resolution.download": "Desktop-App herunterladen",
+  "view.resolution.tryMaximum": "Maximum versuchen",
+  "view.resolution.stop": "Stoppen",
   // Completion section.
   "view.done.ready": "Ihr Bild ist bereit.",
   "view.done.savedDisk": "Auf der Festplatte gespeichert",
@@ -174,6 +180,12 @@ export const de = {
   "view.fail.techDetails": "Technische Fehlerdetails und Fehlermeldung",
   "view.fail.reportBug": "Fehler auf GitHub melden",
   "view.fail.retry": "Erneut versuchen",
+  "view.fail.canvasAllocation":
+    "Dieses Bild ist zu groß für diesen Browser-Tab. Die Desktop-App kann es in voller Größe speichern.",
+  "view.fail.canvasContext":
+    "Dieser Browser-Tab konnte die Bildfläche in dieser Größe nicht erstellen. Die Desktop-App kann es in voller Größe speichern.",
+  "view.fail.canvasEncode":
+    "Dieser Browser-Tab konnte das PNG-Bild in voller Größe nicht fertigstellen. Die Desktop-App kann es in voller Größe speichern.",
   "view.fail.redactHint":
     "Die Details unten koennen vollstaendige Adressen und die Serverantwort enthalten. Der Melde-Link uebernimmt sie in einen GitHub-Entwurf; entfernen Sie Anmeldedaten und Tokens vor dem Absenden.",
   // Cancelled section.
