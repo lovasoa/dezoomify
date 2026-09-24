@@ -41,6 +41,7 @@ import type {
   TilePlacement,
 } from "@dezoomify/wasm-bindings";
 import type { BrowserOutputDisposition } from "./assembly.ts";
+import { stableErrorCode } from "./failure.ts";
 import { originOfUrl } from "./fetch-primitives.ts";
 import type { ProbeSize } from "./probe.ts";
 import type { TileImageLike } from "./tile-draw.ts";
@@ -344,7 +345,12 @@ export function createEngineHost(deps: EngineHostDeps) {
         if (effect.type === "acquire-tile" && effect.placement.probe_output === true) {
           // A probe retained as output participates in the visible assembly;
           // a measurement-only probe must not reveal a provisional canvas.
-          deps.assembly.prepare(effect.placement.canvas);
+          try {
+            deps.assembly.prepare(effect.placement.canvas);
+          } catch (error) {
+            failSurface(error);
+            return;
+          }
         }
         const size = await deps.probeSize(request.uri, headerRecord(request.headers), request.id);
         if (tornDown()) return;
@@ -473,7 +479,12 @@ export function createEngineHost(deps: EngineHostDeps) {
       try {
         if (effect.type === "acquire-tile") {
           // Prepare before network I/O so tiles become visible as they arrive.
-          deps.assembly.prepare(effect.placement.canvas);
+          try {
+            deps.assembly.prepare(effect.placement.canvas);
+          } catch (error) {
+            failSurface(error);
+            return;
+          }
         }
         const result = await deps.fetchResource(effect);
         // Readable bytes for this origin: it is not display-only.
@@ -556,7 +567,9 @@ export function createEngineHost(deps: EngineHostDeps) {
   function finalizationError(error: unknown): EngineError {
     const failure = deps.classifyFailure(error);
     return {
-      code: `${failure.code}`,
+      // Keep the typed failure's own stable code (canvas limits, allocation,
+      // context, PNG encoding); the fetch classifier is only the fallback.
+      code: stableErrorCode(error, `${failure.code}`),
       phase: "output",
       retryable: failure.retryable,
       message: failure.message,
@@ -614,6 +627,19 @@ export function createEngineHost(deps: EngineHostDeps) {
     } catch {
       // Product abort must never break teardown.
     }
+  }
+
+  /**
+   * The output surface itself failed (canvas limits, allocation, 2D
+   * context): fail the job typed at once. Routing it as one tile's fetch
+   * failure would blame a tile and bury the cause under the partial
+   * decision.
+   */
+  function failSurface(error: unknown): void {
+    if (tornDown()) return;
+    abortInFlight();
+    deps.onHostFailure(error);
+    sendToEngine({ type: "engine.command", command: { type: "cancel" } });
   }
 
   function enqueue(step: () => Promise<void> | void) {

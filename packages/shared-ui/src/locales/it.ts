@@ -137,6 +137,12 @@ export const it = {
   "view.display.deskDescClean":
     "Per un salvataggio pulito a piena dimensione quando il browser puo solo mostrare l immagine.",
   "view.display.startOver": "Ricomincia",
+  "view.resolution.notice":
+    "A causa dei limiti del browser non si scarica alla risoluzione massima. Prova l applicazione desktop per rimuovere i limiti del browser.",
+  "view.resolution.sizes": "Salvataggio a {selected} pixel invece del massimo {maximum} pixel.",
+  "view.resolution.download": "Scarica l applicazione desktop",
+  "view.resolution.tryMaximum": "Prova il massimo",
+  "view.resolution.stop": "Ferma",
   // Completion section.
   "view.done.ready": "La tua immagine e pronta.",
   "view.done.savedDisk": "Salvata sul disco",
@@ -169,6 +175,12 @@ export const it = {
   "view.fail.techDetails": "Dettagli tecnici dell errore e segnalazione",
   "view.fail.reportBug": "Segnala un problema su GitHub",
   "view.fail.retry": "Riprova",
+  "view.fail.canvasAllocation":
+    "Questa immagine è troppo grande per essere assemblata in questa scheda del browser. L applicazione desktop può salvarla a dimensione piena.",
+  "view.fail.canvasContext":
+    "Questa scheda del browser non ha potuto creare la superficie dell immagine a questa dimensione. L applicazione desktop può salvarla a dimensione piena.",
+  "view.fail.canvasEncode":
+    "Questa scheda del browser non ha potuto completare l immagine PNG a dimensione piena. L applicazione desktop può salvarla a dimensione piena.",
   "view.fail.redactHint":
     "I dettagli sotto possono includere indirizzi completi e la risposta del server. Il link di segnalazione li copia in una bozza su GitHub; rimuovi credenziali e token prima di inviare.",
   // Cancelled section.

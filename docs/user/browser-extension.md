@@ -49,7 +49,11 @@ Install it from the
    entries. Keep both tabs open; a second press of the button, closing a tab,
    or navigating away stops the active job.
 5. The extension selects the largest image it finds and the highest
-   resolution that fits in a browser tab, then saves it automatically. There
+   resolution that fits in a browser tab, then saves it automatically. When
+   the highest resolution would not fit, the save continues at the largest
+   one that does and a message shows the resolution being saved and the
+   maximum available, with the desktop app, **Try maximum**, and **Stop**;
+   after the save completes, the offer stays without **Stop**. There
    is no list to pick from in the extension. To choose a particular image or
    level, use the [command-line tool](./command-line.md).
 

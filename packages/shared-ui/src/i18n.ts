@@ -242,6 +242,14 @@ const en = {
   "view.display.deskDescClean":
     "For a clean full-size save when the browser can only show the image.",
   "view.display.startOver": "Start over",
+  // Resolution downgrade notice: automatic selection took a smaller known
+  // level than the maximum because of browser limits (website and extension).
+  "view.resolution.notice":
+    "Not downloading at maximal resolution due to browser limitations. Try the desktop app to remove browser limitations.",
+  "view.resolution.sizes": "Saving at {selected} pixels instead of the maximum {maximum} pixels.",
+  "view.resolution.download": "Download desktop app",
+  "view.resolution.tryMaximum": "Try maximum",
+  "view.resolution.stop": "Stop",
   // Completion section.
   "view.done.ready": "Your image is ready.",
   "view.done.savedDisk": "Saved to disk",
@@ -273,6 +281,14 @@ const en = {
   "view.fail.techDetails": "Technical error details & bug report",
   "view.fail.reportBug": "Report a bug on GitHub",
   "view.fail.retry": "Try again",
+  // Browser canvas failure family (allocation, 2D context, PNG encoding):
+  // the desktop app is the recovery, so every message names it.
+  "view.fail.canvasAllocation":
+    "This picture is too large to assemble in this browser tab. The desktop app can save it at full size.",
+  "view.fail.canvasContext":
+    "This browser tab could not create the picture surface at this size. The desktop app can save it at full size.",
+  "view.fail.canvasEncode":
+    "This browser tab could not finish the full-size PNG picture. The desktop app can save it at full size.",
   "view.fail.redactHint":
     "Details below can include full addresses and the server's reply. The report link copies them into a GitHub draft; remove sign-in details and tokens before submitting.",
   // Cancelled section.

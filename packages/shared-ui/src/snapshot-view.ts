@@ -47,6 +47,13 @@ export interface StructuredError {
 
 export type SnapshotPhase = "idle" | "job" | "display-only" | "completed" | "failed" | "cancelled";
 
+/** Selected and maximum known level sizes when automatic selection had to
+ * take a smaller known level (browser limits). */
+export interface ResolutionChoice {
+  selected: { width: number; height: number };
+  maximum: { width: number; height: number };
+}
+
 /** Host-reported step names for products that render without a snapshot yet. */
 export type PresentationStatus =
   | "idle"
@@ -102,6 +109,8 @@ export interface SnapshotPresentation {
   displayOnly: boolean;
   /** True for kept partials: finished, but with named gaps. */
   partial: boolean;
+  /** Set when automatic selection chose a smaller known level than the maximum. */
+  resolution?: ResolutionChoice;
 }
 
 function headlineForState(state: JobState): {
@@ -202,6 +211,42 @@ function basePresentation(): SnapshotPresentation {
 }
 
 /**
+ * Selected versus maximum known level, read off the snapshot catalog: set
+ * only when automatic selection took a smaller known level than the largest
+ * one with a declared size. Pure size comparison, no host facts.
+ */
+export function resolutionChoiceOf(snapshot: JobSnapshot): ResolutionChoice | undefined {
+  const selection = snapshot.selection;
+  const imageIndex = selection.image;
+  const levelIndex = selection.level;
+  if (imageIndex === null || imageIndex === undefined) return undefined;
+  if (levelIndex === null || levelIndex === undefined) return undefined;
+  const entry = selection.catalog?.entries[imageIndex];
+  if (!entry || entry.kind !== "image") return undefined;
+  const levels = entry.levels ?? [];
+  const selected = levels[levelIndex]?.size;
+  if (!selected) return undefined;
+  let maximum: { width: number; height: number } | undefined;
+  for (const level of levels) {
+    const size = level.size;
+    if (!size) continue;
+    if (
+      !maximum ||
+      size.width * size.height > maximum.width * maximum.height ||
+      (size.width * size.height === maximum.width * maximum.height && size.width > maximum.width)
+    ) {
+      maximum = size;
+    }
+  }
+  if (!maximum) return undefined;
+  if (selected.width * selected.height >= maximum.width * maximum.height) return undefined;
+  return {
+    selected: { width: selected.width, height: selected.height },
+    maximum: { width: maximum.width, height: maximum.height },
+  };
+}
+
+/**
  * Derive the full presentation for one authoritative snapshot. Total: every
  * snapshot, including terminals without catalog or progress, yields a
  * renderable presentation.
@@ -247,6 +292,7 @@ export function presentSnapshot(
 
   const detailKey = engineDisplayOnly ? undefined : headline.detail;
   const detailVars = engineDisplayOnly || !headline.detailVars ? undefined : headline.detailVars;
+  const resolution = resolutionChoiceOf(snapshot);
   return {
     ...basePresentation(),
     phase,
@@ -266,6 +312,7 @@ export function presentSnapshot(
     canReset: terminal !== null,
     displayOnly,
     partial,
+    ...(resolution ? { resolution } : {}),
   };
 }
 

@@ -9,6 +9,8 @@ export interface ViewCallbacks {
   onCancel(): void;
   onReset?(): void;
   onRetrySameUrl?(): void;
+  /** Restart the job at the maximum known resolution (browser products). */
+  onTryMaximum?(): void;
   onSave?(): void;
   onOpenOutput?(): void;
   onRevealOutput?(): void;

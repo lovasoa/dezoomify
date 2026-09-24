@@ -141,6 +141,13 @@ export const fr = {
   "view.display.deskDescClean":
     "Pour un enregistrement propre en pleine taille quand le navigateur peut seulement montrer l image.",
   "view.display.startOver": "Recommencer",
+  "view.resolution.notice":
+    "Le téléchargement ne se fait pas à la résolution maximale à cause des limites du navigateur. Essayez l application de bureau pour supprimer les limites du navigateur.",
+  "view.resolution.sizes":
+    "Enregistrement en {selected} pixels au lieu du maximum {maximum} pixels.",
+  "view.resolution.download": "Télécharger l application de bureau",
+  "view.resolution.tryMaximum": "Essayer le maximum",
+  "view.resolution.stop": "Arrêter",
   // Completion section.
   "view.done.ready": "Votre image est prete.",
   "view.done.savedDisk": "Enregistre sur le disque",
@@ -173,6 +180,12 @@ export const fr = {
   "view.fail.techDetails": "Details techniques de l erreur et rapport de bogue",
   "view.fail.reportBug": "Signaler un bogue sur GitHub",
   "view.fail.retry": "Reessayer",
+  "view.fail.canvasAllocation":
+    "Cette image est trop grande pour être assemblée dans cet onglet. L application de bureau peut l enregistrer en taille réelle.",
+  "view.fail.canvasContext":
+    "Cet onglet n a pas pu créer la surface de l image à cette taille. L application de bureau peut l enregistrer en taille réelle.",
+  "view.fail.canvasEncode":
+    "Cet onglet n a pas pu terminer l image PNG en taille réelle. L application de bureau peut l enregistrer en taille réelle.",
   "view.fail.redactHint":
     "Les details ci-dessous peuvent inclure les adresses completes et la reponse du serveur. Le lien de signalement les copie dans un brouillon GitHub ; retirez les identifiants et les jetons avant de valider.",
   // Cancelled section.

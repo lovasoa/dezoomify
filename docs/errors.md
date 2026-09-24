@@ -53,6 +53,6 @@ Messages follow the layered rules in [Product](product.md#progressive-disclosure
 
 ## Failure policy
 
-Transient transport and service errors follow the [retry policy](job-engine.md#retry-and-progress). Proxy-ineligible, auth, and ordinary HTTP failures never take the proxy route. Invalid metadata and deterministic decode failures stop at once. A tile failure reaches partial handling only after retries run out.
+Transient transport and service errors follow the [retry policy](job-engine.md#retry-and-progress). Proxy-ineligible, auth, and ordinary HTTP failures never take the proxy route. Invalid metadata and deterministic decode failures stop at once. A tile failure reaches partial handling only after retries run out. Browser canvas output failures (allocation, 2D context, PNG encoding) stop the job typed at once, never as one tile's failure, and their report always carries the desktop-app action.
 
 Internal errors offer a safe fallback. Security-policy failures never offer a recovery that weakens the policy; see [Security](security.md).

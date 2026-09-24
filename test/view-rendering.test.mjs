@@ -460,3 +460,109 @@ test("failed view offers retry only for retryable errors and start over only whe
   click(card.querySelector("#dz-btn-try-again"));
   assert.equal(retried, 2, "retry stays wired without a reset callback");
 });
+
+test("resolution notice offers maximum retry and stop while fetching, keeps the choice when done", () => {
+  const el = container();
+  let stopped = 0;
+  let tried = 0;
+  const actions = {
+    onSubmitUrl: () => {},
+    onCancel: () => {
+      stopped += 1;
+    },
+    onReset: () => {},
+    onTryMaximum: () => {
+      tried += 1;
+    },
+  };
+  const selection = {
+    image: 0,
+    level: 1,
+    level_count: 3,
+    catalog: {
+      entries: [
+        {
+          kind: "image",
+          levels: [
+            { label: "0", size: { width: 10000, height: 5000 } },
+            { label: "1", size: { width: 20000, height: 10000 } },
+            { label: "2", size: { width: 40000, height: 20000 } },
+          ],
+        },
+      ],
+    },
+    deferred: [],
+  };
+  render(
+    el,
+    jobPresentation(
+      dto({
+        revision: 2,
+        lifecycle: "AcquiringTiles",
+        progress: { completed: 1, total: 4 },
+        selection,
+      }),
+    ),
+    actions,
+  );
+  assert.ok(el.querySelector("#dz-resolution-notice"), "shown while tiles are still in flight");
+  const sizes = el.querySelector("#dz-resolution-sizes").textContent;
+  assert.match(sizes, /20000×10000/, "selected resolution");
+  assert.match(sizes, /40000×20000/, "maximum resolution");
+  assert.match(el.querySelector("#dz-resolution-message").textContent, /maximal resolution/i);
+  click(el.querySelector("#dz-btn-try-maximum"));
+  assert.equal(tried, 1, "Try maximum restarts at the maximum known resolution");
+  assert.ok(el.querySelector("#dz-btn-resolution-stop"));
+  click(el.querySelector("#dz-btn-resolution-stop"));
+  assert.equal(stopped, 1, "Stop ends the smaller download");
+
+  render(
+    el,
+    jobPresentation(
+      dto({
+        revision: 3,
+        lifecycle: "Completed",
+        progress: { completed: 4, total: 4 },
+        selection,
+        terminal: { type: "completed" },
+      }),
+    ),
+    actions,
+  );
+  assert.ok(el.querySelector("#dz-resolution-notice"), "the offer survives completion");
+  assert.equal(el.querySelector("#dz-btn-resolution-stop"), null, "stop is gone once done");
+  assert.ok(el.querySelector("#dz-btn-try-maximum"));
+});
+
+test("hosts without a maximum retry never show the resolution notice", () => {
+  const el = container();
+  render(
+    el,
+    jobPresentation(
+      dto({
+        revision: 2,
+        lifecycle: "AcquiringTiles",
+        progress: { completed: 1, total: 4 },
+        selection: {
+          image: 0,
+          level: 1,
+          level_count: 2,
+          catalog: {
+            entries: [
+              {
+                kind: "image",
+                levels: [
+                  { label: "0", size: { width: 20000, height: 10000 } },
+                  { label: "1", size: { width: 40000, height: 20000 } },
+                ],
+              },
+            ],
+          },
+          deferred: [],
+        },
+      }),
+    ),
+    callbacks,
+  );
+  assert.equal(el.querySelector("#dz-resolution-notice"), null);
+});

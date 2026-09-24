@@ -36,8 +36,9 @@ chat messages, or bug reports.
 ## The image appears blank, or the browser slows to a halt
 
 Very large pictures can exceed what a browser tab is allowed to hold. The
-website stops the job with an error and points to the
-[desktop app](./desktop-app.md). Options:
+website then saves the largest copy that fits and names the maximum
+resolution; **Try maximum** attempts the maximum and stops with an error
+pointing to the [desktop app](./desktop-app.md). Options:
 
 - Use the desktop app, which assembles the image in memory (up to its
   currently available memory) and writes the

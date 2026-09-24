@@ -22,7 +22,7 @@ This table is canonical; user pages state the user-facing facts and link back.
 
 | Surface | Budget | Past the budget |
 |---|---|---|
-| Browser tab (website, extension) | Browser memory and save limits; no fixed size promised | Job stops typed, naming the desktop app as next step |
+| Browser tab (website, extension) | Automatic selection within 32,768 px per side and 268,435,456 pixels of area on desktop, 8,192 px per side and 67,108,864 pixels on mobile (about 1 GiB of picture on a computer, about 256 MiB on phones and tablets) | Job stops typed, naming the desktop app as next step |
 | Desktop app | In-memory canvas, 4 bytes per pixel, within memory available to the process | Typed `output.canvas-limit` before allocation; nothing written; a smaller level fits |
 | CLI | Same in-memory canvas rule as desktop | Same `output.canvas-limit` behavior |
 

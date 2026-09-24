@@ -7,7 +7,12 @@ import {
   renderProgress,
   renderSaveGuidance,
 } from "../packages/shared-ui/src/components.ts";
-import { categoryFor, describeFailure, phaseFor } from "../packages/shared-ui/src/failure.ts";
+import {
+  categoryFor,
+  describeFailure,
+  phaseFor,
+  plainMessageFor,
+} from "../packages/shared-ui/src/failure.ts";
 import { presentSnapshot } from "../packages/shared-ui/src/snapshot-view.ts";
 
 // Authoritative Snapshot builder: the latest snapshot renders
@@ -181,4 +186,96 @@ test("a completed job with engine display-only disposition presents preview", ()
   assert.equal(view.phase, "display-only");
   assert.equal(view.displayOnly, true);
   assert.equal(view.headlineKey, "view.display.title");
+});
+
+const RESOLUTION_CATALOG = {
+  entries: [
+    {
+      kind: "image",
+      title: "Mural",
+      format: "zoomify",
+      sourceKind: "tile",
+      levels: [
+        { label: "0", size: { width: 10000, height: 5000 } },
+        { label: "1", size: { width: 20000, height: 10000 } },
+        { label: "2", size: { width: 40000, height: 20000 } },
+      ],
+    },
+  ],
+};
+
+test("a smaller known level than the maximum presents the resolution choice", () => {
+  const selection = {
+    image: 0,
+    level: 1,
+    level_count: 3,
+    catalog: RESOLUTION_CATALOG,
+    deferred: [],
+  };
+  const live = presentSnapshot(
+    dto({
+      revision: 2,
+      lifecycle: "AcquiringTiles",
+      progress: { completed: 1, total: 4 },
+      selection,
+    }),
+    "direct",
+  );
+  assert.deepEqual(live.resolution, {
+    selected: { width: 20000, height: 10000 },
+    maximum: { width: 40000, height: 20000 },
+  });
+  // The choice survives completion so the offer can stay on screen.
+  const done = presentSnapshot(
+    dto({
+      revision: 3,
+      lifecycle: "Completed",
+      progress: { completed: 4, total: 4 },
+      selection,
+      terminal: { type: "completed" },
+    }),
+    "direct",
+  );
+  assert.deepEqual(done.resolution, live.resolution);
+});
+
+test("no resolution choice at the maximum level or without declared sizes", () => {
+  const atMax = presentSnapshot(
+    dto({
+      revision: 4,
+      lifecycle: "AcquiringTiles",
+      progress: { completed: 0, total: 4 },
+      selection: { image: 0, level: 2, level_count: 3, catalog: RESOLUTION_CATALOG, deferred: [] },
+    }),
+    "direct",
+  );
+  assert.equal(atMax.resolution, undefined);
+  const undeclared = presentSnapshot(
+    dto({
+      revision: 5,
+      lifecycle: "AcquiringTiles",
+      selection: {
+        image: 0,
+        level: 1,
+        level_count: 2,
+        catalog: { entries: [{ kind: "image", levels: [{ label: "0" }, { label: "1" }] }] },
+        deferred: [],
+      },
+    }),
+    "direct",
+  );
+  assert.equal(undeclared.resolution, undefined);
+  const noSelection = presentSnapshot(dto({ revision: 6, lifecycle: "Discovering" }), "direct");
+  assert.equal(noSelection.resolution, undefined);
+});
+
+test("canvas failure copy names the desktop app for every report", () => {
+  for (const code of [
+    "PLAN_INVALID",
+    "OUTPUT_ALLOCATION_FAILED",
+    "OUTPUT_SURFACE_UNAVAILABLE",
+    "OUTPUT_ENCODE_FAILED",
+  ]) {
+    assert.match(plainMessageFor(code, "", "example.test"), /desktop app/i, code);
+  }
 });

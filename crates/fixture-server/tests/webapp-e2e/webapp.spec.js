@@ -313,3 +313,57 @@ test("webapp follows a deferred IIIF manifest request to the info.json and tiles
     "the followed info.json plans the full 512x512 pyramid",
   );
 });
+
+// One DZI pyramid whose maximum level (40000x1000) exceeds the browser
+// canvas side limit while the level below (20000x500) fits: automatic
+// selection takes the smaller level, the notice names both resolutions while
+// tiles are still in flight, and "Try maximum" retries the declared maximum,
+// which reports the large-canvas error with the desktop-app action. The
+// fixture is served entirely from this test: metadata inline, tiles as one
+// held 1x1 PNG, so the only real pipeline runs unmodified.
+const TINY_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+  "base64",
+);
+const RESOLUTION_DZI =
+  '<Image xmlns="http://schemas.microsoft.com/deepzoom/2008" TileSize="10000" Overlap="0" Format="jpg">' +
+  '<Size Width="40000" Height="10000"/></Image>';
+
+test("resolution notice during fetching offers Try maximum and reports the large canvas", async ({ page }) => {
+  await page.route(
+    (url) => url.host === "fixtures.test",
+    async (route) => {
+      if (route.request().url().includes("_files/")) {
+        // Hold tile responses so the notice is observable mid-fetch.
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        await route.fulfill({ status: 200, contentType: "image/png", body: TINY_PNG });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "text/xml",
+        headers: { "access-control-allow-origin": "*" },
+        body: RESOLUTION_DZI,
+      });
+    },
+  );
+  await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
+  await page.locator("#dz-url-input").fill("https://fixtures.test/resolution/big.dzi");
+  await page.getByRole("button", { name: /find image/i }).click();
+
+  // The notice names the selected and maximum resolutions while tiles are
+  // still being fetched; the smaller job keeps downloading behind it.
+  const notice = page.locator("#dz-resolution-notice");
+  await expect(notice).toBeVisible({ timeout: 30000 });
+  await expect(page.locator(".dz-completed-section")).toHaveCount(0);
+  await expect(page.locator("#dz-resolution-message")).toContainText(/maximal resolution/i);
+  const sizes = await page.locator("#dz-resolution-sizes").textContent();
+  assert.match(sizes ?? "", /20000×500/, "selected resolution");
+  assert.match(sizes ?? "", /40000×1000/, "maximum resolution");
+
+  // "Try maximum" retries the declared maximum resolution.
+  await page.locator("#dz-btn-try-maximum").click();
+  await expect(page.locator(".dz-error-section")).toBeVisible({ timeout: 30000 });
+  await expect(page.locator("#dz-error-message")).toContainText(/too large/i);
+  await expect(page.locator("#dz-btn-desktop-handoff")).toBeVisible();
+});
