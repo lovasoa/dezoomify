@@ -32,11 +32,15 @@ The module injects the self-contained functions in `job/source-operations.ts` wi
 
 One source-access object is bound to one source document. A loading event, tab close, changed URL, or returned result from another document invalidates it. It discards results that finish after invalidation. A job that already has inputs can continue through the extension-origin transport when source-context access is lost; the source tab is never silently rebound after navigation. Firefox document IDs are not required, so the current Firefox 133 minimum remains supported.
 
+The job tab discovers, selects, plans, processes, and assembles on a canvas through the shared [engine-effect assembly](browser-runtime.md#engine-effect-assembly). A clean canvas saves through `downloads.download()` from a Blob URL and waits for that job's download to complete. The retained download id drives the shared **Open image** and **Show in folder** actions (`downloads.open` and `downloads.show`). A tainted canvas ends display-only with no later pixel reads, serialization, or file actions.
+
 The source fetch operation uses a per-document abort-controller map in the extension isolated world. The job service's abort signal cancels an in-flight source fetch. Responses are streamed and capped at 8 MiB before they cross the script boundary as base64; the job page decodes and checks the payload once.
 
 ## Fetching and permissions
 
 `activeTab` and `scripting` grant one explicit source-page scan after the toolbar click. Same-origin reads carry the page's browser session, including its cookies. Metadata and requests for the source page's own origin use this context first. A source-context failure falls back to the extension-origin transport; a definitive HTTP refusal remains a typed failure. Cross-origin tiles use the extension-origin transport under an explicitly granted optional host permission. The permission request is made synchronously from the visible job-page action so the browser retains user activation. The job page checks and observes permissions directly; there is no permission mirror in the background.
+
+WXT generates both MV3 manifests from `apps/extension/wxt.config.ts` (Chromium: bundled `background.js` service worker; Firefox: same classic IIFE via `background.scripts`, parsed with `node --check`). The manifest declares `activeTab`, `scripting`, `downloads`, and `downloads.open`, plus optional per-job host permissions. The store package ships the background launcher, job tab, shared UI, browser runtime, icons, and WASM. No content scripts or fallback pages are packaged or tested.
 
 Extension-origin requests attach no cookies or `Authorization` header and follow redirects through browser fetch. Redirect responses do not disclose their bytes to the redirecting site. The extension never uses the metadata proxy. Ordinary unprocessed tiles without readable bytes fall back to `<img>` display, which is visible but tainted and cannot be read or saved.
 

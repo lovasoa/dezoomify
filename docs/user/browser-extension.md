@@ -20,7 +20,7 @@ for the job tab to open, then zoom in on the image once.
 ## 3. Start dezooming
 
 Dezoomify opens a new tab and starts dezooming automatically. Leave it open
-until your image is ready, then save it.
+until your image is ready; the extension saves it automatically.
 
 ## Tiled or static?
 
@@ -56,9 +56,10 @@ Install it from the
    the highest resolution would not fit, the save continues at the largest
    one that does and a message shows the resolution being saved and the
    maximum available, with the desktop app, **Try maximum**, and **Stop**;
-   after the save completes, the offer stays without **Stop**. There
-   is no list to pick from in the extension. To choose a particular image or
-   level, use the [command-line tool](./command-line.md).
+   after the save completes, the offer stays without **Stop**. Choose **Open
+   image** or **Show in folder** once saving finishes. There is no list to pick
+   from in the extension. To choose a particular image or level, use the
+   [command-line tool](./command-line.md).
 
 ## If something goes wrong
 

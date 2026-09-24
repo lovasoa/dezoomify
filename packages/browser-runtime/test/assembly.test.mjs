@@ -121,6 +121,34 @@ test("finalize-output returns the disposition supplied by the product save opera
   assert.equal(disposition, "browser-save-initiated");
 });
 
+test("finalize-output waits for an asynchronous product save to complete", async () => {
+  let finishSave;
+  let announceSave;
+  const saveStarted = new Promise((resolve) => {
+    announceSave = resolve;
+  });
+  const savePending = new Promise((resolve) => {
+    finishSave = resolve;
+  });
+  const { assembly } = harness({
+    save: async () => {
+      announceSave();
+      await savePending;
+      return "browser-save-initiated";
+    },
+  });
+  const finalization = assembly.finalizeOutput(false, "png", { width: 32, height: 32 });
+  let settled = false;
+  void finalization.then(() => {
+    settled = true;
+  });
+  await saveStarted;
+  await Promise.resolve();
+  assert.equal(settled, false, "finalization remains pending while the product save is pending");
+  finishSave();
+  assert.equal(await finalization, "browser-save-initiated");
+});
+
 test("a probe held before canvas allocation is painted when the canvas appears", async () => {
   const { assembly, events, ctx2d } = harness();
   await assembly.acquireTile(0, placement(0, 0, { canvas: null }), bytes16(16));
