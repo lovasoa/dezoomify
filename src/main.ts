@@ -502,7 +502,7 @@ function activeTransport(): string | null {
 function currentPresentation(): SnapshotPresentation {
   // Render the authoritative snapshot directly; hostFailure covers failures
   // that never reached a snapshot. Display-only rides an explicit host flag.
-  if (hostFailure && !activeSnapshot) return presentFailure(hostFailure, activeTransport());
+  if (hostFailure) return presentFailure(hostFailure, activeTransport());
   if (!activeSnapshot) return presentIdle();
   return (
     failurePresentationOf(activeSnapshot) ??
@@ -642,11 +642,6 @@ async function runJob(url: string, origin = url): Promise<void> {
       return assembly;
     },
     quotas: { max_concurrent_fetches: websiteTileConcurrency() },
-    sessionId: () => `job:web-${run}`,
-    getTransport: () => webFetcher.getActiveTransport(),
-    // The website has no host grants: nothing ever suspends for permission.
-    isPermissionPending: () => false,
-    getOutputState: () => (resultBlobUrl ? "writable" : "pending"),
     onRecoveryRequested: (generation) => {
       // Website policy answers partial decisions immediately as discard;
       // the engine owns the consequence.
@@ -719,9 +714,8 @@ async function runJob(url: string, origin = url): Promise<void> {
           max_tiles: BROWSER_MAX_PLAN_TILES,
           browser_selection: selection,
         },
-        host: { kind: "browser", sourceUrl: origin },
       },
-      { snapshot: onSnapshot, hostStatus: () => {} },
+      { snapshot: onSnapshot, failure: onHostFailure },
     );
     if (run !== activeRun) {
       await handle.dispose();

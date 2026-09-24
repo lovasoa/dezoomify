@@ -28,7 +28,6 @@ import {
   humanQueueSummary,
   type JobObserver,
   type JobSnapshot,
-  type JobStartRequest,
   loadHistory as loadHistoryStore,
   pushHistory,
   saveHistory as saveHistoryStore,
@@ -84,7 +83,6 @@ import {
   describeSettingsForLog,
   loadSettings,
   saveSettings,
-  settingsToInvokeArgs,
 } from "./settings.ts";
 import { getEffectiveSettings, resetDesktopSettings } from "./settingsPanel.ts";
 import { DesktopSettingsView } from "./settingsView.tsx";
@@ -111,7 +109,6 @@ const MAX_LOG_LINES = 60;
 // The typed job service: one service, many window-owned jobs. Deep-link
 // confirmations stay in the product shell; settings ride every start_job.
 const service = createDesktopJobService({
-  settings: () => settingsToInvokeArgs(desktopSettings),
   onDeepLink: (payload) => {
     const validated = validateDeepLinkPayload(payload);
     if (validated) showDeepLinkConfirm(validated);
@@ -648,18 +645,9 @@ function launchNativeJob(trimmed: string, token: number): void {
   desktopSettings = effective.settings;
   pushLog(`Settings: ${describeSettingsForLog(desktopSettings)}`);
   update();
-  const format = normalizeNativeFormat(grantedFormat);
-  const request: JobStartRequest = {
-    inputs: [{ url: trimmed }],
-    engine: {},
-    host: {
-      kind: "native",
-      destination: {
-        kind: "file",
-        suggestedName: suggestedNameFor(undefined, undefined, format),
-        format,
-      },
-    },
+  const request = {
+    inputUrl: trimmed,
+    settings: { ...desktopSettings, headers: { ...desktopSettings.headers } },
   };
   // An unreachable host rejects into the typed start-failed path below.
   void service.start(request, jobObserver).then(
@@ -688,8 +676,8 @@ const jobObserver: JobObserver = {
     onSnapshotSideEffects(snapshot);
     update();
   },
-  hostStatus(): void {
-    // The desktop transport is native and fixed; nothing to present.
+  failure(error): void {
+    failLocally(error.code, error.message);
   },
 };
 

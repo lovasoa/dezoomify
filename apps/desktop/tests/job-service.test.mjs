@@ -2,15 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createDesktopJobService } from "../src/jobService.ts";
 
+import { defaultSettings } from "../src/settings.ts";
+
 function nativeRequest(url = "https://museum.example.org/iiif/1/manifest.json") {
-  return {
-    inputs: [{ url }],
-    engine: {},
-    host: {
-      kind: "native",
-      destination: { kind: "file", suggestedName: "dezoomify-800x600.png", format: "png" },
-    },
-  };
+  return { inputUrl: url, settings: defaultSettings() };
 }
 
 // Explicit IPC double: records invokes, replays channel payloads.
@@ -63,12 +58,11 @@ function emit(ipc, channel, payload) {
 function observer() {
   return {
     snapshots: [],
-    hosts: [],
     snapshot(s) {
       this.snapshots.push(s);
     },
-    hostStatus(h) {
-      this.hosts.push(h);
+    failure(error) {
+      throw error;
     },
   };
 }
@@ -195,26 +189,12 @@ test("start validates source, exec, and destination before invoking", async () =
     service.start(nativeRequest("https://user:pw@x.example.org/y"), obs),
     (error) => error.code === "desktop.invalid-source",
   );
-  const browserExec = {
-    inputs: [{ url: "https://x.example.org/y" }],
-    engine: {},
-    host: { kind: "browser" },
-  };
   await assert.rejects(
-    service.start(browserExec, obs),
-    (error) => error.code === "desktop.invalid-exec",
-  );
-  const badFormat = nativeRequest();
-  badFormat.host.destination = { kind: "file", suggestedName: "a.bmp", format: "bmp" };
-  await assert.rejects(
-    service.start(badFormat, obs),
-    (error) => error.code === "desktop.invalid-destination",
-  );
-  const badExt = nativeRequest();
-  badExt.host.destination = { kind: "file", suggestedName: "a.jpg", format: "png" };
-  await assert.rejects(
-    service.start(badExt, obs),
-    (error) => error.code === "desktop.invalid-destination",
+    service.start(
+      { ...nativeRequest(), settings: { ...defaultSettings(), output_format: "bmp" } },
+      obs,
+    ),
+    (error) => error.code === "desktop.invalid-settings",
   );
   assert.equal(ipc.invokes.length, 0);
   await service.dispose();
@@ -232,7 +212,10 @@ test("snapshots forward verbatim per job with identity guard only", async () => 
   assert.equal(handle.id, "job:native-1");
   assert.deepEqual(ipc.invokes[0], {
     cmd: "start_job",
-    args: { inputUrl: "https://museum.example.org/iiif/1/manifest.json" },
+    args: {
+      inputUrl: "https://museum.example.org/iiif/1/manifest.json",
+      settings: defaultSettings(),
+    },
   });
   // Only the snapshot transport plus the deep-link cue are subscribed.
   assert.equal(ipc.handlers.size, 2);
@@ -290,7 +273,6 @@ test("snapshots forward verbatim per job with identity guard only", async () => 
   assert.equal(terminal.lifecycle, "Completed");
   assert.equal(terminal.terminal.type, "completed");
   assert.equal(terminal.output.complete, true);
-  assert.equal(obs.hosts[0].transport, "native");
 
   await handle.dispose();
   await service.dispose();
@@ -416,5 +398,19 @@ test("capabilities reject unknown shell commands", async () => {
     service.queryCapabilities(),
     (error) => error.code === "desktop.capability-mismatch",
   );
+  await service.dispose();
+});
+
+test("start captures the settings it validates before awaiting IPC subscriptions", async () => {
+  const ipc = fakeIpc();
+  const service = createDesktopJobService({ ipc });
+  const request = nativeRequest();
+  request.settings.headers = { accept: "image/png" };
+  const started = service.start(request, observer());
+  request.settings.headers.accept = "changed";
+  request.settings.output_format = "jpeg";
+  await started;
+  assert.equal(ipc.invokes[0].args.settings.output_format, "png");
+  assert.deepEqual(ipc.invokes[0].args.settings.headers, { accept: "image/png" });
   await service.dispose();
 });
