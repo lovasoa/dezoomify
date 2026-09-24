@@ -144,7 +144,7 @@ impl JobOptions {
         self.max_concurrent = self
             .max_concurrent
             .clamp(1, 64)
-            .min(self.max_tiles as usize);
+            .min(self.max_tiles);
         self.max_retries = self.max_retries.min(1024);
         self.max_bytes = self.max_bytes.clamp(1024, 4_294_967_296);
         self.compression = self.compression.min(100);
