@@ -3,6 +3,8 @@
 // The response-size cap mirrors the server limit (`PROXY_MAX_BYTES` in
 // `src/server/security.ts`): the server stays authoritative, this browser-side
 // guard only fails closed early instead of buffering an over-budget body.
+import { readResponseBytes, retryAfterMs } from "../packages/browser-runtime/src/response-body.ts";
+
 export const PROXY_METADATA_MAX_BYTES = 2 * 1024 * 1024;
 
 export const PROXY_UPSTREAM_URL_HEADER = "x-proxy-upstream-url";
@@ -25,71 +27,7 @@ export interface ProxyFetchResult {
   retryAfterMs?: number;
 }
 
-export type ProxyFetchImpl = (
-  input: string,
-  init?: Record<string, unknown>,
-) => Promise<{
-  status: number;
-  headers?: unknown;
-  json?: () => Promise<unknown>;
-  arrayBuffer(): Promise<ArrayBuffer>;
-}>;
-
-function safeHeaders(input: unknown): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (!input) return out;
-  try {
-    const h = input as {
-      get?: (k: string) => string | null;
-      forEach?: (cb: (v: string, k: string) => void) => void;
-    };
-    if (typeof h.get === "function") {
-      for (const k of [
-        "content-type",
-        "content-length",
-        "retry-after",
-        PROXY_UPSTREAM_URL_HEADER,
-      ]) {
-        const v = h.get(k);
-        if (v !== null && v !== undefined) out[k] = String(v);
-      }
-      return out;
-    }
-    if (typeof h.forEach === "function") {
-      h.forEach((v: string, k: string) => {
-        out[String(k).toLowerCase()] = String(v);
-      });
-      return out;
-    }
-  } catch {
-    // ignore
-  }
-  return out;
-}
-
-/**
- * Parse a Retry-After response value (delay seconds or HTTP date) into
- * milliseconds, capped so a stale far-future date never stalls metadata.
- * Returns undefined when absent or unparsable; callers apply their own
- * backoff default and UX-budget cap.
- */
-export function parseRetryAfterMs(value: string | undefined): number | undefined {
-  if (value === undefined) return undefined;
-  const v = value.trim();
-  if (v === "") return undefined;
-  if (/^\d+$/.test(v)) {
-    const secs = Number(v);
-    if (!Number.isFinite(secs) || secs < 0) return undefined;
-    return Math.min(secs * 1000, 30000);
-  }
-  const when = Date.parse(v);
-  if (Number.isFinite(when)) {
-    const delta = when - Date.now();
-    if (delta <= 0) return 0;
-    return Math.min(delta, 30000);
-  }
-  return undefined;
-}
+export type ProxyFetchImpl = typeof fetch;
 
 /**
  * Frontend guard for the Cloudflare metadata CORS proxy: at most 4 proxy
@@ -355,13 +293,8 @@ export function createProxyTransport(
     if (!release) {
       return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
     }
-    let response: {
-      status: number;
-      headers?: unknown;
-      arrayBuffer(): Promise<ArrayBuffer>;
-    };
     try {
-      response = await fetchImpl(proxyPath, {
+      const response = await fetchImpl(proxyPath, {
         method: "POST",
         credentials: "omit",
         signal: callOpts?.signal,
@@ -369,71 +302,70 @@ export function createProxyTransport(
         // Only target URL + protocol version; no cookies/auth/referrer/user headers.
         body: JSON.stringify({ targetUrl, protocolVersion: opts.protocolVersion }),
       });
-    } catch (err: unknown) {
       if (callOpts?.signal?.aborted) {
+        void response.body?.cancel().catch(() => {});
         return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
       }
-      void err;
-      return { ok: false, status: 0, code: "TRANSPORT_NETWORK_ERROR" };
+      if (response.status === 429) {
+        void response.body?.cancel().catch(() => {});
+        const delay = retryAfterMs(response.headers.get("retry-after"));
+        return {
+          ok: false,
+          status: 429,
+          code: "PROXY_RATE_LIMITED",
+          ...(delay !== undefined ? { retryAfterMs: Math.min(delay, 30000) } : {}),
+        };
+      }
+      if (response.status === 413) {
+        void response.body?.cancel().catch(() => {});
+        return { ok: false, status: 413, code: "PROXY_BUDGET_EXCEEDED" };
+      }
+      let bytes: ArrayBuffer;
+      try {
+        bytes = (
+          await readResponseBytes(
+            response,
+            response.ok ? opts.maxBytes : 4096,
+            callOpts?.signal,
+            !response.ok,
+          )
+        ).buffer;
+      } catch (error) {
+        if (callOpts?.signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
+        if ((error as { code?: string })?.code === "TRANSPORT_SIZE_LIMIT")
+          return { ok: false, status: response.status, code: "PROXY_BUDGET_EXCEEDED" };
+        return { ok: false, status: response.status, code: "TRANSPORT_NETWORK_ERROR" };
+      }
+      if (response.status < 200 || response.status > 299) {
+        const relay = parseRelayError(bytes);
+        if (relay.code !== undefined) {
+          return {
+            ok: false,
+            status: response.status,
+            code: relay.code,
+            ...(relay.reason !== undefined ? { reason: relay.reason } : {}),
+          };
+        }
+        if (response.status === 403 || response.status === 422) {
+          return { ok: false, status: response.status, code: "PROXY_POLICY_DENIED" };
+        }
+        return { ok: false, status: response.status, code: "TRANSPORT_HTTP_ERROR" };
+      }
+      const upstream = response.headers.get(PROXY_UPSTREAM_URL_HEADER);
+      return {
+        ok: true,
+        status: response.status,
+        bytes,
+        contentType: response.headers.get("content-type") ?? undefined,
+        ...(upstream ? { finalUrl: upstream } : {}),
+      };
+    } catch {
+      return callOpts?.signal?.aborted
+        ? { ok: false, status: 0, code: "TRANSPORT_CANCELLED" }
+        : { ok: false, status: 0, code: "TRANSPORT_NETWORK_ERROR" };
     } finally {
       release();
     }
-    if (callOpts?.signal?.aborted) {
-      return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
-    }
-    const headers = safeHeaders(response.headers);
-    // Response-size guard before trusting body.
-    const declared = headers["content-length"] ? Number(headers["content-length"]) : NaN;
-    if (Number.isFinite(declared) && declared > opts.maxBytes) {
-      return { ok: false, status: response.status, code: "PROXY_BUDGET_EXCEEDED" };
-    }
-    let bytes: ArrayBuffer;
-    try {
-      bytes = await response.arrayBuffer();
-    } catch {
-      return { ok: false, status: response.status, code: "TRANSPORT_NETWORK_ERROR" };
-    }
-    if (bytes.byteLength > opts.maxBytes) {
-      return { ok: false, status: response.status, code: "PROXY_BUDGET_EXCEEDED" };
-    }
-    if (response.status === 429) {
-      const retryAfterMs = parseRetryAfterMs(headers["retry-after"]);
-      return {
-        ok: false,
-        status: 429,
-        code: "PROXY_RATE_LIMITED",
-        ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
-      };
-    }
-    if (response.status === 413) return { ok: false, status: 413, code: "PROXY_BUDGET_EXCEEDED" };
-    if (response.status < 200 || response.status > 299) {
-      // The relay reports its own decision as JSON `{code, reason?}`; an
-      // upstream 403/404 arrives as TRANSPORT_HTTP_ERROR while our own
-      // policy arrives as PROXY_POLICY_DENIED. Never infer the cause from
-      // the HTTP status alone: a 403 from the viewed site used to
-      // masquerade as a policy denial.
-      const relay = parseRelayError(bytes);
-      if (relay.code !== undefined) {
-        return {
-          ok: false,
-          status: response.status,
-          code: relay.code,
-          ...(relay.reason !== undefined ? { reason: relay.reason } : {}),
-        };
-      }
-      if (response.status === 403 || response.status === 422) {
-        return { ok: false, status: response.status, code: "PROXY_POLICY_DENIED" };
-      }
-      return { ok: false, status: response.status, code: "TRANSPORT_HTTP_ERROR" };
-    }
-    const upstream = headers[PROXY_UPSTREAM_URL_HEADER];
-    return {
-      ok: true,
-      status: response.status,
-      bytes,
-      contentType: headers["content-type"],
-      ...(typeof upstream === "string" && upstream !== "" ? { finalUrl: upstream } : {}),
-    };
   }
 
   return { fetchViaProxy };

@@ -10,6 +10,7 @@
 import type { FetchFailureCode } from "@dezoomify/wasm-bindings";
 import type { FetchCause, StructuredFailure } from "./failure.ts";
 import { blockedReason, fetchFailure } from "./failure.ts";
+import { readErrorPreview, readResponseBytes, retryAfterMs } from "./response-body.ts";
 import {
   combineTimeout,
   DIRECT_METADATA_TIMEOUT_MS,
@@ -19,10 +20,12 @@ import {
   sleep,
   tileFailedError,
 } from "./tile-policy.ts";
-import { extractErrorSignal } from "./transport.ts";
+
+const DIRECT_METADATA_MAX_BYTES = 8 * 1024 * 1024;
+const DIRECT_TILE_MAX_BYTES = 64 * 1024 * 1024;
 
 export interface DirectOutcome {
-  outcome: "readable" | "http-error" | "network-error" | "cancelled";
+  outcome: "readable" | "http-error" | "network-error" | "cancelled" | "too-large";
   finalUrl?: string;
   status?: number;
   bytes?: ArrayBuffer;
@@ -32,15 +35,7 @@ export interface DirectOutcome {
   preview?: string;
 }
 
-export type FetchImplLike = (
-  input: string,
-  init?: Record<string, unknown>,
-) => Promise<{
-  url?: string;
-  status: number;
-  headers?: unknown;
-  arrayBuffer(): Promise<ArrayBuffer>;
-}>;
+export type FetchImplLike = typeof fetch;
 
 export interface ProxyTransportLike {
   fetchViaProxy(
@@ -273,45 +268,6 @@ export function classifyProxyFailure(proxied: {
   };
 }
 
-/**
- * Bounded error-body signal for HTTP failures. Reads at most one small
- * body; oversized or unreadable bodies yield no preview. Never throws.
- */
-async function readErrorPreview(res: {
-  headers?: unknown;
-  arrayBuffer(): Promise<ArrayBuffer>;
-}): Promise<string> {
-  try {
-    const headersLike = res.headers as { get?: (k: string) => string | null } | null;
-    const declared = Number(headersLike?.get?.("content-length"));
-    if (Number.isSafeInteger(declared) && declared > 16 * 1024) return "";
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    return extractErrorSignal(bytes.slice(0, 4096));
-  } catch {
-    return "";
-  }
-}
-
-function parseRetryAfterMs(headers: unknown, at: number): number | undefined {
-  try {
-    const value = headers as {
-      get?: (name: string) => string | null;
-      [name: string]: unknown;
-    } | null;
-    const raw =
-      typeof value?.get === "function"
-        ? value.get("retry-after")
-        : (value?.["retry-after"] ?? value?.["Retry-After"]);
-    if (typeof raw !== "string" || raw.trim() === "") return undefined;
-    const seconds = Number(raw);
-    if (Number.isFinite(seconds) && seconds >= 0) return Math.floor(seconds * 1000);
-    const date = Date.parse(raw);
-    return Number.isFinite(date) ? Math.max(0, date - at) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 function cancelledFailure(url: string): StructuredFailure {
   return fetchFailure("The request was cancelled.", false, {
     cause: { code: "TRANSPORT_CANCELLED", transport: "direct" },
@@ -355,31 +311,8 @@ async function sleepUnlessAborted(
   return result;
 }
 
-function defaultFetchImpl(): FetchImplLike | null {
-  try {
-    const impl = (globalThis as unknown as { fetch?: unknown }).fetch;
-    if (typeof impl === "function") {
-      return (input: string, init?: Record<string, unknown>) =>
-        (
-          impl as (
-            i: string,
-            o?: unknown,
-          ) => Promise<{
-            url?: string;
-            status: number;
-            headers?: unknown;
-            arrayBuffer(): Promise<ArrayBuffer>;
-          }>
-        )(input, { ...(init ?? {}), credentials: "omit" });
-    }
-  } catch {
-    // No host fetch available; the caller must inject one.
-  }
-  return null;
-}
-
 export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
-  const fetchImpl = deps.fetchImpl ?? defaultFetchImpl();
+  const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
   const requestMs = deps.timeouts?.requestMs ?? REQUEST_TIMEOUT_MS;
   const metadataMs = deps.timeouts?.metadataMs ?? DIRECT_METADATA_TIMEOUT_MS;
   const sleepFn = deps.sleepFn ?? sleep;
@@ -392,11 +325,17 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     headers?: Record<string, string>,
     signal?: AbortSignal,
     ms: number = requestMs,
+    maxBytes = DIRECT_TILE_MAX_BYTES,
   ): Promise<DirectOutcome> {
-    if (!fetchImpl) return { outcome: "network-error" };
     const reqId = hooks.onRequestStart("direct");
     const combined = combineTimeout(signal, ms);
     let responseStatus: number | undefined;
+    let ended = false;
+    const end = (ok: boolean) => {
+      if (ended) return;
+      ended = true;
+      hooks.onRequestEnd(reqId, ok);
+    };
     const report = (result: string, finalUrl?: string) => {
       if (!signal?.aborted)
         hooks.onLog(
@@ -404,48 +343,51 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         );
     };
     try {
-      const res = await fetchImpl(url, { headers, signal: combined.signal });
+      const res = await fetchImpl(url, {
+        headers,
+        signal: combined.signal,
+        credentials: "omit",
+        redirect: "follow",
+      });
       responseStatus = res.status;
       if (!(res.status >= 200 && res.status <= 299)) {
-        hooks.onRequestEnd(reqId, false);
-        const preview = await readErrorPreview(res);
-        const retryAfterMs = parseRetryAfterMs(res.headers, now());
+        const preview = await readErrorPreview(res, combined.signal);
+        combined.signal.throwIfAborted();
+        const retryAfter = retryAfterMs(res.headers.get("retry-after"), now());
+        end(false);
         report(
           `HTTP ${res.status}${preview ? ` response=${JSON.stringify(preview)}` : ""}`,
           res.url,
         );
         return {
           outcome: "http-error",
-          finalUrl: typeof res.url === "string" ? res.url : url,
+          finalUrl: res.url || url,
           status: res.status,
-          ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+          ...(retryAfter === undefined ? {} : { retryAfterMs: retryAfter }),
           ...(preview ? { preview } : {}),
         };
       }
-      const bytes = await res.arrayBuffer();
-      hooks.onRequestEnd(reqId, true);
-      let contentType: string | undefined;
-      try {
-        const headersLike = res.headers as { get?: (k: string) => string | null } | null;
-        const ct = headersLike?.get?.("content-type");
-        if (typeof ct === "string" && ct !== "") contentType = ct;
-      } catch {
-        // A missing/unreadable header must never break the readable path.
-      }
+      const bytes = (await readResponseBytes(res, maxBytes, combined.signal)).buffer;
+      end(true);
+      const contentType = res.headers.get("content-type") || undefined;
       report(
         `HTTP ${res.status} bytes=${bytes.byteLength}${contentType ? ` type=${contentType}` : ""}`,
         res.url,
       );
       return {
         outcome: "readable",
-        finalUrl: typeof res.url === "string" && res.url !== "" ? res.url : url,
+        finalUrl: res.url || url,
         status: res.status,
         bytes,
         ...(contentType ? { contentType } : {}),
       };
     } catch (e) {
-      hooks.onRequestEnd(reqId, false);
+      end(false);
       if (signal?.aborted) return { outcome: "cancelled" };
+      if ((e as { code?: string })?.code === "TRANSPORT_SIZE_LIMIT") {
+        report("body exceeded configured limit");
+        return { outcome: "too-large" };
+      }
       const name = (e as { name?: string })?.name;
       const received =
         responseStatus === undefined ? "" : `HTTP ${responseStatus} body-read-failed; `;
@@ -554,7 +496,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     const target = shortUrl(url);
     activeTransport = "direct";
     const directStartedAt = now();
-    const direct = await fetchDirect(url, headers, signal, metadataMs);
+    const direct = await fetchDirect(url, headers, signal, metadataMs, DIRECT_METADATA_MAX_BYTES);
     hooks.onMetadataAttempt?.({
       startedAt: directStartedAt,
       transport: "direct",
@@ -636,6 +578,13 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       // A retired job never falls back to the proxy and never reports a
       // retryable discovery failure for its own cancellation.
       throw cancelledFailure(url);
+    } else if (direct.outcome === "too-large") {
+      throw fetchFailure("This page is too large to check here. Try the desktop app.", false, {
+        cause: { code: "TRANSPORT_SIZE_LIMIT", transport: "direct" },
+        code: "TRANSPORT_SIZE_LIMIT",
+        url,
+        transportKind: "direct",
+      });
     } else if (direct.outcome === "http-error") {
       // The typed cause carries the HTTP status and the bounded server
       // signal; both stay in local-only diagnostics (see the redact hint
@@ -707,6 +656,14 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     const direct = await fetchDirect(url, headers, signal, requestMs);
     if (direct.outcome === "readable" && direct.bytes) return { bytes: direct.bytes };
     if (direct.outcome === "cancelled" || signal?.aborted) throw cancelledFailure(url);
+    if (direct.outcome === "too-large") {
+      throw fetchFailure("This tile is too large for the browser.", false, {
+        cause: { code: "TRANSPORT_SIZE_LIMIT", transport: "direct" },
+        code: "TRANSPORT_SIZE_LIMIT",
+        url,
+        transportKind: "direct",
+      });
+    }
     throw tileFailedError(direct.outcome, direct.status, url, direct.retryAfterMs);
   }
 
