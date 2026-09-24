@@ -1,4 +1,5 @@
 import type { JobHandle } from "@dezoomify/app-model";
+import { suggestedNameFor } from "@dezoomify/app-model";
 import type { ResourceRequest } from "@dezoomify/wasm-bindings";
 import { createAttemptPermissions, type PermissionWait } from "./permissions.ts";
 /** Dedicated extension job-tab integration. No webpage postMessage bridge. */
@@ -15,7 +16,6 @@ import {
   loadTileImage,
   MAXIMUM_SELECTION_LIMITS,
   originOfUrl,
-  saveBlobViaAnchor,
   selectionLimitsFor,
   wantsDesktopHandoff,
 } from "@dezoomify/browser-runtime";
@@ -38,6 +38,7 @@ import {
 import { createElement } from "react";
 import { browser as api } from "wxt/browser";
 import { asFetchFailure, createExtensionFetcher } from "../runtime/fetch.ts";
+import { saveExtensionBlob } from "./download.ts";
 import { createSourceAccess } from "./source-access.ts";
 import { createEngineResourceFetcher } from "./transport.ts";
 import { AccessRequestView, PartialOutputActions } from "./view.tsx";
@@ -55,6 +56,7 @@ function newAttempt() {
     activeSnapshot: null as JobSnapshot | null,
     localFailure: null as StructuredError | null,
     pendingPermission: null as PermissionWait | null,
+    savedDownloadId: null as number | null,
     attemptSourceUrl: "",
     testCompletionNotified: false,
     uiLogLines: [] as string[],
@@ -402,18 +404,18 @@ function createAssembly(args: BrowserAssemblyArgs, attempt: ExtensionAttempt) {
   return createBrowserAssembly({
     ...args,
     canvas: () => document.createElement("canvas"),
-    save: (blob, width, height, signal) => {
+    save: async (blob, width, height, signal) => {
       signal.throwIfAborted();
       if (!owns(attempt)) throw new DOMException("Result retired", "AbortError");
-      const url = URL.createObjectURL(blob);
-      try {
-        saveBlobViaAnchor(document, url, width, height, activeTitle());
-      } finally {
-        // The anchor save reads the URL synchronously; revoke lazily so the
-        // browser never races a slow download start.
-        setTimeout(() => URL.revokeObjectURL(url), 60000);
-      }
-      return "browser-save-initiated";
+      const id = await saveExtensionBlob(
+        api.downloads,
+        blob,
+        suggestedNameFor(width, height, "png", activeTitle()),
+        signal,
+      );
+      if (!owns(attempt)) throw new DOMException("Result retired", "AbortError");
+      attempt.savedDownloadId = id;
+      return "browser-save-initiated" as const;
     },
     limits: browserLimitsFor(clientHints()),
   });
