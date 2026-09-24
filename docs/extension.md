@@ -10,7 +10,7 @@ The first batch holds the top document's rendered `outerHTML`, then rendered DOM
 
 Core runs as WASM inside the job tab. It evaluates captured DOM bytes before fetching URL-only roots; the first root yielding an image confirms detection.
 
-`apps/extension/src/background/source-operations.ts` holds the two functions passed to `scripting.executeScript()`: one snapshots rendered roots plus retained resource-timing entries once the job tab is ready; the other fetches in the tab's origin and returns one bounded base64 payload. Neither registers a listener. A follow-up snapshot is bounded and deduplicated when discovery asks for more candidates. A stale binding or failed start shows an error badge; the extension never silently opens another page.
+`apps/extension/src/background/coordinator.ts` owns job creation, sender authentication, permissions, and browser event wiring. `source-bridge.ts` owns bounded source-document operations and validates their results. The ready, permission, and source-fetch requests return through the browser's existing `runtime.sendMessage()` response; candidate snapshots and permission revocations are pushed to the job tab because they arrive independently. `source-operations.ts` holds the two self-contained functions passed to `scripting.executeScript()`: one snapshots rendered roots plus retained resource-timing entries once the job tab is ready; the other fetches in the tab's origin and returns one bounded base64 payload. Neither registers a listener. A follow-up snapshot is bounded and deduplicated when discovery asks for more candidates. A stale binding or failed start shows an error badge; the extension never silently opens another page.
 
 ## Fetching
 
@@ -54,22 +54,24 @@ sequenceDiagram
     U->>B: toolbar click
     B->>B: bind job + tab and frame IDs + document generation
     B->>J: open dedicated job tab
-    J-->>B: ready
+    J->>B: ready request
+    B-->>J: source binding
     B->>S: scripting.executeScript collectCandidates (bounded snapshot)
     S-->>B: ordered roots (outerHTML, same-origin iframes, timing URLs)
     B->>J: candidate roots
     J->>W: dispatch Start
     W-->>J: acquire-resource effects
     alt source fetch needed
+        J->>B: source fetch request
         B->>S: tab-origin fetch (single bounded payload)
         S-->>B: bytes
-        B->>J: bytes
+        B-->>J: source reply
         J->>W: resource bytes
         W-->>J: catalog event
     else source-context failure
-        J->>B: extension-origin retry request
-        B->>B: pause for host grant only when missing
-        B->>J: extension-origin bytes or typed refusal
+        J->>B: verify missing host grant
+        B-->>J: permission result
+        J->>J: extension-origin retry
         J->>W: resource bytes or fetch failure
         W-->>J: catalog event or typed failure
     end
@@ -80,13 +82,13 @@ sequenceDiagram
     J-->>U: progress, save, or typed failure
 ```
 
-Every source- or job-originated request carries a host-local binding (`job`, browser-verified tab and frame IDs, document generation) plus one request sequence. The coordinator checks sender tab and frame against the stored binding before routing. Navigation bumps `document_generation`; older-generation messages die. A source-tab navigation invalidates only source-context transport; extension-origin transport survives for the same job.
+Every bound request carries a host-local binding (`job`, browser-verified tab and frame IDs, document generation). The coordinator checks sender tab and frame against the stored binding before routing. The browser correlates each request with its response, so the extension does not maintain a second request-ID ledger. Navigation bumps `document_generation`; older-generation messages die. A source-tab navigation invalidates only source-context transport; extension-origin transport survives for the same job.
 
 Bindings and granted-origin state live only in background memory. A worker restart drops them, so the user starts a fresh job with the toolbar button. Closing source or job tab cancels in-flight work and releases the in-memory binding.
 
 `collectCandidates` snapshots rendered `outerHTML` for the document and readable same-origin iframes, then URL-only retained timing entries; cross-origin iframes are skipped. Follow-up snapshots are optional, bounded, and coordinator-deduplicated. No persistent observer exists. Overflow returns as diagnostics, never silent discard.
 
-Candidate and fetch messages use one closed TypeScript union private to the installed build; no cross-version interface. Cancellation stops the source fetch before more bytes are kept. No webpage frame receives extension runtime messages.
+The extension defines its job binding, runtime message shape, and source-fetch reply once in `src/protocol.ts`. Browser messages are still validated at each runtime boundary. Cancellation stops the source fetch before more bytes are kept. No webpage frame receives extension runtime messages.
 
 Outcome classes cover document loss, access required, redirect limits, cancellation, network/throttling, malformed responses, streaming limits, and channel loss. Source-context failure falls back to extension-origin transport; a definitive HTTP response returns straight to discovery (repeating fixes nothing). Missing-grant (`permission-denied`) pauses with host names and rationale; only a visible job-tab action opens the permission prompt. Granted-origin 401/403 is an upstream refusal, not a missing grant: typed failure, no pause. Redirects are followed credential-free by the browser under the initial origin's grant.
 

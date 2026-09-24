@@ -29,7 +29,6 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
 
   const started = await api.runtime.sendMessage({
     type: "dezoomify-test-start-job",
-    requestId: "e2e-start",
     tabId: target.id,
     url: targetUrl,
   });

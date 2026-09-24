@@ -37,28 +37,20 @@ import {
 } from "@dezoomify/shared-ui";
 import type { ProcessingRecipe } from "@dezoomify/wasm-bindings";
 import { createElement } from "react";
-import { createExtensionFetcher } from "../runtime/fetch.ts";
-import type { JobBinding } from "./transport.ts";
+import type { WxtBrowser } from "wxt/browser";
+import type { JobBinding, RuntimeMessage } from "../protocol.ts";
+import { isRuntimeMessage } from "../protocol.ts";
+import { asFetchFailure, createExtensionFetcher } from "../runtime/fetch.ts";
 import {
   createCoordinatorSourceTransport,
   createEngineResourceFetcher,
-  engineFailure,
   isJobBinding,
 } from "./transport.ts";
 import { AccessRequestView, PartialOutputActions } from "./view.tsx";
 
 const TEST_PERMISSION_MOCK = import.meta.env.MODE === "testing";
 
-type ExtensionApi = {
-  runtime?: {
-    sendMessage?(message: unknown): Promise<unknown>;
-    onMessage?: { addListener(listener: (message: Record<string, unknown>) => void): void };
-  };
-  permissions?: {
-    contains?(request: { origins: string[] }): Promise<boolean>;
-    request?(request: { origins: string[] }): Promise<boolean>;
-  };
-};
+type ExtensionApi = Partial<Pick<WxtBrowser, "runtime" | "permissions">>;
 type ViewContext = SharedViewContext & { failure?: StructuredError };
 
 const hostGlobal = globalThis as typeof globalThis & {
@@ -78,8 +70,8 @@ jobLog.addSink((entry) => {
     uiLogLines.splice(0, uiLogLines.length - UI_LOG_MAX_LINES);
 });
 
-/** @type {any | null} */
 let binding: JobBinding | null = null;
+let coordinatorCancelled = false;
 /** Origin of the bound source document; "" until the binding arrives. Same-origin tiles and probes prefer the tab-origin transport. */
 let siteOrigin = "";
 /** Fallback request ids for probes that arrive without an engine request id. Start clear of the engine's small sequential ids. */
@@ -89,10 +81,8 @@ let probeSeq = 1 << 30;
 // this tab keeps binding, transport, assembly, and view wiring. The single
 // authoritative snapshot renders directly; no derived mirrors.
 let jobHandle: JobHandle | null = null;
-let sourceTransport: ReturnType<typeof createCoordinatorSourceTransport> | null = null;
 /** Service abort signal of the live attempt (drives the cancelled() transport view). */
 let attemptSignal: AbortSignal | null = null;
-/** @type {ReturnType<typeof createCanvasAssembly> | null} */
 let assembly: ReturnType<typeof createCanvasAssembly> | null = null;
 let saveCompleted = false;
 /** Single authoritative snapshot: render it directly, never a derived copy. */
@@ -107,11 +97,8 @@ let tryMaximumNext = false;
 /** Source URL of the live attempt (desktop handoff link for canvas failures). */
 let attemptSourceUrl = "";
 
-function requestId(prefix: string) {
-  return `${prefix}-${crypto.randomUUID?.() ?? Date.now().toString(36)}`;
-}
-function boundEnvelope(type: string, extra: Record<string, unknown> = {}) {
-  return { type, ...binding, requestId: requestId(type.replaceAll(".", "-")), ...extra };
+function boundEnvelope(type: string, extra: Record<string, unknown> = {}): RuntimeMessage {
+  return { ...extra, ...binding, type };
 }
 
 function root() {
@@ -270,6 +257,15 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
                       }),
                     );
                   })
+                  .then((response) => {
+                    if (
+                      !isRuntimeMessage(response) ||
+                      response.type !== "dz.job.permission-required" ||
+                      typeof response.granted !== "boolean"
+                    )
+                      throw new Error("invalid permission response");
+                    resolvePermission(response);
+                  })
                   .catch(() => {
                     if (!pendingPermission) return;
                     pendingPermission.requesting = false;
@@ -306,12 +302,8 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
   syncExtensionJobTitle(status, siteOrigin);
 }
 
-function send(message: unknown): Promise<unknown> {
-  const type =
-    message && typeof message === "object" && "type" in message
-      ? String((message as { type?: unknown }).type)
-      : "unknown";
-  jobLog.debug("background-message-sent", `type=${type}`);
+function send(message: RuntimeMessage): Promise<unknown> {
+  jobLog.debug("background-message-sent", `type=${message.type}`);
   if (!api?.runtime?.sendMessage) return Promise.reject(new Error("extension runtime unavailable"));
   return api.runtime.sendMessage(message);
 }
@@ -335,7 +327,7 @@ function showAccessRequired(detail: { hosts: string[] }) {
   render("downloading", { jobActivity: { startedAt: Date.now() } });
 }
 
-function resolvePermission(message: Record<string, unknown>) {
+function resolvePermission(message: RuntimeMessage) {
   if (!binding || message.jobId !== binding.jobId || typeof message.granted !== "boolean") return;
   jobLog.info("permission-resolved", `jobId=${binding.jobId} granted=${message.granted}`);
   pendingPermission = null;
@@ -503,9 +495,8 @@ function createAssembly(
 
 function setup(bound: unknown) {
   if (!isJobBinding(bound) || binding) return;
-  // Keep only the four binding fields: the arriving message carries payload
-  // (type, sourceValid, documentUrl) that must never leak into outgoing
-  // envelopes, where it would override their own message type.
+  // Keep only the four binding fields; the ready response also carries the
+  // source document URL.
   binding = {
     jobId: bound.jobId,
     tabId: bound.tabId,
@@ -513,7 +504,7 @@ function setup(bound: unknown) {
     documentGeneration: bound.documentGeneration,
   };
   try {
-    const documentUrl = (bound as { documentUrl?: unknown }).documentUrl;
+    const documentUrl = "documentUrl" in bound ? bound.documentUrl : undefined;
     siteOrigin = typeof documentUrl === "string" ? originOfUrl(documentUrl) : "";
   } catch {
     siteOrigin = "";
@@ -549,7 +540,6 @@ function stopAttempt() {
   }
   assembly = null;
   saveCompleted = false;
-  sourceTransport = null;
 }
 
 /** Clear every per-attempt flag and buffer; the source binding is untouched. */
@@ -568,7 +558,7 @@ function resetAttemptState() {
  * the engine; the abort scope and disposal live in the service attempt.
  */
 async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
-  if (!binding) return;
+  if (!binding || coordinatorCancelled) return;
   const activeBinding = binding;
   attemptSourceUrl = inputs[0]?.url ?? "";
   const fetcher = createExtensionFetcher({
@@ -608,7 +598,6 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
     cancel: () => fetcher.cancel(),
   };
   const coordinator = createCoordinatorSourceTransport({ sendMessage: send });
-  sourceTransport = coordinator;
   let attemptCancelled = false;
   // Metadata and the bound site's own tiles and probes prefer the source
   // tab's origin context and fall back to the granted extension-origin
@@ -676,7 +665,7 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
         img.onerror = () => reject(new Error("display image failed to load"));
         img.src = url;
       }),
-    classifyFailure: engineFailure,
+    classifyFailure: asFetchFailure,
     createAssembly: ({ sourceUrl, processTile }) => {
       const asm = createAssembly(sourceUrl, processTile);
       assembly = asm;
@@ -723,13 +712,18 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
       },
       {
         snapshot: (snapshot: JobSnapshot) => {
-          if (localFailure) return;
+          if (localFailure || coordinatorCancelled) return;
           activeSnapshot = snapshot;
           renderForSnapshot(snapshot);
         },
         hostStatus: () => {},
       },
     );
+    if (coordinatorCancelled) {
+      void handle.command({ type: "cancel" }).catch(() => {});
+      void handle.dispose().catch(() => {});
+      return;
+    }
     jobHandle = handle;
   } catch (error) {
     onHostFailure(error);
@@ -762,7 +756,8 @@ function renderForSnapshot(snapshot: JobSnapshot) {
 /**
  * Announce this job tab to the coordinator. Used on first load and when a
  * retry is pressed before the first binding ever arrived; the coordinator
- * replies with the binding and a fresh candidate snapshot.
+ * returns the binding; the coordinator sends a bounded candidate snapshot
+ * after it has validated the source document.
  */
 function announceReady() {
   jobLog.info("job-ready-sent", `jobId=${bootstrapJobId ?? "unknown"}`);
@@ -770,15 +765,16 @@ function announceReady() {
   void send({
     type: "dz.job.ready",
     jobId: bootstrapJobId,
-    requestId: requestId("job-ready"),
-  }).catch(() =>
-    onHostFailure(
-      Object.assign(new Error("Could not connect this job tab to the extension."), {
-        code: "network",
-        retryable: true,
-      }),
-    ),
-  );
+  })
+    .then(setup)
+    .catch(() =>
+      onHostFailure(
+        Object.assign(new Error("Could not connect this job tab to the extension."), {
+          code: "network",
+          retryable: true,
+        }),
+      ),
+    );
 }
 
 /**
@@ -825,7 +821,7 @@ function startAttempt() {
   render("discovering", { jobActivity: { startedAt: Date.now() } });
 }
 
-function candidates(message: Record<string, unknown>) {
+function candidates(message: RuntimeMessage) {
   if (!binding || !message || message.jobId !== binding.jobId || jobHandle) return;
   const values = Array.isArray(message.inputs)
     ? message.inputs.flatMap((candidate) => {
@@ -858,12 +854,18 @@ function candidates(message: Record<string, unknown>) {
 }
 
 api?.runtime?.onMessage?.addListener((message) => {
-  if (typeof message?.type === "string" && message.type.startsWith("dz.job."))
+  if (!isRuntimeMessage(message)) return;
+  if (message.type.startsWith("dz.job."))
     jobLog.debug("background-message-received", `type=${message.type}`);
-  if (message?.type === "dz.job.binding") setup(message);
-  else if (message?.type === "dz.job.candidates") candidates(message);
-  else if (message?.type === "dz.job.fetch") sourceTransport?.handleMessage?.(message);
-  else if (message?.type === "dz.job.permission-required") resolvePermission(message);
+  if (message.type === "dz.job.candidates") candidates(message);
+  else if (message.type === "dz.job.permission-required") resolvePermission(message);
+  else if (message?.type === "dz.job.cancel") {
+    coordinatorCancelled = true;
+    void jobHandle?.command({ type: "cancel" }).catch(() => {});
+    stopAttempt();
+    resetAttemptState();
+    render("cancelled", { jobActivity: { startedAt: Date.now() } });
+  }
 });
 
 window.addEventListener("beforeunload", () => {

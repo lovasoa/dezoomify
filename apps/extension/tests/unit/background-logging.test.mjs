@@ -98,7 +98,7 @@ test("coordinator logs active-tab and job-bus interactions", async () => {
   assert.ok(created, "job was created");
   const jobId = created.detail.match(/jobId=(\S+)/)[1];
   fake.listeners.message[0](
-    { type: "dz.job.ready", jobId, requestId: "job-ready-test" },
+    { type: "dz.job.ready", jobId },
     { tab: { id: 2 }, frameId: 0 },
     () => {},
   );
