@@ -21,6 +21,9 @@ export const it = {
   "desktop.done.folderError":
     "Impossibile aprire la cartella. Verifica che sia installato un gestore di file.",
   "desktop.done.missingError": "L’immagine o la cartella non esiste più.",
+  "view.partial.extensionKeep": "Conserva l’immagine parziale",
+  "view.partial.extensionDiscard": "Scarta l’immagine parziale",
+  "view.partial.extensionRetry": "Riprova i riquadri mancanti",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Capito",
   "view.modal.closeDialog": "Chiudi la finestra",

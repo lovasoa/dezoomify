@@ -45,6 +45,10 @@ renders authoritative snapshots.
 - UI-local state (draft inputs, expanded diagnostics, preview toggles,
   settings forms) stays in the product. It is never a job phase.
 
+The shared partial-decision control receives the generated snapshot decision
+and returns a generated `answer-partial` command with its exact generation.
+Products choose when to dispatch it and how to handle command failure.
+
 Desktop startup waits for all event subscriptions before invoking the host.
 Desktop snapshot events use one `{ job, snapshot }` envelope: `job` is the
 sole routing identity and `snapshot` is the unmodified `Snapshot`.

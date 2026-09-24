@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createElement } from "react";
+import { PartialDecisionActions } from "../packages/shared-ui/src/partial-decision.tsx";
 import {
   presentFailure,
   presentIdle,
@@ -195,6 +197,29 @@ test("output actions belong to their completed result", async () => {
   await act(async () => old.reject({ code: "output.not-found" }));
   assert.equal(el.querySelector("#dz-open-error"), null);
   assert.equal(el.querySelector("#dz-btn-open").disabled, false);
+});
+
+test("partial choices return the generated decision generation unchanged", () => {
+  const el = container();
+  const answers = [];
+  act(() =>
+    renderView(el, presentIdle(), callbacks, undefined, {
+      after: createElement(PartialDecisionActions, {
+        decision: { generation: 17, missing: [] },
+        onAnswer: (command) => answers.push(command),
+      }),
+    }),
+  );
+  for (const choice of ["keep", "discard", "retry"])
+    click(el.querySelector(`[data-dz-partial-choice="${choice}"]`));
+  assert.deepEqual(
+    answers,
+    ["keep", "discard", "retry"].map((decision) => ({
+      type: "answer-partial",
+      generation: 17,
+      decision,
+    })),
+  );
 });
 
 test("slow discovery replaces the phase with one waiting status", () => {
