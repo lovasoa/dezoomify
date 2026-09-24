@@ -7,7 +7,7 @@
 // data, so this module never imports app layers. Progress and log hooks
 // drive the caller's live job view. Keep erasable-syntax-only.
 
-import type { FetchFailureCode } from "@dezoomify/wasm-bindings";
+import type { FetchFailureCode, ResourceRequest } from "@dezoomify/wasm-bindings";
 import type { FetchCause, StructuredFailure } from "./failure.ts";
 import { blockedReason, fetchFailure } from "./failure.ts";
 import { readErrorPreview, readResponseBytes, retryAfterMs } from "./response-body.ts";
@@ -39,7 +39,7 @@ export type FetchImplLike = typeof fetch;
 
 export interface ProxyTransportLike {
   fetchViaProxy(
-    targetUrl: string,
+    request: ResourceRequest,
     opts?: { signal?: AbortSignal },
   ): Promise<{
     ok: boolean;
@@ -83,11 +83,7 @@ export interface WebFetchMessages {
 export interface WebFetchDeps {
   fetchImpl?: FetchImplLike;
   proxyTransport?: ProxyTransportLike;
-  isProxyEligible(req: {
-    url: string;
-    kind: "metadata" | "tile";
-    headers?: Record<string, string>;
-  }): ProxyEligibility;
+  isProxyEligible(req: ResourceRequest): ProxyEligibility;
   classifyHint?: (
     bytes: ArrayBuffer,
     info: { via: string; contentType?: string },
@@ -101,34 +97,10 @@ export interface WebFetchDeps {
 }
 
 export interface WebFetcher {
-  fetchDirect(
-    url: string,
-    headers?: Record<string, string>,
-    signal?: AbortSignal,
-    ms?: number,
-  ): Promise<DirectOutcome>;
-  fetchViaProxy(
-    targetUrl: string,
-    signal?: AbortSignal,
-  ): Promise<{
-    ok: boolean;
-    status: number;
-    bytes?: ArrayBuffer;
-    code?: string;
-    reason?: string;
-    finalUrl?: string;
-    retryAfterMs?: number;
-  }>;
-  fetchMetadataFor(
-    url: string,
-    headers: Record<string, string>,
-    signal?: AbortSignal,
-  ): Promise<{ bytes: ArrayBuffer; finalUri?: string; via: string }>;
-  fetchTileFor(
-    url: string,
-    headers: Record<string, string>,
-    signal?: AbortSignal,
-  ): Promise<{ bytes: ArrayBuffer }>;
+  fetchResource(
+    request: ResourceRequest,
+    signal: AbortSignal,
+  ): Promise<{ bytes: Uint8Array; finalUri?: string }>;
   getActiveTransport(): string | null;
   resetActiveTransport(): void;
 }
@@ -148,6 +120,7 @@ export function proxyPolicyReasonText(reason?: string): string | null {
     case "protocol-version":
     case "malformed-body":
     case "method":
+    case "unsupported-header":
       return "Check the address and try again.";
     case "loopback-host":
     case "private-host":
@@ -321,12 +294,12 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
   let activeTransport: string | null = null;
 
   async function fetchDirect(
-    url: string,
-    headers?: Record<string, string>,
+    request: ResourceRequest,
     signal?: AbortSignal,
     ms: number = requestMs,
     maxBytes = DIRECT_TILE_MAX_BYTES,
   ): Promise<DirectOutcome> {
+    const url = request.uri;
     const reqId = hooks.onRequestStart("direct");
     const combined = combineTimeout(signal, ms);
     let responseStatus: number | undefined;
@@ -344,7 +317,9 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     };
     try {
       const res = await fetchImpl(url, {
-        headers,
+        headers: Object.fromEntries(
+          (request.headers ?? []).map(({ name, value }) => [name, value]),
+        ),
         signal: combined.signal,
         credentials: "omit",
         redirect: "follow",
@@ -404,7 +379,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
   }
 
   async function fetchViaProxy(
-    targetUrl: string,
+    request: ResourceRequest,
     signal?: AbortSignal,
   ): Promise<{
     ok: boolean;
@@ -415,6 +390,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     finalUrl?: string;
     retryAfterMs?: number;
   }> {
+    const targetUrl = request.uri;
     if (!deps.proxyTransport) return { ok: false, status: 502, code: "PROXY_ERROR" };
     if (signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
     // Proxy admission budget lives in exactly one owner: the injected
@@ -423,7 +399,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     const reqId = hooks.onRequestStart("proxy");
     const combined = combineTimeout(signal, requestMs);
     try {
-      const res = await deps.proxyTransport.fetchViaProxy(targetUrl, { signal: combined.signal });
+      const res = await deps.proxyTransport.fetchViaProxy(request, { signal: combined.signal });
       if (!signal?.aborted && res.code !== "TRANSPORT_CANCELLED")
         hooks.onLog(
           `fetch metadata-proxy ${res.status > 0 ? `HTTP ${res.status}` : "no response"}${res.ok ? ` bytes=${res.bytes?.byteLength ?? 0}` : ` code=${res.code ?? "PROXY_ERROR"}${res.reason ? ` reason=${res.reason}` : ""}`} url=${targetUrl}${res.finalUrl && res.finalUrl !== targetUrl ? ` final=${res.finalUrl}` : ""}`,
@@ -487,16 +463,16 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
    * copy never enters the engine.
    */
   async function fetchMetadataFor(
-    url: string,
-    headers: Record<string, string>,
+    request: ResourceRequest,
     signal?: AbortSignal,
   ): Promise<{ bytes: ArrayBuffer; finalUri?: string; via: string }> {
+    const url = request.uri;
     // A retired job performs no fetch and never falls back to the proxy.
     if (signal?.aborted) throw cancelledFailure(url);
     const target = shortUrl(url);
     activeTransport = "direct";
     const directStartedAt = now();
-    const direct = await fetchDirect(url, headers, signal, metadataMs, DIRECT_METADATA_MAX_BYTES);
+    const direct = await fetchDirect(request, signal, metadataMs, DIRECT_METADATA_MAX_BYTES);
     hooks.onMetadataAttempt?.({
       startedAt: directStartedAt,
       transport: "direct",
@@ -519,12 +495,12 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     } else if (
       direct.outcome === "network-error" &&
       !signal?.aborted &&
-      deps.isProxyEligible({ url, kind: "metadata", headers }).eligible
+      deps.isProxyEligible(request).eligible
     ) {
       activeTransport = "metadata-proxy";
       via = "proxy";
       let proxyStartedAt = now();
-      let proxied = await fetchViaProxy(url, signal);
+      let proxied = await fetchViaProxy(request, signal);
       hooks.onMetadataAttempt?.({
         startedAt: proxyStartedAt,
         transport: "metadata proxy",
@@ -542,7 +518,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
           hooks.onLog(`Metadata proxy rate-limited; retrying once after ${delay} ms.`);
           if (await sleepUnlessAborted(delay, sleepFn, signal)) throw cancelledFailure(url);
           proxyStartedAt = now();
-          proxied = await fetchViaProxy(url, signal);
+          proxied = await fetchViaProxy(request, signal);
           hooks.onMetadataAttempt?.({
             startedAt: proxyStartedAt,
             transport: "metadata proxy",
@@ -639,10 +615,10 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
   }
 
   async function fetchTileFor(
-    url: string,
-    headers: Record<string, string>,
+    request: ResourceRequest,
     signal?: AbortSignal,
-  ): Promise<{ bytes: ArrayBuffer }> {
+  ): Promise<{ bytes: ArrayBuffer; finalUri?: string }> {
+    const url = request.uri;
     if (signal?.aborted) throw cancelledFailure(url);
     hooks.onTileAttempt?.();
     if (deps.throttle) {
@@ -653,8 +629,9 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       }
     }
     if (signal?.aborted) throw cancelledFailure(url);
-    const direct = await fetchDirect(url, headers, signal, requestMs);
-    if (direct.outcome === "readable" && direct.bytes) return { bytes: direct.bytes };
+    const direct = await fetchDirect(request, signal, requestMs);
+    if (direct.outcome === "readable" && direct.bytes)
+      return { bytes: direct.bytes, finalUri: direct.finalUrl };
     if (direct.outcome === "cancelled" || signal?.aborted) throw cancelledFailure(url);
     if (direct.outcome === "too-large") {
       throw fetchFailure("This tile is too large for the browser.", false, {
@@ -675,12 +652,14 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     activeTransport = null;
   }
 
-  return {
-    fetchDirect,
-    fetchViaProxy,
-    fetchMetadataFor,
-    fetchTileFor,
-    getActiveTransport,
-    resetActiveTransport,
-  };
+  async function fetchResource(request: ResourceRequest, signal: AbortSignal) {
+    if (request.purpose === "metadata") {
+      const result = await fetchMetadataFor(request, signal);
+      return { bytes: new Uint8Array(result.bytes), finalUri: result.finalUri };
+    }
+    const result = await fetchTileFor(request, signal);
+    return { bytes: new Uint8Array(result.bytes), finalUri: result.finalUri };
+  }
+
+  return { fetchResource, getActiveTransport, resetActiveTransport };
 }

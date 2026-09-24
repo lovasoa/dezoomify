@@ -180,10 +180,7 @@ test("service sends one-attempt structured tile failures to the engine", async (
         throttle: async () => {},
       });
       const p = product({
-        fetchResource: (request, signal) =>
-          fetcher
-            .fetchTileFor(request.uri, {}, signal)
-            .then((result) => ({ bytes: new Uint8Array(result.bytes) })),
+        fetchResource: (request, signal) => fetcher.fetchResource(request, signal),
         classifyFailure: (error) => ({
           code: error.cause?.code ?? error.code,
           retryable: error.retryable,

@@ -215,8 +215,10 @@ function fetcherForHead(head) {
 test("regression: literal-free heads are forwarded to discovery, never failed by the hint", async () => {
   for (const [name, head] of Object.entries(LITERAL_FREE_HEADS)) {
     const fetcher = fetcherForHead(head);
-    const res = await fetcher.fetchMetadataFor("https://example.test/", {});
-    assert.equal(res.via, "direct", name);
+    const res = await fetcher.fetchResource(
+      { id: 1, uri: "https://example.test/", purpose: "metadata", headers: [] },
+      new AbortController().signal,
+    );
     assert.ok(res.bytes.byteLength > 0, `${name} bytes reach the engine`);
   }
 });

@@ -83,7 +83,7 @@ The website always shows the active transport, including the automatic switch af
 
 The extension transport is tab-origin direct fetch plus `<img>` display-only fallback; see [Extension](extension.md#fetching). The extension never uses the metadata proxy.
 
-The proxy serves metadata only, never tiles. Both legs (browser-to-proxy, proxy-upstream) omit cookies, `Authorization`, and browser credentials. It accepts only validated public metadata requests, blocks private/local networks, bounds redirects/size/duration, strips non-allowlisted headers, and returns explicit CORS headers. The page holds at most 4 proxy requests in flight and starts at most 4 per second under one global budget; direct tile requests keep separate per-host pacing. Details are in [Security](security.md#proxy-controls).
+The proxy serves metadata only, never tiles or probes. Both legs (browser-to-proxy, proxy-upstream) omit cookies, `Authorization`, and browser credentials. Metadata with headers other than `Accept` and `Accept-Language` is ineligible for proxy fallback, since those are the only engine headers the proxy can forward unchanged. It accepts only validated public metadata requests, blocks private/local networks, bounds redirects/size/duration, strips non-allowlisted headers, and returns explicit CORS headers. The page holds at most 4 proxy requests in flight and starts at most 4 per second under one global budget; direct tile requests keep separate per-host pacing. Details are in [Security](security.md#proxy-controls).
 
 ## Limits and capabilities
 

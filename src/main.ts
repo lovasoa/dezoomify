@@ -11,7 +11,7 @@
 // synthetic controller walk exists.
 
 import { PROXY_TRANSPORT_LABEL } from "@dezoomify/app-model";
-import type { Error as EngineError, Header } from "@dezoomify/wasm-bindings";
+import type { Error as EngineError } from "@dezoomify/wasm-bindings";
 import type { HistoryEntry, JobHandle, JobSnapshot } from "../packages/app-model/src/index.ts";
 import {
   cancelAllQueueEntries,
@@ -318,10 +318,6 @@ function disposeAttempt(): void {
 }
 
 /** Normalize generated request headers for `fetch`. */
-function headerRecord(headers: Header[] | undefined): Record<string, string> {
-  return Object.fromEntries((headers ?? []).map(({ name, value }) => [name, value]));
-}
-
 /** Device limit tier inputs: client hints where available, else the UA. */
 function clientHints(): ClientHints {
   return navigator as unknown as ClientHints;
@@ -579,27 +575,7 @@ async function runJob(url: string, origin = url): Promise<void> {
   // drives product side effects.
   const service = createBrowserJobService({
     createWorker: () => new Worker(new URL("./worker.js", import.meta.url), { type: "module" }),
-    fetchResource: async (request, signal) => {
-      if (request.purpose === "metadata") {
-        const result = await attempt.webFetcher.fetchMetadataFor(
-          request.uri,
-          headerRecord(request.headers),
-          signal,
-        );
-        return {
-          bytes: new Uint8Array(result.bytes),
-          ...(typeof result.finalUri === "string" && result.finalUri !== ""
-            ? { finalUri: result.finalUri }
-            : {}),
-        };
-      }
-      const result = await attempt.webFetcher.fetchTileFor(
-        request.uri,
-        headerRecord(request.headers),
-        signal,
-      );
-      return { bytes: new Uint8Array(result.bytes) };
-    },
+    fetchResource: (request, signal) => attempt.webFetcher.fetchResource(request, signal),
     loadDisplayImage: (tileUrl: string, signal: AbortSignal) =>
       loadTileImage(tileUrl, {
         signal,
