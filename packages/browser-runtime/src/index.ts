@@ -12,6 +12,7 @@ export * from "./logging.ts";
 export * from "./plan-gates.ts";
 export * from "./preview.ts";
 export * from "./probe.ts";
+export * from "./response-body.ts";
 export * from "./tile-decode.ts";
 export * from "./tile-draw.ts";
 export * from "./tile-policy.ts";

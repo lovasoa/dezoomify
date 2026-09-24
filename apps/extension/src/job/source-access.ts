@@ -229,7 +229,7 @@ export function createSourceAccess(
   async function fetch(
     request: EngineRequest,
     signal: AbortSignal,
-  ): Promise<{ bytes: Uint8Array }> {
+  ): Promise<{ bytes: Uint8Array; finalUri: string }> {
     const operationGeneration = generation;
     assertLive(operationGeneration);
     if (signal.aborted) throw failure("cancelled", "source fetch cancelled");
@@ -273,7 +273,7 @@ export function createSourceAccess(
       const bytes = decodeBase64Payload(result.data, SOURCE_FETCH_BYTE_LIMIT);
       if (!bytes || bytes.byteLength !== result.bytes)
         throw failure("malformed", "invalid source payload");
-      return { bytes };
+      return { bytes, finalUri: result.url };
     } finally {
       signal.removeEventListener("abort", cancel);
     }

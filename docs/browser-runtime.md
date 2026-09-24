@@ -6,14 +6,16 @@
 
 The website and the extension job tab share one browser `JobService`
 (`browser-job-service.ts`) and engine host (`engine-host.ts`) over the WASM session;
-they differ only in transport and output surface. The runner owns validation,
+they differ only in transport and output surface. The service owns validation,
 job identity, observer forwarding, and disposal directly, without an
 app-model forwarding wrapper. The runtime owns no job policy (retries,
 cancellation, partials, ordering stay in the engine). Effect meanings are
 defined in the [host-effect contract](job-engine.md#host-effect-contract);
 browser execution only below.
 
-The shared runtime calls the product's tile fetch callback once per engine acquisition. The website callback performs one direct fetch; the extension retains its source-to-extension fallback, with each selected route attempted once. Typed failures preserve the stable transport code, HTTP status, route, and any `Retry-After` hint in milliseconds; the engine alone decides whether and when to retry. Metadata keeps its direct-first fetch and eligible proxy fallback policy below, including its bounded proxy rate-limit retry.
+The shared runtime calls `fetchResource(request, signal)` with the generated `ResourceRequest`, preserving its identity, purpose, URI, and headers. Results contain readable bytes and the final redirect URI. The runtime composes probes from the same fetch, decoder, and ordinary-image loader as acquisition. The website callback performs one direct tile fetch; the extension retains its source-to-extension fallback, with each selected route attempted once. Typed failures preserve the stable transport code, HTTP status, route, and any `Retry-After` hint in milliseconds; the engine alone decides whether and when to retry. Metadata keeps its direct-first fetch and eligible proxy fallback policy below, including its bounded proxy rate-limit retry.
+
+Extension fetches use the attempt signal and a local deadline. Aborting the attempt cancels pending body reads; a deadline remains a network timeout rather than a user cancellation. Streaming bodies are bounded before buffering and error previews consume at most 4 KiB. Request limits belong to the configured transport, never to reconstructed engine requests. Ordinary-image loads also receive the attempt signal.
 
 - `acquire-tile`: the website checks and shows the declared canvas before the first tile, then decodes and paints each good tile at once. The visible canvas is the output throughout, including while paused. Bad tiles fail the acquisition and flow into engine retry/partial handling; a surface failure (canvas limits, allocation, 2D context) fails the job typed at once and never becomes one tile's failure. Probes (`purpose: probe`) share the `probe.ts` helper; a probe kept for output also paints at once.
 - `finalize-output`: encodes the surface already on screen and returns the product's actual output disposition. The website reports `browser-save-ready` when its blob URL is ready for the user's save click; the extension reports `browser-save-initiated` after starting its anchor save. A tainted canvas reports `display-only`. Plans lacking declared dimensions size the surface from accumulated placements here. Over-limit dimensions fail typed (`PLAN_INVALID` plus a desktop handoff) before allocation; a refused allocation or 2D context fails typed the same way (`OUTPUT_ALLOCATION_FAILED`, `OUTPUT_SURFACE_UNAVAILABLE`), and PNG encoding fails as `OUTPUT_ENCODE_FAILED`. Every canvas output failure carries the desktop-app handoff action.
