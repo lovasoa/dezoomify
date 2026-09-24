@@ -1,6 +1,7 @@
 // Public entry point for @dezoomify/browser-runtime.
 
 export * from "./assembly.ts";
+export * from "./browser-assembly.ts";
 export * from "./browser-job-service.ts";
 export * from "./canvas-save.ts";
 export * from "./engine-host.ts";

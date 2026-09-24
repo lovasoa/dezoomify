@@ -46,7 +46,9 @@ export interface AssemblyCanvas {
   ctx2d: Canvas2DLike;
 }
 
-export interface CanvasAssemblyDeps {
+export interface CanvasAssemblyDeps<C extends AssemblyCanvas = AssemblyCanvas> {
+  signal?: AbortSignal;
+  disposeDecoder?(): void;
   /** Decode acquired tile bytes into a bitmap (tile-decode's decoder). */
   decode(bytes: ArrayBuffer): Promise<TileBitmap>;
   /**
@@ -56,11 +58,16 @@ export interface CanvasAssemblyDeps {
    */
   processTile?: (recipe: ProcessingRecipe, bytes: ArrayBuffer) => Promise<ArrayBuffer>;
   /** Allocate the output surface; called only after limit validation. */
-  createCanvas(width: number, height: number): AssemblyCanvas;
+  createCanvas(width: number, height: number): C;
   /** Encode the assembled surface (canvas-to-blob on the job tab). */
-  encode(canvas: AssemblyCanvas): Promise<unknown>;
+  encode(canvas: C, signal: AbortSignal): Promise<Blob>;
   /** Perform the product's save operation and return its actual disposition. */
-  save(output: unknown, width: number, height: number): BrowserSaveDisposition;
+  save(
+    output: Blob,
+    width: number,
+    height: number,
+    signal: AbortSignal,
+  ): BrowserSaveDisposition | Promise<BrowserSaveDisposition>;
   /** Job source URL, used for the desktop handoff link in limit failures. */
   sourceUrl?: string;
   /** Limits override for tests; defaults to the browser canvas limits. */
@@ -115,17 +122,21 @@ function placementGeometry(
   return { x: placement.position.x, y: placement.position.y, w, h };
 }
 
-export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
+export function createCanvasAssembly<C extends AssemblyCanvas>(
+  deps: CanvasAssemblyDeps<C>,
+): CanvasAssembly {
+  const lifetime = new AbortController();
+  const signal = deps.signal ? AbortSignal.any([deps.signal, lifetime.signal]) : lifetime.signal;
   const placements = new Map<number, AssemblyPlacement>();
   const bitmaps = new Map<number, TileBitmap>();
   const displayImages = new Map<number, TileImageLike>();
   const processQueue = deps.processTile ? createProcessQueue(deps.processTile) : null;
-  let canvas: AssemblyCanvas | null = null;
+  let canvas: C | null = null;
   let canvasSize: { width: number; height: number } | null = null;
   let tainted = false;
   let finalized = false;
 
-  function allocate(size: { width: number; height: number }): AssemblyCanvas {
+  function allocate(size: { width: number; height: number }): C {
     const verdict = probeLimits(size, deps.limits ?? BROWSER_LIMITS);
     if (verdict.verdict !== "ok") {
       throw canvasTooLargeFailure(size.width, size.height, deps.sourceUrl ?? "", verdict.reason);
@@ -137,6 +148,7 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
   }
 
   function prepare(declared?: { width: number; height: number } | null): void {
+    signal.throwIfAborted();
     if (!declared || canvas) return;
     if (!(declared.width > 0 && declared.height > 0)) {
       throw failure(
@@ -160,6 +172,7 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
     placement: AssemblyPlacement,
     bytes: ArrayBuffer,
   ): Promise<void> {
+    signal.throwIfAborted();
     recordPlacement(tile, placement);
     let input = bytes;
     if (placement.processing !== "none") {
@@ -176,7 +189,12 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
       }
       input = await processQueue(placement.processing, bytes);
     }
+    signal.throwIfAborted();
     const bitmap = await deps.decode(input);
+    if (signal.aborted) {
+      bitmap.close();
+      signal.throwIfAborted();
+    }
     if (!canvas) {
       bitmaps.set(tile, bitmap);
       return;
@@ -234,6 +252,7 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
     placement: AssemblyPlacement,
     image: TileImageLike,
   ): void {
+    signal.throwIfAborted();
     recordPlacement(tile, placement);
     if (canvas) {
       drawPlacedTile(canvas.ctx2d, image, placementGeometry(placement, undefined), (line) =>
@@ -287,6 +306,7 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
     _format: OutputFormat,
     declared?: { width: number; height: number } | null,
   ): Promise<BrowserOutputDisposition> {
+    signal.throwIfAborted();
     if (finalized) {
       throw failure(
         "OUTPUT_STATE",
@@ -319,10 +339,11 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
       // stays visible as display-only output and no bytes are produced.
       return "display-only";
     }
-    let encoded: unknown;
+    let encoded: Blob;
     try {
-      encoded = await deps.encode(surface);
+      encoded = await deps.encode(surface, signal);
     } catch (error) {
+      signal.throwIfAborted();
       // A browser may defer origin-clean enforcement until encoding. The
       // assembled picture stays visible as display-only instead of failing.
       if (deps.isTaintError?.(error)) {
@@ -331,10 +352,16 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
       }
       throw error;
     }
-    return deps.save(encoded, surface.width, surface.height);
+    signal.throwIfAborted();
+    const disposition = await deps.save(encoded, surface.width, surface.height, signal);
+    signal.throwIfAborted();
+    return disposition;
   }
 
   function release(): void {
+    if (lifetime.signal.aborted) return;
+    lifetime.abort();
+    deps.disposeDecoder?.();
     for (const bitmap of bitmaps.values()) {
       try {
         bitmap.close();
@@ -345,9 +372,6 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
     bitmaps.clear();
     displayImages.clear();
     canvas = null;
-    canvasSize = null;
-    tainted = false;
-    finalized = false;
   }
 
   return {

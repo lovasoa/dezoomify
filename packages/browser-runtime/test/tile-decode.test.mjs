@@ -82,3 +82,46 @@ test("worker errors reject pending decodes and fall back afterwards", async () =
   assert.equal(decoder.workered, false);
   decoder.dispose();
 });
+
+test("disposing a worker decode prevents fallback and closes its late bitmap", async () => {
+  let worker;
+  const decoder = createTileDecoder({
+    workerCtor: class {
+      constructor() {
+        worker = this;
+      }
+      postMessage() {}
+      terminate() {}
+    },
+    offscreenCanvasAvailable: true,
+    createImageBitmap: async () => {
+      assert.fail("disposed decoders must not restart");
+    },
+  });
+  const pending = decoder.decode(new ArrayBuffer(4));
+  decoder.dispose();
+  await assert.rejects(pending, { name: "AbortError" });
+  const late = bitmap();
+  worker.onmessage({ data: { id: 1, ok: true, bitmap: late } });
+  assert.equal(late.closed, true);
+  await assert.rejects(decoder.decode(new ArrayBuffer(4)));
+});
+
+test("cancelling main-thread decode closes the bitmap when the browser eventually returns it", async () => {
+  let finish;
+  const decoder = createTileDecoder({
+    createImageBitmap: () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  });
+  const controller = new AbortController(),
+    pending = decoder.decode(new ArrayBuffer(4), controller.signal);
+  controller.abort();
+  await assert.rejects(pending, { name: "AbortError" });
+  const late = bitmap();
+  finish(late);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(late.closed, true);
+  decoder.dispose();
+});

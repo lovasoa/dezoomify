@@ -34,6 +34,8 @@ Hosts consume the ordered generated `Catalog` as is. `Image` entries carry optio
 
 ## Ordinary image display
 
+`createBrowserAssembly` owns production canvas allocation, 2D context creation, decoding, processing, painting, PNG encoding, and decoder cleanup. Products supply canvas placement, visibility, diagnostics, and `save(Blob, width, height, signal)`. The runtime shares its decoder with probes. Release aborts unfinished execution idempotently while retaining completed dimensions and product-owned output access. Released decoders never restart through fallback, and late bitmaps close without painting. Encoding and save continuations check the attempt signal before publishing output.
+
 For ordinary website tiles with `ProcessingRecipe::None`, the runtime loads through `<img>` and draws into a canvas even when the source taints it. The picture stays visible (browser right-click save where available).
 
 Once tainted, the runtime never runs pixel reads, hashing, processing, `toBlob`, or `toDataURL` on that canvas and never promises a programmatic save. The website says so before rendering and points at a readable route (extension or desktop app) when the job needs processing or a clean save. Budgets are in [Compatibility](compatibility.md#canvas-and-save-limits).
