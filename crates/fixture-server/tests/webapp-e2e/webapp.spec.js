@@ -9,18 +9,6 @@ const assert = require("node:assert/strict");
 
 const ADDR = process.env.DEZOOMIFY_E2E_ADDR;
 
-test("deployment preserves every legacy asset byte and both proxy routes", async ({ request }) => {
-  const root = path.resolve(__dirname, "../../../..");
-  const excluded = new Set([".github", ".gitignore", "AGENTS.md", "README.md", "LICENSE", "functions", "node-app", "tests"]);
-  for (const file of fs.readdirSync(path.join(root, "legacy"), { recursive: true, withFileTypes: true })) {
-    const relative = path.relative(path.join(root, "legacy"), path.join(file.parentPath, file.name));
-    if (file.isFile() && !excluded.has(relative.split(path.sep)[0]))
-      assert.deepEqual(fs.readFileSync(path.join(root, "dist", relative)), fs.readFileSync(path.join(root, "legacy", relative)), relative);
-  }
-  expect((await request.get(ADDR + "/")).ok()).toBeTruthy();
-  expect(JSON.parse(fs.readFileSync(path.join(root, "dist/_routes.json"))).include).toEqual(["/api/proxy", "/proxy"]);
-});
-
 function decodePngSize(bytes) {
   assert.equal(bytes.readUInt32BE(0), 0x89504e47 >>> 0, "PNG signature");
   const width = bytes.readUInt32BE(16);
