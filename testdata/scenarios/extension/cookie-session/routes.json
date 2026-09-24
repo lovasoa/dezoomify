@@ -24,6 +24,16 @@
       "payload": "payloads/127.0.0.1/protected/artwork.dzi"
     },
     {
+      "route_id": "extension-source-access-proof",
+      "method": "GET",
+      "host": "127.0.0.1",
+      "path": "/__source-access-proof",
+      "status": 200,
+      "headers": { "Content-Type": "text/plain" },
+      "required_cookies": { "fixture_session": "extension-e2e" },
+      "payload": "payloads/127.0.0.1/source-access-proof.txt"
+    },
+    {
       "route_id": "cookie-session-tile-0-0",
       "method": "GET",
       "host": "127.0.0.1",

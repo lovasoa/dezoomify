@@ -38,19 +38,16 @@ import {
 import type { ProcessingRecipe } from "@dezoomify/wasm-bindings";
 import { createElement } from "react";
 import type { WxtBrowser } from "wxt/browser";
-import type { JobBinding, RuntimeMessage } from "../protocol.ts";
-import { isRuntimeMessage } from "../protocol.ts";
 import { asFetchFailure, createExtensionFetcher } from "../runtime/fetch.ts";
-import {
-  createCoordinatorSourceTransport,
-  createEngineResourceFetcher,
-  isJobBinding,
-} from "./transport.ts";
+import { createSourceAccess } from "./source-access.ts";
+import { createEngineResourceFetcher } from "./transport.ts";
 import { AccessRequestView, PartialOutputActions } from "./view.tsx";
 
 const TEST_PERMISSION_MOCK = import.meta.env.MODE === "testing";
 
-type ExtensionApi = Partial<Pick<WxtBrowser, "runtime" | "permissions">>;
+type ExtensionApi = Partial<
+  Pick<WxtBrowser, "action" | "runtime" | "permissions" | "tabs" | "scripting">
+>;
 type ViewContext = SharedViewContext & { failure?: StructuredError };
 
 const hostGlobal = globalThis as typeof globalThis & {
@@ -70,36 +67,50 @@ jobLog.addSink((entry) => {
     uiLogLines.splice(0, uiLogLines.length - UI_LOG_MAX_LINES);
 });
 
-let binding: JobBinding | null = null;
-let coordinatorCancelled = false;
-/** Origin of the bound source document; "" until the binding arrives. Same-origin tiles and probes prefer the tab-origin transport. */
+let sourceAccess: ReturnType<typeof createSourceAccess> | null = null;
 let siteOrigin = "";
 /** Fallback request ids for probes that arrive without an engine request id. Start clear of the engine's small sequential ids. */
 let probeSeq = 1 << 30;
 // One shared browser job service attempt. The service owns the worker, the WASM
 // session, cross-worker processing calls, the abort scope, and disposal;
-// this tab keeps binding, transport, assembly, and view wiring. The single
+// this tab owns source access, transport, assembly, and view wiring. The single
 // authoritative snapshot renders directly; no derived mirrors.
 let jobHandle: JobHandle | null = null;
 /** Service abort signal of the live attempt (drives the cancelled() transport view). */
 let attemptSignal: AbortSignal | null = null;
+let discoveryGeneration = 0;
 let assembly: ReturnType<typeof createCanvasAssembly> | null = null;
 let saveCompleted = false;
 /** Single authoritative snapshot: render it directly, never a derived copy. */
 let activeSnapshot: JobSnapshot | null = null;
 let localFailure: StructuredError | null = null;
+let testCompletionNotified = false;
+let lastActionIndicator = "";
 /** Ephemeral permission view (telemetry only, never gates commands). */
 let pendingPermission: { hosts: string[]; requesting: boolean } | null = null;
 const testGrantedOrigins = new Set<string>();
-const bootstrapJobId = new URLSearchParams(location.hash.slice(1)).get("jobId");
 /** True when the next attempt must target the maximum known resolution. */
 let tryMaximumNext = false;
 /** Source URL of the live attempt (desktop handoff link for canvas failures). */
 let attemptSourceUrl = "";
+const sourceTabParam = new URLSearchParams(location.hash.slice(1)).get("sourceTabId");
+const parsedSourceTabId =
+  sourceTabParam !== null && /^\d+$/.test(sourceTabParam) ? Number(sourceTabParam) : -1;
+const sourceTabId =
+  Number.isSafeInteger(parsedSourceTabId) && parsedSourceTabId >= 0 ? parsedSourceTabId : null;
+const sessionId = `job:${crypto.randomUUID()}`;
+const IDLE_ICON = {
+  16: "icons/icon16-grey.png",
+  48: "icons/icon48-grey.png",
+  128: "icons/icon128-grey.png",
+};
+const ACTIVE_ICON = { 16: "icons/icon16.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
 
-function boundEnvelope(type: string, extra: Record<string, unknown> = {}): RuntimeMessage {
-  return { ...extra, ...binding, type };
-}
+type SourceAccessTestHook = {
+  scan(): Promise<{ documentUrl: string; count: number; firstUrl: string }>;
+  fetch(url: string): Promise<{ byteLength: number }>;
+};
+type JobTestWindow = Window & { __DEZOOMIFY_TEST_SOURCE_ACCESS__?: SourceAccessTestHook };
 
 function root() {
   return document.getElementById("dz-job-app");
@@ -238,33 +249,26 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
                 const hosts = pendingPermission.hosts;
                 const origins = hosts.map((origin) => `${origin}/*`);
                 // Optional-host consent must be requested synchronously from this
-                // click handler. A message hop to the service worker loses Chrome's
-                // required user activation and leaves the UI stuck requesting access.
+                // click handler. Keeping it here retains Chrome's user activation.
                 // Chromium's native optional-permission prompt cannot be automated by
-                // the headless extension driver. Its test package mocks only that
-                // browser boundary; the click, coordinator validation, retry, and
-                // completed output still run end to end.
+                // the headless extension driver, so its package mocks this browser API.
                 const request = TEST_PERMISSION_MOCK
                   ? Promise.resolve(true)
                   : Promise.resolve(api?.permissions?.request?.({ origins }));
                 void request
                   .then((granted) => {
                     if (!granted) throw new Error("permission denied");
-                    return send(
-                      boundEnvelope("dz.job.permission-required", {
-                        origins: hosts,
-                        ...(TEST_PERMISSION_MOCK ? { testGrant: true } : {}),
-                      }),
-                    );
+                    if (TEST_PERMISSION_MOCK)
+                      for (const origin of hosts) testGrantedOrigins.add(origin);
+                    return TEST_PERMISSION_MOCK
+                      ? true
+                      : api?.permissions?.contains?.({ origins }).then(Boolean);
                   })
-                  .then((response) => {
-                    if (
-                      !isRuntimeMessage(response) ||
-                      response.type !== "dz.job.permission-required" ||
-                      typeof response.granted !== "boolean"
-                    )
-                      throw new Error("invalid permission response");
-                    resolvePermission(response);
+                  .then((granted) => {
+                    if (!granted) throw new Error("permission was not retained");
+                    pendingPermission = null;
+                    jobHandle?.resolvePermission?.(true);
+                    render("downloading", { jobActivity: { startedAt: Date.now() } });
                   })
                   .catch(() => {
                     if (!pendingPermission) return;
@@ -300,51 +304,38 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
     },
   );
   syncExtensionJobTitle(status, siteOrigin);
+  syncExtensionJobIndicator(status);
 }
 
-function send(message: RuntimeMessage): Promise<unknown> {
-  jobLog.debug("background-message-sent", `type=${message.type}`);
-  if (!api?.runtime?.sendMessage) return Promise.reject(new Error("extension runtime unavailable"));
-  return api.runtime.sendMessage(message);
+/** The job page owns the toolbar status; the background only opens this page. */
+function syncExtensionJobIndicator(status: PresentationStatus) {
+  if (sourceTabId === null || !api?.action) return;
+  const active = isActiveJobStatus(status);
+  const failed = status === "failed";
+  const next = `${active}:${failed}`;
+  if (next === lastActionIndicator) return;
+  lastActionIndicator = next;
+  void api.action
+    .setIcon({ tabId: sourceTabId, path: active || failed ? ACTIVE_ICON : IDLE_ICON })
+    .catch(() => {});
+  void api.action
+    .setBadgeText({ tabId: sourceTabId, text: active ? (failed ? "!" : "•") : failed ? "!" : "" })
+    .catch(() => {});
 }
 
 function closeJob() {
-  jobLog.info("job-close", `jobId=${binding?.jobId ?? "unknown"}`);
+  jobLog.info("job-cancelled", `jobId=${sessionId}`);
   const handle = jobHandle;
-  jobHandle = null;
-  if (handle) {
-    void handle.command({ type: "cancel" }).catch(() => {});
-    void handle.dispose().catch(() => {});
-  }
-  if (binding) void send(boundEnvelope("dz.job.cancel")).catch(() => {});
-  if (binding) void send(boundEnvelope("dz.job.closed")).catch(() => {});
+  void handle?.command({ type: "cancel" }).catch(() => {});
+  stopAttempt();
+  render("cancelled", { jobActivity: { startedAt: Date.now() } });
 }
 
 function showAccessRequired(detail: { hosts: string[] }) {
   const hosts = Array.isArray(detail.hosts) ? detail.hosts : [];
-  jobLog.info("permission-requested", `jobId=${binding?.jobId ?? "unknown"} hosts=${hosts.length}`);
+  jobLog.info("permission-requested", `jobId=${sessionId} hosts=${hosts.length}`);
   pendingPermission = { hosts, requesting: false };
   render("downloading", { jobActivity: { startedAt: Date.now() } });
-}
-
-function resolvePermission(message: RuntimeMessage) {
-  if (!binding || message.jobId !== binding.jobId || typeof message.granted !== "boolean") return;
-  jobLog.info("permission-resolved", `jobId=${binding.jobId} granted=${message.granted}`);
-  pendingPermission = null;
-  if (TEST_PERMISSION_MOCK && message.granted && Array.isArray(message.origins)) {
-    for (const origin of message.origins)
-      if (typeof origin === "string") testGrantedOrigins.add(origin);
-  }
-  if (message.granted) {
-    render("downloading", {
-      jobActivity: { startedAt: Date.now() },
-    });
-  }
-  try {
-    jobHandle?.resolvePermission?.(message.granted);
-  } catch {
-    /* grant resolution is best effort */
-  }
 }
 
 /** Source host for shared copy interpolation; "" when the input is unparseable. */
@@ -409,7 +400,7 @@ function onHostFailure(error: unknown) {
       : "unknown";
   jobLog.error(
     "host-failure",
-    `jobId=${binding?.jobId ?? "unknown"} code=${code} phase=${phase} message=${error instanceof Error ? error.message : String(error)}`,
+    `jobId=${sessionId} code=${code} phase=${phase} message=${error instanceof Error ? error.message : String(error)}`,
   );
   const candidate =
     error && typeof error === "object"
@@ -493,35 +484,61 @@ function createAssembly(
   });
 }
 
-function setup(bound: unknown) {
-  if (!isJobBinding(bound) || binding) return;
-  // Keep only the four binding fields; the ready response also carries the
-  // source document URL.
-  binding = {
-    jobId: bound.jobId,
-    tabId: bound.tabId,
-    frameId: bound.frameId,
-    documentGeneration: bound.documentGeneration,
+function installTestSourceAccessHook() {
+  if (!TEST_PERMISSION_MOCK || !sourceAccess) return;
+  (window as JobTestWindow).__DEZOOMIFY_TEST_SOURCE_ACCESS__ = {
+    async scan() {
+      const snapshot = await sourceAccess?.scan();
+      if (!snapshot) throw new Error("source access is unavailable");
+      return {
+        documentUrl: snapshot.documentUrl,
+        count: snapshot.inputs.length,
+        firstUrl: snapshot.inputs[0]?.url ?? snapshot.documentUrl,
+      };
+    },
+    async fetch(url) {
+      const result = await sourceAccess?.fetch(
+        { uri: url, headers: [] },
+        new AbortController().signal,
+      );
+      if (!result) throw new Error("source access is unavailable");
+      return { byteLength: result.bytes.byteLength };
+    },
   };
-  try {
-    const documentUrl = "documentUrl" in bound ? bound.documentUrl : undefined;
-    siteOrigin = typeof documentUrl === "string" ? originOfUrl(documentUrl) : "";
-  } catch {
-    siteOrigin = "";
-  }
-  jobLog.info(
-    "binding-received",
-    `jobId=${binding.jobId} tab=${binding.tabId} frame=${binding.frameId} gen=${binding.documentGeneration}`,
-  );
-  startAttempt();
 }
 
-/**
- * Tear down the current attempt. The durable source binding survives; the
- * service attempt (worker, WASM session, output assembly, fetch state) does
- * not. Called before every attempt so a retry can never reuse a terminal
- * engine session or a stale request ledger.
- */
+async function bindSourceTab() {
+  render("discovering", { jobActivity: { startedAt: Date.now() } });
+  if (sourceTabId === null || !api?.tabs || !api.scripting) {
+    onHostFailure(
+      Object.assign(new Error("Could not find the source tab for this job."), {
+        code: "source-document-lost",
+        retryable: false,
+      }),
+    );
+    return;
+  }
+  try {
+    const tab = await api.tabs.get(sourceTabId);
+    if (typeof tab.url !== "string" || originOfUrl(tab.url) === "")
+      throw Object.assign(new Error("The source tab no longer has a readable web page."), {
+        code: "source-document-lost",
+        retryable: false,
+      });
+    sourceAccess = createSourceAccess(api as Pick<WxtBrowser, "tabs" | "scripting">, {
+      tabId: sourceTabId,
+      documentUrl: tab.url,
+    });
+    siteOrigin = sourceAccess.origin;
+    installTestSourceAccessHook();
+    jobLog.info("source-bound", `tab=${sourceTabId} origin=${siteOrigin}`);
+    await startAttempt();
+  } catch (error) {
+    onHostFailure(error);
+  }
+}
+
+/** Dispose one engine attempt before a retry. The source access stays bound to the source tab. */
 function stopAttempt() {
   const handle = jobHandle;
   jobHandle = null;
@@ -542,24 +559,18 @@ function stopAttempt() {
   saveCompleted = false;
 }
 
-/** Clear every per-attempt flag and buffer; the source binding is untouched. */
+/** Reset data owned by the previous engine attempt. */
 function resetAttemptState() {
   activeSnapshot = null;
   localFailure = null;
   pendingPermission = null;
 }
 
-/**
- * Begin one discovery-and-fetch attempt behind the shared browser job service.
- * The extension injects its source-bound transport (tab-origin fetch under
- * the narrowest grant plus extension-origin fallback), its output assembly
- * (page canvas, anchor save), and its product actions (explicit permission
- * prompt, keep/discard recovery). Retries, partials, and ordering stay in
- * the engine; the abort scope and disposal live in the service attempt.
- */
+/** Start one WASM-backed attempt with source-tab access and extension-origin fallback. */
 async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
-  if (!binding || coordinatorCancelled) return;
-  const activeBinding = binding;
+  const generation = discoveryGeneration;
+  const source = sourceAccess;
+  if (!source) return;
   attemptSourceUrl = inputs[0]?.url ?? "";
   const fetcher = createExtensionFetcher({
     hasPermission: async (origin) =>
@@ -571,16 +582,13 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
         )),
   });
   const extensionTransport = {
-    async fetchResource(url: string, opts?: unknown) {
+    async fetchResource(url: string, opts?: Parameters<typeof fetcher.fetchResource>[1]) {
       jobLog.debug(
         "extension-fetch-start",
-        `url=${url} purpose=${String((opts as { purpose?: unknown } | undefined)?.purpose ?? "unknown")}`,
+        `url=${url} purpose=${String(opts?.purpose ?? "unknown")}`,
       );
       try {
-        const result = await fetcher.fetchResource(
-          url,
-          opts as Parameters<typeof fetcher.fetchResource>[1],
-        );
+        const result = await fetcher.fetchResource(url, opts);
         jobLog.debug("extension-fetch-complete", `url=${url} bytes=${result.bytes.byteLength}`);
         return result;
       } catch (error) {
@@ -597,21 +605,13 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
     },
     cancel: () => fetcher.cancel(),
   };
-  const coordinator = createCoordinatorSourceTransport({ sendMessage: send });
-  let attemptCancelled = false;
-  // Metadata and the bound site's own tiles and probes prefer the source
-  // tab's origin context and fall back to the granted extension-origin
-  // session; cross-origin tiles always use the extension origin.
   const fetchResource = createEngineResourceFetcher({
-    binding: () => activeBinding,
-    siteOrigin: () => siteOrigin,
-    sourceTransport: coordinator,
+    sourceAccess: source,
     extensionTransport,
-    cancelled: () => attemptCancelled || attemptSignal?.aborted === true,
     onSourceFailure: (cause) =>
       jobLog.warn(
-        "source-fetch-failed",
-        `code=${String(cause.code ?? cause.blocked_reason ?? "network")} retrying=extension-origin`,
+        "source-fetch-fallback",
+        `code=${String(cause.code ?? "network")} origin=extension`,
       ),
   });
   const probeDecoder = createTileDecoder();
@@ -619,12 +619,12 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
     createWorker: () => new Worker(new URL("./worker.js", import.meta.url), { type: "module" }),
     fetchResource: (effect, signal) => {
       attemptSignal = signal;
-      if (signal.aborted || attemptCancelled) {
+      if (signal.aborted) {
         return Promise.reject(
           Object.assign(new Error("request cancelled"), { category: "cancelled" }),
         );
       }
-      return fetchResource(effect);
+      return fetchResource(effect, signal);
     },
     probeSize: createProbeSize({
       fetchTile: async (url: string, headers: Record<string, string>, requestId?: number) => {
@@ -633,14 +633,17 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
           probeSeq += 1;
           id = probeSeq;
         }
-        const result = await fetchResource({
-          request: {
-            id,
-            uri: url,
-            headers: Object.entries(headers).map(([name, value]) => ({ name, value })),
-            purpose: "probe",
+        const result = await fetchResource(
+          {
+            request: {
+              id,
+              uri: url,
+              headers: Object.entries(headers).map(([name, value]) => ({ name, value })),
+              purpose: "probe",
+            },
           },
-        });
+          attemptSignal ?? new AbortController().signal,
+        );
         const bytes = new Uint8Array(result.bytes).slice().buffer as ArrayBuffer;
         return { bytes };
       },
@@ -674,7 +677,7 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
     // Browser session baseline: 6 concurrent tile fetches (matches the
     // website). The engine validates the budget at job creation.
     quotas: { max_concurrent_fetches: 6 },
-    sessionId: () => activeBinding.jobId,
+    sessionId: () => sessionId,
     getTransport: () => "browser-session",
     isPermissionPending: () => pendingPermission !== null,
     getOutputState: () => (saveCompleted ? "writable" : "pending"),
@@ -688,7 +691,6 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
     },
     log: (level, code, detail) => jobLog.log(level, code, detail),
     onAbort: () => {
-      attemptCancelled = true;
       try {
         fetcher.cancel();
       } catch {
@@ -712,14 +714,14 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
       },
       {
         snapshot: (snapshot: JobSnapshot) => {
-          if (localFailure || coordinatorCancelled) return;
+          if (localFailure || generation !== discoveryGeneration) return;
           activeSnapshot = snapshot;
           renderForSnapshot(snapshot);
         },
         hostStatus: () => {},
       },
     );
-    if (coordinatorCancelled) {
+    if (generation !== discoveryGeneration) {
       void handle.command({ type: "cancel" }).catch(() => {});
       void handle.dispose().catch(() => {});
       return;
@@ -747,130 +749,126 @@ function renderForSnapshot(snapshot: JobSnapshot) {
     return;
   }
   if (terminal?.type === "completed" || terminal?.type === "partial-completed") {
+    if (TEST_PERMISSION_MOCK && !testCompletionNotified) {
+      testCompletionNotified = true;
+      void api?.runtime?.sendMessage?.({ type: "dezoomify-test-job-complete" }).catch(() => {});
+    }
     render("completed", { jobActivity: { startedAt: Date.now() } });
     return;
   }
   render(statusForLifecycle(snapshot.lifecycle), { jobActivity: { startedAt: Date.now() } });
 }
 
-/**
- * Announce this job tab to the coordinator. Used on first load and when a
- * retry is pressed before the first binding ever arrived; the coordinator
- * returns the binding; the coordinator sends a bounded candidate snapshot
- * after it has validated the source document.
- */
-function announceReady() {
-  jobLog.info("job-ready-sent", `jobId=${bootstrapJobId ?? "unknown"}`);
-  render("discovering", { jobActivity: { startedAt: Date.now() } });
-  void send({
-    type: "dz.job.ready",
-    jobId: bootstrapJobId,
-  })
-    .then(setup)
-    .catch(() =>
-      onHostFailure(
-        Object.assign(new Error("Could not connect this job tab to the extension."), {
-          code: "network",
-          retryable: true,
-        }),
-      ),
-    );
+function retryJob() {
+  jobLog.info("retry-requested", `jobId=${sessionId}`);
+  void startAttempt();
 }
 
-/**
- * Explicit user retry. With a binding, start a fresh attempt and ask the
- * coordinator for a new bounded snapshot of the bound page. Without one (the
- * first readiness announcement never landed), re-announce the job tab.
- */
-function retryJob() {
-  jobLog.info("retry-requested", `jobId=${binding?.jobId ?? bootstrapJobId ?? "unknown"}`);
-  if (!binding) {
-    resetAttemptState();
-    announceReady();
+/** Each retry takes one fresh source snapshot and starts a fresh engine service. */
+async function startAttempt() {
+  const source = sourceAccess;
+  if (!source) {
+    onHostFailure(
+      Object.assign(new Error("The source tab is unavailable."), {
+        code: "source-document-lost",
+        retryable: false,
+      }),
+    );
     return;
   }
-  startAttempt();
-  void send(boundEnvelope("dz.job.retry")).catch(() =>
-    onHostFailure(
-      Object.assign(new Error("Could not ask the extension to retry this job."), {
-        code: "network",
+  const generation = ++discoveryGeneration;
+  stopAttempt();
+  resetAttemptState();
+  render("discovering", { jobActivity: { startedAt: Date.now() } });
+  try {
+    const snapshot = await source.scan();
+    if (generation !== discoveryGeneration) return;
+    if (snapshot.inputs.length === 0)
+      throw Object.assign(new Error("No image references were found on this page."), {
+        code: "no-candidates",
         retryable: true,
-      }),
-    ),
-  );
+      });
+    jobLog.info(
+      "source-scan-complete",
+      `jobId=${sessionId} candidates=${snapshot.inputs.length} overflow=${snapshot.overflow}`,
+    );
+    await beginAttempt(snapshot.inputs);
+  } catch (error) {
+    if (generation === discoveryGeneration) onHostFailure(error);
+  }
 }
 
-/** Restart the bound job targeting the maximum known resolution. */
+/** Restart the job targeting the maximum known resolution. */
 function tryMaximum() {
-  jobLog.info("maximum-requested", `jobId=${binding?.jobId ?? bootstrapJobId ?? "unknown"}`);
+  jobLog.info("maximum-requested", `jobId=${sessionId}`);
   tryMaximumNext = true;
   retryJob();
 }
 
-/**
- * Prepare one attempt slot. The first attempt follows the job tab's
- * readiness announcement; a retry follows an explicit user action and a
- * fresh coordinator snapshot. The service starts once image candidates
- * arrive (`beginAttempt`); either way the attempt gets a fresh service so no
- * state leaks between attempts.
- */
-function startAttempt() {
-  if (!binding) return;
-  stopAttempt();
-  resetAttemptState();
-  render("discovering", { jobActivity: { startedAt: Date.now() } });
-}
-
-function candidates(message: RuntimeMessage) {
-  if (!binding || !message || message.jobId !== binding.jobId || jobHandle) return;
-  const values = Array.isArray(message.inputs)
-    ? message.inputs.flatMap((candidate) => {
-        if (
-          !candidate ||
-          typeof candidate !== "object" ||
-          !("url" in candidate) ||
-          typeof candidate.url !== "string"
-        )
-          return [];
-        return [
-          {
-            url: candidate.url,
-            ...("contents" in candidate && typeof candidate.contents === "string"
-              ? { contents: candidate.contents }
-              : {}),
-          },
-        ];
-      })
-    : [];
-  if (!values.length) return;
-  jobLog.info(
-    "candidates-received",
-    `jobId=${binding.jobId} count=${values.length} overflow=${typeof message.overflow === "number" ? message.overflow : 0}`,
-  );
-  render("discovering", { jobActivity: { startedAt: Date.now() } });
-  const firstUrl = values[0].url;
-  jobLog.info("engine-start", `jobId=${binding.jobId} url=${firstUrl}`);
-  void beginAttempt(values);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 api?.runtime?.onMessage?.addListener((message) => {
-  if (!isRuntimeMessage(message)) return;
-  if (message.type.startsWith("dz.job."))
-    jobLog.debug("background-message-received", `type=${message.type}`);
-  if (message.type === "dz.job.candidates") candidates(message);
-  else if (message.type === "dz.job.permission-required") resolvePermission(message);
-  else if (message?.type === "dz.job.cancel") {
-    coordinatorCancelled = true;
-    void jobHandle?.command({ type: "cancel" }).catch(() => {});
-    stopAttempt();
-    resetAttemptState();
-    render("cancelled", { jobActivity: { startedAt: Date.now() } });
+  if (!isRecord(message) || typeof message.type !== "string") return;
+  if (message.type === "dz.toolbar-click" && message.sourceTabId === sourceTabId) {
+    jobLog.info(
+      "toolbar-click-forwarded",
+      `jobId=${sessionId} state=${activeSnapshot?.lifecycle ?? "starting"}`,
+    );
+    return;
   }
+  if (!TEST_PERMISSION_MOCK) return;
+  if (message.type === "dezoomify-test-source-access") {
+    if (!sourceAccess) return;
+    return (async () => {
+      const snapshot = await sourceAccess.scan();
+      const expected = message.scenario === "cookie-session" ? "/protected/artwork.dzi" : "/fetch/";
+      const input = snapshot.inputs.find((candidate) => candidate.url.includes(expected));
+      if (!input) throw new Error(`direct scan did not find ${expected}`);
+      const fetchUrl =
+        message.scenario === "cookie-session"
+          ? new URL("/__source-access-proof", sourceAccess.documentUrl).href
+          : input.url;
+      const result = await sourceAccess.fetch(
+        { uri: fetchUrl, headers: [] },
+        new AbortController().signal,
+      );
+      return {
+        ok: true,
+        documentUrl: snapshot.documentUrl,
+        candidates: snapshot.inputs.length,
+        bytes: result.bytes.byteLength,
+      };
+    })().catch((error: unknown) => ({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+  }
+  if (message.type === "dezoomify-test-source-navigation") {
+    if (!sourceAccess) return;
+    return sourceAccess.scan().then(
+      () => ({ ok: false, code: "source-access-stayed-live" }),
+      (error: unknown) => ({
+        ok: false,
+        code:
+          error && typeof error === "object" && "code" in error
+            ? String(error.code)
+            : "unknown-error",
+      }),
+    );
+  }
+});
+
+api?.permissions?.onRemoved?.addListener((removed) => {
+  for (const origin of removed.origins ?? [])
+    testGrantedOrigins.delete(origin.replace(/\/\*$/, ""));
 });
 
 window.addEventListener("beforeunload", () => {
   stopAttempt();
-  if (binding) void send(boundEnvelope("dz.job.closed")).catch(() => {});
+  syncExtensionJobIndicator("cancelled");
+  sourceAccess?.dispose();
 });
 
-announceReady();
+void bindSourceTab();

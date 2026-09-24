@@ -9,6 +9,7 @@ const repository = path.resolve(root, "../..");
 const publicDir = path.join(root, "public");
 const testOrigin = process.env.DEZOOMIFY_TEST_ORIGIN ?? "";
 const testScenario = process.env.DEZOOMIFY_TEST_SCENARIO ?? "";
+const testRestartBackground = process.env.DEZOOMIFY_TEST_RESTART_BACKGROUND === "1";
 
 function testHostPermissions(isTestPackage: boolean): string[] {
   if (!isTestPackage) return [];
@@ -101,7 +102,8 @@ export default defineConfig({
         await writeFile(
           path.join(publicDir, "test/config.js"),
           `globalThis.__DEZOOMIFY_TEST_ORIGIN__ = ${JSON.stringify(testOrigin)};\n` +
-            `globalThis.__DEZOOMIFY_TEST_SCENARIO__ = ${JSON.stringify(testScenario)};\n`,
+            `globalThis.__DEZOOMIFY_TEST_SCENARIO__ = ${JSON.stringify(testScenario)};\n` +
+            `globalThis.__DEZOOMIFY_TEST_RESTART_BACKGROUND__ = ${JSON.stringify(testRestartBackground)};\n`,
         );
       }
     },
