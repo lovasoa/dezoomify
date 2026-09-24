@@ -6,8 +6,7 @@
 // cancellation, pause, partial-output decisions, and ordering belong to the
 // engine. Pause arrives via `snapshot.paused`; retry waits live exactly as
 // long as their `wait-retry-timer` effect (the engine ignores stale
-// duplicates); permission holds suspend the awaiting effect itself until the
-// explicit user action resolves it. Products inject their transports
+// duplicates). Products inject their transports
 // (website: direct-first + metadata proxy fallback; extension: tab-origin
 // + extension-origin under host grants) and their output assembly.
 //
@@ -98,7 +97,6 @@ export interface EngineHostDeps {
    */
   loadDisplayImage?: (url: string) => Promise<TileImageLike>;
   classifyFailure(error: unknown): HostFailure;
-  onPermissionRequired(detail: { hosts: string[]; requestId: number; jobId: string }): void;
   /** The engine asks for a keep/retry/discard choice after tile failures. */
   onRecoveryRequested(generation: number): void;
   onHostFailure(error: unknown): void;
@@ -117,13 +115,6 @@ export function createEngineHost(deps: EngineHostDeps) {
   let chain = Promise.resolve();
   /** Retry waits owned by their `wait-retry-timer` effect, abortable on cancel/dispose. */
   const pendingRetries = new Set<AbortController>();
-  /**
-   * Effects held for an explicit host grant. Each entry suspends its own
-   * acquisition (an effect hold, not a job-state mirror) until
-   * resolvePermission releases it; a grant retries the same acquisition in
-   * place, a denial fails it typed.
-   */
-  const permissionGates = new Map<number, (granted: boolean) => void>();
   /**
    * Origins whose ordinary tiles already fell back to `<img>` display-only
    * this job. Only the first tile per origin tries readable bytes; later
@@ -179,20 +170,6 @@ export function createEngineHost(deps: EngineHostDeps) {
     pendingRetries.clear();
   }
 
-  /** Release every held effect. Denials fail the held acquisitions typed. */
-  function releaseGates(granted: boolean): void {
-    if (permissionGates.size === 0) return;
-    const gates = [...permissionGates.values()];
-    permissionGates.clear();
-    for (const resolve of gates) {
-      try {
-        resolve(granted);
-      } catch {
-        // Release must never break teardown.
-      }
-    }
-  }
-
   /**
    * Explicit retry wait: the host waits `delay_ms` on its own clock then
    * answers with the same tile and attempt. The wait lives exactly as long
@@ -225,32 +202,6 @@ export function createEngineHost(deps: EngineHostDeps) {
 
   function asArrayBuffer(view: Uint8Array): ArrayBuffer {
     return new Uint8Array(view).slice().buffer;
-  }
-
-  function hostsOf(error: unknown): string[] {
-    if (
-      error !== null &&
-      typeof error === "object" &&
-      "hosts" in error &&
-      Array.isArray(error.hosts)
-    ) {
-      return error.hosts.filter((host): host is string => typeof host === "string");
-    }
-    return [];
-  }
-
-  /**
-   * Only a missing host grant pauses for a visible permission action.
-   * Upstream refusals (a granted-origin 401/403) and programming errors
-   * (missing user intent) fail directly; re-prompting cannot fix them.
-   */
-  function grantable(error: unknown, failure: HostFailure): boolean {
-    return (
-      failure.blocked_reason === "access-required" &&
-      error !== null &&
-      typeof error === "object" &&
-      (error as { code?: unknown }).code === "permission-denied"
-    );
   }
 
   function plainRecipe(placement: TilePlacement): boolean {
@@ -306,19 +257,6 @@ export function createEngineHost(deps: EngineHostDeps) {
       ...(failure.preview ? { preview: failure.preview } : {}),
       ...(failure.detail ? { detail: failure.detail } : {}),
     };
-  }
-
-  /**
-   * Suspend one acquisition for the visible permission action. A grant
-   * retries the same acquisition in place; a denial fails it typed. The
-   * hold belongs to the effect lifetime: teardown releases it denied and
-   * the waiter suppresses its outcome.
-   */
-  function holdForPermission(requestId: number, error: unknown): Promise<boolean> {
-    deps.onPermissionRequired({ hosts: hostsOf(error), requestId, jobId: deps.jobId() });
-    return new Promise<boolean>((resolve) => {
-      permissionGates.set(requestId, resolve);
-    });
   }
 
   async function acquireProbe(effect: AcquireEffect): Promise<void> {
@@ -381,20 +319,6 @@ export function createEngineHost(deps: EngineHostDeps) {
           "effect-failed",
           `request=${request.id} code=${failure.code} transport=${failure.transport}${failure.http ? ` HTTP ${failure.http}` : ""} url=${request.uri}`,
         );
-        if (grantable(error, failure)) {
-          const granted = await holdForPermission(request.id, error);
-          permissionGates.delete(request.id);
-          if (!granted) {
-            if (tornDown()) return;
-            sendToEngine({
-              type: "engine.failure",
-              requestId: request.id,
-              error: fetchFailure(failure),
-            });
-            return;
-          }
-          continue;
-        }
         // A failed probe fetch is a missing observation, never a tile
         // failure: the adapter maps it to ProbeOutcome{available:false}.
         if (tornDown()) return;
@@ -519,23 +443,7 @@ export function createEngineHost(deps: EngineHostDeps) {
           "effect-failed",
           `request=${request.id} code=${failure.code} transport=${failure.transport}${failure.http ? ` HTTP ${failure.http}` : ""} url=${request.uri}`,
         );
-        if (grantable(error, failure)) {
-          // A visible, explicit user action may grant this host. Hold the
-          // effect so the same acquisition resumes after a grant.
-          const granted = await holdForPermission(request.id, error);
-          permissionGates.delete(request.id);
-          if (!granted) {
-            if (tornDown()) return;
-            sendToEngine({
-              type: "engine.failure",
-              requestId: request.id,
-              error: fetchFailure(failure),
-            });
-            return;
-          }
-          continue;
-        }
-        if (effect.type === "acquire-tile") {
+        if (effect.type === "acquire-tile" && failure.code !== "TRANSPORT_POLICY_DENIED") {
           const fellBack = await displayFallback(effect, request.id);
           settle?.(fellBack);
           if (fellBack) return;
@@ -604,10 +512,9 @@ export function createEngineHost(deps: EngineHostDeps) {
     });
   }
 
-  /** Abort in-flight host work: retry waits, permission holds, and fetches. */
+  /** Abort in-flight host work: retry waits and fetches. */
   function abortInFlight(): void {
     abortPendingRetries();
-    releaseGates(false);
     try {
       lifetime.abort();
     } catch {
@@ -659,7 +566,6 @@ export function createEngineHost(deps: EngineHostDeps) {
     },
     "cancel-work": () => {
       abortPendingRetries();
-      releaseGates(false);
       try {
         deps.cancelFetch();
       } catch {
@@ -706,10 +612,6 @@ export function createEngineHost(deps: EngineHostDeps) {
         abortInFlight();
       }
       sendToEngine({ type: "engine.command", command });
-    },
-    resolvePermission(granted: boolean) {
-      // Release the held effects; each resumes (grant) or fails typed (denial).
-      releaseGates(granted);
     },
     dispose() {
       if (disposed) return;
