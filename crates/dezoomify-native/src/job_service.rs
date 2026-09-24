@@ -141,10 +141,7 @@ impl JobOptions {
     /// Normalize product options once before configuring the engine and transport.
     fn normalized(mut self) -> Self {
         self.max_tiles = self.max_tiles.clamp(1, 16_777_216);
-        self.max_concurrent = self
-            .max_concurrent
-            .clamp(1, 64)
-            .min(self.max_tiles);
+        self.max_concurrent = self.max_concurrent.clamp(1, 64).min(self.max_tiles);
         self.max_retries = self.max_retries.min(1024);
         self.max_bytes = self.max_bytes.clamp(1024, 4_294_967_296);
         self.compression = self.compression.min(100);
