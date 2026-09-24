@@ -33,7 +33,6 @@ import {
 } from "../packages/browser-runtime/src/canvas-save.ts";
 import type { StructuredFailure } from "../packages/browser-runtime/src/failure.ts";
 import {
-  type BrowserJobHandle,
   createBrowserJobService,
   createCanvasAssembly,
 } from "../packages/browser-runtime/src/index.ts";

@@ -74,22 +74,9 @@ export interface BrowserProduct {
   createAssembly(args: BrowserAssemblyArgs): EngineHostAssembly;
   /** Budget defaults; the request engine options win per job. */
   quotas?: SessionConfig;
-  /** Visible permission action needed (extension access view). */
-  onPermissionRequired?(detail: { hosts: string[]; requestId: number; jobId: string }): void;
   /** Recovery decision needed (product renders keep/discard). */
   onRecoveryRequested?(generation: number): void;
-  /**
-   * Abort in-flight product resources the service signal cannot reach
-   * (extension-origin fetch controllers). Runs on cancel and disposal.
-   */
-  onAbort?(): void;
   log?(level: "debug" | "info" | "warn" | "error", code: string, detail?: unknown): void;
-}
-
-/** Browser job control plus the grant-resolution channel. */
-export interface BrowserJobHandle extends JobHandle {
-  /** Resolve a paused host-grant acquisition after the explicit user action. */
-  resolvePermission(granted: boolean): void;
 }
 
 function serviceError(code: string, message: string): EngineError {
@@ -101,19 +88,16 @@ function firstSourceUrl(inputs: JobInput[]): string | null {
   return typeof raw === "string" && raw !== "" ? raw : null;
 }
 
-/** Browser JobService whose jobs carry the grant-resolution channel. */
-export interface BrowserJobService extends JobService<EngineStartRequest, BrowserJobHandle> {
-  start(request: EngineStartRequest, observer: JobObserver): Promise<BrowserJobHandle>;
+/** Browser service over generated engine requests. */
+export interface BrowserJobService extends JobService<EngineStartRequest, JobHandle> {
+  start(request: EngineStartRequest, observer: JobObserver): Promise<JobHandle>;
 }
 
 export function createBrowserJobService(product: BrowserProduct): BrowserJobService {
   const log = product.log ?? (() => {});
   let jobSequence = 0;
 
-  async function start(
-    request: EngineStartRequest,
-    observer: JobObserver,
-  ): Promise<BrowserJobHandle> {
+  async function start(request: EngineStartRequest, observer: JobObserver): Promise<JobHandle> {
     const problem = validateEngineStartRequest(request);
     if (problem) {
       throw serviceError(problem, "The job request is not valid.");
@@ -143,6 +127,7 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
     const decoder = createTileDecoder();
     const probeSize = createProbeSize({
       fetchResource: product.fetchResource,
+      classifyFailure: product.classifyFailure,
       decode: (bytes) => decoder.decode(bytes),
       loadImage: product.loadDisplayImage
         ? async (url, signal) => {
@@ -157,11 +142,6 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
         attemptSignal.abort();
       } catch {
         // Abort must never break teardown.
-      }
-      try {
-        product.onAbort?.();
-      } catch {
-        // Product abort must never break teardown.
       }
     }
 
@@ -245,10 +225,6 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
         ? (url) => product.loadDisplayImage!(url, attemptSignal.signal)
         : undefined,
       classifyFailure: (error) => product.classifyFailure(error),
-      onPermissionRequired: (detail) => {
-        product.onPermissionRequired?.(detail);
-        log("info", "permission-required", detail.hosts.join(","));
-      },
       onRecoveryRequested: (generation) => {
         product.onRecoveryRequested?.(generation);
       },
@@ -328,13 +304,10 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
       }
     }
 
-    const handle: BrowserJobHandle = {
+    const handle: JobHandle = {
       id,
       command,
       dispose,
-      resolvePermission: (granted: boolean) => {
-        activeHost.resolvePermission(granted);
-      },
     };
     return handle;
   }

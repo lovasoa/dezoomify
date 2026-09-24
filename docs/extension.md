@@ -36,6 +36,8 @@ The source fetch operation uses a per-document abort-controller map in the exten
 
 ## Fetching and permissions
 
+Each attempt owns `permissions.ensure(origin, signal)` around extension-origin fetching. Concurrent requests to an origin share a pending grant; other origins wait independently. The visible action calls the browser permission API synchronously, verifies the retained grant, and settles only that origin's waiters. Denial fails typed. Cancellation removes waiters, and late grants cannot affect replacement attempts. An upstream 401/403 never reopens a permission prompt. Shared runtime handles contain no permission coordination.
+
 `activeTab` and `scripting` grant one explicit source-page scan after the toolbar click. Same-origin reads carry the page's browser session, including its cookies. Metadata and requests for the source page's own origin use this context first. A source-context failure falls back to the extension-origin transport; a definitive HTTP refusal remains a typed failure. Cross-origin tiles use the extension-origin transport under an explicitly granted optional host permission. The permission request is made synchronously from the visible job-page action so the browser retains user activation. The job page checks and observes permissions directly; there is no permission mirror in the background.
 
 Extension-origin requests attach no cookies or `Authorization` header and follow redirects through browser fetch. Redirect responses do not disclose their bytes to the redirecting site. The extension never uses the metadata proxy. Ordinary unprocessed tiles without readable bytes fall back to `<img>` display, which is visible but tainted and cannot be read or saved.

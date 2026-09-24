@@ -280,46 +280,6 @@ test("snapshots pass through without presentation plumbing", async () => {
   await handle.dispose();
 });
 
-test("a missing grant suspends its acquisition until the explicit answer", async () => {
-  const p = product({
-    fetchResource: async () => {
-      throw Object.assign(new Error("grant missing"), { code: "permission-denied" });
-    },
-    classifyFailure: () => ({
-      code: "permission-denied",
-      retryable: false,
-      message: "Access requires an explicit action.",
-      blocked_reason: "access-required",
-      transport: "browser-session",
-    }),
-  });
-  let permissionDetail = null;
-  p.deps.onPermissionRequired = (detail) => {
-    permissionDetail = detail;
-  };
-  const service = createBrowserJobService(p.deps);
-  const emitted = [];
-  const handle = await service.start(startRequest(), {
-    snapshot: (snapshot) => emitted.push(snapshot),
-    failure: (error) => {
-      throw error;
-    },
-  });
-  p.worker.receive(received(snap(1), [TILE]));
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.ok(permissionDetail, "expected the product permission action");
-  assert.deepEqual(permissionDetail.hosts, []);
-  // No engine outcome while suspended: the effect stays pending.
-  assert.ok(!p.worker.posted.some((message) => message.type === "engine.failure"));
-  p.worker.receive(received(snap(2, { progress: { completed: 0, total: 1 } })));
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  // Denial fails the acquisition typed without re-prompting.
-  handle.resolvePermission(false);
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  const failure = p.worker.posted.find((message) => message.type === "engine.failure");
-  assert.ok(failure, "expected the denied grant to fail the effect");
-});
-
 test("user commands map onto the session; engine-internal commands reject typed", async () => {
   const p = product();
   const service = createBrowserJobService(p.deps);
