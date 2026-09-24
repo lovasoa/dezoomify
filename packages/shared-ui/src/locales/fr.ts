@@ -21,6 +21,9 @@ export const fr = {
   "desktop.done.folderError":
     "Impossible d’ouvrir le dossier. Vérifiez qu’un gestionnaire de fichiers est installé.",
   "desktop.done.missingError": "L’image ou le dossier n’existe plus.",
+  "view.partial.extensionKeep": "Conserver l’image partielle",
+  "view.partial.extensionDiscard": "Supprimer l’image partielle",
+  "view.partial.extensionRetry": "Réessayer les tuiles manquantes",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Compris",
   "view.modal.closeDialog": "Fermer la boite de dialogue",

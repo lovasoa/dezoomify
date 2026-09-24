@@ -21,6 +21,9 @@ export const de = {
   "desktop.done.folderError":
     "Der Ordner konnte nicht geöffnet werden. Prüfen Sie, ob ein Dateimanager installiert ist.",
   "desktop.done.missingError": "Das gespeicherte Bild oder der Ordner ist nicht mehr vorhanden.",
+  "view.partial.extensionKeep": "Teilbild behalten",
+  "view.partial.extensionDiscard": "Teilbild verwerfen",
+  "view.partial.extensionRetry": "Fehlende Kacheln erneut laden",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Verstanden",
   "view.modal.closeDialog": "Dialog schliessen",
