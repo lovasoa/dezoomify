@@ -4,7 +4,6 @@ import { createEngineHost } from "@dezoomify/browser-runtime";
 import {
   createCoordinatorSourceTransport,
   createEngineResourceFetcher,
-  engineFailure,
 } from "../../src/job/transport.ts";
 
 const BINDING = { jobId: "job:test-1", tabId: 7, frameId: 0, documentGeneration: 1 };
@@ -400,12 +399,18 @@ test("display fallback holds an ordinary image when bytes are unreadable", async
   );
 });
 
-test("coordinator source fetches name the engine request on the extension bus", async () => {
+test("coordinator source fetch uses the runtime message response", async () => {
   const bus = [];
   const sourceTransport = createCoordinatorSourceTransport({
     async sendMessage(message) {
       bus.push(message);
-      return { ok: true };
+      return {
+        ok: true,
+        status: 200,
+        url: "https://source.test/image.dzi",
+        bytes: 2,
+        data: "AQI=",
+      };
     },
   });
   const { controller, sent } = harness({ sourceTransport });
@@ -417,11 +422,10 @@ test("coordinator source fetches name the engine request on the extension bus", 
   ]);
   await flush();
   assert.deepEqual(
-    bus.map(({ type, requestId, url, purpose }) => ({ type, requestId, url, purpose })),
+    bus.map(({ type, url, purpose }) => ({ type, url, purpose })),
     [
       {
         type: "dz.job.fetch",
-        requestId: "req:4",
         url: "https://source.test/image.dzi",
         purpose: "metadata",
       },
@@ -433,15 +437,6 @@ test("coordinator source fetches name the engine request on the extension bus", 
     "a routed fetch must not fail the engine",
   );
 
-  sourceTransport.handleMessage({
-    requestId: "req:4",
-    sourceType: "dz.source.fetch-complete",
-    ok: true,
-    status: 200,
-    url: "https://source.test/image.dzi",
-    bytes: 2,
-    data: "AQI=",
-  });
   await flush();
   const bytes = sent.find((message) => message.type === "engine.bytes");
   assert.equal(bytes?.requestId, 4);

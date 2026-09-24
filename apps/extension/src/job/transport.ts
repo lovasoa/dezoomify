@@ -1,60 +1,45 @@
 import type { AcquireEffect } from "@dezoomify/browser-runtime";
 import {
   decodeBase64Payload,
+  isPublicHttpUrl,
   originOfUrl,
   SOURCE_FETCH_BYTE_LIMIT,
 } from "@dezoomify/browser-runtime";
+import type { JobBinding, RuntimeMessage, SourceFetchReply } from "../protocol.ts";
+import { SOURCE_FETCH_BASE64_CHAR_LIMIT } from "../protocol.ts";
 import { asFetchFailure } from "../runtime/fetch.ts";
 
-/** @typedef {{ jobId: string, tabId: number, frameId: number, documentGeneration: number }} JobBinding */
-
-/** @param {unknown} value @returns {value is JobBinding} */
-export interface JobBinding {
-  jobId: string;
-  tabId: number;
-  frameId: number;
-  documentGeneration: number;
-}
 interface SourceReply {
   bytes: Uint8Array;
 }
-interface PendingSource {
-  resolve(value: SourceReply): void;
-  reject(reason: unknown): void;
-}
 
 export function isJobBinding(value: unknown): value is JobBinding {
-  const binding = value as Partial<JobBinding> | null;
   return (
-    !!binding &&
-    typeof binding.jobId === "string" &&
-    binding.jobId.startsWith("job:") &&
-    Number.isInteger(binding.tabId) &&
-    Number.isInteger(binding.frameId) &&
-    typeof binding.documentGeneration === "number" &&
-    Number.isInteger(binding.documentGeneration) &&
-    binding.documentGeneration >= 0
+    typeof value === "object" &&
+    value !== null &&
+    "jobId" in value &&
+    typeof value.jobId === "string" &&
+    value.jobId.startsWith("job:") &&
+    "tabId" in value &&
+    typeof value.tabId === "number" &&
+    Number.isSafeInteger(value.tabId) &&
+    "frameId" in value &&
+    typeof value.frameId === "number" &&
+    Number.isSafeInteger(value.frameId) &&
+    "documentGeneration" in value &&
+    typeof value.documentGeneration === "number" &&
+    Number.isSafeInteger(value.documentGeneration) &&
+    value.documentGeneration >= 0
   );
 }
 
-/**
- * Route a source-bound request through the browser-owned coordinator. The
- * engine's numeric request sequence is mandatory: it binds one reply to one
- * WASM effect, not merely to the current job tab. The coordinator bus speaks
- * its own `req:*` string tokens, so this adapter names the sequence once on
- * the way out and matches the echoed token back to the pending engine
- * request. The reply carries one base64 payload; the coordinator owns the
- * request lifecycle.
- */
+/** Fetch in the bound source tab; runtime.sendMessage correlates its reply. */
 export function createCoordinatorSourceTransport(deps: {
-  sendMessage(message: unknown): Promise<unknown>;
+  sendMessage(message: RuntimeMessage): Promise<unknown>;
 }) {
-  const pending = new Map<string, PendingSource>();
   return {
-    /** @param {{ binding: JobBinding, requestId: number, uri: string, method?: string, headers: unknown, purpose: string }} request */
     async fetchResource(request: {
       binding: JobBinding;
-      requestId: number;
       uri: string;
       method?: string;
       headers: unknown;
@@ -62,68 +47,69 @@ export function createCoordinatorSourceTransport(deps: {
     }): Promise<SourceReply> {
       if (
         !isJobBinding(request.binding) ||
-        !Number.isSafeInteger(request.requestId) ||
-        request.requestId < 0
+        request.uri.length > 2048 ||
+        !isPublicHttpUrl(request.uri)
       ) {
         throw Object.assign(new Error("invalid source fetch binding"), { category: "malformed" });
       }
-      const token = `req:${request.requestId}`;
-      await deps.sendMessage({
+      const response = await deps.sendMessage({
         type: "dz.job.fetch",
         ...request.binding,
-        requestId: token,
         url: request.uri,
         method: request.method,
         headers: request.headers,
         purpose: request.purpose,
       });
-      return await new Promise<SourceReply>((resolve, reject) =>
-        pending.set(token, { resolve, reject }),
-      );
-    },
-    /** Receive a coordinator-routed `dz.source.fetch-complete` message. */
-    handleMessage(message: {
-      requestId?: string;
-      sourceType?: string;
-      ok?: boolean;
-      code?: string;
-      status?: number;
-      data?: unknown;
-    }): boolean {
-      if (typeof message?.requestId !== "string") return false;
-      const state = pending.get(message?.requestId);
-      if (!state || message.sourceType !== "dz.source.fetch-complete") return false;
-      pending.delete(message.requestId);
-      if (!message.ok) {
-        state.reject(
-          Object.assign(new Error(`source request failed with HTTP ${message.status ?? 0}`), {
-            category: "network",
-            sourceDefinitive: message.code === "http-error",
-          }),
-        );
-        return true;
+      if (!isSourceFetchReply(response)) {
+        throw Object.assign(new Error("malformed source response"), { category: "malformed" });
       }
-      const bytes = decodeBase64Payload(message.data, SOURCE_FETCH_BYTE_LIMIT);
+      if (!response.ok) {
+        throw Object.assign(new Error(`source request failed with HTTP ${response.status ?? 0}`), {
+          category: "network",
+          sourceDefinitive: response.code === "http-error",
+        });
+      }
+      if (response.data.length > SOURCE_FETCH_BASE64_CHAR_LIMIT) {
+        throw Object.assign(new Error("malformed source payload"), { category: "malformed" });
+      }
+      const bytes = decodeBase64Payload(response.data, SOURCE_FETCH_BYTE_LIMIT);
       if (!bytes) {
-        state.reject(
-          Object.assign(new Error("malformed source payload"), { category: "malformed" }),
-        );
-        return true;
+        throw Object.assign(new Error("malformed source payload"), { category: "malformed" });
       }
-      state.resolve({ bytes });
-      return true;
+      if (
+        !Number.isSafeInteger(response.bytes) ||
+        response.bytes !== bytes.byteLength ||
+        !Number.isInteger(response.status) ||
+        response.status < 200 ||
+        response.status >= 300 ||
+        !isPublicHttpUrl(response.url)
+      ) {
+        throw Object.assign(new Error("malformed source payload"), { category: "malformed" });
+      }
+      return { bytes };
     },
   };
 }
 
-/** @param {unknown} error */
-export function engineFailure(error: unknown) {
-  return asFetchFailure(error);
-}
-
-/** @param {unknown} uri */
-function requestOrigin(uri: unknown): string {
-  return typeof uri === "string" ? originOfUrl(uri) : "";
+function isSourceFetchReply(value: unknown): value is SourceFetchReply {
+  if (typeof value !== "object" || value === null || !("ok" in value)) return false;
+  if (value.ok === false)
+    return (
+      "code" in value &&
+      typeof value.code === "string" &&
+      (!("status" in value && value.status !== undefined) || Number.isInteger(value.status))
+    );
+  return (
+    value.ok === true &&
+    "data" in value &&
+    typeof value.data === "string" &&
+    "bytes" in value &&
+    typeof value.bytes === "number" &&
+    "status" in value &&
+    typeof value.status === "number" &&
+    "url" in value &&
+    typeof value.url === "string"
+  );
 }
 
 /**
@@ -147,11 +133,10 @@ export function createEngineResourceFetcher(deps: {
   return async (effect: Pick<AcquireEffect, "request">): Promise<{ bytes: Uint8Array }> => {
     const request = effect.request;
     const site = deps.siteOrigin();
-    if (request.purpose === "metadata" || (site !== "" && requestOrigin(request.uri) === site)) {
+    if (request.purpose === "metadata" || (site !== "" && originOfUrl(request.uri) === site)) {
       try {
         const result = await deps.sourceTransport.fetchResource({
           binding: deps.binding(),
-          requestId: request.id,
           uri: request.uri,
           headers: request.headers,
           purpose: request.purpose,
