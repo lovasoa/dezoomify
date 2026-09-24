@@ -270,15 +270,10 @@ function recordMetadataAttempt(
 // The product-specific proxy transport owns the actual /api/proxy POST.
 // Browser-runtime owns direct-first orchestration, fallback, and
 // failure classification around this injected effect.
-const proxyTransport = createProxyTransport(
-  (input: string, init?: Record<string, unknown>) =>
-    fetch(input, init as RequestInit).then((res) => ({
-      status: res.status,
-      headers: res.headers,
-      arrayBuffer: () => res.arrayBuffer(),
-    })),
-  { protocolVersion: 1, maxBytes: PROXY_METADATA_MAX_BYTES },
-);
+const proxyTransport = createProxyTransport(fetch, {
+  protocolVersion: 1,
+  maxBytes: PROXY_METADATA_MAX_BYTES,
+});
 
 function makeWebFetcher(attempt: WebAttempt): WebFetcher {
   return createWebFetcher({

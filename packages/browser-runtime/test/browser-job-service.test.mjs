@@ -144,11 +144,7 @@ test("service sends one-attempt structured tile failures to the engine", async (
       status: 403,
       expectedCode: "TRANSPORT_HTTP_ERROR",
       retryable: false,
-      fetchImpl: async () => ({
-        status: 403,
-        headers: {},
-        arrayBuffer: async () => new ArrayBuffer(0),
-      }),
+      fetchImpl: async () => new Response(null, { status: 403 }),
     },
     {
       name: "transient network error",
@@ -164,11 +160,7 @@ test("service sends one-attempt structured tile failures to the engine", async (
       expectedCode: "TRANSPORT_HTTP_ERROR",
       retryable: true,
       retryAfterMs: 3000,
-      fetchImpl: async () => ({
-        status: 429,
-        headers: { get: (name) => (name === "retry-after" ? "3" : null) },
-        arrayBuffer: async () => new ArrayBuffer(0),
-      }),
+      fetchImpl: async () => new Response(null, { status: 429, headers: { "retry-after": "3" } }),
     },
   ]) {
     await t.test(fixture.name, async () => {
