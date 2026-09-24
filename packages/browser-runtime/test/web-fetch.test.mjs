@@ -14,7 +14,10 @@ function makeFetcher(fetchImpl, extra = {}) {
     fetchImpl,
     isProxyEligible: () => ({ eligible: false, reason: "test" }),
     hooks: {
-      onRequestStart: (label) => (events.push(label), events.length),
+      onRequestStart(label) {
+        events.push(label);
+        return events.length;
+      },
       onRequestEnd: (_id, ok) => events.push(ok ? "ok" : "failed"),
       onLog: () => {},
       onUpdate: () => {},

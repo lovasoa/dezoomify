@@ -274,10 +274,10 @@ test("proxyTransport posts only targetUrl+protocolVersion, credentials omit, siz
   assert.equal(denied.code, "PROXY_POLICY_DENIED");
   assert.equal(called, 0);
   // Oversize mapped to budget code.
-  const pt3 = createProxyTransport(
-    async () => new Response(new Uint8Array(2048)),
-    { protocolVersion: 1, maxBytes: 1024 },
-  );
+  const pt3 = createProxyTransport(async () => new Response(new Uint8Array(2048)), {
+    protocolVersion: 1,
+    maxBytes: 1024,
+  });
   const big = await pt3.fetchViaProxy("https://public.test/x.json");
   assert.equal(big.code, "PROXY_BUDGET_EXCEEDED");
   // Cancellation.
@@ -351,10 +351,10 @@ test("proxyTransport surfaces the upstream URL so proxied metadata keeps its til
   assert.equal(r.ok, true);
   assert.equal(r.finalUrl, "https://public.test/galleria_04.xml");
   // Missing header: no finalUrl, callers fall back to the requested URL.
-  const bare = createProxyTransport(
-    async () => new Response(new Uint8Array([1])),
-    { protocolVersion: 1, maxBytes: 1024 },
-  );
+  const bare = createProxyTransport(async () => new Response(new Uint8Array([1])), {
+    protocolVersion: 1,
+    maxBytes: 1024,
+  });
   const r2 = await bare.fetchViaProxy("https://public.test/galleria_04.xml");
   assert.equal(r2.ok, true);
   assert.equal(r2.finalUrl, undefined);
