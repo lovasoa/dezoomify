@@ -14,12 +14,7 @@
 // failure codes, and redaction are the shell's contract; the frontend
 // never refolds them.
 //
-// Command routing against the shipped shell (DESKTOP_COMMANDS):
-// cancel -> cancel_job; pause/resume -> pause_job/resume_job;
-// image/level/partial choices -> answer_choice with the shell's typed
-// choice shapes (single source here, partial carrying generation+choice).
-// Remaining engine-internal commands have no shell command and reject
-// with desktop.unsupported-command.
+// Commands cross IPC in the generated engine vocabulary.
 
 import type {
   JobHandle,
@@ -46,16 +41,6 @@ export interface DesktopJobStartRequest {
 }
 
 // Keep erasable syntax only so node type-stripping can read this file.
-
-// Typed desktop choice shapes sent to the shell `answer_choice` command.
-// Selection shapes are pre-start options; the partial shape carries the
-// decision generation plus the keep/retry/discard choice verbatim.
-// Structured end to end: these objects decode to the shell `Choice` enum
-// directly; no string parsing is involved.
-export type AnswerChoice =
-  | { kind: "image"; index: number }
-  | { kind: "level"; index: number }
-  | { kind: "partial"; generation: number; decision: "keep" | "retry" | "discard" };
 
 export interface DesktopIpc {
   invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown>;
@@ -234,63 +219,20 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
       if (!live) {
         throw serviceError("desktop.job-settled", "The job already finished.");
       }
-      if (command.type === "cancel") {
-        await ipc.invoke("cancel_job", { job: id });
-        return;
-      }
-      if (command.type === "select-image") {
-        const choice: AnswerChoice = { kind: "image", index: command.image };
-        await ipc.invoke("answer_choice", { job: id, choice });
-        return;
-      }
-      if (command.type === "select-level") {
-        const choice: AnswerChoice = { kind: "level", index: command.level };
-        await ipc.invoke("answer_choice", { job: id, choice });
-        return;
-      }
-      if (command.type === "answer-partial") {
-        const choice: AnswerChoice = {
-          kind: "partial",
-          generation: command.generation,
-          decision: command.decision,
-        };
-        await ipc.invoke("answer_choice", { job: id, choice });
-        return;
-      }
-      if (command.type === "pause") {
-        try {
-          await ipc.invoke("pause_job", { job: id });
-        } catch (error) {
-          throw serviceError(
-            "desktop.pause-failed",
-            error instanceof Error ? error.message : "The pause request was rejected.",
-          );
-        }
-        return;
-      }
-      if (command.type === "resume") {
-        try {
-          await ipc.invoke("resume_job", { job: id });
-        } catch (error) {
-          throw serviceError(
-            "desktop.resume-failed",
-            error instanceof Error ? error.message : "The resume request was rejected.",
-          );
-        }
-        return;
-      }
-      throw serviceError(
-        "desktop.unsupported-command",
-        `The desktop host has no command for ${command.type} yet.`,
-      );
+      if (command.type === "start")
+        throw serviceError("desktop.unsupported-command", "A running job cannot restart.");
+      await ipc.invoke("job_command", { job: id, command });
     }
 
     async function openOutput(reveal: boolean): Promise<void> {
+      if (!observers.has(id))
+        throw serviceError("desktop.job-settled", "The result has been retired.");
       await ipc.invoke("open_saved_output", { job: id, reveal });
     }
 
     async function dispose(): Promise<void> {
-      observers.delete(id);
+      if (!observers.delete(id)) return;
+      await ipc.invoke("release_job", { job: id });
     }
 
     return { id, command, dispose, openOutput };
@@ -330,6 +272,7 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
     startingSnapshots.clear();
     for (const id of [...observers.keys()]) {
       observers.delete(id);
+      await ipc.invoke("release_job", { job: id });
     }
     while (unlistens.length > 0) {
       const unlisten = unlistens.pop();

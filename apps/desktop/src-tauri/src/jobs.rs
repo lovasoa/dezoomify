@@ -30,7 +30,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use dezoomify::model::{
-    JobState as ProtocolState, Progress, RecoveryChoice, Selection, Snapshot, Terminal,
+    JobCommand, JobState as ProtocolState, Progress, Selection, Snapshot, Terminal,
 };
 use dezoomify_native::job_service::{
     start_job, JobOptions, JobSnapshot as RunnerSnapshot, OutputTarget, RunningJob,
@@ -107,33 +107,6 @@ pub fn payload_has_forbidden_keys(value: &serde_json::Value) -> bool {
     }
 }
 
-/// Typed user choice for a live desktop job, decoded from JSON at the
-/// command boundary and matched directly. Unknown shapes are rejected
-/// before any effect, so no string parsing is involved.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "lowercase")]
-pub enum Choice {
-    /// Choose a catalog image by position (pre-start option, plus live
-    /// `SelectImage` when the runner is already awaiting selection).
-    Image { index: usize },
-    /// Choose a level of the chosen image by position (pre-start option, plus
-    /// live `SelectLevel` when awaiting level selection).
-    Level { index: usize },
-    /// Answer a pending partial decision (keep, retry, or discard) with the
-    /// engine generation when known (`generation` omitted answers the latest
-    /// pending decision; stale generations are rejected by the engine).
-    Partial {
-        decision: RecoveryChoice,
-        #[serde(default)]
-        generation: Option<u32>,
-    },
-    /// Pause tile acquisition (engine overlay; wrong-phase rejections are safe
-    /// no-ops).
-    Pause,
-    /// Resume tile acquisition.
-    Resume,
-}
-
 /// One tracked job: host handles only. No stored lifecycle, seq,
 /// transcript, progress, output, or terminal mirrors: snapshots flow
 /// verbatim from the runner and the revision rides each emit.
@@ -164,10 +137,6 @@ pub struct JobEntry {
     /// Terminal already forwarded exactly once. Guards stale dispatches and
     /// drops late runner snapshots; never a lifecycle mirror.
     pub settled: bool,
-    /// Latest pending partial-decision generation from the verbatim engine
-    /// snapshot (`None` until `AwaitingPartialDecision`). Used to answer with
-    /// the engine generation; never a lifecycle mirror.
-    pub pending_generation: Option<u32>,
 }
 
 impl std::fmt::Debug for JobEntry {
@@ -202,6 +171,7 @@ pub struct JobTable {
     jobs: HashMap<String, JobEntry>,
     next_job: u64,
     capability_seq: u64,
+    pending_emits: Vec<SnapshotEmit>,
 }
 
 impl std::fmt::Debug for JobTable {
@@ -290,6 +260,7 @@ impl JobTable {
             jobs: HashMap::new(),
             next_job: 0,
             capability_seq: 0,
+            pending_emits: Vec::new(),
         }
     }
 
@@ -407,7 +378,6 @@ impl JobTable {
                 output_dir,
                 saved_path: None,
                 settled: false,
-                pending_generation: None,
             },
         );
         let payload = verbatim_payload(&id, &initial_dto());
@@ -503,7 +473,7 @@ impl JobTable {
     /// finish immediately with one `Cancelled` snapshot emit: no pipeline
     /// could have published output before a destination existed. Terminal
     /// jobs report stale; missing jobs report unknown.
-    pub fn cancel_job(&mut self, job: &str) -> Result<(u64, Vec<SnapshotEmit>), String> {
+    fn cancel_job(&mut self, job: &str) -> Result<(u64, Vec<SnapshotEmit>), String> {
         self.poll_snapshots();
         self.require_live(job)?;
         let has_runner = self.jobs.get(job).is_some_and(|r| r.runner.is_some());
@@ -536,109 +506,58 @@ impl JobTable {
         Ok((0, Vec::new()))
     }
 
-    /// Pause tile acquisition for a live job via the engine `Pause` command
-    /// (overlay; wrong-phase rejections are safe no-ops). Pre-runner jobs
-    /// have nothing to pause yet and resolve silently; the paused flag
-    /// arrives on the next verbatim runner snapshot. Terminal jobs report
-    /// stale; missing jobs report unknown.
-    pub fn pause_job(&mut self, job: &str) -> Result<(u64, Vec<SnapshotEmit>), String> {
-        self.answer_choice(job, &Choice::Pause)
-    }
-
-    /// Resume tile acquisition for a live job via the engine `Resume`
-    /// command. Same routing and staleness rules as [`Self::pause_job`].
-    pub fn resume_job(&mut self, job: &str) -> Result<(u64, Vec<SnapshotEmit>), String> {
-        self.answer_choice(job, &Choice::Resume)
-    }
-
-    /// Answer an image/level choice for a live job, resolve a pending
-    /// partial decision, or pause/resume acquisition.
-    ///
-    /// Image/level selections fold into the runner options so the runner
-    /// plans the chosen image/level when it starts, plus a live engine
-    /// command when the runner is already awaiting selection (wrong-phase
-    /// rejections are safe no-ops). Partial keep/discard/retry forward to the
-    /// live runner with the engine generation (early answers survive; stale
-    /// generations are rejected by the engine), and the terminal outcome
-    /// arrives as the next runner snapshot. Pause/resume forward live
-    /// (wrong-phase safe). No snapshot is emitted synchronously: pre-runner
-    /// choices update options silently and live answers resolve through the
-    /// runner stream.
-    pub fn answer_choice(
+    /// Forward generated user intent. The engine alone validates decision generations.
+    pub fn command(
         &mut self,
         job: &str,
-        choice: &Choice,
+        command: &JobCommand,
     ) -> Result<(u64, Vec<SnapshotEmit>), String> {
         self.poll_snapshots();
         self.require_live(job)?;
-        match *choice {
-            Choice::Partial {
-                decision,
+        let record = self.jobs.get_mut(job).ok_or("unknown")?;
+        let command = match *command {
+            JobCommand::Start { .. } => return Err("a running job cannot restart".into()),
+            JobCommand::Cancel => return self.cancel_job(job),
+            JobCommand::SelectImage { image } => {
+                if record.runner.is_none() {
+                    record.options.image_index = Some(image as usize);
+                }
+                RunnerCommand::SelectImage { image }
+            }
+            JobCommand::SelectLevel { level } => {
+                if record.runner.is_none() {
+                    record.options.zoom_level = Some(level as usize);
+                }
+                RunnerCommand::SelectLevel { level }
+            }
+            JobCommand::FollowDeferred { image } => RunnerCommand::FollowDeferred { image },
+            JobCommand::AnswerPartial {
                 generation,
-            } => {
-                use dezoomify::model::RecoveryChoice as WireDecision;
-                let generation = generation.or_else(|| {
-                    self.jobs
-                        .get(job)
-                        .and_then(|record| record.pending_generation)
-                });
-                if let Some(generation) = generation {
-                    if let Some(record) = self.jobs.get(job) {
-                        if let Some(runner) = record.runner.as_ref() {
-                            let _ = runner.send(RunnerCommand::AnswerPartial {
-                                generation,
-                                decision,
-                            });
-                        }
-                    }
-                }
-                // Keep/discard update the fallback policy so a timeout
-                // stays honest to the last explicit choice. Retry never
-                // changes the fallback policy.
-                if let Some(record) = self.jobs.get_mut(job) {
-                    if decision != WireDecision::Retry {
-                        record.options.keep_partial = decision == WireDecision::Keep;
-                    }
-                }
-            }
-            Choice::Image { index } => {
-                if let Some(record) = self.jobs.get_mut(job) {
-                    record.options.image_index = Some(index);
-                }
-                if let Some(record) = self.jobs.get(job) {
-                    if let Some(runner) = record.runner.as_ref() {
-                        let image = u32::try_from(index).unwrap_or(u32::MAX);
-                        let _ = runner.send(RunnerCommand::SelectImage { image });
-                    }
-                }
-            }
-            Choice::Level { index } => {
-                if let Some(record) = self.jobs.get_mut(job) {
-                    record.options.zoom_level = Some(index);
-                }
-                if let Some(record) = self.jobs.get(job) {
-                    if let Some(runner) = record.runner.as_ref() {
-                        let level = u32::try_from(index).unwrap_or(u32::MAX);
-                        let _ = runner.send(RunnerCommand::SelectLevel { level });
-                    }
-                }
-            }
-            Choice::Pause => {
-                if let Some(record) = self.jobs.get(job) {
-                    if let Some(runner) = record.runner.as_ref() {
-                        let _ = runner.send(RunnerCommand::Pause);
-                    }
-                }
-            }
-            Choice::Resume => {
-                if let Some(record) = self.jobs.get(job) {
-                    if let Some(runner) = record.runner.as_ref() {
-                        let _ = runner.send(RunnerCommand::Resume);
-                    }
-                }
-            }
+                decision,
+            } => RunnerCommand::AnswerPartial {
+                generation,
+                decision,
+            },
+            JobCommand::Pause => RunnerCommand::Pause,
+            JobCommand::Resume => RunnerCommand::Resume,
+        };
+        if let Some(runner) = &record.runner {
+            let _ = runner.send(command);
         }
         Ok((0, Vec::new()))
+    }
+
+    /// Retire registration and output access without deleting any published file.
+    pub fn release_job(&mut self, job: &str) {
+        if let Some(mut record) = self.jobs.remove(job) {
+            if let Some(runner) = record.runner.take() {
+                let _ = runner.send(RunnerCommand::Cancel);
+                std::thread::spawn(move || {
+                    let _ = runner.join();
+                });
+            }
+        }
+        self.pending_emits.retain(|emit| emit.job != job);
     }
 
     /// Record a save destination grant for a live job and ensure the real
@@ -695,10 +614,11 @@ impl JobTable {
         Ok((0, Vec::new()))
     }
 
-    /// Drain live runner snapshots without emitting: advances settled and
-    /// saved handles so `require_live` stays honest between commands.
+    /// Preserve drained updates until the event pump delivers them, including
+    /// updates consumed by commands that subsequently reject as stale.
     fn poll_snapshots(&mut self) {
-        let _ = self.collect_runner_emits();
+        let emits = self.collect_runner_emits();
+        self.pending_emits.extend(emits);
     }
 
     /// Drain live runner snapshots and forward each verbatim as one
@@ -707,7 +627,9 @@ impl JobTable {
     /// `settled` drops any late stragglers) and progress stays monotonic
     /// because runner seq and counts flow through untouched.
     pub fn poll_drivers(&mut self) -> Vec<SnapshotEmit> {
-        self.collect_runner_emits()
+        let mut emits = std::mem::take(&mut self.pending_emits);
+        emits.extend(self.collect_runner_emits());
+        emits
     }
 
     fn collect_runner_emits(&mut self) -> Vec<SnapshotEmit> {
@@ -769,15 +691,9 @@ impl JobTable {
         // payload.
         let payload = verbatim_payload(job, &snapshot.snapshot);
         let seq = u64::from(snapshot.snapshot.revision);
-        if let Some(decision) = snapshot.snapshot.decision.as_ref() {
-            if let Some(record) = self.jobs.get_mut(job) {
-                record.pending_generation = Some(decision.generation);
-            }
-        }
         if snapshot.snapshot.terminal.is_some() {
             if let Some(record) = self.jobs.get_mut(job) {
                 record.settled = true;
-                record.pending_generation = None;
                 if let Some(published) = snapshot.published.as_ref() {
                     record.saved_path = Some(published.path.clone());
                     if record.destination.is_none() {
@@ -1035,7 +951,7 @@ mod tests {
         assert_eq!(table.cancel_job(&id).unwrap_err(), "stale");
         assert_eq!(
             table
-                .answer_choice(&id, &Choice::Image { index: 0 })
+                .command(&id, &JobCommand::SelectImage { image: 0 })
                 .unwrap_err(),
             "stale"
         );
@@ -1230,7 +1146,7 @@ mod tests {
         let (id, initial) = table.start_job("https://example.com/item").unwrap();
         assert_eq!(snapshot_revision(&initial.payload), 0);
         table
-            .answer_choice(&id, &Choice::Image { index: 0 })
+            .command(&id, &JobCommand::SelectImage { image: 0 })
             .unwrap();
         // Progress and terminal flow verbatim from the runner: forward one
         // synthetic terminal through the forwarder (no I/O).
@@ -1274,7 +1190,7 @@ mod tests {
         assert_eq!(table.cancel_job(&id).unwrap_err(), "stale");
         assert_eq!(
             table
-                .answer_choice(&id, &Choice::Image { index: 1 })
+                .command(&id, &JobCommand::SelectImage { image: 1 })
                 .unwrap_err(),
             "stale"
         );
@@ -1530,7 +1446,7 @@ mod tests {
         assert_eq!(table.cancel_job("job:missing").unwrap_err(), "unknown");
         assert_eq!(
             table
-                .answer_choice("job:missing", &Choice::Image { index: 0 })
+                .command("job:missing", &JobCommand::SelectImage { image: 0 })
                 .unwrap_err(),
             "unknown"
         );
@@ -1616,7 +1532,7 @@ mod tests {
             assert_eq!(table.cancel_job(&id).unwrap_err(), "stale", "{terminal}");
             assert_eq!(
                 table
-                    .answer_choice(&id, &Choice::Image { index: 1 })
+                    .command(&id, &JobCommand::SelectImage { image: 1 })
                     .unwrap_err(),
                 "stale",
                 "{terminal}"
@@ -1640,7 +1556,7 @@ mod tests {
         assert_eq!(table.cancel_job(&id).unwrap_err(), "stale");
         assert_eq!(
             table
-                .answer_choice(&id, &Choice::Image { index: 0 })
+                .command(&id, &JobCommand::SelectImage { image: 0 })
                 .unwrap_err(),
             "stale"
         );
@@ -1848,63 +1764,6 @@ mod tests {
     }
 
     #[test]
-    fn partial_answer_forwards_to_the_runner_gate() {
-        let mut table = JobTable::new();
-        let (id, _) = table.start_job("https://example.com/item").unwrap();
-        table
-            .request_destination(&id, &scratch_path("gate", "out.png"), "png", false)
-            .unwrap();
-        // Keep updates the fallback policy for an honest gate timeout.
-        table
-            .answer_choice(
-                &id,
-                &Choice::Partial {
-                    decision: dezoomify::model::RecoveryChoice::Keep,
-                    generation: Some(1),
-                },
-            )
-            .unwrap();
-        assert!(table.options_for(&id).unwrap().keep_partial);
-        // Discard maps distinctly; retry never changes the fallback policy.
-        let (id2, _) = table.start_job("https://example.com/other").unwrap();
-        table
-            .request_destination(&id2, &scratch_path("gate", "out2.png"), "png", false)
-            .unwrap();
-        table
-            .answer_choice(
-                &id2,
-                &Choice::Partial {
-                    decision: dezoomify::model::RecoveryChoice::Discard,
-                    generation: Some(1),
-                },
-            )
-            .unwrap();
-        assert!(!table.options_for(&id2).unwrap().keep_partial);
-        let (id3, _) = table.start_job("https://example.com/third").unwrap();
-        table
-            .request_destination(&id3, &scratch_path("gate", "out3.png"), "png", false)
-            .unwrap();
-        let keep_before = table.options_for(&id3).unwrap().keep_partial;
-        table
-            .answer_choice(
-                &id3,
-                &Choice::Partial {
-                    decision: dezoomify::model::RecoveryChoice::Retry,
-                    generation: Some(1),
-                },
-            )
-            .unwrap();
-        assert_eq!(
-            table.options_for(&id3).unwrap().keep_partial,
-            keep_before,
-            "retry never changes the fallback policy"
-        );
-        let _ = table.cancel_job(&id);
-        let _ = table.cancel_job(&id2);
-        let _ = table.cancel_job(&id3);
-    }
-
-    #[test]
     fn partial_completed_terminal_carries_ordinal_ledger() {
         // An honest partial through the runner boundary: the engine terminal
         // names ordinal missing tiles and the engine output account reports
@@ -1996,6 +1855,9 @@ mod tests {
         // Poll until the runner's terminal is forwarded (bounded wait).
         let mut terminal: Option<SnapshotEmit> = None;
         for _ in 0..200 {
+            // A command may drain the runner stream, including the terminal
+            // which makes that very command stale. The event pump must still deliver it.
+            let _ = table.command(&id, &JobCommand::Pause);
             for emit in table.poll_drivers() {
                 assert_eq!(emit.channel, CHANNEL_JOB_SNAPSHOT);
                 if emit.payload["snapshot"]["terminal"].is_object() {

@@ -299,97 +299,29 @@ async fn start_job(
 }
 
 #[tauri::command]
-async fn cancel_job(
+async fn job_command(
     state: State<'_, Mutex<JobTable>>,
     app: AppHandle,
     job: String,
+    command: serde_json::Value,
 ) -> Result<Dispatched, CommandFailure> {
-    // Signals the runner cancel flag inside `jobs.rs cancel_job`; the
-    // terminal snapshot arrives on the snapshot stream exactly once.
-    let (dispatched, sync) = {
-        let mut table = lock_table(&state)?;
-        let (outcome, emits) = commands::dispatch_cancel_job(&mut table, &job)?;
-        (to_dispatched(outcome), emits)
-    };
-    {
-        let mut table = state.lock().map_err(|_| CommandFailure {
-            code: "shell.lock".into(),
-            message: "job table poisoned".into(),
-        })?;
-        poll_and_emit(&app, &mut table, sync);
-    }
-    Ok(dispatched)
+    let mut table = lock_table(&state)?;
+    let result = commands::dispatch_job_command(&mut table, &job, command);
+    // Even a stale command can drain the terminal that made it stale.
+    let emits = result
+        .as_ref()
+        .map(|(_, emits)| emits.clone())
+        .unwrap_or_default();
+    poll_and_emit(&app, &mut table, emits);
+    result
+        .map(|(outcome, _)| to_dispatched(outcome))
+        .map_err(Into::into)
 }
 
 #[tauri::command]
-async fn answer_choice(
-    state: State<'_, Mutex<JobTable>>,
-    app: AppHandle,
-    job: String,
-    choice: serde_json::Value,
-) -> Result<Dispatched, CommandFailure> {
-    // The choice arrives as structured JSON decoding to a typed `Choice`
-    // inside `jobs.rs answer_choice`; partial answers resolve through the
-    // runner snapshot stream.
-    let (dispatched, sync) = {
-        let mut table = lock_table(&state)?;
-        let (outcome, emits) = commands::dispatch_answer_choice(&mut table, &job, choice)?;
-        (to_dispatched(outcome), emits)
-    };
-    {
-        let mut table = state.lock().map_err(|_| CommandFailure {
-            code: "shell.lock".into(),
-            message: "job table poisoned".into(),
-        })?;
-        poll_and_emit(&app, &mut table, sync);
-    }
-    Ok(dispatched)
-}
-
-#[tauri::command]
-async fn pause_job(
-    state: State<'_, Mutex<JobTable>>,
-    app: AppHandle,
-    job: String,
-) -> Result<Dispatched, CommandFailure> {
-    // Forwards engine `Pause` inside `jobs.rs pause_job` (wrong-phase safe);
-    // the paused flag arrives on the snapshot stream verbatim.
-    let (dispatched, sync) = {
-        let mut table = lock_table(&state)?;
-        let (outcome, emits) = commands::dispatch_pause_job(&mut table, &job)?;
-        (to_dispatched(outcome), emits)
-    };
-    {
-        let mut table = state.lock().map_err(|_| CommandFailure {
-            code: "shell.lock".into(),
-            message: "job table poisoned".into(),
-        })?;
-        poll_and_emit(&app, &mut table, sync);
-    }
-    Ok(dispatched)
-}
-
-#[tauri::command]
-async fn resume_job(
-    state: State<'_, Mutex<JobTable>>,
-    app: AppHandle,
-    job: String,
-) -> Result<Dispatched, CommandFailure> {
-    // Forwards engine `Resume` inside `jobs.rs resume_job`; same routing as
-    // `pause_job` above.
-    let (dispatched, sync) = {
-        let mut table = lock_table(&state)?;
-        let (outcome, emits) = commands::dispatch_resume_job(&mut table, &job)?;
-        (to_dispatched(outcome), emits)
-    };
-    {
-        let mut table = state.lock().map_err(|_| CommandFailure {
-            code: "shell.lock".into(),
-            message: "job table poisoned".into(),
-        })?;
-        poll_and_emit(&app, &mut table, sync);
-    }
-    Ok(dispatched)
+async fn release_job(state: State<'_, Mutex<JobTable>>, job: String) -> Result<(), CommandFailure> {
+    lock_table(&state)?.release_job(&job);
+    Ok(())
 }
 
 #[tauri::command]
