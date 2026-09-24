@@ -27,19 +27,18 @@ function okBytes(...values) {
   return new Uint8Array(values).buffer;
 }
 
+function request(uri, purpose = "metadata", headers = []) {
+  return { id: 1, uri, purpose, headers };
+}
+
+const attemptSignal = new AbortController().signal;
+
 function directImpl(bytes = okBytes(1), status = 200) {
   return {
     calls: 0,
     async fetchImpl() {
       this.calls += 1;
-      return {
-        status,
-        url: "https://public.test/image.json",
-        headers: { get: () => null },
-        async arrayBuffer() {
-          return bytes.slice(0);
-        },
-      };
+      return new Response(bytes.slice(0), { status });
     },
   };
 }
@@ -98,8 +97,7 @@ test("direct is always first; proxy not called on direct success", async () => {
   const proxy = proxyImpl();
   const { deps, attempts } = webDeps({ direct, proxy });
   const fetcher = createWebFetcher(deps);
-  const res = await fetcher.fetchMetadataFor("https://public.test/image.json", {});
-  assert.equal(res.via, "direct");
+  await fetcher.fetchResource(request("https://public.test/image.json"), attemptSignal);
   assert.equal(direct.calls, 1);
   assert.equal(proxy.calls, 0);
   assert.equal(fetcher.getActiveTransport(), "direct");
@@ -114,8 +112,7 @@ test("eligible metadata failure automatically calls proxy without extra user act
   const proxy = proxyImpl();
   const { deps, attempts } = webDeps({ direct, proxy });
   const fetcher = createWebFetcher(deps);
-  const res = await fetcher.fetchMetadataFor("https://public.test/image.json", {});
-  assert.equal(res.via, "proxy");
+  await fetcher.fetchResource(request("https://public.test/image.json"), attemptSignal);
   assert.equal(direct.calls, 1);
   assert.equal(proxy.calls, 1);
   assert.equal(fetcher.getActiveTransport(), "metadata-proxy");
@@ -138,47 +135,35 @@ test("metadata proxy rate-limit retries once, then succeeds", async () => {
   };
   const { deps } = webDeps({ direct, proxy });
   const fetcher = createWebFetcher(deps);
-  const res = await fetcher.fetchMetadataFor("https://public.test/image.json", {});
-  assert.equal(res.via, "proxy");
+  const res = await fetcher.fetchResource(request("https://public.test/image.json"), attemptSignal);
   assert.equal(proxy.calls, 2);
   assert.ok(res.bytes.byteLength > 0, "retried bytes reach discovery");
 });
 
 test("proxy eligibility matrix", () => {
-  const okReq = { url: "https://public.test/image.json", kind: "metadata" };
+  const okReq = request("https://public.test/image.json");
   assert.equal(isProxyEligible(okReq).eligible, true);
   // Tile never proxied.
-  assert.equal(isProxyEligible({ ...okReq, kind: "tile" }).eligible, false);
+  assert.equal(isProxyEligible({ ...okReq, purpose: "tile" }).eligible, false);
   // Credential-bearing targets ineligible.
+  assert.equal(isProxyEligible(request("https://user:pw@public.test/x")).eligible, false);
+  assert.equal(isProxyEligible(request("https://public.test/x?token=abc")).eligible, false);
   assert.equal(
-    isProxyEligible({ url: "https://user:pw@public.test/x", kind: "metadata" }).eligible,
+    isProxyEligible(
+      request("https://public.test/x", "metadata", [{ name: "Cookie", value: "a=b" }]),
+    ).eligible,
     false,
   );
   assert.equal(
-    isProxyEligible({ url: "https://public.test/x?token=abc", kind: "metadata" }).eligible,
+    isProxyEligible(
+      request("https://public.test/x", "metadata", [{ name: "Authorization", value: "Bearer x" }]),
+    ).eligible,
     false,
   );
   assert.equal(
-    isProxyEligible({ url: "https://public.test/x", kind: "metadata", headers: { Cookie: "a=b" } })
-      .eligible,
-    false,
-  );
-  assert.equal(
-    isProxyEligible({
-      url: "https://public.test/x",
-      kind: "metadata",
-      headers: { Authorization: "Bearer x" },
-    }).eligible,
-    false,
-  );
-  assert.equal(
-    isProxyEligible({ url: "https://public.test/x", kind: "metadata", requiresCookies: true })
-      .eligible,
-    false,
-  );
-  assert.equal(
-    isProxyEligible({ url: "https://public.test/x", kind: "metadata", requiresAuth: true })
-      .eligible,
+    isProxyEligible(
+      request("https://public.test/x", "metadata", [{ name: "x-custom", value: "value" }]),
+    ).eligible,
     false,
   );
   // Private/local ineligible.
@@ -188,7 +173,7 @@ test("proxy eligibility matrix", () => {
     "https://10.0.0.5/x",
     "https://192.168.1.1/x",
   ]) {
-    assert.equal(isProxyEligible({ url: u, kind: "metadata" }).eligible, false, u);
+    assert.equal(isProxyEligible(request(u)).eligible, false, u);
   }
 });
 
@@ -200,7 +185,7 @@ test("no proxy for http-error, ineligible targets, cancelled, tile", async () =>
     const { deps } = webDeps({ direct, proxy });
     const fetcher = createWebFetcher(deps);
     await assert.rejects(
-      fetcher.fetchMetadataFor("https://public.test/x", {}),
+      fetcher.fetchResource(request("https://public.test/x"), attemptSignal),
       (error) => error.code === "DISCOVERY_HTTP_ERROR",
     );
     assert.equal(proxy.calls, 0);
@@ -212,7 +197,7 @@ test("no proxy for http-error, ineligible targets, cancelled, tile", async () =>
     const { deps } = webDeps({ direct, proxy });
     const fetcher = createWebFetcher(deps);
     await assert.rejects(
-      fetcher.fetchMetadataFor("https://user:pw@public.test/x", {}),
+      fetcher.fetchResource(request("https://user:pw@public.test/x"), attemptSignal),
       (error) => error.code === "DISCOVERY_FAILED",
     );
     assert.equal(proxy.calls, 0);
@@ -226,7 +211,7 @@ test("no proxy for http-error, ineligible targets, cancelled, tile", async () =>
     const ctrl = new AbortController();
     ctrl.abort();
     await assert.rejects(
-      fetcher.fetchMetadataFor("https://public.test/x", {}, ctrl.signal),
+      fetcher.fetchResource(request("https://public.test/x"), ctrl.signal),
       (error) => error.code === "TRANSPORT_CANCELLED",
     );
     assert.equal(proxy.calls, 0);
@@ -237,7 +222,9 @@ test("no proxy for http-error, ineligible targets, cancelled, tile", async () =>
     const proxy = proxyImpl();
     const { deps } = webDeps({ direct, proxy });
     const fetcher = createWebFetcher(deps);
-    await assert.rejects(fetcher.fetchTileFor("https://public.test/0_0.jpg", {}, 0));
+    await assert.rejects(
+      fetcher.fetchResource(request("https://public.test/0_0.jpg", "tile"), attemptSignal),
+    );
     assert.equal(proxy.calls, 0);
   }
 });
@@ -257,9 +244,16 @@ test("proxyTransport posts only targetUrl+protocolVersion, credentials omit, siz
     });
   };
   const pt = createProxyTransport(fetchImpl, { protocolVersion: 1, maxBytes: 1024 });
-  const r = await pt.fetchViaProxy("https://public.test/x.json");
+  const r = await pt.fetchViaProxy(request("https://public.test/x.json"));
   assert.equal(r.ok, true);
   assert.equal(seen.init.headers["content-type"], "application/json");
+  const withAccept = await pt.fetchViaProxy(
+    request("https://public.test/x.json", "metadata", [
+      { name: "Accept", value: "application/json" },
+    ]),
+  );
+  assert.equal(withAccept.ok, true);
+  assert.equal(seen.init.headers.Accept, "application/json");
   // Credential-bearing target rejected before request.
   let called = 0;
   const pt2 = createProxyTransport(
@@ -269,21 +263,23 @@ test("proxyTransport posts only targetUrl+protocolVersion, credentials omit, siz
     },
     { protocolVersion: 1, maxBytes: 1024 },
   );
-  const denied = await pt2.fetchViaProxy("https://user:pw@public.test/x");
+  const denied = await pt2.fetchViaProxy(request("https://user:pw@public.test/x"));
   assert.equal(denied.ok, false);
   assert.equal(denied.code, "PROXY_POLICY_DENIED");
   assert.equal(called, 0);
   // Oversize mapped to budget code.
-  const pt3 = createProxyTransport(
-    async () => new Response(new Uint8Array(2048)),
-    { protocolVersion: 1, maxBytes: 1024 },
-  );
-  const big = await pt3.fetchViaProxy("https://public.test/x.json");
+  const pt3 = createProxyTransport(async () => new Response(new Uint8Array(2048)), {
+    protocolVersion: 1,
+    maxBytes: 1024,
+  });
+  const big = await pt3.fetchViaProxy(request("https://public.test/x.json"));
   assert.equal(big.code, "PROXY_BUDGET_EXCEEDED");
   // Cancellation.
   const ctrl = new AbortController();
   ctrl.abort();
-  const cancelled = await pt.fetchViaProxy("https://public.test/x.json", { signal: ctrl.signal });
+  const cancelled = await pt.fetchViaProxy(request("https://public.test/x.json"), {
+    signal: ctrl.signal,
+  });
   assert.equal(cancelled.code, "TRANSPORT_CANCELLED");
 });
 
@@ -292,7 +288,7 @@ test("proxyTransport surfaces Retry-After on 429 so callers can back off once", 
     async () => new Response(new Uint8Array([1]), { status: 429, headers: { "retry-after": "2" } }),
     { protocolVersion: 1, maxBytes: 1024 },
   );
-  const hinted = await withHint.fetchViaProxy("https://public.test/busy.json");
+  const hinted = await withHint.fetchViaProxy(request("https://public.test/busy.json"));
   assert.equal(hinted.ok, false);
   assert.equal(hinted.code, "PROXY_RATE_LIMITED");
   assert.equal(hinted.retryAfterMs, 2000);
@@ -300,7 +296,7 @@ test("proxyTransport surfaces Retry-After on 429 so callers can back off once", 
     async () => new Response(new Uint8Array([1]), { status: 429 }),
     { protocolVersion: 1, maxBytes: 1024 },
   );
-  const unhinted = await bare.fetchViaProxy("https://public.test/busy.json");
+  const unhinted = await bare.fetchViaProxy(request("https://public.test/busy.json"));
   assert.equal(unhinted.code, "PROXY_RATE_LIMITED");
   assert.equal(unhinted.retryAfterMs, undefined);
 });
@@ -326,7 +322,9 @@ test("proxyTransport caps proxy load at 4 inflight and 4 starts per second", asy
   });
   const started = Date.now();
   const results = await Promise.all(
-    Array.from({ length: 8 }, (_, i) => pt.fetchViaProxy(`https://public.test/burst-${i}.json`)),
+    Array.from({ length: 8 }, (_, i) =>
+      pt.fetchViaProxy(request(`https://public.test/burst-${i}.json`)),
+    ),
   );
   const elapsed = Date.now() - started;
   assert.ok(
@@ -347,15 +345,15 @@ test("proxyTransport surfaces the upstream URL so proxied metadata keeps its til
       },
     });
   const pt = createProxyTransport(fetchImpl, { protocolVersion: 1, maxBytes: 1024 });
-  const r = await pt.fetchViaProxy("https://public.test/galleria_04.xml");
+  const r = await pt.fetchViaProxy(request("https://public.test/galleria_04.xml"));
   assert.equal(r.ok, true);
   assert.equal(r.finalUrl, "https://public.test/galleria_04.xml");
   // Missing header: no finalUrl, callers fall back to the requested URL.
-  const bare = createProxyTransport(
-    async () => new Response(new Uint8Array([1])),
-    { protocolVersion: 1, maxBytes: 1024 },
-  );
-  const r2 = await bare.fetchViaProxy("https://public.test/galleria_04.xml");
+  const bare = createProxyTransport(async () => new Response(new Uint8Array([1])), {
+    protocolVersion: 1,
+    maxBytes: 1024,
+  });
+  const r2 = await bare.fetchViaProxy(request("https://public.test/galleria_04.xml"));
   assert.equal(r2.ok, true);
   assert.equal(r2.finalUrl, undefined);
 });

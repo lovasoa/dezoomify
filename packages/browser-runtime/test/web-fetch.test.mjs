@@ -8,13 +8,22 @@ const messages = {
   discoveryFailed: (via) => `DISCOVERY_FAILED_VIA_${via}`,
 };
 
+function request(uri, purpose = "metadata", headers = []) {
+  return { id: 23, uri, purpose, headers };
+}
+
+const signal = new AbortController().signal;
+
 function makeFetcher(fetchImpl, extra = {}) {
   const events = [];
   const fetcher = createWebFetcher({
     fetchImpl,
     isProxyEligible: () => ({ eligible: false, reason: "test" }),
     hooks: {
-      onRequestStart: (label) => (events.push(label), events.length),
+      onRequestStart(label) {
+        events.push(label);
+        return events.length;
+      },
       onRequestEnd: (_id, ok) => events.push(ok ? "ok" : "failed"),
       onLog: () => {},
       onUpdate: () => {},
@@ -36,9 +45,12 @@ test("direct metadata keeps the final URI and readable bytes", async () => {
     assert.equal(init.headers["x-test"], "yes");
     return response;
   });
-  const result = await fetcher.fetchMetadataFor("https://a.test/start", { "x-test": "yes" });
+  const result = await fetcher.fetchResource(
+    request("https://a.test/start", "metadata", [{ name: "x-test", value: "yes" }]),
+    signal,
+  );
   assert.equal(result.finalUri, "https://a.test/final.json");
-  assert.deepEqual([...new Uint8Array(result.bytes)], [1, 2]);
+  assert.deepEqual([...result.bytes], [1, 2]);
   assert.deepEqual(events, ["direct", "ok"]);
 });
 
@@ -56,7 +68,7 @@ test("direct metadata never proxies an upstream refusal and bounds its preview",
       },
     },
   );
-  await assert.rejects(fetcher.fetchMetadataFor("https://a.test/x", {}), (error) => {
+  await assert.rejects(fetcher.fetchResource(request("https://a.test/x"), signal), (error) => {
     assert.equal(error.code, "DISCOVERY_HTTP_ERROR");
     assert.match(error.preview, /Forbidden x/);
     assert.ok(error.preview.length <= 300);
@@ -75,7 +87,8 @@ test("metadata proxy follows one bounded retry and reports its redirect URI", as
       isProxyEligible: () => ({ eligible: true, reason: "public" }),
       sleepFn: async () => {},
       proxyTransport: {
-        fetchViaProxy: async () => {
+        fetchViaProxy: async (received) => {
+          assert.equal(received, engineRequest);
           calls += 1;
           return calls === 1
             ? { ok: false, status: 429, code: "PROXY_RATE_LIMITED", retryAfterMs: 1 }
@@ -89,7 +102,8 @@ test("metadata proxy follows one bounded retry and reports its redirect URI", as
       },
     },
   );
-  const result = await fetcher.fetchMetadataFor("https://a.test/info.json", {});
+  const engineRequest = request("https://a.test/info.json");
+  const result = await fetcher.fetchResource(engineRequest, signal);
   assert.equal(result.finalUri, "https://a.test/final/info.json");
   assert.equal(calls, 2);
 });
@@ -100,11 +114,26 @@ test("tiles make one request and return retry hints to the engine", async () => 
     calls += 1;
     return new Response("busy", { status: 429, headers: { "retry-after": "3" } });
   });
-  await assert.rejects(fetcher.fetchTileFor("https://a.test/0.png", {}), (error) => {
-    assert.equal(error.retry_after_ms, 3000);
-    return true;
-  });
+  await assert.rejects(
+    fetcher.fetchResource(request("https://a.test/0.png", "tile"), signal),
+    (error) => {
+      assert.equal(error.retry_after_ms, 3000);
+      return true;
+    },
+  );
   assert.equal(calls, 1);
+});
+
+test("tile and probe redirects retain the final URI", async () => {
+  const { fetcher } = makeFetcher(async () => {
+    const response = new Response(new Uint8Array([4]));
+    Object.defineProperty(response, "url", { value: "https://a.test/final/0.png" });
+    return response;
+  });
+  for (const purpose of ["tile", "probe"]) {
+    const result = await fetcher.fetchResource(request("https://a.test/0.png", purpose), signal);
+    assert.equal(result.finalUri, "https://a.test/final/0.png");
+  }
 });
 
 test("oversized direct streams stop before buffering the full response", async () => {
@@ -118,7 +147,7 @@ test("oversized direct streams stop before buffering the full response", async (
     },
   });
   const { fetcher } = makeFetcher(async () => new Response(stream));
-  await assert.rejects(fetcher.fetchMetadataFor("https://a.test/large", {}), {
+  await assert.rejects(fetcher.fetchResource(request("https://a.test/large"), signal), {
     code: "TRANSPORT_SIZE_LIMIT",
   });
   assert.equal(cancelled, true);
@@ -132,7 +161,7 @@ test("an aborted metadata request makes no proxy request", async () => {
     called = true;
     throw new Error("unexpected fetch");
   });
-  await assert.rejects(fetcher.fetchMetadataFor("https://a.test/x", {}, controller.signal), {
+  await assert.rejects(fetcher.fetchResource(request("https://a.test/x"), controller.signal), {
     code: "TRANSPORT_CANCELLED",
   });
   assert.equal(called, false);

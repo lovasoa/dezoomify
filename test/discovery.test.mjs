@@ -200,14 +200,7 @@ test("regression: heads without zoomable literals are a negative hint, not a ver
 function fetcherForHead(head) {
   const bytes = textToBytes(head).slice(0);
   return createWebFetcher({
-    fetchImpl: async () => ({
-      status: 200,
-      url: "https://example.test/",
-      headers: { get: () => "text/html" },
-      async arrayBuffer() {
-        return bytes;
-      },
-    }),
+    fetchImpl: async () => new Response(bytes, { headers: { "content-type": "text/html" } }),
     isProxyEligible: () => ({ eligible: false }),
     classifyHint: (hintBytes, info) => classifyReadableBytes(hintBytes, info),
     hooks: { onRequestStart: () => 0, onRequestEnd() {}, onLog() {}, onUpdate() {} },
@@ -222,8 +215,10 @@ function fetcherForHead(head) {
 test("regression: literal-free heads are forwarded to discovery, never failed by the hint", async () => {
   for (const [name, head] of Object.entries(LITERAL_FREE_HEADS)) {
     const fetcher = fetcherForHead(head);
-    const res = await fetcher.fetchMetadataFor("https://example.test/", {});
-    assert.equal(res.via, "direct", name);
+    const res = await fetcher.fetchResource(
+      { id: 1, uri: "https://example.test/", purpose: "metadata", headers: [] },
+      new AbortController().signal,
+    );
     assert.ok(res.bytes.byteLength > 0, `${name} bytes reach the engine`);
   }
 });
