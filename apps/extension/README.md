@@ -6,7 +6,8 @@ using your browser's own session so logged-in and interactive viewers work.
 - **Use:** click the extension button on a page with a zoomable image (grey
   idle becomes blue with a dot while the job is active); the dedicated job tab
   snapshots the source page and saves the result. The source page is not
-  reloaded, and a second click focuses the existing job tab.
+  reloaded. A second click focuses the existing job tab and cancels an active
+  job.
   Full steps: [browser extension](../../docs/user/browser-extension.md).
 - Explicit-action jobs only: no background watching, auto-rearm, or unrelated
   tab monitoring. The job page owns each job and invalidates its source access
