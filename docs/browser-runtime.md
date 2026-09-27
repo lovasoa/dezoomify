@@ -79,7 +79,7 @@ flowchart TD
 3. For unprocessed ordinary tiles, one direct readable attempt classifies each origin. A successful ordinary `<img>` fallback marks that origin display-only for the job, so later ordinary tiles load directly through `<img>`.
 4. A typed recovery action offering the [extension](extension.md) or [native app](native-apps.md) when no accepted browser route supplies readable bytes.
 
-The website always shows the active transport, including the automatic switch after a classified direct failure. No per-attempt consent exists.
+The website always shows the active transport, including the automatic switch after a classified direct failure. No per-attempt consent exists. An HTTP error remains an HTTP error when its diagnostic body times out; it never triggers proxy fallback. A proxy deadline reports a retryable transport failure, while cancelling the job reports cancellation.
 
 The extension transport is tab-origin direct fetch plus `<img>` display-only fallback; see [Extension](extension.md#fetching). The extension never uses the metadata proxy.
 
