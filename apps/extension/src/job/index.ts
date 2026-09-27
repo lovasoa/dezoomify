@@ -46,39 +46,50 @@ const TEST_PERMISSION_MOCK = import.meta.env.MODE === "testing";
 
 type ViewContext = SharedViewContext & { failure?: StructuredError };
 
+function newAttempt() {
+  return {
+    retired: false,
+    startedAt: Date.now(),
+    jobHandle: null as JobHandle | null,
+    assembly: null as ReturnType<typeof createBrowserAssembly> | null,
+    activeSnapshot: null as JobSnapshot | null,
+    localFailure: null as StructuredError | null,
+    pendingPermission: null as PermissionWait | null,
+    attemptSourceUrl: "",
+    testCompletionNotified: false,
+    uiLogLines: [] as string[],
+  };
+}
+type ExtensionAttempt = ReturnType<typeof newAttempt>;
+let currentAttempt = newAttempt();
+function owns(attempt: ExtensionAttempt): boolean {
+  return currentAttempt === attempt && !attempt.retired;
+}
+
 const jobLog = createLogger("job");
 // Mirror accepted log lines into the job view's technical-details log (and the
 // copied diagnostics) so a failed job shows the interaction trace. Worker
 // lines arrive over `engine.log` and join the same buffer.
 const UI_LOG_MAX_LINES = 120;
-const uiLogLines: string[] = [];
 jobLog.addSink((entry) => {
-  uiLogLines.push(entry.line);
-  if (uiLogLines.length > UI_LOG_MAX_LINES)
-    uiLogLines.splice(0, uiLogLines.length - UI_LOG_MAX_LINES);
+  currentAttempt.uiLogLines.push(entry.line);
+  if (currentAttempt.uiLogLines.length > UI_LOG_MAX_LINES)
+    currentAttempt.uiLogLines.splice(0, currentAttempt.uiLogLines.length - UI_LOG_MAX_LINES);
 });
 
 let sourceAccess: ReturnType<typeof createSourceAccess> | null = null;
 let siteOrigin = "";
 // One shared browser job service attempt. The service owns the worker, the WASM
 // session, cross-worker processing calls, the abort scope, and disposal;
-// this tab owns source access, transport, assembly, and view wiring. The single
+// this tab owns source access, transport, currentAttempt.assembly, and view wiring. The single
 // authoritative snapshot renders directly; no derived mirrors.
-let jobHandle: JobHandle | null = null;
-let discoveryGeneration = 0;
-let assembly: ReturnType<typeof createBrowserAssembly> | null = null;
 /** Single authoritative snapshot: render it directly, never a derived copy. */
-let activeSnapshot: JobSnapshot | null = null;
-let localFailure: StructuredError | null = null;
-let testCompletionNotified = false;
 let lastActionIndicator = "";
 /** Ephemeral permission view (telemetry only, never gates commands). */
-let pendingPermission: PermissionWait | null = null;
 const testGrantedOrigins = new Set<string>();
 /** True when the next attempt must target the maximum known resolution. */
 let tryMaximumNext = false;
 /** Source URL of the live attempt (desktop handoff link for canvas failures). */
-let attemptSourceUrl = "";
 const sourceTabParam = new URLSearchParams(location.hash.slice(1)).get("sourceTabId");
 const parsedSourceTabId =
   sourceTabParam !== null && /^\d+$/.test(sourceTabParam) ? Number(sourceTabParam) : -1;
@@ -128,8 +139,8 @@ export function syncExtensionJobTitle(status: PresentationStatus, sourceUrl: str
 
 /** Save filename from the authoritative snapshot catalog; undefined when nothing is selected yet. */
 function activeTitle(): string | undefined {
-  const catalog = activeSnapshot?.selection.catalog;
-  const idx = activeSnapshot?.selection.image;
+  const catalog = currentAttempt.activeSnapshot?.selection.catalog;
+  const idx = currentAttempt.activeSnapshot?.selection.image;
   if (!catalog || idx === null || idx === undefined) return undefined;
   const entry = catalog.entries[idx];
   if (entry && entry.kind === "image" && typeof entry.title === "string" && entry.title !== "")
@@ -170,18 +181,19 @@ function statusForLifecycle(lifecycle: JobState): PresentationStatus {
 }
 
 function presentFor(status: PresentationStatus, ctx: ViewContext): SnapshotPresentation {
-  if (localFailure) return presentFailure(localFailure, "browser-session");
-  if (activeSnapshot) {
+  if (currentAttempt.localFailure)
+    return presentFailure(currentAttempt.localFailure, "browser-session");
+  if (currentAttempt.activeSnapshot) {
     // Display-only is a host-known output fact (tainted canvas): probe the
-    // assembly like the website does and pass it explicitly to
+    // currentAttempt.assembly like the website does and pass it explicitly to
     // presentSnapshot. It is never written into the DTO.
     let displayOnly = false;
     try {
-      displayOnly = assembly?.isTainted?.() === true;
+      displayOnly = currentAttempt.assembly?.isTainted?.() === true;
     } catch {
       displayOnly = false;
     }
-    return presentSnapshot(activeSnapshot, "browser-session", { displayOnly });
+    return presentSnapshot(currentAttempt.activeSnapshot, "browser-session", { displayOnly });
   }
   return presentStatus(status, {
     transport: "browser-session",
@@ -190,29 +202,36 @@ function presentFor(status: PresentationStatus, ctx: ViewContext): SnapshotPrese
 }
 
 function render(status: PresentationStatus, ctx: ViewContext = {}) {
+  const attempt = currentAttempt;
   const target = root();
   if (!target) return;
   const viewActivity = {
     ...(ctx.jobActivity ?? {}),
-    ...(uiLogLines.length ? { log: uiLogLines.slice() } : {}),
+    ...(attempt.uiLogLines.length ? { log: attempt.uiLogLines.slice() } : {}),
   };
   const presentation = presentFor(status, ctx);
   // Outstanding partial decision, read off the DTO only: the closed
   // keep/retry/discard answers are the engine's RecoveryChoice values, never
   // fabricated actions.
   const decisionGeneration =
-    activeSnapshot?.lifecycle === "AwaitingPartialDecision"
-      ? activeSnapshot.decision?.generation
+    attempt.activeSnapshot?.lifecycle === "AwaitingPartialDecision"
+      ? attempt.activeSnapshot.decision?.generation
       : undefined;
   renderView(
     target,
     presentation,
     {
       onSubmitUrl: () => {},
-      onCancel: closeJob,
+      onCancel: () => {
+        if (owns(attempt)) closeJob();
+      },
       onCopyDiagnostics: copyDiagnostics,
-      onRetrySameUrl: retryJob,
-      onTryMaximum: tryMaximum,
+      onRetrySameUrl: () => {
+        if (owns(attempt)) retryJob();
+      },
+      onTryMaximum: () => {
+        if (owns(attempt)) tryMaximum();
+      },
       onSave: () => {},
     },
     {
@@ -220,20 +239,21 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
       ...(Object.keys(viewActivity).length ? { jobActivity: viewActivity } : {}),
     },
     {
-      ...(pendingPermission
+      ...(attempt.pendingPermission
         ? {
             replace: createElement(AccessRequestView, {
-              origin: pendingPermission.origin,
-              requesting: pendingPermission.requesting,
-              onRequest: pendingPermission.request,
+              origin: attempt.pendingPermission.origin,
+              requesting: attempt.pendingPermission.requesting,
+              onRequest: attempt.pendingPermission.request,
             }),
           }
         : {}),
-      ...(decisionGeneration !== undefined && !pendingPermission
+      ...(decisionGeneration !== undefined && !attempt.pendingPermission
         ? {
             after: createElement(PartialOutputActions, {
               onChoose: (keep) => {
-                void jobHandle?.command({
+                if (!owns(attempt)) return;
+                void attempt.jobHandle?.command({
                   type: "answer-partial",
                   generation: decisionGeneration,
                   decision: keep ? "keep" : "discard",
@@ -241,7 +261,8 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
                 render("downloading", { jobActivity: { startedAt: Date.now() } });
               },
               onRetry: () => {
-                void jobHandle?.command({
+                if (!owns(attempt)) return;
+                void attempt.jobHandle?.command({
                   type: "answer-partial",
                   generation: decisionGeneration,
                   decision: "retry",
@@ -274,11 +295,11 @@ function syncExtensionJobIndicator(status: PresentationStatus) {
 }
 
 function closeJob() {
-  discoveryGeneration += 1;
   jobLog.info("job-cancelled", `jobId=${sessionId}`);
-  const handle = jobHandle;
+  const handle = currentAttempt.jobHandle;
   void handle?.command({ type: "cancel" }).catch(() => {});
   stopAttempt();
+  currentAttempt = newAttempt();
   render("cancelled", { jobActivity: { startedAt: Date.now() } });
 }
 
@@ -297,8 +318,8 @@ function sourceHost(): string {
  */
 function failureHandoffCtx(code: string): Partial<ViewContext> {
   if (!wantsDesktopHandoff(code)) return {};
-  const link = desktopHandoffLink(attemptSourceUrl);
-  return link !== "" ? { sourceUrl: attemptSourceUrl, desktopHandoffUrl: link } : {};
+  const link = desktopHandoffLink(currentAttempt.attemptSourceUrl);
+  return link !== "" ? { sourceUrl: currentAttempt.attemptSourceUrl, desktopHandoffUrl: link } : {};
 }
 
 /** Device limit tier inputs: client hints where available, else the UA. */
@@ -332,8 +353,9 @@ function presentEngineFailure(error: EngineError): StructuredError {
 }
 
 /** Host-side effect execution failed terminally: render it and stop. */
-function onHostFailure(error: unknown) {
-  if (localFailure) return;
+function onHostFailure(error: unknown, attempt = currentAttempt) {
+  if (!owns(attempt)) return;
+  if (currentAttempt.localFailure) return;
   const code =
     error && typeof error === "object" && "code" in error
       ? String((error as { code?: unknown }).code)
@@ -357,7 +379,7 @@ function onHostFailure(error: unknown) {
           transport?: unknown;
         })
       : null;
-  localFailure = describeFailure({
+  currentAttempt.localFailure = describeFailure({
     code,
     engineDetail:
       typeof candidate?.detail === "string"
@@ -376,11 +398,13 @@ function onHostFailure(error: unknown) {
   });
 }
 
-function createAssembly(args: BrowserAssemblyArgs) {
+function createAssembly(args: BrowserAssemblyArgs, attempt: ExtensionAttempt) {
   return createBrowserAssembly({
     ...args,
     canvas: () => document.createElement("canvas"),
-    save: (blob, width, height) => {
+    save: (blob, width, height, signal) => {
+      signal.throwIfAborted();
+      if (!owns(attempt)) throw new DOMException("Result retired", "AbortError");
       const url = URL.createObjectURL(blob);
       try {
         saveBlobViaAnchor(document, url, width, height, activeTitle());
@@ -451,8 +475,9 @@ async function bindSourceTab() {
 
 /** Dispose one engine attempt before a retry. The source access stays bound to the source tab. */
 function stopAttempt() {
-  const handle = jobHandle;
-  jobHandle = null;
+  currentAttempt.retired = true;
+  const handle = currentAttempt.jobHandle;
+  currentAttempt.jobHandle = null;
   if (handle) {
     try {
       void handle.dispose().catch(() => {});
@@ -461,26 +486,19 @@ function stopAttempt() {
     }
   }
   try {
-    assembly?.release();
+    currentAttempt.assembly?.release();
   } catch {
     /* bitmap cleanup is best effort */
   }
-  assembly = null;
-}
-
-/** Reset data owned by the previous engine attempt. */
-function resetAttemptState() {
-  activeSnapshot = null;
-  localFailure = null;
-  pendingPermission = null;
+  currentAttempt.assembly = null;
 }
 
 /** Start one WASM-backed attempt with source-tab access and extension-origin fallback. */
 async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
-  const generation = discoveryGeneration;
+  const attempt = currentAttempt;
   const source = sourceAccess;
   if (!source) return;
-  attemptSourceUrl = inputs[0]?.url ?? "";
+  attempt.attemptSourceUrl = inputs[0]?.url ?? "";
   const permissionApi = {
     contains: async ({ origins }: { origins?: string[] }) =>
       TEST_PERMISSION_MOCK
@@ -493,8 +511,8 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
     },
   };
   const permissions = createAttemptPermissions(permissionApi, (pending) => {
-    if (generation !== discoveryGeneration) return;
-    pendingPermission = pending[0] ?? null;
+    if (!owns(attempt)) return;
+    attempt.pendingPermission = pending[0] ?? null;
     render("downloading", { jobActivity: { startedAt: Date.now() } });
   });
   const fetcher = createExtensionFetcher({
@@ -503,21 +521,25 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
   const extensionTransport = {
     async fetchResource(request: ResourceRequest, signal: AbortSignal) {
       const url = request.uri;
+      signal.throwIfAborted();
       jobLog.debug("extension-fetch-start", `url=${url} purpose=${request.purpose}`);
       try {
         await permissions.ensure(new URL(request.uri).origin, signal);
         const result = await fetcher.fetchResource(request, signal);
-        jobLog.debug("extension-fetch-complete", `url=${url} bytes=${result.bytes.byteLength}`);
+        if (!owns(attempt)) signal.throwIfAborted();
+        if (owns(attempt))
+          jobLog.debug("extension-fetch-complete", `url=${url} bytes=${result.bytes.byteLength}`);
         return result;
       } catch (error) {
         const code =
           error && typeof error === "object" && "code" in error
             ? String((error as { code?: unknown }).code)
             : "unknown";
-        jobLog.warn(
-          "extension-fetch-failed",
-          `url=${url} code=${code} message=${error instanceof Error ? error.message : String(error)}`,
-        );
+        if (owns(attempt))
+          jobLog.warn(
+            "extension-fetch-failed",
+            `url=${url} code=${code} message=${error instanceof Error ? error.message : String(error)}`,
+          );
         throw error;
       }
     },
@@ -526,6 +548,7 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
     sourceAccess: source,
     extensionTransport,
     onSourceFailure: (cause) =>
+      owns(attempt) &&
       jobLog.warn(
         "source-fetch-fallback",
         `code=${String(cause.code ?? "network")} origin=extension`,
@@ -537,8 +560,8 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
     loadDisplayImage: (url, signal) => loadTileImage(url, { signal }),
     classifyFailure: asFetchFailure,
     createAssembly: (args) => {
-      const asm = createAssembly(args);
-      assembly = asm;
+      const asm = createAssembly(args, attempt);
+      attempt.assembly = asm;
       return asm;
     },
     // Browser session baseline: 6 concurrent tile fetches (matches the
@@ -547,9 +570,11 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
     onRecoveryRequested: () => {
       // The authoritative snapshot carries the decision generation; re-render
       // it directly instead of copying the generation aside.
-      if (activeSnapshot) renderForSnapshot(activeSnapshot);
+      if (owns(attempt) && attempt.activeSnapshot) renderForSnapshot(attempt.activeSnapshot);
     },
-    log: (level, code, detail) => jobLog.log(level, code, detail),
+    log: (level, code, detail) => {
+      if (owns(attempt)) jobLog.log(level, code, detail);
+    },
   });
   try {
     // A "Try maximum" attempt takes the largest known level; the canvas gate
@@ -566,21 +591,21 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
       },
       {
         snapshot: (snapshot: JobSnapshot) => {
-          if (localFailure || generation !== discoveryGeneration) return;
-          activeSnapshot = snapshot;
+          if (attempt.localFailure || !owns(attempt)) return;
+          attempt.activeSnapshot = snapshot;
           renderForSnapshot(snapshot);
         },
-        failure: onHostFailure,
+        failure: (error) => onHostFailure(error, attempt),
       },
     );
-    if (generation !== discoveryGeneration) {
+    if (!owns(attempt)) {
       void handle.command({ type: "cancel" }).catch(() => {});
       void handle.dispose().catch(() => {});
       return;
     }
-    jobHandle = handle;
+    attempt.jobHandle = handle;
   } catch (error) {
-    onHostFailure(error);
+    onHostFailure(error, attempt);
   }
 }
 
@@ -589,7 +614,7 @@ function renderForSnapshot(snapshot: JobSnapshot) {
   const terminal = snapshot.terminal;
   if (terminal?.type === "failed") {
     jobLog.error("engine-terminal", `type=failed code=${terminal.error.code}`);
-    localFailure = presentEngineFailure(terminal.error);
+    currentAttempt.localFailure = presentEngineFailure(terminal.error);
     render("failed", {
       jobActivity: { startedAt: Date.now() },
       ...failureHandoffCtx(terminal.error.code),
@@ -601,8 +626,8 @@ function renderForSnapshot(snapshot: JobSnapshot) {
     return;
   }
   if (terminal?.type === "completed" || terminal?.type === "partial-completed") {
-    if (TEST_PERMISSION_MOCK && !testCompletionNotified) {
-      testCompletionNotified = true;
+    if (TEST_PERMISSION_MOCK && !currentAttempt.testCompletionNotified) {
+      currentAttempt.testCompletionNotified = true;
       void api?.runtime?.sendMessage?.({ type: "dezoomify-test-job-complete" }).catch(() => {});
     }
     render("completed", { jobActivity: { startedAt: Date.now() } });
@@ -628,13 +653,13 @@ async function startAttempt() {
     );
     return;
   }
-  const generation = ++discoveryGeneration;
   stopAttempt();
-  resetAttemptState();
+  currentAttempt = newAttempt();
+  const attempt = currentAttempt;
   render("discovering", { jobActivity: { startedAt: Date.now() } });
   try {
     const snapshot = await source.scan();
-    if (generation !== discoveryGeneration) return;
+    if (!owns(attempt)) return;
     if (snapshot.inputs.length === 0)
       throw Object.assign(new Error("No image references were found on this page."), {
         code: "no-candidates",
@@ -646,7 +671,7 @@ async function startAttempt() {
     );
     await beginAttempt(snapshot.inputs);
   } catch (error) {
-    if (generation === discoveryGeneration) onHostFailure(error);
+    if (owns(attempt)) onHostFailure(error, attempt);
   }
 }
 
@@ -666,11 +691,11 @@ api?.runtime?.onMessage?.addListener((message) => {
   if (message.type === "dz.toolbar-click" && message.sourceTabId === sourceTabId) {
     jobLog.info(
       "toolbar-click-forwarded",
-      `jobId=${sessionId} state=${activeSnapshot?.lifecycle ?? "starting"}`,
+      `jobId=${sessionId} state=${currentAttempt.activeSnapshot?.lifecycle ?? "starting"}`,
     );
-    const terminal = activeSnapshot?.terminal?.type;
+    const terminal = currentAttempt.activeSnapshot?.terminal?.type;
     if (
-      !localFailure &&
+      !currentAttempt.localFailure &&
       terminal !== "completed" &&
       terminal !== "partial-completed" &&
       terminal !== "failed" &&

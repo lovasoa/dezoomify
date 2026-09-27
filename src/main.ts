@@ -94,26 +94,67 @@ import { createWebQueue, enqueueWebQueue } from "./queue.ts";
 
 const preview = createPreviewControls();
 
+function newAttempt() {
+  const attempt = {
+    retired: false,
+    settle: () => {},
+    jobHandle: null as JobHandle | null,
+    resultBlobUrl: null as string | null,
+    resultTitle: undefined as string | undefined,
+    activeSnapshot: null as JobSnapshot | null,
+    displayOnlyActive: false,
+    hostFailure: null as StructuredError | null,
+    lastEngineFailureKey: null as string | null,
+    pendingRecoveryGeneration: null as number | null,
+    activeAssembly: null as ReturnType<typeof createBrowserAssembly> | null,
+    jobActivity: null! as ReturnType<typeof createJobActivity>,
+    tileAttempts: 0,
+    metadataAttempts: [] as Array<{
+      at: number;
+      transport: string;
+      target: string;
+      outcome: string;
+      durationMs: number;
+      bytes?: number;
+    }>,
+    tileThrottle: createTileThrottle(),
+    webFetcher: null! as WebFetcher,
+    viewCtx: createViewContext(),
+  };
+  attempt.jobActivity = createJobActivity({
+    onUpdate: () => {
+      if (owns(attempt)) update();
+    },
+  });
+  attempt.webFetcher = makeWebFetcher(attempt);
+  return attempt;
+}
+type WebAttempt = ReturnType<typeof newAttempt>;
+let currentAttempt: WebAttempt;
+function owns(attempt: WebAttempt): boolean {
+  return currentAttempt === attempt && !attempt.retired;
+}
+
+function retireAttempt(): void {
+  currentAttempt.retired = true;
+  currentAttempt.settle();
+  currentAttempt.jobActivity.stopHeartbeat();
+  disposeAttempt();
+  if (currentAttempt.resultBlobUrl) URL.revokeObjectURL(currentAttempt.resultBlobUrl);
+}
+
 // One browser service attempt (worker, session, abort scope, disposal). The
 // service owns the engine host; product code here keeps URL input, transport
 // product actions, history, queue, and view wiring only.
-let jobHandle: JobHandle | null = null;
-let activeRun = 0;
-let resultBlobUrl: string | null = null;
-let resultTitle: string | undefined;
 // Single authoritative snapshot of the active job, folded by the job service.
-let activeSnapshot: JobSnapshot | null = null;
 // Host-known display-only flag (tainted canvas): passed explicitly to
 // presentSnapshot until the engine snapshot round-trips with
 // output.disposition. Never written into the DTO.
-let displayOnlyActive = false;
 // Host-local failure that never reached an engine snapshot (invalid input,
 // host rejections). View telemetry only; renders through presentFailure.
-let hostFailure: StructuredError | null = null;
 // Dedupe key for the engine-failure presentation below: failurePresentationOf
 // runs on every render, so without this the failure would log and rebuild on
 // every heartbeat (and the rebuild's re-render would recurse forever).
-let lastEngineFailureKey: string | null = null;
 
 // Recent-jobs history: local-only ledger, newest first, at most
 // 20 entries. Each entry keeps its full source address.
@@ -158,7 +199,7 @@ function recordWebHistory(url: string, width: number, height: number, format: st
   if (!entry) return;
   webHistory = pushHistory(webHistory, entry);
   saveHistoryStore(webHistoryStore, HISTORY_KEY_WEBSITE, webHistory);
-  viewCtx.history = [...webHistory];
+  currentAttempt.viewCtx.history = [...webHistory];
 }
 
 // Website single-queue: enqueue while a job runs, sequential. The
@@ -169,49 +210,38 @@ function recordWebHistory(url: string, width: number, height: number, format: st
 let webQueue = createWebQueue();
 
 // --- Live job activity (drives the progressive-disclosure job view) ---
-const jobActivity = createJobActivity({ onUpdate: update });
 // Shared structured logger: console output plus the same lines mirrored into
 // the job view's technical-details log (and copied diagnostics). The `web`
 // context is the default here, so lines carry no bracket; runtime lines from
 // the shared fetchers/painters join under the `runtime` code.
 const webLog = createLogger("web", { defaultContext: "web" });
-webLog.addSink((entry) => jobActivity.pushLog(entry.line));
-let tileAttempts = 0;
-const metadataAttempts: Array<{
-  at: number;
-  transport: string;
-  target: string;
-  outcome: string;
-  durationMs: number;
-  bytes?: number;
-}> = [];
-
+webLog.addSink((entry) => currentAttempt.jobActivity.pushLog(entry.line));
 function resetActivity(url: string): void {
-  tileAttempts = 0;
-  metadataAttempts.length = 0;
-  jobActivity.reset(url, REQUEST_TIMEOUT_MS);
-  jobActivity.state.detail = `Contacting ${hostOf(url)}…`;
-  viewCtx.jobActivity = jobActivity.state;
+  currentAttempt.tileAttempts = 0;
+  currentAttempt.metadataAttempts.length = 0;
+  currentAttempt.jobActivity.reset(url, REQUEST_TIMEOUT_MS);
+  currentAttempt.jobActivity.state.detail = `Contacting ${hostOf(url)}…`;
+  currentAttempt.viewCtx.jobActivity = currentAttempt.jobActivity.state;
 }
 
 /** Keep diagnostics bounded and useful without retaining individual tile URLs. */
-function refreshDiagnostics(): void {
-  const a = jobActivity.state;
+function refreshDiagnostics(attempt = currentAttempt): void {
+  const a = attempt.jobActivity.state;
   const lines: string[] = [];
-  if (metadataAttempts.length > 0) {
+  if (attempt.metadataAttempts.length > 0) {
     lines.push("Metadata requests");
-    for (const attempt of metadataAttempts) {
+    for (const entry of attempt.metadataAttempts) {
       const size =
-        attempt.bytes === undefined ? "" : ` · ${Math.max(1, Math.round(attempt.bytes / 1024))} KB`;
+        entry.bytes === undefined ? "" : ` · ${Math.max(1, Math.round(entry.bytes / 1024))} KB`;
       lines.push(
-        `+${(attempt.at / 1000).toFixed(1)} s  ${attempt.target}  ${attempt.transport}  ${attempt.outcome}  ${attempt.durationMs} ms${size}`,
+        `+${(entry.at / 1000).toFixed(1)} s  ${entry.target}  ${entry.transport}  ${entry.outcome}  ${entry.durationMs} ms${size}`,
       );
     }
   }
-  if (tileAttempts > 0) {
+  if (attempt.tileAttempts > 0) {
     if (lines.length > 0) lines.push("");
     lines.push("Tile acquisition");
-    lines.push(`${tileAttempts} one-attempt requests`);
+    lines.push(`${attempt.tileAttempts} one-attempt requests`);
   }
   a.diagnostics = lines.join("\n");
 }
@@ -221,21 +251,21 @@ function recordMetadataAttempt(
   transport: "direct" | "metadata proxy",
   target: string,
   outcome: string,
-  bytes?: number,
+  bytes: number | undefined,
+  attempt: WebAttempt,
 ): void {
-  metadataAttempts.push({
-    at: Math.max(0, startedAt - (jobActivity.state.startedAt ?? startedAt)),
+  attempt.metadataAttempts.push({
+    at: Math.max(0, startedAt - (attempt.jobActivity.state.startedAt ?? startedAt)),
     transport,
     target,
     outcome,
     durationMs: Math.max(0, Date.now() - startedAt),
     ...(typeof bytes === "number" ? { bytes } : {}),
   });
-  if (metadataAttempts.length > 20) metadataAttempts.splice(0, metadataAttempts.length - 20);
-  refreshDiagnostics();
+  if (attempt.metadataAttempts.length > 20)
+    attempt.metadataAttempts.splice(0, attempt.metadataAttempts.length - 20);
+  refreshDiagnostics(attempt);
 }
-
-const tileThrottle = createTileThrottle();
 
 // The product-specific proxy transport owns the actual /api/proxy POST.
 // Browser-runtime owns direct-first orchestration, fallback, and
@@ -250,34 +280,41 @@ const proxyTransport = createProxyTransport(
   { protocolVersion: 1, maxBytes: PROXY_METADATA_MAX_BYTES },
 );
 
-const webFetcher: WebFetcher = createWebFetcher({
-  proxyTransport,
-  isProxyEligible,
-  classifyHint: (bytes, info) => classifyReadableBytes(bytes, info),
-  hooks: {
-    onRequestStart: (label) => jobActivity.noteRequestStart(label),
-    onRequestEnd: (id, ok) => jobActivity.noteRequestEnd(id, ok),
-    onLog: (line) => webLog.info("runtime", line),
-    onUpdate: update,
-    onMetadataAttempt: ({ startedAt, transport, target, outcome, bytes }) =>
-      recordMetadataAttempt(startedAt, transport, target, outcome, bytes),
-    onTileAttempt: () => {
-      tileAttempts += 1;
-      refreshDiagnostics();
+function makeWebFetcher(attempt: WebAttempt): WebFetcher {
+  return createWebFetcher({
+    proxyTransport,
+    isProxyEligible,
+    classifyHint: (bytes, info) => classifyReadableBytes(bytes, info),
+    hooks: {
+      onRequestStart: (label) => attempt.jobActivity.noteRequestStart(label),
+      onRequestEnd: (id, ok) => attempt.jobActivity.noteRequestEnd(id, ok),
+      onLog: (line) => {
+        if (owns(attempt)) webLog.info("runtime", line);
+      },
+      onUpdate: () => {
+        if (owns(attempt)) update();
+      },
+      onMetadataAttempt: ({ startedAt, transport, target, outcome, bytes }) =>
+        recordMetadataAttempt(startedAt, transport, target, outcome, bytes, attempt),
+      onTileAttempt: () => {
+        attempt.tileAttempts += 1;
+        refreshDiagnostics(attempt);
+      },
     },
-  },
-  messages: {
-    rateLimitedBySite: RATE_LIMITED_BY_SITE_MESSAGE,
-    siteBusy: SITE_BUSY_MESSAGE,
-    discoveryFailed: (_via) =>
-      noImageFoundError().message ?? "No zoomable image was found at this address.",
-  },
-  throttle: (url) => tileThrottle.throttle(url),
-});
+    messages: {
+      rateLimitedBySite: RATE_LIMITED_BY_SITE_MESSAGE,
+      siteBusy: SITE_BUSY_MESSAGE,
+      discoveryFailed: (_via) =>
+        noImageFoundError().message ?? "No zoomable image was found at this address.",
+    },
+    throttle: (url) => attempt.tileThrottle.throttle(url),
+  });
+}
+currentAttempt = newAttempt();
 /** Tear down the active service attempt: worker, session, assembly, buffers. */
 function disposeAttempt(): void {
-  const handle = jobHandle;
-  jobHandle = null;
+  const handle = currentAttempt.jobHandle;
+  currentAttempt.jobHandle = null;
   try {
     void handle?.dispose();
   } catch {
@@ -290,8 +327,6 @@ function headerRecord(headers: Header[] | undefined): Record<string, string> {
   return Object.fromEntries((headers ?? []).map(({ name, value }) => [name, value]));
 }
 
-let activeAssembly: ReturnType<typeof createBrowserAssembly> | null = null;
-
 /** Device limit tier inputs: client hints where available, else the UA. */
 function clientHints(): ClientHints {
   return navigator as unknown as ClientHints;
@@ -303,6 +338,7 @@ let tryMaximumNext = false;
 function createAssembly(
   sourceUrl: string,
   args: BrowserAssemblyArgs,
+  attempt: WebAttempt,
 ): ReturnType<typeof createBrowserAssembly> {
   return createBrowserAssembly({
     ...args,
@@ -315,27 +351,37 @@ function createAssembly(
       setCanvasVisible(document, true);
       preview.resetTransform(document);
     },
-    save: (blob, width, height) => {
-      if (resultBlobUrl) URL.revokeObjectURL(resultBlobUrl);
-      resultBlobUrl = URL.createObjectURL(blob);
-      viewCtx.completedInfo = { width, height, mime: "image/png", blobUrl: resultBlobUrl };
-      viewCtx.originClean = true;
+    save: (blob, width, height, signal) => {
+      signal.throwIfAborted();
+      if (!owns(attempt)) throw new DOMException("Result retired", "AbortError");
+      if (attempt.resultBlobUrl) URL.revokeObjectURL(attempt.resultBlobUrl);
+      attempt.resultBlobUrl = URL.createObjectURL(blob);
+      attempt.viewCtx.completedInfo = {
+        width,
+        height,
+        mime: "image/png",
+        blobUrl: attempt.resultBlobUrl,
+      };
+      attempt.viewCtx.originClean = true;
       return "browser-save-ready";
     },
     limits: browserLimitsFor(clientHints()),
     onDisplayOnly: () => {
-      if (viewCtx.originClean === false) return;
-      viewCtx.originClean = false;
-      viewCtx.sourceUrl = sourceUrl;
-      viewCtx.desktopHandoffUrl = desktopHandoffLink(sourceUrl);
+      if (!owns(attempt)) return;
+      if (attempt.viewCtx.originClean === false) return;
+      attempt.viewCtx.originClean = false;
+      attempt.viewCtx.sourceUrl = sourceUrl;
+      attempt.viewCtx.desktopHandoffUrl = desktopHandoffLink(sourceUrl);
       // Display-only is a host-known output fact; it rides an explicit
       // presentation flag, never a forged snapshot field.
-      displayOnlyActive = true;
-      const dims = activeAssembly?.dimensions();
+      attempt.displayOnlyActive = true;
+      const dims = attempt.activeAssembly?.dimensions();
       recordWebHistory(sourceUrl, dims?.width ?? 0, dims?.height ?? 0, "display");
       update();
     },
-    log: (line) => webLog.info("runtime", line),
+    log: (line) => {
+      if (owns(attempt)) webLog.info("runtime", line);
+    },
   });
 }
 
@@ -346,12 +392,12 @@ function presentEngineFailure(error: EngineError, url: string): void {
   if (wantsDesktopHandoff(code)) {
     const link = desktopHandoffLink(url);
     if (link !== "") {
-      viewCtx.sourceUrl = url;
-      viewCtx.desktopHandoffUrl = link;
+      currentAttempt.viewCtx.sourceUrl = url;
+      currentAttempt.viewCtx.desktopHandoffUrl = link;
     }
   }
   const discovery = classifyDiscoveryCopy(code);
-  hostFailure = describeFailure({
+  currentAttempt.hostFailure = describeFailure({
     code,
     engineDetail: error.detail ?? error.message,
     // The metadata proxy classifies its own outcome into user copy. Other
@@ -359,7 +405,8 @@ function presentEngineFailure(error: EngineError, url: string): void {
     ...(error.transport === "metadata-proxy" ? { message: error.message } : {}),
     phase: error.phase,
     retryable: discovery ? discovery.retryable : error.retryable,
-    transport: error.transport ?? errorTransportFor(code, webFetcher.getActiveTransport()),
+    transport:
+      error.transport ?? errorTransportFor(code, currentAttempt.webFetcher.getActiveTransport()),
     host: hostOf(url),
     url: error.request,
     http: error.http,
@@ -393,9 +440,12 @@ function classifyDiscoveryCopy(code: string): { retryable: boolean } | null {
 function reportProgress(current: number, total: number, message: string): void {
   // Progress text is view telemetry only: it rides the shared view context
   // and never gates engine commands.
-  viewCtx.currentProgress = { ...(viewCtx.currentProgress ?? {}), message };
-  jobActivity.touchProgress();
-  jobActivity.scheduleUpdate();
+  currentAttempt.viewCtx.currentProgress = {
+    ...(currentAttempt.viewCtx.currentProgress ?? {}),
+    message,
+  };
+  currentAttempt.jobActivity.touchProgress();
+  currentAttempt.jobActivity.scheduleUpdate();
 }
 
 function writeHash(url: string): void {
@@ -426,67 +476,78 @@ function clearHash(): void {
 function failurePresentationOf(snapshot: JobSnapshot): SnapshotPresentation | null {
   const terminal = snapshot.terminal;
   if (!terminal || terminal.type !== "failed") return null;
-  // Runs on every render: present (log + hostFailure) exactly once per
+  // Runs on every render: present (log + currentAttempt.hostFailure) exactly once per
   // distinct engine failure, then reuse the stored presentation inputs.
   const key = `${terminal.error.code}\n${terminal.error.message}\n${terminal.error.detail ?? ""}`;
-  if (key !== lastEngineFailureKey) {
-    presentEngineFailure(terminal.error, viewCtx.jobActivity?.url ?? "");
-    lastEngineFailureKey = key;
+  if (key !== currentAttempt.lastEngineFailureKey) {
+    presentEngineFailure(terminal.error, currentAttempt.viewCtx.jobActivity?.url ?? "");
+    currentAttempt.lastEngineFailureKey = key;
   }
-  return hostFailure ? presentFailure(hostFailure, webFetcher.getActiveTransport()) : null;
+  return currentAttempt.hostFailure
+    ? presentFailure(currentAttempt.hostFailure, currentAttempt.webFetcher.getActiveTransport())
+    : null;
 }
 
 function activeTransport(): string | null {
-  return webFetcher.getActiveTransport();
+  return currentAttempt.webFetcher.getActiveTransport();
 }
 
 function currentPresentation(): SnapshotPresentation {
-  // Render the authoritative snapshot directly; hostFailure covers failures
+  // Render the authoritative snapshot directly; currentAttempt.hostFailure covers failures
   // that never reached a snapshot. Display-only rides an explicit host flag.
-  if (hostFailure) return presentFailure(hostFailure, activeTransport());
-  if (!activeSnapshot) return presentIdle();
+  if (currentAttempt.hostFailure)
+    return presentFailure(currentAttempt.hostFailure, activeTransport());
+  if (!currentAttempt.activeSnapshot) return presentIdle();
   return (
-    failurePresentationOf(activeSnapshot) ??
-    presentSnapshot(activeSnapshot, activeTransport(), { displayOnly: displayOnlyActive })
+    failurePresentationOf(currentAttempt.activeSnapshot) ??
+    presentSnapshot(currentAttempt.activeSnapshot, activeTransport(), {
+      displayOnly: currentAttempt.displayOnlyActive,
+    })
   );
 }
 
 function isTerminalNow(): boolean {
-  return hostFailure !== null || (activeSnapshot?.terminal ?? null) !== null;
+  return (
+    currentAttempt.hostFailure !== null ||
+    (currentAttempt.activeSnapshot?.terminal ?? null) !== null
+  );
 }
 
 async function runJob(url: string, origin = url): Promise<void> {
-  const run = ++activeRun;
-  webFetcher.resetActiveTransport();
-  tileThrottle.reset();
+  retireAttempt();
+  currentAttempt = newAttempt();
+  const attempt = currentAttempt;
+  attempt.webFetcher.resetActiveTransport();
+  attempt.tileThrottle.reset();
   resetActivity(origin);
   setCanvasVisible(document, false);
   preview.resetTransform(document);
-  activeSnapshot = null;
-  displayOnlyActive = false;
-  hostFailure = null;
-  lastEngineFailureKey = null;
-  viewCtx.currentProgress = undefined;
-  viewCtx.completedInfo = undefined;
-  viewCtx.sourceUrl = undefined;
-  viewCtx.desktopHandoffUrl = undefined;
-  viewCtx.originClean = true;
-  resultTitle = undefined;
+  attempt.activeSnapshot = null;
+  attempt.displayOnlyActive = false;
+  attempt.hostFailure = null;
+  attempt.lastEngineFailureKey = null;
+  attempt.viewCtx.currentProgress = undefined;
+  attempt.viewCtx.completedInfo = undefined;
+  attempt.viewCtx.sourceUrl = undefined;
+  attempt.viewCtx.desktopHandoffUrl = undefined;
+  attempt.viewCtx.originClean = true;
+  attempt.resultTitle = undefined;
   // Hash owns the active job only: queued URLs never touch the hash until
   // they become active and reach this point.
   writeHash(origin);
-  jobActivity.startHeartbeat();
+  attempt.jobActivity.startHeartbeat();
   update();
 
   let settle: () => void = () => {};
   const finished = new Promise<void>((resolve) => {
     settle = resolve;
+    attempt.settle = resolve;
   });
   let settledOutcome: "done" | "failed" | "cancelled" = "done";
 
   const onHostFailure = (error: unknown): void => {
-    if (run !== activeRun) return;
-    if (hostFailure || activeSnapshot?.terminal) return;
+    if (!owns(attempt)) return;
+    if (attempt.hostFailure || attempt.activeSnapshot?.terminal) return;
     const structured = error as {
       code?: unknown;
       message?: unknown;
@@ -498,11 +559,11 @@ async function runJob(url: string, origin = url): Promise<void> {
     if (wantsDesktopHandoff(code)) {
       const link = desktopHandoffLink(origin);
       if (link !== "") {
-        viewCtx.sourceUrl = origin;
-        viewCtx.desktopHandoffUrl = link;
+        attempt.viewCtx.sourceUrl = origin;
+        attempt.viewCtx.desktopHandoffUrl = link;
       }
     }
-    hostFailure = describeFailure({
+    attempt.hostFailure = describeFailure({
       code,
       engineDetail: typeof structured?.detail === "string" ? structured.detail : undefined,
       message: typeof structured?.message === "string" ? structured.message : undefined,
@@ -525,7 +586,7 @@ async function runJob(url: string, origin = url): Promise<void> {
     createWorker: () => new Worker(new URL("./worker.js", import.meta.url), { type: "module" }),
     fetchResource: async (request, signal) => {
       if (request.purpose === "metadata") {
-        const result = await webFetcher.fetchMetadataFor(
+        const result = await attempt.webFetcher.fetchMetadataFor(
           request.uri,
           headerRecord(request.headers),
           signal,
@@ -537,7 +598,7 @@ async function runJob(url: string, origin = url): Promise<void> {
             : {}),
         };
       }
-      const result = await webFetcher.fetchTileFor(
+      const result = await attempt.webFetcher.fetchTileFor(
         request.uri,
         headerRecord(request.headers),
         signal,
@@ -549,11 +610,13 @@ async function runJob(url: string, origin = url): Promise<void> {
         signal,
         hooks: {
           onLog: (line) => {
-            if (run === activeRun && jobHandle) webLog.info("runtime", line);
+            if (owns(attempt) && attempt.jobHandle) webLog.info("runtime", line);
           },
-          onRequestStart: (label) => jobActivity.noteRequestStart(label),
-          onRequestEnd: (id, ok) => jobActivity.noteRequestEnd(id, ok),
-          onUpdate: update,
+          onRequestStart: (label) => attempt.jobActivity.noteRequestStart(label),
+          onRequestEnd: (id, ok) => attempt.jobActivity.noteRequestEnd(id, ok),
+          onUpdate: () => {
+            if (owns(attempt)) update();
+          },
         },
       }),
     classifyFailure: (error) => {
@@ -576,31 +639,36 @@ async function runJob(url: string, origin = url): Promise<void> {
       };
     },
     createAssembly: (args) => {
-      const assembly = createAssembly(origin, args);
-      activeAssembly = assembly;
+      const assembly = createAssembly(origin, args, attempt);
+      attempt.activeAssembly = assembly;
       return assembly;
     },
     quotas: { max_concurrent_fetches: websiteTileConcurrency() },
     onRecoveryRequested: (generation) => {
       // Website policy answers partial decisions immediately as discard;
       // the engine owns the consequence.
-      void jobHandle?.command({ type: "answer-partial", generation, decision: "discard" });
+      if (!owns(attempt)) return;
+      if (attempt.jobHandle) {
+        void attempt.jobHandle.command({ type: "answer-partial", generation, decision: "discard" });
+      } else {
+        attempt.pendingRecoveryGeneration = generation;
+      }
     },
     log: (level, code, detail) => {
-      webLog.log(level, code, detail);
+      if (owns(attempt)) webLog.log(level, code, detail);
     },
   });
 
   const onSnapshot = (snapshot: JobSnapshot): void => {
-    if (run !== activeRun) return;
-    activeSnapshot = snapshot;
+    if (!owns(attempt)) return;
+    attempt.activeSnapshot = snapshot;
     const imageIndex = snapshot.selection.image;
     const selected =
       imageIndex === null || imageIndex === undefined
         ? undefined
         : snapshot.selection.catalog?.entries[imageIndex];
     const image = selected?.kind === "image" ? selected : undefined;
-    resultTitle = typeof image?.title === "string" ? image.title : undefined;
+    attempt.resultTitle = typeof image?.title === "string" ? image.title : undefined;
 
     const completed = snapshot.progress.completed;
     const total = snapshot.progress.total ?? null;
@@ -612,7 +680,7 @@ async function runJob(url: string, origin = url): Promise<void> {
     const terminalOutcome = snapshot.terminal;
     const terminalKind = terminalOutcome?.type;
     if (terminalOutcome && terminalKind) {
-      if (activeAssembly?.isTainted() === true) {
+      if (attempt.activeAssembly?.isTainted() === true) {
         settledOutcome = "done";
         settle();
         return;
@@ -620,8 +688,8 @@ async function runJob(url: string, origin = url): Promise<void> {
       if (terminalKind === "completed" || terminalKind === "partial-completed") {
         recordWebHistory(
           origin,
-          viewCtx.completedInfo?.width ?? 0,
-          viewCtx.completedInfo?.height ?? 0,
+          attempt.viewCtx.completedInfo?.width ?? 0,
+          attempt.viewCtx.completedInfo?.height ?? 0,
           "png",
         );
         settledOutcome = "done";
@@ -656,22 +724,27 @@ async function runJob(url: string, origin = url): Promise<void> {
       },
       { snapshot: onSnapshot, failure: onHostFailure },
     );
-    if (run !== activeRun) {
+    if (!owns(attempt)) {
       await handle.dispose();
       return;
     }
-    jobHandle = handle;
+    attempt.jobHandle = handle;
+    if (attempt.pendingRecoveryGeneration !== null) {
+      const generation = attempt.pendingRecoveryGeneration;
+      attempt.pendingRecoveryGeneration = null;
+      void handle.command({ type: "answer-partial", generation, decision: "discard" });
+    }
     await finished;
-    if (run !== activeRun) return;
+    if (!owns(attempt)) return;
   } catch (error) {
-    if (run !== activeRun) return;
+    if (!owns(attempt)) return;
     onHostFailure(error);
   }
-  if (run !== activeRun) return;
-  jobActivity.stopHeartbeat();
-  jobActivity.refreshLongestPending();
+  if (!owns(attempt)) return;
+  attempt.jobActivity.stopHeartbeat();
+  attempt.jobActivity.refreshLongestPending();
   disposeAttempt();
-  activeAssembly = null;
+  attempt.activeAssembly = null;
   const queueOutcome: "done" | "failed" | "cancelled" = settledOutcome;
   // Sequential queue: the active entry settles, then the first waiting
   // entry (if any) becomes active and starts. A failed entry never stops
@@ -681,9 +754,9 @@ async function runJob(url: string, origin = url): Promise<void> {
   const next = settled.next;
   if (next) {
     if (isTerminalNow()) {
-      activeSnapshot = null;
-      displayOnlyActive = false;
-      hostFailure = null;
+      attempt.activeSnapshot = null;
+      attempt.displayOnlyActive = false;
+      attempt.hostFailure = null;
     }
     const summary = summarizeQueue(webQueue);
     webLog.info(
@@ -698,7 +771,7 @@ function submitQueuedUrl(url: string): void {
   const res = enqueueWebQueue(webQueue, url);
   webQueue = res.queue;
   if (res.code !== "ok" || !res.entry) {
-    hostFailure = {
+    currentAttempt.hostFailure = {
       code: "INVALID_URL",
       category: "validation",
       retryable: false,
@@ -720,16 +793,18 @@ function submitQueuedUrl(url: string): void {
 
 const appContainer = typeof document !== "undefined" ? document.getElementById("app") : null;
 
-const viewCtx: ViewContext = {
-  capabilities: {
-    extensionAvailable: false,
-    nativeAvailable: false,
-    browserCanSave: true,
-  },
-  originClean: true,
-  initialUrl: undefined,
-  history: [...webHistory],
-};
+function createViewContext(): ViewContext {
+  return {
+    capabilities: {
+      extensionAvailable: false,
+      nativeAvailable: false,
+      browserCanSave: true,
+    },
+    originClean: true,
+    initialUrl: undefined,
+    history: [...webHistory],
+  };
+}
 
 /**
  * Keep the tab title useful while a job runs: `Dezoomify <host>`.
@@ -742,7 +817,10 @@ function syncPageTitle(status: string): void {
       if (document.title !== DEFAULT_PAGE_TITLE) document.title = DEFAULT_PAGE_TITLE;
       return;
     }
-    const url = jobActivity.state.url ?? viewCtx.jobActivity?.url ?? viewCtx.initialUrl;
+    const url =
+      currentAttempt.jobActivity.state.url ??
+      currentAttempt.viewCtx.jobActivity?.url ??
+      currentAttempt.viewCtx.initialUrl;
     const next = jobPageTitle(url);
     if (document.title !== next) document.title = next;
   } catch {
@@ -752,23 +830,27 @@ function syncPageTitle(status: string): void {
 
 function update(): void {
   if (!appContainer) return;
+  const attempt = currentAttempt;
   const presentation = currentPresentation();
   // In-flight tile count rides the context; counts come from the snapshot.
   // Telemetry (pending requests, progress text) never gates engine commands.
-  const keptMessage = viewCtx.currentProgress?.message;
-  const snapTotal = activeSnapshot?.progress.total ?? null;
-  const snapDone = activeSnapshot?.progress.completed ?? 0;
+  const keptMessage = attempt.viewCtx.currentProgress?.message;
+  const snapTotal = attempt.activeSnapshot?.progress.total ?? null;
+  const snapDone = attempt.activeSnapshot?.progress.completed ?? 0;
   if (presentation.phase === "job" && snapTotal) {
-    viewCtx.currentProgress = {
-      active: Math.min(jobActivity.state.pendingRequests ?? 0, Math.max(0, snapTotal - snapDone)),
+    attempt.viewCtx.currentProgress = {
+      active: Math.min(
+        attempt.jobActivity.state.pendingRequests ?? 0,
+        Math.max(0, snapTotal - snapDone),
+      ),
       ...(keptMessage ? { message: keptMessage } : {}),
     };
   } else if (keptMessage && presentation.phase === "job") {
-    viewCtx.currentProgress = { message: keptMessage };
+    attempt.viewCtx.currentProgress = { message: keptMessage };
   } else if (presentation.phase !== "job") {
-    viewCtx.currentProgress = undefined;
+    attempt.viewCtx.currentProgress = undefined;
   }
-  if (viewCtx.jobActivity) jobActivity.refreshLongestPending();
+  if (attempt.viewCtx.jobActivity) attempt.jobActivity.refreshLongestPending();
   syncPageTitle(presentation.phase === "job" ? "downloading" : presentation.phase);
   renderView(
     appContainer,
@@ -776,10 +858,10 @@ function update(): void {
     {
       onSubmitUrl(url: string) {
         if (isLocalFileUrl(url)) {
-          viewCtx.initialUrl = url;
-          viewCtx.sourceUrl = url;
-          viewCtx.desktopHandoffUrl = undefined;
-          hostFailure = {
+          attempt.viewCtx.initialUrl = url;
+          attempt.viewCtx.sourceUrl = url;
+          attempt.viewCtx.desktopHandoffUrl = undefined;
+          attempt.hostFailure = {
             code: "INVALID_URL",
             category: "validation",
             retryable: false,
@@ -793,7 +875,7 @@ function update(): void {
           return;
         }
         if (!isValidInputUrl(url)) {
-          hostFailure = {
+          attempt.hostFailure = {
             code: "INVALID_URL",
             category: "validation",
             retryable: false,
@@ -805,55 +887,62 @@ function update(): void {
         submitQueuedUrl(url);
       },
       onPause() {
+        if (!owns(attempt)) return;
         // Pause v1: stop scheduling new tiles; in-flight finishes, the
         // canvas is retained, resume re-drives the FIFO queue.
-        void jobHandle?.command({ type: "pause" });
-        jobActivity.pause();
+        void attempt.jobHandle?.command({ type: "pause" });
+        attempt.jobActivity.pause();
         webLog.info("paused", "no new pieces are being fetched");
         update();
       },
       onResume() {
-        void jobHandle?.command({ type: "resume" });
-        jobActivity.resume();
+        if (!owns(attempt)) return;
+        void attempt.jobHandle?.command({ type: "resume" });
+        attempt.jobActivity.resume();
         webLog.info("resumed", "fetching queued pieces again");
         update();
       },
       onCancel() {
+        if (!owns(attempt)) return;
         // Stop returns directly to the initial view. Effects from the retired
         // run finish harmlessly without mutating the replacement job.
         stopActiveJob();
         update();
       },
       onReset() {
+        if (!owns(attempt)) return;
         stopActiveJob();
         update();
       },
       onTryMaximum() {
+        if (!owns(attempt)) return;
         // Replace the current attempt with one targeting the maximum known
         // resolution; failures report with the desktop-app action.
-        const lastUrl = viewCtx.jobActivity?.url ?? viewCtx.initialUrl;
+        const lastUrl = attempt.viewCtx.jobActivity?.url ?? attempt.viewCtx.initialUrl;
         if (!lastUrl || !isValidInputUrl(lastUrl)) return;
         stopActiveJob();
         tryMaximumNext = true;
         submitQueuedUrl(lastUrl);
       },
       onRetrySameUrl() {
-        const lastUrl = viewCtx.jobActivity?.url ?? viewCtx.initialUrl;
+        if (!owns(attempt)) return;
+        const lastUrl = attempt.viewCtx.jobActivity?.url ?? attempt.viewCtx.initialUrl;
         if (!lastUrl || !isValidInputUrl(lastUrl)) return;
-        viewCtx.currentProgress = undefined;
-        viewCtx.completedInfo = undefined;
-        viewCtx.sourceUrl = undefined;
-        viewCtx.desktopHandoffUrl = undefined;
+        attempt.viewCtx.currentProgress = undefined;
+        attempt.viewCtx.completedInfo = undefined;
+        attempt.viewCtx.sourceUrl = undefined;
+        attempt.viewCtx.desktopHandoffUrl = undefined;
         submitQueuedUrl(lastUrl);
       },
       onSave() {
-        if (!resultBlobUrl) return;
+        if (!owns(attempt)) return;
+        if (!attempt.resultBlobUrl) return;
         saveBlobViaAnchor(
           document,
-          resultBlobUrl,
-          viewCtx.completedInfo?.width,
-          viewCtx.completedInfo?.height,
-          resultTitle,
+          attempt.resultBlobUrl,
+          attempt.viewCtx.completedInfo?.width,
+          attempt.viewCtx.completedInfo?.height,
+          attempt.resultTitle,
         );
       },
       onCopyDiagnostics(text: string) {
@@ -904,35 +993,33 @@ function update(): void {
       onClearHistory() {
         webHistory = [];
         clearHistoryStore(webHistoryStore, HISTORY_KEY_WEBSITE);
-        viewCtx.history = [];
+        attempt.viewCtx.history = [];
         update();
       },
     },
-    viewCtx,
+    attempt.viewCtx,
   );
 }
 
 function resetJobViewState(): void {
-  activeSnapshot = null;
-  displayOnlyActive = false;
-  hostFailure = null;
-  lastEngineFailureKey = null;
-  lastEngineFailureKey = null;
-  viewCtx.currentProgress = undefined;
-  viewCtx.completedInfo = undefined;
-  viewCtx.jobActivity = undefined;
-  viewCtx.initialUrl = undefined;
-  viewCtx.sourceUrl = undefined;
-  viewCtx.desktopHandoffUrl = undefined;
+  currentAttempt.activeSnapshot = null;
+  currentAttempt.displayOnlyActive = false;
+  currentAttempt.hostFailure = null;
+  currentAttempt.lastEngineFailureKey = null;
+  currentAttempt.viewCtx.currentProgress = undefined;
+  currentAttempt.viewCtx.completedInfo = undefined;
+  currentAttempt.viewCtx.jobActivity = undefined;
+  currentAttempt.viewCtx.initialUrl = undefined;
+  currentAttempt.viewCtx.sourceUrl = undefined;
+  currentAttempt.viewCtx.desktopHandoffUrl = undefined;
 }
 
 /** Retire the active run and every queued entry; the view returns to idle. */
 function stopActiveJob(): void {
-  activeRun += 1;
-  jobActivity.stopHeartbeat();
-  disposeAttempt();
-  webFetcher.resetActiveTransport();
-  tileThrottle.reset();
+  retireAttempt();
+  currentAttempt = newAttempt();
+  currentAttempt.webFetcher.resetActiveTransport();
+  currentAttempt.tileThrottle.reset();
   setCanvasVisible(document, false);
   preview.resetTransform(document);
   // Reset clears the whole queue: no new work is issued afterwards.
@@ -940,9 +1027,9 @@ function stopActiveJob(): void {
   webQueue = createWebQueue();
   resetJobViewState();
   clearHash();
-  if (resultBlobUrl) {
-    URL.revokeObjectURL(resultBlobUrl);
-    resultBlobUrl = null;
+  if (currentAttempt.resultBlobUrl) {
+    URL.revokeObjectURL(currentAttempt.resultBlobUrl);
+    currentAttempt.resultBlobUrl = null;
   }
 }
 
@@ -950,11 +1037,11 @@ function startFromHash(): void {
   if (typeof window === "undefined") return;
   const raw = parseHash(window.location.hash);
   if (raw && looksLikeUsableUrl(raw) && isValidInputUrl(raw)) {
-    viewCtx.initialUrl = raw;
+    currentAttempt.viewCtx.initialUrl = raw;
     update();
     runJob(raw);
   } else if (raw) {
-    viewCtx.initialUrl = raw;
+    currentAttempt.viewCtx.initialUrl = raw;
     update();
   }
 }
@@ -979,11 +1066,11 @@ if (appContainer) {
   if (typeof window !== "undefined") {
     window.addEventListener("hashchange", () => {
       const raw = parseHash(window.location.hash);
-      const current = viewCtx.jobActivity?.url;
+      const current = currentAttempt.viewCtx.jobActivity?.url;
       if (raw && raw !== current && looksLikeUsableUrl(raw) && isValidInputUrl(raw)) {
         runJob(raw);
       } else if (!raw && !current) {
-        viewCtx.initialUrl = undefined;
+        currentAttempt.viewCtx.initialUrl = undefined;
         update();
       }
     });

@@ -115,20 +115,37 @@ const service = createDesktopJobService({
   },
 });
 
+function newAttempt() {
+  return {
+    retired: false,
+    settled: false,
+    activeHandle: null as DesktopJobHandle | null,
+    currentSnapshot: null as JobSnapshot | null,
+    localFailure: null as StructuredError | null,
+    lastInputUrl: "",
+    activeQueueId: null as string | null,
+    heartbeatTimer: null as ReturnType<typeof setInterval> | null,
+    outputActionError: undefined as { action: "open" | "folder"; code: string } | undefined,
+    recoveryReturnFocus: null as HTMLElement | null,
+    lastRecoveryKey: null as string | null,
+    viewCtx: createViewContext(),
+  };
+}
+type DesktopAttempt = ReturnType<typeof newAttempt>;
+let currentAttempt = newAttempt();
+function owns(attempt: DesktopAttempt): boolean {
+  return currentAttempt === attempt && !attempt.retired;
+}
+
 // The job this window currently follows. Snapshots arrive verbatim from
 // the typed service and render directly; no follow guard or partial field
 // mirrors live here. Product wiring only: the active handle plus the
 // sequential queue and the local history ledger below.
-let activeHandle: DesktopJobHandle | null = null;
 // Authoritative snapshot of the active job; null before any start. Set
 // verbatim from the observer with no fold and no follow check: late
 // snapshots for retired jobs never arrive (their observer was disposed).
-let currentSnapshot: JobSnapshot | null = null;
 // Host-local failure that never reached an engine snapshot (invalid input,
 // rejected start, denied dialog). Renders through presentFailure.
-let localFailure: StructuredError | null = null;
-let submitToken = 0;
-let lastInputUrl = "";
 let grantedFormat: NativeFormat = "png";
 
 // Sequential multi-job queue (todo 5.3): lives in the integration layer
@@ -138,7 +155,6 @@ let grantedFormat: NativeFormat = "png";
 // failed entries retry behind the line. A failed entry never stops the rest;
 // totals mirror the CLI bulk contract. Only redacted origins enter the panel.
 let desktopQueue: DesktopQueue = createDesktopQueue();
-let activeQueueId: string | null = null;
 function desktopQueueEnabled(): boolean {
   try {
     return integration.getCapabilities().bulkSupported === true;
@@ -248,8 +264,8 @@ interface PendingDecision {
 }
 
 function pendingDecisionOf(): PendingDecision | null {
-  if (localFailure) return null;
-  const snapshot = currentSnapshot;
+  if (currentAttempt.localFailure) return null;
+  const snapshot = currentAttempt.currentSnapshot;
   if (!snapshot || snapshot.terminal || snapshot.lifecycle !== "AwaitingPartialDecision")
     return null;
   const decision = snapshot.decision;
@@ -266,8 +282,6 @@ function pendingDecisionOf(): PendingDecision | null {
 // Accessibility (Task 5.2): dialog focus state. Each modal stores the element
 // focused before it opened so focus returns on close. Recovery tracks its key
 // so a new decision moves focus once without stealing it on every tick.
-let recoveryReturnFocus: HTMLElement | null = null;
-let lastRecoveryKey: string | null = null;
 
 // Focusable selectors for trap cycles. All desktop actions are native
 // buttons, inputs, textareas, links, or summaries, so Tab reaches submit,
@@ -312,27 +326,29 @@ function recoveryKeyFor(decision: PendingDecision | null): string | null {
 // Marked partial completion: a kept partial output stays distinguishable
 // from a complete save. Read from the snapshot output account (missing tile
 // ordinals), so the UI can never claim a complete save for partial bytes.
-let outputActionError: { action: "open" | "folder"; code: string } | undefined;
 
 // Live heartbeat for the loading view: advances now and longestPendingMs
 // so the pending box and smooth track stay current between IPC snapshots.
 // The desktop shell reports snapshots (progress.completed/total), not
 // per-request start/end, so the longest wait derives from last progress.
-let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
 function isTerminalNow(): boolean {
-  return localFailure !== null || (currentSnapshot?.terminal ?? null) !== null;
+  return (
+    currentAttempt.localFailure !== null ||
+    (currentAttempt.currentSnapshot?.terminal ?? null) !== null
+  );
 }
 
 // --- Live job activity (drives the progressive-disclosure job view) ---
 
 function activity(): NonNullable<ViewContext["jobActivity"]> {
-  if (!viewCtx.jobActivity) viewCtx.jobActivity = { timeoutMs: REQUEST_TIMEOUT_MS };
-  return viewCtx.jobActivity as NonNullable<ViewContext["jobActivity"]>;
+  if (!currentAttempt.viewCtx.jobActivity)
+    currentAttempt.viewCtx.jobActivity = { timeoutMs: REQUEST_TIMEOUT_MS };
+  return currentAttempt.viewCtx.jobActivity as NonNullable<ViewContext["jobActivity"]>;
 }
 
 function refreshLongestPending(): void {
-  const a = viewCtx.jobActivity;
+  const a = currentAttempt.viewCtx.jobActivity;
   if (!a) return;
   const now = Date.now();
   a.now = now;
@@ -346,17 +362,19 @@ function refreshLongestPending(): void {
 
 function startHeartbeat(): void {
   stopHeartbeat();
+  const attempt = currentAttempt;
   try {
-    heartbeatTimer = setInterval(() => {
+    currentAttempt.heartbeatTimer = setInterval(() => {
+      if (!owns(attempt)) return;
       if (isTerminalNow()) {
         stopHeartbeat();
         return;
       }
-      if (!viewCtx.jobActivity) return;
+      if (!currentAttempt.viewCtx.jobActivity) return;
       refreshLongestPending();
       update();
     }, 500);
-    const t = heartbeatTimer as unknown as { unref?: () => void };
+    const t = currentAttempt.heartbeatTimer as unknown as { unref?: () => void };
     if (t && typeof t.unref === "function") {
       try {
         t.unref();
@@ -365,24 +383,24 @@ function startHeartbeat(): void {
       }
     }
   } catch {
-    heartbeatTimer = null;
+    currentAttempt.heartbeatTimer = null;
   }
 }
 
 function stopHeartbeat(): void {
-  if (heartbeatTimer) {
+  if (currentAttempt.heartbeatTimer) {
     try {
-      clearInterval(heartbeatTimer);
+      clearInterval(currentAttempt.heartbeatTimer);
     } catch {
       // Ignore timer errors.
     }
-    heartbeatTimer = null;
+    currentAttempt.heartbeatTimer = null;
   }
 }
 
 function resetActivity(url: string): void {
   const now = Date.now();
-  viewCtx.jobActivity = {
+  currentAttempt.viewCtx.jobActivity = {
     url,
     startedAt: now,
     now,
@@ -454,8 +472,8 @@ function failLocally(
     settle?: boolean;
   },
 ): void {
-  const sourceUrl = lastInputUrl || activity().url || "";
-  localFailure = describeFailure({
+  const sourceUrl = currentAttempt.lastInputUrl || activity().url || "";
+  currentAttempt.localFailure = describeFailure({
     code,
     engineDetail: trimTechnical(message || ""),
     extraDetail: opts?.detail && opts.detail !== message ? trimTechnical(opts.detail) : undefined,
@@ -465,7 +483,7 @@ function failLocally(
     url: sourceUrl || undefined,
     host: hostOf(sourceUrl),
     extras: [
-      `Status: ${currentSnapshot?.lifecycle ?? "idle"}`,
+      `Status: ${currentAttempt.currentSnapshot?.lifecycle ?? "idle"}`,
       `Origin: ${redactedOriginOnly(sourceUrl) === "" ? "n/a" : redactedOriginOnly(sourceUrl)}`,
     ],
   });
@@ -521,20 +539,21 @@ function diagnosticsSnapshot() {
   return {
     status: presentation.stateLabel ?? presentation.phase,
     transport: presentation.transport,
-    jobId: activeHandle?.id ?? null,
+    jobId: currentAttempt.activeHandle?.id ?? null,
     attempt: undefined,
     sessionId: NATIVE_TRANSPORT,
     nativeTransport: NATIVE_TRANSPORT,
     progress:
-      currentSnapshot &&
-      (currentSnapshot.progress.total !== undefined || currentSnapshot.progress.completed > 0)
+      currentAttempt.currentSnapshot &&
+      (currentAttempt.currentSnapshot.progress.total !== undefined ||
+        currentAttempt.currentSnapshot.progress.completed > 0)
         ? {
-            current: currentSnapshot.progress.completed,
-            total: currentSnapshot.progress.total ?? 0,
+            current: currentAttempt.currentSnapshot.progress.completed,
+            total: currentAttempt.currentSnapshot.progress.total ?? 0,
           }
         : undefined,
-    origin: redactedOriginOnly(lastInputUrl),
-    outputActionError,
+    origin: redactedOriginOnly(currentAttempt.lastInputUrl),
+    outputActionError: currentAttempt.outputActionError,
   };
 }
 
@@ -544,7 +563,7 @@ function failurePresentationOf(snapshot: JobSnapshot): SnapshotPresentation | nu
   const terminal = snapshot.terminal;
   if (!terminal || terminal.type !== "failed") return null;
   const dto = terminal.error;
-  const sourceUrl = lastInputUrl || activity().url || "";
+  const sourceUrl = currentAttempt.lastInputUrl || activity().url || "";
   const error = describeFailure({
     code: dto.code,
     engineDetail: dto.detail ?? dto.message,
@@ -562,18 +581,20 @@ function failurePresentationOf(snapshot: JobSnapshot): SnapshotPresentation | nu
 }
 
 function currentPresentation(): SnapshotPresentation {
-  if (localFailure) return presentFailure(localFailure, NATIVE_TRANSPORT);
-  if (!currentSnapshot) return presentIdle();
+  if (currentAttempt.localFailure)
+    return presentFailure(currentAttempt.localFailure, NATIVE_TRANSPORT);
+  if (!currentAttempt.currentSnapshot) return presentIdle();
   return (
-    failurePresentationOf(currentSnapshot) ?? presentSnapshot(currentSnapshot, NATIVE_TRANSPORT)
+    failurePresentationOf(currentAttempt.currentSnapshot) ??
+    presentSnapshot(currentAttempt.currentSnapshot, NATIVE_TRANSPORT)
   );
 }
 
 function clearJobViewState(): void {
-  outputActionError = undefined;
-  viewCtx.currentProgress = undefined;
-  viewCtx.completedInfo = undefined;
-  viewCtx.jobActivity = undefined;
+  currentAttempt.outputActionError = undefined;
+  currentAttempt.viewCtx.currentProgress = undefined;
+  currentAttempt.viewCtx.completedInfo = undefined;
+  currentAttempt.viewCtx.jobActivity = undefined;
   // The encoder choice is a persisted preference (settings.ts output_format,
   // seeded into grantedFormat at boot): a new submit must not reset it to
   // png, or the reloaded choice would never reach the picker.
@@ -603,7 +624,7 @@ function handleSubmitUrl(url: string): void {
       update();
       return;
     }
-    activeQueueId = res.entry.id;
+    currentAttempt.activeQueueId = res.entry.id;
   } else {
     // A submit after a terminal state starts a fresh job; a submit while a
     // non-queue peer still runs retires it (its late snapshots are dropped
@@ -611,23 +632,26 @@ function handleSubmitUrl(url: string): void {
     retireActiveJob();
     const res = enqueueDesktopQueue(desktopQueue, trimmed);
     desktopQueue = res.queue;
-    activeQueueId = res.entry ? res.entry.id : null;
+    currentAttempt.activeQueueId = res.entry ? res.entry.id : null;
   }
-  launchNativeJob(trimmed, ++submitToken);
+  launchNativeJob(trimmed);
 }
 
 /** Stop following the current job; its late events can never move the view. */
 function retireActiveJob(): void {
-  const handle = activeHandle;
-  activeHandle = null;
-  currentSnapshot = null;
-  localFailure = null;
+  currentAttempt.retired = true;
+  const handle = currentAttempt.activeHandle;
+  currentAttempt.activeHandle = null;
+  currentAttempt.currentSnapshot = null;
+  currentAttempt.localFailure = null;
   clearJobViewState();
   if (handle) void handle.dispose().catch(() => undefined);
+  currentAttempt = newAttempt();
 }
 
-function launchNativeJob(trimmed: string, token: number): void {
-  lastInputUrl = trimmed;
+function launchNativeJob(trimmed: string): void {
+  const attempt = currentAttempt;
+  attempt.lastInputUrl = trimmed;
   resetActivity(trimmed);
   pushLog(`Starting job for ${redactedOriginOnly(trimmed) || "the server"}`);
   // Minimal settings are validated fail-closed here: invalid settings fail
@@ -650,17 +674,17 @@ function launchNativeJob(trimmed: string, token: number): void {
     settings: { ...desktopSettings, headers: { ...desktopSettings.headers } },
   };
   // An unreachable host rejects into the typed start-failed path below.
-  void service.start(request, jobObserver).then(
+  void service.start(request, observerFor(attempt)).then(
     (handle) => {
-      if (token !== submitToken) {
+      if (!owns(attempt)) {
         void handle.dispose().catch(() => undefined);
         return;
       }
-      activeHandle = handle;
+      attempt.activeHandle = handle;
       update();
     },
     (error: unknown) => {
-      if (token !== submitToken) return;
+      if (!owns(attempt)) return;
       failLocally("START_FAILED", invokeErrorMessage(error, t("desktop.invoke.startFallback")));
     },
   );
@@ -670,16 +694,22 @@ function launchNativeJob(trimmed: string, token: number): void {
 // the `JobSnapshot`: it renders verbatim with no fold and no follow guard.
 // Side effects (logs, queue progress, history, settling) key off snapshot
 // transitions; the view itself renders the presentation derived in update().
-const jobObserver: JobObserver = {
-  snapshot(snapshot: JobSnapshot): void {
-    currentSnapshot = snapshot;
-    onSnapshotSideEffects(snapshot);
-    update();
-  },
-  failure(error): void {
-    failLocally(error.code, error.message);
-  },
-};
+function observerFor(attempt: DesktopAttempt): JobObserver {
+  return {
+    snapshot(snapshot: JobSnapshot): void {
+      if (!owns(attempt) || attempt.settled) return;
+      attempt.settled = snapshot.terminal != null;
+      attempt.currentSnapshot = snapshot;
+      onSnapshotSideEffects(snapshot);
+      if (owns(attempt)) update();
+    },
+    failure(error): void {
+      if (!owns(attempt) || attempt.settled) return;
+      attempt.settled = true;
+      failLocally(error.code, error.message);
+    },
+  };
+}
 
 function onSnapshotSideEffects(snapshot: JobSnapshot): void {
   if (snapshot.terminal) {
@@ -691,9 +721,9 @@ function onSnapshotSideEffects(snapshot: JobSnapshot): void {
       if (output?.format) {
         grantedFormat = normalizeNativeFormat(output.format);
       }
-      if (lastInputUrl !== "") {
+      if (currentAttempt.lastInputUrl !== "") {
         recordDesktopHistory(
-          lastInputUrl,
+          currentAttempt.lastInputUrl,
           output?.canvas?.width,
           output?.canvas?.height,
           grantedFormat,
@@ -714,10 +744,10 @@ function onSnapshotSideEffects(snapshot: JobSnapshot): void {
   const total = snapshot.progress.total;
   if (typeof total === "number" && total > 0) {
     noteProgress(snapshot.progress.completed, total);
-    if (activeQueueId) {
+    if (currentAttempt.activeQueueId) {
       const res = recordDesktopProgress(
         desktopQueue,
-        activeQueueId,
+        currentAttempt.activeQueueId,
         snapshot.progress.completed,
         total,
       );
@@ -742,13 +772,13 @@ function settleActiveQueue(
   outcome: "done" | "failed" | "cancelled",
   detail?: { errorCode?: string },
 ): void {
-  if (!activeQueueId) return;
+  if (!currentAttempt.activeQueueId) return;
   const finished = finishActiveQueueEntry(desktopQueue, outcome, detail?.errorCode);
   desktopQueue = finished.queue;
   trimDesktopQueue();
   const summary = summarizeQueue(desktopQueue);
   pushLog(`Queue: ${humanQueueSummary(summary)}`);
-  activeQueueId = null;
+  currentAttempt.activeQueueId = null;
   const next = finished.next;
   if (!next) {
     update();
@@ -756,9 +786,9 @@ function settleActiveQueue(
   }
   // Fresh view for the next queued job.
   retireActiveJob();
-  activeQueueId = next.id;
+  currentAttempt.activeQueueId = next.id;
   pushLog(`Queue: starting next job for ${next.origin || "the server"}`);
-  launchNativeJob(next.inputUrl, ++submitToken);
+  launchNativeJob(next.inputUrl);
 }
 
 // Keep the panel bounded: at most 20 settled entries ride alongside live ones.
@@ -779,7 +809,7 @@ function trimDesktopQueue(): void {
 }
 
 function handleQueueCancelOne(id: string): void {
-  if (id === activeQueueId) {
+  if (id === currentAttempt.activeQueueId) {
     handleCancel();
     return;
   }
@@ -791,9 +821,9 @@ function handleQueueCancelOne(id: string): void {
 }
 
 function handleQueueCancelAll(): void {
-  const hadActive = activeQueueId !== null;
+  const hadActive = currentAttempt.activeQueueId !== null;
   desktopQueue = cancelAllQueueEntries(desktopQueue);
-  activeQueueId = null;
+  currentAttempt.activeQueueId = null;
   if (hadActive) {
     // Cancel the running native job too; its terminal event finds no active
     // queue entry and settles nothing.
@@ -810,9 +840,9 @@ function handleQueueRetry(id: string): void {
   desktopQueue = res.queue;
   if (res.entry.status === "active") {
     retireActiveJob();
-    activeQueueId = res.entry.id;
+    currentAttempt.activeQueueId = res.entry.id;
     pushLog(`Queue: retrying ${res.entry.origin || "the server"}`);
-    launchNativeJob(res.entry.inputUrl, ++submitToken);
+    launchNativeJob(res.entry.inputUrl);
     return;
   }
   pushLog(`Queue: retry queued for ${res.entry.origin || "the server"}`);
@@ -912,7 +942,7 @@ function appendDesktopQueuePanel(aux: HTMLElement, doc: Document): void {
 
 function handleCancel(): void {
   if (isTerminalNow()) return;
-  const handle = activeHandle;
+  const handle = currentAttempt.activeHandle;
   // Stop is immediate in the UI. The native host still receives cancellation
   // and performs cleanup, while its late events are retired below.
   if (handle) void handle.command({ type: "cancel" }).catch(() => undefined);
@@ -920,50 +950,57 @@ function handleCancel(): void {
 }
 
 function handlePause(): void {
+  const attempt = currentAttempt;
   if (isTerminalNow()) return;
-  const handle = activeHandle;
+  const handle = currentAttempt.activeHandle;
   if (!handle) return;
   pushLog("Pause requested");
   void handle.command({ type: "pause" }).then(
-    () => update(),
+    () => {
+      if (owns(attempt)) update();
+    },
     (error: unknown) => {
+      if (!owns(attempt)) return;
       failLocally("PAUSE_FAILED", invokeErrorMessage(error, "The pause request was rejected."));
     },
   );
 }
 
 function handleResume(): void {
+  const attempt = currentAttempt;
   if (isTerminalNow()) return;
-  const handle = activeHandle;
+  const handle = currentAttempt.activeHandle;
   if (!handle) return;
   pushLog("Resume requested");
   void handle.command({ type: "resume" }).then(
     () => {
+      if (!owns(attempt)) return;
       touchProgress();
       update();
     },
     (error: unknown) => {
+      if (!owns(attempt)) return;
       failLocally("RESUME_FAILED", invokeErrorMessage(error, "The resume request was rejected."));
     },
   );
 }
 
 async function handleOpenOutput(reveal: boolean): Promise<void> {
-  const handle = activeHandle;
+  const handle = currentAttempt.activeHandle;
   if (!handle) return;
-  outputActionError = undefined;
+  currentAttempt.outputActionError = undefined;
   root?.querySelector("#dz-open-error")?.remove();
   try {
     await handle.openOutput(reveal);
   } catch (error) {
-    if (handle !== activeHandle) return;
+    if (handle !== currentAttempt.activeHandle) return;
     const rawCode = error && typeof error === "object" && "code" in error ? error.code : null;
     const code =
       typeof rawCode === "string" && /^output\.[a-z-]+$/.test(rawCode)
         ? rawCode
         : "output.invoke-failed";
-    outputActionError = { action: reveal ? "folder" : "open", code };
-    pushLog(`File action ${outputActionError.action} failed (${code})`);
+    currentAttempt.outputActionError = { action: reveal ? "folder" : "open", code };
+    pushLog(`File action ${currentAttempt.outputActionError.action} failed (${code})`);
     const section = root?.querySelector(".dz-completed-section");
     if (!section) return;
     const note = section.ownerDocument.createElement("p");
@@ -978,18 +1015,21 @@ async function handleOpenOutput(reveal: boolean): Promise<void> {
 // Wired to the typed shell `JobCommand::AnswerPartial` via job_command with
 // generation+choice.
 function handleRecoveryRetry(): void {
+  const attempt = currentAttempt;
   const decision = pendingDecisionOf();
-  const handle = activeHandle;
+  const handle = currentAttempt.activeHandle;
   if (!decision || !handle || isTerminalNow()) return;
   pushLog("Retry requested (partial)");
   void handle
     .command({ type: "answer-partial", generation: decision.generation, decision: "retry" })
     .then(
       () => {
+        if (!owns(attempt)) return;
         touchProgress();
         update();
       },
       (error: unknown) => {
+        if (!owns(attempt)) return;
         failLocally("CHOICE_FAILED", invokeErrorMessage(error, t("desktop.invoke.retry")));
       },
     );
@@ -1000,8 +1040,9 @@ function handleRecoveryRetry(): void {
 // (partial-completed / failed) arrives as the next snapshot; nothing is
 // rendered locally so the terminal stays exactly-once.
 function handlePartialChoice(keep: boolean): void {
+  const attempt = currentAttempt;
   const decision = pendingDecisionOf();
-  const handle = activeHandle;
+  const handle = currentAttempt.activeHandle;
   if (!decision || !handle) return;
   if (isTerminalNow()) return;
   pushLog(keep ? "Keeping partial image…" : "Discarding partial image…");
@@ -1013,29 +1054,30 @@ function handlePartialChoice(keep: boolean): void {
     })
     .then(
       () => {
+        if (!owns(attempt)) return;
         touchProgress();
         update();
       },
       (error: unknown) => {
+        if (!owns(attempt)) return;
         failLocally("CHOICE_FAILED", invokeErrorMessage(error, t("desktop.invoke.partial")));
       },
     );
 }
 
 function handleReset(): void {
-  submitToken += 1;
   retireActiveJob();
   // Reset clears the whole queue: no new work is issued afterwards.
   desktopQueue = createDesktopQueue();
-  activeQueueId = null;
+  currentAttempt.activeQueueId = null;
   dismissDeepLinkConfirm(false);
-  recoveryReturnFocus = null;
-  lastRecoveryKey = null;
+  currentAttempt.recoveryReturnFocus = null;
+  currentAttempt.lastRecoveryKey = null;
   // Idle prefill survives reset: a launch URL stays available for the next
   // empty form without ever starting a job on its own.
   const prefilled = readInitialUrl();
-  if (prefilled) viewCtx.initialUrl = prefilled;
-  else viewCtx.initialUrl = undefined;
+  if (prefilled) currentAttempt.viewCtx.initialUrl = prefilled;
+  else currentAttempt.viewCtx.initialUrl = undefined;
   update();
 }
 
@@ -1121,32 +1163,34 @@ function queryCapabilitiesAtBoot(): void {
   );
 }
 
-const viewCtx: ViewContext = {
-  capabilities: {
-    nativeAvailable: integration.getCapabilities().nativeAvailable,
-    extensionAvailable: integration.getCapabilities().extensionAvailable,
-    browserCanSave: integration.getCapabilities().browserCanSave,
-    proxyAllowed: integration.getCapabilities().proxyAllowed,
-  },
-};
+function createViewContext(): ViewContext {
+  return {
+    capabilities: {
+      nativeAvailable: integration.getCapabilities().nativeAvailable,
+      extensionAvailable: integration.getCapabilities().extensionAvailable,
+      browserCanSave: integration.getCapabilities().browserCanSave,
+      proxyAllowed: integration.getCapabilities().proxyAllowed,
+    },
+  };
+}
 
 // Idle prefill is launch input only: set once at startup and on reset, never
 // from a submitted job. The shared input section prefills the empty field
 // from this value and never overwrites user typing.
 function initInitialUrl(): void {
   const prefilled = readInitialUrl();
-  if (prefilled) viewCtx.initialUrl = prefilled;
+  if (prefilled) currentAttempt.viewCtx.initialUrl = prefilled;
 }
 
 function syncInitialUrlFromLocation(): void {
-  if (currentSnapshot !== null || localFailure !== null) return;
+  if (currentAttempt.currentSnapshot !== null || currentAttempt.localFailure !== null) return;
   const prefilled = readInitialUrl();
-  const current = viewCtx.initialUrl;
+  const current = currentAttempt.viewCtx.initialUrl;
   if (prefilled && prefilled !== current) {
-    viewCtx.initialUrl = prefilled;
+    currentAttempt.viewCtx.initialUrl = prefilled;
     update();
   } else if (!prefilled && current) {
-    viewCtx.initialUrl = undefined;
+    currentAttempt.viewCtx.initialUrl = undefined;
     update();
   }
 }
@@ -1177,20 +1221,20 @@ function ensureDesktopAuxPanel(): void {
   const doc = root.ownerDocument;
   const decision = pendingDecisionOf();
   const decisionKey = recoveryKeyFor(decision);
-  const prevKey = lastRecoveryKey;
+  const prevKey = currentAttempt.lastRecoveryKey;
   const existing = doc.getElementById("dz-desktop-aux");
   const focusedInside =
     existing && existing.contains(doc.activeElement) ? (doc.activeElement as HTMLElement) : null;
   const focusedLabel =
     focusedInside && focusedInside instanceof HTMLButtonElement ? focusedInside.textContent : null;
-  if (decisionKey && decisionKey !== prevKey && !recoveryReturnFocus) {
+  if (decisionKey && decisionKey !== prevKey && !currentAttempt.recoveryReturnFocus) {
     const opener = activeElementOf(doc);
-    recoveryReturnFocus = opener && existing?.contains(opener) ? null : opener;
-    if (recoveryReturnFocus === null && opener && !existing?.contains(opener)) {
-      recoveryReturnFocus = opener;
+    currentAttempt.recoveryReturnFocus = opener && existing?.contains(opener) ? null : opener;
+    if (currentAttempt.recoveryReturnFocus === null && opener && !existing?.contains(opener)) {
+      currentAttempt.recoveryReturnFocus = opener;
     }
     if (existing && existing.contains(opener as Node) && prevKey === null) {
-      recoveryReturnFocus = null;
+      currentAttempt.recoveryReturnFocus = null;
     }
   }
   existing?.remove();
@@ -1198,15 +1242,15 @@ function ensureDesktopAuxPanel(): void {
   const showCancelledNote = presentation.phase === "cancelled";
   if (!decision && !showPartialDone && !showCancelledNote) {
     if (prevKey !== null) {
-      restoreFocus(recoveryReturnFocus);
-      recoveryReturnFocus = null;
+      restoreFocus(currentAttempt.recoveryReturnFocus);
+      currentAttempt.recoveryReturnFocus = null;
     }
-    lastRecoveryKey = decisionKey;
+    currentAttempt.lastRecoveryKey = decisionKey;
     return;
   }
   const card = root.querySelector(".dz-card");
   if (!card) {
-    lastRecoveryKey = decisionKey;
+    currentAttempt.lastRecoveryKey = decisionKey;
     return;
   }
 
@@ -1303,7 +1347,7 @@ function ensureDesktopAuxPanel(): void {
     // from a complete save. The missing tile ordinals ride the snapshot
     // output account, so the UI can never claim a complete save for
     // partial bytes.
-    const completedMissing = (currentSnapshot?.output?.missing ?? []).map(String);
+    const completedMissing = (currentAttempt.currentSnapshot?.output?.missing ?? []).map(String);
     const doneBox = doc.createElement("div");
     doneBox.className = "dz-partial-note";
     doneBox.setAttribute("role", "status");
@@ -1369,10 +1413,10 @@ function ensureDesktopAuxPanel(): void {
     }
   }
   if (!decisionKey && prevKey !== null) {
-    restoreFocus(recoveryReturnFocus);
-    recoveryReturnFocus = null;
+    restoreFocus(currentAttempt.recoveryReturnFocus);
+    currentAttempt.recoveryReturnFocus = null;
   }
-  lastRecoveryKey = decisionKey;
+  currentAttempt.lastRecoveryKey = decisionKey;
 }
 
 // Resolve any anchor href seen in the privileged window to a canonical
@@ -1461,22 +1505,23 @@ function ensureDesktopFooter(): void {
 
 function update() {
   if (!root) return;
+  const attempt = currentAttempt;
   const presentation = currentPresentation();
   const caps = integration.getCapabilities();
-  if (viewCtx.jobActivity && presentation.phase === "job") {
+  if (currentAttempt.viewCtx.jobActivity && presentation.phase === "job") {
     refreshLongestPending();
   }
   // Completion geometry rides the snapshot output canvas; the view context
   // only carries what the shared view renders.
-  const canvas = currentSnapshot?.output?.canvas;
+  const canvas = currentAttempt.currentSnapshot?.output?.canvas;
   if (presentation.phase === "completed" && canvas) {
-    viewCtx.completedInfo = {
+    currentAttempt.viewCtx.completedInfo = {
       width: canvas.width,
       height: canvas.height,
-      mime: encoderToMime(currentSnapshot?.output?.format, grantedMime()),
+      mime: encoderToMime(currentAttempt.currentSnapshot?.output?.format, grantedMime()),
     };
   } else if (presentation.phase !== "completed") {
-    viewCtx.completedInfo = undefined;
+    currentAttempt.viewCtx.completedInfo = undefined;
   }
 
   renderView(
@@ -1487,24 +1532,29 @@ function update() {
         handleSubmitUrl(url);
       },
       onCancel() {
+        if (!owns(attempt)) return;
         handleCancel();
       },
       onPause() {
+        if (!owns(attempt)) return;
         handlePause();
       },
       onResume() {
+        if (!owns(attempt)) return;
         handleResume();
       },
       onCopyDiagnostics(text: string) {
         handleCopyDiagnostics(() => `${text}\n\n${buildCopyDiagnostics(diagnosticsSnapshot())}`);
       },
       onRetrySameUrl() {
+        if (!owns(attempt)) return;
         // Re-run the last submitted address. `handleSubmitUrl` retires the
         // terminal job first, so this is a true retry rather than a no-op.
-        const url = lastInputUrl || viewCtx.jobActivity?.url || "";
+        const url = currentAttempt.lastInputUrl || currentAttempt.viewCtx.jobActivity?.url || "";
         if (isValidInputUrl(url)) handleSubmitUrl(url);
       },
       onReset() {
+        if (!owns(attempt)) return;
         handleReset();
       },
       ...(presentation.phase === "completed"
@@ -1518,7 +1568,7 @@ function update() {
           }
         : {}),
       onHistorySelect(entry: HistoryEntry) {
-        viewCtx.initialUrl = entry.url;
+        currentAttempt.viewCtx.initialUrl = entry.url;
         const input = root.querySelector<HTMLInputElement>("#dz-url-input");
         if (input) input.value = entry.url;
         update();
@@ -1543,9 +1593,15 @@ function update() {
       ...(presentation.phase === "completed"
         ? { nativeSaved: { partial: presentation.partial } }
         : {}),
-      ...(viewCtx.jobActivity ? { jobActivity: viewCtx.jobActivity } : {}),
-      ...(viewCtx.initialUrl ? { initialUrl: viewCtx.initialUrl } : {}),
-      ...(viewCtx.completedInfo ? { completedInfo: viewCtx.completedInfo } : {}),
+      ...(currentAttempt.viewCtx.jobActivity
+        ? { jobActivity: currentAttempt.viewCtx.jobActivity }
+        : {}),
+      ...(currentAttempt.viewCtx.initialUrl
+        ? { initialUrl: currentAttempt.viewCtx.initialUrl }
+        : {}),
+      ...(currentAttempt.viewCtx.completedInfo
+        ? { completedInfo: currentAttempt.viewCtx.completedInfo }
+        : {}),
       history: [...desktopHistory],
     },
     presentation.phase === "idle"
@@ -1581,7 +1637,7 @@ if (root !== null) {
 }
 
 function getCurrentJobId(): string | null {
-  return activeHandle?.id ?? null;
+  return currentAttempt.activeHandle?.id ?? null;
 }
 
 export {
