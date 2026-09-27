@@ -38,7 +38,7 @@ import {
   type HostFailure,
 } from "./engine-host.ts";
 import { createProbeSize } from "./probe.ts";
-import { createTileDecoder } from "./tile-decode.ts";
+import { createTileDecoder, type TileDecoder } from "./tile-decode.ts";
 import type { TileImageLike } from "./tile-draw.ts";
 import type { WorkerHostMessage, WorkerHostOutput } from "./worker-host.ts";
 
@@ -50,6 +50,8 @@ export interface BrowserWorker {
 }
 
 export interface BrowserAssemblyArgs {
+  signal: AbortSignal;
+  decoder: TileDecoder;
   /** First input URL: save naming, history, and desktop handoff stay product-side. */
   sourceUrl: string;
   /**
@@ -128,7 +130,7 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
     const probeSize = createProbeSize({
       fetchResource: product.fetchResource,
       classifyFailure: product.classifyFailure,
-      decode: (bytes) => decoder.decode(bytes),
+      decode: (bytes) => decoder.decode(bytes, attemptSignal.signal),
       loadImage: product.loadDisplayImage
         ? async (url, signal) => {
             const image = await product.loadDisplayImage!(url, signal);
@@ -209,7 +211,12 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
       };
     }
 
-    assembly = product.createAssembly({ sourceUrl, processTile });
+    assembly = product.createAssembly({
+      sourceUrl,
+      processTile,
+      signal: attemptSignal.signal,
+      decoder,
+    });
     const activeAssembly = assembly;
     host = createEngineHost({
       worker: { postMessage: (message) => worker.postMessage(message) },

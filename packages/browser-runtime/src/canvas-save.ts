@@ -13,7 +13,7 @@ export const BROWSER_SAVE_COLOR_WARNING =
   "Colors may shift slightly: the browser save does not keep the original color profile. For exact colors, use the desktop app.";
 
 export interface CanvasLike {
-  toBlob(cb: (blob: unknown | null) => void, mime?: string): void;
+  toBlob(cb: BlobCallback, mime?: string): void;
 }
 
 export interface DocumentLike {
@@ -36,25 +36,33 @@ export function isCanvasTaintError(error: unknown): boolean {
 }
 
 /** Encode the assembled canvas as a PNG Blob (origin-clean only). */
-export function canvasToPngBlob(canvas: CanvasLike): Promise<unknown> {
+export function canvasToPngBlob(canvas: CanvasLike, signal?: AbortSignal): Promise<Blob> {
+  signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
+    const abort = () => reject(signal?.reason);
+    signal?.addEventListener("abort", abort, { once: true });
+    const finish = (blob: Blob | null) => {
+      signal?.removeEventListener("abort", abort);
+      if (signal?.aborted) {
+        reject(signal.reason);
+        return;
+      }
+      if (blob) resolve(blob);
+      else
+        reject(
+          failure(
+            "OUTPUT_ENCODE_FAILED",
+            "The final picture could not be created from the saved pieces.",
+            false,
+            undefined,
+            "canvas.toBlob returned null while encoding the PNG",
+          ),
+        );
+    };
     try {
-      canvas.toBlob(
-        (b) =>
-          b
-            ? resolve(b)
-            : reject(
-                failure(
-                  "OUTPUT_ENCODE_FAILED",
-                  "The final picture could not be created from the saved pieces.",
-                  false,
-                  undefined,
-                  "canvas.toBlob returned null while encoding the PNG",
-                ),
-              ),
-        "image/png",
-      );
+      canvas.toBlob(finish, "image/png");
     } catch (e) {
+      signal?.removeEventListener("abort", abort);
       if (isCanvasTaintError(e)) {
         reject(e);
         return;

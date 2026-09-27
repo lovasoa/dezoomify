@@ -33,13 +33,14 @@ export interface TileBitmap {
 }
 
 export interface TileDecoder {
-  decode(bytes: ArrayBuffer): Promise<TileBitmap>;
+  decode(bytes: ArrayBuffer, signal?: AbortSignal): Promise<TileBitmap>;
   dispose(): void;
   get workered(): boolean;
 }
 
 export function createTileDecoder(host?: TileDecodeHost): TileDecoder {
   const h = host ?? {};
+  const lifetime = new AbortController();
   let worker: TileDecodeWorkerLike | null = null;
   let seq = 0;
   let unavailable = false;
@@ -90,7 +91,10 @@ export function createTileDecoder(host?: TileDecodeHost): TileDecoder {
         };
         const id = typeof data.id === "number" ? data.id : -1;
         const entry = pending.get(id);
-        if (!entry) return;
+        if (!entry) {
+          (data.bitmap as TileBitmap | undefined)?.close();
+          return;
+        }
         pending.delete(id);
         if (data.ok === true && data.bitmap) {
           entry.resolve(data.bitmap as TileBitmap);
@@ -126,6 +130,7 @@ export function createTileDecoder(host?: TileDecodeHost): TileDecoder {
   }
 
   function mainThreadDecode(bytes: ArrayBuffer): Promise<TileBitmap> {
+    if (lifetime.signal.aborted) return Promise.reject(lifetime.signal.reason);
     const rawImpl =
       h.createImageBitmap ??
       (typeof createImageBitmap === "function" ? createImageBitmap : undefined);
@@ -142,7 +147,7 @@ export function createTileDecoder(host?: TileDecodeHost): TileDecoder {
     }
   }
 
-  function decode(bytes: ArrayBuffer): Promise<TileBitmap> {
+  function decodeRaw(bytes: ArrayBuffer): Promise<TileBitmap> {
     const w = defaultHostAvailable() ? spawnWorker() : null;
     if (!w) return mainThreadDecode(bytes);
     try {
@@ -163,7 +168,31 @@ export function createTileDecoder(host?: TileDecodeHost): TileDecoder {
     }
   }
 
+  function decode(bytes: ArrayBuffer, signal?: AbortSignal): Promise<TileBitmap> {
+    const owned = signal ? AbortSignal.any([signal, lifetime.signal]) : lifetime.signal;
+    if (owned.aborted) return Promise.reject(owned.reason);
+    return new Promise((resolve, reject) => {
+      const abort = () => reject(owned.reason);
+      owned.addEventListener("abort", abort, { once: true });
+      void decodeRaw(bytes).then(
+        (bitmap) => {
+          owned.removeEventListener("abort", abort);
+          if (owned.aborted) {
+            bitmap.close();
+            reject(owned.reason);
+          } else resolve(bitmap);
+        },
+        (error) => {
+          owned.removeEventListener("abort", abort);
+          reject(error);
+        },
+      );
+    });
+  }
+
   function dispose(): void {
+    if (lifetime.signal.aborted) return;
+    lifetime.abort();
     unavailable = true;
     for (const [, entry] of pending) {
       try {

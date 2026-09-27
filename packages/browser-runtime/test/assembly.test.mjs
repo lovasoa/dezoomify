@@ -40,7 +40,7 @@ function harness(overrides = {}) {
     },
     encode: async (canvas) => {
       events.encoded.push({ width: canvas.width, height: canvas.height });
-      return { blob: true, width: canvas.width, height: canvas.height };
+      return new Blob(["png"], { type: "image/png" });
     },
     save: (output, width, height) => {
       events.saved.push({ output, width, height });
@@ -83,7 +83,7 @@ test("declared output paints progressively before finalization, then encodes and
   assert.deepEqual(events.created, [{ width: 32, height: 32 }]);
   assert.equal(events.encoded.length, 1);
   assert.deepEqual(events.saved, [
-    { output: { blob: true, width: 32, height: 32 }, width: 32, height: 32 },
+    { output: new Blob(["png"], { type: "image/png" }), width: 32, height: 32 },
   ]);
   assert.equal(ctx2d.draws.length, 2);
   assert.deepEqual(ctx2d.draws[0], {
@@ -306,4 +306,20 @@ test("release closes retained bitmaps deterministically", async () => {
     held.every((bitmap) => bitmap.closed),
     true,
   );
+});
+
+test("retiring an assembly during encoding never saves its late Blob", async () => {
+  let finish;
+  const { assembly, events } = harness({
+    encode: () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  });
+  assembly.prepare({ width: 16, height: 16 });
+  const pending = assembly.finalizeOutput(false, "png");
+  assembly.release();
+  finish(new Blob(["png"]));
+  await assert.rejects(pending, { name: "AbortError" });
+  assert.equal(events.saved.length, 0);
 });

@@ -6,14 +6,11 @@ import { createAttemptPermissions, type PermissionWait } from "./permissions.ts"
 import type { Error as EngineError, JobSnapshot, JobState } from "@dezoomify/app-model";
 import {
   BROWSER_MAX_PLAN_TILES,
+  type BrowserAssemblyArgs,
   browserLimitsFor,
   type ClientHints,
-  canvasAllocationFailure,
-  canvasSurfaceFailure,
-  canvasToPngBlob,
+  createBrowserAssembly,
   createBrowserJobService,
-  createCanvasAssembly,
-  createTileDecoder,
   desktopHandoffLink,
   loadTileImage,
   MAXIMUM_SELECTION_LIMITS,
@@ -38,7 +35,6 @@ import {
   presentStatus,
   renderView,
 } from "@dezoomify/shared-ui";
-import type { ProcessingRecipe } from "@dezoomify/wasm-bindings";
 import { createElement } from "react";
 import { browser as api } from "wxt/browser";
 import { asFetchFailure, createExtensionFetcher } from "../runtime/fetch.ts";
@@ -70,7 +66,7 @@ let siteOrigin = "";
 // authoritative snapshot renders directly; no derived mirrors.
 let jobHandle: JobHandle | null = null;
 let discoveryGeneration = 0;
-let assembly: ReturnType<typeof createCanvasAssembly> | null = null;
+let assembly: ReturnType<typeof createBrowserAssembly> | null = null;
 /** Single authoritative snapshot: render it directly, never a derived copy. */
 let activeSnapshot: JobSnapshot | null = null;
 let localFailure: StructuredError | null = null;
@@ -380,42 +376,11 @@ function onHostFailure(error: unknown) {
   });
 }
 
-function createAssembly(
-  sourceUrl: string,
-  processTile: (recipe: ProcessingRecipe, bytes: ArrayBuffer) => Promise<ArrayBuffer>,
-) {
-  const decoder = createTileDecoder();
-  return createCanvasAssembly({
-    decode: (bytes: ArrayBuffer) => decoder.decode(bytes),
-    processTile,
-    createCanvas: (width: number, height: number) => {
-      const element = document.createElement("canvas");
-      try {
-        element.width = width;
-        element.height = height;
-      } catch {
-        throw canvasAllocationFailure(width, height, sourceUrl);
-      }
-      if (element.width !== width || element.height !== height) {
-        throw canvasAllocationFailure(width, height, sourceUrl);
-      }
-      const ctx2d = element.getContext("2d");
-      if (!ctx2d) {
-        throw canvasSurfaceFailure(width, height, sourceUrl);
-      }
-      // The executor draws through ctx2d and encodes through toBlob: expose
-      // both on one surface object.
-      return {
-        width,
-        height,
-        ctx2d,
-        toBlob: (cb: BlobCallback, mime?: string) => element.toBlob(cb, mime),
-      };
-    },
-    encode: (canvas) =>
-      canvasToPngBlob(canvas as unknown as { toBlob(cb: BlobCallback, mime?: string): void }),
-    save: (blob: unknown, width: number, height: number) => {
-      if (!(blob instanceof Blob)) throw new TypeError("encoded output is not a Blob");
+function createAssembly(args: BrowserAssemblyArgs) {
+  return createBrowserAssembly({
+    ...args,
+    canvas: () => document.createElement("canvas"),
+    save: (blob, width, height) => {
       const url = URL.createObjectURL(blob);
       try {
         saveBlobViaAnchor(document, url, width, height, activeTitle());
@@ -426,7 +391,6 @@ function createAssembly(
       }
       return "browser-save-initiated";
     },
-    sourceUrl,
     limits: browserLimitsFor(clientHints()),
   });
 }
@@ -572,8 +536,8 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
     fetchResource,
     loadDisplayImage: (url, signal) => loadTileImage(url, { signal }),
     classifyFailure: asFetchFailure,
-    createAssembly: ({ sourceUrl, processTile }) => {
-      const asm = createAssembly(sourceUrl, processTile);
+    createAssembly: (args) => {
+      const asm = createAssembly(args);
       assembly = asm;
       return asm;
     },
