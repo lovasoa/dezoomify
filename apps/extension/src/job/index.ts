@@ -30,10 +30,12 @@ import {
   describeFailure,
   isActiveJobStatus,
   jobPageTitle,
+  PartialDecisionActions,
   presentFailure,
   presentSnapshot,
   presentStatus,
   renderView,
+  t,
 } from "@dezoomify/shared-ui";
 import { createElement } from "react";
 import { browser as api } from "wxt/browser";
@@ -41,7 +43,7 @@ import { asFetchFailure, createExtensionFetcher } from "../runtime/fetch.ts";
 import { saveExtensionBlob } from "./download.ts";
 import { createSourceAccess } from "./source-access.ts";
 import { createEngineResourceFetcher } from "./transport.ts";
-import { AccessRequestView, PartialOutputActions } from "./view.tsx";
+import { AccessRequestView } from "./view.tsx";
 
 const TEST_PERMISSION_MOCK = import.meta.env.MODE === "testing";
 
@@ -215,9 +217,9 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
   // Outstanding partial decision, read off the DTO only: the closed
   // keep/retry/discard answers are the engine's RecoveryChoice values, never
   // fabricated actions.
-  const decisionGeneration =
+  const decision =
     attempt.activeSnapshot?.lifecycle === "AwaitingPartialDecision"
-      ? attempt.activeSnapshot.decision?.generation
+      ? attempt.activeSnapshot.decision
       : undefined;
   renderView(
     target,
@@ -250,25 +252,18 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
             }),
           }
         : {}),
-      ...(decisionGeneration !== undefined && !attempt.pendingPermission
+      ...(decision && !attempt.pendingPermission
         ? {
-            after: createElement(PartialOutputActions, {
-              onChoose: (keep) => {
-                if (!owns(attempt)) return;
-                void attempt.jobHandle?.command({
-                  type: "answer-partial",
-                  generation: decisionGeneration,
-                  decision: keep ? "keep" : "discard",
-                });
-                render("downloading", { jobActivity: { startedAt: Date.now() } });
+            after: createElement(PartialDecisionActions, {
+              decision,
+              labels: {
+                keep: t("view.partial.extensionKeep"),
+                discard: t("view.partial.extensionDiscard"),
+                retry: t("view.partial.extensionRetry"),
               },
-              onRetry: () => {
+              onAnswer: (command) => {
                 if (!owns(attempt)) return;
-                void attempt.jobHandle?.command({
-                  type: "answer-partial",
-                  generation: decisionGeneration,
-                  decision: "retry",
-                });
+                void attempt.jobHandle?.command(command);
                 render("downloading", { jobActivity: { startedAt: Date.now() } });
               },
             }),
