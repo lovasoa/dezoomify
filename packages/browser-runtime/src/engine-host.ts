@@ -84,14 +84,14 @@ export interface EngineHostDeps {
   worker: { postMessage(message: WorkerHostMessage): void };
   jobId(): string;
   /** Fetch one effect resource as readable bytes (product transport). Single attempt; the engine owns retries. */
-  fetchResource(effect: AcquireEffect): Promise<{ bytes: Uint8Array; finalUri?: string }>;
+  fetchResource(request: ResourceRequest): Promise<{ bytes: Uint8Array; finalUri?: string }>;
   /** Cancel in-flight fetches (product transport). */
   cancelFetch(): void;
   assembly: EngineHostAssembly;
   /** Optional job-budget overrides forwarded to the session at start. */
   quotas?: SessionConfig;
   /** Measure one probe tile (shared probe helper). The engine request id lets a host route the probe like any effect fetch. */
-  probeSize(url: string, headers: Record<string, string>, requestId?: number): Promise<ProbeSize>;
+  probeSize(request: ResourceRequest): Promise<ProbeSize>;
   /**
    * Load one tile as an ordinary image element for display-only fallback.
    * Absent: no display fallback (failed acquisitions fail the engine).
@@ -253,15 +253,6 @@ export function createEngineHost(deps: EngineHostDeps) {
     );
   }
 
-  /**
-   * Normalize generated request headers to the record `fetch` accepts. The contract
-   * shape is `Header[]` (`{name, value}`); hosts and `fetch` expect a
-   * plain object.
-   */
-  function headerRecord(headers: ResourceRequest["headers"]): Record<string, string> {
-    return Object.fromEntries((headers ?? []).map(({ name, value }) => [name, value]));
-  }
-
   function plainRecipe(placement: TilePlacement): boolean {
     return placement.processing === "none";
   }
@@ -352,7 +343,7 @@ export function createEngineHost(deps: EngineHostDeps) {
             return;
           }
         }
-        const size = await deps.probeSize(request.uri, headerRecord(request.headers), request.id);
+        const size = await deps.probeSize(request);
         if (tornDown()) return;
         const probeOutput =
           effect.type === "acquire-tile" && effect.placement.probe_output === true;
@@ -486,7 +477,7 @@ export function createEngineHost(deps: EngineHostDeps) {
             return;
           }
         }
-        const result = await deps.fetchResource(effect);
+        const result = await deps.fetchResource(effect.request);
         // Readable bytes for this origin: it is not display-only.
         settle?.(false);
         if (tornDown()) return;

@@ -1,3 +1,4 @@
+import type { ResourceRequest } from "@dezoomify/wasm-bindings";
 /** Dedicated extension job-tab integration. No webpage postMessage bridge. */
 
 import type { Error as EngineError, JobSnapshot, JobState } from "@dezoomify/app-model";
@@ -11,9 +12,9 @@ import {
   canvasToPngBlob,
   createBrowserJobService,
   createCanvasAssembly,
-  createProbeSize,
   createTileDecoder,
   desktopHandoffLink,
+  loadTileImage,
   MAXIMUM_SELECTION_LIMITS,
   originOfUrl,
   saveBlobViaAnchor,
@@ -71,14 +72,12 @@ jobLog.addSink((entry) => {
 let sourceAccess: ReturnType<typeof createSourceAccess> | null = null;
 let siteOrigin = "";
 /** Fallback request ids for probes that arrive without an engine request id. Start clear of the engine's small sequential ids. */
-let probeSeq = 1 << 30;
 // One shared browser job service attempt. The service owns the worker, the WASM
 // session, cross-worker processing calls, the abort scope, and disposal;
 // this tab owns source access, transport, assembly, and view wiring. The single
 // authoritative snapshot renders directly; no derived mirrors.
 let jobHandle: BrowserJobHandle | null = null;
 /** Service abort signal of the live attempt (drives the cancelled() transport view). */
-let attemptSignal: AbortSignal | null = null;
 let discoveryGeneration = 0;
 let assembly: ReturnType<typeof createCanvasAssembly> | null = null;
 /** Single authoritative snapshot: render it directly, never a derived copy. */
@@ -542,7 +541,6 @@ async function bindSourceTab() {
 function stopAttempt() {
   const handle = jobHandle;
   jobHandle = null;
-  attemptSignal = null;
   if (handle) {
     try {
       void handle.dispose().catch(() => {});
@@ -581,13 +579,11 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
         )),
   });
   const extensionTransport = {
-    async fetchResource(url: string, opts?: Parameters<typeof fetcher.fetchResource>[1]) {
-      jobLog.debug(
-        "extension-fetch-start",
-        `url=${url} purpose=${String(opts?.purpose ?? "unknown")}`,
-      );
+    async fetchResource(request: ResourceRequest, signal: AbortSignal) {
+      const url = request.uri;
+      jobLog.debug("extension-fetch-start", `url=${url} purpose=${request.purpose}`);
       try {
-        const result = await fetcher.fetchResource(url, opts);
+        const result = await fetcher.fetchResource(request, signal);
         jobLog.debug("extension-fetch-complete", `url=${url} bytes=${result.bytes.byteLength}`);
         return result;
       } catch (error) {
@@ -602,7 +598,6 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
         throw error;
       }
     },
-    cancel: () => fetcher.cancel(),
   };
   const fetchResource = createEngineResourceFetcher({
     sourceAccess: source,
@@ -613,60 +608,10 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
         `code=${String(cause.code ?? "network")} origin=extension`,
       ),
   });
-  const probeDecoder = createTileDecoder();
   const service = createBrowserJobService({
     createWorker: () => new Worker(new URL("./worker.js", import.meta.url), { type: "module" }),
-    fetchResource: (effect, signal) => {
-      attemptSignal = signal;
-      if (signal.aborted) {
-        return Promise.reject(
-          Object.assign(new Error("request cancelled"), { category: "cancelled" }),
-        );
-      }
-      return fetchResource(effect, signal);
-    },
-    probeSize: createProbeSize({
-      fetchTile: async (url: string, headers: Record<string, string>, requestId?: number) => {
-        let id = requestId;
-        if (typeof id !== "number" || !Number.isSafeInteger(id) || id < 0) {
-          probeSeq += 1;
-          id = probeSeq;
-        }
-        const result = await fetchResource(
-          {
-            request: {
-              id,
-              uri: url,
-              headers: Object.entries(headers).map(([name, value]) => ({ name, value })),
-              purpose: "probe",
-            },
-          },
-          attemptSignal ?? new AbortController().signal,
-        );
-        const bytes = new Uint8Array(result.bytes).slice().buffer as ArrayBuffer;
-        return { bytes };
-      },
-      decode: (bytes: ArrayBuffer) => probeDecoder.decode(bytes),
-      loadImage: (url: string) =>
-        new Promise((resolve, reject) => {
-          const img = new Image();
-          img.onload = () =>
-            resolve({
-              width: img.naturalWidth,
-              height: img.naturalHeight,
-              image: img,
-            });
-          img.onerror = () => reject(new Error("probe image failed to load"));
-          img.src = url;
-        }),
-    }),
-    loadDisplayImage: (url: string) =>
-      new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error("display image failed to load"));
-        img.src = url;
-      }),
+    fetchResource,
+    loadDisplayImage: (url, signal) => loadTileImage(url, { signal }),
     classifyFailure: asFetchFailure,
     createAssembly: ({ sourceUrl, processTile }) => {
       const asm = createAssembly(sourceUrl, processTile);
@@ -685,13 +630,6 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
       if (activeSnapshot) renderForSnapshot(activeSnapshot);
     },
     log: (level, code, detail) => jobLog.log(level, code, detail),
-    onAbort: () => {
-      try {
-        fetcher.cancel();
-      } catch {
-        /* abort must never break teardown */
-      }
-    },
   });
   try {
     // A "Try maximum" attempt takes the largest known level; the canvas gate

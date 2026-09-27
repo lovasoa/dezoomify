@@ -1,3 +1,5 @@
+import type { ResourceRequest } from "@dezoomify/wasm-bindings";
+
 // Shared probe-size helper for browser hosts.
 //
 // Probing only needs decoded dimensions: fetch one tile as readable bytes,
@@ -31,15 +33,14 @@ export interface ProbeBitmap {
 
 export interface ProbeSizeDeps {
   /** Fetch one tile as readable bytes. The engine request id lets a host route the probe without colliding with tile requests. */
-  fetchTile(
-    url: string,
-    headers: Record<string, string>,
-    requestId?: number,
-  ): Promise<{ bytes: ArrayBuffer }>;
+  fetchResource(request: ResourceRequest, signal: AbortSignal): Promise<{ bytes: Uint8Array }>;
   /** Decode fetched bytes far enough to report dimensions. */
   decode(bytes: ArrayBuffer): Promise<ProbeBitmap>;
   /** Measure dimensions without byte access (plain <img> fallback). */
-  loadImage?: (url: string) => Promise<{ width: number; height: number; image?: ProbeImage }>;
+  loadImage?: (
+    url: string,
+    signal: AbortSignal,
+  ) => Promise<{ width: number; height: number; image?: ProbeImage }>;
 }
 
 function observedSize(
@@ -54,16 +55,16 @@ function observedSize(
 
 export function createProbeSize(
   deps: ProbeSizeDeps,
-): (url: string, headers: Record<string, string>, requestId?: number) => Promise<ProbeSize> {
-  return async (
-    url: string,
-    headers: Record<string, string>,
-    requestId?: number,
-  ): Promise<ProbeSize> => {
+): (request: ResourceRequest, signal: AbortSignal) => Promise<ProbeSize> {
+  return async (request: ResourceRequest, signal: AbortSignal): Promise<ProbeSize> => {
+    signal.throwIfAborted();
     let bytes: ArrayBuffer;
     try {
-      ({ bytes } = await deps.fetchTile(url, headers, requestId));
+      const result = await deps.fetchResource(request, signal);
+      bytes = result.bytes.slice().buffer;
+      signal.throwIfAborted();
     } catch (error) {
+      signal.throwIfAborted();
       // A missing host grant is actionable (the host pauses for permission),
       // never a silent missing probe. Only other fetch failures fall through
       // to the <img> fallback / missing observation.
@@ -76,13 +77,14 @@ export function createProbeSize(
       }
       if (!deps.loadImage) return { status: "missing" };
       try {
-        const observed = await deps.loadImage(url);
+        const observed = await deps.loadImage(request.uri, signal);
         return observedSize(
           observed.width,
           observed.height,
           observed.image ? { image: observed.image } : {},
         );
       } catch {
+        signal.throwIfAborted();
         return { status: "missing" };
       }
     }
@@ -94,19 +96,22 @@ export function createProbeSize(
       } catch {
         // Bitmap cleanup is best-effort.
       }
+      signal.throwIfAborted();
       return size;
     } catch {
+      signal.throwIfAborted();
       // Readable bytes are unavailable (e.g. no CORS grant). Probing only
       // needs dimensions, which a plain <img> reports without byte access.
       if (!deps.loadImage) return { status: "missing" };
       try {
-        const observed = await deps.loadImage(url);
+        const observed = await deps.loadImage(request.uri, signal);
         return observedSize(
           observed.width,
           observed.height,
           observed.image ? { image: observed.image } : {},
         );
       } catch {
+        signal.throwIfAborted();
         return { status: "missing" };
       }
     }

@@ -1,3 +1,4 @@
+import { createTileDecoder } from "../packages/browser-runtime/src/tile-decode.ts";
 // Web application entry point (single source of truth; Vite bundles this
 // file directly, there is no hand-maintained `.js` mirror).
 // Real pipeline: worker-hosted wasm core discovery -> direct-first transport
@@ -35,7 +36,6 @@ import {
   type BrowserJobHandle,
   createBrowserJobService,
   createCanvasAssembly,
-  createProbeSize,
 } from "../packages/browser-runtime/src/index.ts";
 import { createJobActivity } from "../packages/browser-runtime/src/job-activity.ts";
 import {
@@ -57,7 +57,6 @@ import {
   createPreviewControls,
   setCanvasVisible,
 } from "../packages/browser-runtime/src/preview.ts";
-import { createTileDecoder } from "../packages/browser-runtime/src/tile-decode.ts";
 import { loadTileImage } from "../packages/browser-runtime/src/tile-draw.ts";
 import {
   createTileThrottle,
@@ -244,7 +243,6 @@ function recordMetadataAttempt(
 }
 
 const tileThrottle = createTileThrottle();
-const tileDecoder = createTileDecoder();
 
 // The product-specific proxy transport owns the actual /api/proxy POST.
 // Browser-runtime owns direct-first orchestration, fallback, and
@@ -283,31 +281,6 @@ const webFetcher: WebFetcher = createWebFetcher({
   },
   throttle: (url) => tileThrottle.throttle(url),
 });
-async function probeSizeFor(url: string, headers: Record<string, string>, signal?: AbortSignal) {
-  const probe = createProbeSize({
-    fetchTile: (probeUrl, probeHeaders) => webFetcher.fetchTileFor(probeUrl, probeHeaders, signal),
-    decode: (bytes) => tileDecoder.decode(bytes),
-    loadImage: async (probeUrl) => {
-      const img = await loadTileImage(probeUrl, {
-        hooks: {
-          onLog: (line) => {
-            if (!signal?.aborted) webLog.info("runtime", line);
-          },
-          onRequestStart: (label) => jobActivity.noteRequestStart(label),
-          onRequestEnd: (id, ok) => jobActivity.noteRequestEnd(id, ok),
-          onUpdate: update,
-        },
-      });
-      return {
-        width: img.naturalWidth,
-        height: img.naturalHeight,
-        image: img,
-      };
-    },
-  });
-  return probe(url, headers);
-}
-
 /** Tear down the active service attempt: worker, session, assembly, buffers. */
 function disposeAttempt(): void {
   const handle = jobHandle;
@@ -582,8 +555,7 @@ async function runJob(url: string, origin = url): Promise<void> {
   // drives product side effects.
   const service = createBrowserJobService({
     createWorker: () => new Worker(new URL("./worker.js", import.meta.url), { type: "module" }),
-    fetchResource: async (effect, signal) => {
-      const request = effect.request;
+    fetchResource: async (request, signal) => {
       if (request.purpose === "metadata") {
         const result = await webFetcher.fetchMetadataFor(
           request.uri,
@@ -604,10 +576,9 @@ async function runJob(url: string, origin = url): Promise<void> {
       );
       return { bytes: new Uint8Array(result.bytes) };
     },
-    probeSize: (probeUrl, probeHeaders, requestId, signal) =>
-      probeSizeFor(probeUrl, probeHeaders, signal),
-    loadDisplayImage: (tileUrl: string) =>
+    loadDisplayImage: (tileUrl: string, signal: AbortSignal) =>
       loadTileImage(tileUrl, {
+        signal,
         hooks: {
           onLog: (line) => {
             if (run === activeRun && jobHandle) webLog.info("runtime", line);

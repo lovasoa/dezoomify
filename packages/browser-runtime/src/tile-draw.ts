@@ -98,10 +98,12 @@ export function loadTileImage(
     setTimeoutFn?: (cb: () => void, ms: number) => unknown;
     clearTimeoutFn?: (t: unknown) => void;
     ms?: number;
+    signal?: AbortSignal;
     hooks?: Pick<TileDrawHooks, "onRequestStart" | "onRequestEnd" | "onUpdate"> &
       Partial<Pick<TileDrawHooks, "onLog">>;
   } = {},
 ): Promise<TileImageElementLike> {
+  deps.signal?.throwIfAborted();
   const ms = deps.ms ?? 30000;
   const hooks = deps.hooks;
   const reqId = hooks ? hooks.onRequestStart("img") : -1;
@@ -128,6 +130,7 @@ export function loadTileImage(
     const done = (ok: boolean, value: TileImageElementLike | Error) => {
       if (settled) return;
       settled = true;
+      deps.signal?.removeEventListener("abort", abort);
       if (timer) clearTimer(timer);
       timer = null;
       if (hooks) {
@@ -140,6 +143,15 @@ export function loadTileImage(
       if (ok) resolve(value as TileImageElementLike);
       else reject(value);
     };
+    const abort = () => {
+      done(false, new DOMException("Image load cancelled", "AbortError"));
+      img.src = "";
+    };
+    deps.signal?.addEventListener("abort", abort, { once: true });
+    if (deps.signal?.aborted) {
+      abort();
+      return;
+    }
     img.addEventListener("load", () => done(true, img), { once: true });
     img.addEventListener("error", () => done(false, new Error("tile image failed to load")), {
       once: true,

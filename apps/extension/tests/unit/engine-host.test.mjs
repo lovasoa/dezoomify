@@ -50,8 +50,8 @@ function harness({
       },
     },
     extensionTransport: {
-      async fetchResource(url, opts) {
-        seen.push(["extension", url, opts]);
+      async fetchResource(request, signal) {
+        seen.push(["extension", request.uri, request, signal]);
         return { bytes: new Uint8Array([1, 2, 3]) };
       },
     },
@@ -481,14 +481,14 @@ test("a probe request routes through the same fetcher as effects", async () => {
       },
     },
     extensionTransport: {
-      async fetchResource(url, opts) {
-        seen.push(["extension", url, opts]);
+      async fetchResource(request, signal) {
+        seen.push(["extension", request.uri, request, signal]);
         return { bytes: new Uint8Array([1, 2, 3]) };
       },
     },
   });
   const result = await fetchResource(
-    { request: { id: 9, uri: "https://cdn.test/probe_0.jpg", headers: [], purpose: "probe" } },
+    { id: 9, uri: "https://cdn.test/probe_0.jpg", headers: [], purpose: "probe" },
     new AbortController().signal,
   );
   assert.deepEqual([...result.bytes], [7, 8]);
