@@ -9,8 +9,9 @@ snapshots.
 ## Contents
 
 - `types.ts`: the frozen service contract: `JobService`, `JobHandle`,
-  `JobObserver`, `JobStartRequest` (engine options plus the discriminated
-  product-local `HostSpec`), `JobSnapshot`, and `HostStatus`.
+  `JobObserver`, `EngineStartRequest`, and `JobSnapshot`. Services are generic
+  over the concrete start request and handle; runtime faults remain separate
+  from authoritative engine snapshots.
   Cross-language types come from `@dezoomify/wasm-bindings` and are never
   redeclared here.
 - `snapshot.ts`: pure predicates over the authoritative `Snapshot`

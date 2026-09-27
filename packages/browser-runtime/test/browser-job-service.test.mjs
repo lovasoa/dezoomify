@@ -38,15 +38,11 @@ function product(overrides = {}) {
   const worker = fakeWorker();
   const seen = { fetches: 0, assemblies: 0 };
   let tainted = false;
-  let permissionPending = false;
   return {
     worker,
     seen,
     setTainted(value) {
       tainted = value;
-    },
-    setPermissionPending(value) {
-      permissionPending = value;
     },
     deps: {
       createWorker: () => worker,
@@ -75,10 +71,6 @@ function product(overrides = {}) {
         };
       },
       quotas: { max_concurrent_fetches: 6 },
-      sessionId: () => "sess:test",
-      getTransport: () => "direct",
-      isPermissionPending: () => permissionPending,
-      getOutputState: () => "pending",
       ...overrides,
     },
   };
@@ -88,7 +80,7 @@ function startRequest(overrides = {}) {
   return {
     inputs: [{ url: "https://meta.test/info.json" }],
     engine: {},
-    host: { kind: "browser", sourceUrl: "https://meta.test/info.json" },
+
     ...overrides,
   };
 }
@@ -120,7 +112,12 @@ function received(snapshot, messages = []) {
 }
 
 function sink(emitted) {
-  return { snapshot: (snapshot) => emitted.push(snapshot), hostStatus: () => {} };
+  return {
+    snapshot: (snapshot) => emitted.push(snapshot),
+    failure: (error) => {
+      throw error;
+    },
+  };
 }
 
 test("invalid service requests reject typed before any worker exists", async () => {
@@ -128,17 +125,12 @@ test("invalid service requests reject typed before any worker exists", async () 
   const service = createBrowserJobService(p.deps);
   await assert.rejects(
     () =>
-      service.start(startRequest({ host: { kind: "native", destination: {} } }), {
+      service.start(startRequest({ inputs: [] }), {
         snapshot: () => {},
-        hostStatus: () => {},
+        failure: (error) => {
+          throw error;
+        },
       }),
-    (error) => {
-      assert.equal(error.code, "browser.invalid-exec");
-      return true;
-    },
-  );
-  await assert.rejects(
-    () => service.start(startRequest({ inputs: [] }), { snapshot: () => {}, hostStatus: () => {} }),
     (error) => {
       assert.equal(error.code, "validation.empty-inputs");
       return true;
@@ -215,7 +207,9 @@ test("service sends one-attempt structured tile failures to the engine", async (
       const service = createBrowserJobService(p.deps);
       const handle = await service.start(startRequest(), {
         snapshot: () => {},
-        hostStatus: () => {},
+        failure: (error) => {
+          throw error;
+        },
       });
       p.worker.receive(received(snap(1), [TILE]));
       await new Promise((resolve) => setImmediate(resolve));
@@ -247,7 +241,12 @@ test("start roots the session at the first input and preserves selection policy"
         browser_selection: browserSelection,
       },
     }),
-    { snapshot: () => {}, hostStatus: () => {} },
+    {
+      snapshot: () => {},
+      failure: (error) => {
+        throw error;
+      },
+    },
   );
   const start = p.worker.posted.find((message) => message.type === "engine.start");
   assert.ok(start, "expected engine.start on the worker");
@@ -260,7 +259,9 @@ test("start roots the session at the first input and preserves selection policy"
   const manual = product();
   await createBrowserJobService(manual.deps).start(startRequest(), {
     snapshot: () => {},
-    hostStatus: () => {},
+    failure: (error) => {
+      throw error;
+    },
   });
   const manualStart = manual.worker.posted.find((message) => message.type === "engine.start");
   assert.equal(
@@ -270,38 +271,17 @@ test("start roots the session at the first input and preserves selection policy"
   );
 });
 
-test("snapshots pass through with live host status", async () => {
+test("snapshots pass through without presentation plumbing", async () => {
   const p = product();
-  const service = createBrowserJobService(p.deps);
   const emitted = [];
-  const statuses = [];
-  const handle = await service.start(startRequest(), {
-    snapshot: (snapshot) => emitted.push(snapshot),
-    hostStatus: (status) => statuses.push(status),
-  });
-  assert.equal(handle.id, "job:1");
-  assert.deepEqual(statuses[0], {
-    transport: null,
-    permission: "unavailable",
-    output: "pending",
-  });
-  p.worker.receive(received(snap(1, { progress: { completed: 1, total: 4 } })));
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(emitted.length, 1);
-  assert.equal(emitted[0].progress.completed, 1);
-  assert.deepEqual(statuses.at(-1), {
-    transport: "direct",
-    permission: "granted",
-    output: "pending",
-  });
-  p.setTainted(true);
-  p.worker.receive(received(snap(2, { progress: { completed: 2, total: 4 } })));
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(statuses.at(-1).output, "display-only");
+  const handle = await createBrowserJobService(p.deps).start(startRequest(), sink(emitted));
+  const snapshot = snap(1);
+  p.worker.receive(received(snapshot));
+  assert.deepEqual(emitted, [snapshot]);
   await handle.dispose();
 });
 
-test("a missing grant suspends as pending host status, not a phase machine", async () => {
+test("a missing grant suspends its acquisition until the explicit answer", async () => {
   const p = product({
     fetchResource: async () => {
       throw Object.assign(new Error("grant missing"), { code: "permission-denied" });
@@ -320,10 +300,11 @@ test("a missing grant suspends as pending host status, not a phase machine", asy
   };
   const service = createBrowserJobService(p.deps);
   const emitted = [];
-  const statuses = [];
   const handle = await service.start(startRequest(), {
     snapshot: (snapshot) => emitted.push(snapshot),
-    hostStatus: (status) => statuses.push(status),
+    failure: (error) => {
+      throw error;
+    },
   });
   p.worker.receive(received(snap(1), [TILE]));
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -331,10 +312,8 @@ test("a missing grant suspends as pending host status, not a phase machine", asy
   assert.deepEqual(permissionDetail.hosts, []);
   // No engine outcome while suspended: the effect stays pending.
   assert.ok(!p.worker.posted.some((message) => message.type === "engine.failure"));
-  p.setPermissionPending(true);
   p.worker.receive(received(snap(2, { progress: { completed: 0, total: 1 } })));
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(statuses.at(-1).permission, "prompt");
   // Denial fails the acquisition typed without re-prompting.
   handle.resolvePermission(false);
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -347,7 +326,9 @@ test("user commands map onto the session; engine-internal commands reject typed"
   const service = createBrowserJobService(p.deps);
   const handle = await service.start(startRequest(), {
     snapshot: () => {},
-    hostStatus: () => {},
+    failure: (error) => {
+      throw error;
+    },
   });
   await handle.command({ type: "select-image", image: 2 });
   await handle.command({ type: "follow-deferred", image: 1 });
@@ -395,11 +376,15 @@ test("a terminal snapshot settles the UI; stale live snapshots never emit", asyn
   );
 });
 
-test("an adapter error projects to a terminal failed snapshot, not a hang", async () => {
+test("an adapter fault settles once without inventing an engine snapshot", async () => {
   const p = product();
   const service = createBrowserJobService(p.deps);
   const emitted = [];
-  await service.start(startRequest(), sink(emitted));
+  const failures = [];
+  await service.start(startRequest(), {
+    ...sink(emitted),
+    failure: (error) => failures.push(error),
+  });
   const adapterError = {
     code: "adapter.abi",
     phase: "validation",
@@ -409,9 +394,10 @@ test("an adapter error projects to a terminal failed snapshot, not a hang", asyn
   };
   p.worker.receive({ type: "engine.error", error: adapterError });
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(emitted.length, 1);
-  assert.equal(emitted[0].terminal.type, "failed");
-  assert.equal(emitted[0].terminal.error.code, "adapter.abi");
+  p.worker.receive({ type: "engine.error", error: adapterError });
+  assert.deepEqual(emitted, []);
+  assert.deepEqual(failures, [adapterError]);
+  assert.equal(p.worker.terminated, true);
 });
 
 test("dispose aborts in-flight fetches, terminates the worker, and settles pending work", async () => {
@@ -456,7 +442,9 @@ test("processing calls transfer their buffer and settle on disposal", async () =
   const service = createBrowserJobService(p.deps);
   const handle = await service.start(startRequest(), {
     snapshot: () => {},
-    hostStatus: () => {},
+    failure: (error) => {
+      throw error;
+    },
   });
   const bytes = new Uint8Array([1, 2, 3]).buffer;
   const pending = assemblyProcess({ recipe: "none" }, bytes);

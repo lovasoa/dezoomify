@@ -7,7 +7,7 @@
 //
 // This implements the app-model `JobService` declaration directly:
 // `start` validates and runs one browser attempt, then emits absolute engine
-// snapshots plus host presentation state. The returned handle forwards every
+// snapshots and separate runtime faults. The returned handle forwards every
 // `UserCommand` to the engine and disposes the attempt. Selection stays
 // explicit: the engine
 // terminal is the only settle signal, so the service keeps no settled flag
@@ -16,15 +16,14 @@
 // cross-worker processing ledger plus the worker and assembly handles are
 // the only per-attempt state kept.
 import type {
-  HostStatus,
+  EngineStartRequest,
   JobHandle,
   JobObserver,
   JobService,
-  JobStartRequest,
   Snapshot,
   UserCommand,
 } from "@dezoomify/app-model";
-import { initialHostStatus, validateJobStartRequest } from "@dezoomify/app-model";
+import { validateEngineStartRequest } from "@dezoomify/app-model";
 import type {
   Error as EngineError,
   JobInput,
@@ -80,13 +79,6 @@ export interface BrowserProduct {
   createAssembly(args: BrowserAssemblyArgs): EngineHostAssembly;
   /** Budget defaults; the request engine options win per job. */
   quotas?: SessionConfig;
-  sessionId(): string;
-  /** Active transport label for HostStatus (website fetcher, extension session). */
-  getTransport(): string | null;
-  /** True while paused for an explicit host grant (extension only). */
-  isPermissionPending(): boolean;
-  /** Output presentation: tainted surfaces report display-only. */
-  getOutputState(): HostStatus["output"];
   /** Visible permission action needed (extension access view). */
   onPermissionRequired?(detail: { hosts: string[]; requestId: number; jobId: string }): void;
   /** Recovery decision needed (product renders keep/discard). */
@@ -115,21 +107,21 @@ function firstSourceUrl(inputs: JobInput[]): string | null {
 }
 
 /** Browser JobService whose jobs carry the grant-resolution channel. */
-export interface BrowserJobService extends JobService {
-  start(request: JobStartRequest, observer: JobObserver): Promise<BrowserJobHandle>;
+export interface BrowserJobService extends JobService<EngineStartRequest, BrowserJobHandle> {
+  start(request: EngineStartRequest, observer: JobObserver): Promise<BrowserJobHandle>;
 }
 
 export function createBrowserJobService(product: BrowserProduct): BrowserJobService {
   const log = product.log ?? (() => {});
   let jobSequence = 0;
 
-  async function start(request: JobStartRequest, observer: JobObserver): Promise<BrowserJobHandle> {
-    const problem = validateJobStartRequest(request);
+  async function start(
+    request: EngineStartRequest,
+    observer: JobObserver,
+  ): Promise<BrowserJobHandle> {
+    const problem = validateEngineStartRequest(request);
     if (problem) {
       throw serviceError(problem, "The job request is not valid.");
-    }
-    if (!request || typeof request !== "object" || request.host?.kind !== "browser") {
-      throw serviceError("browser.invalid-exec", "The browser job service runs browser jobs only.");
     }
     const sourceUrl = firstSourceUrl(request.inputs);
     if (sourceUrl === null) {
@@ -137,10 +129,11 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
     }
     jobSequence += 1;
     const id = `job:${jobSequence}`;
-    observer.hostStatus(initialHostStatus());
     const worker = product.createWorker();
     const attemptSignal = new AbortController();
     let disposed = false;
+    let failed = false;
+    let terminal = false;
     // Transport-edge revision guard: the single stale drop. Live snapshots
     // apply only when newer; engine terminals always apply and settle the UI.
     let lastSnapshotRevision = -1;
@@ -166,22 +159,8 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
       }
     }
 
-    function status(): HostStatus {
-      let output = product.getOutputState();
-      try {
-        if (assembly?.isTainted?.() === true) output = "display-only";
-      } catch {
-        // A broken surface probe must never stall status.
-      }
-      return {
-        transport: product.getTransport(),
-        permission: product.isPermissionPending() ? "prompt" : "granted",
-        output,
-      };
-    }
-
     function processTile(recipe: ProcessingRecipe, bytes: ArrayBuffer): Promise<ArrayBuffer> {
-      if (disposed) {
+      if (disposed || failed) {
         return Promise.reject(
           serviceError("browser.job-settled", "The browser job already finished."),
         );
@@ -197,40 +176,22 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
     function forwardSnapshot(snapshot: Snapshot): void {
       lastSnapshotRevision = snapshot.revision;
       observer.snapshot(snapshot);
-      observer.hostStatus(status());
     }
 
     function onSnapshot(snapshot: Snapshot): void {
       // Stale live snapshots never move the UI; terminals always settle it.
-      if (disposed) return;
+      if (disposed || failed || terminal) return;
+      terminal = snapshot.terminal != null;
       if (!snapshot.terminal && snapshot.revision <= lastSnapshotRevision) return;
       forwardSnapshot(snapshot);
     }
 
-    /**
-     * Terminal projection for a dead engine (adapter ABI fault or host
-     * execution failure): the engine cannot report its own terminal, so the
-     * edge projects one from the typed error instead of hanging. Codes,
-     * phases, transports, and previews pass through untouched.
-     */
-    function forwardTerminalError(error: EngineError): void {
-      if (disposed) return;
-      forwardSnapshot({
-        revision: lastSnapshotRevision + 1,
-        lifecycle: "Failed",
-        paused: false,
-        progress: { completed: 0, total: undefined },
-        selection: {
-          image: undefined,
-          level: undefined,
-          level_count: 0,
-          catalog: undefined,
-          deferred: [],
-        },
-        decision: undefined,
-        terminal: { type: "failed", error },
-        output: undefined,
-      });
+    // A dead runtime cannot author an engine snapshot. Report its fault once.
+    function forwardRuntimeError(error: EngineError): void {
+      if (disposed || failed || terminal) return;
+      failed = true;
+      observer.failure(error);
+      void dispose();
     }
 
     function projectFailure(error: unknown): EngineError {
@@ -266,7 +227,7 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
     const activeAssembly = assembly;
     host = createEngineHost({
       worker: { postMessage: (message) => worker.postMessage(message) },
-      jobId: () => product.sessionId(),
+      jobId: () => id,
       fetchResource: (effect) => product.fetchResource(effect, attemptSignal.signal),
       cancelFetch: () => {
         abortAttempt();
@@ -288,7 +249,7 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
       onHostFailure: (error) => {
         if (disposed) return;
         abortAttempt();
-        forwardTerminalError(projectFailure(error));
+        forwardRuntimeError(projectFailure(error));
       },
       log,
     });
@@ -320,7 +281,7 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
       if (data.type === "engine.error") {
         if (disposed) return;
         abortAttempt();
-        forwardTerminalError(data.error);
+        forwardRuntimeError(data.error);
       }
     });
 

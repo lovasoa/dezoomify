@@ -14,13 +14,12 @@ renders authoritative snapshots.
   `JobCommand` type, never a redeclared copy.
 - Concrete runtimes implement `JobService` directly when they own the full
   start boundary. The browser service validates requests, assigns job identity,
-  emits the neutral initial host status, and forwards snapshots without a
+  forwards snapshots and separate runtime faults without a
   second service wrapper.
-- `JobStartRequest` composes engine options (`SessionConfig`) with the
-  discriminated product-local `HostSpec`: `browser` for host assembly from
-  readable bytes, `native` with a validated destination for host-written
-  output. The discriminated shape is fixed: `browser` carries
-  the `sourceUrl` data field, `native` carries the validated destination.
+- `JobService<Request, Handle>` accepts a concrete runtime request. Browser
+  starts carry `EngineStartRequest` inputs and engine options. Desktop starts
+  carry an input URL and an immutable copy of the actual output settings;
+  validation and IPC consume the same request, with no ambient settings callback.
 - `JobSnapshot` is absolute and authoritative. The shared UI renders the
   latest snapshot and never reconstructs phases from event walks. `revision`
   increases on every engine transition; runtimes drop stale revisions at
@@ -28,10 +27,9 @@ renders authoritative snapshots.
 - `isTerminalSnapshot`/`isActiveSnapshot` are pure predicates over absolute
   snapshots: terminals are set exactly once by the engine, observers settle
   on them, and nothing here folds events or assigns revisions.
-- `HostStatus` is presentation only (transport, permission, output). It is
-  never a phase machine; phases come from snapshots. The initial status is
-  neutral (no transport, no permission implied, output pending) until the
-  first host emission replaces it.
+- `JobObserver.failure(Error)` settles a runtime fault separately from engine
+  snapshots. Runtime failures never manufacture an engine revision or terminal.
+  Products own transport, permission, and output presentation directly.
 - The shared FIFO queue owns activation, advancement, cancellation, retry, and
   status totals for products with one active engine job. Products validate
   inputs and keep their queue payloads, progress, and presentation metadata.
