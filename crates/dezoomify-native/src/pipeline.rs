@@ -7,10 +7,8 @@
 //! logic stays in `dezoomify::formats`; all lifecycle policy stays in
 //! `dezoomify::engine`.
 
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use dezoomify::core::model::Request;
 use dezoomify::core::redact_uri;
 use dezoomify::Vec2d;
 
@@ -125,17 +123,6 @@ pub(crate) fn tiff_compression_for(compression: u8) -> tiff::encoder::compressio
 // ---------------------------------------------------------------------------
 // Effect executors (pure I/O + pixels; lifecycle stays in the job engine)
 // ---------------------------------------------------------------------------
-
-pub(crate) fn merge_headers(request: &Request) -> BTreeMap<String, String> {
-    let mut merged: BTreeMap<String, String> = dezoomify::default_headers()
-        .into_iter()
-        .map(|(name, value)| (name.to_ascii_lowercase(), value))
-        .collect();
-    for header in &request.headers {
-        merged.insert(header.name.to_ascii_lowercase(), header.value.clone());
-    }
-    merged
-}
 
 /// Fetch one tile with resume-cache support. When `cache` carries
 /// `(cache_dir, job_namespace)`, stored bytes that still decode skip the

@@ -4,7 +4,7 @@
 // cross IPC, projected by the typed job service.
 //
 // The typed job service (apps/desktop/src/jobService.ts) owns the job
-// lifecycle over the public Tauri API: start_job, answer_choice, cancel_job,
+// lifecycle over the public Tauri API: start_job, job_command, cancel_job,
 // pause_job, resume_job, request_destination, open_saved_output, and
 // query_capabilities. It subscribes to the single dezoomify://job-snapshot
 // channel, forwards each canonical Snapshot verbatim, and publishes
@@ -17,7 +17,7 @@
 //
 // Recovery decisions read the snapshot decision: AwaitingPartialDecision
 // carries generation plus missing tiles (partial keep/discard/retry wired
-// to answer_choice with generation+choice).
+// to job_command with generation+choice).
 import {
   cancelAllQueueEntries,
   cancelQueueEntry,
@@ -239,7 +239,7 @@ let settingsError: string | null = null;
 
 // Outstanding recovery decision, derived from the snapshot decision.
 // AwaitingPartialDecision carries generation plus missing tile ordinals;
-// the keep/discard/retry answers ride answer_choice with generation+choice.
+// the keep/discard/retry answers ride job_command with generation+choice.
 interface PendingDecision {
   missingTiles: Array<number>;
   failedCount: number;
@@ -975,7 +975,7 @@ async function handleOpenOutput(reveal: boolean): Promise<void> {
 }
 
 // Recovery: retry the outstanding partial decision (retry failed tiles).
-// Wired to the typed shell `Choice::Partial` via answer_choice with
+// Wired to the typed shell `JobCommand::AnswerPartial` via job_command with
 // generation+choice.
 function handleRecoveryRetry(): void {
   const decision = pendingDecisionOf();
@@ -996,7 +996,7 @@ function handleRecoveryRetry(): void {
 }
 
 // Recovery: keep or discard a partial result. Wired to the typed shell
-// `Choice::Partial` via answer_choice. The terminal outcome
+// `JobCommand::AnswerPartial` via job_command. The terminal outcome
 // (partial-completed / failed) arrives as the next snapshot; nothing is
 // rendered locally so the terminal stays exactly-once.
 function handlePartialChoice(keep: boolean): void {
@@ -1098,13 +1098,11 @@ function queryCapabilitiesAtBoot(): void {
     (caps) => {
       const commands = [...caps.commands].sort();
       const expected = [
-        "answer_choice",
-        "cancel_job",
+        "job_command",
         "open_saved_output",
-        "pause_job",
         "query_capabilities",
+        "release_job",
         "request_destination",
-        "resume_job",
         "start_job",
       ];
       const mismatch =
@@ -1248,7 +1246,7 @@ function ensureDesktopAuxPanel(): void {
     }
 
     // The only pending decision is the partial one: keep, discard, or
-    // retry the missing tiles through answer_choice generation+choice.
+    // retry the missing tiles through job_command generation+choice.
     title.textContent = t("desktop.rec.partialTitle");
     const missing = decision.missingTiles.map(String);
     const summary = formatMissingSummary(missing, decision.failedCount);

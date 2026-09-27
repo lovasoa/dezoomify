@@ -28,13 +28,11 @@ function fakeIpc() {
           protocol_min: "2.0",
           protocol_max: "2.0",
           commands: [
-            "answer_choice",
-            "cancel_job",
+            "job_command",
             "open_saved_output",
-            "pause_job",
+            "release_job",
             "query_capabilities",
             "request_destination",
-            "resume_job",
             "start_job",
           ],
         });
@@ -331,40 +329,27 @@ test("partial terminal never reads as completed and failures stay typed", async 
   await service2.dispose();
 });
 
-test("commands route to typed shell commands; engine-only commands reject", async () => {
-  const ipc = fakeIpc();
-  const service = createDesktopJobService({ ipc });
+test("commands cross IPC unchanged and disposal releases the retained native registration once", async () => {
+  const ipc = fakeIpc(),
+    service = createDesktopJobService({ ipc });
   const handle = await service.start(nativeRequest(), observer());
-  await handle.command({ type: "cancel" });
-  await handle.command({ type: "select-image", image: 2 });
-  await handle.command({ type: "select-level", level: 1 });
-  await handle.command({ type: "answer-partial", generation: 7, decision: "retry" });
-  await handle.command({ type: "answer-partial", generation: 7, decision: "keep" });
-  await handle.command({ type: "answer-partial", generation: 7, decision: "discard" });
-  await handle.command({ type: "pause" });
-  await handle.command({ type: "resume" });
-  const routed = ipc.invokes.slice(1).map((call) => call.args.choice ?? call.cmd);
-  assert.deepEqual(routed, [
-    "cancel_job",
-    { kind: "image", index: 2 },
-    { kind: "level", index: 1 },
-    { kind: "partial", generation: 7, decision: "retry" },
-    { kind: "partial", generation: 7, decision: "keep" },
-    { kind: "partial", generation: 7, decision: "discard" },
-    "pause_job",
-    "resume_job",
-  ]);
-  const pauseCall = ipc.invokes.find((call) => call.cmd === "pause_job");
-  const resumeCall = ipc.invokes.find((call) => call.cmd === "resume_job");
-  assert.deepEqual(pauseCall.args, { job: "job:native-1" });
-  assert.deepEqual(resumeCall.args, { job: "job:native-1" });
-  // Engine-internal commands with no shell command still reject typed.
-  await assert.rejects(
-    handle.command({ type: "tile-acquired", request: 0 }),
-    (error) => error.code === "desktop.unsupported-command",
+  const commands = [
+    { type: "pause" },
+    { type: "resume" },
+    { type: "answer-partial", generation: 7, decision: "retry" },
+    { type: "follow-deferred", image: 2 },
+    { type: "cancel" },
+  ];
+  for (const command of commands) await handle.command(command);
+  assert.deepEqual(
+    ipc.invokes.slice(1),
+    commands.map((command) => ({ cmd: "job_command", args: { job: handle.id, command } })),
   );
   await handle.dispose();
+  await handle.dispose();
   await service.dispose();
+  assert.equal(ipc.invokes.filter((call) => call.cmd === "release_job").length, 1);
+  await assert.rejects(handle.openOutput(false), { code: "desktop.job-settled" });
 });
 
 test("output actions use the retained job ref", async () => {
@@ -387,7 +372,7 @@ test("capabilities reject unknown shell commands", async () => {
   const service = createDesktopJobService({ ipc });
   const caps = await service.queryCapabilities();
   assert.equal(caps.protocolMin, "2.0");
-  assert.equal(caps.commands.length, 8);
+  assert.equal(caps.commands.length, 6);
   ipc.invoke = (_cmd) =>
     Promise.resolve({
       protocol_min: "2.0",

@@ -35,7 +35,7 @@
 //! remapping: late, duplicate, and out-of-order completions die inside the
 //! engine exactly like late host responses.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -44,7 +44,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 use dezoomify::core::discovery::{FetchCause, FetchCode, TransportKind};
-use dezoomify::core::model::{ProcessingRecipe, Request};
+use dezoomify::core::model::ProcessingRecipe;
 use dezoomify::engine::{
     EffectId as EngineEffectId, EffectResult as EngineEffectResult, EngineError as EngineJobError,
     EngineJob, JobOptions as EngineOptions, ResponseMetadata as EngineResponseMetadata,
@@ -52,7 +52,7 @@ use dezoomify::engine::{
 };
 use dezoomify::model::{
     CatalogEntry, HostEffect as EngineEffect, JobState as EngineLifecycle, OutputDisposition,
-    ProbeOutcome, RecoveryChoice as EnginePartialDecision, RequestPurpose,
+    ProbeOutcome, RecoveryChoice as EnginePartialDecision, RequestPurpose, ResourceRequest,
     Snapshot as EngineSnapshot, Terminal as EngineTerminal,
 };
 use dezoomify::Vec2d;
@@ -60,7 +60,7 @@ use dezoomify::Vec2d;
 use crate::error::NativeError;
 use crate::http::{FetchLimits, FetchOutcome, UserHeaders};
 use crate::output::OutputFormat;
-use crate::pipeline::{load_image_with_metadata, merge_headers, DecodedTile, PartialPolicy};
+use crate::pipeline::{load_image_with_metadata, DecodedTile, PartialPolicy};
 use crate::sink::{Published, Sink, SinkOptions};
 use crate::transport::NativeTransport;
 
@@ -730,8 +730,7 @@ struct TileFetch {
     effect: EngineEffectId,
     ordinal: u32,
     tile: String,
-    uri: String,
-    headers: BTreeMap<String, String>,
+    request: ResourceRequest,
     processing: ProcessingRecipe,
     destination: Vec2d,
     extent: Option<Vec2d>,
@@ -752,11 +751,8 @@ fn execute_effects(
                 if pump.snapshot.lifecycle != EngineLifecycle::Discovering {
                     continue;
                 }
-                let id = EngineEffectId(request.id);
-                let uri = request.uri;
-                let merged = merge_headers(&Request::new(&uri));
                 attempt.instrumentation.attempts += 1;
-                spawn_metadata(attempt, completion_tx, handles, id, uri, merged);
+                spawn_metadata(attempt, completion_tx, handles, request);
             }
             EngineEffect::AcquireTile {
                 request,
@@ -764,13 +760,7 @@ fn execute_effects(
                 placement,
             } => {
                 let id = EngineEffectId(request.id);
-                let uri = request.uri;
                 let probe = request.purpose == RequestPurpose::Probe;
-                let headers = request
-                    .headers
-                    .into_iter()
-                    .map(|header| (header.name.to_ascii_lowercase(), header.value))
-                    .collect::<BTreeMap<_, _>>();
                 let destination = Vec2d {
                     x: placement.position.x,
                     y: placement.position.y,
@@ -791,8 +781,7 @@ fn execute_effects(
                         handles,
                         id,
                         tile,
-                        uri,
-                        headers,
+                        request,
                         placement.processing,
                         destination,
                         expected_size,
@@ -828,8 +817,7 @@ fn execute_effects(
                         effect: id,
                         ordinal: tile,
                         tile: tile_id,
-                        uri,
-                        headers,
+                        request,
                         processing: placement.processing,
                         destination,
                         extent: expected_size,
@@ -905,9 +893,7 @@ fn spawn_metadata(
     attempt: &mut Attempt<'_>,
     completion_tx: &mpsc::Sender<Completion>,
     handles: &mut Vec<tokio::task::JoinHandle<()>>,
-    effect: EngineEffectId,
-    uri: String,
-    merged: BTreeMap<String, String>,
+    request: ResourceRequest,
 ) {
     let transport = Arc::clone(&attempt.transport);
     let task_transport = Arc::clone(&transport);
@@ -928,7 +914,7 @@ fn spawn_metadata(
             ))
         } else {
             match task_transport
-                .fetch_async(&uri, &merged, Some(&user), None, &limits)
+                .fetch_resource(&request, Some(&user), None, &limits)
                 .await
             {
                 Ok(outcome) if outcome.ok() => Ok((outcome.body, outcome.final_uri)),
@@ -941,7 +927,7 @@ fn spawn_metadata(
             Err(_) => 0,
         };
         let _ = tx.send(Completion::Metadata {
-            effect,
+            effect: EngineEffectId(request.id),
             result,
             bytes,
         });
@@ -957,8 +943,7 @@ fn spawn_probe(
     handles: &mut Vec<tokio::task::JoinHandle<()>>,
     effect: EngineEffectId,
     ordinal: u32,
-    uri: String,
-    headers: BTreeMap<String, String>,
+    request: ResourceRequest,
     processing: ProcessingRecipe,
     destination: Vec2d,
     extent: Option<Vec2d>,
@@ -973,14 +958,8 @@ fn spawn_probe(
     let tails = Arc::clone(&attempt.decode_tails);
     attempt.note_flight();
     handles.push(transport.spawn(async move {
-        let mut request = Request::new(&uri);
-        request.headers = headers
-            .into_iter()
-            .map(|(name, value)| dezoomify::model::Header { name, value })
-            .collect();
-        let merged = merge_headers(&request);
         let fetched = task_transport
-            .fetch_async(&uri, &merged, Some(&user), None, &limits)
+            .fetch_resource(&request, Some(&user), None, &limits)
             .await;
         let bytes = fetched.as_ref().map_or(0, |o| o.body.len());
         let read = match fetched {
@@ -1095,7 +1074,7 @@ async fn fetch_and_decode(
     tails: &Arc<DecodeTails>,
 ) -> Result<(DecodedTile, usize), TileAttemptFailure> {
     if let Some((dir, namespace)) = cache {
-        if let Some(bytes) = crate::cache::load(dir, namespace, &need.uri) {
+        if let Some(bytes) = crate::cache::load(dir, namespace, &need.request.uri) {
             let bytes_len = bytes.len();
             tails.reserve(bytes_len);
             let tails_release = Arc::clone(tails);
@@ -1121,24 +1100,15 @@ async fn fetch_and_decode(
                 // through to the fresh fetch below.
                 _ => {
                     let _ = std::fs::remove_file(
-                        dir.join(namespace).join(crate::cache::cache_key(&need.uri)),
+                        dir.join(namespace)
+                            .join(crate::cache::cache_key(&need.request.uri)),
                     );
                 }
             }
         }
     }
-    let mut request = Request::new(&need.uri);
-    request.headers = need
-        .headers
-        .iter()
-        .map(|(name, value)| dezoomify::model::Header {
-            name: name.clone(),
-            value: value.clone(),
-        })
-        .collect();
-    let merged = merge_headers(&request);
     let outcome = transport
-        .fetch_async(&need.uri, &merged, Some(user), None, fetch_limits)
+        .fetch_resource(&need.request, Some(user), None, fetch_limits)
         .await
         .map_err(TileAttemptFailure::transport)?;
     if !outcome.ok() {
@@ -1151,7 +1121,7 @@ async fn fetch_and_decode(
     let body_len = outcome.body.len();
     let processing = need.processing;
     let cache_store = cache.clone();
-    let uri = need.uri.clone();
+    let uri = need.request.uri.clone();
     tails.reserve(body_len);
     let tails_release = Arc::clone(tails);
     let decoded = tokio::task::spawn_blocking(move || {

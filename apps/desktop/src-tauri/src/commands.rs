@@ -7,8 +7,9 @@
 // terminal events appear exactly once. No tile bytes cross IPC, only
 // protocol progress and events.
 
-use crate::jobs::{Choice, JobTable};
+use crate::jobs::JobTable;
 use crate::settings::parse_settings;
+use dezoomify::model::JobCommand;
 
 macro_rules! command_names {
     ($($command:ident),* $(,)?) => {
@@ -179,112 +180,25 @@ pub fn dispatch_start_job(
     ))
 }
 
-/// Typed `cancel_job` dispatch: unknown or stale job ids are rejected before
-/// any effect.
-pub fn dispatch_cancel_job(
+/// Dispatch the generated command vocabulary through one endpoint.
+pub fn dispatch_job_command(
     table: &mut JobTable,
     job: &str,
+    command: serde_json::Value,
 ) -> Result<(DispatchOutcome, Vec<crate::jobs::SnapshotEmit>), CommandError> {
     if !is_valid_job_id(job) {
         return Err(CommandError::invalid_input(
             "job id must look like job:<suffix>",
         ));
     }
-    match table.cancel_job(job) {
+    let command: JobCommand = serde_json::from_value(command)
+        .map_err(|_| CommandError::invalid_input("invalid generated job command"))?;
+    match table.command(job, &command) {
         Ok((seq, emits)) => Ok((
             DispatchOutcome {
-                job: job.to_string(),
+                job: job.into(),
                 seq,
-                event: "job-snapshot".to_string(),
-            },
-            emits,
-        )),
-        Err(kind) if kind == "unknown" => Err(CommandError::unknown_job(job)),
-        Err(kind) if kind == "stale" => Err(CommandError::stale_job(job)),
-        Err(other) => Err(CommandError::invalid_input(&other)),
-    }
-}
-
-/// Typed `pause_job` dispatch: forwards engine `Pause` for a live job;
-/// unknown or stale job ids are rejected before any effect. Pre-runner jobs
-/// resolve silently (nothing to pause yet); the paused flag arrives on the
-/// next verbatim runner snapshot.
-pub fn dispatch_pause_job(
-    table: &mut JobTable,
-    job: &str,
-) -> Result<(DispatchOutcome, Vec<crate::jobs::SnapshotEmit>), CommandError> {
-    if !is_valid_job_id(job) {
-        return Err(CommandError::invalid_input(
-            "job id must look like job:<suffix>",
-        ));
-    }
-    match table.pause_job(job) {
-        Ok((seq, emits)) => Ok((
-            DispatchOutcome {
-                job: job.to_string(),
-                seq,
-                event: "job-snapshot".to_string(),
-            },
-            emits,
-        )),
-        Err(kind) if kind == "unknown" => Err(CommandError::unknown_job(job)),
-        Err(kind) if kind == "stale" => Err(CommandError::stale_job(job)),
-        Err(other) => Err(CommandError::invalid_input(&other)),
-    }
-}
-
-/// Typed `resume_job` dispatch: forwards engine `Resume` for a live job.
-/// Same routing and staleness rules as [`dispatch_pause_job`].
-pub fn dispatch_resume_job(
-    table: &mut JobTable,
-    job: &str,
-) -> Result<(DispatchOutcome, Vec<crate::jobs::SnapshotEmit>), CommandError> {
-    if !is_valid_job_id(job) {
-        return Err(CommandError::invalid_input(
-            "job id must look like job:<suffix>",
-        ));
-    }
-    match table.resume_job(job) {
-        Ok((seq, emits)) => Ok((
-            DispatchOutcome {
-                job: job.to_string(),
-                seq,
-                event: "job-snapshot".to_string(),
-            },
-            emits,
-        )),
-        Err(kind) if kind == "unknown" => Err(CommandError::unknown_job(job)),
-        Err(kind) if kind == "stale" => Err(CommandError::stale_job(job)),
-        Err(other) => Err(CommandError::invalid_input(&other)),
-    }
-}
-
-/// Typed `answer_choice` dispatch: the choice arrives as structured JSON,
-/// decodes to a [`Choice`] before any effect, and unknown or stale job ids
-/// are rejected first.
-pub fn dispatch_answer_choice(
-    table: &mut JobTable,
-    job: &str,
-    choice: serde_json::Value,
-) -> Result<(DispatchOutcome, Vec<crate::jobs::SnapshotEmit>), CommandError> {
-    if !is_valid_job_id(job) {
-        return Err(CommandError::invalid_input(
-            "job id must look like job:<suffix>",
-        ));
-    }
-    let choice: Choice = serde_json::from_value(choice).map_err(|_| {
-        CommandError::invalid_input(
-            "choice must be {\"kind\":\"image\"|\"level\",\"index\":n}, \
-             {\"kind\":\"partial\",\"decision\":\"keep\"|\"retry\"|\"discard\"}, or \
-             {\"kind\":\"pause\"|\"resume\"}",
-        )
-    })?;
-    match table.answer_choice(job, &choice) {
-        Ok((seq, emits)) => Ok((
-            DispatchOutcome {
-                job: job.to_string(),
-                seq,
-                event: "job-snapshot".to_string(),
+                event: "job-snapshot".into(),
             },
             emits,
         )),
@@ -402,11 +316,11 @@ mod tests {
     use super::*;
 
     fn image_choice(index: usize) -> serde_json::Value {
-        serde_json::json!({"kind": "image", "index": index})
+        serde_json::json!({"type": "select-image", "image": index})
     }
 
     fn level_choice(index: usize) -> serde_json::Value {
-        serde_json::json!({"kind": "level", "index": index})
+        serde_json::json!({"type": "select-level", "level": index})
     }
 
     /// Forward one synthetic runner terminal through the production
@@ -497,15 +411,13 @@ mod tests {
 
     #[test]
     fn registry_lists_exact_commands() {
-        assert_eq!(COMMANDS.len(), 8);
+        assert_eq!(COMMANDS.len(), 6);
         for name in [
             "start_job",
-            "cancel_job",
-            "pause_job",
-            "resume_job",
-            "answer_choice",
             "request_destination",
+            "job_command",
             "open_saved_output",
+            "release_job",
             "query_capabilities",
         ] {
             assert!(is_known_command(name), "missing {name}");
@@ -526,7 +438,12 @@ mod tests {
     #[test]
     fn unknown_job_rejected() {
         let mut table = JobTable::new();
-        let err = dispatch_cancel_job(&mut table, "job:nope").unwrap_err();
+        let err = dispatch_job_command(
+            &mut table,
+            "job:nope",
+            serde_json::json!({"type": "cancel"}),
+        )
+        .unwrap_err();
         assert_eq!(err.code, "job.unknown");
     }
 
@@ -534,9 +451,10 @@ mod tests {
     fn stale_job_rejected_after_terminal() {
         let mut table = JobTable::new();
         let (id, _) = table.start_job("https://example.com/item").unwrap();
-        table.cancel_job(&id).unwrap();
+        table.command(&id, &JobCommand::Cancel).unwrap();
         // Second cancel targets a terminal job: stale, not unknown.
-        let err = dispatch_cancel_job(&mut table, &id).unwrap_err();
+        let err = dispatch_job_command(&mut table, &id, serde_json::json!({"type": "cancel"}))
+            .unwrap_err();
         assert_eq!(err.code, "job.stale");
     }
 
@@ -544,9 +462,9 @@ mod tests {
     fn duplicate_cancellation_is_stale_not_new_effect() {
         let mut table = JobTable::new();
         let (id, _) = table.start_job("https://example.com/item").unwrap();
-        let (first_seq, first_emits) = table.cancel_job(&id).unwrap();
+        let (first_seq, first_emits) = table.command(&id, &JobCommand::Cancel).unwrap();
         assert_eq!(first_emits.len(), 1, "terminal emits exactly once");
-        let err = table.cancel_job(&id).unwrap_err();
+        let err = table.command(&id, &JobCommand::Cancel).unwrap_err();
         assert_eq!(err, "stale");
         assert!(table.poll_drivers().is_empty());
         assert!(first_seq >= 1);
@@ -557,44 +475,60 @@ mod tests {
         let mut table = JobTable::new();
         // Unknown jobs reject before any effect.
         assert_eq!(
-            dispatch_pause_job(&mut table, "job:nope").unwrap_err().code,
-            "job.unknown"
-        );
-        assert_eq!(
-            dispatch_resume_job(&mut table, "job:nope")
+            dispatch_job_command(&mut table, "job:nope", serde_json::json!({"type": "pause"}))
                 .unwrap_err()
                 .code,
             "job.unknown"
         );
+        assert_eq!(
+            dispatch_job_command(
+                &mut table,
+                "job:nope",
+                serde_json::json!({"type": "resume"})
+            )
+            .unwrap_err()
+            .code,
+            "job.unknown"
+        );
         // Malformed ids are invalid-input before lookup.
         assert_eq!(
-            dispatch_pause_job(&mut table, "bad-id").unwrap_err().code,
+            dispatch_job_command(&mut table, "bad-id", serde_json::json!({"type": "pause"}))
+                .unwrap_err()
+                .code,
             "job.invalid-input"
         );
         assert_eq!(
-            dispatch_resume_job(&mut table, "").unwrap_err().code,
+            dispatch_job_command(&mut table, "", serde_json::json!({"type": "resume"}))
+                .unwrap_err()
+                .code,
             "job.invalid-input"
         );
         // A live pre-runner job resolves silently: nothing to pause yet, no
         // synchronous emit; the paused flag arrives on runner snapshots.
         let (id, _) = table.start_job("https://example.com/item").unwrap();
-        let (paused, emits) = dispatch_pause_job(&mut table, &id).unwrap();
+        let (paused, emits) =
+            dispatch_job_command(&mut table, &id, serde_json::json!({"type": "pause"})).unwrap();
         assert_eq!(paused.job, id);
         assert_eq!(paused.seq, 0);
         assert_eq!(paused.event, "job-snapshot");
         assert!(emits.is_empty());
-        let (resumed, emits) = dispatch_resume_job(&mut table, &id).unwrap();
+        let (resumed, emits) =
+            dispatch_job_command(&mut table, &id, serde_json::json!({"type": "resume"})).unwrap();
         assert_eq!(resumed.job, id);
         assert_eq!(resumed.seq, 0);
         assert!(emits.is_empty());
         // Post-terminal jobs are stale with no new effect.
-        table.cancel_job(&id).unwrap();
+        table.command(&id, &JobCommand::Cancel).unwrap();
         assert_eq!(
-            dispatch_pause_job(&mut table, &id).unwrap_err().code,
+            dispatch_job_command(&mut table, &id, serde_json::json!({"type": "pause"}))
+                .unwrap_err()
+                .code,
             "job.stale"
         );
         assert_eq!(
-            dispatch_resume_job(&mut table, &id).unwrap_err().code,
+            dispatch_job_command(&mut table, &id, serde_json::json!({"type": "resume"}))
+                .unwrap_err()
+                .code,
             "job.stale"
         );
         assert!(table.poll_drivers().is_empty());
@@ -626,7 +560,7 @@ mod tests {
         // spurious revision bump; live revisions flow verbatim from the
         // runner via `poll_drivers`.
         let (seq, emits) = table
-            .answer_choice(&id, &Choice::Image { index: 0 })
+            .command(&id, &JobCommand::SelectImage { image: 0 })
             .unwrap();
         assert_eq!(seq, 0);
         assert!(emits.is_empty());
@@ -652,7 +586,7 @@ mod tests {
         // Unknown and stale jobs are rejected before any effect.
         let err = dispatch_destination(&mut table, "job:nope", "png", &path, false).unwrap_err();
         assert_eq!(err.code, "job.unknown");
-        table.cancel_job(&id).unwrap();
+        table.command(&id, &JobCommand::Cancel).unwrap();
         // Poll until the cancelled terminal settles the job (bounded wait);
         // only then are post-terminal grants stale.
         for _ in 0..200 {
@@ -710,9 +644,14 @@ mod tests {
     fn unknown_job_maps_to_job_unknown_without_effects() {
         let mut table = JobTable::new();
         assert!(table.poll_drivers().is_empty());
-        let err = dispatch_cancel_job(&mut table, "job:nope").unwrap_err();
+        let err = dispatch_job_command(
+            &mut table,
+            "job:nope",
+            serde_json::json!({"type": "cancel"}),
+        )
+        .unwrap_err();
         assert_eq!(err.code, "job.unknown");
-        let err = dispatch_answer_choice(&mut table, "job:nope", image_choice(0)).unwrap_err();
+        let err = dispatch_job_command(&mut table, "job:nope", image_choice(0)).unwrap_err();
         assert_eq!(err.code, "job.unknown");
         let path = std::path::PathBuf::from("/tmp/dz-unknown-out.png");
         let err = dispatch_destination(&mut table, "job:nope", "png", &path, false).unwrap_err();
@@ -728,12 +667,14 @@ mod tests {
         let mut table = JobTable::new();
         let (started, _) = dispatch_start_job(&mut table, "https://example.com/item").unwrap();
         let id = started.job.clone();
-        let (_, emits) = dispatch_cancel_job(&mut table, &id).unwrap();
+        let (_, emits) =
+            dispatch_job_command(&mut table, &id, serde_json::json!({"type": "cancel"})).unwrap();
         assert_eq!(emits.len(), 1, "terminal emits exactly once");
         let _ = table.poll_drivers();
-        let err = dispatch_cancel_job(&mut table, &id).unwrap_err();
+        let err = dispatch_job_command(&mut table, &id, serde_json::json!({"type": "cancel"}))
+            .unwrap_err();
         assert_eq!(err.code, "job.stale");
-        let err = dispatch_answer_choice(&mut table, &id, image_choice(1)).unwrap_err();
+        let err = dispatch_job_command(&mut table, &id, image_choice(1)).unwrap_err();
         assert_eq!(err.code, "job.stale");
         assert!(table.poll_drivers().is_empty());
         // Destination grants after terminal are stale too.
@@ -749,14 +690,16 @@ mod tests {
         // Cancelled terminal.
         let mut table = JobTable::new();
         let (id, _) = table.start_job("https://example.com/item").unwrap();
-        let (_, emits) = table.cancel_job(&id).unwrap();
+        let (_, emits) = table.command(&id, &JobCommand::Cancel).unwrap();
         assert_eq!(emits.len(), 1);
         assert_eq!(
-            dispatch_cancel_job(&mut table, &id).unwrap_err().code,
+            dispatch_job_command(&mut table, &id, serde_json::json!({"type": "cancel"}))
+                .unwrap_err()
+                .code,
             "job.stale"
         );
         assert_eq!(
-            dispatch_answer_choice(&mut table, &id, image_choice(0))
+            dispatch_job_command(&mut table, &id, image_choice(0))
                 .unwrap_err()
                 .code,
             "job.stale"
@@ -780,7 +723,9 @@ mod tests {
         let id = started.job.clone();
         fold_test_terminal(&mut table, &id, TestTerminal::Failed);
         assert_eq!(
-            dispatch_cancel_job(&mut table, &id).unwrap_err().code,
+            dispatch_job_command(&mut table, &id, serde_json::json!({"type": "cancel"}))
+                .unwrap_err()
+                .code,
             "job.stale"
         );
         // Completed terminal: choice after completion is stale.
@@ -789,7 +734,7 @@ mod tests {
         let id = started.job.clone();
         fold_test_terminal(&mut table, &id, TestTerminal::Completed);
         assert_eq!(
-            dispatch_answer_choice(&mut table, &id, level_choice(0))
+            dispatch_job_command(&mut table, &id, level_choice(0))
                 .unwrap_err()
                 .code,
             "job.stale"
@@ -802,12 +747,13 @@ mod tests {
         let mut table = JobTable::new();
         let (started, _) = dispatch_start_job(&mut table, "https://example.com/item").unwrap();
         let id = started.job.clone();
-        dispatch_cancel_job(&mut table, &id).unwrap();
+        dispatch_job_command(&mut table, &id, serde_json::json!({"type": "cancel"})).unwrap();
         let _ = table.poll_drivers();
         for _ in 0..3 {
-            let err = dispatch_cancel_job(&mut table, &id).unwrap_err();
+            let err = dispatch_job_command(&mut table, &id, serde_json::json!({"type": "cancel"}))
+                .unwrap_err();
             assert_eq!(err.code, "job.stale");
-            let err = dispatch_answer_choice(&mut table, &id, image_choice(0)).unwrap_err();
+            let err = dispatch_job_command(&mut table, &id, image_choice(0)).unwrap_err();
             assert_eq!(err.code, "job.stale");
         }
         assert!(table.poll_drivers().is_empty());
@@ -822,9 +768,9 @@ mod tests {
         assert_eq!(started.seq, 0);
         assert_eq!(started.event, "job-snapshot");
         let id = started.job.clone();
-        let (answered, _) = dispatch_answer_choice(&mut table, &id, image_choice(0)).unwrap();
+        let (answered, _) = dispatch_job_command(&mut table, &id, image_choice(0)).unwrap();
         assert_eq!(answered.seq, 0, "sync choices carry no revision");
-        let (answered2, _) = dispatch_answer_choice(&mut table, &id, level_choice(0)).unwrap();
+        let (answered2, _) = dispatch_job_command(&mut table, &id, level_choice(0)).unwrap();
         assert_eq!(answered2.seq, 0);
     }
 
@@ -837,7 +783,12 @@ mod tests {
             let id = started.job.clone();
             let terminal_emits = match terminal {
                 "cancelled" => {
-                    let (outcome, emits) = dispatch_cancel_job(&mut table, &id).unwrap();
+                    let (outcome, emits) = dispatch_job_command(
+                        &mut table,
+                        &id,
+                        serde_json::json!({"type": "cancel"}),
+                    )
+                    .unwrap();
                     assert_eq!(outcome.event, "job-snapshot");
                     assert_eq!(emits.len(), 1);
                     emits
@@ -861,7 +812,8 @@ mod tests {
                 assert_eq!(terminal_emits.len(), 1, "{terminal} must terminate once");
             }
             // Any further dispatch stays stale with no second terminal.
-            let err = dispatch_cancel_job(&mut table, &id).unwrap_err();
+            let err = dispatch_job_command(&mut table, &id, serde_json::json!({"type": "cancel"}))
+                .unwrap_err();
             assert_eq!(err.code, "job.stale", "{terminal}");
             assert!(table.poll_drivers().is_empty(), "{terminal} stays single");
         }
@@ -877,36 +829,48 @@ mod tests {
         assert!(table.is_empty());
         // Malformed job ids are invalid-input before lookup.
         for bad in ["bad-id", "job:", "job:x/y", "job:x y", ""] {
-            let err = dispatch_cancel_job(&mut table, bad).unwrap_err();
+            let err = dispatch_job_command(&mut table, bad, serde_json::json!({"type": "cancel"}))
+                .unwrap_err();
             assert_eq!(err.code, "job.invalid-input", "bad id {bad:?}");
-            let err = dispatch_answer_choice(&mut table, bad, image_choice(0)).unwrap_err();
+            let err = dispatch_job_command(&mut table, bad, image_choice(0)).unwrap_err();
             assert_eq!(err.code, "job.invalid-input", "bad id {bad:?}");
         }
         let overlong = format!("job:{}", "a".repeat(200));
         assert!(overlong.len() > 128);
-        let err = dispatch_cancel_job(&mut table, &overlong).unwrap_err();
+        let err =
+            dispatch_job_command(&mut table, &overlong, serde_json::json!({"type": "cancel"}))
+                .unwrap_err();
         assert_eq!(err.code, "job.invalid-input");
         assert!(table.is_empty());
         // Well-formed but unknown ids are job.unknown.
-        let err = dispatch_cancel_job(&mut table, "job:ghost").unwrap_err();
+        let err = dispatch_job_command(
+            &mut table,
+            "job:ghost",
+            serde_json::json!({"type": "cancel"}),
+        )
+        .unwrap_err();
         assert_eq!(err.code, "job.unknown");
         // Empty ids and choices are invalid-input (typed dispatchers take
         // no optional args to omit).
         assert_eq!(
-            dispatch_cancel_job(&mut table, "").unwrap_err().code,
+            dispatch_job_command(&mut table, "", serde_json::json!({"type": "cancel"}))
+                .unwrap_err()
+                .code,
             "job.invalid-input"
         );
         assert_eq!(
-            dispatch_answer_choice(&mut table, "job:ghost", serde_json::json!(""))
+            dispatch_job_command(&mut table, "job:ghost", serde_json::json!(""))
                 .unwrap_err()
                 .code,
             "job.invalid-input"
         );
         // Stale (wrong-state post-terminal) is job.stale.
         let (id, _) = table.start_job("https://example.com/item").unwrap();
-        table.cancel_job(&id).unwrap();
+        table.command(&id, &JobCommand::Cancel).unwrap();
         assert_eq!(
-            dispatch_cancel_job(&mut table, &id).unwrap_err().code,
+            dispatch_job_command(&mut table, &id, serde_json::json!({"type": "cancel"}))
+                .unwrap_err()
+                .code,
             "job.stale"
         );
     }
@@ -957,11 +921,12 @@ mod tests {
             serde_json::json!("x".repeat(129)),
             serde_json::json!({"kind": "image"}),
             serde_json::json!({"kind": "level", "index": "0"}),
+            serde_json::json!({"type": "answer-partial", "decision": "keep"}),
         ] {
-            let err = dispatch_answer_choice(&mut table, &id, choice.clone()).unwrap_err();
+            let err = dispatch_job_command(&mut table, &id, choice.clone()).unwrap_err();
             assert_eq!(err.code, "job.invalid-input", "choice {choice}");
         }
         assert!(table.poll_drivers().is_empty());
-        table.cancel_job(&id).unwrap();
+        table.command(&id, &JobCommand::Cancel).unwrap();
     }
 }

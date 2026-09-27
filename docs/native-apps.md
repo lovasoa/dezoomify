@@ -45,6 +45,10 @@ The native baseline reports encoders `[png, jpeg, tiff, zif, webp]`, destination
 
 ## Desktop
 
+Desktop controls use `job_command(job, command)` with the generated `JobCommand`; partial answers require the exact engine generation. Commands preserve every drained native snapshot for event delivery even when dispatch then rejects as stale. `release_job` cancels unfinished execution and releases the retired registration and output handle without deleting published files. Completed output access remains registered until the product retires its result.
+
+CLI and desktop supply `JobOptions` to the same native normalization and validation path. Metadata, probes, and tiles retain their generated `ResourceRequest` until the HTTP boundary, where request headers combine with native defaults. Scoped user credentials stay separate and are reapplied per redirect.
+
 The Tauri app hosts the shared UI. Its integration maps protocol commands to Tauri invocations and native events back. A start carries every output setting from the main screen; the driver names output from the catalog title and saves straight into the configured folder, no second dialog.
 
 Website and deep-link [handoffs](protocol.md#handoff) are untrusted input: validated, then user-confirmed, never client-signed. The shipped extension keeps browser cookies in the browser.
@@ -59,11 +63,11 @@ One output per job, saved in submission order. The format picker offers `png`, `
 
 Settings render only while idle. History selection prefills the input without starting. Completion uses native open/reveal on the published path (completed or partially completed only) via the platform launcher on a blocking worker with fallbacks; file-existence, launcher, and IPC errors stay distinct, and every failed file action updates the visible error plus diagnostics. No caller-supplied path crosses IPC. Encoding progress never erases tile counts.
 
-No catalog notice, no display-only branch on the native path. The engine owns native automatic image and level selection; output naming and result format read the selected image from the authoritative engine snapshot. The shell progress allowlist carries counts only. Engine terminals map once to native product codes for IPC (`job.no-images` → `discovery.no-image`, etc.; already-native codes pass through), so the frontend renders one vocabulary. The frontend `catalogNotice` is local-only save-name geometry, never protocol; window E2E pins both absences. Pause/resume travel live (`answer_choice` pause/resume plus the job command channel); open/reveal resolve the published sibling, never a caller-supplied path.
+No catalog notice, no display-only branch on the native path. The engine owns native automatic image and level selection; output naming and result format read the selected image from the authoritative engine snapshot. The shell progress allowlist carries counts only. Engine terminals map once to native product codes for IPC (`job.no-images` → `discovery.no-image`, etc.; already-native codes pass through), so the frontend renders one vocabulary. The frontend `catalogNotice` is local-only save-name geometry, never protocol; window E2E pins both absences. Pause/resume travel live (the generated `job_command` endpoint); open/reveal resolve the published sibling, never a caller-supplied path.
 
 ### Desktop partial-output honesty
 
-Default policy is `Keep`. Kept partials publish to the `.partial` sibling; the granted destination stays untouched, so partials never masquerade as complete; `--no-partial`/`Fail` writes nothing (`tile.download-failed`). The driver answers `request-decision{partial}` from policy itself, so the shell shows no partial dialog (`answer_choice` markers still map onto policy pre-grant). The pump retains partial flag, missing ledger, and published path. Kept partials end `PartiallyCompleted` with a distinct label; open/reveal resolve the sibling, never the untouched destination.
+Default policy is `Keep`. Kept partials publish to the `.partial` sibling; the granted destination stays untouched, so partials never masquerade as complete; `--no-partial`/`Fail` writes nothing (`tile.download-failed`). The desktop presents the generated partial decision and sends its exact generation through `job_command`. The native driver waits up to 60 seconds for an answer, then applies the configured default policy. CLI interactive and policy answers use the same native command channel. The pump retains partial flag, missing ledger, and published path. Kept partials end `PartiallyCompleted` with a distinct label; open/reveal resolve the sibling, never the untouched destination.
 
 ### Desktop updater
 

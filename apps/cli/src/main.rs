@@ -265,11 +265,7 @@ fn job_options_for(parsed: &Args, input: &str, output: &Path) -> JobOptions {
         input_url: input.to_string(),
         output: OutputTarget::File(output.to_path_buf()),
         overwrite: parsed.overwrite,
-        format: if parsed.format.eq_ignore_ascii_case("auto") {
-            None
-        } else {
-            Some(parsed.format.clone())
-        },
+        format: Some(parsed.format.clone()),
         image_index: parsed.image_index,
         zoom_level: parsed.zoom_level,
         largest: parsed.should_use_largest(),
@@ -280,10 +276,7 @@ fn job_options_for(parsed: &Args, input: &str, output: &Path) -> JobOptions {
         keep_partial: parsed.keep_partial,
         compression: parsed.compression,
         headers: user_headers,
-        cache_dir: parsed
-            .tile_cache
-            .clone()
-            .or_else(|| Some(dezoomify_native::pipeline::default_tile_cache_dir())),
+        cache_dir: parsed.tile_cache.clone(),
         timeout: parsed.timeout,
         connect_timeout: parsed.connect_timeout,
         max_idle_per_host: parsed.max_idle_per_host,

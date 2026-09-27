@@ -111,10 +111,6 @@ pub fn job_options_for(settings: &DesktopSettings) -> JobOptions {
         min_interval,
         compression: settings.compression,
         cache_dir: settings.cache_dir.clone(),
-        timeout: Duration::from_secs(30),
-        connect_timeout: Duration::from_secs(6),
-        max_idle_per_host: 32,
-        keep_partial: true,
         ..JobOptions::default()
     }
 }
