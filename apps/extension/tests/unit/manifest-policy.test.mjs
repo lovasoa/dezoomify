@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const output = (browser) => new URL(`../../.output/${browser}-mv3/`, import.meta.url);
 const manifest = (browser) =>
   JSON.parse(readFileSync(new URL("manifest.json", output(browser)), "utf8"));
-const REVIEWED_PERMISSIONS = ["activeTab", "scripting"];
+const REVIEWED_PERMISSIONS = ["activeTab", "downloads", "scripting"];
 
 for (const browser of ["chrome", "firefox"]) {
   test(`${browser}: WXT emits the reviewed MV3 manifest`, () => {
@@ -22,7 +22,7 @@ for (const browser of ["chrome", "firefox"]) {
     assert.equal(value.content_scripts, undefined);
     assert.equal(value.web_accessible_resources, undefined);
     assert.equal(value.offscreen, undefined);
-    for (const forbidden of ["tabs", "downloads", "cookies"]) {
+    for (const forbidden of ["tabs", "cookies"]) {
       assert.ok(
         !value.permissions.includes(forbidden),
         `${browser} must not permanently request ${forbidden}`,

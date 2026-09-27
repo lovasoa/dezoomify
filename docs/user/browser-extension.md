@@ -20,7 +20,7 @@ for the job tab to open, then zoom in on the image once.
 ## 3. Start dezooming
 
 Dezoomify opens a new tab and starts dezooming automatically. Leave it open
-until your image is ready, then save it.
+until it confirms that your image has been saved.
 
 ## Tiled or static?
 
@@ -59,6 +59,9 @@ Install it from the
    after the save completes, the offer stays without **Stop**. There
    is no list to pick from in the extension. To choose a particular image or
    level, use the [command-line tool](./command-line.md).
+
+The job finishes when your browser confirms the saved file. If saving fails,
+the job tab shows an error. Stopping the job also cancels an unfinished save.
 
 ## If something goes wrong
 
