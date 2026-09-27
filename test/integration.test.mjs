@@ -252,13 +252,9 @@ test("proxyTransport posts only targetUrl+protocolVersion, credentials omit, siz
     const body = JSON.parse(init.body);
     assert.deepEqual(Object.keys(body).sort(), ["protocolVersion", "targetUrl"]);
     assert.ok(!("cookie" in (init.headers ?? {})));
-    return {
-      status: 200,
-      headers: { get: (k) => (k.toLowerCase() === "content-type" ? "application/json" : null) },
-      async arrayBuffer() {
-        return new Uint8Array([1, 2]).buffer;
-      },
-    };
+    return new Response(new Uint8Array([1, 2]), {
+      headers: { "content-type": "application/json" },
+    });
   };
   const pt = createProxyTransport(fetchImpl, { protocolVersion: 1, maxBytes: 1024 });
   const r = await pt.fetchViaProxy("https://public.test/x.json");
@@ -278,16 +274,10 @@ test("proxyTransport posts only targetUrl+protocolVersion, credentials omit, siz
   assert.equal(denied.code, "PROXY_POLICY_DENIED");
   assert.equal(called, 0);
   // Oversize mapped to budget code.
-  const pt3 = createProxyTransport(
-    async () => ({
-      status: 200,
-      headers: { get: () => null },
-      async arrayBuffer() {
-        return new Uint8Array(2048).buffer;
-      },
-    }),
-    { protocolVersion: 1, maxBytes: 1024 },
-  );
+  const pt3 = createProxyTransport(async () => new Response(new Uint8Array(2048)), {
+    protocolVersion: 1,
+    maxBytes: 1024,
+  });
   const big = await pt3.fetchViaProxy("https://public.test/x.json");
   assert.equal(big.code, "PROXY_BUDGET_EXCEEDED");
   // Cancellation.
@@ -299,13 +289,7 @@ test("proxyTransport posts only targetUrl+protocolVersion, credentials omit, siz
 
 test("proxyTransport surfaces Retry-After on 429 so callers can back off once", async () => {
   const withHint = createProxyTransport(
-    async () => ({
-      status: 429,
-      headers: { get: (k) => (k.toLowerCase() === "retry-after" ? "2" : null) },
-      async arrayBuffer() {
-        return new Uint8Array([1]).buffer;
-      },
-    }),
+    async () => new Response(new Uint8Array([1]), { status: 429, headers: { "retry-after": "2" } }),
     { protocolVersion: 1, maxBytes: 1024 },
   );
   const hinted = await withHint.fetchViaProxy("https://public.test/busy.json");
@@ -313,13 +297,7 @@ test("proxyTransport surfaces Retry-After on 429 so callers can back off once", 
   assert.equal(hinted.code, "PROXY_RATE_LIMITED");
   assert.equal(hinted.retryAfterMs, 2000);
   const bare = createProxyTransport(
-    async () => ({
-      status: 429,
-      headers: { get: () => null },
-      async arrayBuffer() {
-        return new Uint8Array([1]).buffer;
-      },
-    }),
+    async () => new Response(new Uint8Array([1]), { status: 429 }),
     { protocolVersion: 1, maxBytes: 1024 },
   );
   const unhinted = await bare.fetchViaProxy("https://public.test/busy.json");
@@ -339,13 +317,7 @@ test("proxyTransport caps proxy load at 4 inflight and 4 starts per second", asy
     maxInflight = Math.max(maxInflight, inflight);
     await new Promise((resolve) => setTimeout(resolve, 20));
     inflight -= 1;
-    return {
-      status: 200,
-      headers: { get: () => null },
-      async arrayBuffer() {
-        return new Uint8Array([1]).buffer;
-      },
-    };
+    return new Response(new Uint8Array([1]));
   };
   const pt = createProxyTransport(fetchImpl, {
     protocolVersion: 1,
@@ -367,35 +339,22 @@ test("proxyTransport caps proxy load at 4 inflight and 4 starts per second", asy
 });
 
 test("proxyTransport surfaces the upstream URL so proxied metadata keeps its tile base", async () => {
-  const fetchImpl = async () => ({
-    status: 200,
-    headers: {
-      get: (k) => {
-        const l = k.toLowerCase();
-        if (l === "content-type") return "application/xml";
-        if (l === "x-proxy-upstream-url") return "https://public.test/galleria_04.xml";
-        return null;
+  const fetchImpl = async () =>
+    new Response(new Uint8Array([1]), {
+      headers: {
+        "content-type": "application/xml",
+        "x-proxy-upstream-url": "https://public.test/galleria_04.xml",
       },
-    },
-    async arrayBuffer() {
-      return new Uint8Array([1]).buffer;
-    },
-  });
+    });
   const pt = createProxyTransport(fetchImpl, { protocolVersion: 1, maxBytes: 1024 });
   const r = await pt.fetchViaProxy("https://public.test/galleria_04.xml");
   assert.equal(r.ok, true);
   assert.equal(r.finalUrl, "https://public.test/galleria_04.xml");
   // Missing header: no finalUrl, callers fall back to the requested URL.
-  const bare = createProxyTransport(
-    async () => ({
-      status: 200,
-      headers: { get: () => null },
-      async arrayBuffer() {
-        return new Uint8Array([1]).buffer;
-      },
-    }),
-    { protocolVersion: 1, maxBytes: 1024 },
-  );
+  const bare = createProxyTransport(async () => new Response(new Uint8Array([1])), {
+    protocolVersion: 1,
+    maxBytes: 1024,
+  });
   const r2 = await bare.fetchViaProxy("https://public.test/galleria_04.xml");
   assert.equal(r2.ok, true);
   assert.equal(r2.finalUrl, undefined);

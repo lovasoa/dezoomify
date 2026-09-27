@@ -200,14 +200,7 @@ test("regression: heads without zoomable literals are a negative hint, not a ver
 function fetcherForHead(head) {
   const bytes = textToBytes(head).slice(0);
   return createWebFetcher({
-    fetchImpl: async () => ({
-      status: 200,
-      url: "https://example.test/",
-      headers: { get: () => "text/html" },
-      async arrayBuffer() {
-        return bytes;
-      },
-    }),
+    fetchImpl: async () => new Response(bytes, { headers: { "content-type": "text/html" } }),
     isProxyEligible: () => ({ eligible: false }),
     classifyHint: (hintBytes, info) => classifyReadableBytes(hintBytes, info),
     hooks: { onRequestStart: () => 0, onRequestEnd() {}, onLog() {}, onUpdate() {} },

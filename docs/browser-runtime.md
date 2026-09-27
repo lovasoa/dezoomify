@@ -42,7 +42,7 @@ Once tainted, the runtime never runs pixel reads, hashing, processing, `toBlob`,
 
 ## Readable-byte fetching
 
-Readable metadata, processed tiles, and clean saves start with direct browser fetch. After a classified CORS or network failure, the website retries only an eligible public, non-credential metadata request through the metadata proxy; tiles never use the proxy, so readable tile bytes on CORS-blocked sources need the extension or desktop app. Bytes go to workers for decode, core-recipe processing, and save assembly. Size limits are checked before allocation.
+Readable metadata, processed tiles, and clean saves start with direct browser fetch. After a classified CORS or network failure, the website retries only an eligible public, non-credential metadata request through the metadata proxy; tiles never use the proxy, so readable tile bytes on CORS-blocked sources need the extension or desktop app. Direct metadata streams stop at 8 MiB and direct tile streams at 64 MiB; the metadata proxy stops at 2 MiB. The transport cancels a body as soon as its limit or attempt signal is reached, and reads at most 4 KiB for an HTTP error preview. Bytes go to workers for decode, core-recipe processing, and save assembly. Size limits are checked before allocation.
 
 Object URLs live for one job and are then revoked.
 
@@ -79,7 +79,7 @@ flowchart TD
 3. For unprocessed ordinary tiles, one direct readable attempt classifies each origin. A successful ordinary `<img>` fallback marks that origin display-only for the job, so later ordinary tiles load directly through `<img>`.
 4. A typed recovery action offering the [extension](extension.md) or [native app](native-apps.md) when no accepted browser route supplies readable bytes.
 
-The website always shows the active transport, including the automatic switch after a classified direct failure. No per-attempt consent exists.
+The website always shows the active transport, including the automatic switch after a classified direct failure. No per-attempt consent exists. An HTTP error remains an HTTP error when its diagnostic body times out; it never triggers proxy fallback. A proxy deadline reports a retryable transport failure, while cancelling the job reports cancellation.
 
 The extension transport is tab-origin direct fetch plus `<img>` display-only fallback; see [Extension](extension.md#fetching). The extension never uses the metadata proxy.
 
