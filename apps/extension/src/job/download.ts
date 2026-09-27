@@ -17,6 +17,7 @@ export function saveExtensionBlob(
     let id: number | null = null;
     let settled = false;
     let aborted = false;
+    let cancelling = false;
     const early = new Map<number, DownloadDelta>();
 
     const finish = (result: { id: number } | { error: unknown }) => {
@@ -37,14 +38,22 @@ export function saveExtensionBlob(
         return;
       }
       if (delta.id !== id) return;
-      if (delta.state.current === "complete") finish({ id });
+      if (aborted) finish({ error: signal.reason });
+      else if (delta.state.current === "complete") finish({ id });
       else finish({ error: failed(delta.error?.current ?? "download interrupted") });
+    };
+    const cancelAndFinish = (error: unknown) => {
+      if (id === null || settled || cancelling) return;
+      cancelling = true;
+      // The manager may still be reading the Blob until cancellation settles.
+      void downloads.cancel(id).then(
+        () => finish({ error }),
+        () => finish({ error }),
+      );
     };
     const onAbort = () => {
       aborted = true;
-      if (id === null) return;
-      void downloads.cancel(id).catch(() => {});
-      finish({ error: signal.reason ?? new DOMException("Job cancelled", "AbortError") });
+      cancelAndFinish(signal.reason ?? new DOMException("Job cancelled", "AbortError"));
     };
 
     downloads.onChanged.addListener(onChanged);
@@ -72,7 +81,7 @@ export function saveExtensionBlob(
             finish({ error: failed(item.error ?? "download interrupted") });
           }
         } catch (error) {
-          finish({ error: failed(error instanceof Error ? error.message : String(error)) });
+          cancelAndFinish(failed(error instanceof Error ? error.message : String(error)));
         }
       },
       (error) =>
