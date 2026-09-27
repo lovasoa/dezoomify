@@ -77,6 +77,72 @@ test("direct metadata never proxies an upstream refusal and bounds its preview",
   assert.equal(proxyCalls, 0);
 });
 
+test("a stalled error preview preserves the HTTP refusal without proxy fallback", async (t) => {
+  const deadline = new AbortController();
+  t.mock.method(AbortSignal, "timeout", () => deadline.signal);
+  let proxyCalls = 0;
+  let cancelled = false;
+  const { fetcher } = makeFetcher(
+    async () =>
+      new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { status: 403 },
+      ),
+    {
+      isProxyEligible: () => ({ eligible: true, reason: "public" }),
+      proxyTransport: {
+        fetchViaProxy: async () => {
+          proxyCalls += 1;
+          return { ok: false, status: 502, code: "PROXY_NETWORK_ERROR" };
+        },
+      },
+    },
+  );
+  const pending = fetcher.fetchResource(request("https://a.test/x"), signal);
+  await new Promise((resolve) => setImmediate(resolve));
+  deadline.abort(new DOMException("Timed out", "TimeoutError"));
+  await assert.rejects(pending, (error) => {
+    assert.equal(error.code, "DISCOVERY_HTTP_ERROR");
+    assert.equal(error.cause.http, 403);
+    return true;
+  });
+  assert.equal(proxyCalls, 0);
+  assert.equal(cancelled, true);
+});
+
+test("a proxy deadline reports a network failure rather than job cancellation", async (t) => {
+  const deadline = new AbortController();
+  t.mock.method(AbortSignal, "timeout", () => deadline.signal);
+  const { fetcher } = makeFetcher(
+    async () => {
+      throw new TypeError("CORS");
+    },
+    {
+      isProxyEligible: () => ({ eligible: true, reason: "public" }),
+      proxyTransport: {
+        fetchViaProxy: (_request, { signal }) =>
+          new Promise((resolve) => {
+            signal.addEventListener("abort", () =>
+              resolve({ ok: false, status: 0, code: "TRANSPORT_CANCELLED" }),
+            );
+          }),
+      },
+    },
+  );
+  const pending = fetcher.fetchResource(request("https://a.test/x"), signal);
+  await new Promise((resolve) => setImmediate(resolve));
+  deadline.abort(new DOMException("Timed out", "TimeoutError"));
+  await assert.rejects(pending, (error) => {
+    assert.equal(error.cause.code, "PROXY_ERROR");
+    assert.equal(error.retryable, true);
+    return true;
+  });
+});
+
 test("metadata proxy follows one bounded retry and reports its redirect URI", async () => {
   let calls = 0;
   const { fetcher } = makeFetcher(
