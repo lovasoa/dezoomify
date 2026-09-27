@@ -1,10 +1,11 @@
+import type { JobHandle } from "@dezoomify/app-model";
 import type { ResourceRequest } from "@dezoomify/wasm-bindings";
+import { createAttemptPermissions, type PermissionWait } from "./permissions.ts";
 /** Dedicated extension job-tab integration. No webpage postMessage bridge. */
 
 import type { Error as EngineError, JobSnapshot, JobState } from "@dezoomify/app-model";
 import {
   BROWSER_MAX_PLAN_TILES,
-  type BrowserJobHandle,
   browserLimitsFor,
   type ClientHints,
   canvasAllocationFailure,
@@ -39,7 +40,7 @@ import {
 } from "@dezoomify/shared-ui";
 import type { ProcessingRecipe } from "@dezoomify/wasm-bindings";
 import { createElement } from "react";
-import type { WxtBrowser } from "wxt/browser";
+import { browser as api } from "wxt/browser";
 import { asFetchFailure, createExtensionFetcher } from "../runtime/fetch.ts";
 import { createSourceAccess } from "./source-access.ts";
 import { createEngineResourceFetcher } from "./transport.ts";
@@ -47,16 +48,8 @@ import { AccessRequestView, PartialOutputActions } from "./view.tsx";
 
 const TEST_PERMISSION_MOCK = import.meta.env.MODE === "testing";
 
-type ExtensionApi = Partial<
-  Pick<WxtBrowser, "action" | "runtime" | "permissions" | "tabs" | "scripting">
->;
 type ViewContext = SharedViewContext & { failure?: StructuredError };
 
-const hostGlobal = globalThis as typeof globalThis & {
-  browser?: ExtensionApi;
-  chrome?: ExtensionApi;
-};
-const api = hostGlobal.browser ?? hostGlobal.chrome;
 const jobLog = createLogger("job");
 // Mirror accepted log lines into the job view's technical-details log (and the
 // copied diagnostics) so a failed job shows the interaction trace. Worker
@@ -71,13 +64,11 @@ jobLog.addSink((entry) => {
 
 let sourceAccess: ReturnType<typeof createSourceAccess> | null = null;
 let siteOrigin = "";
-/** Fallback request ids for probes that arrive without an engine request id. Start clear of the engine's small sequential ids. */
 // One shared browser job service attempt. The service owns the worker, the WASM
 // session, cross-worker processing calls, the abort scope, and disposal;
 // this tab owns source access, transport, assembly, and view wiring. The single
 // authoritative snapshot renders directly; no derived mirrors.
-let jobHandle: BrowserJobHandle | null = null;
-/** Service abort signal of the live attempt (drives the cancelled() transport view). */
+let jobHandle: JobHandle | null = null;
 let discoveryGeneration = 0;
 let assembly: ReturnType<typeof createCanvasAssembly> | null = null;
 /** Single authoritative snapshot: render it directly, never a derived copy. */
@@ -86,7 +77,7 @@ let localFailure: StructuredError | null = null;
 let testCompletionNotified = false;
 let lastActionIndicator = "";
 /** Ephemeral permission view (telemetry only, never gates commands). */
-let pendingPermission: { hosts: string[]; requesting: boolean } | null = null;
+let pendingPermission: PermissionWait | null = null;
 const testGrantedOrigins = new Set<string>();
 /** True when the next attempt must target the maximum known resolution. */
 let tryMaximumNext = false;
@@ -236,45 +227,9 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
       ...(pendingPermission
         ? {
             replace: createElement(AccessRequestView, {
-              origin:
-                pendingPermission.hosts.length === 1
-                  ? pendingPermission.hosts[0]
-                  : "the required image host",
+              origin: pendingPermission.origin,
               requesting: pendingPermission.requesting,
-              onRequest: () => {
-                if (!pendingPermission || pendingPermission.requesting) return;
-                pendingPermission.requesting = true;
-                render(status, ctx);
-                const hosts = pendingPermission.hosts;
-                const origins = hosts.map((origin) => `${origin}/*`);
-                // Optional-host consent must be requested synchronously from this
-                // click handler. Keeping it here retains Chrome's user activation.
-                // Chromium's native optional-permission prompt cannot be automated by
-                // the headless extension driver, so its package mocks this browser API.
-                const request = TEST_PERMISSION_MOCK
-                  ? Promise.resolve(true)
-                  : Promise.resolve(api?.permissions?.request?.({ origins }));
-                void request
-                  .then((granted) => {
-                    if (!granted) throw new Error("permission denied");
-                    if (TEST_PERMISSION_MOCK)
-                      for (const origin of hosts) testGrantedOrigins.add(origin);
-                    return TEST_PERMISSION_MOCK
-                      ? true
-                      : api?.permissions?.contains?.({ origins }).then(Boolean);
-                  })
-                  .then((granted) => {
-                    if (!granted) throw new Error("permission was not retained");
-                    pendingPermission = null;
-                    jobHandle?.resolvePermission?.(true);
-                    render("downloading", { jobActivity: { startedAt: Date.now() } });
-                  })
-                  .catch(() => {
-                    if (!pendingPermission) return;
-                    pendingPermission.requesting = false;
-                    render(status, ctx);
-                  });
-              },
+              onRequest: pendingPermission.request,
             }),
           }
         : {}),
@@ -329,13 +284,6 @@ function closeJob() {
   void handle?.command({ type: "cancel" }).catch(() => {});
   stopAttempt();
   render("cancelled", { jobActivity: { startedAt: Date.now() } });
-}
-
-function showAccessRequired(detail: { hosts: string[] }) {
-  const hosts = Array.isArray(detail.hosts) ? detail.hosts : [];
-  jobLog.info("permission-requested", `jobId=${sessionId} hosts=${hosts.length}`);
-  pendingPermission = { hosts, requesting: false };
-  render("downloading", { jobActivity: { startedAt: Date.now() } });
 }
 
 /** Source host for shared copy interpolation; "" when the input is unparseable. */
@@ -524,7 +472,7 @@ async function bindSourceTab() {
         code: "source-document-lost",
         retryable: false,
       });
-    sourceAccess = createSourceAccess(api as Pick<WxtBrowser, "tabs" | "scripting">, {
+    sourceAccess = createSourceAccess(api, {
       tabId: sourceTabId,
       documentUrl: tab.url,
     });
@@ -569,20 +517,31 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
   const source = sourceAccess;
   if (!source) return;
   attemptSourceUrl = inputs[0]?.url ?? "";
+  const permissionApi = {
+    contains: async ({ origins }: { origins?: string[] }) =>
+      TEST_PERMISSION_MOCK
+        ? (origins ?? []).every((pattern) => testGrantedOrigins.has(pattern.slice(0, -2)))
+        : api!.permissions!.contains({ origins }),
+    request: ({ origins }: { origins?: string[] }) => {
+      if (!TEST_PERMISSION_MOCK) return api!.permissions!.request({ origins });
+      for (const pattern of origins ?? []) testGrantedOrigins.add(pattern.slice(0, -2));
+      return Promise.resolve(true);
+    },
+  };
+  const permissions = createAttemptPermissions(permissionApi, (pending) => {
+    if (generation !== discoveryGeneration) return;
+    pendingPermission = pending[0] ?? null;
+    render("downloading", { jobActivity: { startedAt: Date.now() } });
+  });
   const fetcher = createExtensionFetcher({
-    hasPermission: async (origin) =>
-      testGrantedOrigins.has(origin) ||
-      (!TEST_PERMISSION_MOCK &&
-        !!(
-          api?.permissions?.contains &&
-          (await api.permissions.contains({ origins: [`${origin}/*`] }))
-        )),
+    hasPermission: (origin) => permissionApi.contains({ origins: [`${origin}/*`] }),
   });
   const extensionTransport = {
     async fetchResource(request: ResourceRequest, signal: AbortSignal) {
       const url = request.uri;
       jobLog.debug("extension-fetch-start", `url=${url} purpose=${request.purpose}`);
       try {
+        await permissions.ensure(new URL(request.uri).origin, signal);
         const result = await fetcher.fetchResource(request, signal);
         jobLog.debug("extension-fetch-complete", `url=${url} bytes=${result.bytes.byteLength}`);
         return result;
@@ -621,9 +580,6 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
     // Browser session baseline: 6 concurrent tile fetches (matches the
     // website). The engine validates the budget at job creation.
     quotas: { max_concurrent_fetches: 6 },
-    onPermissionRequired: (detail) => {
-      showAccessRequired(detail);
-    },
     onRecoveryRequested: () => {
       // The authoritative snapshot carries the decision generation; re-render
       // it directly instead of copying the generation aside.

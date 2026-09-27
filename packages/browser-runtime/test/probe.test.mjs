@@ -63,8 +63,9 @@ test("probe reports missing when every route fails", async () => {
   );
 });
 
-test("probe rethrows missing-grant errors for permission pauses", async () => {
+test("probe propagates transport policy failures without ordinary-image fallback", async () => {
   const probe = createProbeSize({
+    classifyFailure: () => ({ code: "TRANSPORT_POLICY_DENIED" }),
     fetchResource: async () => {
       throw Object.assign(new Error("grant"), { code: "permission-denied" });
     },

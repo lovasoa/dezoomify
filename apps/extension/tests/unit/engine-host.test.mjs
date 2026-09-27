@@ -77,7 +77,6 @@ function harness({
       message: String(error?.message ?? error),
       transport: "browser-session",
     }),
-    onPermissionRequired: (detail) => seen.push(["permission", detail]),
     onRecoveryRequested: (generation) => seen.push(["recovery-decision", generation]),
     onHostFailure: (error) => seen.push(["host-failure", error]),
     log: (level, code, detail) => logs.push({ level, code, detail }),
@@ -130,58 +129,11 @@ test("a tile that cannot decode reports a failed acquisition, not a broken outpu
   );
 });
 
-test("an access grant re-drives the paused acquisition instead of failing the job", async () => {
-  let attempts = 0;
-  const sent = [];
-  const retried = [];
-  const assembly = fakeAssembly();
-  const controller = createEngineHost({
-    worker: { postMessage: (message) => sent.push(message) },
-    jobId: () => SESSION_ID,
-    fetchResource: async () => {
-      attempts += 1;
-      if (attempts === 1)
-        throw Object.assign(new Error("grant required"), {
-          category: "access-required",
-          code: "permission-denied",
-          hosts: ["https://cdn.test"],
-        });
-      return { bytes: new Uint8Array([1]) };
-    },
-    cancelFetch: () => {},
-    assembly,
-    probeSize: async () => ({ status: "available", width: 256, height: 256 }),
-    classifyFailure: (error) => ({
-      blocked_reason: error?.category ?? "network",
-      code: "extension.network",
-      retryable: true,
-      message: String(error?.message ?? error),
-      transport: "browser-session",
-    }),
-    onPermissionRequired: (detail) => retried.push(detail),
-    onRecoveryRequested() {},
-    onHostFailure() {},
-  });
-  controller.handleEngineMessages([TILE_EFFECT]);
-  await flush();
-  assert.equal(
-    sent.some((message) => message.type === "engine.failure"),
-    false,
-    "grantable access waits for the decision",
-  );
-  assert.equal(retried.length, 1);
-  controller.resolvePermission(true);
-  await flush();
-  assert.equal(attempts, 2);
-  assert.ok(sent.some((message) => message.type === "engine.acquired"));
-});
-
 test("a granted-origin refusal fails typed without re-prompting for a grant", async () => {
   // #1081: an upstream 401/403 is not a missing browser permission. The
   // host must not pause for a grant it already holds; the failure flows to
   // the engine and the acquisition fails.
   const sent = [];
-  const retried = [];
   const assembly = fakeAssembly();
   const controller = createEngineHost({
     worker: { postMessage: (message) => sent.push(message) },
@@ -203,13 +155,11 @@ test("a granted-origin refusal fails typed without re-prompting for a grant", as
       message: String(error?.message ?? error),
       transport: "browser-session",
     }),
-    onPermissionRequired: (detail) => retried.push(detail),
     onRecoveryRequested() {},
     onHostFailure() {},
   });
   controller.handleEngineMessages([TILE_EFFECT]);
   await flush();
-  assert.equal(retried.length, 0, "a granted-origin refusal never pauses for another grant");
   const failure = sent.find((message) => message.type === "engine.failure");
   assert.ok(failure, "the refusal reaches the engine");
   assert.equal(failure.requestId, 0);

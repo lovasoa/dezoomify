@@ -1,4 +1,5 @@
 import type { ResourceRequest } from "@dezoomify/wasm-bindings";
+import type { HostFailure } from "./engine-host.ts";
 
 // Shared probe-size helper for browser hosts.
 //
@@ -32,6 +33,7 @@ export interface ProbeBitmap {
 }
 
 export interface ProbeSizeDeps {
+  classifyFailure?(error: unknown): HostFailure;
   /** Fetch one tile as readable bytes. The engine request id lets a host route the probe without colliding with tile requests. */
   fetchResource(request: ResourceRequest, signal: AbortSignal): Promise<{ bytes: Uint8Array }>;
   /** Decode fetched bytes far enough to report dimensions. */
@@ -65,16 +67,7 @@ export function createProbeSize(
       signal.throwIfAborted();
     } catch (error) {
       signal.throwIfAborted();
-      // A missing host grant is actionable (the host pauses for permission),
-      // never a silent missing probe. Only other fetch failures fall through
-      // to the <img> fallback / missing observation.
-      if (
-        error !== null &&
-        typeof error === "object" &&
-        (error as { code?: unknown }).code === "permission-denied"
-      ) {
-        throw error;
-      }
+      if (deps.classifyFailure?.(error).code === "TRANSPORT_POLICY_DENIED") throw error;
       if (!deps.loadImage) return { status: "missing" };
       try {
         const observed = await deps.loadImage(request.uri, signal);

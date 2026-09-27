@@ -1,11 +1,11 @@
 import {
   decodeBase64Payload,
   isPublicHttpUrl,
-  normalizeFetchMethod,
   originOfUrl,
   SOURCE_FETCH_BYTE_LIMIT,
   validateEngineHeaders,
 } from "@dezoomify/browser-runtime";
+import type { ResourceRequest } from "@dezoomify/wasm-bindings";
 import type { WxtBrowser } from "wxt/browser";
 import { cancelSourceFetch, collectCandidates, fetchSource } from "./source-operations.ts";
 
@@ -14,11 +14,6 @@ type CandidateSnapshot = Awaited<ReturnType<typeof collectCandidates>>;
 type CandidateInput = CandidateSnapshot["inputs"][number];
 type SourceRequest = Parameters<typeof fetchSource>[0];
 type FetchResult = Awaited<ReturnType<typeof fetchSource>>;
-type EngineRequest = {
-  uri: string;
-  method?: string;
-  headers?: Array<{ name: string; value: string }>;
-};
 
 const MAX_URL_LENGTH = 2048;
 const MAX_CANDIDATES = 100;
@@ -144,7 +139,6 @@ export function createSourceAccess(
 
   const { tabId, documentUrl } = reference;
   let invalidated = false;
-  let generation = 0;
   const onUpdated = (updatedTabId: number, changeInfo: { status?: string; url?: string }) => {
     if (updatedTabId !== tabId) return;
     if (changeInfo.status === "loading") {
@@ -160,22 +154,19 @@ export function createSourceAccess(
   function invalidate() {
     if (invalidated) return;
     invalidated = true;
-    generation += 1;
   }
   browserApi.tabs.onUpdated.addListener(onUpdated);
   browserApi.tabs.onRemoved.addListener(onRemoved);
 
-  function assertLive(expectedGeneration: number) {
-    if (invalidated || generation !== expectedGeneration)
-      throw failure("source-document-lost", "source document changed");
+  function assertLive() {
+    if (invalidated) throw failure("source-document-lost", "source document changed");
   }
 
   async function inject<Args extends unknown[], Result>(
     func: (...args: Args) => Result,
     args: Args,
-    expectedGeneration: number,
   ): Promise<Awaited<Result>> {
-    assertLive(expectedGeneration);
+    assertLive();
     const tab = await browserApi.tabs.get(tabId).catch(() => null);
     if (!tab) {
       invalidate();
@@ -185,7 +176,7 @@ export function createSourceAccess(
       invalidate();
       throw failure("source-document-lost", "source document changed");
     }
-    assertLive(expectedGeneration);
+    assertLive();
     const results = await browserApi.scripting
       .executeScript<Args, Result>({
         target: { tabId, frameIds: [0] },
@@ -193,12 +184,12 @@ export function createSourceAccess(
         args,
       })
       .catch((cause: unknown) => {
-        assertLive(expectedGeneration);
+        assertLive();
         throw failure("network", "source operation could not run", {
           ...(cause instanceof Error ? { sourceDefinitive: false } : {}),
         });
       });
-    assertLive(expectedGeneration);
+    assertLive();
     if (!Array.isArray(results) || results.length !== 1 || results[0]?.frameId !== 0)
       throw failure("malformed", "source operation returned an invalid result");
     const tabAfter = await browserApi.tabs.get(tabId).catch(() => null);
@@ -206,7 +197,7 @@ export function createSourceAccess(
       invalidate();
       throw failure("source-document-lost", "source document changed");
     }
-    assertLive(expectedGeneration);
+    assertLive();
     const result = results[0].result;
     const resultDocumentUrl =
       isRecord(result) && typeof result.documentUrl === "string" ? result.documentUrl : null;
@@ -218,20 +209,18 @@ export function createSourceAccess(
   }
 
   async function scan(): Promise<CandidateSnapshot> {
-    const operationGeneration = generation;
-    const snapshot = await inject(collectCandidates, [], operationGeneration);
+    const snapshot = await inject(collectCandidates, []);
     if (!validSnapshot(snapshot, documentUrl))
       throw failure("malformed", "invalid source scan result");
-    assertLive(operationGeneration);
+    assertLive();
     return snapshot;
   }
 
   async function fetch(
-    request: EngineRequest,
+    request: Pick<ResourceRequest, "uri" | "headers">,
     signal: AbortSignal,
   ): Promise<{ bytes: Uint8Array; finalUri: string }> {
-    const operationGeneration = generation;
-    assertLive(operationGeneration);
+    assertLive();
     if (signal.aborted) throw failure("cancelled", "source fetch cancelled");
     if (
       typeof request.uri !== "string" ||
@@ -239,14 +228,13 @@ export function createSourceAccess(
       !isPublicHttpUrl(request.uri)
     )
       throw failure("malformed", "invalid source request URL");
-    const method = normalizeFetchMethod(request.method);
     const headers = validateEngineHeaders(request.headers ?? []);
-    if (!method || !headers) throw failure("malformed", "invalid source request headers");
+    if (!headers) throw failure("malformed", "invalid source request headers");
 
     const operationId = crypto.randomUUID();
     const sourceRequest: SourceRequest = {
       url: request.uri,
-      method,
+      method: "GET",
       headers,
       operationId,
     };
@@ -264,9 +252,9 @@ export function createSourceAccess(
     signal.addEventListener("abort", cancel, { once: true });
     try {
       if (signal.aborted) cancel();
-      const result = await inject(fetchSource, [sourceRequest], operationGeneration);
+      const result = await inject(fetchSource, [sourceRequest]);
       if (aborted || signal.aborted) throw failure("cancelled", "source fetch cancelled");
-      assertLive(operationGeneration);
+      assertLive();
       if (!validFetchResult(result, documentUrl))
         throw failure("malformed", "invalid source fetch result");
       if (result.ok === false) throw classifyResultFailure(result);
