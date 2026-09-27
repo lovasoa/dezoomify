@@ -352,7 +352,9 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       responseStatus = res.status;
       if (!(res.status >= 200 && res.status <= 299)) {
         const preview = await readErrorPreview(res, combined.signal);
-        combined.signal.throwIfAborted();
+        // The status is authoritative even if its optional diagnostic body
+        // stalls. Only cancellation by the caller overrides an HTTP refusal.
+        signal?.throwIfAborted();
         const retryAfter = retryAfterMs(res.headers.get("retry-after"), now());
         end(false);
         report(
@@ -424,6 +426,11 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     const combined = combineTimeout(signal, requestMs);
     try {
       const res = await deps.proxyTransport.fetchViaProxy(targetUrl, { signal: combined.signal });
+      if (res.code === "TRANSPORT_CANCELLED" && combined.signal.aborted && !signal?.aborted) {
+        hooks.onRequestEnd(reqId, false);
+        hooks.onLog(`fetch metadata-proxy timeout after ${requestMs} ms url=${targetUrl}`);
+        return { ok: false, status: 0, code: "PROXY_NETWORK_ERROR" };
+      }
       if (!signal?.aborted && res.code !== "TRANSPORT_CANCELLED")
         hooks.onLog(
           `fetch metadata-proxy ${res.status > 0 ? `HTTP ${res.status}` : "no response"}${res.ok ? ` bytes=${res.bytes?.byteLength ?? 0}` : ` code=${res.code ?? "PROXY_ERROR"}${res.reason ? ` reason=${res.reason}` : ""}`} url=${targetUrl}${res.finalUrl && res.finalUrl !== targetUrl ? ` final=${res.finalUrl}` : ""}`,
