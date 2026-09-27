@@ -3,6 +3,8 @@
 // The response-size cap mirrors the server limit (`PROXY_MAX_BYTES` in
 // `src/server/security.ts`): the server stays authoritative, this browser-side
 // guard only fails closed early instead of buffering an over-budget body.
+
+import type { ResourceRequest } from "@dezoomify/wasm-bindings";
 import { readResponseBytes, retryAfterMs } from "../packages/browser-runtime/src/response-body.ts";
 
 export const PROXY_METADATA_MAX_BYTES = 2 * 1024 * 1024;
@@ -267,15 +269,29 @@ export function createProxyTransport(
     rateLimiter?: ProxyRateLimiter;
   },
 ): {
-  fetchViaProxy(targetUrl: string, callOpts?: { signal?: AbortSignal }): Promise<ProxyFetchResult>;
+  fetchViaProxy(
+    request: ResourceRequest,
+    callOpts?: { signal?: AbortSignal },
+  ): Promise<ProxyFetchResult>;
 } {
   const proxyPath = opts.proxyPath ?? "/api/proxy";
   const limiter = opts.rateLimiter ?? globalLimiter();
 
   async function fetchViaProxy(
-    targetUrl: string,
+    request: ResourceRequest,
     callOpts?: { signal?: AbortSignal },
   ): Promise<ProxyFetchResult> {
+    if (request.purpose !== "metadata") {
+      return { ok: false, status: 0, code: "PROXY_POLICY_DENIED", reason: "method" };
+    }
+    if (
+      (request.headers ?? []).some(
+        ({ name }) => !["accept", "accept-language"].includes(name.toLowerCase()),
+      )
+    ) {
+      return { ok: false, status: 0, code: "PROXY_POLICY_DENIED", reason: "unsupported-header" };
+    }
+    const targetUrl = request.uri;
     // Reject credential-bearing targets before any proxy request.
     let parsed: URL;
     try {
@@ -298,7 +314,10 @@ export function createProxyTransport(
         method: "POST",
         credentials: "omit",
         signal: callOpts?.signal,
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...Object.fromEntries((request.headers ?? []).map(({ name, value }) => [name, value])),
+        },
         // Only target URL + protocol version; no cookies/auth/referrer/user headers.
         body: JSON.stringify({ targetUrl, protocolVersion: opts.protocolVersion }),
       });

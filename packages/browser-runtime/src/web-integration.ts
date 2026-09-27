@@ -3,16 +3,7 @@
 //
 // Single policy module for the website: proxy eligibility, ordinary-image
 // rules, and error transport mapping. Pure, no I/O, no clocks.
-import type { ProcessingRecipe } from "@dezoomify/wasm-bindings";
-
-export interface WebFetchRequest {
-  url: string;
-  kind: "metadata" | "tile";
-  headers?: Record<string, string>;
-  requiresCookies?: boolean;
-  requiresAuth?: boolean;
-  signal?: AbortSignal;
-}
+import type { ProcessingRecipe, ResourceRequest } from "@dezoomify/wasm-bindings";
 
 const SIGNED_QUERY_KEYS = new Set([
   "token",
@@ -39,10 +30,10 @@ function hasSignedQuery(urlString: string): boolean {
   }
 }
 
-function hasCredentialHeader(headers: Record<string, string> | undefined): boolean {
+function hasCredentialHeader(headers: ResourceRequest["headers"]): boolean {
   if (!headers) return false;
-  for (const k of Object.keys(headers)) {
-    const l = k.toLowerCase();
+  for (const { name } of headers) {
+    const l = name.toLowerCase();
     if (l === "cookie" || l === "authorization" || l === "proxy-authorization") return true;
   }
   return false;
@@ -61,19 +52,23 @@ function isPrivateOrLocalHostname(hostname: string): boolean {
   return false;
 }
 
-export function isProxyEligible(req: WebFetchRequest): { eligible: boolean; reason: string } {
-  if (req.kind === "tile") return { eligible: false, reason: "tile-never-proxied" };
-  if (req.requiresCookies) return { eligible: false, reason: "cookie-requiring" };
-  if (req.requiresAuth) return { eligible: false, reason: "auth-dependent" };
+export function isProxyEligible(req: ResourceRequest): { eligible: boolean; reason: string } {
+  if (req.purpose !== "metadata") return { eligible: false, reason: "tile-never-proxied" };
   if (hasCredentialHeader(req.headers)) return { eligible: false, reason: "credential-header" };
+  if (
+    (req.headers ?? []).some(
+      ({ name }) => !["accept", "accept-language"].includes(name.toLowerCase()),
+    )
+  )
+    return { eligible: false, reason: "unsupported-header" };
   let u: URL;
   try {
-    u = new URL(req.url);
+    u = new URL(req.uri);
   } catch {
     return { eligible: false, reason: "invalid-url" };
   }
   if (u.username !== "" || u.password !== "") return { eligible: false, reason: "url-userinfo" };
-  if (hasSignedQuery(req.url)) return { eligible: false, reason: "signed-query" };
+  if (hasSignedQuery(req.uri)) return { eligible: false, reason: "signed-query" };
   if (isPrivateOrLocalHostname(u.hostname))
     return { eligible: false, reason: "private-local-target" };
   if (u.protocol !== "http:" && u.protocol !== "https:")
