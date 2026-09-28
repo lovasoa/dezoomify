@@ -191,6 +191,17 @@ async fn serve_original_url(
                     head_only,
                 );
             }
+            if let Some(header) = hit.route.missing_required_header(headers, &state.origin) {
+                record(
+                    state,
+                    serde_json::json!({"via": via, "url": original, "status": 403, "route": hit.route.route_id, "missing_header": header}),
+                );
+                return text_response(
+                    StatusCode::FORBIDDEN,
+                    &format!("fixture requires header {header}"),
+                    head_only,
+                );
+            }
             let body = match hit.route.render(state, hit.scenario, &parsed) {
                 Ok(b) => b,
                 Err(status) => {
@@ -395,6 +406,17 @@ async fn serve_static(
                 return text_response(
                     StatusCode::FORBIDDEN,
                     &format!("fixture auth required: missing cookie {cookie}"),
+                    head_only,
+                );
+            }
+            if let Some(header) = hit.route.missing_required_header(headers, &state.origin) {
+                record(
+                    state,
+                    serde_json::json!({"via": "direct", "path": full_path, "status": 403, "route": hit.route.route_id, "missing_header": header}),
+                );
+                return text_response(
+                    StatusCode::FORBIDDEN,
+                    &format!("fixture requires header {header}"),
                     head_only,
                 );
             }

@@ -54,6 +54,8 @@ Failures and retry actions stay in the job page. A retry takes another bounded s
 
 ## Packaging and tests
 
+The protected-session fixture requires both its HttpOnly session cookie and the exact source-page referrer for metadata and every tile. Both packaged browsers must save the readable image through this route; extension-tab requests with only the cookie fail the fixture.
+
 WXT generates both MV3 manifests from `apps/extension/wxt.config.ts` (Chromium service worker and Firefox classic background script). The store package ships the launcher, job page, shared UI, browser runtime, icons, and WASM. It has no content scripts or fallback pages.
 
 The browser suite runs the packaged extension in Chromium and Firefox. It covers direct job-page source scanning, authenticated source fetching, source navigation invalidation, extension-origin fallback, and output behavior. Chromium also closes and restarts the background worker after a completed job and proves that the job page can still scan and fetch from the source tab.

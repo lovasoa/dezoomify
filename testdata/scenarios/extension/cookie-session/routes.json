@@ -15,6 +15,7 @@
     },
     {
       "route_id": "cookie-session-metadata",
+      "required_headers": { "Referer": "{{origin}}/target.html?scenario=cookie-session" },
       "method": "GET",
       "host": "127.0.0.1",
       "path": "/protected/artwork.dzi",
@@ -25,6 +26,7 @@
     },
     {
       "route_id": "extension-source-access-proof",
+      "required_headers": { "Referer": "{{origin}}/target.html?scenario=cookie-session" },
       "method": "GET",
       "host": "127.0.0.1",
       "path": "/__source-access-proof",
@@ -35,6 +37,7 @@
     },
     {
       "route_id": "cookie-session-tile-0-0",
+      "required_headers": { "Referer": "{{origin}}/target.html?scenario=cookie-session" },
       "method": "GET",
       "host": "127.0.0.1",
       "path": "/protected/artwork_files/9/0_0.png",
@@ -45,6 +48,7 @@
     },
     {
       "route_id": "cookie-session-tile-1-0",
+      "required_headers": { "Referer": "{{origin}}/target.html?scenario=cookie-session" },
       "method": "GET",
       "host": "127.0.0.1",
       "path": "/protected/artwork_files/9/1_0.png",
@@ -55,6 +59,7 @@
     },
     {
       "route_id": "cookie-session-tile-0-1",
+      "required_headers": { "Referer": "{{origin}}/target.html?scenario=cookie-session" },
       "method": "GET",
       "host": "127.0.0.1",
       "path": "/protected/artwork_files/9/0_1.png",
@@ -65,6 +70,7 @@
     },
     {
       "route_id": "cookie-session-tile-1-1",
+      "required_headers": { "Referer": "{{origin}}/target.html?scenario=cookie-session" },
       "method": "GET",
       "host": "127.0.0.1",
       "path": "/protected/artwork_files/9/1_1.png",

@@ -447,7 +447,7 @@ export function createEngineHost(deps: EngineHostDeps) {
       // context, PNG encoding); the fetch classifier is only the fallback.
       code: stableErrorCode(error, `${failure.code}`),
       phase: "output",
-      retryable: failure.retryable,
+      retryable: false,
       message: failure.message,
       recovery: [],
       ...(failure.transport ? { transport: failure.transport } : {}),

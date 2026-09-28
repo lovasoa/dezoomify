@@ -593,9 +593,13 @@ impl Session {
                     Error {
                         code: format!("{:?}", failure.code),
                         phase: ErrorPhase::Discovery,
-                        retryable: failure.retryable,
+                        retryable: dezoomify::engine::retry::classify_tile_failure(
+                            &format!("{:?}", failure.code),
+                            failure.http,
+                        )
+                        .is_retryable(),
                         message: failure.message.clone(),
-                        recovery: failure.recovery.clone(),
+                        recovery: Vec::new(),
                         request: None,
                         transport: Some(failure.transport),
                         blocked_reason: failure.blocked_reason,
