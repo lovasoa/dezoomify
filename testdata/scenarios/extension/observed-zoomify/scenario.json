@@ -1,0 +1,13 @@
+{
+  "description": "Rendered Museum Ludwig-shaped viewer with no initialization declaration, an unrelated analytics iframe, and observed Zoomify metadata with signed redirects",
+  "id": "extension/observed-zoomify",
+  "input": {
+    "mode": "explicit",
+    "url": "http://127.0.0.1/observed-zoomify/viewer.html"
+  },
+  "operation": "extension-browser-session-fetch",
+  "source_evidence": {
+    "path": "apps/extension/tests/browser/headless.test.mjs",
+    "snapshot": "local synthetic Museum Ludwig reproduction"
+  }
+}

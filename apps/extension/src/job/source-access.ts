@@ -61,6 +61,13 @@ function sameDocumentUrl(a: string, b: string): boolean {
 
 function validCandidate(value: unknown): value is CandidateInput {
   if (!isRecord(value) || typeof value.url !== "string") return false;
+  if (
+    value.kind !== undefined &&
+    value.kind !== "source" &&
+    value.kind !== "observed-document" &&
+    value.kind !== "observed-resource"
+  )
+    return false;
   if (value.url.length > MAX_URL_LENGTH || !isPublicHttpUrl(value.url)) return false;
   if (value.contents === undefined) return true;
   if (typeof value.contents !== "string") return false;

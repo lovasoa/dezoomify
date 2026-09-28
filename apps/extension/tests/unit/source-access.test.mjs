@@ -118,6 +118,16 @@ test("navigation invalidates access and discards an in-flight scan result", asyn
   source.dispose();
 });
 
+test("source scan rejects unknown observation kinds", async () => {
+  const fake = fakeBrowser(async () => ({
+    ...snapshot(),
+    inputs: [{ url: SOURCE_URL, kind: "trusted-image" }],
+  }));
+  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  await assert.rejects(source.scan(), { code: "malformed" });
+  source.dispose();
+});
+
 test("source fetch treats HTTP refusals as definitive and leaves fallback decisions typed", async () => {
   const fake = fakeBrowser(async () => ({
     ok: false,

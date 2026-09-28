@@ -13,7 +13,9 @@ use crate::core::{
 pub const SPEC: FormatSpec = FormatSpec::new(
     "arcgis",
     &[
-        DiscoveryMatch::UrlPredicate(is_arcgis_url).map_url(metadata_url),
+        DiscoveryMatch::UrlPredicate(is_arcgis_url)
+            .map_url(metadata_url)
+            .observed_resource(),
         DiscoveryMatch::Any.decode(decode),
     ],
 )

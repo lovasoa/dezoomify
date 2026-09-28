@@ -5,7 +5,7 @@
 //! outcome to [`DiscoveryOperation`].
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fmt;
 use std::sync::LazyLock;
 
@@ -15,6 +15,41 @@ use serde::{Deserialize, Serialize};
 use super::model::{CatalogPlan, DiscoveryCatalog, ImagePlan, Request};
 use super::tile_plan::TileSourceError;
 use super::uri::resolve_relative;
+use crate::model::DiscoveryInputKind;
+
+/// User source or host observation supplied to the shared discovery search.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiscoveryInput {
+    pub url: String,
+    pub contents: Option<Vec<u8>>,
+    pub kind: DiscoveryInputKind,
+}
+
+impl DiscoveryInput {
+    #[must_use]
+    pub fn new(url: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            contents: None,
+            kind: DiscoveryInputKind::Source,
+        }
+    }
+
+    #[must_use]
+    pub fn with_contents(url: impl Into<String>, contents: impl Into<Vec<u8>>) -> Self {
+        Self {
+            url: url.into(),
+            contents: Some(contents.into()),
+            kind: DiscoveryInputKind::Source,
+        }
+    }
+
+    #[must_use]
+    pub const fn with_kind(mut self, kind: DiscoveryInputKind) -> Self {
+        self.kind = kind;
+        self
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct RequestId(pub usize);
@@ -455,6 +490,7 @@ impl DiscoveryMatch {
         DiscoveryRoute {
             matcher: self,
             handler,
+            observed_resource: false,
         }
     }
 
@@ -477,9 +513,22 @@ impl DiscoveryMatch {
 pub struct DiscoveryRoute {
     matcher: DiscoveryMatch,
     handler: RouteAction,
+    observed_resource: bool,
 }
 
 impl DiscoveryRoute {
+    /// This URL route identifies an image resource in a host observation.
+    /// Broad site preferences and content-only routes do not qualify.
+    #[must_use]
+    pub const fn observed_resource(mut self) -> Self {
+        match self.matcher {
+            DiscoveryMatch::UrlSuffix(_) | DiscoveryMatch::UrlPredicate(_) => {}
+            _ => panic!("observed resources require a URL matcher"),
+        }
+        self.observed_resource = true;
+        self
+    }
+
     /// Follow a named regex capture against the resource's final URI.
     #[must_use]
     pub const fn relative_capture(
@@ -488,6 +537,7 @@ impl DiscoveryRoute {
     ) -> Self {
         Self {
             matcher: DiscoveryMatch::ContentRegex(regex),
+            observed_resource: false,
             handler: RouteAction::FollowCapture {
                 capture,
                 html_entities: false,
@@ -505,6 +555,7 @@ impl DiscoveryRoute {
     ) -> Self {
         Self {
             matcher: DiscoveryMatch::ContentRegex(regex),
+            observed_resource: false,
             handler: RouteAction::FollowCapture {
                 capture,
                 html_entities: true,
@@ -524,6 +575,7 @@ impl DiscoveryRoute {
     ) -> Self {
         Self {
             matcher: DiscoveryMatch::ContentRegex(regex),
+            observed_resource: false,
             handler: RouteAction::FollowCapture {
                 capture,
                 html_entities: false,
@@ -702,6 +754,16 @@ impl FormatSpec {
     pub fn prefers(&self, uri: &str) -> bool {
         (self.prefer)(uri)
     }
+
+    fn recognizes_resource(&self, uri: &str) -> bool {
+        (self.recognize)(uri)
+            && match self.program {
+                DiscoveryProgram::Rules(routes, _) => routes
+                    .iter()
+                    .any(|route| route.observed_resource && route.matcher.matches(uri, None)),
+                DiscoveryProgram::ImmediatePlan(_) => false,
+            }
+    }
 }
 
 impl PartialEq for FormatSpec {
@@ -758,6 +820,7 @@ pub enum DiscoveryError {
     /// A format handler or extractor failed without a typed rejection.
     Session(String),
     TransitionLimitExceeded,
+    ResourceLimitExceeded,
     MetadataSizeLimitExceeded,
 }
 
@@ -857,6 +920,7 @@ impl fmt::Display for DiscoveryError {
             Self::Rejected { .. } => f.write_str("candidate rejected the input"),
             Self::Session(message) => f.write_str(message),
             Self::TransitionLimitExceeded => f.write_str("discovery transition limit exceeded"),
+            Self::ResourceLimitExceeded => f.write_str("discovery resource limit exceeded"),
             Self::MetadataSizeLimitExceeded => {
                 f.write_str("discovery metadata size limit exceeded")
             }
@@ -912,6 +976,8 @@ pub struct DiscoveryOperation {
     input: String,
     specs: Vec<FormatSpec>,
     candidates: Vec<Candidate>,
+    inputs: VecDeque<DiscoveryInput>,
+    unclassified_inputs: VecDeque<DiscoveryInput>,
     /// Generic references wait until every format-specific path settles.
     navigation: BTreeMap<(RequestId, usize), String>,
     navigated: HashSet<String>,
@@ -920,6 +986,8 @@ pub struct DiscoveryOperation {
     catalog: Option<DiscoveryCatalog>,
     transitions: usize,
     retained_bytes: usize,
+    supplied_bytes: usize,
+    initial_error: Option<DiscoveryError>,
     limits: DiscoveryLimits,
 }
 
@@ -938,14 +1006,61 @@ impl DiscoveryOperation {
             input,
             specs: specs.to_vec(),
             candidates,
+            inputs: VecDeque::new(),
+            unclassified_inputs: VecDeque::new(),
             navigation: BTreeMap::new(),
             requests: Vec::new(),
             diagnostics: Vec::new(),
             catalog: None,
             transitions: 0,
             retained_bytes: 0,
+            supplied_bytes: 0,
+            initial_error: None,
             limits,
         }
+    }
+
+    pub(crate) fn from_inputs(
+        mut inputs: Vec<DiscoveryInput>,
+        specs: &[FormatSpec],
+        limits: DiscoveryLimits,
+    ) -> Self {
+        let mut operation = Self::new(String::new(), specs, limits);
+        operation.candidates.clear();
+        operation.navigated.clear();
+        if inputs.len() > limits.resources {
+            operation.initial_error = Some(DiscoveryError::ResourceLimitExceeded);
+            return operation;
+        }
+        let supplied_bytes = inputs.iter().try_fold(0usize, |total, input| {
+            total.checked_add(input.contents.as_ref().map_or(0, Vec::len))
+        });
+        let Some(supplied_bytes) = supplied_bytes.filter(|total| *total <= limits.retained_bytes)
+        else {
+            operation.initial_error = Some(DiscoveryError::MetadataSizeLimitExceeded);
+            return operation;
+        };
+        operation.supplied_bytes = supplied_bytes;
+        // Keep user intent and readable documents ahead of observed URLs.
+        // Only explicit format resource routes promote traffic observations.
+        inputs.sort_by_key(|input| match input.kind {
+            DiscoveryInputKind::Source => 0,
+            DiscoveryInputKind::ObservedDocument => 1,
+            DiscoveryInputKind::ObservedResource => 2,
+        });
+        for input in inputs {
+            if (input.kind == DiscoveryInputKind::ObservedDocument && input.contents.is_none())
+                || (input.kind == DiscoveryInputKind::ObservedResource
+                    && !specs
+                        .iter()
+                        .any(|spec| spec.recognizes_resource(&input.url)))
+            {
+                operation.unclassified_inputs.push_back(input);
+            } else {
+                operation.inputs.push_back(input);
+            }
+        }
+        operation
     }
     fn resource(&self, id: RequestId) -> Option<&ResourceRecord> {
         self.requests.get(id.0)
@@ -1003,6 +1118,15 @@ impl DiscoveryOperation {
         id: RequestId,
         outcome: ResourceOutcome,
     ) -> Result<(), DiscoveryError> {
+        self.record_outcome(id, outcome)?;
+        self.drive()
+    }
+
+    fn record_outcome(
+        &mut self,
+        id: RequestId,
+        outcome: ResourceOutcome,
+    ) -> Result<(), DiscoveryError> {
         let Some(resource) = self.requests.get(id.0) else {
             return Err(DiscoveryError::UnknownRequest(id));
         };
@@ -1013,7 +1137,13 @@ impl DiscoveryOperation {
             self.retained_bytes = self
                 .retained_bytes
                 .checked_add(response.bytes.len())
-                .filter(|total| *total <= self.limits.retained_bytes)
+                .filter(|total| {
+                    *total
+                        <= self
+                            .limits
+                            .retained_bytes
+                            .saturating_sub(self.supplied_bytes)
+                })
                 .ok_or(DiscoveryError::MetadataSizeLimitExceeded)?;
             // Merely containing an iframe says nothing about the image
             // format. Retain bounded references for the navigation phase.
@@ -1039,7 +1169,7 @@ impl DiscoveryOperation {
             }
         }
         self.requests[id.0].outcome = Some(outcome);
-        self.drive()
+        Ok(())
     }
 
     #[must_use]
@@ -1060,6 +1190,9 @@ impl DiscoveryOperation {
         self.catalog.take().ok_or(DiscoveryError::NotComplete)
     }
     fn drive(&mut self) -> Result<(), DiscoveryError> {
+        if let Some(error) = &self.initial_error {
+            return Err(error.clone());
+        }
         while self.catalog.is_none() {
             let Some(index) = self
                 .candidates
@@ -1074,7 +1207,10 @@ impl DiscoveryOperation {
                 if pending {
                     return Ok(());
                 }
-                if self.start_next_navigation() {
+                if self.start_next_input(false)?
+                    || self.start_next_navigation()
+                    || self.start_next_input(true)?
+                {
                     continue;
                 }
                 return Err(DiscoveryError::NoCandidateAccepted {
@@ -1197,21 +1333,51 @@ impl DiscoveryOperation {
             if !self.navigated.insert(uri.clone()) {
                 continue;
             }
-            self.input = uri;
-            self.candidates = self
-                .specs
-                .iter()
-                .map(|&spec| Candidate {
-                    spec,
-                    state: CandidateState::New,
-                    history: Vec::new(),
-                })
-                .collect();
-            self.candidates
-                .sort_by_key(|candidate| !candidate.spec.prefers(&self.input));
+            self.start_root(uri);
             return true;
         }
         false
+    }
+
+    fn start_next_input(&mut self, unclassified: bool) -> Result<bool, DiscoveryError> {
+        let inputs = if unclassified {
+            &mut self.unclassified_inputs
+        } else {
+            &mut self.inputs
+        };
+        let Some(input) = inputs.pop_front() else {
+            return Ok(false);
+        };
+        self.navigated.insert(input.url.clone());
+        self.start_root(input.url.clone());
+        if let Some(contents) = input.contents {
+            self.supplied_bytes -= contents.len();
+            let id = self
+                .register_request(Request::new(input.url))
+                .ok_or(DiscoveryError::ResourceLimitExceeded)?;
+            if self.requests[id.0].outcome.is_none() {
+                self.record_outcome(
+                    id,
+                    ResourceOutcome::Response(ResourceResponse::new(id, contents)),
+                )?;
+            }
+        }
+        Ok(true)
+    }
+
+    fn start_root(&mut self, uri: String) {
+        self.input = uri;
+        self.candidates = self
+            .specs
+            .iter()
+            .map(|&spec| Candidate {
+                spec,
+                state: CandidateState::New,
+                history: Vec::new(),
+            })
+            .collect();
+        self.candidates
+            .sort_by_key(|candidate| !candidate.spec.prefers(&self.input));
     }
 
     fn apply_step(&mut self, index: usize, step: DiscoveryStep) -> Result<(), DiscoveryError> {

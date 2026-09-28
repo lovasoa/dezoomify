@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Observed Zoomify viewer</title></head>
+<body>
+<h1>Museum viewer</h1>
+<iframe src="{{localhost_origin}}/observed-zoomify/opt-out.html" title="Analytics opt-out"></iframe>
+<script>
+  fetch("/fetch/https://fixtures.test/observed-zoomify/proxy/ImageProperties.xml")
+    .then(response => { if (!response.ok) throw new Error("metadata"); return response.text(); })
+    .then(() => { document.documentElement.dataset.viewerReady = "true"; });
+  document.currentScript.remove();
+</script>
+</body>
+</html>

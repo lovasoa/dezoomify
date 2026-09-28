@@ -27,7 +27,9 @@ static FILES_ARRAY_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 const ROUTES: &[DiscoveryRoute] = &[
-    DiscoveryMatch::UrlPredicate(is_ecw_url).decode(decode),
+    DiscoveryMatch::UrlPredicate(is_ecw_url)
+        .decode(decode)
+        .observed_resource(),
     DiscoveryMatch::ContentPredicate(contains_layer).then(follow_layer),
     DiscoveryMatch::Any.decode(decode),
 ];

@@ -32,6 +32,12 @@ const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::ContentPredicate(looks_like_viewer_js).then(handle_viewer_js),
     DiscoveryMatch::ContentPredicate(looks_like_krpano_html).then(handle_html),
     DiscoveryMatch::UrlPredicate(is_javascript_uri).then(handle_viewer_js),
+    DiscoveryMatch::UrlSuffix("/tiles.xml")
+        .then(handle_xml)
+        .observed_resource(),
+    DiscoveryMatch::UrlSuffix("/tour.xml")
+        .then(handle_xml)
+        .observed_resource(),
 ];
 
 pub const SPEC: FormatSpec = FormatSpec::new("krpano", ROUTES)

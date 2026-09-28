@@ -146,6 +146,34 @@ fn tile_failure_fails_honestly_without_output() {
 }
 
 #[test]
+fn single_source_viewer_assembles_zoomify_through_signed_redirects() {
+    let origin = start_fixture_server();
+    let input = format!("{origin}/observed-zoomify/native-viewer.html");
+    let output = temp_dir("observed-zoomify").join("image.png");
+    let outcome = support::run_with_options(
+        &input,
+        output.to_str().unwrap(),
+        false,
+        &JobOptions::default(),
+        &mut |_| {},
+    )
+    .expect("single-source native discovery succeeds");
+    assert_eq!(
+        (outcome.width, outcome.height, outcome.tile_count),
+        (512, 512, 4)
+    );
+    let decoded = image::open(output).unwrap().to_rgb8();
+    for (x, y, expected) in [
+        (64, 64, [196, 48, 48]),
+        (448, 64, [48, 168, 64]),
+        (64, 448, [48, 72, 200]),
+        (448, 448, [232, 220, 96]),
+    ] {
+        assert_eq!(decoded.get_pixel(x, y).0, expected);
+    }
+}
+
+#[test]
 fn retries_zero_fails_without_a_second_attempt() {
     // `--retries 0` parity: the first tile failure fails the job with the
     // honest code and no output. The driver answers the engine's retry

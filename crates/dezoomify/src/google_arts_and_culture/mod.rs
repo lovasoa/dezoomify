@@ -12,7 +12,9 @@ mod tile_info;
 mod url;
 
 const ROUTES: &[DiscoveryRoute] = &[
-    DiscoveryMatch::UrlSuffix("=g").then(parse_tile_information),
+    DiscoveryMatch::UrlSuffix("=g")
+        .then(parse_tile_information)
+        .observed_resource(),
     DiscoveryMatch::Any.then(parse_page),
 ];
 

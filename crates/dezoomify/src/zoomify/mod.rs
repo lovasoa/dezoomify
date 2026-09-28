@@ -20,9 +20,15 @@ use crate::core::{
 mod image_properties;
 
 const ROUTES: &[DiscoveryRoute] = &[
-    DiscoveryMatch::UrlPredicate(is_tile_url).map_url(tile_metadata),
-    DiscoveryMatch::UrlSuffix("ImageProperties.xml").then(extract_catalog),
-    DiscoveryMatch::UrlPredicate(is_broker_url).then(broker_catalog_step),
+    DiscoveryMatch::UrlPredicate(is_tile_url)
+        .map_url(tile_metadata)
+        .observed_resource(),
+    DiscoveryMatch::UrlSuffix("ImageProperties.xml")
+        .then(extract_catalog)
+        .observed_resource(),
+    DiscoveryMatch::UrlPredicate(is_broker_url)
+        .then(broker_catalog_step)
+        .observed_resource(),
     DiscoveryMatch::ContentPredicate(has_inline_tile_service).then(extract_inline_catalog),
     DiscoveryMatch::ContentPredicate(contains_zoomify_declaration)
         .then(extract_image_properties_url),

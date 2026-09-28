@@ -119,35 +119,7 @@ use crate::engine::retry::TileFailure as InnerFailure;
 pub use crate::engine::transition::JobError as EngineError;
 use crate::engine::{Config, Job, JobCommand as InnerCommand, JobEffect as InnerEffect, Outcome};
 
-/// One ordered discovery root: a URL the host can fetch, or inline bytes
-/// the engine evaluates directly.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DiscoveryInput {
-    /// Input URL (`http(s)`, `file://`, or a local path, up to 2048 bytes).
-    pub url: String,
-    /// Inline bytes, when the host already holds the resource.
-    pub contents: Option<Vec<u8>>,
-}
-
-impl DiscoveryInput {
-    /// Discovery root fetched by the host.
-    #[must_use]
-    pub fn new(url: impl Into<String>) -> Self {
-        Self {
-            url: url.into(),
-            contents: None,
-        }
-    }
-
-    /// Discovery root evaluated directly from supplied bytes.
-    #[must_use]
-    pub fn with_contents(url: impl Into<String>, contents: impl Into<Vec<u8>>) -> Self {
-        Self {
-            url: url.into(),
-            contents: Some(contents.into()),
-        }
-    }
-}
+pub use crate::core::discovery::DiscoveryInput;
 
 /// What the job does when tiles are missing after retries run out.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -192,7 +164,7 @@ pub enum SelectionPolicy {
 /// budgets. All bounds are validated before any work starts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JobOptions {
-    /// Ordered discovery roots; the first root yielding a catalog wins.
+    /// User sources and host observations for one bounded discovery search.
     pub inputs: Vec<DiscoveryInput>,
     /// Format selector: `None`/`"auto"` auto-detects, otherwise the single
     /// named format is used.
@@ -653,6 +625,11 @@ impl EngineJob {
     /// rejects.
     pub fn validate_options(options: &JobOptions) -> Result<(), ValidationError> {
         if options.inputs.is_empty()
+            || options.inputs.len() > crate::core::discovery::DiscoveryLimits::default().resources
+            || !options
+                .inputs
+                .iter()
+                .any(|input| input.kind == crate::model::DiscoveryInputKind::Source)
             || options
                 .inputs
                 .iter()
@@ -660,7 +637,7 @@ impl EngineJob {
         {
             return Err(EngineError::new(
                 "job.invalid-input",
-                "inputs must contain valid http(s) URLs, file:// URIs, or local paths up to 2048 bytes",
+                "inputs require a user source and at most 256 valid http(s) URLs, file:// URIs, or local paths up to 2048 bytes",
             ));
         }
         let config = options.config();

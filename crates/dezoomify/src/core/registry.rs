@@ -1,6 +1,6 @@
 //! Stable registration and precedence policy for pure formats.
 
-use super::discovery::{DiscoveryLimits, DiscoveryOperation, FormatSpec};
+use super::discovery::{DiscoveryInput, DiscoveryLimits, DiscoveryOperation, FormatSpec};
 use crate::{
     arcgis, bulk_text, custom_yaml, dzi, fsi, generic, google_arts_and_culture, hungaricana, iiif,
     iipimage, krpano, lizardtech, pnav, second_canvas, topviewer, vls, wmts, xlimage, zoomify,
@@ -65,6 +65,22 @@ impl Registry {
         limits: DiscoveryLimits,
     ) -> DiscoveryOperation {
         DiscoveryOperation::new(uri.into(), &self.specs, limits)
+    }
+
+    /// Start one bounded search across user sources and host observations.
+    #[must_use]
+    pub fn start_inputs(&self, inputs: Vec<DiscoveryInput>) -> DiscoveryOperation {
+        self.start_inputs_with_limits(inputs, DiscoveryLimits::default())
+    }
+
+    /// Start a source-and-observation search with explicit shared limits.
+    #[must_use]
+    pub fn start_inputs_with_limits(
+        &self,
+        inputs: Vec<DiscoveryInput>,
+        limits: DiscoveryLimits,
+    ) -> DiscoveryOperation {
+        DiscoveryOperation::from_inputs(inputs, &self.specs, limits)
     }
 
     /// Look up a registered format by stable id.

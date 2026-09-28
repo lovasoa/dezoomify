@@ -15,10 +15,15 @@ use crate::model::Header;
 mod tile_set;
 mod variable;
 
-pub const SPEC: FormatSpec = FormatSpec::new("custom", &[DiscoveryMatch::Any.decode(decode)])
-    .with_display_name("Custom tiles")
-    .recognizing(is_tiles_yaml, "not a tiles.yaml file")
-    .preferring(is_tiles_yaml);
+pub const SPEC: FormatSpec = FormatSpec::new(
+    "custom",
+    &[DiscoveryMatch::UrlPredicate(is_tiles_yaml)
+        .decode(decode)
+        .observed_resource()],
+)
+.with_display_name("Custom tiles")
+.recognizing(is_tiles_yaml, "not a tiles.yaml file")
+.preferring(is_tiles_yaml);
 
 fn is_tiles_yaml(uri: &str) -> bool {
     uri.split(['?', '#'])

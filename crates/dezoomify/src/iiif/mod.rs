@@ -32,7 +32,8 @@ mod title_tests;
 
 const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::UrlPredicate(|uri| image_request_info(uri).is_some())
-        .map_url(|uri| Ok(image_request_info(uri).expect("route matched IIIF image request"))),
+        .map_url(|uri| Ok(image_request_info(uri).expect("route matched IIIF image request")))
+        .observed_resource(),
     DiscoveryMatch::UrlPredicate(has_manifest_parameter).map_url(manifest_parameter),
     onb::ROUTE,
     contentdm::RECORD_ROUTE,
@@ -42,6 +43,12 @@ const ROUTES: &[DiscoveryRoute] = &[
         .then(national_gallery::follow_image),
     philadelphia::ROUTE,
     DiscoveryMatch::ContentPredicate(has_info_json_url).then(follow_info_json_url),
+    DiscoveryMatch::UrlSuffix("/info.json")
+        .extract(catalog)
+        .observed_resource(),
+    DiscoveryMatch::UrlSuffix("/manifest.json")
+        .extract(catalog)
+        .observed_resource(),
     DiscoveryMatch::Any.extract(catalog),
 ];
 

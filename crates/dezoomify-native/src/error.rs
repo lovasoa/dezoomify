@@ -152,9 +152,9 @@ impl From<dezoomify::core::discovery::DiscoveryError> for NativeError {
             // host renders its own prominent message and never repeats
             // the engine's headline inside the technical details.
             E::NoCandidateAccepted { .. } => Self::new("discovery.no-image", error.engine_detail()),
-            E::TransitionLimitExceeded | E::MetadataSizeLimitExceeded => {
-                Self::new("tile.limit", error.to_string())
-            }
+            E::TransitionLimitExceeded
+            | E::ResourceLimitExceeded
+            | E::MetadataSizeLimitExceeded => Self::new("tile.limit", error.to_string()),
             E::UnknownRequest(_) | E::RequestAlreadyProvided(_) | E::NotComplete => {
                 Self::new("native.internal", error.to_string())
             }

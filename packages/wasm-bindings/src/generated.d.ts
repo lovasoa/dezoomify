@@ -103,18 +103,19 @@ export interface TilePlacement {
 }
 
 /**
- * One ordered catalog slot: a ready image or a request to resolve one.
- */
-export type CatalogEntry = ({ kind: "image" } & Image) | ({ kind: "image-request" } & ImageRequest);
-
-/**
- * One ordered discovery root. `contents` is omitted when the host only has
- * a reference and discovery should acquire it normally.
+ * One discovery input. An omitted kind is a user-supplied source for
+ * compatibility with products that have no browser observations.
  */
 export interface JobInput {
     url: string;
     contents?: string;
+    kind?: DiscoveryInputKind;
 }
+
+/**
+ * One ordered catalog slot: a ready image or a request to resolve one.
+ */
+export type CatalogEntry = ({ kind: "image" } & Image) | ({ kind: "image-request" } & ImageRequest);
 
 /**
  * One portable resource description. URI text is preserved exactly after
@@ -213,6 +214,12 @@ export type Terminal = { type: "completed" } | { type: "partial-completed"; miss
  * The browser output representation requested by the job engine.
  */
 export type OutputFormat = "png";
+
+/**
+ * The source of discovery evidence. Products report facts; core discovery
+ * decides when a supplied document or observed resource is relevant.
+ */
+export type DiscoveryInputKind = "source" | "observed-document" | "observed-resource";
 
 /**
  * Typed argument for the pure WASM tile-processing operation.

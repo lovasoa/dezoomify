@@ -24,7 +24,9 @@ static SEADRAGON_EMBED: LazyLock<BytesRegex> = LazyLock::new(|| {
     .expect("constant Seadragon embed pattern")
 });
 const ROUTES: &[DiscoveryRoute] = &[
-    DiscoveryMatch::UrlPredicate(is_tile_url).map_url(tile_metadata),
+    DiscoveryMatch::UrlPredicate(is_tile_url)
+        .map_url(tile_metadata)
+        .observed_resource(),
     DiscoveryMatch::UrlPredicate(is_bl_viewer_url).map_url(bl_metadata),
     DiscoveryMatch::UrlPredicate(is_nla_view_url).map_url(nla_metadata),
     DiscoveryMatch::UrlPredicate(is_polona_item_url).then(follow_polona_json),
@@ -35,6 +37,9 @@ const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::ContentPredicate(has_wdl_template).then(follow_wdl_template),
     DiscoveryRoute::relative_capture(&DZI_LINK_RE, "url"),
     DiscoveryRoute::relative_capture(&DZI_ATTR_RE, "url"),
+    DiscoveryMatch::UrlSuffix(".dzi")
+        .catalog(decode_catalog)
+        .observed_resource(),
     DiscoveryMatch::Any.catalog(decode_catalog),
 ];
 

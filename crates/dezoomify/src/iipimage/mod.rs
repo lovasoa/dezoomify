@@ -12,7 +12,9 @@ pub const SPEC: FormatSpec = FormatSpec::new(
     "iipimage",
     &[
         DiscoveryMatch::UrlPredicate(needs_metadata).map_url(metadata_url),
-        DiscoveryMatch::Any.decode(decode),
+        DiscoveryMatch::UrlPredicate(is_iip)
+            .decode(decode)
+            .observed_resource(),
     ],
 )
 .with_display_name("IIPImage")

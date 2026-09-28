@@ -31,6 +31,7 @@
         .then((r) => {
           if (!r.ok) throw new Error("status " + r.status);
           window.__sourceFetched = true;
+          document.documentElement.dataset.viewerReady = "true";
         })
         .catch(() => {
           window.__sourceFetched = false;

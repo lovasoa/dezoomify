@@ -54,6 +54,16 @@ is evaluated against the registered formats afresh; sibling frames remain
 available after a failed path. Requests, retained bytes, transitions, and
 navigation cycles share the operation's limits.
 
+One discovery operation owns all job inputs. Inputs distinguish user sources,
+observed documents, and observed resource URLs; omitted kinds mean user sources.
+Source catalogs and their explicit references take precedence over observations.
+Readable observed documents follow, then resource URLs recognized by a format's
+explicit `observed_resource` URL routes. Generic iframe navigation follows those
+paths; unclassified resource observations remain last-resort inputs. Broad format
+preferences only order parsers and never promote traffic observations. Supplied
+documents count toward the same byte budget as fetched metadata, and all roots
+share request deduplication, resource counts, and transition limits.
+
 To add a conventional format, define one `FormatSpec` with a metadata decoder,
 return an `ImagePlan` whose levels use `ResolvedLevel::grid`, and register the
 spec in `core::registry`. The decoder supplies image dimensions and a tile

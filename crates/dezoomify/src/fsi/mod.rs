@@ -24,7 +24,9 @@ static HEIGHT_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 const ROUTES: &[DiscoveryRoute] = &[
-    DiscoveryMatch::UrlPredicate(is_server_url).map_url(metadata_url),
+    DiscoveryMatch::UrlPredicate(is_server_url)
+        .map_url(metadata_url)
+        .observed_resource(),
     DiscoveryMatch::ContentPredicate(contains_server).then(follow_page_server),
     DiscoveryMatch::Any.decode(decode),
 ];

@@ -11,7 +11,9 @@ use crate::core::{
 
 const INFO_QUERY: &str = "cmd=info";
 
-const ROUTES: &[DiscoveryRoute] = &[DiscoveryMatch::Any.decode(decode)];
+const ROUTES: &[DiscoveryRoute] = &[DiscoveryMatch::UrlPredicate(is_xlimage_url)
+    .decode(decode)
+    .observed_resource()];
 
 pub const SPEC: FormatSpec = FormatSpec::new("xlimage", ROUTES)
     .with_display_name("XLimage")

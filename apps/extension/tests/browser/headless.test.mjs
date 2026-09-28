@@ -405,8 +405,26 @@ async function runFirefoxJob(base, work, runOptions = {}) {
     await driver.manage().setTimeouts({ pageLoad: 15000, script: 15000, implicit: 0 });
     const addonId = await driver.installAddon(zip, true);
     assert.equal(addonId, GECKO_ID, `unexpected add-on id ${addonId}`);
+    await driver.wait(async () => {
+      for (const handle of await driver.getAllWindowHandles()) {
+        await driver.switchTo().window(handle);
+        if (!(await driver.getCurrentUrl()).endsWith("/test/driver.html")) continue;
+        const body = await driver.findElement(webdriver.By.css("body"));
+        const state = await body.getDomAttribute("data-driver");
+        if (state === "failed") throw new Error(await body.getText());
+        if (state === "ready") return true;
+      }
+      return false;
+    }, 30000);
     const deadline = Date.now() + 90000;
-    const output = await readCompletedPng(downloadsDir, deadline);
+    const output = await readCompletedPng(downloadsDir, deadline).catch(async (error) => {
+      const pages = [];
+      for (const handle of await driver.getAllWindowHandles()) {
+        await driver.switchTo().window(handle);
+        pages.push(`${await driver.getCurrentUrl()}\n${await driver.getPageSource()}`);
+      }
+      throw new Error(`${error.message}\n${pages.join("\n")}`, { cause: error });
+    });
     const handles = await driver.getAllWindowHandles();
     let jobTab;
     for (const handle of handles) {
@@ -584,6 +602,67 @@ test("firefox: packaged extension runs the job-tab engine flow", { timeout: 1800
     rmSync(work, { recursive: true, force: true });
   }
 });
+
+for (const [browser, runJob] of [
+  ["chromium", runChromiumJob],
+  ["firefox", runFirefoxJob],
+]) {
+  test(`${browser}: observed Zoomify metadata wins without analytics access`, {
+    timeout: 180000,
+  }, async () => {
+    const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-observed-zoomify-"));
+    const offset = existsSync(fixtureServer.logFile)
+      ? readFileSync(fixtureServer.logFile, "utf8").length
+      : 0;
+    try {
+      // No permission action is clicked. localhost is the ungranted analytics
+      // origin; the source observation contains only the metadata request URL.
+      assertPng(
+        await runJob(fixtureServer.base, work, {
+          sourceHostOnly: true,
+          scenario: "observed-zoomify",
+        }),
+      );
+      const events = newFixtureEvents(fixtureServer.logFile, offset);
+      assert.equal(
+        events.filter((event) => event.path === "/observed-zoomify/opt-out.html").length,
+        1,
+        "only the source page loads the analytics iframe",
+      );
+      for (const path of [
+        "signed/metadata.xml",
+        "signed/0_0.png",
+        "signed/1_0.png",
+        "signed/0_1.png",
+        "signed/1_1.png",
+      ]) {
+        assert.ok(
+          events.some(
+            (event) => event.route === `observed-zoomify-${path}` && event.status === 200,
+          ),
+          path,
+        );
+      }
+      assert.ok(
+        events.some(
+          (event) =>
+            event.route === "observed-zoomify-redirect-proxy/ImageProperties.xml" &&
+            event.status === 307,
+        ),
+      );
+      assert.equal(
+        events.filter(
+          (event) =>
+            event.route?.startsWith("observed-zoomify-redirect-proxy/TileGroup0/") &&
+            event.status === 307,
+        ).length,
+        4,
+      );
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+}
 
 test("firefox: job page directly fetches authenticated source data and rejects navigation", {
   timeout: 180000,

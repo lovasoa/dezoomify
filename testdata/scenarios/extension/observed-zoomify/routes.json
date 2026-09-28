@@ -1,0 +1,104 @@
+{
+  "routes": [
+    {
+      "route_id": "observed-zoomify-redirect-proxy/ImageProperties.xml",
+      "host": "fixtures.test",
+      "path": "/observed-zoomify/proxy/ImageProperties.xml",
+      "status": 307,
+      "headers": {
+        "Location": "/fetch?url=https%3A%2F%2Ffixtures.test%2Fobserved-zoomify%2Fsigned%2Fmetadata.xml%3Ftoken%3Dfixture-signature"
+      },
+      "payload": "payloads/fixtures.test/observed-zoomify/empty.txt"
+    },
+    {
+      "route_id": "observed-zoomify-signed/metadata.xml",
+      "host": "fixtures.test",
+      "path": "/observed-zoomify/signed/metadata.xml",
+      "query": "token=fixture-signature",
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "payload": "payloads/fixtures.test/observed-zoomify/signed/metadata.xml"
+    },
+    {
+      "route_id": "observed-zoomify-redirect-proxy/TileGroup0/1-0-0.jpg",
+      "host": "fixtures.test",
+      "path": "/observed-zoomify/proxy/TileGroup0/1-0-0.jpg",
+      "status": 307,
+      "headers": {
+        "Location": "/fetch?url=https%3A%2F%2Ffixtures.test%2Fobserved-zoomify%2Fsigned%2F0_0.png%3Ftoken%3Dfixture-signature"
+      },
+      "payload": "payloads/fixtures.test/observed-zoomify/empty.txt"
+    },
+    {
+      "route_id": "observed-zoomify-signed/0_0.png",
+      "host": "fixtures.test",
+      "path": "/observed-zoomify/signed/0_0.png",
+      "query": "token=fixture-signature",
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "payload": "payloads/fixtures.test/observed-zoomify/signed/0_0.png"
+    },
+    {
+      "route_id": "observed-zoomify-redirect-proxy/TileGroup0/1-1-0.jpg",
+      "host": "fixtures.test",
+      "path": "/observed-zoomify/proxy/TileGroup0/1-1-0.jpg",
+      "status": 307,
+      "headers": {
+        "Location": "/fetch?url=https%3A%2F%2Ffixtures.test%2Fobserved-zoomify%2Fsigned%2F1_0.png%3Ftoken%3Dfixture-signature"
+      },
+      "payload": "payloads/fixtures.test/observed-zoomify/empty.txt"
+    },
+    {
+      "route_id": "observed-zoomify-signed/1_0.png",
+      "host": "fixtures.test",
+      "path": "/observed-zoomify/signed/1_0.png",
+      "query": "token=fixture-signature",
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "payload": "payloads/fixtures.test/observed-zoomify/signed/1_0.png"
+    },
+    {
+      "route_id": "observed-zoomify-redirect-proxy/TileGroup0/1-0-1.jpg",
+      "host": "fixtures.test",
+      "path": "/observed-zoomify/proxy/TileGroup0/1-0-1.jpg",
+      "status": 307,
+      "headers": {
+        "Location": "/fetch?url=https%3A%2F%2Ffixtures.test%2Fobserved-zoomify%2Fsigned%2F0_1.png%3Ftoken%3Dfixture-signature"
+      },
+      "payload": "payloads/fixtures.test/observed-zoomify/empty.txt"
+    },
+    {
+      "route_id": "observed-zoomify-signed/0_1.png",
+      "host": "fixtures.test",
+      "path": "/observed-zoomify/signed/0_1.png",
+      "query": "token=fixture-signature",
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "payload": "payloads/fixtures.test/observed-zoomify/signed/0_1.png"
+    },
+    {
+      "route_id": "observed-zoomify-redirect-proxy/TileGroup0/1-1-1.jpg",
+      "host": "fixtures.test",
+      "path": "/observed-zoomify/proxy/TileGroup0/1-1-1.jpg",
+      "status": 307,
+      "headers": {
+        "Location": "/fetch?url=https%3A%2F%2Ffixtures.test%2Fobserved-zoomify%2Fsigned%2F1_1.png%3Ftoken%3Dfixture-signature"
+      },
+      "payload": "payloads/fixtures.test/observed-zoomify/empty.txt"
+    },
+    {
+      "route_id": "observed-zoomify-signed/1_1.png",
+      "host": "fixtures.test",
+      "path": "/observed-zoomify/signed/1_1.png",
+      "query": "token=fixture-signature",
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "payload": "payloads/fixtures.test/observed-zoomify/signed/1_1.png"
+    }
+  ]
+}
