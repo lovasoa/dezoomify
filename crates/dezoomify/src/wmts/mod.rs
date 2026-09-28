@@ -1,33 +1,45 @@
 //! Pure discovery for Web Map Tile Service capabilities documents.
 
-use crate::core::{DiscoveryError, DiscoveryMatch, FormatSpec, ImagePlan};
+use crate::core::discovery::{any, metadata, url_matches};
+use crate::core::{DiscoveryError, DiscoveryStep, FormatSpec, ImagePlan};
 
 mod capabilities;
 mod layer;
 mod tilematrix;
 
-pub const SPEC: FormatSpec = FormatSpec::new("wmts", &[DiscoveryMatch::Any.decode(decode)])
-    .with_display_name("WMTS")
-    .recognizing(is_wmts_url, "not a WMTS capabilities URL")
-    .preferring(|uri| uri.to_ascii_lowercase().contains("wmts"));
+pub const SPEC: FormatSpec = FormatSpec::new(
+    "wmts",
+    &[
+        metadata(url_matches(is_wmts_url)).decode(decode),
+        metadata(any()).decode(decode),
+    ],
+)
+.with_display_name("WMTS");
 
 fn is_wmts_url(uri: &str) -> bool {
-    uri.to_ascii_lowercase().contains("wmts")
+    let uri = uri.to_ascii_lowercase();
+    let path = uri.split(['?', '#']).next().unwrap_or(&uri);
+    (path.contains("wmts") && path.ends_with(".xml"))
+        || (uri.contains("service=wmts") && uri.contains("request=getcapabilities"))
 }
 
-fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
+fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+    let (url, bytes) = (resource.final_uri(), resource.bytes());
     let document = capabilities::parse_document(bytes)?;
     let context = layer::parse_context(url, &document)?;
     let levels = layer::build_levels(&context)?;
     if levels.is_empty() {
         return Err(DiscoveryError::Session("WMTS has no tile matrices".into()));
     }
-    Ok(ImagePlan::new(Some(context.layer_name), levels))
+    Ok(DiscoveryStep::Image(ImagePlan::new(
+        Some(context.layer_name),
+        levels,
+    )))
 }
 
 #[cfg(test)]
 fn catalog(url: &str, bytes: &[u8]) -> Result<crate::core::DiscoveryCatalog, DiscoveryError> {
-    decode(url, bytes)?.compile("wmts")
+    decode(crate::core::DiscoveryResource::new(url, bytes))?.compile("wmts")
 }
 
 #[cfg(test)]

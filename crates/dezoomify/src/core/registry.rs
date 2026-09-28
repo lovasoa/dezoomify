@@ -1,6 +1,6 @@
 //! Stable registration and precedence policy for pure formats.
 
-use super::discovery::{DiscoveryLimits, DiscoveryOperation, FormatSpec};
+use super::discovery::{DiscoveryInput, DiscoveryLimits, DiscoveryOperation, FormatSpec};
 use crate::{
     arcgis, bulk_text, custom_yaml, dzi, fsi, generic, google_arts_and_culture, hungaricana, iiif,
     iipimage, krpano, lizardtech, pnav, second_canvas, topviewer, vls, wmts, xlimage, zoomify,
@@ -64,7 +64,23 @@ impl Registry {
         uri: impl Into<String>,
         limits: DiscoveryLimits,
     ) -> DiscoveryOperation {
-        DiscoveryOperation::new(uri.into(), &self.specs, limits)
+        self.start_inputs_with_limits(vec![DiscoveryInput::new(uri)], limits)
+    }
+
+    /// Start one bounded search across user sources and host observations.
+    #[must_use]
+    pub fn start_inputs(&self, inputs: Vec<DiscoveryInput>) -> DiscoveryOperation {
+        self.start_inputs_with_limits(inputs, DiscoveryLimits::default())
+    }
+
+    /// Start a source-and-observation search with explicit shared limits.
+    #[must_use]
+    pub fn start_inputs_with_limits(
+        &self,
+        inputs: Vec<DiscoveryInput>,
+        limits: DiscoveryLimits,
+    ) -> DiscoveryOperation {
+        DiscoveryOperation::from_inputs(inputs, &self.specs, limits)
     }
 
     /// Look up a registered format by stable id.
@@ -83,19 +99,12 @@ impl Registry {
     }
 }
 
-/// The first built-in format which prefers `uri`.
-fn preferred_name(uri: &str) -> Option<&'static FormatSpec> {
-    BUILTINS.iter().find(|spec| spec.prefers(uri))
-}
-
-/// Compose every built-in format, preferring the one whose URL hints match.
+/// Compose every built-in format. Discovery owns per-resource ordering.
 #[must_use]
-pub fn default_registry(uri: &str) -> Registry {
-    let preferred = preferred_name(uri);
-    let is_other = |&b: &&FormatSpec| !preferred.is_some_and(|d| b == d);
-    let others = BUILTINS.iter().filter(is_other);
-    let specs = preferred.iter().copied().chain(others).copied().collect();
-    Registry { specs }
+pub fn default_registry() -> Registry {
+    Registry {
+        specs: BUILTINS.to_vec(),
+    }
 }
 
 /// Resolve a single built-in format by its name.
@@ -114,12 +123,15 @@ pub fn registry_for(name: &str) -> Option<Registry> {
 mod tests {
     use super::*;
     use crate::Vec2d;
-    use crate::core::discovery::{DiscoveryMatch, ResourceResponse};
+    use crate::core::discovery::{DiscoveryStep, ResourceResponse, any, metadata};
     use crate::core::{DiscoveredEntry, ImagePlan, Request, ResolvedLevel, TileSource};
 
     #[test]
     fn a_regular_format_needs_only_a_decoder_and_tile_address() {
-        fn decode(_: &str, bytes: &[u8]) -> Result<ImagePlan, super::super::DiscoveryError> {
+        fn decode(
+            resource: super::super::DiscoveryResource<'_>,
+        ) -> Result<DiscoveryStep, super::super::DiscoveryError> {
+            let bytes = resource.bytes();
             let width = u32::from(*bytes.first().unwrap());
             let level = ResolvedLevel::grid(Vec2d { x: width, y: 2 }, Vec2d::square(2), |tile| {
                 Request::new(format!(
@@ -127,10 +139,13 @@ mod tests {
                     tile.coord.column, tile.coord.row
                 ))
             })?;
-            Ok(ImagePlan::new(Some("Toy image".into()), vec![level]))
+            Ok(DiscoveryStep::Image(ImagePlan::new(
+                Some("Toy image".into()),
+                vec![level],
+            )))
         }
 
-        const TOY: FormatSpec = FormatSpec::new("toy", &[DiscoveryMatch::Any.decode(decode)]);
+        const TOY: FormatSpec = FormatSpec::new("toy", &[metadata(any()).decode(decode)]);
         let mut registry = Registry::new();
         registry.register(TOY);
         let mut operation = registry.start("memory://metadata");
@@ -156,7 +171,7 @@ mod tests {
     #[test]
     fn registry_snapshot_lists_ids_and_display_names() {
         // Reviewed order: registry order defines automatic precedence.
-        let registry = default_registry("https://example.test/unknown");
+        let registry = default_registry();
         assert_eq!(
             registry.snapshot(),
             [
@@ -193,34 +208,6 @@ mod tests {
             assert_eq!(registry.specs[0].name(), name);
         }
         assert!(registry_for("nope").is_none());
-    }
-
-    #[test]
-    fn route_preferences_promote_the_matching_program() {
-        assert_eq!(
-            preferred_name("x/info.json").map(FormatSpec::name),
-            Some("iiif")
-        );
-        assert_eq!(preferred_name("x/unknown").map(FormatSpec::name), None);
-        assert_eq!(
-            default_registry("x/info.json").specs[0].name(),
-            "iiif",
-            "the matching program must be tried first"
-        );
-        assert_eq!(
-            preferred_name("server?fif=image.tif").map(FormatSpec::name),
-            Some("iipimage")
-        );
-        assert_eq!(
-            preferred_name("x/TileGroup0/0-0-0.jpg").map(FormatSpec::name),
-            Some("zoomify")
-        );
-    }
-
-    #[test]
-    fn default_registry_without_a_hint_keeps_definition_order() {
-        assert_eq!(default_registry("x/unknown").specs[0].name(), "custom");
-        let _ = default_registry("x/unknown").start("memory://root");
     }
 
     #[test]

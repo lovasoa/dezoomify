@@ -1,18 +1,12 @@
 use url::Url;
 
-use crate::core::{
-    DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
-    DiscoveryStep, Request,
-};
+use crate::core::{DiscoveryError, DiscoveryResource, DiscoveryRoute, DiscoveryStep, Request};
 
+use crate::core::discovery::{metadata as metadata_route, url_matches, viewer};
 pub(super) const RECORD_ROUTE: DiscoveryRoute =
-    DiscoveryMatch::UrlPredicate(is_record).map_url(metadata);
+    viewer(url_matches(is_record)).resolve_metadata(metadata);
 pub(super) const METADATA_ROUTE: DiscoveryRoute =
-    DiscoveryMatch::UrlPredicate(is_metadata).then(follow_info);
-
-pub(super) fn prefers(uri: &str) -> bool {
-    is_record(uri)
-}
+    metadata_route(url_matches(is_metadata)).extract_metadata(follow_info);
 
 pub(super) fn is_record(uri: &str) -> bool {
     let Ok(url) = Url::parse(uri) else {
@@ -51,7 +45,6 @@ pub(super) fn is_metadata(uri: &str) -> bool {
 }
 
 pub(super) fn follow_info(
-    _: &DiscoveryContext<'_>,
     resource: DiscoveryResource<'_>,
 ) -> Result<DiscoveryStep, DiscoveryError> {
     let info_uri = serde_json::from_slice::<serde_json::Value>(resource.bytes())

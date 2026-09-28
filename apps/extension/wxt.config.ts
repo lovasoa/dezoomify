@@ -20,9 +20,13 @@ function testHostPermissions(isTestPackage: boolean): string[] {
   // The permission E2E declares its loopback tile origin so Chromium may
   // transport fixture bytes. The test package's job view still treats it as
   // ungranted until its native-permission boundary mock is clicked.
+  // Firefox match patterns do not accept ports; the fixture uses an
+  // ephemeral port, while grants apply to its loopback host.
+  const source = new URL(testOrigin);
+  const sourcePattern = `${source.protocol}//${source.hostname}/*`;
   if (process.env.DEZOOMIFY_TEST_SOURCE_HOST_ONLY === "1")
-    return [`${testOrigin}/*`, "http://localhost/*"];
-  return ["http://127.0.0.1/*", "http://localhost/*", `${testOrigin}/*`];
+    return [sourcePattern, "http://localhost/*"];
+  return [...new Set(["http://127.0.0.1/*", "http://localhost/*", sourcePattern])];
 }
 
 export default defineConfig({

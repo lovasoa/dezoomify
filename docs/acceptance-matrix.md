@@ -36,6 +36,13 @@ sites; `cargo xtask test live --public` stays opt-in and advisory.
 
 ## Engine and transports (owned by the engine and runtime owners)
 
+Discovery precedence, navigation, and budgets share the request-trace tests in
+`crates/dezoomify/tests/discovery_navigation.rs`. Discovery unit tests cover
+branch-local history and response-order independence (`cargo xtask test core`).
+`extension/observed-zoomify` reuses the `extension/tile-redirect` image and saves
+it without granting analytics access in Chromium and Firefox
+(`cargo xtask test extension`).
+
 | Behavior | Corpus | Lane |
 |---|---|---|
 | Metadata trace, deferred catalog, 403 handling | `testdata/scenarios/native/cli-deferred`, `testdata/scenarios/native/cli-deferred-limit`, `testdata/scenarios/web/iiif-discovery` | `cargo xtask test scenario`, `cargo xtask test web` |

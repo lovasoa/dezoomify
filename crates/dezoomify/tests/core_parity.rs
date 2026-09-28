@@ -19,7 +19,7 @@ macro_rules! coverage_fixture {
 }
 
 fn discover(input: &str, resources: &[Resource<'_>]) -> Result<DiscoveryCatalog, DiscoveryError> {
-    discover_with(default_registry(input), input, resources)
+    discover_with(default_registry(), input, resources)
 }
 
 fn discover_with(
@@ -237,7 +237,7 @@ fn automatic_discovery_selects_every_ready_format() {
     assert_eq!(generic.format, "generic");
 
     let input = "https://artsandculture.google.com/asset/test";
-    let mut operation = default_registry(input).start(input);
+    let mut operation = default_registry().start(input);
     let page = operation.next_priority_need().unwrap().unwrap();
     operation
         .provide(ResourceResponse::new(

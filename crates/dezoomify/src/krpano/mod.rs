@@ -13,12 +13,14 @@ use krpano_decrypt::{decrypt_xml, is_encrypted_xml};
 use krpano_metadata::{KrpanoMetadata, XY, all_sides};
 
 use crate::Vec2d;
-use crate::core::discovery::ResourceFailure;
+use crate::core::discovery::{
+    ResourceFailure, html_matches, metadata, url_matches, url_suffix, viewer,
+};
 use crate::core::resolve_relative;
 use crate::core::{
-    CatalogPlan, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, GridRequests, GridTile,
-    ImagePlan, Request, ResolvedLevel,
+    CatalogPlan, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryResource,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, GridRequests, GridTile, ImagePlan, Request,
+    ResolvedLevel,
 };
 use crate::krpano::krpano_metadata::{ImageInfo, LevelDesc};
 use crate::template::Template;
@@ -26,23 +28,22 @@ use crate::template::Template;
 mod krpano_metadata;
 
 const ROUTES: &[DiscoveryRoute] = &[
-    DiscoveryMatch::ContentPredicate(looks_like_xml_or_encrypted).then(handle_xml),
-    DiscoveryMatch::ContentPredicate(looks_like_viewer_js).then(handle_viewer_js),
-    DiscoveryMatch::ContentPredicate(looks_like_krpano_html).then(handle_html),
-    DiscoveryMatch::UrlPredicate(is_javascript_uri).then(handle_viewer_js),
+    metadata(html_matches(looks_like_xml_or_encrypted)).decode(handle_xml),
+    viewer(html_matches(looks_like_viewer_js)).extract_metadata(handle_viewer_js),
+    viewer(html_matches(looks_like_krpano_html)).extract_metadata(handle_html),
+    viewer(url_matches(is_javascript_uri)).extract_metadata(handle_viewer_js),
+    metadata(url_suffix("/tiles.xml")).decode(handle_xml),
+    metadata(url_suffix("/tour.xml")).decode(handle_xml),
 ];
 
 pub const SPEC: FormatSpec = FormatSpec::new("krpano", ROUTES)
     .with_display_name("krpano")
-    .on_failure(handle_failure)
-    .preferring(|uri| uri.contains("tiles.xml"));
+    .on_failure(handle_failure);
 
-fn handle_html(
-    context: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+fn handle_html(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+    let context = resource.context();
     if find_xml(context).is_some() {
-        return handle_viewer_js(context, resource);
+        return handle_viewer_js(resource);
     }
     let html = resource.text_lossy();
     let xml_reference =
@@ -54,10 +55,8 @@ fn handle_html(
     Ok(DiscoveryStep::Follow(Request::new(xml_uri)))
 }
 
-fn handle_xml(
-    context: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+fn handle_xml(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+    let context = resource.context();
     let contents = resource.bytes();
     if !is_encrypted_xml(contents) {
         return complete(resource.final_uri(), contents);
@@ -82,10 +81,8 @@ fn handle_xml(
     }
 }
 
-fn handle_viewer_js(
-    context: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+fn handle_viewer_js(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+    let context = resource.context();
     let Some(xml) = find_xml(context) else {
         if extract_viewer_js(resource.bytes()).is_none() {
             return Err(DiscoveryError::Session(

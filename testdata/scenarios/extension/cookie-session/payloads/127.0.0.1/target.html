@@ -8,6 +8,7 @@
         .then((response) => {
           if (!response.ok) throw new Error("protected artwork metadata returned " + response.status);
           window.__sourceFetched = true;
+          document.documentElement.dataset.viewerReady = "true";
         })
         .catch(() => { window.__sourceFetched = false; });
     </script>

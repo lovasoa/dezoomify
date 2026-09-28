@@ -5,9 +5,10 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use crate::Vec2d;
+use crate::core::discovery::{any, html_matches, metadata, url_matches, viewer};
 use crate::core::{
-    DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
-    DiscoveryStep, FormatSpec, ImagePlan, Request, ResolvedLevel, image_title, resolve_relative,
+    DiscoveryError, DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, ImagePlan,
+    Request, ResolvedLevel, image_title, resolve_relative,
 };
 
 static SOURCE_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -24,14 +25,12 @@ static HEIGHT_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 const ROUTES: &[DiscoveryRoute] = &[
-    DiscoveryMatch::UrlPredicate(is_server_url).map_url(metadata_url),
-    DiscoveryMatch::ContentPredicate(contains_server).then(follow_page_server),
-    DiscoveryMatch::Any.decode(decode),
+    metadata(url_matches(is_server_url)).resolve_metadata(metadata_url),
+    viewer(html_matches(contains_server)).extract_metadata(follow_page_server),
+    metadata(any()).decode(decode),
 ];
 
-pub const SPEC: FormatSpec = FormatSpec::new("fsi", ROUTES)
-    .with_display_name("FSI")
-    .preferring(is_server_url);
+pub const SPEC: FormatSpec = FormatSpec::new("fsi", ROUTES).with_display_name("FSI");
 
 fn is_server_url(uri: &str) -> bool {
     uri.split_once('?').is_some_and(|(path, query)| {
@@ -55,10 +54,7 @@ fn contains_server(bytes: &[u8]) -> bool {
     SERVER_RE.is_match(&String::from_utf8_lossy(bytes))
 }
 
-fn follow_page_server(
-    _: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+fn follow_page_server(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
     // Server URLs are embedded in HTML, where query separators are escaped.
     let page = resource.text_lossy().replace("&amp;", "&");
     let server = SERVER_RE
@@ -72,7 +68,8 @@ fn follow_page_server(
     metadata_url(&server).map(DiscoveryStep::Follow)
 }
 
-fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
+fn decode(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+    let (url, bytes) = (resource.final_uri(), resource.bytes());
     let width = number(&WIDTH_RE, bytes, "width")?;
     let height = number(&HEIGHT_RE, bytes, "height")?;
     let source = SOURCE_RE
@@ -112,7 +109,7 @@ fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
             ))
         },
     )?;
-    Ok(ImagePlan::new(title, vec![level]))
+    Ok(DiscoveryStep::Image(ImagePlan::new(title, vec![level])))
 }
 
 fn number(regex: &Regex, bytes: &[u8], name: &str) -> Result<u32, DiscoveryError> {

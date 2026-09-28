@@ -31,9 +31,9 @@ test("candidate snapshot includes the document and retained resources in one bat
       ok: true,
       documentUrl: "https://gallery.example/page",
       inputs: [
-        { url: "https://gallery.example/page" },
-        { url: "https://cdn.example/viewer.js" },
-        { url: "https://gallery.example/info.json" },
+        { url: "https://gallery.example/page", kind: "source" },
+        { url: "https://cdn.example/viewer.js", kind: "observed-resource" },
+        { url: "https://gallery.example/info.json", kind: "observed-resource" },
       ],
       overflow: 0,
     });
@@ -70,12 +70,17 @@ test("candidate snapshot orders rendered document and readable iframe DOM before
   };
   try {
     assert.deepEqual(collectCandidates().inputs, [
-      { url: "https://gallery.example/page", contents: "<html><body>rendered page</body></html>" },
+      {
+        url: "https://gallery.example/page",
+        kind: "source",
+        contents: "<html><body>rendered page</body></html>",
+      },
       {
         url: "https://gallery.example/frame",
+        kind: "observed-document",
         contents: "<html><script>dynamic viewer config</script></html>",
       },
-      { url: "https://gallery.example/TileGroup0/1-0-0.jpg" },
+      { url: "https://gallery.example/TileGroup0/1-0-0.jpg", kind: "observed-resource" },
     ]);
   } finally {
     globalThis.location = oldLocation;

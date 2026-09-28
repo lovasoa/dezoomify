@@ -47,12 +47,35 @@ which resolves them against the post-redirect URI before issuing the next pure
 request. Named regex captures can use shared routes to resolve links, decode
 HTML entities, or fill a fixed resource URL before following it.
 
-Generic iframe navigation belongs to shared discovery, not individual formats.
-It retains bounded references in document order and waits until every
-format-specific path has failed before acquiring an embedded page. Each page
-is evaluated against the registered formats afresh; sibling frames remain
-available after a failed path. Requests, retained bytes, transitions, and
-navigation cycles share the operation's limits.
+Formats declare `metadata(url_suffix(...)).decode(...)`,
+`image_url(predicate).resolve_metadata(...)`, and
+`viewer(html_matches(...)).extract_metadata(...)` routes. All decoders and
+extractors consume the same resource, including requested/final URLs and parser
+history, and return an image, catalog, or next request. Shared discovery compiles
+plans and schedules acquisitions; formats know nothing about observations.
+`continue_with` declares metadata requiring a previously read parent, such as
+Google Arts tile information. Route matchers replace format-level recognition
+and preference predicates; opaque addresses still receive content detection.
+
+One discovery operation owns all inputs and one ordered work frontier. Products
+label input provenance (source, observed document, observed resource); omitted
+kinds mean source. Source catalogs and their format-specific references precede
+readable observed documents, recognized metadata/image URLs, viewer navigation,
+and finally opaque observations. Semantic URL matches order parsers, with the
+stable registry order breaking ties.
+
+Format-derived references carry image-specific evidence even when found in a
+generic frame; they precede unrelated page navigation. Within an evidence class,
+discovery expands breadth first, with input/document
+order and format order breaking ties. Parser continuations retain their own
+resource history instead of sharing a mutable current root. Acquisitions may
+overlap, but results are accepted in frontier order, independent of response
+timing, including when replies contain further iframe references. Navigation
+references expand once per resource in frontier order, with a bounded number of
+queued roots independent of the number of parsers. Each new page is
+evaluated against all registered formats. A parent's rejection never prunes its
+children. Supplied documents and fetched responses share byte, request, and
+transition limits; request deduplication and navigation cycle guards span roots.
 
 To add a conventional format, define one `FormatSpec` with a metadata decoder,
 return an `ImagePlan` whose levels use `ResolvedLevel::grid`, and register the

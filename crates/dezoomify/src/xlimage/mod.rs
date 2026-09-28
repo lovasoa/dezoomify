@@ -5,18 +5,14 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::Vec2d;
+use crate::core::discovery::{metadata, url_matches};
 use crate::core::{
-    DiscoveryError, DiscoveryMatch, DiscoveryRoute, FormatSpec, ImagePlan, Request, ResolvedLevel,
+    DiscoveryError, DiscoveryRoute, DiscoveryStep, FormatSpec, ImagePlan, Request, ResolvedLevel,
 };
 
-const INFO_QUERY: &str = "cmd=info";
+const ROUTES: &[DiscoveryRoute] = &[metadata(url_matches(is_xlimage_url)).decode(decode)];
 
-const ROUTES: &[DiscoveryRoute] = &[DiscoveryMatch::Any.decode(decode)];
-
-pub const SPEC: FormatSpec = FormatSpec::new("xlimage", ROUTES)
-    .with_display_name("XLimage")
-    .recognizing(is_xlimage_url, "not an XLimage URL")
-    .preferring(is_info_url);
+pub const SPEC: FormatSpec = FormatSpec::new("xlimage", ROUTES).with_display_name("XLimage");
 
 fn is_xlimage_url(uri: &str) -> bool {
     let path = uri.split_once(['?', '#']).map_or(uri, |(path, _)| path);
@@ -27,17 +23,14 @@ fn is_xlimage_url(uri: &str) -> bool {
     })
 }
 
-fn is_info_url(uri: &str) -> bool {
-    uri.to_ascii_lowercase().contains(INFO_QUERY)
-}
-
 fn image_origin(url: &str) -> String {
     url.split_once(['?', '#'])
         .map_or(url, |(path, _)| path)
         .to_owned()
 }
 
-fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
+fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+    let (url, bytes) = (resource.final_uri(), resource.bytes());
     let metadata: Metadata = serde_xml_rs::from_reader(bytes).map_err(|error| {
         DiscoveryError::Session(format!("unable to parse XLimage metadata: {error}"))
     })?;
@@ -54,7 +47,7 @@ fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
     let levels = build_levels(&metadata, &origin)?;
     let title = image_title(&origin);
 
-    Ok(ImagePlan::new(title, levels))
+    Ok(DiscoveryStep::Image(ImagePlan::new(title, levels)))
 }
 
 fn image_title(origin: &str) -> Option<String> {

@@ -12,30 +12,29 @@ use image_properties::ImageProperties;
 use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
+use crate::core::discovery::{html_matches, image_url, metadata, url_matches, url_suffix, viewer};
 use crate::core::{
-    CatalogPlan, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryRoute, DiscoveryStep, FormatSpec, ImagePlan, Request, ResolvedLevel, resolve_relative,
+    CatalogPlan, DiscoveryError, DiscoveryRoute, DiscoveryStep, FormatSpec, ImagePlan, Request,
+    ResolvedLevel, resolve_relative,
 };
 
 mod image_properties;
 
 const ROUTES: &[DiscoveryRoute] = &[
-    DiscoveryMatch::UrlPredicate(is_tile_url).map_url(tile_metadata),
-    DiscoveryMatch::UrlSuffix("ImageProperties.xml").then(extract_catalog),
-    DiscoveryMatch::UrlPredicate(is_broker_url).then(broker_catalog_step),
-    DiscoveryMatch::ContentPredicate(has_inline_tile_service).then(extract_inline_catalog),
-    DiscoveryMatch::ContentPredicate(contains_zoomify_declaration)
-        .then(extract_image_properties_url),
-    DiscoveryMatch::ContentPredicate(has_fluid_access_number).then(extract_fluid_catalog),
-    DiscoveryMatch::UrlPredicate(is_unibe_page).then(extract_unibe_catalog),
-    DiscoveryMatch::ContentPredicate(has_openlayers_source).then(extract_openlayers_catalog),
+    metadata(url_suffix("ImageProperties.xml")).decode(image_properties),
+    image_url(is_tile_url).resolve_metadata(tile_metadata),
+    metadata(url_matches(is_broker_url)).extract_metadata(broker_catalog_step),
+    viewer(html_matches(has_inline_tile_service)).decode(inline_catalog),
+    viewer(html_matches(contains_zoomify_declaration))
+        .extract_metadata(extract_image_properties_url),
+    viewer(html_matches(has_fluid_access_number)).extract_metadata(extract_fluid_catalog),
+    viewer(url_matches(is_unibe_page)).extract_metadata(extract_unibe_catalog),
+    viewer(html_matches(has_openlayers_source)).extract_metadata(extract_openlayers_catalog),
     ngv::ROUTE,
-    DiscoveryMatch::ContentPredicate(has_ete_url).then(extract_ete_catalog),
+    viewer(html_matches(has_ete_url)).extract_metadata(extract_ete_catalog),
 ];
 
-pub const SPEC: FormatSpec = FormatSpec::new("zoomify", ROUTES)
-    .with_display_name("Zoomify")
-    .preferring(is_zoomify_url);
+pub const SPEC: FormatSpec = FormatSpec::new("zoomify", ROUTES).with_display_name("Zoomify");
 
 static SHOW_IMAGE_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(r#"(?i)(?:\bZ\s*\.\s*)?\bshowImage\s*\([^,]*,\s*["'](?P<image>[^"']+)["']"#)
@@ -138,12 +137,7 @@ fn is_tile_url(uri: &str) -> bool {
     TILE_URL_RE.is_match(uri)
 }
 
-fn is_zoomify_url(uri: &str) -> bool {
-    uri.contains("/ImageProperties.xml") || ngv::prefers(uri) || is_tile_url(uri)
-}
-
 fn extract_image_properties_url(
-    _: &DiscoveryContext<'_>,
     resource: crate::core::DiscoveryResource<'_>,
 ) -> Result<DiscoveryStep, DiscoveryError> {
     let image_path = extract_image_path(resource.bytes()).ok_or_else(|| {
@@ -235,13 +229,12 @@ fn pyramid_tile_count(width: u32, height: u32, tile_size: u32) -> u32 {
     u32::try_from(total).unwrap_or(u32::MAX)
 }
 
-fn extract_inline_catalog(
-    _: &DiscoveryContext<'_>,
+fn inline_catalog(
     resource: crate::core::DiscoveryResource<'_>,
 ) -> Result<DiscoveryStep, DiscoveryError> {
-    let base_href = extract_html_base(resource.bytes()).unwrap_or_default();
-    let services: Vec<InlineService> =
-        inline_tile_services(resource.bytes(), resource.final_uri(), &base_href).collect();
+    let (uri, bytes) = (resource.final_uri(), resource.bytes());
+    let base_href = extract_html_base(bytes).unwrap_or_default();
+    let services: Vec<InlineService> = inline_tile_services(bytes, uri, &base_href).collect();
     if services.is_empty() {
         return Err(DiscoveryError::Session(
             "Zoomify viewer page declares no inline image geometry".into(),
@@ -260,17 +253,7 @@ fn extract_inline_catalog(
                 .map_err(|_| DiscoveryError::Session("invalid inline Zoomify geometry".into()))?,
         );
     }
-    let catalog = CatalogPlan::images(images)
-        .compile("zoomify")
-        .map_err(|_| DiscoveryError::Session("invalid inline Zoomify geometry".into()))?;
-    Ok(DiscoveryStep::Complete(catalog))
-}
-
-fn extract_catalog(
-    _: &DiscoveryContext<'_>,
-    resource: crate::core::DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
-    load_catalog(resource.uri(), resource.bytes()).map(DiscoveryStep::Complete)
+    Ok(DiscoveryStep::Catalog(CatalogPlan::images(images)))
 }
 
 fn has_fluid_access_number(bytes: &[u8]) -> bool {
@@ -278,7 +261,6 @@ fn has_fluid_access_number(bytes: &[u8]) -> bool {
 }
 
 fn extract_fluid_catalog(
-    _: &DiscoveryContext<'_>,
     resource: crate::core::DiscoveryResource<'_>,
 ) -> Result<DiscoveryStep, DiscoveryError> {
     // Fluid Engage pages name an image collection; collection metadata comes
@@ -299,7 +281,6 @@ fn is_broker_url(uri: &str) -> bool {
 }
 
 fn broker_catalog_step(
-    _: &DiscoveryContext<'_>,
     resource: crate::core::DiscoveryResource<'_>,
 ) -> Result<DiscoveryStep, DiscoveryError> {
     broker_catalog(resource.bytes())
@@ -323,7 +304,6 @@ fn is_unibe_page(uri: &str) -> bool {
 }
 
 fn extract_unibe_catalog(
-    _: &DiscoveryContext<'_>,
     resource: crate::core::DiscoveryResource<'_>,
 ) -> Result<DiscoveryStep, DiscoveryError> {
     let path = UNIBE_URL_RE
@@ -342,7 +322,6 @@ fn has_openlayers_source(bytes: &[u8]) -> bool {
 }
 
 fn extract_openlayers_catalog(
-    _: &DiscoveryContext<'_>,
     resource: crate::core::DiscoveryResource<'_>,
 ) -> Result<DiscoveryStep, DiscoveryError> {
     let path = OPENLAYERS_RE
@@ -361,7 +340,6 @@ fn has_ete_url(bytes: &[u8]) -> bool {
 }
 
 fn extract_ete_catalog(
-    _: &DiscoveryContext<'_>,
     resource: crate::core::DiscoveryResource<'_>,
 ) -> Result<DiscoveryStep, DiscoveryError> {
     let path = ETE_URL_RE
@@ -473,7 +451,10 @@ fn tile_metadata(input: &str) -> Result<Request, DiscoveryError> {
     Ok(Request::new(uri))
 }
 
-fn load_catalog(url: &str, contents: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
+fn image_properties(
+    resource: crate::core::DiscoveryResource<'_>,
+) -> Result<DiscoveryStep, DiscoveryError> {
+    let (url, contents) = (resource.uri(), resource.bytes());
     let properties: ImageProperties = serde_xml_rs::from_reader(contents).map_err(|error| {
         DiscoveryError::Session(format!("unable to parse Zoomify XML: {error}"))
     })?;
@@ -485,8 +466,8 @@ fn load_catalog(url: &str, contents: &[u8]) -> Result<DiscoveryCatalog, Discover
     plan_from_properties(
         url.split("/ImageProperties.xml").next().unwrap_or(url),
         &properties,
-    )?
-    .compile("zoomify")
+    )
+    .map(DiscoveryStep::Image)
 }
 
 fn plan_from_properties(
@@ -858,7 +839,8 @@ mod tests {
     }
 
     fn ready_image(url: &str, contents: &[u8]) -> ResolvedImage {
-        match load_catalog(url, contents)
+        match image_properties(crate::core::DiscoveryResource::new(url, contents))
+            .and_then(|step| step.compile("zoomify"))
             .unwrap()
             .into_entries()
             .pop()
