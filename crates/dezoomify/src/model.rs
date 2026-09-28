@@ -840,7 +840,7 @@ pub struct Snapshot {
 
 // Diagnostics are observations, never commands or authoritative job state.
 // Hosts supply clocks and identity. Fields are bounded scalar facts: bodies,
-// buffers, credentials, and arbitrary object graphs cannot enter a report.
+// buffers, and arbitrary object graphs cannot enter a report.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]

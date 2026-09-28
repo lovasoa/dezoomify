@@ -10,6 +10,8 @@
 // type-strip it directly in tests.
 
 export const de = {
+  "view.diagnostics.signedInNote":
+    "Wenn Sie sich auf dieser Website anmelden müssen, können diese Details sensible Informationen enthalten. Prüfen Sie sie vor dem Teilen.",
   "view.diagnostics.save": "Diagnosebericht speichern",
   "view.diagnostics.copyFailed":
     "Kopieren fehlgeschlagen. Markieren und kopieren Sie die Details unten.",

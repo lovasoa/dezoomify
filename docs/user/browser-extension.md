@@ -85,6 +85,10 @@ and press the Dezoomify toolbar button.
 - Sign-in details stay in the browser. The extension does not transfer them
   to the desktop app.
 
+**Technical details & logs** includes the full page and image addresses.
+If this site requires you to sign in, these details may contain sensitive
+information. Review them before sharing.
+
 ## Next steps
 
 - [The extension found nothing? See troubleshooting](./troubleshooting.md)

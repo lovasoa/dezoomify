@@ -1,5 +1,4 @@
 // Restricted metadata fetch relay (pure, no server framework).
-import { redactDiagnosticText } from "../../packages/app-model/src/diagnostics.ts";
 import { readErrorPreview } from "../../packages/browser-runtime/src/response-body.ts";
 import {
   buildProxyCorsHeaders,
@@ -298,9 +297,7 @@ export async function handleProxyRequest(
       const code = res.status === 429 ? "PROXY_RATE_LIMITED" : "TRANSPORT_HTTP_ERROR";
       const deadline = AbortSignal.timeout(500);
       const signal = deps.signal ? AbortSignal.any([deps.signal, deadline]) : deadline;
-      const preview = res.body
-        ? redactDiagnosticText(await readErrorPreview(new Response(res.body), signal))
-        : undefined;
+      const preview = res.body ? await readErrorPreview(new Response(res.body), signal) : undefined;
       return {
         status: res.status,
         headers: baseHeaders,

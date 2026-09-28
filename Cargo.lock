@@ -1134,7 +1134,6 @@ dependencies = [
  "dezoomify",
  "dezoomify-fixture-server",
  "image",
- "regex",
  "reqwest 0.12.28",
  "rustls",
  "serde",

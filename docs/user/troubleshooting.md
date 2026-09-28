@@ -122,8 +122,7 @@ and the [desktop app](./desktop-app.md).
 - Open **Technical details & logs** to copy or save the diagnostic report,
   even if the image completed but looks wrong. The report link opens GitHub
   with the address and failure details filled in. Review the draft and add
-  a screenshot. Leave out anything private: no passwords, no
-  cookies, no signed-in addresses with tokens in them. You can also
+  a screenshot. You can also
   [open an issue](https://github.com/lovasoa/dezoomify/issues) yourself with
   the same details.
 
