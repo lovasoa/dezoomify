@@ -116,6 +116,8 @@ function parseAcceptLanguage(header: string): Array<string> {
 export type I18nVars = Record<string, string | number>;
 
 const en = {
+  "view.diagnostics.signedInNote":
+    "If this site requires you to sign in, these details may contain sensitive information. Review them before sharing.",
   "view.diagnostics.save": "Save diagnostic report",
   "view.diagnostics.copyFailed": "Could not copy. Select and copy the details below.",
   "view.diagnostics.loadFailed":

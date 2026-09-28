@@ -14,7 +14,7 @@ Each error includes:
 - an ordered set of permitted recovery actions;
 - optional redacted request, transport, blocked-reason, resource-kind, HTTP status, bounded server signal, and diagnostic detail.
 
-Codes are stable API; messages improve freely. Secrets, cookies, auth headers, signed query values, and local paths are redacted before logging or serialization.
+Codes are stable API; messages improve freely. Prominent errors omit credentials. Diagnostic reports retain exact URLs, paths, and settings under the [diagnostic capture contract](security.md#credentials).
 
 Hosts keep their own error chains internally; only the typed shape crosses the contract. Browser code classifies a fetch failure once into `FetchFailure` (host-observed facts only). The Rust session adds the correlated request: metadata failures are `discovery`, tile/probe failures are `acquisition`, request URI and kind come from the emitted effect. Product code adds no context of its own. Output failures use phase `output`. Never branch on display strings.
 
@@ -48,7 +48,7 @@ Messages follow the layered rules in [Product](product.md#progressive-disclosure
 - Jargon waits for expandable details and linked docs. Wording is driven by structured context (code, phase, transport, kind, blocked reason, redacted origin), so identical causes read identically everywhere.
 - A fetch failure is the job outcome: plain message plus stable code up front; engine diagnostics (for discovery, the headline-free per-format bullets) only inside expandable details.
 - User and technical wording never mix. Each fetch failure carries a generated `FetchFailureCode`, a plain sentence for the user, and a typed `FetchCause` (code, HTTP status, transport kind, policy reason) for the engine. Product wording uses the classified sentence; it never parses a stable code. Discovery diagnostics group on the typed `(kind, cause)` key, never on rendered text. A proxy-denied cause names relay code, HTTP status, and policy reason, so policy denials never read as upstream refusals and vice versa.
-- Details stay on the device in the diagnostic report: redacted request URL, observed HTTP status, bounded server signal, and engine failure context. Format URL-shape misses (`DidNotMatchUrl`, nothing fetched) collapse to a count; fetch rejections group by typed `(kind, cause)` under format names; other rejections group by `(kind, detail)`.
+- Details stay on the device in the diagnostic report: full request URL, observed HTTP status, bounded server signal, and engine failure context. Format URL-shape misses (`DidNotMatchUrl`, nothing fetched) collapse to a count; fetch rejections group by typed `(kind, cause)` under format names; other rejections group by `(kind, detail)`.
 - Every code has user wording; a code without wording is a release defect. Only transient failures invite retry; policy denials and upstream 4xx name the next app or address fix instead. Retry re-runs the same request, never a reset. Start over exists only where a new address is accepted (website, desktop); the extension job tab stays bound to the scanned page.
 
 ## Failure policy

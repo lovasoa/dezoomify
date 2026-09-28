@@ -5,7 +5,6 @@ import type {
   DiagnosticValue,
   Snapshot,
 } from "@dezoomify/wasm-bindings";
-import { DEEP_LINK_SECRET_QUERY_KEYS } from "./source-url.ts";
 
 export type { DiagnosticLevel, DiagnosticRecord, DiagnosticReport };
 export type DiagnosticFields = Record<string, DiagnosticValue>;
@@ -14,41 +13,8 @@ export const DIAGNOSTIC_MAX_RECORDS = 1000;
 const FIELD_LIMIT = 4096;
 const MAX_FIELDS = 48;
 const MAX_GROUPS = 16;
-const SECRET =
-  /authorization|cookie|password|secret|token|signature|api.?key|credential|(^|[._-])(auth|session|sig|key|policy)($|[._-])|^x-amz-|^x-goog-/i;
 // JSON escaping and UTF-8 use at most six bytes per UTF-16 code unit.
 const size = (value: unknown) => JSON.stringify(value).length * 6;
-
-/** Preserve URL spelling (including escapes and semantic query parameters). */
-export function redactDiagnosticText(value: string): string {
-  return (
-    value
-      .replace(/(https?:\/\/)[^\s/@]+@/gi, "$1[redacted]@")
-      .replace(/([?&#])([^=&#\s]+)=([^&#\s]*)/g, (all, sep, key) => {
-        let decoded = key;
-        try {
-          decoded = decodeURIComponent(key);
-        } catch {
-          /* Keep malformed spelling. */
-        }
-        return SECRET.test(decoded) || DEEP_LINK_SECRET_QUERY_KEYS.has(decoded.toLowerCase())
-          ? `${sep}${key}=[redacted]`
-          : all;
-      })
-      .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9+/=._~-]+/gi, "$1 [redacted]")
-      .replace(
-        /\b(authorization|auth|cookie|passwd|password|secret|session(?:id|token)?|sid|ticket|token|signature|api[_-]?key)\s*[:=]\s*[^\s,;&#]+/gi,
-        "$1=[redacted]",
-      )
-      .replace(/file:\/\/[^\s"'<>]+/gi, "[local file]")
-      .replace(
-        /(^|[\s"'(])(?:\/(?:home|Users|tmp|private|var)\/|[A-Z]:\\)[^\s"'<>)]*/g,
-        "$1[local path]",
-      )
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: Strip terminal control characters.
-      .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "")
-  );
-}
 
 /** Flatten bounded facts; explicitly retain Error's non-enumerable properties. */
 export function diagnosticFields(
@@ -59,20 +25,17 @@ export function diagnosticFields(
   const seen = new Set<unknown>();
   let remaining = 8192;
   function visit(key: string, item: unknown, depth: number): void {
-    key = redactDiagnosticText(key).slice(0, 256);
+    key = key.slice(0, 256);
     if (Object.keys(out).length >= MAX_FIELDS) {
       truncated();
       return;
     }
     if (item === undefined || item === null || typeof item === "function") return;
-    if (SECRET.test(key) && !/header_names|credentials_present/.test(key)) {
-      out[key] = "[redacted]";
-      return;
-    }
     if (typeof item === "boolean" || (typeof item === "number" && Number.isFinite(item))) {
       out[key] = item;
     } else if (typeof item === "string") {
-      const text = redactDiagnosticText(item);
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: Strip terminal control characters.
+      const text = item.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "");
       const limit = Math.max(0, Math.min(FIELD_LIMIT, remaining));
       out[key] = text.length > limit ? `${text.slice(0, limit)}…[truncated]` : text;
       remaining -= Math.min(limit, text.length);
@@ -97,9 +60,7 @@ export function diagnosticFields(
       for (const [child, next] of entries.slice(0, MAX_FIELDS)) {
         if (/^(contents|body|pixels|tile_bytes|bytes)$/i.test(child) && typeof next !== "number")
           continue;
-        if (/^(output_dir|cache_dir|path|destination)$/i.test(child)) {
-          visit(key ? `${key}.${child}` : child, "[local path]", depth + 1);
-        } else visit(key ? `${key}.${child}` : child, next, depth + 1);
+        visit(key ? `${key}.${child}` : child, next, depth + 1);
       }
       if (entries.length > MAX_FIELDS) truncated();
     }
@@ -156,7 +117,7 @@ export function createDiagnosticRecorder(options: {
   const started = options.now();
   const state: DiagnosticReport = {
     schema_version: 1,
-    id: redactDiagnosticText(options.id).slice(0, 128),
+    id: options.id.slice(0, 128),
     context: {},
     counters: {},
     failures: [],
@@ -179,12 +140,12 @@ export function createDiagnosticRecorder(options: {
     sequence: ++sequence,
     elapsed_ms: Math.max(0, options.now() - started),
     level,
-    event: redactDiagnosticText(event).slice(0, 128),
+    event: event.slice(0, 128),
     fields: clean(fields),
   });
   function count(name: string, value = 1): void {
     if (!Number.isFinite(value)) return;
-    name = redactDiagnosticText(name).slice(0, 128);
+    name = name.slice(0, 128);
     if (!(name in state.counters) && Object.keys(state.counters).length >= 48) return;
     state.counters[name] = (state.counters[name] ?? 0) + value;
   }

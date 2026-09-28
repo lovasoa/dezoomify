@@ -1,9 +1,8 @@
 //! Canary redaction: no secret in snapshots, terminals, or output paths.
 //!
-//! The job runs through the real typed runner against an unroutable local
-//! port (fast connection-refused, no public network): every observable
-//! surface must carry only redacted transport diagnostics, never the
-//! credential-bearing query.
+//! The job runs through the native job service against an unroutable local
+//! port (fast connection-refused, no public network). Snapshots omit the
+//! credential-bearing query; local diagnostics retain the reproduction input.
 
 use dezoomify_native::{start_job, JobOptions, OutputTarget};
 use std::time::Duration;
@@ -19,8 +18,7 @@ fn canaries_never_appear_in_snapshots_or_terminals() {
         ..Default::default()
     })
     .expect("runner starts");
-    // The input URL (with its secret query) flows through the driver; every
-    // observable surface must never carry it back.
+    // The input URL flows through the driver without entering snapshots.
     let mut snapshots = Vec::new();
     loop {
         let snapshot = job
@@ -50,9 +48,10 @@ fn canaries_never_appear_in_snapshots_or_terminals() {
     let report = diagnostics.report();
     assert_eq!(report.outcome.unwrap().event, "failed");
     assert!(report.counters["request_failures"] > 0.0);
-    assert!(!serde_json::to_string(&diagnostics.report())
-        .unwrap()
-        .contains("CANARY-TOKEN"));
+    assert_eq!(
+        serde_json::to_value(&report.context).unwrap()["input"],
+        "http://127.0.0.1:9/item?token=CANARY-TOKEN"
+    );
     let _ = std::fs::remove_dir_all(&work);
 }
 
@@ -77,30 +76,10 @@ fn auth_debug_redacts_values() {
 #[test]
 fn diagnostic_budget_protects_problem_samples_and_terminal() {
     use dezoomify::model::DiagnosticLevel as Level;
-    use dezoomify_native::diagnostics::{redact, Diagnostics, MAX_BYTES};
+    use dezoomify_native::diagnostics::{Diagnostics, MAX_BYTES};
     use serde_json::json;
-    let vectors: serde_json::Value =
-        serde_json::from_str(include_str!("../../../testdata/redaction-vectors.json")).unwrap();
-    for key in vectors["sensitive_query_keys"].as_array().unwrap() {
-        assert!(
-            !redact(&format!(
-                "https://h/?{}=CANARY&page=2",
-                key.as_str().unwrap()
-            ))
-            .contains("CANARY"),
-            "{key}"
-        );
-    }
-    for vector in vectors["redaction_cases"].as_array().unwrap() {
-        for secret in vector["must_not_contain"].as_array().unwrap() {
-            assert!(!redact(vector["input"].as_str().unwrap()).contains(secret.as_str().unwrap()));
-        }
-    }
-    assert_eq!(
-        redact("https://h/a%2Fb?token=CANARY&page=2&sig=CANARY&lang=fr"),
-        "https://h/a%2Fb?token=[redacted]&page=2&sig=[redacted]&lang=fr"
-    );
     let d = Diagnostics::new("test", "test");
+    d.context(json!({"selection_policy": "automatic", "path": "/home/me/output.png"}));
     d.record(
         Level::Warn,
         "request",
@@ -113,6 +92,9 @@ fn diagnostic_budget_protects_problem_samples_and_terminal() {
     d.finish("failed", json!({"code":"tile.download-failed"}));
     d.finish("retired", json!({}));
     let report = d.report();
+    let context = serde_json::to_value(&report.context).unwrap();
+    assert_eq!(context["selection_policy"], "automatic");
+    assert_eq!(context["path"], "/home/me/output.png");
     assert!(serde_json::to_vec(&report).unwrap().len() <= MAX_BYTES);
     assert!(report.records.len() <= 1000 && report.omitted_records > 0);
     assert_eq!(report.failures[0].count, 2001);

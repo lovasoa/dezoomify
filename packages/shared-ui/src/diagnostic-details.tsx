@@ -59,6 +59,7 @@ export function DiagnosticDetails({
       }}
     >
       <summary className="dz-summary">{t("view.job.techDetails")}</summary>
+      {shown.context.product === "extension" ? <p>{t("view.diagnostics.signedInNote")}</p> : null}
       <div className="dz-actions-row">
         {callbacks.onCopyDiagnostics ? (
           <button

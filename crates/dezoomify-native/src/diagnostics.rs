@@ -3,60 +3,16 @@ use dezoomify::model::{
     DiagnosticFailureGroup, DiagnosticLevel, DiagnosticRecord, DiagnosticReport, DiagnosticValue,
     Snapshot,
 };
-use regex::{Captures, Regex};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
-    Arc, LazyLock, Mutex,
+    Arc, Mutex,
 };
 use std::time::Instant;
 
 pub const MAX_BYTES: usize = 1024 * 1024;
 static NEXT: AtomicU64 = AtomicU64::new(1);
-static SECRET: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new("(?i)authorization|cookie|password|secret|token|signature|api.?key|credential|(^|[._-])(auth|session|sig|key|policy)($|[._-])|^x-amz-|^x-goog-").expect("constant regex")
-});
-static QUERY: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"([?&#])([^=&#\s]+)=([^&#\s]*)").expect("constant regex"));
-static USERINFO: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)(https?://)[^\s/@]+@").expect("constant regex"));
-static AUTH: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(Bearer|Basic)\s+[A-Za-z0-9+/=._~-]+").expect("constant regex")
-});
-static TOKENS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(authorization|auth|cookie|passwd|password|secret|session(?:id|token)?|sid|ticket|token|signature|api[_-]?key)\s*[:=]\s*[^\s,;&#]+").expect("constant regex")
-});
-static PATH: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)file://[^\s"'<>]+|(?:^|[\s"'(])(?:/(?:home|Users|tmp|private|var)/|[A-Z]:\\)[^\s"'<>)]*"#).expect("constant regex")
-});
-
-pub fn redact(text: &str) -> String {
-    let text = USERINFO.replace_all(text, "$1[redacted]@");
-    let text = QUERY.replace_all(&text, |c: &Captures<'_>| {
-        let decoded = url::form_urlencoded::parse(format!("{}=", &c[2]).as_bytes())
-            .next()
-            .map(|(key, _)| key.into_owned())
-            .unwrap_or_default();
-        if SECRET.is_match(&decoded)
-            || matches!(
-                decoded.to_ascii_lowercase().as_str(),
-                "bearer" | "code" | "passwd" | "sessionid" | "sid" | "state" | "ticket"
-            )
-        {
-            format!("{}{}=[redacted]", &c[1], &c[2])
-        } else {
-            c[0].to_owned()
-        }
-    });
-    let text = AUTH.replace_all(&text, "$1 [redacted]");
-    let text = TOKENS.replace_all(&text, "$1=[redacted]");
-    PATH.replace_all(&text, "[local path]")
-        .chars()
-        .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
-        .collect()
-}
-
 fn fields(value: Value, truncated: &mut u32) -> BTreeMap<String, DiagnosticValue> {
     fn visit(
         key: String,
@@ -66,21 +22,17 @@ fn fields(value: Value, truncated: &mut u32) -> BTreeMap<String, DiagnosticValue
         truncated: &mut u32,
         out: &mut BTreeMap<String, DiagnosticValue>,
     ) {
-        let key: String = redact(&key).chars().take(256).collect();
+        let key: String = key.chars().take(256).collect();
         if out.len() >= 48 || depth > 4 {
             *truncated += 1;
             return;
         }
-        if SECRET.is_match(&key)
-            && !key.contains("header_names")
-            && !key.contains("credentials_present")
-        {
-            out.insert(key, DiagnosticValue::Text("[redacted]".into()));
-            return;
-        }
         match value {
             Value::String(s) => {
-                let text = redact(&s);
+                let text: String = s
+                    .chars()
+                    .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
+                    .collect();
                 let limit = (*left).min(4096);
                 let mut bounded: String = text.chars().take(limit).collect();
                 *left = left.saturating_sub(bounded.chars().count());
@@ -109,14 +61,6 @@ fn fields(value: Value, truncated: &mut u32) -> BTreeMap<String, DiagnosticValue
                         name.clone()
                     } else {
                         format!("{key}.{name}")
-                    };
-                    let value = if matches!(
-                        name.as_str(),
-                        "path" | "destination" | "output_dir" | "cache_dir"
-                    ) {
-                        Value::String("[local path]".into())
-                    } else {
-                        value
                     };
                     visit(next, value, depth + 1, left, truncated, out);
                 }
@@ -209,7 +153,7 @@ impl Diagnostics {
         if !value.is_finite() {
             return;
         }
-        let name: String = redact(name).chars().take(128).collect();
+        let name: String = name.chars().take(128).collect();
         if let Ok(mut state) = self.inner.lock() {
             if state.report.counters.len() < 48 || state.report.counters.contains_key(&name) {
                 *state.report.counters.entry(name).or_default() += value;
@@ -225,7 +169,7 @@ impl Diagnostics {
                 sequence: state.sequence,
                 elapsed_ms: self.started.elapsed().as_secs_f64() * 1000.0,
                 level,
-                event: redact(event).chars().take(128).collect(),
+                event: event.chars().take(128).collect(),
                 fields: fields(facts, &mut state.report.truncated_fields),
             };
             let mut repeated = false;
@@ -303,7 +247,7 @@ impl Diagnostics {
                     } else {
                         DiagnosticLevel::Info
                     },
-                    event: redact(event).chars().take(128).collect(),
+                    event: event.chars().take(128).collect(),
                     fields: fields(facts, &mut state.report.truncated_fields),
                 });
             }

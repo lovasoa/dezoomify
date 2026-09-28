@@ -27,8 +27,7 @@ test("issue draft keeps evidence and bounds the encoded URL", () => {
   const body = url.searchParams.get("body");
   assert.match(body, /job.partial-discarded/);
   assert.match(body, /challenge/);
-  assert.match(body, /a%2Fb.*page=2/);
-  assert.ok(!body.includes("SECRET"));
+  assert.ok(body.includes(r.context.input));
 });
 test("failed clipboard leaves selectable report and never claims success", async () => {
   const el = makeContainer();

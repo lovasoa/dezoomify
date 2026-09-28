@@ -309,7 +309,7 @@ test("error layering: plain message prominent, engine diagnostics only in techni
   const diagnostics = card.querySelector("#dz-job-diagnostics").textContent;
   assert.match(diagnostics, /http=429/);
   assert.match(diagnostics, /Too many requests/);
-  assert.match(diagnostics, /sig=\[redacted\]&lang=fr/);
+  assert.match(diagnostics, /sig=abc&lang=fr/);
   assert.ok(diagnostics.includes(engineBlock));
   // A fresh failure without url/http/detail renders only the trailing line.
   const fresh = failurePresentation({
@@ -324,6 +324,18 @@ test("error layering: plain message prominent, engine diagnostics only in techni
   const diag2 = card.querySelector("#dz-job-diagnostics").textContent;
   assert.match(diag2, /code=NO_IMAGE_FOUND/);
   assert.ok(!diag2.includes("example.test"), "stale detail must be replaced");
+});
+
+test("only extension technical details show the conditional sign-in note", () => {
+  const el = container();
+  for (const product of ["extension", "website", "desktop"]) {
+    const d = createDiagnosticRecorder({ id: product, now: () => 0, context: { product } });
+    render(el, presentStatus("discovering"), callbacks, { diagnosticReport: d.report() });
+    assert.equal(
+      el.querySelector(".dz-details").textContent.includes("If this site requires you to sign in"),
+      product === "extension",
+    );
+  }
 });
 
 test("job rail keeps integrated stop and diagnostics-copy controls, and header visibility tracks phase", () => {

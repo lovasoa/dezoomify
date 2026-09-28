@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   createDiagnosticRecorder,
   diagnosticFields,
   formatDiagnosticReport,
-  redactDiagnosticText,
 } from "../../app-model/src/diagnostics.ts";
 import {
   copyDiagnosticText,
@@ -13,32 +11,23 @@ import {
   retainDiagnostics,
 } from "../src/diagnostics.ts";
 
-test("redaction preserves URL spelling and useful parameters and captures Error causes", () => {
-  const vectors = JSON.parse(
-    readFileSync(new URL("../../../testdata/redaction-vectors.json", import.meta.url)),
-  );
-  for (const key of vectors.sensitive_query_keys)
-    assert.ok(!redactDiagnosticText(`https://h/?${key}=CANARY&page=2`).includes("CANARY"), key);
-  for (const vector of vectors.redaction_cases)
-    for (const secret of vector.must_not_contain ?? [])
-      assert.ok(!redactDiagnosticText(vector.input).includes(secret));
-  const url = "https://user:CANARY@host/a%2Fb?token=CANARY&page=2&region=full&sig=CANARY&lang=fr";
-  assert.equal(
-    redactDiagnosticText(url),
-    "https://[redacted]@host/a%2Fb?token=[redacted]&page=2&region=full&sig=[redacted]&lang=fr",
-  );
+test("diagnostics preserve reproduction facts and Error causes without retaining payloads", () => {
+  const url = "https://host/a%2Fb?token=abc&page=2&region=full&sig=def&lang=fr";
   const error = new Error("fetch failed", { cause: Object.assign(new Error(url), { http: 403 }) });
   const fields = diagnosticFields({
     error,
-    authorization: "CANARY",
+    selection_policy: "automatic",
+    policy_reason: "metadata-only",
     contents: [1, 2],
     bitmap: new Uint8Array([3]),
     path: "/home/me/private.png",
   });
   assert.equal(fields["error.cause.http"], 403);
   assert.equal(fields["error.message"], "fetch failed");
-  assert.ok(!JSON.stringify(fields).includes("CANARY"));
-  assert.ok(!JSON.stringify(fields).includes("private.png"));
+  assert.equal(fields["error.cause.message"], url);
+  assert.equal(fields.selection_policy, "automatic");
+  assert.equal(fields.policy_reason, "metadata-only");
+  assert.equal(fields.path, "/home/me/private.png");
   assert.ok(!("contents.0" in fields) && !("bitmap.0" in fields));
 });
 

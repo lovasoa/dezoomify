@@ -149,13 +149,12 @@ impl NativeTransport {
                         }
                     } else {
                         diagnostics.count("request_failures", 1.0);
-                        facts["preview"] = crate::diagnostics::redact(&String::from_utf8_lossy(
-                            &outcome.body[..outcome.body.len().min(4096)],
-                        ))
-                        .chars()
-                        .take(300)
-                        .collect::<String>()
-                        .into();
+                        facts["preview"] =
+                            String::from_utf8_lossy(&outcome.body[..outcome.body.len().min(4096)])
+                                .chars()
+                                .take(300)
+                                .collect::<String>()
+                                .into();
                         facts["code"] = "TRANSPORT_HTTP_ERROR".into();
                         DiagnosticLevel::Warn
                     }
