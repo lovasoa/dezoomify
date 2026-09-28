@@ -59,6 +59,16 @@ limits and never fixes this case.
 
 ## The save stopped partway
 
+If no part of the image can be retrieved, Dezoomify stops without saving a file.
+When the extension reports that the website refused access, use **Open source page**
+and check that the site's own image viewer works.
+
+If only part of the image is available, the extension shows how many tiles were
+retrieved. **Save incomplete image** saves a picture with gaps; **Cancel** leaves
+it unsaved. **Retry failed tiles** is offered when the remaining failures are
+temporary. These choices appear above technical details, which include a link
+to report the problem.
+
 Small network interruptions are retried automatically. The tile cache stays
 on by default, so run the job again and already-saved tiles are reused
 instead of fetched again (a custom folder uses `--tile-cache` on the

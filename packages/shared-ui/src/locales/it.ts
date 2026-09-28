@@ -28,6 +28,22 @@ export const it = {
     "Impossibile aprire la cartella. Verifica che sia installato un gestore di file.",
   "desktop.done.missingError": "L’immagine o la cartella non esiste più.",
   "view.partial.extensionKeep": "Conserva l’immagine parziale",
+  "view.partial.title": "L’immagine è incompleta",
+  "view.partial.summary": "Sono stati recuperati {done} riquadri su {total}.",
+  "view.partial.gaps":
+    "L’immagine salvata avrà parti mancanti. Nessun file è stato ancora salvato.",
+  "view.partial.refused":
+    "Il sito ha rifiutato i riquadri rimanenti. L’immagine salvata avrà parti mancanti.",
+  "view.partial.save": "Salva immagine incompleta",
+  "view.partial.cancel": "Annulla",
+  "view.partial.retry": "Riprova i riquadri non riusciti",
+  "view.partial.accessDenied": "Il sito ha rifiutato l’accesso a questa immagine",
+  "view.partial.empty": "Impossibile recuperare l’immagine",
+  "view.partial.noneSaved":
+    "Nessuna parte dell’immagine è stata recuperata. Nessun file è stato salvato.",
+  "view.partial.checkSource":
+    "Apri la pagina di origine e verifica che il suo visualizzatore funzioni.",
+  "view.partial.openSource": "Apri pagina di origine",
   "view.partial.extensionDiscard": "Scarta l’immagine parziale",
   "view.partial.extensionRetry": "Riprova i riquadri mancanti",
   // Modal chrome (shared view.ts openModal).

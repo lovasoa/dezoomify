@@ -421,6 +421,22 @@ function JobView({
   ctx?: ViewContext;
 }) {
   const d = deriveJob(presentation, ctx);
+  if (presentation.stateLabel === "AwaitingPartialDecision") {
+    const missing = presentation.decision?.missing ?? [];
+    const refused =
+      missing.length > 0 &&
+      missing.every(({ failures }) => {
+        const failure = failures.at(-1);
+        return failure?.http === 401 || failure?.http === 403;
+      });
+    return (
+      <section className="dz-view-body dz-partial-section" aria-labelledby="dz-partial-title">
+        <h2 id="dz-partial-title">{t("view.partial.title")}</h2>
+        <p>{t("view.partial.summary", { done: d.current, total: d.total })}</p>
+        <p>{t(refused ? "view.partial.refused" : "view.partial.gaps")}</p>
+      </section>
+    );
+  }
   const showPause = !d.paused && typeof callbacks.onPause === "function";
   const showResume = d.paused && typeof callbacks.onResume === "function";
   return (
@@ -800,6 +816,33 @@ function FailedView({
   const origin = isFile ? "" : handoffOriginFor(handoffUrl, source);
   const label = origin !== "" ? t("view.handoff.sendOrigin", { origin }) : t("view.handoff.send");
   const hostDoc = globalThis.document;
+  if (error.code === "job.no-usable-tiles") {
+    const refused = error.http === 401 || error.http === 403;
+    return (
+      <section className="dz-view-body dz-error-section">
+        <h2>{t(refused ? "view.partial.accessDenied" : "view.partial.empty")}</h2>
+        <p>{t("view.partial.noneSaved")}</p>
+        {callbacks.onOpenSource ? <p>{t("view.partial.checkSource")}</p> : null}
+        <div className="dz-actions-row">
+          {callbacks.onOpenSource ? (
+            <button type="button" className="dz-btn-tactile" onClick={callbacks.onOpenSource}>
+              {t("view.partial.openSource")}
+            </button>
+          ) : null}
+          {error.retryable && callbacks.onRetrySameUrl ? (
+            <button type="button" className="dz-btn-secondary" onClick={callbacks.onRetrySameUrl}>
+              {t("view.fail.retry")}
+            </button>
+          ) : null}
+          {callbacks.onReset ? (
+            <button type="button" className="dz-btn-secondary" onClick={callbacks.onReset}>
+              {t("view.display.startOver")}
+            </button>
+          ) : null}
+        </div>
+      </section>
+    );
+  }
   return (
     <div className="dz-view-body dz-error-section dz-fade-in">
       <div className="dz-error-header">
