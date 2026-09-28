@@ -129,6 +129,43 @@ function harness({
 }
 
 // Canonical HostEffect: bare typed effects, no kind/event envelope.
+test("known HTTP failures reach the engine without a second ordinary-image request", async () => {
+  for (const http of [403, 404, 429, 503, undefined]) {
+    const failure = {
+      code: http === undefined ? "TRANSPORT_NETWORK_ERROR" : "TRANSPORT_HTTP_ERROR",
+      message: "Failed",
+      transport: "browser-session",
+      ...(http === undefined ? {} : { http }),
+    };
+    const sent = [];
+    let displays = 0;
+    const host = createEngineHost({
+      worker: { postMessage: (message) => sent.push(message) },
+      jobId: () => SESSION_ID,
+      fetchResource: async () => {
+        throw failure;
+      },
+      cancelFetch() {},
+      assembly: fakeAssembly(),
+      probeSize: async () => ({ status: "missing" }),
+      classifyFailure: (error) => error,
+      loadDisplayImage: async () => {
+        displays++;
+        return { naturalWidth: 256, naturalHeight: 256 };
+      },
+      onRecoveryRequested() {},
+      onHostFailure(error) {
+        assert.fail(String(error));
+      },
+    });
+    host.handleEngineMessages([TILE_EFFECT]);
+    await flush();
+    assert.equal(displays, http === undefined ? 1 : 0);
+    if (http !== undefined)
+      assert.equal(sent.find((message) => message.type === "engine.failure").error, failure);
+  }
+});
+
 const TILE_EFFECT = {
   type: "acquire-tile",
   tile: 0,
