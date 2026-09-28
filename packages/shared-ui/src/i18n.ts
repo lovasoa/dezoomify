@@ -295,8 +295,6 @@ const en = {
     "This browser tab could not create the picture surface at this size. The desktop app can save it at full size.",
   "view.fail.canvasEncode":
     "This browser tab could not finish the full-size PNG picture. The desktop app can save it at full size.",
-  "view.fail.redactHint":
-    "Details below can include full addresses and the server's reply. The report link copies them into a GitHub draft; remove sign-in details and tokens before submitting.",
   // Cancelled section.
   "view.cancel.title": "Save cancelled",
   "view.cancel.message": "The image save was stopped.",
@@ -446,7 +444,7 @@ const en = {
   "desktop.copy.copied": "Copied!",
   // Multi-job queue panel (desktop integration queue, todo 5.3). Jobs save
   // one at a time in the order they were added; a failed job never stops the
-  // rest. Only redacted origins appear here, never full addresses.
+  // rest. Queue entries show their input addresses.
   "desktop.queue.title": "Queue",
   "desktop.queue.statusQueued": "Waiting",
   "desktop.queue.statusActive": "Running",
@@ -471,7 +469,7 @@ const en = {
   "desktop.help.donate": "Donate",
   "desktop.settings.title": "Customize",
   "desktop.settings.desc":
-    "Minimal download settings. Saved on this device and used for the next job. Headers are sent to the image origin only and never logged.",
+    "Minimal download settings. Saved on this device and used for the next job. Headers are sent to the image origin only.",
   "desktop.settings.fileGroup": "File",
   "desktop.settings.imageGroup": "Image",
   "desktop.settings.networkGroup": "Network and recovery",
@@ -523,8 +521,7 @@ const en = {
   "desktop.advanced.choose": "Choose…",
   "desktop.advanced.change": "Change…",
   "desktop.advanced.headers": "Request headers",
-  "desktop.advanced.headersDesc":
-    "For protected viewers. Sent only to the image origin and never logged.",
+  "desktop.advanced.headersDesc": "For protected viewers. Sent only to the image origin.",
   // Extension job-tab user copy, rendered through the same `t(key, vars)`
   // shape; log and diagnostics lines stay literal English and never use these
   // keys. `test/ui-i18n.test.mjs` fails when the page renders a key outside

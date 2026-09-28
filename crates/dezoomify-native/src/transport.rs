@@ -229,7 +229,7 @@ fn is_http_uri(uri: &str) -> bool {
 }
 
 /// Reject credential-bearing userinfo in the request URI itself, mirroring
-/// the redirect-target rule: secrets never travel in the address.
+/// the redirect-target rule.
 fn reject_userinfo_uri(uri: &str) -> Result<(), NativeError> {
     let parsed = url::Url::parse(uri)
         .map_err(|e| NativeError::new("transport.bad-url", format!("bad url: {e}")))?;
@@ -350,24 +350,9 @@ async fn fetch_once(
         )),
         Err(error) => Err(NativeError::new(
             "transport.network-error",
-            format!(
-                "network failure: {}",
-                redact_url_from_error(&error, &request.uri)
-            ),
+            format!("network failure: {error}"),
         )),
     }
-}
-
-/// Strip credential-bearing URL text from a transport diagnostic: reqwest
-/// error displays echo the request URL verbatim, so the raw URI is replaced
-/// with its redacted form (sensitive query keys, userinfo, and fragments
-/// never reach logs, events, or error messages).
-fn redact_url_from_error(error: &impl std::fmt::Display, uri: &str) -> String {
-    let redacted = dezoomify::core::redact_uri(uri);
-    if redacted == uri {
-        return error.to_string();
-    }
-    error.to_string().replace(uri, &redacted)
 }
 
 /// Stream the body with a hard cap (`max_bytes + 1`): oversize responses fail
@@ -398,13 +383,9 @@ async fn read_body_capped(
             }
             Ok(None) => break,
             Err(e) => {
-                let url = response.url().clone();
                 return Err(NativeError::new(
                     "transport.network-error",
-                    format!(
-                        "body read failed: {}",
-                        redact_url_from_error(&e, url.as_str())
-                    ),
+                    format!("body read failed: {e}"),
                 ));
             }
         }

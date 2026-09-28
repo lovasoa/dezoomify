@@ -195,8 +195,6 @@ export const fr = {
     "Cet onglet n a pas pu créer la surface de l image à cette taille. L application de bureau peut l enregistrer en taille réelle.",
   "view.fail.canvasEncode":
     "Cet onglet n a pas pu terminer l image PNG en taille réelle. L application de bureau peut l enregistrer en taille réelle.",
-  "view.fail.redactHint":
-    "Les details ci-dessous peuvent inclure les adresses completes et la reponse du serveur. Le lien de signalement les copie dans un brouillon GitHub ; retirez les identifiants et les jetons avant de valider.",
   // Cancelled section.
   "view.cancel.title": "Enregistrement annule",
   "view.cancel.message": "L enregistrement de l image a ete interrompu.",
@@ -352,7 +350,7 @@ export const fr = {
   "desktop.copy.copied": "Copie !",
   // Multi-job queue panel (desktop integration queue, todo 5.3). Jobs save
   // one at a time in the order they were added; a failed job never stops the
-  // rest. Only redacted origins appear here, never full addresses.
+  // rest. Queue entries show their input addresses.
   "desktop.queue.title": "File d attente",
   "desktop.queue.statusQueued": "En attente",
   "desktop.queue.statusActive": "En cours",
@@ -377,7 +375,7 @@ export const fr = {
   "desktop.help.donate": "Faire un don",
   "desktop.settings.title": "Personnaliser",
   "desktop.settings.desc":
-    "Parametres de telechargement minimaux. Enregistres sur cet appareil et utilises pour la prochaine tache. Les entetes sont envoyes uniquement a l origine de l image et ne sont jamais journalises.",
+    "Parametres de telechargement minimaux. Enregistres sur cet appareil et utilises pour la prochaine tache. Les entetes sont envoyes uniquement a l origine de l image.",
   "desktop.settings.fileGroup": "Fichier",
   "desktop.settings.imageGroup": "Image",
   "desktop.settings.networkGroup": "Reseau et reprise",
@@ -431,7 +429,7 @@ export const fr = {
   "desktop.advanced.change": "Modifier…",
   "desktop.advanced.headers": "Entetes de requete",
   "desktop.advanced.headersDesc":
-    "Pour les visionneuses protegees. Envoyees seulement a l origine de l image et jamais journalisees.",
+    "Pour les visionneuses protegees. Envoyees seulement a l origine de l image.",
   // Extension job-tab user copy, rendered through the same `t(key, vars)`
   // shape; log and diagnostics lines stay literal English and never use these
   // keys. `test/ui-i18n.test.mjs` fails when the page renders a key outside

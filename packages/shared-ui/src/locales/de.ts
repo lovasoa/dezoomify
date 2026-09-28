@@ -196,8 +196,6 @@ export const de = {
     "Dieser Browser-Tab konnte die Bildfläche in dieser Größe nicht erstellen. Die Desktop-App kann es in voller Größe speichern.",
   "view.fail.canvasEncode":
     "Dieser Browser-Tab konnte das PNG-Bild in voller Größe nicht fertigstellen. Die Desktop-App kann es in voller Größe speichern.",
-  "view.fail.redactHint":
-    "Die Details unten koennen vollstaendige Adressen und die Serverantwort enthalten. Der Melde-Link uebernimmt sie in einen GitHub-Entwurf; entfernen Sie Anmeldedaten und Tokens vor dem Absenden.",
   // Cancelled section.
   "view.cancel.title": "Speichern abgebrochen",
   "view.cancel.message": "Das Speichern des Bildes wurde gestoppt.",
@@ -353,7 +351,7 @@ export const de = {
   "desktop.copy.copied": "Kopiert!",
   // Multi-job queue panel (desktop integration queue, todo 5.3). Jobs save
   // one at a time in the order they were added; a failed job never stops the
-  // rest. Only redacted origins appear here, never full addresses.
+  // rest. Queue entries show their input addresses.
   "desktop.queue.title": "Warteschlange",
   "desktop.queue.statusQueued": "Wartet",
   "desktop.queue.statusActive": "Lauft",
@@ -378,7 +376,7 @@ export const de = {
   "desktop.help.donate": "Spenden",
   "desktop.settings.title": "Anpassen",
   "desktop.settings.desc":
-    "Minimale Download-Einstellungen. Auf diesem Gerat gespeichert und fuer den nachsten Auftrag verwendet. Kopfzeilen gehen nur an die Bildquelle und werden nie protokolliert.",
+    "Minimale Download-Einstellungen. Auf diesem Gerat gespeichert und fuer den nachsten Auftrag verwendet. Kopfzeilen gehen nur an die Bildquelle.",
   "desktop.settings.fileGroup": "Datei",
   "desktop.settings.imageGroup": "Bild",
   "desktop.settings.networkGroup": "Netzwerk und Wiederaufnahme",
@@ -432,8 +430,7 @@ export const de = {
   "desktop.advanced.choose": "Auswaehlen…",
   "desktop.advanced.change": "Aendern…",
   "desktop.advanced.headers": "Anfragekopfzeilen",
-  "desktop.advanced.headersDesc":
-    "Fuer geschuetzte Viewer. Nur an den Bildursprung gesendet und nie protokolliert.",
+  "desktop.advanced.headersDesc": "Fuer geschuetzte Viewer. Nur an den Bildursprung gesendet.",
   // Extension job-tab user copy, rendered through the same `t(key, vars)`
   // shape; log and diagnostics lines stay literal English and never use these
   // keys. `test/ui-i18n.test.mjs` fails when the page renders a key outside

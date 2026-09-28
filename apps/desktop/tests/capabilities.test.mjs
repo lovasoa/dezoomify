@@ -119,7 +119,7 @@ test("desktop protocol matches the v2-only release contract", () => {
   assert.ok(compat.includes('n_minus_1 = "2.0"'), "compat minimum is 2.0");
 });
 
-test("desktop scenario transcript is minimal and redacted", () => {
+test("desktop scenario transcript contains the terminal state", () => {
   const result = readJson("../../../testdata/scenarios/desktop/basic/expected/result.json");
   assert.ok(Array.isArray(result.states) && result.states.length >= 2, "states");
   assert.ok(result.states.includes("completed"), "terminal state");

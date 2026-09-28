@@ -119,7 +119,7 @@ export interface JobInput {
 /**
  * One portable resource description. URI text is preserved exactly after
  * the core's approved normalization; secret headers are never carried here
- * (hosts attach scoped authorization out-of-band and redact logs).
+ * (hosts attach scoped authorization out-of-band).
  */
 export interface ResourceRequest {
     id: number;

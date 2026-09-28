@@ -20,7 +20,7 @@ pub enum RequestPurpose {
 
 /// One portable resource description. URI text is preserved exactly after
 /// the core's approved normalization; secret headers are never carried here
-/// (hosts attach scoped authorization out-of-band and redact logs).
+/// (hosts attach scoped authorization out-of-band).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct ResourceRequest {
@@ -628,45 +628,6 @@ impl Error {
     }
 }
 
-/// Redact credential-bearing text from error display strings
-/// (case-insensitive key match).
-#[must_use]
-pub fn redact_error_text(input: &str) -> String {
-    let mut out = input.to_string();
-    for needle in [
-        "apikey=",
-        "api-key=",
-        "api_key=",
-        "x-api-key",
-        "access_token=",
-        "access-token=",
-        "token=",
-        "bearer",
-        "session=",
-        "cookie=",
-        "set-cookie",
-        "authorization:",
-        "auth=",
-        "secret=",
-        "password=",
-    ] {
-        let mut search_from = 0;
-        loop {
-            let window = out[search_from..].to_ascii_lowercase();
-            let Some(rel) = window.find(needle) else {
-                break;
-            };
-            let pos = search_from + rel;
-            let end = out[pos..]
-                .find(['&', ' ', '"', '\''])
-                .map_or(out.len(), |e| pos + e);
-            out.replace_range(pos + needle.len()..end, "REDACTED");
-            search_from = pos + needle.len() + "REDACTED".len();
-        }
-    }
-    out
-}
-
 // ---------------------------------------------------------------------------
 // Typed WASM session boundary
 // ---------------------------------------------------------------------------
@@ -708,7 +669,7 @@ pub struct BrowserSelectionLimits {
 //
 // The engine projects one absolute snapshot per transition: lifecycle,
 // pause flag, progress, selection/decision payload, terminal result, and
-// output summary. Snapshots carry no secrets, pixels, paths, or handles,
+// output summary. Snapshots carry no pixels or handles,
 // and no routing identifiers (job IDs stay host-side).
 
 /// Closed retry category for one classified tile failure.

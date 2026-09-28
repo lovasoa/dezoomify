@@ -25,8 +25,8 @@
 //! Rules honored here: one opaque job ID per `EngineJob` (routing tokens
 //! stay outside); engine-minted job-scoped [`EffectId`]s with one new ID
 //! per attempt; [`Update`] carries newly issued effects plus the current
-//! [`Snapshot`]; snapshots are projections (no secrets, pixels, paths,
-//! or handles); timers report elapsed time as explicit completions (no
+//! [`Snapshot`]; snapshots are projections (no pixels or handles);
+//! timers report elapsed time as explicit completions (no
 //! clocks in the engine); tile success is body-free (bytes travel only
 //! through `provide_metadata`, and user commands can never supply bytes).
 //!
@@ -341,7 +341,7 @@ pub struct Failure {
     pub retry_after_ms: Option<u64>,
     /// Transport that attempted the fetch, when known.
     pub transport: Option<TransportKind>,
-    /// Bounded diagnostic detail (never secrets, pixels, paths, handles).
+    /// Bounded diagnostic detail.
     pub detail: Option<String>,
 }
 

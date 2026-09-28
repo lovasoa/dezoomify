@@ -1,4 +1,4 @@
-// Desktop error copy and redaction (todo 2.2 split from main.tsx).
+// Desktop error copy (todo 2.2 split from main.tsx).
 // Layered presentation helpers plus the payload/deep-link validators.
 // Pure: the host string and controller status arrive as parameters, so this
 // module owns no job state. File move, no behavior change.
@@ -13,29 +13,12 @@ export {
   isValidInputUrl,
 } from "@dezoomify/app-model";
 
-// Redacted origin (scheme://host[:port]) for diagnostics and bug reports.
-// Never includes userinfo, path, query, or fragment; "" when unparseable.
-export function redactedOriginOnly(url: string): string {
-  try {
-    const u = new URL(url);
-    if (u.protocol !== "http:" && u.protocol !== "https:") return "";
-    const host = u.hostname.toLowerCase();
-    if (!host) return "";
-    const defaultPort = u.protocol === "https:" ? "443" : "80";
-    const port = u.port && u.port !== defaultPort ? `:${u.port}` : "";
-    return `${u.protocol}//${host}${port}`;
-  } catch {
-    return "";
-  }
-}
-
 export function hostOf(url: string): string {
-  const origin = redactedOriginOnly(url);
-  if (origin) {
-    const withoutScheme = origin.split("://")[1] ?? "";
-    if (withoutScheme) return withoutScheme;
+  try {
+    return new URL(url).host || "the server";
+  } catch {
+    return "the server";
   }
-  return "the server";
 }
 
 // Idle prefill: read an initial URL from the launch location without ever
@@ -84,10 +67,7 @@ export function readInitialUrl(): string | null {
   return null;
 }
 
-// Bound free-form technical text. Credentials are already redacted by the
-// backend (`redact_error_text`); the full request URL is deliberately kept
-// verbatim in the on-device details (the shared renderer places it on its
-// own line), so only the length is trimmed here.
+// Bound free-form technical text while preserving the original details.
 export function trimTechnical(text: string, max = 2000): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max)}…`;
@@ -217,7 +197,7 @@ export function parseRawDeepLinkUrl(raw: string): ValidatedDeepLink | null {
 }
 
 // Validate a `dezoomify://deep-link-pending` payload again in the frontend
-// before showing the confirm UI. Accepts exactly the redacted
+// before showing the confirm UI. Accepts exactly the validated
 // `{source_url, hint, version}` triple emitted by the Rust shell, or a raw
 // `dezoomify://open` URL value re-validated strictly below.
 // Null means reject (no-op).

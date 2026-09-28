@@ -7,8 +7,7 @@ retry budget); the job-driven download pipeline (`dezoomify::engine` owns
 discovery, selection, planning, retry, and lifecycle policy while
 `pipeline`/`exec` execute fetch, probe, decode, assemble, output encode
 (PNG, JPEG, TIFF, ZIF pyramid, WebP, static `iiif-dir` tile trees), atomic
-write, and real sha256); plus auth/header scope (credentials redacted from
-every error, log, and snapshot), engine-slot concurrency bounds, an optional
+write, and real sha256); plus auth/header scope, engine-slot concurrency bounds, an optional
 tile resume cache (storage `cache`: response bodies under per-job digest
 namespaces, reused across runs, headers and cookies never stored), and
 output validation.

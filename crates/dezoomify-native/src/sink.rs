@@ -738,7 +738,7 @@ pub(crate) fn tile_bytes(image: &RgbaImage) -> u64 {
 }
 
 /// Human-readable byte counts for limit errors (exact bytes plus a
-/// GiB/MiB approximation); never carries paths or credentials.
+/// GiB/MiB approximation).
 fn describe_bytes(bytes: u64) -> String {
     const GIB: f64 = (1u64 << 30) as f64;
     const MIB: f64 = (1u64 << 20) as f64;

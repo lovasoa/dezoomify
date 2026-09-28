@@ -72,8 +72,7 @@ is the default route table:
   synthetic test-doubles (e.g. `review:test-double-token` for a public demo
   `apiKey`). `cargo xtask fixtures verify` accepts `false` and `review:*`
   but fails closed on `true`. Expected transcripts containing the same
-  public test-double are covered by the same vocabulary; request logs and
-  error bodies redact its value regardless.
+  public test-double are covered by the same vocabulary.
 - **Transcript updates:** transcripts are compare-only expected data; tests
   fail on drift. Update them deliberately, then inspect `git diff` and
   `git status --porcelain -- testdata/scenarios` before accepting.

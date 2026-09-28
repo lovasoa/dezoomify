@@ -1,6 +1,6 @@
 //! Local inputs end-to-end: a plain-path `tiles.yaml` plus local tile URIs
 //! flow through validation, filesystem fetch, and assembly with scoped
-//! credentials and redacted errors preserved.
+//! credential scope and typed errors preserved.
 
 use std::path::PathBuf;
 

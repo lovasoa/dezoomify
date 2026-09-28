@@ -38,7 +38,7 @@ export type DesktopCommand = (typeof DESKTOP_COMMANDS)[number];
 
 export type { DesktopEventChannel } from "./events.ts";
 // The event channels are owned by apps/desktop/src/events.ts (the IPC
-// redaction guards live there); this module re-exports the single registry
+// payload guards live there); this module re-exports the single registry
 // so capability checks share one source without an import cycle.
 export { DESKTOP_EVENT_CHANNELS } from "./events.ts";
 

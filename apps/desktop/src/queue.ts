@@ -23,7 +23,6 @@ export interface DesktopQueueProgress {
 
 export interface DesktopQueueEntry extends QueueEntry {
   readonly inputUrl: string;
-  readonly origin: string;
   readonly progress: DesktopQueueProgress;
 }
 
@@ -32,17 +31,6 @@ export type DesktopQueue = SequentialQueue<DesktopQueueEntry>;
 /** Empty queue. */
 export function createDesktopQueue(): DesktopQueue {
   return createSequentialQueue<DesktopQueueEntry>("jobq:");
-}
-
-/** Redacted origin (`scheme://host[:port]`) for reports; never full URLs. */
-export function redactedOriginForQueue(url: string): string {
-  try {
-    const u = new URL(url);
-    if (u.protocol !== "http:" && u.protocol !== "https:") return "";
-    return `${u.protocol}//${u.hostname}${u.port ? `:${u.port}` : ""}`;
-  } catch {
-    return "";
-  }
 }
 
 function isValidDesktopQueueUrl(url: string): boolean {
@@ -79,7 +67,6 @@ export function enqueueDesktopQueue(
   const result = enqueueSequential(queue, (id, status) => ({
     id,
     inputUrl: trimmed,
-    origin: redactedOriginForQueue(trimmed),
     status,
     progress: { acquired: 0, total: 0 },
   }));
@@ -117,7 +104,6 @@ export function recordDesktopProgress(
   const next: DesktopQueueEntry = {
     id: found.id,
     inputUrl: found.inputUrl,
-    origin: found.origin,
     status: found.status,
     progress: {
       acquired: Math.max(found.progress.acquired, safeAcquired),
@@ -141,7 +127,6 @@ export function retryDesktopEntry(
   return retryQueueEntry(queue, id, (freshId, previous, status) => ({
     id: freshId,
     inputUrl: previous.inputUrl,
-    origin: previous.origin,
     status,
     progress: { acquired: 0, total: 0 },
   }));

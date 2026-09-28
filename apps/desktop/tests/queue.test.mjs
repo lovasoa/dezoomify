@@ -17,7 +17,6 @@ import {
   enqueueDesktopQueue,
   machineDesktopQueueSummary,
   recordDesktopProgress,
-  redactedOriginForQueue,
   retryDesktopEntry,
 } from "../src/queue.ts";
 
@@ -108,17 +107,15 @@ test("cancel one and cancel all stop issuing new work", () => {
   assert.equal(res.code, "job.stale");
 });
 
-test("retry failed moves behind the line and reports redacted origins only", () => {
+test("retry failed moves behind the line and preserves the input URL", () => {
   let q = createDesktopQueue();
   q = enqueueDesktopQueue(q, "https://example.com/a?token=CANARY").queue;
   const active = activeDesktopEntry(q).id;
-  assert.equal(redactedOriginForQueue("https://example.com/a?token=CANARY"), "https://example.com");
   q = finishActiveDesktopEntry(q, "failed", "tile.download-failed").queue;
   const retried = retryDesktopEntry(q, active);
   assert.equal(retried.code, "ok");
   q = retried.queue;
-  assert.equal(activeDesktopEntry(q).origin, "https://example.com");
-  assert.ok(!JSON.stringify(summarizeDesktopQueue(q)).includes("CANARY"));
+  assert.equal(activeDesktopEntry(q).inputUrl, "https://example.com/a?token=CANARY");
   const bad = retryDesktopEntry(q, active);
   assert.equal(bad.code, "job.unknown");
 });
@@ -141,7 +138,7 @@ function runQueueScript(doc) {
         entry: res.entry.id,
         transition: res.entry.status,
         ...(res.entry.status === "active" || res.entry.status === "queued"
-          ? { origin: res.entry.origin }
+          ? { inputUrl: res.entry.inputUrl }
           : {}),
       });
     } else if (step.op === "progress") {
@@ -175,7 +172,11 @@ function runQueueScript(doc) {
       assert.equal(res.code, "ok", `retry ${step.entry}`);
       q = res.queue;
       assert.ok(res.entry);
-      events.push({ entry: res.entry.id, transition: res.entry.status, origin: res.entry.origin });
+      events.push({
+        entry: res.entry.id,
+        transition: res.entry.status,
+        inputUrl: res.entry.inputUrl,
+      });
     } else {
       assert.fail(`unknown script op ${step.op}`);
     }
@@ -190,8 +191,6 @@ for (const id of ["queue-basic", "queue-retry"]) {
     assert.equal(doc.scenario, `desktop/${id}`);
     assert.equal(doc.capabilities.bulkSupported, true, "queue scenarios need bulkSupported");
     assert.equal(doc.protocol, "2.0");
-    assert.equal(doc.redacted, true);
-    assert.ok(!JSON.stringify(doc).includes("CANARY"), "no secrets in the scenario");
     const { queue: q, events, byIndex } = runQueueScript(doc);
     assert.deepEqual(events, transcript.events, "ordered queue transcript");
     const outcomes = q.entries.map((e) => ({
@@ -212,10 +211,6 @@ for (const id of ["queue-basic", "queue-retry"]) {
       const retried = q.entries.find((e) => e.status === "done" && e.id !== byIndex[0]);
       assert.ok(retried, "retried entry finished");
       assert.notEqual(retried.id, failedId, "retry runs under a fresh id");
-    }
-    // Golden origins stay redacted: scheme://host only, never full URLs.
-    for (const entry of q.entries) {
-      assert.match(entry.origin, /^https?:\/\/[^/]+$/, `redacted origin for ${entry.id}`);
     }
   });
 }

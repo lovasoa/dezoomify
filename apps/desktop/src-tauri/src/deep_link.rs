@@ -75,8 +75,7 @@ impl std::fmt::Display for DeepLinkError {
 impl std::error::Error for DeepLinkError {}
 
 /// Single shared credential-query vocabulary. Mirrors the canonical
-/// `dezoomify::model::SENSITIVE_QUERY_KEYS` plus the shared vectors in
-/// `testdata/redaction-vectors.json` and the generated Rust bindings.
+/// `dezoomify::model::SENSITIVE_QUERY_KEYS` and the generated Rust bindings.
 /// Matching is case-insensitive exact (never substring) so `/cookie-recipe/`
 /// stays valid while `?token=secret` is rejected. This file stays std-only by
 /// design (lean shell); keep the list in sync with the protocol source.
@@ -318,7 +317,7 @@ pub fn parse_deep_link(url: &str) -> Result<DeepLink, DeepLinkError> {
             }
         }
     }
-    // Fragments never reach servers but can leak tokens in labels/logs.
+    // Handoff validation applies to fragment parameters too.
     if let Some(fragment) = source_url.split('#').nth(1) {
         for pair in fragment.split('&') {
             if let Some((k, _)) = pair.split_once('=') {

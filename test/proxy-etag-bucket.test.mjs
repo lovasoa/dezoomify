@@ -136,7 +136,7 @@ test("per-origin bucket fails closed with 429 without recording URLs", async () 
   clearProxyOriginBuckets();
 });
 
-test("origin keys are redacted origins only", () => {
+test("bucket keys group requests by origin", () => {
   assert.equal(proxyOriginKey("https://public.test/a/b?token=secret#frag"), "https://public.test");
   assert.equal(proxyOriginKey("https://PUBLIC.test:443/x.json"), "https://public.test");
   assert.equal(proxyOriginKey("http://127.0.0.1:8080/x.json"), "http://127.0.0.1:8080");

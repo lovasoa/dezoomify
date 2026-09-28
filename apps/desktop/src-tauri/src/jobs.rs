@@ -11,7 +11,7 @@
 // never rebuilt.
 //
 // The table is an id registry only: `id -> RunningJob + destination +
-// options`, plus the redacted origin, the settings-selected output dir,
+// options`, plus the settings-selected output dir,
 // the published output handle for explicit open/reveal, and the host
 // `settled` boolean for exactly-once terminals. All execution (engine,
 // completion-driven effects, partial gate, cancellation flag, output
@@ -23,8 +23,7 @@
 // wire. Automatic (settings) starts launch the runner immediately.
 //
 // Error codes travel as typed fields (never string-encoded into `k=v` or
-// JSON details); only the DTO crosses IPC, never tile bytes, pixels, paths,
-// full URLs, or secrets.
+// JSON details); the DTO crosses IPC without tile bytes or pixels.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -47,7 +46,7 @@ pub const CHANNEL_JOB_SNAPSHOT: &str = "dezoomify://job-snapshot";
 pub const CHANNEL_DEEP_LINK: &str = "dezoomify://deep-link-pending";
 
 /// Keys that must never cross IPC. Mirrors the frontend `FORBIDDEN_IPC_KEYS`
-/// set; payloads carry only counts, hashes, and redacted context, never
+/// set; payloads carry only counts, hashes, and context, never
 /// tile bytes, pixels, or buffers.
 const FORBIDDEN_IPC_SUBSTRINGS: &[&str] = &[
     "tilebytes",
@@ -58,34 +57,8 @@ const FORBIDDEN_IPC_SUBSTRINGS: &[&str] = &[
     "imagedata",
 ];
 
-/// Redacted job origin: scheme + host (+ port if non-default), never the
-/// path, query, or fragment, which may carry credentials or tokens.
-/// Pure string parsing (no network); `unknown-origin` on malformed input.
-fn redact_origin(input_url: &str) -> String {
-    let Some((scheme, rest)) = input_url.split_once("://") else {
-        return "unknown-origin".to_string();
-    };
-    if scheme != "http" && scheme != "https" {
-        return "unknown-origin".to_string();
-    }
-    let authority = rest
-        .split('/')
-        .next()
-        .unwrap_or("")
-        .split('?')
-        .next()
-        .unwrap_or("");
-    // Strip userinfo (rejected upstream, but it must never reach the
-    // snapshot even if validation order changes).
-    let host = authority.rsplit('@').next().unwrap_or("");
-    if host.is_empty() {
-        return "unknown-origin".to_string();
-    }
-    format!("{scheme}://{host}")
-}
-
 /// True when a payload value tree contains a forbidden tile-byte key.
-/// Payloads must carry only counts, hashes, and redacted context.
+/// Payloads must carry only counts, hashes, and context.
 pub fn payload_has_forbidden_keys(value: &serde_json::Value) -> bool {
     match value {
         serde_json::Value::Object(map) => {
@@ -110,15 +83,10 @@ pub fn payload_has_forbidden_keys(value: &serde_json::Value) -> bool {
 /// One tracked job: host handles only. No stored lifecycle, seq,
 /// transcript, progress, output, or terminal mirrors: snapshots flow
 /// verbatim from the runner and the revision rides each emit.
-///
-/// `Debug` is redacted on purpose: the runner options may hold the handoff
-/// `Cookie` header (memory-only, never logged or cached), so only header
-/// names are shown, never values.
+#[derive(Debug)]
 pub struct JobEntry {
     pub diagnostics: dezoomify_native::diagnostics::Diagnostics,
     pub id: String,
-    /// Redacted input origin (`scheme://host`) for emit context.
-    pub origin: String,
     /// Runner options: settings, handoff headers, and pre-start selections.
     /// Cloned into the runner at start; later edits never affect a live job.
     pub options: JobOptions,
@@ -138,19 +106,6 @@ pub struct JobEntry {
     /// Terminal already forwarded exactly once. Guards stale dispatches and
     /// drops late runner snapshots; never a lifecycle mirror.
     pub settled: bool,
-}
-
-impl std::fmt::Debug for JobEntry {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let header_names: Vec<&String> = self.options.headers.keys().collect();
-        f.debug_struct("JobEntry")
-            .field("id", &self.id)
-            .field("origin", &self.origin)
-            .field("user_header_names", &header_names)
-            .field("settled", &self.settled)
-            .field("has_runner", &self.runner.is_some())
-            .finish_non_exhaustive()
-    }
 }
 
 /// One projected IPC emit: always the snapshot channel plus the
@@ -367,10 +322,7 @@ impl JobTable {
         self.next_job = self.next_job.saturating_add(1);
         let id = format!("job:{n}");
 
-        // The runner fetches the input URL; only the redacted origin
-        // (scheme://host) ever reaches emits, never the full URL.
         options.input_url = input_url.to_string();
-        let origin = redact_origin(input_url);
 
         self.jobs.insert(
             id.clone(),
@@ -380,7 +332,6 @@ impl JobTable {
                     option_env!("DEZOOMIFY_VERSION").unwrap_or(env!("CARGO_PKG_VERSION")),
                 ),
                 id: id.clone(),
-                origin: origin.clone(),
                 options,
                 runner: None,
                 destination: None,
@@ -414,7 +365,7 @@ impl JobTable {
     ///
     /// `user_headers` carries the consented `Cookie` header for the input
     /// origin (or is empty for a cookieless handoff). The map lives in the
-    /// job's runner options RAM only: never logged (see the redacted `Debug`
+    /// job's runner options RAM only (see `JobEntry`
     /// above), never written to disk, and never inserted into the tile cache
     /// (bodies only). Origin scoping itself is enforced by the caller
     /// before this call and by the native `UserHeaders`
@@ -1132,7 +1083,7 @@ mod tests {
     }
 
     #[test]
-    fn handoff_user_headers_reach_runner_and_stay_out_of_debug() {
+    fn handoff_user_headers_reach_runner() {
         use std::collections::BTreeMap;
         let mut table = JobTable::new();
         let mut headers = BTreeMap::new();
@@ -1146,13 +1097,6 @@ mod tests {
             Some("session=CANARY-handoff"),
             "handoff cookie must reach the runner options"
         );
-        // Memory-only secrets never appear in Debug, emits, or ids.
-        let debug = format!("{:?}", table);
-        assert!(
-            !debug.contains("CANARY-handoff"),
-            "cookie value leaked into Debug"
-        );
-        assert!(debug.contains("cookie"), "header name stays visible");
         assert!(!initial.payload.to_string().contains("CANARY-handoff"));
         table.cancel_job(&id).unwrap();
     }

@@ -7,7 +7,7 @@
 // - max-width / max-height caps, optional positive ints
 // - retries, default 3 (0 allowed = no retries), bounded 0-100
 // - cache-dir, optional resume cache (tile bodies only, never headers)
-// - user headers (-H, trusted, origin-scoped, never logged)
+// - user headers (-H, trusted, origin-scoped)
 //
 // Persistence is the webview local file (localStorage key
 // `dezoomify.desktop.settings.v1`), validated on load with fail-closed to
@@ -138,13 +138,6 @@ export function parseHeadersText(text: string): HeadersParse {
   return { headers, errors };
 }
 
-export function headersToText(headers: Readonly<Record<string, string>>): string {
-  return Object.entries(headers)
-    .map(([name]) => `${name}: …`)
-    .join("\n");
-}
-
-// Raw header text with values (for editing only; never log this string).
 export function headersToEditableText(headers: Readonly<Record<string, string>>): string {
   return Object.entries(headers)
     .map(([name, value]) => `${name}: ${value}`)
@@ -443,7 +436,6 @@ export function saveSettings(settings: DesktopSettings): Array<string> {
 }
 
 // Payload for the `start_job` Tauri command (snake_case, null for unset).
-// Header values travel here; never pass this object to logs.
 export function settingsToInvokeArgs(settings: DesktopSettings): Record<string, unknown> {
   return {
     output_format: settings.output_format,

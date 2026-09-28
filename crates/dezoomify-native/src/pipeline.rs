@@ -9,7 +9,6 @@
 
 use std::path::PathBuf;
 
-use dezoomify::core::redact_uri;
 use dezoomify::Vec2d;
 
 use crate::error::NativeError;
@@ -166,9 +165,9 @@ pub(crate) fn load_image_with_metadata(
     })
 }
 
-/// Provide actionable, redacted HTTP diagnostics for host logs.
+/// Provide actionable HTTP diagnostics for host logs.
 pub(crate) fn describe_http_failure(outcome: &crate::http::FetchOutcome) -> String {
-    let mut requested = redact_uri(&outcome.final_uri);
+    let mut requested = outcome.final_uri.clone();
     if requested.len() > 2_048 {
         requested.truncate(2_048);
         requested.push_str("...");

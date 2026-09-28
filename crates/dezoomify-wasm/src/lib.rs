@@ -60,7 +60,7 @@ pub mod discovery;
 pub mod error;
 pub mod session;
 
-pub use error::{redact, AdapterError, AdapterErrorCode};
+pub use error::{AdapterError, AdapterErrorCode};
 pub use session::Session;
 
 /// JavaScript (`wasm32`) bindings. Native targets and tests use the plain

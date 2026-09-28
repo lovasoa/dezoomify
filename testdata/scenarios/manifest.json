@@ -4293,7 +4293,7 @@
       "served_urls": [],
       "sha256": "8bee3e81b84f12cb340aadc932cae0493a7dbc6cbd92647577d0a14b63f8908a",
       "size": 370,
-      "source_path": "crates/xtask/src/live.rs topviewer_media_api (apiKey REDACTED)",
+      "source_path": "crates/xtask/src/live.rs topviewer_media_api (synthetic apiKey)",
       "source_snapshot": "live-triage-2026-09-07"
     },
     {
@@ -4305,7 +4305,7 @@
       "served_urls": [],
       "sha256": "d772a43e17ccb86182f1ac2b8b34dc83f6bc02127f0d7cb68bc7cf140cfca625",
       "size": 181,
-      "source_path": "crates/xtask/src/live.rs topviewer_media_api (apiKey REDACTED)",
+      "source_path": "crates/xtask/src/live.rs topviewer_media_api (synthetic apiKey)",
       "source_snapshot": "live-triage-2026-09-07"
     },
     {
@@ -4315,9 +4315,9 @@
       "path": "web/live-topviewer-apikey/payloads/fixtures.test/live/topviewer/mediabank.html",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "219ed83fc25d2c0844c6dcd0791aed28a8f48e21f62d8ccfff91abf5675935b0",
-      "size": 152,
-      "source_path": "crates/xtask/src/live.rs topviewer_media_api (apiKey REDACTED)",
+      "sha256": "49956f03f59e4b0c9b6fe472f8874269aa7c2f18eef3f37eec6ef33fbcf593f3",
+      "size": 155,
+      "source_path": "crates/xtask/src/live.rs topviewer_media_api (synthetic apiKey)",
       "source_snapshot": "live-triage-2026-09-07"
     },
     {
@@ -4351,8 +4351,8 @@
       "path": "web/proxy/expected/legacy-web.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "96d0c7a47e4fe0eff7d77b094023070489a25af7c94fe93c6dc2850878b45fcc",
-      "size": 414,
+      "sha256": "e917ce22ff0ce9a0d40c94d15536b7f96af2336f6adec82f1c8de3c1dda186eb",
+      "size": 426,
       "source_path": "tests/proxy-function.spec.js",
       "source_snapshot": "f7caa07"
     },
@@ -4387,8 +4387,8 @@
       "path": "web/query-params/expected/legacy-web.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "e7f3d2e98a8a5f99d531faeb27b767ba9b9013fb5088c38aa0c64262b162829d",
-      "size": 2171,
+      "sha256": "4d7ab7b13a20684149054c5b0ab33a60528b62fa485329e306c0449397b55bb9",
+      "size": 2199,
       "source_path": "tests/dezoomers.spec.js query params",
       "source_snapshot": "f7caa07"
     },
@@ -4735,8 +4735,8 @@
       "path": "web/site-adapters/expected/legacy-web.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "d26d2df0065c927ad18c1a66fe50e178f1a4bbd1fa405ff6c29d127be3c47f85",
-      "size": 6609,
+      "sha256": "7fd8d1fe7ca5220d35752e77742aa38e4ad341d31c5023d61acadb0133451834",
+      "size": 6608,
       "source_path": "tests/dezoomers.spec.js remaining adapters",
       "source_snapshot": "f7caa07"
     },
@@ -4939,8 +4939,8 @@
       "path": "web/topviewer/expected/legacy-web.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "9862097c5bebb52241d508db19a58e04b82973014d73238f6653fa8f9b56d54d",
-      "size": 6538,
+      "sha256": "f7bbf75d79bdffe74279e609713e37d8681195530eac630ee6edc04274900839",
+      "size": 6566,
       "source_path": "tests/dezoomers.spec.js topviewer",
       "source_snapshot": "f7caa07"
     },

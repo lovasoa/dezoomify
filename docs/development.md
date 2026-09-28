@@ -137,4 +137,4 @@ Follow [Contributing a format](CONTRIBUTING-format.md). In short:
 - Runtime differences travel as capabilities and shared error codes.
 - Behavior exercised by more than one runtime gets a shared scenario.
 - Lifecycle, retry, and transport-effect policy stay in the job engine; the website's direct-first proxy eligibility stays in the web app at the root. Integrations execute supplied transport effects and report results; no hidden fallbacks, no per-attempt proxy consent flows.
-- Redact credentials and sensitive URLs at every diagnostic boundary.
+- Preserve exact URLs, settings, and error causes in diagnostics so reports can reproduce failures. Keep capture bounded and use the extension-only sign-in note described in [Security](security.md#credentials).

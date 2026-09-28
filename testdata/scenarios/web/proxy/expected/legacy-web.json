@@ -14,8 +14,8 @@
     }
   ],
   "metadata_requests": [
-    "GET data:<redacted>",
-    "GET data:<redacted>"
+    "GET data:text/plain,hello",
+    "GET data:text/plain,hello"
   ],
   "scenario": "web/proxy",
   "tile_requests": []

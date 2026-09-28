@@ -15,9 +15,9 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-/// Trusted user headers (CLI `-H`). They are native-memory only, redacted
-/// from diagnostics, and credential headers (`cookie`, `authorization`) are
-/// sent exclusively to the input origin and its same-host redirects.
+/// Trusted user headers (CLI `-H`). They are native-memory only; credential
+/// headers (`cookie`, `authorization`) are sent exclusively to the input
+/// origin and its same-host redirects.
 #[derive(Clone, Debug, Default)]
 pub struct UserHeaders {
     pub map: BTreeMap<String, String>,

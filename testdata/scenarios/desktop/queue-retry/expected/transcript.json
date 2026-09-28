@@ -3,12 +3,12 @@
   "events": [
     {
       "entry": "jobq:0",
-      "origin": "https://fixtures.test",
+      "inputUrl": "https://fixtures.test/desktop/basic/pyramid.dzi",
       "transition": "active"
     },
     {
       "entry": "jobq:1",
-      "origin": "https://fixtures.test",
+      "inputUrl": "https://fixtures.test/desktop/tile-failure-keep/corrupt.dzi",
       "transition": "queued"
     },
     {
@@ -26,7 +26,7 @@
     },
     {
       "entry": "jobq:2",
-      "origin": "https://fixtures.test",
+      "inputUrl": "https://fixtures.test/desktop/tile-failure-keep/corrupt.dzi",
       "transition": "active"
     },
     {

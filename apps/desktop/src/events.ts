@@ -1,4 +1,4 @@
-// Desktop Tauri event channels and IPC redaction guards.
+// Desktop Tauri event channels and payload guards.
 //
 // The desktop job keeps pixels in the native runtime. Only the
 // self-describing `job-snapshot` (one routing id plus the canonical
@@ -41,19 +41,6 @@ const FORBIDDEN_IPC_KEYS = new Set([
   "imagedata",
 ]);
 
-const SECRET_KEY_FRAGMENTS = [
-  "cookie",
-  "authorization",
-  "bearer",
-  "token",
-  "secret",
-  "password",
-  "session",
-  "apikey",
-  "api_key",
-  "signature",
-];
-
 export function isDesktopEventChannel(value: string): value is DesktopEventChannel {
   return (DESKTOP_EVENT_CHANNELS as readonly string[]).includes(value);
 }
@@ -92,51 +79,4 @@ export function assertNoTileBytes(payload: unknown): void {
   if (containsForbiddenKey(payload, new Set())) {
     throw new Error("ipc.forbidden-tile-bytes: tile bytes must stay in the native runtime");
   }
-}
-
-function redactValue(key: string, value: unknown): unknown {
-  const lower = key.toLowerCase();
-  for (const frag of SECRET_KEY_FRAGMENTS) {
-    if (lower.includes(frag)) return "REDACTED";
-  }
-  if (typeof value === "string") {
-    let out = value;
-    for (const needle of [
-      "apiKey=",
-      "api_key=",
-      "token=",
-      "session=",
-      "cookie=",
-      "Authorization:",
-    ]) {
-      let from = 0;
-      while (true) {
-        const at = out.indexOf(needle, from);
-        if (at < 0) break;
-        const start = at + needle.length;
-        let end = out.length;
-        for (const stop of ["&", " ", '"', "'"]) {
-          const idx = out.indexOf(stop, start);
-          if (idx >= 0 && idx < end) end = idx;
-        }
-        out = out.slice(0, start) + "REDACTED" + out.slice(end);
-        from = start + "REDACTED".length;
-      }
-    }
-    return out;
-  }
-  return value;
-}
-
-// Redact credential-bearing fields before an event crosses IPC or reaches logs.
-export function redactForEvent(payload: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(payload)) {
-    if (v !== null && typeof v === "object" && !Array.isArray(v) && !(v instanceof ArrayBuffer)) {
-      out[k] = redactForEvent(v as Record<string, unknown>);
-    } else {
-      out[k] = redactValue(k, v);
-    }
-  }
-  return out;
 }

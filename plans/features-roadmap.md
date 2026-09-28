@@ -25,7 +25,7 @@ no pause command).
 |---|---|---|
 | 1 | Queue / bulk | Reuses the single-job engine; unblocks collectors and scripts without a runtime queue. Highest contract risk, so it goes first while the boundary is fresh. |
 | 2 | Preview / estimate | Makes step 2 of the [core workflow](../docs/product.md#core-workflow) honest: users see cost and limits before acquisition. Read-only, feeds app choice. |
-| 3 | History | Builds on 1: a queue produces repeatable jobs worth re-running. Needs storage and redaction design. |
+| 3 | History | Builds on 1: a queue produces repeatable jobs worth re-running. Needs storage design. |
 | 4 | Distribution | Ships what exists (signed installers, store listing) before widening the job surface further. No runtime change. |
 | 5 | i18n / a11y | Cross-cuts every string. Goes last so locales translate settled flows, not churn. |
 
@@ -105,11 +105,9 @@ bytes only, keyed by versioned URL digests, never headers, cookies, or
 credentials).
 
 Capability impact: touches `storage_modes`. Anything persisted beyond
-memory needs a declared storage feature and the resume-cache redaction
-rule extended: request headers, cookies, credentials, and signed query
-values never enter history; only redacted origins and typed outcomes do.
+memory needs a declared storage feature with explicit retention and clear controls.
 
-Smallest slice: an in-memory recent-jobs list (redacted source origin,
+Smallest slice: an in-memory recent-jobs list (source URL,
 selection, outcome code, output name) with re-run of the same job and a
 clear action. No background sync, no cross-device store, no credential
 replay.
@@ -118,7 +116,7 @@ Acceptance:
 
 - Recent jobs survive navigation within the app session and re-run
   without retyping input.
-- Stored entries contain no secrets; an audit greps clean.
+- Stored entries preserve the source address for re-run.
 - Failed jobs record their stable code and permitted recovery actions for
   re-run or handoff to another app.
 - Clear removes all entries; no residue on disk from this slice.

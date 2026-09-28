@@ -97,7 +97,7 @@ links.
    React through a typed snapshot.
 3. Replace the imperative desktop settings panel, queue/recovery panels,
    deep-link confirmation, diagnostics-copy feedback, header, and footer with
-   React components. Preserve local settings validation, secret-redaction, and
+   React components. Preserve local settings validation and
    fail-closed external navigation behavior.
 4. Update desktop unit and real-window E2E coverage for settings, output
    actions, recovery choices, deep-link confirmation, and external link policy.

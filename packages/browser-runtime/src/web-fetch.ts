@@ -96,7 +96,7 @@ export interface WebFetcher {
 }
 
 /**
- * Plain words for a relay policy `reason` (never credentials, never URLs).
+ * Plain words for a relay policy `reason`.
  * Keeps the prominent message specific without leaking jargon: the exact
  * `reason` still travels in the technical chain.
  */
@@ -585,8 +585,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       });
     } else if (direct.outcome === "http-error") {
       // The typed cause carries the HTTP status and the bounded server
-      // signal; both stay in local-only diagnostics (see the redact hint
-      // in the shared UI) and never in the prominent message.
+      // signal in the diagnostic report.
       if (direct.status === 429) {
         // A direct fetch uses the user's own connection, so this throttle is
         // on their IP, not on our server; the fix is waiting, not another app.
