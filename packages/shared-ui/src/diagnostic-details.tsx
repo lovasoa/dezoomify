@@ -7,7 +7,8 @@ export function diagnosticIssueUrl(report: DiagnosticReport): string {
   const lines = [
     "### Diagnostics",
     `Report: ${report.id}`,
-    `Outcome: ${report.outcome?.event ?? "running"}`,
+    `Outcome: ${report.outcome?.event ?? report.context.lifecycle ?? "running"}`,
+    ...Object.entries(report.counters).map(([key, value]) => `${key}: ${value}`),
     ...["input", "effective_input", "product", "version"].map(
       (key) => `${key}: ${report.context[key] ?? "unknown"}`,
     ),

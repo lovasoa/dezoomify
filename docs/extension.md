@@ -62,4 +62,6 @@ Same engine and fixture contracts as web and desktop govern job behavior. See [T
 
 ## Diagnostics
 
+Request counters measure route attempts, including source-document, extension-origin, and ordinary-image fallback. Pending attempts settle as completed, failed, or cancelled; tile totals come independently from engine snapshots. Definitive source HTTP refusals are grouped at warning level with their route and URL, even when no fallback occurs. Ordinary-image failures explicitly report unavailable HTTP status. Elapsed time uses the attempt's original start time across every render.
+
 Each attempt owns a bounded [diagnostic report](errors.md#diagnostic-reports). It retains the scanned document URL, candidate count and overflow, candidate URLs without DOM contents, the first tile request, source fetch status and content type, extension-origin fallback, permission prompts, commands, and failures. The report survives cancellation. Browser injection failures preserve their original cause; the worker has no separate logging channel. URLs remain intact; technical details show the conditional sign-in note from the [data-use guidance](user/browser-extension.md#what-the-extension-does-with-your-data) before sharing controls.

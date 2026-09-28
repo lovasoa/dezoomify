@@ -195,6 +195,8 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
   if (!target) return;
   const viewActivity = {
     ...(ctx.jobActivity ?? {}),
+    startedAt: attempt.startedAt,
+    url: attempt.attemptSourceUrl || sourceAccess?.documentUrl,
   };
   const presentation = presentFor(status, ctx);
   const downloadId = presentation.phase === "completed" ? attempt.savedDownloadId : null;
@@ -550,7 +552,30 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
     diagnostics: attempt.diagnostics,
     createWorker: () => new Worker(new URL("./worker.js", import.meta.url), { type: "module" }),
     fetchResource,
-    loadDisplayImage: (url, signal) => loadTileImage(url, { signal }),
+    loadDisplayImage: async (url, signal) => {
+      const started = performance.now();
+      attempt.diagnostics.count("requests");
+      attempt.diagnostics.count("requests_pending");
+      try {
+        const image = await loadTileImage(url, { signal });
+        attempt.diagnostics.count("requests_completed");
+        return image;
+      } catch (error) {
+        attempt.diagnostics.count(signal.aborted ? "requests_cancelled" : "request_failures");
+        if (!signal.aborted)
+          attempt.diagnostics.record("warn", "request-failed", {
+            transport: "ordinary-image",
+            purpose: "tile",
+            url,
+            http_status: "unavailable",
+            duration_ms: performance.now() - started,
+            error,
+          });
+        throw error;
+      } finally {
+        attempt.diagnostics.count("requests_pending", -1);
+      }
+    },
     classifyFailure: asFetchFailure,
     createAssembly: (args) => {
       const asm = createAssembly(args, attempt);
