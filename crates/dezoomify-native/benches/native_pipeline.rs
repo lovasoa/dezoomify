@@ -1,11 +1,3 @@
-//! Native pipeline benchmarks: end-to-end tile throughput on the shipped
-//! exec path and encode time per format.
-//!
-//! The throughput bench runs the real `start_job` over four generated
-//! local tiles (no network, no separate pool): it tracks the shipped
-//! fetch/decode/assemble/encode path the driver uses, including the engine
-//! concurrency budget.
-//!
 use criterion::{criterion_group, criterion_main, Criterion};
 use dezoomify_native::pipeline::{encode_jpeg, encode_png, encode_tiff};
 use dezoomify_native::{JobOptions, OutputTarget};
@@ -45,10 +37,6 @@ fn solid_tile_png() -> Vec<u8> {
     bytes
 }
 
-/// Tile throughput: run the real `start_job` over four generated local
-/// tiles per iteration (fetch is the local fast path; decode, assemble,
-/// and encode are the shipped code). The output reuses one path with
-/// overwrite so every iteration measures the full publish.
 fn bench_tile_throughput(criterion: &mut Criterion) {
     let work = std::env::temp_dir().join(format!("dezoomify-bench-tiles-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&work);
@@ -75,7 +63,7 @@ fn bench_tile_throughput(criterion: &mut Criterion) {
     let input = manifest.to_str().expect("utf8 manifest").to_string();
     let output = work.join("bench.png");
     let mut group = criterion.benchmark_group("tile-throughput");
-    group.bench_function("native-runner-4-tiles", |bencher| {
+    group.bench_function("native-host-4-tiles", |bencher| {
         bencher.iter(|| {
             let options = JobOptions {
                 input_url: black_box(&input).clone(),
@@ -84,7 +72,7 @@ fn bench_tile_throughput(criterion: &mut Criterion) {
                 ..JobOptions::default()
             };
             let outcome = support::run_options_observed(options, |_, _| {})
-                .expect("native job service succeeds");
+                .expect("native invocation succeeds");
             black_box(outcome.tile_count)
         });
     });

@@ -1,12 +1,14 @@
 {
   "commands": [
+    "answer_partial",
+    "cancel_job",
+    "dezoomify",
     "get_job_diagnostics",
-    "job_command",
     "open_saved_output",
-    "release_job",
+    "pause_job",
     "query_capabilities",
-    "request_destination",
-    "start_job"
+    "release_job",
+    "resume_job"
   ],
   "decoders": [
     "png",
@@ -21,14 +23,10 @@
     "webp"
   ],
   "eventChannels": [
-    "dezoomify://job-snapshot",
-    "dezoomify://deep-link-pending"
+    "dezoomify://deep-link-pending",
+    "dezoomify://partial",
+    "dezoomify://progress"
   ],
-  "protocol": {
-    "max": "2.0",
-    "min": "2.0",
-    "version": "2.0"
-  },
   "updater": {
     "allowlist": [],
     "channel": "stable",

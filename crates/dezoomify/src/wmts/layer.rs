@@ -39,7 +39,7 @@ pub(crate) fn parse_context(
         }
     }
     if matrix_sets.is_empty() {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "WMTS has no supported tile matrix set".into(),
         ));
     }
@@ -51,8 +51,9 @@ pub(crate) fn parse_context(
             Err(error) => last_error = Some(error),
         }
     }
-    Err(last_error
-        .unwrap_or_else(|| DiscoveryError::Session("WMTS capabilities has no layer".into())))
+    Err(last_error.unwrap_or_else(|| {
+        DiscoveryError::InvalidMetadata("WMTS capabilities has no layer".into())
+    }))
 }
 
 fn context_for_layer(
@@ -84,7 +85,7 @@ fn context_for_layer(
         })
     }
     .ok_or_else(|| {
-        DiscoveryError::Session("WMTS layer has no supported linked tile matrix set".into())
+        DiscoveryError::InvalidMetadata("WMTS layer has no supported linked tile matrix set".into())
     })?;
 
     let projected_bounds = bounds.map(project_bounds).transpose()?;
@@ -134,7 +135,9 @@ fn resource_template(layer: &XmlElement) -> Result<String, DiscoveryError> {
         .and_then(|resource| resource.attribute("template"))
         .filter(|template| !template.trim().is_empty())
         .map(str::to_owned)
-        .ok_or_else(|| DiscoveryError::Session("WMTS layer has no tile URL template".into()))
+        .ok_or_else(|| {
+            DiscoveryError::InvalidMetadata("WMTS layer has no tile URL template".into())
+        })
 }
 
 fn layer_style(layer: &XmlElement) -> String {
@@ -164,11 +167,15 @@ pub(crate) fn build_levels(context: &WmtsContext) -> Result<Vec<ResolvedLevel>, 
             let width = u64::from(columns)
                 .checked_mul(u64::from(matrix.tile_size.x))
                 .and_then(|size| u32::try_from(size).ok())
-                .ok_or_else(|| DiscoveryError::Session("WMTS image width is too large".into()))?;
+                .ok_or_else(|| {
+                    DiscoveryError::InvalidMetadata("WMTS image width is too large".into())
+                })?;
             let height = u64::from(rows)
                 .checked_mul(u64::from(matrix.tile_size.y))
                 .and_then(|size| u32::try_from(size).ok())
-                .ok_or_else(|| DiscoveryError::Session("WMTS image height is too large".into()))?;
+                .ok_or_else(|| {
+                    DiscoveryError::InvalidMetadata("WMTS image height is too large".into())
+                })?;
             let template = Arc::clone(&context.template);
             let matrix_set = context.matrix_set_name.clone();
             let matrix_identifier = matrix.identifier.clone();
@@ -207,7 +214,7 @@ fn tile_ranges(
         let x_span = f64::from(matrix.tile_size.x) * matrix.scale_denominator * METRES_PER_PIXEL;
         let y_span = f64::from(matrix.tile_size.y) * matrix.scale_denominator * METRES_PER_PIXEL;
         if !x_span.is_finite() || !y_span.is_finite() || x_span <= 0.0 || y_span <= 0.0 {
-            return Err(DiscoveryError::Session(
+            return Err(DiscoveryError::InvalidMetadata(
                 "WMTS matrix has an invalid tile span".into(),
             ));
         }
@@ -241,7 +248,7 @@ fn tile_ranges(
         rows.1 = rows.1.min(limit.maximum_row);
     }
     if columns.0 > columns.1 || rows.0 > rows.1 {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "WMTS tile matrix has no tiles in the layer extent".into(),
         ));
     }
@@ -249,7 +256,7 @@ fn tile_ranges(
 }
 
 fn out_of_range() -> DiscoveryError {
-    DiscoveryError::Session("WMTS tile coordinate is out of range".into())
+    DiscoveryError::InvalidMetadata("WMTS tile coordinate is out of range".into())
 }
 
 fn validate_template(template: &str) -> Result<(), DiscoveryError> {
@@ -257,11 +264,13 @@ fn validate_template(template: &str) -> Result<(), DiscoveryError> {
     while let Some(start) = remaining.find('{') {
         let after_start = &remaining[start + 1..];
         let end = after_start.find('}').ok_or_else(|| {
-            DiscoveryError::Session("WMTS tile URL template has an unclosed placeholder".into())
+            DiscoveryError::InvalidMetadata(
+                "WMTS tile URL template has an unclosed placeholder".into(),
+            )
         })?;
         let placeholder = &after_start[..end];
         if !is_template_placeholder(placeholder) {
-            return Err(DiscoveryError::Session(format!(
+            return Err(DiscoveryError::InvalidMetadata(format!(
                 "unsupported WMTS tile URL placeholder: {{{placeholder}}}"
             )));
         }

@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use arguments::Args;
-use dezoomify_native::{start_job_with_diagnostics, JobOptions, OutputTarget};
+use dezoomify_native::{JobOptions, NativeHost, OutputTarget};
 
 /// Minimum-interval pacing between bulk images. Ports the reference
 /// `Throttler` idea synchronously for bulk image pacing; per-tile request
@@ -237,9 +237,6 @@ fn prompt_line(prompt: &str) -> Option<String> {
     }
 }
 
-/// Map CLI args onto one validated [`JobOptions`] for the shared native
-/// runner. Hosts map their own args/settings onto this struct; validation is
-/// typed and happens in [`start_job`] before any effect.
 fn job_options_for(parsed: &Args, input: &str, output: &Path) -> JobOptions {
     let mut user_headers = parsed.headers.clone();
     if let Some(referer) = parsed.request_referer() {
@@ -290,92 +287,60 @@ fn job_options_for(parsed: &Args, input: &str, output: &Path) -> JobOptions {
 fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
     let level = parsed.logging.as_str();
     let json = parsed.json;
-    let keep_partial = parsed.keep_partial;
-    let diagnostics = report::job_diagnostics(level);
-    let job = match start_job_with_diagnostics(
+    let sequence = std::cell::Cell::new(1u64);
+    let job_id = format!("job:cli-{}", std::process::id());
+    let started = Instant::now();
+    let mut progress_gate = report::ProgressGate::default();
+    let host = match NativeHost::with_diagnostics(
         job_options_for(parsed, input, output),
-        diagnostics.clone(),
+        report::job_diagnostics(level),
     ) {
-        Ok(job) => job,
+        Ok(host) => host,
         Err(error) => {
             eprintln!("error: {} ({})", error.message, error.code);
             return false;
         }
     };
-    let job_id = job.id.clone();
-    // Stream engine snapshots verbatim in revision order; exactly one carries
-    // the terminal. Non-terminal snapshots print as progress; the terminal
-    // revision is reused for the machine completion record so stdout seqs stay
-    // strictly increasing (no separate event is printed for it). Partial
-    // decisions auto-answer from the CLI policy immediately (no 60s gate
-    // wait): keep (blank-filled `.partial` sibling) or discard
-    // (`tile.download-failed`, no output).
-    let terminal_seq: u64;
-    let mut first = true;
-    let started = Instant::now();
-    let mut progress = report::ProgressGate::default();
-    loop {
-        let snapshot = match job.snapshots().recv() {
-            Ok(snapshot) => snapshot,
-            Err(_) => {
-                diagnostics.finish("runtime-failed", serde_json::json!({"code": "native.internal", "message": "job ended without a terminal event"}));
-                eprintln!("error: job ended without a terminal event (native.internal)");
-                return false;
-            }
-        };
-        // Auto-answer partial decisions from policy before printing: the
-        // engine waits for `AnswerPartial`, and the CLI is non-interactive.
-        if let Some(decision) = snapshot.snapshot.decision.as_ref() {
-            use dezoomify::model::RecoveryChoice;
-            let generation = decision.generation;
-            let choice = if keep_partial {
-                RecoveryChoice::Keep
+    print_progress(
+        json,
+        &job_id,
+        sequence.get(),
+        "started",
+        &BTreeMap::new(),
+        level,
+    );
+    host.on_progress(|progress| {
+        let (kind, detail) = progress_view(&progress);
+        if json || progress_gate.allow(kind, started.elapsed()) {
+            sequence.set(sequence.get() + 1);
+            print_progress(json, &job_id, sequence.get(), kind, &detail, level);
+        }
+    });
+    let result = host
+        .transport
+        .block_on(dezoomify::dezoomify(
+            host.inputs(),
+            host.algorithm_options(),
+            &host,
+        ))
+        .map_err(dezoomify_native::NativeError::from)
+        .and_then(|_| {
+            host.publication().ok_or_else(|| {
+                dezoomify_native::NativeError::new("native.internal", "output was not published")
+            })
+        });
+    if let Err(error) = &result {
+        host.diagnostics.finish(
+            if error.code == "job.cancelled" {
+                "cancelled"
             } else {
-                RecoveryChoice::Discard
-            };
-            diagnostics.record(dezoomify::model::DiagnosticLevel::Info, "partial-answer", serde_json::json!({"generation": generation, "initiator": "policy", "decision": choice}));
-            let _ = job.send(dezoomify_native::UserCommand::AnswerPartial {
-                generation,
-                decision: choice,
-            });
-        }
-        if snapshot.snapshot.terminal.is_some() || snapshot.published.is_some() {
-            terminal_seq = u64::from(snapshot.snapshot.revision);
-            break;
-        }
-        // The first snapshot always prints as `started` (preserving the
-        // accessibility-adjacent CLI contract); later snapshots print engine
-        // progress verbatim. Engine revisions start above 1, so revision
-        // alone cannot mark the start.
-        if first {
-            first = false;
-            print_snapshot(
-                json,
-                &snapshot.job,
-                u64::from(snapshot.snapshot.revision),
-                "started",
-                &BTreeMap::new(),
-                level,
-            );
-            continue;
-        }
-        let (kind, detail) = progress_view(&snapshot);
-        if !json && !progress.allow(kind, started.elapsed()) {
-            continue;
-        }
-        print_snapshot(
-            json,
-            &snapshot.job,
-            u64::from(snapshot.snapshot.revision),
-            kind,
-            &detail,
-            level,
+                "failed"
+            },
+            serde_json::json!({"code": error.code, "message": error.message}),
         );
     }
-    // `join` owns quiescence and cleanup; its publication agrees with the
-    // streamed terminal (native publication that won the cancel race, or
-    // `job.cancelled`/typed failure with nothing published).
-    match job.join() {
+    let terminal_seq = sequence.get() + 1;
+    match result {
         Ok(summary) => {
             if json {
                 println!(
@@ -422,45 +387,22 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
     }
 }
 
-/// Printable view of a non-terminal engine snapshot: the `started` marker
-/// for revision 0/1, otherwise the lifecycle kind plus monotonic
-/// `acquired`/`total` counts.
 fn progress_view(
-    snapshot: &dezoomify_native::JobSnapshot,
+    progress: &dezoomify::model::Progress,
 ) -> (&'static str, BTreeMap<String, String>) {
-    if snapshot.snapshot.revision <= 1 {
-        return ("started", BTreeMap::new());
-    }
-    let mut detail = BTreeMap::new();
-    detail.insert(
-        "acquired".to_string(),
-        snapshot.snapshot.progress.completed.to_string(),
-    );
-    detail.insert(
-        "total".to_string(),
-        snapshot.snapshot.progress.total.unwrap_or(0).to_string(),
-    );
-    (snapshot_kind(&snapshot.snapshot.lifecycle), detail)
-}
-
-/// Project an engine lifecycle onto the stable CLI event kind.
-fn snapshot_kind(lifecycle: &dezoomify::model::JobState) -> &'static str {
-    use dezoomify::model::JobState;
-    match lifecycle {
-        JobState::Created
-        | JobState::Discovering
-        | JobState::AwaitingImageSelection
-        | JobState::AwaitingLevelSelection
-        | JobState::Planning => "discovery",
-        JobState::AcquiringTiles => "downloading",
-        JobState::AwaitingPartialDecision => "recovery-requested",
-        JobState::Finalizing
-        | JobState::Cancelling
-        | JobState::Completed
-        | JobState::PartiallyCompleted
-        | JobState::Failed
-        | JobState::Cancelled => "encoding",
-    }
+    use dezoomify::model::ProgressPhase;
+    let kind = match progress.phase {
+        ProgressPhase::Discovery | ProgressPhase::Planning => "discovery",
+        ProgressPhase::Acquisition => "downloading",
+        ProgressPhase::Output => "encoding",
+    };
+    (
+        kind,
+        BTreeMap::from([
+            ("acquired".into(), progress.completed.to_string()),
+            ("total".into(), progress.total.unwrap_or(0).to_string()),
+        ]),
+    )
 }
 
 fn run_bulk(parsed: Args) {
@@ -606,79 +548,67 @@ fn run_one_bulk_image(
     url: &str,
     output: &str,
 ) -> Result<(usize, String), (String, String)> {
-    // Bulk progress stays human on stderr; machine mode emits only
-    // bulk-item lines on stdout, so event details never pollute JSON.
-    let show = !parsed.json;
-    let logging = parsed.logging.clone();
-    let diagnostics = report::job_diagnostics(&logging);
     let started = Instant::now();
-    let mut progress = report::ProgressGate::default();
-    let job = start_job_with_diagnostics(
+    let mut progress_gate = report::ProgressGate::default();
+    let sequence = std::cell::Cell::new(1u64);
+    let job_id = format!("job:cli-{}", std::process::id());
+    let host = NativeHost::with_diagnostics(
         job_options_for(parsed, url, Path::new(output)),
-        diagnostics.clone(),
+        report::job_diagnostics(&parsed.logging),
     )
     .map_err(|error| (error.code, error.message))?;
-    if show {
-        print_snapshot(false, &job.id, 1, "started", &BTreeMap::new(), &logging);
+    if !parsed.json {
+        print_progress(
+            false,
+            &job_id,
+            1,
+            "started",
+            &BTreeMap::new(),
+            &parsed.logging,
+        );
     }
-    loop {
-        let snapshot = match job.snapshots().recv() {
-            Ok(snapshot) => snapshot,
-            Err(_) => {
-                diagnostics.finish("runtime-failed", serde_json::json!({"code": "native.internal", "message": "job ended without a terminal event"}));
-                return Err((
-                    "native.internal".to_string(),
-                    "job ended without a terminal event".to_string(),
-                ));
-            }
-        };
-        if let Some(decision) = snapshot.snapshot.decision.as_ref() {
-            use dezoomify::model::RecoveryChoice;
-            let generation = decision.generation;
-            let choice = if parsed.keep_partial {
-                RecoveryChoice::Keep
-            } else {
-                RecoveryChoice::Discard
-            };
-            diagnostics.record(dezoomify::model::DiagnosticLevel::Info, "partial-answer", serde_json::json!({"generation": generation, "initiator": "policy", "decision": choice}));
-            let _ = job.send(dezoomify_native::UserCommand::AnswerPartial {
-                generation,
-                decision: choice,
-            });
+    host.on_progress(|progress| {
+        let (kind, detail) = progress_view(&progress);
+        if !parsed.json && progress_gate.allow(kind, started.elapsed()) {
+            sequence.set(sequence.get() + 1);
+            print_progress(
+                false,
+                &job_id,
+                sequence.get(),
+                kind,
+                &detail,
+                &parsed.logging,
+            );
         }
-        if snapshot.snapshot.terminal.is_some() || snapshot.published.is_some() {
-            break;
-        }
-        if show {
-            let (kind, detail) = progress_view(&snapshot);
-            // The `started` marker above covers revision 0/1; print later
-            // revisions once, not twice.
-            if snapshot.snapshot.revision > 1 && progress.allow(kind, started.elapsed()) {
-                print_snapshot(
-                    false,
-                    &snapshot.job,
-                    u64::from(snapshot.snapshot.revision),
-                    kind,
-                    &detail,
-                    &logging,
-                );
-            }
-        }
-    }
-    match job.join() {
-        Ok(summary) => Ok((
-            summary.tile_count,
-            summary.path.to_string_lossy().into_owned(),
-        )),
-        Err(error) if error.code == "job.cancelled" => Err((
-            "job.cancelled".to_string(),
-            "job cancelled before completion".to_string(),
-        )),
-        Err(error) => Err((error.code, error.message)),
-    }
+    });
+    host.transport
+        .block_on(dezoomify::dezoomify(
+            host.inputs(),
+            host.algorithm_options(),
+            &host,
+        ))
+        .map_err(dezoomify_native::NativeError::from)
+        .map_err(|error| {
+            host.diagnostics.finish(
+                if error.code == "job.cancelled" {
+                    "cancelled"
+                } else {
+                    "failed"
+                },
+                serde_json::json!({"code": error.code, "message": error.message}),
+            );
+            (error.code, error.message)
+        })?;
+    let summary = host
+        .publication()
+        .ok_or_else(|| ("native.internal".into(), "output was not published".into()))?;
+    Ok((
+        summary.tile_count,
+        summary.path.to_string_lossy().into_owned(),
+    ))
 }
 
-fn print_snapshot(
+fn print_progress(
     json: bool,
     job: &str,
     seq: u64,

@@ -1,237 +1,66 @@
-// Off-main-thread tile decode.
-// When Worker plus OffscreenCanvas exist, createImageBitmap plus drawImage
-// run in the packaged decode worker (`./tile-decode-worker.ts`, bundled once
-// like any other module -- never a string-built Blob URL) and the ImageBitmap
-// is transferred back; the main thread only paints the finished bitmap.
-// Otherwise this falls back to main-thread createImageBitmap. Full
-// transferControlToOffscreen drawing stays out: it would break the ordinary
-// <img> display-only fallback and the canvas.toBlob save path, while decode
-// offload already removes the costly raster from the main thread.
-//
-// All host constructors are injected so node tests drive the fallback and
-// worker paths with fakes.
-import type { DiagnosticRecorder } from "@dezoomify/app-model";
-
-export interface TileDecodeHost {
-  workerCtor?: new (url: string | URL) => TileDecodeWorkerLike;
-  /** Packaged worker URL override (tests); defaults to the bundled module. */
-  workerUrl?: string | URL;
-  createImageBitmap?: (blob: unknown) => Promise<unknown>;
-  blobCtor?: new (parts: Array<unknown>, opts?: { type?: string }) => unknown;
-  offscreenCanvasAvailable?: boolean;
-}
-
-export interface TileDecodeWorkerLike {
-  postMessage(msg: unknown, transfer?: ArrayBuffer[]): void;
-  terminate(): void;
-  onmessage: ((ev: { data?: unknown }) => void) | null;
-  onerror: ((ev: unknown) => void) | null;
-}
+import type { DiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
 
 export interface TileBitmap {
   width: number;
   height: number;
   close(): void;
 }
-
+export interface TileDecodeHost {
+  createImageBitmap?: (blob: unknown) => Promise<unknown>;
+  blobCtor?: new (parts: Array<unknown>, opts?: { type?: string }) => unknown;
+}
 export interface TileDecoder {
   decode(bytes: ArrayBuffer, signal?: AbortSignal): Promise<TileBitmap>;
   dispose(): void;
-  get workered(): boolean;
+  settle(): Promise<void>;
 }
 
+/** Browser image decoding owns its pixels until painting or cancellation closes them. */
 export function createTileDecoder(
-  host?: TileDecodeHost,
+  host: TileDecodeHost = {},
   diagnostics?: DiagnosticRecorder,
 ): TileDecoder {
-  const h = host ?? {};
   const lifetime = new AbortController();
-  let worker: TileDecodeWorkerLike | null = null;
-  let seq = 0;
-  let unavailable = false;
-  let fallbackReported = false;
-  function fallback(reason: string, error?: unknown): void {
-    if (fallbackReported) return;
-    fallbackReported = true;
-    diagnostics?.record("debug", "decode-fallback", { method: "main-thread", reason, error });
-  }
-  const pending = new Map<
-    number,
-    { resolve: (b: TileBitmap) => void; reject: (e: unknown) => void }
-  >();
-
-  function defaultHostAvailable(): boolean {
-    if (h.workerCtor || h.workerUrl) return true;
-    try {
-      return (
-        typeof Worker !== "undefined" &&
-        (h.offscreenCanvasAvailable ?? typeof OffscreenCanvas !== "undefined") &&
-        typeof createImageBitmap === "function"
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  function spawnWorker(): TileDecodeWorkerLike | null {
-    if (unavailable) return null;
-    if (worker) return worker;
-    try {
-      const WorkerCtor =
-        h.workerCtor ??
-        (typeof Worker !== "undefined"
-          ? (Worker as unknown as new (
-              url: string | URL,
-            ) => TileDecodeWorkerLike)
-          : undefined);
-      const offscreen = h.offscreenCanvasAvailable ?? typeof OffscreenCanvas !== "undefined";
-      // The packaged decode module; bundlers resolve and hash it at build
-      // time. Tests inject `workerUrl`/`workerCtor` fakes instead.
-      const url = h.workerUrl ?? new URL("./tile-decode-worker.ts", import.meta.url);
-      if (!WorkerCtor || !offscreen) {
-        unavailable = true;
-        fallback("worker-unavailable");
-        return null;
-      }
-      const w: TileDecodeWorkerLike = new WorkerCtor(url);
-      w.onmessage = (e: { data?: unknown }) => {
-        const data = (e?.data ?? {}) as {
-          id?: unknown;
-          ok?: unknown;
-          bitmap?: unknown;
-          error?: unknown;
-        };
-        const id = typeof data.id === "number" ? data.id : -1;
-        const entry = pending.get(id);
-        if (!entry) {
-          (data.bitmap as TileBitmap | undefined)?.close();
-          return;
-        }
-        pending.delete(id);
-        if (data.ok === true && data.bitmap) {
-          entry.resolve(data.bitmap as TileBitmap);
-        } else {
-          entry.reject(
-            new Error(typeof data.error === "string" ? data.error : "tile decode failed"),
-          );
-        }
-      };
-      w.onerror = (error) => {
-        fallback("worker-failed", error);
-        unavailable = true;
-        for (const [, entry] of pending) {
-          try {
-            entry.reject(new Error("tile decode worker failed"));
-          } catch {
-            // Rejecting must never throw.
-          }
-        }
-        pending.clear();
-        try {
-          w.terminate();
-        } catch {
-          // Termination is best-effort.
-        }
-        worker = null;
-      };
-      worker = w;
-      return w;
-    } catch (error) {
-      unavailable = true;
-      fallback("worker-start-failed", error);
-      return null;
-    }
-  }
-
-  function mainThreadDecode(bytes: ArrayBuffer): Promise<TileBitmap> {
-    if (lifetime.signal.aborted) return Promise.reject(lifetime.signal.reason);
-    const rawImpl =
-      h.createImageBitmap ??
-      (typeof createImageBitmap === "function" ? createImageBitmap : undefined);
-    const impl = rawImpl as ((blob: unknown) => Promise<unknown>) | undefined;
-    const blobCtor = h.blobCtor ?? (typeof Blob !== "undefined" ? Blob : undefined);
-    if (!impl || !blobCtor)
-      return Promise.reject(new Error("tile decode unavailable: no createImageBitmap"));
-    try {
-      return (impl(new blobCtor([bytes])) as Promise<TileBitmap>).catch((e) => {
-        throw e;
-      });
-    } catch (e) {
-      return Promise.reject(e);
-    }
-  }
-
-  function decodeRaw(bytes: ArrayBuffer): Promise<TileBitmap> {
-    const w = defaultHostAvailable() ? spawnWorker() : null;
-    if (!w) return mainThreadDecode(bytes);
-    try {
-      const id = ++seq;
-      const copy = bytes.slice(0);
-      const gate = new Promise<TileBitmap>((resolve, reject) => {
-        pending.set(id, { resolve, reject });
-      });
-      try {
-        w.postMessage({ id, bytes: copy }, [copy]);
-      } catch {
-        pending.delete(id);
-        return mainThreadDecode(bytes);
-      }
-      return gate.catch((error) => {
-        fallback("worker-decode-failed", error);
-        return mainThreadDecode(bytes);
-      });
-    } catch {
-      return mainThreadDecode(bytes);
-    }
-  }
-
-  function decode(bytes: ArrayBuffer, signal?: AbortSignal): Promise<TileBitmap> {
-    const owned = signal ? AbortSignal.any([signal, lifetime.signal]) : lifetime.signal;
-    if (owned.aborted) return Promise.reject(owned.reason);
-    return new Promise((resolve, reject) => {
-      const abort = () => reject(owned.reason);
-      owned.addEventListener("abort", abort, { once: true });
-      void decodeRaw(bytes).then(
-        (bitmap) => {
-          owned.removeEventListener("abort", abort);
-          if (owned.aborted) {
-            bitmap.close();
-            reject(owned.reason);
-          } else resolve(bitmap);
-        },
-        (error) => {
-          owned.removeEventListener("abort", abort);
-          reject(error);
-        },
-      );
-    });
-  }
-
-  function dispose(): void {
-    if (lifetime.signal.aborted) return;
-    lifetime.abort();
-    unavailable = true;
-    for (const [, entry] of pending) {
-      try {
-        entry.reject(new Error("tile decoder disposed"));
-      } catch {
-        // Rejecting must never throw.
-      }
-    }
-    pending.clear();
-    try {
-      worker?.terminate();
-    } catch {
-      // Termination is best-effort.
-    }
-    worker = null;
-  }
-
+  const pending = new Set<Promise<void>>();
   return {
-    decode,
-    dispose,
-    get workered(): boolean {
-      return worker !== null;
+    decode(bytes, signal) {
+      const owned = signal ? AbortSignal.any([signal, lifetime.signal]) : lifetime.signal;
+      if (owned.aborted) return Promise.reject(owned.reason);
+      const decode = host.createImageBitmap ?? globalThis.createImageBitmap;
+      const BlobClass = host.blobCtor ?? Blob;
+      return new Promise<TileBitmap>((resolve, reject) => {
+        const abort = () => reject(owned.reason);
+        owned.addEventListener("abort", abort, { once: true });
+        const work = Promise.resolve()
+          .then(() => {
+            owned.throwIfAborted();
+            return decode(new BlobClass([bytes]) as Blob);
+          })
+          .then(
+            (value) => {
+              owned.removeEventListener("abort", abort);
+              const bitmap = value as TileBitmap;
+              if (owned.aborted) {
+                bitmap.close();
+                reject(owned.reason);
+              } else resolve(bitmap);
+            },
+            (error) => {
+              owned.removeEventListener("abort", abort);
+              diagnostics?.record("debug", "decode-failed", error);
+              reject(error);
+            },
+          )
+          .finally(() => pending.delete(work));
+        pending.add(work);
+        void work.catch(reject);
+      });
+    },
+    dispose() {
+      lifetime.abort();
+    },
+    async settle() {
+      while (pending.size) await Promise.allSettled([...pending]);
     },
   };
 }

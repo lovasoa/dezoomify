@@ -10,7 +10,7 @@ import {
   originOfPublicUrl,
   originOfUrl,
   sanitizeHeaderPair,
-  validateEngineHeaders,
+  validateRequestHeaders,
 } from "../src/fetch-primitives.ts";
 
 test("public URL check accepts http(s) and rejects the rest", () => {
@@ -48,17 +48,17 @@ test("method normalization defaults, uppercases, and rejects", () => {
   }
 });
 
-test("engine header validation accepts well-formed pairs and rejects the rest", () => {
-  assert.deepEqual(validateEngineHeaders([{ name: "Accept", value: "application/json" }]), [
+test("request header validation accepts well-formed pairs and rejects the rest", () => {
+  assert.deepEqual(validateRequestHeaders([{ name: "Accept", value: "application/json" }]), [
     { name: "Accept", value: "application/json" },
   ]);
-  assert.equal(validateEngineHeaders([]).length, 0);
-  assert.equal(validateEngineHeaders([{ name: "", value: "x" }]), null);
-  assert.equal(validateEngineHeaders([{ name: "A", value: "b\rc" }]), null);
-  assert.equal(validateEngineHeaders([{ name: "A" }]), null);
-  assert.equal(validateEngineHeaders("Accept: x"), null);
-  assert.equal(validateEngineHeaders(new Array(65).fill({ name: "A", value: "b" })), null);
-  assert.equal(validateEngineHeaders([{ name: "A".repeat(257), value: "b" }]), null);
+  assert.equal(validateRequestHeaders([]).length, 0);
+  assert.equal(validateRequestHeaders([{ name: "", value: "x" }]), null);
+  assert.equal(validateRequestHeaders([{ name: "A", value: "b\rc" }]), null);
+  assert.equal(validateRequestHeaders([{ name: "A" }]), null);
+  assert.equal(validateRequestHeaders("Accept: x"), null);
+  assert.equal(validateRequestHeaders(new Array(65).fill({ name: "A", value: "b" })), null);
+  assert.equal(validateRequestHeaders([{ name: "A".repeat(257), value: "b" }]), null);
   assert.equal(sanitizeHeaderPair("A", "b")?.value, "b");
   assert.equal(sanitizeHeaderPair("A", "b\n"), null);
 });

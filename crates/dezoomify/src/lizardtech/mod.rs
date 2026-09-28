@@ -8,7 +8,7 @@ use url::Url;
 use crate::Vec2d;
 use crate::core::discovery::{metadata, url_matches};
 use crate::core::{
-    DiscoveryError, DiscoveryStep, FormatSpec, ImagePlan, Request, ResolvedLevel, image_title,
+    DiscoveryError, FormatSpec, ImagePlan, ParsedResource, Request, ResolvedLevel, image_title,
 };
 use crate::markup::attribute;
 
@@ -35,36 +35,39 @@ fn is_lizardtech_url(uri: &str) -> bool {
     uri.to_ascii_lowercase().contains("/lizardtech/iserv/")
 }
 
-fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let (url, bytes) = (resource.final_uri(), resource.bytes());
-    let source_text = std::str::from_utf8(bytes)
-        .map_err(|error| DiscoveryError::Session(format!("invalid LizardTech XML: {error}")))?;
+    let source_text = std::str::from_utf8(bytes).map_err(|error| {
+        DiscoveryError::InvalidMetadata(format!("invalid LizardTech XML: {error}"))
+    })?;
     let server = SERVER_RE
         .captures(source_text)
         .and_then(|captures| captures.get(1))
-        .ok_or_else(|| DiscoveryError::Session("invalid LizardTech ImageServer XML".into()))?;
+        .ok_or_else(|| {
+            DiscoveryError::InvalidMetadata("invalid LizardTech ImageServer XML".into())
+        })?;
     let catalog_node = CATALOG_RE
         .captures(source_text)
         .and_then(|captures| captures.get(1))
-        .ok_or_else(|| DiscoveryError::Session("LizardTech XML has no Catalog".into()))?;
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("LizardTech XML has no Catalog".into()))?;
     let image = IMAGE_RE
         .captures(source_text)
         .and_then(|captures| captures.get(1))
-        .ok_or_else(|| DiscoveryError::Session("LizardTech XML has no Image".into()))?;
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("LizardTech XML has no Image".into()))?;
     let width = attribute(image.as_str(), "width")
         .and_then(|value| value.parse().ok())
         .filter(|value| *value > 0)
-        .ok_or_else(|| DiscoveryError::Session("missing LizardTech image width".into()))?;
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("missing LizardTech image width".into()))?;
     let height = attribute(image.as_str(), "height")
         .and_then(|value| value.parse().ok())
         .filter(|value| *value > 0)
-        .ok_or_else(|| DiscoveryError::Session("missing LizardTech image height".into()))?;
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("missing LizardTech image height".into()))?;
     let source = Url::parse(url)
-        .map_err(|_| DiscoveryError::Session("invalid LizardTech metadata URL".into()))?;
+        .map_err(|_| DiscoveryError::InvalidMetadata("invalid LizardTech metadata URL".into()))?;
     let host = attribute(server.as_str(), "host")
         .map_or_else(|| source_host(&source).unwrap_or_default(), str::to_owned);
     if host.is_empty() {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "LizardTech server has no host".into(),
         ));
     }
@@ -81,12 +84,12 @@ fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<DiscoveryStep,
         let name = attribute(image.as_str(), "name")?;
         Some(format!("{parent}/{name}"))
     });
-    let item = item
-        .filter(|item| !item.is_empty())
-        .ok_or_else(|| DiscoveryError::Session("LizardTech XML has no image item".into()))?;
+    let item = item.filter(|item| !item.is_empty()).ok_or_else(|| {
+        DiscoveryError::InvalidMetadata("LizardTech XML has no image item".into())
+    })?;
     let title = image_title(&item);
     let levels = build_levels(width, height, &origin, &catalog_name, &item)?;
-    Ok(DiscoveryStep::Image(ImagePlan::new(title, levels)))
+    Ok(ParsedResource::Image(ImagePlan::new(title, levels)))
 }
 
 fn build_levels(
@@ -111,7 +114,7 @@ fn build_levels(
         height = next_height;
         service_level = service_level
             .checked_add(1)
-            .ok_or_else(|| DiscoveryError::Session("LizardTech level overflow".into()))?;
+            .ok_or_else(|| DiscoveryError::InvalidMetadata("LizardTech level overflow".into()))?;
     }
     levels.reverse();
     levels
@@ -120,7 +123,7 @@ fn build_levels(
         .map(|(ordinal, (width, height, service_level))| {
             let nominal = 512_u32
                 .checked_mul(2_u32.checked_pow(u32::try_from(ordinal).unwrap_or(u32::MAX)).unwrap_or(u32::MAX))
-                .ok_or_else(|| DiscoveryError::Session("LizardTech level size overflow".into()))?;
+                .ok_or_else(|| DiscoveryError::InvalidMetadata("LizardTech level size overflow".into()))?;
             let dx = (f64::from(nominal) - f64::from(width)) / (2.0 * f64::from(width));
             let dy = (f64::from(nominal) - f64::from(height)) / (2.0 * f64::from(height));
             let origin = Arc::clone(origin);

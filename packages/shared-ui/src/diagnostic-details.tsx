@@ -1,5 +1,5 @@
-import { type DiagnosticReport, formatDiagnosticReport } from "@dezoomify/app-model";
 import { useState } from "react";
+import { type DiagnosticReport, formatDiagnosticReport } from "./diagnostics.ts";
 import { t } from "./i18n.ts";
 import type { ViewCallbacks } from "./view-types.ts";
 

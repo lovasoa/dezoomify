@@ -125,8 +125,6 @@ pub struct CommitParams<'a> {
     pub image_size: Vec2d,
 }
 
-/// One output sink per job attempt. Single-threaded by construction: the
-/// engine pump thread is the only caller.
 pub struct Sink {
     compression: u8,
     jpeg_quality: u8,
@@ -143,7 +141,6 @@ pub struct Sink {
     pending: HashMap<u32, DecodedTile>,
     retained_bytes: u64,
     meta: HashMap<u32, TileMetadata>,
-    /// Declared canvas seen on any effect, once known.
     declared: Option<Vec2d>,
     /// Unknown-dimension spool: job-owned temp directory plus index.
     spool_dir: Option<PathBuf>,
@@ -181,18 +178,12 @@ impl Sink {
         }
     }
 
-    /// Note a declared canvas size from an effect. The allocation itself
-    /// happens on first placement (or at finalization for spooled jobs).
     pub fn note_declared(&mut self, canvas: Option<Vec2d>) {
         if self.declared.is_none() {
             self.declared = canvas;
         }
     }
 
-    /// Retained (overlapping, unpainted) tile bytes currently held.
-    /// The pump adds in-flight decode bytes (tracked tails not yet placed)
-    /// to this before enforcing the retain cap, so the cap covers decoded
-    /// bytes from reservation to painting, not just from placement.
     pub fn retained_bytes(&self) -> u64 {
         self.retained_bytes
     }
@@ -648,7 +639,6 @@ impl Sink {
         self.spool_bytes = 0;
     }
 
-    /// Snapshot the accounting for the job instrumentation.
     pub fn stats(&self) -> SinkStats {
         self.stats.clone()
     }

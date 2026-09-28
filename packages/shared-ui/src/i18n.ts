@@ -20,7 +20,7 @@
 // - Brand and product names ("Dezoomify", "Chrome Web Store", "GitHub
 //   Releases", format names such as "PNG") stay literal in code; translators
 //   never rewrite them.
-// - Interpolation is `{name}` substitution only (no plurals engine, no
+// - Interpolation is `{name}` substitution only (no plural rules, no
 //   markup). Callers escape with `escapeHtml` when composing `innerHTML`.
 // - Hosts bundle the shared UI directly; there is no `.js` codegen mirror.
 //   `test/ui-i18n.test.mjs` fails when a renderer uses a key outside this
@@ -337,8 +337,6 @@ const en = {
   "desktop.output.deniedPick":
     "The save destination was not accepted. Choose a different file to continue.",
   "desktop.output.deniedFallback": "The save destination was denied.",
-  "desktop.proto.incompatible":
-    "This app version cannot open this picture from {host}. Update the app and try again.",
   "desktop.handoff.rejected":
     "This link cannot be opened from {host}. Try a different address without sign-in details.",
   "desktop.handoff.acceptedDetail":
@@ -374,7 +372,6 @@ const en = {
   "desktop.job.cancelledMsg": "The image save was stopped. Any unfinished file was removed.",
   "desktop.start.failed": "Could not start saving this picture from {host}. Try again.",
   "desktop.choice.failed": "That choice was not accepted. Try again.",
-  "view.ext.desynced": "The extension lost sync while reading this image. Start the scan again.",
   "desktop.save.generic":
     "Could not save this picture from {host}. Try again with a different address.",
   "desktop.internal.error":

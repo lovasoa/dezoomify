@@ -1,7 +1,7 @@
 //! Pure discovery for Web Map Tile Service capabilities documents.
 
 use crate::core::discovery::{any, metadata, url_matches};
-use crate::core::{DiscoveryError, DiscoveryStep, FormatSpec, ImagePlan};
+use crate::core::{DiscoveryError, FormatSpec, ImagePlan, ParsedResource};
 
 mod capabilities;
 mod layer;
@@ -23,15 +23,17 @@ fn is_wmts_url(uri: &str) -> bool {
         || (uri.contains("service=wmts") && uri.contains("request=getcapabilities"))
 }
 
-fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let (url, bytes) = (resource.final_uri(), resource.bytes());
     let document = capabilities::parse_document(bytes)?;
     let context = layer::parse_context(url, &document)?;
     let levels = layer::build_levels(&context)?;
     if levels.is_empty() {
-        return Err(DiscoveryError::Session("WMTS has no tile matrices".into()));
+        return Err(DiscoveryError::InvalidMetadata(
+            "WMTS has no tile matrices".into(),
+        ));
     }
-    Ok(DiscoveryStep::Image(ImagePlan::new(
+    Ok(ParsedResource::Image(ImagePlan::new(
         Some(context.layer_name),
         levels,
     )))

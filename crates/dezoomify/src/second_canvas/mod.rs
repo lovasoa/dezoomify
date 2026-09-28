@@ -9,8 +9,8 @@ use url::Url;
 use crate::Vec2d;
 use crate::core::discovery::{html_matches, metadata, viewer};
 use crate::core::{
-    CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec,
-    Grid, ImagePlan, Positioned, Request, ResolvedLevel,
+    CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
+    ParsedResource, Positioned, Request, ResolvedLevel,
 };
 
 const ROUTES: &[DiscoveryRoute] = &[
@@ -48,8 +48,8 @@ static EMBEDDED_CONFIG_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     .expect("constant Second Canvas embedded configuration pattern")
 });
 
-fn follow_viewer_config(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
-    Ok(DiscoveryStep::Follow(Request::new(viewer_config_uri(
+fn follow_viewer_config(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+    Ok(ParsedResource::Follow(Request::new(viewer_config_uri(
         resource.final_uri(),
         resource.bytes(),
     )?)))
@@ -57,7 +57,7 @@ fn follow_viewer_config(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep
 
 fn viewer_config_uri(viewer_uri: &str, viewer_bytes: &[u8]) -> Result<String, DiscoveryError> {
     let viewer = Url::parse(viewer_uri).map_err(|error| {
-        DiscoveryError::Session(format!("invalid Second Canvas viewer URL: {error}"))
+        DiscoveryError::InvalidMetadata(format!("invalid Second Canvas viewer URL: {error}"))
     })?;
     let config = viewer
         .query_pairs()
@@ -69,23 +69,23 @@ fn viewer_config_uri(viewer_uri: &str, viewer_bytes: &[u8]) -> Result<String, Di
                 .map(|config| String::from_utf8_lossy(config.as_bytes()).into_owned())
         })
         .ok_or_else(|| {
-            DiscoveryError::Session("Second Canvas viewer has no JSON configuration".into())
+            DiscoveryError::InvalidMetadata("Second Canvas viewer has no JSON configuration".into())
         })?;
     let config = viewer.join(&config).map_err(|error| {
-        DiscoveryError::Session(format!("invalid Second Canvas configuration URL: {error}"))
+        DiscoveryError::InvalidMetadata(format!("invalid Second Canvas configuration URL: {error}"))
     })?;
     if !config.path().to_ascii_lowercase().ends_with(".json") {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "Second Canvas viewer js configuration is not JSON".into(),
         ));
     }
     Ok(config.into())
 }
 
-fn decode_catalog(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn decode_catalog(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let bytes = resource.bytes();
     let document: Document = serde_json::from_slice(bytes).map_err(|error| {
-        DiscoveryError::Session(format!("unable to parse Second Canvas metadata: {error}"))
+        DiscoveryError::InvalidMetadata(format!("unable to parse Second Canvas metadata: {error}"))
     })?;
     let gigapixel = document.gigapixel;
     if gigapixel.url.is_empty()
@@ -93,7 +93,7 @@ fn decode_catalog(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, Disc
         || gigapixel.size.h == 0
         || gigapixel.tile == 0
     {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "Second Canvas metadata must declare a URL and positive size and tile values".into(),
         ));
     }
@@ -104,7 +104,7 @@ fn decode_catalog(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, Disc
         .or_else(|| layers.first())
         .map(|layer| layer.level)
         .ok_or_else(|| {
-            DiscoveryError::Session("Second Canvas metadata has no image layers".into())
+            DiscoveryError::InvalidMetadata("Second Canvas metadata has no image layers".into())
         })?;
 
     let images = layers
@@ -127,7 +127,7 @@ fn decode_catalog(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, Disc
             ))
         })
         .collect::<Result<Vec<_>, DiscoveryError>>()?;
-    Ok(DiscoveryStep::Catalog(CatalogPlan::images(images)))
+    Ok(ParsedResource::Catalog(CatalogPlan::images(images)))
 }
 
 #[cfg(test)]
@@ -138,7 +138,9 @@ fn catalog(uri: &str, bytes: &[u8]) -> Result<crate::core::DiscoveryCatalog, Dis
 fn layer_size(size: Size, normal_level: u32, layer_level: u32) -> Result<Vec2d, DiscoveryError> {
     let divisor = 1_u32
         .checked_shl(normal_level.saturating_sub(layer_level))
-        .ok_or_else(|| DiscoveryError::Session("Second Canvas level is too large".into()))?;
+        .ok_or_else(|| {
+            DiscoveryError::InvalidMetadata("Second Canvas level is too large".into())
+        })?;
     Ok(Vec2d {
         x: size.w.div_ceil(divisor),
         y: size.h.div_ceil(divisor),
@@ -155,7 +157,7 @@ fn build_levels(
     (0..=layer.level)
         .map(|level| {
             let downscale = 1_u32.checked_shl(layer.level - level).ok_or_else(|| {
-                DiscoveryError::Session("Second Canvas level is too large".into())
+                DiscoveryError::InvalidMetadata("Second Canvas level is too large".into())
             })?;
             let level_size = Vec2d {
                 x: image_size.x.div_ceil(downscale),
@@ -212,10 +214,14 @@ impl Gigapixel {
             return Ok(self.types.clone());
         }
         let pattern = self.pattern.clone().ok_or_else(|| {
-            DiscoveryError::Session("legacy Second Canvas metadata has no normal pattern".into())
+            DiscoveryError::InvalidMetadata(
+                "legacy Second Canvas metadata has no normal pattern".into(),
+            )
         })?;
         let level = self.level.ok_or_else(|| {
-            DiscoveryError::Session("legacy Second Canvas metadata has no normal level".into())
+            DiscoveryError::InvalidMetadata(
+                "legacy Second Canvas metadata has no normal level".into(),
+            )
         })?;
         let mut layers = vec![Layer {
             name: Some("Normal".into()),

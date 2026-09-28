@@ -1,13 +1,5 @@
-//! Pure domain model, discovery formats, and deterministic job engine for
-//! Dezoomify.
-//!
-//! This crate deliberately contains no HTTP client, async runtime, image
-//! decoding, filesystem, or CLI code.  Its modules transform supplied bytes
-//! into image catalogs and tile descriptions; an application (such as the
-//! `dezoomify-rs` binary) owns fetching, decoding, and writing.  The
-//! dependency boundary is enforced by this crate's `Cargo.toml`, which lists
-//! only pure libraries, and is regression-tested by
-//! `tests/dependency_architecture.rs`.
+//! Shared image discovery, geometry, and asynchronous dezooming.
+//! Platform I/O is supplied through the Host capability contract.
 #![forbid(unsafe_code)]
 #![cfg_attr(not(test), deny(clippy::disallowed_methods, clippy::disallowed_types))]
 #![cfg_attr(test, allow(clippy::disallowed_methods, clippy::disallowed_types))]
@@ -41,15 +33,20 @@ pub mod wmts;
 pub mod xlimage;
 pub mod zoomify;
 
-/// Canonical public values shared by discovery, the engine, and hosts.
+/// Canonical public values shared by discovery and hosts.
 pub mod model;
 
-/// Deterministic job state, transitions, scheduling, and policy.
-pub mod engine;
+pub mod host;
+pub mod retry;
+mod run;
+pub use host::Host;
+pub use run::dezoomify;
 
 mod json_utils;
 mod markup;
 mod template;
+#[cfg(test)]
+mod test_support;
 mod web_page;
 
 pub use vec2d::Vec2d;

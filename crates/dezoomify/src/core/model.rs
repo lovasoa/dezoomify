@@ -180,7 +180,7 @@ impl ImagePlan {
 
     pub fn compile_entry(self, format: &'static str) -> Result<DiscoveredEntry, DiscoveryError> {
         if self.levels.is_empty() && self.warnings.is_empty() {
-            return Err(DiscoveryError::Session(format!(
+            return Err(DiscoveryError::InvalidMetadata(format!(
                 "{format} image has no levels"
             )));
         }
@@ -190,7 +190,7 @@ impl ImagePlan {
                 .count()
                 .is_some_and(|count| count > u64::from(u32::MAX))
         }) {
-            return Err(DiscoveryError::Session(format!(
+            return Err(DiscoveryError::InvalidMetadata(format!(
                 "{format} tile count exceeds supported ordinals"
             )));
         }
@@ -286,14 +286,13 @@ pub struct DiscoveryCatalog(Vec<DiscoveredEntry>);
 pub(crate) fn floor_index(value: f64, format: &str) -> Result<i64, DiscoveryError> {
     let value = value.floor();
     if !value.is_finite() {
-        return Err(DiscoveryError::Session(format!(
+        return Err(DiscoveryError::InvalidMetadata(format!(
             "{format} tile coordinate is out of range"
         )));
     }
-    value
-        .to_string()
-        .parse::<i64>()
-        .map_err(|_| DiscoveryError::Session(format!("{format} tile coordinate is out of range")))
+    value.to_string().parse::<i64>().map_err(|_| {
+        DiscoveryError::InvalidMetadata(format!("{format} tile coordinate is out of range"))
+    })
 }
 
 impl DiscoveryCatalog {

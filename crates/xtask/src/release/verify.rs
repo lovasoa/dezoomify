@@ -1,8 +1,7 @@
 //! `cargo xtask release verify`: ensure a frozen plan has all expected artifacts.
 
 use super::common::{
-    expected_artifact_name, load_capabilities, load_compatibility, load_config, load_targets,
-    read_plan, validate_version, Plan,
+    expected_artifact_name, load_capabilities, load_targets, read_plan, validate_version, Plan,
 };
 use std::path::{Path, PathBuf};
 
@@ -46,16 +45,9 @@ pub(crate) fn release_verify(plan: &Plan, artifacts: &Path) -> Result<(), String
     if plan.tag != expected_tag {
         return Err("plan tag does not match version".to_string());
     }
-    let config = load_config()?;
-    let compat = load_compatibility()?;
     let caps = load_capabilities()?;
     let targets = load_targets()?;
     if plan.version != super::common::app_version()?.0
-        || plan.protocol.range != config.protocol.range
-        || plan.protocol.min_peer != config.protocol.min_peer
-        || plan.protocol.compatibility_current != compat.compatibility.current
-        || plan.protocol.compatibility_n_minus_1 != compat.compatibility.n_minus_1
-        || caps.protocol != plan.protocol.range
         || caps.capabilities != plan.capabilities
         || plan.targets.len() != targets.list.len()
         || plan

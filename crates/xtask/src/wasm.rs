@@ -1,8 +1,5 @@
 //! `cargo xtask build wasm` / `cargo xtask test wasm [--browser <name>]`.
-//! Adapter-only gate: target/tool versions, forbidden capabilities, adapter
-//! tests, Node harness, and native/WASM transcript equality. The `--browser`
-//! flag runs the Node harness and then a real headless-Chromium pass over
-//! the compiled adapter through the webapp E2E suite.
+//! Fresh generated Host bindings and product execution in Chromium.
 
 use std::process::Command;
 
@@ -50,8 +47,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
 fn browser_focus(_name: &str) -> Result<(), String> {
     run_node_harness()?;
     // Real headless browser run: the webapp E2E loads the compiled wasm
-    // adapter (wasm-bindgen glue, release profile) inside Chromium and
-    // exercises session/dispatch/buffer plumbing end to end.
+    // function (wasm-bindgen glue, release profile) inside Chromium.
     super::browser::run_e2e()?;
     Ok(())
 }

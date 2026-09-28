@@ -29,7 +29,7 @@ Retain Dezoomify's authentic parchment aesthetic, wide proportions, and distinct
 
 6. **Automatic Format Detection:**
    - Display a serene, uncluttered default view: full-width input and the centered primary `Dezoomify !` button.
-   - The engine detects the image format automatically; the UI offers no manual format override.
+   - The Rust algorithm detects the image format automatically; the UI offers no manual format override.
    - Left-align body copy (never `text-align: justify`).
 
 7. **Pinned Bottom Footer & Error Guidance:**
@@ -39,6 +39,6 @@ Retain Dezoomify's authentic parchment aesthetic, wide proportions, and distinct
 
 8. **Languages (English, French, German, Italian):**
    - User copy renders through `t(key, vars)` against `src/i18n.ts`; English is the canonical table and `src/locales/fr.ts`, `de.ts`, `it.ts` mirror it key for key with identical `{placeholders}`. Missing keys fall back to English per key, never to `undefined`.
-   - The audience includes multilingual art historians and archivists: translate buttons, messages, and guidance, but keep brand and product names (`Dezoomify`, `Chrome Web Store`, `GitHub Releases`), format names (`PNG`), codes, URLs, and diagnostics literal. Interpolation is `{name}` substitution only, with no plurals engine and no markup.
+   - The audience includes multilingual art historians and archivists: translate buttons, messages, and guidance, but keep brand and product names (`Dezoomify`, `Chrome Web Store`, `GitHub Releases`), format names (`PNG`), codes, URLs, and diagnostics literal. Interpolation is `{name}` substitution only, with no plural rules and no markup.
    - Hosts pick the locale with `setLocale()` (explicit picker choice) or `pickLocale()` (`Accept-Language` header or `navigator.languages`); unknown tags fail closed to English. A new locale adds a sibling table under `src/locales/` plus a `SUPPORTED_LOCALES` entry, never a second lookup path.
    - Hosts bundle the shared UI directly (Vite for the website and desktop, WXT for the extension); there are no hand-maintained `.js` mirrors or `vendor/` copies. `test/ui-i18n.test.mjs` fails on missing keys, placeholder drift, or replica tables.

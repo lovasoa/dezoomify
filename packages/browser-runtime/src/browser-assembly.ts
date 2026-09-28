@@ -1,5 +1,5 @@
 import { type CanvasAssemblyDeps, createCanvasAssembly } from "./assembly.ts";
-import type { BrowserAssemblyArgs } from "./browser-job-service.ts";
+import type { BrowserAssemblyArgs } from "./browser-host.ts";
 import { canvasToPngBlob, isCanvasTaintError } from "./canvas-save.ts";
 import { canvasAllocationFailure, canvasSurfaceFailure } from "./plan-gates.ts";
 

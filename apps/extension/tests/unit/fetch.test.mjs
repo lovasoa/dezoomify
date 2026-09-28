@@ -26,7 +26,7 @@ test.after(() => {
   server.closeAllConnections();
   server.close();
 });
-const resource = (path, purpose = "tile") => ({ id: 7, uri: origin + path, purpose, headers: [] });
+const resource = (path, purpose = "tile") => ({ uri: origin + path, purpose, headers: [] });
 const fetcher = (options = {}) => createExtensionFetcher({ hasPermission: () => true, ...options });
 const signal = () => new AbortController().signal;
 

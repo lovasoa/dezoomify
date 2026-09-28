@@ -1,7 +1,7 @@
 //! Pure discovery for text files containing deferred image URLs.
 
 use crate::core::discovery::{metadata, url_matches};
-use crate::core::{CatalogPlan, DeferredResource, DiscoveryError, DiscoveryStep, FormatSpec};
+use crate::core::{CatalogPlan, DeferredResource, DiscoveryError, FormatSpec, ParsedResource};
 
 pub const SPEC: FormatSpec = FormatSpec::new(
     "bulk_text",
@@ -11,18 +11,18 @@ pub const SPEC: FormatSpec = FormatSpec::new(
 
 fn decode_catalog(
     resource: crate::core::DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+) -> Result<ParsedResource, DiscoveryError> {
     let (uri, bytes) = (resource.final_uri(), resource.bytes());
     let text = std::str::from_utf8(bytes).map_err(|error| {
-        DiscoveryError::Session(format!("failed to parse bulk list as UTF-8: {error}"))
+        DiscoveryError::InvalidMetadata(format!("failed to parse bulk list as UTF-8: {error}"))
     })?;
     let images = parse_text_urls_with_base(text, uri)?;
     if images.is_empty() {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "no valid URLs found in text file".into(),
         ));
     }
-    Ok(DiscoveryStep::Catalog(CatalogPlan::deferred(
+    Ok(ParsedResource::Catalog(CatalogPlan::deferred(
         images.into_iter().map(|image| DeferredResource {
             uri: image.uri,
             title: image.title,
@@ -125,7 +125,7 @@ fn validate_uri(input: &str, line: usize) -> Result<(), DiscoveryError> {
     {
         return Ok(());
     }
-    Err(DiscoveryError::Session(format!(
+    Err(DiscoveryError::InvalidMetadata(format!(
         "on line {line}: '{input}' is not a valid URL or file path"
     )))
 }
@@ -179,7 +179,7 @@ mod tests {
     }
 
     #[test]
-    fn session_completes_deferred_entries_and_rejects_bad_lists() {
+    fn catalog_contains_deferred_entries_and_rejects_bad_lists() {
         let catalog = complete(
             "file://test.txt",
             "http://example.com/image1.jpg\nhttps://example.org/manifest.json",

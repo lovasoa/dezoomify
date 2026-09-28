@@ -1,22 +1,12 @@
-// Modern accessible Shared UI: typed React components.
-//
-// This module owns presentation only. Hosts keep their effect layers
-// (fetch, native IPC, worker) and mount the shared view through the stable
-// `renderView(container, state, callbacks, ctx)` entry point; the imperative
-// DOM renderer it replaces lived in the same file. `renderView` drives one
-// React root per container and flushes synchronously, so hosts observe the
-// same "call then inspect the DOM" semantics they had before.
-//
-// The rendered class names, ids, roles, and visible text are part of the
-// product contract (theme CSS, E2E selectors); keep them stable.
+// Host-neutral React views for progress, interaction, and output.
 
-import type { HistoryEntry } from "@dezoomify/app-model";
 import type { ReactElement, ReactNode } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
-import type { ResolutionChoice, SnapshotPresentation, StructuredError } from "./snapshot-view.ts";
+import type { HistoryEntry } from "./history.ts";
+import type { Presentation, ResolutionChoice, StructuredError } from "./presentation.ts";
 import {
   displaySourceUrl,
   handoffOriginFor,
@@ -254,7 +244,7 @@ function ResolutionNotice({
 
 /** Resolution notice for hosts that offer "Try maximum" (website and extension). */
 function resolutionNoticeOf(
-  presentation: SnapshotPresentation,
+  presentation: Presentation,
   callbacks: ViewCallbacks,
   running: boolean,
 ): ReactElement | null {
@@ -353,7 +343,7 @@ interface JobDerived {
   activePct: number;
 }
 
-function deriveJob(presentation: SnapshotPresentation, ctx?: ViewContext): JobDerived {
+function deriveJob(presentation: Presentation, ctx?: ViewContext): JobDerived {
   const activity = ctx?.jobActivity ?? {};
   const current = presentation.progress?.current ?? 0;
   const total = presentation.progress?.total ?? 0;
@@ -416,12 +406,12 @@ function JobView({
   callbacks,
   ctx,
 }: {
-  presentation: SnapshotPresentation;
+  presentation: Presentation;
   callbacks: ViewCallbacks;
   ctx?: ViewContext;
 }) {
   const d = deriveJob(presentation, ctx);
-  if (presentation.stateLabel === "AwaitingPartialDecision") {
+  if (presentation.decision) {
     const missing = presentation.decision?.missing ?? [];
     const refused =
       missing.length > 0 &&
@@ -632,7 +622,7 @@ function CompletedView({
   callbacks,
   ctx,
 }: {
-  presentation: SnapshotPresentation;
+  presentation: Presentation;
   callbacks: ViewCallbacks;
   ctx?: ViewContext;
 }) {
@@ -795,7 +785,7 @@ function FailedView({
   callbacks,
   ctx,
 }: {
-  presentation: SnapshotPresentation;
+  presentation: Presentation;
   callbacks: ViewCallbacks;
   ctx?: ViewContext;
 }) {
@@ -983,7 +973,7 @@ function SharedView({
   ctx,
   options,
 }: {
-  presentation: SnapshotPresentation;
+  presentation: Presentation;
   callbacks: ViewCallbacks;
   ctx?: ViewContext;
   options?: ViewRenderOptions;
@@ -1046,7 +1036,7 @@ function renderInto(container: HTMLElement, node: ReactElement): void {
 
 export function renderView(
   container: HTMLElement,
-  presentation: SnapshotPresentation,
+  presentation: Presentation,
   callbacks: ViewCallbacks,
   ctx?: ViewContext,
   options?: ViewRenderOptions,

@@ -1,9 +1,3 @@
-//! Retry budgets are engine-owned and classification-driven: permanent
-//! failures (HTTP 403/404, deterministic decode failures) attempt exactly
-//! once no matter the budget, while transient failures (HTTP 500/503,
-//! timeouts) retry to the exact budget on explicit engine timers. Counts
-//! loopback tile requests to prove it.
-
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;

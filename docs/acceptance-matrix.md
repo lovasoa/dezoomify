@@ -1,70 +1,35 @@
 # Acceptance matrix
 
-The simplification preserves behavior; this matrix maps each preserved
-behavior to its deterministic corpus entry under `testdata/scenarios` and
-its executable lane. Every entry runs without network access to public
-sites; `cargo xtask test live --public` stays opt-in and advisory.
+Behavior is checked through the shared Rust function, real platform operations,
+and product entry points. Fixture data lives under `testdata/scenarios`; required
+tests contact no public source websites.
 
-## Snapshot-driven UI
-
-| Behavior | Corpus | Lane |
+| Behavior | Executable evidence | Lane |
 |---|---|---|
-| Full job renders from snapshots, no synthetic events | `test/snapshot-view.test.mjs` | `cargo xtask test ui` |
-| Snapshot fold happy path and display-only branch | `test/presentation.test.mjs` | `cargo xtask test ui` |
-| Terminal renders without catalog or progress | `test/snapshot-view.test.mjs` (completed/failed/cancelled) | `cargo xtask test ui` |
-| Kept partials name their gaps | `test/snapshot-view.test.mjs` | `cargo xtask test ui` |
-| Display-only vs readable-bytes distinction | `test/snapshot-view.test.mjs`, `testdata/scenarios/post-cutover/taint` | `cargo xtask test ui`, `cargo xtask test scenario` |
-| Pause stops new work, keeps progress | `testdata/scenarios/job/pause-resume` | `cargo xtask test scenario` |
-| Cancel before/after finalization settles after quiescence | `testdata/scenarios/job/cancel-midway` | `cargo xtask test scenario` |
-| Resolution downgrade notice names selected/maximum resolutions; maximum retry reports the large canvas with the desktop action | `test/presentation.test.mjs`, `test/view-rendering.test.mjs`, `packages/browser-runtime/test/limits.test.mjs`, `crates/fixture-server/tests/webapp-e2e/webapp.spec.js` | `cargo xtask test ui`, `cargo xtask test browser`, `cargo xtask test web` |
+| Format parsing, geometry, exact URLs, headers, processing | Rust format tests, `core_parity.rs`, `discovery_navigation.rs` | `test core` |
+| Image/level precedence, deferred resources, budgets | Direct async discovery and algorithm tests with injected capabilities | `test core` |
+| Bounded acquisition, retry, missing-only retry, cancellation | Direct Host tests and native loopback tests | `test core`, `test native` |
+| Async binding success, structured rejection, invalid values, binary data, concurrent invocations, late cancellation | `packages/wasm-harness/src/node.spec.mjs`, fresh WASM build | `test wasm` |
+| Direct metadata success avoids proxy; eligible failures use proxy; HTTP refusals stay refusals | `test/integration.test.mjs`, browser transport tests | `test web`, `test browser` |
+| Body limits, decode disposal, image placement, canvas failure, ordinary image display | Browser operation tests, website assembly fixtures | `test browser`, `test web --e2e` |
+| Progress, completed output, partial gaps, resolution notice, error details | `test/presentation.test.mjs`, `test/view-rendering.test.mjs` | `test ui` |
+| Keyboard, accessible names, translated controls | `test/ui-a11y.test.mjs`, `test/ui-i18n.test.mjs` | `test ui` |
+| FIFO advancement, isolated failures, cancellation, retry | Shared queue tests and desktop queue tests | `test`, `test desktop` |
+| Local history retention and canonical labels | `test/history.test.mjs`, `test/labels.test.mjs` | `test` |
+| Source-document identity, scan limits, permission user activation, authenticated fetch, redirects | Extension source tests and packaged Chromium/Firefox fixture journeys | `test extension` |
+| Native file/HTTP reads, cache, output formats, ICC/EXIF, overwrite policy, publication | Native I/O tests and actual CLI scenarios | `test native`, `test scenario` |
+| Bounded decode, memory/spool accounting, cancellation/publication ordering | Native pipeline, sink, and performance tests | `test native`, `test perf --smoke` |
+| Desktop settings, save, cancel, queue, partial, open/reveal, confirmed handoff | Desktop tests and real-window fixture journeys | `test desktop`, `test desktop --e2e-window` |
+| Legacy `/` and new `/beta` routes, fresh WASM, packaged assets | Assembled-site build and website/extension E2E | `build web`, `test all` |
 
-## Service, queue, history
+`cargo xtask check` validates formatting, Clippy, TypeScript, architecture,
+fixtures, content, and generated bindings. `cargo xtask test` runs fast Rust and
+Node tests once. `test all` adds built-WASM and packaged-browser journeys.
+`ci local` also validates portability and dependencies.
 
-| Behavior | Corpus | Lane |
-|---|---|---|
-| Snapshots route to the owning observer only | `test/app-model.test.mjs` | `cargo xtask test app-model` |
-| Sequential queue, isolated failures, cancel-one/all/retry | `packages/browser-runtime/test/queue.test.mjs`, `test/queue.test.mjs`, `testdata/scenarios/desktop/queue-basic`, `testdata/scenarios/desktop/queue-retry` | `cargo xtask test browser`, `cargo xtask test`, `cargo xtask test desktop` |
-| Shared last-20 history over injected storage | `test/history.test.mjs` | `cargo xtask test app-model`, `cargo xtask test ui` |
-| Canonical labels and save names | `test/app-model.test.mjs`, `packages/browser-runtime/test/naming.test.mjs` | `cargo xtask test app-model`, `cargo xtask test browser` |
-
-## Desktop frontend
-
-| Behavior | Corpus | Lane |
-|---|---|---|
-| Typed start/control/open/reveal over public Tauri API | `apps/desktop/tests/job-service.test.mjs` | `cargo xtask test desktop` |
-| Real-window snapshots over the per-job channel | `cargo xtask test desktop --e2e-window` (explicit, needs a display) | separate |
-
-## Engine and transports (owned by the engine and runtime owners)
-
-Discovery precedence, navigation, and budgets share the request-trace tests in
-`crates/dezoomify/tests/discovery_navigation.rs`. Discovery unit tests cover
-branch-local history and response-order independence (`cargo xtask test core`).
-`extension/observed-zoomify` reuses the `extension/tile-redirect` image and saves
-it without granting analytics access in Chromium and Firefox
-(`cargo xtask test extension`).
-
-| Behavior | Corpus | Lane |
-|---|---|---|
-| Metadata trace, deferred catalog, 403 handling | `testdata/scenarios/native/cli-deferred`, `testdata/scenarios/native/cli-deferred-limit`, `testdata/scenarios/web/iiif-discovery` | `cargo xtask test scenario`, `cargo xtask test web` |
-| Format references precede generic iframe navigation; sibling frames retain format detection, redirect resolution, and cycle limits | `crates/dezoomify/tests/discovery_navigation.rs` | `cargo xtask test core` |
-| Transient retry, timers, partial in-flight accounting | `testdata/scenarios/native/edge-throttle-429`, `testdata/scenarios/native/cli-partial-keep` | `cargo xtask test scenario` |
-| Signed-proxy redirects keep the requested tile base (metadata and per-tile 307) | `crates/dezoomify/src/zoomify` unit tests, `testdata/scenarios/extension/tile-redirect` | `cargo xtask test core`, `cargo xtask test extension` |
-| Permission-gated and display-only paths | `testdata/scenarios/extension/cookie-session`, `testdata/scenarios/web/assembly` | `cargo xtask test extension`, `cargo xtask test web` |
-| Protocol error terminals and handshake | `crates/dezoomify` model tests, `crates/dezoomify-wasm/tests/adapter.rs` terminal cases, `packages/wasm-harness/src/node.spec.mjs` | `cargo xtask test protocol`, `cargo xtask test wasm` |
-| Scheduling scales with bounded in-flight slots (1/4/16/64/256-tile plans) | `crates/dezoomify/tests/engine_checklist.rs` (acquisition scaling), `crates/dezoomify-native/tests/perf.rs` (pipeline scaling) | `cargo xtask test job`, `cargo xtask test perf` |
-
-## Deployment
-
-| Behavior | Corpus | Lane |
-|---|---|---|
-| Legacy site serves `/`, the new app serves `/beta`, both proxies stay bound | `test/website-deploy.test.mjs` | `cargo xtask test web` |
-
-## Reading the matrix
-
-- A behavior is preserved when its corpus entry passes on the production
-  path (engine plus host runner plus shared UI), not on a shim.
-- Cross-runtime assertions compare output, attempts, cleanup, and
-  decisions, never message spelling or event order.
-- New behaviors add a corpus entry here in the same change that adds
-  them. Local fixture data lives under the owning tree until it is
-  promoted into the shared corpus.
+The desktop real-window and native performance smoke gates run explicitly.
+Production builds cover web, CLI, extension, and desktop. Product observations
+compare selected dimensions, decoded pixels, required/forbidden requests,
+attempt counts, visible choices, actual saved output, and cleanup. Pure parser
+and platform tests remain focused where full product tests cannot economically
+exercise exhaustive combinations.

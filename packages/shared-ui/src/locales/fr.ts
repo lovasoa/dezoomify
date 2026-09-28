@@ -255,8 +255,6 @@ export const fr = {
   "desktop.output.deniedPick":
     "La destination d enregistrement n a pas ete acceptee. Choisissez un autre fichier pour continuer.",
   "desktop.output.deniedFallback": "La destination d enregistrement a ete refusee.",
-  "desktop.proto.incompatible":
-    "Cette version de l application ne peut pas ouvrir cette image depuis {host}. Mettez l application a jour et reessayez.",
   "desktop.handoff.rejected":
     "Ce lien ne peut pas etre ouvert depuis {host}. Essayez une autre adresse sans donnees de connexion.",
   "desktop.handoff.acceptedDetail":
@@ -295,8 +293,6 @@ export const fr = {
   "desktop.start.failed":
     "Impossible de demarrer l enregistrement de cette image depuis {host}. Reessayez.",
   "desktop.choice.failed": "Ce choix n a pas ete accepte. Reessayez.",
-  "view.ext.desynced":
-    "L extension a perdu la synchronisation pendant la lecture. Relancez l analyse.",
   "desktop.save.generic":
     "Impossible d enregistrer cette image depuis {host}. Reessayez avec une autre adresse.",
   "desktop.internal.error":

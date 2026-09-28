@@ -28,16 +28,16 @@ jobs:
           - wasm
           - browser+web
           - extension
-          - protocol+security
+          - bindings+security
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup-pnpm
         with:
-          install: ${{ matrix.lane-group == 'check' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' || matrix.lane-group == 'protocol+security' }}
+          install: ${{ matrix.lane-group == 'check' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' || matrix.lane-group == 'bindings+security' }}
       - name: Set up Rust toolchain (WASM target)
-        if: matrix.lane-group == 'check' || matrix.lane-group == 'wasm' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' || matrix.lane-group == 'protocol+security'
+        if: matrix.lane-group == 'check' || matrix.lane-group == 'wasm' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' || matrix.lane-group == 'bindings+security'
         uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
         with:
           toolchain: 1.98.0 # must match rust-toolchain.toml
@@ -52,7 +52,7 @@ jobs:
         # Version-coupled to Cargo.lock (see the action): every workflow that
         # consumes wasm-bindgen resolves the same CLI release, and the
         # installer caches it by that version, so consumers cannot drift.
-        if: matrix.lane-group == 'check' || matrix.lane-group == 'wasm' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' || matrix.lane-group == 'protocol+security'
+        if: matrix.lane-group == 'check' || matrix.lane-group == 'wasm' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' || matrix.lane-group == 'bindings+security'
         uses: ./.github/actions/setup-wasm-bindgen
       - name: Install cargo-deny 0.20.2
         if: matrix.lane-group == 'check'
@@ -108,9 +108,9 @@ jobs:
       - name: CI lane (extension)
         if: matrix.lane-group == 'extension'
         run: cargo xtask ci extension
-      - name: CI lane (protocol)
-        if: matrix.lane-group == 'protocol+security'
-        run: cargo xtask ci protocol
+      - name: CI lane (bindings)
+        if: matrix.lane-group == 'bindings+security'
+        run: cargo xtask ci bindings
       - name: CI lane (security)
-        if: matrix.lane-group == 'protocol+security'
+        if: matrix.lane-group == 'bindings+security'
         run: cargo xtask ci security

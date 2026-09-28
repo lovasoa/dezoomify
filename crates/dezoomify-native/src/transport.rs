@@ -1,27 +1,3 @@
-//! Reqwest-backed native transport: one reusable client per job scope.
-//!
-//! A [`NativeTransport`] owns a Tokio runtime plus a single `reqwest::Client`
-//! and serves every fetch of one job (discovery, probes, tiles) through it,
-//! so connections are reused across tiles instead of rebuilding a client per
-//! fetch. The driver holds one transport per job attempt and shares it across
-//! its scoped worker threads (`reqwest::Client` is `Clone + Send + Sync` and
-//! `block_on` on a multi-thread runtime is safe from plain threads).
-//!
-//! Single-attempt semantics: the transport performs exactly one HTTP exchange
-//! per hop and never retries. A 403/500 response comes back once as a typed
-//! [`FetchOutcome`]; the engine owns the whole retry budget and decides
-//! refetch vs partial handling, so transport retries can no longer multiply
-//! the engine budget. Redirects are still followed manually (up to
-//! [`FetchLimits::max_redirects`]) with per-hop header rebuild and credential
-//! rescoping via [`crate::client`], mirroring the previous manual loop.
-//!
-//! TLS trusts the Mozilla roots via `webpki-roots` (parity with the legacy
-//! client default), configured through a preconfigured `rustls::ClientConfig`
-//! because the workspace reqwest build carries no bundled roots
-//! (`rustls-tls-manual-roots`). The legacy `--accept-invalid-certs` hatch
-//! keeps working through `danger_accept_invalid_certs`. Local `file://` URIs
-//! and plain paths never reach the network.
-
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
@@ -32,7 +8,7 @@ use crate::http::{FetchLimits, FetchOutcome, UserHeaders};
 
 /// Redirect statuses followed manually, one hop at a time, so every hop can
 /// revalidate the target and rescope credentials. Mirrors the previous
-/// transport's list exactly (including the legacy `300` entry).
+/// transport's list exactly (including `300`).
 const REDIRECT_CODES: [u16; 6] = [301, 302, 303, 307, 308, 300];
 
 /// Idle connections are kept per host for 15 s, matching the documented
@@ -94,10 +70,6 @@ impl NativeTransport {
         Self::new(limits)
     }
 
-    /// Fetch one URI: local fast path or a single-attempt HTTP exchange with
-    /// manual redirect handling. Exactly one HTTP request runs per hop; HTTP
-    /// error statuses return as outcomes (never errors) so the engine can
-    /// classify them.
     pub fn fetch(
         &self,
         uri: &str,
@@ -110,7 +82,6 @@ impl NativeTransport {
             .block_on(self.fetch_async(uri, extra_headers, user, auth, limits))
     }
 
-    /// Engine acquisition keeps its generated request intact until this HTTP boundary.
     pub async fn fetch_resource(
         &self,
         request: &dezoomify::model::ResourceRequest,
@@ -132,7 +103,7 @@ impl NativeTransport {
         if let Some(diagnostics) = &self.diagnostics {
             use dezoomify::model::DiagnosticLevel;
             diagnostics.count("requests", 1.0);
-            let mut facts = serde_json::json!({"request": request.id, "purpose": request.purpose, "url": request.uri, "transport": "native", "duration_ms": started.elapsed().as_secs_f64() * 1000.0});
+            let mut facts = serde_json::json!({"purpose": request.purpose, "url": request.uri, "transport": "native", "duration_ms": started.elapsed().as_secs_f64() * 1000.0});
             let level = match &result {
                 Ok(outcome) => {
                     facts["http"] = outcome.status.into();
@@ -171,9 +142,7 @@ impl NativeTransport {
         result
     }
 
-    /// Async fetch core: identical semantics to [`NativeTransport::fetch`]
-    /// without blocking. Task-spawned by the completion-driven executor so
-    /// one slow tile never blocks unrelated tiles.
+    /// Fetch readable bytes without blocking unrelated acquisitions.
     pub async fn fetch_async(
         &self,
         uri: &str,
@@ -192,16 +161,6 @@ impl NativeTransport {
         }
         let deadline = Instant::now() + limits.timeout;
         fetch_loop(&self.client, request, auth, user, limits, &deadline).await
-    }
-
-    /// Spawn an async task on the transport runtime. The pump tracks the
-    /// handle for abort-on-terminal; completions travel back over channels.
-    pub fn spawn<F>(&self, future: F) -> tokio::task::JoinHandle<F::Output>
-    where
-        F: std::future::Future + Send + 'static,
-        F::Output: Send + 'static,
-    {
-        self.runtime.spawn(future)
     }
 
     /// Block the calling (non-runtime) thread on one future. Never called
@@ -320,9 +279,6 @@ async fn read_error_prefix(mut response: reqwest::Response) -> Vec<u8> {
     .unwrap_or_default()
 }
 
-/// One HTTP exchange, no retries: timeouts and connection failures return
-/// typed errors immediately so the engine (not the transport) budgets the
-/// retry.
 async fn fetch_once(
     client: &reqwest::Client,
     request: &EffectiveRequest,
@@ -393,9 +349,6 @@ async fn read_body_capped(
     Ok(body)
 }
 
-/// Parse a `retry-after` value in the numeric-seconds form, clamped to the
-/// engine's honored maximum (5 minutes). HTTP-date forms are not parsed
-/// (hosts report `None` rather than invent a hint).
 fn parse_retry_after_ms(value: &str) -> Option<u64> {
     let seconds: u64 = value.trim().parse().ok()?;
     Some(seconds.saturating_mul(1000).min(300_000))

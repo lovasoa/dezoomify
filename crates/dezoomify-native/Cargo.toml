@@ -3,7 +3,7 @@ name = "dezoomify-native"
 version = "1.0.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "Native effect runtime shared by the CLI and desktop app."
+description = "Native Host shared by the CLI and desktop app."
 repository = "https://github.com/lovasoa/dezoomify"
 
 [dependencies]
@@ -12,7 +12,7 @@ serde.workspace = true
 serde_json.workspace = true
 rustls.workspace = true
 reqwest.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["sync", "time", "macros"] }
 webpki-roots = "1"
 url.workspace = true
 sha2.workspace = true

@@ -1,17 +1,3 @@
-//! Native fetch façade: typed limits, scoped user headers, and outcomes.
-//!
-//! All HTTP goes through [`crate::transport::NativeTransport`] (one reusable
-//! reqwest client per job scope). [`fetch`] is the one-shot path for
-//! out-of-band reads (bulk-list fetches); the driver hot paths (discovery,
-//! probes, tiles) take a job-scoped transport directly so connections are
-//! reused across tiles instead of rebuilding a client per fetch.
-//!
-//! Single-attempt semantics: the transport performs exactly one HTTP exchange
-//! per call and never retries. The engine owns the whole retry budget, so
-//! transport retries can no longer multiply it. Non-HTTP URIs never reach
-//! the network: plain local paths and `file://` URIs are read from the
-//! filesystem with the same outcome shape.
-
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -64,19 +50,14 @@ impl UserHeaders {
 use crate::auth::EphemeralAuthorization;
 use crate::error::NativeError;
 
-/// TLS policy for one logical fetch. `accept_invalid_certs` is a legacy
-/// parity escape hatch, explicitly requested by the user via the CLI
+/// TLS policy for one logical fetch. `accept_invalid_certs` is
+/// explicitly requested by the user via the CLI
 /// `--accept-invalid-certs` flag; it is never enabled by default.
 #[derive(Clone, Debug, Default)]
 pub struct TlsPolicy {
     pub accept_invalid_certs: bool,
 }
 
-/// Transport limits for one logical fetch (including its redirects).
-///
-/// There is deliberately no retry count here: the transport performs exactly
-/// one attempt per call and the engine owns the whole retry budget, so a
-/// transport retry loop can no longer multiply engine retries.
 #[derive(Clone, Debug)]
 pub struct FetchLimits {
     pub max_bytes: u64,
@@ -113,10 +94,6 @@ pub struct FetchOutcome {
     pub status: u16,
     pub final_uri: String,
     pub body: Vec<u8>,
-    /// Host-observed `retry-after` hint in milliseconds, parsed from the
-    /// final response when present (numeric-seconds form only, clamped to 5
-    /// minutes). The engine honors it on transient failures; `None` means no
-    /// hint was observed.
     pub retry_after_ms: Option<u64>,
 }
 

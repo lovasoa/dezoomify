@@ -7,7 +7,7 @@ use regex::Regex;
 use crate::Vec2d;
 use crate::core::discovery::{any, html_matches, metadata, url_matches, viewer};
 use crate::core::{
-    DiscoveryError, DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, ImagePlan,
+    DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource,
     Request, ResolvedLevel, image_title, resolve_relative,
 };
 
@@ -42,7 +42,7 @@ fn metadata_url(uri: &str) -> Result<Request, DiscoveryError> {
     let source = SOURCE_RE
         .captures(uri)
         .and_then(|captures| captures.get(1))
-        .ok_or_else(|| DiscoveryError::Session("FSI URL has no source parameter".into()))?;
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("FSI URL has no source parameter".into()))?;
     let origin = uri.split_once('?').map_or(uri, |(origin, _)| origin);
     Ok(Request::new(format!(
         "{origin}?type=info&source={}",
@@ -54,7 +54,7 @@ fn contains_server(bytes: &[u8]) -> bool {
     SERVER_RE.is_match(&String::from_utf8_lossy(bytes))
 }
 
-fn follow_page_server(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn follow_page_server(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     // Server URLs are embedded in HTML, where query separators are escaped.
     let page = resource.text_lossy().replace("&amp;", "&");
     let server = SERVER_RE
@@ -63,19 +63,19 @@ fn follow_page_server(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, 
             let server = captures.get(1)?.as_str();
             SOURCE_RE.is_match(server).then_some(server.to_owned())
         })
-        .ok_or_else(|| DiscoveryError::Session("no FSI URL found in page".into()))?;
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("no FSI URL found in page".into()))?;
     let server = resolve_relative(resource.final_uri(), &server);
-    metadata_url(&server).map(DiscoveryStep::Follow)
+    metadata_url(&server).map(ParsedResource::Follow)
 }
 
-fn decode(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn decode(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let (url, bytes) = (resource.final_uri(), resource.bytes());
     let width = number(&WIDTH_RE, bytes, "width")?;
     let height = number(&HEIGHT_RE, bytes, "height")?;
     let source = SOURCE_RE
         .captures(url)
         .and_then(|captures| captures.get(1))
-        .ok_or_else(|| DiscoveryError::Session("FSI metadata URL has no source".into()))?
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("FSI metadata URL has no source".into()))?
         .as_str()
         .to_owned();
     let origin = url
@@ -109,7 +109,7 @@ fn decode(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryErr
             ))
         },
     )?;
-    Ok(DiscoveryStep::Image(ImagePlan::new(title, vec![level])))
+    Ok(ParsedResource::Image(ImagePlan::new(title, vec![level])))
 }
 
 fn number(regex: &Regex, bytes: &[u8], name: &str) -> Result<u32, DiscoveryError> {
@@ -118,7 +118,7 @@ fn number(regex: &Regex, bytes: &[u8], name: &str) -> Result<u32, DiscoveryError
         .and_then(|captures| captures.get(1))
         .and_then(|value| value.as_str().parse().ok())
         .filter(|number| *number > 0)
-        .ok_or_else(|| DiscoveryError::Session(format!("FSI metadata has invalid {name}")))
+        .ok_or_else(|| DiscoveryError::InvalidMetadata(format!("FSI metadata has invalid {name}")))
 }
 
 fn ratio(numerator: u32, denominator: u32) -> f64 {

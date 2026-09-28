@@ -1,5 +1,5 @@
 // Real-webapp E2E (Chromium): open the actual website served on loopback,
-// paste a fixture-server zoomable image URL, let the worker-hosted wasm core
+// paste a fixture-server zoomable image URL, let the shared async WASM function
 // discover and download the tiles, then save real bytes and verify the PNG.
 const { test, expect } = require("@playwright/test");
 const fs = require("node:fs");
@@ -177,14 +177,14 @@ test("metadata proxy failure reaches the error UI with its complete typed contex
   assert.match(diagnostics, /http=406\b/);
   assert.match(diagnostics, /proxy-example/);
   assert.match(diagnostics, /Cloudflare challenge/);
-  assert.doesNotMatch(diagnostics, /adapter\.|engine\.error/);
+  assert.doesNotMatch(diagnostics, /binding\.invalid-value/);
   await expect(page.locator("#app")).toContainText(/The site refused to share this file \(HTTP 406\)/i);
 });
 
 // Production topology of a Google Arts & Culture asset page: no CORS grant
 // on the page (the direct browser fetch fails) while the tile-info XML and
 // the signed, AES-CBC-encrypted tiles are readable. The metadata CORS proxy
-// relays the page; the browser decrypts tiles via the wasm adapter.
+// relays the page; the browser decrypts tiles via the WASM function.
 const ARTS_PAGE_URL = "https://artsandculture.google.com/asset/liza-kottou-0113.html";
 
 test("webapp downloads a Google Arts & Culture image through the metadata proxy", async ({ page }) => {

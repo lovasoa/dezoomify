@@ -1,38 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement } from "react";
-import { createDiagnosticRecorder } from "../packages/app-model/src/diagnostics.ts";
+import { createDiagnosticRecorder } from "../packages/shared-ui/src/diagnostics.ts";
 import { PartialDecisionActions } from "../packages/shared-ui/src/partial-decision.tsx";
 import {
   presentFailure,
   presentIdle,
-  presentSnapshot,
+  presentOutput,
+  presentProgress,
   presentStatus,
-} from "../packages/shared-ui/src/snapshot-view.ts";
+} from "../packages/shared-ui/src/presentation.ts";
 import { renderView } from "../packages/shared-ui/src/view.tsx";
 import { act, click } from "./react-dom.mjs";
-
-// Authoritative Snapshot builder: each presentation renders one
-// latest snapshot, never a folded event walk.
-function dto(overrides = {}) {
-  return {
-    revision: 0,
-    lifecycle: "Discovering",
-    paused: false,
-    progress: { completed: 0, total: undefined },
-    selection: {
-      image: undefined,
-      level: undefined,
-      level_count: 0,
-      catalog: undefined,
-      deferred: [],
-    },
-    decision: undefined,
-    terminal: undefined,
-    output: undefined,
-    ...overrides,
-  };
-}
 
 function container() {
   const el = globalThis.document.createElement("div");
@@ -51,10 +30,6 @@ function render(el, presentation, callbacks, ctx) {
       { diagnosticReport: d.report(), ...ctx },
     ),
   );
-}
-
-function jobPresentation(snapshot, transport = "direct") {
-  return presentSnapshot(snapshot, transport);
 }
 
 function failurePresentation(error, transport = "direct") {
@@ -101,7 +76,12 @@ test("renderView mounts card and updates job section in place without DOM destru
     },
   };
 
-  render(el, jobPresentation(dto({ revision: 1, lifecycle: "Discovering" })), callbacks, ctx);
+  render(
+    el,
+    presentProgress({ phase: "discovery", completed: 0, total: null }, "direct"),
+    callbacks,
+    ctx,
+  );
   assert.equal(card.dataset.viewPhase, "job");
   const jobSec = card.querySelector(".dz-job-section");
   assert.ok(jobSec, "job section mounted");
@@ -117,13 +97,7 @@ test("renderView mounts card and updates job section in place without DOM destru
   // 3. Heartbeat update / progress ticks during job
   render(
     el,
-    jobPresentation(
-      dto({
-        revision: 3,
-        lifecycle: "AcquiringTiles",
-        progress: { completed: 15, total: 60 },
-      }),
-    ),
+    presentProgress({ phase: "acquisition", completed: 15, total: 60 }, "direct"),
     callbacks,
     {
       ...ctx,
@@ -154,12 +128,9 @@ test("renderView mounts card and updates job section in place without DOM destru
   assert.equal(details.open, true, "open details preserved across in-place updates");
 
   // 4. Rapid heartbeat / progress ticks
-  const tickPresentation = jobPresentation(
-    dto({
-      revision: 3,
-      lifecycle: "AcquiringTiles",
-      progress: { completed: 15, total: 60 },
-    }),
+  const tickPresentation = presentProgress(
+    { phase: "acquisition", completed: 15, total: 60 },
+    "direct",
   );
   for (let tick = 1; tick <= 10; tick++) {
     render(el, tickPresentation, callbacks, {
@@ -181,7 +152,11 @@ test("renderView mounts card and updates job section in place without DOM destru
   // 5. Transition to completed
   render(
     el,
-    jobPresentation(dto({ revision: 4, lifecycle: "Completed", terminal: { type: "completed" } })),
+    presentOutput(
+      { format: "png", complete: true, missing: [], disposition: "browser-save-ready" },
+      { phase: "acquisition", completed: 0, total: null },
+      "direct",
+    ),
     callbacks,
     { completedInfo: { width: 4000, height: 3000, mime: "image/png" } },
   );
@@ -198,7 +173,11 @@ test("renderView mounts card and updates job section in place without DOM destru
 test("output actions belong to their completed result", async () => {
   const el = container();
   const old = Promise.withResolvers();
-  const done = jobPresentation(dto({ lifecycle: "Completed", terminal: { type: "completed" } }));
+  const done = presentOutput(
+    { format: "png", complete: true, missing: [], disposition: "browser-save-ready" },
+    { phase: "acquisition", completed: 0, total: null },
+    "direct",
+  );
   render(el, done, { ...callbacks, onOpenOutput: () => old.promise }, { outputKey: "old" });
   click(el.querySelector("#dz-btn-open"));
   assert.equal(el.querySelector("#dz-btn-open").disabled, true);
@@ -209,14 +188,13 @@ test("output actions belong to their completed result", async () => {
   assert.equal(el.querySelector("#dz-btn-open").disabled, false);
 });
 
-test("partial choices return the generated decision generation unchanged", () => {
+test("partial controls return the selected choice", () => {
   const el = container();
   const answers = [];
   act(() =>
     renderView(el, presentIdle(), callbacks, undefined, {
       after: createElement(PartialDecisionActions, {
         decision: {
-          generation: 17,
           missing: [{ tile: 1, failures: [{ category: "transient", code: "TRANSPORT_TIMEOUT" }] }],
         },
         onAnswer: (command) => answers.push(command),
@@ -225,28 +203,20 @@ test("partial choices return the generated decision generation unchanged", () =>
   );
   for (const choice of ["keep", "discard", "retry"])
     click(el.querySelector(`[data-dz-partial-choice="${choice}"]`));
-  assert.deepEqual(
-    answers,
-    ["keep", "discard", "retry"].map((decision) => ({
-      type: "answer-partial",
-      generation: 17,
-      decision,
-    })),
-  );
+  assert.deepEqual(answers, ["keep", "discard", "retry"]);
 });
 
 test("partial refusal is a static decision with useful actions before diagnostics", () => {
   const el = container();
   const decision = {
-    generation: 3,
     missing: [
       { tile: 1, failures: [{ code: "TRANSPORT_HTTP_ERROR", category: "permanent", http: 403 }] },
     ],
   };
-  const presentation = presentSnapshot(
-    dto({ lifecycle: "AwaitingPartialDecision", progress: { completed: 3, total: 4 }, decision }),
-    "browser-session",
-  );
+  const presentation = {
+    ...presentProgress({ phase: "acquisition", completed: 3, total: 4 }, "browser-session"),
+    decision,
+  };
   act(() =>
     renderView(
       el,
@@ -313,7 +283,12 @@ test("slow discovery replaces the phase with one waiting status", () => {
       lastProgressAt: now - 11000,
     },
   };
-  render(el, jobPresentation(dto({ revision: 1, lifecycle: "Discovering" })), callbacks, ctx);
+  render(
+    el,
+    presentProgress({ phase: "discovery", completed: 0, total: null }, "direct"),
+    callbacks,
+    ctx,
+  );
   const card = el.querySelector(".dz-card");
   const step = card.querySelector("#dz-job-step-text");
   assert.ok(step, "job status shown while stalled");
@@ -353,9 +328,9 @@ test("failed state updates error details in place without destroying error conta
   );
 });
 
-test("error layering: plain message prominent, engine diagnostics only in technical details", () => {
+test("error layering: plain message prominent, parser diagnostics only in technical details", () => {
   const el = container();
-  const engineBlock =
+  const details =
     " - zoomify, iiif, krpano: HTTP 429 fetching this address\n" +
     " - 2 other format(s) did not match this page address";
   const presentation = failurePresentation({
@@ -364,7 +339,7 @@ test("error layering: plain message prominent, engine diagnostics only in techni
     retryable: true,
     message:
       "The website hosting this image limits how many pages our server may request from it, and that limit was just reached, so the page could not be opened.",
-    detail: engineBlock,
+    detail: details,
     transport: "metadata-proxy",
     phase: "discovery",
     url: "https://example.test/viewer/tour.xml?sig=abc&lang=fr",
@@ -374,13 +349,13 @@ test("error layering: plain message prominent, engine diagnostics only in techni
   render(el, presentation, callbacks);
   const card = el.querySelector(".dz-card");
   const prominent = card.querySelector("#dz-error-message").textContent;
-  assert.ok(!prominent.includes("zoomify"), "engine block must not be prominent");
+  assert.ok(!prominent.includes("zoomify"), "parser details must not be prominent");
   assert.ok(!prominent.includes("429"), "status must not be prominent");
   const diagnostics = card.querySelector("#dz-job-diagnostics").textContent;
   assert.match(diagnostics, /http=429/);
   assert.match(diagnostics, /Too many requests/);
   assert.match(diagnostics, /sig=abc&lang=fr/);
-  assert.ok(diagnostics.includes(engineBlock));
+  assert.ok(diagnostics.includes(details));
   // A fresh failure without url/http/detail renders only the trailing line.
   const fresh = failurePresentation({
     code: "NO_IMAGE_FOUND",
@@ -418,13 +393,7 @@ test("job rail keeps integrated stop and diagnostics-copy controls, and header v
 
   render(
     el,
-    jobPresentation(
-      dto({
-        revision: 2,
-        lifecycle: "AcquiringTiles",
-        progress: { completed: 10, total: 50 },
-      }),
-    ),
+    presentProgress({ phase: "acquisition", completed: 10, total: 50 }, "direct"),
     callbacks,
   );
   assert.equal(header.style.display, "none", "header hidden in job phase");
@@ -457,14 +426,7 @@ test("paused job activity freezes the displayed elapsed time", () => {
   const el = container();
   render(
     el,
-    jobPresentation(
-      dto({
-        revision: 2,
-        lifecycle: "AcquiringTiles",
-        paused: true,
-        progress: { completed: 3, total: 10 },
-      }),
-    ),
+    presentProgress({ phase: "acquisition", completed: 3, total: 10 }, "direct", { paused: true }),
     { onSubmitUrl: () => {}, onCancel: () => {}, onReset: () => {} },
     {
       jobActivity: { startedAt: 1_000, pausedAt: 4_000, now: 12_000, paused: true },
@@ -554,33 +516,17 @@ test("resolution notice offers maximum retry and stop while fetching, keeps the 
       tried += 1;
     },
   };
-  const selection = {
-    image: 0,
-    level: 1,
-    level_count: 3,
-    catalog: {
-      entries: [
-        {
-          kind: "image",
-          levels: [
-            { label: "0", size: { width: 10000, height: 5000 } },
-            { label: "1", size: { width: 20000, height: 10000 } },
-            { label: "2", size: { width: 40000, height: 20000 } },
-          ],
-        },
-      ],
-    },
-    deferred: [],
-  };
   render(
     el,
-    jobPresentation(
-      dto({
-        revision: 2,
-        lifecycle: "AcquiringTiles",
-        progress: { completed: 1, total: 4 },
-        selection,
-      }),
+    presentProgress(
+      {
+        phase: "acquisition",
+        completed: 1,
+        total: 4,
+        selected: { width: 20000, height: 10000 },
+        maximum: { width: 40000, height: 20000 },
+      },
+      "direct",
     ),
     actions,
   );
@@ -597,14 +543,16 @@ test("resolution notice offers maximum retry and stop while fetching, keeps the 
 
   render(
     el,
-    jobPresentation(
-      dto({
-        revision: 3,
-        lifecycle: "Completed",
-        progress: { completed: 4, total: 4 },
-        selection,
-        terminal: { type: "completed" },
-      }),
+    presentOutput(
+      { format: "png", complete: true, missing: [], disposition: "browser-save-ready" },
+      {
+        phase: "acquisition",
+        completed: 4,
+        total: 4,
+        selected: { width: 20000, height: 10000 },
+        maximum: { width: 40000, height: 20000 },
+      },
+      "direct",
     ),
     actions,
   );
@@ -617,29 +565,15 @@ test("hosts without a maximum retry never show the resolution notice", () => {
   const el = container();
   render(
     el,
-    jobPresentation(
-      dto({
-        revision: 2,
-        lifecycle: "AcquiringTiles",
-        progress: { completed: 1, total: 4 },
-        selection: {
-          image: 0,
-          level: 1,
-          level_count: 2,
-          catalog: {
-            entries: [
-              {
-                kind: "image",
-                levels: [
-                  { label: "0", size: { width: 20000, height: 10000 } },
-                  { label: "1", size: { width: 40000, height: 20000 } },
-                ],
-              },
-            ],
-          },
-          deferred: [],
-        },
-      }),
+    presentProgress(
+      {
+        phase: "acquisition",
+        completed: 1,
+        total: 4,
+        selected: { width: 20000, height: 10000 },
+        maximum: { width: 40000, height: 20000 },
+      },
+      "direct",
     ),
     callbacks,
   );

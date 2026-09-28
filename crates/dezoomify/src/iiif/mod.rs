@@ -10,10 +10,10 @@ use crate::core::discovery::{
     any, html_matches, image_url, metadata, url_matches, url_suffix, viewer,
 };
 use crate::core::{
-    AdaptiveProgram, AdaptiveSource, CatalogPlan, DeferredResource, DiscoverableStep,
-    DiscoveryCatalog, DiscoveryError, DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec,
-    Grid, GridRequests, GridTile, ImagePlan, ObservationResult, ProbeContinuation, Request,
-    ResolvedLevel, TileRole, TileSourceError, TileSpec, resolve_relative,
+    AdaptiveSource, CatalogPlan, DeferredResource, DiscoveryCatalog, DiscoveryError,
+    DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, GridRequests, GridTile, ImagePlan,
+    ObservationResult, ParsedResource, Request, ResolvedGrid, ResolvedLevel, TileRole, TileSpec,
+    resolve_relative,
 };
 use crate::iiif::tile_info::TileSizeFormat;
 use crate::json_utils::all_json;
@@ -53,8 +53,8 @@ const ROUTES: &[DiscoveryRoute] = &[
 /// IIIF format. See <https://iiif.io/>.
 pub const SPEC: FormatSpec = FormatSpec::new("iiif", ROUTES).with_display_name("IIIF");
 
-fn decode(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
-    catalog(resource.final_uri(), resource.bytes()).map(DiscoveryStep::Complete)
+fn decode(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+    catalog(resource.final_uri(), resource.bytes()).map(ParsedResource::Complete)
 }
 
 /// Determines the best title for an image from IIIF manifest metadata
@@ -97,7 +97,7 @@ pub enum IIIFError {
 
 impl From<IIIFError> for DiscoveryError {
     fn from(err: IIIFError) -> Self {
-        Self::Session(err.to_string())
+        Self::InvalidMetadata(err.to_string())
     }
 }
 
@@ -108,7 +108,7 @@ fn has_manifest_parameter(uri: &str) -> bool {
 fn manifest_parameter(uri: &str) -> Result<Request, DiscoveryError> {
     manifest_parameter_value(uri)
         .map(Request::new)
-        .ok_or_else(|| DiscoveryError::Session("missing IIIF manifest parameter".into()))
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("missing IIIF manifest parameter".into()))
 }
 
 fn manifest_parameter_value(uri: &str) -> Option<String> {
@@ -159,9 +159,9 @@ fn image_request_info(uri: &str) -> Option<Request> {
 #[test]
 fn direct_image_request_url_maps_to_info_json() {
     let uri = "https://img.example/iiif/item.tif/0,0,256,256/256,256/0/default.jpg?v=1";
-    let mut discovery = crate::core::registry_for("iiif").unwrap().start(uri);
+    let (_, requests) = crate::test_support::discover(SPEC, uri, &[]);
     assert_eq!(
-        discovery.next_priority_need().unwrap().unwrap().request.uri,
+        requests[0].uri,
         "https://img.example/iiif/item.tif/info.json?v=1"
     );
     assert!(image_request_info("https://img.example/photo.jpg").is_none());
@@ -219,19 +219,21 @@ fn page_base_uri(bytes: &[u8], final_uri: &str) -> String {
         )
 }
 
-fn follow_info_json_url(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn follow_info_json_url(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     // Payloads that already parse as IIIF (info.json bodies, manifests)
     // keep the standard extractor; harvesting is for embedder pages.
     if let Ok(found) = catalog(resource.final_uri(), resource.bytes()) {
-        return Ok(DiscoveryStep::Complete(found));
+        return Ok(ParsedResource::Complete(found));
     }
     let base = page_base_uri(resource.bytes(), resource.final_uri());
     let target = harvest_info_json_urls(resource.bytes())
         .into_iter()
         .map(|url| resolve_relative(&base, url.trim()))
         .find(|url| *url != resource.final_uri())
-        .ok_or_else(|| DiscoveryError::Session("page declares no IIIF info.json URL".into()))?;
-    Ok(DiscoveryStep::Follow(Request::new(target)))
+        .ok_or_else(|| {
+            DiscoveryError::InvalidMetadata("page declares no IIIF info.json URL".into())
+        })?;
+    Ok(ParsedResource::Follow(Request::new(target)))
 }
 
 fn catalog(uri: &str, contents: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
@@ -426,13 +428,10 @@ fn levels_from_info(url: &str, mut image_info: ImageInfo) -> Result<Vec<Resolved
                 .map_err(|error| IIIFError::GeometryError {
                     description: error.to_string(),
                 })?;
-                let adaptive = AdaptiveSource::with_declared_grid(
-                    IIIFProbeProgram {
-                        declared: source.clone(),
-                        requests,
-                    },
-                    source,
-                );
+                let adaptive = AdaptiveSource::Iiif(IIIFProbeProgram {
+                    declared: source.clone(),
+                    requests,
+                });
                 Ok(ResolvedLevel::new(adaptive)
                     .with_title(Some(format!("IIIF level {tile_ordinal}")))
                     .with_scale_factor(Some(scale_factor))
@@ -500,68 +499,56 @@ impl GridRequests for IIIFLevel {
 }
 
 #[derive(Clone, Debug)]
-struct IIIFProbeProgram {
-    declared: Grid,
+pub struct IIIFProbeProgram {
+    pub(crate) declared: Grid,
     requests: IIIFLevel,
 }
 
-impl AdaptiveProgram for IIIFProbeProgram {
-    fn start(&self) -> DiscoverableStep {
-        self.probe(&self.requests, true)
-    }
-}
-
 impl IIIFProbeProgram {
-    fn probe(&self, requests: &IIIFLevel, ordinary: bool) -> DiscoverableStep {
-        let Ok(tile) = Grid::new(
-            requests.image_size(),
-            self.declared.tile_size(),
-            Vec2d::default(),
-            requests.clone(),
-        )
-        .and_then(|grid| {
-            grid.tiles_row_major()
-                .next()
-                .expect("IIIF grids are non-empty")
-        }) else {
-            return DiscoverableStep::Error(TileSourceError::InvalidDimensions);
-        };
-        let program = self.clone();
-        DiscoverableStep::Probe {
-            tile: TileSpec {
-                role: TileRole::ProbeAndOutput,
-                ..tile
-            },
-            continuation: ProbeContinuation::new(move |result| program.resolve(result, ordinary)),
-        }
-    }
-
-    fn resolve(
+    #[allow(clippy::result_large_err)]
+    pub(crate) async fn resolve(
         self,
-        result: ObservationResult,
-        ordinary: bool,
-    ) -> Result<DiscoverableStep, TileSourceError> {
-        if let ObservationResult::Available { size } = result
-            && size.x > 0
-            && size.y > 0
-        {
+        host: &impl crate::Host,
+    ) -> Result<Option<ResolvedGrid>, crate::model::Error> {
+        let tries = if self.requests.use_size_upscaling {
+            2
+        } else {
+            1
+        };
+        for attempt in 0..tries {
             let mut requests = self.requests.clone();
-            requests.force_width_only = !ordinary;
-            let grid = Grid::new(requests.image_size(), size, Vec2d::default(), requests)?;
-            return Ok(DiscoverableStep::Resolved {
-                grid,
-                previously_output: vec![Vec2d::default()],
-            });
+            requests.force_width_only = attempt > 0;
+            let tile = Grid::new(
+                requests.image_size(),
+                self.declared.tile_size(),
+                Vec2d::default(),
+                requests.clone(),
+            )?
+            .tiles_row_major()
+            .next()
+            .expect("IIIF grids have tiles")?;
+            let result = crate::run::probe(
+                host,
+                TileSpec {
+                    role: TileRole::ProbeAndOutput,
+                    ..tile
+                },
+            )
+            .await?;
+            if let ObservationResult::Available { size } = result
+                && size.x > 0
+                && size.y > 0
+            {
+                return Ok(Some(ResolvedGrid {
+                    grid: Grid::new(requests.image_size(), size, Vec2d::default(), requests)?,
+                    previously_output: vec![Vec2d::default()],
+                }));
+            }
         }
-        if ordinary && self.requests.use_size_upscaling {
-            let mut fallback = self.requests.clone();
-            fallback.force_width_only = true;
-            return Ok(self.probe(&fallback, false));
-        }
-        Ok(DiscoverableStep::Resolved {
+        Ok(Some(ResolvedGrid {
             grid: self.declared,
             previously_output: Vec::new(),
-        })
+        }))
     }
 }
 
@@ -969,23 +956,21 @@ fn tile_urls(level: &ResolvedLevel) -> Vec<String> {
 
 #[test]
 fn discovery_requests_metadata_then_returns_normalized_replayable_levels() {
-    let mut registry = crate::core::Registry::new();
-    registry.register(SPEC);
-    let mut operation = registry.start("https://example.com/image/info.json");
-    let need = operation.missing_resources().unwrap().pop().unwrap();
-    assert_eq!(need.request.uri, "https://example.com/image/info.json");
-    operation
-        .provide(crate::core::ResourceResponse::new(
-            need.id,
+    let (result, requests) = crate::test_support::discover(
+        SPEC,
+        "https://example.com/image/info.json",
+        &[(
             br#"{
           "type":"ImageService3", "id":"https://images.example/item",
           "width":1000, "height":1500,
           "tiles":[{"width":512,"height":512,"scaleFactors":[1,2,4]}]
-        }"#
-            .as_slice(),
-        ))
-        .unwrap();
-    let catalog = operation.finish().unwrap();
+        }"#,
+            None,
+        )],
+    );
+    let catalog = result.unwrap();
+    assert_eq!(requests.len(), 1);
+
     let [DiscoveredEntry::Ready(image)] = catalog.entries() else {
         panic!("info.json must be ready, not deferred");
     };
@@ -1011,38 +996,19 @@ fn discovery_requests_metadata_then_returns_normalized_replayable_levels() {
 
 #[test]
 fn page_with_embedded_info_json_url_is_followed() {
-    // Mirrors bruun-rasmussen.dk: the viewer page carries a
-    // protocol-relative info.json reference in data-image-url.
-    let mut registry = crate::core::Registry::new();
-    registry.register(SPEC);
-    let mut operation = registry.start("https://viewer.example/lots/1/images/1");
-    let need = operation.missing_resources().unwrap().pop().unwrap();
-    operation
-        .provide(crate::core::ResourceResponse::new(
-            need.id,
-            br#"<div id="zoom-viewer"
-                 data-image-url="//img.viewer.example/iiif/Online/2510/br_item.tif/info.json"></div>"#
-                .as_slice(),
-        ))
-        .unwrap();
-    let follow = operation.missing_resources().unwrap().pop().unwrap();
-    assert_eq!(
-        follow.request.uri,
-        "https://img.viewer.example/iiif/Online/2510/br_item.tif/info.json"
-    );
-    operation
-        .provide(crate::core::ResourceResponse::new(
-            follow.id,
-            br#"{
+    let (result,requests)=crate::test_support::discover(SPEC,"https://viewer.example/lots/1/images/1",&[(br#"<div id="zoom-viewer"
+                 data-image-url="//img.viewer.example/iiif/Online/2510/br_item.tif/info.json"></div>"#,None),(br#"{
           "type":"ImageService3", "id":"https://img.viewer.example/iiif/Online/2510/br_item.tif",
           "width":1000, "height":1500,
           "tiles":[{"width":256,"height":256,"scaleFactors":[1,2]}]
-        }"#
-            .as_slice(),
-        ))
-        .unwrap();
-    assert!(operation.missing_resources().unwrap().is_empty());
-    let catalog = operation.finish().unwrap();
+        }"#,None)]);
+    let catalog = result.unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(
+        requests[1].uri,
+        "https://img.viewer.example/iiif/Online/2510/br_item.tif/info.json"
+    );
+
     let [DiscoveredEntry::Ready(image)] = catalog.entries() else {
         panic!("followed info.json must be ready");
     };
@@ -1072,25 +1038,21 @@ fn harvest_prefers_iiif_candidates_and_resolves_relative_urls() {
 
 #[test]
 fn direct_info_json_bodies_are_not_harvested() {
-    // A payload that already parses as IIIF completes directly, even when
-    // it mentions its own info.json URL.
-    let mut registry = crate::core::Registry::new();
-    registry.register(SPEC);
-    let mut operation = registry.start("https://images.example/item/info.json");
-    let need = operation.missing_resources().unwrap().pop().unwrap();
-    operation
-        .provide(crate::core::ResourceResponse::new(
-            need.id,
+    let (result, requests) = crate::test_support::discover(
+        SPEC,
+        "https://images.example/item/info.json",
+        &[(
             br#"{
           "type":"ImageService3", "id":"https://images.example/item/info.json",
           "width":512, "height":512,
           "tiles":[{"width":256,"scaleFactors":[1]}]
-        }"#
-            .as_slice(),
-        ))
-        .unwrap();
-    assert!(operation.missing_resources().unwrap().is_empty());
-    let catalog = operation.finish().unwrap();
+        }"#,
+            None,
+        )],
+    );
+    let catalog = result.unwrap();
+    assert_eq!(requests.len(), 1);
+
     assert_eq!(catalog.len(), 1);
 }
 

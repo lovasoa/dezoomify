@@ -9,7 +9,7 @@ dezoomify turns tiled, zoomable images into portable files. A user supplies a UR
 - **Desktop app**: native runtime for large images and local sources, one file or `iiif-dir` per job; see [Native apps](native-apps.md).
 - **CLI**: same native behavior for scripts; see the [Command-line guide](user/command-line.md).
 
-One React TSX shared UI presents the same job concepts in every app. Capability negotiation changes available actions, never their meaning. See [Architecture](architecture.md) and [Protocol](protocol.md).
+One React TSX shared UI presents the same job concepts in every app. Capability negotiation changes available actions, never their meaning. See [Architecture](architecture.md) and [Bindings](bindings.md).
 
 ## Choosing an app
 
@@ -42,14 +42,14 @@ Nothing important hides in an unreachable tier, and every failure leaves at leas
 
 1. The runtime discovers one or more image catalogs from an input.
 2. The user selects an image, resolution level, processing recipe, and output.
-3. The job engine validates the request against runtime capabilities.
-4. The runtime executes tile acquisition and processing effects while the engine records their outcomes and reports deterministic progress.
-5. The engine drives encoding, finalization, publication, and cleanup effects through the selected output destination.
+3. The Rust algorithm validates input and options.
+4. The algorithm awaits bounded tile acquisition through Host capabilities and reports progress.
+5. The algorithm awaits Host output and cleanup, returning the actual result.
 
-Discovery, selection, acquisition, processing, and saving stay distinct, keeping failures and recovery choices specific; see [Job engine](job-engine.md) and [Errors](errors.md).
+Discovery, selection, acquisition, processing, and saving stay distinct, keeping failures and recovery choices specific; see [Algorithm](algorithm.md) and [Errors](errors.md).
 
 ## App boundaries
 
-Browsers handle interactive jobs fitting browser memory and save limits; budgets: [Compatibility](compatibility.md#canvas-and-save-limits). Native apps own huge images and local input (PNG, JPEG, TIFF, ZIF, WebP, file or `iiif-dir`). Website baseline: encoders `[png]`; native baseline: [Native apps](native-apps.md#capability-baseline). Queues live in the integration layer, never the engine: website single-queue (submitted addresses wait their turn), desktop multi-job queue (table with per-job progress, cancel one/all, retry failed). CLI `--bulk` runs one bounded run per entry with shared per-entry plus totals reporting. Credentials: [Security](security.md).
+Browsers handle interactive jobs fitting browser memory and save limits; budgets: [Compatibility](compatibility.md#canvas-and-save-limits). Native apps own huge images and local input (PNG, JPEG, TIFF, ZIF, WebP, file or `iiif-dir`). Website baseline: encoders `[png]`; native baseline: [Native apps](native-apps.md#capability-baseline). Queues belong to the application: website single-queue (submitted addresses wait their turn), desktop multi-job queue (table with per-job progress, cancel one/all, retry failed). CLI `--bulk` runs one bounded run per entry with shared per-entry plus totals reporting. Credentials: [Security](security.md).
 
 dezoomify bypasses no authentication or access controls. Users are responsible for permission to retrieve and reproduce source material.

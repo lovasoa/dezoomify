@@ -8,8 +8,8 @@ Source sites, metadata, tiles, handoff payloads, and output names are all untrus
 - Page policy allows cross-origin images for plain tile display; shown tiles taint the canvas, keeping it unreadable to scripts, so no pixels leak that way.
 - The metadata proxy is a restricted fetcher for eligible public, non-credential metadata, never a credential endpoint or tile relay.
 - The extension background accepts requests only from its own authenticated contexts.
-- Native apps reach network and filesystem, so they validate protocol input and require user-picked local destinations.
-- Core and job parse and decide without performing effects.
+- Native apps reach network and filesystem, so they validate typed input and require user-picked local destinations.
+- Parsers and geometry stay pure; the shared algorithm awaits only injected Host capabilities.
 
 Parsers and decoders cap input, dimensions, tile counts, allocation, recursion, and decompression. URLs normalize before policy checks. Redirects carrying credentials revalidate every hop.
 
@@ -27,6 +27,6 @@ The proxy allows only supported methods and serves metadata only, never tiles. I
 
 ## Extension and desktop
 
-Extension behavior is defined once in [Extension](extension.md): the job tab owns each job and calls finite source operations directly after the toolbar action; there are no content scripts, no `<all_urls>`, no metadata proxy, and no job-message relay in the background. Source results are validated at the job-page boundary and bounded before transfer; cookies and auth values never leave the source tab. Tauri exposes an allowlisted command surface and opaque file handles instead of raw paths where practical. The desktop declares only permissions its shipped code uses; the frontend calls `query_capabilities` once at boot so grants track live negotiation, and external links leave only through `opener:allow-open-url` for valid `https` URLs.
+Extension behavior is defined once in [Extension](extension.md): the job tab owns each job and calls finite source operations directly after the toolbar action; there are no content scripts, no `<all_urls>`, no metadata proxy, and the background only launches and focuses the job page. Source results are validated at the job-page boundary and bounded before transfer; cookies and auth values never leave the source tab. Tauri exposes an allowlisted command surface and opaque file handles instead of raw paths where practical. The desktop declares only permissions its shipped code uses; the frontend calls `query_capabilities` once at boot so grants track live negotiation, and external links leave only through `opener:allow-open-url` for valid `https` URLs.
 
 Website deep links are untrusted input for native validation plus user confirmation; no client-side signing. They contain bounded non-secret job input and never transfer browser credentials. Security regressions are covered in [Testing](testing.md).

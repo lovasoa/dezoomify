@@ -1,6 +1,6 @@
 //! Stable registration and precedence policy for pure formats.
 
-use super::discovery::{DiscoveryInput, DiscoveryLimits, DiscoveryOperation, FormatSpec};
+use super::discovery::{DiscoveryInput, DiscoveryLimits, FormatSpec};
 use crate::{
     arcgis, bulk_text, custom_yaml, dzi, fsi, generic, google_arts_and_culture, hungaricana, iiif,
     iipimage, krpano, lizardtech, pnav, second_canvas, topviewer, vls, wmts, xlimage, zoomify,
@@ -51,36 +51,18 @@ impl Registry {
         self.specs.push(spec);
     }
 
-    /// Start a discovery operation with candidates in registration order.
-    #[must_use]
-    pub fn start(&self, uri: impl Into<String>) -> DiscoveryOperation {
-        self.start_with_limits(uri, DiscoveryLimits::default())
-    }
-
-    /// Start independent parser state with explicit operation limits.
-    #[must_use]
-    pub fn start_with_limits(
-        &self,
-        uri: impl Into<String>,
-        limits: DiscoveryLimits,
-    ) -> DiscoveryOperation {
-        self.start_inputs_with_limits(vec![DiscoveryInput::new(uri)], limits)
-    }
-
-    /// Start one bounded search across user sources and host observations.
-    #[must_use]
-    pub fn start_inputs(&self, inputs: Vec<DiscoveryInput>) -> DiscoveryOperation {
-        self.start_inputs_with_limits(inputs, DiscoveryLimits::default())
-    }
-
-    /// Start a source-and-observation search with explicit shared limits.
-    #[must_use]
-    pub fn start_inputs_with_limits(
+    /// Resolve supplied sources with platform resource acquisition.
+    pub async fn discover<F, Fut>(
         &self,
         inputs: Vec<DiscoveryInput>,
         limits: DiscoveryLimits,
-    ) -> DiscoveryOperation {
-        DiscoveryOperation::from_inputs(inputs, &self.specs, limits)
+        fetch: F,
+    ) -> Result<super::DiscoveryCatalog, super::DiscoveryError>
+    where
+        F: Fn(super::Request, crate::model::Interaction) -> Fut,
+        Fut: std::future::Future<Output = Result<crate::model::ResourceRead, crate::model::Error>>,
+    {
+        super::discovery::discover(inputs, &self.specs, limits, fetch).await
     }
 
     /// Look up a registered format by stable id.
@@ -89,9 +71,9 @@ impl Registry {
         self.specs.iter().find(|spec| spec.name() == name)
     }
 
-    /// Ordered `(id, display_name)` snapshot for review and UI labels.
+    /// Ordered `(id, display_name)` entries for review and UI labels.
     #[must_use]
-    pub fn snapshot(&self) -> Vec<(&'static str, &'static str)> {
+    pub fn formats(&self) -> Vec<(&'static str, &'static str)> {
         self.specs
             .iter()
             .map(|spec| (spec.name(), spec.display_name()))
@@ -123,14 +105,14 @@ pub fn registry_for(name: &str) -> Option<Registry> {
 mod tests {
     use super::*;
     use crate::Vec2d;
-    use crate::core::discovery::{DiscoveryStep, ResourceResponse, any, metadata};
+    use crate::core::discovery::{ParsedResource, any, metadata};
     use crate::core::{DiscoveredEntry, ImagePlan, Request, ResolvedLevel, TileSource};
 
     #[test]
     fn a_regular_format_needs_only_a_decoder_and_tile_address() {
         fn decode(
             resource: super::super::DiscoveryResource<'_>,
-        ) -> Result<DiscoveryStep, super::super::DiscoveryError> {
+        ) -> Result<ParsedResource, super::super::DiscoveryError> {
             let bytes = resource.bytes();
             let width = u32::from(*bytes.first().unwrap());
             let level = ResolvedLevel::grid(Vec2d { x: width, y: 2 }, Vec2d::square(2), |tile| {
@@ -139,7 +121,7 @@ mod tests {
                     tile.coord.column, tile.coord.row
                 ))
             })?;
-            Ok(DiscoveryStep::Image(ImagePlan::new(
+            Ok(ParsedResource::Image(ImagePlan::new(
                 Some("Toy image".into()),
                 vec![level],
             )))
@@ -148,12 +130,19 @@ mod tests {
         const TOY: FormatSpec = FormatSpec::new("toy", &[metadata(any()).decode(decode)]);
         let mut registry = Registry::new();
         registry.register(TOY);
-        let mut operation = registry.start("memory://metadata");
-        let resource = operation.missing_resources().unwrap().remove(0);
-        operation
-            .provide(ResourceResponse::new(resource.id, [4]))
-            .unwrap();
-        let catalog = operation.finish().unwrap();
+        let catalog = futures::executor::block_on(registry.discover(
+            vec![DiscoveryInput::new("memory://metadata")],
+            DiscoveryLimits::default(),
+            |_, _| async {
+                Ok(crate::model::ResourceRead::Response {
+                    response: crate::model::ResourceResponse {
+                        bytes: vec![4],
+                        final_uri: None,
+                    },
+                })
+            },
+        ))
+        .unwrap();
         let [DiscoveredEntry::Ready(image)] = catalog.entries() else {
             panic!("toy decoder must publish an image")
         };
@@ -169,11 +158,11 @@ mod tests {
     }
 
     #[test]
-    fn registry_snapshot_lists_ids_and_display_names() {
+    fn registry_lists_ids_and_display_names() {
         // Reviewed order: registry order defines automatic precedence.
         let registry = default_registry();
         assert_eq!(
-            registry.snapshot(),
+            registry.formats(),
             [
                 ("custom", "Custom tiles"),
                 ("google_arts_and_culture", "Arts & Culture"),
@@ -211,10 +200,26 @@ mod tests {
     }
 
     #[test]
-    fn content_driven_formats_request_even_without_a_url_match() {
+    fn content_driven_formats_read_unknown_urls() {
         for name in ["iiif", "deepzoom"] {
-            let mut operation = registry_for(name).unwrap().start("memory://unknown");
-            assert_eq!(operation.missing_resources().unwrap().len(), 1, "{name}");
+            let calls = std::cell::Cell::new(0);
+            let result = futures::executor::block_on(registry_for(name).unwrap().discover(
+                vec![DiscoveryInput::new("memory://unknown")],
+                DiscoveryLimits::default(),
+                |_, _| {
+                    calls.set(calls.get() + 1);
+                    async {
+                        Ok(crate::model::ResourceRead::Response {
+                            response: crate::model::ResourceResponse {
+                                bytes: b"bad metadata".to_vec(),
+                                final_uri: None,
+                            },
+                        })
+                    }
+                },
+            ));
+            assert!(result.is_err());
+            assert_eq!(calls.get(), 1, "{name}");
         }
     }
 }

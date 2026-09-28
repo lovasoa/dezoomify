@@ -18,17 +18,6 @@ pub(crate) const ARTIFACTS_ROOT: &str = "target/release-dist";
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
-pub(crate) struct Config {
-    pub(crate) protocol: ConfigProtocol,
-}
-
-#[derive(Deserialize)]
-pub(crate) struct ConfigProtocol {
-    pub(crate) range: String,
-    pub(crate) min_peer: String,
-}
-
-#[derive(Deserialize)]
 pub(crate) struct Targets {
     #[serde(rename = "target")]
     pub(crate) list: Vec<TargetEntry>,
@@ -42,20 +31,8 @@ pub(crate) struct TargetEntry {
 }
 
 #[derive(Deserialize)]
-pub(crate) struct Compatibility {
-    pub(crate) compatibility: CompatibilitySection,
-}
-
-#[derive(Deserialize)]
-pub(crate) struct CompatibilitySection {
-    pub(crate) current: String,
-    pub(crate) n_minus_1: String,
-}
-
-#[derive(Deserialize)]
 pub(crate) struct Capabilities {
     pub(crate) capabilities: Vec<String>,
-    pub(crate) protocol: String,
 }
 
 /// Release targets mirror the host bundlers in `release/targets.toml`.
@@ -69,14 +46,6 @@ fn parse_toml<T: for<'de> Deserialize<'de>>(rel: &str) -> Result<T, String> {
     let text = std::fs::read_to_string(crate::repo_root().join(rel))
         .map_err(|e| format!("missing {rel}: {e}"))?;
     toml::from_str(&text).map_err(|e| format!("bad {rel}: {e}"))
-}
-
-pub(crate) fn load_config() -> Result<Config, String> {
-    parse_toml("release/config.toml")
-}
-
-pub(crate) fn load_compatibility() -> Result<Compatibility, String> {
-    parse_toml("release/compatibility.toml")
 }
 
 pub(crate) fn load_capabilities() -> Result<Capabilities, String> {
@@ -96,17 +65,8 @@ pub(crate) struct Plan {
     pub(crate) tag: String,
     pub(crate) channel: String,
     pub(crate) commit: String,
-    pub(crate) protocol: PlanProtocol,
     pub(crate) capabilities: Vec<String>,
     pub(crate) targets: Vec<PlanTarget>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, PartialEq)]
-pub(crate) struct PlanProtocol {
-    pub(crate) range: String,
-    pub(crate) min_peer: String,
-    pub(crate) compatibility_current: String,
-    pub(crate) compatibility_n_minus_1: String,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, PartialEq)]
@@ -253,9 +213,7 @@ pub(crate) fn temp_root(name: &str) -> PathBuf {
 
 #[cfg(test)]
 pub(crate) fn plan_from_repo() -> Plan {
-    let config = load_config().unwrap();
     let targets = load_targets().unwrap();
-    let compat = load_compatibility().unwrap();
     let caps = load_capabilities().unwrap();
     let version = app_version().unwrap().0;
     Plan {
@@ -263,12 +221,6 @@ pub(crate) fn plan_from_repo() -> Plan {
         version,
         channel: "rolling".to_string(),
         commit: "0".repeat(40),
-        protocol: PlanProtocol {
-            range: config.protocol.range.clone(),
-            min_peer: config.protocol.min_peer.clone(),
-            compatibility_current: compat.compatibility.current.clone(),
-            compatibility_n_minus_1: compat.compatibility.n_minus_1.clone(),
-        },
         capabilities: caps.capabilities.clone(),
         targets: targets
             .list

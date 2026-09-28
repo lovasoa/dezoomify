@@ -1,16 +1,7 @@
-// Desktop integration: the desktop app implementation connecting the
-// shared UI to its runtime and host capabilities.
-//
-// No imports from apps/web, apps/extension, browser-session fetch, or the
-// metadata CORS proxy. The desktop app uses native effects only.
-
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 // Keep erasable syntax only so node type-stripping can read this file.
 
-export const PROTOCOL_MIN = "2.0" as const;
-export const PROTOCOL_MAX = "2.0" as const;
-export const PROTOCOL_VERSION = "2.0" as const;
 export const APP_IDENTIFIER = "dev.ophir.dezoomify" as const;
 
 export const NATIVE_ENCODERS = ["png", "jpeg", "tiff", "zif", "webp"] as const;
@@ -26,12 +17,14 @@ export const NATIVE_FORMATS: readonly NativeFormat[] = [...NATIVE_ENCODERS, "iii
 // capability documents.
 export const DESKTOP_COMMANDS = [
   "get_job_diagnostics",
-  "job_command",
+  "answer_partial",
+  "cancel_job",
+  "dezoomify",
+  "pause_job",
+  "resume_job",
   "open_saved_output",
   "release_job",
   "query_capabilities",
-  "request_destination",
-  "start_job",
 ] as const;
 
 export type DesktopCommand = (typeof DESKTOP_COMMANDS)[number];
@@ -48,8 +41,6 @@ export interface DesktopCapabilities {
   readonly browserCanSave: boolean;
   readonly proxyAllowed: false;
   readonly encoders: readonly string[];
-  readonly protocolMin: string;
-  readonly protocolMax: string;
   readonly bulkSupported: true;
 }
 
@@ -73,12 +64,6 @@ export function createDesktopIntegration(opts?: { extensionAvailable?: boolean }
       browserCanSave: true,
       proxyAllowed: false,
       encoders: [...NATIVE_ENCODERS],
-      protocolMin: PROTOCOL_MIN,
-      protocolMax: PROTOCOL_MAX,
-      // Todo 5.3: the desktop integration runs a sequential multi-job queue
-      // (apps/desktop/src/queue.ts) over the single-job engine, so the queue
-      // is always offered here. The engine still validates each queued
-      // request on its own; the flag only gates the controls.
       bulkSupported: true,
     };
   }
@@ -116,7 +101,7 @@ export function createDesktopIntegration(opts?: { extensionAvailable?: boolean }
   }
 
   function describe(): string {
-    return `desktop native=${String(getCapabilities().nativeAvailable)} protocol=${PROTOCOL_MIN}`;
+    return `desktop native=${String(getCapabilities().nativeAvailable)}`;
   }
 
   return { kind: "desktop", getCapabilities, openExternalLink, describe };

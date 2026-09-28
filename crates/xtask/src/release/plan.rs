@@ -1,16 +1,16 @@
 //! `cargo xtask release plan`: freeze the deterministic release contract.
 //!
-//! The plan pins the version, tag, commit, protocol range, capabilities,
+//! The plan pins the version, tag, commit, capabilities,
 //! and per-target availability from
 //! `release/*.toml` + `generated/*.json`, and refuses to silently replace
 //! an existing plan for the same version (byte-identical rewrites are the
 //! only idempotent case).
 
 use super::common::{
-    app_version, git_commit, git_output, load_capabilities, load_compatibility, load_config,
-    load_targets, validate_version, ARTIFACTS_ROOT,
+    app_version, git_commit, git_output, load_capabilities, load_targets, validate_version,
+    ARTIFACTS_ROOT,
 };
-use super::common::{Plan, PlanProtocol, PlanTarget};
+use super::common::{Plan, PlanTarget};
 use std::path::{Path, PathBuf};
 
 pub(crate) fn plan_cmd(args: &[String]) -> Result<(), String> {
@@ -32,25 +32,11 @@ pub(crate) fn release_plan(numbered: bool) -> Result<PathBuf, String> {
 fn release_plan_at(base: &Path, numbered: bool) -> Result<PathBuf, String> {
     let (version, exactly_tagged) = app_version()?;
     validate_version(&version)?;
-    let config = load_config()?;
     if numbered && !exactly_tagged {
         return Err(format!("numbered release requires tag v{version} at HEAD"));
     }
     let targets = load_targets()?;
-    let compat = load_compatibility()?;
     let caps = load_capabilities()?;
-    if config.protocol.range != compat.compatibility.current {
-        return Err(format!(
-            "protocol range {} disagrees with compatibility current {}",
-            config.protocol.range, compat.compatibility.current
-        ));
-    }
-    if caps.protocol != config.protocol.range {
-        return Err(format!(
-            "release capabilities protocol {} disagrees with config range {}",
-            caps.protocol, config.protocol.range
-        ));
-    }
     let commit = git_commit()?;
     let plan = Plan {
         tag: if numbered {
@@ -61,12 +47,6 @@ fn release_plan_at(base: &Path, numbered: bool) -> Result<PathBuf, String> {
         channel: if numbered { "stable" } else { "rolling" }.to_string(),
         version: version.clone(),
         commit,
-        protocol: PlanProtocol {
-            range: config.protocol.range.clone(),
-            min_peer: config.protocol.min_peer.clone(),
-            compatibility_current: compat.compatibility.current.clone(),
-            compatibility_n_minus_1: compat.compatibility.n_minus_1.clone(),
-        },
         capabilities: caps.capabilities.clone(),
         targets: targets
             .list

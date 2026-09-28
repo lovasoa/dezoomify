@@ -39,9 +39,6 @@ pub struct Args {
     /// Tile retry budget, wired to native `max_retries`. Zero means no
     /// retries and is passed through unchanged.
     pub retries: u32,
-    /// Base retry wait, wired to native `retry_base_delay`: attempt `n`
-    /// waits this value doubled `n-1` times (engine backoff ceiling and
-    /// observed `retry-after` still apply).
     pub retry_delay: Duration,
     /// Output compression, 0 is less, 100 is more. Wired to native
     /// `compression`: JPEG quality is `100 - compression`, PNG tiers map
@@ -411,9 +408,6 @@ fn take_value(
         .ok_or_else(|| format!("missing value for {flag}"))
 }
 
-/// Known `--format` names, mirroring the core registry order
-/// (`dezoomify::formats` registry snapshot). `auto` is the
-/// pseudo-name for automatic detection and is always accepted.
 #[must_use]
 pub fn known_formats() -> &'static [&'static str] {
     &[

@@ -5,7 +5,7 @@
 // Everything here is host-free: no DOM, no fetch, no globals beyond URL and
 // the base64 helpers, so node tests drive each function directly. Trust
 // boundaries stay with the callers: the extension coordinator validates
-// engine requests, transports enforce their own credential and header
+// resource requests, transports enforce their own credential and header
 // policies, and the injected tab operation receives pre-validated input.
 import type { RequestPurpose } from "@dezoomify/wasm-bindings";
 
@@ -24,7 +24,7 @@ declare global {
 /** Byte cap for one tab-origin source response, enforced while streaming. */
 export const SOURCE_FETCH_BYTE_LIMIT = 8 * 1024 * 1024;
 
-/** HTTP methods an engine-declared source request may use. */
+/** HTTP methods a declared source request may use. */
 export const FETCH_METHODS: readonly string[] = Object.freeze([
   "GET",
   "POST",
@@ -35,8 +35,8 @@ export const FETCH_METHODS: readonly string[] = Object.freeze([
   "OPTIONS",
 ]);
 
-/** Shape bounds for engine-declared request headers. */
-export const ENGINE_HEADER_LIMITS = Object.freeze({
+/** Shape bounds for declared request headers. */
+export const REQUEST_HEADER_LIMITS = Object.freeze({
   maxCount: 64,
   maxName: 256,
   maxValue: 4096,
@@ -84,7 +84,7 @@ export function originOfPublicUrl(value: unknown): string | null {
 }
 
 /**
- * Normalize an engine-declared method, null when disallowed. `undefined`
+ * Normalize a declared method, null when disallowed. `undefined`
  * means GET, matching fetch defaults.
  * @param {unknown} method
  */
@@ -102,13 +102,13 @@ export function normalizeFetchMethod(method: unknown): string | null {
 }
 
 /**
- * Validate one engine-declared header pair, null when malformed. Values pass
+ * Validate one declared header pair, null when malformed. Values pass
  * through otherwise unchanged; forwarding policies live with the transports.
  */
 export function sanitizeHeaderPair(
   name: unknown,
   value: unknown,
-  limits: { maxName: number; maxValue: number } = ENGINE_HEADER_LIMITS,
+  limits: { maxName: number; maxValue: number } = REQUEST_HEADER_LIMITS,
 ): { name: string; value: string } | null {
   if (
     typeof name !== "string" ||
@@ -124,12 +124,12 @@ export function sanitizeHeaderPair(
 }
 
 /**
- * Validate engine-declared headers into a fresh array, null when malformed.
+ * Validate declared headers into a fresh array, null when malformed.
  * @param {unknown} headers
  */
-export function validateEngineHeaders(
+export function validateRequestHeaders(
   headers: unknown,
-  limits: { maxCount: number; maxName: number; maxValue: number } = ENGINE_HEADER_LIMITS,
+  limits: { maxCount: number; maxName: number; maxValue: number } = REQUEST_HEADER_LIMITS,
 ): Array<{ name: string; value: string }> | null {
   if (!Array.isArray(headers) || headers.length > limits.maxCount) return null;
   const result: Array<{ name: string; value: string }> = [];
@@ -146,7 +146,7 @@ export function validateEngineHeaders(
 }
 
 /**
- * Reduce engine-declared headers to the core forwarding allowlist.
+ * Reduce declared headers to the core forwarding allowlist.
  * @param {unknown} headers @param {RequestPurpose} purpose
  */
 export function forwardCoreHeaders(

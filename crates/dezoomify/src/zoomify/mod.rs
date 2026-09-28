@@ -14,7 +14,7 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 use crate::Vec2d;
 use crate::core::discovery::{html_matches, image_url, metadata, url_matches, url_suffix, viewer};
 use crate::core::{
-    CatalogPlan, DiscoveryError, DiscoveryRoute, DiscoveryStep, FormatSpec, ImagePlan, Request,
+    CatalogPlan, DiscoveryError, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource, Request,
     ResolvedLevel, resolve_relative,
 };
 
@@ -139,23 +139,23 @@ fn is_tile_url(uri: &str) -> bool {
 
 fn extract_image_properties_url(
     resource: crate::core::DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+) -> Result<ParsedResource, DiscoveryError> {
     let image_path = extract_image_path(resource.bytes()).ok_or_else(|| {
-        DiscoveryError::Session("Zoomify viewer page does not declare an image path".into())
+        DiscoveryError::InvalidMetadata("Zoomify viewer page does not declare an image path".into())
     })?;
     let page_base_uri = extract_html_base(resource.bytes()).map_or_else(
         || resource.final_uri().to_owned(),
         |base| resolve_relative(resource.final_uri(), &base),
     );
     let image_uri = resolve_relative(&page_base_uri, &image_path);
-    Ok(DiscoveryStep::Follow(Request::new(append_path_component(
+    Ok(ParsedResource::Follow(Request::new(append_path_component(
         &image_uri,
         "ImageProperties.xml",
     ))))
 }
 
 /// Whether a script block declares an inline source *with* geometry.
-/// Path-only declarations (legacy `Z.showImage`, bare `tilesUrl`) keep the
+/// Path-only declarations (`Z.showImage`, bare `tilesUrl`) keep the
 /// `ImageProperties.xml` route below; only full configurations qualify here.
 fn has_inline_tile_service(bytes: &[u8]) -> bool {
     inline_tile_services(bytes, "", "").next().is_some()
@@ -247,12 +247,12 @@ fn inline_levels(width: u32, height: u32, tile_size: u32) -> Vec<ZoomLevelInfo> 
 
 fn inline_catalog(
     resource: crate::core::DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+) -> Result<ParsedResource, DiscoveryError> {
     let (uri, bytes) = (resource.final_uri(), resource.bytes());
     let base_href = extract_html_base(bytes).unwrap_or_default();
     let services: Vec<InlineService> = inline_tile_services(bytes, uri, &base_href).collect();
     if services.is_empty() {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "Zoomify viewer page declares no inline image geometry".into(),
         ));
     }
@@ -265,10 +265,12 @@ fn inline_catalog(
                 false,
                 Vec::new(),
             )
-            .map_err(|_| DiscoveryError::Session("invalid inline Zoomify geometry".into()))?,
+            .map_err(|_| {
+                DiscoveryError::InvalidMetadata("invalid inline Zoomify geometry".into())
+            })?,
         );
     }
-    Ok(DiscoveryStep::Catalog(CatalogPlan::images(images)))
+    Ok(ParsedResource::Catalog(CatalogPlan::images(images)))
 }
 
 fn has_fluid_access_number(bytes: &[u8]) -> bool {
@@ -277,18 +279,20 @@ fn has_fluid_access_number(bytes: &[u8]) -> bool {
 
 fn extract_fluid_catalog(
     resource: crate::core::DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+) -> Result<ParsedResource, DiscoveryError> {
     // Fluid Engage pages name an image collection; collection metadata comes
     // from the site-root XML broker.
     let access = FLUID_ACCESS_RE
         .captures(resource.bytes())
         .and_then(|captures| capture_text(&captures, "access"))
-        .ok_or_else(|| DiscoveryError::Session("Zoomify page has no Fluid access number".into()))?;
+        .ok_or_else(|| {
+            DiscoveryError::InvalidMetadata("Zoomify page has no Fluid access number".into())
+        })?;
     let broker = format!(
         "{}/scripts/XMLBroker.new.php?Lang=2&contentType=IMAGES&contentID={access}",
         origin_of(resource.final_uri())
     );
-    Ok(DiscoveryStep::Follow(Request::new(broker)))
+    Ok(ParsedResource::Follow(Request::new(broker)))
 }
 
 fn is_broker_url(uri: &str) -> bool {
@@ -297,18 +301,18 @@ fn is_broker_url(uri: &str) -> bool {
 
 fn broker_catalog_step(
     resource: crate::core::DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+) -> Result<ParsedResource, DiscoveryError> {
     broker_catalog(resource.bytes())
 }
 
-fn broker_catalog(bytes: &[u8]) -> Result<DiscoveryStep, DiscoveryError> {
+fn broker_catalog(bytes: &[u8]) -> Result<ParsedResource, DiscoveryError> {
     let path = BROKER_IMAGE_RE
         .captures(bytes)
         .and_then(|captures| capture_text(&captures, "image"))
         .ok_or_else(|| {
-            DiscoveryError::Session("Fluid broker response has no zoomify image".into())
+            DiscoveryError::InvalidMetadata("Fluid broker response has no zoomify image".into())
         })?;
-    Ok(DiscoveryStep::Follow(Request::new(append_path_component(
+    Ok(ParsedResource::Follow(Request::new(append_path_component(
         &path,
         "ImageProperties.xml",
     ))))
@@ -320,13 +324,15 @@ fn is_unibe_page(uri: &str) -> bool {
 
 fn extract_unibe_catalog(
     resource: crate::core::DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+) -> Result<ParsedResource, DiscoveryError> {
     let path = UNIBE_URL_RE
         .captures(resource.bytes())
         .and_then(|captures| capture_text(&captures, "path"))
-        .ok_or_else(|| DiscoveryError::Session("Unibe page declares no image URL".into()))?;
+        .ok_or_else(|| {
+            DiscoveryError::InvalidMetadata("Unibe page declares no image URL".into())
+        })?;
     let image_uri = resolve_relative(resource.final_uri(), &path);
-    Ok(DiscoveryStep::Follow(Request::new(append_path_component(
+    Ok(ParsedResource::Follow(Request::new(append_path_component(
         &image_uri,
         "ImageProperties.xml",
     ))))
@@ -338,13 +344,15 @@ fn has_openlayers_source(bytes: &[u8]) -> bool {
 
 fn extract_openlayers_catalog(
     resource: crate::core::DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+) -> Result<ParsedResource, DiscoveryError> {
     let path = OPENLAYERS_RE
         .captures(resource.bytes())
         .and_then(|captures| capture_text(&captures, "source"))
-        .ok_or_else(|| DiscoveryError::Session("OpenLayers page declares no image path".into()))?;
+        .ok_or_else(|| {
+            DiscoveryError::InvalidMetadata("OpenLayers page declares no image path".into())
+        })?;
     let image_uri = resolve_relative(resource.final_uri(), &path);
-    Ok(DiscoveryStep::Follow(Request::new(append_path_component(
+    Ok(ParsedResource::Follow(Request::new(append_path_component(
         &image_uri,
         "ImageProperties.xml",
     ))))
@@ -356,12 +364,12 @@ fn has_ete_url(bytes: &[u8]) -> bool {
 
 fn extract_ete_catalog(
     resource: crate::core::DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+) -> Result<ParsedResource, DiscoveryError> {
     let path = ETE_URL_RE
         .captures(resource.bytes())
         .and_then(|captures| capture_text(&captures, "page"))
-        .ok_or_else(|| DiscoveryError::Session("page declares no ETE image URL".into()))?;
-    Ok(DiscoveryStep::Follow(Request::new(append_path_component(
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("page declares no ETE image URL".into()))?;
+    Ok(ParsedResource::Follow(Request::new(append_path_component(
         &path,
         "ImageProperties.xml",
     ))))
@@ -394,8 +402,7 @@ fn append_path_component(uri: &str, component: &str) -> String {
 }
 
 fn extract_image_path(html: &[u8]) -> Option<String> {
-    // Earliest match wins across the page-level declaration forms, mirroring
-    // the legacy client's combined-pattern scan.
+    // Earliest match wins across the page-level declaration forms.
     let image_path = IMAGE_PATH_RE
         .captures_iter(html)
         .find_map(|captures| Some((captures.get(0)?.start(), capture_text(&captures, "image")?)));
@@ -468,13 +475,13 @@ fn tile_metadata(input: &str) -> Result<Request, DiscoveryError> {
 
 fn image_properties(
     resource: crate::core::DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+) -> Result<ParsedResource, DiscoveryError> {
     let (url, contents) = (resource.uri(), resource.bytes());
     let properties: ImageProperties = serde_xml_rs::from_reader(contents).map_err(|error| {
-        DiscoveryError::Session(format!("unable to parse Zoomify XML: {error}"))
+        DiscoveryError::InvalidMetadata(format!("unable to parse Zoomify XML: {error}"))
     })?;
     if properties.width == 0 || properties.height == 0 || properties.tile_size == 0 {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "Zoomify XML must declare positive WIDTH, HEIGHT, and TILESIZE values".into(),
         ));
     }
@@ -482,7 +489,7 @@ fn image_properties(
         url.split("/ImageProperties.xml").next().unwrap_or(url),
         &properties,
     )
-    .map(DiscoveryStep::Image)
+    .map(ParsedResource::Image)
 }
 
 fn plan_from_properties(
@@ -549,8 +556,7 @@ fn plan_from_levels(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::discovery::DiscoveryOperation;
-    use crate::core::{DiscoveredEntry, ResolvedImage, ResourceResponse, TileSource};
+    use crate::core::{DiscoveredEntry, ResolvedImage, TileSource};
 
     const XML: &[u8] = br#"<IMAGE_PROPERTIES WIDTH="512" HEIGHT="256" NUMTILES="2" NUMIMAGES="1" VERSION="1.8" TILESIZE="256"/>"#;
 
@@ -562,36 +568,7 @@ mod tests {
         );
     }
 
-    fn operation(uri: &str) -> DiscoveryOperation {
-        let mut registry = crate::core::Registry::new();
-        registry.register(SPEC);
-        registry.start(uri)
-    }
-
-    fn provide_next(operation: &mut DiscoveryOperation, bytes: &[u8]) -> String {
-        let need = operation.missing_resources().unwrap().pop().unwrap();
-        let uri = need.request.uri.clone();
-        operation
-            .provide(ResourceResponse::new(need.id, bytes))
-            .unwrap();
-        uri
-    }
-
-    fn provide_next_at(
-        operation: &mut DiscoveryOperation,
-        bytes: &[u8],
-        final_uri: &str,
-    ) -> String {
-        let need = operation.missing_resources().unwrap().pop().unwrap();
-        let uri = need.request.uri.clone();
-        operation
-            .provide(ResourceResponse::new(need.id, bytes).with_final_uri(final_uri))
-            .unwrap();
-        uri
-    }
-
-    fn first_tile(operation: DiscoveryOperation) -> String {
-        let catalog = operation.finish().unwrap();
+    fn first_tile(catalog: crate::core::DiscoveryCatalog) -> String {
         let DiscoveredEntry::Ready(image) = &catalog.entries()[0] else {
             panic!("Zoomify metadata must produce a ready image")
         };
@@ -602,22 +579,24 @@ mod tests {
     }
 
     fn discover_viewer(page_uri: &str, page: &[u8]) -> (String, String) {
-        let mut operation = operation(page_uri);
-        assert_eq!(provide_next(&mut operation, page), page_uri);
-        let metadata = provide_next(&mut operation, XML);
-        (metadata, first_tile(operation))
+        let (catalog, requests) =
+            crate::test_support::discover(SPEC, page_uri, &[(page, None), (XML, None)]);
+        (requests[1].uri.clone(), first_tile(catalog.unwrap()))
     }
 
     #[test]
     fn tile_urls_request_sibling_metadata() {
-        let mut operation =
-            operation("https://example.com/images/book/TileGroup0/3-0-0.jpg?token=secret");
+        let (catalog, requests) = crate::test_support::discover(
+            SPEC,
+            "https://example.com/images/book/TileGroup0/3-0-0.jpg?token=secret",
+            &[(XML, None)],
+        );
         assert_eq!(
-            provide_next(&mut operation, XML),
+            requests[0].uri,
             "https://example.com/images/book/ImageProperties.xml?token=secret"
         );
         assert_eq!(
-            first_tile(operation),
+            first_tile(catalog.unwrap()),
             "https://example.com/images/book/TileGroup0/0-0-0.jpg"
         );
     }
@@ -644,32 +623,33 @@ mod tests {
 
     #[test]
     fn viewer_pages_resolve_relative_paths_against_the_redirect_target() {
-        let mut operation = operation("https://museum.example/object/12");
-        assert_eq!(
-            provide_next_at(
-                &mut operation,
-                br#"<script>Z.showImage("viewer", "tiles");</script>"#,
-                "https://cdn.example/viewer/12/index.html",
-            ),
-            "https://museum.example/object/12"
+        let (catalog, requests) = crate::test_support::discover(
+            SPEC,
+            "https://museum.example/object/12",
+            &[
+                (
+                    br#"<script>Z.showImage("viewer", "tiles");</script>"#,
+                    Some("https://cdn.example/viewer/12/index.html"),
+                ),
+                (XML, None),
+            ],
         );
+        catalog.unwrap();
         assert_eq!(
-            provide_next(&mut operation, XML),
+            requests[1].uri,
             "https://cdn.example/viewer/12/tiles/ImageProperties.xml"
         );
     }
 
     #[test]
     fn redirected_metadata_keeps_the_requested_tile_base() {
-        let mut operation = operation("https://origin.example/book/ImageProperties.xml");
-        let metadata = provide_next_at(
-            &mut operation,
-            XML,
-            "https://cdn.example/metadata/content.xml",
+        let (catalog, _) = crate::test_support::discover(
+            SPEC,
+            "https://origin.example/book/ImageProperties.xml",
+            &[(XML, Some("https://cdn.example/metadata/content.xml"))],
         );
-        assert_eq!(metadata, "https://origin.example/book/ImageProperties.xml");
         assert_eq!(
-            first_tile(operation),
+            first_tile(catalog.unwrap()),
             "https://origin.example/book/TileGroup0/0-0-0.jpg"
         );
     }
@@ -720,15 +700,15 @@ mod tests {
 
     #[test]
     fn unrelated_pages_are_rejected() {
-        let mut operation = operation("https://example.com/page");
-        let need = operation.missing_resources().unwrap().pop().unwrap();
-        let error = operation
-            .provide(ResourceResponse::new(
-                need.id,
-                b"<html><body>ordinary page</body></html>",
-            ))
-            .unwrap_err();
-        assert!(matches!(error, DiscoveryError::NoCandidateAccepted { .. }));
+        let (result, _) = crate::test_support::discover(
+            SPEC,
+            "https://example.com/page",
+            &[(b"<html><body>ordinary page</body></html>", None)],
+        );
+        assert!(matches!(
+            result,
+            Err(DiscoveryError::NoCandidateAccepted { .. })
+        ));
     }
 
     #[test]
@@ -752,17 +732,10 @@ mod tests {
 
     #[test]
     fn inline_tile_service_completes_without_metadata_fetch() {
-        // Mirrors the geographicus.com OpenSeadragon embed: geometry travels
-        // with the page, so no ImageProperties.xml request may be emitted.
-        let mut operation = operation("https://www.geographicus.com/P/AntiqueMap/example");
-        let need = operation.missing_resources().unwrap().pop().unwrap();
-        assert_eq!(
-            need.request.uri,
-            "https://www.geographicus.com/P/AntiqueMap/example"
-        );
-        operation
-            .provide(ResourceResponse::new(
-                need.id,
+        let (catalog, requests) = crate::test_support::discover(
+            SPEC,
+            "https://www.geographicus.com/P/AntiqueMap/example",
+            &[(
                 br#"<html><head><base href="https://www.geographicus.com/mm5/" /></head><body>
                 <script>viewer = OpenSeadragon({ tileSources: [
                   { type: "zoomifytileservice", width: 7066, height: 9380,
@@ -772,10 +745,11 @@ mod tests {
                     tilesUrl: "/mm5/graphics/00000001/zoomify/Cowboys-mora-1941-3-image2/",
                     tileSize: 256, fileFormat: 'jpg' }
                 ] });</script></body></html>"#,
-            ))
-            .unwrap();
-        assert!(operation.missing_resources().unwrap().is_empty());
-        let catalog = operation.finish().unwrap();
+                None,
+            )],
+        );
+        let catalog = catalog.unwrap();
+        assert_eq!(requests.len(), 1);
         assert_eq!(catalog.len(), 2);
         let DiscoveredEntry::Ready(first) = &catalog.entries()[0] else {
             panic!("inline Zoomify sources must be ready");
@@ -833,16 +807,13 @@ mod tests {
                     tilesUrl: "/mm5/graphics/zoomify/Cowboys-mora-1941-3-image2/", tileSize: 256 }
                 ] });</script></body></html>"#,
         );
-        let mut operation = operation("https://www.geographicus.com/P/AntiqueMap/example");
-        let need = operation.missing_resources().unwrap().pop().unwrap();
-        operation
-            .provide(ResourceResponse::new(need.id, page.into_bytes()))
-            .unwrap();
-        assert!(
-            operation.missing_resources().unwrap().is_empty(),
-            "the inline config must complete discovery without fetching ImageProperties.xml"
+        let (catalog, requests) = crate::test_support::discover(
+            SPEC,
+            "https://www.geographicus.com/P/AntiqueMap/example",
+            &[(page.as_bytes(), None)],
         );
-        let catalog = operation.finish().unwrap();
+        let catalog = catalog.unwrap();
+        assert_eq!(requests.len(), 1);
         assert_eq!(catalog.len(), 2);
         let DiscoveredEntry::Ready(first) = &catalog.entries()[0] else {
             panic!("inline Zoomify sources must be ready");
@@ -868,34 +839,25 @@ mod tests {
 
     #[test]
     fn inline_config_without_geometry_falls_back_to_xml() {
-        // A path-only tilesUrl has no width/height, so the legacy metadata
-        // route must still be used.
-        let mut operation = operation("https://example.com/page");
-        let need = operation.missing_resources().unwrap().pop().unwrap();
-        operation
-            .provide(ResourceResponse::new(
-                need.id,
-                br#"<script>var config = {"type": "zoomifytileservice", "tilesUrl": "/zoomify"};</script>"#,
-            ))
-            .unwrap();
-        let follow = operation.missing_resources().unwrap().pop().unwrap();
+        let (catalog,requests)=crate::test_support::discover(SPEC,"https://example.com/page",&[(br#"<script>var config = {"type": "zoomifytileservice", "tilesUrl": "/zoomify"};</script>"#,None),(XML,None)]);
+        catalog.unwrap();
         assert_eq!(
-            follow.request.uri,
+            requests[1].uri,
             "https://example.com/zoomify/ImageProperties.xml"
         );
     }
 
     #[test]
     fn generic_var_url_pages_are_not_treated_as_ngv() {
-        let mut operation = operation("https://example.com/page");
-        let need = operation.missing_resources().unwrap().pop().unwrap();
-        let error = operation
-            .provide(ResourceResponse::new(
-                need.id,
-                br"<script>var url = '/zoomify';</script>",
-            ))
-            .unwrap_err();
-        assert!(matches!(error, DiscoveryError::NoCandidateAccepted { .. }));
+        let (result, _) = crate::test_support::discover(
+            SPEC,
+            "https://example.com/page",
+            &[(br"<script>var url = '/zoomify';</script>", None)],
+        );
+        assert!(matches!(
+            result,
+            Err(DiscoveryError::NoCandidateAccepted { .. })
+        ));
     }
 
     fn ready_image(url: &str, contents: &[u8]) -> ResolvedImage {

@@ -364,7 +364,7 @@ fn cli_full_flags_produce_golden_output() {
         "width-only",
         "automatic level",
         "6 concurrent",
-        "engine defaults",
+        "native defaults",
         "ignoring the height",
     ] {
         assert!(

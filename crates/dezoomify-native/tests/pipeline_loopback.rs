@@ -1,12 +1,3 @@
-//! C2 acceptance: the native job service downloads, decodes, assembles, encodes,
-//! and writes real output over loopback sockets against `dezoomify-fixture-server`
-//! scenarios. Expected results (including the real output digest) are pinned
-//! in `testdata/scenarios/native/*/expected/result.json`.
-//!
-//! Raw-TCP tests cover flows the gateway cannot express (deferred follows
-//! need runtime-port absolute URLs): a canned per-path responder serves list
-//! files, metadata, and tiles on a fresh loopback port per test.
-
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -147,10 +138,6 @@ fn tile_failure_fails_honestly_without_output() {
 
 #[test]
 fn file_uri_tiles_assemble_from_a_remote_manifest() {
-    // Local tile URIs (`file://`) read from the filesystem even when the
-    // manifest itself arrives over HTTP: the assembled output matches the
-    // loopback golden exactly. (Local *inputs* still need a job-engine
-    // validation widening outside this crate; see `fetch_local`.)
     let work = temp_dir("local-tiles");
     for tile in ["0_0", "1_0", "0_1", "1_1"] {
         let bytes = scenario_payload(&format!("tile-{tile}.png"));
@@ -308,9 +295,6 @@ fn max_width_selects_the_largest_fitting_level() {
 
 #[test]
 fn probe_planned_grid_matches_the_fixed_grid_output() {
-    // A generic template has no fixed geometry: the driver answers probe
-    // effects with observed tile sizes until the job resolves a real grid.
-    // The assembled output must equal the fixed-grid pyramid byte for byte.
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/probe/{{{{X}}}}/{{{{Y}}}}.png");
     let out_dir = temp_dir("probe");
@@ -776,15 +760,10 @@ fn cancellation_before_publish_writes_nothing() {
         output.to_str().expect("utf8 output"),
         false,
         &JobOptions::default(),
-        |job, snapshot| {
-            if !cancelled
-                && snapshot.snapshot.lifecycle == dezoomify::model::JobState::AcquiringTiles
-            {
+        |controls, progress| {
+            if !cancelled && progress.phase == dezoomify::model::ProgressPhase::Acquisition {
                 cancelled = true;
-                assert_eq!(
-                    job.send(dezoomify_native::UserCommand::Cancel),
-                    Ok(dezoomify_native::JobCommandAck::Accepted)
-                );
+                controls.cancel();
             }
         },
     )

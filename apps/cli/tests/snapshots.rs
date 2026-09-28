@@ -1,5 +1,3 @@
-//! CLI snapshots: help, version, invalid args, collisions.
-
 #[test]
 fn help_snapshot_matches_golden_byte_for_byte() {
     let help = std::process::Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))

@@ -8,10 +8,9 @@ use serde::Deserialize;
 use crate::Vec2d;
 use crate::core::discovery::{metadata, url_matches, viewer};
 use crate::core::{
-    AdaptiveProgram, AdaptiveSource, DiscoverableStep, DiscoveryError, DiscoveryResource,
-    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImagePlan, ObservationResult,
-    ProbeContinuation, Request, ResolvedLevel, TileRole, TileSourceError, TileSpec,
-    resolve_relative,
+    AdaptiveSource, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
+    ObservationResult, ParsedResource, Request, ResolvedGrid, ResolvedLevel, TileRole,
+    TileSourceError, TileSpec, resolve_relative,
 };
 use crate::markup::attribute;
 use crate::web_page::page_title;
@@ -21,7 +20,7 @@ static META_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?is)<meta\b[^>]*>").expect("constant pnav meta tag pattern"));
 const ROUTES: &[DiscoveryRoute] = &[
     viewer(url_matches(is_pnav_url)).extract_metadata(follow_image_json),
-    metadata(url_matches(is_image_json)).continue_with(complete_from_json),
+    metadata(url_matches(is_image_json)).child_metadata(complete_from_json),
 ];
 
 pub const SPEC: FormatSpec = FormatSpec::new("pnav", ROUTES).with_display_name("pnav");
@@ -68,19 +67,19 @@ fn extract_image_url(page: &str, page_uri: &str) -> Option<String> {
     })
 }
 
-fn follow_image_json(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn follow_image_json(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let image = extract_image_url(&resource.text_lossy(), resource.final_uri())
-        .ok_or_else(|| DiscoveryError::Session("pnav page has no og:image URL".into()))?;
-    Ok(DiscoveryStep::Follow(Request::new(json_url(&image)?)))
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("pnav page has no og:image URL".into()))?;
+    Ok(ParsedResource::Follow(Request::new(json_url(&image)?)))
 }
 
-fn complete_from_json(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn complete_from_json(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let context = resource.context();
     let metadata: Metadata = serde_json::from_slice(resource.bytes()).map_err(|error| {
-        DiscoveryError::Session(format!("unable to parse pnav image metadata: {error}"))
+        DiscoveryError::InvalidMetadata(format!("unable to parse pnav image metadata: {error}"))
     })?;
     if metadata.width == 0 || metadata.height == 0 {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "pnav image dimensions must be positive".into(),
         ));
     }
@@ -89,19 +88,19 @@ fn complete_from_json(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, 
         .rev()
         .find(|page| extract_image_url(&page.text_lossy(), page.final_uri()).is_some())
         .ok_or_else(|| {
-            DiscoveryError::Session("pnav page is missing from discovery history".into())
+            DiscoveryError::InvalidMetadata("pnav page is missing from discovery history".into())
         })?;
     let page_text = page.text_lossy();
     let image = extract_image_url(&page_text, page.final_uri()).ok_or_else(|| {
-        DiscoveryError::Session("pnav page is missing from discovery history".into())
+        DiscoveryError::InvalidMetadata("pnav page is missing from discovery history".into())
     })?;
     let title = page_title(&page_text);
-    let source = AdaptiveSource::new(PnavProgram {
+    let source = AdaptiveSource::Pnav(PnavProgram {
         image_url: image,
         width: metadata.width,
         height: metadata.height,
     });
-    Ok(DiscoveryStep::Image(ImagePlan::new(
+    Ok(ParsedResource::Image(ImagePlan::new(
         title,
         vec![ResolvedLevel::new(source)],
     )))
@@ -116,33 +115,17 @@ fn json_url(image: &str) -> Result<String, DiscoveryError> {
             path[*index..].eq_ignore_ascii_case(".jpg")
                 || path[*index..].eq_ignore_ascii_case(".jpeg")
         })
-        .ok_or_else(|| DiscoveryError::Session("pnav image URL has no JPEG extension".into()))?;
+        .ok_or_else(|| {
+            DiscoveryError::InvalidMetadata("pnav image URL has no JPEG extension".into())
+        })?;
     Ok(format!("{}.json{suffix}", &path[..dot]))
 }
 
 #[derive(Clone, Debug)]
-struct PnavProgram {
+pub struct PnavProgram {
     image_url: String,
     width: u32,
     height: u32,
-}
-
-impl AdaptiveProgram for PnavProgram {
-    fn start(&self) -> DiscoverableStep {
-        let program = self.clone();
-        let tile = TileSpec {
-            ordinal: 0,
-            request: Request::new(program.probe_url()),
-            destination: Vec2d::default(),
-            expected_size: None,
-            processing: crate::core::ProcessingRecipe::None,
-            role: TileRole::ProbeAndOutput,
-        };
-        DiscoverableStep::Probe {
-            tile,
-            continuation: ProbeContinuation::new(move |result| program.resolve(result)),
-        }
-    }
 }
 
 impl PnavProgram {
@@ -156,12 +139,28 @@ impl PnavProgram {
         )
     }
 
-    fn resolve(self, result: ObservationResult) -> Result<DiscoverableStep, TileSourceError> {
+    #[allow(clippy::result_large_err)]
+    pub(crate) async fn resolve(
+        self,
+        host: &impl crate::Host,
+    ) -> Result<Option<ResolvedGrid>, crate::model::Error> {
+        let tile = TileSpec {
+            ordinal: 0,
+            request: Request::new(self.probe_url()),
+            destination: Vec2d::default(),
+            expected_size: None,
+            processing: crate::core::ProcessingRecipe::None,
+            role: TileRole::ProbeAndOutput,
+        };
+        let result = crate::run::probe(host, tile).await?;
+        Ok(self.geometry(result)?)
+    }
+    fn geometry(self, result: ObservationResult) -> Result<Option<ResolvedGrid>, TileSourceError> {
         let ObservationResult::Available { size } = result else {
-            return Ok(DiscoverableStep::Empty);
+            return Ok(None);
         };
         if size.x == 0 || size.y == 0 || size == Vec2d::square(1) {
-            return Ok(DiscoverableStep::Empty);
+            return Ok(None);
         }
         let image_size = Vec2d {
             x: rounded_scale(self.width, size.x)?,
@@ -199,10 +198,10 @@ impl PnavProgram {
                 "{image_url}?w={output_width}&h={output_height}&cl={crop_left}&ct={crop_top}&cw={crop_width}&ch={crop_height}"
             ))
         })?;
-        Ok(DiscoverableStep::Resolved {
+        Ok(Some(ResolvedGrid {
             grid: source,
             previously_output: vec![Vec2d::default()],
-        })
+        }))
     }
 }
 
@@ -235,8 +234,8 @@ mod tests {
             width: 600,
             height: 700,
         };
-        let DiscoverableStep::Resolved { grid, .. } = program
-            .resolve(ObservationResult::Available {
+        let Some(ResolvedGrid { grid, .. }) = program
+            .geometry(ObservationResult::Available {
                 size: Vec2d::square(512),
             })
             .unwrap()

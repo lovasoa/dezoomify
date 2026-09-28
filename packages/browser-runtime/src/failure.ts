@@ -1,8 +1,4 @@
-// Structured failure type shared by every browser-runtime module.
-//
-// Extracted from `./session.ts` so leaf modules (canvas save, assembly,
-// plan gates) can raise typed failures without depending on the discovery
-// client.
+// Structured failures shared by browser operations.
 import type {
   BlockedReason,
   ErrorTransport,
@@ -56,11 +52,11 @@ export function isFetchFailure(value: unknown): value is FetchFailure {
 export interface StructuredFailure extends Error {
   code: string;
   retryable: boolean;
-  /** Raw engine diagnostics for the technical-details section; never shown prominently. */
+  /** Raw job diagnostics for the technical-details section; never shown prominently. */
   detail?: string;
   /**
    * Dense technical diagnostics (transport, HTTP status, failure chain) for
-   * logs, the engine, and bug reports. `message` stays the hand-holding UI
+   * logs, the Rust algorithm, and bug reports. `message` stays the hand-holding UI
    * sentence; `technical` never reaches the prominent error slot.
    */
   technical?: string;
@@ -84,7 +80,7 @@ export interface StructuredFailure extends Error {
   preview?: string;
 }
 
-/** Typed fetch cause crossing the worker boundary into the wasm core. */
+/** Typed fetch cause passed to the Rust algorithm. */
 export interface FetchCause {
   code: string;
   http?: number;
@@ -171,7 +167,7 @@ export function failure(
 /**
  * Build a fetch failure carrying its typed cause plus the structured
  * context the details renderer needs. Free-text technical chains are
- * replaced by these fields: the engine gets `cause`, the renderer gets
+ * replaced by these fields: the Rust algorithm gets `cause`, the renderer gets
  * `url`/`http`/`preview`.
  */
 export function fetchFailure(

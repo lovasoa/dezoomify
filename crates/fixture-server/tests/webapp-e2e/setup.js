@@ -5,7 +5,7 @@ const path = require("node:path");
 
 const root = path.resolve(__dirname, "..", "..", "..", "..");
 
-// Full site build: help, wasm adapter (release profile), glue, and dist/.
+// Full site build: help, WASM binding (release profile), glue, and dist/.
 const site = spawnSync("node", ["scripts/build-site.mjs"], {
   cwd: root,
   encoding: "utf8",

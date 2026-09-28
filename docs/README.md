@@ -7,11 +7,11 @@ dezoomify discovers zoomable images, lets a user choose an image and level, down
 - [User documentation](user/README.md): plain-language guide published to `/help/`; the single source of truth for user-facing copy.
 - [Product](product.md): users, workflows, and product boundaries.
 - [Architecture](architecture.md): monorepo components and dependency rules.
-- [Job engine](job-engine.md): deterministic job state, effects, and policies.
+- [Algorithm](algorithm.md): async discovery, acquisition, selection, and retry policy.
 - [Browser runtime](browser-runtime.md): browser fetching, processing, and saving.
 - [Extension](extension.md): page discovery and browser-session fetching, including the source-binding and job-tab contract appendix.
 - [Native apps](native-apps.md): CLI and Tauri desktop capabilities.
-- [Protocol](protocol.md): generated commands, events, handoff, and compatibility.
+- [Bindings](bindings.md): generated Host calls, domain values, and handoff.
 - [Errors](errors.md): typed failures and recovery actions.
 - [Testing](testing.md): shared scenarios and runtime-specific coverage.
 - [Security](security.md): trust boundaries, credentials, and proxy controls.
@@ -24,8 +24,8 @@ dezoomify discovers zoomable images, lets a user choose an image and level, down
 ## Words used across these pages
 
 - **job**: one user request, from pasted address to saved file.
-- **host**: whatever runs a job's side effects (browser tab, desktop shell, CLI process).
-- **runtime**: the effect layer inside an app (browser or native code doing fetch, decode, save).
+- **host**: injected platform capabilities (browser tab, desktop shell, CLI process).
+- **runtime**: platform operations inside an app (browser or native code doing fetch, decode, save).
 - **transport**: how bytes reach the app (direct fetch, proxy, browser session).
 - **handoff**: moving a job to the desktop app through a `dezoomify://` link.
 - **scenario**: a deterministic test unit under `testdata/scenarios`.
@@ -39,7 +39,7 @@ Each fact lives once; every other page links to it:
 | Fact | Canonical home |
 |---|---|
 | Transport policy (direct browser fetch first, automatic metadata proxy fallback) | [Browser runtime](browser-runtime.md#request-order) |
-| Metadata window constant (`METADATA_WINDOW_MS`) | `crates/dezoomify/src/model.rs` and its generated TypeScript projection |
+| Metadata window constant (`METADATA_WINDOW_MS`) | `packages/browser-runtime/src/tile-policy.ts` |
 | Native output formats and encoder behavior | [Native apps](native-apps.md#native-runtime) |
 | Capability baselines | `crates/dezoomify/src/model.rs` and manifests under `generated/` |
 | Canvas and save limits | [Compatibility](compatibility.md#canvas-and-save-limits) |
@@ -49,9 +49,9 @@ Each fact lives once; every other page links to it:
 
 ## System invariants
 
-- [`crates/dezoomify`](architecture.md#cratesdezoomify) is the pure Rust domain library with no network, filesystem, clock, UI, or image-codec access.
-- [`dezoomify::model`](protocol.md) is the Rust source for the generated TypeScript bindings used across the WASM boundary.
-- One shared [UI](architecture.md#packagesshared-ui) (React TSX) serves the website, desktop app, and extension.
+- [`crates/dezoomify`](architecture.md#rust-algorithm) is the shared Rust algorithm and pure parsers, with platform operations injected through Host.
+- [`dezoomify::model`](bindings.md) is the Rust source for the generated TypeScript bindings used across the WASM boundary.
+- One shared [UI](architecture.md#shared-ui-and-application) (React TSX) serves the website, desktop app, and extension.
 - Browser and native runtimes implement the same capabilities honestly; unsupported operations are reported before a job starts.
 - The extension never transfers browser cookies to another app. Desktop deep links are revalidated and confirmed before they start work.
 - Every user-visible failure has a stable error code and zero or more typed [recovery actions](errors.md#recovery-actions).

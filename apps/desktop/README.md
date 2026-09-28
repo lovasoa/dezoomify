@@ -1,8 +1,7 @@
 # Desktop Application (lean shell)
 
-Dezoomify native shell: validated deep links, command registry, job lifecycle
-table, capability manifests, and per-user `dezoomify://` protocol-handler
-registration.
+Dezoomify desktop: shared UI, a Rust NativeHost, validated deep links, native
+file actions, and per-user `dezoomify://` protocol-handler registration.
 
 - Shell: lean `src-tauri/` (pure Rust, no Tauri SDK vendored); frontend contract from `packages/shared-ui`.
 - Deep links are validated, bounded, and confirmed before any work starts.
@@ -12,8 +11,12 @@ registration.
 - Installers ship unsigned (no paid Apple/Azure signing in this free project);
   automatic updates are disabled, so check GitHub Releases manually.
 
-Contributing: talk to the engine only through the narrow validated IPC
-bridge. Tests: `cargo xtask test desktop`.
+The Tauri entry point awaits `dezoomify::dezoomify` with NativeHost. IPC carries
+progress, pending partial choices, and the returned output; image bytes stay
+native. Tests: `cargo xtask test desktop`.
+
+`node scripts/generate-desktop-capabilities.mjs` derives permission manifests
+from the Rust command and event declarations. Its `--check` mode detects drift.
 
 ## End-to-end
 
@@ -34,7 +37,7 @@ The lane builds the frontend, fixture server, and window shell (features
 `node --test specs/desktop.e2e.mjs`. The spec
 covers the user-visible journeys: automatic submit/save to an isolated output
 directory versus the `native/cli-dzi` golden, cancellation with no output, the
-deep-link confirm gate (pending links perform no effect), and a kept partial
+deep-link confirmation (pending links perform no I/O), and a kept partial
 published to a `.partial` sibling. The harness configures the existing
 output-directory setting to an isolated temporary folder through the rendered
 settings panel, so generated filenames remain discoverable on every supported

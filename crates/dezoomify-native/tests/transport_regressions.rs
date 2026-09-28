@@ -68,7 +68,6 @@ fn generated_requests_keep_headers_and_redirect_results_for_every_purpose() {
         RequestPurpose::Probe,
     ] {
         let request = ResourceRequest {
-            id: 42,
             uri: format!("{origin}/start"),
             purpose,
             headers: vec![Header {
@@ -166,9 +165,6 @@ fn serve_counted(
 
 #[test]
 fn http_refusal_returns_once_without_retry() {
-    // A 403 is an outcome, not a transport error, and the transport makes
-    // exactly one request: permanent failures must never be retried by the
-    // transport (the engine classifies them once and attempts once).
     let (port, _conns, requests, server) = serve_counted(
         vec![response(
             "HTTP/1.1 403 Forbidden",

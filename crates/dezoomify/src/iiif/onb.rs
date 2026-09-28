@@ -16,7 +16,8 @@ pub(super) fn is_entry(uri: &str) -> bool {
 }
 
 pub(super) fn manifest(uri: &str) -> Result<Request, DiscoveryError> {
-    let url = Url::parse(uri).map_err(|_| DiscoveryError::Session("invalid ONB URL".into()))?;
+    let url =
+        Url::parse(uri).map_err(|_| DiscoveryError::InvalidMetadata("invalid ONB URL".into()))?;
     let identifier = match url.host_str() {
         Some("viewer.onb.ac.at") => url
             .path_segments()
@@ -28,7 +29,7 @@ pub(super) fn manifest(uri: &str) -> Result<Request, DiscoveryError> {
         _ => None,
     }
     .filter(|identifier| !identifier.is_empty())
-    .ok_or_else(|| DiscoveryError::Session("missing ONB document identifier".into()))?;
+    .ok_or_else(|| DiscoveryError::InvalidMetadata("missing ONB document identifier".into()))?;
     Ok(Request::new(format!(
         "https://api.onb.ac.at/iiif/presentation/v3/manifest/{identifier}"
     )))

@@ -4,8 +4,8 @@
   "type": "module",
   "description": "Dezoomify browser extension: finite active-tab scan and browser-session fetch.",
   "scripts": {
-    "test": "node --test-reporter=dot --test \"tests/unit/!(job-worker|manifest-policy).test.mjs\"",
-    "test:unit": "node --test-reporter=dot --test \"tests/unit/!(job-worker|manifest-policy).test.mjs\"",
+    "test": "node --test-reporter=dot --test \"tests/unit/!(manifest-policy).test.mjs\"",
+    "test:unit": "node --test-reporter=dot --test \"tests/unit/!(manifest-policy).test.mjs\"",
     "typecheck": "tsc --noEmit",
     "postinstall": "wxt prepare",
     "build": "wxt build --browser chrome && wxt build --browser firefox",
@@ -20,8 +20,7 @@
     "@dezoomify/shared-ui": "workspace:*",
     "@dezoomify/wasm-bindings": "workspace:*",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "@dezoomify/app-model": "workspace:*"
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

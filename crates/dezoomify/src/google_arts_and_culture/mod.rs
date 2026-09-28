@@ -3,7 +3,7 @@
 use crate::Vec2d;
 use crate::core::discovery::{metadata, url_matches, url_suffix, viewer};
 use crate::core::{
-    DiscoveryError, DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImagePlan,
+    DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan, ParsedResource,
     ProcessingRecipe, Request, ResolvedLevel,
 };
 use std::sync::Arc;
@@ -13,7 +13,7 @@ mod tile_info;
 mod url;
 
 const ROUTES: &[DiscoveryRoute] = &[
-    metadata(url_suffix("=g")).continue_with(parse_tile_information),
+    metadata(url_suffix("=g")).child_metadata(parse_tile_information),
     viewer(url_matches(is_google_arts_url)).extract_metadata(parse_page),
 ];
 
@@ -24,18 +24,18 @@ fn is_google_arts_url(uri: &str) -> bool {
     uri.contains("artsandculture.google.com") || uri.contains("g.co/arts/")
 }
 
-fn parse_page(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn parse_page(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let source = std::str::from_utf8(resource.bytes())
-        .map_err(|error| DiscoveryError::Session(error.to_string()))?;
+        .map_err(|error| DiscoveryError::InvalidMetadata(error.to_string()))?;
     let page = source
         .parse::<PageInfo>()
-        .map_err(|error| DiscoveryError::Session(error.to_string()))?;
-    Ok(DiscoveryStep::Follow(Request::new(page.tile_info_url())))
+        .map_err(|error| DiscoveryError::InvalidMetadata(error.to_string()))?;
+    Ok(ParsedResource::Follow(Request::new(page.tile_info_url())))
 }
 
 fn parse_tile_information(
     resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+) -> Result<ParsedResource, DiscoveryError> {
     let page = resource
         .context()
         .resources()
@@ -43,8 +43,10 @@ fn parse_tile_information(
         .filter_map(|bytes| std::str::from_utf8(bytes).ok())
         .find_map(|source| source.parse::<PageInfo>().ok())
         .map(Arc::new)
-        .ok_or_else(|| DiscoveryError::Session("Google Arts page metadata is missing".into()))?;
-    decode(&page, resource.bytes()).map(DiscoveryStep::Image)
+        .ok_or_else(|| {
+            DiscoveryError::InvalidMetadata("Google Arts page metadata is missing".into())
+        })?;
+    decode(&page, resource.bytes()).map(ParsedResource::Image)
 }
 
 fn decode(page: &Arc<PageInfo>, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
@@ -54,7 +56,7 @@ fn decode(page: &Arc<PageInfo>, bytes: &[u8]) -> Result<ImagePlan, DiscoveryErro
         pyramid_level,
         ..
     } = serde_xml_rs::from_reader(bytes).map_err(|error| {
-        DiscoveryError::Session(format!("invalid Google Arts tile XML: {error}"))
+        DiscoveryError::InvalidMetadata(format!("invalid Google Arts tile XML: {error}"))
     })?;
     let levels: Vec<_> = pyramid_level
         .into_iter()
@@ -80,7 +82,7 @@ fn decode(page: &Arc<PageInfo>, bytes: &[u8]) -> Result<ImagePlan, DiscoveryErro
                 },
             )
             .map_err(|error| {
-                DiscoveryError::Session(format!("invalid Google Arts grid: {error}"))
+                DiscoveryError::InvalidMetadata(format!("invalid Google Arts grid: {error}"))
             })?;
             Ok(ResolvedLevel::new(source).with_title(Some(page.name.clone())))
         })
@@ -90,52 +92,35 @@ fn decode(page: &Arc<PageInfo>, bytes: &[u8]) -> Result<ImagePlan, DiscoveryErro
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{DiscoveredEntry, DiscoveryCatalog, ResourceResponse, TileSource};
+    use crate::core::{DiscoveredEntry, DiscoveryCatalog, TileSource};
 
     fn fixture_catalog() -> DiscoveryCatalog {
-        let mut registry = crate::core::Registry::new();
-        registry.register(SPEC);
-        let mut operation = registry.start("https://artsandculture.google.com/asset/test");
-        let page = operation.missing_resources().unwrap().pop().unwrap();
-        operation
-            .provide(ResourceResponse::new(
-                page.id,
-                include_bytes!("../../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/google_arts_and_culture/page_source.html"),
-            ))
-            .unwrap();
-        let tile_info = operation.missing_resources().unwrap().pop().unwrap();
-        operation
-            .provide(ResourceResponse::new(
-                tile_info.id,
-                include_bytes!("../../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/google_arts_and_culture/tile_info.xml"),
-            ))
-            .unwrap();
-        operation.finish().unwrap()
+        let (catalog, requests) = crate::test_support::discover(
+            SPEC,
+            "https://artsandculture.google.com/asset/test",
+            &[
+                (
+                    include_bytes!(
+                        "../../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/google_arts_and_culture/page_source.html"
+                    ),
+                    None,
+                ),
+                (
+                    include_bytes!(
+                        "../../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/google_arts_and_culture/tile_info.xml"
+                    ),
+                    None,
+                ),
+            ],
+        );
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].uri.ends_with("=g"));
+        catalog.unwrap()
     }
 
     #[test]
     fn discovers_fixture_as_five_replayable_levels() {
-        let mut registry = crate::core::Registry::new();
-        registry.register(SPEC);
-        let input = "https://artsandculture.google.com/asset/test";
-        let mut operation = registry.start(input);
-        let page = operation.missing_resources().unwrap().pop().unwrap();
-        assert_eq!(page.request.uri, input);
-        operation
-            .provide(ResourceResponse::new(
-                page.id,
-                include_bytes!("../../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/google_arts_and_culture/page_source.html"),
-            ))
-            .unwrap();
-        let tile_info = operation.missing_resources().unwrap().pop().unwrap();
-        assert!(tile_info.request.uri.ends_with("=g"));
-        operation
-            .provide(ResourceResponse::new(
-                tile_info.id,
-                include_bytes!("../../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/google_arts_and_culture/tile_info.xml"),
-            ))
-            .unwrap();
-        let catalog = operation.finish().unwrap();
+        let catalog = fixture_catalog();
         let [DiscoveredEntry::Ready(image)] = catalog.entries() else {
             panic!("Google Arts produces one ready image");
         };
@@ -168,34 +153,33 @@ mod tests {
 
     #[test]
     fn rejects_non_google_urls_without_requesting_data() {
-        let mut registry = crate::core::Registry::new();
-        registry.register(SPEC);
-        let mut operation = registry.start("https://example.com/test");
+        let (result, requests) =
+            crate::test_support::discover(SPEC, "https://example.com/test", &[]);
         assert!(matches!(
-            operation.missing_resources(),
+            result,
             Err(DiscoveryError::NoCandidateAccepted { .. })
         ));
+        assert!(requests.is_empty());
     }
 
     #[test]
     fn does_not_advertise_tile_metadata_without_the_required_page_context() {
-        let mut registry = crate::core::Registry::new();
-        registry.register(SPEC);
-        let mut operation = registry.start("https://lh3.googleusercontent.com/image-id=g");
+        let (result, requests) = crate::test_support::discover(
+            SPEC,
+            "https://lh3.googleusercontent.com/image-id=g",
+            &[],
+        );
         assert!(matches!(
-            operation.missing_resources(),
+            result,
             Err(DiscoveryError::NoCandidateAccepted { .. })
         ));
+        assert!(requests.is_empty());
     }
 
     #[test]
     fn recognizes_google_arts_short_urls() {
-        let mut registry = crate::core::Registry::new();
-        registry.register(SPEC);
-        let mut operation = registry.start("https://g.co/arts/fixture");
-        let need = operation.missing_resources().unwrap();
-        assert_eq!(need.len(), 1);
-        assert_eq!(need[0].request.uri, "https://g.co/arts/fixture");
+        let (_, requests) = crate::test_support::discover(SPEC, "https://g.co/arts/fixture", &[]);
+        assert_eq!(requests[0].uri, "https://g.co/arts/fixture");
     }
 
     #[test]
@@ -228,23 +212,24 @@ mod tests {
 
     #[test]
     fn invalid_tile_information_is_reported_as_a_parser_error() {
-        let mut registry = crate::core::Registry::new();
-        registry.register(SPEC);
-        let mut operation = registry.start("https://artsandculture.google.com/asset/test");
-        let page = operation.missing_resources().unwrap().pop().unwrap();
-        operation
-            .provide(ResourceResponse::new(
-                page.id,
-                include_bytes!("../../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/google_arts_and_culture/page_source.html"),
-            ))
-            .unwrap();
-        let tile_info = operation.missing_resources().unwrap().pop().unwrap();
-        let error = operation
-            .provide(ResourceResponse::new(
-                tile_info.id,
-                b"<invalid>not a tile info</invalid>",
-            ))
-            .unwrap_err();
-        assert!(error.to_string().contains("invalid Google Arts tile XML"));
+        let (result, _) = crate::test_support::discover(
+            SPEC,
+            "https://artsandculture.google.com/asset/test",
+            &[
+                (
+                    include_bytes!(
+                        "../../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/google_arts_and_culture/page_source.html"
+                    ),
+                    None,
+                ),
+                (b"<invalid>not a tile info</invalid>", None),
+            ],
+        );
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("invalid Google Arts tile XML")
+        );
     }
 }

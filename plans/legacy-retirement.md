@@ -119,7 +119,7 @@ repository-relative.
 - `AGENTS.md`: Generated-artifacts row becomes single-app (build via
   `scripts/build-site.mjs`, new app at `/`, never serves repository
   files); Git row drops `holds both the legacy site (legacy/) and`
-  (master holds the new app); keep the vocabulary and protocol rows.
+  (master holds the new app); keep the vocabulary and binding rules.
 - `docs/development.md` Website deployment contract: step 1 becomes
   `dist/` = new app at `/` + `_routes.json` limited to `/api/proxy`
   (`functions/api/proxy.ts`); step 3 becomes verify single app +

@@ -19,10 +19,7 @@ fn decode(template: &str) -> Result<ImagePlan, DiscoveryError> {
 
 #[test]
 fn valid_template_completes_on_start_without_resources() {
-    let mut registry = crate::core::Registry::new();
-    registry.register(SPEC);
-    let mut operation = registry.start("tiles/{{X}}/{{Y}}.jpg");
-    assert!(operation.missing_resources().unwrap().is_empty());
-    assert!(operation.is_complete());
-    assert_eq!(operation.finish().unwrap().len(), 1);
+    let (result, requests) = crate::test_support::discover(SPEC, "tiles/{{X}}/{{Y}}.jpg", &[]);
+    assert_eq!(result.unwrap().len(), 1);
+    assert!(requests.is_empty());
 }

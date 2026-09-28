@@ -460,7 +460,7 @@ export function outputFiles(outputDir, extension = ".png") {
 
 // Delivers a deep link the way the OS does: a second app process with the link
 // argv forwards it to the running window through the single-instance channel
-// and exits. The link performs no effect until the frontend confirm gate
+// and exits. The link performs no I/O until the frontend confirm gate
 // accepts it. Times out fail-closed when the forwarder lingers.
 export async function deliverDeepLink({ env, link }) {
   const child = spawn(APP_BIN, [link], { env, stdio: "ignore" });

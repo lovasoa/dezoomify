@@ -1,12 +1,3 @@
-//! Native download pipeline: one [`dezoomify::engine::EngineJob`] owns discovery,
-//! selection, planning, retry, and lifecycle policy; this module executes its
-//! effects with real HTTP, decode, assemble, encode, and atomic-write fns.
-//!
-//! All network I/O goes through [`crate::transport::NativeTransport`] (one
-//! reusable reqwest client per job scope, single-attempt fetches); all format
-//! logic stays in `dezoomify::formats`; all lifecycle policy stays in
-//! `dezoomify::engine`.
-
 use std::path::PathBuf;
 
 use dezoomify::Vec2d;
@@ -30,8 +21,7 @@ pub const WEBP_MAX_SIDE: u32 = 16_383;
 /// `iiif-dir` tile width: one entry of the `tiles` block in `info.json`.
 pub const IIIF_TILE_WIDTH: u32 = 512;
 
-/// Fixed tile-worker pool width: every scheduler, pipeline batch,
-/// and perf smoke uses 16 workers on scoped std threads with backpressure.
+/// Default number of tile acquisitions in flight.
 pub const MAX_CONCURRENT: usize = 16;
 
 /// Composed canvas bytes (RGBA, 4 bytes/pixel) for a `width` by `height`
@@ -69,20 +59,6 @@ pub fn exceeds_available_memory(required: u64, available: u64) -> bool {
     required > available
 }
 
-/// What to do when required tiles still fail after retries.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum PartialPolicy {
-    /// Fail the job with `tile.download-failed` and write no output.
-    Fail,
-    /// Encode the acquired tiles with missing regions left blank and
-    /// report success with `partial: true`, published to a `.partial`
-    /// sibling (see [`crate::output::partial_path_for`]). This matches the
-    /// reference `PartialDownload` file behavior (partial output kept) and
-    /// is the default; `--no-partial` selects `Fail`.
-    #[default]
-    Keep,
-}
-
 /// Default on-disk tile-cache root: `<tmp>/dezoomify-tile-cache`. The cache
 /// holds response bodies only (never headers or credentials) under a
 /// versioned per-job namespace; a corrupt entry falls back to a fresh fetch.
@@ -118,10 +94,6 @@ pub(crate) fn tiff_compression_for(compression: u8) -> tiff::encoder::compressio
         _ => DeflateLevel::Best,
     }
 }
-
-// ---------------------------------------------------------------------------
-// Effect executors (pure I/O + pixels; lifecycle stays in the job engine)
-// ---------------------------------------------------------------------------
 
 /// Fetch one tile with resume-cache support. When `cache` carries
 /// `(cache_dir, job_namespace)`, stored bytes that still decode skip the
@@ -324,21 +296,6 @@ pub(crate) fn tiff_pyramid_sizes(width: u32, height: u32) -> Vec<(u32, u32)> {
     sizes
 }
 
-/// Encode the assembled canvas as ZIF: a TIFF-compatible multi-directory
-/// pyramid holding the full-resolution image plus the halved levels from
-/// [`tiff_pyramid_sizes`], each deflate-compressed at the level selected by
-/// `compression` (see [`tiff_compression_for`]) with the first tile's ICC
-/// profile embedded in every directory.
-///
-/// This is the clean equivalent of the reference `ZifTiffEncoder`
-/// passthrough (`zif_tiff_encoder.rs`): byte-preserving encoded-tile
-/// passthrough cannot cross the job-engine boundary (the engine plans one
-/// level and reports only decoded-tile outcomes, so no encoded bytes or
-/// source-pyramid levels ever reach the runtime), and the engine's effects
-/// are fixed by the protocol. Instead of renaming a single image, native
-/// re-encodes the assembled canvas at every pyramid resolution, so `.zif`
-/// output carries real multi-resolution data readable by any TIFF reader
-/// (first directory) and by pyramid-aware readers (all directories).
 pub fn encode_zif_pyramid(
     image: &image::RgbaImage,
     compression: u8,

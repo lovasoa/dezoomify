@@ -1,5 +1,4 @@
-/* Dezoomify Desktop visual compliance layer (Task 5.1 states + copy,
- * Task 5.2 accessibility).
+/* Dezoomify Desktop styles and accessibility.
  *
  * Tokens (parchment light, walnut dark, sapphire/sage links, beveled
  * buttons, 2px focus rings) live in packages/shared-ui/src/styles/theme.css.

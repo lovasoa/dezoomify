@@ -256,8 +256,6 @@ export const de = {
   "desktop.output.deniedPick":
     "Das Speicherziel wurde nicht angenommen. Wahlen Sie eine andere Datei, um fortzufahren.",
   "desktop.output.deniedFallback": "Das Speicherziel wurde verweigert.",
-  "desktop.proto.incompatible":
-    "Diese App-Version kann dieses Bild von {host} nicht offnen. Aktualisieren Sie die App und versuchen Sie es erneut.",
   "desktop.handoff.rejected":
     "Dieser Link kann von {host} aus nicht geoffnet werden. Versuchen Sie eine andere Adresse ohne Anmeldedaten.",
   "desktop.handoff.acceptedDetail":
@@ -296,8 +294,6 @@ export const de = {
   "desktop.start.failed":
     "Das Speichern dieses Bildes von {host} konnte nicht gestartet werden. Versuchen Sie es erneut.",
   "desktop.choice.failed": "Diese Wahl wurde nicht angenommen. Versuchen Sie es erneut.",
-  "view.ext.desynced":
-    "Die Erweiterung hat die Synchronisierung verloren. Starten Sie den Scan erneut.",
   "desktop.save.generic":
     "Dieses Bild von {host} konnte nicht gespeichert werden. Versuchen Sie es mit einer anderen Adresse erneut.",
   "desktop.internal.error":

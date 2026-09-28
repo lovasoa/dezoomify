@@ -8,11 +8,10 @@ const LANES: &[&str] = &[
     "wasm",
     "browser",
     "ui",
-    "app-model",
     "web",
     "desktop",
     "extension",
-    "protocol",
+    "bindings",
     "security",
 ];
 
@@ -23,7 +22,7 @@ pub fn ci(args: &[String]) -> Result<(), String> {
             // runs their shared Rust/Node suites only once through test_all.
             super::check::run(&[])?;
             test_all()?;
-            super::protocol::wasm_portability_check()?;
+            super::bindings::wasm_portability_check()?;
             super::supply::audit_js()
         }
         Some("digest") => digest(&args[1..]),
@@ -43,11 +42,10 @@ fn ci_lane(lane: &str) -> Result<(), String> {
         "wasm" => super::wasm::run_node_harness(),
         "browser" => super::command::node_test(&["packages/browser-runtime/test/*.test.mjs"], true),
         "ui" => super::test_cmd::test_ui(&[]),
-        "app-model" => super::test_cmd::test_app_model(&[]),
         "web" => super::browser::test_web(&["--e2e".to_string()]),
         "desktop" => super::command::node_test(&["apps/desktop/tests/*.test.mjs"], true),
         "extension" => super::extension::test_extension(&[]),
-        "protocol" => super::protocol::test_protocol(),
+        "bindings" => super::bindings::test_bindings(),
         "security" => {
             super::supply::audit_js()?;
             Ok(())
@@ -81,7 +79,6 @@ const DIGEST_FILES: &[&str] = &[
     "Cargo.lock",
     "release/config.toml",
     "release/targets.toml",
-    "release/compatibility.toml",
     "generated/release-capabilities.json",
     "generated/desktop-capabilities.json",
     "testdata/scenarios/manifest.json",

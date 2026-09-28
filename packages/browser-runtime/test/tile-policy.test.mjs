@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  BROWSER_CAPABILITY_MAX_CONCURRENCY,
+  BROWSER_MAX_CONCURRENCY,
   createTileThrottle,
   DIRECT_METADATA_TIMEOUT_MS,
   hostOf,
@@ -36,15 +36,12 @@ test("pickTileConcurrency adapts to cores and RTT within 6-12 plus floor", () =>
   assert.equal(pickTileConcurrency({ hardwareConcurrency: 64 }), 12);
   assert.equal(pickTileConcurrency({ hardwareConcurrency: 8, rttMs: 400 }), 9);
   assert.equal(pickTileConcurrency({ hardwareConcurrency: 8, rttMs: 800 }), 8);
-  assert.equal(pickTileConcurrency({ hardwareConcurrency: 64, capabilityCap: 4 }), 4);
+  assert.equal(pickTileConcurrency({ hardwareConcurrency: 64, maxConcurrent: 4 }), 4);
   assert.equal(pickTileConcurrency({}), 8);
 });
 
-test("websiteTileConcurrency negotiates to the browser capability baseline 6", () => {
-  assert.equal(BROWSER_CAPABILITY_MAX_CONCURRENCY, 6);
-  // Adaptive picker stays 6-12 for future caps, but the live website path is
-  // capped at the browser baseline so website 6, extension 6, native 16 stay
-  // on the capability-negotiated policy.
+test("websiteTileConcurrency limits browser requests to six", () => {
+  assert.equal(BROWSER_MAX_CONCURRENCY, 6);
   assert.equal(websiteTileConcurrency({ hardwareConcurrency: 2 }), 6);
   assert.equal(websiteTileConcurrency({ hardwareConcurrency: 16, connection: { rtt: 900 } }), 6);
   assert.equal(websiteTileConcurrency({}), 6);
@@ -86,7 +83,7 @@ test("hostOf stays readable", () => {
   assert.equal(hostOf("bogus"), "the server");
 });
 
-test("tileFailedError carries typed one-attempt facts for the engine", () => {
+test("tileFailedError carries typed one-attempt facts for the Rust algorithm", () => {
   const error = tileFailedError("http-error", 403, "https://a.test/1.png");
   assert.equal(error.code, "TILE_FAILED");
   assert.equal(error.retryable, false);

@@ -1,169 +1,96 @@
 # Architecture
 
-dezoomify is one monorepo containing Rust crates, generated WASM bindings, the shared UI, browser-extension packaging, and native applications. Dependencies point inward toward pure domain libraries; hosts own all effects.
+All four products call `dezoomify(inputs, options, host)`, one asynchronous Rust
+function. It discovers images, chooses a level, acquires tiles with bounded
+concurrency, resolves partial output, and awaits the actual save result.
 
 ```mermaid
-flowchart TD
-    UI[Shared UI or CLI] -->|typed command| JOB[dezoomify::engine]
-    JOB <-->|supplied bytes and results| FORMATS[dezoomify formats]
-    JOB -->|typed effects| HOST
-    HOST -->|typed events| UI
-    subgraph HOST[Host runtime]
-        BR[packages/browser-runtime<br/>via crates/dezoomify-wasm]
-        NR[crates/dezoomify-native]
-    end
-    MODEL[dezoomify::model<br/>single contract source] -. defines values for .- JOB
-    MODEL -. defines values for .- FORMATS
-    MODEL -. defines values for .- BR
-    MODEL -. defines values for .- NR
+flowchart TB
+    Website --> App[Shared browser application]
+    Extension --> App
+    App --> WASM[Generated WASM function]
+    WASM --> Core[dezoomify]
+    CLI --> Core
+    Desktop --> Core
+    Core --> Browser[BrowserHost]
+    Core --> Native[NativeHost]
+    Browser --> BrowserIO[Browser fetching, decoding, canvas and save]
+    Native --> NativeIO[HTTP, files, decoding and output]
 ```
 
-## Components
+## Rust algorithm
 
-Inline OpenSeadragon Zoomify services build their pyramid from declared dimensions using floor-halving, including the smallest single-tile level. Tile groups count actual tiles in all preceding levels. XML `NUMTILES` compatibility heuristics apply only to XML metadata; inline services never synthesize that hint.
+`crates/dezoomify` contains the shared algorithm, domain values, format parsers,
+geometry, selection rules, and retry policy. It performs platform operations only
+through injected `Host` methods. It imports no network, filesystem, clock, UI,
+or image-codec implementation. Parsing and planning remain deterministic.
 
-### `crates/dezoomify`
+`model.rs` defines the values crossing language boundaries. `host.rs` defines
+one capability list that generates the Rust trait and JavaScript method bindings.
+The generated TypeScript declaration is tracked in `packages/wasm-bindings`.
+See [Bindings](bindings.md) and [Algorithm](algorithm.md).
 
-The single pure Rust domain crate. `model` defines canonical public values;
-format modules turn supplied bytes and URLs into catalogs, tile plans, and
-processing recipes; `engine` owns job lifecycle policy. It never fetches
-anything and touches no network, filesystem, clock, UI, or codecs. Formats
-register in one ordered registry; registry order sets automatic precedence.
-Catalog construction owns canonical level ordering, which freezes before
-publication; selection uses array positions. Formats compile conventional ready
-images through `ImagePlan`, which rejects images lacking both levels and warnings
-and tile counts beyond the engine's ordinal range before assigning the format
-identity. A metadata file that declares multiple images uses `CatalogPlan` to
-collect ready images or deferred image links; single-image formats never need
-that type. Regular non-overlapping levels use `ResolvedLevel::grid`; formats with
-overlap or unusual requests can supply a `Grid` directly. Padded grid tiles use
-positioned output backed by the same validated grid geometry. Public level
-geometry is derived from each tile program when the
-catalog is published. Grid, positioned,
-generic-template, adaptive, and format-owned tile sources implement one
-crate-private tile-program contract, including declared geometry and stable
-source-kind metadata; the public source variants remain a compatibility facade, and the
-engine starts work without dispatching on those variants.
-Discovery handlers follow extracted references through `DiscoveryResource`,
-which resolves them against the post-redirect URI before issuing the next pure
-request. Named regex captures can use shared routes to resolve links, decode
-HTML entities, or fill a fixed resource URL before following it.
+Formats register in one ordered registry. Registry order breaks ties between
+equally relevant format matches. `ImagePlan` validates ready images and their
+tile counts. `CatalogPlan` collects multiple ready images or deferred links.
+`ResolvedLevel::grid` provides regular geometry; format-owned tile programs
+provide overlap, padding, probes, and custom placement. Tile requests are lazy.
 
-Formats declare `metadata(url_suffix(...)).decode(...)`,
-`image_url(predicate).resolve_metadata(...)`, and
-`viewer(html_matches(...)).extract_metadata(...)` routes. All decoders and
-extractors consume the same resource, including requested/final URLs and parser
-history, and return an image, catalog, or next request. Shared discovery compiles
-plans and schedules acquisitions; formats know nothing about observations.
-`continue_with` declares metadata requiring a previously read parent, such as
-Google Arts tile information. Route matchers replace format-level recognition
-and preference predicates; opaque addresses still receive content detection.
+Formats declare metadata, image-address, and viewer routes. Decoders receive the
+requested URL, redirected URL, bytes, and branch-local parent resources.
+References resolve against the redirected base. Named captures can resolve
+links, decode HTML entities, and fill resource addresses. Routes that require a
+previously read parent retain that parent explicitly.
 
-One discovery operation owns all inputs and one ordered work frontier. Products
-label input provenance (source, observed document, observed resource); omitted
-kinds mean source. Source catalogs and their format-specific references precede
-readable observed documents, recognized metadata/image URLs, viewer navigation,
-and finally opaque observations. Semantic URL matches order parsers, with the
-stable registry order breaking ties.
+Inline OpenSeadragon Zoomify services use floor-halving, including their smallest
+single-tile level. Tile groups count actual preceding tiles. XML `NUMTILES`
+heuristics apply only to XML metadata.
 
-Format-derived references carry image-specific evidence even when found in a
-generic frame; they precede unrelated page navigation. Within an evidence class,
-discovery expands breadth first, with input/document
-order and format order breaking ties. Parser continuations retain their own
-resource history instead of sharing a mutable current root. Acquisitions may
-overlap, but results are accepted in frontier order, independent of response
-timing, including when replies contain further iframe references. Navigation
-references expand once per resource in frontier order, with a bounded number of
-queued roots independent of the number of parsers. Each new page is
-evaluated against all registered formats. A parent's rejection never prunes its
-children. Supplied documents and fetched responses share byte, request, and
-transition limits; request deduplication and navigation cycle guards span roots.
+## Hosts
 
-To add a conventional format, define one `FormatSpec` with a metadata decoder,
-return an `ImagePlan` whose levels use `ResolvedLevel::grid`, and register the
-spec in `core::registry`. The decoder supplies image dimensions and a tile
-request function; catalog identity, ordering, geometry, and validation belong
-to the shared compiler. Compose discovery routes for multi-resource formats.
-Formats with overlap, padded tiles, probes, or custom placement keep that
-behavior in their tile program while using the same plan and registry.
-The small format in `core::registry` tests exercises this path end to end.
+`crates/dezoomify-native` implements `NativeHost` for CLI and desktop. It owns
+HTTP and local resource reads, authentication, cache, decode workers, memory and
+spool accounting, encoders, publication, and cancellation cleanup.
 
-#### `dezoomify::engine`
+`packages/browser-runtime/src/browser-host.ts` implements `BrowserHost` for website and
+extension. It owns readable bytes or ordinary image display, decoding, canvas
+assembly, output, and awaited interaction callbacks. Both browser products use
+one application flow with injected input, transport, permission, save, and
+optional toolbar capabilities.
 
-Pure state machine: owns discovery, selection, planning, acquisition, recovery choices, and finalization. Hosts send typed commands and carry out the effects it emits. It keeps no routing identifiers; integrations keep opaque job tokens outside it. See [Job engine](job-engine.md).
+`crates/dezoomify-wasm` converts values and futures. It has no platform I/O,
+canvas, storage, or application policy. Imported object methods call the supplied
+Host directly; the exported function awaits the same Rust algorithm as native.
 
-#### `dezoomify::model`
+## Shared UI and application
 
-The single source of truth for public values, including types crossing the
-Rust/TypeScript line. Generates `packages/wasm-bindings`, imported by every
-TypeScript boundary. See [Cross-language contracts](protocol.md).
+`packages/shared-ui` contains React components, translations, pure presentation
+functions, history, queue utilities, labels, and bounded diagnostics. It has no
+host globals. Browser application code may import the shared UI; browser
+transport and image operations receive callbacks.
 
-### `crates/dezoomify-native`
+One browser invocation owns cancellation, pause, pending interactions, progress,
+and retirement. A replacement invocation cannot receive its predecessor's
+progress or output. Completed output stays available until the user retires it.
+Desktop retains only the task ownership and IPC required by its process boundary.
+See [Application](application.md).
 
-Native fetch, file access, decoding, processing, and output encoders. Canvas assembly is bounded by memory available to the process. Used by the CLI and the Tauri desktop app. See [Native apps](native-apps.md).
+## Website and proxy
 
-### `crates/dezoomify-wasm`
+The assembled website serves the legacy product at `/` and the new product at
+`/beta`. The deploy workflow builds both; it does not serve repository sources.
 
-The typed WASM bridge to the domain crate. A session takes command objects and returns result objects. It owns no fetching, workers, decoding, canvases, storage, or saves. See [Browser runtime](browser-runtime.md).
+`src/server/proxy.ts` owns metadata proxy policy. Cloudflare Pages and the local
+development server translate HTTP requests into the same function. Eligibility,
+credential restrictions, redirect checks, limits, and CORS behavior have one
+implementation. See [Browser runtime](browser-runtime.md) and [Security](security.md).
 
-### `packages/shared-ui`
+## Boundaries
 
-One React view (`.tsx`) for discovery, selection, progress, recovery, and output in every graphical app. Hosts mount it with `renderView(container, presentation, callbacks, ctx)` and keep their own effect layers. Sources are bundled directly by Vite/WXT; no hand-maintained `.js` mirrors exist. Snapshot presentation (`snapshot-view.ts`) derives the one renderable view from the latest authoritative `JobSnapshot` (`presentSnapshot`), a host-local failure (`presentFailure`), or a host step (`presentStatus`); no transition table exists.
-
-### `packages/app-model`
-
-The host-neutral application model: the `JobService` contract, snapshot predicates, shared FIFO queue semantics, shared history, and canonical transport labels and save-name helpers. React-free with no host globals; hosts inject effects, storage, and clocks. Products own queue input validation, payloads, progress, and presentation metadata. See [Application model](app-model.md).
-
-### `packages/browser-runtime`
-
-The browser effect layer: workers, fetching, decoding, tile painting, canvases, and save surfaces. The website and the extension job tab share one browser job service (`browser-job-service.ts`, `createBrowserJobService`) that implements `JobService` directly over the engine host (`engine-host.ts`) and WASM, and differ only in transport and output surface. It owns no job policy. See [Browser runtime](browser-runtime.md).
-
-```mermaid
-flowchart LR
-    subgraph PAGE[Host page]
-        SITE[Website]
-        EXT[Extension job tab]
-        EH[browser-job-service.ts<br/>over engine-host.ts]
-        T1[Website transport:<br/>direct fetch + metadata proxy]
-        T2[Extension transport:<br/>tab-origin fetch + img fallback]
-    end
-    subgraph WASM[WASM module]
-        SES[Session<br/>job + direct bytes]
-        JOB[dezoomify::engine]
-        FORMATS[dezoomify formats]
-    end
-    SITE --> EH
-    EXT --> EH
-    EH --> T1
-    EH --> T2
-    EH <-->|commands<br/>results| SES
-    SES <--> JOB
-    JOB <-->|bytes and results| FORMATS
-```
-
-### Metadata CORS proxy
-
-One relay module, `src/server/proxy.ts` (`handleProxyRequest`), with three thin host adapters:
-
-```mermaid
-flowchart TD
-    CORE[src/server/proxy.ts<br/>single relay policy] --> CF[functions/api/proxy.ts<br/>Cloudflare Pages Function]
-    CORE --> NODE[src/server/proxy-node.ts<br/>local dev server]
-    CORE --> TEST[proxy unit tests<br/>node:test seam]
-```
-
-Each adapter translates its host transport to the same relay call, so tests, local development, and production share one SSRF, credential, redirect, size, content-type, and CORS policy.
-
-### Support workspaces
-
-`packages/wasm-bindings` contains the tracked declaration emitted by the real WASM build. `crates/fixture-server` serves controlled origins, `testdata/scenarios` contains shared declarative scenarios, and `crates/xtask` owns repository generation and validation tasks.
-
-## Boundary rules
-
-- Rust visibility keeps the engine's internal commands and state private. Runtime integration tests verify which engine actually performs work; checking runner names, implementation filenames, or the number of structs named `Runner` is not an ownership proof.
-- The domain model, formats, and engine stay deterministic and testable without I/O.
-- App-model and shared UI stay host-neutral; app-model is also React-free. Dependencies point inward (products → shared UI → app-model → generated bindings); runtimes never import UI packages.
-- URLs, headers, credentials, bytes, and output destinations cross boundaries only as typed values. Browser code never redeclares Rust contract types.
-- Generated unions are consumed through exhaustive typed handler tables. Rust state supplies context such as error phase and request identity; hosts never resupply it.
-- Runtime differences appear as negotiated [capabilities](protocol.md#product-capabilities); automatic fallback shows through active-transport state, never silently.
-- Errors cross host boundaries as stable codes with typed [recovery actions](errors.md).
+- Products never import each other.
+- Parsers and geometry import domain values; orchestration calls injected Host methods.
+- Platform implementations own I/O, resources, and clocks, with no duplicate selection or retry policy.
+- Shared UI imports domain declarations and local utilities, with no host globals.
+- Browser application modules may compose UI and Host; image and transport modules remain independent of UI.
+- Crossing values derive from Rust declarations. URLs, headers, errors, and geometry retain their exact meaning.
+- Errors carry stable codes and typed recovery actions; callers never branch on display text.

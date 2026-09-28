@@ -3,7 +3,7 @@ name = "dezoomify"
 version = "3.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
-description = "Pure domain model, discovery formats, and deterministic job engine for Dezoomify."
+description = "Image discovery, tile geometry, and asynchronous dezooming through injected platform capabilities."
 repository = "https://github.com/lovasoa/dezoomify"
 keywords = ["image", "download"]
 
@@ -30,6 +30,11 @@ thiserror.workspace = true
 html-escape.workspace = true
 tsify = { workspace = true, optional = true }
 wasm-bindgen = { workspace = true, optional = true }
+futures-util = "0.3"
+serde_bytes = "0.11"
+
+[dev-dependencies]
+futures = "0.3"
 
 [features]
 typescript = ["dep:tsify", "dep:wasm-bindgen"]

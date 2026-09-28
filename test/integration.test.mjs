@@ -1,14 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createDiagnosticRecorder } from "../packages/app-model/src/diagnostics.ts";
 import { DIRECT_METADATA_TIMEOUT_MS } from "../packages/browser-runtime/src/tile-policy.ts";
-import { createWebFetcher } from "../packages/browser-runtime/src/web-fetch.ts";
-import {
-  errorTransportFor,
-  isOrdinaryImageTile,
-  isProxyEligible,
-} from "../packages/browser-runtime/src/web-integration.ts";
-import { presentIdle } from "../packages/shared-ui/src/snapshot-view.ts";
+import { createWebFetcher, isProxyEligible } from "../packages/browser-runtime/src/web-fetch.ts";
+import { createDiagnosticRecorder } from "../packages/shared-ui/src/diagnostics.ts";
+import { presentIdle } from "../packages/shared-ui/src/presentation.ts";
 import { renderView } from "../packages/shared-ui/src/view.tsx";
 import {
   createProxyRateLimiter,
@@ -23,7 +18,7 @@ function okBytes(...values) {
 }
 
 function request(uri, purpose = "metadata", headers = []) {
-  return { id: 1, uri, purpose, headers };
+  return { uri, purpose, headers };
 }
 
 const attemptSignal = new AbortController().signal;
@@ -371,18 +366,4 @@ test("proxy fallback is unconditional: no opt-out UI, 1500 ms direct head start"
     }),
   );
   assert.equal(el.querySelector("#dz-proxy-optin"), null, "idle view renders no proxy toggle");
-});
-
-test("ordinary display fallback only for unprocessed tiles", () => {
-  assert.equal(isOrdinaryImageTile("none"), true);
-  // Processed tiles need readable bytes: display fallback would drop the
-  // processing, so it is never allowed.
-  assert.equal(isOrdinaryImageTile("google-arts-decrypt"), false);
-});
-
-test("tile failures report the direct transport, never the metadata proxy", () => {
-  assert.equal(errorTransportFor("TILE_FAILED", "metadata-proxy"), "direct");
-  assert.equal(errorTransportFor("TILE_FAILED", null), "direct");
-  assert.equal(errorTransportFor("DISCOVERY_FAILED", "metadata-proxy"), "metadata-proxy");
-  assert.equal(errorTransportFor("NO_IMAGE_FOUND", null), "direct");
 });

@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { presentFailure } from "../packages/shared-ui/src/snapshot-view.ts";
+import { presentFailure } from "../packages/shared-ui/src/presentation.ts";
 import { renderView } from "../packages/shared-ui/src/view.tsx";
 import { act } from "./react-dom.mjs";
 

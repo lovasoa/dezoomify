@@ -19,7 +19,7 @@ use crate::core::discovery::{
 use crate::core::resolve_relative;
 use crate::core::{
     CatalogPlan, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryResource,
-    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, GridRequests, GridTile, ImagePlan, Request,
+    DiscoveryRoute, FormatSpec, Grid, GridRequests, GridTile, ImagePlan, ParsedResource, Request,
     ResolvedLevel,
 };
 use crate::krpano::krpano_metadata::{ImageInfo, LevelDesc};
@@ -40,7 +40,7 @@ pub const SPEC: FormatSpec = FormatSpec::new("krpano", ROUTES)
     .with_display_name("krpano")
     .on_failure(handle_failure);
 
-fn handle_html(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn handle_html(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let context = resource.context();
     if find_xml(context).is_some() {
         return handle_viewer_js(resource);
@@ -52,10 +52,10 @@ fn handle_html(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, Discove
         || sibling_uri(resource.final_uri(), "tour.xml"),
         |reference| resolve_relative(resource.final_uri(), &reference),
     );
-    Ok(DiscoveryStep::Follow(Request::new(xml_uri)))
+    Ok(ParsedResource::Follow(Request::new(xml_uri)))
 }
 
-fn handle_xml(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn handle_xml(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let context = resource.context();
     let contents = resource.bytes();
     if !is_encrypted_xml(contents) {
@@ -72,24 +72,24 @@ fn handle_xml(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, Discover
         Ok(decrypted) => complete(resource.final_uri(), &decrypted),
         Err(error) => next_viewer(context, resource, resource.final_uri()).map_or_else(
             || {
-                Err(DiscoveryError::Session(format!(
+                Err(DiscoveryError::InvalidMetadata(format!(
                     "unable to decrypt krpano XML: {error}"
                 )))
             },
-            |uri| Ok(DiscoveryStep::Follow(Request::new(uri))),
+            |uri| Ok(ParsedResource::Follow(Request::new(uri))),
         ),
     }
 }
 
-fn handle_viewer_js(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn handle_viewer_js(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let context = resource.context();
     let Some(xml) = find_xml(context) else {
         if extract_viewer_js(resource.bytes()).is_none() {
-            return Err(DiscoveryError::Session(
+            return Err(DiscoveryError::InvalidMetadata(
                 "not krpano viewer JavaScript".into(),
             ));
         }
-        return Ok(DiscoveryStep::Follow(Request::new(sibling_uri(
+        return Ok(ParsedResource::Follow(Request::new(sibling_uri(
             resource.final_uri(),
             "tour.xml",
         ))));
@@ -100,11 +100,11 @@ fn handle_viewer_js(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, Di
         Ok(decrypted) => complete(xml.final_uri(), &decrypted),
         Err(error) => next_viewer(context, resource, xml.final_uri()).map_or_else(
             || {
-                Err(DiscoveryError::Session(format!(
+                Err(DiscoveryError::InvalidMetadata(format!(
                     "unable to decrypt krpano XML: {error}"
                 )))
             },
-            |uri| Ok(DiscoveryStep::Follow(Request::new(uri))),
+            |uri| Ok(ParsedResource::Follow(Request::new(uri))),
         ),
     }
 }
@@ -113,11 +113,11 @@ fn handle_failure(
     context: &DiscoveryContext<'_>,
     request: &Request,
     failure: &ResourceFailure,
-) -> Result<DiscoveryStep, DiscoveryError> {
+) -> Result<ParsedResource, DiscoveryError> {
     if let Some(xml) = find_xml(context)
         && let Some(uri) = next_viewer_after_failure(context, request.uri.as_str(), xml.final_uri())
     {
-        return Ok(DiscoveryStep::Follow(Request::new(uri)));
+        return Ok(ParsedResource::Follow(Request::new(uri)));
     }
     // No recovery left: retain the typed cause. Hosts record requests and
     // outcomes; the pure format performs no ambient logging.
@@ -183,8 +183,8 @@ fn looks_like_xml_or_encrypted(contents: &[u8]) -> bool {
     is_encrypted_xml(contents) || looks_like_krpano_xml(contents)
 }
 
-fn complete(uri: &str, bytes: &[u8]) -> Result<DiscoveryStep, DiscoveryError> {
-    load_catalog(uri, bytes).map(DiscoveryStep::Complete)
+fn complete(uri: &str, bytes: &[u8]) -> Result<ParsedResource, DiscoveryError> {
+    load_catalog(uri, bytes).map(ParsedResource::Complete)
 }
 
 /// True if the content looks like a krpano XML file rather than HTML.
@@ -410,8 +410,9 @@ fn load_catalog(url: &str, contents: &[u8]) -> Result<DiscoveryCatalog, Discover
 }
 
 fn decode_catalog(url: &str, contents: &[u8]) -> Result<CatalogPlan, DiscoveryError> {
-    let metadata = KrpanoMetadata::from_bytes(contents)
-        .map_err(|error| DiscoveryError::Session(format!("unable to parse krpano XML: {error}")))?;
+    let metadata = KrpanoMetadata::from_bytes(contents).map_err(|error| {
+        DiscoveryError::InvalidMetadata(format!("unable to parse krpano XML: {error}"))
+    })?;
     let global_title = metadata.get_title().unwrap_or_default().to_owned();
     let mut images = Vec::new();
 
@@ -469,7 +470,7 @@ fn decode_catalog(url: &str, contents: &[u8]) -> Result<CatalogPlan, DiscoveryEr
         images.push(ImagePlan::new(image_title, levels).with_warnings(warnings));
     }
     if images.is_empty() {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "krpano XML contains no tiled images".into(),
         ));
     }
@@ -535,10 +536,9 @@ mod tests {
     use super::*;
     use crate::core::DiscoveredEntry;
     use crate::core::discovery::{
-        DiscoveryError, DiscoveryOperation, FetchCause, FetchCode, RejectionKind, ResourceFailure,
-        ResourceNeed, TransportKind,
+        DiscoveryError, FetchCause, FetchCode, RejectionKind, TransportKind,
     };
-    use crate::core::{ResolvedImage, ResourceResponse, TileSource};
+    use crate::core::{ResolvedImage, TileSource};
 
     fn image(catalog: DiscoveryCatalog) -> ResolvedImage {
         match catalog.into_entries().into_iter().next().unwrap() {
@@ -563,15 +563,9 @@ mod tests {
     }
 
     fn discover_single_resource(uri: &str, bytes: Vec<u8>) -> DiscoveryCatalog {
-        let mut registry = crate::core::Registry::new();
-        registry.register(SPEC);
-        let mut operation = registry.start(uri);
-        let need = operation.missing_resources().unwrap().pop().unwrap();
-        assert_eq!(need.request.uri, uri);
-        operation
-            .provide(ResourceResponse::new(need.id, bytes))
-            .unwrap();
-        operation.finish().unwrap()
+        let (catalog, requests) = crate::test_support::discover(SPEC, uri, &[(&bytes, None)]);
+        assert_eq!(requests[0].uri, uri);
+        catalog.unwrap()
     }
 
     #[test]
@@ -592,14 +586,9 @@ mod tests {
             let mut registry = crate::core::Registry::new();
             registry.register(SPEC);
             let uri = "https://krpano.com/panos/andreabiffi/galleria_04.xml";
-            let mut operation = registry.start(uri);
-            let need = operation.missing_resources().unwrap().pop().unwrap();
-            let mut response = ResourceResponse::new(need.id, xml.to_vec());
-            if with_empty {
-                response = response.with_final_uri("");
-            }
-            operation.provide(response).unwrap();
-            let catalog = operation.finish().unwrap();
+            let (catalog, _) =
+                crate::test_support::discover(SPEC, uri, &[(xml, with_empty.then_some(""))]);
+            let catalog = catalog.unwrap();
             let image = self::image(catalog);
             let (tile_uri, _) = tile_requests(&image.levels[0], 1).pop().unwrap();
             assert!(
@@ -918,27 +907,18 @@ mod tests {
 
     #[test]
     fn html_query_xml_is_followed_instead_of_the_viewer_default() {
-        let mut registry = crate::core::Registry::new();
-        registry.register(SPEC);
-        let mut operation =
-            registry.start("https://example.com/viewer/krpano.html?xml=examples/tour.xml");
-        let page = operation.missing_resources().unwrap().pop().unwrap();
-        operation
-            .provide(ResourceResponse::new(
-                page.id,
+        let (_, requests) = crate::test_support::discover(
+            SPEC,
+            "https://example.com/viewer/krpano.html?xml=examples/tour.xml",
+            &[(
                 br#"<html><script src="krpano.js"></script><script>
                     embedpano({xml:"krpano.xml", passQueryParameters:"xml"});
                 </script></html>"#,
-            ))
-            .unwrap();
+                None,
+            )],
+        );
         assert_eq!(
-            operation
-                .missing_resources()
-                .unwrap()
-                .pop()
-                .unwrap()
-                .request
-                .uri,
+            requests[1].uri,
             "https://example.com/viewer/examples/tour.xml"
         );
     }
@@ -961,178 +941,100 @@ mod tests {
 
     #[test]
     fn viewer_js_is_detected_before_html_embed_markers() {
-        let mut registry = crate::core::Registry::new();
-        registry.register(SPEC);
-        let mut operation = registry.start("https://example.com/krpano.js");
-        let script = operation.missing_resources().unwrap().pop().unwrap();
-        operation
-            .provide(ResourceResponse::new(
-                script.id,
-                b"function embedpano(opts) { /* krpano viewer */ }",
-            ))
-            .unwrap();
-        assert_eq!(
-            operation
-                .missing_resources()
-                .unwrap()
-                .pop()
-                .unwrap()
-                .request
-                .uri,
-            "https://example.com/tour.xml"
+        let (_, requests) = crate::test_support::discover(
+            SPEC,
+            "https://example.com/krpano.js",
+            &[(b"function embedpano(opts) { /* krpano viewer */ }", None)],
         );
+        assert_eq!(requests[1].uri, "https://example.com/tour.xml");
     }
 
     #[test]
     fn html_with_inline_viewer_code_keeps_its_explicit_xml_url() {
-        let mut registry = crate::core::Registry::new();
-        registry.register(SPEC);
-        let mut operation = registry.start("https://example.com/pano/index.html");
-        let page = operation.missing_resources().unwrap().pop().unwrap();
-        operation
-            .provide(ResourceResponse::new(
-                page.id,
+        let (_, requests) = crate::test_support::discover(
+            SPEC,
+            "https://example.com/pano/index.html",
+            &[(
                 br#"<html><script>
                     function embedpano(opts) { return opts; }
                     embedpano({xml: "scenes/custom.xml", target: "pano"});
                 </script></html>"#,
-            ))
-            .unwrap();
+                None,
+            )],
+        );
         assert_eq!(
-            operation
-                .missing_resources()
-                .unwrap()
-                .pop()
-                .unwrap()
-                .request
-                .uri,
+            requests[1].uri,
             "https://example.com/pano/scenes/custom.xml"
         );
     }
 
     #[test]
     fn old_create_pano_viewer_js_is_detected_as_viewer_js() {
-        let mut registry = crate::core::Registry::new();
-        registry.register(SPEC);
-        let mut operation = registry.start("https://example.com/viewer.js");
-        let script = operation.missing_resources().unwrap().pop().unwrap();
-        operation
-            .provide(ResourceResponse::new(
-                script.id,
+        let (_, requests) = crate::test_support::discover(
+            SPEC,
+            "https://example.com/viewer.js",
+            &[(
                 b"function createPanoViewer(opts) { return buildViewer(opts); }",
-            ))
-            .unwrap();
-        assert_eq!(
-            operation
-                .missing_resources()
-                .unwrap()
-                .pop()
-                .unwrap()
-                .request
-                .uri,
-            "https://example.com/tour.xml"
+                None,
+            )],
         );
-    }
-
-    fn operation_waiting_for_first_viewer() -> (DiscoveryOperation, ResourceNeed) {
-        let mut registry = crate::core::Registry::new();
-        registry.register(SPEC);
-        let mut operation = registry.start("https://example.com/pano/index.html");
-        let page = operation.missing_resources().unwrap().pop().unwrap();
-        operation
-            .provide(ResourceResponse::new(
-                page.id,
-                br#"<html><script src="first.js"></script><script src="second.js"></script>
-                    <script>embedpano({xml: "tour.xml"});</script></html>"#,
-            ))
-            .unwrap();
-        let xml = operation.missing_resources().unwrap().pop().unwrap();
-        operation
-            .provide(ResourceResponse::new(
-                xml.id,
-                b"<encrypted>not-valid-krpano-data</encrypted>",
-            ))
-            .unwrap();
-        let viewer = operation.missing_resources().unwrap().pop().unwrap();
-        assert_eq!(viewer.request.uri, "https://example.com/pano/first.js");
-        (operation, viewer)
+        assert_eq!(requests[1].uri, "https://example.com/tour.xml");
     }
 
     #[test]
     fn failed_viewer_attempts_advance_to_the_next_candidate() {
-        for failure in [false, true] {
-            let (mut operation, first) = operation_waiting_for_first_viewer();
-            if failure {
-                operation
-                    .provide_failure(ResourceFailure {
-                        id: first.id,
-                        cause: FetchCause {
-                            code: FetchCode::TransportHttpError,
-                            http: Some(404),
-                            transport: TransportKind::Direct,
-                            reason: None,
-                        },
-                    })
-                    .unwrap();
-            } else {
-                operation
-                    .provide(ResourceResponse::new(
-                        first.id,
-                        b"invalid viewer JavaScript",
-                    ))
-                    .unwrap();
-            }
-            assert_eq!(
-                operation
-                    .missing_resources()
-                    .unwrap()
-                    .pop()
-                    .unwrap()
-                    .request
-                    .uri,
-                "https://example.com/pano/second.js"
+        for http_failure in [false, true] {
+            let (result, requests) = viewer_failures(http_failure);
+            assert!(result.is_err());
+            assert!(
+                requests
+                    .iter()
+                    .any(|request| request.uri == "https://example.com/pano/first.js")
+            );
+            assert!(
+                requests
+                    .iter()
+                    .any(|request| request.uri == "https://example.com/pano/second.js")
             );
         }
+    }
+    fn viewer_failures(
+        http_failure: bool,
+    ) -> (Result<DiscoveryCatalog, DiscoveryError>, Vec<Request>) {
+        use crate::model::{Error, ErrorPhase, ErrorTransport, ResourceRead, ResourceResponse};
+        let requests = std::cell::RefCell::new(Vec::new());
+        let registry = crate::core::registry_for("krpano").unwrap();
+        let result=futures::executor::block_on(registry.discover(vec![crate::core::discovery::DiscoveryInput::new("https://example.com/pano/index.html")],Default::default(),|request,_| {
+            let uri=request.uri.clone();requests.borrow_mut().push(request);
+            async move {
+                let bytes:&[u8]=if uri.ends_with("index.html") {br#"<html><script src="first.js"></script><script src="second.js"></script><script>embedpano({xml:"tour.xml"});</script></html>"#.as_slice()} else if uri.ends_with("tour.xml") {b"<encrypted>not-valid-krpano-data</encrypted>"} else if !http_failure {b"invalid viewer JavaScript"} else {let mut error=Error::new("TRANSPORT_HTTP_ERROR",ErrorPhase::Discovery,"forbidden");error.http=Some(403);error.transport=Some(ErrorTransport::Direct);return Err(error);};
+                Ok(ResourceRead::Response {response:ResourceResponse {bytes:bytes.to_vec(),final_uri:None}})
+            }
+        }));
+        (result, requests.into_inner())
     }
 
     #[test]
     fn exhausted_viewer_failures_report_the_typed_cause() {
-        let (mut operation, first) = operation_waiting_for_first_viewer();
-        let cause = FetchCause {
-            code: FetchCode::TransportHttpError,
-            http: Some(403),
-            transport: TransportKind::Direct,
-            reason: None,
-        };
-        operation
-            .provide_failure(ResourceFailure {
-                id: first.id,
-                cause: cause.clone(),
-            })
-            .unwrap();
-        let second = operation.missing_resources().unwrap().pop().unwrap();
-        // The last viewer failure rejects the only candidate, so the
-        // aggregate surfaces from the provide call itself; the krpano
-        // diagnostic must carry the typed fetch cause, not a wrapped
-        // sentence.
-        let error = operation
-            .provide_failure(ResourceFailure {
-                id: second.id,
-                cause: cause.clone(),
-            })
-            .unwrap_err();
+        let (result, _) = viewer_failures(true);
+        let error = result.unwrap_err();
         let DiscoveryError::NoCandidateAccepted { diagnostics } = &error else {
-            panic!("expected no-candidate aggregate, got {error}");
+            panic!("expected candidate diagnostics")
         };
-        let diagnostic = diagnostics
-            .iter()
-            .find(|diagnostic| diagnostic.format == "krpano")
-            .expect("krpano diagnostic");
+        let diagnostic = diagnostics.iter().find(|d| d.format == "krpano").unwrap();
         assert_eq!(diagnostic.kind, RejectionKind::FetchFailed);
-        assert_eq!(diagnostic.cause.as_ref(), Some(&cause));
+        assert_eq!(
+            diagnostic.cause,
+            Some(FetchCause {
+                code: FetchCode::TransportHttpError,
+                http: Some(403),
+                transport: TransportKind::Direct,
+                reason: None
+            })
+        );
         assert!(
             error
-                .engine_detail()
+                .detail()
                 .contains("krpano: HTTP 403 fetching this address")
         );
     }

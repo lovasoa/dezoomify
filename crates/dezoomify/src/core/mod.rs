@@ -11,16 +11,11 @@ pub mod registry;
 pub mod tile_plan;
 pub mod uri;
 
-pub use adaptive::{
-    AdaptiveProgram, AdaptiveSource, DiscoverableGrid, DiscoverableStep, ObservationResult,
-    ProbeContinuation,
-};
+pub use adaptive::{AdaptiveSource, DiscoverableGrid, ObservationResult, ResolvedGrid};
 pub use discovery::{
     CandidateDiagnostic, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
-    DiscoveryRoute, DiscoveryStep, FormatSpec, RejectionKind,
+    DiscoveryRoute, FormatSpec, ParsedResource, RejectionKind,
 };
-#[cfg(test)]
-pub use discovery::{RequestId, ResourceResponse};
 pub(crate) use model::floor_index;
 pub use model::{
     CatalogPlan, DeferredResource, DiscoveredEntry, DiscoveryCatalog, ImagePlan, ProcessingRecipe,

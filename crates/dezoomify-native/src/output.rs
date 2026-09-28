@@ -1,5 +1,5 @@
 //! Output writer: atomic file replacement, format/extension validation,
-//! overwrite policy identical to legacy behavior (refuse without flag).
+//! overwrite refusal unless explicitly requested.
 //! Single-file formats (PNG, JPEG, TIFF, WebP) encode to one file; `zif`
 //! encodes one multi-directory TIFF pyramid file; `iiif-dir`
 //! writes a static tiled directory holding an `info.json` beside JPEG tiles.
@@ -58,30 +58,6 @@ impl OutputFormat {
         matches!(self, OutputFormat::IiifDir)
     }
 
-    /// Infer the output format from the destination path:
-    ///
-    /// * `.png` becomes PNG, `.jpg`/`.jpeg` becomes JPEG, `.tif`/`.tiff`
-    ///   becomes single-image TIFF, `.webp` becomes lossless WebP;
-    /// * `.zif` becomes ZIF: a TIFF-compatible multi-directory pyramid
-    ///   holding the full-resolution canvas plus halved levels (see
-    ///   [`crate::pipeline::encode_zif_pyramid`]). Byte-preserving
-    ///   encoded-tile passthrough cannot cross the job-engine boundary
-    ///   (the engine plans one level and reports decoded-tile outcomes
-    ///   only), so native re-encodes the assembled canvas at every
-    ///   pyramid resolution instead of renaming a single image;
-    /// * `.iiif` becomes `iiif-dir` (a directory written at the `.iiif`
-    ///   path, mirroring the reference trigger) alongside the native
-    ///   extensionless-or-existing-directory `iiif-dir` trigger;
-    /// * an extensionless path, or a path that already exists as a
-    ///   directory, becomes `iiif-dir`;
-    /// * any other extension is a typed error (no output is attempted).
-    ///   The reference generic canvas would write whatever `image` infers
-    ///   from the extension; native stays fail-closed for the rest because
-    ///   only the PNG/JPEG/TIFF/ZIF/WebP codecs are compiled in and the
-    ///   capability manifest promises exactly those encoders.
-    ///
-    /// Track C consumes this rule for the `--tile-cache`-sibling CLI surface:
-    /// the output file name alone selects the encoder.
     pub fn infer_from_path(path: &Path) -> Result<Self, NativeError> {
         if path.is_dir() {
             return Ok(OutputFormat::IiifDir);

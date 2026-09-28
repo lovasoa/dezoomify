@@ -3,7 +3,7 @@ name = "dezoomify-wasm"
 version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "Generated typed WASM adapter over the Dezoomify job engine."
+description = "Generated asynchronous Host bindings for Dezoomify."
 repository = "https://github.com/lovasoa/dezoomify"
 
 [lib]
@@ -13,11 +13,9 @@ crate-type = ["cdylib", "rlib"]
 dezoomify = { path = "../dezoomify", features = ["typescript"] }
 serde.workspace = true
 wasm-bindgen.workspace = true
+wasm-bindgen-futures = "0.4"
 serde-wasm-bindgen.workspace = true
 tsify.workspace = true
-
-[dev-dependencies]
-wasm-bindgen-test.workspace = true
 
 # Manual lint tables until legacy debt clears (see the workspace policy
 # note in the root Cargo.toml).

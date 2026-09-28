@@ -10,22 +10,22 @@ processes, temporary profiles, servers, and integration registrations.
 ```text
 cargo xtask setup
 cargo xtask check
-cargo xtask test [core|protocol|job|wasm|browser|ui|app-model|web|native|scenario|desktop|extension|perf|live|all] [options]
+cargo xtask test [core|bindings|wasm|browser|ui|web|native|scenario|desktop|extension|perf|live|all] [options]
 cargo xtask build <wasm|web|cli|desktop|extension> [options]
 cargo xtask dev <ui|web|desktop|extension> [options]
-cargo xtask ci <check|rust|wasm|browser|web|desktop|extension|protocol|security|local|digest> [--check <hex>]
+cargo xtask ci <check|rust|wasm|browser|web|desktop|extension|bindings|security|local|digest> [--check <hex>]
 cargo xtask release version
 cargo xtask release plan [--numbered]
 cargo xtask release build --plan <path> --target <target>
 cargo xtask release verify --plan <path> --artifacts <path>
 cargo xtask release publish --plan <path> --artifacts <path>
-cargo xtask protocol <generate|check> [options]
+cargo xtask bindings <generate|check> [options]
 cargo xtask fixtures <verify|serve|capture> [options]
 ```
 
 With no target, `test` runs `cargo test --workspace` exactly once with terse
 output, generates help pages, then runs one Node dot-reporter process over the
-website, browser runtime, protocol TypeScript, desktop Node, and pure extension
+website, browser runtime, bindings TypeScript, desktop Node, and pure extension
 unit suites. It does not run `check`, generated WASM bindings, WXT packaging, or
 browsers. `test all` runs that aggregate once, then adds the generated WASM Node
 harness, website Chromium E2E, and build-dependent extension units plus
@@ -37,7 +37,7 @@ Node 24 is the minimum supported Node version. Direct Cargo and pnpm commands
 are valid for focused debugging, but xtask remains the unified front door.
 
 `check`, all maintenance `check`/`verify` commands, and generated binding checks
-are read-only. `protocol generate` is the explicit generated-source update.
+are read-only. `bindings generate` is the explicit generated-source update.
 Builds write only to
 declared generated paths, `target/`, `dist/`, or `artifacts/` as appropriate.
 Release verification checks the frozen plan and expected artifacts.
@@ -51,7 +51,7 @@ cargo xtask test scenario
 cargo xtask build desktop --unsigned-test
 cargo xtask dev extension --browser chromium
 cargo xtask ci local
-cargo xtask protocol generate --check
+cargo xtask bindings generate --check
 cargo xtask fixtures serve --port 0 --write-address target/fixture-server.addr
 ```
 
@@ -95,7 +95,7 @@ CI lanes are disjoint: `check` owns static contracts, `rust` owns one workspace
 Cargo test run, `wasm` owns the generated Node harness, `browser` owns
 browser-runtime Node tests, `web` owns website Node tests plus Chromium E2E,
 `desktop` owns desktop Node tests, `extension` owns generated-package units and
-Chromium/Firefox E2E, `protocol` owns protocol TypeScript tests, and `security`
+Chromium/Firefox E2E, `bindings` owns bindings TypeScript tests, and `security`
 owns the JavaScript audit. Cargo policy stays in `check`. Native and scenario
 tests have no separate CI rerun because the Rust workspace lane includes them;
 the path-gated desktop workflow owns desktop coverage when applicable.

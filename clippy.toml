@@ -3,13 +3,13 @@
 # - `allow-unwrap-in-tests`: `clippy::unwrap_used` still fires in shipped
 #   code (denied per crate through `[workspace.lints]`), but test code may
 #   use `unwrap`/`expect` for fixture setup and assertions. Shipped code
-#   must map failures to typed errors (`JobError`, `NativeError`,
-#   `AdapterError`, `handoff.rejected` / `protocol.*`) instead of panicking.
+#   must map failures to typed domain errors (`Error`, `NativeError`,
+#   `handoff.rejected`) instead of panicking.
 allow-unwrap-in-tests = true
 
 # The pure domain crate denies these semantic Clippy lints in non-test builds.
-# Clippy resolves aliases and re-exports before comparing paths, unlike the
-# retired source-text purity scanners. `cargo xtask check` allows these two
+# Clippy resolves aliases and re-exports before comparing paths.
+# `cargo xtask check` allows these two
 # lints during its general workspace pass, then runs a dedicated strict Clippy
 # pass over the `dezoomify` production library. Effect-owning host crates may
 # therefore use these capabilities while the domain boundary stays enforced.

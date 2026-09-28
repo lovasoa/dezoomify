@@ -1,5 +1,5 @@
 // Minimal host-neutral shared-ui helpers (no React, no browser globals).
-import type { StructuredError } from "./snapshot-view.ts";
+import type { StructuredError } from "./presentation.ts";
 
 /** Product capabilities the shared view and guidance copy read. */
 export interface AppCapabilities {
@@ -79,7 +79,7 @@ export function renderProgress(current: number, total: number): string {
  * every app (website, desktop app, extension) renders the same gap map
  * instead of silent gaps. Pure data: callers compose the sentence through
  * their own dictionary (`view.done.gapMap` in shared UI). Ids are short
- * plan tokens supplied by the engine.
+ * plan tokens supplied by the Rust algorithm.
  */
 export function splitGapLedger(
   missingTiles: Array<string>,

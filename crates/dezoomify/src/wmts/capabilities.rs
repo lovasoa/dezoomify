@@ -31,9 +31,9 @@ pub(crate) fn parse_document(bytes: &[u8]) -> Result<XmlElement, DiscoveryError>
     let mut stack = Vec::new();
 
     loop {
-        let event = reader
-            .read_event_into(&mut buffer)
-            .map_err(|error| DiscoveryError::Session(format!("invalid WMTS XML: {error}")))?;
+        let event = reader.read_event_into(&mut buffer).map_err(|error| {
+            DiscoveryError::InvalidMetadata(format!("invalid WMTS XML: {error}"))
+        })?;
         match event {
             Event::Start(start) => stack.push(element_from_start(&start)?),
             Event::Empty(start) => {
@@ -41,13 +41,15 @@ pub(crate) fn parse_document(bytes: &[u8]) -> Result<XmlElement, DiscoveryError>
             }
             Event::End(_) => {
                 let element = stack.pop().ok_or_else(|| {
-                    DiscoveryError::Session("invalid WMTS XML: unmatched closing element".into())
+                    DiscoveryError::InvalidMetadata(
+                        "invalid WMTS XML: unmatched closing element".into(),
+                    )
                 })?;
                 append_element(&mut root, &mut stack, element)?;
             }
             Event::Text(text) => {
                 let unescaped = quick_xml::escape::unescape(&text).map_err(|error| {
-                    DiscoveryError::Session(format!("invalid WMTS text escape: {error}"))
+                    DiscoveryError::InvalidMetadata(format!("invalid WMTS text escape: {error}"))
                 })?;
                 append_text(&mut stack, unescaped.as_ref())?;
             }
@@ -57,7 +59,7 @@ pub(crate) fn parse_document(bytes: &[u8]) -> Result<XmlElement, DiscoveryError>
             Event::GeneralRef(reference) => {
                 let escaped = format!("&{};", reference.as_ref());
                 let unescaped = quick_xml::escape::unescape(&escaped).map_err(|error| {
-                    DiscoveryError::Session(format!("invalid WMTS reference: {error}"))
+                    DiscoveryError::InvalidMetadata(format!("invalid WMTS reference: {error}"))
                 })?;
                 append_text(&mut stack, unescaped.as_ref())?;
             }
@@ -68,11 +70,13 @@ pub(crate) fn parse_document(bytes: &[u8]) -> Result<XmlElement, DiscoveryError>
     }
 
     if !stack.is_empty() {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "invalid WMTS XML: unclosed element".into(),
         ));
     }
-    root.ok_or_else(|| DiscoveryError::Session("invalid WMTS XML: no document element".into()))
+    root.ok_or_else(|| {
+        DiscoveryError::InvalidMetadata("invalid WMTS XML: no document element".into())
+    })
 }
 
 fn element_from_start(start: &BytesStart<'_>) -> Result<XmlElement, DiscoveryError> {
@@ -80,12 +84,14 @@ fn element_from_start(start: &BytesStart<'_>) -> Result<XmlElement, DiscoveryErr
     let mut attributes = Vec::new();
     for attribute in start.attributes() {
         let attribute = attribute.map_err(|error| {
-            DiscoveryError::Session(format!("invalid WMTS XML attribute: {error}"))
+            DiscoveryError::InvalidMetadata(format!("invalid WMTS XML attribute: {error}"))
         })?;
         let name = attribute.key.local_name().into_inner().to_string();
         let value = quick_xml::escape::unescape(&attribute.value)
             .map_err(|error| {
-                DiscoveryError::Session(format!("invalid WMTS XML attribute value: {error}"))
+                DiscoveryError::InvalidMetadata(format!(
+                    "invalid WMTS XML attribute value: {error}"
+                ))
             })?
             .into_owned();
         attributes.push(XmlAttribute { name, value });
@@ -109,7 +115,7 @@ fn append_element(
     if let Some(parent) = stack.last_mut() {
         parent.children.push(element);
     } else if root.is_some() {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "invalid WMTS XML: multiple document elements".into(),
         ));
     } else {
@@ -125,7 +131,7 @@ fn append_text(stack: &mut [XmlElement], text: &str) -> Result<(), DiscoveryErro
     } else if text.trim().is_empty() {
         Ok(())
     } else {
-        Err(DiscoveryError::Session(
+        Err(DiscoveryError::InvalidMetadata(
             "invalid WMTS XML: text outside document element".into(),
         ))
     }
@@ -200,5 +206,5 @@ pub(crate) fn required_text(
         .next()
         .map(text_content)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| DiscoveryError::Session(format!("WMTS has no {label}")))
+        .ok_or_else(|| DiscoveryError::InvalidMetadata(format!("WMTS has no {label}")))
 }

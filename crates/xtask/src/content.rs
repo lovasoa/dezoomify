@@ -2,7 +2,7 @@
 //! contract tense, staleness markers, and tracked size budgets.
 //!
 //! Size budgets (todo 6.3) pin the shipped bytes that prose guards cannot
-//! see: the wasm adapter (`wasm/dezoomify-wasm_bg.wasm`, 5 MB warn / 6 MB
+//! see: the WASM binding (`wasm/dezoomify-wasm_bg.wasm`, 5 MB warn / 6 MB
 //! fail), the extension store ZIPs (`target/extension/*.zip`, 3 MB warn /
 //! 4 MB fail), the served `dist/beta` JavaScript (750 kB warn / 1 MB fail),
 //! and the shared-UI theme (`packages/shared-ui/src/styles/theme.css`,
@@ -68,8 +68,8 @@ pub fn verify(a: &[String]) -> Result<(), String> {
     let (p, q, d) = (
         std::fs::read_to_string(r.join("docs/product.md"))
             .map_err(|e| format!("read product.md: {e}"))?,
-        std::fs::read_to_string(r.join("docs/protocol.md"))
-            .map_err(|e| format!("read protocol.md: {e}"))?,
+        std::fs::read_to_string(r.join("docs/bindings.md"))
+            .map_err(|e| format!("read bindings.md: {e}"))?,
         std::fs::read_to_string(r.join("generated/desktop-capabilities.json"))
             .map_err(|e| format!("read desktop-capabilities.json: {e}"))?,
     );
@@ -83,7 +83,7 @@ pub fn verify(a: &[String]) -> Result<(), String> {
             .all(|e| d.contains(&format!("\"{e}\"")))
     {
         return Err(format!(
-            "encoder-list drift: product.md {:?} vs protocol.md {:?} vs desktop capabilities [png, jpeg, tiff]",
+            "encoder-list drift: product.md {:?} vs bindings.md {:?} vs desktop capabilities [png, jpeg, tiff]",
             b(&p),
             b(&q)
         ));

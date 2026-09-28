@@ -1,28 +1,14 @@
-// Real Tauri window shell (behind the `tauri` feature).
-//
-// One local window (`main`), strict navigation policy from
-// tauri.conf.json (no remote IPC access, strict CSP), and the exact
-// commands of the generated capability documents wired to the pure job
-// table. No tile bytes cross IPC, only protocol progress and events.
-//
-// All commands are async Tauri commands over `State<Mutex<JobTable>>` +
-// `AppHandle`. The mutex is held only inside the synchronous typed dispatch
-// calls (never across await/dialog); lifecycle, driver threads, and
-// `poll_drivers` stay owned by `jobs.rs`.
-
 use std::sync::Mutex;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tauri_plugin_dialog::DialogExt;
 
 use crate::commands::{self, CommandError};
 use crate::deep_link;
 use crate::jobs::JobTable;
 use crate::settings::parse_settings;
-use dezoomify_native::output::{validate_destination, OutputFormat};
+use dezoomify_native::{output::OutputFormat, NativeHost, OutputTarget};
 
-/// Command registry, mirrored from the pure layer for compile-time checks.
 const COMMANDS: &[&str] = commands::COMMANDS;
 
 #[cfg(all(test, target_os = "linux"))]
@@ -174,155 +160,144 @@ impl From<CommandError> for CommandFailure {
     }
 }
 
-#[derive(Serialize)]
-struct Dispatched {
-    job: String,
-    seq: u64,
-    event: String,
-}
-
-#[derive(Serialize)]
-struct DestinationResult {
-    outcome: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    reason: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    code: Option<String>,
-}
-
-#[derive(Serialize)]
-struct CapabilitySnapshot {
-    native_available: bool,
-    encoders: Vec<String>,
-    protocol_min: String,
-    protocol_max: String,
-    commands: Vec<&'static str>,
-}
-
-/// Projected IPC payload shape. Every job emit is the canonical
-/// `{ job, snapshot }`, where `snapshot` is the `Snapshot` verbatim.
-///
-/// Only the DTO crosses IPC; tile bytes and pixels stay in the host.
-fn emit_snapshot(app: &AppHandle, emit: crate::jobs::SnapshotEmit) {
-    debug_assert!(!crate::jobs::payload_has_forbidden_keys(&emit.payload));
-    let _ = app.emit(emit.channel, emit.payload);
-}
-
-/// Emit synchronous snapshot emits plus freshly polled runner snapshots.
-/// Per-job revisions flow verbatim from the runner (`saturating_add` at
-/// the driver); terminals were forwarded exactly once and post-terminal
-/// snapshots are dropped, so this preserves exactly-once terminal delivery.
-fn poll_and_emit(
-    app: &AppHandle,
-    table: &mut crate::jobs::JobTable,
-    sync: Vec<crate::jobs::SnapshotEmit>,
-) {
-    for emit in sync {
-        emit_snapshot(app, emit);
-    }
-    for emit in table.poll_drivers() {
-        emit_snapshot(app, emit);
-    }
-}
-
-/// Run one typed commands-layer dispatch under the table lock.
 fn lock_table<'a>(
     state: &'a State<'_, Mutex<JobTable>>,
 ) -> Result<std::sync::MutexGuard<'a, JobTable>, CommandFailure> {
     state.lock().map_err(|_| CommandFailure {
         code: "shell.lock".into(),
-        message: "job table poisoned".into(),
+        message: "native resources unavailable".into(),
     })
 }
 
-fn to_dispatched(outcome: commands::DispatchOutcome) -> Dispatched {
-    Dispatched {
-        job: outcome.job,
-        seq: outcome.seq,
-        event: outcome.event,
-    }
-}
-
 #[tauri::command]
-async fn start_job(
-    state: State<'_, Mutex<JobTable>>,
-    app: AppHandle,
-    input_url: String,
-    settings: Option<serde_json::Value>,
-) -> Result<Dispatched, CommandFailure> {
-    // Validates `input_url` plus the minimal settings JSON (validated
-    // bounds, fail closed on invalid), then spawns the driver via
-    // `jobs.rs start_job_with_settings` (CLI-parity transport). Emits the
-    // initial `job-snapshot` for the new job. Header values never enter
-    // logs or error strings.
-    if !commands::is_valid_input_url(&input_url) {
-        return Err(CommandError::invalid_input(
-            "input_url must be an http(s) URL up to 2048 bytes without userinfo",
-        )
-        .into());
-    }
-    let (dispatched, initial) = {
-        let mut table = state.lock().map_err(|_| CommandFailure {
-            code: "shell.lock".into(),
-            message: "job table poisoned".into(),
-        })?;
-        let (id, emit) = match settings.as_ref() {
-            None => table
-                .start_job(&input_url)
-                .map_err(|e| CommandError::invalid_input(&e))?,
-            Some(value) => {
-                let parsed = parse_settings(value).map_err(|e| CommandError::invalid_input(&e))?;
-                table
-                    .start_job_with_settings(&input_url, &parsed)
-                    .map_err(|e| CommandError::invalid_input(&e))?
-            }
-        };
-        let seq = emit.seq;
-        (
-            Dispatched {
-                job: id,
-                seq,
-                event: "job-snapshot".to_string(),
-            },
-            emit,
-        )
-    };
-    {
-        let mut table = state.lock().map_err(|_| CommandFailure {
-            code: "shell.lock".into(),
-            message: "job table poisoned".into(),
-        })?;
-        poll_and_emit(&app, &mut table, vec![initial]);
-    }
-    Ok(dispatched)
-}
-
-#[tauri::command]
-async fn job_command(
+async fn dezoomify(
     state: State<'_, Mutex<JobTable>>,
     app: AppHandle,
     job: String,
-    command: serde_json::Value,
-) -> Result<Dispatched, CommandFailure> {
-    let mut table = lock_table(&state)?;
-    let result = commands::dispatch_job_command(&mut table, &job, command);
-    // Even a stale command can drain the terminal that made it stale.
-    let emits = result
-        .as_ref()
-        .map(|(_, emits)| emits.clone())
-        .unwrap_or_default();
-    poll_and_emit(&app, &mut table, emits);
-    result
-        .map(|(outcome, _)| to_dispatched(outcome))
-        .map_err(Into::into)
+    input_url: String,
+    settings: Option<serde_json::Value>,
+) -> Result<dezoomify::model::Output, dezoomify::model::Error> {
+    use dezoomify::model::{Error, ErrorPhase};
+    let invalid =
+        |message: String| Error::new("job.invalid-input", ErrorPhase::Validation, message);
+    if !commands::is_valid_input_url(&input_url) {
+        return Err(invalid(
+            "input_url must be an http(s) URL up to 2048 bytes without userinfo".into(),
+        ));
+    }
+    let settings = settings
+        .map(|value| parse_settings(&value))
+        .transpose()
+        .map_err(invalid)?
+        .unwrap_or_else(crate::settings::DesktopSettings::with_defaults);
+    let registration = lock_table(&state)
+        .map_err(|error| invalid(error.message))?
+        .insert(&job)
+        .map_err(|error| invalid(error.message))?;
+    let mut options = crate::settings::job_options_for(&settings);
+    options.input_url = input_url;
+    let format = match settings.output_format.as_str() {
+        "jpeg" => OutputFormat::Jpeg,
+        "tiff" => OutputFormat::Tiff,
+        "zif" => OutputFormat::Zif,
+        "webp" => OutputFormat::Webp,
+        "iiif-dir" => OutputFormat::IiifDir,
+        _ => OutputFormat::Png,
+    };
+    options.output = OutputTarget::AutoDir {
+        dir: settings.output_dir.unwrap_or_else(std::env::temp_dir),
+        format,
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut host = match NativeHost::with_diagnostics(options, registration.diagnostics.clone())
+        {
+            Ok(host) => host,
+            Err(error) => {
+                registration.finish(None);
+                registration.diagnostics.finish(
+                    "failed",
+                    serde_json::json!({"code": error.code, "message": error.message}),
+                );
+                return Err(dezoomify_native::host::native_error(error));
+            }
+        };
+        host.controls = registration.controls.clone();
+        host.on_progress(|progress| {
+            let _ = app.emit(
+                crate::jobs::CHANNEL_PROGRESS,
+                serde_json::json!({"job": job, "progress": progress}),
+            );
+        });
+        host.on_partial(|missing| {
+            let (question, answer) = registration.request_partial();
+            let _ = app.emit(
+                crate::jobs::CHANNEL_PARTIAL,
+                serde_json::json!({"job": job, "question": question, "missing": missing}),
+            );
+            Box::pin(async move {
+                answer.await.map_err(|_| {
+                    Error::new(
+                        "interaction.expired",
+                        ErrorPhase::Acquisition,
+                        "The question is no longer open.",
+                    )
+                })
+            })
+        });
+        let result = host.transport.block_on(dezoomify::dezoomify(
+            host.inputs(),
+            host.algorithm_options(),
+            &host,
+        ));
+        registration.finish(host.publication().map(|output| output.path));
+        if let Err(error) = &result {
+            registration.diagnostics.finish(
+                if error.code == "job.cancelled" {
+                    "cancelled"
+                } else {
+                    "failed"
+                },
+                serde_json::json!({"code": error.code, "message": error.message}),
+            );
+        }
+        result
+    })
+    .await
+    .map_err(|_| Error::new("native.internal", ErrorPhase::Cleanup, "native task failed"))?
 }
 
+#[tauri::command]
+async fn cancel_job(state: State<'_, Mutex<JobTable>>, job: String) -> Result<(), CommandFailure> {
+    lock_table(&state)?.live(&job)?.controls.cancel();
+    Ok(())
+}
+#[tauri::command]
+async fn pause_job(state: State<'_, Mutex<JobTable>>, job: String) -> Result<(), CommandFailure> {
+    lock_table(&state)?.live(&job)?.controls.pause();
+    Ok(())
+}
+#[tauri::command]
+async fn resume_job(state: State<'_, Mutex<JobTable>>, job: String) -> Result<(), CommandFailure> {
+    lock_table(&state)?.live(&job)?.controls.resume();
+    Ok(())
+}
+#[tauri::command]
+async fn answer_partial(
+    state: State<'_, Mutex<JobTable>>,
+    job: String,
+    question: u64,
+    answer: dezoomify::model::RecoveryChoice,
+) -> Result<(), CommandFailure> {
+    lock_table(&state)?
+        .live(&job)?
+        .answer_partial(question, answer)?;
+    Ok(())
+}
 #[tauri::command]
 async fn release_job(state: State<'_, Mutex<JobTable>>, job: String) -> Result<(), CommandFailure> {
     lock_table(&state)?.release_job(&job);
     Ok(())
 }
-
 #[tauri::command]
 async fn get_job_diagnostics(
     state: State<'_, Mutex<JobTable>>,
@@ -332,162 +307,11 @@ async fn get_job_diagnostics(
         .diagnostic_report(&job)
         .ok_or_else(|| commands::CommandError::unknown_job(&job).into())
 }
-
 #[tauri::command]
-async fn query_capabilities(
-    state: State<'_, Mutex<JobTable>>,
-) -> Result<CapabilitySnapshot, CommandFailure> {
-    {
-        let mut table = lock_table(&state)?;
-        commands::dispatch_query_capabilities(&mut table)?;
-    }
-    Ok(CapabilitySnapshot {
-        native_available: true,
-        encoders: commands::SUPPORTED_FORMATS
-            .iter()
-            .map(|s| (*s).to_string())
-            .collect(),
-        protocol_min: "2.0".into(),
-        protocol_max: "2.0".into(),
-        commands: COMMANDS.to_vec(),
-    })
-}
-
-/// Native save dialog: shows the real OS dialog off the main thread
-/// (async command), validates the chosen path, then grants the real
-/// destination through the validated commands-layer dispatch. The chosen
-/// path stays native; only the opaque destination handle crosses IPC (never
-/// raw paths in events).
-#[tauri::command]
-async fn request_destination(
-    state: State<'_, Mutex<JobTable>>,
-    app: AppHandle,
-    job: String,
-    format: String,
-    suggested_name: String,
-) -> Result<DestinationResult, CommandFailure> {
-    // Format-only validation here with no table side effects (no dialog yet).
-    // Path validation after the dialog uses the output layer
-    // (`infer_from_path` + `validate_destination`); the grant below
-    // re-validates under the lock and preserves
-    // unknown/stale/invalid-input codes.
-    if !commands::SUPPORTED_FORMATS.contains(&format.as_str()) {
-        return Err(CommandError::invalid_input(
-            "format must be one of png, jpeg, tiff, zif, webp, iiif-dir",
-        )
-        .into());
-    }
-    let (filter_name, extension): (&str, &str) = match format.as_str() {
-        "png" => ("PNG image", "png"),
-        "jpeg" => ("JPEG image", "jpg"),
-        "tiff" => ("TIFF image", "tif"),
-        "zif" => ("ZIF pyramid", "zif"),
-        "webp" => ("WebP image", "webp"),
-        "iiif-dir" | "iiif" => ("IIIF tile tree", "iiif"),
-        _ => {
-            return Err(CommandError::invalid_input(
-                "format must be one of png, jpeg, tiff, zif, webp, iiif-dir",
-            )
-            .into());
-        }
-    };
-    // Settings-selected output dir seeds the dialog's initial directory; the
-    // user still picks the exact file. Read without holding the lock across
-    // the blocking dialog.
-    let output_dir = {
-        let table = state.lock().map_err(|_| CommandFailure {
-            code: "shell.lock".into(),
-            message: "job table poisoned".into(),
-        })?;
-        table.output_dir_for(&job)
-    };
-    // Blocking dialogs must not run on the main thread; async commands run on
-    // the async runtime, so this is the sanctioned shape.
-    let mut dialog = app
-        .dialog()
-        .file()
-        .set_file_name(&suggested_name)
-        .add_filter(filter_name, &[extension]);
-    if let Some(dir) = output_dir.as_deref() {
-        dialog = dialog.set_directory(dir);
-    }
-    let chosen = dialog.blocking_save_file();
-    let Some(path) = chosen else {
-        return Ok(DestinationResult {
-            outcome: "cancelled",
-            reason: Some("user-cancelled".into()),
-            code: None,
-        });
-    };
-    let path = path.into_path().map_err(|_| CommandFailure {
-        code: "command.invalid-input".into(),
-        message: "invalid destination path".into(),
-    })?;
-    if path.as_os_str().is_empty() {
-        return Ok(DestinationResult {
-            outcome: "cancelled",
-            reason: Some("user-cancelled".into()),
-            code: None,
-        });
-    }
-    // Real-destination validation before any work: infer the format from the
-    // dialog path extension (`.png` -> PNG, `.jpg`/`.jpeg` -> JPEG,
-    // `.tif`/`.tiff` -> TIFF, `.zif` -> ZIF pyramid, `.webp` -> lossless
-    // WebP, `.iiif`/extensionless/existing directory -> `iiif-dir`, anything
-    // else a typed error), then enforce the extension/format match with
-    // overwrite=false. No overwrite confirmation UI exists yet, so an
-    // existing destination is denied for choose-output recovery instead of
-    // replaced. Denials carry the typed output-layer reason with no table
-    // side effects; the raw path never leaves the host.
-    let requested = match format.as_str() {
-        "png" => OutputFormat::Png,
-        "jpeg" => OutputFormat::Jpeg,
-        "tiff" => OutputFormat::Tiff,
-        "zif" => OutputFormat::Zif,
-        "webp" => OutputFormat::Webp,
-        "iiif-dir" | "iiif" => OutputFormat::IiifDir,
-        _ => {
-            return Err(CommandError::invalid_input(
-                "format must be one of png, jpeg, tiff, zif, webp, iiif-dir",
-            )
-            .into());
-        }
-    };
-    let denied = OutputFormat::infer_from_path(&path)
-        .map(|_| ())
-        .and_then(|()| validate_destination(&path, &requested, false))
-        .err();
-    if let Some(error) = denied {
-        return Ok(DestinationResult {
-            outcome: "denied",
-            reason: Some(error.message.clone()),
-            code: Some(error.code.clone()),
-        });
-    }
-    // Grant the real destination through the validated dispatch; the native
-    // runtime reports completion only after atomic output finalization.
-    // The raw path stays native; it never crosses IPC.
-    // Overwrite stays false until an explicit overwrite confirmation exists.
-    let sync = {
-        let mut table = state.lock().map_err(|_| CommandFailure {
-            code: "shell.lock".into(),
-            message: "job table poisoned".into(),
-        })?;
-        let (_, emits) = commands::dispatch_destination(&mut table, &job, &format, &path, false)?;
-        emits
-    };
-    {
-        let mut table = state.lock().map_err(|_| CommandFailure {
-            code: "shell.lock".into(),
-            message: "job table poisoned".into(),
-        })?;
-        poll_and_emit(&app, &mut table, sync);
-    }
-    Ok(DestinationResult {
-        outcome: "granted",
-        reason: None,
-        code: None,
-    })
+async fn query_capabilities() -> Result<serde_json::Value, CommandFailure> {
+    Ok(
+        serde_json::json!({"native_available": true, "encoders": commands::SUPPORTED_FORMATS, "commands": COMMANDS}),
+    )
 }
 
 #[derive(Serialize, Clone)]
@@ -507,15 +331,6 @@ fn focus_main_window(app: &AppHandle) {
     }
 }
 
-/// Validate one raw deep-link candidate and, only on success, emit
-/// `dezoomify://deep-link-pending` with the validated
-/// `{source_url, hint, version}` triple.
-///
-/// Rejected links are logged to stderr with no effect. Accepted links still
-/// require explicit frontend confirmation before any `start_job` effect: the
-/// confirmation gate (`apply_after_confirmation` with `confirmed = false`)
-/// must refuse here, and only the frontend confirm path may re-apply with
-/// `confirmed = true`.
 fn handle_deep_link_url(app: &AppHandle, raw: &str) {
     match deep_link::parse_deep_link(raw) {
         Ok(link) => {
@@ -541,37 +356,10 @@ fn handle_deep_link_url(app: &AppHandle, raw: &str) {
     }
 }
 
-/// Scan second-instance (or initial-launch) argv for a deep link and forward
-/// it to the main window. No effect is performed before frontend confirmation.
 fn handle_deep_link_argv(app: &AppHandle, argv: &[String]) {
     if let Some(candidate) = deep_link::find_deep_link_in_argv(argv) {
         handle_deep_link_url(app, &candidate);
     }
-}
-
-/// Background driver poller: forwards worker snapshots verbatim on the
-/// snapshot channel. Polls every 100 ms without blocking commands; the
-/// table lock is held only for the synchronous pump, never across
-/// await/dialog. Terminals were forwarded exactly once and post-terminal
-/// snapshots dropped, so the poller preserves exactly-once delivery. No
-/// tile bytes cross IPC; payloads come from `jobs.rs`.
-fn spawn_driver_poller(app: AppHandle) {
-    let _ = std::thread::Builder::new()
-        .name("dezoomify-driver-poll".to_string())
-        .spawn(move || loop {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            let pending: Vec<crate::jobs::SnapshotEmit> = {
-                let state = app.state::<Mutex<JobTable>>();
-                let mut table = match state.lock() {
-                    Ok(table) => table,
-                    Err(_) => break,
-                };
-                table.poll_drivers()
-            };
-            for emit in pending {
-                emit_snapshot(&app, emit);
-            }
-        });
 }
 
 /// Run the desktop shell. Exits the process on failure.
@@ -604,9 +392,6 @@ pub fn run() {
             // (`dezoomify-desktop dezoomify://open?...`).
             let argv: Vec<String> = std::env::args().collect();
             handle_deep_link_argv(app.handle(), &argv);
-            // Real-time snapshots: runner progress and terminals reach the
-            // frontend on the snapshot channel without waiting for the next command.
-            spawn_driver_poller(app.handle().clone());
             Ok(())
         })
         .build(tauri::generate_context!())

@@ -12,61 +12,79 @@ import {
   phaseFor,
   plainMessageFor,
 } from "../packages/shared-ui/src/failure.ts";
-import { presentSnapshot } from "../packages/shared-ui/src/snapshot-view.ts";
+import {
+  presentFailure,
+  presentIdle,
+  presentOutput,
+  presentProgress,
+  presentStatus,
+} from "../packages/shared-ui/src/presentation.ts";
 
-// Authoritative Snapshot builder: the latest snapshot renders
-// directly, even when intermediate notifications were skipped.
-function dto(overrides = {}) {
-  return {
-    revision: 0,
-    lifecycle: "Discovering",
-    paused: false,
-    progress: { completed: 0, total: undefined },
-    selection: {
-      image: undefined,
-      level: undefined,
-      level_count: 0,
-      catalog: undefined,
-      deferred: [],
-    },
-    decision: undefined,
-    terminal: undefined,
-    output: undefined,
-    ...overrides,
-  };
-}
+const progress = (extra = {}) => ({ phase: "acquisition", completed: 2, total: 4, ...extra });
+const output = (extra = {}) => ({
+  canvas: { width: 512, height: 512 },
+  format: "png",
+  complete: true,
+  missing: [],
+  disposition: "browser-save-ready",
+  ...extra,
+});
 
-test("the latest snapshot presents the terminal exactly once with its progress", () => {
-  const snap = dto({
-    revision: 9,
-    lifecycle: "Completed",
-    progress: { completed: 1, total: 4 },
-    terminal: { type: "completed" },
-  });
-  // Intermediate notifications skipped: only the latest snapshot renders.
-  const view = presentSnapshot(snap, "direct");
+test("idle, discovery, pause, and cancellation retain their controls", () => {
+  const idle = presentIdle();
+  assert.equal(idle.phase, "idle");
+  assert.equal(idle.canCancel, false);
+  const live = presentProgress(progress({ phase: "discovery" }), "direct", { paused: true });
+  assert.equal(live.headlineKey, "view.step.discovering");
+  assert.equal(live.canCancel, true);
+  assert.equal(live.canReset, false);
+  assert.equal(live.paused, true);
+  assert.equal(live.transportLabel, "Direct from your browser");
+  assert.equal(presentStatus("cancelled").headlineKey, "view.cancel.title");
+});
+
+test("completed output preserves acquired progress", () => {
+  const view = presentOutput(output(), progress({ completed: 1 }), "direct");
   assert.equal(view.phase, "completed");
   assert.equal(view.terminal.kind, "completed");
   assert.deepEqual(view.progress, { current: 1, total: 4 });
 });
 
-test("a tainted canvas keeps progress while dezooming, preview only when done", () => {
-  const snap = dto({
-    revision: 3,
-    lifecycle: "AcquiringTiles",
-    progress: { completed: 2, total: 4 },
-  });
-  const view = presentSnapshot(snap, "browser-session", { displayOnly: true });
-  assert.equal(view.phase, "job");
-  assert.equal(view.headlineKey, "view.step.downloading");
-  assert.equal(view.progress.current, 2);
-  const taintedTerminal = presentSnapshot(
-    dto({ ...snap, terminal: { type: "completed" } }),
+test("ordinary image display keeps progress during work and presents its final preview", () => {
+  const live = presentProgress(progress(), "browser-session", { displayOnly: true });
+  assert.equal(live.phase, "job");
+  assert.equal(live.headlineKey, "view.step.downloading");
+  assert.equal(live.progress.current, 2);
+  const done = presentOutput(
+    output({ disposition: "display-only" }),
+    progress(),
     "browser-session",
-    { displayOnly: true },
   );
-  assert.equal(taintedTerminal.phase, "completed");
-  assert.equal(taintedTerminal.displayOnly, false, "terminals render their own phase");
+  assert.equal(done.phase, "display-only");
+  assert.equal(done.displayOnly, true);
+  assert.equal(done.headlineKey, "view.display.title");
+});
+
+test("results render without catalog or progress and partials identify gaps", () => {
+  const done = presentOutput(output(), undefined, "native");
+  assert.equal(done.canReset, true);
+  assert.equal(done.canCancel, false);
+  const partial = presentOutput(
+    output({ complete: false, missing: [10, 11, 12] }),
+    undefined,
+    "native",
+  );
+  assert.equal(partial.partial, true);
+  assert.equal(partial.terminal.output.failedTiles, 3);
+  assert.equal(partial.terminal.gapCount, 3);
+  assert.match(partial.terminal.gapShown, /10/);
+  const failed = presentFailure(
+    { code: "tile.failed", message: "Three tiles failed.", category: "transport", retryable: true },
+    "native",
+  );
+  assert.equal(failed.phase, "failed");
+  assert.equal(failed.terminal.error.code, "tile.failed");
+  assert.equal(failed.terminal.output, undefined);
 });
 
 test("app-choice guidance is plain language with no jargon", () => {
@@ -117,14 +135,14 @@ test("components render save/error/progress plainly", () => {
   assert.ok(renderProgress(1, 4).includes("1 of 4"));
 });
 
-test("failure presenter keeps the engine block out of the headline", () => {
-  const engineBlock =
+test("failure presenter keeps the diagnostic detail out of the headline", () => {
+  const diagnostics =
     " - iiif: Invalid IIIF info.json file: expected value at line 1 column 1\n" +
     " - zoomify: HTTP 404 fetching this address\n" +
     " - 12 other format(s) did not match this page address";
   const error = describeFailure({
     code: "job.discovery-failed",
-    engineDetail: engineBlock,
+    detail: diagnostics,
     retryable: false,
     host: "example.test",
   });
@@ -134,8 +152,8 @@ test("failure presenter keeps the engine block out of the headline", () => {
   assert.equal(error.phase, "discovery");
   assert.ok(!error.message.includes("iiif"));
   assert.ok(error.message.includes("No zoomable image"));
-  // The engine block is the only thing in the technical detail.
-  assert.equal(error.detail, engineBlock);
+  // The diagnostic detail is the only thing in the technical detail.
+  assert.equal(error.detail, diagnostics);
 });
 
 test("a fetch failure keeps its classified headline", () => {
@@ -165,105 +183,20 @@ test("failure classification derives from codes, never text", () => {
   assert.equal(phaseFor({ code: "OUTPUT_DENIED" }), "acquisition");
 });
 
-test("a completed job with engine display-only disposition presents preview", () => {
-  const snap = dto({
-    revision: 7,
-    lifecycle: "Completed",
-    progress: { completed: 4, total: 4 },
-    terminal: { type: "completed" },
-    output: {
-      canvas: { width: 512, height: 512 },
-      format: "png",
-      complete: true,
-      missing: [],
-      disposition: "display-only",
-    },
-  });
-  const view = presentSnapshot(snap, "browser-session");
-  assert.equal(view.phase, "display-only");
-  assert.equal(view.displayOnly, true);
-  assert.equal(view.headlineKey, "view.display.title");
-});
-
-const RESOLUTION_CATALOG = {
-  entries: [
-    {
-      kind: "image",
-      title: "Mural",
-      format: "zoomify",
-      sourceKind: "tile",
-      levels: [
-        { label: "0", size: { width: 10000, height: 5000 } },
-        { label: "1", size: { width: 20000, height: 10000 } },
-        { label: "2", size: { width: 40000, height: 20000 } },
-      ],
-    },
-  ],
-};
-
-test("a smaller known level than the maximum presents the resolution choice", () => {
-  const selection = {
-    image: 0,
-    level: 1,
-    level_count: 3,
-    catalog: RESOLUTION_CATALOG,
-    deferred: [],
-  };
-  const live = presentSnapshot(
-    dto({
-      revision: 2,
-      lifecycle: "AcquiringTiles",
-      progress: { completed: 1, total: 4 },
-      selection,
-    }),
-    "direct",
-  );
-  assert.deepEqual(live.resolution, {
+test("resolution downgrade remains visible after completion", () => {
+  const current = progress({
     selected: { width: 20000, height: 10000 },
     maximum: { width: 40000, height: 20000 },
   });
-  // The choice survives completion so the offer can stay on screen.
-  const done = presentSnapshot(
-    dto({
-      revision: 3,
-      lifecycle: "Completed",
-      progress: { completed: 4, total: 4 },
-      selection,
-      terminal: { type: "completed" },
-    }),
-    "direct",
+  const live = presentProgress(current, "direct");
+  assert.deepEqual(live.resolution, { selected: current.selected, maximum: current.maximum });
+  assert.deepEqual(presentOutput(output(), current, "direct").resolution, live.resolution);
+  assert.equal(
+    presentProgress(progress({ selected: current.maximum, maximum: current.maximum }), "direct")
+      .resolution,
+    undefined,
   );
-  assert.deepEqual(done.resolution, live.resolution);
-});
-
-test("no resolution choice at the maximum level or without declared sizes", () => {
-  const atMax = presentSnapshot(
-    dto({
-      revision: 4,
-      lifecycle: "AcquiringTiles",
-      progress: { completed: 0, total: 4 },
-      selection: { image: 0, level: 2, level_count: 3, catalog: RESOLUTION_CATALOG, deferred: [] },
-    }),
-    "direct",
-  );
-  assert.equal(atMax.resolution, undefined);
-  const undeclared = presentSnapshot(
-    dto({
-      revision: 5,
-      lifecycle: "AcquiringTiles",
-      selection: {
-        image: 0,
-        level: 1,
-        level_count: 2,
-        catalog: { entries: [{ kind: "image", levels: [{ label: "0" }, { label: "1" }] }] },
-        deferred: [],
-      },
-    }),
-    "direct",
-  );
-  assert.equal(undeclared.resolution, undefined);
-  const noSelection = presentSnapshot(dto({ revision: 6, lifecycle: "Discovering" }), "direct");
-  assert.equal(noSelection.resolution, undefined);
+  assert.equal(presentProgress(progress(), "direct").resolution, undefined);
 });
 
 test("canvas failure copy names the desktop app for every report", () => {

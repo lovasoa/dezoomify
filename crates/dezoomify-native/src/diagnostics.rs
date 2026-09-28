@@ -1,7 +1,7 @@
-//! Bounded local observations, separate from the authoritative engine state.
+//! Bounded local observations for native platform work.
 use dezoomify::model::{
     DiagnosticFailureGroup, DiagnosticLevel, DiagnosticRecord, DiagnosticReport, DiagnosticValue,
-    Snapshot,
+    Progress,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -98,7 +98,6 @@ struct State {
     sequence: u32,
     bytes: usize,
     phase: String,
-    selection: String,
 }
 
 impl std::fmt::Debug for Diagnostics {
@@ -131,10 +130,9 @@ impl Diagnostics {
                 sequence: 0,
                 bytes: 0,
                 phase: String::new(),
-                selection: String::new(),
             })),
         };
-        result.context(json!({"product": product, "version": version, "protocol": "2.0", "os": std::env::consts::OS, "arch": std::env::consts::ARCH}));
+        result.context(json!({"product": product, "version": version, "os": std::env::consts::OS, "arch": std::env::consts::ARCH}));
         result
     }
 
@@ -254,14 +252,14 @@ impl Diagnostics {
         }
     }
 
-    pub fn observe(&self, snapshot: &Snapshot) {
-        let phase = format!("{:?}:{}", snapshot.lifecycle, snapshot.paused);
-        let (changed, selected) = if let Ok(mut state) = self.inner.lock() {
+    pub fn observe(&self, progress: &Progress) {
+        let phase = format!("{:?}", progress.phase);
+        let changed = if let Ok(mut state) = self.inner.lock() {
             state
                 .report
                 .counters
-                .insert("tiles_completed".into(), snapshot.progress.completed as f64);
-            if let Some(total) = snapshot.progress.total {
+                .insert("tiles_completed".into(), progress.completed as f64);
+            if let Some(total) = progress.total {
                 state
                     .report
                     .counters
@@ -269,30 +267,19 @@ impl Diagnostics {
             }
             let changed = state.phase != phase;
             state.phase = phase;
-            let selection = format!(
-                "{:?}:{:?}",
-                snapshot.selection.image, snapshot.selection.level
-            );
-            let selected = selection != state.selection;
-            state.selection = selection;
-            (changed, selected)
+            changed
         } else {
             return;
         };
         if changed {
-            self.record(DiagnosticLevel::Info, "phase", json!({"phase": snapshot.lifecycle, "paused": snapshot.paused, "revision": snapshot.revision}));
+            self.record(
+                DiagnosticLevel::Info,
+                "phase",
+                json!({"phase": progress.phase}),
+            );
         }
-        if selected {
-            if let Some(dezoomify::model::CatalogEntry::Image(image)) =
-                snapshot.selection.catalog.as_ref().and_then(|c| {
-                    c.entries
-                        .get(snapshot.selection.image.unwrap_or(u32::MAX) as usize)
-                })
-            {
-                let facts = json!({"format": image.format, "image": snapshot.selection.image, "level": snapshot.selection.level, "levels": image.levels.len(), "title": image.title, "size": image.levels.get(snapshot.selection.level.unwrap_or(u32::MAX) as usize).and_then(|l| l.size.as_ref()), "maximum": image.size, "source_kind": image.source_kind});
-                self.context(json!({"selection": facts}));
-                self.record(DiagnosticLevel::Info, "selection", facts);
-            }
+        if progress.selected.is_some() {
+            self.context(json!({"selection": {"title": progress.title, "size": progress.selected, "maximum": progress.maximum}}));
         }
     }
 

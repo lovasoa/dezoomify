@@ -4,7 +4,7 @@ import {
   extensionForSaveFormat,
   safeTitleStem,
   suggestedNameFor,
-} from "../../app-model/src/index.ts";
+} from "../../shared-ui/src/labels.ts";
 
 test("suggestedNameFor builds dezoomify-WxH names with format extensions", () => {
   assert.equal(suggestedNameFor(800, 600, "png"), "dezoomify-800x600.png");

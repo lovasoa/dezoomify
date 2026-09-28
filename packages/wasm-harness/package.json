@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Test-only Node conformance harness for the dezoomify-wasm adapter. No runtime dependencies, no network.",
+  "description": "Test-only Node conformance harness for the dezoomify-WASM binding. No runtime dependencies, no network.",
   "scripts": {
     "test": "node --test-reporter=dot --test src/node.spec.mjs",
     "test:node": "node --test-reporter=dot --test src/node.spec.mjs"

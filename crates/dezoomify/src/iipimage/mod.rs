@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::Vec2d;
 use crate::core::discovery::{image_url, metadata, url_matches};
-use crate::core::{DiscoveryError, DiscoveryStep, FormatSpec, ImagePlan, Request, ResolvedLevel};
+use crate::core::{DiscoveryError, FormatSpec, ImagePlan, ParsedResource, Request, ResolvedLevel};
 
 const META: &str = "&OBJ=Max-size&OBJ=Tile-size&OBJ=Resolution-number";
 
@@ -38,7 +38,7 @@ fn metadata_url(input: &str) -> Result<Request, DiscoveryError> {
     )))
 }
 
-fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let (uri, bytes) = (resource.final_uri(), resource.bytes());
     let metadata = Arc::new(Metadata::try_from(bytes)?);
     let base: Arc<str> = uri.trim_end_matches(META).into();
@@ -53,7 +53,7 @@ fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<DiscoveryStep,
             .with_title(Some(format!("IIP level {index}"))))
         })
         .collect::<Result<Vec<_>, DiscoveryError>>()?;
-    Ok(DiscoveryStep::Image(ImagePlan::new(None, levels)))
+    Ok(ParsedResource::Image(ImagePlan::new(None, levels)))
 }
 
 #[derive(Clone, Debug)]
@@ -89,12 +89,14 @@ impl FromStr for Metadata {
         });
         let levels = numbers("resolution-number", 1).map(|values| values[0]);
         Ok(Self {
-            size: size
-                .ok_or_else(|| DiscoveryError::Session("IIP metadata lacks Max-size".into()))?,
-            tile_size: tile_size
-                .ok_or_else(|| DiscoveryError::Session("IIP metadata lacks Tile-size".into()))?,
+            size: size.ok_or_else(|| {
+                DiscoveryError::InvalidMetadata("IIP metadata lacks Max-size".into())
+            })?,
+            tile_size: tile_size.ok_or_else(|| {
+                DiscoveryError::InvalidMetadata("IIP metadata lacks Tile-size".into())
+            })?,
             levels: levels.ok_or_else(|| {
-                DiscoveryError::Session("IIP metadata lacks Resolution-number".into())
+                DiscoveryError::InvalidMetadata("IIP metadata lacks Resolution-number".into())
             })?,
         })
     }
@@ -103,7 +105,7 @@ impl TryFrom<&[u8]> for Metadata {
     type Error = DiscoveryError;
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
         std::str::from_utf8(bytes)
-            .map_err(|error| DiscoveryError::Session(error.to_string()))?
+            .map_err(|error| DiscoveryError::InvalidMetadata(error.to_string()))?
             .parse()
     }
 }

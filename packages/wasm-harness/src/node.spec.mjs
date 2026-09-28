@@ -1,204 +1,232 @@
-// Node conformance for the generated object ABI. The declarations and runtime
-// module are emitted by the same WASM build immediately before this file runs.
-
+// Executes the fresh wasm-bindgen module against injected asynchronous capabilities.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { describe, it } from "node:test";
+import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(HERE, "..", "..", "..");
-const TARGET_DIR = JSON.parse(
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const target = JSON.parse(
   execFileSync("cargo", ["metadata", "--format-version", "1", "--no-deps"], {
-    cwd: ROOT,
+    cwd: root,
     encoding: "utf8",
   }),
 ).target_directory;
-const GENERATED = path.join(TARGET_DIR, "wasm-node-harness", "dezoomify_wasm.js");
-
-assert.ok(
-  existsSync(GENERATED),
-  "generated Node bindings are missing; run through `cargo xtask test wasm`",
+const wasm = createRequire(import.meta.url)(
+  path.join(target, "wasm-node-harness/dezoomify_wasm.js"),
 );
-const wasm = createRequire(import.meta.url)(GENERATED);
+const url = "https://example.com/image.dzi";
+const document = new TextEncoder().encode(
+  '<Image TileSize="256" Overlap="0" Format="jpg" xmlns="http://schemas.microsoft.com/deepzoom/2008"><Size Width="512" Height="512"/></Image>',
+);
+const options = {
+  selection: { kind: "automatic", image_index: 0, largest: true },
+  partial: "keep",
+  max_concurrent: 2,
+  max_retries: 0,
+};
 
-function start(session, url = "https://example.com/image.dzi") {
-  return session.command({ type: "start", inputs: [{ url }] });
-}
-
-function discoveryRequest(result) {
-  assert.equal(result.status, "ok");
-  return result.messages.find((message) => message.type === "acquire-resource")?.request;
-}
-
-const DZI = `<?xml version="1.0" encoding="UTF-8"?>
-<Image TileSize="256" Overlap="0" Format="jpg" xmlns="http://schemas.microsoft.com/deepzoom/2008">
-  <Size Width="512" Height="512"/>
-</Image>
-`;
-
-function tileError(code, http) {
+function host(overrides = {}) {
+  const observed = { reads: [], tiles: [], progress: [], delays: [], settled: 0 };
   return {
-    code,
-    retryable: false,
-    message: `tile refused: ${code}`,
-    recovery: [],
-    transport: "direct",
-    http: http ?? null,
+    observed,
+    async fetch(request) {
+      observed.reads.push(request);
+      await Promise.resolve();
+      return { kind: "response", response: { bytes: document, final_uri: request.uri } };
+    },
+    async probe() {
+      return { status: "missing" };
+    },
+    async acquireTile(tile) {
+      await Promise.resolve();
+      observed.tiles.push(tile);
+      return { display_only: false };
+    },
+    async finish(request) {
+      return {
+        canvas: request.canvas,
+        format: request.format,
+        complete: request.missing.length === 0,
+        missing: request.missing,
+        disposition: request.display_only ? "display-only" : "browser-save-ready",
+      };
+    },
+    async chooseImage() {
+      return 0;
+    },
+    async chooseLevel(image) {
+      return image.levels.length - 1;
+    },
+    async choosePartial() {
+      return "keep";
+    },
+    async checkpoint() {},
+    async sleep(delay) {
+      observed.delays.push(delay);
+    },
+    report(progress) {
+      observed.progress.push(progress);
+    },
+    async settle() {
+      observed.settled += 1;
+    },
+    ...overrides,
   };
 }
 
-/// Drive one session through discovery and selection of the largest level.
-/// Returns the live session plus `(tile, request)` pairs in effect order.
-/// Discovery bodies cross directly in the command; nothing is retained.
-function acquireTiles(session) {
-  const started = start(session);
-  const request = discoveryRequest(started);
-  assert.ok(request);
-  const bytes = Array.from(Buffer.from(DZI, "utf8"));
-  const provided = session.complete({
-    type: "provide-resource",
-    request: request.id,
-    bytes,
-  });
-  assert.equal(provided.status, "ok");
-  const catalog = provided.snapshot.selection.catalog;
-  assert.ok(catalog, "metadata yields a catalog in the snapshot");
-  const selected = session.command({ type: "select-image", image: 0 });
-  assert.equal(selected.status, "ok");
-  const levels = catalog.entries[0].levels.length;
-  const leveled = session.command({ type: "select-level", level: levels - 1 });
-  assert.equal(leveled.status, "ok");
-  const tiles = leveled.messages
-    .filter((message) => message.type === "acquire-tile")
-    .map((message) => ({ tile: message.tile, request: message.request.id }));
-  assert.equal(tiles.length, 4, "largest DZI level is a 2x2 grid");
-  return { tiles };
-}
+test("async Host reads binary metadata and saves the full selected image", async () => {
+  const platform = host();
+  const output = await wasm.dezoomify([{ url }], options, platform);
+  assert.deepEqual(output.canvas, { width: 512, height: 512 });
+  assert.equal(output.complete, true);
+  assert.equal(output.disposition, "browser-save-ready");
+  assert.equal(platform.observed.tiles.length, 4);
+  assert.equal(platform.observed.settled, 1);
+  assert.ok(platform.observed.reads.every((request) => request.uri === url));
+  assert.ok(platform.observed.progress.some((progress) => progress.completed === 4));
+});
 
-describe("generated typed WASM surface", () => {
-  it("returns effects directly from dispatch plus the absolute snapshot", () => {
-    assert.equal(typeof wasm.Session, "function");
-    const session = new wasm.Session({});
-    const result = start(session);
-    assert.equal(result.status, "ok");
-    assert.equal(result.messages[0].type, "acquire-resource");
-    assert.equal(result.snapshot.lifecycle, "Discovering");
-    assert.ok(discoveryRequest(result));
-    const disposed = session.dispose();
-    assert.equal(disposed.status, "ok");
-    assert.ok(disposed.messages.some((message) => message.type === "cancel-work"));
-    assert.equal(disposed.snapshot.terminal.type, "cancelled");
-    const again = session.dispose();
-    assert.equal(again.status, "ok");
-    assert.deepEqual(again.messages, []);
+test("structured Host rejection retains request facts", async () => {
+  const failure = {
+    code: "TRANSPORT_HTTP_ERROR",
+    phase: "discovery",
+    retryable: false,
+    message: "Fixture metadata refused.",
+    request: url,
+    transport: "direct",
+    resource_kind: "metadata",
+    http: 403,
+    recovery: [],
+  };
+  const platform = host({
+    async fetch() {
+      throw failure;
+    },
   });
+  await assert.rejects(wasm.dezoomify([{ url }], options, platform), (error) => {
+    assert.equal(error.code, failure.code);
+    assert.equal(error.http, 403);
+    assert.equal(error.request, url);
+    return true;
+  });
+  assert.equal(platform.observed.settled, 1);
+});
 
-  it("carries discovery bodies directly in provide-resource", () => {
-    const session = new wasm.Session({});
-    const request = discoveryRequest(start(session));
-    assert.ok(request);
-    const bytes = Array.from(Buffer.from(DZI, "utf8"));
-    const provided = session.complete({
-      type: "provide-resource",
-      request: request.id,
-      bytes,
-    });
-    assert.equal(provided.status, "ok");
-    assert.ok(provided.snapshot.selection.catalog, "direct bytes yield a catalog in the snapshot");
-    session.dispose();
+test("malformed JavaScript input and Host return values fail as typed errors", async () => {
+  await assert.rejects(wasm.dezoomify("invalid", options, host()), {
+    code: "binding.invalid-value",
   });
+  const platform = host({
+    async acquireTile() {
+      return { display_only: "invalid" };
+    },
+  });
+  await assert.rejects(wasm.dezoomify([{ url }], options, platform), (error) => {
+    assert.ok(error.code);
+    assert.equal(platform.observed.settled, 1);
+    return true;
+  });
+});
 
-  it("rejects tile bytes through provide-resource", () => {
-    const session = new wasm.Session({});
-    const { tiles } = acquireTiles(session);
-    const rejected = session.complete({
-      type: "provide-resource",
-      request: tiles[0].request,
-      bytes: [1, 2, 3, 4],
-    });
-    assert.equal(rejected.status, "error", "tile bytes never enter the adapter");
-    session.dispose();
+test("processing uses Uint8Array without numeric body arrays", () => {
+  const bytes = Uint8Array.of(0, 1, 127, 128, 255);
+  const result = wasm.applyProcessing("none", bytes);
+  assert.ok(result instanceof Uint8Array);
+  assert.deepEqual(result, bytes);
+  assert.throws(() => wasm.applyProcessing("unknown-recipe", bytes), {
+    code: "binding.invalid-value",
   });
+});
 
-  it("preserves a complete metadata transport failure through the engine", () => {
-    const session = new wasm.Session({});
-    const request = discoveryRequest(start(session, "https://example.com/info.json"));
-    assert.ok(request);
-    const result = session.complete({
-      type: "provide-fetch-failure",
-      request: request.id,
-      error: {
-        code: "PROXY_ERROR",
-        retryable: true,
-        message: "The metadata proxy returned an error.",
-        recovery: [],
-        transport: "metadata-proxy",
-        http: 502,
-        preview: "upstream timeout",
-      },
-    });
-    assert.equal(result.status, "ok");
-    const failed = result.snapshot.terminal;
-    assert.equal(failed.type, "failed");
-    assert.equal(failed.error.code, "PROXY_ERROR");
-    assert.equal(failed.error.phase, "discovery", "Rust derives phase from the answered effect");
-    assert.equal(failed.error.transport, "metadata-proxy");
-    assert.equal(failed.error.http, 502);
-    assert.equal(failed.error.request, request.uri);
+test("concurrent invocations use distinct Host objects and settle each once", async () => {
+  const left = host();
+  const right = host({
+    async acquireTile(tile) {
+      right.observed.tiles.push(tile);
+      return { display_only: true };
+    },
   });
+  const [a, b] = await Promise.all([
+    wasm.dezoomify([{ url }], options, left),
+    wasm.dezoomify([{ url }], options, right),
+  ]);
+  assert.equal(a.disposition, "browser-save-ready");
+  assert.equal(b.disposition, "display-only");
+  assert.equal(left.observed.tiles.length, 4);
+  assert.equal(right.observed.tiles.length, 4);
+  assert.equal(left.observed.settled, 1);
+  assert.equal(right.observed.settled, 1);
+});
 
-  it("rejects malformed external objects at the generated conversion boundary", () => {
-    const session = new wasm.Session({});
-    assert.throws(
-      () => session.complete({ type: "provide-fetch-failure" }),
-      /typed ABI conversion failed/,
-    );
-    session.dispose();
+test("malformed tile processing remains a permanent missing tile eligible for partial output", async () => {
+  const platform = host({
+    async acquireTile(tile) {
+      platform.observed.tiles.push(tile);
+      if (tile.index === 1)
+        wasm.applyProcessing("google-arts-decrypt", Uint8Array.of(10, 10, 10, 10));
+      return { display_only: false };
+    },
+    async choosePartial({ missing }) {
+      assert.equal(missing.length, 1);
+      assert.equal(missing[0].tile, 1);
+      assert.equal(missing[0].failures[0].code, "tile.processing-failed");
+      assert.equal(missing[0].failures[0].category, "permanent");
+      return "keep";
+    },
   });
+  assert.throws(() => wasm.applyProcessing("google-arts-decrypt", Uint8Array.of(10, 10, 10, 10)), {
+    code: "tile.processing-failed",
+    phase: "processing",
+  });
+  const output = await wasm.dezoomify(
+    [{ url }],
+    { ...options, partial: "prompt", max_retries: 3 },
+    platform,
+  );
+  assert.equal(output.complete, false);
+  assert.deepEqual(output.missing, [1]);
+  assert.equal(platform.observed.tiles.length, 4);
+  assert.equal(platform.observed.delays.length, 0);
+  assert.equal(platform.observed.settled, 1);
+});
 
-  it("drives tiles to completion through display-only acknowledgements", () => {
-    const session = new wasm.Session({});
-    const { tiles } = acquireTiles(session);
-    let messageCount = 0;
-    let finalized = false;
-    for (const { request } of tiles) {
-      const result = session.complete({ type: "provide-display-outcome", request });
-      assert.equal(result.status, "ok");
-      messageCount += result.messages.length;
-      finalized ||= result.messages.some((message) => message.type === "finalize-output");
-    }
-    assert.ok(finalized, "display-only acquisition still finalizes");
-    // eslint-disable-next-line no-console
-    console.log(`display-only completion: ${messageCount} host messages, body-free acks`);
-    session.dispose();
+test("cancelled invocation settles late reads before returning and never saves", async () => {
+  let release;
+  let cancelled = false;
+  let acknowledge;
+  const entered = new Promise((resolve) => {
+    acknowledge = resolve;
   });
-
-  it("retries a transient failure after the explicit host wait", () => {
-    const session = new wasm.Session({});
-    const { tiles } = acquireTiles(session);
-    const failed = session.complete({
-      type: "provide-fetch-failure",
-      request: tiles[0].request,
-      error: tileError("TRANSPORT_TIMEOUT"),
-    });
-    assert.equal(failed.status, "ok");
-    const wait = failed.messages.find((message) => message.type === "wait-retry-timer");
-    assert.equal(wait.tile, tiles[0].tile);
-    assert.equal(wait.attempt, 1);
-    assert.ok(wait.delay_ms > 0, "the host waits before retrying");
-    const elapsed = session.complete({
-      type: "retry-timer-elapsed",
-      effect: wait.effect,
-    });
-    assert.equal(elapsed.status, "ok");
-    const reacquired = elapsed.messages.filter(
-      (message) => message.type === "acquire-tile" && message.tile === wait.tile,
-    );
-    assert.equal(reacquired.length, 1, "the timer completion issues exactly one re-acquisition");
-    session.dispose();
+  const blocked = new Promise((resolve) => {
+    release = resolve;
   });
+  const platform = host({
+    async fetch(request) {
+      acknowledge();
+      await blocked;
+      return { kind: "response", response: { bytes: document, final_uri: request.uri } };
+    },
+    async checkpoint() {
+      if (cancelled)
+        throw {
+          code: "job.cancelled",
+          phase: "cleanup",
+          retryable: false,
+          message: "Cancelled",
+          recovery: [],
+        };
+    },
+    async finish() {
+      assert.fail("cancelled invocation cannot save");
+    },
+  });
+  const running = wasm.dezoomify([{ url }], options, platform);
+  await entered;
+  cancelled = true;
+  release();
+  await assert.rejects(running, { code: "job.cancelled" });
+  assert.equal(platform.observed.settled, 1);
+  assert.equal(platform.observed.tiles.length, 0);
 });

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -20,14 +21,20 @@ function sorted(arr) {
 
 const EXPECTED_COMMANDS = [
   "get_job_diagnostics",
-  "job_command",
+  "answer_partial",
+  "cancel_job",
+  "dezoomify",
+  "pause_job",
+  "resume_job",
   "open_saved_output",
   "release_job",
   "query_capabilities",
-  "request_destination",
-  "start_job",
 ];
-const EXPECTED_CHANNELS = ["dezoomify://job-snapshot", "dezoomify://deep-link-pending"];
+const EXPECTED_CHANNELS = [
+  "dezoomify://progress",
+  "dezoomify://partial",
+  "dezoomify://deep-link-pending",
+];
 const EXPECTED_ENCODERS = ["png", "jpeg", "tiff", "zif", "webp"];
 
 const DESKTOP_META = readJson("../src-tauri/dezoomify.json");
@@ -54,20 +61,13 @@ test("generated files list exact commands and channels", () => {
   const a = DESKTOP_META;
   const b = xdezoomify(capGen);
   const c = xdezoomify(desktopCap);
-  for (const field of [
-    "commands",
-    "eventChannels",
-    "encoders",
-    "decoders",
-    "protocol",
-    "updater",
-  ]) {
+  for (const field of ["commands", "eventChannels", "encoders", "decoders", "updater"]) {
     assert.deepEqual(a[field], b[field], `tauri vs capabilities field ${field}`);
     assert.deepEqual(a[field], c[field], `tauri vs desktop-capabilities field ${field}`);
   }
 });
 
-test("protocol range, encoders, and updater stay consistent", () => {
+test("encoders and updater stay consistent", () => {
   const tauriConf = readJson("../src-tauri/tauri.conf.json");
   const desktopCap = readJson("../../../generated/desktop-capabilities.json");
   // The bundle identifier and deep-link scheme live in the tauri config.
@@ -75,7 +75,6 @@ test("protocol range, encoders, and updater stay consistent", () => {
   assert.deepEqual(DESKTOP_META.deepLink.schemes, ["dezoomify"]);
   for (const doc of [DESKTOP_META, desktopCap]) {
     const x = xdezoomify(doc);
-    assert.deepEqual(x.protocol, { max: "2.0", min: "2.0", version: "2.0" });
     assert.deepEqual(sorted(x.encoders), sorted(EXPECTED_ENCODERS));
     assert.equal(x.updater.enabled, false);
     assert.equal(x.updater.httpsOnly, true);
@@ -96,12 +95,9 @@ test("generated files are canonical bytes (LF, pretty, no drift)", () => {
   }
 });
 
-test("desktop protocol matches the v2-only release contract", () => {
-  const desktopCap = readJson("../../../generated/desktop-capabilities.json");
-  const x = xdezoomify(desktopCap);
-  const desktopProto = desktopCap.protocol ?? x.protocol;
-  assert.deepEqual(desktopProto, { max: "2.0", min: "2.0", version: "2.0" });
-  const compat = readText("../../../release/compatibility.toml");
-  assert.ok(compat.includes('current = "2.0"'), "compat current is 2.0");
-  assert.ok(compat.includes('n_minus_1 = "2.0"'), "compat minimum is 2.0");
+test("desktop capabilities match authored commands and event channels", async () => {
+  execFileSync(process.execPath, [
+    path.join(here, "../../../scripts/generate-desktop-capabilities.mjs"),
+    "--check",
+  ]);
 });

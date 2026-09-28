@@ -1,11 +1,7 @@
-//! Pure, resumable discovery orchestration.
-//!
-//! A discovery program declares how acquired resources are matched and what
-//! resource to follow next. The application owns acquisition and feeds each
-//! outcome to [`DiscoveryOperation`].
+//! Format parsing and bounded asynchronous discovery.
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::fmt;
 use std::sync::LazyLock;
 
@@ -51,45 +47,6 @@ impl DiscoveryInput {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct RequestId(pub usize);
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ResourceNeed {
-    pub id: RequestId,
-    pub request: Request,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ResourceResponse {
-    pub id: RequestId,
-    pub bytes: Vec<u8>,
-    final_uri: Option<String>,
-}
-impl ResourceResponse {
-    #[must_use]
-    pub fn new(id: RequestId, bytes: impl Into<Vec<u8>>) -> Self {
-        Self {
-            id,
-            bytes: bytes.into(),
-            final_uri: None,
-        }
-    }
-
-    /// Set the URI reached after the host followed redirects. Empty values
-    /// are ignored so relative tile URLs keep resolving against the request
-    /// URI instead of collapsing to a page-relative path.
-    #[must_use]
-    pub fn with_final_uri(mut self, uri: impl Into<String>) -> Self {
-        let uri = uri.into();
-        if !uri.is_empty() {
-            self.final_uri = Some(uri);
-        }
-        self
-    }
-}
-
-/// Transport that attempted a fetch. A grouping-key component, never a
-/// display string: hosts keep their own labels.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum TransportKind {
@@ -321,7 +278,7 @@ impl FetchCause {
         self
     }
 
-    /// One rendering of this failure for engine diagnostics. The request
+    /// One rendering of this failure for discovery diagnostics. The request
     /// URL is deliberately absent: callers place it once, outside the
     /// per-format bullets.
     #[must_use]
@@ -339,44 +296,42 @@ impl FetchCause {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResourceFailure {
-    pub id: RequestId,
     pub cause: FetchCause,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum ResourceOutcome {
-    Response(ResourceResponse),
-    Failure(ResourceFailure),
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DiscoveryLimits {
-    pub transitions: usize,
+    pub max_parses: usize,
     pub resources: usize,
     pub retained_bytes: usize,
+    pub concurrent: usize,
 }
 
 impl Default for DiscoveryLimits {
     fn default() -> Self {
         Self {
-            transitions: 10_000,
+            max_parses: 10_000,
             resources: 256,
             retained_bytes: 64 * 1024 * 1024,
+            concurrent: 8,
         }
     }
 }
 
-pub enum DiscoveryStep {
+pub enum ParsedResource {
     Follow(Request),
     Image(ImagePlan),
     Catalog(CatalogPlan),
     Complete(DiscoveryCatalog),
 }
-impl DiscoveryStep {
+impl ParsedResource {
     pub(crate) fn compile(self, format: &'static str) -> Result<DiscoveryCatalog, DiscoveryError> {
         match self {
             Self::Image(plan) => plan.compile(format),
             Self::Catalog(plan) => plan.compile(format),
             Self::Complete(catalog) => Ok(catalog),
-            Self::Follow(_) => Err(DiscoveryError::NotComplete),
+            Self::Follow(_) => Err(DiscoveryError::InvalidMetadata(
+                "a metadata reference has no image plan".into(),
+            )),
         }
     }
 }
@@ -395,10 +350,7 @@ impl<'a> DiscoveryResource<'a> {
             uri,
             bytes,
             final_uri: uri,
-            context: DiscoveryContext {
-                history_ids: &[],
-                requests: &[],
-            },
+            context: DiscoveryContext { history: &[] },
         }
     }
     #[must_use]
@@ -427,44 +379,33 @@ impl<'a> DiscoveryResource<'a> {
 
     /// Follow a resource reference against this response's post-redirect URI.
     #[must_use]
-    pub fn follow_relative(self, reference: &str) -> DiscoveryStep {
-        DiscoveryStep::Follow(Request::new(resolve_relative(self.final_uri, reference)))
+    pub fn follow_relative(self, reference: &str) -> ParsedResource {
+        ParsedResource::Follow(Request::new(resolve_relative(self.final_uri, reference)))
     }
 }
 #[derive(Clone, Copy, Debug)]
 pub struct DiscoveryContext<'a> {
-    history_ids: &'a [RequestId],
-    requests: &'a [ResourceRecord],
+    history: &'a [ReadResource],
 }
-
 impl<'a> DiscoveryContext<'a> {
-    #[must_use]
     pub fn resources(&self) -> impl DoubleEndedIterator<Item = DiscoveryResource<'a>> + '_ {
-        self.history_ids
-            .iter()
-            .filter_map(|id| self.requests.get(id.0))
-            .filter_map(ResourceRecord::resource)
+        self.history.iter().filter_map(ReadResource::resource)
     }
-    #[must_use]
     pub fn has_visited(&self, uri: &str) -> bool {
-        self.history_ids.iter().any(|id| {
-            self.requests.get(id.0).is_some_and(|record| {
-                record.request.uri == uri
-                    || matches!(
-                        record.outcome.as_ref(),
-                        Some(ResourceOutcome::Response(response))
-                            if response.final_uri.as_deref() == Some(uri)
-                    )
-            })
+        self.history.iter().any(|record| {
+            record.request.uri == uri
+                || record
+                    .resource()
+                    .is_some_and(|resource| resource.final_uri() == uri)
         })
     }
 }
-type Decoder = for<'a> fn(DiscoveryResource<'a>) -> Result<DiscoveryStep, DiscoveryError>;
+type Decoder = for<'a> fn(DiscoveryResource<'a>) -> Result<ParsedResource, DiscoveryError>;
 type FailureHandler = for<'a> fn(
     &DiscoveryContext<'a>,
     &'a Request,
     &'a ResourceFailure,
-) -> Result<DiscoveryStep, DiscoveryError>;
+) -> Result<ParsedResource, DiscoveryError>;
 type UrlMapper = fn(&str) -> Result<Request, DiscoveryError>;
 type UrlPredicate = fn(&str) -> bool;
 type ContentPredicate = fn(&[u8]) -> bool;
@@ -561,8 +502,8 @@ impl RoutePattern {
     }
     /// Metadata that is meaningful only after this format has read its parent.
     #[must_use]
-    pub const fn continue_with(self, handler: Decoder) -> DiscoveryRoute {
-        self.route(RouteAction::Continuation(handler))
+    pub const fn child_metadata(self, handler: Decoder) -> DiscoveryRoute {
+        self.route(RouteAction::ChildMetadata(handler))
     }
     #[must_use]
     pub const fn resolve_metadata(self, mapper: UrlMapper) -> DiscoveryRoute {
@@ -631,7 +572,7 @@ impl DiscoveryRoute {
 #[derive(Clone, Copy, Debug)]
 enum RouteAction {
     Plan(fn(&str) -> Result<ImagePlan, DiscoveryError>),
-    Continuation(Decoder),
+    ChildMetadata(Decoder),
     Decode(Decoder),
     MapUrl(UrlMapper),
     FollowCapture {
@@ -642,11 +583,11 @@ enum RouteAction {
     },
 }
 
-fn dispatch_resource(
+fn parse_resource(
     routes: &[DiscoveryRoute],
     resource: DiscoveryResource<'_>,
     unmatched: &str,
-) -> Result<DiscoveryStep, DiscoveryError> {
+) -> Result<ParsedResource, DiscoveryError> {
     for route in routes {
         let matches_final = route
             .matcher
@@ -658,7 +599,7 @@ fn dispatch_resource(
             continue;
         }
         return match route.handler {
-            RouteAction::Decode(decoder) | RouteAction::Continuation(decoder) => decoder(resource),
+            RouteAction::Decode(decoder) | RouteAction::ChildMetadata(decoder) => decoder(resource),
             RouteAction::FollowCapture {
                 capture,
                 html_entities,
@@ -672,7 +613,7 @@ fn dispatch_resource(
                     .captures(resource.bytes())
                     .and_then(|captures| captures.name(capture))
                     .ok_or_else(|| {
-                        DiscoveryError::Session("resource has no matching link".into())
+                        DiscoveryError::InvalidMetadata("resource has no matching link".into())
                     })?;
                 let link = String::from_utf8_lossy(link.as_bytes());
                 let link = if html_entities {
@@ -715,7 +656,7 @@ impl FormatSpec {
         self
     }
     /// User-visible format name. Defaults to the stable id; formats with a
-    /// legacy display name set it explicitly at their `SPEC` site.
+    /// display name set it explicitly at their `SPEC` site.
     #[must_use]
     pub const fn with_display_name(mut self, display_name: &'static str) -> Self {
         self.display_name = display_name;
@@ -735,16 +676,20 @@ impl FormatSpec {
         self.routes
             .iter()
             .filter(|route| {
-                !matches!(route.handler, RouteAction::Continuation(_))
+                !matches!(route.handler, RouteAction::ChildMetadata(_))
                     && route.matcher.url_match(uri) == Some(true)
             })
             .map(|route| route.kind)
             .min()
     }
 
-    fn follow(&self, request: Request, has_history: bool) -> Result<DiscoveryStep, DiscoveryError> {
+    fn follow(
+        &self,
+        request: Request,
+        has_history: bool,
+    ) -> Result<ParsedResource, DiscoveryError> {
         if !self.routes.iter().any(|route| {
-            (has_history || !matches!(route.handler, RouteAction::Continuation(_)))
+            (has_history || !matches!(route.handler, RouteAction::ChildMetadata(_)))
                 && route.matcher.url_match(&request.uri) != Some(false)
         }) {
             return Err(DiscoveryError::rejected(
@@ -758,13 +703,15 @@ impl FormatSpec {
             }
             match route.handler {
                 RouteAction::MapUrl(mapper) => {
-                    return mapper(&request.uri).map(DiscoveryStep::Follow);
+                    return mapper(&request.uri).map(ParsedResource::Follow);
                 }
-                RouteAction::Plan(decode) => return decode(&request.uri).map(DiscoveryStep::Image),
+                RouteAction::Plan(decode) => {
+                    return decode(&request.uri).map(ParsedResource::Image);
+                }
                 _ => {}
             }
         }
-        Ok(DiscoveryStep::Follow(request))
+        Ok(ParsedResource::Follow(request))
     }
 }
 
@@ -799,12 +746,10 @@ pub struct CandidateDiagnostic {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DiscoveryError {
-    UnknownRequest(RequestId),
-    RequestAlreadyProvided(RequestId),
+    Host(Box<crate::model::Error>),
     NoCandidateAccepted {
         diagnostics: Vec<CandidateDiagnostic>,
     },
-    NotComplete,
     /// A candidate rejected the input or resource; `kind` classifies why.
     /// Fetch failures carry the typed cause; other rejections carry a
     /// free-text detail.
@@ -814,15 +759,15 @@ pub enum DiscoveryError {
         detail: Option<String>,
     },
     /// A format handler or extractor failed without a typed rejection.
-    Session(String),
-    TransitionLimitExceeded,
+    InvalidMetadata(String),
+    ParseLimitExceeded,
     ResourceLimitExceeded,
     MetadataSizeLimitExceeded,
 }
 
 impl From<TileSourceError> for DiscoveryError {
     fn from(error: TileSourceError) -> Self {
-        Self::Session(format!("invalid tile grid: {error}"))
+        Self::InvalidMetadata(format!("invalid tile grid: {error}"))
     }
 }
 
@@ -896,8 +841,7 @@ pub fn diagnostic_bullets(diagnostics: &[CandidateDiagnostic]) -> Vec<String> {
 impl fmt::Display for DiscoveryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnknownRequest(id) => write!(f, "unknown discovery request {}", id.0),
-            Self::RequestAlreadyProvided(id) => write!(f, "request {} was already supplied", id.0),
+            Self::Host(error) => error.fmt(f),
             Self::NoCandidateAccepted { diagnostics } => {
                 f.write_str("no discovery candidate accepted the input")?;
                 for line in diagnostic_bullets(diagnostics) {
@@ -905,7 +849,6 @@ impl fmt::Display for DiscoveryError {
                 }
                 Ok(())
             }
-            Self::NotComplete => f.write_str("discovery is not complete"),
             Self::Rejected {
                 cause: Some(cause), ..
             } => f.write_str(&cause.describe()),
@@ -914,8 +857,8 @@ impl fmt::Display for DiscoveryError {
                 ..
             } => f.write_str(detail),
             Self::Rejected { .. } => f.write_str("candidate rejected the input"),
-            Self::Session(message) => f.write_str(message),
-            Self::TransitionLimitExceeded => f.write_str("discovery transition limit exceeded"),
+            Self::InvalidMetadata(message) => f.write_str(message),
+            Self::ParseLimitExceeded => f.write_str("discovery parse limit exceeded"),
             Self::ResourceLimitExceeded => f.write_str("discovery resource limit exceeded"),
             Self::MetadataSizeLimitExceeded => {
                 f.write_str("discovery metadata size limit exceeded")
@@ -925,12 +868,12 @@ impl fmt::Display for DiscoveryError {
 }
 
 impl DiscoveryError {
-    /// Engine diagnostics for wire errors: the headline-free per-format
+    /// Discovery diagnostics: the headline-free per-format
     /// bullet block for a rejected aggregate, or the plain error text
     /// otherwise. The headline stays out: callers render their own
     /// prominent message and never repeat it inside the details.
     #[must_use]
-    pub fn engine_detail(&self) -> String {
+    pub fn detail(&self) -> String {
         match self {
             Self::NoCandidateAccepted { diagnostics } => {
                 let block = diagnostic_bullets(diagnostics).join("\n");
@@ -950,739 +893,489 @@ impl DiscoveryError {
 
 impl std::error::Error for DiscoveryError {}
 
-struct Interpretation {
-    spec: FormatSpec,
-    history: Vec<RequestId>,
-}
-
-#[derive(Debug)]
-struct ResourceRecord {
+#[derive(Clone, Debug)]
+struct ReadResource {
     request: Request,
-    outcome: Option<ResourceOutcome>,
-    navigation_expanded: bool,
+    response: Option<std::sync::Arc<crate::model::ResourceResponse>>,
 }
-impl ResourceRecord {
+impl ReadResource {
     fn resource(&self) -> Option<DiscoveryResource<'_>> {
-        let ResourceOutcome::Response(response) = self.outcome.as_ref()? else {
-            return None;
-        };
+        let response = self.response.as_ref()?;
         Some(DiscoveryResource {
-            final_uri: response.final_uri.as_deref().unwrap_or(&self.request.uri),
+            final_uri: response
+                .final_uri
+                .as_deref()
+                .filter(|uri| !uri.is_empty())
+                .unwrap_or(&self.request.uri),
             ..DiscoveryResource::new(&self.request.uri, &response.bytes)
         })
     }
 }
 
-/// Product provenance sets precedence; distance breaks ties breadth first.
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
-enum Evidence {
-    Source,
-    Document,
-    Resource,
-    Navigation,
-    Fallback,
+#[derive(Clone)]
+enum Read {
+    Response(std::sync::Arc<crate::model::ResourceResponse>),
+    NeedsAccess,
 }
+type SharedRead<'a> = futures_util::future::Shared<
+    futures_util::future::LocalBoxFuture<'a, Result<Read, crate::model::Error>>,
+>;
 
-type Position = (Evidence, usize, usize, usize);
+type Priority = (u8, usize, usize, usize);
 
-enum Work {
-    Root(DiscoveryInput),
-    Parse(Interpretation),
-}
-
-pub struct DiscoveryOperation {
-    specs: Vec<FormatSpec>,
-    frontier: BTreeMap<Position, Work>,
-    next_branch: usize,
-    navigated: HashSet<String>,
-    requests: Vec<ResourceRecord>,
-    diagnostics: Vec<CandidateDiagnostic>,
-    catalog: Option<DiscoveryCatalog>,
-    transitions: usize,
-    retained_bytes: usize,
-    initial_error: Option<DiscoveryError>,
+struct Resources<'a, F> {
+    fetch: &'a F,
+    reads: std::cell::RefCell<Vec<(Request, bool, SharedRead<'a>)>>,
+    responses: std::rc::Rc<std::cell::RefCell<Vec<ReadResource>>>,
+    retained: std::rc::Rc<std::cell::Cell<usize>>,
+    parsed: std::cell::Cell<usize>,
+    depths: std::cell::RefCell<std::collections::BTreeMap<Request, usize>>,
     limits: DiscoveryLimits,
 }
 
-impl DiscoveryOperation {
-    pub(crate) fn from_inputs(
-        inputs: Vec<DiscoveryInput>,
-        specs: &[FormatSpec],
-        limits: DiscoveryLimits,
-    ) -> Self {
-        let mut operation = Self {
-            specs: specs.to_vec(),
-            frontier: BTreeMap::new(),
-            next_branch: 0,
-            navigated: HashSet::new(),
-            requests: Vec::new(),
-            diagnostics: Vec::new(),
-            catalog: None,
-            transitions: 0,
-            retained_bytes: 0,
-            initial_error: None,
-            limits,
-        };
-        if inputs.len() > limits.resources {
-            operation.initial_error = Some(DiscoveryError::ResourceLimitExceeded);
-            return operation;
+impl<'a, F, Fut> Resources<'a, F>
+where
+    F: Fn(Request, crate::model::Interaction) -> Fut,
+    Fut: std::future::Future<Output = Result<crate::model::ResourceRead, crate::model::Error>> + 'a,
+{
+    fn supplied(&self, input: &DiscoveryInput) -> Result<(), DiscoveryError> {
+        use futures_util::FutureExt;
+        if let Some(bytes) = &input.contents {
+            let retained = self
+                .retained
+                .get()
+                .checked_add(bytes.len())
+                .ok_or(DiscoveryError::MetadataSizeLimitExceeded)?;
+            if retained > self.limits.retained_bytes {
+                return Err(DiscoveryError::MetadataSizeLimitExceeded);
+            }
+            self.retained.set(retained);
+            let request = Request::new(&input.url);
+            let response = std::sync::Arc::new(crate::model::ResourceResponse {
+                bytes: bytes.clone(),
+                final_uri: None,
+            });
+            self.responses.borrow_mut().push(ReadResource {
+                request: request.clone(),
+                response: Some(response.clone()),
+            });
+            self.reads.borrow_mut().push((
+                request,
+                false,
+                async move { Ok(Read::Response(response)) }
+                    .boxed_local()
+                    .shared(),
+            ));
         }
-        let supplied_bytes = inputs.iter().try_fold(0usize, |total, input| {
-            total.checked_add(input.contents.as_ref().map_or(0, Vec::len))
-        });
-        let Some(supplied_bytes) = supplied_bytes.filter(|total| *total <= limits.retained_bytes)
-        else {
-            operation.initial_error = Some(DiscoveryError::MetadataSizeLimitExceeded);
-            return operation;
-        };
-        operation.retained_bytes = supplied_bytes;
-        for input in inputs {
-            let evidence = match input.kind {
-                DiscoveryInputKind::Source => Evidence::Source,
-                DiscoveryInputKind::ObservedDocument if input.contents.is_some() => {
-                    Evidence::Document
+        Ok(())
+    }
+
+    async fn read(&self, request: Request, interactive: bool) -> Result<Read, DiscoveryError> {
+        use futures_util::FutureExt;
+        let cached = self
+            .reads
+            .borrow()
+            .iter()
+            .find(|(key, allowed, _)| *key == request && *allowed == interactive)
+            .map(|(_, _, future)| future.clone());
+        let future = if let Some(cached) = cached {
+            cached
+        } else {
+            if self.reads.borrow().len() >= self.limits.resources {
+                return Err(DiscoveryError::rejected(
+                    RejectionKind::Failed,
+                    "discovery resource limit exceeded",
+                ));
+            }
+            let future = (self.fetch)(
+                request.clone(),
+                if interactive {
+                    crate::model::Interaction::Allowed
+                } else {
+                    crate::model::Interaction::Forbidden
+                },
+            );
+            let responses = self.responses.clone();
+            let retained = self.retained.clone();
+            let limit = self.limits.retained_bytes;
+            let key = request.clone();
+            let future = async move {
+                match future.await? {
+                    crate::model::ResourceRead::NeedsAccess { .. } => Ok(Read::NeedsAccess),
+                    crate::model::ResourceRead::Response { response } => {
+                        let total = retained
+                            .get()
+                            .checked_add(response.bytes.len())
+                            .filter(|total| *total <= limit)
+                            .ok_or_else(|| {
+                                crate::model::Error::new(
+                                    "job.resource-limit",
+                                    crate::model::ErrorPhase::Discovery,
+                                    "discovery metadata size limit exceeded",
+                                )
+                            })?;
+                        retained.set(total);
+                        let response = std::sync::Arc::new(response);
+                        responses.borrow_mut().push(ReadResource {
+                            request: key,
+                            response: Some(response.clone()),
+                        });
+                        Ok(Read::Response(response))
+                    }
                 }
+            }
+            .boxed_local()
+            .shared();
+            self.reads
+                .borrow_mut()
+                .push((request.clone(), interactive, future.clone()));
+            future
+        };
+        future
+            .await
+            .map_err(|error| DiscoveryError::Host(Box::new(error)))
+    }
+
+    async fn resolve(
+        &self,
+        spec: FormatSpec,
+        uri: &str,
+        interactive: bool,
+        priority: &std::cell::Cell<Priority>,
+        base: Priority,
+    ) -> Result<Option<(usize, DiscoveryCatalog)>, DiscoveryError> {
+        let mut history = Vec::new();
+        let mut parsed = ParsedResource::Follow(Request::new(uri));
+        loop {
+            let ParsedResource::Follow(request) = parsed else {
+                return parsed
+                    .compile(spec.name)
+                    .map(|catalog| Some((history.len(), catalog)));
+            };
+            parsed = spec.follow(request, !history.is_empty())?;
+            let ParsedResource::Follow(request) = parsed else {
+                continue;
+            };
+            priority.set((
+                base.0.min(if history.is_empty() { base.0 } else { 2 }),
+                base.1 + history.len() + 1,
+                base.2,
+                base.3,
+            ));
+            self.depths
+                .borrow_mut()
+                .entry(request.clone())
+                .and_modify(|depth| *depth = (*depth).min(base.1 + history.len()))
+                .or_insert(base.1 + history.len());
+            let context = DiscoveryContext { history: &history };
+            if history
+                .iter()
+                .any(|previous: &ReadResource| previous.request == request)
+            {
+                return Err(DiscoveryError::rejected(
+                    RejectionKind::Failed,
+                    "discovery followed the same resource twice",
+                ));
+            }
+            self.parsed.set(self.parsed.get() + 1);
+            if self.parsed.get() > self.limits.max_parses {
+                return Err(DiscoveryError::ParseLimitExceeded);
+            }
+            let response = match self.read(request.clone(), false).await {
+                Ok(Read::NeedsAccess) if interactive => self.read(request.clone(), true).await,
+                result => result,
+            };
+            let record = match response {
+                Ok(Read::NeedsAccess) => return Ok(None),
+                Ok(Read::Response(response)) => ReadResource {
+                    request: request.clone(),
+                    response: Some(response),
+                },
+                Err(DiscoveryError::Host(error))
+                    if error.code == "job.cancelled"
+                        || error.code == "TRANSPORT_CANCELLED"
+                        || error.code == "job.resource-limit"
+                        || error.code.starts_with("binding.") =>
+                {
+                    return Err(DiscoveryError::Host(error));
+                }
+                Err(DiscoveryError::Host(error)) => {
+                    let failure = ResourceFailure {
+                        cause: FetchCause {
+                            code: FetchCode::from_string(error.code),
+                            http: error.http,
+                            transport: match error.transport {
+                                Some(crate::model::ErrorTransport::MetadataProxy) => {
+                                    TransportKind::MetadataProxy
+                                }
+                                Some(crate::model::ErrorTransport::BrowserSession) => {
+                                    TransportKind::BrowserSession
+                                }
+                                _ => TransportKind::Direct,
+                            },
+                            reason: error
+                                .blocked_reason
+                                .map(|r| PolicyReason::from_string(r.as_str())),
+                        },
+                    };
+                    parsed = match spec.on_failure {
+                        Some(handler) => handler(&context, &request, &failure)?,
+                        None => return Err(DiscoveryError::fetch_failed(failure.cause)),
+                    };
+                    history.push(ReadResource {
+                        request,
+                        response: None,
+                    });
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            parsed = parse_resource(
+                spec.routes,
+                DiscoveryResource {
+                    context,
+                    ..record.resource().expect("read response")
+                },
+                "resource did not match any discovery route",
+            )?;
+            history.push(record);
+        }
+    }
+}
+
+/// Resolve formats through shared, bounded asynchronous resource reads.
+pub async fn discover<F, Fut>(
+    inputs: Vec<DiscoveryInput>,
+    specs: &[FormatSpec],
+    limits: DiscoveryLimits,
+    fetch: F,
+) -> Result<DiscoveryCatalog, DiscoveryError>
+where
+    F: Fn(Request, crate::model::Interaction) -> Fut,
+    Fut: std::future::Future<Output = Result<crate::model::ResourceRead, crate::model::Error>>,
+{
+    use futures_util::{StreamExt, stream};
+    if inputs.len() > limits.resources {
+        return Err(DiscoveryError::ResourceLimitExceeded);
+    }
+    let resources = Resources {
+        fetch: &fetch,
+        reads: Default::default(),
+        responses: Default::default(),
+        retained: Default::default(),
+        parsed: Default::default(),
+        depths: Default::default(),
+        limits,
+    };
+    let mut roots: Vec<_> = inputs
+        .into_iter()
+        .enumerate()
+        .map(|(order, input)| {
+            let evidence = match input.kind {
+                DiscoveryInputKind::Source => 0,
+                DiscoveryInputKind::ObservedDocument if input.contents.is_some() => 1,
                 _ => match specs
                     .iter()
                     .filter_map(|spec| spec.url_kind(&input.url))
                     .min()
                 {
-                    Some(RouteKind::Metadata | RouteKind::Image) => Evidence::Resource,
-                    Some(RouteKind::Viewer) => Evidence::Navigation,
-                    None => Evidence::Fallback,
+                    Some(RouteKind::Metadata | RouteKind::Image) => 2,
+                    Some(RouteKind::Viewer) => 3,
+                    None => 4,
                 },
             };
-            operation.enqueue(input, evidence, 0);
-        }
-        operation
-    }
-    fn enqueue(&mut self, input: DiscoveryInput, evidence: Evidence, depth: usize) {
-        let position = (evidence, depth, self.next_branch, 0);
-        self.next_branch += 1;
-        self.frontier.insert(position, Work::Root(input));
-    }
-    pub fn missing_resources(&mut self) -> Result<Vec<ResourceNeed>, DiscoveryError> {
-        self.drive()?;
-        Ok(if self.catalog.is_none() {
-            self.outstanding_needs().collect()
-        } else {
-            Vec::new()
+            (evidence, 0usize, order, input)
         })
+        .collect();
+    for (_, _, _, input) in &roots {
+        resources.supplied(input)?;
     }
-    pub fn next_priority_need(&mut self) -> Result<Option<ResourceNeed>, DiscoveryError> {
-        Ok(self.missing_resources()?.into_iter().next())
-    }
-    fn outstanding_needs(&self) -> impl Iterator<Item = ResourceNeed> + '_ {
-        let mut seen = HashSet::new();
-        self.frontier.values().filter_map(move |work| {
-            let Work::Parse(interpretation) = work else {
-                return None;
-            };
-            let id = *interpretation.history.last()?;
-            let resource = &self.requests[id.0];
-            (resource.outcome.is_none() && seen.insert(id)).then(|| ResourceNeed {
-                id,
-                request: resource.request.clone(),
-            })
-        })
-    }
-    pub fn provide(&mut self, response: ResourceResponse) -> Result<(), DiscoveryError> {
-        self.provide_outcome(response.id, ResourceOutcome::Response(response))
-    }
-    pub fn provide_failure(&mut self, failure: ResourceFailure) -> Result<(), DiscoveryError> {
-        self.provide_outcome(failure.id, ResourceOutcome::Failure(failure))
-    }
-    fn provide_outcome(
-        &mut self,
-        id: RequestId,
-        outcome: ResourceOutcome,
-    ) -> Result<(), DiscoveryError> {
-        self.record_outcome(id, outcome)?;
-        self.drive()
-    }
-
-    fn record_outcome(
-        &mut self,
-        id: RequestId,
-        outcome: ResourceOutcome,
-    ) -> Result<(), DiscoveryError> {
-        let Some(resource) = self.requests.get(id.0) else {
-            return Err(DiscoveryError::UnknownRequest(id));
-        };
-        if resource.outcome.is_some() {
-            return Err(DiscoveryError::RequestAlreadyProvided(id));
-        }
-        if let ResourceOutcome::Response(response) = &outcome {
-            self.retained_bytes = self
-                .retained_bytes
-                .checked_add(response.bytes.len())
-                .filter(|total| *total <= self.limits.retained_bytes)
-                .ok_or(DiscoveryError::MetadataSizeLimitExceeded)?;
-        }
-        self.requests[id.0].outcome = Some(outcome);
-        Ok(())
-    }
-
-    /// Expand references once, in traversal order rather than fetch-reply order.
-    fn expand_navigation(&mut self, id: RequestId, depth: usize) {
-        let resource = &mut self.requests[id.0];
-        if resource.navigation_expanded {
-            return;
-        }
-        let Some(ResourceOutcome::Response(response)) = &resource.outcome else {
-            return;
-        };
-        resource.navigation_expanded = true;
-        let base = response
-            .final_uri
-            .as_deref()
-            .filter(|uri| !uri.is_empty())
-            .unwrap_or(&resource.request.uri);
-        self.navigated.insert(resource.request.uri.clone());
-        self.navigated.insert(base.to_owned());
-        let roots = self
-            .frontier
-            .values()
-            .filter(|work| matches!(work, Work::Root(_)))
+    let mut visited: HashSet<String> = roots
+        .iter()
+        .map(|(_, _, _, input)| input.url.clone())
+        .collect();
+    let mut diagnostics = Vec::new();
+    let mut blocked = Vec::new();
+    let mut branch = roots.len();
+    loop {
+        roots.sort_by_key(|(evidence, depth, order, _)| (*evidence, *depth, *order));
+        let mut candidates = Vec::new();
+        let tier = roots
+            .first()
+            .map(|(evidence, depth, _, _)| (*evidence, *depth));
+        let ready = roots
+            .iter()
+            .take_while(|(evidence, depth, _, _)| Some((*evidence, *depth)) == tier)
             .count();
-        let references: Vec<_> = crate::web_page::iframe_sources(&response.bytes)
-            .take(self.limits.resources.saturating_sub(roots))
-            .map(|source| resolve_relative(base, &source))
-            .filter(|uri| {
-                let supported = match url::Url::parse(uri) {
-                    Ok(parsed) => matches!(parsed.scheme(), "http" | "https" | "file"),
+        for (evidence, depth, order, input) in roots.drain(..ready) {
+            let mut formats = specs.to_vec();
+            formats.sort_by_key(|spec| {
+                let kind = spec.url_kind(&input.url);
+                (kind.is_none(), kind)
+            });
+            candidates.extend(
+                formats
+                    .into_iter()
+                    .enumerate()
+                    .map(|(rank, spec)| ((evidence, depth, order, rank), spec, input.url.clone())),
+            );
+        }
+        let priorities: Vec<_> = candidates
+            .iter()
+            .map(|(rank, spec, uri)| {
+                let direct = spec.url_kind(uri) == Some(RouteKind::Image);
+                std::cell::Cell::new((rank.0, rank.1 + usize::from(!direct), rank.2, rank.3))
+            })
+            .collect();
+        let mut finished = vec![false; candidates.len()];
+        let mut results = stream::iter(candidates.iter().enumerate().map(
+            |(index, (rank, spec, uri))| {
+                let priority = &priorities[index];
+                let resources = &resources;
+                async move {
+                    (
+                        index,
+                        *rank,
+                        *spec,
+                        uri.clone(),
+                        resources.resolve(*spec, uri, false, priority, *rank).await,
+                    )
+                }
+            },
+        ))
+        .buffer_unordered(limits.concurrent.max(1));
+        let mut winner: Option<(Priority, DiscoveryCatalog)> = None;
+        loop {
+            let next = futures_util::future::poll_fn(|cx| {
+                use futures_util::Stream;
+                use std::task::Poll;
+                // Ordinary earlier reads keep their precedence. A branch that has
+                // followed a deeper link no longer delays a shallower result.
+                if winner.as_ref().is_some_and(|(best, _)| {
+                    priorities
+                        .iter()
+                        .enumerate()
+                        .all(|(i, rank)| finished[i] || rank.get() >= *best)
+                }) {
+                    return Poll::Ready(None);
+                }
+                let result = std::pin::Pin::new(&mut results).poll_next(cx);
+                if result.is_pending()
+                    && winner.as_ref().is_some_and(|(best, _)| {
+                        priorities
+                            .iter()
+                            .enumerate()
+                            .all(|(i, rank)| finished[i] || rank.get() >= *best)
+                    })
+                {
+                    return Poll::Ready(None);
+                }
+                result
+            })
+            .await;
+            let Some((index, rank, spec, uri, result)) = next else {
+                break;
+            };
+            finished[index] = true;
+            match result {
+                Ok(Some((distance, catalog))) => {
+                    let rank = (
+                        rank.0.min(if distance > 1 { 2 } else { rank.0 }),
+                        rank.1 + distance,
+                        rank.2,
+                        rank.3,
+                    );
+                    if winner.as_ref().is_none_or(|(best, _)| rank < *best) {
+                        winner = Some((rank, catalog));
+                    }
+                }
+                Ok(None) => blocked.push((rank, spec, uri)),
+                Err(error) => record_diagnostic(&mut diagnostics, spec, error)?,
+            }
+        }
+        drop(results);
+        if let Some((_, catalog)) = winner {
+            return Ok(catalog);
+        }
+        let reads = resources.reads.borrow();
+        let responses = resources.responses.borrow();
+        for (request, _, _) in reads.iter() {
+            let Some(resource) = responses
+                .iter()
+                .find(|resource| resource.request == *request)
+            else {
+                continue;
+            };
+            let Some(response) = &resource.response else {
+                continue;
+            };
+            let base = response
+                .final_uri
+                .as_deref()
+                .filter(|uri| !uri.is_empty())
+                .unwrap_or(&resource.request.uri);
+            visited.insert(resource.request.uri.clone());
+            visited.insert(base.to_owned());
+            for source in crate::web_page::iframe_sources(&response.bytes) {
+                let uri = resolve_relative(base, &source);
+                let supported = match url::Url::parse(&uri) {
+                    Ok(url) => matches!(url.scheme(), "http" | "https" | "file"),
                     Err(url::ParseError::RelativeUrlWithoutBase) => url::Url::parse(base).is_err(),
                     Err(_) => false,
                 };
-                supported && !self.navigated.contains(uri)
-            })
-            .collect();
-        for uri in references {
-            self.enqueue(DiscoveryInput::new(uri), Evidence::Navigation, depth + 1);
-        }
-    }
-
-    #[must_use]
-    pub fn is_complete(&self) -> bool {
-        self.catalog.is_some()
-    }
-
-    /// Request URI for a core request id, for fetch-failure diagnostics.
-    #[must_use]
-    pub fn request_uri(&self, id: RequestId) -> Option<&str> {
-        self.requests
-            .get(id.0)
-            .map(|record| record.request.uri.as_str())
-    }
-
-    pub fn finish(mut self) -> Result<DiscoveryCatalog, DiscoveryError> {
-        self.drive()?;
-        self.catalog.take().ok_or(DiscoveryError::NotComplete)
-    }
-    fn drive(&mut self) -> Result<(), DiscoveryError> {
-        if let Some(error) = &self.initial_error {
-            return Err(error.clone());
-        }
-        while self.catalog.is_none() {
-            let Some((position, work)) = self.frontier.pop_first() else {
-                return Err(DiscoveryError::NoCandidateAccepted {
-                    diagnostics: self.diagnostics.clone(),
-                });
-            };
-            match work {
-                Work::Root(input) => self.expand(position, input)?,
-                Work::Parse(interpretation) => {
-                    let id = *interpretation
-                        .history
-                        .last()
-                        .expect("parser owns a resource");
-                    if self.requests[id.0].outcome.is_none() {
-                        // Keep acceptance deterministic even when fetch replies arrive out of order.
-                        self.frontier.insert(position, Work::Parse(interpretation));
-                        return Ok(());
-                    }
-                    self.tick()?;
-                    self.expand_navigation(id, position.1);
-                    let result = self.parse(&interpretation);
-                    self.apply(position, interpretation, result)?;
+                if supported && visited.insert(uri.clone()) && roots.len() < limits.resources {
+                    let depth = resources.depths.borrow().get(request).copied().unwrap_or(0) + 1;
+                    roots.push((3, depth, branch, DiscoveryInput::new(uri)));
+                    branch += 1;
                 }
             }
         }
-        Ok(())
-    }
-
-    fn tick(&mut self) -> Result<(), DiscoveryError> {
-        self.transitions += 1;
-        if self.transitions > self.limits.transitions {
-            return Err(DiscoveryError::TransitionLimitExceeded);
-        }
-        Ok(())
-    }
-
-    fn parse(&self, interpretation: &Interpretation) -> Result<DiscoveryStep, DiscoveryError> {
-        let (&id, previous_history) = interpretation
-            .history
-            .split_last()
-            .expect("parser resource");
-        let resource = &self.requests[id.0];
-        let context = DiscoveryContext {
-            history_ids: previous_history,
-            requests: &self.requests,
-        };
-        match resource.outcome.as_ref().expect("ready parser") {
-            ResourceOutcome::Response(_) => dispatch_resource(
-                interpretation.spec.routes,
-                DiscoveryResource {
-                    context,
-                    ..resource.resource().expect("response")
-                },
-                "resource did not match any discovery route",
-            ),
-            // The resource could not be fetched: handlers may still
-            // recover (krpano tries the next viewer script); otherwise the
-            // failure is reported with its typed cause.
-            ResourceOutcome::Failure(failure) => match interpretation.spec.on_failure {
-                Some(handler) => handler(&context, &resource.request, failure),
-                None => Err(DiscoveryError::fetch_failed(failure.cause.clone())),
-            },
+        if roots.is_empty() {
+            break;
         }
     }
-
-    fn expand(&mut self, position: Position, input: DiscoveryInput) -> Result<(), DiscoveryError> {
-        if position.0 == Evidence::Navigation && self.navigated.contains(&input.url) {
-            return Ok(());
-        }
-        self.navigated.insert(input.url.clone());
-        if let Some(contents) = input.contents {
-            self.retained_bytes -= contents.len();
-            let id = self
-                .register_request(Request::new(input.url.clone()))
-                .ok_or(DiscoveryError::ResourceLimitExceeded)?;
-            if self.requests[id.0].outcome.is_none() {
-                self.record_outcome(
-                    id,
-                    ResourceOutcome::Response(ResourceResponse::new(id, contents)),
-                )?;
-            }
-            self.expand_navigation(id, position.1);
-        }
-        let mut specs = self.specs.clone();
-        // Unknown URL shapes still get content detection. A suffix miss is not a rejection.
-        // Explicit matches precede unknowns; registry order breaks ties.
-        specs.sort_by_key(|spec| {
-            let kind = spec.url_kind(&input.url);
-            (kind.is_none(), kind)
-        });
-        for (rank, spec) in specs.into_iter().enumerate() {
-            self.tick()?;
-            // Initial acquisition stays at the root's depth; following a reference advances it.
-            self.apply(
-                (position.0, position.1, position.2, rank),
-                Interpretation {
-                    spec,
-                    history: Vec::new(),
-                },
-                Ok(DiscoveryStep::Follow(Request::new(&input.url))),
-            )?;
-            if self.catalog.is_some() {
-                break;
-            }
-        }
-        Ok(())
-    }
-
-    fn apply(
-        &mut self,
-        mut position: Position,
-        mut interpretation: Interpretation,
-        result: Result<DiscoveryStep, DiscoveryError>,
-    ) -> Result<(), DiscoveryError> {
-        let format = interpretation.spec.name;
-        let result = result
-            .and_then(|step| match step {
-                DiscoveryStep::Follow(request) => interpretation
-                    .spec
-                    .follow(request, !interpretation.history.is_empty()),
-                step => Ok(step),
-            })
-            .and_then(|step| match step {
-                DiscoveryStep::Follow(request) => {
-                    if !interpretation.history.is_empty() {
-                        position.1 += 1;
-                        // A format-derived link is image-specific evidence, even
-                        // when its parent was reached through generic navigation.
-                        position.0 = position.0.min(Evidence::Resource);
-                    }
-                    let id = self.register_request(request).ok_or_else(|| {
-                        DiscoveryError::rejected(
-                            RejectionKind::Failed,
-                            "discovery resource limit exceeded",
-                        )
-                    })?;
-                    if interpretation.history.contains(&id) {
-                        return Err(DiscoveryError::rejected(
-                            RejectionKind::Failed,
-                            "discovery followed the same resource twice",
-                        ));
-                    }
-                    interpretation.history.push(id);
-                    Ok(Some(interpretation))
-                }
-                step => {
-                    self.catalog = Some(step.compile(format)?);
-                    Ok(None)
-                }
-            });
-        match result {
-            Ok(Some(interpretation)) => {
-                self.frontier.insert(position, Work::Parse(interpretation));
-            }
-            Ok(None) => {}
-            Err(error) => {
-                let (kind, cause, detail) = match error {
-                    DiscoveryError::Rejected {
-                        kind,
-                        cause,
-                        detail,
-                    } => (kind, cause, detail),
-                    DiscoveryError::Session(message) => {
-                        (RejectionKind::InvalidMetadata, None, Some(message))
-                    }
-                    other => return Err(other),
-                };
-                self.diagnostics.push(CandidateDiagnostic {
-                    format: format.to_owned(),
-                    kind,
-                    cause,
-                    detail,
-                });
-            }
-        }
-        Ok(())
-    }
-
-    fn register_request(&mut self, request: Request) -> Option<RequestId> {
-        if let Some(index) = self
-            .requests
-            .iter()
-            .position(|resource| resource.request == request)
+    blocked.sort_by_key(|(rank, _, _)| *rank);
+    for (rank, spec, uri) in blocked {
+        match resources
+            .resolve(spec, &uri, true, &std::cell::Cell::new(rank), rank)
+            .await
         {
-            return Some(RequestId(index));
+            Ok(Some((_, catalog))) => return Ok(catalog),
+            Ok(None) => {}
+            Err(error) => record_diagnostic(&mut diagnostics, spec, error)?,
         }
-        if self.requests.len() >= self.limits.resources {
-            return None;
-        }
-        let id = RequestId(self.requests.len());
-        self.requests.push(ResourceRecord {
-            request,
-            outcome: None,
-            navigation_expanded: false,
-        });
-        Some(id)
     }
+    Err(DiscoveryError::NoCandidateAccepted { diagnostics })
+}
+
+fn record_diagnostic(
+    diagnostics: &mut Vec<CandidateDiagnostic>,
+    spec: FormatSpec,
+    error: DiscoveryError,
+) -> Result<(), DiscoveryError> {
+    let (kind, cause, detail) = match error {
+        DiscoveryError::Rejected {
+            kind,
+            cause,
+            detail,
+        } => (kind, cause, detail),
+        DiscoveryError::InvalidMetadata(message) => {
+            (RejectionKind::InvalidMetadata, None, Some(message))
+        }
+        other => return Err(other),
+    };
+    diagnostics.push(CandidateDiagnostic {
+        format: spec.name.into(),
+        kind,
+        cause,
+        detail,
+    });
+    Ok(())
 }
 
 #[cfg(test)]
-#[allow(clippy::unnecessary_wraps)]
 mod tests {
     use super::*;
-    use crate::core::model::{DiscoveredEntry, ResolvedImage};
-    use crate::core::registry::Registry;
-
-    fn catalog(_: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
-        Ok(DiscoveryStep::Complete(DiscoveryCatalog::default()))
-    }
-
-    fn final_uri_catalog(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
-        Ok(DiscoveryStep::Complete(DiscoveryCatalog::new([
-            DiscoveredEntry::Ready(ResolvedImage {
-                title: Some(resource.final_uri().into()),
-                ..Default::default()
-            }),
-        ])))
-    }
-
-    const FINAL_URI: &[DiscoveryRoute] =
-        &[metadata(url_suffix("/redirect")).decode(final_uri_catalog)];
-
-    fn reject(_: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
-        Err(DiscoveryError::Session("wrong format".into()))
-    }
-
-    const COMPLETE: &[DiscoveryRoute] = &[metadata(any()).decode(catalog)];
-    static LINK_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-        BytesRegex::new(r#"href="(?P<link>[^"]+)""#).expect("constant test link pattern")
-    });
-    const FOLLOW_CAPTURE: &[DiscoveryRoute] = &[
-        DiscoveryRoute::html_relative_capture(&LINK_RE, "link"),
-        metadata(any()).decode(catalog),
-    ];
-    static ID_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-        BytesRegex::new(r#"id="(?P<id>[A-Za-z0-9]+)""#).expect("constant test ID pattern")
-    });
-    const FOLLOW_ID: &[DiscoveryRoute] = &[
-        DiscoveryRoute::capture_url(&ID_RE, "id", "https://tiles.test/", "/info.json"),
-        metadata(any()).decode(catalog),
-    ];
-
-    fn provide(operation: &mut DiscoveryOperation, bytes: &[u8]) {
-        let need = operation.missing_resources().unwrap().pop().unwrap();
-        operation
-            .provide(ResourceResponse::new(need.id, bytes))
-            .unwrap();
-    }
-
-    fn operation(routes: &'static [DiscoveryRoute], uri: &str) -> DiscoveryOperation {
-        let mut registry = Registry::new();
-        registry.register(FormatSpec::new("test", routes));
-        registry.start(uri)
-    }
-
-    #[test]
-    fn decoders_use_redirect_targets_and_ignore_empty_final_uris() {
-        let requested = "https://example.test/redirect";
-        for target in [None, Some(""), Some("https://cdn.example.test/info.xml")] {
-            let mut operation = operation(FINAL_URI, requested);
-            let need = operation.next_priority_need().unwrap().unwrap();
-            let mut response = ResourceResponse::new(need.id, b"metadata");
-            if let Some(target) = target {
-                response = response.with_final_uri(target);
-            }
-            operation.provide(response).unwrap();
-            let catalog = operation.finish().unwrap();
-            let [DiscoveredEntry::Ready(image)] = catalog.entries() else {
-                panic!("expected one image")
-            };
-            assert_eq!(
-                image.title.as_deref(),
-                Some(target.filter(|uri| !uri.is_empty()).unwrap_or(requested))
-            );
-        }
-    }
-
-    #[test]
-    fn captured_links_resolve_after_redirects_and_decode_html_entities() {
-        let mut operation = operation(FOLLOW_CAPTURE, "https://example.test/old/page");
-        let first = operation.missing_resources().unwrap().pop().unwrap();
-        operation
-            .provide(
-                ResourceResponse::new(first.id, br#"<a href="tiles/one.xml?x=1&amp;y=2">"#)
-                    .with_final_uri("https://cdn.example.test/new/page"),
-            )
-            .unwrap();
-        let second = operation.missing_resources().unwrap().pop().unwrap();
-        assert_eq!(
-            second.request.uri,
-            "https://cdn.example.test/new/tiles/one.xml?x=1&y=2"
-        );
-        operation
-            .provide(ResourceResponse::new(second.id, b"metadata"))
-            .unwrap();
-        assert!(operation.finish().unwrap().is_empty());
-    }
-
-    #[test]
-    fn captured_id_fills_a_resource_url() {
-        let mut operation = operation(FOLLOW_ID, "https://example.test/viewer");
-        provide(&mut operation, br#"<viewer id="Ab12">"#);
-        let next = operation.missing_resources().unwrap().pop().unwrap();
-        assert_eq!(next.request.uri, "https://tiles.test/Ab12/info.json");
-    }
-
-    fn branch(
-        resource: DiscoveryResource<'_>,
-        target: &str,
-    ) -> Result<DiscoveryStep, DiscoveryError> {
-        let context = resource.context();
-        if context.resources().next().is_none() {
-            return Ok(DiscoveryStep::Follow(
-                Request::new(target).with_header("X-Test", "preserved"),
-            ));
-        }
-        assert_eq!(
-            context.resources().map(|r| r.uri()).collect::<Vec<_>>(),
-            ["memory://shared"]
-        );
-        assert!(context.has_visited("memory://redirected"));
-        match resource.bytes() {
-            b"deeper" => Ok(resource.follow_relative("/deeper")),
-            b"ok" => catalog(resource),
-            _ => Err(DiscoveryError::Session("not an image".into())),
-        }
-    }
-
-    const HISTORY_A: &[DiscoveryRoute] =
-        &[viewer(any()).extract_metadata(|r| branch(r, "memory://a"))];
-    const HISTORY_B: &[DiscoveryRoute] =
-        &[viewer(any()).extract_metadata(|r| branch(r, "memory://b"))];
-
-    #[test]
-    fn shared_requests_preserve_history_headers_and_breadth_first_precedence() {
-        let mut registry = Registry::new();
-        registry.register(FormatSpec::new("a", HISTORY_A));
-        registry.register(FormatSpec::new("b", HISTORY_B));
-        for (reversed, resources) in [(false, 3), (true, 3), (false, 4), (true, 4)] {
-            for first_reply in [b"reject".as_slice(), b"deeper"] {
-                let mut operation = registry.start_with_limits(
-                    "memory://shared",
-                    DiscoveryLimits {
-                        resources,
-                        ..Default::default()
-                    },
-                );
-                let needs = operation.missing_resources().unwrap();
-                assert_eq!(needs.len(), 1);
-                operation
-                    .provide(
-                        ResourceResponse::new(needs[0].id, b"shared")
-                            .with_final_uri("memory://redirected"),
-                    )
-                    .unwrap();
-                let needs = operation.missing_resources().unwrap();
-                assert_eq!(
-                    needs
-                        .iter()
-                        .map(|n| n.request.uri.as_str())
-                        .collect::<Vec<_>>(),
-                    ["memory://a", "memory://b"]
-                );
-                assert!(
-                    needs
-                        .iter()
-                        .all(|n| n.request.header("X-Test") == Some("preserved"))
-                );
-                let mut replies = [
-                    ResourceResponse::new(needs[0].id, first_reply),
-                    ResourceResponse::new(needs[1].id, b"ok"),
-                ];
-                if reversed {
-                    replies.reverse();
-                }
-                let [first, second] = replies;
-                operation.provide(first).unwrap();
-                assert!(!operation.is_complete());
-                operation.provide(second).unwrap();
-                assert!(operation.is_complete());
-                assert!(operation.missing_resources().unwrap().is_empty());
-            }
-        }
-    }
-
-    fn recover(
-        _: &DiscoveryContext<'_>,
-        request: &Request,
-        failure: &ResourceFailure,
-    ) -> Result<DiscoveryStep, DiscoveryError> {
-        assert_eq!(request.uri, "memory://failure");
-        assert_eq!(failure.cause.code, FetchCode::DiscoveryFailed);
-        assert_eq!(failure.cause.transport, TransportKind::Direct);
-        Ok(DiscoveryStep::Complete(DiscoveryCatalog::default()))
-    }
-
-    #[test]
-    fn failure_handlers_choose_the_next_action() {
-        let mut registry = Registry::new();
-        registry.register(FormatSpec::new("failure", COMPLETE).on_failure(recover));
-        let mut operation = registry.start("memory://failure");
-        let need = operation.missing_resources().unwrap().pop().unwrap();
-        operation
-            .provide_failure(ResourceFailure {
-                id: need.id,
-                cause: FetchCause::new(FetchCode::DiscoveryFailed, TransportKind::Direct),
-            })
-            .unwrap();
-        assert!(operation.finish().unwrap().is_empty());
-    }
-
-    fn repeat(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
-        Ok(DiscoveryStep::Follow(Request::new(resource.uri())))
-    }
-
-    const REPEAT: &[DiscoveryRoute] = &[viewer(any()).extract_metadata(repeat)];
-
-    #[test]
-    fn following_the_same_uri_is_rejected() {
-        let mut operation = operation(REPEAT, "memory://repeat");
-        let need = operation.missing_resources().unwrap().pop().unwrap();
-        let error = operation
-            .provide(ResourceResponse::new(need.id, b"again"))
-            .unwrap_err();
-        assert!(error.to_string().contains("same resource twice"));
-    }
-
-    fn follow_again(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
-        Ok(DiscoveryStep::Follow(Request::new(format!(
-            "memory://{}",
-            resource.context().resources().count()
-        ))))
-    }
-
-    const LOOP: &[DiscoveryRoute] = &[viewer(any()).extract_metadata(follow_again)];
-
-    #[test]
-    fn operation_limits_are_enforced() {
-        let mut registry = Registry::new();
-        registry.register(FormatSpec::new("loop", LOOP));
-        let mut transitions = registry.start_with_limits(
-            "memory://start",
-            DiscoveryLimits {
-                transitions: 2,
-                ..Default::default()
-            },
-        );
-        let need = transitions.missing_resources().unwrap().pop().unwrap();
-        transitions
-            .provide(ResourceResponse::new(need.id, []))
-            .unwrap();
-        let need = transitions.missing_resources().unwrap().pop().unwrap();
-        let error = transitions
-            .provide(ResourceResponse::new(need.id, []))
-            .unwrap_err();
-        assert_eq!(error, DiscoveryError::TransitionLimitExceeded);
-    }
-
-    #[test]
-    fn concurrent_page_replies_keep_navigation_in_frontier_order() {
-        const FIRST: &[DiscoveryRoute] = &[
-            viewer(url_suffix("/root"))
-                .resolve_metadata(|_| Ok(Request::new("https://viewer.test/first"))),
-            viewer(any()).extract_metadata(reject),
-        ];
-        const SECOND: &[DiscoveryRoute] = &[
-            viewer(url_suffix("/root"))
-                .resolve_metadata(|_| Ok(Request::new("https://viewer.test/second"))),
-            viewer(any()).extract_metadata(reject),
-        ];
-        for reversed in [false, true] {
-            let mut registry = Registry::new();
-            registry.register(FormatSpec::new("first", FIRST));
-            registry.register(FormatSpec::new("second", SECOND));
-            let mut operation = registry.start("https://viewer.test/root");
-            let needs = operation.missing_resources().unwrap();
-            assert_eq!(needs.len(), 2);
-            let mut replies = [
-                ResourceResponse::new(
-                    needs[0].id,
-                    br#"<iframe src="/first-child"></iframe>"#.as_slice(),
-                ),
-                ResourceResponse::new(
-                    needs[1].id,
-                    br#"<iframe src="/second-child"></iframe>"#.as_slice(),
-                ),
-            ];
-            if reversed {
-                replies.reverse();
-            }
-            for reply in replies {
-                operation.provide(reply).unwrap();
-            }
-            assert_eq!(
-                operation.next_priority_need().unwrap().unwrap().request.uri,
-                "https://viewer.test/first-child"
-            );
-        }
-    }
-
     #[test]
     fn diagnostics_group_by_typed_cause_and_collapse_url_misses() {
         let http_cause = |status: u16| FetchCause {
@@ -1740,9 +1433,9 @@ mod tests {
              \n - deepzoom: unable to parse DZI metadata\
              \n - 2 other format(s) did not match this page address"
         );
-        // The engine block for wire diagnostics carries no headline.
+        // Detailed diagnostics carry no headline.
         assert_eq!(
-            error.engine_detail(),
+            error.detail(),
             " - iiif, zoomify: HTTP 403 fetching this address\
              \n - deepzoom: unable to parse DZI metadata\
              \n - 2 other format(s) did not match this page address"

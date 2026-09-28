@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 use regex::bytes::Regex as BytesRegex;
 
 use crate::core::{
-    DiscoveryError, DiscoveryResource, DiscoveryRoute, DiscoveryStep, Request, resolve_relative,
+    DiscoveryError, DiscoveryResource, DiscoveryRoute, ParsedResource, Request, resolve_relative,
 };
 
 use super::{append_path_component, capture_text};
@@ -23,15 +23,15 @@ pub(super) fn is_work_page(uri: &str) -> bool {
 
 pub(super) fn follow_image_path(
     resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+) -> Result<ParsedResource, DiscoveryError> {
     let path = IMAGE_PATH
         .captures(resource.bytes())
         .and_then(|captures| capture_text(&captures, "image"))
         .ok_or_else(|| {
-            DiscoveryError::Session("NGV page does not declare a Zoomify path".into())
+            DiscoveryError::InvalidMetadata("NGV page does not declare a Zoomify path".into())
         })?;
     let image_uri = resolve_relative(resource.final_uri(), &path);
-    Ok(DiscoveryStep::Follow(Request::new(append_path_component(
+    Ok(ParsedResource::Follow(Request::new(append_path_component(
         &image_uri,
         "ImageProperties.xml",
     ))))

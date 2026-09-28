@@ -29,7 +29,7 @@ missing_docs = "allow"
 pedantic = "allow"
 
 [dependencies]
-# Engine deps (inward only: core -> engine -> native runtime + protocol DTOs).
+# Shared algorithm and native platform capabilities.
 # All pure Rust via dezoomify-native (reqwest/rustls/image/url/sha2); no webview
 # system packages, so the lean offline default still builds anywhere.
 dezoomify = { path = "../../../crates/dezoomify" }
@@ -37,6 +37,7 @@ dezoomify-native = { path = "../../../crates/dezoomify-native" }
 # Lean offline shell: pure Rust only (no webview system packages).
 serde = { workspace = true }
 serde_json = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
 # Real window shell (optional; see the `tauri` feature below).
 tauri = { version = "2", optional = true , features = [] }
 tauri-plugin-dialog = { version = "2", optional = true }
