@@ -8,6 +8,7 @@ import { defineConfig } from "vite";
 export default defineConfig({
   base: "/beta/",
   plugins: [react()],
+  define: { __DEZOOMIFY_VERSION__: JSON.stringify(process.env.DEZOOMIFY_VERSION ?? "development") },
   build: {
     target: "es2022",
     outDir: "dist/beta",

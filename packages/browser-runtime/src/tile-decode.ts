@@ -10,6 +10,8 @@
 //
 // All host constructors are injected so node tests drive the fallback and
 // worker paths with fakes.
+import type { DiagnosticRecorder } from "@dezoomify/app-model";
+
 export interface TileDecodeHost {
   workerCtor?: new (url: string | URL) => TileDecodeWorkerLike;
   /** Packaged worker URL override (tests); defaults to the bundled module. */
@@ -38,12 +40,21 @@ export interface TileDecoder {
   get workered(): boolean;
 }
 
-export function createTileDecoder(host?: TileDecodeHost): TileDecoder {
+export function createTileDecoder(
+  host?: TileDecodeHost,
+  diagnostics?: DiagnosticRecorder,
+): TileDecoder {
   const h = host ?? {};
   const lifetime = new AbortController();
   let worker: TileDecodeWorkerLike | null = null;
   let seq = 0;
   let unavailable = false;
+  let fallbackReported = false;
+  function fallback(reason: string, error?: unknown): void {
+    if (fallbackReported) return;
+    fallbackReported = true;
+    diagnostics?.record("debug", "decode-fallback", { method: "main-thread", reason, error });
+  }
   const pending = new Map<
     number,
     { resolve: (b: TileBitmap) => void; reject: (e: unknown) => void }
@@ -79,6 +90,7 @@ export function createTileDecoder(host?: TileDecodeHost): TileDecoder {
       const url = h.workerUrl ?? new URL("./tile-decode-worker.ts", import.meta.url);
       if (!WorkerCtor || !offscreen) {
         unavailable = true;
+        fallback("worker-unavailable");
         return null;
       }
       const w: TileDecodeWorkerLike = new WorkerCtor(url);
@@ -104,7 +116,8 @@ export function createTileDecoder(host?: TileDecodeHost): TileDecoder {
           );
         }
       };
-      w.onerror = () => {
+      w.onerror = (error) => {
+        fallback("worker-failed", error);
         unavailable = true;
         for (const [, entry] of pending) {
           try {
@@ -123,8 +136,9 @@ export function createTileDecoder(host?: TileDecodeHost): TileDecoder {
       };
       worker = w;
       return w;
-    } catch {
+    } catch (error) {
       unavailable = true;
+      fallback("worker-start-failed", error);
       return null;
     }
   }
@@ -162,7 +176,10 @@ export function createTileDecoder(host?: TileDecodeHost): TileDecoder {
         pending.delete(id);
         return mainThreadDecode(bytes);
       }
-      return gate.catch(() => mainThreadDecode(bytes));
+      return gate.catch((error) => {
+        fallback("worker-decode-failed", error);
+        return mainThreadDecode(bytes);
+      });
     } catch {
       return mainThreadDecode(bytes);
     }

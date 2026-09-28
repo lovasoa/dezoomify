@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement } from "react";
+import { createDiagnosticRecorder } from "../packages/app-model/src/diagnostics.ts";
 import {
   presentFailure,
   presentIdle,
@@ -23,7 +24,21 @@ const callbacks = {
 };
 
 function render(el, presentation, cb, ctx, options) {
-  act(() => renderView(el, presentation, cb ?? callbacks, ctx, options));
+  const d = createDiagnosticRecorder({
+    id: "view",
+    now: () => 0,
+    context: { input: ctx?.sourceUrl },
+  });
+  if (presentation.terminal?.error) d.finish("failed", presentation.terminal.error);
+  act(() =>
+    renderView(
+      el,
+      presentation,
+      cb ?? callbacks,
+      { diagnosticReport: d.report(), ...ctx },
+      options,
+    ),
+  );
 }
 
 function progressPresentation(current, total) {
@@ -119,7 +134,7 @@ test("static accessibility contract: failed view layers guidance with named reco
     "error message slot is populated",
   );
   assertButtonsNamed(card, "failed");
-  const report = card.querySelector(".dz-diagnostics-report a");
+  const report = card.querySelector(".dz-details a");
   assert.ok(report, "bug-report path stays reachable from the failed view");
   const href = report.getAttribute("href") || "";
   const parsed = new URL(href);
@@ -127,18 +142,13 @@ test("static accessibility contract: failed view layers guidance with named reco
     `${parsed.origin}${parsed.pathname}`,
     "https://github.com/lovasoa/dezoomify/issues/new",
   );
-  assert.equal(parsed.searchParams.get("labels"), "new site support,unconfirmed");
-  assert.ok(
-    (parsed.searchParams.get("title") || "").startsWith("[new site support]"),
-    "issue title is prefilled",
-  );
   const body = parsed.searchParams.get("body") || "";
   assert.ok(
     body.includes("https://museum.example.org/viewer?page=1"),
     "body carries the source address",
   );
   assert.ok(body.includes("No zoomable image could be found."), "body carries the engine error");
-  assert.ok(body.includes("code:X"), "body carries the diagnostics code line");
+  assert.ok(body.includes("code: X"), "body carries the diagnostics code line");
 });
 
 test("native completion opens saved output without browser save guidance", () => {

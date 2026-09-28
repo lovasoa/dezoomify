@@ -46,6 +46,7 @@ const RUNTIME_WORKERS: usize = 2;
 /// One reusable HTTP scope: Tokio runtime plus a single connection-pooling
 /// client. Create one per job attempt and share it for every fetch.
 pub struct NativeTransport {
+    pub(crate) diagnostics: Option<crate::diagnostics::Diagnostics>,
     runtime: tokio::runtime::Runtime,
     client: reqwest::Client,
 }
@@ -75,7 +76,16 @@ impl NativeTransport {
         let client = builder
             .build()
             .map_err(|e| NativeError::new("native.internal", format!("transport client: {e}")))?;
-        Ok(Self { runtime, client })
+        Ok(Self {
+            runtime,
+            client,
+            diagnostics: None,
+        })
+    }
+
+    pub fn with_diagnostics(mut self, diagnostics: crate::diagnostics::Diagnostics) -> Self {
+        self.diagnostics = Some(diagnostics);
+        self
     }
 
     /// Ephemeral one-shot transport for out-of-band fetches (bulk-list reads).
@@ -115,8 +125,51 @@ impl NativeTransport {
         for header in &request.headers {
             headers.insert(header.name.to_ascii_lowercase(), header.value.clone());
         }
-        self.fetch_async(&request.uri, &headers, user, auth, limits)
-            .await
+        let started = Instant::now();
+        let result = self
+            .fetch_async(&request.uri, &headers, user, auth, limits)
+            .await;
+        if let Some(diagnostics) = &self.diagnostics {
+            use dezoomify::model::DiagnosticLevel;
+            diagnostics.count("requests", 1.0);
+            let mut facts = serde_json::json!({"request": request.id, "purpose": request.purpose, "url": request.uri, "transport": "native", "duration_ms": started.elapsed().as_secs_f64() * 1000.0});
+            let level = match &result {
+                Ok(outcome) => {
+                    facts["http"] = outcome.status.into();
+                    facts["final_url"] = outcome.final_uri.clone().into();
+                    facts["bytes"] = outcome.body.len().into();
+                    facts["content_type"] = serde_json::json!(outcome.content_type);
+                    facts["retry_after_ms"] = serde_json::json!(outcome.retry_after_ms);
+                    diagnostics.count("bytes_fetched", outcome.body.len() as f64);
+                    if outcome.ok() {
+                        if request.purpose == dezoomify::model::RequestPurpose::Metadata {
+                            DiagnosticLevel::Debug
+                        } else {
+                            DiagnosticLevel::Trace
+                        }
+                    } else {
+                        diagnostics.count("request_failures", 1.0);
+                        facts["preview"] = crate::diagnostics::redact(&String::from_utf8_lossy(
+                            &outcome.body[..outcome.body.len().min(4096)],
+                        ))
+                        .chars()
+                        .take(300)
+                        .collect::<String>()
+                        .into();
+                        facts["code"] = "TRANSPORT_HTTP_ERROR".into();
+                        DiagnosticLevel::Warn
+                    }
+                }
+                Err(error) => {
+                    diagnostics.count("request_failures", 1.0);
+                    facts["code"] = error.code.clone().into();
+                    facts["message"] = error.message.clone().into();
+                    DiagnosticLevel::Warn
+                }
+            };
+            diagnostics.record(level, "request", facts);
+        }
+        result
     }
 
     /// Async fetch core: identical semantics to [`NativeTransport::fetch`]
@@ -218,8 +271,18 @@ async fn fetch_loop(
                 .get(reqwest::header::RETRY_AFTER)
                 .and_then(|value| value.to_str().ok())
                 .and_then(parse_retry_after_ms);
-            let body = read_body_capped(response, limits).await?;
+            let content_type = response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string);
+            let body = if (200..300).contains(&status) {
+                read_body_capped(response, limits).await?
+            } else {
+                read_error_prefix(response).await
+            };
             return Ok(FetchOutcome {
+                content_type,
                 status,
                 final_uri,
                 body,
@@ -239,6 +302,23 @@ async fn fetch_loop(
             user.apply(&mut request);
         }
     }
+}
+
+// Diagnostic reads never replace an observed HTTP refusal with a body error.
+async fn read_error_prefix(mut response: reqwest::Response) -> Vec<u8> {
+    tokio::time::timeout(Duration::from_millis(500), async move {
+        let mut prefix = Vec::new();
+        while let Ok(Some(chunk)) = response.chunk().await {
+            let keep = chunk.len().min(4096 - prefix.len());
+            prefix.extend_from_slice(&chunk[..keep]);
+            if prefix.len() == 4096 {
+                break;
+            }
+        }
+        prefix
+    })
+    .await
+    .unwrap_or_default()
 }
 
 /// One HTTP exchange, no retries: timeouts and connection failures return
@@ -410,6 +490,7 @@ fn fetch_local(uri: &str, limits: &FetchLimits) -> Result<FetchOutcome, NativeEr
         ));
     }
     Ok(FetchOutcome {
+        content_type: None,
         status: 200,
         final_uri: uri.to_string(),
         body,

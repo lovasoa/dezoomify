@@ -115,6 +115,7 @@ pub fn payload_has_forbidden_keys(value: &serde_json::Value) -> bool {
 /// `Cookie` header (memory-only, never logged or cached), so only header
 /// names are shown, never values.
 pub struct JobEntry {
+    pub diagnostics: dezoomify_native::diagnostics::Diagnostics,
     pub id: String,
     /// Redacted input origin (`scheme://host`) for emit context.
     pub origin: String,
@@ -255,6 +256,10 @@ fn cancelled_dto() -> Snapshot {
 }
 
 impl JobTable {
+    pub fn diagnostic_report(&self, job: &str) -> Option<dezoomify::model::DiagnosticReport> {
+        self.jobs.get(job).map(|record| record.diagnostics.report())
+    }
+
     pub fn new() -> Self {
         Self {
             jobs: HashMap::new(),
@@ -370,6 +375,10 @@ impl JobTable {
         self.jobs.insert(
             id.clone(),
             JobEntry {
+                diagnostics: dezoomify_native::diagnostics::Diagnostics::new(
+                    "desktop",
+                    option_env!("DEZOOMIFY_VERSION").unwrap_or(env!("CARGO_PKG_VERSION")),
+                ),
                 id: id.clone(),
                 origin: origin.clone(),
                 options,
@@ -460,6 +469,10 @@ impl JobTable {
             }
         };
         if let Some(record) = self.jobs.get_mut(&id) {
+            record.diagnostics = runner.diagnostics.clone();
+            record
+                .diagnostics
+                .context(serde_json::json!({"product": "desktop", "host_job": id}));
             record.options = options;
             record.runner = Some(runner);
         }
@@ -607,6 +620,10 @@ impl JobTable {
         // still receive a corrected destination grant.
         let runner = start_job(options.clone()).map_err(|error| error.to_string())?;
         if let Some(record) = self.jobs.get_mut(job) {
+            record.diagnostics = runner.diagnostics.clone();
+            record
+                .diagnostics
+                .context(serde_json::json!({"product": "desktop", "host_job": job}));
             record.destination = Some(path.to_path_buf());
             record.options = options;
             record.runner = Some(runner);

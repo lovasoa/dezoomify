@@ -40,12 +40,19 @@ fn canaries_never_appear_in_snapshots_or_terminals() {
         !text.contains("CANARY-TOKEN"),
         "canary leaked into snapshots: {text}"
     );
+    let diagnostics = job.diagnostics.clone();
     match job.join() {
         Err(_) => {}
         Ok(summary) => {
             panic!("refused input must not publish: {summary:?}")
         }
     }
+    let report = diagnostics.report();
+    assert_eq!(report.outcome.unwrap().event, "failed");
+    assert!(report.counters["request_failures"] > 0.0);
+    assert!(!serde_json::to_string(&diagnostics.report())
+        .unwrap()
+        .contains("CANARY-TOKEN"));
     let _ = std::fs::remove_dir_all(&work);
 }
 
@@ -65,4 +72,52 @@ fn auth_debug_redacts_values() {
     )
     .unwrap();
     assert!(!format!("{auth:?}").contains("CANARY-VALUE"));
+}
+
+#[test]
+fn diagnostic_budget_protects_problem_samples_and_terminal() {
+    use dezoomify::model::DiagnosticLevel as Level;
+    use dezoomify_native::diagnostics::{redact, Diagnostics, MAX_BYTES};
+    use serde_json::json;
+    let vectors: serde_json::Value =
+        serde_json::from_str(include_str!("../../../testdata/redaction-vectors.json")).unwrap();
+    for key in vectors["sensitive_query_keys"].as_array().unwrap() {
+        assert!(
+            !redact(&format!(
+                "https://h/?{}=CANARY&page=2",
+                key.as_str().unwrap()
+            ))
+            .contains("CANARY"),
+            "{key}"
+        );
+    }
+    for vector in vectors["redaction_cases"].as_array().unwrap() {
+        for secret in vector["must_not_contain"].as_array().unwrap() {
+            assert!(!redact(vector["input"].as_str().unwrap()).contains(secret.as_str().unwrap()));
+        }
+    }
+    assert_eq!(
+        redact("https://h/a%2Fb?token=CANARY&page=2&sig=CANARY&lang=fr"),
+        "https://h/a%2Fb?token=[redacted]&page=2&sig=[redacted]&lang=fr"
+    );
+    let d = Diagnostics::new("test", "test");
+    d.record(
+        Level::Warn,
+        "request",
+        json!({"http":403,"preview":"challenge"}),
+    );
+    for i in 0..2000 {
+        d.record(Level::Warn, "request", json!({"http":403,"tile":i}));
+        d.record(Level::Debug, "sample", json!({"text":"界".repeat(2000)}));
+    }
+    d.finish("failed", json!({"code":"tile.download-failed"}));
+    d.finish("retired", json!({}));
+    let report = d.report();
+    assert!(serde_json::to_vec(&report).unwrap().len() <= MAX_BYTES);
+    assert!(report.records.len() <= 1000 && report.omitted_records > 0);
+    assert_eq!(report.failures[0].count, 2001);
+    assert_eq!(report.outcome.unwrap().event, "failed");
+    assert!(serde_json::to_string(&report.failures[0].first)
+        .unwrap()
+        .contains("challenge"));
 }

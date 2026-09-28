@@ -76,6 +76,8 @@ fn cli_fails_honestly_on_missing_tiles() {
     let out_dir = temp_dir("e2e-failure");
     let output = out_dir.join("broken.png");
     let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--diagnostics")
+        .arg(out_dir.join("report.jsonl"))
         .arg("--no-partial")
         .arg(&input)
         .arg(&output)
@@ -83,6 +85,11 @@ fn cli_fails_honestly_on_missing_tiles() {
         .expect("run cli");
     assert!(!run.status.success(), "cli must fail on tile errors");
     assert!(!output.exists(), "no output on failure");
+    let report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(out_dir.join("report.jsonl")).unwrap())
+            .unwrap();
+    assert_eq!(report["outcome"]["event"], "failed");
+    assert!(!report["failures"].as_array().unwrap().is_empty());
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
         stderr.contains("tile.download-failed"),
@@ -143,6 +150,8 @@ fn json_mode_emits_machine_events() {
     let out_dir = temp_dir("e2e-json");
     let output = out_dir.join("pyramid.png");
     let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--diagnostics")
+        .arg(out_dir.join("report.jsonl"))
         .arg("--json")
         .arg("--overwrite")
         .arg(&input)
@@ -151,6 +160,10 @@ fn json_mode_emits_machine_events() {
         .expect("run cli");
     assert!(run.status.success());
     let stdout = String::from_utf8_lossy(&run.stdout);
+    let report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(out_dir.join("report.jsonl")).unwrap())
+            .unwrap();
+    assert_eq!(report["outcome"]["event"], "completed");
     // Machine output must be line-delimited JSON events with honest shapes.
     let mut saw_started = false;
     let mut last_seq: u64 = 0;
@@ -458,7 +471,7 @@ fn cli_logging_levels_control_human_verbosity() {
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(stderr.contains("saved"), "info shows success: {stderr}");
     assert!(
-        !stderr.contains("debug "),
+        !stderr.contains("\"purpose\":\"metadata\""),
         "info has no debug diagnostics: {stderr}"
     );
 
@@ -475,12 +488,14 @@ fn cli_logging_levels_control_human_verbosity() {
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(stderr.contains("saved"), "debug shows success: {stderr}");
     assert!(
-        stderr.contains("debug "),
+        stderr.contains("\"purpose\":\"metadata\""),
         "debug adds diagnostics: {stderr}"
     );
 
     let out_trace = temp_dir("e2e-log-trace");
     let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--tile-cache")
+        .arg(out_trace.join("cache"))
         .arg("--logging")
         .arg("trace")
         .arg("--overwrite")
@@ -491,8 +506,14 @@ fn cli_logging_levels_control_human_verbosity() {
     assert!(run.status.success());
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(stderr.contains("saved"), "trace shows success: {stderr}");
-    assert!(stderr.contains("debug "), "trace keeps debug: {stderr}");
-    assert!(stderr.contains("trace "), "trace adds payloads: {stderr}");
+    assert!(
+        stderr.contains("\"purpose\":\"metadata\""),
+        "trace keeps discovery: {stderr}"
+    );
+    assert!(
+        stderr.contains("\"purpose\":\"tile\""),
+        "trace adds tile requests: {stderr}"
+    );
 }
 
 #[test]

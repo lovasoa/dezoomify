@@ -12,6 +12,7 @@
 pub mod auth;
 pub mod cache;
 pub mod client;
+pub mod diagnostics;
 pub mod error;
 pub mod exec;
 pub mod http;
@@ -23,6 +24,6 @@ pub mod transport;
 
 pub use error::NativeError;
 pub use job_service::{
-    start_job, CommandRejected, JobCommandAck, JobOptions, JobSnapshot, OutputSummary,
-    OutputTarget, RunningJob, UserCommand,
+    start_job, start_job_with_diagnostics, CommandRejected, JobCommandAck, JobOptions, JobSnapshot,
+    OutputSummary, OutputTarget, RunningJob, UserCommand,
 };

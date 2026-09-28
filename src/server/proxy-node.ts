@@ -61,11 +61,13 @@ function sendJson(
   code: string,
   requestId?: string,
   reason?: string,
+  preview?: string,
 ): void {
   const body = JSON.stringify({
     code,
     ...(reason !== undefined ? { reason } : {}),
     ...(requestId !== undefined ? { requestId } : {}),
+    ...(preview ? { preview } : {}),
   });
   const bytes = Buffer.from(body);
   res.writeHead(status, {
@@ -164,5 +166,6 @@ export async function handleNodeProxyRequest(
     result.code ?? "PROXY_ERROR",
     result.requestId,
     result.reason,
+    result.preview,
   );
 }

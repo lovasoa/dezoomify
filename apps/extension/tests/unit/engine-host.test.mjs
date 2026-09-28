@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createDiagnosticRecorder } from "@dezoomify/app-model";
 import { createEngineHost } from "@dezoomify/browser-runtime";
 import { createEngineResourceFetcher } from "../../src/job/transport.ts";
 
@@ -40,7 +41,13 @@ function harness({
   const sent = [];
   const seen = [];
   const logs = [];
+  const diagnostics = createDiagnosticRecorder({
+    id: SESSION_ID,
+    now: () => 0,
+    sink: (record) => logs.push(record),
+  });
   const fetchResource = createEngineResourceFetcher({
+    diagnostics,
     sourceAccess: {
       origin: siteOrigin,
       async fetch(request, signal) {
@@ -55,8 +62,6 @@ function harness({
         return { bytes: new Uint8Array([1, 2, 3]) };
       },
     },
-    onSourceFailure: (cause) =>
-      logs.push({ level: "warn", code: "source-fetch-fallback", detail: cause }),
   });
   const controller = createEngineHost({
     worker: { postMessage: (message) => sent.push(message) },
@@ -79,7 +84,7 @@ function harness({
     }),
     onRecoveryRequested: (generation) => seen.push(["recovery-decision", generation]),
     onHostFailure: (error) => seen.push(["host-failure", error]),
-    log: (level, code, detail) => logs.push({ level, code, detail }),
+    diagnostics,
   });
   return { controller, sent, seen, assembly, logs };
 }
@@ -405,7 +410,7 @@ test("a failed site-origin source fetch falls back to the extension origin", asy
   const acquired = sent.find((message) => message.type === "engine.acquired");
   assert.equal(acquired?.requestId, 0);
   assert.ok(
-    logs.some((log) => log.code === "source-fetch-fallback"),
+    logs.some((log) => log.event === "source-fetch-fallback"),
     "the source failure is logged before the fallback",
   );
 });

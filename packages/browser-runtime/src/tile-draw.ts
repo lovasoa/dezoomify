@@ -15,7 +15,6 @@ export interface TileImageLike {
 export interface TileDrawHooks {
   onRequestStart(label: string): number;
   onRequestEnd(id: number, ok: boolean): void;
-  onLog(line: string): void;
   onUpdate(): void;
 }
 
@@ -57,14 +56,12 @@ export interface PlacedTileGeometry {
  * than its planned extent is cropped from the right and bottom; this is how
  * padded edge tiles are represented by Google Arts & Culture and similar
  * services. A smaller tile leaves the remainder unpainted instead of
- * stretching its pixels. `onMismatch` receives a generic diagnostic; it
- * never identifies an individual tile.
+ * stretching its pixels. The assembly records actual and planned geometry.
  */
 export function drawPlacedTile(
   ctx2d: Canvas2DLike,
   source: TileBitmap | TileImageLike,
   geometry: PlacedTileGeometry,
-  onMismatch?: (line: string) => void,
 ): void {
   // Image elements carry naturalWidth/naturalHeight (their layout width
   // would mislead); decoded bitmaps carry width/height. Branch on the
@@ -76,9 +73,6 @@ export function drawPlacedTile(
   const planH = geometry.h ?? fullH;
   const copyW = Math.min(planW, fullW);
   const copyH = Math.min(planH, fullH);
-  if (planW !== fullW || planH !== fullH) {
-    onMismatch?.("A tile size differed from the plan; only its planned pixel extent was drawn.");
-  }
   if (copyW > 0 && copyH > 0) {
     ctx2d.drawImage(source, 0, 0, copyW, copyH, geometry.x, geometry.y, copyW, copyH);
   }
@@ -99,8 +93,7 @@ export function loadTileImage(
     clearTimeoutFn?: (t: unknown) => void;
     ms?: number;
     signal?: AbortSignal;
-    hooks?: Pick<TileDrawHooks, "onRequestStart" | "onRequestEnd" | "onUpdate"> &
-      Partial<Pick<TileDrawHooks, "onLog">>;
+    hooks?: TileDrawHooks;
   } = {},
 ): Promise<TileImageElementLike> {
   deps.signal?.throwIfAborted();
@@ -134,9 +127,6 @@ export function loadTileImage(
       if (timer) clearTimer(timer);
       timer = null;
       if (hooks) {
-        hooks.onLog?.(
-          `fetch img ${ok ? `loaded ${img.naturalWidth}x${img.naturalHeight}` : (value as Error).message} (HTTP status unavailable) url=${url}`,
-        );
         hooks.onRequestEnd(reqId, ok);
         hooks.onUpdate();
       }

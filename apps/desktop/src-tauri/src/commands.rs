@@ -411,8 +411,9 @@ mod tests {
 
     #[test]
     fn registry_lists_exact_commands() {
-        assert_eq!(COMMANDS.len(), 6);
+        assert_eq!(COMMANDS.len(), 7);
         for name in [
+            "get_job_diagnostics",
             "start_job",
             "request_destination",
             "job_command",

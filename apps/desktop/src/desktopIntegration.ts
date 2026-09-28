@@ -25,6 +25,7 @@ export const NATIVE_FORMATS: readonly NativeFormat[] = [...NATIVE_ENCODERS, "iii
 // apps/desktop/src-tauri/src/commands.rs COMMANDS and the generated
 // capability documents.
 export const DESKTOP_COMMANDS = [
+  "get_job_diagnostics",
   "job_command",
   "open_saved_output",
   "release_job",

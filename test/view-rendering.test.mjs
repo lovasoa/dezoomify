@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement } from "react";
+import { createDiagnosticRecorder } from "../packages/app-model/src/diagnostics.ts";
 import { PartialDecisionActions } from "../packages/shared-ui/src/partial-decision.tsx";
 import {
   presentFailure,
@@ -40,7 +41,16 @@ function container() {
 }
 
 function render(el, presentation, callbacks, ctx) {
-  act(() => renderView(el, presentation, callbacks, ctx));
+  const d = createDiagnosticRecorder({ id: "view", now: () => 0 });
+  if (presentation.terminal?.error) d.finish("failed", presentation.terminal.error);
+  act(() =>
+    renderView(
+      el,
+      presentation,
+      { onCopyDiagnostics() {}, ...callbacks },
+      { diagnosticReport: d.report(), ...ctx },
+    ),
+  );
 }
 
 function jobPresentation(snapshot, transport = "direct") {
@@ -100,7 +110,7 @@ test("renderView mounts card and updates job section in place without DOM destru
   assert.equal(stepTextEl.textContent, "Finding the zoomable image…");
 
   // User opens technical details
-  const details = card.querySelector("#dz-job-details");
+  const details = card.querySelector(".dz-details");
   assert.ok(details);
   details.open = true;
 
@@ -296,25 +306,11 @@ test("error layering: plain message prominent, engine diagnostics only in techni
   const prominent = card.querySelector("#dz-error-message").textContent;
   assert.ok(!prominent.includes("zoomify"), "engine block must not be prominent");
   assert.ok(!prominent.includes("429"), "status must not be prominent");
-  const diagnostics = card.querySelector("#dz-error-diagnostics").textContent;
-  const lines = diagnostics.split("\n");
-  // Four-part order: url, http, server, blank, engine block, blank, trailing.
-  assert.equal(lines[0], "url: https://example.test/viewer/tour.xml?sig=abc&lang=fr");
-  assert.equal(lines[1], "http: 429");
-  assert.equal(lines[2], "server: Too many requests");
-  assert.equal(lines[3], "");
-  assert.equal(lines[4], " - zoomify, iiif, krpano: HTTP 429 fetching this address");
-  assert.equal(lines[5], " - 2 other format(s) did not match this page address");
-  assert.equal(lines[6], "");
-  assert.equal(
-    lines[7],
-    "code:UPSTREAM_RATE_LIMITED category:transport retryable:true transport:metadata-proxy phase:discovery http:429",
-  );
-  assert.equal(lines.length, 8, "exactly one trailing line, nothing after it");
-  // No headline repetition, no JSON, no label style from the old shape.
-  assert.ok(!diagnostics.includes("no discovery candidate"), "no engine headline");
-  assert.ok(!diagnostics.includes("Message:"), "no prominent-message repetition");
-  assert.ok(!diagnostics.includes("{"), "no JSON");
+  const diagnostics = card.querySelector("#dz-job-diagnostics").textContent;
+  assert.match(diagnostics, /http=429/);
+  assert.match(diagnostics, /Too many requests/);
+  assert.match(diagnostics, /sig=\[redacted\]&lang=fr/);
+  assert.ok(diagnostics.includes(engineBlock));
   // A fresh failure without url/http/detail renders only the trailing line.
   const fresh = failurePresentation({
     code: "NO_IMAGE_FOUND",
@@ -325,47 +321,9 @@ test("error layering: plain message prominent, engine diagnostics only in techni
     phase: "discovery",
   });
   render(el, fresh, callbacks);
-  const diag2 = card.querySelector("#dz-error-diagnostics").textContent;
-  assert.equal(
-    diag2,
-    "code:NO_IMAGE_FOUND category:discovery retryable:false transport:direct phase:discovery",
-  );
+  const diag2 = card.querySelector("#dz-job-diagnostics").textContent;
+  assert.match(diag2, /code=NO_IMAGE_FOUND/);
   assert.ok(!diag2.includes("example.test"), "stale detail must be replaced");
-});
-
-test("failed technical details show the activity log below the error diagnostics", () => {
-  const el = container();
-  const presentation = failurePresentation({
-    code: "job.partial-discarded",
-    category: "engine",
-    retryable: false,
-    message: "Discarded.",
-  });
-  const ctx = {
-    jobActivity: {
-      log: [
-        "[job] engine-start url=https://example.test/a.dzi",
-        "[worker] session-created jobId=job:1",
-      ],
-    },
-  };
-  render(el, presentation, callbacks, ctx);
-  const card = el.querySelector(".dz-card");
-  const log = card.querySelector("#dz-error-log");
-  assert.ok(log, "log block mounted in failure details");
-  assert.equal(
-    log.textContent,
-    "[job] engine-start url=https://example.test/a.dzi\n[worker] session-created jobId=job:1",
-  );
-  assert.ok(!card.querySelector("#dz-error-diagnostics").textContent.includes("engine-start"));
-
-  const empty = container();
-  render(empty, presentation, callbacks, {});
-  assert.equal(
-    empty.querySelector(".dz-card").querySelector("#dz-error-log"),
-    null,
-    "no log block without logs",
-  );
 });
 
 test("job rail keeps integrated stop and diagnostics-copy controls, and header visibility tracks phase", () => {

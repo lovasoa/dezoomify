@@ -1,6 +1,6 @@
 // Live job activity shared by browser products.
 // Drives the progressive-disclosure job view: pending-request clocks, the
-// longest-wait gauge, the capped technical log, and the delta-gated 500 ms
+// longest-wait gauge and the delta-gated 500 ms
 // heartbeat whose paints are rAF-batched. The owning orchestrator supplies
 // the state object shape (shared-ui ViewContext jobActivity) through the
 // returned tracker's `state` reference and a repaint callback; this module
@@ -18,8 +18,6 @@ export interface ActivityLog {
   longestPendingMs?: number;
   timeoutMs?: number;
   lastProgressAt?: number;
-  log?: Array<string>;
-  diagnostics?: string;
   paused?: boolean;
   pausedAt?: number;
   pausedDurationMs?: number;
@@ -38,7 +36,6 @@ export interface JobActivity {
   scheduleUpdate(): void;
   reset(url: string, timeoutMs: number): void;
   touchProgress(): void;
-  pushLog(line: string, maxLines?: number): void;
   noteRequestStart(label: string): number;
   noteRequestEnd(id: number, ok: boolean): void;
   refreshLongestPending(): void;
@@ -48,9 +45,6 @@ export interface JobActivity {
   pause(): void;
   resume(): void;
 }
-
-/** Capped technical log (oldest dropped first), web parity. */
-export const ACTIVITY_MAX_LOG_LINES = 60;
 
 export function createJobActivity(hooks: ActivityHooks): JobActivity {
   const now = hooks.nowFn ?? Date.now;
@@ -119,8 +113,6 @@ export function createJobActivity(hooks: ActivityHooks): JobActivity {
     state.longestPendingMs = 0;
     state.timeoutMs = timeoutMs;
     state.lastProgressAt = at;
-    state.log = [];
-    state.diagnostics = undefined;
     state.paused = false;
     state.pausedAt = undefined;
     state.pausedDurationMs = 0;
@@ -128,17 +120,6 @@ export function createJobActivity(hooks: ActivityHooks): JobActivity {
 
   function touchProgress(): void {
     ensure().lastProgressAt = now();
-  }
-
-  function pushLog(line: string, maxLines: number = ACTIVITY_MAX_LOG_LINES): void {
-    const a = ensure();
-    if (!a.log) a.log = [];
-    const at = a.pausedAt ?? now();
-    const elapsed = a.startedAt
-      ? Math.round((at - a.startedAt - (a.pausedDurationMs ?? 0)) / 1000)
-      : 0;
-    a.log.push(`${elapsed}s: ${line}`);
-    if (a.log.length > maxLines) a.log.splice(0, a.log.length - maxLines);
   }
 
   function noteRequestStart(label: string): number {
@@ -240,7 +221,6 @@ export function createJobActivity(hooks: ActivityHooks): JobActivity {
     scheduleUpdate: scheduleBatchedUpdate,
     reset,
     touchProgress,
-    pushLog,
     noteRequestStart,
     noteRequestEnd,
     refreshLongestPending,

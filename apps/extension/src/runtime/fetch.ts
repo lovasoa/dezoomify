@@ -8,6 +8,7 @@
  * transport is only for extension-origin requests with an existing host grant.
  */
 
+import type { DiagnosticRecorder } from "@dezoomify/app-model";
 import type { HostFailure } from "@dezoomify/browser-runtime";
 import {
   blockedReason,
@@ -33,6 +34,7 @@ type TransportCategory =
   | "malformed"
   | "limit-exceeded";
 type FetchDeps = {
+  diagnostics?: DiagnosticRecorder;
   maxBytes?: number;
   timeoutMs?: number;
   fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
@@ -143,6 +145,8 @@ export function createExtensionFetcher(deps: FetchDeps) {
   const fetchImpl: (url: string, init: RequestInit) => Promise<Response> =
     deps.fetchImpl ?? (fetch as (url: string, init: RequestInit) => Promise<Response>);
   async function fetchResource(request: ResourceRequest, signal: AbortSignal) {
+    const started = performance.now();
+    deps.diagnostics?.count("requests");
     signal.throwIfAborted();
     const parsed = checkedUrl(request.uri);
     const origin = originOfUrl(parsed.href);
@@ -176,6 +180,20 @@ export function createExtensionFetcher(deps: FetchDeps) {
         signal: controller.signal,
         headers: forwardCoreHeaders(request.headers, request.purpose ?? "metadata"),
       });
+      deps.diagnostics?.record(
+        request.purpose === "metadata" || !response.ok ? "debug" : "trace",
+        "request",
+        {
+          request: request.id,
+          purpose: request.purpose,
+          transport: "extension-origin",
+          url: request.uri,
+          final_url: response.url,
+          http: response.status,
+          content_type: response.headers.get("content-type"),
+          duration_ms: performance.now() - started,
+        },
+      );
       if (!response || typeof response.status !== "number")
         throw transportError("malformed", "malformed fetch response");
       if (response.status === 429)
@@ -226,12 +244,29 @@ export function createExtensionFetcher(deps: FetchDeps) {
         deps.maxBytes ?? MAX_BYTES_DEFAULT,
         controller.signal,
       );
+      deps.diagnostics?.count("bytes_fetched", bytes.byteLength);
+      deps.diagnostics?.record("trace", "body-read", {
+        request: request.id,
+        bytes: bytes.byteLength,
+        duration_ms: performance.now() - started,
+      });
       return {
         bytes,
         finalUri: response.url || parsed.href,
         contentType,
       };
     } catch (error) {
+      if (!signal.aborted) {
+        deps.diagnostics?.count("request_failures");
+        deps.diagnostics?.record("debug", "request-failed", {
+          request: request.id,
+          purpose: request.purpose,
+          transport: "extension-origin",
+          url: request.uri,
+          duration_ms: performance.now() - started,
+          error,
+        });
+      }
       if (error && typeof error === "object" && "category" in error) throw error;
       if (
         error &&

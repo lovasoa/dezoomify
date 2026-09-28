@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createDiagnosticRecorder } from "../../app-model/src/diagnostics.ts";
 import { createCanvasAssembly } from "../src/assembly.ts";
 
 /** Fake decoded bitmap with a 9-arg drawImage recorder. */
@@ -26,8 +27,9 @@ function fakeCtx() {
 }
 
 function harness(overrides = {}) {
-  const events = { decoded: [], created: [], encoded: [], saved: [], log: [] };
+  const events = { decoded: [], created: [], encoded: [], saved: [] };
   const ctx2d = fakeCtx();
+  const diagnostics = createDiagnosticRecorder({ id: "assembly", now: () => 0 });
   const deps = {
     decode: async (bytes) => {
       const size = new DataView(bytes.buffer ?? bytes).getUint16(0, true);
@@ -47,10 +49,10 @@ function harness(overrides = {}) {
       return overrides.saveDisposition ?? "browser-save-ready";
     },
     sourceUrl: "https://example.test/image.dzi",
-    log: (line) => events.log.push(line),
+    diagnostics,
     ...overrides,
   };
-  return { assembly: createCanvasAssembly(deps), events, ctx2d };
+  return { assembly: createCanvasAssembly(deps), events, ctx2d, diagnostics };
 }
 
 function placement(x, y, extra = {}) {
@@ -145,8 +147,8 @@ test("finalize-output rejects a second call and release is idempotent", async ()
   assert.equal(events.saved.length, 1);
 });
 
-test("a decoded padded edge tile is cropped to the planned extent and logs", async () => {
-  const { assembly, ctx2d, events } = harness();
+test("a decoded padded edge tile is cropped to the planned extent and records actual geometry", async () => {
+  const { assembly, ctx2d, diagnostics } = harness();
   await assembly.acquireTile(
     0,
     placement(2560, 2048, {
@@ -167,10 +169,10 @@ test("a decoded padded edge tile is cropped to the planned extent and logs", asy
     dw: 428,
     dh: 196,
   });
-  assert.equal(events.log.length, 1);
+  assert.equal(diagnostics.report().counters.geometry_mismatches, 1);
   assert.equal(
-    events.log[0],
-    "A tile size differed from the plan; only its planned pixel extent was drawn.",
+    diagnostics.report().records.find((r) => r.event === "tile-geometry").fields.decoded_width,
+    512,
   );
 });
 
@@ -259,6 +261,7 @@ test("partial output leaves missing regions empty without failing assembly", asy
 test("display-only output draws ordinary images and skips encoding", async () => {
   let displayOnly = 0;
   const ctx2d = fakeCtx();
+  const diagnostics = createDiagnosticRecorder({ id: "assembly", now: () => 0 });
   const encoded = [];
   const saved = [];
   const local = createCanvasAssembly({

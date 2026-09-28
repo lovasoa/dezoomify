@@ -10,6 +10,10 @@
 // type-strip it directly in tests.
 
 export const fr = {
+  "view.diagnostics.save": "Enregistrer le rapport de diagnostic",
+  "view.diagnostics.copyFailed": "Copie impossible. Sélectionnez et copiez les détails ci-dessous.",
+  "view.diagnostics.loadFailed":
+    "Le rapport complet est inaccessible. Les détails disponibles sont affichés ci-dessous.",
   "desktop.done.title": "Image enregistrée",
   "desktop.done.partial": "Image enregistrée avec des parties manquantes",
   "desktop.done.size": "{width} × {height} pixels",

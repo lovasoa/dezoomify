@@ -1,5 +1,6 @@
 {
   "commands": [
+    "get_job_diagnostics",
     "job_command",
     "open_saved_output",
     "release_job",

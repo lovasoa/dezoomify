@@ -19,23 +19,28 @@
 // carries generation plus missing tiles (partial keep/discard/retry wired
 // to job_command with generation+choice).
 import {
+  boundDiagnosticReport,
   cancelAllQueueEntries,
   cancelQueueEntry,
   clearHistory as clearHistoryStore,
   finishActiveQueueEntry,
   HISTORY_KEY_DESKTOP,
   type HistoryEntry,
-  humanQueueSummary,
   type JobObserver,
   type JobSnapshot,
   loadHistory as loadHistoryStore,
   pushHistory,
   saveHistory as saveHistoryStore,
-  suggestedNameFor,
   summarizeQueue,
   toHistoryEntry,
 } from "@dezoomify/app-model";
-import { createLogger } from "@dezoomify/browser-runtime";
+import {
+  copyDiagnosticText,
+  createAttemptDiagnostics,
+  retainDiagnosticReport,
+  retainDiagnostics,
+  saveDiagnosticReport,
+} from "@dezoomify/browser-runtime";
 import type { ViewContext } from "@dezoomify/shared-ui";
 import {
   describeFailure,
@@ -56,7 +61,6 @@ import {
   PROTOCOL_MAX,
   PROTOCOL_MIN,
 } from "./desktopIntegration.ts";
-import { buildCopyDiagnostics, handleCopyDiagnostics } from "./diagnostics.ts";
 import type { ValidatedDeepLink } from "./errorCopy.ts";
 import {
   encoderToMime,
@@ -78,12 +82,7 @@ import {
   retryDesktopEntry,
 } from "./queue.ts";
 import type { DesktopSettings } from "./settings.ts";
-import {
-  defaultOutputDirectory,
-  describeSettingsForLog,
-  loadSettings,
-  saveSettings,
-} from "./settings.ts";
+import { defaultOutputDirectory, loadSettings, saveSettings } from "./settings.ts";
 import { getEffectiveSettings, resetDesktopSettings } from "./settingsPanel.ts";
 import { DesktopSettingsView } from "./settingsView.tsx";
 
@@ -103,9 +102,6 @@ const NATIVE_TRANSPORT = "native";
 // 6 s connect; the view renders the single per-request figure).
 const REQUEST_TIMEOUT_MS = 30000;
 
-// Capped technical log (oldest dropped first), web parity.
-const MAX_LOG_LINES = 60;
-
 // The typed job service: one service, many window-owned jobs. Deep-link
 // confirmations stay in the product shell; settings ride every start_job.
 const service = createDesktopJobService({
@@ -117,6 +113,7 @@ const service = createDesktopJobService({
 
 function newAttempt() {
   return {
+    diagnostics: createAttemptDiagnostics("desktop"),
     retired: false,
     settled: false,
     activeHandle: null as DesktopJobHandle | null,
@@ -242,12 +239,8 @@ function normalizeNativeFormat(value: unknown): NativeFormat {
   return "png";
 }
 
-// Minimal settings (task 3.5): persisted locally, validated with fail-closed
-// bounds, and sent on the next start_job. Header values never enter logs;
-// use describeSettingsForLog for any diagnostics. The persisted output_format
-// (todo 5.1, first-class in settings.ts) seeds grantedFormat at boot so
-// the chosen encoder survives reloads; download settings still travel via
-// settingsToInvokeArgs only.
+// Validated settings persist locally and travel via settingsToInvokeArgs.
+// Header values stay out of diagnostics; the chosen encoder survives reloads.
 let desktopSettings: DesktopSettings = loadSettings();
 grantedFormat = normalizeNativeFormat(desktopSettings.output_format);
 
@@ -347,19 +340,6 @@ function activity(): NonNullable<ViewContext["jobActivity"]> {
   return currentAttempt.viewCtx.jobActivity as NonNullable<ViewContext["jobActivity"]>;
 }
 
-function refreshLongestPending(): void {
-  const a = currentAttempt.viewCtx.jobActivity;
-  if (!a) return;
-  const now = Date.now();
-  a.now = now;
-  if ((a.pendingRequests ?? 0) > 0) {
-    const base = a.lastProgressAt ?? a.startedAt ?? now;
-    a.longestPendingMs = Math.max(0, now - base);
-  } else {
-    a.longestPendingMs = 0;
-  }
-}
-
 function startHeartbeat(): void {
   stopHeartbeat();
   const attempt = currentAttempt;
@@ -371,7 +351,7 @@ function startHeartbeat(): void {
         return;
       }
       if (!currentAttempt.viewCtx.jobActivity) return;
-      refreshLongestPending();
+      activity().now = Date.now();
       update();
     }, 500);
     const t = currentAttempt.heartbeatTimer as unknown as { unref?: () => void };
@@ -404,13 +384,8 @@ function resetActivity(url: string): void {
     url,
     startedAt: now,
     now,
-    pendingRequests: 0,
-    completedRequests: 0,
-    failedRequests: 0,
-    longestPendingMs: 0,
     timeoutMs: REQUEST_TIMEOUT_MS,
     lastProgressAt: now,
-    log: [],
   };
   startHeartbeat();
 }
@@ -420,41 +395,6 @@ function touchProgress(): void {
   const now = Date.now();
   a.now = now;
   a.lastProgressAt = now;
-}
-
-function pushLog(line: string): void {
-  appLog.info(undefined, line);
-}
-
-/** Append an accepted log line to the job view's technical-details buffer. */
-function appendActivityLog(line: string): void {
-  const a = activity();
-  if (!a.log) a.log = [];
-  const elapsed = a.startedAt ? Math.round((Date.now() - a.startedAt) / 1000) : 0;
-  a.log.push(`${elapsed}s: ${line}`);
-  if (a.log.length > MAX_LOG_LINES) a.log.splice(0, a.log.length - MAX_LOG_LINES);
-  a.now = Date.now();
-}
-
-// The shared logger owns formatting and level gating; the desktop sink feeds
-// the job view's log, so failed jobs show the same trace in technical details.
-const appLog = createLogger("app", {
-  defaultContext: "app",
-  sink: (entry) => appendActivityLog(entry.line),
-});
-
-function noteProgress(current: number, total: number): void {
-  const a = activity();
-  const now = Date.now();
-  a.now = now;
-  a.lastProgressAt = now;
-  a.completedRequests = current;
-  a.pendingRequests = total > current ? total - current : 0;
-  if (typeof a.failedRequests !== "number") a.failedRequests = 0;
-  refreshLongestPending();
-  // Keep lastProgressAt as the freshness anchor: longestPendingMs derives
-  // from it on the heartbeat, so the pending box shows live waiting time.
-  a.now = Date.now();
 }
 
 // Host-local failure presentation: the same layered presenter the other
@@ -487,7 +427,7 @@ function failLocally(
       `Origin: ${redactedOriginOnly(sourceUrl) === "" ? "n/a" : redactedOriginOnly(sourceUrl)}`,
     ],
   });
-  pushLog(`Failed (${code}): ${trimTechnical(message, 160)}`);
+  currentAttempt.diagnostics.finish("failed", { code, message, ...opts });
   stopHeartbeat();
   if (opts?.settle !== false) settleActiveQueue("failed", { errorCode: code });
   update();
@@ -509,7 +449,6 @@ function invokeErrorMessage(error: unknown, fallback: string): string {
 function runPersistSettingsFromPanel(): void {
   const errors = saveSettings(desktopSettings);
   settingsError = errors.length ? errors.join("; ") : null;
-  if (!settingsError) pushLog(`Settings saved: ${describeSettingsForLog(desktopSettings)}`);
   update();
 }
 
@@ -517,7 +456,6 @@ function runResetDesktopSettings(): void {
   desktopSettings = resetDesktopSettings();
   grantedFormat = normalizeNativeFormat(desktopSettings.output_format);
   settingsError = null;
-  pushLog("Settings reset to defaults");
   update();
   void applyPlatformOutputDefault();
 }
@@ -532,29 +470,6 @@ async function applyPlatformOutputDefault(): Promise<void> {
   desktopSettings = { ...desktopSettings, output_dir };
   saveSettings(desktopSettings);
   update();
-}
-
-function diagnosticsSnapshot() {
-  const presentation = currentPresentation();
-  return {
-    status: presentation.stateLabel ?? presentation.phase,
-    transport: presentation.transport,
-    jobId: currentAttempt.activeHandle?.id ?? null,
-    attempt: undefined,
-    sessionId: NATIVE_TRANSPORT,
-    nativeTransport: NATIVE_TRANSPORT,
-    progress:
-      currentAttempt.currentSnapshot &&
-      (currentAttempt.currentSnapshot.progress.total !== undefined ||
-        currentAttempt.currentSnapshot.progress.completed > 0)
-        ? {
-            current: currentAttempt.currentSnapshot.progress.completed,
-            total: currentAttempt.currentSnapshot.progress.total ?? 0,
-          }
-        : undefined,
-    origin: redactedOriginOnly(currentAttempt.lastInputUrl),
-    outputActionError: currentAttempt.outputActionError,
-  };
 }
 
 // --- Presentation (single source: latest snapshot or host-local failure) ---
@@ -619,8 +534,6 @@ function handleSubmitUrl(url: string): void {
       return;
     }
     if (res.entry.status === "queued") {
-      const position = desktopQueue.entries.filter((e) => e.status === "queued").length;
-      pushLog(`Queued ${res.entry.origin || "the server"} (position ${position} in queue)`);
       update();
       return;
     }
@@ -639,21 +552,36 @@ function handleSubmitUrl(url: string): void {
 
 /** Stop following the current job; its late events can never move the view. */
 function retireActiveJob(): void {
+  const diagnostics = currentAttempt.diagnostics;
+  diagnostics.finish("retired", { reason: "replaced-or-reset" });
+  retainDiagnostics(diagnostics);
   currentAttempt.retired = true;
   const handle = currentAttempt.activeHandle;
   currentAttempt.activeHandle = null;
   currentAttempt.currentSnapshot = null;
   currentAttempt.localFailure = null;
   clearJobViewState();
-  if (handle) void handle.dispose().catch(() => undefined);
+  if (handle)
+    void service
+      .diagnostics(handle.id)
+      .then(retainDiagnosticReport, () => {})
+      .finally(() => handle.dispose())
+      .catch(() => undefined);
   currentAttempt = newAttempt();
 }
 
 function launchNativeJob(trimmed: string): void {
   const attempt = currentAttempt;
   attempt.lastInputUrl = trimmed;
+  attempt.diagnostics.context({
+    input: trimmed,
+    submitted: {
+      ...desktopSettings,
+      headers: undefined,
+      header_names: Object.keys(desktopSettings.headers),
+    },
+  });
   resetActivity(trimmed);
-  pushLog(`Starting job for ${redactedOriginOnly(trimmed) || "the server"}`);
   // Minimal settings are validated fail-closed here: invalid settings fail
   // the submit before any start_job effect. The redacted summary never
   // includes header values.
@@ -661,13 +589,11 @@ function launchNativeJob(trimmed: string): void {
   if (!effective.ok || !effective.settings) {
     const detail = effective.errors.join("; ") || "Invalid settings.";
     settingsError = detail;
-    pushLog("Settings invalid; job not started");
     failLocally("INVALID_SETTINGS", t("desktop.settings.invalidSubmit"), { detail });
     return;
   }
   settingsError = null;
   desktopSettings = effective.settings;
-  pushLog(`Settings: ${describeSettingsForLog(desktopSettings)}`);
   update();
   const request = {
     inputUrl: trimmed,
@@ -681,10 +607,12 @@ function launchNativeJob(trimmed: string): void {
         return;
       }
       attempt.activeHandle = handle;
+      attempt.diagnostics.context({ host_job: handle.id });
       update();
     },
     (error: unknown) => {
       if (!owns(attempt)) return;
+      attempt.diagnostics.finish("runtime-failed", error);
       failLocally("START_FAILED", invokeErrorMessage(error, t("desktop.invoke.startFallback")));
     },
   );
@@ -700,12 +628,14 @@ function observerFor(attempt: DesktopAttempt): JobObserver {
       if (!owns(attempt) || attempt.settled) return;
       attempt.settled = snapshot.terminal != null;
       attempt.currentSnapshot = snapshot;
+      attempt.diagnostics.observe(snapshot);
       onSnapshotSideEffects(snapshot);
       if (owns(attempt)) update();
     },
     failure(error): void {
       if (!owns(attempt) || attempt.settled) return;
       attempt.settled = true;
+      attempt.diagnostics.finish("runtime-failed", error);
       failLocally(error.code, error.message);
     },
   };
@@ -717,7 +647,6 @@ function onSnapshotSideEffects(snapshot: JobSnapshot): void {
     const terminal = snapshot.terminal;
     if (terminal.type === "completed" || terminal.type === "partial-completed") {
       const output = snapshot.output;
-      pushLog(terminal.type === "partial-completed" ? "Partial output ready" : "Output ready");
       if (output?.format) {
         grantedFormat = normalizeNativeFormat(output.format);
       }
@@ -732,10 +661,8 @@ function onSnapshotSideEffects(snapshot: JobSnapshot): void {
       settleActiveQueue("done");
     } else if (terminal.type === "failed") {
       const code = terminal.error.code;
-      pushLog(`Failed (${code})`);
       settleActiveQueue("failed", { errorCode: code });
     } else {
-      pushLog("Cancelled; unfinished file removed");
       settleActiveQueue("cancelled");
     }
     return;
@@ -743,7 +670,6 @@ function onSnapshotSideEffects(snapshot: JobSnapshot): void {
   touchProgress();
   const total = snapshot.progress.total;
   if (typeof total === "number" && total > 0) {
-    noteProgress(snapshot.progress.completed, total);
     if (currentAttempt.activeQueueId) {
       const res = recordDesktopProgress(
         desktopQueue,
@@ -753,14 +679,6 @@ function onSnapshotSideEffects(snapshot: JobSnapshot): void {
       );
       desktopQueue = res.queue;
     }
-  }
-  if (snapshot.lifecycle === "AwaitingPartialDecision" && snapshot.decision) {
-    const missing = snapshot.decision.missing.map((entry) => entry.tile);
-    const summary = formatMissingSummary(missing.map(String), missing.length);
-    pushLog(`Recovery requested: partial (${summary} keep-partial / discard-partial / retry)`);
-    const a = activity();
-    a.failedRequests = missing.length;
-    a.now = Date.now();
   }
 }
 
@@ -776,8 +694,6 @@ function settleActiveQueue(
   const finished = finishActiveQueueEntry(desktopQueue, outcome, detail?.errorCode);
   desktopQueue = finished.queue;
   trimDesktopQueue();
-  const summary = summarizeQueue(desktopQueue);
-  pushLog(`Queue: ${humanQueueSummary(summary)}`);
   currentAttempt.activeQueueId = null;
   const next = finished.next;
   if (!next) {
@@ -787,7 +703,6 @@ function settleActiveQueue(
   // Fresh view for the next queued job.
   retireActiveJob();
   currentAttempt.activeQueueId = next.id;
-  pushLog(`Queue: starting next job for ${next.origin || "the server"}`);
   launchNativeJob(next.inputUrl);
 }
 
@@ -816,7 +731,6 @@ function handleQueueCancelOne(id: string): void {
   const res = cancelQueueEntry(desktopQueue, id);
   if (res.code !== "ok") return;
   desktopQueue = res.queue;
-  pushLog("Queue: entry cancelled");
   update();
 }
 
@@ -830,7 +744,6 @@ function handleQueueCancelAll(): void {
     handleCancel();
     return;
   }
-  pushLog("Queue: all entries cancelled");
   update();
 }
 
@@ -841,11 +754,9 @@ function handleQueueRetry(id: string): void {
   if (res.entry.status === "active") {
     retireActiveJob();
     currentAttempt.activeQueueId = res.entry.id;
-    pushLog(`Queue: retrying ${res.entry.origin || "the server"}`);
     launchNativeJob(res.entry.inputUrl);
     return;
   }
-  pushLog(`Queue: retry queued for ${res.entry.origin || "the server"}`);
   update();
 }
 
@@ -954,7 +865,6 @@ function handlePause(): void {
   if (isTerminalNow()) return;
   const handle = currentAttempt.activeHandle;
   if (!handle) return;
-  pushLog("Pause requested");
   void handle.command({ type: "pause" }).then(
     () => {
       if (owns(attempt)) update();
@@ -971,7 +881,6 @@ function handleResume(): void {
   if (isTerminalNow()) return;
   const handle = currentAttempt.activeHandle;
   if (!handle) return;
-  pushLog("Resume requested");
   void handle.command({ type: "resume" }).then(
     () => {
       if (!owns(attempt)) return;
@@ -1000,7 +909,8 @@ async function handleOpenOutput(attempt: DesktopAttempt, reveal: boolean): Promi
         ? rawCode
         : "output.invoke-failed";
     attempt.outputActionError = { action: reveal ? "folder" : "open", code };
-    pushLog(`File action ${attempt.outputActionError.action} failed (${code})`);
+    attempt.diagnostics.context({ output_action_error: attempt.outputActionError });
+    attempt.diagnostics.record("error", "output-action-failed", attempt.outputActionError);
     throw error;
   }
 }
@@ -1013,7 +923,6 @@ function handleRecoveryRetry(): void {
   const decision = pendingDecisionOf();
   const handle = currentAttempt.activeHandle;
   if (!decision || !handle || isTerminalNow()) return;
-  pushLog("Retry requested (partial)");
   void handle
     .command({ type: "answer-partial", generation: decision.generation, decision: "retry" })
     .then(
@@ -1039,7 +948,6 @@ function handlePartialChoice(keep: boolean): void {
   const handle = currentAttempt.activeHandle;
   if (!decision || !handle) return;
   if (isTerminalNow()) return;
-  pushLog(keep ? "Keeping partial image…" : "Discarding partial image…");
   void handle
     .command({
       type: "answer-partial",
@@ -1134,6 +1042,7 @@ function queryCapabilitiesAtBoot(): void {
     (caps) => {
       const commands = [...caps.commands].sort();
       const expected = [
+        "get_job_diagnostics",
         "job_command",
         "open_saved_output",
         "query_capabilities",
@@ -1147,12 +1056,11 @@ function queryCapabilitiesAtBoot(): void {
         commands.length !== expected.length ||
         commands.some((name, index) => name !== expected[index]);
       if (mismatch) {
-        pushLog("Capability handshake mismatch (capability.mismatch)");
+        currentAttempt.diagnostics.record("error", "capability.mismatch", caps);
       }
     },
     (error: unknown) => {
-      const detail = invokeErrorMessage(error, "query_capabilities denied");
-      pushLog(`Capability handshake failed: ${detail} (capability.unavailable)`);
+      currentAttempt.diagnostics.record("error", "capability.unavailable", error);
     },
   );
 }
@@ -1503,7 +1411,7 @@ function update() {
   const presentation = currentPresentation();
   const caps = integration.getCapabilities();
   if (currentAttempt.viewCtx.jobActivity && presentation.phase === "job") {
-    refreshLongestPending();
+    activity().now = Date.now();
   }
   // Completion geometry rides the snapshot output canvas; the view context
   // only carries what the shared view renders.
@@ -1537,8 +1445,17 @@ function update() {
         if (!owns(attempt)) return;
         handleResume();
       },
-      onCopyDiagnostics(text: string) {
-        handleCopyDiagnostics(() => `${text}\n\n${buildCopyDiagnostics(diagnosticsSnapshot())}`);
+      onCopyDiagnostics: copyDiagnosticText,
+      onSaveDiagnostics: saveDiagnosticReport,
+      async onLoadDiagnostics() {
+        const local = attempt.diagnostics.report();
+        const handle = attempt.activeHandle;
+        if (!handle) return local;
+        const native = await service.diagnostics(handle.id);
+        return boundDiagnosticReport({
+          ...native,
+          context: { ...local.context, ...native.context, frontend_report: local.id },
+        });
       },
       onRetrySameUrl() {
         if (!owns(attempt)) return;
@@ -1580,6 +1497,7 @@ function update() {
         browserCanSave: caps.browserCanSave,
         proxyAllowed: caps.proxyAllowed,
       },
+      diagnosticReport: attempt.diagnostics.report(),
       ...(presentation.phase === "completed"
         ? { nativeSaved: { partial: presentation.partial }, outputKey: attempt.activeHandle?.id }
         : {}),
@@ -1631,11 +1549,9 @@ function getCurrentJobId(): string | null {
 }
 
 export {
-  buildCopyDiagnostics,
   dismissDeepLinkConfirm,
   getCurrentJobId,
   getEffectiveSettings,
-  handleCopyDiagnostics,
   integration,
   service,
   showDeepLinkConfirm,

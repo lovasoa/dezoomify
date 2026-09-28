@@ -116,6 +116,10 @@ function parseAcceptLanguage(header: string): Array<string> {
 export type I18nVars = Record<string, string | number>;
 
 const en = {
+  "view.diagnostics.save": "Save diagnostic report",
+  "view.diagnostics.copyFailed": "Could not copy. Select and copy the details below.",
+  "view.diagnostics.loadFailed":
+    "Could not read the full report. The available details are shown below.",
   "desktop.done.title": "Image saved",
   "desktop.done.partial": "Image saved with gaps",
   "desktop.done.size": "{width} × {height} pixels",

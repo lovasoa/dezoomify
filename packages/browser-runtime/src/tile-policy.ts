@@ -267,16 +267,6 @@ export function combineTimeout(
   return { signal: ctrl.signal, cleanup, timedOut: () => timedOut };
 }
 
-export function shortUrl(url: string): string {
-  try {
-    const u = new URL(url);
-    const path = u.pathname.length > 40 ? `…${u.pathname.slice(-39)}` : u.pathname;
-    return `${u.host}${path}`;
-  } catch {
-    return String(url).slice(0, 60);
-  }
-}
-
 /** Hostname of a job's website, for plain-language progress messages. */
 export function hostOf(url: string): string {
   try {

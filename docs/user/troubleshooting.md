@@ -119,10 +119,10 @@ and the [desktop app](./desktop-app.md).
 
 - Disable other browser extensions and try once more; some of them
   interfere with Dezoomify.
-- If you believe Dezoomify should support this site, use the report link on
-  the error screen. It opens GitHub with the page address and technical
-  details already filled in; review the draft, then add your browser's name
-  and version and a screenshot. Leave out anything private: no passwords, no
+- Open **Technical details & logs** to copy or save the diagnostic report,
+  even if the image completed but looks wrong. The report link opens GitHub
+  with the address and failure details filled in. Review the draft and add
+  a screenshot. Leave out anything private: no passwords, no
   cookies, no signed-in addresses with tokens in them. You can also
   [open an issue](https://github.com/lovasoa/dezoomify/issues) yourself with
   the same details.

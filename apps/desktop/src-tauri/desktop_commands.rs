@@ -11,6 +11,7 @@ macro_rules! desktop_commands {
             open_saved_output,
             job_command,
             release_job,
+            get_job_diagnostics,
             query_capabilities
         )
     };

@@ -837,3 +837,69 @@ pub struct Snapshot {
     pub terminal: Option<Terminal>,
     pub output: Option<OutputSummary>,
 }
+
+// Diagnostics are observations, never commands or authoritative job state.
+// Hosts supply clocks and identity. Fields are bounded scalar facts: bodies,
+// buffers, credentials, and arbitrary object graphs cannot enter a report.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum DiagnosticValue {
+    Text(String),
+    Number(f64),
+    Bool(bool),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum DiagnosticLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct DiagnosticRecord {
+    pub sequence: u32,
+    pub elapsed_ms: f64,
+    pub level: DiagnosticLevel,
+    pub event: String,
+    #[cfg_attr(
+        feature = "typescript",
+        tsify(type = "Record<string, DiagnosticValue>")
+    )]
+    pub fields: std::collections::BTreeMap<String, DiagnosticValue>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct DiagnosticFailureGroup {
+    pub key: String,
+    pub count: u32,
+    pub first: DiagnosticRecord,
+    pub last: DiagnosticRecord,
+}
+
+/// Versioned, local-only support report. Limits include protected evidence.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct DiagnosticReport {
+    pub schema_version: u32,
+    pub id: String,
+    #[cfg_attr(
+        feature = "typescript",
+        tsify(type = "Record<string, DiagnosticValue>")
+    )]
+    pub context: std::collections::BTreeMap<String, DiagnosticValue>,
+    #[cfg_attr(feature = "typescript", tsify(type = "Record<string, number>"))]
+    pub counters: std::collections::BTreeMap<String, f64>,
+    pub failures: Vec<DiagnosticFailureGroup>,
+    pub records: Vec<DiagnosticRecord>,
+    pub outcome: Option<DiagnosticRecord>,
+    pub omitted_records: u32,
+    pub truncated_fields: u32,
+}

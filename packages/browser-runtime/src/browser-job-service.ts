@@ -16,6 +16,7 @@
 // cross-worker processing ledger plus the worker and assembly handles are
 // the only per-attempt state kept.
 import type {
+  DiagnosticRecorder,
   EngineStartRequest,
   JobHandle,
   JobObserver,
@@ -50,6 +51,7 @@ export interface BrowserWorker {
 }
 
 export interface BrowserAssemblyArgs {
+  diagnostics?: DiagnosticRecorder;
   signal: AbortSignal;
   decoder: TileDecoder;
   /** First input URL: save naming, history, and desktop handoff stay product-side. */
@@ -64,6 +66,7 @@ export interface BrowserAssemblyArgs {
 
 /** Product-injected effects and surfaces behind one browser attempt. */
 export interface BrowserProduct {
+  diagnostics?: DiagnosticRecorder;
   createWorker(): BrowserWorker;
   /** One-attempt resource fetch feeding the engine retry budget. */
   fetchResource(
@@ -78,7 +81,6 @@ export interface BrowserProduct {
   quotas?: SessionConfig;
   /** Recovery decision needed (product renders keep/discard). */
   onRecoveryRequested?(generation: number): void;
-  log?(level: "debug" | "info" | "warn" | "error", code: string, detail?: unknown): void;
 }
 
 function serviceError(code: string, message: string): EngineError {
@@ -96,20 +98,33 @@ export interface BrowserJobService extends JobService<EngineStartRequest, JobHan
 }
 
 export function createBrowserJobService(product: BrowserProduct): BrowserJobService {
-  const log = product.log ?? (() => {});
   let jobSequence = 0;
 
   async function start(request: EngineStartRequest, observer: JobObserver): Promise<JobHandle> {
+    const diagnostics = product.diagnostics;
     const problem = validateEngineStartRequest(request);
     if (problem) {
-      throw serviceError(problem, "The job request is not valid.");
+      const error = serviceError(problem, "The job request is not valid.");
+      diagnostics?.finish("validation-failed", error);
+      throw error;
     }
+    diagnostics?.context({
+      effective_input: request.inputs[0]?.url,
+      settings: { ...product.quotas, ...request.engine },
+    });
+    diagnostics?.record("info", "start", {
+      inputs: request.inputs.map(({ url, contents }) => ({
+        url,
+        supplied_bytes: contents?.length ?? 0,
+      })),
+    });
     const sourceUrl = firstSourceUrl(request.inputs);
     if (sourceUrl === null) {
       throw serviceError("browser.invalid-source", "The browser job has no usable input URL.");
     }
     jobSequence += 1;
     const id = `job:${jobSequence}`;
+    diagnostics?.context({ engine_job: id });
     const worker = product.createWorker();
     const attemptSignal = new AbortController();
     let disposed = false;
@@ -126,7 +141,7 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
       { resolve: (bytes: ArrayBuffer) => void; reject: (error: unknown) => void }
     >();
     let processSeq = 0;
-    const decoder = createTileDecoder();
+    const decoder = createTileDecoder(undefined, diagnostics);
     const probeSize = createProbeSize({
       fetchResource: product.fetchResource,
       classifyFailure: product.classifyFailure,
@@ -163,6 +178,7 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
 
     function forwardSnapshot(snapshot: Snapshot): void {
       lastSnapshotRevision = snapshot.revision;
+      diagnostics?.observe(snapshot);
       observer.snapshot(snapshot);
     }
 
@@ -178,6 +194,7 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
     function forwardRuntimeError(error: EngineError): void {
       if (disposed || failed || terminal) return;
       failed = true;
+      diagnostics?.finish("runtime-failed", error);
       observer.failure(error);
       void dispose();
     }
@@ -212,6 +229,7 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
     }
 
     assembly = product.createAssembly({
+      diagnostics,
       sourceUrl,
       processTile,
       signal: attemptSignal.signal,
@@ -241,7 +259,7 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
         abortAttempt();
         forwardRuntimeError(projectFailure(error));
       },
-      log,
+      diagnostics,
     });
     const activeHost = host;
 
@@ -264,10 +282,6 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
           );
         return;
       }
-      if (data.type === "engine.log" && typeof data.line === "string") {
-        log("info", "worker", data.line);
-        return;
-      }
       if (data.type === "engine.error") {
         if (disposed) return;
         abortAttempt();
@@ -278,6 +292,7 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
     activeHost.start(request.inputs);
 
     async function command(command: UserCommand): Promise<void> {
+      diagnostics?.record("info", "command", command);
       // Every command forwards to the engine, including after its terminal:
       // the engine owns post-terminal semantics. Only a disposed attempt
       // rejects, since its worker and assembly are gone.

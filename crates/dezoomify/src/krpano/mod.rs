@@ -11,11 +11,9 @@ use url::Url;
 
 use krpano_decrypt::{decrypt_xml, is_encrypted_xml};
 use krpano_metadata::{KrpanoMetadata, XY, all_sides};
-use log::{debug, info, warn};
 
 use crate::Vec2d;
 use crate::core::discovery::ResourceFailure;
-use crate::core::redact_uri;
 use crate::core::resolve_relative;
 use crate::core::{
     CatalogPlan, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch,
@@ -53,7 +51,6 @@ fn handle_html(
         || sibling_uri(resource.final_uri(), "tour.xml"),
         |reference| resolve_relative(resource.final_uri(), &reference),
     );
-    debug!("krpano: resolved XML URI {}", redact_uri(&xml_uri));
     Ok(DiscoveryStep::Follow(Request::new(xml_uri)))
 }
 
@@ -103,10 +100,7 @@ fn handle_viewer_js(
     let viewer_js =
         extract_viewer_js(resource.bytes()).unwrap_or_else(|| resource.bytes().to_vec());
     match decrypt_xml(xml.bytes(), Some(&viewer_js)) {
-        Ok(decrypted) => {
-            info!("krpano: successfully decrypted XML using viewer JS");
-            complete(xml.final_uri(), &decrypted)
-        }
+        Ok(decrypted) => complete(xml.final_uri(), &decrypted),
         Err(error) => next_viewer(context, resource, xml.final_uri()).map_or_else(
             || {
                 Err(DiscoveryError::Session(format!(
@@ -123,20 +117,13 @@ fn handle_failure(
     request: &Request,
     failure: &ResourceFailure,
 ) -> Result<DiscoveryStep, DiscoveryError> {
-    debug!("krpano: fetch failed: {}", failure.cause.describe());
-    if let Some(xml) = find_xml(context) {
-        warn!(
-            "krpano: viewer JS fetch failed for {}: {}",
-            redact_uri(xml.final_uri()),
-            failure.cause.describe()
-        );
-        if let Some(uri) = next_viewer_after_failure(context, request.uri.as_str(), xml.final_uri())
-        {
-            return Ok(DiscoveryStep::Follow(Request::new(uri)));
-        }
+    if let Some(xml) = find_xml(context)
+        && let Some(uri) = next_viewer_after_failure(context, request.uri.as_str(), xml.final_uri())
+    {
+        return Ok(DiscoveryStep::Follow(Request::new(uri)));
     }
-    // No recovery left: report the fetch failure with its typed cause
-    // (stage detail lives in the debug log above, never in the error).
+    // No recovery left: retain the typed cause. Hosts record requests and
+    // outcomes; the pure format performs no ambient logging.
     Err(DiscoveryError::fetch_failed(failure.cause.clone()))
 }
 

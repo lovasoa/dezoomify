@@ -8,7 +8,6 @@ import {
   pickTileConcurrency,
   proxyRateLimitDelayMs,
   REQUEST_TIMEOUT_MS,
-  shortUrl,
   TILE_CONCURRENCY_CAP,
   TILE_CONCURRENCY_FLOOR,
   TILE_CONCURRENCY_MAX,
@@ -82,15 +81,9 @@ test("createTileThrottle staggers starts per host", async () => {
   assert.equal(slept.length, 1);
 });
 
-test("shortUrl and hostOf stay readable", () => {
+test("hostOf stays readable", () => {
   assert.equal(hostOf("https://example.test/x"), "example.test");
   assert.equal(hostOf("bogus"), "the server");
-  assert.ok(
-    shortUrl(
-      "https://example.test/a-very-long-path-name-that-keeps-going-forever-and-ever/x.png",
-    ).startsWith("example.test"),
-  );
-  assert.equal(shortUrl("bogus"), "bogus");
 });
 
 test("tileFailedError carries typed one-attempt facts for the engine", () => {

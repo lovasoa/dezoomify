@@ -47,6 +47,7 @@ export interface AssemblyCanvas {
 }
 
 export interface CanvasAssemblyDeps<C extends AssemblyCanvas = AssemblyCanvas> {
+  diagnostics?: import("@dezoomify/app-model").DiagnosticRecorder;
   signal?: AbortSignal;
   disposeDecoder?(): void;
   /** Decode acquired tile bytes into a bitmap (tile-decode's decoder). */
@@ -72,8 +73,6 @@ export interface CanvasAssemblyDeps<C extends AssemblyCanvas = AssemblyCanvas> {
   sourceUrl?: string;
   /** Limits override for tests; defaults to the browser canvas limits. */
   limits?: BrowserLimits;
-  /** Diagnostics sink for placement/decode size mismatches. */
-  log?(line: string): void;
   /**
    * Called once when the output becomes display-only (an ordinary image was
    * drawn, or encoding failed because the canvas tainted). Hosts switch the
@@ -135,8 +134,14 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
   let canvasSize: { width: number; height: number } | null = null;
   let tainted = false;
   let finalized = false;
+  let mismatchSamples = 0;
 
   function allocate(size: { width: number; height: number }): C {
+    deps.diagnostics?.context({
+      canvas: size,
+      canvas_bytes: size.width * size.height * 4,
+      canvas_limits: deps.limits ?? BROWSER_LIMITS,
+    });
     const verdict = probeLimits(size, deps.limits ?? BROWSER_LIMITS);
     if (verdict.verdict !== "ok") {
       throw canvasTooLargeFailure(size.width, size.height, deps.sourceUrl ?? "", verdict.reason);
@@ -191,6 +196,18 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
     }
     signal.throwIfAborted();
     const bitmap = await deps.decode(input);
+    const mismatch =
+      placement.expected_size &&
+      (placement.expected_size.width !== bitmap.width ||
+        placement.expected_size.height !== bitmap.height);
+    if ((mismatch && mismatchSamples++ < 3) || tile < 3)
+      deps.diagnostics?.record("debug", "tile-geometry", {
+        tile,
+        decoded_width: bitmap.width,
+        decoded_height: bitmap.height,
+        ...placement,
+      });
+    if (mismatch) deps.diagnostics?.count("geometry_mismatches");
     if (signal.aborted) {
       bitmap.close();
       signal.throwIfAborted();
@@ -200,9 +217,7 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
       return;
     }
     try {
-      drawPlacedTile(canvas.ctx2d, bitmap, placementGeometry(placement, bitmap), (line) =>
-        deps.log?.(line),
-      );
+      drawPlacedTile(canvas.ctx2d, bitmap, placementGeometry(placement, bitmap));
     } finally {
       try {
         bitmap.close();
@@ -225,9 +240,7 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
       const placement = placements.get(tile);
       if (!placement) continue;
       try {
-        drawPlacedTile(canvas.ctx2d, bitmap, placementGeometry(placement, bitmap), (line) =>
-          deps.log?.(line),
-        );
+        drawPlacedTile(canvas.ctx2d, bitmap, placementGeometry(placement, bitmap));
       } finally {
         bitmaps.delete(tile);
         try {
@@ -240,9 +253,7 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
     for (const [tile, image] of displayImages) {
       const placement = placements.get(tile);
       if (!placement) continue;
-      drawPlacedTile(canvas.ctx2d, image, placementGeometry(placement, undefined), (line) =>
-        deps.log?.(line),
-      );
+      drawPlacedTile(canvas.ctx2d, image, placementGeometry(placement, undefined));
       displayImages.delete(tile);
     }
   }
@@ -255,9 +266,7 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
     signal.throwIfAborted();
     recordPlacement(tile, placement);
     if (canvas) {
-      drawPlacedTile(canvas.ctx2d, image, placementGeometry(placement, undefined), (line) =>
-        deps.log?.(line),
-      );
+      drawPlacedTile(canvas.ctx2d, image, placementGeometry(placement, undefined));
     } else {
       displayImages.set(tile, image);
     }
@@ -340,6 +349,7 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
       return "display-only";
     }
     let encoded: Blob;
+    const started = performance.now();
     try {
       encoded = await deps.encode(surface, signal);
     } catch (error) {
@@ -353,6 +363,13 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
       throw error;
     }
     signal.throwIfAborted();
+    deps.diagnostics?.record("info", "encoded", {
+      width: surface.width,
+      height: surface.height,
+      bytes: encoded.size,
+      format: encoded.type,
+      duration_ms: performance.now() - started,
+    });
     const disposition = await deps.save(encoded, surface.width, surface.height, signal);
     signal.throwIfAborted();
     return disposition;

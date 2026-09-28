@@ -6,7 +6,7 @@ import { canvasAllocationFailure, canvasSurfaceFailure } from "./plan-gates.ts";
 /** Products place the canvas and save the Blob; the runtime owns its execution. */
 export function createBrowserAssembly(
   deps: BrowserAssemblyArgs &
-    Pick<CanvasAssemblyDeps, "limits" | "save" | "log" | "onDisplayOnly"> & {
+    Pick<CanvasAssemblyDeps, "limits" | "save" | "onDisplayOnly"> & {
       canvas(): HTMLCanvasElement;
       showCanvas?(canvas: HTMLCanvasElement): void;
     },
