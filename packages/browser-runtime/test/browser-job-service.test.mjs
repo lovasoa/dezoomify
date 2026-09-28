@@ -145,7 +145,7 @@ test("service sends one-attempt structured tile failures to the engine", async (
       status: 403,
       expectedCode: "TRANSPORT_HTTP_ERROR",
       retryable: false,
-      fetchImpl: async () => new Response(null, { status: 403 }),
+      fetchImpl: async () => new Response("<p>Cloudflare challenge</p>", { status: 403 }),
     },
     {
       name: "transient network error",
@@ -165,14 +165,16 @@ test("service sends one-attempt structured tile failures to the engine", async (
     },
   ]) {
     await t.test(fixture.name, async () => {
+      const diagnostics = createDiagnosticRecorder({ id: "issue-1098", now: () => 0 });
       let calls = 0;
       const fetcher = createWebFetcher({
+        diagnostics,
         fetchImpl: async (...args) => {
           calls += 1;
           return fixture.fetchImpl(...args);
         },
         isProxyEligible: () => ({ eligible: false, reason: "tile" }),
-        hooks: { onRequestStart: () => 1, onRequestEnd() {}, onLog() {}, onUpdate() {} },
+        hooks: { onRequestStart: () => 1, onRequestEnd() {}, onUpdate() {} },
         messages: {
           rateLimitedBySite: "limited",
           siteBusy: "busy",
@@ -181,11 +183,13 @@ test("service sends one-attempt structured tile failures to the engine", async (
         throttle: async () => {},
       });
       const p = product({
+        diagnostics,
         fetchResource: (request, signal) => fetcher.fetchResource(request, signal),
         classifyFailure: (error) => ({
           code: error.cause?.code ?? error.code,
           retryable: error.retryable,
           message: error.message,
+          preview: error.preview,
           transport: error.cause?.transport ?? "direct",
           ...(typeof error.http === "number" ? { http: error.http } : {}),
           ...(typeof error.retry_after_ms === "number"
@@ -194,12 +198,7 @@ test("service sends one-attempt structured tile failures to the engine", async (
         }),
       });
       const service = createBrowserJobService(p.deps);
-      const handle = await service.start(startRequest(), {
-        snapshot: () => {},
-        failure: (error) => {
-          throw error;
-        },
-      });
+      const handle = await service.start(startRequest(), sink([]));
       p.worker.receive(received(snap(1), [TILE]));
       await new Promise((resolve) => setImmediate(resolve));
       assert.equal(calls, 1);
@@ -213,6 +212,17 @@ test("service sends one-attempt structured tile failures to the engine", async (
       if (fixture.status) assert.equal(failureMessage.error.http, fixture.status);
       if (fixture.retryAfterMs)
         assert.equal(failureMessage.error.retry_after_ms, fixture.retryAfterMs);
+      for (let i = 0; i < 1000; i++)
+        diagnostics.record("debug", "later", { text: "x".repeat(300) });
+      diagnostics.finish("failed", { code: "job.partial-discarded", initiator: "policy" });
+      const report = diagnostics.report();
+      const cause = report.failures.find((group) => group.first.event === "acquisition-failed")
+        .first.fields;
+      assert.equal(cause.code, fixture.expectedCode);
+      assert.equal(cause.url, TILE.request.uri);
+      if (fixture.status === 403) assert.equal(cause.preview, "Cloudflare challenge");
+      assert.equal(report.context["first_tile.url"], TILE.request.uri);
+      assert.equal(report.outcome.fields.initiator, "policy");
       await handle.dispose();
     });
   }
@@ -230,12 +240,7 @@ test("start roots the session at the first input and preserves selection policy"
         browser_selection: browserSelection,
       },
     }),
-    {
-      snapshot: () => {},
-      failure: (error) => {
-        throw error;
-      },
-    },
+    sink([]),
   );
   const start = p.worker.posted.find((message) => message.type === "engine.start");
   assert.ok(start, "expected engine.start on the worker");
@@ -246,12 +251,7 @@ test("start roots the session at the first input and preserves selection policy"
   assert.equal(p.seen.assemblies, 1);
 
   const manual = product();
-  await createBrowserJobService(manual.deps).start(startRequest(), {
-    snapshot: () => {},
-    failure: (error) => {
-      throw error;
-    },
-  });
+  await createBrowserJobService(manual.deps).start(startRequest(), sink([]));
   const manualStart = manual.worker.posted.find((message) => message.type === "engine.start");
   assert.equal(
     manualStart.quotas.browser_selection,

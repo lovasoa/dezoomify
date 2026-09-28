@@ -302,10 +302,13 @@ function syncExtensionJobIndicator(status: PresentationStatus) {
 }
 
 function closeJob() {
+  const diagnostics = currentAttempt.diagnostics;
+  diagnostics.finish("cancelled", { initiator: "user" });
   const handle = currentAttempt.jobHandle;
   void handle?.command({ type: "cancel" }).catch(() => {});
   stopAttempt();
   currentAttempt = newAttempt();
+  currentAttempt.diagnostics = diagnostics;
   render("cancelled", { jobActivity: { startedAt: Date.now() } });
 }
 
@@ -654,10 +657,13 @@ async function startAttempt() {
   try {
     const snapshot = await source.scan();
     if (!owns(attempt)) return;
-    attempt.diagnostics.record("info", "source-scan", {
+    const scan = {
+      document_url: snapshot.documentUrl,
       candidates: snapshot.inputs.length,
       overflow: snapshot.overflow,
-    });
+    };
+    attempt.diagnostics.context({ scan });
+    attempt.diagnostics.record("info", "source-scan", scan);
     for (const [index, input] of snapshot.inputs.entries())
       attempt.diagnostics.record("debug", "scan-candidate", {
         index,

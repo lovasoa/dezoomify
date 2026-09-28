@@ -37,22 +37,14 @@ export function createEngineResourceFetcher(deps: {
           transport: "source-document",
           url: request.uri,
           final_url: result.finalUri,
+          http: result.http,
+          content_type: result.contentType,
           bytes: result.bytes.byteLength,
           duration_ms: performance.now() - started,
         });
         return result;
       } catch (error) {
-        if (!signal.aborted) {
-          deps.diagnostics?.count("request_failures");
-          deps.diagnostics?.record("debug", "source-request-failed", {
-            request: request.id,
-            purpose: request.purpose,
-            transport: "source-document",
-            url: request.uri,
-            duration_ms: performance.now() - started,
-            error,
-          });
-        }
+        if (!signal.aborted) deps.diagnostics?.count("request_failures");
         if (
           signal.aborted ||
           (error &&
@@ -61,7 +53,15 @@ export function createEngineResourceFetcher(deps: {
             error.sourceDefinitive === true)
         )
           throw error;
-        deps.diagnostics?.record("warn", "source-fetch-fallback", asFetchFailure(error));
+        deps.diagnostics?.record("warn", "source-fetch-fallback", {
+          ...asFetchFailure(error),
+          request: request.id,
+          purpose: request.purpose,
+          transport: "source-document",
+          url: request.uri,
+          duration_ms: performance.now() - started,
+          error,
+        });
       }
     }
     return deps.extensionTransport.fetchResource(request, signal);

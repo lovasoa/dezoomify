@@ -93,6 +93,8 @@ function validFetchResult(value: unknown, expectedUrl: string): value is FetchRe
     );
   return (
     value.ok === true &&
+    (value.contentType === undefined ||
+      (typeof value.contentType === "string" && value.contentType.length <= 256)) &&
     typeof value.data === "string" &&
     value.data.length <= MAX_BASE64_CHARS &&
     typeof value.bytes === "number" &&
@@ -185,9 +187,10 @@ export function createSourceAccess(
       })
       .catch((cause: unknown) => {
         assertLive();
-        throw failure("network", "source operation could not run", {
-          ...(cause instanceof Error ? { sourceDefinitive: false } : {}),
-        });
+        throw Object.assign(
+          failure("network", "source operation could not run", { sourceDefinitive: false }),
+          { cause },
+        );
       });
     assertLive();
     if (!Array.isArray(results) || results.length !== 1 || results[0]?.frameId !== 0)
@@ -216,10 +219,7 @@ export function createSourceAccess(
     return snapshot;
   }
 
-  async function fetch(
-    request: Pick<ResourceRequest, "uri" | "headers">,
-    signal: AbortSignal,
-  ): Promise<{ bytes: Uint8Array; finalUri: string }> {
+  async function fetch(request: Pick<ResourceRequest, "uri" | "headers">, signal: AbortSignal) {
     assertLive();
     if (signal.aborted) throw failure("cancelled", "source fetch cancelled");
     if (
@@ -261,7 +261,7 @@ export function createSourceAccess(
       const bytes = decodeBase64Payload(result.data, SOURCE_FETCH_BYTE_LIMIT);
       if (!bytes || bytes.byteLength !== result.bytes)
         throw failure("malformed", "invalid source payload");
-      return { bytes, finalUri: result.url };
+      return { bytes, finalUri: result.url, http: result.status, contentType: result.contentType };
     } finally {
       signal.removeEventListener("abort", cancel);
     }

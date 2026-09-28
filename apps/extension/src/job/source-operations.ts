@@ -106,11 +106,17 @@ export function collectCandidates(): {
  * job page retries an eligible source failure through the extension-origin
  * transport. Cookies/session credentials are never part of this result.
  */
-export async function fetchSource(
-  request: SourceRequest,
-): Promise<
+export async function fetchSource(request: SourceRequest): Promise<
   | FetchFailure
-  | { ok: true; status: number; url: string; bytes: number; data: string; documentUrl: string }
+  | {
+      ok: true;
+      status: number;
+      url: string;
+      bytes: number;
+      data: string;
+      documentUrl: string;
+      contentType?: string;
+    }
 > {
   const MAX_SOURCE_FETCH_BYTES = 8 * 1024 * 1024;
   const documentUrl = String(globalThis.location?.href ?? "");
@@ -181,6 +187,7 @@ export async function fetchSource(
     return {
       ok: true,
       status: response.status,
+      contentType: String(response.headers?.get?.("content-type") ?? "").slice(0, 256),
       url: responseUrl,
       bytes: total,
       data: bytes.toBase64(),

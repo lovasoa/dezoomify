@@ -170,10 +170,10 @@ test("a decoded padded edge tile is cropped to the planned extent and records ac
     dh: 196,
   });
   assert.equal(diagnostics.report().counters.geometry_mismatches, 1);
-  assert.equal(
-    diagnostics.report().records.find((r) => r.event === "tile-geometry").fields.decoded_width,
-    512,
-  );
+  const geometry = diagnostics.report().records.find((r) => r.event === "tile-geometry").fields;
+  assert.equal(geometry.decoded_width, 512);
+  assert.equal(geometry["expected_size.width"], 428);
+  assert.equal(geometry["position.x"], 2560);
 });
 
 test("undeclared canvas derives the output size from placements", async () => {

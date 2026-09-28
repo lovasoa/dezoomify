@@ -68,6 +68,7 @@ test("job-page source access calls injected scan and fetch with inferred argumen
       url: "https://gallery.example/info.json",
       bytes: 3,
       data: "AQID",
+      contentType: "text/html",
       documentUrl: SOURCE_URL,
     };
   });
@@ -82,6 +83,8 @@ test("job-page source access calls injected scan and fetch with inferred argumen
       new AbortController().signal,
     );
     assert.deepEqual([...result.bytes], [1, 2, 3]);
+    assert.equal(result.contentType, "text/html");
+    assert.equal(result.http, 200);
     assert.equal(fake.calls.length, 2);
     assert.deepEqual(
       fake.calls.map((call) => call.target),
@@ -142,5 +145,15 @@ test("source access refuses a tab whose URL no longer matches its bound document
   const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
   await assert.rejects(source.scan(), { code: "source-document-lost" });
   assert.equal(fake.calls.length, 0);
+  source.dispose();
+});
+
+test("source injection errors retain the browser's cause", async () => {
+  const cause = new Error("Missing host permission");
+  const fake = fakeBrowser(async () => {
+    throw cause;
+  });
+  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  await assert.rejects(source.scan(), { code: "network", cause });
   source.dispose();
 });
