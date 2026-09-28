@@ -96,7 +96,7 @@ test("webapp discovers, downloads, assembles, and saves a real DZI pyramid", asy
 
   // The pipeline must reach the completed state with real dimensions.
   await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 60000 });
-  await expect(page.getByText(/512/)).toBeVisible();
+  await expect(page.locator(".dz-completed-section")).toContainText(/512/);
   // Tiles paint live during acquisition, so the assembled
   // picture stays visible next to the save button on the clean path too.
   await expect(canvas).toBeVisible();
@@ -150,7 +150,8 @@ test("metadata proxy failure reaches the error UI with its complete typed contex
     route.fulfill({
       status: 406,
       contentType: "application/json",
-      body: JSON.stringify({ code: "TRANSPORT_HTTP_ERROR" }),
+      headers: { "x-request-id": "proxy-example" },
+      body: JSON.stringify({ code: "TRANSPORT_HTTP_ERROR", preview: "Cloudflare challenge" }),
     });
   });
   await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
@@ -159,12 +160,14 @@ test("metadata proxy failure reaches the error UI with its complete typed contex
   await expect(page.locator(".dz-error-section")).toBeVisible({ timeout: 30000 });
   assert.equal(proxyPosts, 1, "the failed direct metadata request falls back exactly once");
 
-  const diagnostics = await page.locator("#dz-error-diagnostics").textContent();
+  const diagnostics = await page.locator("#dz-job-diagnostics").textContent();
   assert.ok(diagnostics);
-  assert.match(diagnostics, /code:TRANSPORT_HTTP_ERROR\b/);
-  assert.match(diagnostics, /phase:discovery\b/);
-  assert.match(diagnostics, /transport:metadata-proxy\b/);
-  assert.match(diagnostics, /http:406\b/);
+  assert.match(diagnostics, /code=TRANSPORT_HTTP_ERROR\b/);
+  assert.match(diagnostics, /phase=discovery\b/);
+  assert.match(diagnostics, /transport=metadata-proxy\b/);
+  assert.match(diagnostics, /http=406\b/);
+  assert.match(diagnostics, /proxy-example/);
+  assert.match(diagnostics, /Cloudflare challenge/);
   assert.doesNotMatch(diagnostics, /adapter\.|engine\.error/);
   await expect(page.locator("#app")).toContainText(/The site refused to share this file \(HTTP 406\)/i);
 });

@@ -12,13 +12,15 @@
     "dezoomify:allow-job-command",
     "dezoomify:allow-release-job",
     "dezoomify:allow-request-destination",
-    "dezoomify:allow-start-job"
+    "dezoomify:allow-start-job",
+    "dezoomify:allow-get-job-diagnostics"
   ],
   "windows": [
     "main"
   ],
   "x-dezoomify": {
     "commands": [
+      "get_job_diagnostics",
       "job_command",
       "open_saved_output",
       "release_job",

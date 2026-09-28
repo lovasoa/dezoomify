@@ -12,6 +12,8 @@ export const PROXY_METADATA_MAX_BYTES = 2 * 1024 * 1024;
 export const PROXY_UPSTREAM_URL_HEADER = "x-proxy-upstream-url";
 
 export interface ProxyFetchResult {
+  requestId?: string;
+  preview?: string;
   ok: boolean;
   status: number;
   code?: string;
@@ -246,14 +248,19 @@ function globalLimiter(): ProxyRateLimiter {
  * Returns an empty object when the body is not a relay error payload, in
  * which case callers fall back to status-based classification.
  */
-export function parseRelayError(bytes: ArrayBuffer): { code?: string; reason?: string } {
+export function parseRelayError(bytes: ArrayBuffer): {
+  code?: string;
+  reason?: string;
+  preview?: string;
+} {
   try {
     if (bytes.byteLength === 0 || bytes.byteLength > 4096) return {};
     const text = new TextDecoder().decode(bytes);
-    const parsed = JSON.parse(text) as { code?: unknown; reason?: unknown };
+    const parsed = JSON.parse(text) as { code?: unknown; reason?: unknown; preview?: unknown };
     if (typeof parsed?.code !== "string" || parsed.code === "") return {};
-    const out: { code?: string; reason?: string } = { code: parsed.code };
+    const out: { code?: string; reason?: string; preview?: string } = { code: parsed.code };
     if (typeof parsed.reason === "string" && parsed.reason !== "") out.reason = parsed.reason;
+    if (typeof parsed.preview === "string") out.preview = parsed.preview.slice(0, 300);
     return out;
   } catch {
     return {};
@@ -321,6 +328,7 @@ export function createProxyTransport(
         // Only target URL + protocol version; no cookies/auth/referrer/user headers.
         body: JSON.stringify({ targetUrl, protocolVersion: opts.protocolVersion }),
       });
+      const requestId = response.headers.get("x-request-id") ?? undefined;
       if (callOpts?.signal?.aborted) {
         void response.body?.cancel().catch(() => {});
         return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
@@ -332,12 +340,13 @@ export function createProxyTransport(
           ok: false,
           status: 429,
           code: "PROXY_RATE_LIMITED",
+          requestId,
           ...(delay !== undefined ? { retryAfterMs: Math.min(delay, 30000) } : {}),
         };
       }
       if (response.status === 413) {
         void response.body?.cancel().catch(() => {});
-        return { ok: false, status: 413, code: "PROXY_BUDGET_EXCEEDED" };
+        return { ok: false, status: 413, code: "PROXY_BUDGET_EXCEEDED", requestId };
       }
       let bytes: ArrayBuffer;
       try {
@@ -352,8 +361,8 @@ export function createProxyTransport(
       } catch (error) {
         if (callOpts?.signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
         if ((error as { code?: string })?.code === "TRANSPORT_SIZE_LIMIT")
-          return { ok: false, status: response.status, code: "PROXY_BUDGET_EXCEEDED" };
-        return { ok: false, status: response.status, code: "TRANSPORT_NETWORK_ERROR" };
+          return { ok: false, status: response.status, code: "PROXY_BUDGET_EXCEEDED", requestId };
+        return { ok: false, status: response.status, code: "TRANSPORT_NETWORK_ERROR", requestId };
       }
       if (response.status < 200 || response.status > 299) {
         const relay = parseRelayError(bytes);
@@ -362,17 +371,20 @@ export function createProxyTransport(
             ok: false,
             status: response.status,
             code: relay.code,
+            requestId,
+            ...(relay.preview ? { preview: relay.preview } : {}),
             ...(relay.reason !== undefined ? { reason: relay.reason } : {}),
           };
         }
         if (response.status === 403 || response.status === 422) {
-          return { ok: false, status: response.status, code: "PROXY_POLICY_DENIED" };
+          return { ok: false, status: response.status, code: "PROXY_POLICY_DENIED", requestId };
         }
-        return { ok: false, status: response.status, code: "TRANSPORT_HTTP_ERROR" };
+        return { ok: false, status: response.status, code: "TRANSPORT_HTTP_ERROR", requestId };
       }
       const upstream = response.headers.get(PROXY_UPSTREAM_URL_HEADER);
       return {
         ok: true,
+        requestId,
         status: response.status,
         bytes,
         contentType: response.headers.get("content-type") ?? undefined,

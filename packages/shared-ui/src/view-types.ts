@@ -1,4 +1,4 @@
-import type { HistoryEntry } from "@dezoomify/app-model";
+import type { DiagnosticReport, HistoryEntry } from "@dezoomify/app-model";
 import type { ReactElement, ReactNode } from "react";
 import type { AppCapabilities } from "./components.ts";
 import type { SnapshotPresentation } from "./snapshot-view.ts";
@@ -16,7 +16,9 @@ export interface ViewCallbacks {
   onRevealOutput?(): Promise<void>;
   onHistorySelect?(entry: HistoryEntry): void;
   onOpenExternalLink?(url: string): void;
-  onCopyDiagnostics?(text: string): void;
+  onCopyDiagnostics?(text: string): void | Promise<void>;
+  onSaveDiagnostics?(report: DiagnosticReport): void | Promise<void>;
+  onLoadDiagnostics?(): Promise<DiagnosticReport>;
   onClearHistory?(): void;
   onPause?(): void;
   onResume?(): void;
@@ -34,8 +36,6 @@ export interface JobActivity {
   longestPendingMs?: number;
   timeoutMs?: number;
   lastProgressAt?: number;
-  log?: string[];
-  diagnostics?: string;
   paused?: boolean;
   pausedAt?: number;
   pausedDurationMs?: number;
@@ -47,6 +47,7 @@ export interface JobActivity {
  * stream plus product-local surfaces (canvas blobs, saved files, history).
  */
 export interface ViewContext {
+  diagnosticReport?: DiagnosticReport;
   capabilities?: AppCapabilities;
   currentProgress?: {
     active?: number;

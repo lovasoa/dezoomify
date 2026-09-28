@@ -1,3 +1,4 @@
+import type { DiagnosticRecorder } from "@dezoomify/app-model";
 import { originOfUrl } from "@dezoomify/browser-runtime";
 import type { ResourceRequest } from "@dezoomify/wasm-bindings";
 import { asFetchFailure } from "../runtime/fetch.ts";
@@ -7,6 +8,7 @@ type SourceAccess = ReturnType<typeof createSourceAccess>;
 
 /** Prefer the source tab's session when it is still bound; otherwise use the host transport. */
 export function createEngineResourceFetcher(deps: {
+  diagnostics?: DiagnosticRecorder;
   sourceAccess: SourceAccess;
   extensionTransport: {
     fetchResource(
@@ -14,7 +16,6 @@ export function createEngineResourceFetcher(deps: {
       signal: AbortSignal,
     ): Promise<{ bytes: Uint8Array; finalUri?: string }>;
   };
-  onSourceFailure?(failure: ReturnType<typeof asFetchFailure>): void;
 }) {
   return async (
     request: ResourceRequest,
@@ -25,9 +26,33 @@ export function createEngineResourceFetcher(deps: {
       request.purpose === "metadata" ||
       (sourceOrigin !== "" && originOfUrl(request.uri) === sourceOrigin)
     ) {
+      const started = performance.now();
+      deps.diagnostics?.count("requests");
       try {
-        return await deps.sourceAccess.fetch(request, signal);
+        const result = await deps.sourceAccess.fetch(request, signal);
+        deps.diagnostics?.count("bytes_fetched", result.bytes.byteLength);
+        deps.diagnostics?.record(request.purpose === "metadata" ? "debug" : "trace", "request", {
+          request: request.id,
+          purpose: request.purpose,
+          transport: "source-document",
+          url: request.uri,
+          final_url: result.finalUri,
+          bytes: result.bytes.byteLength,
+          duration_ms: performance.now() - started,
+        });
+        return result;
       } catch (error) {
+        if (!signal.aborted) {
+          deps.diagnostics?.count("request_failures");
+          deps.diagnostics?.record("debug", "source-request-failed", {
+            request: request.id,
+            purpose: request.purpose,
+            transport: "source-document",
+            url: request.uri,
+            duration_ms: performance.now() - started,
+            error,
+          });
+        }
         if (
           signal.aborted ||
           (error &&
@@ -36,7 +61,7 @@ export function createEngineResourceFetcher(deps: {
             error.sourceDefinitive === true)
         )
           throw error;
-        deps.onSourceFailure?.(asFetchFailure(error));
+        deps.diagnostics?.record("warn", "source-fetch-fallback", asFetchFailure(error));
       }
     }
     return deps.extensionTransport.fetchResource(request, signal);

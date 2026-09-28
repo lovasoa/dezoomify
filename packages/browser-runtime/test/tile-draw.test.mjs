@@ -10,7 +10,6 @@ function hooks() {
       return seq;
     },
     onRequestEnd() {},
-    onLog() {},
     onUpdate() {},
   };
 }
@@ -36,28 +35,17 @@ function bitmap(w = 256, h = 256) {
 }
 
 test("drawPlacedTile paints readable bytes at the planned extent", () => {
-  const log = [];
   const ctx = ctx2d();
-  drawPlacedTile(ctx, bitmap(256, 256), { x: 0, y: 0, w: 256, h: 256 }, (line) => log.push(line));
+  drawPlacedTile(ctx, bitmap(256, 256), { x: 0, y: 0, w: 256, h: 256 });
   assert.equal(ctx.drawn.length, 1);
   assert.deepEqual(ctx.drawn[0], { sw: 256, sh: 256, dx: 0, dy: 0, dw: 256, dh: 256 });
-  assert.deepEqual(log, []);
 });
 
 test("drawPlacedTile does not stretch an undersized tile", () => {
-  const log = [];
   const ctx = ctx2d();
-  drawPlacedTile(ctx, bitmap(100, 100), { x: 256, y: 0, w: 256, h: 256 }, (line) => log.push(line));
+  drawPlacedTile(ctx, bitmap(100, 100), { x: 256, y: 0, w: 256, h: 256 });
   assert.equal(ctx.drawn.length, 1);
   assert.deepEqual(ctx.drawn[0], { sw: 100, sh: 100, dx: 256, dy: 0, dw: 100, dh: 100 });
-  assert.ok(
-    log.some((line) => line.includes("A tile size differed from the plan")),
-    "mismatch logged without identifying a tile",
-  );
-  assert.ok(
-    log.every((line) => !line.includes("a.test") && !line.includes("256,0")),
-    "mismatch log has no tile URL or coordinates",
-  );
 });
 
 test("drawPlacedTile crops a full-sized padded Google edge tile at 1:1 scale", () => {
@@ -72,8 +60,7 @@ test("drawPlacedTile measures ordinary image elements by natural size", () => {
   assert.deepEqual(ctx.drawn[0], { sw: 256, sh: 128, dx: 0, dy: 0, dw: 256, dh: 128 });
 });
 
-test("image timeout logs once even when clearing src fires an error", async () => {
-  const log = [];
+test("image timeout settles once even when clearing src fires an error", async () => {
   let timeout;
   let completions = 0;
   class Image {
@@ -98,15 +85,11 @@ test("image timeout logs once even when clearing src fires an error", async () =
       onRequestEnd: () => {
         completions += 1;
       },
-      onLog: (line) => log.push(line),
     },
   });
   timeout();
   await assert.rejects(pending, /timed out/);
   assert.equal(completions, 1);
-  assert.deepEqual(log, [
-    "fetch img tile image timed out after 0.1s (HTTP status unavailable) url=https://a.test/slow.jpg",
-  ]);
 });
 
 test("createProcessQueue serializes processing while fetching stays parallel", async () => {
@@ -124,8 +107,6 @@ test("createProcessQueue serializes processing while fetching stays parallel", a
 
 test("loadTileImage resolves on load and rejects on error", async () => {
   const h = hooks();
-  const log = [];
-  h.onLog = (line) => log.push(line);
   class FakeImg {
     constructor() {
       this.handlers = {};
@@ -158,10 +139,5 @@ test("loadTileImage resolves on load and rejects on error", async () => {
       hooks: h,
     }),
     /failed to load/,
-  );
-  assert.equal(log.length, 2);
-  assert.match(
-    log[1],
-    /fetch img tile image failed to load \(HTTP status unavailable\) url=https:\/\/a.test\/2.png/,
   );
 });

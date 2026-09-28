@@ -7,6 +7,7 @@
 // data, so this module never imports app layers. Progress and log hooks
 // drive the caller's live job view. Keep erasable-syntax-only.
 
+import type { DiagnosticRecorder } from "@dezoomify/app-model";
 import type { FetchFailureCode, ResourceRequest } from "@dezoomify/wasm-bindings";
 import type { FetchCause, StructuredFailure } from "./failure.ts";
 import { blockedReason, fetchFailure } from "./failure.ts";
@@ -16,7 +17,6 @@ import {
   DIRECT_METADATA_TIMEOUT_MS,
   proxyRateLimitDelayMs,
   REQUEST_TIMEOUT_MS,
-  shortUrl,
   sleep,
   tileFailedError,
 } from "./tile-policy.ts";
@@ -49,6 +49,8 @@ export interface ProxyTransportLike {
     reason?: string;
     finalUrl?: string;
     retryAfterMs?: number;
+    requestId?: string;
+    preview?: string;
   }>;
 }
 
@@ -61,16 +63,7 @@ export interface ProxyEligibility {
 export interface WebFetchHooks {
   onRequestStart(label: string): number;
   onRequestEnd(id: number, ok: boolean): void;
-  onLog(line: string): void;
   onUpdate(): void;
-  onMetadataAttempt?(attempt: {
-    startedAt: number;
-    transport: "direct" | "metadata proxy";
-    target: string;
-    outcome: string;
-    bytes?: number;
-  }): void;
-  onTileAttempt?(): void;
 }
 
 /** Caller-owned UI copy plus the readable-bytes hint (never gates). */
@@ -81,13 +74,10 @@ export interface WebFetchMessages {
 }
 
 export interface WebFetchDeps {
+  diagnostics?: DiagnosticRecorder;
   fetchImpl?: FetchImplLike;
   proxyTransport?: ProxyTransportLike;
   isProxyEligible(req: ResourceRequest): ProxyEligibility;
-  classifyHint?: (
-    bytes: ArrayBuffer,
-    info: { via: string; contentType?: string },
-  ) => { found: boolean };
   hooks: WebFetchHooks;
   messages: WebFetchMessages;
   sleepFn?: (ms: number) => Promise<void>;
@@ -300,6 +290,8 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     maxBytes = DIRECT_TILE_MAX_BYTES,
   ): Promise<DirectOutcome> {
     const url = request.uri;
+    const started = now();
+    deps.diagnostics?.count("requests");
     const reqId = hooks.onRequestStart("direct");
     const combined = combineTimeout(signal, ms);
     let responseStatus: number | undefined;
@@ -309,11 +301,21 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       ended = true;
       hooks.onRequestEnd(reqId, ok);
     };
-    const report = (result: string, finalUrl?: string) => {
-      if (!signal?.aborted)
-        hooks.onLog(
-          `fetch direct ${result} url=${url}${finalUrl && finalUrl !== url ? ` final=${finalUrl}` : ""}`,
-        );
+    const report = (fields: Record<string, unknown>, finalUrl?: string) => {
+      if (signal?.aborted) return;
+      deps.diagnostics?.record(
+        request.purpose === "metadata" || fields.outcome !== "readable" ? "debug" : "trace",
+        "request",
+        {
+          request: request.id,
+          purpose: request.purpose,
+          transport: "direct",
+          url,
+          final_url: finalUrl,
+          duration_ms: now() - started,
+          ...fields,
+        },
+      );
     };
     try {
       const res = await fetchImpl(url, {
@@ -332,8 +334,15 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         signal?.throwIfAborted();
         const retryAfter = retryAfterMs(res.headers.get("retry-after"), now());
         end(false);
+        deps.diagnostics?.count("request_failures");
         report(
-          `HTTP ${res.status}${preview ? ` response=${JSON.stringify(preview)}` : ""}`,
+          {
+            outcome: "http-error",
+            http: res.status,
+            preview,
+            retry_after_ms: retryAfter,
+            content_type: res.headers.get("content-type"),
+          },
           res.url,
         );
         return {
@@ -347,8 +356,14 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       const bytes = (await readResponseBytes(res, maxBytes, combined.signal)).buffer;
       end(true);
       const contentType = res.headers.get("content-type") || undefined;
+      deps.diagnostics?.count("bytes_fetched", bytes.byteLength);
       report(
-        `HTTP ${res.status} bytes=${bytes.byteLength}${contentType ? ` type=${contentType}` : ""}`,
+        {
+          outcome: "readable",
+          http: res.status,
+          bytes: bytes.byteLength,
+          content_type: contentType,
+        },
         res.url,
       );
       return {
@@ -361,18 +376,17 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     } catch (e) {
       end(false);
       if (signal?.aborted) return { outcome: "cancelled" };
+      deps.diagnostics?.count("request_failures");
       if ((e as { code?: string })?.code === "TRANSPORT_SIZE_LIMIT") {
-        report("body exceeded configured limit");
+        report({ outcome: "too-large", limit_bytes: maxBytes, http: responseStatus });
         return { outcome: "too-large" };
       }
       const name = (e as { name?: string })?.name;
-      const received =
-        responseStatus === undefined ? "" : `HTTP ${responseStatus} body-read-failed; `;
       if (name === "TimeoutError" || (combined.timedOut && combined.timedOut())) {
-        report(`${received}timeout after ${ms} ms`);
+        report({ outcome: "timeout", timeout_ms: ms, http: responseStatus, error: e });
         return { outcome: "network-error" };
       }
-      report(`${received}network/CORS error (no readable response)`);
+      report({ outcome: "network-or-cors", http: responseStatus, error: e });
       return { outcome: "network-error" };
     } finally {
       combined.cleanup();
@@ -391,8 +405,12 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     reason?: string;
     finalUrl?: string;
     retryAfterMs?: number;
+    requestId?: string;
+    preview?: string;
   }> {
     const targetUrl = request.uri;
+    const started = now();
+    deps.diagnostics?.count("requests");
     if (!deps.proxyTransport) return { ok: false, status: 502, code: "PROXY_ERROR" };
     if (signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
     // Proxy admission budget lives in exactly one owner: the injected
@@ -402,15 +420,28 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     const combined = combineTimeout(signal, requestMs);
     try {
       const res = await deps.proxyTransport.fetchViaProxy(request, { signal: combined.signal });
+      deps.diagnostics?.record("debug", "request", {
+        request: request.id,
+        purpose: request.purpose,
+        transport: "metadata-proxy",
+        url: targetUrl,
+        final_url: res.finalUrl,
+        http: res.status,
+        code: res.code,
+        reason: res.reason,
+        proxy_request: res.requestId,
+        timed_out: combined.timedOut?.(),
+        preview: res.preview,
+        retry_after_ms: res.retryAfterMs,
+        duration_ms: now() - started,
+        bytes: res.bytes?.byteLength,
+      });
+      if (res.ok) deps.diagnostics?.count("bytes_fetched", res.bytes?.byteLength ?? 0);
+      else deps.diagnostics?.count("request_failures");
       if (res.code === "TRANSPORT_CANCELLED" && combined.signal.aborted && !signal?.aborted) {
         hooks.onRequestEnd(reqId, false);
-        hooks.onLog(`fetch metadata-proxy timeout after ${requestMs} ms url=${targetUrl}`);
         return { ok: false, status: 0, code: "PROXY_NETWORK_ERROR" };
       }
-      if (!signal?.aborted && res.code !== "TRANSPORT_CANCELLED")
-        hooks.onLog(
-          `fetch metadata-proxy ${res.status > 0 ? `HTTP ${res.status}` : "no response"}${res.ok ? ` bytes=${res.bytes?.byteLength ?? 0}` : ` code=${res.code ?? "PROXY_ERROR"}${res.reason ? ` reason=${res.reason}` : ""}`} url=${targetUrl}${res.finalUrl && res.finalUrl !== targetUrl ? ` final=${res.finalUrl}` : ""}`,
-        );
       if (!res.ok) {
         hooks.onRequestEnd(reqId, false);
         return {
@@ -419,6 +450,8 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
           code: res.code ?? "PROXY_ERROR",
           ...(typeof res.reason === "string" && res.reason !== "" ? { reason: res.reason } : {}),
           ...(typeof res.retryAfterMs === "number" ? { retryAfterMs: res.retryAfterMs } : {}),
+          requestId: res.requestId,
+          preview: res.preview,
         };
       }
       hooks.onRequestEnd(reqId, true);
@@ -433,14 +466,13 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     } catch (e) {
       hooks.onRequestEnd(reqId, false);
       if (signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
-      if (
-        (e as { name?: string })?.name === "TimeoutError" ||
-        (combined.timedOut && combined.timedOut())
-      ) {
-        hooks.onLog(`fetch metadata-proxy timeout after ${requestMs} ms url=${targetUrl}`);
-        return { ok: false, status: 502, code: "PROXY_NETWORK_ERROR" };
-      }
-      hooks.onLog(`fetch metadata-proxy network error (no response) url=${targetUrl}`);
+      deps.diagnostics?.count("request_failures");
+      deps.diagnostics?.record("debug", "proxy-failed", {
+        request: request.id,
+        url: targetUrl,
+        error: e,
+        timeout_ms: requestMs,
+      });
       return { ok: false, status: 502, code: "PROXY_NETWORK_ERROR" };
     } finally {
       combined.cleanup();
@@ -476,20 +508,11 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     const url = request.uri;
     // A retired job performs no fetch and never falls back to the proxy.
     if (signal?.aborted) throw cancelledFailure(url);
-    const target = shortUrl(url);
     activeTransport = "direct";
-    const directStartedAt = now();
     const direct = await fetchDirect(request, signal, metadataMs, DIRECT_METADATA_MAX_BYTES);
-    hooks.onMetadataAttempt?.({
-      startedAt: directStartedAt,
-      transport: "direct",
-      target,
-      outcome: direct.outcome === "http-error" ? `HTTP ${direct.status ?? 0}` : direct.outcome,
-      ...(direct.bytes ? { bytes: direct.bytes.byteLength } : {}),
-    });
+
     let via = "direct";
     let bytes: ArrayBuffer | null = null;
-    let contentType: string | undefined;
     // Post-redirect base for relative tile URLs. Direct fetches report
     // res.url; proxied fetches must fall back to the requested URL (the relay
     // follows redirects internally without exposing the upstream final URL).
@@ -497,24 +520,22 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     if (direct.outcome === "readable" && direct.bytes) {
       bytes = direct.bytes;
       if (typeof direct.finalUrl === "string" && direct.finalUrl !== "") finalUri = direct.finalUrl;
-      if (typeof direct.contentType === "string" && direct.contentType !== "")
-        contentType = direct.contentType;
     } else if (
       direct.outcome === "network-error" &&
       !signal?.aborted &&
       deps.isProxyEligible(request).eligible
     ) {
       activeTransport = "metadata-proxy";
-      via = "proxy";
-      let proxyStartedAt = now();
-      let proxied = await fetchViaProxy(request, signal);
-      hooks.onMetadataAttempt?.({
-        startedAt: proxyStartedAt,
-        transport: "metadata proxy",
-        target,
-        outcome: proxied.ok ? `HTTP ${proxied.status}` : (proxied.code ?? `HTTP ${proxied.status}`),
-        ...(proxied.bytes ? { bytes: proxied.bytes.byteLength } : {}),
+      deps.diagnostics?.record("info", "transport-fallback", {
+        request: request.id,
+        from: "direct",
+        to: "metadata-proxy",
+        reason: direct.outcome,
+        url,
       });
+      via = "proxy";
+      let proxied = await fetchViaProxy(request, signal);
+
       // Retry-After + backoff: one bounded retry converts a transient
       // token-bucket 429 into success. A persistent throttle, or a
       // Retry-After beyond the UX budget, still fails fast below with the
@@ -522,19 +543,12 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       if (!proxied.ok && proxied.code === "PROXY_RATE_LIMITED") {
         const delay = proxyRateLimitDelayMs(proxied.retryAfterMs);
         if (delay !== null) {
-          hooks.onLog(`Metadata proxy rate-limited; retrying once after ${delay} ms.`);
-          if (await sleepUnlessAborted(delay, sleepFn, signal)) throw cancelledFailure(url);
-          proxyStartedAt = now();
-          proxied = await fetchViaProxy(request, signal);
-          hooks.onMetadataAttempt?.({
-            startedAt: proxyStartedAt,
-            transport: "metadata proxy",
-            target,
-            outcome: proxied.ok
-              ? `HTTP ${proxied.status}`
-              : (proxied.code ?? `HTTP ${proxied.status}`),
-            ...(proxied.bytes ? { bytes: proxied.bytes.byteLength } : {}),
+          deps.diagnostics?.record("debug", "proxy-retry", {
+            request: request.id,
+            delay_ms: delay,
           });
+          if (await sleepUnlessAborted(delay, sleepFn, signal)) throw cancelledFailure(url);
+          proxied = await fetchViaProxy(request, signal);
         }
       }
       if (!proxied.ok || !proxied.bytes) {
@@ -552,6 +566,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
           code: classified.code,
           url,
           transportKind: "metadata-proxy",
+          preview: proxied.preview,
         });
       }
       bytes = proxied.bytes;
@@ -602,22 +617,6 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         transportKind: "direct",
       });
     }
-    // WASM core is authoritative: always forward readable bytes so formats
-    // whose first head carries no zoomable literal still resolve. The
-    // classifier is a UI hint only.
-    if (bytes && deps.classifyHint) {
-      let found = true;
-      try {
-        found = deps.classifyHint(bytes, { via, ...(contentType ? { contentType } : {}) }).found;
-      } catch {
-        found = true;
-      }
-      if (!found) {
-        hooks.onLog(
-          `content hint: no zoomable marker in first bytes (${via}); running full discovery…`,
-        );
-      }
-    }
     return { bytes: bytes as ArrayBuffer, finalUri, via };
   }
 
@@ -627,7 +626,6 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
   ): Promise<{ bytes: ArrayBuffer; finalUri?: string }> {
     const url = request.uri;
     if (signal?.aborted) throw cancelledFailure(url);
-    hooks.onTileAttempt?.();
     if (deps.throttle) {
       try {
         await deps.throttle(url);
@@ -648,7 +646,9 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         transportKind: "direct",
       });
     }
-    throw tileFailedError(direct.outcome, direct.status, url, direct.retryAfterMs);
+    const failure = tileFailedError(direct.outcome, direct.status, url, direct.retryAfterMs);
+    if (direct.preview) Object.assign(failure, { preview: direct.preview });
+    throw failure;
   }
 
   function getActiveTransport(): string | null {

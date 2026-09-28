@@ -1,4 +1,6 @@
 // Restricted metadata fetch relay (pure, no server framework).
+import { redactDiagnosticText } from "../../packages/app-model/src/diagnostics.ts";
+import { readErrorPreview } from "../../packages/browser-runtime/src/response-body.ts";
 import {
   buildProxyCorsHeaders,
   cacheControlForProxy,
@@ -30,6 +32,7 @@ export interface ProxyRelayDeps {
     status: number;
     headers: { get(name: string): string | null };
     arrayBuffer(): Promise<ArrayBuffer>;
+    body?: ReadableStream<Uint8Array> | null;
   }>;
   websiteOrigin: string;
   maxBytes?: number;
@@ -92,6 +95,7 @@ function takeOriginToken(originKey: string, nowMs: number): boolean {
 }
 
 export interface ProxyRelayResult {
+  preview?: string;
   status: number;
   headers: Record<string, string>;
   body?: ArrayBuffer;
@@ -213,6 +217,7 @@ export async function handleProxyRequest(
       status: number;
       headers: { get(name: string): string | null };
       arrayBuffer(): Promise<ArrayBuffer>;
+      body?: ReadableStream<Uint8Array> | null;
     };
     let rateLimitAttempts = 0;
     for (;;) {
@@ -291,7 +296,18 @@ export async function handleProxyRequest(
     }
     if (res.status < 200 || res.status > 299) {
       const code = res.status === 429 ? "PROXY_RATE_LIMITED" : "TRANSPORT_HTTP_ERROR";
-      return { status: res.status, headers: baseHeaders, code, requestId };
+      const deadline = AbortSignal.timeout(500);
+      const signal = deps.signal ? AbortSignal.any([deps.signal, deadline]) : deadline;
+      const preview = res.body
+        ? redactDiagnosticText(await readErrorPreview(new Response(res.body), signal))
+        : undefined;
+      return {
+        status: res.status,
+        headers: baseHeaders,
+        code,
+        requestId,
+        ...(preview ? { preview } : {}),
+      };
     }
     const contentType = res.headers.get("content-type");
     if (!isAllowedMetadataContentType(contentType)) {

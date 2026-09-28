@@ -325,6 +325,16 @@ async fn release_job(state: State<'_, Mutex<JobTable>>, job: String) -> Result<(
 }
 
 #[tauri::command]
+async fn get_job_diagnostics(
+    state: State<'_, Mutex<JobTable>>,
+    job: String,
+) -> Result<dezoomify::model::DiagnosticReport, CommandFailure> {
+    lock_table(&state)?
+        .diagnostic_report(&job)
+        .ok_or_else(|| commands::CommandError::unknown_job(&job).into())
+}
+
+#[tauri::command]
 async fn query_capabilities(
     state: State<'_, Mutex<JobTable>>,
 ) -> Result<CapabilitySnapshot, CommandFailure> {

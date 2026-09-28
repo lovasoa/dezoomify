@@ -284,9 +284,44 @@ static NEXT_JOB: AtomicU64 = AtomicU64::new(1);
 /// validation. The function holds no state; each job owns its thread,
 /// transport, temporary files, and completion.
 pub fn start_job(options: JobOptions) -> Result<RunningJob, NativeError> {
+    start_job_with_diagnostics(
+        options,
+        crate::diagnostics::Diagnostics::new(
+            "native",
+            option_env!("DEZOOMIFY_VERSION").unwrap_or(env!("CARGO_PKG_VERSION")),
+        ),
+    )
+}
+
+/// A caller-owned recorder also retains preflight failures before a handle exists.
+pub fn start_job_with_diagnostics(
+    options: JobOptions,
+    diagnostics: crate::diagnostics::Diagnostics,
+) -> Result<RunningJob, NativeError> {
+    diagnostics.context(serde_json::json!({"input": options.input_url, "submitted": {
+        "format": options.format, "max_width": options.max_width, "max_height": options.max_height,
+        "parallelism": options.max_concurrent, "retries": options.max_retries, "compression": options.compression
+    }}));
     let options = options.normalized();
-    options.validate()?;
-    let engine_options = options.engine_options()?;
+    diagnostics.context(serde_json::json!({"settings": {
+        "format": options.format, "image_index": options.image_index, "zoom_level": options.zoom_level,
+        "largest": options.largest, "max_width": options.max_width, "max_height": options.max_height,
+        "parallelism": options.max_concurrent, "retries": options.max_retries, "retry_delay_ms": options.retry_base_delay.as_millis(),
+        "keep_partial": options.keep_partial, "compression": options.compression,
+        "header_names": options.headers.keys().collect::<Vec<_>>(), "credentials_present": !options.headers.is_empty(),
+        "cache_enabled": options.cache_dir.is_some(), "timeout_ms": options.timeout.as_millis(), "connect_timeout_ms": options.connect_timeout.as_millis(),
+        "accept_invalid_certs": options.accept_invalid_certs, "max_tiles": options.max_tiles, "max_bytes": options.max_bytes,
+        "min_interval_ms": options.min_interval.as_millis(), "retain_cap": options.output_retain_cap, "spool_cap": options.output_spool_cap
+    }}));
+    let engine_options = options
+        .validate()
+        .and_then(|()| options.engine_options())
+        .inspect_err(|error| {
+            diagnostics.finish(
+                "validation-failed",
+                serde_json::json!({"code": error.code, "message": error.message}),
+            )
+        })?;
     let id = format!("job:native-{}", NEXT_JOB.fetch_add(1, Ordering::SeqCst));
     let cancel_flag = Arc::new(AtomicBool::new(false));
     let (command_tx, command_rx) = mpsc::channel::<EngineUserCommand>();
@@ -298,8 +333,16 @@ pub fn start_job(options: JobOptions) -> Result<RunningJob, NativeError> {
     let alive = Arc::new(AtomicBool::new(true));
     let worker_alive = Arc::clone(&alive);
     let worker_cancel = Arc::clone(&cancel_flag);
+    diagnostics.context(serde_json::json!({"engine_job": id}));
+    diagnostics.record(
+        dezoomify::model::DiagnosticLevel::Info,
+        "start",
+        serde_json::json!({"job": id}),
+    );
+    let worker_diagnostics = diagnostics.clone();
     let handle = std::thread::spawn(move || {
         let control = crate::exec::JobControl {
+            diagnostics: worker_diagnostics.clone(),
             cancel: worker_cancel,
             commands: exec_commands,
         };
@@ -312,9 +355,16 @@ pub fn start_job(options: JobOptions) -> Result<RunningJob, NativeError> {
             &snapshot_tx,
         );
         worker_alive.store(false, Ordering::SeqCst);
+        if let Err(error) = &outcome {
+            worker_diagnostics.finish(
+                "runtime-failed",
+                serde_json::json!({"code": error.code, "message": error.message}),
+            );
+        }
         outcome
     });
     Ok(RunningJob {
+        diagnostics,
         id,
         alive,
         snapshot_rx,
@@ -329,6 +379,7 @@ pub fn start_job(options: JobOptions) -> Result<RunningJob, NativeError> {
 /// stream; the driver still runs to its honest terminal (cancel first via
 /// [`RunningJob::send`] when abandoning).
 pub struct RunningJob {
+    pub diagnostics: crate::diagnostics::Diagnostics,
     /// Opaque job id (`job:native-N`); safe to log and to correlate snapshots.
     pub id: String,
     alive: Arc<AtomicBool>,
@@ -360,6 +411,11 @@ impl RunningJob {
     /// applied to a later job). Commands never supply bytes and never claim
     /// publication.
     pub fn send(&self, command: EngineUserCommand) -> Result<JobCommandAck, CommandRejected> {
+        self.diagnostics.record(
+            dezoomify::model::DiagnosticLevel::Debug,
+            "command",
+            serde_json::json!({"command": format!("{command:?}")}),
+        );
         if !self.alive.load(Ordering::SeqCst) {
             return Err(CommandRejected { code: "job.stale" });
         }
@@ -421,12 +477,14 @@ fn run_job(
     control: crate::exec::JobControl,
     snapshots: &mpsc::Sender<JobSnapshot>,
 ) -> Result<OutputSummary, NativeError> {
+    let diagnostics = control.diagnostics.clone();
     // Forward engine projections verbatim, buffering the terminal so the
     // exactly-once terminal snapshot carries the native publication.
     // Non-terminal snapshots stream immediately; the terminal waits for the
     // commit outcome below.
     let mut terminal_held: Option<EngineSnapshot> = None;
     let mut emit = |snapshot: &EngineSnapshot| {
+        diagnostics.observe(snapshot);
         if snapshot.terminal.is_some() {
             terminal_held = Some(snapshot.clone());
         } else {
@@ -474,6 +532,7 @@ fn run_job(
     );
     match result {
         Ok(published) => {
+            diagnostics.finish(if published.partial { "partial-completed" } else { "completed" }, serde_json::json!({"width": published.width, "height": published.height, "format": published.format, "missing": published.missing.len(), "disposition": "native-publication"}));
             // Publication won the race: report the committed result, never
             // a cancellation (the commit point already refuses to publish
             // once cancellation was requested, so reaching here with the
@@ -491,6 +550,14 @@ fn run_job(
             Ok(published)
         }
         Err(error) => {
+            diagnostics.finish(
+                if error.code == "job.cancelled" {
+                    "cancelled"
+                } else {
+                    "failed"
+                },
+                serde_json::json!({"code": error.code, "message": error.message}),
+            );
             // Cancel and failure terminals were already held from the live
             // stream; forward verbatim with no publication (cancel/failure
             // never publish). Internal errors without an engine terminal end

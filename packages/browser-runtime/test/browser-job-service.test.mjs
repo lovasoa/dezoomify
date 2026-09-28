@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createDiagnosticRecorder } from "../../app-model/src/diagnostics.ts";
 import { createBrowserJobService } from "../src/browser-job-service.ts";
 import { createWebFetcher } from "../src/web-fetch.ts";
 
@@ -352,7 +353,11 @@ test("dispose aborts in-flight fetches, terminates the worker, and settles pendi
   let sawAbortedSignal = false;
   const logs = [];
   const p = product({
-    log: (level, code, detail) => logs.push({ level, code, detail }),
+    diagnostics: createDiagnosticRecorder({
+      id: "dispose",
+      now: () => 0,
+      sink: (record) => logs.push(record),
+    }),
     fetchResource: async (effect, signal) => {
       await new Promise((resolve) => setTimeout(resolve, 20));
       sawAbortedSignal = signal.aborted;
@@ -369,7 +374,7 @@ test("dispose aborts in-flight fetches, terminates the worker, and settles pendi
   assert.equal(p.worker.terminated, true);
   assert.equal(sawAbortedSignal, true, "in-flight fetch never observed the abort");
   assert.equal(emitted.length, emittedBeforeDispose, "disposed attempt emitted after teardown");
-  assert.ok(!logs.some(({ code }) => code === "effect-failed"));
+  assert.ok(!logs.some(({ event }) => event === "acquisition-failed"));
 });
 
 test("processing calls transfer their buffer and settle on disposal", async () => {

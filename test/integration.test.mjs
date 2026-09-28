@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createDiagnosticRecorder } from "../packages/app-model/src/diagnostics.ts";
 import {
   canvasToPngBlob,
   isCanvasTaintError,
@@ -70,7 +71,13 @@ function webDeps({ direct, proxy }) {
     fetchImpl: (...args) => direct.fetchImpl(...args),
     proxyTransport: { fetchViaProxy: (...args) => proxy.fetchViaProxy(...args) },
     isProxyEligible: (req) => isProxyEligible(req),
-    classifyHint: undefined,
+    diagnostics: createDiagnosticRecorder({
+      id: "fetch",
+      now: () => 0,
+      sink(record) {
+        if (record.event === "request") attempts.push(record.fields);
+      },
+    }),
     hooks: {
       onRequestStart: () => {
         started += 1;
@@ -79,7 +86,6 @@ function webDeps({ direct, proxy }) {
       onRequestEnd() {},
       onLog() {},
       onUpdate() {},
-      onMetadataAttempt: (attempt) => attempts.push(attempt),
     },
     messages: {
       rateLimitedBySite: "rate limited",
@@ -118,7 +124,7 @@ test("eligible metadata failure automatically calls proxy without extra user act
   assert.equal(fetcher.getActiveTransport(), "metadata-proxy");
   assert.deepEqual(
     attempts.map((a) => a.transport),
-    ["direct", "metadata proxy"],
+    ["direct", "metadata-proxy"],
   );
 });
 
@@ -389,22 +395,14 @@ test("tile failures report the direct transport, never the metadata proxy", () =
 
 test("edge tiles crop to the plan, saves warn on color profiles, PNG encodes via canvas", async () => {
   // Padded edge tiles (e.g. Google Arts & Culture) crop from the right and
-  // bottom; the mismatch is logged without identifying any tile.
+  // bottom; actual/expected dimensions are recorded by the assembly.
   const draws = [];
-  const mismatches = [];
   drawPlacedTile(
     { drawImage: (...args) => draws.push(args) },
     { width: 512, height: 512 },
     { x: 0, y: 0, w: 256, h: 256 },
-    (line) => mismatches.push(line),
   );
   assert.deepEqual(draws, [[{ width: 512, height: 512 }, 0, 0, 256, 256, 0, 0, 256, 256]]);
-  assert.equal(mismatches.length, 1);
-  assert.ok(mismatches[0].includes("A tile size differed from the plan"));
-  assert.ok(
-    !mismatches[0].includes("256,0") && !mismatches[0].includes("http"),
-    "no tile identity leaks",
-  );
 
   // The browser canvas path strips ICC/EXIF, so save guidance warns that
   // colors may shift.

@@ -53,3 +53,5 @@ The website baseline reports encoders `[png]`. Values belong to product integrat
 ## Handoff
 
 Handoff moves a job to the desktop app via a `dezoomify://` link. Receivers treat handoff input as untrusted and confirm it with the user before acting. Handoff carries bounded non-secret job input; it does not transfer browser credentials or replace an authenticated transport.
+
+`DiagnosticReport` and its record/value types are generated from `model.rs`. Reports are host observations with their own schema version; they never enter `Snapshot`, drive engine transitions, or authorize recovery.

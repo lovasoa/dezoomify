@@ -19,11 +19,9 @@ import { createRoot } from "react-dom/client";
 import type { ResolutionChoice, SnapshotPresentation, StructuredError } from "./snapshot-view.ts";
 import {
   displaySourceUrl,
-  errorDiagnosticsText,
   handoffOriginFor,
   hostFromUrl,
   isFileHandoffSource,
-  reportIssueUrl,
 } from "./view-helpers.ts";
 import type {
   ConfirmModalArgs,
@@ -51,6 +49,7 @@ export type {
 } from "./view-types.ts";
 
 import { formatElapsed, renderCompletion, renderSaveGuidance } from "./components.ts";
+import { DiagnosticDetails } from "./diagnostic-details.tsx";
 import { t } from "./i18n.ts";
 import { UrlInput } from "./url-input.tsx";
 
@@ -86,36 +85,6 @@ function historyDateLabel(at: number): string {
   }
 }
 
-function diagnosticsText(
-  presentation: SnapshotPresentation,
-  ctx?: ViewContext,
-  elapsedMs?: number,
-  timeoutMs?: number,
-): string {
-  const a = ctx?.jobActivity ?? {};
-  const p = ctx?.currentProgress;
-  const lines = [
-    `Status: ${presentation.stateLabel ?? presentation.phase}`,
-    `Transport: ${presentation.transport ?? "direct"}`,
-    `Elapsed: ${Math.round((elapsedMs ?? 0) / 1000)} s`,
-    `Per-request timeout: ${Math.round((timeoutMs ?? a.timeoutMs ?? 30000) / 1000)} s`,
-    `Requests: ${a.pendingRequests ?? 0} pending, ${a.completedRequests ?? 0} done, ${a.failedRequests ?? 0} failed`,
-  ];
-  if (presentation.progress) {
-    lines.push(`Tiles: ${presentation.progress.current} of ${presentation.progress.total ?? "?"}`);
-  }
-  if (p?.active !== undefined) lines.push(`Tiles active: ${p.active}`);
-  if (p?.retrying !== undefined) lines.push(`Tiles retrying: ${p.retrying}`);
-  if (a.url) lines.push(`Source: ${displaySourceUrl(a.url)}`);
-  return lines.join("\n");
-}
-
-/** The most recent activity-log lines, literal English, shown in both the job and failed technical sections. */
-function activityLogText(ctx?: ViewContext): string {
-  const log = ctx?.jobActivity?.log;
-  return log && log.length > 0 ? log.slice(-20).join("\n") : "";
-}
-
 // ---------------------------------------------------------------------------
 // Presentational atoms.
 // ---------------------------------------------------------------------------
@@ -142,25 +111,6 @@ function Logo() {
       </svg>
       <span>Dezoomify</span>
     </h1>
-  );
-}
-
-function Chevron() {
-  return (
-    <svg
-      className="dz-summary-icon"
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <polyline points="6 9 12 15 18 9" />
-    </svg>
   );
 }
 
@@ -407,9 +357,6 @@ interface JobDerived {
   active: number;
   donePct: number;
   activePct: number;
-  diagText: string;
-  logText: string;
-  copiedLog: string;
 }
 
 function deriveJob(presentation: SnapshotPresentation, ctx?: ViewContext): JobDerived {
@@ -429,7 +376,6 @@ function deriveJob(presentation: SnapshotPresentation, ctx?: ViewContext): JobDe
   const timerNow = activity.pausedAt ?? now;
   const elapsedMs = Math.max(0, timerNow - startedAt - (activity.pausedDurationMs ?? 0));
   const elapsed = formatElapsed(elapsedMs);
-  const timeoutMs = activity.timeoutMs ?? 30000;
   const lastProgressAt = activity.lastProgressAt ?? startedAt;
   const stalledMs = Math.max(0, timerNow - lastProgressAt);
   const showStalled = stalledMs >= 10000 && presentation.headlineKey !== "view.step.saving";
@@ -455,11 +401,6 @@ function deriveJob(presentation: SnapshotPresentation, ctx?: ViewContext): JobDe
   const countsText = determinate
     ? `${current} done${active > 0 ? ` + ${active} in progress` : ""} / ${total}`
     : "";
-  const diagText = diagnosticsText(presentation, ctx, elapsedMs, timeoutMs);
-  const logText = activityLogText(ctx);
-  const copiedLog =
-    activity.log && activity.log.length > 0 ? `\n\nEvents\n${activity.log.join("\n")}` : "";
-  const copied = `${diagText}${activity.diagnostics ? `\n\n${activity.diagnostics}` : ""}${copiedLog}`;
   return {
     paused,
     step,
@@ -473,9 +414,6 @@ function deriveJob(presentation: SnapshotPresentation, ctx?: ViewContext): JobDe
     active,
     donePct,
     activePct,
-    diagText,
-    logText,
-    copiedLog: copied,
   };
 }
 
@@ -599,36 +537,6 @@ function JobView({
         </div>
       </div>
       {resolutionNoticeOf(presentation, callbacks, true)}
-      <details className="dz-details" id="dz-job-details">
-        <summary className="dz-summary">
-          <span>{t("view.job.techDetails")}</span>
-          <Chevron />
-        </summary>
-        <button
-          type="button"
-          className="dz-copy-diagnostics"
-          id="dz-btn-copy-diagnostics"
-          style={{ display: callbacks.onCopyDiagnostics ? "" : "none" }}
-          aria-label="Copy technical details"
-          title="Copy technical details"
-          onClick={() => callbacks.onCopyDiagnostics?.(d.copiedLog)}
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="9" y="9" width="10" height="11" rx="1" />
-            <path d="M15 9V5H5v11h4" />
-          </svg>
-        </button>
-        <div className="dz-diagnostics" id="dz-job-diagnostics">
-          {d.diagText}
-        </div>
-        <div
-          className="dz-diagnostics dz-log"
-          id="dz-job-log"
-          style={{ display: d.logText ? "" : "none" }}
-        >
-          {d.logText}
-        </div>
-      </details>
     </div>
   );
 }
@@ -897,7 +805,6 @@ function FailedView({
   const isFile = isFileHandoffSource(source);
   const origin = isFile ? "" : handoffOriginFor(handoffUrl, source);
   const label = origin !== "" ? t("view.handoff.sendOrigin", { origin }) : t("view.handoff.send");
-  const reportHref = reportIssueUrl({ source, error, activityLog: activityLogText(ctx) });
   const hostDoc = globalThis.document;
   return (
     <div className="dz-view-body dz-error-section dz-fade-in">
@@ -959,25 +866,6 @@ function FailedView({
           </a>
         </div>
       </div>
-      <details className="dz-details">
-        <summary className="dz-summary">
-          <span>{t("view.fail.techDetails")}</span>
-          <Chevron />
-        </summary>
-        <div className="dz-diagnostics" id="dz-error-diagnostics">
-          {errorDiagnosticsText(error)}
-        </div>
-        {activityLogText(ctx) ? (
-          <div className="dz-diagnostics dz-log" id="dz-error-log">
-            {activityLogText(ctx)}
-          </div>
-        ) : null}
-        <div className="dz-diagnostics-report">
-          <a href={reportHref} target="_blank" rel="noopener">
-            {t("view.fail.reportBug")}
-          </a>
-        </div>
-      </details>
       <div className="dz-actions-row">
         {error.retryable && callbacks.onRetrySameUrl ? (
           <button
@@ -1065,7 +953,20 @@ function SharedView({
   options?: ViewRenderOptions;
 }) {
   const phase = presentation.phase;
-  if (options?.replace) return options.replace;
+  const diagnostics = ctx?.diagnosticReport ? (
+    <DiagnosticDetails
+      key={ctx.diagnosticReport.id}
+      report={ctx.diagnosticReport}
+      callbacks={callbacks}
+    />
+  ) : null;
+  if (options?.replace)
+    return (
+      <>
+        {options.replace}
+        {diagnostics}
+      </>
+    );
   return (
     <div className="dz-card" data-view-phase={phase}>
       <div className="dz-header" style={{ display: phase === "idle" ? "" : "none" }}>
@@ -1091,6 +992,7 @@ function SharedView({
       ) : null}
       {phase === "cancelled" ? <CancelledView callbacks={callbacks} /> : null}
       {options?.after}
+      {phase !== "idle" ? diagnostics : null}
     </div>
   );
 }

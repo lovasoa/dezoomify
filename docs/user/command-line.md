@@ -48,6 +48,7 @@ ignores caps).
 | Tune the connection pool | `--max-idle-per-host 32` (max idle connections per host) |
 | Go slower to stay gentle with the server | `-i, --min-interval 200ms` (bulk paces images; per-tile requests are staggered) |
 | Tune timeouts | `--timeout 30s`, `--connect-timeout 6s` (max time for one request and to connect) |
+| Save a report for troubleshooting | `--diagnostics report.jsonl` (new file; one report per image, including failures) |
 | Tune logging | `--logging info` (error, warn, info, debug, trace; controls human stderr verbosity, `--json` stdout unchanged) |
 | Tune concurrency | `-n, --parallelism 16` (max concurrent tile downloads) |
 | Look like you come from the site's viewer | `-H "Referer: <viewer page>"` (`--header` is an alias; otherwise the http(s) input or bulk source is sent as `Referer`) |

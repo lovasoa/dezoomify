@@ -79,12 +79,13 @@ pub(crate) struct NativeHostSettings {
 /// Per-run control handles. These are process-local capabilities and never
 /// enter the serializable domain model.
 pub(crate) struct JobControl {
+    pub diagnostics: crate::diagnostics::Diagnostics,
     pub cancel: Arc<std::sync::atomic::AtomicBool>,
     pub commands: Arc<Mutex<mpsc::Receiver<EngineUserCommand>>>,
 }
 
 /// Honest execution accounting, reported with every terminal result.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Instrumentation {
     /// Tile/probe/metadata effects attempted.
     pub attempts: u64,
@@ -223,6 +224,7 @@ impl TileAttemptFailure {
 }
 
 struct Attempt<'a> {
+    diagnostics: crate::diagnostics::Diagnostics,
     settings: &'a NativeHostSettings,
     cancel: Arc<std::sync::atomic::AtomicBool>,
     user: &'a UserHeaders,
@@ -341,10 +343,13 @@ fn execute_attempt(
     on_snapshot: &mut dyn FnMut(&EngineSnapshot),
 ) -> Result<OutputSummary, NativeError> {
     let (mut job, update) = EngineJob::start(engine_options).map_err(map_setup_error)?;
-    let transport = Arc::new(NativeTransport::new(&settings.fetch)?);
+    let transport = Arc::new(
+        NativeTransport::new(&settings.fetch)?.with_diagnostics(control.diagnostics.clone()),
+    );
     let (completion_tx, completion_rx) = mpsc::channel::<Completion>();
     let mut handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
     let mut attempt = Attempt {
+        diagnostics: control.diagnostics,
         settings,
         cancel: control.cancel,
         user,
@@ -497,6 +502,9 @@ fn execute_attempt(
         }
     };
     finish_sink_stats(&mut attempt, &sink);
+    attempt
+        .diagnostics
+        .context(serde_json::json!({"execution": attempt.instrumentation}));
     match terminal {
         Terminal::Output(published) => {
             let format = selected_catalog_image(&pump.snapshot)
@@ -830,6 +838,7 @@ fn execute_effects(
                 attempt: retry_attempt,
                 delay_ms,
             } => {
+                attempt.diagnostics.record(dezoomify::model::DiagnosticLevel::Debug, "retry-scheduled", serde_json::json!({"effect": effect, "tile": tile, "attempt": retry_attempt, "delay_ms": delay_ms}));
                 attempt.instrumentation.retries_scheduled += 1;
                 attempt.instrumentation.timer_wait_ms += delay_ms;
                 spawn_timer(
@@ -1046,6 +1055,9 @@ fn spawn_tile(
     handles.push(transport.spawn(async move {
         let result =
             fetch_and_decode(&need, &task_transport, &user, &config_fetch, &cache, &tails).await;
+        if let (Some(diagnostics), Err(failure)) = (&task_transport.diagnostics, &result) {
+            diagnostics.record(dezoomify::model::DiagnosticLevel::Warn, "acquisition-failed", serde_json::json!({"effect": need.effect.0, "request": need.request.id, "tile": need.ordinal, "url": need.request.uri, "x": need.destination.x, "y": need.destination.y, "code": failure.error.code, "http": failure.http, "retry_after_ms": failure.retry_after_ms, "message": failure.error.message}));
+        }
         let bytes = result.as_ref().map(|ok| ok.1).unwrap_or(0);
         let _ = tx.send(Completion::Tile {
             effect: need.effect,
@@ -1075,6 +1087,9 @@ async fn fetch_and_decode(
 ) -> Result<(DecodedTile, usize), TileAttemptFailure> {
     if let Some((dir, namespace)) = cache {
         if let Some(bytes) = crate::cache::load(dir, namespace, &need.request.uri) {
+            if let Some(diagnostics) = &transport.diagnostics {
+                diagnostics.count("cache_reads", 1.0);
+            }
             let bytes_len = bytes.len();
             tails.reserve(bytes_len);
             let tails_release = Arc::clone(tails);
@@ -1464,6 +1479,7 @@ fn await_partial_choice(
         }
     };
     let Some(rx) = attempt.command_rx.clone() else {
+        attempt.diagnostics.record(dezoomify::model::DiagnosticLevel::Info, "partial-answer", serde_json::json!({"generation": generation, "initiator": "policy", "decision": format!("{:?}", policy())}));
         return Some((generation, policy()));
     };
     let deadline = Instant::now() + Duration::from_secs(60);
@@ -1473,6 +1489,7 @@ fn await_partial_choice(
         }
         let wait = deadline.saturating_duration_since(Instant::now());
         if wait.is_zero() {
+            attempt.diagnostics.record(dezoomify::model::DiagnosticLevel::Info, "partial-answer", serde_json::json!({"generation": generation, "initiator": "policy-timeout", "decision": format!("{:?}", policy())}));
             return Some((generation, policy()));
         }
         let command = match rx.lock() {

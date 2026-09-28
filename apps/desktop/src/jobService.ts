@@ -76,6 +76,7 @@ export interface DesktopJobHandle extends JobHandle {
 }
 
 export interface DesktopJobService extends JobService<DesktopJobStartRequest, DesktopJobHandle> {
+  diagnostics(job: string): Promise<import("@dezoomify/app-model").DiagnosticReport>;
   start(request: DesktopJobStartRequest, observer: JobObserver): Promise<DesktopJobHandle>;
   queryCapabilities(): Promise<DesktopCapabilities>;
   dispose(): Promise<void>;
@@ -285,5 +286,12 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
     listening = null;
   }
 
-  return { start, queryCapabilities, dispose };
+  async function diagnostics(
+    job: string,
+  ): Promise<import("@dezoomify/app-model").DiagnosticReport> {
+    const report = await ipc.invoke("get_job_diagnostics", { job });
+    assertNoTileBytes(report);
+    return report as import("@dezoomify/app-model").DiagnosticReport;
+  }
+  return { start, queryCapabilities, dispose, diagnostics };
 }

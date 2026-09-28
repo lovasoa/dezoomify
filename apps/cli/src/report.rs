@@ -3,6 +3,24 @@
 
 use std::collections::BTreeMap;
 
+#[derive(Default)]
+pub struct ProgressGate {
+    phase: String,
+    at: std::time::Duration,
+}
+
+impl ProgressGate {
+    pub fn allow(&mut self, phase: &str, now: std::time::Duration) -> bool {
+        if self.phase != phase || now.saturating_sub(self.at) >= std::time::Duration::from_secs(1) {
+            self.phase = phase.to_owned();
+            self.at = now;
+            true
+        } else {
+            false
+        }
+    }
+}
+
 #[must_use]
 pub fn machine_event_detail(
     job: &str,
@@ -141,18 +159,6 @@ pub fn show_progress(level: &str) -> bool {
     log_level_rank(level) >= 2
 }
 
-/// Extra per-run diagnostics show at debug and above.
-#[must_use]
-pub fn is_verbose(level: &str) -> bool {
-    log_level_rank(level) >= 3
-}
-
-/// Full event payloads show at trace only.
-#[must_use]
-pub fn is_trace(level: &str) -> bool {
-    log_level_rank(level) >= 4
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,11 +179,6 @@ mod tests {
         assert!(!show_progress("warn"));
         assert!(show_progress("info"));
         assert!(show_progress("debug"));
-        assert!(!is_verbose("info"));
-        assert!(is_verbose("debug"));
-        assert!(is_verbose("trace"));
-        assert!(!is_trace("debug"));
-        assert!(is_trace("trace"));
     }
 
     #[test]

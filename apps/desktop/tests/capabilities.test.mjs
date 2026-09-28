@@ -25,6 +25,7 @@ function assertNoTrailingSpaces(content, label) {
 }
 
 const EXPECTED_COMMANDS = [
+  "get_job_diagnostics",
   "job_command",
   "open_saved_output",
   "release_job",

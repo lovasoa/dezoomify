@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ACTIVITY_MAX_LOG_LINES, createJobActivity } from "../src/job-activity.ts";
+import { createJobActivity } from "../src/job-activity.ts";
 
 function tracker(now = { at: 1000 }) {
   const frames = [];
@@ -37,7 +37,6 @@ test("reset initializes the job view state", () => {
   assert.equal(activity.state.url, "https://a.test/");
   assert.equal(activity.state.timeoutMs, 30000);
   assert.equal(activity.state.pendingRequests, 0);
-  assert.deepEqual(activity.state.log, []);
 });
 
 test("request clocks drive pending and longest-wait gauges", () => {
@@ -55,15 +54,13 @@ test("request clocks drive pending and longest-wait gauges", () => {
   assert.equal(t.activity.state.failedRequests, 1);
 });
 
-test("touch and logs batch paints and cap lines", () => {
+test("progress updates batch paints", () => {
   const t = tracker();
   t.activity.reset("https://a.test/", 30000);
   const before = t.updates;
   t.activity.touchProgress();
   assert.ok((t.activity.state.lastProgressAt ?? 0) > 0);
   assert.equal(t.updates, before);
-  for (let i = 0; i < ACTIVITY_MAX_LOG_LINES + 10; i++) t.activity.pushLog(`line ${i}`);
-  assert.equal(t.activity.state.log?.length, ACTIVITY_MAX_LOG_LINES);
   t.activity.scheduleUpdate();
   t.activity.scheduleUpdate();
   assert.equal(t.frames.length, 1);
@@ -103,8 +100,6 @@ test("pause excludes paused time from elapsed and pending clocks", () => {
   assert.equal(t.activity.state.paused, true);
   assert.equal(t.activity.state.pausedAt, 1500);
   t.now.at += 5000;
-  t.activity.pushLog("still paused");
-  assert.match(t.activity.state.log.at(-1), /^1s:/);
   t.activity.resume();
   assert.equal(t.activity.state.paused, false);
   assert.equal(t.activity.state.pausedDurationMs, 5000);

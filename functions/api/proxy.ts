@@ -85,6 +85,7 @@ export async function onRequestPost(context: { request: Request }): Promise<Resp
       code: result.code ?? "PROXY_ERROR",
       ...(result.reason !== undefined ? { reason: result.reason } : {}),
       requestId: result.requestId,
+      ...(result.preview ? { preview: result.preview } : {}),
     },
     { status: result.status, headers: result.headers },
   );

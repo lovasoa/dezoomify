@@ -230,6 +230,36 @@ export interface Progress {
     total: number | undefined;
 }
 
+/**
+ * Versioned, local-only support report. Limits include protected evidence.
+ */
+export interface DiagnosticReport {
+    schema_version: number;
+    id: string;
+    context: Record<string, DiagnosticValue>;
+    counters: Record<string, number>;
+    failures: DiagnosticFailureGroup[];
+    records: DiagnosticRecord[];
+    outcome: DiagnosticRecord | undefined;
+    omitted_records: number;
+    truncated_fields: number;
+}
+
+export interface DiagnosticFailureGroup {
+    key: string;
+    count: number;
+    first: DiagnosticRecord;
+    last: DiagnosticRecord;
+}
+
+export interface DiagnosticRecord {
+    sequence: number;
+    elapsed_ms: number;
+    level: DiagnosticLevel;
+    event: string;
+    fields: Record<string, DiagnosticValue>;
+}
+
 export interface Error {
     code: string;
     phase: ErrorPhase;
@@ -292,6 +322,10 @@ export interface SessionConfig {
 }
 
 export type BlockedReason = "access-required" | "blocked-ipv4" | "blocked-ipv6" | "cancelled" | "content-type" | "dns-rebinding" | "dns-rebinding-v6" | "forbidden" | "invalid-url" | "limit-exceeded" | "loopback-host" | "malformed" | "malformed-body" | "method" | "network" | "non-standard-port" | "origin" | "private-host" | "protocol-version" | "redirect-limit" | "redirect-target" | "redirect-unavailable" | "scheme" | "signed-query" | "source-document-lost" | "throttled" | "userinfo";
+
+export type DiagnosticLevel = "trace" | "debug" | "info" | "warn" | "error";
+
+export type DiagnosticValue = string | number | boolean;
 
 export type DispatchResult = { status: "ok"; messages: HostEffect[]; snapshot: Snapshot } | { status: "error"; error: Error };
 

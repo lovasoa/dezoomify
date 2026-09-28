@@ -5,6 +5,7 @@
 #![deny(clippy::unwrap_used)]
 
 mod arguments;
+mod diagnostics;
 mod report;
 
 use std::collections::BTreeMap;
@@ -12,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use arguments::Args;
-use dezoomify_native::{start_job, JobOptions, OutputTarget};
+use dezoomify_native::{start_job_with_diagnostics, JobOptions, OutputTarget};
 
 /// Minimum-interval pacing between bulk images. Ports the reference
 /// `Throttler` idea synchronously for bulk image pacing; per-tile request
@@ -60,6 +61,10 @@ fn main() {
             std::process::exit(2);
         }
     };
+    if let Err(error) = diagnostics::prepare(&parsed) {
+        eprintln!("error: {error}");
+        std::process::exit(2);
+    }
     if parsed.is_bulk_mode() {
         run_bulk(parsed);
         return;
@@ -287,41 +292,18 @@ fn job_options_for(parsed: &Args, input: &str, output: &Path) -> JobOptions {
     }
 }
 
-/// Extra human diagnostics for `--logging debug`/`trace` on stderr.
-/// Never includes headers, credentials, URLs, or paths: only numeric and
-/// selection config. Machine `--json` stdout is never touched.
-fn emit_verbose_diagnostics(level: &str, parsed: &Args) {
-    if report::is_verbose(level) {
-        eprintln!(
-            "debug format={} retries={} parallelism={} largest={} logging={}",
-            parsed.format, parsed.retries, parsed.parallelism, parsed.largest, parsed.logging,
-        );
-    }
-    if report::is_trace(level) {
-        eprintln!(
-            "trace max_width={:?} max_height={:?} zoom_level={:?} image_index={:?} compression={} retry_delay={:?} min_interval={:?} timeout={:?} connect_timeout={:?} max_idle_per_host={}",
-            parsed.max_width,
-            parsed.max_height,
-            parsed.zoom_level,
-            parsed.image_index,
-            parsed.compression,
-            parsed.retry_delay,
-            parsed.min_interval,
-            parsed.timeout,
-            parsed.connect_timeout,
-            parsed.max_idle_per_host,
-        );
-    }
-}
-
 fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
     let level = parsed.logging.as_str();
-    emit_verbose_diagnostics(level, parsed);
     let json = parsed.json;
     let keep_partial = parsed.keep_partial;
-    let job = match start_job(job_options_for(parsed, input, output)) {
+    let diagnostics = diagnostics::start(parsed);
+    let job = match start_job_with_diagnostics(
+        job_options_for(parsed, input, output),
+        diagnostics.clone(),
+    ) {
         Ok(job) => job,
         Err(error) => {
+            diagnostics::save(&diagnostics);
             eprintln!("error: {} ({})", error.message, error.code);
             return false;
         }
@@ -336,10 +318,14 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
     // (`tile.download-failed`, no output).
     let terminal_seq: u64;
     let mut first = true;
+    let started = Instant::now();
+    let mut progress = report::ProgressGate::default();
     loop {
         let snapshot = match job.snapshots().recv() {
             Ok(snapshot) => snapshot,
             Err(_) => {
+                diagnostics.finish("runtime-failed", serde_json::json!({"code": "native.internal", "message": "job ended without a terminal event"}));
+                diagnostics::save(&diagnostics);
                 eprintln!("error: job ended without a terminal event (native.internal)");
                 return false;
             }
@@ -354,6 +340,7 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
             } else {
                 RecoveryChoice::Discard
             };
+            diagnostics.record(dezoomify::model::DiagnosticLevel::Info, "partial-answer", serde_json::json!({"generation": generation, "initiator": "policy", "decision": choice}));
             let _ = job.send(dezoomify_native::UserCommand::AnswerPartial {
                 generation,
                 decision: choice,
@@ -380,6 +367,9 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
             continue;
         }
         let (kind, detail) = progress_view(&snapshot);
+        if !json && !progress.allow(kind, started.elapsed()) {
+            continue;
+        }
         print_snapshot(
             json,
             &snapshot.job,
@@ -392,7 +382,9 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
     // `join` owns quiescence and cleanup; its publication agrees with the
     // streamed terminal (native publication that won the cancel race, or
     // `job.cancelled`/typed failure with nothing published).
-    match job.join() {
+    let result = job.join();
+    diagnostics::save(&diagnostics);
+    match result {
         Ok(summary) => {
             if json {
                 println!(
@@ -482,7 +474,6 @@ fn snapshot_kind(lifecycle: &dezoomify::model::JobState) -> &'static str {
 
 fn run_bulk(parsed: Args) {
     let level = parsed.logging.clone();
-    emit_verbose_diagnostics(&level, &parsed);
     let bulk_arg = parsed.bulk.clone().unwrap_or_default();
     let entries = match load_bulk_entries(&bulk_arg, &parsed.headers, parsed.accept_invalid_certs) {
         Ok(entries) => entries,
@@ -628,9 +619,18 @@ fn run_one_bulk_image(
     // bulk-item lines on stdout, so event details never pollute JSON.
     let show = !parsed.json;
     let logging = parsed.logging.clone();
-    let job = match start_job(job_options_for(parsed, url, Path::new(output))) {
+    let diagnostics = diagnostics::start(parsed);
+    let started = Instant::now();
+    let mut progress = report::ProgressGate::default();
+    let job = match start_job_with_diagnostics(
+        job_options_for(parsed, url, Path::new(output)),
+        diagnostics.clone(),
+    ) {
         Ok(job) => job,
-        Err(error) => return Err((error.code, error.message)),
+        Err(error) => {
+            diagnostics::save(&diagnostics);
+            return Err((error.code, error.message));
+        }
     };
     if show {
         print_snapshot(false, &job.id, 1, "started", &BTreeMap::new(), &logging);
@@ -639,6 +639,8 @@ fn run_one_bulk_image(
         let snapshot = match job.snapshots().recv() {
             Ok(snapshot) => snapshot,
             Err(_) => {
+                diagnostics.finish("runtime-failed", serde_json::json!({"code": "native.internal", "message": "job ended without a terminal event"}));
+                diagnostics::save(&diagnostics);
                 return Err((
                     "native.internal".to_string(),
                     "job ended without a terminal event".to_string(),
@@ -653,6 +655,7 @@ fn run_one_bulk_image(
             } else {
                 RecoveryChoice::Discard
             };
+            diagnostics.record(dezoomify::model::DiagnosticLevel::Info, "partial-answer", serde_json::json!({"generation": generation, "initiator": "policy", "decision": choice}));
             let _ = job.send(dezoomify_native::UserCommand::AnswerPartial {
                 generation,
                 decision: choice,
@@ -665,7 +668,7 @@ fn run_one_bulk_image(
             let (kind, detail) = progress_view(&snapshot);
             // The `started` marker above covers revision 0/1; print later
             // revisions once, not twice.
-            if snapshot.snapshot.revision > 1 {
+            if snapshot.snapshot.revision > 1 && progress.allow(kind, started.elapsed()) {
                 print_snapshot(
                     false,
                     &snapshot.job,
@@ -677,7 +680,9 @@ fn run_one_bulk_image(
             }
         }
     }
-    match job.join() {
+    let result = job.join();
+    diagnostics::save(&diagnostics);
+    match result {
         Ok(summary) => Ok((
             summary.tile_count,
             summary.path.to_string_lossy().into_owned(),
@@ -714,11 +719,6 @@ fn print_snapshot(
         eprintln!("{kind} {job}");
     } else {
         eprintln!("{kind} {job} {flat}");
-    }
-    if report::is_trace(logging) {
-        if let Ok(payload) = serde_json::to_string(detail) {
-            eprintln!("trace {kind} {job} {payload}");
-        }
     }
 }
 

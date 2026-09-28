@@ -22,6 +22,7 @@ options:
   --timeout <duration>        max time for one request (default 30s)
   --connect-timeout <duration> max time to connect (default 6s)
   --logging <level>           log verbosity: error, warn, info, debug, trace (default info)
+  --diagnostics <path>        write JSONL support reports to a new file
   -c, --tile-cache <dir>      resume folder reusing downloaded tiles
   --keep-partial              keep partial output with blank regions on tile failure (default,
                               saved to a .partial sibling: out.png becomes out.partial.png)

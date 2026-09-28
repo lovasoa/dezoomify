@@ -12,7 +12,7 @@
 // Persistence is the webview local file (localStorage key
 // `dezoomify.desktop.settings.v1`), validated on load with fail-closed to
 // defaults. No Tauri store plugin is required. Header values never enter
-// logs, diagnostics, or cache keys; use describeSettingsForLog.
+// logs, diagnostics, or cache keys.
 //
 // Keep erasable syntax only so node type-stripping can read this file. No
 // imports from apps/web, apps/extension, or browser-runtime. No fetch/XHR.
@@ -456,21 +456,6 @@ export function settingsToInvokeArgs(settings: DesktopSettings): Record<string, 
     cache_dir: settings.cache_dir,
     headers: { ...settings.headers },
   };
-}
-
-// Redacted one-line summary for logs and diagnostics: numeric fields plus
-// presence flags and header names only. Never header values.
-export function describeSettingsForLog(settings: DesktopSettings): string {
-  const names = Object.keys(settings.headers).sort();
-  const max_width = settings.max_width === null ? "none" : String(settings.max_width);
-  const max_height = settings.max_height === null ? "none" : String(settings.max_height);
-  const output_dir = settings.output_dir === null ? "unset" : "set";
-  const cache_dir = settings.cache_dir === null ? "unset" : "set";
-  return (
-    `output_format=${settings.output_format} compression=${settings.compression} retries=${settings.retries} network=${settings.network_profile} ` +
-    `max_width=${max_width} max_height=${max_height} output_dir=${output_dir} ` +
-    `cache_dir=${cache_dir} headers=${names.length} [${names.join(",")}]`
-  );
 }
 
 // Native directory picker via the Tauri dialog plugin (`dialog:allow-open`).

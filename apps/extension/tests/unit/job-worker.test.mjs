@@ -10,11 +10,9 @@ await wasm.default({
 
 test("worker and generated WASM complete the first discovery round trip", async () => {
   const sent = [];
-  const logs = [];
   const host = createJobWorkerHost({
     postMessage: (message) => sent.push(message),
     wasm: async () => wasm,
-    log: (level, code, detail) => logs.push({ level, code, detail }),
   });
   await host.onMessage({
     type: "engine.start",
@@ -50,10 +48,6 @@ test("worker and generated WASM complete the first discovery round trip", async 
     entries.some((entry) => entry?.kind === "image"),
     JSON.stringify(sent),
   );
-  const codes = logs.map((entry) => entry.code);
-  assert.ok(codes.includes("session-created"));
-  assert.ok(codes.includes("command-dispatched"));
-  assert.ok(codes.includes("messages-returned"));
 });
 
 test("worker disposal is repeat-safe and does not manufacture effects", async () => {
@@ -83,7 +77,6 @@ test("worker disposal is repeat-safe and does not manufacture effects", async ()
 
 test("worker preserves typed WASM diagnostics", async () => {
   const sent = [];
-  const logs = [];
   class Session {
     constructor() {}
     command() {
@@ -102,14 +95,12 @@ test("worker preserves typed WASM diagnostics", async () => {
   const host = createJobWorkerHost({
     postMessage: (message) => sent.push(message),
     wasm: async () => ({ Session }),
-    log: (level, code, detail) => logs.push({ level, code, detail }),
   });
   await host.onMessage({
     type: "engine.start",
     jobId: "job:one",
     inputs: [{ url: "https://example.test/image.dzi" }],
   });
-  assert.ok(logs.some((entry) => entry.code === "core-error" && entry.level === "error"));
   assert.deepEqual(sent, [
     {
       type: "engine.error",

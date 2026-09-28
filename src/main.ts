@@ -26,6 +26,12 @@ import {
   toHistoryEntry,
 } from "../packages/app-model/src/index.ts";
 import { saveBlobViaAnchor } from "../packages/browser-runtime/src/canvas-save.ts";
+import {
+  copyDiagnosticText,
+  createAttemptDiagnostics,
+  retainDiagnostics,
+  saveDiagnosticReport,
+} from "../packages/browser-runtime/src/diagnostics.ts";
 import type { StructuredFailure } from "../packages/browser-runtime/src/failure.ts";
 import {
   type BrowserAssemblyArgs,
@@ -40,7 +46,6 @@ import {
   MAXIMUM_SELECTION_LIMITS,
   selectionLimitsFor,
 } from "../packages/browser-runtime/src/limits.ts";
-import { createLogger } from "../packages/browser-runtime/src/logging.ts";
 import {
   desktopHandoffLink,
   isLocalFileUrl,
@@ -82,12 +87,7 @@ import {
   isActiveJobStatus,
   jobPageTitle,
 } from "../packages/shared-ui/src/view-helpers.ts";
-import {
-  classifyReadableBytes,
-  noImageFoundError,
-  RATE_LIMITED_BY_SITE_MESSAGE,
-  SITE_BUSY_MESSAGE,
-} from "./discovery.ts";
+import { RATE_LIMITED_BY_SITE_MESSAGE, SITE_BUSY_MESSAGE } from "./discovery.ts";
 import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.ts";
 import { createProxyTransport, PROXY_METADATA_MAX_BYTES } from "./proxyTransport.ts";
 import { createWebQueue, enqueueWebQueue } from "./queue.ts";
@@ -96,6 +96,7 @@ const preview = createPreviewControls();
 
 function newAttempt() {
   const attempt = {
+    diagnostics: createAttemptDiagnostics("website"),
     retired: false,
     settle: () => {},
     jobHandle: null as JobHandle | null,
@@ -108,15 +109,6 @@ function newAttempt() {
     pendingRecoveryGeneration: null as number | null,
     activeAssembly: null as ReturnType<typeof createBrowserAssembly> | null,
     jobActivity: null! as ReturnType<typeof createJobActivity>,
-    tileAttempts: 0,
-    metadataAttempts: [] as Array<{
-      at: number;
-      transport: string;
-      target: string;
-      outcome: string;
-      durationMs: number;
-      bytes?: number;
-    }>,
     tileThrottle: createTileThrottle(),
     webFetcher: null! as WebFetcher,
     viewCtx: createViewContext(),
@@ -136,6 +128,8 @@ function owns(attempt: WebAttempt): boolean {
 }
 
 function retireAttempt(): void {
+  currentAttempt.diagnostics.finish("retired", { reason: "replaced-or-reset" });
+  retainDiagnostics(currentAttempt.diagnostics);
   currentAttempt.retired = true;
   currentAttempt.settle();
   currentAttempt.jobActivity.stopHeartbeat();
@@ -210,61 +204,10 @@ function recordWebHistory(url: string, width: number, height: number, format: st
 let webQueue = createWebQueue();
 
 // --- Live job activity (drives the progressive-disclosure job view) ---
-// Shared structured logger: console output plus the same lines mirrored into
-// the job view's technical-details log (and copied diagnostics). The `web`
-// context is the default here, so lines carry no bracket; runtime lines from
-// the shared fetchers/painters join under the `runtime` code.
-const webLog = createLogger("web", { defaultContext: "web" });
-webLog.addSink((entry) => currentAttempt.jobActivity.pushLog(entry.line));
 function resetActivity(url: string): void {
-  currentAttempt.tileAttempts = 0;
-  currentAttempt.metadataAttempts.length = 0;
   currentAttempt.jobActivity.reset(url, REQUEST_TIMEOUT_MS);
   currentAttempt.jobActivity.state.detail = `Contacting ${hostOf(url)}…`;
   currentAttempt.viewCtx.jobActivity = currentAttempt.jobActivity.state;
-}
-
-/** Keep diagnostics bounded and useful without retaining individual tile URLs. */
-function refreshDiagnostics(attempt = currentAttempt): void {
-  const a = attempt.jobActivity.state;
-  const lines: string[] = [];
-  if (attempt.metadataAttempts.length > 0) {
-    lines.push("Metadata requests");
-    for (const entry of attempt.metadataAttempts) {
-      const size =
-        entry.bytes === undefined ? "" : ` · ${Math.max(1, Math.round(entry.bytes / 1024))} KB`;
-      lines.push(
-        `+${(entry.at / 1000).toFixed(1)} s  ${entry.target}  ${entry.transport}  ${entry.outcome}  ${entry.durationMs} ms${size}`,
-      );
-    }
-  }
-  if (attempt.tileAttempts > 0) {
-    if (lines.length > 0) lines.push("");
-    lines.push("Tile acquisition");
-    lines.push(`${attempt.tileAttempts} one-attempt requests`);
-  }
-  a.diagnostics = lines.join("\n");
-}
-
-function recordMetadataAttempt(
-  startedAt: number,
-  transport: "direct" | "metadata proxy",
-  target: string,
-  outcome: string,
-  bytes: number | undefined,
-  attempt: WebAttempt,
-): void {
-  attempt.metadataAttempts.push({
-    at: Math.max(0, startedAt - (attempt.jobActivity.state.startedAt ?? startedAt)),
-    transport,
-    target,
-    outcome,
-    durationMs: Math.max(0, Date.now() - startedAt),
-    ...(typeof bytes === "number" ? { bytes } : {}),
-  });
-  if (attempt.metadataAttempts.length > 20)
-    attempt.metadataAttempts.splice(0, attempt.metadataAttempts.length - 20);
-  refreshDiagnostics(attempt);
 }
 
 // The product-specific proxy transport owns the actual /api/proxy POST.
@@ -277,30 +220,20 @@ const proxyTransport = createProxyTransport(fetch, {
 
 function makeWebFetcher(attempt: WebAttempt): WebFetcher {
   return createWebFetcher({
+    diagnostics: attempt.diagnostics,
     proxyTransport,
     isProxyEligible,
-    classifyHint: (bytes, info) => classifyReadableBytes(bytes, info),
     hooks: {
       onRequestStart: (label) => attempt.jobActivity.noteRequestStart(label),
       onRequestEnd: (id, ok) => attempt.jobActivity.noteRequestEnd(id, ok),
-      onLog: (line) => {
-        if (owns(attempt)) webLog.info("runtime", line);
-      },
       onUpdate: () => {
         if (owns(attempt)) update();
-      },
-      onMetadataAttempt: ({ startedAt, transport, target, outcome, bytes }) =>
-        recordMetadataAttempt(startedAt, transport, target, outcome, bytes, attempt),
-      onTileAttempt: () => {
-        attempt.tileAttempts += 1;
-        refreshDiagnostics(attempt);
       },
     },
     messages: {
       rateLimitedBySite: RATE_LIMITED_BY_SITE_MESSAGE,
       siteBusy: SITE_BUSY_MESSAGE,
-      discoveryFailed: (_via) =>
-        noImageFoundError().message ?? "No zoomable image was found at this address.",
+      discoveryFailed: (_via) => "No zoomable image was found at this address.",
     },
     throttle: (url) => attempt.tileThrottle.throttle(url),
   });
@@ -370,16 +303,12 @@ function createAssembly(
       recordWebHistory(sourceUrl, dims?.width ?? 0, dims?.height ?? 0, "display");
       update();
     },
-    log: (line) => {
-      if (owns(attempt)) webLog.info("runtime", line);
-    },
   });
 }
 
 /** Shared presenter for engine failures: headline plus stable classification. */
 function presentEngineFailure(error: EngineError, url: string): void {
   const code = error.code;
-  webLog.error("failed", `code=${code} message=${error.message}`);
   if (wantsDesktopHandoff(code)) {
     const link = desktopHandoffLink(url);
     if (link !== "") {
@@ -511,6 +440,11 @@ async function runJob(url: string, origin = url): Promise<void> {
   attempt.webFetcher.resetActiveTransport();
   attempt.tileThrottle.reset();
   resetActivity(origin);
+  attempt.diagnostics.context({
+    input: origin,
+    effective_input: url,
+    selection_policy: tryMaximumNext ? "maximum" : "automatic",
+  });
   setCanvasVisible(document, false);
   preview.resetTransform(document);
   attempt.activeSnapshot = null;
@@ -538,6 +472,7 @@ async function runJob(url: string, origin = url): Promise<void> {
 
   const onHostFailure = (error: unknown): void => {
     if (!owns(attempt)) return;
+    attempt.diagnostics.finish("runtime-failed", error);
     if (attempt.hostFailure || attempt.activeSnapshot?.terminal) return;
     const structured = error as {
       code?: unknown;
@@ -546,7 +481,6 @@ async function runJob(url: string, origin = url): Promise<void> {
       retryable?: unknown;
     };
     const code = typeof structured?.code === "string" ? structured.code : "OUTPUT_FAILED";
-    webLog.error("host-failure", `code=${code} message=${String(structured?.message ?? code)}`);
     if (wantsDesktopHandoff(code)) {
       const link = desktopHandoffLink(origin);
       if (link !== "") {
@@ -574,15 +508,13 @@ async function runJob(url: string, origin = url): Promise<void> {
   // The service is the browser JobService; the observer below renders and
   // drives product side effects.
   const service = createBrowserJobService({
+    diagnostics: attempt.diagnostics,
     createWorker: () => new Worker(new URL("./worker.js", import.meta.url), { type: "module" }),
     fetchResource: (request, signal) => attempt.webFetcher.fetchResource(request, signal),
     loadDisplayImage: (tileUrl: string, signal: AbortSignal) =>
       loadTileImage(tileUrl, {
         signal,
         hooks: {
-          onLog: (line) => {
-            if (owns(attempt) && attempt.jobHandle) webLog.info("runtime", line);
-          },
           onRequestStart: (label) => attempt.jobActivity.noteRequestStart(label),
           onRequestEnd: (id, ok) => attempt.jobActivity.noteRequestEnd(id, ok),
           onUpdate: () => {
@@ -616,6 +548,11 @@ async function runJob(url: string, origin = url): Promise<void> {
     },
     quotas: { max_concurrent_fetches: websiteTileConcurrency() },
     onRecoveryRequested: (generation) => {
+      attempt.diagnostics.record("info", "partial-answer", {
+        generation,
+        decision: "discard",
+        initiator: "policy",
+      });
       // Website policy answers partial decisions immediately as discard;
       // the engine owns the consequence.
       if (!owns(attempt)) return;
@@ -624,9 +561,6 @@ async function runJob(url: string, origin = url): Promise<void> {
       } else {
         attempt.pendingRecoveryGeneration = generation;
       }
-    },
-    log: (level, code, detail) => {
-      if (owns(attempt)) webLog.log(level, code, detail);
     },
   });
 
@@ -729,11 +663,7 @@ async function runJob(url: string, origin = url): Promise<void> {
       attempt.displayOnlyActive = false;
       attempt.hostFailure = null;
     }
-    const summary = summarizeQueue(webQueue);
-    webLog.info(
-      "queue",
-      `succeeded=${summary.succeeded} failed=${summary.failed} pending=${summary.pending}`,
-    );
+    attempt.diagnostics.record("info", "queue", summarizeQueue(webQueue));
     void runJob(next.url);
   }
 }
@@ -758,7 +688,7 @@ function submitQueuedUrl(url: string): void {
   // Queued behind the active job: no hash write, no cancel of the running
   // job. The hash stays owned by the active URL until it settles.
   const position = webQueue.entries.filter((e) => e.status === "queued").length;
-  webLog.info("queued", `url=${url} position=${position}`);
+  currentAttempt.diagnostics.record("info", "queued", { url, position });
   update();
 }
 
@@ -803,6 +733,8 @@ function update(): void {
   if (!appContainer) return;
   const attempt = currentAttempt;
   const presentation = currentPresentation();
+  if (presentation.terminal?.error)
+    attempt.diagnostics.finish("failed", presentation.terminal.error);
   // In-flight tile count rides the context; counts come from the snapshot.
   // Telemetry (pending requests, progress text) never gates engine commands.
   const keptMessage = attempt.viewCtx.currentProgress?.message;
@@ -863,14 +795,12 @@ function update(): void {
         // canvas is retained, resume re-drives the FIFO queue.
         void attempt.jobHandle?.command({ type: "pause" });
         attempt.jobActivity.pause();
-        webLog.info("paused", "no new pieces are being fetched");
         update();
       },
       onResume() {
         if (!owns(attempt)) return;
         void attempt.jobHandle?.command({ type: "resume" });
         attempt.jobActivity.resume();
-        webLog.info("resumed", "fetching queued pieces again");
         update();
       },
       onCancel() {
@@ -908,6 +838,10 @@ function update(): void {
       onSave() {
         if (!owns(attempt)) return;
         if (!attempt.resultBlobUrl) return;
+        attempt.diagnostics.record("info", "save-requested", {
+          disposition: "browser-save-initiated",
+          confirmed: false,
+        });
         saveBlobViaAnchor(
           document,
           attempt.resultBlobUrl,
@@ -916,40 +850,8 @@ function update(): void {
           attempt.resultTitle,
         );
       },
-      onCopyDiagnostics(text: string) {
-        const btn = document.getElementById("dz-btn-copy-diagnostics");
-        const done = () => {
-          if (btn) {
-            btn.setAttribute("title", "Copied");
-            btn.setAttribute("aria-label", "Copied");
-            setTimeout(() => {
-              try {
-                if (btn.isConnected) {
-                  btn.setAttribute("title", "Copy technical details");
-                  btn.setAttribute("aria-label", "Copy technical details");
-                }
-              } catch {
-                // Button may be gone after re-render; ignore.
-              }
-            }, 2000);
-          }
-        };
-        try {
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            (navigator.clipboard.writeText(text) as Promise<void>).then(done, done);
-          } else if (text) {
-            const ta = document.createElement("textarea");
-            ta.value = text;
-            document.body.appendChild(ta);
-            ta.select();
-            document.execCommand("copy");
-            ta.remove();
-            done();
-          }
-        } catch {
-          // Copy failures stay silent; the address bar link still works.
-        }
-      },
+      onCopyDiagnostics: copyDiagnosticText,
+      onSaveDiagnostics: saveDiagnosticReport,
       onOpenExternalLink(url: string) {
         // Display-only desktop handoff: plain navigation to the
         // `dezoomify://` link, never a proxied tile fetch.
@@ -968,7 +870,7 @@ function update(): void {
         update();
       },
     },
-    attempt.viewCtx,
+    { ...attempt.viewCtx, diagnosticReport: attempt.diagnostics.report() },
   );
 }
 

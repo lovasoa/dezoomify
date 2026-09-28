@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-const APP_VERSION: &str = match option_env!("DEZOOMIFY_VERSION") {
+pub(crate) const APP_VERSION: &str = match option_env!("DEZOOMIFY_VERSION") {
     Some(version) => version,
     None => env!("CARGO_PKG_VERSION"),
 };
@@ -59,6 +59,7 @@ pub struct Args {
     /// Log verbosity: error, warn, info, debug, trace (default info).
     /// Controls human stderr verbosity; `--json` stdout is unchanged.
     pub logging: String,
+    pub diagnostics: Option<PathBuf>,
     /// Degree of parallelism, wired to native `max_concurrent`.
     pub parallelism: usize,
     /// Resume folder wired to native `cache_dir`.
@@ -140,6 +141,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     let mut timeout = Duration::from_secs(30);
     let mut connect_timeout = Duration::from_secs(6);
     let mut logging = "info".to_string();
+    let mut diagnostics = None;
     let mut parallelism: usize = 16;
     let mut tile_cache: Option<PathBuf> = None;
     let mut bulk: Option<String> = None;
@@ -270,6 +272,13 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                 }
                 logging = validate_logging(&raw)?;
             }
+            "--diagnostics" => {
+                let raw = take_value(args, &mut i, inline_value, "--diagnostics")?;
+                if raw.is_empty() {
+                    return Err("missing value for --diagnostics".into());
+                }
+                diagnostics = Some(PathBuf::from(raw));
+            }
             "--tile-cache" | "-c" => {
                 let raw = take_value(args, &mut i, inline_value, "--tile-cache")?;
                 if raw.is_empty() {
@@ -357,6 +366,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         timeout,
         connect_timeout,
         logging,
+        diagnostics,
         parallelism,
         tile_cache,
         bulk,
@@ -547,6 +557,7 @@ fn help() -> String {
         "  --timeout <duration>        max time for one request (default 30s)",
         "  --connect-timeout <duration> max time to connect (default 6s)",
         "  --logging <level>           log verbosity: error, warn, info, debug, trace (default info)",
+        "  --diagnostics <path>        write JSONL support reports to a new file",
         "  -c, --tile-cache <dir>      resume folder reusing downloaded tiles",
         "  --keep-partial              keep partial output with blank regions on tile failure (default,",
         "                              saved to a .partial sibling: out.png becomes out.partial.png)",

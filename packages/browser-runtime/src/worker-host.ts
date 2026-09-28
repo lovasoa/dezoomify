@@ -18,12 +18,6 @@ import type {
 import type { DispatchTable } from "./typed-dispatch.ts";
 import { dispatchTyped } from "./typed-dispatch.ts";
 
-export type WorkerHostLog = (
-  level: "debug" | "info" | "warn" | "error",
-  code: string,
-  detail?: unknown,
-) => void;
-
 function abiFault(error: unknown): EngineError {
   const detail = error instanceof Error ? error.message : String(error);
   return {
@@ -72,25 +66,17 @@ export type WorkerHostOutput =
   | { type: "engine.processed"; requestId: number; bytes: ArrayBuffer }
   | { type: "engine.process-failed"; requestId: number; error: EngineError }
   | { type: "engine.ranked"; requestId: number; urls: string[] }
-  | { type: "engine.error"; error: EngineError }
-  | { type: "engine.log"; line: string };
+  | { type: "engine.error"; error: EngineError };
 
 export function createJobWorkerHost(deps: {
   postMessage(message: WorkerHostOutput, transfer?: Transferable[]): void;
   wasm(): Promise<WorkerHostWasm>;
-  log?: WorkerHostLog;
 }) {
-  const log: WorkerHostLog = deps.log ?? (() => {});
   let session: WasmSession | null = null;
   let disposed = false;
 
   function publish(result: DispatchResult): void {
     if (result.status === "error") {
-      log(
-        "error",
-        "core-error",
-        `code=${result.error.code} phase=${result.error.phase} message=${result.error.message}`,
-      );
       deps.postMessage({ type: "engine.error", error: result.error });
       return;
     }
@@ -100,24 +86,16 @@ export function createJobWorkerHost(deps: {
     // produced no messages: the snapshot is the only job-state object and
     // the UI renders it directly. Stale revisions are dropped at the
     // runner edge, never here.
-    log("debug", "messages-returned", `effects=${messages.length} revision=${snapshot.revision}`);
     deps.postMessage({ type: "engine.messages", messages, snapshot });
   }
 
   function dispatch(command: JobCommand): void {
     if (!session || disposed) return;
-    log("debug", "command-dispatched", `command=${command.type}`);
     publish(session.command(command));
   }
 
   function complete(completion: HostCompletion): void {
     if (!session || disposed) return;
-    const request = "request" in completion ? completion.request : undefined;
-    log(
-      "debug",
-      "completion-dispatched",
-      `completion=${completion.type}${request === undefined ? "" : ` request=${request}`}`,
-    );
     publish(session.complete(completion));
   }
 
@@ -128,7 +106,6 @@ export function createJobWorkerHost(deps: {
     if (disposed) return;
     await wasm.default?.();
     session = new wasm.Session(message.quotas ?? {});
-    log("info", "session-created", `jobId=${String(message.jobId)} typed-abi=true`);
     dispatch({ type: "start", inputs: message.inputs });
   }
 
@@ -206,7 +183,6 @@ export function createJobWorkerHost(deps: {
     "engine.command": (input) => dispatch(input.command),
     "engine.finalize": (input) => complete(input.outcome),
     "engine.dispose": () => {
-      log("info", "session-disposed", "");
       disposed = true;
       try {
         if (session) publish(session.dispose());
@@ -224,11 +200,6 @@ export function createJobWorkerHost(deps: {
         await dispatchTyped(messageHandlers, input);
       } catch (error) {
         const failure = abiFault(error);
-        log(
-          "error",
-          "core-error",
-          `code=${failure.code} phase=${failure.phase} message=${failure.message} detail=${failure.detail ?? ""}`,
-        );
         deps.postMessage({ type: "engine.error", error: failure });
       }
     },

@@ -109,6 +109,7 @@ impl Default for FetchLimits {
 /// Result of one logical fetch: final (post-redirect) URI plus body bytes.
 #[derive(Clone, Debug)]
 pub struct FetchOutcome {
+    pub content_type: Option<String>,
     pub status: u16,
     pub final_uri: String,
     pub body: Vec<u8>,

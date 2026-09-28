@@ -10,16 +10,19 @@ import {
   type BrowserAssemblyArgs,
   browserLimitsFor,
   type ClientHints,
+  copyDiagnosticText,
+  createAttemptDiagnostics,
   createBrowserAssembly,
   createBrowserJobService,
   desktopHandoffLink,
   loadTileImage,
   MAXIMUM_SELECTION_LIMITS,
   originOfUrl,
+  retainDiagnostics,
+  saveDiagnosticReport,
   selectionLimitsFor,
   wantsDesktopHandoff,
 } from "@dezoomify/browser-runtime";
-import { createLogger } from "@dezoomify/browser-runtime/logging";
 import type {
   PresentationStatus,
   ViewContext as SharedViewContext,
@@ -51,6 +54,7 @@ type ViewContext = SharedViewContext & { failure?: StructuredError };
 
 function newAttempt() {
   return {
+    diagnostics: createAttemptDiagnostics("extension", api.runtime.getManifest().version),
     retired: false,
     startedAt: Date.now(),
     jobHandle: null as JobHandle | null,
@@ -61,7 +65,6 @@ function newAttempt() {
     savedDownloadId: null as number | null,
     attemptSourceUrl: "",
     testCompletionNotified: false,
-    uiLogLines: [] as string[],
   };
 }
 type ExtensionAttempt = ReturnType<typeof newAttempt>;
@@ -69,17 +72,6 @@ let currentAttempt = newAttempt();
 function owns(attempt: ExtensionAttempt): boolean {
   return currentAttempt === attempt && !attempt.retired;
 }
-
-const jobLog = createLogger("job");
-// Mirror accepted log lines into the job view's technical-details log (and the
-// copied diagnostics) so a failed job shows the interaction trace. Worker
-// lines arrive over `engine.log` and join the same buffer.
-const UI_LOG_MAX_LINES = 120;
-jobLog.addSink((entry) => {
-  currentAttempt.uiLogLines.push(entry.line);
-  if (currentAttempt.uiLogLines.length > UI_LOG_MAX_LINES)
-    currentAttempt.uiLogLines.splice(0, currentAttempt.uiLogLines.length - UI_LOG_MAX_LINES);
-});
 
 let sourceAccess: ReturnType<typeof createSourceAccess> | null = null;
 let siteOrigin = "";
@@ -99,7 +91,6 @@ const parsedSourceTabId =
   sourceTabParam !== null && /^\d+$/.test(sourceTabParam) ? Number(sourceTabParam) : -1;
 const sourceTabId =
   Number.isSafeInteger(parsedSourceTabId) && parsedSourceTabId >= 0 ? parsedSourceTabId : null;
-const sessionId = `job:${crypto.randomUUID()}`;
 const IDLE_ICON = {
   16: "icons/icon16-grey.png",
   48: "icons/icon48-grey.png",
@@ -115,12 +106,6 @@ type JobTestWindow = Window & { __DEZOOMIFY_TEST_SOURCE_ACCESS__?: SourceAccessT
 
 function root() {
   return document.getElementById("dz-job-app");
-}
-
-function copyDiagnostics(text: string) {
-  if (text === "") return;
-  const operation = navigator.clipboard?.writeText?.(text);
-  void operation?.catch(() => undefined);
 }
 
 /** Base job-tab title when no source is active; while dezooming it becomes `Dezoomify <host>`. */
@@ -211,7 +196,6 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
   if (!target) return;
   const viewActivity = {
     ...(ctx.jobActivity ?? {}),
-    ...(attempt.uiLogLines.length ? { log: attempt.uiLogLines.slice() } : {}),
   };
   const presentation = presentFor(status, ctx);
   const downloadId = presentation.phase === "completed" ? attempt.savedDownloadId : null;
@@ -231,7 +215,8 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
       onCancel: () => {
         if (owns(attempt)) closeJob();
       },
-      onCopyDiagnostics: copyDiagnostics,
+      onCopyDiagnostics: copyDiagnosticText,
+      onSaveDiagnostics: saveDiagnosticReport,
       onRetrySameUrl: () => {
         if (owns(attempt)) retryJob();
       },
@@ -260,6 +245,7 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
               : {}),
           }
         : {}),
+      diagnosticReport: attempt.diagnostics.report(),
       ...(Object.keys(viewActivity).length ? { jobActivity: viewActivity } : {}),
     },
     {
@@ -283,6 +269,10 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
               },
               onAnswer: (command) => {
                 if (!owns(attempt)) return;
+                attempt.diagnostics.record("info", "partial-answer", {
+                  ...command,
+                  initiator: "user",
+                });
                 void attempt.jobHandle?.command(command);
                 render("downloading", { jobActivity: { startedAt: Date.now() } });
               },
@@ -312,7 +302,6 @@ function syncExtensionJobIndicator(status: PresentationStatus) {
 }
 
 function closeJob() {
-  jobLog.info("job-cancelled", `jobId=${sessionId}`);
   const handle = currentAttempt.jobHandle;
   void handle?.command({ type: "cancel" }).catch(() => {});
   stopAttempt();
@@ -372,6 +361,7 @@ function presentEngineFailure(error: EngineError): StructuredError {
 /** Host-side effect execution failed terminally: render it and stop. */
 function onHostFailure(error: unknown, attempt = currentAttempt) {
   if (!owns(attempt)) return;
+  attempt.diagnostics.finish("runtime-failed", error);
   if (currentAttempt.localFailure) return;
   const code =
     error && typeof error === "object" && "code" in error
@@ -381,10 +371,6 @@ function onHostFailure(error: unknown, attempt = currentAttempt) {
     error && typeof error === "object" && "phase" in error
       ? String((error as { phase?: unknown }).phase)
       : "unknown";
-  jobLog.error(
-    "host-failure",
-    `jobId=${sessionId} code=${code} phase=${phase} message=${error instanceof Error ? error.message : String(error)}`,
-  );
   const candidate =
     error && typeof error === "object"
       ? (error as {
@@ -430,6 +416,12 @@ function createAssembly(args: BrowserAssemblyArgs, attempt: ExtensionAttempt) {
       );
       if (!owns(attempt)) throw new DOMException("Result retired", "AbortError");
       attempt.savedDownloadId = id;
+      attempt.diagnostics.record("info", "save-confirmed", {
+        download_id: id,
+        width,
+        height,
+        bytes: blob.size,
+      });
       return "browser-save-initiated" as const;
     },
     limits: browserLimitsFor(clientHints()),
@@ -483,7 +475,6 @@ async function bindSourceTab() {
     });
     siteOrigin = sourceAccess.origin;
     installTestSourceAccessHook();
-    jobLog.info("source-bound", `tab=${sourceTabId} origin=${siteOrigin}`);
     await startAttempt();
   } catch (error) {
     onHostFailure(error);
@@ -492,6 +483,8 @@ async function bindSourceTab() {
 
 /** Dispose one engine attempt before a retry. The source access stays bound to the source tab. */
 function stopAttempt() {
+  currentAttempt.diagnostics.finish("retired", { reason: "replaced-or-closed" });
+  retainDiagnostics(currentAttempt.diagnostics);
   currentAttempt.retired = true;
   const handle = currentAttempt.jobHandle;
   currentAttempt.jobHandle = null;
@@ -529,49 +522,32 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
   };
   const permissions = createAttemptPermissions(permissionApi, (pending) => {
     if (!owns(attempt)) return;
+    attempt.diagnostics.record(
+      "debug",
+      "permissions",
+      pending.map(({ origin, requesting }) => ({ origin, requesting })),
+    );
     attempt.pendingPermission = pending[0] ?? null;
     render("downloading", { jobActivity: { startedAt: Date.now() } });
   });
   const fetcher = createExtensionFetcher({
+    diagnostics: attempt.diagnostics,
     hasPermission: (origin) => permissionApi.contains({ origins: [`${origin}/*`] }),
   });
   const extensionTransport = {
     async fetchResource(request: ResourceRequest, signal: AbortSignal) {
-      const url = request.uri;
       signal.throwIfAborted();
-      jobLog.debug("extension-fetch-start", `url=${url} purpose=${request.purpose}`);
-      try {
-        await permissions.ensure(new URL(request.uri).origin, signal);
-        const result = await fetcher.fetchResource(request, signal);
-        if (!owns(attempt)) signal.throwIfAborted();
-        if (owns(attempt))
-          jobLog.debug("extension-fetch-complete", `url=${url} bytes=${result.bytes.byteLength}`);
-        return result;
-      } catch (error) {
-        const code =
-          error && typeof error === "object" && "code" in error
-            ? String((error as { code?: unknown }).code)
-            : "unknown";
-        if (owns(attempt))
-          jobLog.warn(
-            "extension-fetch-failed",
-            `url=${url} code=${code} message=${error instanceof Error ? error.message : String(error)}`,
-          );
-        throw error;
-      }
+      await permissions.ensure(new URL(request.uri).origin, signal);
+      return fetcher.fetchResource(request, signal);
     },
   };
   const fetchResource = createEngineResourceFetcher({
+    diagnostics: attempt.diagnostics,
     sourceAccess: source,
     extensionTransport,
-    onSourceFailure: (cause) =>
-      owns(attempt) &&
-      jobLog.warn(
-        "source-fetch-fallback",
-        `code=${String(cause.code ?? "network")} origin=extension`,
-      ),
   });
   const service = createBrowserJobService({
+    diagnostics: attempt.diagnostics,
     createWorker: () => new Worker(new URL("./worker.js", import.meta.url), { type: "module" }),
     fetchResource,
     loadDisplayImage: (url, signal) => loadTileImage(url, { signal }),
@@ -588,9 +564,6 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
       // The authoritative snapshot carries the decision generation; re-render
       // it directly instead of copying the generation aside.
       if (owns(attempt) && attempt.activeSnapshot) renderForSnapshot(attempt.activeSnapshot);
-    },
-    log: (level, code, detail) => {
-      if (owns(attempt)) jobLog.log(level, code, detail);
     },
   });
   try {
@@ -630,7 +603,6 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
 function renderForSnapshot(snapshot: JobSnapshot) {
   const terminal = snapshot.terminal;
   if (terminal?.type === "failed") {
-    jobLog.error("engine-terminal", `type=failed code=${terminal.error.code}`);
     currentAttempt.localFailure = presentEngineFailure(terminal.error);
     render("failed", {
       jobActivity: { startedAt: Date.now() },
@@ -654,7 +626,7 @@ function renderForSnapshot(snapshot: JobSnapshot) {
 }
 
 function retryJob() {
-  jobLog.info("retry-requested", `jobId=${sessionId}`);
+  currentAttempt.diagnostics.record("info", "retry-requested");
   void startAttempt();
 }
 
@@ -674,18 +646,29 @@ async function startAttempt() {
   currentAttempt = newAttempt();
   const attempt = currentAttempt;
   render("discovering", { jobActivity: { startedAt: Date.now() } });
+  attempt.diagnostics.context({
+    input: source.documentUrl,
+    source_tab: sourceTabId,
+    source_origin: source.origin,
+  });
   try {
     const snapshot = await source.scan();
     if (!owns(attempt)) return;
+    attempt.diagnostics.record("info", "source-scan", {
+      candidates: snapshot.inputs.length,
+      overflow: snapshot.overflow,
+    });
+    for (const [index, input] of snapshot.inputs.entries())
+      attempt.diagnostics.record("debug", "scan-candidate", {
+        index,
+        url: input.url,
+        supplied_bytes: input.contents?.length ?? 0,
+      });
     if (snapshot.inputs.length === 0)
       throw Object.assign(new Error("No image references were found on this page."), {
         code: "no-candidates",
         retryable: true,
       });
-    jobLog.info(
-      "source-scan-complete",
-      `jobId=${sessionId} candidates=${snapshot.inputs.length} overflow=${snapshot.overflow}`,
-    );
     await beginAttempt(snapshot.inputs);
   } catch (error) {
     if (owns(attempt)) onHostFailure(error, attempt);
@@ -694,7 +677,6 @@ async function startAttempt() {
 
 /** Restart the job targeting the maximum known resolution. */
 function tryMaximum() {
-  jobLog.info("maximum-requested", `jobId=${sessionId}`);
   tryMaximumNext = true;
   retryJob();
 }
@@ -706,10 +688,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 api?.runtime?.onMessage?.addListener((message) => {
   if (!isRecord(message) || typeof message.type !== "string") return;
   if (message.type === "dz.toolbar-click" && message.sourceTabId === sourceTabId) {
-    jobLog.info(
-      "toolbar-click-forwarded",
-      `jobId=${sessionId} state=${currentAttempt.activeSnapshot?.lifecycle ?? "starting"}`,
-    );
     const terminal = currentAttempt.activeSnapshot?.terminal?.type;
     if (
       !currentAttempt.localFailure &&
