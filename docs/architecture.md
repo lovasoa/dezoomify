@@ -47,6 +47,13 @@ which resolves them against the post-redirect URI before issuing the next pure
 request. Named regex captures can use shared routes to resolve links, decode
 HTML entities, or fill a fixed resource URL before following it.
 
+Generic iframe navigation belongs to shared discovery, not individual formats.
+It retains bounded references in document order and waits until every
+format-specific path has failed before acquiring an embedded page. Each page
+is evaluated against the registered formats afresh; sibling frames remain
+available after a failed path. Requests, retained bytes, transitions, and
+navigation cycles share the operation's limits.
+
 To add a conventional format, define one `FormatSpec` with a metadata decoder,
 return an `ImagePlan` whose levels use `ResolvedLevel::grid`, and register the
 spec in `core::registry`. The decoder supplies image dimensions and a tile

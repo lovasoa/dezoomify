@@ -8,7 +8,6 @@ use serde::{Deserialize, Deserializer};
 use url::Url;
 
 use crate::json_utils::all_json;
-use crate::web_page::{follow_iframe, has_iframe};
 use image_properties::ImageProperties;
 use regex::{Regex, bytes::Regex as BytesRegex};
 
@@ -31,7 +30,6 @@ const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::UrlPredicate(is_unibe_page).then(extract_unibe_catalog),
     DiscoveryMatch::ContentPredicate(has_openlayers_source).then(extract_openlayers_catalog),
     ngv::ROUTE,
-    DiscoveryMatch::ContentPredicate(has_iframe).then(follow_iframe),
     DiscoveryMatch::ContentPredicate(has_ete_url).then(extract_ete_catalog),
 ];
 
