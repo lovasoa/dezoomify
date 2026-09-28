@@ -42,7 +42,7 @@ export const BROWSER_MOBILE_LIMITS: BrowserLimits = {
   maxBytes: BROWSER_MOBILE_MAX_CANVAS_AREA * 4,
 };
 
-/** Automatic selection caps (`SessionConfig.browser_selection`). */
+/** Automatic selection caps (`SelectionPolicy`). */
 export interface SelectionLimits {
   maxWidth: number;
   maxHeight: number;
@@ -62,7 +62,7 @@ export function browserLimitsFor(hints?: ClientHints | null): BrowserLimits {
   return isMobileClient(hints) ? BROWSER_MOBILE_LIMITS : BROWSER_LIMITS;
 }
 
-/** Automatic selection limits for this client, shaped for `browser_selection`. */
+/** Automatic selection limits for the browser device. */
 export function selectionLimitsFor(hints?: ClientHints | null): SelectionLimits {
   const limits = browserLimitsFor(hints);
   return {
@@ -73,7 +73,7 @@ export function selectionLimitsFor(hints?: ClientHints | null): SelectionLimits 
 }
 
 /**
- * Selection caps for a "Try maximum" attempt: unbounded, so the engine takes
+ * Selection caps for a "Try maximum" attempt: unbounded, so the Rust algorithm takes
  * the largest known level and the canvas gate reports what cannot work
  * (allocation, context, or PNG encoding) with a desktop-app action.
  */

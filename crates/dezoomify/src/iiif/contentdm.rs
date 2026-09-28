@@ -1,6 +1,6 @@
 use url::Url;
 
-use crate::core::{DiscoveryError, DiscoveryResource, DiscoveryRoute, DiscoveryStep, Request};
+use crate::core::{DiscoveryError, DiscoveryResource, DiscoveryRoute, ParsedResource, Request};
 
 use crate::core::discovery::{metadata as metadata_route, url_matches, viewer};
 pub(super) const RECORD_ROUTE: DiscoveryRoute =
@@ -16,14 +16,14 @@ pub(super) fn is_record(uri: &str) -> bool {
 }
 
 pub(super) fn metadata(uri: &str) -> Result<Request, DiscoveryError> {
-    let url =
-        Url::parse(uri).map_err(|_| DiscoveryError::Session("invalid CONTENTdm URL".into()))?;
+    let url = Url::parse(uri)
+        .map_err(|_| DiscoveryError::InvalidMetadata("invalid CONTENTdm URL".into()))?;
     let segments = url
         .path_segments()
         .map(Iterator::collect::<Vec<_>>)
-        .ok_or_else(|| DiscoveryError::Session("invalid CONTENTdm path".into()))?;
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("invalid CONTENTdm path".into()))?;
     let ["digital", "collection", collection, "id", identifier, ..] = segments.as_slice() else {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "invalid CONTENTdm record URL".into(),
         ));
     };
@@ -46,14 +46,16 @@ pub(super) fn is_metadata(uri: &str) -> bool {
 
 pub(super) fn follow_info(
     resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+) -> Result<ParsedResource, DiscoveryError> {
     let info_uri = serde_json::from_slice::<serde_json::Value>(resource.bytes())
         .ok()
         .and_then(|value| value.get("iiifInfoUri")?.as_str().map(str::to_owned))
         .filter(|uri| !uri.is_empty())
-        .ok_or_else(|| DiscoveryError::Session("CONTENTdm metadata has no IIIF URL".into()))?;
+        .ok_or_else(|| {
+            DiscoveryError::InvalidMetadata("CONTENTdm metadata has no IIIF URL".into())
+        })?;
     let base = Url::parse(resource.final_uri())
-        .map_err(|_| DiscoveryError::Session("invalid CONTENTdm metadata URL".into()))?;
+        .map_err(|_| DiscoveryError::InvalidMetadata("invalid CONTENTdm metadata URL".into()))?;
     let origin = base.origin().ascii_serialization();
     let uri = if Url::parse(&info_uri).is_ok() {
         info_uri
@@ -64,5 +66,5 @@ pub(super) fn follow_info(
     } else {
         format!("{origin}/digital/{info_uri}")
     };
-    Ok(DiscoveryStep::Follow(Request::new(uri)))
+    Ok(ParsedResource::Follow(Request::new(uri)))
 }

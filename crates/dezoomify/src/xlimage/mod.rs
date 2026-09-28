@@ -7,7 +7,7 @@ use serde::Deserialize;
 use crate::Vec2d;
 use crate::core::discovery::{metadata, url_matches};
 use crate::core::{
-    DiscoveryError, DiscoveryRoute, DiscoveryStep, FormatSpec, ImagePlan, Request, ResolvedLevel,
+    DiscoveryError, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource, Request, ResolvedLevel,
 };
 
 const ROUTES: &[DiscoveryRoute] = &[metadata(url_matches(is_xlimage_url)).decode(decode)];
@@ -29,17 +29,17 @@ fn image_origin(url: &str) -> String {
         .to_owned()
 }
 
-fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let (url, bytes) = (resource.final_uri(), resource.bytes());
     let metadata: Metadata = serde_xml_rs::from_reader(bytes).map_err(|error| {
-        DiscoveryError::Session(format!("unable to parse XLimage metadata: {error}"))
+        DiscoveryError::InvalidMetadata(format!("unable to parse XLimage metadata: {error}"))
     })?;
     if metadata.width == 0
         || metadata.height == 0
         || metadata.tileside == 0
         || metadata.maxzoom == 0
     {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "XLimage metadata must declare positive width, height, tileside, and maxzoom".into(),
         ));
     }
@@ -47,7 +47,7 @@ fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<DiscoveryStep,
     let levels = build_levels(&metadata, &origin)?;
     let title = image_title(&origin);
 
-    Ok(DiscoveryStep::Image(ImagePlan::new(title, levels)))
+    Ok(ParsedResource::Image(ImagePlan::new(title, levels)))
 }
 
 fn image_title(origin: &str) -> Option<String> {

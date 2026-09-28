@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createDiagnosticRecorder } from "../../app-model/src/diagnostics.ts";
+import { createDiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
 import { createCanvasAssembly } from "../src/assembly.ts";
 
 /** Fake decoded bitmap with a 9-arg drawImage recorder. */

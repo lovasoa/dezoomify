@@ -50,9 +50,6 @@ fn available_memory_gate_is_deterministic() {
     assert!(exceeds_available_memory(1025, 1024));
 }
 
-/// Four generated tiles plus a `tiles.yaml` manifest: the same local-input
-/// shape the job-service tests use, so the concurrency bound is measured on the
-/// shipped fetch/decode/place path instead of a throwaway pool.
 fn write_local_tiles(work: &std::path::Path) -> String {
     for name in ["tile-0_0", "tile-1_0", "tile-0_1", "tile-1_1"] {
         let mut tile = image::RgbaImage::new(256, 256);
@@ -90,9 +87,9 @@ fn write_local_tiles(work: &std::path::Path) -> String {
 }
 
 #[test]
-fn exec_bounds_inflight_to_max_concurrent() {
+fn host_bounds_inflight_to_max_concurrent() {
     let start = Instant::now();
-    let work = std::env::temp_dir().join(format!("dz-perf-exec-{}", std::process::id()));
+    let work = std::env::temp_dir().join(format!("dz-perf-host-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work).expect("temp dir");
     let input = write_local_tiles(&work);
@@ -110,30 +107,24 @@ fn exec_bounds_inflight_to_max_concurrent() {
     )
     .expect("local pipeline succeeds");
     assert_eq!(outcome.tile_count, 4);
-    // The engine's own budget bounds outstanding work: the honest
-    // instrumentation peaks within it on the shipped path, with no separate
-    // scheduler or pool to enforce the width.
     assert_eq!(outcome.instrumentation.acquired, 4);
     assert!(
         (1..=2).contains(&outcome.instrumentation.peak_inflight),
-        "inflight stays within the engine budget: {}",
+        "inflight stays within the acquisition budget: {}",
         outcome.instrumentation.peak_inflight
     );
     let elapsed = start.elapsed();
     println!(
-        "exec 4 tiles with max_concurrent=2 in {elapsed:?} (peak_inflight={})",
+        "host 4 tiles with max_concurrent=2 in {elapsed:?} (peak_inflight={})",
         outcome.instrumentation.peak_inflight
     );
     assert!(
         elapsed < std::time::Duration::from_secs(60),
-        "bounded exec must finish promptly"
+        "bounded acquisition must finish promptly"
     );
     let _ = std::fs::remove_dir_all(&work);
 }
 
-/// Grid-shaped local inputs for the scaling test: `grid` by `grid` tiles of
-/// `tile_px`, the same local-input shape the job-service tests use, so scaling is
-/// measured on the shipped fetch/decode/place path.
 fn write_local_tiles_grid(work: &std::path::Path, grid: u32, tile_px: u32) -> String {
     for x in 0..grid {
         for y in 0..grid {
@@ -180,12 +171,8 @@ fn write_local_tiles_grid(work: &std::path::Path, grid: u32, tile_px: u32) -> St
     manifest.to_str().expect("utf8 manifest").to_string()
 }
 
-/// Scheduling scaling on the REAL pipeline: 1/16/64/256-tile grids through
-/// the shipped start_job path (local fetch, decode, assemble, encode).
-/// In-flight descriptors stay within the engine slot budget at every shape
-/// while completions track the plan exactly (linear by construction).
 #[test]
-fn exec_scales_with_bounded_inflight_across_increasing_tile_counts() {
+fn host_scales_with_bounded_inflight_across_increasing_tile_counts() {
     use std::time::Instant;
     let work = std::env::temp_dir().join(format!("dz-perf-scale-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&work);
@@ -224,7 +211,7 @@ fn exec_scales_with_bounded_inflight_across_increasing_tile_counts() {
         );
         assert!(
             (1..=BUDGET).contains(&outcome.instrumentation.peak_inflight),
-            "inflight stays within the engine budget at {expected} tiles: {}",
+            "inflight stays within the acquisition budget at {expected} tiles: {}",
             outcome.instrumentation.peak_inflight
         );
         assert!(

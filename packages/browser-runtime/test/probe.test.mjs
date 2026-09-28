@@ -10,7 +10,7 @@ test("probe decodes fetched bytes to dimensions", async () => {
   });
   assert.deepEqual(
     await probe(
-      { id: 1, uri: "https://cdn.test/0.jpg", headers: [], purpose: "probe" },
+      { uri: "https://cdn.test/0.jpg", headers: [], purpose: "probe" },
       new AbortController().signal,
     ),
     {
@@ -34,7 +34,7 @@ test("probe falls back to image dimensions without readable bytes", async () => 
   });
   assert.deepEqual(
     await probe(
-      { id: 1, uri: "https://cdn.test/0.jpg", headers: [], purpose: "probe" },
+      { uri: "https://cdn.test/0.jpg", headers: [], purpose: "probe" },
       new AbortController().signal,
     ),
     {
@@ -56,7 +56,7 @@ test("probe reports missing when every route fails", async () => {
   });
   assert.deepEqual(
     await probe(
-      { id: 1, uri: "https://cdn.test/0.jpg", headers: [], purpose: "probe" },
+      { uri: "https://cdn.test/0.jpg", headers: [], purpose: "probe" },
       new AbortController().signal,
     ),
     { status: "missing" },
@@ -77,7 +77,7 @@ test("probe propagates transport policy failures without ordinary-image fallback
   await assert.rejects(
     () =>
       probe(
-        { id: 1, uri: "https://cdn.test/0.jpg", headers: [], purpose: "probe" },
+        { uri: "https://cdn.test/0.jpg", headers: [], purpose: "probe" },
         new AbortController().signal,
       ),
     /grant/,

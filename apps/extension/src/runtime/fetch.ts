@@ -8,8 +8,6 @@
  * transport is only for extension-origin requests with an existing host grant.
  */
 
-import type { DiagnosticRecorder } from "@dezoomify/app-model";
-import type { HostFailure } from "@dezoomify/browser-runtime";
 import {
   blockedReason,
   forwardCoreHeaders,
@@ -20,6 +18,7 @@ import {
   readResponseBytes,
   retryAfterMs,
 } from "@dezoomify/browser-runtime";
+import type { DiagnosticRecorder } from "@dezoomify/shared-ui";
 import type { FetchFailure, FetchFailureCode, ResourceRequest } from "@dezoomify/wasm-bindings";
 
 export const PROXY_PATH = "/api/proxy";
@@ -73,7 +72,7 @@ export function transportError(
 }
 
 /** @param {unknown} error */
-export function asFetchFailure(error: unknown): HostFailure {
+export function asFetchFailure(error: unknown): FetchFailure {
   if (isFetchFailure(error)) return error;
   const candidate = error as {
     category?: unknown;
@@ -179,7 +178,6 @@ export function createExtensionFetcher(deps: FetchDeps) {
         request.purpose === "metadata" || !response.ok ? "debug" : "trace",
         "request",
         {
-          request: request.id,
           purpose: request.purpose,
           transport: "extension-origin",
           url: request.uri,
@@ -219,7 +217,6 @@ export function createExtensionFetcher(deps: FetchDeps) {
       deps.diagnostics?.count("bytes_fetched", bytes.byteLength);
       deps.diagnostics?.count("requests_completed");
       deps.diagnostics?.record("trace", "body-read", {
-        request: request.id,
         bytes: bytes.byteLength,
         duration_ms: performance.now() - started,
       });
@@ -233,7 +230,6 @@ export function createExtensionFetcher(deps: FetchDeps) {
         deps.diagnostics?.count("request_failures");
         deps.diagnostics?.record("warn", "request-failed", {
           ...asFetchFailure(error),
-          request: request.id,
           purpose: request.purpose,
           transport: "extension-origin",
           url: request.uri,

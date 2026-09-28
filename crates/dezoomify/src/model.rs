@@ -2,7 +2,7 @@
 //! here exactly once and `tsify` projects it into the WASM declaration.
 
 use serde::{Deserialize, Serialize};
-use std::num::{NonZeroU32, NonZeroU64};
+use std::num::NonZeroU64;
 
 // ---------------------------------------------------------------------------
 // Requests and direct byte ownership
@@ -24,7 +24,6 @@ pub enum RequestPurpose {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct ResourceRequest {
-    pub id: u32,
     pub uri: String,
     #[serde(default)]
     pub headers: Vec<Header>,
@@ -66,20 +65,18 @@ pub enum ProcessingRecipe {
     GoogleArtsDecrypt,
 }
 
-/// Typed argument for the pure WASM tile-processing operation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub struct ProcessingRequest {
-    pub recipe: ProcessingRecipe,
-}
-
-/// The browser output representation requested by the job engine.
+/// The requested browser output representation.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum OutputFormat {
     #[default]
     Png,
+    Jpeg,
+    Tiff,
+    Zif,
+    Webp,
+    IiifDir,
 }
 
 /// Host-neutral placement of one tile in the output image, projected from
@@ -170,7 +167,7 @@ pub enum DiscoveryInputKind {
 }
 
 /// One discovery input. An omitted kind is a user-supplied source for
-/// compatibility with products that have no browser observations.
+/// products that have no browser observations.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct JobInput {
@@ -203,181 +200,6 @@ impl JobInput {
             kind: None,
         }
     }
-}
-
-// User commands (UI -> job): intent that can never supply bytes, complete
-// an effect, or claim publication. Host completions travel separately as
-// [`HostCompletion`]; the split is structural, not documentary.
-// ---------------------------------------------------------------------------
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "kebab-case")]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum JobCommand {
-    Start {
-        inputs: Vec<JobInput>,
-    },
-    SelectImage {
-        image: u32,
-    },
-    /// Follow one still-deferred catalog entry within the same job
-    /// (zero-based position). Bounded and cycle-guarded; the catalog is
-    /// replaced on success with no new job ID.
-    FollowDeferred {
-        image: u32,
-    },
-    SelectLevel {
-        level: u32,
-    },
-    /// Answer the outstanding partial decision. Same generation + decision
-    /// vocabulary as the engine `AnswerPartial`; stale generations are
-    /// rejected, never consumed in order.
-    AnswerPartial {
-        generation: u32,
-        decision: RecoveryChoice,
-    },
-    Cancel,
-    Pause,
-    Resume,
-}
-
-// Host completions (host -> job): answers to outstanding [`HostEffect`]s.
-// Only these carry bytes, failures, observations, and publication claims.
-// ---------------------------------------------------------------------------
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "kebab-case")]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum HostCompletion {
-    ProvideResource {
-        request: u32,
-        /// Resource body, carried directly in the completion. Nothing is
-        /// retained adapter-side; tile success is body-free
-        /// (`ProvideDisplayOutcome`) and never carries bytes.
-        bytes: Vec<u8>,
-        /// Post-redirect URL observed by the host, when it has one. Relative
-        /// tile URLs resolve against this instead of the request URI.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        final_uri: Option<String>,
-    },
-    ProvideFetchFailure {
-        request: u32,
-        error: FetchFailure,
-    },
-    /// Probe observation for one outstanding `acquire-tile` with
-    /// `purpose: probe`. Correlated by the adapter-minted request id (like
-    /// `ProvideResource`); the adapter maps it to the engine tile ordinal
-    /// and forwards `ProbeOutcome`. `ok=false` (or zero width/height)
-    /// reports a missing probe.
-    ProvideProbeOutcome {
-        request: u32,
-        outcome: ProbeOutcome,
-    },
-    /// Display-only observation for one outstanding `acquire-tile` in
-    /// `AcquiringTiles`. The host has already retained a valid ordinary
-    /// image element and the adapter forwards a typed `TileDisplayed`.
-    ProvideDisplayOutcome {
-        request: u32,
-    },
-    /// Successful acquisition of one outstanding `acquire-tile` in
-    /// `AcquiringTiles`. The host has already fetched, decoded, and placed
-    /// the tile; the body is NOT carried (it never re-enters the adapter).
-    /// The adapter forwards a typed `TileAcquired`.
-    TileAcquired {
-        request: u32,
-    },
-    /// Elapsed retry wait for one outstanding `wait-retry-timer` host
-    /// effect. The engine owns no clocks: the host waits `delay_ms` on its
-    /// own clock, then answers with the exact effect id it received. The
-    /// engine parks elapsed retries while paused; stale or duplicate
-    /// completions are rejected as stale effects.
-    RetryTimerElapsed {
-        effect: u32,
-    },
-    FinalizationSucceeded {
-        /// Correlation of the outstanding `finalize-output` effect.
-        effect: u32,
-        /// Honest disposition from the host that performed the save:
-        /// tainted (display-only) canvases report DisplayOnly so every
-        /// product presents preview instead of claiming a saved file.
-        disposition: OutputDisposition,
-    },
-    FinalizationFailed {
-        /// Correlation of the outstanding `finalize-output` effect.
-        effect: u32,
-        error: Error,
-    },
-}
-
-// ---------------------------------------------------------------------------
-// Host effects (job -> host; every effect has correlation + one response)
-// ---------------------------------------------------------------------------
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "kebab-case")]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum HostEffect {
-    AcquireResource {
-        request: ResourceRequest,
-    },
-    AcquireTile {
-        request: ResourceRequest,
-        /// Engine tile id correlating this acquisition with the tile outcome.
-        tile: u32,
-        /// Complete output placement for the acquired bytes (see
-        /// [`TilePlacement`]). Hosts that assemble images read the
-        /// placement here, at acquisition time, so acquisition failures and
-        /// decode failures surface through the same tile outcome.
-        placement: TilePlacement,
-    },
-    /// Awaited host-owned output operation. The host validates its destination,
-    /// assembles/encodes when readable, and replies exactly once.
-    FinalizeOutput {
-        /// Engine-minted effect correlation echoed by finalization completion.
-        effect: u32,
-        partial: bool,
-        format: OutputFormat,
-        canvas: Option<Size>,
-    },
-    /// Explicit retry wait for one tile: the host waits `delay_ms` on its
-    /// own clock and then answers with `RetryTimerElapsed` carrying this
-    /// exact effect id. No new acquisition for this tile starts before that
-    /// completion. The engine parks elapsed retries while paused and
-    /// re-drives them on resume.
-    WaitRetryTimer {
-        /// Engine-minted effect correlation echoed by timer completion.
-        effect: u32,
-        tile: u32,
-        attempt: u32,
-        delay_ms: u64,
-    },
-    CancelWork,
-    RequestDecision {
-        generation: u32,
-    },
-}
-
-// ---------------------------------------------------------------------------
-// Job lifecycle (engine -> hosts; absolute snapshots, terminal exactly once)
-// ---------------------------------------------------------------------------
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum JobState {
-    #[default]
-    Created,
-    Discovering,
-    AwaitingImageSelection,
-    AwaitingLevelSelection,
-    Planning,
-    AcquiringTiles,
-    AwaitingPartialDecision,
-    Finalizing,
-    Cancelling,
-    Completed,
-    PartiallyCompleted,
-    Failed,
-    Cancelled,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -424,7 +246,6 @@ pub struct RecoveryAction {
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum ErrorPhase {
-    Handshake,
     Validation,
     Discovery,
     Acquisition,
@@ -493,8 +314,8 @@ pub enum BlockedReason {
 
 /// Stable code for a host-observed fetch failure.
 ///
-/// Variant identifiers are the protocol's serialized values, so this enum
-/// preserves the pre-existing wire vocabulary without rename tables.
+/// Variant identifiers are the serialized values, so this enum
+/// preserves stable error codes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 #[allow(non_camel_case_types)]
@@ -561,7 +382,7 @@ pub enum ResourceKind {
     Output,
 }
 
-/// Host-observed fetch facts. Retry and recovery policy belongs to the engine.
+/// Host-observed fetch facts. Retry and recovery policy belongs to the shared algorithm.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct FetchFailure {
@@ -573,7 +394,7 @@ pub struct FetchFailure {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub http: Option<u16>,
     /// Host-observed `retry-after` in milliseconds, when the response
-    /// carried one. The engine waits at least this long before the retry.
+    /// carried one. The shared algorithm waits at least this long before the retry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_after_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -585,6 +406,8 @@ pub struct FetchFailure {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct Error {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_ms: Option<u64>,
     pub code: String,
     pub phase: ErrorPhase,
     pub retryable: bool,
@@ -611,6 +434,7 @@ impl Error {
     #[must_use]
     pub fn new(code: impl Into<String>, phase: ErrorPhase, message: impl Into<String>) -> Self {
         Self {
+            retry_after_ms: None,
             code: code.into(),
             phase,
             retryable: false,
@@ -639,50 +463,6 @@ impl Error {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Typed WASM session boundary
-// ---------------------------------------------------------------------------
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub struct SessionConfig {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "typescript", tsify(type = "number"))]
-    pub max_concurrent_fetches: Option<NonZeroU32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "typescript", tsify(type = "number"))]
-    pub max_tiles: Option<NonZeroU32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_retries: Option<u32>,
-    /// Opt in to browser selection using the largest ready image and the
-    /// largest level that fits these declared canvas limits.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub browser_selection: Option<BrowserSelectionLimits>,
-}
-
-/// Positive declared-canvas limits used by browser automatic selection.
-/// Non-zero integer types reject invalid limits at the typed boundary.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub struct BrowserSelectionLimits {
-    #[cfg_attr(feature = "typescript", tsify(type = "number"))]
-    pub max_width: NonZeroU32,
-    #[cfg_attr(feature = "typescript", tsify(type = "number"))]
-    pub max_height: NonZeroU32,
-    #[cfg_attr(feature = "typescript", tsify(type = "number"))]
-    pub max_area: NonZeroU64,
-}
-
-// ---------------------------------------------------------------------------
-// Engine snapshots (authoritative per-job projections for UI rendering)
-// ---------------------------------------------------------------------------
-//
-// The engine projects one absolute snapshot per transition: lifecycle,
-// pause flag, progress, selection/decision payload, terminal result, and
-// output summary. Snapshots carry no pixels or handles,
-// and no routing identifiers (job IDs stay host-side).
-
 /// Closed retry category for one classified tile failure.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -704,16 +484,21 @@ pub struct TileFailure {
     pub retry_after_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
-    /// Original host-observed fetch facts, retained without adapter reformatting.
+    /// Original host-observed fetch facts, retained without reformatting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed: Option<FetchFailure>,
 }
 
 /// Unit progress for the active phase (totals stay unknown until the plan
 /// resolves).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct Progress {
+    pub phase: ProgressPhase,
+    pub source_format: Option<String>,
+    pub title: Option<String>,
+    pub selected: Option<Size>,
+    pub maximum: Option<Size>,
     pub completed: u64,
     pub total: Option<u64>,
 }
@@ -721,31 +506,15 @@ pub struct Progress {
 impl Default for Progress {
     fn default() -> Self {
         Self {
+            phase: ProgressPhase::Discovery,
+            source_format: None,
+            title: None,
+            selected: None,
+            maximum: None,
             completed: 0,
             total: Some(0),
         }
     }
-}
-
-/// One still-deferred catalog entry: position plus follow-up URI.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub struct DeferredEntry {
-    pub position: u32,
-    pub uri: String,
-}
-
-/// Current selection state (positions into the kept catalog).
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub struct Selection {
-    pub image: Option<u32>,
-    pub level: Option<u32>,
-    pub level_count: u32,
-    /// The kept catalog with full geometry, once discovered. Replaced when
-    /// a deferred catalog entry is followed within the same job.
-    pub catalog: Option<Catalog>,
-    pub deferred: Vec<DeferredEntry>,
 }
 
 /// One tile settled as missing, with its full structured detail.
@@ -754,25 +523,6 @@ pub struct Selection {
 pub struct MissingTile {
     pub tile: u32,
     pub failures: Vec<TileFailure>,
-}
-
-/// Outstanding partial decision payload.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub struct Decision {
-    pub generation: u32,
-    pub missing: Vec<MissingTile>,
-}
-
-/// Terminal outcome, set exactly once.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "kebab-case")]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum Terminal {
-    Completed,
-    PartialCompleted { missing: Vec<u32> },
-    Failed { error: Error },
-    Cancelled,
 }
 
 /// Honest output disposition reported by the host that performed the save.
@@ -789,31 +539,15 @@ pub enum OutputDisposition {
 /// Output summary: geometry, completeness, and the honest disposition.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub struct OutputSummary {
+pub struct Output {
     pub canvas: Option<Size>,
     pub format: OutputFormat,
     pub complete: bool,
     pub missing: Vec<u32>,
-    pub disposition: Option<OutputDisposition>,
+    pub disposition: OutputDisposition,
 }
 
-/// Authoritative per-job projection. Snapshots are absolute: UIs render
-/// the latest snapshot and never reconstruct phases from event walks.
-/// `revision` increases on every transition; observers drop stale ones.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub struct Snapshot {
-    pub revision: u32,
-    pub lifecycle: JobState,
-    pub paused: bool,
-    pub progress: Progress,
-    pub selection: Selection,
-    pub decision: Option<Decision>,
-    pub terminal: Option<Terminal>,
-    pub output: Option<OutputSummary>,
-}
-
-// Diagnostics are observations, never commands or authoritative job state.
+// Bounded diagnostic observations.
 // Hosts supply clocks and identity. Fields are bounded scalar facts: bodies,
 // buffers, and arbitrary object graphs cannot enter a report.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -878,3 +612,147 @@ pub struct DiagnosticReport {
     pub omitted_records: u32,
     pub truncated_fields: u32,
 }
+
+/// A direct resource read, including its redirected base address.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct ResourceResponse {
+    #[serde(with = "serde_bytes")]
+    #[cfg_attr(feature = "typescript", tsify(type = "Uint8Array"))]
+    pub bytes: Vec<u8>,
+    pub final_uri: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum ResourceRead {
+    Response { response: ResourceResponse },
+    NeedsAccess { origin: String },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum Interaction {
+    Forbidden,
+    Allowed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum Gate {
+    Cancellation,
+    Acquisition,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum ProgressPhase {
+    Discovery,
+    Planning,
+    Acquisition,
+    Output,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct Tile {
+    pub index: u32,
+    pub request: ResourceRequest,
+    pub placement: TilePlacement,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct TileReceipt {
+    pub display_only: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct FinishRequest {
+    pub canvas: Option<Size>,
+    pub format: OutputFormat,
+    pub title: Option<String>,
+    pub missing: Vec<u32>,
+    pub display_only: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct MissingTiles {
+    pub missing: Vec<MissingTile>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum SelectionPolicy {
+    #[default]
+    Interactive,
+    Fitting {
+        max_width: u32,
+        max_height: u32,
+        max_area: u64,
+    },
+    Automatic {
+        image_index: usize,
+        largest: bool,
+        max_width: Option<u32>,
+        max_height: Option<u32>,
+        zoom_level: Option<usize>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum PartialPolicy {
+    #[default]
+    Prompt,
+    Keep,
+    Discard,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct Options {
+    pub format: Option<String>,
+    pub selection: SelectionPolicy,
+    pub partial: PartialPolicy,
+    pub output: OutputFormat,
+    pub max_concurrent: u32,
+    pub max_tiles: u32,
+    pub max_retries: u32,
+    pub max_bytes: u64,
+    pub max_deferred_follows: u32,
+    pub retry_base_delay_ms: u64,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            format: None,
+            selection: SelectionPolicy::default(),
+            partial: PartialPolicy::default(),
+            output: OutputFormat::Png,
+            max_concurrent: 4,
+            max_tiles: 4096,
+            max_retries: 3,
+            max_bytes: 67_108_864,
+            max_deferred_follows: 8,
+            retry_base_delay_ms: 1000,
+        }
+    }
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.code, self.message)
+    }
+}
+impl std::error::Error for Error {}

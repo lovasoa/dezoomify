@@ -5,12 +5,12 @@ One monorepo: Rust crates, generated WASM bindings, shared UI, hosts, extension 
 ## Working areas
 
 - `crates/dezoomify`: pure domain crate. `model` owns canonical public values,
-  formats own discovery/planning, and `engine` owns lifecycle policy.
+  formats own parsing and geometry, and `run.rs` awaits injected Host operations.
 - `crates/dezoomify/src/model.rs`: contract source;
   `packages/wasm-bindings` tracks the emitted declaration.
-- `crates/dezoomify-native`: native effects for CLI and Tauri.
+- `crates/dezoomify-native`: NativeHost operations for CLI and Tauri.
 - `crates/dezoomify-wasm`: core and job behavior for browser hosts.
-- `packages/shared-ui`: shared React UI; `packages/browser-runtime`: browser workers, decoding, canvases, and saving.
+- `packages/shared-ui`: shared React UI; `packages/browser-runtime`: the shared browser application, Host operations, decoding, canvases, and saving.
 - `crates/fixture-server`: controlled origins; `testdata/scenarios`: shared scenarios; `crates/xtask`: repository tasks.
 
 Dependency direction: [Architecture](architecture.md). Task grammar: [`crates/xtask/README.md`](../crates/xtask/README.md). Test matrix: [Testing](testing.md).
@@ -41,7 +41,7 @@ Bare `test` is the fast aggregate (one Rust workspace run plus one combined Node
 | Target | Output |
 |---|---|
 | `wasm` | real WASM artifact under `target/wasm32-unknown-unknown/` |
-| `web` | full site via `scripts/build-site.mjs`: wasm adapter plus browser glue under `wasm/`, Vite bundle, help pages, deployable `dist/` tree (needs `wasm-bindgen-cli` matching `Cargo.lock`) |
+| `web` | full site via `scripts/build-site.mjs`: WASM function plus browser glue under `wasm/`, Vite bundle, help pages, deployable `dist/` tree (needs `wasm-bindgen-cli` matching `Cargo.lock`) |
 | `cli` | real `dezoomify-cli` binary under `target/debug/` |
 | `desktop` | lean shell always compiles; Tauri window shell (feature `tauri`) compiles with platform webview packages present; with bundler prerequisites and without `--unsigned-test`, a real bundle for the matching host (Linux `deb`, Windows `msi`/`nsis`, macOS `dmg`; see [Native apps](native-apps.md#desktop-bundles)) |
 | `extension` | store-shaped Chromium and Firefox ZIPs under `target/extension/`, packed by the store-submission script |
@@ -77,19 +77,19 @@ Example: `cargo xtask dev extension --browser chromium`. Standalone deterministi
 
 ## Maintenance
 
-Protocol files derive from Rust; never hand-edit. Fixture and protocol commands are deterministic unless named `live`.
+Binding files derive from Rust; never hand-edit. Fixture and bindings commands are deterministic unless named `live`.
 
 ```sh
-cargo xtask protocol generate
-cargo xtask protocol generate --check
-cargo xtask protocol check
+cargo xtask bindings generate
+cargo xtask bindings generate --check
+cargo xtask bindings check
 cargo xtask fixtures verify
 cargo xtask fixtures serve --port 0 --write-address target/fixture-server.addr
 ```
 
-`protocol generate` refreshes the checked-in bindings. `--check` compares against a declaration from a real WASM build in a temp dir; `protocol check` compiles the Rust contract, runs generated-package tests, and checks WASM portability. `fixtures verify` validates manifests, provenance, licenses, routes, and hashes.
+`bindings generate` refreshes the checked-in bindings. `--check` compares against a declaration from a real WASM build in a temp dir; `bindings check` compiles the Rust contract, runs generated-package tests, and checks WASM portability. `fixtures verify` validates manifests, provenance, licenses, routes, and hashes.
 
-One Playwright version rules repo-wide via the `pnpm.overrides` pin in root `package.json`; website E2E and the extension gate share the engine. A Playwright bump moves override plus workspace specs together.
+One Playwright version rules repo-wide via the `pnpm.overrides` pin in root `package.json`; website E2E and the extension gate share the browser binary. A Playwright bump moves override plus workspace specs together.
 
 ## Releases
 
@@ -117,14 +117,14 @@ Follow [Contributing a format](CONTRIBUTING-format.md). In short:
 ### Change the shared UI
 
 1. Iterate under `cargo xtask dev ui`.
-2. Run `cargo xtask test ui` and `cargo xtask test app-model`, then `cargo xtask test web` plus affected `test desktop` / `test extension`.
+2. Run `cargo xtask test ui`, then `cargo xtask test web` plus affected `test desktop` / `test extension`.
 3. Run `cargo xtask build web` to catch integration and bundle-policy failures.
 
-### Change the protocol
+### Change the bindings
 
-1. Edit Rust source and protocol fixtures only.
-2. Run `cargo xtask protocol generate` and `cargo xtask test protocol`.
-3. Run `cargo xtask protocol check` plus affected host targets.
+1. Edit Rust source and bindings fixtures only.
+2. Run `cargo xtask bindings generate` and `cargo xtask test bindings`.
+3. Run `cargo xtask bindings check` plus affected host targets.
 
 ### Before a pull request
 
@@ -132,9 +132,9 @@ Follow [Contributing a format](CONTRIBUTING-format.md). In short:
 
 ## Change rules
 
-- Domain decisions live in core/job code, never in UI or transport code.
-- Effect code implements protocol effects; it never replays job policy.
+- Domain decisions live in the shared Rust algorithm, never in UI or transport code.
+- Hosts implement capabilities; the shared algorithm owns selection and retries.
 - Runtime differences travel as capabilities and shared error codes.
 - Behavior exercised by more than one runtime gets a shared scenario.
-- Lifecycle, retry, and transport-effect policy stay in the job engine; the website's direct-first proxy eligibility stays in the web app at the root. Integrations execute supplied transport effects and report results; no hidden fallbacks, no per-attempt proxy consent flows.
+- Discovery, selection, retry, and partial-output policy live in shared Rust. The website supplies direct-first metadata proxy policy through its Host capabilities.
 - Preserve exact URLs, settings, and error causes in diagnostics so reports can reproduce failures. Keep capture bounded and use the extension-only sign-in note described in [Security](security.md#credentials).

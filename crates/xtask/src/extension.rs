@@ -177,19 +177,15 @@ pub fn test_extension(args: &[String]) -> Result<(), String> {
 pub(crate) fn test_extension_integration() -> Result<(), String> {
     prepare_extension_tests()?;
     super::command::node_test(
-        &[
-            "apps/extension/tests/unit/job-worker.test.mjs",
-            "apps/extension/tests/unit/manifest-policy.test.mjs",
-        ],
+        &["apps/extension/tests/unit/manifest-policy.test.mjs"],
         false,
     )?;
     test_headless_browser()
 }
 
 fn prepare_extension_tests() -> Result<(), String> {
-    // The unit suite imports and executes this exact generated boundary.
-    // Build it first so a stale or absent local artifact cannot be mocked
-    // away while the store package is broken.
+    // Browser tests execute the real generated function in both packages.
+    // Build it first so each package contains the current Rust implementation.
     build_wasm_glue()?;
     for browser in ["chrome", "firefox"] {
         build_wxt(browser)?;

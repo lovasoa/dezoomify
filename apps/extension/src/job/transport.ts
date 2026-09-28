@@ -1,26 +1,28 @@
-import type { DiagnosticRecorder } from "@dezoomify/app-model";
 import { isFetchFailure, originOfUrl } from "@dezoomify/browser-runtime";
-import type { ResourceRequest } from "@dezoomify/wasm-bindings";
+import type { DiagnosticRecorder } from "@dezoomify/shared-ui";
+import type { Interaction, ResourceRead, ResourceRequest } from "@dezoomify/wasm-bindings";
 import { asFetchFailure } from "../runtime/fetch.ts";
 import type { createSourceAccess } from "./source-access.ts";
 
 type SourceAccess = ReturnType<typeof createSourceAccess>;
 
 /** Prefer the source tab's session when it is still bound; otherwise use the host transport. */
-export function createEngineResourceFetcher(deps: {
+export function createResourceFetcher(deps: {
   diagnostics?: DiagnosticRecorder;
   sourceAccess: SourceAccess;
   extensionTransport: {
     fetchResource(
       request: ResourceRequest,
       signal: AbortSignal,
-    ): Promise<{ bytes: Uint8Array; finalUri?: string }>;
+      interaction: Interaction,
+    ): Promise<ResourceRead>;
   };
 }) {
   return async (
     request: ResourceRequest,
     signal: AbortSignal,
-  ): Promise<{ bytes: Uint8Array; finalUri?: string }> => {
+    interaction: Interaction,
+  ): Promise<ResourceRead> => {
     const sourceOrigin = deps.sourceAccess.origin;
     if (
       request.purpose === "metadata" ||
@@ -34,7 +36,6 @@ export function createEngineResourceFetcher(deps: {
         deps.diagnostics?.count("requests_completed");
         deps.diagnostics?.count("bytes_fetched", result.bytes.byteLength);
         deps.diagnostics?.record(request.purpose === "metadata" ? "debug" : "trace", "request", {
-          request: request.id,
           purpose: request.purpose,
           transport: "source-document",
           url: request.uri,
@@ -44,13 +45,12 @@ export function createEngineResourceFetcher(deps: {
           bytes: result.bytes.byteLength,
           duration_ms: performance.now() - started,
         });
-        return result;
+        return { kind: "response", response: { bytes: result.bytes, final_uri: result.finalUri } };
       } catch (error) {
         deps.diagnostics?.count(signal.aborted ? "requests_cancelled" : "request_failures");
         if (!signal.aborted)
           deps.diagnostics?.record("warn", "request-failed", {
             ...asFetchFailure(error),
-            request: request.id,
             purpose: request.purpose,
             transport: "source-document",
             url: request.uri,
@@ -64,7 +64,6 @@ export function createEngineResourceFetcher(deps: {
           throw error;
         deps.diagnostics?.record("warn", "source-fetch-fallback", {
           ...asFetchFailure(error),
-          request: request.id,
           purpose: request.purpose,
           transport: "source-document",
           url: request.uri,
@@ -75,6 +74,6 @@ export function createEngineResourceFetcher(deps: {
         deps.diagnostics?.count("requests_pending", -1);
       }
     }
-    return deps.extensionTransport.fetchResource(request, signal);
+    return deps.extensionTransport.fetchResource(request, signal, interaction);
   };
 }

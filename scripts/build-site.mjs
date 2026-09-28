@@ -92,7 +92,7 @@ function main() {
   // 1. Help pages from docs/user.
   run(process.execPath, ["scripts/build-help.mjs"]);
 
-  // 2. Wasm adapter (release profile: the deployed artifact) and its glue.
+  // 2. WASM binding (release profile: the deployed artifact) and its glue.
   if (!noWasm) {
     const bindgen = spawnSync("wasm-bindgen", ["--version"], { encoding: "utf8" });
     if (bindgen.status !== 0) {

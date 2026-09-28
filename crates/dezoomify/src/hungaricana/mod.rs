@@ -10,7 +10,7 @@ use url::Url;
 use crate::Vec2d;
 use crate::core::discovery::{metadata, url_matches, viewer};
 use crate::core::{
-    DiscoveryError, DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, ImagePlan,
+    DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource,
     Request, ResolvedLevel, image_title,
 };
 
@@ -51,7 +51,7 @@ fn is_ecw_url(uri: &str) -> bool {
         .ends_with(".ecw")
 }
 
-fn follow_layer(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn follow_layer(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let page = resource.text_lossy();
     if let Some(files) = FILES_ARRAY_RE
         .captures(&page)
@@ -59,7 +59,7 @@ fn follow_layer(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, Discov
     {
         return follow_file_array(&page, resource.final_uri(), files.as_str());
     }
-    Err(DiscoveryError::Session(
+    Err(DiscoveryError::InvalidMetadata(
         "unable to find the Hungaricana layer file name".into(),
     ))
 }
@@ -68,14 +68,14 @@ fn follow_file_array(
     page: &str,
     page_uri: &str,
     encoded: &str,
-) -> Result<DiscoveryStep, DiscoveryError> {
+) -> Result<ParsedResource, DiscoveryError> {
     let files: Vec<String> = serde_json::from_str(encoded).map_err(|error| {
-        DiscoveryError::Session(format!("invalid Hungaricana file list: {error}"))
+        DiscoveryError::InvalidMetadata(format!("invalid Hungaricana file list: {error}"))
     })?;
-    let file = files
-        .get(image_index(page_uri))
-        .ok_or_else(|| DiscoveryError::Session("Hungaricana file index is out of range".into()))?;
-    Ok(DiscoveryStep::Follow(Request::new(layer_file_url(
+    let file = files.get(image_index(page_uri)).ok_or_else(|| {
+        DiscoveryError::InvalidMetadata("Hungaricana file index is out of range".into())
+    })?;
+    Ok(ParsedResource::Follow(Request::new(layer_file_url(
         page, file,
     )?)))
 }
@@ -85,7 +85,9 @@ fn layer_file_url(page: &str, file: &str) -> Result<String, DiscoveryError> {
         .captures(page)
         .and_then(|captures| captures.get(1))
         .map(|value| value.as_str().replace("&amp;", "&"))
-        .ok_or_else(|| DiscoveryError::Session("Hungaricana page has no layer URL".into()))?;
+        .ok_or_else(|| {
+            DiscoveryError::InvalidMetadata("Hungaricana page has no layer URL".into())
+        })?;
     let path = PATH_RE
         .captures(page)
         .and_then(|captures| captures.get(1))
@@ -106,15 +108,15 @@ fn image_index(uri: &str) -> usize {
         .unwrap_or(0)
 }
 
-fn decode(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn decode(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let (url, bytes) = (resource.final_uri(), resource.bytes());
     let metadata: Metadata = serde_json::from_slice(bytes).map_err(|error| {
-        DiscoveryError::Session(format!(
+        DiscoveryError::InvalidMetadata(format!(
             "unable to parse Hungaricana image metadata: {error}"
         ))
     })?;
     if metadata.width == 0 || metadata.height == 0 {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "Hungaricana image dimensions must be positive".into(),
         ));
     }
@@ -124,7 +126,7 @@ fn decode(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryErr
     } else if let Some((base, path)) = url.split_once("/image/") {
         (format!("{base}/image/{path}/"), path.to_owned())
     } else {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "Hungaricana metadata URL has no image path".into(),
         ));
     };
@@ -142,7 +144,7 @@ fn decode(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryErr
             Request::new(format!("{origin}{hash}"))
         },
     )?;
-    Ok(DiscoveryStep::Image(ImagePlan::new(
+    Ok(ParsedResource::Image(ImagePlan::new(
         image_title(&path),
         vec![level],
     )))

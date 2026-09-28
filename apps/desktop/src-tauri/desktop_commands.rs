@@ -6,10 +6,12 @@
 macro_rules! desktop_commands {
     ($callback:ident) => {
         $callback!(
-            start_job,
-            request_destination,
+            dezoomify,
+            cancel_job,
+            pause_job,
+            resume_job,
+            answer_partial,
             open_saved_output,
-            job_command,
             release_job,
             get_job_diagnostics,
             query_capabilities

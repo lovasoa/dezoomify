@@ -63,7 +63,7 @@ pub fn test_browser(args: &[String]) -> Result<(), String> {
     run_node(&["packages/browser-runtime/test/*.test.mjs"])?;
     if browser_flag {
         // Real headless browser run: the webapp E2E drives the compiled wasm
-        // adapter, browser-runtime workers, decoding, canvas assembly, and
+        // function, browser Host, decoding, canvas assembly, and
         // real save inside actual Chromium over the deterministic fixture
         // server. Unknown engines failed closed above.
         run_e2e()?;
@@ -72,9 +72,15 @@ pub fn test_browser(args: &[String]) -> Result<(), String> {
 }
 
 fn build_only_check() -> Result<(), String> {
-    // Type-stripped import check: every runtime source must load under node.
-    run_node(&["packages/browser-runtime/test/types.test.mjs"])?;
-    Ok(())
+    let status = super::desktop::pnpm_command()?
+        .args(["--filter", "@dezoomify/browser-runtime", "typecheck"])
+        .current_dir(super::repo_root())
+        .status()
+        .map_err(|error| format!("typecheck browser runtime: {error}"))?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| "browser runtime typecheck failed".to_string())
 }
 
 pub fn test_web(args: &[String]) -> Result<(), String> {
@@ -155,16 +161,15 @@ pub fn build_web(_args: &[String]) -> Result<(), String> {
     for rel in [
         "package.json",
         "index.html",
-        "packages/browser-runtime/src/web-integration.ts",
+        "packages/browser-runtime/src/web-fetch.ts",
         "src/proxyTransport.ts",
-        "src/worker.js",
         "src/server/proxy.ts",
         "src/server/proxy-node.ts",
         "functions/proxy.js",
         "functions/api/proxy.ts",
         "src/server/security.ts",
         "scripts/dev-server.mjs",
-        "packages/shared-ui/src/snapshot-view.ts",
+        "packages/shared-ui/src/presentation.ts",
     ] {
         if !super::repo_root().join(rel).is_file() {
             return Err(format!("missing web source {rel}"));

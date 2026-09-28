@@ -3,7 +3,7 @@ import test from "node:test";
 import { validateDeepLinkPayload } from "../apps/desktop/src/errorCopy.ts";
 import { desktopHandoffLink } from "../packages/browser-runtime/src/plan-gates.ts";
 import { EN, t } from "../packages/shared-ui/src/i18n.ts";
-import { presentFailure, presentStatus } from "../packages/shared-ui/src/snapshot-view.ts";
+import { presentFailure, presentStatus } from "../packages/shared-ui/src/presentation.ts";
 import {
   handoffOriginFor,
   isFileHandoffSource,
@@ -105,7 +105,7 @@ const viewCallbacks = {
 const failedState = presentFailure(
   {
     code: "PLAN_INVALID",
-    category: "engine",
+    category: "discovery",
     retryable: false,
     message: "This picture is too large for a browser tab.",
   },

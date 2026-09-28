@@ -248,8 +248,6 @@ export const it = {
   "desktop.output.deniedPick":
     "La destinazione di salvataggio non e stata accettata. Scegli un altro file per continuare.",
   "desktop.output.deniedFallback": "La destinazione di salvataggio e stata rifiutata.",
-  "desktop.proto.incompatible":
-    "Questa versione dell applicazione non puo aprire questa immagine da {host}. Aggiorna l applicazione e riprova.",
   "desktop.handoff.rejected":
     "Questo collegamento non si puo aprire da {host}. Prova un altro indirizzo senza dati di accesso.",
   "desktop.handoff.acceptedDetail":
@@ -288,7 +286,6 @@ export const it = {
   "desktop.start.failed":
     "Impossibile avviare il salvataggio di questa immagine da {host}. Riprova.",
   "desktop.choice.failed": "Questa scelta non e stata accettata. Riprova.",
-  "view.ext.desynced": "L estensione ha perso la sincronizzazione. Riavvia la scansione.",
   "desktop.save.generic":
     "Impossibile salvare questa immagine da {host}. Riprova con un altro indirizzo.",
   "desktop.internal.error":

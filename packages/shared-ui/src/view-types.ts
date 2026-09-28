@@ -1,7 +1,8 @@
-import type { DiagnosticReport, HistoryEntry } from "@dezoomify/app-model";
 import type { ReactElement, ReactNode } from "react";
 import type { AppCapabilities } from "./components.ts";
-import type { SnapshotPresentation } from "./snapshot-view.ts";
+import type { DiagnosticReport } from "./diagnostics.ts";
+import type { HistoryEntry } from "./history.ts";
+import type { Presentation } from "./presentation.ts";
 
 /** Effects supplied by the graphical product that hosts the shared UI. */
 export interface ViewCallbacks {
@@ -44,8 +45,7 @@ export interface JobActivity {
 
 /**
  * Host presentation context. Counts, selection geometry, and terminal data
- * ride the SnapshotPresentation; hosts set these fields from their snapshot
- * stream plus product-local surfaces (canvas blobs, saved files, history).
+ * ride the Presentation; hosts set these fields from progress callbacks plus product-local surfaces (canvas blobs, saved files, history).
  */
 export interface ViewContext {
   diagnosticReport?: DiagnosticReport;
@@ -84,7 +84,7 @@ export interface ViewRenderOptions {
   replace?: ReactElement;
 }
 
-export type ViewPhase = SnapshotPresentation["phase"];
+export type ViewPhase = Presentation["phase"];
 
 export interface ConfirmModalArgs {
   id?: string;

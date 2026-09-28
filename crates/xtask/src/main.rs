@@ -6,6 +6,7 @@
 // policy note).
 #![deny(clippy::unwrap_used)]
 
+mod bindings;
 mod browser;
 mod check;
 mod ci;
@@ -15,11 +16,9 @@ mod core;
 mod desktop;
 mod extension;
 mod fixtures;
-mod job;
 mod live;
 mod native;
 mod perf;
-mod protocol;
 mod release;
 mod setup;
 mod style;
@@ -29,7 +28,7 @@ mod wasm;
 
 use std::process::ExitCode;
 
-const HELP: &str = "cargo xtask <task>\n\nAvailable tasks:\n  setup                 verify pinned tools\n  check                 formatting, lint, prose hygiene, and read-only artifact validation\n  fixtures verify       verify scenario schemas, routes, payloads, and manifest\n  fixtures serve [--port <n>] [--write-address <path>]\n                        serve deterministic fixtures on loopback\n  fixtures capture --url <url> --out <scenario> [--also <url>...]\n                        fetch public metadata and save routes.json and payloads\n  protocol generate [--check]\n                        write or verify the generated WASM declaration\n  protocol check        verify bindings, TypeScript use, and portability\n  build wasm|web|cli|desktop|extension\n                        build app artifacts\n  build desktop [--unsigned-test]\n                        desktop shell + bundle (no bundle with --unsigned-test)\n  dev ui|web|desktop|extension\n                        run the named app's development environment\n  dev extension [--browser <name>]\n                        extension dev with named engine (chromium only)\n  ci <lane>|local|digest [--check <hex>] run CI lanes locally; digest attests release inputs\n  release plan|build|sign|verify|publish\n                        release orchestration\n  test                  run all fast deterministic suites\n  test core [--purity|--parity]\n                        pure discovery core suites\n  test protocol         generated typed-contract suites\n  test job [--transcripts]\n                        portable job-engine suites\n  test wasm [--browser <name>]\n                        WASM adapter suites\n  test browser [--build-only|--browser <name>|--scenario <id>]\n                        browser-runtime suites\n  test web [--e2e|--no-e2e|--browser <chromium|firefox|webkit|all>]\n                        website integration suites\n  test native           native runtime + CLI suites\n  test scenario         scenario file suites\n  test desktop [--e2e-window]   desktop shell suites (real window via the embedded WebDriver server, selenium)\n  test extension        extension unit + manifest suites
+const HELP: &str = "cargo xtask <task>\n\nAvailable tasks:\n  setup                 verify pinned tools\n  check                 formatting, lint, prose hygiene, and read-only artifact validation\n  fixtures verify       verify scenario schemas, routes, payloads, and manifest\n  fixtures serve [--port <n>] [--write-address <path>]\n                        serve deterministic fixtures on loopback\n  fixtures capture --url <url> --out <scenario> [--also <url>...]\n                        fetch public metadata and save routes.json and payloads\n  bindings generate [--check]\n                        write or verify the generated WASM declaration\n  bindings check        verify bindings, TypeScript use, and portability\n  build wasm|web|cli|desktop|extension\n                        build app artifacts\n  build desktop [--unsigned-test]\n                        desktop shell + bundle (no bundle with --unsigned-test)\n  dev ui|web|desktop|extension\n                        run the named app's development environment\n  dev extension [--browser <name>]\n                        extension dev with named engine (chromium only)\n  ci <lane>|local|digest [--check <hex>] run CI lanes locally; digest attests release inputs\n  release plan|build|sign|verify|publish\n                        release orchestration\n  test                  run all fast deterministic suites\n  test core [--purity|--parity]\n                        pure discovery core suites\n  test bindings         generated typed-contract suites\n  test wasm [--browser <name>]\n                        WASM Host binding suites\n  test browser [--build-only|--browser <name>|--scenario <id>]\n                        browser-runtime suites\n  test web [--e2e|--no-e2e|--browser <chromium|firefox|webkit|all>]\n                        website integration suites\n  test native           native runtime + CLI suites\n  test scenario         scenario file suites\n  test desktop [--e2e-window]   desktop shell suites (real window via the embedded WebDriver server, selenium)\n  test extension        extension unit + manifest suites
   test perf [--smoke]     native pipeline perf smoke + benches (opt-in, tracked)\n  test all              full deterministic aggregate\n  test live --dry-run --fixtures\n                        live-compat dry run (no public targets)\n  test live --public [--limit <n>] [--site <id>]\n                        low-volume public download check (real bytes, opt-in)\n  test live --webapp    live webapp check in Chromium (opt-in, diagnostic)\n";
 
 fn main() -> ExitCode {
@@ -64,7 +63,7 @@ fn dispatch(args: &[String]) -> Result<(), String> {
             )),
             None => Err("usage: cargo xtask fixtures <verify|serve|capture> [options]".to_string()),
         },
-        "protocol" => protocol::run(&args[1..]),
+        "bindings" => bindings::run(&args[1..]),
         "build" => match args.get(1).map(String::as_str) {
             Some("wasm") => wasm::build_wasm(&args[2..]),
             Some("web") => browser::build_web(&args[2..]),
@@ -90,7 +89,7 @@ fn dispatch(args: &[String]) -> Result<(), String> {
         "release" => release::run(&args[1..]),
         "test" => test_cmd::run(&args[1..]),
         other => Err(format!(
-            "unknown task '{other}' (tasks: setup, check, fixtures, protocol, build, dev, ci, release, test)"
+            "unknown task '{other}' (tasks: setup, check, fixtures, bindings, build, dev, ci, release, test)"
         )),
     }
 }
@@ -164,7 +163,7 @@ mod tests {
         // Help lists the implemented command surface: no future commands.
         assert!(dispatch(&s(&["--help"])).is_ok());
         for cmd in [
-            "setup", "check", "fixtures", "protocol", "build", "dev", "ci", "release", "test",
+            "setup", "check", "fixtures", "bindings", "build", "dev", "ci", "release", "test",
         ] {
             assert!(HELP.contains(cmd), "help lacks {cmd}");
         }
@@ -177,7 +176,7 @@ mod tests {
             vec!["dev", "bogus"],
             vec!["ci", "bogus"],
             vec!["release", "bogus"],
-            vec!["protocol", "bogus"],
+            vec!["bindings", "bogus"],
             vec!["test", "bogus"],
             vec!["bogus"],
         ] {

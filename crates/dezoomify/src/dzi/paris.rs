@@ -24,7 +24,7 @@ pub(super) fn reader(uri: &str) -> Result<Request, DiscoveryError> {
     let ark = uri
         .strip_prefix("https://bibliotheques-specialisees.paris.fr/ark:")
         .filter(|ark| ark.split('/').filter(|part| !part.is_empty()).count() >= 3)
-        .ok_or_else(|| DiscoveryError::Session("invalid Paris ARK URL".into()))?;
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("invalid Paris ARK URL".into()))?;
     let mut parts = ark.split('/').filter(|part| !part.is_empty());
     let prefix = format!(
         "/{}/{}/{}",

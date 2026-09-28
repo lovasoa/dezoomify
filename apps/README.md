@@ -1,6 +1,6 @@
 # Applications
 
-The four user-facing programs. Each composes the shared engine
+The four user-facing programs. Each calls the shared async Rust algorithm
 (`crates/`) and shared UI (`packages/`) with its own host capabilities;
 no app imports another app, and reusable logic lives below, not in apps.
 

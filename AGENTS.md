@@ -12,9 +12,9 @@ graphical apps; `packages/browser-runtime` integrates it with the browser.
 Run from the repository root:
 
 ```sh
-cargo xtask check          # fmt + clippy + Biome + fixture/protocol artifact validation
+cargo xtask check          # fmt + clippy + Biome + fixture/binding artifact validation
 cargo xtask test           # one Rust workspace run + one combined Node unit run
-cargo xtask test <target>  # core|protocol|job|wasm|browser|ui|web|native|desktop|extension|scenario|all
+cargo xtask test <target>  # core|bindings|wasm|browser|ui|web|native|desktop|extension|scenario|all
 cargo xtask build <target> # wasm|web|cli|desktop|extension
 cargo xtask dev <target>   # ui|web|desktop|extension
 cargo xtask release version|plan|build|sign|verify|publish
@@ -37,13 +37,13 @@ compilation. Use `--profile dev-debug` only when a diagnosis needs symbols.
 | Area | Contract |
 |---|---|
 | Architecture, crate boundaries, data flow | [`docs/architecture.md`](docs/architecture.md) |
-| Application model (service, snapshots, queue, history) | [`docs/app-model.md`](docs/app-model.md) |
+| Application (invocations, queue, history) | [`docs/application.md`](docs/application.md) |
 | Acceptance matrix (behavior → corpus → lane) | [`docs/acceptance-matrix.md`](docs/acceptance-matrix.md) |
-| Job engine (phases, retries, cancellation) | [`docs/job-engine.md`](docs/job-engine.md) |
+| Algorithm (discovery, retries, cancellation) | [`docs/algorithm.md`](docs/algorithm.md) |
 | Browser runtime, transports, tainted canvas | [`docs/browser-runtime.md`](docs/browser-runtime.md) |
 | Extension behavior, packaging, source binding | [`docs/extension.md`](docs/extension.md) |
 | CLI and desktop app | [`docs/native-apps.md`](docs/native-apps.md) |
-| Protocol (commands, events, handoff) | [`docs/protocol.md`](docs/protocol.md) |
+| Generated Host bindings and handoff | [`docs/bindings.md`](docs/bindings.md) |
 | Errors and typed recovery | [`docs/errors.md`](docs/errors.md) |
 | Security and credential rules | [`docs/security.md`](docs/security.md) |
 | Testing policy and fixtures | [`docs/testing.md`](docs/testing.md) |
@@ -53,15 +53,15 @@ compilation. Use `--profile dev-debug` only when a diagnosis needs symbols.
 
 ## Hard rules
 
-- **Boundaries:** dependencies point inward (`model` → formats → `engine` →
-  runtimes); the `dezoomify` domain crate is pure and deterministic (no I/O,
-  clocks, or tasks); apps never import each
-  other; shared UI never touches host globals directly. Enforced by
-  Biome's scoped restrictions in `biome.jsonc` through `cargo xtask check`;
-  add an architecture test whenever a boundary can be enforced mechanically.
+- **Boundaries:** parsers and geometry are pure; the shared async algorithm calls
+  only injected Host capabilities. Platform I/O, clocks, codecs, and task ownership
+  belong to Hosts. Products never import each other. Shared UI never touches host
+  globals. Browser application modules compose UI and Host; transport/image modules
+  receive callbacks. Biome enforces scoped import rules; add architecture tests for
+  mechanically enforceable boundaries.
 - **Contracts:** cross-language types are defined once in `crates/dezoomify/src/model.rs`;
   `packages/wasm-bindings` is emitted by the real WASM build via
-  `cargo xtask protocol generate` and never hand-edited. Browser boundary
+  `cargo xtask bindings generate` and never hand-edited. Browser boundary
   modules import it and never redeclare Rust contract types. Errors carry stable codes and typed recovery actions;
   never branch on display strings.
 - **Generated artifacts:** nothing generated for the website is committed
@@ -93,11 +93,9 @@ Use these terms consistently in docs, code, and user-facing copy.
 |---|---|
 | product | The website, extension, desktop app, or CLI. Not "surface" or "client". |
 | shared UI | The host-neutral UI (`packages/shared-ui`). |
-| runtime | The effect layer inside an app (browser or native). Internal term. |
-| host | Whatever executes a job's effects. |
-| job service | The product-facing boundary that starts and controls jobs. Do not call this boundary a "runner". |
-| shared UI integration | An app's typed shared-UI↔runtime wiring. Never "adapter". |
-| WASM adapter | The role of `crates/dezoomify-wasm`. The only sanctioned "adapter". |
+| runtime | Platform operations inside an app (browser or native). Internal term. |
+| Host | Injected platform capabilities called by the shared Rust algorithm. |
+| shared UI integration | An app's typed UI callbacks and capabilities. |
 | direct browser fetch | The website's credential-free readable fetch, always tried first. |
 | metadata CORS proxy | The website's metadata-only proxy ("Metadata proxy"). |
 | browser-session fetch | The extension's session fetch. Never "privileged fetch". |
@@ -105,7 +103,7 @@ Use these terms consistently in docs, code, and user-facing copy.
 | readable bytes | Response bytes JavaScript can read. |
 | handoff | Moving a job to another app; the `dezoomify://` deep link is the mechanism. Never "escalation". |
 | output / save | The produced files and the user action that writes them. Never "export"/"download". |
-| job | One end-to-end user request; "session" is only the JS binding object. |
+| job | One end-to-end user request, owned by one invocation. |
 | discovery / scan | Core image/level finding; the extension's one-shot tab observation. |
 | format | A site-format implementation. Never "dezoomer". |
 | scenario / fixture / golden / transcript | Deterministic test units under `testdata/scenarios`. Never "case". |

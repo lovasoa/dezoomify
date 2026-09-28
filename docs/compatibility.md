@@ -2,7 +2,7 @@
 
 ## Installed extension and desktop versions
 
-Deep-link input remains untrusted and needs validation and confirmation before effects. Release automation verifies the handoff protocol range and this matrix (see [Releases](releases.md)).
+Deep-link input remains untrusted and needs validation and confirmation before effects. The desktop app accepts handoff envelope versions 1 and 2; the browser products produce version 2.
 
 ## Browsers and operating systems
 
@@ -48,7 +48,7 @@ Browser apps show tainted tiles but save nothing clean from them (above). The ex
 
 ### Bulk
 
-Queues run sequential single-job runs in the integration layer, never the engine: website single-queue (submitted addresses wait their turn), native multi-job queue (per-job progress, cancel one/all, retry failed). Each job still saves one output; failures never stop the rest. CLI `--bulk` runs one bounded run per entry (per-image plus totals summary; exit 1 when any entry fails). Bulk text discovery yields deferred entries resolving one at a time. User behavior: [Website guide](user/website.md#saving-several-images), [Desktop app guide](user/desktop-app.md), [Command-line guide](user/command-line.md#saving-many-images).
+Queues run sequential invocations in the application: website single-queue (submitted addresses wait their turn), native multi-job queue (per-job progress, cancel one/all, retry failed). Each job still saves one output; failures never stop the rest. CLI `--bulk` runs one bounded run per entry (per-image plus totals summary; exit 1 when any entry fails). Bulk text discovery yields deferred entries resolving one at a time. User behavior: [Website guide](user/website.md#saving-several-images), [Desktop app guide](user/desktop-app.md), [Command-line guide](user/command-line.md#saving-many-images).
 
 ## Reporting a problem
 
@@ -57,7 +57,7 @@ Copy the diagnostics block from the app's error details (stays on your device) a
 - page or manifest address;
 - exact message plus code, phase, transport, resource kind, blocked reason;
 - diagnostics copy (failure details name the full request URL and quote the server reply);
-- app and protocol versions, browser name and version;
+- app version, browser name and version;
 - what was tried already (retry later, extension, desktop app);
 - a screenshot where it helps.
 

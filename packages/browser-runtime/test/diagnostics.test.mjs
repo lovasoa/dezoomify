@@ -4,7 +4,7 @@ import {
   createDiagnosticRecorder,
   diagnosticFields,
   formatDiagnosticReport,
-} from "../../app-model/src/diagnostics.ts";
+} from "../../shared-ui/src/diagnostics.ts";
 import {
   copyDiagnosticText,
   recentDiagnosticReports,

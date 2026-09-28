@@ -1,21 +1,4 @@
-// Engine-effect canvas assembly executor.
-//
-// The browser executor for the Rust job engine maps typed host effects onto
-// canvas execution and owns no job policy. The engine owns retries,
-// cancellation, recovery, and ordering; this module only executes what the
-// effects describe:
-//
-//   acquire-tile      -> prepare the declared surface, decode, and paint the
-//                        tile immediately at its planned placement
-//   finalize-output   -> allocate a derived-size surface when the plan had no
-//                        declared size, flush any held tiles, then encode and
-//                        save; a tainted canvas stays display-only and
-//                        produces no bytes
-//   cancel-work       -> close every retained tile resource
-//
-// All host constructors are injected so node tests drive the full path with
-// fakes.
-
+// Canvas decoding, painting, and PNG output for browser capabilities.
 import type {
   OutputDisposition,
   OutputFormat,
@@ -36,9 +19,6 @@ export type BrowserSaveDisposition = Extract<
 >;
 export type BrowserOutputDisposition = BrowserSaveDisposition | "display-only";
 
-/** Generated shape of one tile's output placement. */
-export type AssemblyPlacement = TilePlacement;
-
 /** Allocated output surface: geometry plus a 2D drawing context. */
 export interface AssemblyCanvas {
   width: number;
@@ -47,14 +27,14 @@ export interface AssemblyCanvas {
 }
 
 export interface CanvasAssemblyDeps<C extends AssemblyCanvas = AssemblyCanvas> {
-  diagnostics?: import("@dezoomify/app-model").DiagnosticRecorder;
+  diagnostics?: import("../../shared-ui/src/diagnostics.ts").DiagnosticRecorder;
   signal?: AbortSignal;
   disposeDecoder?(): void;
   /** Decode acquired tile bytes into a bitmap (tile-decode's decoder). */
   decode(bytes: ArrayBuffer): Promise<TileBitmap>;
   /**
    * Apply one core processing recipe (e.g. `google-arts-decrypt`) to raw
-   * tile bytes before decoding. Hosts route this through the WASM session's
+   * tile bytes before decoding. Hosts call the WASM
    * pure `applyProcessing` op; calls are serialized by the assembly.
    */
   processTile?: (recipe: ProcessingRecipe, bytes: ArrayBuffer) => Promise<ArrayBuffer>;
@@ -87,13 +67,13 @@ export interface CanvasAssembly {
   /** Validate and reveal the declared output surface before acquisition. */
   prepare(canvas?: { width: number; height: number } | null): void;
   /** Decode and paint immediately, or hold when the plan has no declared size. */
-  acquireTile(tile: number, placement: AssemblyPlacement, bytes: ArrayBuffer): Promise<void>;
+  acquireTile(tile: number, placement: TilePlacement, bytes: ArrayBuffer): Promise<void>;
   /**
    * Display-only acquisition: hold an ordinary image element for assembly.
    * The canvas taints when it is drawn, so the job can only complete as
    * display-only (no pixel reads, no programmatic save).
    */
-  acquireDisplayTile(tile: number, placement: AssemblyPlacement, image: TileImageLike): void;
+  acquireDisplayTile(tile: number, placement: TilePlacement, image: TileImageLike): void;
   /** Whether any display-only tile was acquired (output is tainted). */
   isTainted(): boolean;
   /** Output dimensions from the declared canvas or accumulated placements. */
@@ -113,7 +93,7 @@ export interface CanvasAssembly {
 }
 
 function placementGeometry(
-  placement: AssemblyPlacement,
+  placement: TilePlacement,
   bitmap: TileBitmap | undefined,
 ): PlacedTileGeometry {
   const w = placement.expected_size?.width ?? bitmap?.width;
@@ -126,7 +106,7 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
 ): CanvasAssembly {
   const lifetime = new AbortController();
   const signal = deps.signal ? AbortSignal.any([deps.signal, lifetime.signal]) : lifetime.signal;
-  const placements = new Map<number, AssemblyPlacement>();
+  const placements = new Map<number, TilePlacement>();
   const bitmaps = new Map<number, TileBitmap>();
   const displayImages = new Map<number, TileImageLike>();
   const processQueue = deps.processTile ? createProcessQueue(deps.processTile) : null;
@@ -168,13 +148,13 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
     flushHeld();
   }
 
-  function recordPlacement(tile: number, placement: AssemblyPlacement): void {
+  function recordPlacement(tile: number, placement: TilePlacement): void {
     placements.set(tile, placement);
   }
 
   async function acquireTile(
     tile: number,
-    placement: AssemblyPlacement,
+    placement: TilePlacement,
     bytes: ArrayBuffer,
   ): Promise<void> {
     signal.throwIfAborted();
@@ -258,11 +238,7 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
     }
   }
 
-  function acquireDisplayTile(
-    tile: number,
-    placement: AssemblyPlacement,
-    image: TileImageLike,
-  ): void {
+  function acquireDisplayTile(tile: number, placement: TilePlacement, image: TileImageLike): void {
     signal.throwIfAborted();
     recordPlacement(tile, placement);
     if (canvas) {
@@ -322,7 +298,7 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
         "The output surface is already open.",
         false,
         undefined,
-        "finalize-output arrived twice",
+        "output was finalized twice",
       );
     }
     let surface = canvas;
@@ -334,7 +310,7 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
           "The image size could not be determined.",
           false,
           undefined,
-          `finalize-output derived an empty canvas ${size.width}x${size.height}`,
+          `output had an empty canvas ${size.width}x${size.height}`,
         );
       }
       surface = allocate(size);

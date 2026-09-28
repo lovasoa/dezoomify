@@ -1,10 +1,3 @@
-// Deep-link parsing for `dezoomify://open` (lean shell, std only).
-//
-// Every website/deep-link handoff is bounded, versioned, non-secret,
-// untrusted input. Accepted links still require explicit user confirmation
-// before any network or file effect; rejected or unconfirmed links produce
-// no effect.
-
 /// Deep-link envelope version currently produced.
 pub const DEEP_LINK_CURRENT_VERSION: u32 = 2;
 /// Oldest envelope version still accepted (N-1).
@@ -78,7 +71,7 @@ impl std::error::Error for DeepLinkError {}
 /// `dezoomify::model::SENSITIVE_QUERY_KEYS` and the generated Rust bindings.
 /// Matching is case-insensitive exact (never substring) so `/cookie-recipe/`
 /// stays valid while `?token=secret` is rejected. This file stays std-only by
-/// design (lean shell); keep the list in sync with the protocol source.
+/// design (lean shell); keep the list in sync with the model source.
 fn is_secret_key(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
@@ -201,14 +194,6 @@ fn validate_source(src: &str) -> Result<(), DeepLinkError> {
     Ok(())
 }
 
-/// Scan process argv for the first `dezoomify://` deep-link candidate.
-///
-/// Second-instance forwarding and initial-launch handling share this scan:
-/// the OS delivers the link as a plain argv entry (`dezoomify://open?...`).
-/// The returned candidate is still untrusted input: callers must validate it
-/// with [`parse_deep_link`] and gate every effect with
-/// [`apply_after_confirmation`]. Returns `None` when no entry carries the
-/// scheme. Never performs an effect.
 pub fn find_deep_link_in_argv(argv: &[String]) -> Option<String> {
     for arg in argv {
         let candidate = arg.trim();
@@ -219,7 +204,6 @@ pub fn find_deep_link_in_argv(argv: &[String]) -> Option<String> {
     None
 }
 
-/// Parse and validate one `dezoomify://open` URL. No effect is performed.
 pub fn parse_deep_link(url: &str) -> Result<DeepLink, DeepLinkError> {
     if url.len() > MAX_DEEP_LINK_LEN {
         return Err(DeepLinkError::Oversize);
@@ -306,7 +290,7 @@ pub fn parse_deep_link(url: &str) -> Result<DeepLink, DeepLinkError> {
     validate_source(&source_url)?;
     // Secret query keys inside the decoded source are also forbidden
     // (cookie-param style smuggling). Matching is exact per key
-    // (case-insensitive), never substring, mirroring the protocol DTO.
+    // (case-insensitive), never substring, matching the model field.
     if let Some(q) = source_url.split('?').nth(1) {
         let query = q.split('#').next().unwrap_or(q);
         for pair in query.split('&') {
@@ -361,10 +345,6 @@ pub fn requires_confirmation(_link: &DeepLink) -> bool {
     true
 }
 
-/// Gate any network or file effect on explicit confirmation.
-///
-/// Returns the link only when `confirmed` is true; otherwise reports a
-/// pending-confirmation state and the caller must perform no effect.
 pub fn apply_after_confirmation(
     link: DeepLink,
     confirmed: bool,
@@ -579,7 +559,7 @@ mod tests {
     }
 
     #[test]
-    fn no_effect_without_confirm() {
+    fn confirmation_precedes_io() {
         let link = parse_deep_link(&link("2", "https%3A%2F%2Fexample.com%2Fitem")).unwrap();
         assert!(apply_after_confirmation(link.clone(), false).is_err());
         assert!(apply_after_confirmation(link, true).is_ok());

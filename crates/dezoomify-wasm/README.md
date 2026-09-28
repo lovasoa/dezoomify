@@ -1,13 +1,12 @@
 # dezoomify-wasm
 
-Runs the core/job engine inside browsers through generated typed JavaScript
-objects for `packages/browser-runtime`. Each dispatch returns its effects and
-events directly. It owns no
-fetch, DOM, storage, or worker lifecycle: the JavaScript host does that.
+Exposes the async Rust `dezoomify` function and generated `Host` contract to
+JavaScript. The function awaits the capabilities supplied by `BrowserHost` in
+`packages/browser-runtime`. Rust owns the algorithm; the Host owns browser I/O.
 
 ```sh
 cargo xtask build wasm   # wasm32 build
-cargo xtask test wasm    # adapter + generated object-ABI Node harness
+cargo xtask test wasm    # real WASM Host ABI and promise harness
 ```
 
 Bare `cargo xtask test` covers the crate's native Rust tests but does not

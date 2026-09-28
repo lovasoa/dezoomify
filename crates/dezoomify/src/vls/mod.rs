@@ -7,7 +7,7 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::discovery::{metadata, url_matches, viewer};
-use crate::core::{DiscoveryError, DiscoveryStep, FormatSpec, ImagePlan, Request, ResolvedLevel};
+use crate::core::{DiscoveryError, FormatSpec, ImagePlan, ParsedResource, Request, ResolvedLevel};
 use crate::markup::attribute;
 use crate::web_page::page_title;
 
@@ -44,23 +44,23 @@ fn normalize_url(uri: &str) -> Result<Request, DiscoveryError> {
     ))
 }
 
-fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let (url, bytes) = (resource.final_uri(), resource.bytes());
     let page = String::from_utf8_lossy(bytes);
     let map = MAP_RE
         .captures(&page)
         .and_then(|captures| captures.get(1))
-        .ok_or_else(|| DiscoveryError::Session("VLS page has no map element".into()))?;
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("VLS page has no map element".into()))?;
     let id = attribute(map.as_str(), "vls:ot_id")
         .or_else(|| attribute(map.as_str(), "ot_id"))
         .filter(|id| !id.is_empty())
-        .ok_or_else(|| DiscoveryError::Session("VLS map has no image ID".into()))?;
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("VLS map has no image ID".into()))?;
     let width = positive_attribute(map.as_str(), "vls:width")
         .or_else(|| positive_attribute(map.as_str(), "width"))
-        .ok_or_else(|| DiscoveryError::Session("VLS map has invalid width".into()))?;
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("VLS map has invalid width".into()))?;
     let height = positive_attribute(map.as_str(), "vls:height")
         .or_else(|| positive_attribute(map.as_str(), "height"))
-        .ok_or_else(|| DiscoveryError::Session("VLS map has invalid height".into()))?;
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("VLS map has invalid height".into()))?;
     let zoom_tile_size = VAR_RE
         .captures_iter(&page)
         .find_map(|captures| {
@@ -71,13 +71,15 @@ fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<DiscoveryStep,
                 .and_then(|value| value.parse::<u32>().ok())
         })
         .filter(|size| *size > 0)
-        .ok_or_else(|| DiscoveryError::Session("VLS page has no valid zoom tile size".into()))?;
+        .ok_or_else(|| {
+            DiscoveryError::InvalidMetadata("VLS page has no valid zoom tile size".into())
+        })?;
     let height = height
         .div_ceil(zoom_tile_size)
         .checked_mul(zoom_tile_size)
-        .ok_or_else(|| DiscoveryError::Session("VLS image height exceeds u32".into()))?;
-    let parsed =
-        Url::parse(url).map_err(|_| DiscoveryError::Session("invalid VLS viewer URL".into()))?;
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("VLS image height exceeds u32".into()))?;
+    let parsed = Url::parse(url)
+        .map_err(|_| DiscoveryError::InvalidMetadata("invalid VLS viewer URL".into()))?;
     let mut base = parsed;
     base.set_path(&format!("/image/tiler/square/{id}/0"));
     base.set_query(None);
@@ -91,7 +93,7 @@ fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<DiscoveryStep,
         Vec2d::square(1024),
         move |tile| Request::new(format!("{base}/{}/{}", tile.coord.column, tile.coord.row)),
     )?;
-    Ok(DiscoveryStep::Image(ImagePlan::new(
+    Ok(ParsedResource::Image(ImagePlan::new(
         page_title(&page),
         vec![level],
     )))

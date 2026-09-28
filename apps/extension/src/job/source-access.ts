@@ -4,7 +4,7 @@ import {
   isPublicHttpUrl,
   originOfUrl,
   SOURCE_FETCH_BYTE_LIMIT,
-  validateEngineHeaders,
+  validateRequestHeaders,
 } from "@dezoomify/browser-runtime";
 import type { FetchFailure, ResourceRequest } from "@dezoomify/wasm-bindings";
 import type { WxtBrowser } from "wxt/browser";
@@ -252,8 +252,8 @@ export function createSourceAccess(
     }
   }
 
-  async function scan(): Promise<CandidateSnapshot> {
-    const snapshot = await inject(collectCandidates, []);
+  async function scan(signal?: AbortSignal): Promise<CandidateSnapshot> {
+    const snapshot = await inject(collectCandidates, [], signal);
     if (!validSnapshot(snapshot, documentUrl))
       throw failure("malformed", "invalid source scan result");
     assertLive();
@@ -269,7 +269,7 @@ export function createSourceAccess(
       !isPublicHttpUrl(request.uri)
     )
       throw failure("malformed", "invalid source request URL");
-    const headers = validateEngineHeaders(request.headers ?? []);
+    const headers = validateRequestHeaders(request.headers ?? []);
     if (!headers) throw failure("malformed", "invalid source request headers");
 
     const operationId = crypto.randomUUID();

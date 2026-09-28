@@ -3,7 +3,7 @@ import {
   type DiagnosticRecorder,
   type DiagnosticReport,
   formatDiagnosticRecord,
-} from "@dezoomify/app-model";
+} from "../../shared-ui/src/diagnostics.ts";
 
 let sequence = 0;
 declare const __DEZOOMIFY_VERSION__: string;
@@ -21,7 +21,6 @@ export function createAttemptDiagnostics(
     context: {
       product,
       version,
-      protocol: "2.0",
       build: import.meta.url,
       user_agent: typeof navigator === "undefined" ? undefined : navigator.userAgent,
       platform: typeof navigator === "undefined" ? undefined : navigator.platform,

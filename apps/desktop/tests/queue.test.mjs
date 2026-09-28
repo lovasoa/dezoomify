@@ -11,7 +11,7 @@ import {
   humanQueueSummary as humanDesktopQueueSummary,
   pendingQueueEntries as pendingDesktopEntries,
   summarizeQueue as summarizeDesktopQueue,
-} from "@dezoomify/app-model";
+} from "@dezoomify/shared-ui";
 import {
   createDesktopQueue,
   enqueueDesktopQueue,
@@ -121,7 +121,7 @@ test("retry failed moves behind the line and preserves the input URL", () => {
 });
 
 // Deterministic queue scenarios (testdata/scenarios/desktop/queue-*): the
-// scripted steps drive the real integration-layer queue module and the
+// scripted steps drive the real queue module and the
 // golden per-entry outcomes, totals, and ordered transcript must match.
 function runQueueScript(doc) {
   let q = createDesktopQueue();

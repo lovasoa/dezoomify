@@ -10,8 +10,8 @@ use crate::core::discovery::{
     any, html_matches, image_url, metadata, url_matches, url_suffix, viewer,
 };
 use crate::core::{
-    CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec,
-    Grid, ImagePlan, Request, ResolvedLevel,
+    CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
+    ParsedResource, Request, ResolvedLevel,
 };
 use crate::json_utils::all_json;
 
@@ -73,15 +73,15 @@ fn has_wdl_template(bytes: &[u8]) -> bool {
         .any(|window| window == b"dziUrlTemplate")
 }
 
-fn follow_wdl_template(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn follow_wdl_template(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let template = WDL_TEMPLATE_RE
         .captures(resource.bytes())
         .and_then(|captures| captures.get(1))
         .map(|capture| String::from_utf8_lossy(capture.as_bytes()).into_owned())
-        .ok_or_else(|| DiscoveryError::Session("WDL page declares no template".into()))?;
-    let view = WDL_VIEW_RE
-        .captures(resource.uri())
-        .ok_or_else(|| DiscoveryError::Session("WDL page URL has no view coordinates".into()))?;
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("WDL page declares no template".into()))?;
+    let view = WDL_VIEW_RE.captures(resource.uri()).ok_or_else(|| {
+        DiscoveryError::InvalidMetadata("WDL page URL has no view coordinates".into())
+    })?;
     let url = template
         .replace("{group}", &view[1])
         .replace("{index}", &view[2]);
@@ -91,7 +91,7 @@ fn follow_wdl_template(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep,
 fn tile_metadata(input: &str) -> Result<Request, DiscoveryError> {
     let matched = TILE_URL
         .find(input)
-        .ok_or_else(|| DiscoveryError::Session("not a DZI tile URL".into()))?;
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("not a DZI tile URL".into()))?;
     Ok(Request::new(format!("{}.dzi", &input[..matched.start()])))
 }
 
@@ -140,7 +140,7 @@ fn is_polona_json_url(uri: &str) -> bool {
     uri.contains("polona.pl/resources/item/") && uri.contains("format=json")
 }
 
-fn follow_polona_json(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn follow_polona_json(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     static ITEM_RE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"polona\.pl/item/(\d+)/").expect("constant Polona item pattern")
     });
@@ -148,13 +148,13 @@ fn follow_polona_json(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, 
         .captures(resource.uri())
         .and_then(|captures| captures.get(1))
         .map(|capture| capture.as_str().to_owned())
-        .ok_or_else(|| DiscoveryError::Session("Polona item URL has no id".into()))?;
-    Ok(DiscoveryStep::Follow(Request::new(format!(
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("Polona item URL has no id".into()))?;
+    Ok(ParsedResource::Follow(Request::new(format!(
         "http://polona.pl/resources/item/{id}/?format=json"
     ))))
 }
 
-fn follow_polona_dzi(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn follow_polona_dzi(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let context = resource.context();
     static PAGE_RE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"polona\.pl/item/\d+/(\d+)").expect("constant Polona page pattern")
@@ -164,16 +164,18 @@ fn follow_polona_dzi(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, D
         .find_map(|prior| PAGE_RE.captures(prior.uri()))
         .and_then(|captures| captures.get(1))
         .and_then(|capture| capture.as_str().parse().ok())
-        .ok_or_else(|| DiscoveryError::Session("Polona JSON has no item context".into()))?;
-    let manifest: serde_json::Value = serde_json::from_slice(resource.bytes())
-        .map_err(|error| DiscoveryError::Session(format!("invalid Polona JSON: {error}")))?;
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("Polona JSON has no item context".into()))?;
+    let manifest: serde_json::Value =
+        serde_json::from_slice(resource.bytes()).map_err(|error| {
+            DiscoveryError::InvalidMetadata(format!("invalid Polona JSON: {error}"))
+        })?;
     let dzi = manifest
         .get("pages")
         .and_then(|pages| pages.get(page))
         .and_then(|page| page.get("dzi_url"))
         .and_then(|url| url.as_str())
-        .ok_or_else(|| DiscoveryError::Session("Polona JSON has no page DZI URL".into()))?;
-    Ok(DiscoveryStep::Follow(Request::new(dzi.to_owned())))
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("Polona JSON has no page DZI URL".into()))?;
+    Ok(ParsedResource::Follow(Request::new(dzi.to_owned())))
 }
 
 fn contains_seadragon_embed(contents: &[u8]) -> bool {
@@ -182,20 +184,22 @@ fn contains_seadragon_embed(contents: &[u8]) -> bool {
 
 fn follow_seadragon_embed(
     resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+) -> Result<ParsedResource, DiscoveryError> {
     let metadata = SEADRAGON_EMBED
         .captures(resource.bytes())
         .and_then(|captures| captures.name("metadata"))
         .map(|capture| std::str::from_utf8(capture.as_bytes()))
         .transpose()
-        .map_err(|_| DiscoveryError::Session("Seadragon metadata URL is not UTF-8".into()))?
-        .ok_or_else(|| DiscoveryError::Session("Seadragon embed lacks a metadata URL".into()))?;
+        .map_err(|_| DiscoveryError::InvalidMetadata("Seadragon metadata URL is not UTF-8".into()))?
+        .ok_or_else(|| {
+            DiscoveryError::InvalidMetadata("Seadragon embed lacks a metadata URL".into())
+        })?;
     Ok(resource.follow_relative(metadata))
 }
 
 mod paris;
 
-fn decode_catalog(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn decode_catalog(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let (url, contents) = (resource.final_uri(), resource.bytes());
     let xml_result = serde_xml_rs::from_reader::<'_, DziFile, _>(contents);
     let xml_err = xml_result.as_ref().err().map(ToString::to_string);
@@ -206,11 +210,11 @@ fn decode_catalog(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, Disc
         .collect::<Vec<_>>();
     if parsed.is_empty() {
         let detail = xml_err.map(|e| format!(": {e}")).unwrap_or_default();
-        return Err(DiscoveryError::Session(format!(
+        return Err(DiscoveryError::InvalidMetadata(format!(
             "unable to parse DZI metadata{detail}"
         )));
     }
-    catalog_from_dzi(url, parsed).map(DiscoveryStep::Catalog)
+    catalog_from_dzi(url, parsed).map(ParsedResource::Catalog)
 }
 
 fn catalog_from_dzi(
@@ -220,10 +224,12 @@ fn catalog_from_dzi(
     let mut plans = Vec::new();
     for image in images {
         if image.tile_size == 0 {
-            return Err(DiscoveryError::Session("invalid DZI zero tile size".into()));
+            return Err(DiscoveryError::InvalidMetadata(
+                "invalid DZI zero tile size".into(),
+            ));
         }
         if image.get_size().x == 0 || image.get_size().y == 0 {
-            return Err(DiscoveryError::Session(
+            return Err(DiscoveryError::InvalidMetadata(
                 "invalid DZI zero image size".into(),
             ));
         }
@@ -253,7 +259,9 @@ fn catalog_from_dzi(
                         cell.x, cell.y
                     ))
                 })
-                .map_err(|error| DiscoveryError::Session(format!("invalid DZI grid: {error}")))?;
+                .map_err(|error| {
+                    DiscoveryError::InvalidMetadata(format!("invalid DZI grid: {error}"))
+                })?;
             Ok(ResolvedLevel::new(source).with_title(Some(format!("DZI level {ordinal}"))))
         })
         .collect::<Result<Vec<_>, DiscoveryError>>()?;

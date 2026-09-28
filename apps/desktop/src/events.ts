@@ -1,32 +1,10 @@
-// Desktop Tauri event channels and payload guards.
-//
-// The desktop job keeps pixels in the native runtime. Only the
-// self-describing `job-snapshot` (one routing id plus the canonical
-// `Snapshot` the service forwards verbatim to its observer)
-// crosses the IPC boundary; tile bytes never do.
-// This module names the allowed channels and guards their payloads.
-
-// Keep erasable syntax only so node type-stripping can read this file.
-
-import type { Snapshot } from "@dezoomify/app-model";
-
 export const DESKTOP_EVENT_CHANNELS = [
-  "dezoomify://job-snapshot",
+  "dezoomify://progress",
+  "dezoomify://partial",
   "dezoomify://deep-link-pending",
 ] as const;
 
 export type DesktopEventChannel = (typeof DESKTOP_EVENT_CHANNELS)[number];
-
-/// Canonical runner snapshot, emitted on `dezoomify://job-snapshot`
-/// for every runner snapshot the shell forwards verbatim. The payload is
-/// the authoritative `Snapshot`: revision, lifecycle, paused,
-/// progress, selection (with catalog), decision, terminal, and output.
-/// The snapshot carries no job identity, so the host wraps it once instead of
-/// mutating it with routing aliases.
-export interface JobSnapshotPayload {
-  job: string;
-  snapshot: Snapshot;
-}
 
 const FORBIDDEN_IPC_KEYS = new Set([
   "tilebytes",

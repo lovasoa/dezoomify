@@ -7,12 +7,12 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./worker-host": "./src/worker-host.ts",
-    "./engine-host": "./src/engine-host.ts"
+    "./application": "./src/application.ts"
   },
   "dependencies": {
-    "@dezoomify/app-model": "workspace:*",
-    "@dezoomify/wasm-bindings": "workspace:*"
+    "@dezoomify/shared-ui": "workspace:*",
+    "@dezoomify/wasm-bindings": "workspace:*",
+    "react": "^19.0.0"
   },
   "scripts": {
     "test": "node --test-reporter=dot --test \"test/*.test.mjs\"",

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createAttemptPermissions } from "../../src/job/permissions.ts";
+import { createAttemptPermissions } from "../../../../packages/browser-runtime/src/permissions.ts";
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 function setup() {
@@ -54,7 +54,7 @@ test("denial and unretained grants fail every waiter instead of reopening a prom
     const p = setup(),
       controller = new AbortController();
     const result = assert.rejects(p.ensure("https://a.example", controller.signal), {
-      code: "access-required",
+      code: "TRANSPORT_POLICY_DENIED",
     });
     await tick();
     p.pending[0].request();

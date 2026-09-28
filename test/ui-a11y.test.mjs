@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement } from "react";
-import { createDiagnosticRecorder } from "../packages/app-model/src/diagnostics.ts";
+import { createDiagnosticRecorder } from "../packages/shared-ui/src/diagnostics.ts";
 import {
   presentFailure,
   presentIdle,
-  presentSnapshot,
+  presentProgress,
   presentStatus,
-} from "../packages/shared-ui/src/snapshot-view.ts";
+} from "../packages/shared-ui/src/presentation.ts";
 import {
   openConfirmModal,
   openModal,
@@ -42,25 +42,7 @@ function render(el, presentation, cb, ctx, options) {
 }
 
 function progressPresentation(current, total) {
-  return presentSnapshot(
-    {
-      revision: 3,
-      lifecycle: "AcquiringTiles",
-      paused: false,
-      progress: { completed: current, total },
-      selection: {
-        image: undefined,
-        level: undefined,
-        level_count: 0,
-        catalog: undefined,
-        deferred: [],
-      },
-      decision: undefined,
-      terminal: undefined,
-      output: undefined,
-    },
-    "direct",
-  );
+  return presentProgress({ phase: "acquisition", completed: current, total }, "direct");
 }
 
 /** Every button must expose a non-empty accessible name (text or aria-label). */
@@ -147,7 +129,7 @@ test("static accessibility contract: failed view layers guidance with named reco
     body.includes("https://museum.example.org/viewer?page=1"),
     "body carries the source address",
   );
-  assert.ok(body.includes("No zoomable image could be found."), "body carries the engine error");
+  assert.ok(body.includes("No zoomable image could be found."), "body carries the discovery error");
   assert.ok(body.includes("code: X"), "body carries the diagnostics code line");
 });
 

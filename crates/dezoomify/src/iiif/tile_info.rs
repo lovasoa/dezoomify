@@ -95,8 +95,7 @@ impl ImageInfo {
 
     /// Best tile format, mirroring the deployed web behavior: prefer `png`
     /// when the metadata declares it, else the first declared format, else
-    /// `jpg`. Profile-advertised formats are not consulted (parity with the
-    /// legacy web client, which requests `jpg` by default).
+    /// `jpg`. Profile-advertised formats are not consulted.
     #[must_use]
     pub fn best_format(&self) -> String {
         match self.formats.as_deref().unwrap_or(&[]) {
@@ -527,7 +526,7 @@ mod best_format_tests {
 
     #[test]
     fn best_format_pins_web_parity_policy() {
-        // No declared formats -> jpg (legacy web client default).
+        // No declared formats -> jpg.
         assert_eq!(info_with(None).best_format(), "jpg");
         // png declared -> png, wherever it appears in the list.
         assert_eq!(

@@ -1,9 +1,22 @@
 /* tslint:disable */
 /* eslint-disable */
+
+export function dezoomify(inputs: JobInput[], options: Options, host: Host): Promise<Output>;
+export function applyProcessing(recipe: ProcessingRecipe, bytes: Uint8Array): Uint8Array;
+
+
 /**
  * A closed byte transformation applied before image decoding.
  */
 export type ProcessingRecipe = "none" | "google-arts-decrypt";
+
+/**
+ * A direct resource read, including its redirected base address.
+ */
+export interface ResourceResponse {
+    bytes: Uint8Array;
+    final_uri: string | undefined;
+}
 
 /**
  * A pixel size (output canvas or planned tile extent).
@@ -42,40 +55,9 @@ export interface ImageRequest {
 }
 
 /**
- * Authoritative per-job projection. Snapshots are absolute: UIs render
- * the latest snapshot and never reconstruct phases from event walks.
- * `revision` increases on every transition; observers drop stale ones.
- */
-export interface Snapshot {
-    revision: number;
-    lifecycle: JobState;
-    paused: boolean;
-    progress: Progress;
-    selection: Selection;
-    decision: Decision | undefined;
-    terminal: Terminal | undefined;
-    output: OutputSummary | undefined;
-}
-
-/**
  * Closed retry category for one classified tile failure.
  */
 export type FailureCategory = "permanent" | "transient";
-
-/**
- * Current selection state (positions into the kept catalog).
- */
-export interface Selection {
-    image: number | undefined;
-    level: number | undefined;
-    level_count: number;
-    /**
-     * The kept catalog with full geometry, once discovered. Replaced when
-     * a deferred catalog entry is followed within the same job.
-     */
-    catalog: Catalog | undefined;
-    deferred: DeferredEntry[];
-}
 
 /**
  * Honest output disposition reported by the host that performed the save.
@@ -103,7 +85,7 @@ export interface TilePlacement {
 }
 
 /**
- * Host-observed fetch facts. Retry and recovery policy belongs to the engine.
+ * Host-observed fetch facts. Retry and recovery policy belongs to the shared algorithm.
  */
 export interface FetchFailure {
     code: FetchFailureCode;
@@ -113,7 +95,7 @@ export interface FetchFailure {
     http?: number;
     /**
      * Host-observed `retry-after` in milliseconds, when the response
-     * carried one. The engine waits at least this long before the retry.
+     * carried one. The shared algorithm waits at least this long before the retry.
      */
     retry_after_ms?: number;
     preview?: string;
@@ -122,7 +104,7 @@ export interface FetchFailure {
 
 /**
  * One discovery input. An omitted kind is a user-supplied source for
- * compatibility with products that have no browser observations.
+ * products that have no browser observations.
  */
 export interface JobInput {
     url: string;
@@ -141,18 +123,9 @@ export type CatalogEntry = ({ kind: "image" } & Image) | ({ kind: "image-request
  * (hosts attach scoped authorization out-of-band).
  */
 export interface ResourceRequest {
-    id: number;
     uri: string;
     headers?: Header[];
     purpose: RequestPurpose;
-}
-
-/**
- * One still-deferred catalog entry: position plus follow-up URI.
- */
-export interface DeferredEntry {
-    position: number;
-    uri: string;
 }
 
 /**
@@ -166,30 +139,12 @@ export interface MissingTile {
 /**
  * Output summary: geometry, completeness, and the honest disposition.
  */
-export interface OutputSummary {
+export interface Output {
     canvas: Size | undefined;
     format: OutputFormat;
     complete: boolean;
     missing: number[];
-    disposition: OutputDisposition | undefined;
-}
-
-/**
- * Outstanding partial decision payload.
- */
-export interface Decision {
-    generation: number;
-    missing: MissingTile[];
-}
-
-/**
- * Positive declared-canvas limits used by browser automatic selection.
- * Non-zero integer types reject invalid limits at the typed boundary.
- */
-export interface BrowserSelectionLimits {
-    maxWidth: number;
-    maxHeight: number;
-    maxArea: number;
+    disposition: OutputDisposition;
 }
 
 /**
@@ -200,8 +155,8 @@ export type RequestPurpose = "metadata" | "tile" | "probe";
 /**
  * Stable code for a host-observed fetch failure.
  *
- * Variant identifiers are the protocol's serialized values, so this enum
- * preserves the pre-existing wire vocabulary without rename tables.
+ * Variant identifiers are the serialized values, so this enum
+ * preserves stable error codes.
  */
 export type FetchFailureCode = "TRANSPORT_HTTP_ERROR" | "DISCOVERY_HTTP_ERROR" | "UPSTREAM_RATE_LIMITED" | "TRANSPORT_POLICY_DENIED" | "PROXY_BUDGET_EXCEEDED" | "PROXY_ERROR" | "PROXY_NETWORK_ERROR" | "PROXY_RATE_LIMITED" | "DISCOVERY_FAILED" | "TRANSPORT_TIMEOUT" | "TRANSPORT_NETWORK_ERROR" | "TRANSPORT_CANCELLED" | "TRANSPORT_BAD_URL" | "TRANSPORT_BAD_REDIRECT" | "TRANSPORT_REDIRECT_LIMIT" | "TRANSPORT_SIZE_LIMIT";
 
@@ -222,20 +177,15 @@ export interface TileFailure {
     retry_after_ms?: number;
     detail?: string;
     /**
-     * Original host-observed fetch facts, retained without adapter reformatting.
+     * Original host-observed fetch facts, retained without reformatting.
      */
     observed?: FetchFailure;
 }
 
 /**
- * Terminal outcome, set exactly once.
+ * The requested browser output representation.
  */
-export type Terminal = { type: "completed" } | { type: "partial-completed"; missing: number[] } | { type: "failed"; error: Error } | { type: "cancelled" };
-
-/**
- * The browser output representation requested by the job engine.
- */
-export type OutputFormat = "png";
+export type OutputFormat = "png" | "jpeg" | "tiff" | "zif" | "webp" | "iiif-dir";
 
 /**
  * The source of discovery evidence. Products report facts; core discovery
@@ -244,17 +194,15 @@ export type OutputFormat = "png";
 export type DiscoveryInputKind = "source" | "observed-document" | "observed-resource";
 
 /**
- * Typed argument for the pure WASM tile-processing operation.
- */
-export interface ProcessingRequest {
-    recipe: ProcessingRecipe;
-}
-
-/**
  * Unit progress for the active phase (totals stay unknown until the plan
  * resolves).
  */
 export interface Progress {
+    phase: ProgressPhase;
+    source_format: string | undefined;
+    title: string | undefined;
+    selected: Size | undefined;
+    maximum: Size | undefined;
     completed: number;
     total: number | undefined;
 }
@@ -290,6 +238,7 @@ export interface DiagnosticRecord {
 }
 
 export interface Error {
+    retry_after_ms?: number;
     code: string;
     phase: ErrorPhase;
     retryable: boolean;
@@ -304,15 +253,55 @@ export interface Error {
     detail?: string;
 }
 
+export interface FinishRequest {
+    canvas: Size | undefined;
+    format: OutputFormat;
+    title: string | undefined;
+    missing: number[];
+    display_only: boolean;
+}
+
 export interface Header {
     name: string;
     value: string;
 }
 
+export interface Host {
+    fetch(request: ResourceRequest,interaction: Interaction,): Promise<ResourceRead>;
+    probe(tile: Tile,): Promise<ProbeOutcome>;
+    acquireTile(tile: Tile,): Promise<TileReceipt>;
+    finish(request: FinishRequest,): Promise<Output>;
+    chooseImage(catalog: Catalog,): Promise<number>;
+    chooseLevel(image: Image,): Promise<number>;
+    choosePartial(missing: MissingTiles,): Promise<RecoveryChoice>;
+    checkpoint(gate: Gate,): Promise<void>;
+    sleep(delay_ms: number,): Promise<void>;
+    report(progress: Progress): void;
+    settle(): Promise<void>;
+}
+
+
 export interface Level {
     label: string;
     size?: Size;
     tileSize?: Size;
+}
+
+export interface MissingTiles {
+    missing: MissingTile[];
+}
+
+export interface Options {
+    format?: string | undefined;
+    selection?: SelectionPolicy;
+    partial?: PartialPolicy;
+    output?: OutputFormat;
+    max_concurrent?: number;
+    max_tiles?: number;
+    max_retries?: number;
+    max_bytes?: number;
+    max_deferred_follows?: number;
+    retry_base_delay_ms?: number;
 }
 
 export interface RecoveryAction {
@@ -322,15 +311,14 @@ export interface RecoveryAction {
     rationale: string;
 }
 
-export interface SessionConfig {
-    max_concurrent_fetches?: number;
-    max_tiles?: number;
-    max_retries?: number;
-    /**
-     * Opt in to browser selection using the largest ready image and the
-     * largest level that fits these declared canvas limits.
-     */
-    browser_selection?: BrowserSelectionLimits;
+export interface Tile {
+    index: number;
+    request: ResourceRequest;
+    placement: TilePlacement;
+}
+
+export interface TileReceipt {
+    display_only: boolean;
 }
 
 export type BlockedReason = "access-required" | "blocked-ipv4" | "blocked-ipv6" | "cancelled" | "content-type" | "dns-rebinding" | "dns-rebinding-v6" | "forbidden" | "invalid-url" | "limit-exceeded" | "loopback-host" | "malformed" | "malformed-body" | "method" | "network" | "non-standard-port" | "origin" | "private-host" | "protocol-version" | "redirect-limit" | "redirect-target" | "scheme" | "signed-query" | "source-document-lost" | "throttled" | "userinfo";
@@ -339,21 +327,19 @@ export type DiagnosticLevel = "trace" | "debug" | "info" | "warn" | "error";
 
 export type DiagnosticValue = string | number | boolean;
 
-export type DispatchResult = { status: "ok"; messages: HostEffect[]; snapshot: Snapshot } | { status: "error"; error: Error };
-
-export type ErrorPhase = "handshake" | "validation" | "discovery" | "acquisition" | "decode" | "processing" | "output" | "publication" | "cleanup";
+export type ErrorPhase = "validation" | "discovery" | "acquisition" | "decode" | "processing" | "output" | "publication" | "cleanup";
 
 export type ErrorTransport = "direct" | "metadata-proxy" | "browser-session" | "native" | "display-only";
 
-export type HostCompletion = { type: "provide-resource"; request: number; bytes: number[]; final_uri?: string } | { type: "provide-fetch-failure"; request: number; error: FetchFailure } | { type: "provide-probe-outcome"; request: number; outcome: ProbeOutcome } | { type: "provide-display-outcome"; request: number } | { type: "tile-acquired"; request: number } | { type: "retry-timer-elapsed"; effect: number } | { type: "finalization-succeeded"; effect: number; disposition: OutputDisposition } | { type: "finalization-failed"; effect: number; error: Error };
+export type Gate = "cancellation" | "acquisition";
 
-export type HostEffect = { type: "acquire-resource"; request: ResourceRequest } | { type: "acquire-tile"; request: ResourceRequest; tile: number; placement: TilePlacement } | { type: "finalize-output"; effect: number; partial: boolean; format: OutputFormat; canvas: Size | undefined } | { type: "wait-retry-timer"; effect: number; tile: number; attempt: number; delay_ms: number } | { type: "cancel-work" } | { type: "request-decision"; generation: number };
+export type Interaction = "forbidden" | "allowed";
 
-export type JobCommand = { type: "start"; inputs: JobInput[] } | { type: "select-image"; image: number } | { type: "follow-deferred"; image: number } | { type: "select-level"; level: number } | { type: "answer-partial"; generation: number; decision: RecoveryChoice } | { type: "cancel" } | { type: "pause" } | { type: "resume" };
-
-export type JobState = "Created" | "Discovering" | "AwaitingImageSelection" | "AwaitingLevelSelection" | "Planning" | "AcquiringTiles" | "AwaitingPartialDecision" | "Finalizing" | "Cancelling" | "Completed" | "PartiallyCompleted" | "Failed" | "Cancelled";
+export type PartialPolicy = "prompt" | "keep" | "discard";
 
 export type ProbeOutcome = { status: "missing" } | { status: "available"; width: number; height: number };
+
+export type ProgressPhase = "discovery" | "planning" | "acquisition" | "output";
 
 export type RecoveryChoice = "keep" | "retry" | "discard";
 
@@ -361,62 +347,25 @@ export type RecoveryKind = "retry" | "edit-input" | "choose-output" | "grant-per
 
 export type ResourceKind = "metadata" | "tile" | "probe" | "output";
 
+export type ResourceRead = { kind: "response"; response: ResourceResponse } | { kind: "needs-access"; origin: string };
 
-/**
- * The `Session` export: owns one job.
- */
-export class Session {
-    free(): void;
-    [Symbol.dispose](): void;
-    /**
-     * Apply one core processing recipe to tile bytes (pure: no job
-     * state, same recipes as the discovery adapter).
-     */
-    applyProcessing(request: ProcessingRequest, bytes: Uint8Array): Uint8Array;
-    /**
-     * Run one typed user command and return its ordered host effects
-     * plus the canonical snapshot after the answer. User commands
-     * never carry bytes or claim publication.
-     */
-    command(command: JobCommand): DispatchResult;
-    /**
-     * Answer one outstanding host effect and return its ordered host
-     * effects plus the canonical snapshot after the answer. Only
-     * completions carry bytes, failures, observations, and
-     * publication claims.
-     */
-    complete(completion: HostCompletion): DispatchResult;
-    /**
-     * Cancel/release session resources; repeat-safe (`dispose`).
-     */
-    dispose(): DispatchResult;
-    /**
-     * Validate typed configuration and own exactly one job session.
-     */
-    constructor(config: SessionConfig);
-    /**
-     * Project the canonical engine snapshot for the active job.
-     * Absolute state for UI rendering; issues no work.
-     */
-    snapshot(): Snapshot;
-}
+export type SelectionPolicy = { kind: "interactive" } | { kind: "fitting"; max_width: number; max_height: number; max_area: number } | { kind: "automatic"; image_index: number; largest: boolean; max_width: number | undefined; max_height: number | undefined; zoom_level: number | undefined };
+
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
-    readonly __wbg_session_free: (a: number, b: number) => void;
-    readonly session_applyProcessing: (a: number, b: any, c: number, d: number) => [number, number, number, number];
-    readonly session_command: (a: number, b: any) => [number, number, number];
-    readonly session_complete: (a: number, b: any) => [number, number, number];
-    readonly session_dispose: (a: number) => [number, number, number];
-    readonly session_new: (a: any) => [number, number, number];
-    readonly session_snapshot: (a: number) => [number, number, number];
+    readonly applyProcessing: (a: any, b: number, c: number) => [number, number, number, number];
+    readonly dezoomify: (a: any, b: any, c: any) => any;
+    readonly wasm_bindgen_2a67c6f173b08fad___convert__closures_____invoke___js_sys_c1f2febeb42441dd___Function_fn_wasm_bindgen_2a67c6f173b08fad___JsValue_____wasm_bindgen_2a67c6f173b08fad___sys__Undefined___js_sys_c1f2febeb42441dd___Function_fn_wasm_bindgen_2a67c6f173b08fad___JsValue_____wasm_bindgen_2a67c6f173b08fad___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
+    readonly wasm_bindgen_2a67c6f173b08fad___convert__closures_____invoke___wasm_bindgen_2a67c6f173b08fad___JsValue__core_ed718c3d60ebd546___result__Result_____wasm_bindgen_2a67c6f173b08fad___JsError___true_: (a: number, b: number, c: any) => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;
     readonly __externref_table_alloc: () => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
+    readonly __wbindgen_destroy_closure: (a: number, b: number) => void;
     readonly __externref_table_dealloc: (a: number) => void;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_start: () => void;

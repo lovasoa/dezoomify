@@ -1,12 +1,3 @@
-// Desktop queue: sequential multi-job table in the integration
-// layer, over the single-job engine.
-//
-// One active job at a time; further submits wait FIFO. Tracks progress per
-// job, cancel one/all, and retry of failed or cancelled entries. A failed
-// entry never stops the rest; totals mirror the CLI bulk contract
-// (`bulk: X succeeded, Y failed, Z total`). Pure, no I/O, no clocks, no Tauri
-// globals. Keep erasable-syntax-only so node type-stripping can import it.
-
 import {
   createSequentialQueue,
   enqueueSequential,
@@ -14,7 +5,7 @@ import {
   type QueueSummary,
   retryQueueEntry,
   type SequentialQueue,
-} from "@dezoomify/app-model";
+} from "@dezoomify/shared-ui";
 
 export interface DesktopQueueProgress {
   readonly acquired: number;
@@ -116,7 +107,7 @@ export function recordDesktopProgress(
 
 /**
  * Cancel one entry. Cancelling the active job marks it cancelled and promotes
- * the next queued entry (the caller stops the engine job and removes
+ * the next queued entry (the caller cancels the invocation and removes
  * uncommitted output first). Cancelling a queued entry keeps the active job.
  */
 /** Re-queue a failed or cancelled entry behind the waiting line. */

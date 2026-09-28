@@ -115,12 +115,6 @@ impl NativeError {
         Self::new("output.write-failed", detail.into())
     }
 
-    /// Protocol version mismatch detected before any work.
-    #[must_use]
-    pub fn protocol_incompatible(detail: impl Into<String>) -> Self {
-        Self::new("protocol.incompatible", detail.into())
-    }
-
     /// Rejected untrusted handoff input.
     #[must_use]
     pub fn handoff_rejected(detail: impl Into<String>) -> Self {
@@ -146,17 +140,17 @@ impl From<dezoomify::core::discovery::DiscoveryError> for NativeError {
     fn from(error: dezoomify::core::discovery::DiscoveryError) -> Self {
         use dezoomify::core::discovery::DiscoveryError as E;
         match &error {
+            E::Host(error) => Self::from(error.as_ref().clone()),
             // The aggregate carries the headline-free bullet block: the
             // host renders its own prominent message and never repeats
-            // the engine's headline inside the technical details.
-            E::NoCandidateAccepted { .. } => Self::new("discovery.no-image", error.engine_detail()),
-            E::TransitionLimitExceeded
-            | E::ResourceLimitExceeded
-            | E::MetadataSizeLimitExceeded => Self::new("tile.limit", error.to_string()),
-            E::UnknownRequest(_) | E::RequestAlreadyProvided(_) | E::NotComplete => {
-                Self::new("native.internal", error.to_string())
+            // the discovery headline inside the technical details.
+            E::NoCandidateAccepted { .. } => Self::new("discovery.no-image", error.detail()),
+            E::ParseLimitExceeded | E::ResourceLimitExceeded | E::MetadataSizeLimitExceeded => {
+                Self::new("tile.limit", error.to_string())
             }
-            E::Rejected { .. } | E::Session(_) => Self::new("discovery.failed", error.to_string()),
+            E::Rejected { .. } | E::InvalidMetadata(_) => {
+                Self::new("discovery.failed", error.to_string())
+            }
         }
     }
 }
@@ -173,33 +167,44 @@ impl From<dezoomify::core::processing::ProcessingError> for NativeError {
     }
 }
 
-/// Map an engine terminal failure code onto the stable native product code
-/// while preserving the engine message. Branches on the stable engine code
-/// only, never on message text. Unknown codes fail closed as internal.
-#[must_use]
-pub fn map_engine_failure_to_native(code: &str) -> &str {
-    match code {
-        "job.discovery-failed" | "job.catalog-invalid" | "job.empty-resource" => "discovery.failed",
-        "job.no-images" => "discovery.no-image",
-        "job.unknown-format" => "discovery.unknown-format",
-        "job.resource-limit" => "tile.limit",
-        "job.plan-invalid" => "discovery.tile-plan",
-        "job.plan-empty" => "discovery.no-level",
-        "job.partial-discarded" => "tile.download-failed",
-        // Already-native product codes pass through untouched.
-        already
-            if already.starts_with("discovery.")
-                || already.starts_with("tile.")
-                || already.starts_with("transport.")
-                || already.starts_with("output.")
-                || already.starts_with("auth.")
-                || already.starts_with("protocol.")
-                || already.starts_with("handoff.")
-                || already == "job.cancelled" =>
-        {
+impl From<dezoomify::model::Error> for NativeError {
+    fn from(error: dezoomify::model::Error) -> Self {
+        let code = error.code.as_str();
+        let code = match code {
+            "job.invalid-input"
+            | "job.discovery-failed"
+            | "job.catalog-invalid"
+            | "job.empty-resource" => "discovery.failed",
+            "job.no-images" => "discovery.no-image",
+            "job.unknown-format" => "discovery.unknown-format",
+            "job.resource-limit" => "tile.limit",
+            "job.deferred-limit" => "discovery.deferred",
+            "job.plan-invalid" => "discovery.tile-plan",
+            "job.plan-empty" => "discovery.no-level",
+            "job.partial-discarded" | "job.no-usable-tiles" => "tile.download-failed",
+            "TRANSPORT_TIMEOUT" => "transport.timeout",
+            "TRANSPORT_NETWORK_ERROR" => "transport.network-error",
+            "TRANSPORT_SIZE_LIMIT" => "transport.size-limit",
+            "TRANSPORT_BAD_URL" => "transport.bad-url",
+            "TRANSPORT_BAD_REDIRECT" => "transport.bad-redirect",
+            "TRANSPORT_REDIRECT_LIMIT" => "transport.redirect-limit",
+            "TRANSPORT_HTTP_ERROR" => "tile.http-error",
+            "TILE_DECODE_FAILED" => "tile.decode-failed",
+            // Already-native product codes pass through untouched.
             already
-        }
-        _ => "native.internal",
+                if already.starts_with("discovery.")
+                    || already.starts_with("tile.")
+                    || already.starts_with("transport.")
+                    || already.starts_with("output.")
+                    || already.starts_with("auth.")
+                    || already.starts_with("handoff.")
+                    || already == "job.cancelled" =>
+            {
+                already
+            }
+            _ => "native.internal",
+        };
+        Self::new(code, error.message)
     }
 }
 
@@ -207,9 +212,7 @@ pub fn map_engine_failure_to_native(code: &str) -> &str {
 /// code prefix/exact code, never on display strings.
 #[must_use]
 pub fn error_phase(code: &str) -> &'static str {
-    if code == "protocol.incompatible" {
-        "handshake"
-    } else if code == "handoff.rejected" {
+    if code == "handoff.rejected" {
         "validation"
     } else if code.starts_with("discovery.")
         || code.starts_with("job.discovery")
@@ -246,15 +249,7 @@ pub fn error_phase(code: &str) -> &'static str {
         || code == "job.overflow"
     {
         "acquisition"
-    } else if code.starts_with("command.")
-        || code.starts_with("job.invalid")
-        || code == "job.post-terminal"
-        || code == "job.unknown"
-        || code == "job.stale"
-        || code == "job.wrong-job"
-        || code == "job.invalid-state"
-        || code == "job.invalid-id"
-    {
+    } else if code == "job.invalid-input" {
         "validation"
     } else if code.starts_with("job.") {
         "discovery"
@@ -314,18 +309,11 @@ pub fn error_recovery(code: &str) -> &'static str {
         || code == "transport.size-limit"
         || code == "transport.redirect-limit"
         || code == "job.invalid-input"
-        || code == "job.invalid-id"
-        || code == "job.invalid-state"
-        || code == "job.wrong-job"
-        || code == "job.post-terminal"
-        || code == "job.unknown"
-        || code == "job.stale"
-        || code == "command.unknown"
         || code == "handoff.rejected"
     {
         "edit-input"
     } else {
-        // Safe fallback for internal, auth, TLS, and protocol errors:
+        // Safe fallback for internal, auth, and TLS errors:
         // never a weakening recovery.
         "handoff-to-native"
     }
@@ -354,8 +342,6 @@ pub fn error_resource_kind(code: &str) -> Option<&'static str> {
         Some("credential")
     } else if code.starts_with("handoff.") {
         Some("handoff")
-    } else if code.starts_with("protocol.") {
-        Some("protocol")
     } else {
         Some("job")
     }
@@ -366,9 +352,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn legacy_remaps_stay_stable() {
-        // Preserved via `exec::map_failure_code`; the boundary mapping must
-        // agree on phase/recovery for each legacy code.
+    fn product_error_codes_have_consistent_facts() {
+        for (source, expected) in [
+            ("job.no-usable-tiles", "tile.download-failed"),
+            ("TRANSPORT_TIMEOUT", "transport.timeout"),
+            ("TRANSPORT_HTTP_ERROR", "tile.http-error"),
+            ("TILE_DECODE_FAILED", "tile.decode-failed"),
+        ] {
+            let error = dezoomify::model::Error::new(
+                source,
+                dezoomify::model::ErrorPhase::Acquisition,
+                "fixture error",
+            );
+            assert_eq!(NativeError::from(error).code, expected);
+        }
         for code in [
             "discovery.failed",
             "discovery.no-image",
@@ -444,14 +441,7 @@ mod tests {
     }
 
     #[test]
-    fn protocol_and_handoff_map_once_by_code() {
-        let incompatible = NativeError::protocol_incompatible("unsupported protocol version 9");
-        assert_eq!(incompatible.code, "protocol.incompatible");
-        assert_eq!(incompatible.phase(), "handshake");
-        assert!(!incompatible.retryable());
-        // Safe fallback, never a weakening recovery.
-        assert_eq!(incompatible.recovery(), "handoff-to-native");
-
+    fn handoff_rejection_has_validation_facts() {
         let rejected = NativeError::handoff_rejected("handoff must not carry userinfo");
         assert_eq!(rejected.code, "handoff.rejected");
         assert_eq!(rejected.phase(), "validation");
@@ -460,19 +450,7 @@ mod tests {
     }
 
     #[test]
-    fn lifecycle_codes_map_to_validation_without_retry() {
-        for code in [
-            "job.post-terminal",
-            "job.unknown",
-            "job.stale",
-            "job.wrong-job",
-            "job.invalid-state",
-            "command.unknown",
-        ] {
-            assert_eq!(error_phase(code), "validation", "phase for {code}");
-            assert!(!error_retryable(code), "retryable for {code}");
-            assert_eq!(error_recovery(code), "edit-input", "recovery for {code}");
-        }
+    fn cancellation_has_cleanup_facts() {
         assert_eq!(error_phase("job.cancelled"), "cleanup");
         assert!(!error_retryable("job.cancelled"));
     }
@@ -514,10 +492,8 @@ mod tests {
             "output.exists",
             "output.destination-denied",
             "output.write-failed",
-            "protocol.incompatible",
             "handoff.rejected",
             "job.invalid-input",
-            "job.post-terminal",
             "native.internal",
         ] {
             assert!(!error_retryable(code), "{code} must not be retryable");
@@ -534,7 +510,6 @@ mod tests {
             "transport.tls",
             "transport.bad-redirect",
             "handoff.rejected",
-            "protocol.incompatible",
         ] {
             let recovery = error_recovery(code);
             assert!(
@@ -554,9 +529,9 @@ mod tests {
         }
         .into();
         assert_eq!(no_image.code, "discovery.no-image");
-        let limit: NativeError = E::TransitionLimitExceeded.into();
+        let limit: NativeError = E::ParseLimitExceeded.into();
         assert_eq!(limit.code, "tile.limit");
-        let failed: NativeError = E::Session("bad page".into()).into();
+        let failed: NativeError = E::InvalidMetadata("bad page".into()).into();
         assert_eq!(failed.code, "discovery.failed");
     }
 

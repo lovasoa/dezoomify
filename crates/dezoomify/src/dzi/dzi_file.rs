@@ -68,7 +68,7 @@ fn implicit_base_url(resource_url: &str) -> String {
             return url.to_string();
         }
     }
-    // Legacy rule: strip a trailing `.ext` (no `/` after the dot) from the
+    // Strip a trailing `.ext` (no `/` after the dot) from the
     // whole URL, then append `_files`. Query strings survive only when they
     // contain a `/` after the last dot (e.g. `Proxy.ashx?view=X` keeps
     // `?view=X` before `_files`).

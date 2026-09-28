@@ -1,5 +1,4 @@
-import type { ResourceRequest } from "@dezoomify/wasm-bindings";
-import type { HostFailure } from "./engine-host.ts";
+import type { FetchFailure, ResourceRequest } from "@dezoomify/wasm-bindings";
 
 // Shared probe-size helper for browser hosts.
 //
@@ -33,8 +32,8 @@ export interface ProbeBitmap {
 }
 
 export interface ProbeSizeDeps {
-  classifyFailure?(error: unknown): HostFailure;
-  /** Fetch one tile as readable bytes. The engine request id lets a host route the probe without colliding with tile requests. */
+  classifyFailure?(error: unknown): FetchFailure;
+  /** Fetch one tile as readable bytes.  */
   fetchResource(request: ResourceRequest, signal: AbortSignal): Promise<{ bytes: Uint8Array }>;
   /** Decode fetched bytes far enough to report dimensions. */
   decode(bytes: ArrayBuffer): Promise<ProbeBitmap>;

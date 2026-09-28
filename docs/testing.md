@@ -1,6 +1,6 @@
 # Testing
 
-Tests are deterministic unless the command says `live`. Shared scenarios in `testdata/scenarios` describe resources, capabilities, commands, effect results, transitions, events, outputs, and errors. Parity behavior has blocking deterministic coverage; live diagnostics never substitute.
+Tests are deterministic unless the command says `live`. Shared scenarios in `testdata/scenarios` describe resources, inputs, expected output, and errors. Tests compare requests, choices, pixels, saves, resource limits, and cleanup. Live diagnostics never substitute.
 
 Deterministic suites use fixed fixture bytes, stable ordering, explicit seeds, controlled time, no public DNS or network. Platform-specific deterministic tests and manual release checks supplement that contract, never weaken it. Task grammar: [`crates/xtask/README.md`](../crates/xtask/README.md).
 
@@ -27,7 +27,7 @@ It never runs `check`, generates bindings, builds WXT packages, or launches a br
 
 `cargo xtask test all` runs the fast aggregate once, then adds the fresh WASM Node harness, website Chromium Playwright E2E, and remaining extension tests needing generated WASM/WXT packages (Chromium plus Firefox headless E2E). It re-invokes no focused aliases, so it repeats neither the fast Rust nor the Node matrix. It excludes public-network tests and the desktop real-window test.
 
-`cargo xtask ci local` combines `check`, `test all`, the protocol's no-default-features WASM portability check, and the JavaScript dependency audit. It runs the shared suites once instead of replaying the overlapping distributed CI lanes.
+`cargo xtask ci local` combines `check`, `test all`, the bindings's no-default-features WASM portability check, and the JavaScript dependency audit. It runs the shared suites once instead of replaying the overlapping distributed CI lanes.
 
 `cargo xtask test web --e2e` adds Chromium Playwright to the website suite. `cargo xtask test extension` is the full extension gate: current WASM bindings, Chromium plus Firefox WXT output, all extension units, both browsers headless. The extension package's own `pnpm test` / `pnpm test:unit` run pure units only, needing neither generated output nor browsers.
 
@@ -38,12 +38,10 @@ Focused aliases remain available for iteration:
 | Target | Coverage |
 |---|---|
 | `core [--purity\|--parity]` | core crate, with optional purity or format-parity focus |
-| `protocol` | generated-artifact comparison, Rust and TypeScript contracts, and WASM portability |
-| `job [--transcripts]` | job engine, with optional workflow/transcript focus |
-| `wasm [--browser chromium]` | WASM adapter and generated Node harness; optional Chromium website E2E |
+| `bindings` | generated-artifact comparison, Rust and TypeScript contracts, and WASM portability |
+| `wasm [--browser chromium]` | WASM Host ABI and generated Node harness; optional Chromium website E2E |
 | `browser [--build-only\|--browser chromium\|--scenario <id>]` | browser-runtime Node contracts; a browser selection adds website Chromium E2E |
-| `ui` | shared-UI snapshot presentation and product-agnostic view contract |
-| `app-model` | host-neutral service, snapshot predicates, history, labels |
+| `ui` | shared-UI presentation and product-agnostic view contract |
 | `web [--e2e]` | website Node suite; `--e2e` adds Chromium Playwright |
 | `native` | native runtime and CLI Rust suites |
 | `desktop [--e2e-window]` | desktop Rust and Node suites; the option runs the explicit real-window gate instead |
@@ -76,12 +74,11 @@ Use the narrowest owning target first. Targets reject unknown options instead of
 | `rust` | one `cargo test --workspace` run |
 | `wasm` | generated WASM Node harness |
 | `browser` | browser-runtime Node suite |
-| `ui` | shared-UI snapshot presentation and view contract |
-| `app-model` | host-neutral model Node suite |
+| `ui` | shared-UI presentation and view contract |
 | `web` | website Node suite plus Chromium Playwright E2E |
 | `desktop` | desktop Node suite; the path-gated desktop workflow owns desktop testing when applicable |
 | `extension` | full generated-package extension unit and Chromium/Firefox E2E gate |
-| `protocol` | binding drift, generated declaration, Rust contract, and WASM portability |
+| `bindings` | binding drift, generated declaration, Rust contract, and WASM portability |
 | `security` | JavaScript workspace audit; Cargo policy belongs to `check` |
 
 There are no separate native or scenario CI lanes: the Rust workspace lane already owns those tests. Central CI runs applicable lanes in parallel groups; desktop JavaScript coverage stays with the path-gated desktop workflow. `cargo xtask ci local` runs every lane serially. Required CI and `test all` stay deterministic; scheduled or manual live CI is separate.
@@ -117,4 +114,4 @@ This explicit lane builds current frontend, fixture server, and Tauri shell with
 
 ## Cross-runtime guarantees
 
-Scenario traces normalize runtime-specific details. Capabilities choose branches, but equal commands and effect results give equal job states, error codes, and recovery actions. Release candidates pass the matrix in [Releases](releases.md); security-sensitive scenarios follow [Security](security.md).
+Browser and native products call the same async algorithm. Fixtures verify output, attempts, cleanup, error codes, and recovery independently of platform APIs. Release candidates pass the matrix in [Releases](releases.md); security-sensitive scenarios follow [Security](security.md).

@@ -68,10 +68,9 @@ links.
    configured with `base: "/beta/"`. Convert `index.html` to a minimal Vite
    shell while moving navigation, footer, guidance dialogs, app status card,
    and preview controls into React components.
-2. Keep job orchestration, queues, browser fetch policy, worker protocol,
-   history persistence, canvas assembly, and Blob save as host effects. Expose
-   a typed snapshot/subscription boundary from the web host to React rather
-   than duplicating controller state in components.
+2. Keep shared browser application flow, queues, fetch policy, history
+   persistence, canvas assembly, and Blob save outside React components.
+   Pass typed presentation values and callbacks to React.
 3. Adapt the preview control in `packages/browser-runtime/src/preview.ts` to
    operate through a React ref or injected surface while retaining its
    transform-only, tainted-canvas-safe invariant.
@@ -82,7 +81,7 @@ links.
    `/proxy` routes.
 5. Update `crates/xtask/src/browser.rs`, web tests, and
    `.github/workflows/website-deploy.yml` to validate the Vite manifest/assets,
-   `/beta` base paths, worker/WASM MIME types, help, proxy routes, and source
+   `/beta` base paths, WASM MIME types, help, proxy routes, and source
    exposure without assuming `src/main.js` is served.
 
 ## Phase 3: Desktop React shell
@@ -94,7 +93,7 @@ links.
 2. Keep IPC subscription, typed recovery, queue control, save/output actions,
    diagnostics construction, deep-link validation, and external-link
    validation in the desktop host. Feed their current state and callbacks to
-   React through a typed snapshot.
+   React through typed presentation values.
 3. Replace the imperative desktop settings panel, queue/recovery panels,
    deep-link confirmation, diagnostics-copy feedback, header, and footer with
    React components. Preserve local settings validation and

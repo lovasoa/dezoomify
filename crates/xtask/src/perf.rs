@@ -2,7 +2,7 @@
 //!
 //! `--smoke` runs the fast deterministic perf smoke
 //! (`cargo test -p dezoomify-native --test perf`): fixed-pool width, 512 MiB
-//! spill decision, 20k streaming-halves-legacy model, 40k canvas-limit gate,
+//! spill decision, 20k streaming memory model, 40k canvas-limit gate,
 //! versioned cache keys, and encoded byte sizes within 20 percent of
 //! `crates/dezoomify-native/tests/perf-baseline.json`. No gigapixel
 //! allocation, no public network.

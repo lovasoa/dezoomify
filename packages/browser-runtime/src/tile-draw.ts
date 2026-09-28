@@ -41,7 +41,7 @@ export interface Canvas2DLike {
 }
 
 /** Output placement of one decoded tile, shared by the website painter and
- * the engine-effect assembly executor: top-left corner plus the planned
+ * the canvas assembly: top-left corner plus the planned
  * extent when the plan declares one. */
 export interface PlacedTileGeometry {
   x: number;

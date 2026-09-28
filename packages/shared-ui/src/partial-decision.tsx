@@ -1,17 +1,14 @@
-import type { JobCommand, JobSnapshot } from "@dezoomify/app-model";
+import type { MissingTiles, RecoveryChoice } from "@dezoomify/wasm-bindings";
 import type { ReactElement } from "react";
 import { t } from "./i18n.ts";
 
-type PartialAnswer = Extract<JobCommand, { type: "answer-partial" }>;
-
-/** The UI returns the engine's generation and choice without translating either. */
 export function PartialDecisionActions({
   decision,
   onAnswer,
   labels,
 }: {
-  decision: NonNullable<JobSnapshot["decision"]>;
-  onAnswer(command: PartialAnswer): void;
+  decision: MissingTiles;
+  onAnswer(choice: RecoveryChoice): void;
   labels?: { keep: string; discard: string; retry: string };
 }): ReactElement {
   const text = labels ?? {
@@ -22,9 +19,7 @@ export function PartialDecisionActions({
   const canRetry =
     decision.missing.length > 0 &&
     decision.missing.every(({ failures }) => failures.at(-1)?.category === "transient");
-  function answer(choice: PartialAnswer["decision"]): void {
-    onAnswer({ type: "answer-partial", generation: decision.generation, decision: choice });
-  }
+  const answer = onAnswer;
   return (
     <div className="dz-actions-row" data-dz-partial-decision="true">
       {canRetry ? (

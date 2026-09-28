@@ -7,7 +7,7 @@ use serde::Deserialize;
 use crate::Vec2d;
 use crate::core::discovery::{metadata, url_matches};
 use crate::core::{
-    DiscoveryError, DiscoveryStep, FormatSpec, ImagePlan, Positioned, ProcessingRecipe, Request,
+    DiscoveryError, FormatSpec, ImagePlan, ParsedResource, Positioned, ProcessingRecipe, Request,
     ResolvedLevel, TileSourceError,
 };
 use crate::default_headers;
@@ -28,8 +28,8 @@ fn is_tiles_yaml(uri: &str) -> bool {
         .is_some_and(|path| path.ends_with("tiles.yaml"))
 }
 
-fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
-    decode_yaml(resource.bytes()).map(DiscoveryStep::Image)
+fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+    decode_yaml(resource.bytes()).map(ParsedResource::Image)
 }
 
 #[derive(Deserialize)]
@@ -45,7 +45,7 @@ struct CustomYamlTiles {
 
 fn decode_yaml(bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
     let yaml: CustomYamlTiles = serde_yaml::from_slice(bytes)
-        .map_err(|error| DiscoveryError::Session(format!("invalid tiles.yaml: {error}")))?;
+        .map_err(|error| DiscoveryError::InvalidMetadata(format!("invalid tiles.yaml: {error}")))?;
     let mut headers: Vec<_> = yaml
         .headers
         .into_iter()
@@ -54,7 +54,7 @@ fn decode_yaml(bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
     headers.sort_by(|left, right| left.name.cmp(&right.name));
     yaml.tile_set
         .len()
-        .map_err(|error| DiscoveryError::Session(format!("invalid tiles.yaml: {error}")))?;
+        .map_err(|error| DiscoveryError::InvalidMetadata(format!("invalid tiles.yaml: {error}")))?;
     let size = yaml.width.zip(yaml.height).map(|(x, y)| Vec2d { x, y });
     Ok(ImagePlan::new(
         yaml.title,

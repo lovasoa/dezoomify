@@ -68,12 +68,12 @@ pub(crate) fn parse_matrix_set(element: &XmlElement) -> Result<MatrixSet, Discov
     let identifier = required_text(element, "Identifier", "matrix set identifier")?;
     let supported_crs = required_text(element, "SupportedCRS", "matrix set CRS")?;
     let reference = coordinate_reference(&supported_crs).ok_or_else(|| {
-        DiscoveryError::Session(format!(
+        DiscoveryError::InvalidMetadata(format!(
             "unsupported WMTS coordinate reference system: {supported_crs}"
         ))
     })?;
     if reference != CoordinateReference::WebMercator {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "WMTS tile matrix set is not Web Mercator".into(),
         ));
     }
@@ -82,7 +82,7 @@ pub(crate) fn parse_matrix_set(element: &XmlElement) -> Result<MatrixSet, Discov
         .map(parse_matrix)
         .collect::<Result<Vec<_>, _>>()?;
     if matrices.is_empty() {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "WMTS tile matrix set has no tile matrices".into(),
         ));
     }
@@ -145,7 +145,9 @@ pub(crate) fn parse_layer_bounds(
         element
             .attribute("crs")
             .and_then(coordinate_reference)
-            .ok_or_else(|| DiscoveryError::Session("unsupported WMTS bounding-box CRS".into()))?
+            .ok_or_else(|| {
+                DiscoveryError::InvalidMetadata("unsupported WMTS bounding-box CRS".into())
+            })?
     };
     let lower = coordinates(
         &required_text(element, "LowerCorner", "bounding-box lower corner")?,
@@ -156,7 +158,7 @@ pub(crate) fn parse_layer_bounds(
         "bounding-box upper corner",
     )?;
     if lower.0 > upper.0 || lower.1 > upper.1 {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "WMTS bounding box has invalid corner order".into(),
         ));
     }
@@ -213,7 +215,7 @@ pub(crate) fn parse_matrix_limit(element: &XmlElement) -> Result<MatrixLimit, Di
         "maximum tile row",
     )?;
     if minimum_column > maximum_column || minimum_row > maximum_row {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "WMTS tile matrix limits have invalid ranges".into(),
         ));
     }
@@ -243,7 +245,7 @@ pub(crate) fn project_coordinate(
     reference: CoordinateReference,
 ) -> Result<(f64, f64), DiscoveryError> {
     if !x.is_finite() || !y.is_finite() {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "WMTS bounding box has non-finite coordinates".into(),
         ));
     }
@@ -251,14 +253,14 @@ pub(crate) fn project_coordinate(
         CoordinateReference::WebMercator => Ok((x, y)),
         CoordinateReference::Geographic => {
             if !(-180.0..=180.0).contains(&x) || !(-90.0..=90.0).contains(&y) || y.abs() >= 90.0 {
-                return Err(DiscoveryError::Session(
+                return Err(DiscoveryError::InvalidMetadata(
                     "invalid WMTS geographic bounding box".into(),
                 ));
             }
             let projected_y = RADIUS * (std::f64::consts::PI * (y + 90.0) / 360.0).tan().ln();
             let projected = (HALF_SIZE * x / 180.0, projected_y);
             projected.1.is_finite().then_some(projected).ok_or_else(|| {
-                DiscoveryError::Session("invalid WMTS geographic bounding box".into())
+                DiscoveryError::InvalidMetadata("invalid WMTS geographic bounding box".into())
             })
         }
     }
@@ -269,20 +271,22 @@ pub(crate) fn coordinates(text: &str, label: &str) -> Result<(f64, f64), Discove
         .split_ascii_whitespace()
         .map(str::parse::<f64>)
         .collect::<Result<_, _>>()
-        .map_err(|_| DiscoveryError::Session(format!("invalid WMTS {label}")))?;
+        .map_err(|_| DiscoveryError::InvalidMetadata(format!("invalid WMTS {label}")))?;
     match values.as_slice() {
         [x, y] if x.is_finite() && y.is_finite() => Ok((*x, *y)),
-        _ => Err(DiscoveryError::Session(format!("invalid WMTS {label}"))),
+        _ => Err(DiscoveryError::InvalidMetadata(format!(
+            "invalid WMTS {label}"
+        ))),
     }
 }
 
 pub(crate) fn positive_number(text: &str, label: &str) -> Result<f64, DiscoveryError> {
     let value = text
         .parse::<f64>()
-        .map_err(|_| DiscoveryError::Session(format!("invalid WMTS {label}")))?;
+        .map_err(|_| DiscoveryError::InvalidMetadata(format!("invalid WMTS {label}")))?;
     (value.is_finite() && value > 0.0)
         .then_some(value)
-        .ok_or_else(|| DiscoveryError::Session(format!("invalid WMTS {label}")))
+        .ok_or_else(|| DiscoveryError::InvalidMetadata(format!("invalid WMTS {label}")))
 }
 
 pub(crate) fn positive_integer(text: &str, label: &str) -> Result<u32, DiscoveryError> {
@@ -290,20 +294,21 @@ pub(crate) fn positive_integer(text: &str, label: &str) -> Result<u32, Discovery
     (value.fract() == 0.0 && value <= f64::from(u32::MAX))
         .then(|| value.to_string().parse::<u32>())
         .transpose()
-        .map_err(|_| DiscoveryError::Session(format!("invalid WMTS {label}")))?
-        .ok_or_else(|| DiscoveryError::Session(format!("invalid WMTS {label}")))
+        .map_err(|_| DiscoveryError::InvalidMetadata(format!("invalid WMTS {label}")))?
+        .ok_or_else(|| DiscoveryError::InvalidMetadata(format!("invalid WMTS {label}")))
 }
 
 pub(crate) fn nonnegative_integer(text: &str, label: &str) -> Result<u32, DiscoveryError> {
     let value = text
         .parse::<u64>()
-        .map_err(|_| DiscoveryError::Session(format!("invalid WMTS {label}")))?;
-    u32::try_from(value).map_err(|_| DiscoveryError::Session(format!("invalid WMTS {label}")))
+        .map_err(|_| DiscoveryError::InvalidMetadata(format!("invalid WMTS {label}")))?;
+    u32::try_from(value)
+        .map_err(|_| DiscoveryError::InvalidMetadata(format!("invalid WMTS {label}")))
 }
 
 pub(crate) fn count_between(minimum: u32, maximum: u32) -> Result<u32, DiscoveryError> {
     maximum
         .checked_sub(minimum)
         .and_then(|value| value.checked_add(1))
-        .ok_or_else(|| DiscoveryError::Session("WMTS tile range is too large".into()))
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("WMTS tile range is too large".into()))
 }

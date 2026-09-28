@@ -89,7 +89,6 @@ pub(crate) fn check_schemas(dir: &Path) -> Result<(), String> {
         "manifest.schema.json",
         "scenario.schema.json",
         "routes.schema.json",
-        "transcript.schema.json",
     ] {
         let p = dir.join("schema").join(name);
         let text =

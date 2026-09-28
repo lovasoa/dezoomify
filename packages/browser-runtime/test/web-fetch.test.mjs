@@ -9,7 +9,7 @@ const messages = {
 };
 
 function request(uri, purpose = "metadata", headers = []) {
-  return { id: 23, uri, purpose, headers };
+  return { uri, purpose, headers };
 }
 
 const signal = new AbortController().signal;
@@ -154,7 +154,7 @@ test("metadata proxy follows one bounded retry and reports its redirect URI", as
       sleepFn: async () => {},
       proxyTransport: {
         fetchViaProxy: async (received) => {
-          assert.equal(received, engineRequest);
+          assert.equal(received, resourceRequest);
           calls += 1;
           return calls === 1
             ? { ok: false, status: 429, code: "PROXY_RATE_LIMITED", retryAfterMs: 1 }
@@ -168,13 +168,13 @@ test("metadata proxy follows one bounded retry and reports its redirect URI", as
       },
     },
   );
-  const engineRequest = request("https://a.test/info.json");
-  const result = await fetcher.fetchResource(engineRequest, signal);
+  const resourceRequest = request("https://a.test/info.json");
+  const result = await fetcher.fetchResource(resourceRequest, signal);
   assert.equal(result.finalUri, "https://a.test/final/info.json");
   assert.equal(calls, 2);
 });
 
-test("tiles make one request and return retry hints to the engine", async () => {
+test("tiles make one request and return retry hints to the Rust algorithm", async () => {
   let calls = 0;
   const { fetcher } = makeFetcher(async () => {
     calls += 1;

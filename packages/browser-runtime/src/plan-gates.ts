@@ -1,6 +1,6 @@
 // Browser canvas failure and source URL helpers.
 
-import { isValidDeepLinkSource } from "@dezoomify/app-model";
+import { isValidDeepLinkSource } from "../../shared-ui/src/source-url.ts";
 import type { StructuredFailure } from "./failure.ts";
 import { failure } from "./failure.ts";
 

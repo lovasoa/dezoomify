@@ -1,41 +1,22 @@
-//! The job runs through the native job service against an unroutable local
-//! port (fast connection-refused, no public network). Local diagnostics retain the reproduction input.
-
-use dezoomify_native::{start_job, JobOptions, OutputTarget};
-use std::time::Duration;
+use dezoomify_native::{JobOptions, NativeHost, OutputTarget};
+mod support;
 
 #[test]
 fn failed_jobs_retain_diagnostics() {
     let work = std::env::temp_dir().join(format!("dz-diagnostics-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work).expect("temp dir");
-    let job = start_job(JobOptions {
+    let host = NativeHost::new(JobOptions {
         input_url: "http://127.0.0.1:9/item?token=CANARY-TOKEN".into(),
         output: OutputTarget::File(work.join("out.png")),
         ..Default::default()
     })
-    .expect("runner starts");
-    let mut snapshots = Vec::new();
-    loop {
-        let snapshot = job
-            .snapshots()
-            .recv_timeout(Duration::from_secs(60))
-            .expect("snapshot arrives");
-        assert_eq!(snapshot.job, job.id, "snapshots stay job-scoped");
-        let done = snapshot.snapshot.terminal.is_some() || snapshot.published.is_some();
-        snapshots.push(snapshot);
-        if done {
-            break;
-        }
-    }
-    assert!(!snapshots.is_empty(), "started plus terminal snapshots");
-    let diagnostics = job.diagnostics.clone();
-    match job.join() {
-        Err(_) => {}
-        Ok(summary) => {
-            panic!("refused input must not publish: {summary:?}")
-        }
-    }
+    .expect("host initializes");
+    let diagnostics = host.diagnostics.clone();
+    assert!(
+        support::run_host(&host).is_err(),
+        "refused input must not publish"
+    );
     let report = diagnostics.report();
     assert_eq!(report.outcome.unwrap().event, "failed");
     assert!(report.counters["request_failures"] > 0.0);

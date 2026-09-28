@@ -1,11 +1,4 @@
-// Desktop shell library root: shared constants and module wiring.
-//
-// Lean offline shell: pure Rust only (std + serde/serde_json for wire JSON);
-// no Tauri SDK, no network, no filesystem effects in
-// this module. See docs/native-apps.md for the runtime split.
-
-// 6.1 unwrap policy: shipped shell code maps failures to typed
-// `handoff.rejected`/`protocol.*`/job errors instead of panicking. Unit
+// Shipped shell code maps failures to typed errors instead of panicking. Unit
 // tests are exempt via `allow-unwrap-in-tests` in the workspace
 // `clippy.toml`; integration `tests/` targets never inherit this attribute.
 #![deny(clippy::unwrap_used)]

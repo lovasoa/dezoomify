@@ -2,13 +2,10 @@
 // Direct browser fetch first; the metadata CORS proxy is an automatic
 // fallback for eligible public metadata only (never tiles, never
 // credentials). The single-policy proxy transport instance is supplied by
-// the caller (`src/proxyTransport.ts`); UI copy and the readable-bytes
-// classifier live in the caller too (`src/discovery.ts`) and arrive as plain
-// data, so this module never imports app layers. Progress and log hooks
-// drive the caller's live job view. Keep erasable-syntax-only.
+// the caller. Progress and diagnostics callbacks update the job view.
 
-import type { DiagnosticRecorder } from "@dezoomify/app-model";
 import type { FetchFailureCode, ResourceRequest } from "@dezoomify/wasm-bindings";
+import type { DiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
 import type { FetchCause, StructuredFailure } from "./failure.ts";
 import { blockedReason, fetchFailure } from "./failure.ts";
 import { readErrorPreview, readResponseBytes, retryAfterMs } from "./response-body.ts";
@@ -20,6 +17,77 @@ import {
   sleep,
   tileFailedError,
 } from "./tile-policy.ts";
+
+const SIGNED_QUERY_KEYS = new Set([
+  "token",
+  "signature",
+  "sig",
+  "auth",
+  "key",
+  "session",
+  "sid",
+  "ticket",
+  "secret",
+  "password",
+]);
+
+function hasSignedQuery(urlString: string): boolean {
+  try {
+    const u = new URL(urlString);
+    for (const k of u.searchParams.keys()) {
+      if (SIGNED_QUERY_KEYS.has(k.toLowerCase())) return true;
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+function hasCredentialHeader(headers: ResourceRequest["headers"]): boolean {
+  if (!headers) return false;
+  for (const { name } of headers) {
+    const l = name.toLowerCase();
+    if (l === "cookie" || l === "authorization" || l === "proxy-authorization") return true;
+  }
+  return false;
+}
+
+function isPrivateOrLocalHostname(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  if (h === "localhost" || h === "localhost." || h.endsWith(".localhost")) return true;
+  if (h.endsWith(".local") || h.endsWith(".internal") || h.endsWith(".lan")) return true;
+  if (h === "127.0.0.1" || h.startsWith("127.") || h === "10.0.0.1") return true;
+  if (h.startsWith("10.") || h.startsWith("192.168.") || h.startsWith("169.254.")) return true;
+  if (h === "::1" || h === "[::1]") return true;
+  // 172.16/12
+  const m = h.match(/^172\.(\d+)\./);
+  if (m && Number(m[1]) >= 16 && Number(m[1]) <= 31) return true;
+  return false;
+}
+
+export function isProxyEligible(req: ResourceRequest): { eligible: boolean; reason: string } {
+  if (req.purpose !== "metadata") return { eligible: false, reason: "tile-never-proxied" };
+  if (hasCredentialHeader(req.headers)) return { eligible: false, reason: "credential-header" };
+  if (
+    (req.headers ?? []).some(
+      ({ name }) => !["accept", "accept-language"].includes(name.toLowerCase()),
+    )
+  )
+    return { eligible: false, reason: "unsupported-header" };
+  let u: URL;
+  try {
+    u = new URL(req.uri);
+  } catch {
+    return { eligible: false, reason: "invalid-url" };
+  }
+  if (u.username !== "" || u.password !== "") return { eligible: false, reason: "url-userinfo" };
+  if (hasSignedQuery(req.uri)) return { eligible: false, reason: "signed-query" };
+  if (isPrivateOrLocalHostname(u.hostname))
+    return { eligible: false, reason: "private-local-target" };
+  if (u.protocol !== "http:" && u.protocol !== "https:")
+    return { eligible: false, reason: "scheme" };
+  return { eligible: true, reason: "public-non-credential-metadata" };
+}
 
 const DIRECT_METADATA_MAX_BYTES = 8 * 1024 * 1024;
 const DIRECT_TILE_MAX_BYTES = 64 * 1024 * 1024;
@@ -134,7 +202,7 @@ export interface ClassifiedProxyFailure {
   code: FetchFailureCode;
   message: string;
   retryable: boolean;
-  /** Typed cause for the engine: the diagnostics grouping key. */
+  /** Typed cause for the Rust algorithm: the diagnostics grouping key. */
   cause: FetchCause;
 }
 
@@ -307,7 +375,6 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         request.purpose === "metadata" || fields.outcome !== "readable" ? "debug" : "trace",
         "request",
         {
-          request: request.id,
           purpose: request.purpose,
           transport: "direct",
           url,
@@ -421,7 +488,6 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     try {
       const res = await deps.proxyTransport.fetchViaProxy(request, { signal: combined.signal });
       deps.diagnostics?.record("debug", "request", {
-        request: request.id,
         purpose: request.purpose,
         transport: "metadata-proxy",
         url: targetUrl,
@@ -468,7 +534,6 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       if (signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
       deps.diagnostics?.count("request_failures");
       deps.diagnostics?.record("debug", "proxy-failed", {
-        request: request.id,
         url: targetUrl,
         error: e,
         timeout_ms: requestMs,
@@ -497,9 +562,8 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
    * Every thrown failure carries its typed cause: `message` is a plain,
    * actionable sentence for the prominent UI slot, while `cause`
    * (transport, HTTP status, proxy code, policy reason) plus `url` and
-   * the bounded `preview` server signal feed the engine diagnostics and
-   * the technical-details section. The two layers never mix, and user
-   * copy never enters the engine.
+   * the bounded `preview` server signal feed the Rust algorithm diagnostics and
+   * the technical-details section. User copy stays in the presentation.
    */
   async function fetchMetadataFor(
     request: ResourceRequest,
@@ -527,7 +591,6 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     ) {
       activeTransport = "metadata-proxy";
       deps.diagnostics?.record("info", "transport-fallback", {
-        request: request.id,
         from: "direct",
         to: "metadata-proxy",
         reason: direct.outcome,
@@ -544,7 +607,6 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         const delay = proxyRateLimitDelayMs(proxied.retryAfterMs);
         if (delay !== null) {
           deps.diagnostics?.record("debug", "proxy-retry", {
-            request: request.id,
             delay_ms: delay,
           });
           if (await sleepUnlessAborted(delay, sleepFn, signal)) throw cancelledFailure(url);

@@ -289,8 +289,6 @@ fn transport_and_concurrency_defaults_match_reference_tuning() {
     let config = JobOptions::default();
     assert_eq!(config.max_concurrent, 16);
     assert_eq!(config.max_retries, 3);
-    // Retry timing is engine-owned (explicit WaitForRetry timers); no
-    // transport/pipeline delay field exists.
     assert_eq!(config.min_interval, std::time::Duration::ZERO);
     let fetch = FetchLimits::default();
     assert_eq!(fetch.timeout, std::time::Duration::from_secs(30));

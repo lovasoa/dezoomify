@@ -30,7 +30,7 @@ fn help_lists_the_stable_surface() {
     assert!(out.status.success(), "help failed: {}", stderr_text(&out));
     let help = stdout_text(&out);
     for token in [
-        "setup", "check", "fixtures", "protocol", "build", "dev", "ci", "release", "test",
+        "setup", "check", "fixtures", "bindings", "build", "dev", "ci", "release", "test",
         "digest", "perf",
     ] {
         assert!(help.contains(token), "help lacks {token}");
@@ -44,7 +44,7 @@ fn rejects_unknown_tasks_targets_and_lanes() {
         &["build", "bogus"],
         &["dev", "bogus"],
         &["fixtures", "bogus"],
-        &["protocol", "bogus"],
+        &["bindings", "bogus"],
         &["ci", "bogus"],
         &["release", "bogus"],
         &["test", "bogus"],

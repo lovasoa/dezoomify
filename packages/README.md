@@ -8,7 +8,8 @@ Shared browser-side code consumed by the apps:
   behind a readable-bytes vs. display-only distinction.
 - [`wasm-bindings/`](wasm-bindings/): the declaration emitted from the
   authoritative Rust contracts by the real WASM build (never hand-edited; regenerate with
-  `cargo xtask protocol generate`).
+  `cargo xtask bindings generate`).
 
-Contributing: packages stay host-neutral; no app entry points, no direct
-extension/native APIs, and no second contract source.
+Contributing: shared UI stays host-neutral. The browser runtime implements
+Host capabilities and shares application flow; products inject extension/native
+APIs. Rust remains the only source of crossing domain types.

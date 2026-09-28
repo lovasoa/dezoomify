@@ -8,7 +8,7 @@ use url::Url;
 use crate::Vec2d;
 use crate::core::discovery::{metadata, url_matches};
 use crate::core::{
-    DiscoveryError, DiscoveryStep, FormatSpec, ImagePlan, Request, ResolvedLevel, floor_index,
+    DiscoveryError, FormatSpec, ImagePlan, ParsedResource, Request, ResolvedLevel, floor_index,
 };
 
 pub const SPEC: FormatSpec = FormatSpec::new(
@@ -57,7 +57,7 @@ fn basemap_url(input: &str) -> Option<String> {
 
 fn service_url(input: &str) -> Result<String, DiscoveryError> {
     let url = Url::parse(input)
-        .map_err(|_| DiscoveryError::Session("invalid ArcGIS MapServer URL".into()))?;
+        .map_err(|_| DiscoveryError::InvalidMetadata("invalid ArcGIS MapServer URL".into()))?;
     let path = url
         .path()
         .trim_end_matches('/')
@@ -65,7 +65,7 @@ fn service_url(input: &str) -> Result<String, DiscoveryError> {
         .next()
         .unwrap_or_default();
     if !path.eq_ignore_ascii_case("MapServer") {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "expected an ArcGIS MapServer URL".into(),
         ));
     }
@@ -75,7 +75,7 @@ fn service_url(input: &str) -> Result<String, DiscoveryError> {
 
 fn tile_parameters(input: &str) -> Result<String, DiscoveryError> {
     let url = Url::parse(input)
-        .map_err(|_| DiscoveryError::Session("invalid ArcGIS MapServer URL".into()))?;
+        .map_err(|_| DiscoveryError::InvalidMetadata("invalid ArcGIS MapServer URL".into()))?;
     let mut serializer = url::form_urlencoded::Serializer::new(String::new());
     for (name, value) in url.query_pairs() {
         if !name.eq_ignore_ascii_case("f") {
@@ -85,10 +85,10 @@ fn tile_parameters(input: &str) -> Result<String, DiscoveryError> {
     Ok(serializer.finish())
 }
 
-fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let (url, bytes) = (resource.final_uri(), resource.bytes());
     let mut metadata: Metadata = serde_json::from_slice(bytes).map_err(|error| {
-        DiscoveryError::Session(format!(
+        DiscoveryError::InvalidMetadata(format!(
             "unable to parse ArcGIS MapServer metadata: {error}"
         ))
     })?;
@@ -102,37 +102,37 @@ fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<DiscoveryStep,
     let parameters: Arc<str> = tile_parameters(url)?.into();
     let levels = build_levels(tile_info, &extent, &service, &parameters)?;
     if levels.is_empty() {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "ArcGIS MapServer has no LODs".into(),
         ));
     }
-    Ok(DiscoveryStep::Image(ImagePlan::new(title, levels)))
+    Ok(ParsedResource::Image(ImagePlan::new(title, levels)))
 }
 
 fn validate_metadata(metadata: Metadata) -> Result<(TileInfo, Extent), DiscoveryError> {
     if metadata.service_type.as_deref() != Some("MapServer") {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "ArcGIS service is not a MapServer".into(),
         ));
     }
     if !metadata.single_fused_map_cache {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "ArcGIS MapServer does not provide a fused tile cache".into(),
         ));
     }
     let tile_info = metadata.tile_info.ok_or_else(|| {
-        DiscoveryError::Session("ArcGIS MapServer is missing tile metadata".into())
+        DiscoveryError::InvalidMetadata("ArcGIS MapServer is missing tile metadata".into())
     })?;
     let extent = metadata.full_extent.ok_or_else(|| {
-        DiscoveryError::Session("ArcGIS MapServer is missing full extent metadata".into())
+        DiscoveryError::InvalidMetadata("ArcGIS MapServer is missing full extent metadata".into())
     })?;
     if !matching_spatial_references(&tile_info.spatial_reference, &extent.spatial_reference) {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "ArcGIS tile cache and extent use different spatial references".into(),
         ));
     }
     if tile_info.cols == 0 || tile_info.rows == 0 || tile_info.cols != tile_info.rows {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "ArcGIS MapServer must use square cached tiles".into(),
         ));
     }
@@ -143,7 +143,7 @@ fn validate_metadata(metadata: Metadata) -> Result<(TileInfo, Extent), Discovery
         || extent.xmin > extent.xmax
         || extent.ymin > extent.ymax
     {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "invalid ArcGIS MapServer extent".into(),
         ));
     }
@@ -169,7 +169,7 @@ fn build_levels(
         .into_iter()
         .map(|lod| {
             if !lod.resolution.is_finite() || lod.resolution <= 0.0 {
-                return Err(DiscoveryError::Session(
+                return Err(DiscoveryError::InvalidMetadata(
                     "invalid ArcGIS LOD resolution".into(),
                 ));
             }
@@ -183,12 +183,14 @@ fn build_levels(
             let width = columns
                 .checked_mul(u64::from(tile_width))
                 .and_then(|value| u32::try_from(value).ok())
-                .ok_or_else(|| DiscoveryError::Session("ArcGIS image width is too large".into()))?;
+                .ok_or_else(|| {
+                    DiscoveryError::InvalidMetadata("ArcGIS image width is too large".into())
+                })?;
             let height = rows
                 .checked_mul(u64::from(tile_height))
                 .and_then(|value| u32::try_from(value).ok())
                 .ok_or_else(|| {
-                    DiscoveryError::Session("ArcGIS image height is too large".into())
+                    DiscoveryError::InvalidMetadata("ArcGIS image height is too large".into())
                 })?;
             let service = Arc::clone(service);
             let parameters = Arc::clone(parameters);
@@ -238,7 +240,7 @@ fn canonical_wkid(id: i64) -> i64 {
 
 fn count_between(minimum: i64, maximum: i64) -> Result<u64, DiscoveryError> {
     if maximum < minimum {
-        return Err(DiscoveryError::Session(
+        return Err(DiscoveryError::InvalidMetadata(
             "ArcGIS extent is outside its tile cache".into(),
         ));
     }
@@ -246,7 +248,7 @@ fn count_between(minimum: i64, maximum: i64) -> Result<u64, DiscoveryError> {
         .checked_sub(minimum)
         .and_then(|value| value.checked_add(1))
         .and_then(|value| u64::try_from(value).ok())
-        .ok_or_else(|| DiscoveryError::Session("ArcGIS tile range is too large".into()))
+        .ok_or_else(|| DiscoveryError::InvalidMetadata("ArcGIS tile range is too large".into()))
 }
 
 #[derive(Debug, Deserialize)]

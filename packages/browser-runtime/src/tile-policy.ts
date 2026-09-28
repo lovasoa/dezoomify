@@ -2,7 +2,7 @@
 //
 // This module owns every tile-fetch tuning constant plus the per-host throttle,
 // the adaptive concurrency picker, combined timeout signal, and proxy
-// rate-limit delay. Tile retries belong to the engine. Pure and dependency
+// rate-limit delay. Tile retries belong to the Rust algorithm. Pure and dependency
 // injected where the host clock is involved, so node tests use fakes.
 
 import type { StructuredFailure } from "./failure.ts";
@@ -20,50 +20,33 @@ export const REQUEST_TIMEOUT_MS = 30000;
  */
 export const DIRECT_METADATA_TIMEOUT_MS = 1500;
 
-/**
- * Tile politeness + resilience plus capability-negotiated concurrency.
- * At most 5 tile request starts per second per host (legacy
- * ZoomManager.MAX_REQUESTS_PER_SECOND parity: 1000/5 ms spacing between
- * starts). The engine owns retries; this module only schedules one attempt.
- * Capability policy: website 6, extension 6, native 16
- * (protocol `browser_baseline` 6 vs `native_baseline` 16 vs
- * `extension_baseline` 6). The website picker below stays adaptive 6-12
- * for future caps but the live website path negotiates to the browser
- * baseline 6; native/CLI keep their own 16 and never read the browser cap.
- */
+/** Space request starts by at least 200 ms per host. Rust owns tile retries. */
 export const TILE_MAX_REQUESTS_PER_SECOND = 5;
 export const TILE_MIN_INTERVAL_MS = 1000 / TILE_MAX_REQUESTS_PER_SECOND;
 
-/**
- * Website tile concurrency bounds. The adaptive picker range is 6-12;
- * 4 is the absolute floor for unknown or constrained hosts. The generic
- * picker cap stays 12 for `pickTileConcurrency` callers; the live website
- * path negotiates to `BROWSER_CAPABILITY_MAX_CONCURRENCY` 6 (protocol
- * `browser_baseline`), the extension runs a fixed 6, and native/CLI stay
- * at their own 16 and never read the browser cap.
- */
+/** Adaptive concurrency bounds, with a smaller limit for browser products. */
 export const TILE_CONCURRENCY_FLOOR = 4;
 export const TILE_CONCURRENCY_MIN = 6;
 export const TILE_CONCURRENCY_MAX = 12;
 export const TILE_CONCURRENCY_CAP = 12;
-/** Browser capability baseline: 6 concurrent tiles (protocol dto). */
-export const BROWSER_CAPABILITY_MAX_CONCURRENCY = 6;
+/** Maximum concurrent tile requests in browser products. */
+export const BROWSER_MAX_CONCURRENCY = 6;
 export const TILE_RTT_MEDIUM_MS = 400;
 export const TILE_RTT_SLOW_MS = 800;
 
 /**
  * Pure adaptive concurrency: base from core count, minus for slow RTT,
- * clamped to 6-12, then within the capability cap with a floor of 4.
- * Slow networks back off so extra workers do not pile onto timeouts.
+ * clamped to 6-12, then within the requested limit with a floor of 4.
+ * Slow networks back off so extra requests do not pile onto timeouts.
  */
 export function pickTileConcurrency(opts?: {
   hardwareConcurrency?: unknown;
   rttMs?: unknown;
-  capabilityCap?: unknown;
+  maxConcurrent?: unknown;
 }): number {
   let cap = TILE_CONCURRENCY_CAP;
-  if (typeof opts?.capabilityCap === "number" && Number.isFinite(opts.capabilityCap as number)) {
-    cap = Math.floor(opts.capabilityCap as number);
+  if (typeof opts?.maxConcurrent === "number" && Number.isFinite(opts.maxConcurrent as number)) {
+    cap = Math.floor(opts.maxConcurrent as number);
   }
   let cores = 4;
   if (
@@ -91,16 +74,7 @@ export interface HostConcurrencyHints {
   connection?: { rtt?: unknown };
 }
 
-/**
- * Website concurrency from host hints, negotiated to the browser capability
- * baseline (6). hardwareConcurrency sizes the pool and NetworkInformation.rtt
- * (ms, when present) backs off slow links, then the result is capped at the
- * browser baseline so the website, extension (fixed 6), and native (16) stay
- * on the capability-negotiated policy. Every read is best-effort: unknown
- * hosts get the deterministic default (4 cores, no RTT), which still
- * respects the floor. Pass explicit hints in tests; when omitted, the global
- * navigator is read best-effort and ignored when absent.
- */
+/** Choose website concurrency from hardware and connection hints, capped at six. */
 export function websiteTileConcurrency(host?: HostConcurrencyHints): number {
   let cores = 4;
   let rtt: number | undefined;
@@ -125,7 +99,7 @@ export function websiteTileConcurrency(host?: HostConcurrencyHints): number {
   return pickTileConcurrency({
     hardwareConcurrency: cores,
     rttMs: rtt,
-    capabilityCap: BROWSER_CAPABILITY_MAX_CONCURRENCY,
+    maxConcurrent: BROWSER_MAX_CONCURRENCY,
   });
 }
 
@@ -276,7 +250,7 @@ export function hostOf(url: string): string {
   }
 }
 
-/** One failed tile attempt maps to a typed failure with engine retry facts. */
+/** One failed tile attempt maps to a typed failure with retry facts. */
 export function tileFailedError(
   lastOutcome: string,
   lastStatus: number | undefined,

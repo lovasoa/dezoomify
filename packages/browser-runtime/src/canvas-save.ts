@@ -5,7 +5,7 @@
 // blindly. The canvas host is injected so node tests drive the encode path
 // with fakes.
 
-import { suggestedNameFor } from "@dezoomify/app-model";
+import { suggestedNameFor } from "../../shared-ui/src/labels.ts";
 import { failure } from "./failure.ts";
 
 /** Warning logged beside every completed browser save (profile stripped). */

@@ -435,7 +435,6 @@ export function saveSettings(settings: DesktopSettings): Array<string> {
   return [];
 }
 
-// Payload for the `start_job` Tauri command (snake_case, null for unset).
 export function settingsToInvokeArgs(settings: DesktopSettings): Record<string, unknown> {
   return {
     output_format: settings.output_format,

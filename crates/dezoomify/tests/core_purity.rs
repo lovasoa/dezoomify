@@ -25,7 +25,6 @@ const BANNED: &[&str] = &[
     "colour",
     "png",
     "zif-tiff",
-    "futures",
     "tempfile",
     "criterion",
     "sanitize-filename-reader-friendly",

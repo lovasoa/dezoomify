@@ -79,7 +79,7 @@ hosts).
 
 Paste the address of the page (or of the image description file) into the
 app and start dezooming. The app immediately saves to the folder selected on
-the main screen; it does not ask for a second file choice. The native engine
+the main screen; it does not ask for a second file choice. The native app
 uses the image title it finds to determine the file name and adds the extension
 for the selected format. You can also start the app with the address as an
 argument, or drive it from the terminal; see the
@@ -106,7 +106,7 @@ itself as coming from there. On the command line, this is the
 
 Open **Customize** before saving to pick PNG, JPEG, TIFF, ZIF, WebP, or an
 IIIF tile folder. The app remembers your choice and summarizes it while the
-panel is closed. The native engine uses that choice to add the matching
+panel is closed. The native app uses that choice to add the matching
 extension to its derived output name: `.png`, `.jpg`, `.tif`, `.zif`, `.webp`,
 or `.iiif`. An IIIF folder contains `info.json` and the image tiles, ready to
 serve from a static file server.

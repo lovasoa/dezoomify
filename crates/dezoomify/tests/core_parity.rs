@@ -1,13 +1,14 @@
 //! Portable format coverage: each implemented format is reachable through
-//! automatic discovery, page adapters follow their metadata, and malformed
+//! automatic discovery, page formats follow their metadata, and malformed
 //! metadata is rejected. Focused plan assertions pin format-specific geometry
-//! and request behavior without restoring the former broad parity harness.
+//! and request behavior through direct asynchronous resource reads.
 
 use dezoomify::Vec2d;
-use dezoomify::core::discovery::{DiscoveryError, ResourceResponse};
+use dezoomify::core::discovery::{DiscoveryError, DiscoveryInput, DiscoveryLimits};
+use dezoomify::model::{Error, ErrorPhase, ProbeOutcome, ResourceRead, ResourceResponse};
+mod support;
 use dezoomify::core::{
-    DiscoverableStep, DiscoveredEntry, DiscoveryCatalog, Grid, ObservationResult, Registry,
-    ResolvedLevel, TileSource, default_registry,
+    DiscoveredEntry, DiscoveryCatalog, Grid, Registry, ResolvedLevel, TileSource, default_registry,
 };
 
 type Resource<'a> = (&'a str, &'a [u8]);
@@ -27,23 +28,32 @@ fn discover_with(
     input: &str,
     resources: &[Resource<'_>],
 ) -> Result<DiscoveryCatalog, DiscoveryError> {
-    let mut operation = registry.start(input);
-    loop {
-        let Some(need) = operation.next_priority_need()? else {
-            return operation.finish();
-        };
-        let Some(bytes) = resources
-            .iter()
-            .find(|(uri, _)| *uri == need.request.uri)
-            .map(|(_, bytes)| *bytes)
-        else {
-            return Err(DiscoveryError::Session(format!(
-                "test fixture does not provide requested resource: {}",
-                need.request.uri
-            )));
-        };
-        operation.provide(ResourceResponse::new(need.id, bytes))?;
-    }
+    futures::executor::block_on(registry.discover(
+        vec![DiscoveryInput::new(input)],
+        DiscoveryLimits::default(),
+        |request, _| {
+            let bytes = resources
+                .iter()
+                .find(|(uri, _)| *uri == request.uri)
+                .map(|(_, bytes)| *bytes);
+            async move {
+                bytes
+                    .map(|bytes| ResourceRead::Response {
+                        response: ResourceResponse {
+                            bytes: bytes.to_vec(),
+                            final_uri: None,
+                        },
+                    })
+                    .ok_or_else(|| {
+                        Error::new(
+                            "DISCOVERY_FAILED",
+                            ErrorPhase::Discovery,
+                            format!("no fixture: {}", request.uri),
+                        )
+                    })
+            }
+        },
+    ))
 }
 
 fn ready_image(catalog: DiscoveryCatalog) -> dezoomify::core::ResolvedImage {
@@ -120,37 +130,31 @@ fn iiif_probe_falls_back_to_caret_size_and_preserves_probe_tile() {
     let TileSource::Adaptive(source) = &level.source else {
         panic!("IIIF level must use adaptive probing")
     };
-    let DiscoverableStep::Probe {
-        tile: first,
-        continuation,
-    } = source.start()
-    else {
-        panic!("probe must start with the ordinary size")
-    };
-    assert!(first.request.uri.ends_with("/256,256/0/default.jpg"));
-    let DiscoverableStep::Probe {
-        tile: fallback,
-        continuation,
-    } = continuation.submit(ObservationResult::Missing).unwrap()
-    else {
-        panic!("missing ordinary tile must trigger caret-size fallback")
-    };
-    assert!(fallback.request.uri.ends_with("/^256,/0/default.jpg"));
-    let DiscoverableStep::Resolved {
-        grid,
-        previously_output,
-    } = continuation
-        .submit(ObservationResult::Available {
-            size: Vec2d::square(256),
-        })
+    let host = support::MemoryHost::default();
+    host.probe_results.borrow_mut().extend([
+        ProbeOutcome::Missing,
+        ProbeOutcome::Available {
+            width: std::num::NonZeroU64::new(256).unwrap(),
+            height: std::num::NonZeroU64::new(256).unwrap(),
+        },
+    ]);
+    let resolved = futures::executor::block_on(source.resolve(&host))
         .unwrap()
-    else {
-        panic!("available fallback must resolve the grid")
-    };
-    assert_eq!(previously_output, [Vec2d::default()]);
+        .unwrap();
+    let probes = host.probes.borrow();
+    assert!(probes[0].request.uri.ends_with("/256,256/0/default.jpg"));
+    assert!(probes[1].request.uri.ends_with("/^256,/0/default.jpg"));
+    assert_eq!(resolved.previously_output, [Vec2d::default()]);
     assert_eq!(
-        grid.tiles_row_major().next().unwrap().unwrap().request.uri,
-        fallback.request.uri
+        resolved
+            .grid
+            .tiles_row_major()
+            .next()
+            .unwrap()
+            .unwrap()
+            .request
+            .uri,
+        probes[1].request.uri
     );
 }
 
@@ -237,25 +241,11 @@ fn automatic_discovery_selects_every_ready_format() {
     assert_eq!(generic.format, "generic");
 
     let input = "https://artsandculture.google.com/asset/test";
-    let mut operation = default_registry().start(input);
-    let page = operation.next_priority_need().unwrap().unwrap();
-    operation
-        .provide(ResourceResponse::new(
-            page.id,
-            include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/google_arts_and_culture/page_source.html"),
-        ))
-        .unwrap();
-    let tile_info = operation.next_priority_need().unwrap().unwrap();
-    operation
-        .provide(ResourceResponse::new(
-            tile_info.id,
-            include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/google_arts_and_culture/tile_info.xml"),
-        ))
-        .unwrap();
-    assert_eq!(
-        ready_image(operation.finish().unwrap()).format,
-        "google_arts_and_culture"
-    );
+    let catalog=futures::executor::block_on(default_registry().discover(vec![DiscoveryInput::new(input)],Default::default(),|request,_|async move {
+        let bytes=if request.uri==input {include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/google_arts_and_culture/page_source.html").as_slice()} else if request.uri.ends_with("=g") {include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/google_arts_and_culture/tile_info.xml").as_slice()} else {return Err(Error::new("DISCOVERY_FAILED",ErrorPhase::Discovery,"missing fixture"));};
+        Ok(ResourceRead::Response {response:ResourceResponse {bytes:bytes.to_vec(),final_uri:None}})
+    })).unwrap();
+    assert_eq!(ready_image(catalog).format, "google_arts_and_culture");
 
     let catalog = discover(
         "https://fixtures.test/list.txt",

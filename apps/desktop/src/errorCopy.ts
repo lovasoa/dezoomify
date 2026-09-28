@@ -3,15 +3,14 @@
 // Pure: the host string and controller status arrive as parameters, so this
 // module owns no job state. File move, no behavior change.
 
-import { isValidDeepLinkSource, isValidInputUrl } from "@dezoomify/app-model";
-import { t } from "@dezoomify/shared-ui";
+import { isValidDeepLinkSource, isValidInputUrl, t } from "@dezoomify/shared-ui";
 
 export {
   DEEP_LINK_SECRET_QUERY_KEYS,
   hasSecretQueryParams,
   isValidDeepLinkSource,
   isValidInputUrl,
-} from "@dezoomify/app-model";
+} from "@dezoomify/shared-ui";
 
 export function hostOf(url: string): string {
   try {
@@ -22,7 +21,7 @@ export function hostOf(url: string): string {
 }
 
 // Idle prefill: read an initial URL from the launch location without ever
-// treating it as a started job. Supports ?url=/ ?src= and legacy #url= or
+// treating it as a started job. Supports ?url=/ ?src= and #url= or
 // bare hash payloads. Invalid or secret-bearing candidates return null.
 export function readInitialUrl(): string | null {
   try {

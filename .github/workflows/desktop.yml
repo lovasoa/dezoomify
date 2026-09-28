@@ -6,7 +6,7 @@ on:
       - crates/**
       - packages/shared-ui/**
       - packages/browser-runtime/**
-      - packages/protocol-ts/**
+      - packages/wasm-bindings/**
       - testdata/**
       - scripts/**
       - installer/**

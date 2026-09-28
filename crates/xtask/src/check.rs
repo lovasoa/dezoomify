@@ -39,7 +39,15 @@ pub fn run(args: &[String]) -> Result<(), String> {
     super::fixtures::verify(&[])?;
     super::style::verify(&[])?;
     super::content::verify(&[])?;
-    super::protocol::run(&["generate".to_string(), "--check".to_string()])?;
+    super::bindings::run(&["generate".to_string(), "--check".to_string()])?;
+    let status = std::process::Command::new("node")
+        .args(["scripts/generate-desktop-capabilities.mjs", "--check"])
+        .current_dir(super::repo_root())
+        .status()
+        .map_err(|e| format!("check desktop capabilities: {e}"))?;
+    if !status.success() {
+        return Err("desktop capabilities differ from their declarations".to_string());
+    }
     super::supply::check_workspace_lockfiles()?;
     super::supply::check_deny()?;
     println!("check: ok");

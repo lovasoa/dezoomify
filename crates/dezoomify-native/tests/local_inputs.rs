@@ -100,16 +100,3 @@ fn file_uri_with_remote_host_is_rejected_typed() {
     );
     assert!(!output.exists());
 }
-
-#[test]
-fn job_validation_accepts_local_but_rejects_remote_file_hosts() {
-    use dezoomify::engine::{DiscoveryInput, EngineJob, JobOptions};
-    fn valid(url: &str) -> bool {
-        EngineJob::validate_options(&JobOptions::new(vec![DiscoveryInput::new(url)])).is_ok()
-    }
-    assert!(valid("/tmp/tiles.yaml"));
-    assert!(valid("tiles.yaml"));
-    assert!(valid("file:///tmp/tiles.yaml"));
-    assert!(valid("file://localhost/tmp/tiles.yaml"));
-    assert!(!valid("file://other.test/t.png"));
-}

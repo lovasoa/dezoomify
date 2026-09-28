@@ -6,7 +6,7 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "dependencies": {
-    "@dezoomify/app-model": "workspace:*"
+    "@dezoomify/wasm-bindings": "workspace:*"
   },
   "scripts": {
     "test": "cargo xtask test ui",

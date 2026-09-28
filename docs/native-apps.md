@@ -1,28 +1,42 @@
 # Native apps
 
-The CLI and desktop backend share one native job service (`crates/dezoomify-native/src/job_service.rs`): native HTTP, filesystem, decoding, processing, and encoders driving `dezoomify::engine`. Effect meanings are in the [host-effect contract](job-engine.md#host-effect-contract); native execution only below. User behavior: [Desktop app guide](user/desktop-app.md), [Command-line guide](user/command-line.md).
-
-## One native job service
-
-`start_job` validates `JobOptions` and spawns one background driver thread per job. The service builds one output specification and calls `exec::execute` once; it is the sole end-to-end native execution entry point. There is one engine-driven path only: no dummy engines or transient cancellation engines. Snapshots forward the engine `Snapshot` verbatim (revision, `JobState` lifecycle, paused overlay, progress, selection with catalog/deferred, decision with generation, terminal `Terminal`, output) plus the native publication record once committed. No service-local lifecycle, terminal, or recovery fold exists. Commands are the engine `UserCommand` vocabulary verbatim: `SelectImage`, `FollowDeferred`, `SelectLevel`, `AnswerPartial{generation, decision: RecoveryChoice}`, `Pause`, `Resume`, `Cancel`. Commands never supply bytes and never claim publication; publication is reported by the driver through `OutputCommitted{NativePublication}` only after finalization.
-
-Deferred catalog entries resolve in place on the same job via `FollowDeferred` (engine-bounded follow/cycle guard, no host recursive replacement jobs). Native automatic selection follows the configured catalog position, and a rejected follow (cycle, budget exhausted) ends the job as `discovery.deferred`.
+CLI and desktop construct NativeHost and await the shared Rust
+`dezoomify(inputs, options, host)` function. The Host owns HTTP, local files,
+cache, decoding, assembly, encoders, output publication, and resource cleanup.
+User behavior: [Desktop app guide](user/desktop-app.md) and
+[Command-line guide](user/command-line.md).
 
 ## Native runtime
 
-- One reusable reqwest transport per job (connection reuse across metadata/probe/tiles; 32 idle per host, 15 s idle), 16 concurrent tile fetches (website 6, extension 6, native 16), per-host pacing 5/s (200 ms floor, `max(--min-interval, 200 ms)`), engine-driven retry timing (1 s base doubling to 30 s max, `Retry-After` honored to 300 s; `--retries 0` means first failure settles the tile), 30 s request / 6 s connect timeouts, HTTP/1.1 keep-alive, single-attempt fetches with manual redirect handling, persistent throttles fail closed, cancellation. One engine slot covers the full acquire/process/decode/place path: at most `max_concurrent` fetches plus chained decodes are ever in flight, with no second scheduler and no unbounded decoded-result queue beyond the engine budget;
-- format selection (`JobOptions::format`: `None`/`auto` detects; a name picks one program; unknown names fail `discovery.unknown-format`);
-- remote fetch plus local reads (plain paths, `file://` absolute paths only; single local `tiles.yaml` and local tile URIs flow end to end; credentials stay scoped);
-- automatic selection (`--largest`, exact `--zoom-level`, width/height caps, `--image-index`) is passed to the engine as `NativeAutomatic`; the engine clamps positions, follows the selected deferred entry in the same job, and applies native level precedence. The catalog snapshot and selection-command boundary remain available for a future graphical selector;
-- fixed-pool fetch plus decode over one reqwest transport with a 2-worker Tokio I/O runtime, assembly bounded by available memory;
-- PNG (deflate tier from `--compression`), JPEG (quality `100 - compression`, default 95), TIFF (deflate, always lossless), ZIF (multi-level pyramid, per-level deflate), lossless WebP, `iiif-dir`, atomic publication, first-tile ICC preserved (JPEG, PNG, TIFF, ZIF, WebP) and EXIF (PNG);
-- tile resume cache on by default (`<cache-dir>/<job>/<key>`, custom `--tile-cache`); reruns skip tiles whose stored bytes still decode.
+- One reusable reqwest transport per invocation, with connection reuse, scoped
+  authentication, manual redirect handling, and local-resource support.
+- Sixteen concurrent tile operations by default. One acquisition includes
+  fetch, processing, decode, and placement. Per-host pacing has a 200 ms floor.
+- Requests have a 30 s timeout and 6 s connection timeout. Each transport call
+  makes one attempt; shared Rust code classifies failures and schedules retries.
+- Blocking decoding reserves body bytes before scheduling and releases them
+  when the decoder exits. Cleanup waits for owned tasks and decoder tails.
+- Cache keys use versioned URL digests under an input-specific namespace.
+  Cached bytes must still decode; corrupt entries trigger a fresh fetch.
+  Headers, cookies, and credentials never enter cache keys.
 
-Temp files are job-scoped. Success moves output into place atomically where possible; cancellation and failure remove uncommitted output. Pause (`Pause`/`Resume` over the job command channel) stops new `acquire-tile` scheduling, finishes in-flight work, keeps decoded output and queue order, and resumes the pending queue on resume. The cache keeps response bodies keyed by versioned URL digests under a per-job namespace from the input URL; never headers, cookies, or credentials. Corrupt entries fall back to fresh fetch.
+Selection preserves `--largest`, exact `--zoom-level`, width/height caps, and
+`--image-index`. Deferred catalogs resolve within the invocation with follow
+and cycle bounds. Unknown formats and invalid settings fail before output.
 
-One output owner (`sink.rs`): streaming paint with deterministic plan-order overlapping-tile placement. Tiles spool to job-owned files only while canvas geometry is unknown; the actual `output_spool_cap` bounds that disk use. Known-geometry work paints directly, while overlapping tiles remain in memory under `output_retain_cap`; tracked in-flight decode bytes remain bounded by engine slots. One commit point checks cancellation first, then destination validation, then performs exactly one atomic publication with job-owned-temp-only cleanup. Every blocking decode reserves its body bytes up front and releases them when its closure finishes; cancellation detaches an uninterruptible decode tail but keeps it accounted until it exits. Cancel reports only after quiescence (every tracked task aborted and joined, plus every tracked decode tail released; detached tails drop their results and publish nothing). The cancel/publication race is ordered: a committed publication is reported as completed, otherwise nothing is published and pre-existing destinations stay byte-identical. Results distinguish native publication (`NativePublication`) from browser dispositions (`BrowserSaveInitiated`, `BrowserSaveReady`, `DisplayOnly`); native never claims an initiated browser download reached disk.
+`sink.rs` owns deterministic placement and memory accounting. Known geometry
+paints directly. Unknown geometry spools under the configured disk cap;
+overlapping tiles retain plan order under the retained-memory cap. The canvas
+uses four bytes per pixel and cannot exceed available system memory.
 
-The canvas costs 4 bytes per pixel. Before allocating, the runtime compares against `System::available_memory()` and fails `output.canvas-limit` when larger; no safety margin. `--max-width` fits a smaller level into memory. Honest accounting (`Instrumentation`): attempts, acquired, transient/permanent failures, scheduled retries, timer wait, fetched bytes, peak in-flight, peak retained/spool, peak in-flight decode bytes, canvas/encoded bytes, and the accounted peak (canvas plus peak retained plus encoded). Tracked numbers: `cargo xtask test perf --smoke`, criterion `native_pipeline` benches.
+Output publication checks cancellation and the destination before committing.
+Uncommitted temporary resources are invocation-owned and cleaned after failure.
+Published files remain intact. A publication that has committed returns success;
+otherwise cancellation publishes nothing and preserves any existing destination.
+
+Instrumentation records attempts, acquired tiles, failures, retries, wait time,
+fetched bytes, peak in-flight work, retained/spooled bytes, decode bytes, canvas,
+and encoded output. Performance gates use the actual native pipeline.
 
 ### Output naming and encoders
 
@@ -37,37 +51,56 @@ Other extensions fail typed before any work. JPEG caps at 65535 px per side, Web
 
 ### Partial output
 
-Post-retry tile failures keep a gappy output at a `.partial` sibling (`out.png` → `out.partial.png`), `partial: true` by default; `--no-partial` fails `tile.download-failed` with no output. The shell never presents partial bytes as complete: the driver announces the missing ledger with the engine generation, waits up to 60 s for keep/discard/retry (`RecoveryChoice` verbatim, fail-closed to policy), and ends `partial-completed` with missing ids plus sibling basename (never the granted path). A retry requeues exactly the settled-as-failed tiles in plan order with a fresh budget and preserves successes (good tiles are never refetched). Discarding fails `tile.download-failed` with no output. The CLI auto-answers partial decisions from its policy immediately (non-interactive, no 60 s wait); the desktop forwards the user choice with the pending generation (stale generations are rejected by the engine).
+Post-retry failures can save a gappy result at a `.partial` sibling
+(`out.png` → `out.partial.png`). The intended complete destination stays
+untouched. Retry acquires only missing tiles with a fresh budget and preserves
+good tiles. Discard writes nothing and reports the stable tile failure.
+
+The CLI applies its configured partial policy immediately. The desktop awaits
+a user keep/discard/retry choice and applies the configured default after
+60 seconds. Missing-tile details and partial naming remain visible in the result.
 
 ### Capability baseline
 
-The native baseline reports encoders `[png, jpeg, tiff, zif, webp]`, destination modes `[file, iiif-dir]`, storage modes `[cache]`, `max_concurrency` 16, `bulk_supported` true, `paused_supported` true. Negotiation exposes real codec and resource limits; see [Protocol](protocol.md#product-capabilities).
+Native reports encoders `[png, jpeg, tiff, zif, webp]`, destination modes
+`[file, iiif-dir]`, storage modes `[cache]`, maximum concurrency 16, bulk support,
+and pause support. See [Bindings](bindings.md#domain-values).
 
 ## Desktop
 
-Desktop controls use `job_command(job, command)` with the generated `JobCommand`; partial answers require the exact engine generation. Commands preserve every drained native snapshot for event delivery even when dispatch then rejects as stale. `release_job` cancels unfinished execution and releases the retired registration and output handle without deleting published files. Completed output access remains registered until the product retires its result.
+Tauri owns the actual native tasks and saved-file handles. Its dezoomify call
+returns the same Output value as the shared algorithm. Progress and awaited
+partial choices use generated values associated with the owning invocation.
+Dedicated pause, resume, cancel, answer, and release calls control that task.
 
-CLI and desktop supply `JobOptions` to the same native normalization and validation path. Metadata, probes, and tiles retain their generated `ResourceRequest` until the HTTP boundary, where request headers combine with native defaults. Scoped user credentials stay separate and are reapplied per redirect.
+The frontend subscribes before starting. Retired tasks cannot update a replacement
+view; releasing unfinished work cancels and awaits cleanup. A completed result
+keeps its output handle until retirement, without deleting the published file.
 
-The Tauri app hosts the shared UI. Its integration maps protocol commands to Tauri invocations and native events back. A start carries every output setting from the main screen; the driver names output from the catalog title and saves straight into the configured folder, no second dialog.
-
-Website and deep-link [handoffs](protocol.md#handoff) are untrusted input: validated, then user-confirmed, never client-signed. The shipped extension keeps browser cookies in the browser.
+Every start carries an immutable copy of current settings. The shared native
+validation path checks input, dimensions, retries, cache, headers, and output.
+Titles determine output names; numeric suffixes avoid overwriting existing files.
 
 ### Desktop queue
 
-Sequential multi-job queue in the integration layer (`apps/desktop/src/queue.ts`) over the single-job engine: submitted-while-running addresses wait in a table. Rows show the input URL, status, progress; cancel one or cancel-all; failed/cancelled entries retry behind the line. Failures never stop the rest; totals mirror the CLI bulk contract (`bulk: X succeeded, Y failed, Z total`). The engine validates each entry itself, so checks are never UI-only.
+The FIFO queue activates one address at a time, advances after failure, and
+supports cancel-one, cancel-all, and retry at the back. Rows show the address,
+progress, and result. Aggregate totals use the same succeeded/failed/total
+meaning as CLI bulk output. Rust validates each entry independently.
 
 ### Desktop output and settings
 
-One output per job, saved in submission order. The format picker offers `png`, `jpeg`, `tiff`, `zif`, `webp`, `iiif-dir` (default `png`), persisted in localStorage (`dezoomify.desktop.settings.v1`, fail-closed on load) and sent with `start_job` alongside the output directory. Basename comes from the catalog title plus format extension, with numeric suffixes instead of overwrites (overwrite is always false; no confirmation UI exists). JPEG quality is `100 - compression` (default 5 → 95). Panel settings (output directory, compression, width/height caps, retries, cache directory, `-H` headers) persist across relaunches and fall back to defaults on invalid drafts. User behavior: [Desktop app guide](user/desktop-app.md).
+Formats are PNG, JPEG, TIFF, ZIF, lossless WebP, and iiif-dir; PNG is the default.
+Settings persist under `dezoomify.desktop.settings.v1` and fall back to defaults
+on invalid saved data. Output directory, compression, width/height caps, retries,
+cache directory, and headers accompany each invocation. JPEG quality is
+`100 - compression` (default compression 5 gives quality 95).
 
-Settings render only while idle. History selection prefills the input without starting. Completion uses native open/reveal on the published path (completed or partially completed only) via the platform launcher on a blocking worker with fallbacks; file-existence, launcher, and IPC errors stay distinct. The shared UI renders pending and failed file actions for the owning completed result; the desktop records failures in diagnostics. No caller-supplied path crosses IPC. Encoding progress never erases tile counts.
-
-No catalog notice, no display-only branch on the native path. The engine owns native automatic image and level selection; output naming and result format read the selected image from the authoritative engine snapshot. The shell progress allowlist carries counts only. Engine terminals map once to native product codes for IPC (`job.no-images` → `discovery.no-image`, etc.; already-native codes pass through), so the frontend renders one vocabulary. The frontend `catalogNotice` is local-only save-name geometry, never protocol; window E2E pins both absences. Pause/resume travel live (the generated `job_command` endpoint); open/reveal resolve the published sibling, never a caller-supplied path.
-
-### Desktop partial-output honesty
-
-Default policy is `Keep`. Kept partials publish to the `.partial` sibling; the granted destination stays untouched, so partials never masquerade as complete; `--no-partial`/`Fail` writes nothing (`tile.download-failed`). The desktop presents the generated partial decision and sends its exact generation through `job_command`. The native driver waits up to 60 seconds for an answer, then applies the configured default policy. CLI interactive and policy answers use the same native command channel. The pump retains partial flag, missing ledger, and published path. Kept partials end `PartiallyCompleted` with a distinct label; open/reveal resolve the sibling, never the untouched destination.
+Settings render while idle. History prefills input without starting work.
+Open/reveal uses the registered published path, including a partial sibling;
+caller-supplied paths never cross IPC. File existence, launcher, and IPC errors
+remain distinct. Pending or failed actions belong to the owning completed result.
+Encoding progress retains acquired tile counts.
 
 ### Desktop updater
 
@@ -79,7 +112,7 @@ Inert. `tauri.conf.json` ships empty updater endpoints and pubkey; `release/conf
 
 Linux needs `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential` plus `dpkg-deb` (`dpkg-dev`); icons come from `scripts/gen-desktop-icons.py` before the bundler. macOS needs Xcode Command Line Tools plus `icons/icon.icns`. Windows needs WiX v3 (`msi`), NSIS (`nsis`), plus `icons/icon.ico`. Installers ship unsigned (Linux x86_64 `.deb`, Windows x86_64 `.msi`, Apple silicon `.dmg`); user note: [Desktop app guide](user/desktop-app.md#install).
 
-Per-OS install smoke runs in the desktop CI `bundle-smoke` matrix (see [Testing](testing.md#desktop-real-window)): Linux `dpkg -i` plus timed stay-alive launch under Xvfb; macOS mounts the `dmg` and execs the binary from the image; Windows silent `msi` install (WiX and NSIS required). No `--version` flag exists, so every smoke proves install plus launch by holding the window 15–20 s. Gatekeeper/SIP untouched; the unsigned Windows binary carries no Mark-of-the-Web, so SmartScreen stays out and no OS policy is bypassed.
+Per-OS install smoke runs in the desktop CI `bundle-smoke` matrix (see [Testing](testing.md#desktop-window)): Linux `dpkg -i` plus timed stay-alive launch under Xvfb; macOS mounts the `dmg` and execs the binary from the image; Windows silent `msi` install (WiX and NSIS required). No `--version` flag exists, so every smoke proves install plus launch by holding the window 15–20 s. Gatekeeper/SIP untouched; the unsigned Windows binary carries no Mark-of-the-Web, so SmartScreen stays out and no OS policy is bypassed.
 
 ### Real-window E2E hook
 
@@ -87,6 +120,12 @@ Per-OS install smoke runs in the desktop CI `bundle-smoke` matrix (see [Testing]
 
 ## CLI
 
-Maps arguments to commands on the shared native job service; prints typed events as human or machine records (`--json`). Engine lifecycles map to stable kinds (`discovery`, `downloading`, `recovery-requested`, `encoding`); the first snapshot always prints as `started` and the terminal revision is reused for the machine completion record. Non-interactive: missing arguments print help, fixed retry budget 3, failures exit with the typed error class. Flags: `--overwrite`, `--json`, `-d/--format`, `--largest`, `--max-width`, `--max-height`, `--zoom-level`, `--image-index`, `--retries`, `--retry-delay`, `--keep-partial` (default) / `--no-partial`, `--tile-cache`, `--bulk`, `-H "Name: value"`, positionals `<input-url> <output>`. One job per run, one output (`.png`, `.jpg`/`.jpeg`, `.tif`/`.tiff`, `.zif`, `.webp`, `.iiif`, extensionless `iiif-dir`). `--retry-delay` sets the engine backoff base (doubling per attempt).
+The CLI awaits NativeHost and prints progress and results as human output or
+stable machine records with `--json`. Missing arguments print help. A typed
+failure determines exit status. Public arguments, JSON keys, local-resource
+support, output formats, metadata preservation, and overwrite behavior remain
+part of the [command-line contract](user/command-line.md).
 
-`--bulk` runs one bounded single-job run per list entry with per-entry plus totals reporting; exit 1 when any entry fails. Options reference: [Command-line guide](user/command-line.md#useful-options). Errors: [Errors](errors.md). Engine: [Job engine](job-engine.md).
+`--bulk` processes one bounded invocation per list entry, prints per-entry and
+total results, and exits 1 if any entry fails. `--retry-delay` sets the shared
+backoff base; `--retries 0` settles a failed tile after its first attempt.

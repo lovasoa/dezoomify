@@ -5,8 +5,9 @@ fetches for decoding and saving, versus ordinary `<img>` display that stays
 visible but tainted. Script may show it, never read its pixels
 (`originClean` guards enforce this).
 
-Hosts the WASM worker (built from `crates/dezoomify-wasm`) and reports the
-active transport (direct vs. metadata proxy) to the UI.
+`BrowserHost` supplies asynchronous operations to the Rust `dezoomify`
+function. The website and extension share `createBrowserApplication` for
+invocation lifetime, interactions, progress, history, and output presentation.
 
-Contributing: no UI, no cookie-jar exposure, no treating opaque loads as
-bytes. Tests: `cargo xtask test browser`.
+Products inject source acquisition, transport, permissions, and saving.
+Opaque loads never provide readable bytes. Tests: `cargo xtask test browser`.

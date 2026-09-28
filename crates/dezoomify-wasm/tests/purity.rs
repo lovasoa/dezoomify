@@ -1,4 +1,4 @@
-//! Purity gate: WASM adapter keeps runtime crates out of direct dependencies.
+//! Bindings have no platform I/O, image codecs, or application dependencies.
 
 use std::path::Path;
 use std::process::Command;
@@ -7,7 +7,7 @@ const BANNED_DEPS: &[&str] = &[
     "reqwest", "tokio", "web-sys", "js-sys", "image", "png", "clap",
 ];
 #[test]
-fn direct_dependencies_stay_adapter_only() {
+fn direct_dependencies_only_convert_values_and_futures() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
     let output = Command::new(env!("CARGO"))
         .args([

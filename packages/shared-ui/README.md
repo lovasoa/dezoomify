@@ -1,12 +1,12 @@
 # shared-ui
 
 The Dezoomify interface shared by the website, desktop app, and extension:
-URL entry, format choice, progress, cancellation, results, and layered error
-guidance. Host-neutral, so every app behaves the same.
+URL entry, automatic format detection, progress, cancellation, results, and
+error guidance. Shared pure helpers own history, queues, naming, and bounded
+diagnostic reports.
 
-Hosts plug in capabilities (fetch, save, permissions) through the runtime
-integration contract; the UI never touches network, filesystem, or
-extension APIs directly.
+Products supply progress, results, and ordinary action callbacks. The UI
+never touches network, filesystem, or extension APIs directly.
 
 Contributing: keep components host-neutral, error codes stable, and the
 active transport always visible. Tests live beside the sources.

@@ -1,7 +1,7 @@
 // Browser E2E for the only supported extension flow: the toolbar action
 // starts a job (headless browsers use the test-only driver), a finite source
 // snapshot reads the tab's retained resource timeline, the dedicated job tab
-// runs the engine end to end, and the output saves as a PNG.
+// runs the Rust algorithm end to end, and the output saves as a PNG.
 
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
@@ -466,7 +466,7 @@ async function runFirefoxJob(base, work, runOptions = {}) {
   }
 }
 
-test("chromium: packaged extension runs the job-tab engine flow", { timeout: 180000 }, async () => {
+test("chromium: packaged extension runs the job-tab flow", { timeout: 180000 }, async () => {
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-chromium-"));
   try {
     assertPng(
@@ -595,7 +595,7 @@ test("chromium: packaged extension follows signed metadata and tile redirects wi
   }
 });
 
-test("firefox: packaged extension runs the job-tab engine flow", { timeout: 180000 }, async () => {
+test("firefox: packaged extension runs the job-tab flow", { timeout: 180000 }, async () => {
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-firefox-"));
   try {
     assertPng(await runFirefoxJob(fixtureServer.base, work));

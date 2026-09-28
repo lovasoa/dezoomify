@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { createDiagnosticRecorder } from "../packages/app-model/src/diagnostics.ts";
 import {
   DiagnosticDetails,
   diagnosticIssueUrl,
 } from "../packages/shared-ui/src/diagnostic-details.tsx";
+import { createDiagnosticRecorder } from "../packages/shared-ui/src/diagnostics.ts";
 import { act, click, makeContainer } from "./react-dom.mjs";
 
 const report = () => {

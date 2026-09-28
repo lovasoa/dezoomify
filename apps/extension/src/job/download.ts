@@ -4,7 +4,7 @@ import type { browser } from "wxt/browser";
 type Downloads = Pick<typeof browser.downloads, "download" | "search" | "cancel" | "onChanged">;
 type DownloadDelta = Parameters<Parameters<Downloads["onChanged"]["addListener"]>[0]>[0];
 
-/** Wait for the browser's saved-file result before the engine can complete. */
+/** Wait for the browser's saved-file result before the Rust algorithm can complete. */
 export function saveExtensionBlob(
   downloads: Downloads,
   blob: Blob,
