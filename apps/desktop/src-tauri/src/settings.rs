@@ -7,15 +7,13 @@
 // - max-width / max-height caps, optional positive ints
 // - retries, default 3 (0 allowed = no retries), bounded 0-100
 // - cache-dir, optional resume cache (response bodies only, never headers)
-// - user headers (-H, trusted, origin-scoped, never logged)
+// - user headers (-H, trusted, origin-scoped)
 //
 // Wiring: `pipeline_config_for` mirrors `apps/cli/src/main.rs`
 // `pipeline_config_for` for the fixed transport (parallelism 16, timeout 30s,
 // connect 6s, max_idle 32, max_tiles 1M, available-memory canvas preflight).
 // Validation fails
-// closed on any out-of-bounds or malformed value; logs must use
-// `describe_settings_for_log`, which never includes header values, paths
-// aside from presence, or credentials.
+// closed on any out-of-bounds or malformed value.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -68,7 +66,7 @@ pub struct DesktopSettings {
     pub network_profile: NetworkProfile,
     /// Optional resume-cache directory (tile bodies only).
     pub cache_dir: Option<PathBuf>,
-    /// Trusted user headers, lowercased names (origin-scoped, never logged).
+    /// Trusted user headers, lowercased names (origin-scoped).
     pub headers: BTreeMap<String, String>,
 }
 
@@ -93,7 +91,7 @@ impl DesktopSettings {
 /// (parallelism 16, timeout 30s, connect 6s, max_idle 32, max_tiles 1M,
 /// available-memory canvas preflight) plus the validated settings-mapped fields. No implicit
 /// Referer is added: only explicit user headers are sent (origin-scoped by
-/// the native `UserHeaders` layer, never logged or cached). The output
+/// the native `UserHeaders` layer or cached). The output
 /// target is set by the job table when a destination exists (dialog grant
 /// or automatic directory).
 pub fn job_options_for(settings: &DesktopSettings) -> JobOptions {
@@ -113,40 +111,6 @@ pub fn job_options_for(settings: &DesktopSettings) -> JobOptions {
         cache_dir: settings.cache_dir.clone(),
         ..JobOptions::default()
     }
-}
-
-/// Redacted one-line summary for logs and diagnostics: numeric fields plus
-/// presence flags and header names only. Never header values, cookie
-/// content, or full credential-bearing strings.
-pub fn describe_settings_for_log(settings: &DesktopSettings) -> String {
-    let mut names: Vec<&str> = settings.headers.keys().map(String::as_str).collect();
-    names.sort();
-    format!(
-        "compression={} retries={} network={:?} max_width={} max_height={} output_dir={} cache_dir={} headers={} [{}]",
-        settings.compression,
-        settings.retries,
-        settings.network_profile,
-        settings
-            .max_width
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "none".to_string()),
-        settings
-            .max_height
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "none".to_string()),
-        if settings.output_dir.is_some() {
-            "set"
-        } else {
-            "unset"
-        },
-        if settings.cache_dir.is_some() {
-            "set"
-        } else {
-            "unset"
-        },
-        names.len(),
-        names.join(","),
-    )
 }
 
 fn validate_dir_field(raw: &str, field: &str) -> Result<Option<PathBuf>, String> {
@@ -511,16 +475,12 @@ mod tests {
     }
 
     #[test]
-    fn headers_validated_and_redacted_in_logs() {
+    fn headers_are_validated() {
         let settings = parse_settings(&json!({"headers": {"Cookie": "secret=1"}})).unwrap();
         assert_eq!(
             settings.headers.get("cookie").map(String::as_str),
             Some("secret=1")
         );
-        let summary = describe_settings_for_log(&settings);
-        assert!(summary.contains("headers=1"));
-        assert!(summary.contains("cookie"));
-        assert!(!summary.contains("secret=1"));
         assert!(parse_settings(&json!({"headers": {"bad name": "v"}})).is_err());
         assert!(parse_settings(&json!({"headers": ["no-colon"]})).is_err());
     }

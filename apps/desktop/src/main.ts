@@ -68,7 +68,6 @@ import {
   hostOf,
   isValidInputUrl,
   readInitialUrl,
-  redactedOriginOnly,
   trimTechnical,
   validateDeepLinkPayload,
 } from "./errorCopy.ts";
@@ -150,7 +149,7 @@ let grantedFormat: NativeFormat = "png";
 // a time; further submits wait FIFO. Progress is tracked per job, one entry
 // can be cancelled without touching the rest, cancel-all stops new work, and
 // failed entries retry behind the line. A failed entry never stops the rest;
-// totals mirror the CLI bulk contract. Only redacted origins enter the panel.
+// totals mirror the CLI bulk contract.
 let desktopQueue: DesktopQueue = createDesktopQueue();
 function desktopQueueEnabled(): boolean {
   try {
@@ -160,9 +159,8 @@ function desktopQueueEnabled(): boolean {
   }
 }
 
-// Recent-jobs history (todo 5.2): local-only ledger on this device, newest
-// first, at most 20 entries. Only a redacted origin plus a path hash persists.
-// Credentials never enter history.
+// Recent-jobs history: full source addresses on this device, newest first,
+// at most 20 entries.
 const desktopMemoryFallback = new Map<string, string>();
 const desktopHistoryStore = {
   getItem(key: string): string | null {
@@ -424,7 +422,7 @@ function failLocally(
     host: hostOf(sourceUrl),
     extras: [
       `Status: ${currentAttempt.currentSnapshot?.lifecycle ?? "idle"}`,
-      `Origin: ${redactedOriginOnly(sourceUrl) === "" ? "n/a" : redactedOriginOnly(sourceUrl)}`,
+      `URL: ${sourceUrl || "n/a"}`,
     ],
   });
   currentAttempt.diagnostics.finish("failed", { code, message, ...opts });
@@ -583,7 +581,7 @@ function launchNativeJob(trimmed: string): void {
   });
   resetActivity(trimmed);
   // Minimal settings are validated fail-closed here: invalid settings fail
-  // the submit before any start_job effect. The redacted summary never
+  // the submit before any start_job effect. The summary never
   // includes header values.
   const effective = getEffectiveSettings(desktopSettings);
   if (!effective.ok || !effective.settings) {
@@ -768,12 +766,11 @@ function desktopQueueStatusLabel(status: string): string {
   return t("desktop.queue.statusQueued");
 }
 
-// Multi-job queue panel (todo 5.3): one row per queued job with its redacted
-// origin, status, and progress, plus cancel-one, cancel-all, and retry
+// Multi-job queue panel: one row per queued job with its input URL,
+// status, and progress, plus cancel-one, cancel-all, and retry
 // actions. Rendered only when the negotiated capabilities offer the queue and
 // at least one entry exists. All actions are native buttons in the existing
-// architectural style; only counts, hashes, codes, and redacted origins ever
-// reach this panel, never full URLs, paths, or secrets.
+// architectural style.
 function appendDesktopQueuePanel(aux: HTMLElement, doc: Document): void {
   if (!desktopQueueEnabled()) return;
   if (desktopQueue.entries.length === 0) return;
@@ -803,7 +800,7 @@ function appendDesktopQueuePanel(aux: HTMLElement, doc: Document): void {
     item.className = "dz-queue-item";
     const label = doc.createElement("span");
     label.className = "dz-queue-label";
-    let text = `${entry.origin || t("desktop.queue.unknownOrigin")} - ${desktopQueueStatusLabel(entry.status)}`;
+    let text = `${entry.inputUrl} - ${desktopQueueStatusLabel(entry.status)}`;
     if (entry.status === "active" && entry.progress.total > 0) {
       text += ` - ${t("desktop.queue.progress", {
         current: entry.progress.acquired,

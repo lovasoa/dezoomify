@@ -44,7 +44,7 @@ A release candidate passes:
 - encoder output and large-image boundary tests;
 - website direct-first request-order and classified automatic proxy-fallback tests;
 - proxy public-resource eligibility, credential omission, redirect, and active-transport display audits;
-- extension permission, redaction, and dependency audits.
+- extension permission and dependency audits.
 
 ## Pipeline
 

@@ -15,8 +15,7 @@
 //!   the host observed one.
 //! * [`TileFailure`] carries the bounded structured facts for one failed
 //!   attempt: category, stable code, HTTP status, retry-after hint, and a
-//!   length-capped diagnostic detail string. Secrets, pixels, paths, and
-//!   handles never enter it.
+//!   length-capped diagnostic detail string.
 //!
 //! Everything here is pure and deterministic: no I/O, no clocks, no tasks.
 
@@ -53,7 +52,7 @@ pub struct TileFailure {
     pub http: Option<u16>,
     /// Host-observed `retry-after` hint in milliseconds, when present.
     pub retry_after_ms: Option<u64>,
-    /// Bounded diagnostic detail (server signal excerpt, never secrets).
+    /// Bounded diagnostic detail (server signal excerpt).
     pub detail: Option<String>,
 }
 

@@ -57,12 +57,6 @@ import { UrlInput } from "./url-input.tsx";
 // Pure helpers (host-neutral, no DOM).
 // ---------------------------------------------------------------------------
 
-/**
- * Redacted origin (`scheme://host[:port]/`) for the one-click desktop handoff
- * summary. Prefers the original source URL; falls back to the `src` query
- * inside the `dezoomify://` link. Returns "" for local files or unparseable
- * input. Never includes userinfo, path, query, or fragment.
- */
 function historyDimsLabel(entry: HistoryEntry): string {
   if (
     typeof entry.width === "number" &&
@@ -828,7 +822,6 @@ function FailedView({
           <p className="dz-error-message" id="dz-error-message">
             {error.message}
           </p>
-          <p className="dz-error-redact-hint">{t("view.fail.redactHint")}</p>
         </div>
       </div>
       <div className="dz-guidance-section">

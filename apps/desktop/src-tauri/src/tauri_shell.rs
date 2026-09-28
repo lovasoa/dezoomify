@@ -202,8 +202,7 @@ struct CapabilitySnapshot {
 /// Projected IPC payload shape. Every job emit is the canonical
 /// `{ job, snapshot }`, where `snapshot` is the `Snapshot` verbatim.
 ///
-/// Only the DTO crosses IPC; tile bytes, pixels, paths, full URLs, and
-/// secrets never do.
+/// Only the DTO crosses IPC; tile bytes and pixels stay in the host.
 fn emit_snapshot(app: &AppHandle, emit: crate::jobs::SnapshotEmit) {
     debug_assert!(!crate::jobs::payload_has_forbidden_keys(&emit.payload));
     let _ = app.emit(emit.channel, emit.payload);
@@ -509,7 +508,7 @@ fn focus_main_window(app: &AppHandle) {
 }
 
 /// Validate one raw deep-link candidate and, only on success, emit
-/// `dezoomify://deep-link-pending` with the redacted
+/// `dezoomify://deep-link-pending` with the validated
 /// `{source_url, hint, version}` triple.
 ///
 /// Rejected links are logged to stderr with no effect. Accepted links still
@@ -527,7 +526,7 @@ fn handle_deep_link_url(app: &AppHandle, raw: &str) {
             }
             // Validated fields are non-secret by construction: the parser
             // rejects userinfo and secret keys, enforces v1-2, the 2048-byte
-            // bound, and strict percent-decoding. Only this redacted triple
+            // bound, and strict percent-decoding. Only this validated triple
             // crosses the event boundary, never the raw link.
             let payload = DeepLinkPendingPayload {
                 source_url: link.source_url.clone(),
@@ -555,7 +554,7 @@ fn handle_deep_link_argv(app: &AppHandle, argv: &[String]) {
 /// table lock is held only for the synchronous pump, never across
 /// await/dialog. Terminals were forwarded exactly once and post-terminal
 /// snapshots dropped, so the poller preserves exactly-once delivery. No
-/// tile bytes cross IPC; payloads are already redacted in `jobs.rs`.
+/// tile bytes cross IPC; payloads come from `jobs.rs`.
 fn spawn_driver_poller(app: AppHandle) {
     let _ = std::thread::Builder::new()
         .name("dezoomify-driver-poll".to_string())

@@ -1,6 +1,6 @@
 {
   "id": "web/live-lizardtech",
-  "description": "Live recording: LizardTech http-only legacy shape (cartweb.geography.ua.edu calcrgn, redacted to fixtures.test)",
+  "description": "Live recording: LizardTech http-only legacy shape (cartweb.geography.ua.edu calcrgn, replayed at fixtures.test)",
   "source_evidence": {
     "path": "crates/xtask/src/live.rs lizardtech (live http-only, https unavailable)",
     "snapshot": "live-triage-2026-09-07"

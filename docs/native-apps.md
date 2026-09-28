@@ -12,7 +12,7 @@ Deferred catalog entries resolve in place on the same job via `FollowDeferred` (
 
 - One reusable reqwest transport per job (connection reuse across metadata/probe/tiles; 32 idle per host, 15 s idle), 16 concurrent tile fetches (website 6, extension 6, native 16), per-host pacing 5/s (200 ms floor, `max(--min-interval, 200 ms)`), engine-driven retry timing (1 s base doubling to 30 s max, `Retry-After` honored to 300 s; `--retries 0` means first failure settles the tile), 30 s request / 6 s connect timeouts, HTTP/1.1 keep-alive, single-attempt fetches with manual redirect handling, persistent throttles fail closed, cancellation. One engine slot covers the full acquire/process/decode/place path: at most `max_concurrent` fetches plus chained decodes are ever in flight, with no second scheduler and no unbounded decoded-result queue beyond the engine budget;
 - format selection (`JobOptions::format`: `None`/`auto` detects; a name picks one program; unknown names fail `discovery.unknown-format`);
-- remote fetch plus local reads (plain paths, `file://` absolute paths only; single local `tiles.yaml` and local tile URIs flow end to end; credentials stay scoped, errors redacted);
+- remote fetch plus local reads (plain paths, `file://` absolute paths only; single local `tiles.yaml` and local tile URIs flow end to end; credentials stay scoped);
 - automatic selection (`--largest`, exact `--zoom-level`, width/height caps, `--image-index`) is passed to the engine as `NativeAutomatic`; the engine clamps positions, follows the selected deferred entry in the same job, and applies native level precedence. The catalog snapshot and selection-command boundary remain available for a future graphical selector;
 - fixed-pool fetch plus decode over one reqwest transport with a 2-worker Tokio I/O runtime, assembly bounded by available memory;
 - PNG (deflate tier from `--compression`), JPEG (quality `100 - compression`, default 95), TIFF (deflate, always lossless), ZIF (multi-level pyramid, per-level deflate), lossless WebP, `iiif-dir`, atomic publication, first-tile ICC preserved (JPEG, PNG, TIFF, ZIF, WebP) and EXIF (PNG);
@@ -37,7 +37,7 @@ Other extensions fail typed before any work. JPEG caps at 65535 px per side, Web
 
 ### Partial output
 
-Post-retry tile failures keep a gappy output at a `.partial` sibling (`out.png` → `out.partial.png`), `partial: true` by default; `--no-partial` fails `tile.download-failed` with no output. The shell never presents partial bytes as complete: the driver announces the redacted missing ledger with the engine generation, waits up to 60 s for keep/discard/retry (`RecoveryChoice` verbatim, fail-closed to policy), and ends `partial-completed` with missing ids plus sibling basename (never the granted path). A retry requeues exactly the settled-as-failed tiles in plan order with a fresh budget and preserves successes (good tiles are never refetched). Discarding fails `tile.download-failed` with no output. The CLI auto-answers partial decisions from its policy immediately (non-interactive, no 60 s wait); the desktop forwards the user choice with the pending generation (stale generations are rejected by the engine).
+Post-retry tile failures keep a gappy output at a `.partial` sibling (`out.png` → `out.partial.png`), `partial: true` by default; `--no-partial` fails `tile.download-failed` with no output. The shell never presents partial bytes as complete: the driver announces the missing ledger with the engine generation, waits up to 60 s for keep/discard/retry (`RecoveryChoice` verbatim, fail-closed to policy), and ends `partial-completed` with missing ids plus sibling basename (never the granted path). A retry requeues exactly the settled-as-failed tiles in plan order with a fresh budget and preserves successes (good tiles are never refetched). Discarding fails `tile.download-failed` with no output. The CLI auto-answers partial decisions from its policy immediately (non-interactive, no 60 s wait); the desktop forwards the user choice with the pending generation (stale generations are rejected by the engine).
 
 ### Capability baseline
 
@@ -55,7 +55,7 @@ Website and deep-link [handoffs](protocol.md#handoff) are untrusted input: valid
 
 ### Desktop queue
 
-Sequential multi-job queue in the integration layer (`apps/desktop/src/queue.ts`) over the single-job engine: submitted-while-running addresses wait in a table. Rows show redacted origin, status, progress; cancel one or cancel-all; failed/cancelled entries retry behind the line. Failures never stop the rest; totals mirror the CLI bulk contract (`bulk: X succeeded, Y failed, Z total`). The engine validates each entry itself, so checks are never UI-only.
+Sequential multi-job queue in the integration layer (`apps/desktop/src/queue.ts`) over the single-job engine: submitted-while-running addresses wait in a table. Rows show the input URL, status, progress; cancel one or cancel-all; failed/cancelled entries retry behind the line. Failures never stop the rest; totals mirror the CLI bulk contract (`bulk: X succeeded, Y failed, Z total`). The engine validates each entry itself, so checks are never UI-only.
 
 ### Desktop output and settings
 

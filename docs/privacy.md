@@ -81,8 +81,8 @@ ever touches, so they get their own rules:
   yourself.
 - They're never sent to the project's server, which by design can't
   receive them.
-- They're never written into the finished image file, into logs, or into
-  any report.
+- The extension does not read cookie values into reports. Reports include
+  the full page and image addresses; see [extension data use](user/browser-extension.md#what-the-extension-does-with-your-data).
 - Cookies are used by your browser session to request artwork from the
   site. The extension does not transfer them to the desktop app.
 

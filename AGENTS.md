@@ -78,6 +78,9 @@ compilation. Use `--profile dev-debug` only when a diagnosis needs symbols.
 - **Edits:** use `apply_patch` for manual edits; make the smallest complete
   change; read the current file first and never revert unrelated or
   concurrent work.
+- **Diagnostics:** preserve exact URLs, settings, and error causes for reproduction.
+  Keep reports bounded; use the extension-only sign-in note from
+  [the data-use guidance](docs/user/browser-extension.md#what-the-extension-does-with-your-data).
 - **Docs:** contracts in `docs/` are written in present tense as invariants
   and updated in the same change that changes them. `docs/user/` is the only
   source of user-facing text; link to it, never duplicate it.

@@ -391,9 +391,7 @@ impl RouteTable {
 }
 
 impl ScenarioRoute {
-    /// Return the first missing cookie name without exposing its expected or
-    /// received value. Routes use this to produce useful, secret-free auth
-    /// diagnostics.
+    /// Return the first missing or mismatched cookie name for auth diagnostics.
     pub fn missing_required_cookie<'a>(&'a self, headers: &HeaderMap) -> Option<&'a str> {
         let raw = headers
             .get("cookie")

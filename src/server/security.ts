@@ -283,7 +283,7 @@ export function createProxyRequestId(): string {
 }
 
 /**
- * Per-origin bucket key: redacted origin only (`scheme://host`
+ * Per-origin bucket key: origin only (`scheme://host`
  * with a non-default port). Paths, queries, fragments, userinfo, and case
  * never enter the key, so token-bucket accounting cannot retain secrets.
  * Returns null for unparseable URLs.

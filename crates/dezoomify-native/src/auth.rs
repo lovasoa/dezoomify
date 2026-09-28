@@ -1,5 +1,5 @@
 //! Scoped in-memory authorization for phase-12 handoffs. Memory-only,
-//! never serialized, Debug redacts values, best-effort overwrite on drop
+//! never serialized, best-effort overwrite on drop
 //! (no universal-zeroization claim).
 
 use std::collections::HashMap;
@@ -34,6 +34,7 @@ impl AuthorizationScope {
     }
 }
 
+#[derive(Debug)]
 pub struct EphemeralAuthorization {
     scope: AuthorizationScope,
     cookies: HashMap<String, String>,
@@ -109,14 +110,5 @@ impl Drop for EphemeralAuthorization {
             *value = "x".repeat(len);
         }
         self.cookies.clear();
-    }
-}
-
-impl std::fmt::Debug for EphemeralAuthorization {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EphemeralAuthorization")
-            .field("scope", &self.scope)
-            .field("cookies", &format!("<{} redacted>", self.cookies.len()))
-            .finish()
     }
 }

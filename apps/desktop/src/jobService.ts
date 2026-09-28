@@ -11,7 +11,7 @@
 // output). The service forwards each canonical snapshot directly to its
 // observer: no channel/kind fold, no seq guard, no settled mirror.
 // Exactly-once terminals, monotonic progress, honest partials, typed
-// failure codes, and redaction are the shell's contract; the frontend
+// failure codes are the shell's contract; the frontend
 // never refolds them.
 //
 // Commands cross IPC in the generated engine vocabulary.
@@ -124,7 +124,7 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
     }
     // Verbatim forward: the snapshot is already authoritative (shell
     // guarantees exactly-once terminals, monotonic counts, honest
-    // partials, typed codes, redacted context), so no fold, no seq guard,
+    // partials, typed codes, context), so no fold, no seq guard,
     // and no settled mirror live here.
     tracked.observer.snapshot(payload.snapshot);
   }

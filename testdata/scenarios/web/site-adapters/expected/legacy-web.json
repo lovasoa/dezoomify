@@ -212,7 +212,7 @@
     "GET https://artsandculture.google.com/arts/plain=x0-y0-z0-tzdRNize3ufKrS8Sc39e_9KE5HBQ",
     "GET https://artsandculture.google.com/asset/fixture",
     "GET https://artsandculture.google.com/asset/plain",
-    "GET https://fixtures.test/arcgis/MapServer?token=REDACTED&f=json",
+    "GET https://fixtures.test/arcgis/MapServer?token=fixture&f=json",
     "GET https://fixtures.test/arcgis/uncached/MapServer?f=json",
     "GET https://fixtures.test/hungaricana/files-url.html?img=1",
     "GET https://fixtures.test/hungaricana/files.json",

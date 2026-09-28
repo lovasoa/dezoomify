@@ -20,7 +20,7 @@ test("deep-link copy names the destination and source origin", () => {
   assert.ok(label.includes("https://example.com/"), "button names the origin");
 });
 
-test("handoff 5.5: origin helper is redacted origins-only, file-aware, exact-match", () => {
+test("handoff 5.5: origin helper is origins-only, file-aware, exact-match", () => {
   assert.equal(
     handoffOriginFor(
       "dezoomify://open?v=2&src=https%3A%2F%2Fexample.com%2Fx",

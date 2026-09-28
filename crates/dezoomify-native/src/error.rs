@@ -1,12 +1,11 @@
-//! Stable native errors with redacted context.
+//! Stable native errors.
 //!
 //! Single boundary mapping: every host failure maps once here to
 //! `{code, phase, retryable, message, recovery}` by stable code, never by
 //! display text. Callers construct [`NativeError`] with a stable namespaced
 //! code at the failure site; [`error_phase`]/[`error_retryable`]/
 //! [`error_recovery`]/[`error_transport`]/[`error_resource_kind`] derive the
-//! typed projection from that code alone. Messages are redacted and never
-//! branched on.
+//! typed projection from that code alone. Messages are never branched on.
 
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +20,7 @@ impl NativeError {
     pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             code: code.into(),
-            message: redact(&message.into()),
+            message: message.into(),
         }
     }
 
@@ -111,7 +110,6 @@ impl NativeError {
     }
 
     /// Output write failure (atomic rename, directory creation, tile write).
-    /// The message carries only the OS message, never the path text.
     #[must_use]
     pub fn write_failed(detail: impl Into<String>) -> Self {
         Self::new("output.write-failed", detail.into())
@@ -123,7 +121,7 @@ impl NativeError {
         Self::new("protocol.incompatible", detail.into())
     }
 
-    /// Rejected untrusted handoff input (never carries secrets or paths).
+    /// Rejected untrusted handoff input.
     #[must_use]
     pub fn handoff_rejected(detail: impl Into<String>) -> Self {
         Self::new("handoff.rejected", detail.into())
@@ -363,10 +361,6 @@ pub fn error_resource_kind(code: &str) -> Option<&'static str> {
     }
 }
 
-fn redact(input: &str) -> String {
-    dezoomify::model::redact_error_text(input)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -582,12 +576,11 @@ mod tests {
     }
 
     #[test]
-    fn redaction_strips_credentials_from_messages() {
+    fn messages_preserve_failure_details() {
         let error = NativeError::new(
             "tile.http-error",
             "failed with token=SECRET123 and cookie=abc",
         );
-        assert!(!error.message.contains("SECRET123"));
-        assert!(error.message.contains("REDACTED"));
+        assert_eq!(error.message, "failed with token=SECRET123 and cookie=abc");
     }
 }

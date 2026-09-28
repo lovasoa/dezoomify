@@ -12,9 +12,9 @@ Each error includes:
 - whether retry is valid;
 - a concise user message;
 - an ordered set of permitted recovery actions;
-- optional redacted request, transport, blocked-reason, resource-kind, HTTP status, bounded server signal, and diagnostic detail.
+- optional request, transport, blocked-reason, resource-kind, HTTP status, bounded server signal, and diagnostic detail.
 
-Codes are stable API; messages improve freely. Prominent errors omit credentials. Diagnostic reports retain exact URLs, paths, and settings under the [diagnostic capture contract](security.md#credentials).
+Codes are stable API; messages improve freely. Diagnostic reports retain exact URLs, paths, and settings under the [diagnostic capture contract](security.md#credentials).
 
 Hosts keep their own error chains internally; only the typed shape crosses the contract. Browser code classifies a fetch failure once into `FetchFailure` (host-observed facts only). The Rust session adds the correlated request: metadata failures are `discovery`, tile/probe failures are `acquisition`, request URI and kind come from the emitted effect. Product code adds no context of its own. Output failures use phase `output`. Never branch on display strings.
 
@@ -45,7 +45,7 @@ The website transport transition is automatic for eligible metadata (no per-atte
 Messages follow the layered rules in [Product](product.md#progressive-disclosure):
 
 - First: one specific plain sentence (what failed for this job, which step and resource, which route) plus the single best next action. No shared generic template across causes.
-- Jargon waits for expandable details and linked docs. Wording is driven by structured context (code, phase, transport, kind, blocked reason, redacted origin), so identical causes read identically everywhere.
+- Jargon waits for expandable details and linked docs. Wording is driven by structured context (code, phase, transport, kind, blocked reason, source origin), so identical causes read identically everywhere.
 - A fetch failure is the job outcome: plain message plus stable code up front; engine diagnostics (for discovery, the headline-free per-format bullets) only inside expandable details.
 - User and technical wording never mix. Each fetch failure carries a generated `FetchFailureCode`, a plain sentence for the user, and a typed `FetchCause` (code, HTTP status, transport kind, policy reason) for the engine. Product wording uses the classified sentence; it never parses a stable code. Discovery diagnostics group on the typed `(kind, cause)` key, never on rendered text. A proxy-denied cause names relay code, HTTP status, and policy reason, so policy denials never read as upstream refusals and vice versa.
 - Details stay on the device in the diagnostic report: full request URL, observed HTTP status, bounded server signal, and engine failure context. Format URL-shape misses (`DidNotMatchUrl`, nothing fetched) collapse to a count; fetch rejections group by typed `(kind, cause)` under format names; other rejections group by `(kind, detail)`.

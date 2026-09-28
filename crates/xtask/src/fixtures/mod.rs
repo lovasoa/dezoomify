@@ -5,7 +5,7 @@
 //! files, unsafe traversal, provenance, and sensitive flags. Serve spawns the
 //! deterministic fixture server on loopback. Capture fetches public metadata
 //! over the network (explicit, low-volume, like `test live`) and saves
-//! redacted `routes.json` plus payloads for pull requests; it never sends or
+//! `routes.json` plus payloads for pull requests; it never sends or
 //! stores credentials (see `docs/security.md` and
 //! `docs/CONTRIBUTING-format.md`).
 //!

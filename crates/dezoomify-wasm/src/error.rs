@@ -14,12 +14,9 @@
 //!
 //! [`AdapterError::to_error`] maps these to protocol `Error` values
 //! with code `adapter.{code}` so they cannot collide with core/protocol
-//! codes. All messages are redacted at construction: credential-bearing
-//! query values (`apiKey=`, `token=`, `auth=`, `password=`, `secret=`,
-//! `session=`, `cookie=`, `Authorization:`) are replaced with `REDACTED`,
-//! extending [`dezoomify::model::redact_error_text`].
+//! codes.
 
-use dezoomify::model::{redact_error_text, Error, ErrorPhase};
+use dezoomify::model::{Error, ErrorPhase};
 
 /// Stable machine-readable adapter failure code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -47,7 +44,7 @@ impl AdapterErrorCode {
     }
 }
 
-/// Typed adapter failure. The message is always [`redact`]ed at construction.
+/// Typed adapter failure.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AdapterError {
     code: AdapterErrorCode,
@@ -55,12 +52,12 @@ pub struct AdapterError {
 }
 
 impl AdapterError {
-    /// Build an error, redacting credential-bearing text from `message`.
+    /// Build an error with its original message.
     #[must_use]
     pub fn new(code: AdapterErrorCode, message: impl Into<String>) -> Self {
         Self {
             code,
-            message: redact(&message.into()),
+            message: message.into(),
         }
     }
 
@@ -76,7 +73,7 @@ impl AdapterError {
         self.code.as_str()
     }
 
-    /// Redacted human-readable detail (safe for logs and protocol events).
+    /// Human-readable detail.
     #[must_use]
     pub fn message(&self) -> &str {
         &self.message
@@ -107,28 +104,6 @@ impl std::fmt::Display for AdapterError {
 
 impl std::error::Error for AdapterError {}
 
-/// Redact credential-bearing values from error text.
-///
-/// Extends [`redact_error_text`] with query/form keys the protocol helper
-/// does not cover (`auth=`, `password=`, `secret=`, `access_token=`).
-/// Values run to the next `&`, whitespace, quote, or end of string.
-#[must_use]
-pub fn redact(input: &str) -> String {
-    let mut out = redact_error_text(input);
-    for needle in ["auth=", "password=", "secret=", "access_token="] {
-        let mut search_from = 0;
-        while let Some(relative) = out[search_from..].find(needle) {
-            let position = search_from + relative;
-            let end = out[position..]
-                .find(['&', ' ', '"', '\''])
-                .map_or(out.len(), |offset| position + offset);
-            out.replace_range(position + needle.len()..end, "REDACTED");
-            search_from = position + needle.len() + "REDACTED".len();
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,14 +117,15 @@ mod tests {
     }
 
     #[test]
-    fn messages_are_redacted_at_construction() {
+    fn messages_preserve_failure_details() {
         let error = AdapterError::new(
             AdapterErrorCode::Malformed,
             "fetch https://h/?apiKey=CANARY&x=1 and auth=TOPSECRET failed",
         );
-        assert!(!error.message().contains("CANARY"));
-        assert!(!error.message().contains("TOPSECRET"));
-        assert!(error.message().contains("REDACTED"));
+        assert_eq!(
+            error.message(),
+            "fetch https://h/?apiKey=CANARY&x=1 and auth=TOPSECRET failed"
+        );
     }
 
     #[test]

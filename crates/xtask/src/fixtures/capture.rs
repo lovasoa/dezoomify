@@ -1,11 +1,4 @@
-//! `cargo xtask fixtures capture`: fetch public metadata and save redacted
-//! fixtures.
-//!
-//! Explicit, low-volume network use (like `test live`): fetches the given
-//! public metadata URLs and saves redacted `routes.json` plus payloads for
-//! pull requests. Capture never sends or stores credentials (see
-//! `docs/security.md` and `docs/CONTRIBUTING-format.md`); without `--redact`
-//! it refuses to save anything.
+//! Capture public metadata and preserve its URLs and payloads in fixtures.
 
 use super::common::hex;
 use sha2::{Digest, Sha256};
@@ -21,14 +14,11 @@ pub fn capture(args: &[String]) -> Result<(), String> {
     let mut fetched: Vec<FetchedResource> = Vec::new();
     for url in &opts.urls {
         let parsed = split_capture_url(url)?;
-        let redacted = redact_capture_url(&parsed);
         let outcome = fetch_url(url, opts.timeout_secs, opts.max_bytes)?;
-        let scrubbed = scrub_secrets(&outcome.bytes, &redacted.secrets, &outcome.content_type);
-        let rel = payload_rel_path(&parsed.host, &parsed.path, &redacted.query);
+        let rel = payload_rel_path(&parsed.host, &parsed.path, &parsed.query);
         fetched.push(FetchedResource {
             parsed,
-            redacted,
-            bytes: scrubbed,
+            bytes: outcome.bytes,
             content_type: outcome.content_type,
             rel,
         });
@@ -56,17 +46,17 @@ pub fn capture(args: &[String]) -> Result<(), String> {
             "id": opts.out,
             "description": format!(
                 "Captured from {} ({}); review before merge",
-                first.redacted.url, first.parsed.host,
+                first.parsed.url, first.parsed.host,
             ),
             "source_evidence": {
                 "snapshot": opts.snapshot,
-                "path": first.redacted.url,
+                "path": first.parsed.url,
             },
             "input": {
                 "mode": "automatic",
                 "url": format!(
-                    "http://{{{{origin}}}}/fetch?url={}://{}{}",
-                    first.parsed.scheme, first.parsed.host, first.redacted.path_query,
+                    "http://{{{{origin}}}}/fetch?url={}",
+                    first.parsed.url,
                 ),
             },
             "operation": "discover",
@@ -77,12 +67,12 @@ pub fn capture(args: &[String]) -> Result<(), String> {
             .map_err(|e| format!("cannot write {}: {e}", scenario_path.display()))?;
     }
     println!(
-        "fixtures capture: {} resource(s) into {} (redacted)",
+        "fixtures capture: {} resource(s) into {}",
         fetched.len(),
         opts.out,
     );
     for item in &fetched {
-        println!("  {} -> {}", item.redacted.url, item.rel);
+        println!("  {} -> {}", item.parsed.url, item.rel);
     }
     println!(
         "manifest snippet (review, then insert sorted into testdata/scenarios/manifest.json):"
@@ -107,7 +97,7 @@ pub fn capture(args: &[String]) -> Result<(), String> {
     let text = serde_json::to_string_pretty(&snippet)
         .map_err(|e| format!("cannot encode snippet: {e}"))?;
     println!("{text}");
-    println!("next: inspect `git diff` for secrets, add the manifest entries, then run");
+    println!("next: inspect `git diff`, add the manifest entries, then run");
     println!("`cargo xtask fixtures verify` and `cargo xtask test core --parity`.");
     println!("See docs/CONTRIBUTING-format.md for the full format checklist.");
     Ok(())
@@ -123,22 +113,14 @@ struct CaptureOptions {
 }
 
 struct CaptureUrl {
-    scheme: String,
+    url: String,
     host: String,
     path: String,
     query: Option<String>,
 }
 
-struct RedactedUrl {
-    url: String,
-    path_query: String,
-    query: Option<String>,
-    secrets: Vec<String>,
-}
-
 struct FetchedResource {
     parsed: CaptureUrl,
-    redacted: RedactedUrl,
     bytes: Vec<u8>,
     content_type: String,
     rel: String,
@@ -149,24 +131,9 @@ struct FetchOutcome {
     content_type: String,
 }
 
-/// Query key substrings whose values are credentials per docs/security.md.
-/// Mirrors the fixture-server request-log redaction vocabulary.
-const SENSITIVE_SUBSTRINGS: &[&str] = &[
-    "apikey",
-    "api_key",
-    "token",
-    "auth",
-    "session",
-    "signature",
-    "secret",
-    "password",
-    "cookie",
-];
-
 fn parse_capture_args(args: &[String]) -> Result<CaptureOptions, String> {
     let mut urls: Vec<String> = Vec::new();
     let mut out: Option<String> = None;
-    let mut redact = false;
     let mut timeout_secs = 30u64;
     let mut max_bytes = 5_242_880u64;
     let mut license = "see PR (reviewer confirms license before merge)".to_string();
@@ -190,7 +157,6 @@ fn parse_capture_args(args: &[String]) -> Result<CaptureOptions, String> {
                         .ok_or("fixtures capture --out needs a value")?,
                 );
             }
-            "--redact" => redact = true,
             "--timeout-secs" => {
                 i += 1;
                 timeout_secs = args
@@ -230,7 +196,7 @@ fn parse_capture_args(args: &[String]) -> Result<CaptureOptions, String> {
             "--help" | "-h" => {
                 return Err(
                     "usage: cargo xtask fixtures capture --url <url> [--also <url>...] \
-                     --out <scenario-id> --redact [--timeout-secs <1-300>] \
+                     --out <scenario-id> [--timeout-secs <1-300>] \
                      [--max-bytes <1-20971520>] [--license <text>] [--snapshot <text>]"
                         .to_string(),
                 );
@@ -238,7 +204,7 @@ fn parse_capture_args(args: &[String]) -> Result<CaptureOptions, String> {
             other => {
                 return Err(format!(
                     "unknown fixtures capture option '{other}' \
-                     (only --url|--also|--out|--redact|--timeout-secs|--max-bytes|--license|--snapshot)"
+                     (only --url|--also|--out|--timeout-secs|--max-bytes|--license|--snapshot)"
                 ));
             }
         }
@@ -255,11 +221,6 @@ fn parse_capture_args(args: &[String]) -> Result<CaptureOptions, String> {
     }
     let out = out.ok_or("fixtures capture needs --out <scenario-id>")?;
     check_capture_out(&out)?;
-    if !redact {
-        return Err(
-            "fixtures capture refuses to save without --redact (credentials stay out of the corpus; see docs/security.md)".to_string(),
-        );
-    }
     if license.trim().is_empty() || snapshot.trim().is_empty() {
         return Err("fixtures capture needs non-empty --license and --snapshot".to_string());
     }
@@ -299,13 +260,9 @@ fn check_capture_out(out: &str) -> Result<(), String> {
 }
 
 fn split_capture_url(url: &str) -> Result<CaptureUrl, String> {
-    let (scheme, rest) = url
+    let rest = url
         .strip_prefix("http://")
-        .map(|rest| ("http".to_string(), rest))
-        .or_else(|| {
-            url.strip_prefix("https://")
-                .map(|rest| ("https".to_string(), rest))
-        })
+        .or_else(|| url.strip_prefix("https://"))
         .ok_or("capture url must start with http:// or https://")?;
     if rest.is_empty() || rest.contains(' ') {
         return Err("capture url has a bad authority".to_string());
@@ -315,10 +272,7 @@ fn split_capture_url(url: &str) -> Result<CaptureUrl, String> {
         None => (rest, "/".to_string()),
     };
     if authority.is_empty() || authority.contains('@') {
-        return Err(
-            "capture url must not contain userinfo (strip credentials and use a public url)"
-                .to_string(),
-        );
+        return Err("capture url must not contain userinfo".to_string());
     }
     // Fixture identity ignores ports: the fixture server matches routes on
     // hostname only so loopback captures replay on ephemeral ports.
@@ -350,48 +304,11 @@ fn split_capture_url(url: &str) -> Result<CaptureUrl, String> {
         return Err("capture url path must not contain '..'".to_string());
     }
     Ok(CaptureUrl {
-        scheme,
+        url: url.to_owned(),
         host,
         path,
         query,
     })
-}
-
-fn is_sensitive_key(key: &str) -> bool {
-    let lower = key.to_ascii_lowercase();
-    SENSITIVE_SUBSTRINGS.iter().any(|n| lower.contains(n))
-}
-
-/// Redact a capture URL: fragments are dropped, userinfo is already rejected,
-/// and sensitive query values become `REDACTED`. Returns the redacted URL plus
-/// the original secret values so payload bytes can be scrubbed the same way.
-fn redact_capture_url(parsed: &CaptureUrl) -> RedactedUrl {
-    let mut secrets = Vec::new();
-    let query = parsed.query.as_deref().map(|q| {
-        q.split('&')
-            .map(|pair| {
-                let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
-                if !v.is_empty() && is_sensitive_key(k) {
-                    secrets.push(v.to_string());
-                    format!("{k}=REDACTED")
-                } else {
-                    pair.to_string()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("&")
-    });
-    let path_query = match &query {
-        Some(q) if !q.is_empty() => format!("{}?{q}", parsed.path),
-        _ => parsed.path.clone(),
-    };
-    let url = format!("{}://{}{}", parsed.scheme, parsed.host, path_query);
-    RedactedUrl {
-        url,
-        path_query,
-        query,
-        secrets,
-    }
 }
 
 fn route_id_for(host: &str, path: &str) -> String {
@@ -413,9 +330,9 @@ fn route_id_for(host: &str, path: &str) -> String {
 }
 
 /// On-disk payload path under the scenario dir. Colons become `%3A` so the
-/// tree checks out on Windows; a redacted-query hash disambiguates resources
+/// tree checks out on Windows; a query hash disambiguates resources
 /// whose paths collide.
-fn payload_rel_path(host: &str, path: &str, redacted_query: &Option<String>) -> String {
+fn payload_rel_path(host: &str, path: &str, query: &Option<String>) -> String {
     let trimmed = path.trim_start_matches('/');
     let mut base = if trimmed.is_empty() || path.ends_with('/') {
         format!("{trimmed}index.html")
@@ -423,7 +340,7 @@ fn payload_rel_path(host: &str, path: &str, redacted_query: &Option<String>) -> 
         trimmed.to_string()
     };
     base = base.replace(':', "%3A");
-    if let Some(q) = redacted_query {
+    if let Some(q) = query {
         if !q.is_empty() {
             let mut hasher = Sha256::new();
             hasher.update(q.as_bytes());
@@ -504,34 +421,6 @@ fn fetch_url(url: &str, timeout_secs: u64, max_bytes: u64) -> Result<FetchOutcom
         bytes,
         content_type,
     })
-}
-
-fn is_text_content_type(content_type: &str) -> bool {
-    let lower = content_type.to_ascii_lowercase();
-    lower.starts_with("text/")
-        || lower.contains("json")
-        || lower.contains("xml")
-        || lower.contains("javascript")
-        || lower.contains("svg")
-}
-
-fn scrub_secrets(bytes: &[u8], secrets: &[String], content_type: &str) -> Vec<u8> {
-    if secrets.is_empty() {
-        return bytes.to_vec();
-    }
-    if !content_type.is_empty() && !is_text_content_type(content_type) {
-        return bytes.to_vec();
-    }
-    let Ok(text) = std::str::from_utf8(bytes) else {
-        return bytes.to_vec();
-    };
-    let mut scrubbed = text.to_string();
-    for secret in secrets {
-        if !secret.is_empty() {
-            scrubbed = scrubbed.replace(secret, "REDACTED");
-        }
-    }
-    scrubbed.into_bytes()
 }
 
 fn content_type_for(path: &str, fetched: &str) -> String {
@@ -615,7 +504,7 @@ fn manifest_entry(opts: &CaptureOptions, name: &str, bytes: &[u8]) -> serde_json
         "size": bytes.len(),
         "content_type": content_type,
         "source_snapshot": opts.snapshot,
-        "source_path": "capture (see PR for the redacted source url)",
+        "source_path": "capture (see PR for the source URL)",
         "license_provenance": opts.license,
         "sensitive": false,
         "served_urls": [],
@@ -638,23 +527,12 @@ mod tests {
     }
 
     #[test]
-    fn capture_needs_url_out_and_redact() {
+    fn capture_preserves_input() {
         assert!(parse_capture_args(&[]).is_err());
-        assert!(parse_capture_args(&[
-            "--url".to_string(),
-            "https://example.test/a".to_string(),
-            "--out".to_string(),
-            "web/x".to_string(),
-        ])
-        .is_err());
-        assert!(parse_capture_args(&[
-            "--url".to_string(),
-            "https://example.test/a".to_string(),
-            "--out".to_string(),
-            "web/x".to_string(),
-            "--redact".to_string(),
-        ])
-        .is_ok());
+        let url = "https://example.test/item?apiKey=demo&view=2&token=example";
+        let args = ["--url", url, "--out", "web/example"].map(String::from);
+        assert_eq!(parse_capture_args(&args).unwrap().urls, vec![url]);
+        assert_eq!(split_capture_url(url).unwrap().url, url);
     }
 
     #[test]
@@ -672,29 +550,6 @@ mod tests {
     }
 
     #[test]
-    fn redaction_strips_secrets_but_keeps_shape() {
-        let parsed =
-            split_capture_url("https://example.test/item?apiKey=SECRET-1&view=2&token=SECRET-2")
-                .unwrap();
-        let redacted = redact_capture_url(&parsed);
-        assert_eq!(
-            redacted.url,
-            "https://example.test/item?apiKey=REDACTED&view=2&token=REDACTED"
-        );
-        assert_eq!(redacted.secrets, vec!["SECRET-1", "SECRET-2"]);
-        assert!(!redacted.url.contains("SECRET"));
-        let scrubbed = scrub_secrets(
-            b"{\"key\":\"SECRET-1\",\"view\":2}" as &[u8],
-            &redacted.secrets,
-            "application/json",
-        );
-        assert_eq!(scrubbed, b"{\"key\":\"REDACTED\",\"view\":2}");
-        // Binary payloads are never rewritten.
-        let png = [0x89, 0x50, 0x4eu8];
-        assert_eq!(scrub_secrets(&png, &redacted.secrets, "image/png"), png);
-    }
-
-    #[test]
     fn payload_paths_stay_traversal_free_and_windows_safe() {
         assert_eq!(
             payload_rel_path("example.test", "/a/b.json", &None),
@@ -705,7 +560,7 @@ mod tests {
             "payloads/example.test/iiif/ark%3A/1/info.json"
         );
         let with_query =
-            payload_rel_path("example.test", "/iip", &Some("FIF=REDACTED".to_string()));
+            payload_rel_path("example.test", "/iip", &Some("FIF=image.tif".to_string()));
         assert!(with_query.starts_with("payloads/example.test/iip__q"));
         assert!(!with_query.contains(".."));
         assert!(!with_query.contains(':'));
@@ -716,10 +571,10 @@ mod tests {
     }
 
     #[test]
-    fn manifest_entries_carry_provenance_without_secrets() {
+    fn manifest_entries_carry_provenance() {
         let entry = manifest_entry(&opts(), "routes.json", b"{}");
         assert_eq!(entry["path"], "web/capture-test/routes.json");
         assert_eq!(entry["sensitive"], false);
-        assert!(!entry["source_path"].as_str().unwrap().contains("SECRET"));
+        assert_eq!(entry["source_snapshot"], "test");
     }
 }

@@ -52,11 +52,11 @@ Queues run sequential single-job runs in the integration layer, never the engine
 
 ## Reporting a problem
 
-Copy the diagnostics block from the app's error details (stays on your device, never credentials) and open an issue at <https://github.com/lovasoa/dezoomify/issues> with:
+Copy the diagnostics block from the app's error details (stays on your device) and open an issue at <https://github.com/lovasoa/dezoomify/issues> with:
 
-- page or manifest address, tokens removed;
+- page or manifest address;
 - exact message plus code, phase, transport, resource kind, blocked reason;
-- diagnostics copy (failure details name the full request URL and quote the server reply; strip sign-in details and tokens first);
+- diagnostics copy (failure details name the full request URL and quote the server reply);
 - app and protocol versions, browser name and version;
 - what was tried already (retry later, extension, desktop app);
 - a screenshot where it helps.

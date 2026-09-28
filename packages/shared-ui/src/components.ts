@@ -79,7 +79,7 @@ export function renderProgress(current: number, total: number): string {
  * every app (website, desktop app, extension) renders the same gap map
  * instead of silent gaps. Pure data: callers compose the sentence through
  * their own dictionary (`view.done.gapMap` in shared UI). Ids are short
- * plan tokens; URLs and paths never belong here (hosts filter them out).
+ * plan tokens supplied by the engine.
  */
 export function splitGapLedger(
   missingTiles: Array<string>,

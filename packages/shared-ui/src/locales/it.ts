@@ -190,8 +190,6 @@ export const it = {
     "Questa scheda del browser non ha potuto creare la superficie dell immagine a questa dimensione. L applicazione desktop può salvarla a dimensione piena.",
   "view.fail.canvasEncode":
     "Questa scheda del browser non ha potuto completare l immagine PNG a dimensione piena. L applicazione desktop può salvarla a dimensione piena.",
-  "view.fail.redactHint":
-    "I dettagli sotto possono includere indirizzi completi e la risposta del server. Il link di segnalazione li copia in una bozza su GitHub; rimuovi credenziali e token prima di inviare.",
   // Cancelled section.
   "view.cancel.title": "Salvataggio annullato",
   "view.cancel.message": "Il salvataggio dell immagine e stato interrotto.",
@@ -341,7 +339,7 @@ export const it = {
   "desktop.copy.copied": "Copiata!",
   // Multi-job queue panel (desktop integration queue, todo 5.3). Jobs save
   // one at a time in the order they were added; a failed job never stops the
-  // rest. Only redacted origins appear here, never full addresses.
+  // rest. Queue entries show their input addresses.
   "desktop.queue.title": "Coda",
   "desktop.queue.statusQueued": "In attesa",
   "desktop.queue.statusActive": "In corso",
@@ -366,7 +364,7 @@ export const it = {
   "desktop.help.donate": "Dona",
   "desktop.settings.title": "Personalizza",
   "desktop.settings.desc":
-    "Impostazioni minime di scaricamento. Salvate su questo dispositivo e usate per la prossima attivita. Le intestazioni vanno solo all origine dell immagine e non sono mai registrate.",
+    "Impostazioni minime di scaricamento. Salvate su questo dispositivo e usate per la prossima attivita. Le intestazioni vanno solo all origine dell immagine.",
   "desktop.settings.fileGroup": "File",
   "desktop.settings.imageGroup": "Immagine",
   "desktop.settings.networkGroup": "Rete e ripristino",
@@ -419,8 +417,7 @@ export const it = {
   "desktop.advanced.choose": "Scegli…",
   "desktop.advanced.change": "Modifica…",
   "desktop.advanced.headers": "Intestazioni della richiesta",
-  "desktop.advanced.headersDesc":
-    "Per i visori protetti. Inviate solo all origine dell immagine e mai registrate.",
+  "desktop.advanced.headersDesc": "Per i visori protetti. Inviate solo all origine dell immagine.",
   // Extension job-tab user copy, rendered through the same `t(key, vars)`
   // shape; log and diagnostics lines stay literal English and never use these
   // keys. `test/ui-i18n.test.mjs` fails when the page renders a key outside

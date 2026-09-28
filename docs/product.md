@@ -36,7 +36,7 @@ flowchart TD
 2. **"What happened":** expandable plain-language cause plus honest alternatives, still no jargon.
 3. **Technical detail:** copyable diagnostics and linked docs, for users choosing to look.
 
-Nothing important hides in an unreachable tier, and every failure leaves at least one next action. Structured context is captured at error time (code, phase, transport, kind, blocked reason, redacted origin, capability snapshot), so messages and reports stay specific without interrogating the user. See [Errors](errors.md#user-presentation).
+Nothing important hides in an unreachable tier, and every failure leaves at least one next action. Structured context is captured at error time (code, phase, transport, kind, blocked reason, source origin, capability snapshot), so messages and reports stay specific without interrogating the user. See [Errors](errors.md#user-presentation).
 
 ## Core workflow
 

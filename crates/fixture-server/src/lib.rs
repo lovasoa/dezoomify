@@ -66,74 +66,6 @@ fn cors_headers(map: &mut HeaderMap) {
     );
 }
 
-/// Redact credential-bearing URL parts before request-log persistence or
-/// error-body echo. Preserves `scheme://host/path` shape (transcript-stable)
-/// while stripping userinfo and replacing sensitive query values.
-fn redact_url_for_log(original: &str) -> String {
-    let Some((scheme, without_scheme)) = original
-        .strip_prefix("http://")
-        .map(|rest| ("http", rest))
-        .or_else(|| {
-            original
-                .strip_prefix("https://")
-                .map(|rest| ("https", rest))
-        })
-    else {
-        return "invalid-url".to_string();
-    };
-    let (authority, path_query) = match without_scheme.find('/') {
-        Some(i) => (&without_scheme[..i], &without_scheme[i..]),
-        None => (without_scheme, "/"),
-    };
-    // Strip userinfo first: `user:pass@host` must never reach logs or bodies.
-    let no_userinfo = authority.rsplit('@').next().unwrap_or(authority);
-    let (host, port) = match no_userinfo.rsplit_once(':') {
-        Some((h, p)) if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) => (h, Some(p)),
-        _ => (no_userinfo, None),
-    };
-    let (path, query) = match path_query.find('?') {
-        Some(i) => (&path_query[..i], Some(&path_query[i + 1..])),
-        None => (path_query, None),
-    };
-    let redacted_query = query.map(|q| {
-        q.split('&')
-            .map(|pair| {
-                let (k, _) = pair.split_once('=').unwrap_or((pair, ""));
-                let lower = k.to_ascii_lowercase();
-                if [
-                    "apikey",
-                    "api_key",
-                    "token",
-                    "auth",
-                    "session",
-                    "signature",
-                    "secret",
-                    "password",
-                    "cookie",
-                ]
-                .iter()
-                .any(|n| lower.contains(n))
-                {
-                    format!("{k}=REDACTED")
-                } else {
-                    pair.to_string()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("&")
-    });
-    match redacted_query {
-        Some(q) if !q.is_empty() => format!(
-            "{scheme}://{host}{}{path}?{q}",
-            port.map_or_else(String::new, |p| format!(":{p}"))
-        ),
-        _ => format!(
-            "{scheme}://{host}{}{path}",
-            port.map_or_else(String::new, |p| format!(":{p}"))
-        ),
-    }
-}
-
 fn record(state: &AppState, entry: serde_json::Value) {
     let mut log = state.log.lock().expect("request log lock");
     log.push(entry);
@@ -206,7 +138,7 @@ async fn serve_original_url(
                 None => {
                     record(
                         state,
-                        serde_json::json!({"via": via, "url": "data:<redacted>", "status": 400, "route": "data"}),
+                        serde_json::json!({"via": via, "url": original, "status": 400, "route": "data"}),
                     );
                     return text_response(StatusCode::BAD_REQUEST, "bad data url", head_only);
                 }
@@ -216,7 +148,7 @@ async fn serve_original_url(
         };
         record(
             state,
-            serde_json::json!({"via": via, "url": "data:<redacted>", "status": 200, "route": "data"}),
+            serde_json::json!({"via": via, "url": original, "status": 200, "route": "data"}),
         );
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -230,7 +162,7 @@ async fn serve_original_url(
         None => {
             record(
                 state,
-                serde_json::json!({"via": via, "url": redact_url_for_log(original), "status": 400, "route": null}),
+                serde_json::json!({"via": via, "url": original, "status": 400, "route": null}),
             );
             return text_response(StatusCode::BAD_REQUEST, "bad url", head_only);
         }
@@ -245,7 +177,7 @@ async fn serve_original_url(
                     state,
                     serde_json::json!({
                         "via": via,
-                        "url": redact_url_for_log(original),
+                        "url": original,
                         "status": 403,
                         "route": hit.route.route_id,
                         "scenario": hit.scenario,
@@ -264,27 +196,26 @@ async fn serve_original_url(
                 Err(status) => {
                     record(
                         state,
-                        serde_json::json!({"via": via, "url": redact_url_for_log(original), "status": status.as_u16(), "route": hit.route.route_id, "scenario": hit.scenario}),
+                        serde_json::json!({"via": via, "url": original, "status": status.as_u16(), "route": hit.route.route_id, "scenario": hit.scenario}),
                     );
                     return text_response(status, "fixture error", head_only);
                 }
             };
             record(
                 state,
-                serde_json::json!({"via": via, "url": redact_url_for_log(original), "status": hit.route.status, "route": hit.route.route_id, "scenario": hit.scenario}),
+                serde_json::json!({"via": via, "url": original, "status": hit.route.status, "route": hit.route.route_id, "scenario": hit.scenario}),
             );
             bytes_response(hit.route.status, body.headers, body.bytes, head_only)
         }
         None => {
             record(
                 state,
-                serde_json::json!({"via": via, "url": redact_url_for_log(original), "status": 404, "route": null}),
+                serde_json::json!({"via": via, "url": original, "status": 404, "route": null}),
             );
             let mut map = HeaderMap::new();
             cors_headers(&mut map);
             map.insert("content-type", HeaderValue::from_static("application/json"));
-            // Never echo the full attacker URL cross-origin; log redacted host+path only.
-            let body = serde_json::json!({"error": "fixture-missing", "url": redact_url_for_log(original)}).to_string();
+            let body = serde_json::json!({"error": "fixture-missing", "url": original}).to_string();
             bytes_response(404, map, body.into_bytes(), head_only)
         }
     }

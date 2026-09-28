@@ -282,7 +282,7 @@ fn encode_bytes_stay_within_twenty_percent_of_baseline() {
 }
 
 #[test]
-fn cache_keys_are_versioned_sha256_without_secrets() {
+fn cache_keys_are_versioned_sha256() {
     let a = dezoomify_native::cache::cache_key("https://h/tile?x=0&y=0");
     let b = dezoomify_native::cache::cache_key("https://h/tile?x=9&y=9");
     assert_ne!(a, b);

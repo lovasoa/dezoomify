@@ -38,7 +38,7 @@ deep-link confirm gate (pending links perform no effect), and a kept partial
 published to a `.partial` sibling. The harness configures the existing
 output-directory setting to an isolated temporary folder through the rendered
 settings panel, so generated filenames remain discoverable on every supported
-host. Reports stay redacted and inputs fixed.
+host. Inputs stay fixed.
 
 The lane needs a display on headless Linux (`xvfb-run -a`); macOS and Windows
 CI runners provide a GUI session. It needs the webview system packages above;

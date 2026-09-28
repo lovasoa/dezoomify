@@ -1,8 +1,6 @@
 //! Atomic per-job tile cache: temp-write + rename, versioned digest keys.
 //! Keys are truncated SHA256 digests of the full URI (query included):
-//! distinct resources never collide, and a hex digest persists no secrets,
-//! so the URL text, headers, cookies, handoff payloads, and unredacted URIs
-//! are never stored. Bumping `CACHE_VERSION` invalidates every prior entry.
+//! distinct resources have distinct keys. Only response bodies are stored. Bumping `CACHE_VERSION` invalidates every prior entry.
 //!
 //! The pipeline stores each successfully fetched tile body under
 //! `<cache_dir>/<job>/<key>` and skips the fetch when the stored bytes still

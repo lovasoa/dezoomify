@@ -58,7 +58,6 @@
   },
   "protocol": "2.0",
   "provenance": "fixture",
-  "redacted": true,
   "scenario": "desktop/queue-retry",
   "script": [
     {
