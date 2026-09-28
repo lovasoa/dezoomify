@@ -413,7 +413,11 @@ export function createEngineHost(deps: EngineHostDeps) {
       } catch (error) {
         if (tornDown()) return;
         const failure = deps.classifyFailure(error);
-        if (effect.type === "acquire-tile" && failure.code !== "TRANSPORT_POLICY_DENIED") {
+        if (
+          effect.type === "acquire-tile" &&
+          failure.http === undefined &&
+          failure.code !== "TRANSPORT_POLICY_DENIED"
+        ) {
           const fellBack = await displayFallback(effect, request.id);
           settle?.(fellBack);
           if (fellBack) return;
