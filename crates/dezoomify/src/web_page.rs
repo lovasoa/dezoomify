@@ -4,7 +4,6 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::core::{DiscoveryContext, DiscoveryError, DiscoveryResource, DiscoveryStep};
 use crate::markup::attribute;
 
 static META_RE: LazyLock<Regex> =
@@ -13,34 +12,19 @@ static TITLE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?is)<title\b[^>]*>([^<]*)</title>").expect("constant title pattern")
 });
 static IFRAME_RE: LazyLock<regex::bytes::Regex> = LazyLock::new(|| {
-    regex::bytes::Regex::new(r#"(?i)<iframe[^>]*\bsrc\s*=\s*["'](?P<src>[^"']*)"#)
-        .expect("constant iframe source pattern")
+    regex::bytes::Regex::new(r"(?i)<iframe\b[^>]*>").expect("constant iframe source pattern")
 });
 
-/// Whether the page embeds a zoomable image through an `<iframe>`.
-#[must_use]
-pub fn has_iframe(bytes: &[u8]) -> bool {
-    IFRAME_RE.is_match(bytes)
-}
-
-/// Extract the `src` of the first `<iframe>` on a page, if any.
-/// `&amp;` in the attribute value is decoded.
-#[must_use]
-pub fn iframe_source(bytes: &[u8]) -> Option<String> {
+/// Generic navigation references in document order, without format claims.
+/// Empty sources are ignored and HTML character references are decoded.
+pub(crate) fn iframe_sources(bytes: &[u8]) -> impl Iterator<Item = String> + '_ {
     IFRAME_RE
-        .captures(bytes)
-        .and_then(|captures| captures.name("src"))
-        .map(|capture| String::from_utf8_lossy(capture.as_bytes()).replace("&amp;", "&"))
-}
-
-/// Follow the first iframe source relative to the page's final URI.
-pub fn follow_iframe(
-    _: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
-    let src = iframe_source(resource.bytes())
-        .ok_or_else(|| DiscoveryError::Session("page iframe has no source".into()))?;
-    Ok(resource.follow_relative(&src))
+        .find_iter(bytes)
+        .filter_map(|tag| std::str::from_utf8(tag.as_bytes()).ok())
+        .filter_map(|tag| attribute(tag, "src"))
+        .map(decode_html_entities)
+        .map(|source| source.trim().to_owned())
+        .filter(|source| !source.is_empty())
 }
 
 /// Best-effort human-readable title of an HTML page.

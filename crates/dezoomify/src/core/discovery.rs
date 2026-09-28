@@ -5,6 +5,7 @@
 //! outcome to [`DiscoveryOperation`].
 
 use std::borrow::Cow;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::sync::LazyLock;
 
@@ -909,7 +910,11 @@ struct ResourceRecord {
 
 pub struct DiscoveryOperation {
     input: String,
+    specs: Vec<FormatSpec>,
     candidates: Vec<Candidate>,
+    /// Generic references wait until every format-specific path settles.
+    navigation: BTreeMap<(RequestId, usize), String>,
+    navigated: HashSet<String>,
     requests: Vec<ResourceRecord>,
     diagnostics: Vec<CandidateDiagnostic>,
     catalog: Option<DiscoveryCatalog>,
@@ -929,8 +934,11 @@ impl DiscoveryOperation {
             })
             .collect();
         Self {
+            navigated: HashSet::from([input.clone()]),
             input,
+            specs: specs.to_vec(),
             candidates,
+            navigation: BTreeMap::new(),
             requests: Vec::new(),
             diagnostics: Vec::new(),
             catalog: None,
@@ -1007,6 +1015,28 @@ impl DiscoveryOperation {
                 .checked_add(response.bytes.len())
                 .filter(|total| *total <= self.limits.retained_bytes)
                 .ok_or(DiscoveryError::MetadataSizeLimitExceeded)?;
+            // Merely containing an iframe says nothing about the image
+            // format. Retain bounded references for the navigation phase.
+            let base = response
+                .final_uri
+                .as_deref()
+                .unwrap_or(&resource.request.uri);
+            self.navigated.insert(resource.request.uri.clone());
+            self.navigated.insert(base.to_owned());
+            for (position, source) in crate::web_page::iframe_sources(&response.bytes)
+                .take(self.limits.resources.saturating_sub(self.navigation.len()))
+                .enumerate()
+            {
+                let uri = resolve_relative(base, &source);
+                let supported = match url::Url::parse(&uri) {
+                    Ok(parsed) => matches!(parsed.scheme(), "http" | "https" | "file"),
+                    Err(url::ParseError::RelativeUrlWithoutBase) => url::Url::parse(base).is_err(),
+                    Err(_) => false,
+                };
+                if supported && !self.navigated.contains(&uri) {
+                    self.navigation.insert((id, position), uri);
+                }
+            }
         }
         self.requests[id.0].outcome = Some(outcome);
         self.drive()
@@ -1043,6 +1073,9 @@ impl DiscoveryOperation {
                         .any(|c| !matches!(c.state, CandidateState::Rejected));
                 if pending {
                     return Ok(());
+                }
+                if self.start_next_navigation() {
+                    continue;
                 }
                 return Err(DiscoveryError::NoCandidateAccepted {
                     diagnostics: self.diagnostics.clone(),
@@ -1157,6 +1190,28 @@ impl DiscoveryOperation {
                 None => Err(DiscoveryError::fetch_failed(failure.cause.clone())),
             },
         }
+    }
+
+    fn start_next_navigation(&mut self) -> bool {
+        while let Some((_, uri)) = self.navigation.pop_first() {
+            if !self.navigated.insert(uri.clone()) {
+                continue;
+            }
+            self.input = uri;
+            self.candidates = self
+                .specs
+                .iter()
+                .map(|&spec| Candidate {
+                    spec,
+                    state: CandidateState::New,
+                    history: Vec::new(),
+                })
+                .collect();
+            self.candidates
+                .sort_by_key(|candidate| !candidate.spec.prefers(&self.input));
+            return true;
+        }
+        false
     }
 
     fn apply_step(&mut self, index: usize, step: DiscoveryStep) -> Result<(), DiscoveryError> {

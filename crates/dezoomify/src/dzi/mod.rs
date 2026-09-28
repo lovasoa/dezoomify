@@ -2,7 +2,6 @@
 
 use std::sync::{Arc, LazyLock};
 
-use crate::web_page::{follow_iframe, has_iframe};
 use dzi_file::DziFile;
 use regex::{Regex, bytes::Regex as BytesRegex};
 
@@ -36,7 +35,6 @@ const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::ContentPredicate(has_wdl_template).then(follow_wdl_template),
     DiscoveryRoute::relative_capture(&DZI_LINK_RE, "url"),
     DiscoveryRoute::relative_capture(&DZI_ATTR_RE, "url"),
-    DiscoveryMatch::ContentPredicate(has_iframe).then(follow_iframe),
     DiscoveryMatch::Any.catalog(decode_catalog),
 ];
 
