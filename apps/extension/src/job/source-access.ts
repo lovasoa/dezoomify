@@ -1,5 +1,6 @@
 import {
   decodeBase64Payload,
+  isFetchFailure,
   isPublicHttpUrl,
   originOfUrl,
   SOURCE_FETCH_BYTE_LIMIT,
@@ -86,11 +87,7 @@ function validSnapshot(value: unknown, expectedUrl: string): value is CandidateS
 function validFetchResult(value: unknown, expectedUrl: string): value is FetchResult {
   if (!isRecord(value) || typeof value.documentUrl !== "string") return false;
   if (!sameDocumentUrl(value.documentUrl, expectedUrl)) return false;
-  if (value.ok === false)
-    return (
-      typeof value.code === "string" &&
-      (value.status === undefined || Number.isInteger(value.status))
-    );
+  if (value.ok === false) return isFetchFailure(value.error);
   return (
     value.ok === true &&
     (value.contentType === undefined ||
@@ -109,20 +106,6 @@ function validFetchResult(value: unknown, expectedUrl: string): value is FetchRe
     value.url.length <= MAX_URL_LENGTH &&
     isPublicHttpUrl(value.url)
   );
-}
-
-function classifyResultFailure(result: Extract<FetchResult, { ok: false }>): SourceAccessError {
-  if (result.code === "cancelled") return failure("cancelled", "source fetch cancelled");
-  if (result.code === "http-error")
-    return failure("http-error", "source returned an HTTP error", {
-      ...(result.status === undefined ? {} : { status: result.status }),
-      sourceDefinitive: true,
-    });
-  if (result.code === "too-large")
-    return failure("limit-exceeded", "source response exceeds limit");
-  if (result.code === "invalid-response")
-    return failure("malformed", "source returned an invalid response");
-  return failure("network", "source fetch failed");
 }
 
 /**
@@ -257,7 +240,7 @@ export function createSourceAccess(
       assertLive();
       if (!validFetchResult(result, documentUrl))
         throw failure("malformed", "invalid source fetch result");
-      if (result.ok === false) throw classifyResultFailure(result);
+      if (result.ok === false) throw result.error;
       const bytes = decodeBase64Payload(result.data, SOURCE_FETCH_BYTE_LIMIT);
       if (!bytes || bytes.byteLength !== result.bytes)
         throw failure("malformed", "invalid source payload");

@@ -528,6 +528,7 @@ async function runJob(url: string, origin = url): Promise<void> {
       const transport = structured.transportKind ?? structured.cause?.transport;
       return {
         code: structured.fetchFailureCode ?? "DISCOVERY_FAILED",
+        recovery: [],
         retryable: structured.retryable === true,
         message: structured.message ?? "The browser could not read this resource.",
         ...(reason ? { blocked_reason: reason } : {}),

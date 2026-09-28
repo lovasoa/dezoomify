@@ -1,5 +1,5 @@
 import type { DiagnosticRecorder } from "@dezoomify/app-model";
-import { originOfUrl } from "@dezoomify/browser-runtime";
+import { isFetchFailure, originOfUrl } from "@dezoomify/browser-runtime";
 import type { ResourceRequest } from "@dezoomify/wasm-bindings";
 import { asFetchFailure } from "../runtime/fetch.ts";
 import type { createSourceAccess } from "./source-access.ts";
@@ -45,14 +45,7 @@ export function createEngineResourceFetcher(deps: {
         return result;
       } catch (error) {
         if (!signal.aborted) deps.diagnostics?.count("request_failures");
-        if (
-          signal.aborted ||
-          (error &&
-            typeof error === "object" &&
-            "sourceDefinitive" in error &&
-            error.sourceDefinitive === true)
-        )
-          throw error;
+        if (signal.aborted || (isFetchFailure(error) && error.http !== undefined)) throw error;
         deps.diagnostics?.record("warn", "source-fetch-fallback", {
           ...asFetchFailure(error),
           request: request.id,

@@ -13,13 +13,14 @@
  * resource URLs. Same-origin iframe DOM is readable here; cross-origin frames
  * throw on access and are skipped.
  */
+import type { FetchFailure, FetchFailureCode } from "@dezoomify/wasm-bindings";
+
 type SourceRequest = {
   url: string;
   method?: string;
   headers: Array<{ name: string; value: string }>;
   operationId?: string;
 };
-type FetchFailure = { ok: false; code: string; status?: number; documentUrl: string };
 
 export function collectCandidates(): {
   ok: true;
@@ -107,7 +108,7 @@ export function collectCandidates(): {
  * transport. Cookies/session credentials are never part of this result.
  */
 export async function fetchSource(request: SourceRequest): Promise<
-  | FetchFailure
+  | { ok: false; error: FetchFailure; documentUrl: string }
   | {
       ok: true;
       status: number;
@@ -128,10 +129,20 @@ export async function fetchSource(request: SourceRequest): Promise<
     controllers = new Map();
     world.__dezoomifySourceFetches = controllers;
   }
-  const fail = (code: string, status?: number): FetchFailure => ({
-    ok: false,
-    code,
-    ...(Number.isInteger(status) ? { status } : {}),
+  const fail = (code: FetchFailureCode, message: string, http?: number) => ({
+    ok: false as const,
+    error: {
+      code,
+      message,
+      recovery: [],
+      transport: "browser-session",
+      retryable:
+        http !== undefined
+          ? [408, 425, 429].includes(http) || http >= 500
+          : code === "TRANSPORT_NETWORK_ERROR",
+      ...(http === undefined ? {} : { http }),
+      ...(http === 401 || http === 403 ? { blocked_reason: "forbidden" as const } : {}),
+    } satisfies FetchFailure,
     documentUrl,
   });
 
@@ -146,8 +157,23 @@ export async function fetchSource(request: SourceRequest): Promise<
       headers,
       signal: controller?.signal,
     });
-    if (!response || typeof response.status !== "number") return fail("invalid-response");
-    if (!response.ok) return fail("http-error", response.status);
+    if (!response || typeof response.status !== "number")
+      return fail("TRANSPORT_NETWORK_ERROR", "The source returned an invalid response.");
+    if (!response.ok) {
+      const result = fail(
+        "TRANSPORT_HTTP_ERROR",
+        "The website refused this file.",
+        response.status,
+      );
+      const raw = response.headers?.get?.("retry-after");
+      if (raw) {
+        const seconds = Number(raw);
+        const delay = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(raw) - Date.now();
+        if (Number.isFinite(delay) && delay >= 0)
+          Object.assign(result.error, { retry_after_ms: Math.min(300000, Math.floor(delay)) });
+      }
+      return result;
+    }
     const responseUrl =
       typeof response.url === "string" && response.url !== "" ? response.url : request.url;
 
@@ -167,7 +193,7 @@ export async function fetchSource(request: SourceRequest): Promise<
 
     const declared = Number(response.headers?.get?.("content-length"));
     if (Number.isSafeInteger(declared) && declared > MAX_SOURCE_FETCH_BYTES)
-      return fail("too-large");
+      return fail("TRANSPORT_SIZE_LIMIT", "The source response exceeds the byte limit.");
     const reader = response.body?.getReader?.();
     if (reader) {
       for (;;) {
@@ -195,8 +221,14 @@ export async function fetchSource(request: SourceRequest): Promise<
     };
   } catch (error) {
     const caught = error as { code?: unknown; name?: unknown };
-    if (caught?.code === "too-large") return fail("too-large");
-    return fail(caught?.name === "AbortError" ? "cancelled" : "network");
+    if (caught?.code === "too-large")
+      return fail("TRANSPORT_SIZE_LIMIT", "The source response exceeds the byte limit.");
+    return caught?.name === "AbortError"
+      ? fail("TRANSPORT_CANCELLED", "The source fetch was cancelled.")
+      : fail(
+          "TRANSPORT_NETWORK_ERROR",
+          error instanceof Error ? error.message.slice(0, 4096) : "The source fetch failed.",
+        );
   } finally {
     if (request.operationId) controllers.delete(request.operationId);
   }

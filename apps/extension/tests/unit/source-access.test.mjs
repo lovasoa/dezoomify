@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createSourceAccess } from "../../src/job/source-access.ts";
 import { collectCandidates, fetchSource } from "../../src/job/source-operations.ts";
+import { asFetchFailure } from "../../src/runtime/fetch.ts";
 
 const SOURCE_URL = "https://gallery.example/page?view=1";
 
@@ -124,8 +125,14 @@ test("navigation invalidates access and discards an in-flight scan result", asyn
 test("source fetch treats HTTP refusals as definitive and leaves fallback decisions typed", async () => {
   const fake = fakeBrowser(async () => ({
     ok: false,
-    code: "http-error",
-    status: 403,
+    error: {
+      code: "TRANSPORT_HTTP_ERROR",
+      http: 403,
+      retryable: false,
+      message: "Refused",
+      recovery: [],
+      transport: "browser-session",
+    },
     documentUrl: SOURCE_URL,
   }));
   const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
@@ -134,7 +141,7 @@ test("source fetch treats HTTP refusals as definitive and leaves fallback decisi
       { uri: "https://gallery.example/private.xml", headers: [] },
       new AbortController().signal,
     ),
-    { code: "http-error", status: 403, sourceDefinitive: true },
+    { code: "TRANSPORT_HTTP_ERROR", http: 403, retryable: false },
   );
   source.dispose();
 });
@@ -156,4 +163,36 @@ test("source injection errors retain the browser's cause", async () => {
   const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
   await assert.rejects(source.scan(), { code: "network", cause });
   source.dispose();
+});
+
+test("generated failure facts survive source validation and classification unchanged", async () => {
+  const error = {
+    code: "TRANSPORT_HTTP_ERROR",
+    http: 429,
+    retryable: true,
+    message: "Busy",
+    recovery: [],
+    transport: "browser-session",
+    blocked_reason: "throttled",
+    retry_after_ms: 3000,
+    preview: "Try later",
+    detail: "original diagnostic",
+  };
+  const fake = fakeBrowser(async () => ({ ok: false, error, documentUrl: SOURCE_URL }));
+  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  try {
+    await assert.rejects(
+      source.fetch(
+        { uri: "https://gallery.example/tile.jpg", headers: [] },
+        new AbortController().signal,
+      ),
+      (caught) => {
+        assert.equal(caught, error);
+        assert.equal(asFetchFailure(caught), error);
+        return true;
+      },
+    );
+  } finally {
+    source.dispose();
+  }
 });

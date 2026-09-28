@@ -25,11 +25,8 @@
 // on draw, so the job completes as display-only with no programmatic save.
 import type { DiagnosticRecorder } from "@dezoomify/app-model";
 import type {
-  BlockedReason,
   Error as EngineError,
-  ErrorTransport,
   FetchFailure,
-  FetchFailureCode,
   HostEffect,
   JobCommand,
   JobInput,
@@ -68,17 +65,7 @@ export interface EngineHostAssembly {
 export type AcquireEffect = Extract<HostEffect, { type: "acquire-resource" | "acquire-tile" }>;
 type EffectMessage = HostEffect;
 
-export interface HostFailure {
-  code: FetchFailureCode;
-  retryable: boolean;
-  message: string;
-  blocked_reason?: BlockedReason;
-  transport: ErrorTransport;
-  http?: number;
-  retry_after_ms?: number;
-  preview?: string;
-  detail?: string;
-}
+export type HostFailure = FetchFailure;
 
 export interface EngineHostDeps {
   diagnostics?: DiagnosticRecorder;
@@ -246,23 +233,6 @@ export function createEngineHost(deps: EngineHostDeps) {
     }
   }
 
-  function fetchFailure(failure: HostFailure): FetchFailure {
-    return {
-      code: failure.code,
-      retryable: failure.retryable,
-      message: failure.message,
-      recovery: [],
-      transport: failure.transport,
-      ...(failure.blocked_reason ? { blocked_reason: failure.blocked_reason } : {}),
-      ...(typeof failure.http === "number" ? { http: failure.http } : {}),
-      ...(typeof failure.retry_after_ms === "number"
-        ? { retry_after_ms: failure.retry_after_ms }
-        : {}),
-      ...(failure.preview ? { preview: failure.preview } : {}),
-      ...(failure.detail ? { detail: failure.detail } : {}),
-    };
-  }
-
   async function acquireProbe(effect: AcquireEffect): Promise<void> {
     const request = effect.request;
     // Probe effects resolve planning geometry. Probe-and-output effects also
@@ -323,7 +293,7 @@ export function createEngineHost(deps: EngineHostDeps) {
         sendToEngine({
           type: "engine.failure",
           requestId: request.id,
-          error: fetchFailure(failure),
+          error: failure,
         });
         return;
       }
@@ -459,7 +429,7 @@ export function createEngineHost(deps: EngineHostDeps) {
         sendToEngine({
           type: "engine.failure",
           requestId: request.id,
-          error: fetchFailure(failure),
+          error: failure,
         });
         return;
       }

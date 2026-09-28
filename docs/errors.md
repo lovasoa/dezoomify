@@ -18,6 +18,8 @@ Codes are stable API; messages improve freely. Diagnostic reports retain exact U
 
 Hosts keep their own error chains internally; only the typed shape crosses the contract. Browser code classifies a fetch failure once into `FetchFailure` (host-observed facts only). The Rust session adds the correlated request: metadata failures are `discovery`, tile/probe failures are `acquisition`, request URI and kind come from the emitted effect. Product code adds no context of its own. Output failures use phase `output`. Never branch on display strings.
 
+Extension HTTP responses produce the generated `FetchFailure` at the fetch boundary. Source-script results carry that payload unchanged through validation, fallback selection, and the worker completion. HTTP status is never renamed or reconstructed from a JavaScript exception. The shared engine host accepts the generated payload directly; only unclassified host exceptions require classification.
+
 Adapter faults (bad external objects, bad session use) are not job failures. They return the `DispatchResult` error branch and a contract-failure screen, and replace no accepted transport failure.
 
 ## Recovery actions
