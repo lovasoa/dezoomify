@@ -1,6 +1,8 @@
 //! Normalized human/machine reporting: stdout = JSON events with --json,
 //! stderr = human progress. Never mixed.
 
+use dezoomify::model::DiagnosticLevel;
+use dezoomify_native::diagnostics::Diagnostics;
 use std::collections::BTreeMap;
 
 #[derive(Default)]
@@ -136,6 +138,42 @@ pub fn log_level_rank(level: &str) -> u8 {
         "trace" => 4,
         _ => 2,
     }
+}
+
+pub fn job_diagnostics(level: &str) -> Diagnostics {
+    let diagnostics = Diagnostics::new("cli", crate::arguments::APP_VERSION);
+    let threshold = log_level_rank(level);
+    diagnostics.set_sink(move |record| {
+        let rank = match record.level {
+            DiagnosticLevel::Error => 0,
+            DiagnosticLevel::Warn => 1,
+            DiagnosticLevel::Info => 2,
+            DiagnosticLevel::Debug => 3,
+            DiagnosticLevel::Trace => 4,
+        };
+        // Existing human progress and final output own these milestones.
+        if rank > threshold
+            || matches!(
+                record.event.as_str(),
+                "start"
+                    | "phase"
+                    | "completed"
+                    | "partial-completed"
+                    | "failed"
+                    | "runtime-failed"
+                    | "validation-failed"
+            )
+        {
+            return;
+        }
+        eprintln!(
+            "+{:.3}s {} {}",
+            record.elapsed_ms / 1000.0,
+            record.event,
+            serde_json::to_string(&record.fields).unwrap_or_default()
+        );
+    });
+    diagnostics
 }
 
 /// Warnings (`warning: ...`, EOF notices) show at warn and above.

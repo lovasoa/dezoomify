@@ -5,7 +5,6 @@
 #![deny(clippy::unwrap_used)]
 
 mod arguments;
-mod diagnostics;
 mod report;
 
 use std::collections::BTreeMap;
@@ -61,10 +60,6 @@ fn main() {
             std::process::exit(2);
         }
     };
-    if let Err(error) = diagnostics::prepare(&parsed) {
-        eprintln!("error: {error}");
-        std::process::exit(2);
-    }
     if parsed.is_bulk_mode() {
         run_bulk(parsed);
         return;
@@ -296,14 +291,13 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
     let level = parsed.logging.as_str();
     let json = parsed.json;
     let keep_partial = parsed.keep_partial;
-    let diagnostics = diagnostics::start(parsed);
+    let diagnostics = report::job_diagnostics(level);
     let job = match start_job_with_diagnostics(
         job_options_for(parsed, input, output),
         diagnostics.clone(),
     ) {
         Ok(job) => job,
         Err(error) => {
-            diagnostics::save(&diagnostics);
             eprintln!("error: {} ({})", error.message, error.code);
             return false;
         }
@@ -325,7 +319,6 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
             Ok(snapshot) => snapshot,
             Err(_) => {
                 diagnostics.finish("runtime-failed", serde_json::json!({"code": "native.internal", "message": "job ended without a terminal event"}));
-                diagnostics::save(&diagnostics);
                 eprintln!("error: job ended without a terminal event (native.internal)");
                 return false;
             }
@@ -382,9 +375,7 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
     // `join` owns quiescence and cleanup; its publication agrees with the
     // streamed terminal (native publication that won the cancel race, or
     // `job.cancelled`/typed failure with nothing published).
-    let result = job.join();
-    diagnostics::save(&diagnostics);
-    match result {
+    match job.join() {
         Ok(summary) => {
             if json {
                 println!(
@@ -619,19 +610,14 @@ fn run_one_bulk_image(
     // bulk-item lines on stdout, so event details never pollute JSON.
     let show = !parsed.json;
     let logging = parsed.logging.clone();
-    let diagnostics = diagnostics::start(parsed);
+    let diagnostics = report::job_diagnostics(&logging);
     let started = Instant::now();
     let mut progress = report::ProgressGate::default();
-    let job = match start_job_with_diagnostics(
+    let job = start_job_with_diagnostics(
         job_options_for(parsed, url, Path::new(output)),
         diagnostics.clone(),
-    ) {
-        Ok(job) => job,
-        Err(error) => {
-            diagnostics::save(&diagnostics);
-            return Err((error.code, error.message));
-        }
-    };
+    )
+    .map_err(|error| (error.code, error.message))?;
     if show {
         print_snapshot(false, &job.id, 1, "started", &BTreeMap::new(), &logging);
     }
@@ -640,7 +626,6 @@ fn run_one_bulk_image(
             Ok(snapshot) => snapshot,
             Err(_) => {
                 diagnostics.finish("runtime-failed", serde_json::json!({"code": "native.internal", "message": "job ended without a terminal event"}));
-                diagnostics::save(&diagnostics);
                 return Err((
                     "native.internal".to_string(),
                     "job ended without a terminal event".to_string(),
@@ -680,9 +665,7 @@ fn run_one_bulk_image(
             }
         }
     }
-    let result = job.join();
-    diagnostics::save(&diagnostics);
-    match result {
+    match job.join() {
         Ok(summary) => Ok((
             summary.tile_count,
             summary.path.to_string_lossy().into_owned(),
