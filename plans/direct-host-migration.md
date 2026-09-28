@@ -15,21 +15,26 @@ order-of-magnitude reduction in orchestration; verify the reduction against a
 recorded baseline rather than promising the same reduction in parsers, codecs,
 or other substantive functionality.
 
-```text
-website capabilities ─┐
-                      ├─ shared browser application ─ BrowserHost (TypeScript)
-extension capabilities┘                                  ↑ direct calls
-                                                   shared async Rust
-                                                         ↓ direct calls
-CLI callbacks ────────┐
-                     ├────────────────────────────── NativeHost (Rust)
-desktop callbacks ───┘
+```mermaid
+flowchart TB
+    Web[Website capabilities] --> App[Shared browser application]
+    Extension[Extension capabilities] --> App
+    App -->|await dezoomify| Core[Shared async Rust algorithm]
+    CLI[CLI entry point] -->|await dezoomify| Core
+    Desktop[Desktop native entry point] -->|await dezoomify| Core
+    Core -->|Host calls through generated bindings| Browser[BrowserHost in TypeScript]
+    Core -->|Host calls| Native[NativeHost in Rust]
+    Browser --> BrowserIO[Browser fetch, images, output, and shared interactions]
+    Native --> NativeIO[Native HTTP, files, images, and interaction callbacks]
 ```
 
 Both products in each pair call the same Rust implementation. Rust defines the
 Host signatures and crossing data types. Bindings generate JavaScript calls,
 promise/future conversion, TypeScript declarations, and mechanical delegation.
 They contain no policy, request scheduler, or second set of message shapes.
+
+The [architecture reference](#architecture-reference-and-code-sketches) below
+provides target file layouts, dependency choices, and Rust/TypeScript examples.
 
 This plan covers the four modern products. Coordinate with
 [the React/Vite plan](react-vite-migration.md) before changing overlapping files.
@@ -395,3 +400,398 @@ AGENTS.md rules at the step that changes them. Consolidate or remove obsolete
 pages and repair links instead of leaving the old architecture as an alternate
 contract. Keep current contracts in present tense; future design belongs here
 until implemented. User-facing text remains sourced from `docs/user/`.
+
+## Architecture reference and code sketches
+
+These are proposed implementation excerpts, not APIs already present in the
+repository or a second implementation to add alongside it. Domain types and
+small helper bodies are omitted where they do not illustrate the boundary.
+Step 4 must validate the generated boundary with real compilation and execution;
+the diagrams and snippets do not substitute for that proof.
+
+### Target file layout
+
+Keep existing package locations when they remain useful. The diagram shows
+ownership, not a prerequisite mass rename of format files.
+
+```text
+crates/
+  dezoomify/src/
+    lib.rs                      # exports the actual async function and values
+    run.rs                      # end-to-end async algorithm
+    host.rs                     # single authored Host contract
+    host_bindings.rs            # narrow macro generating the binding hook
+    types/                      # input, request, catalog, output, error values
+    discovery/
+      mod.rs                    # traversal and winner selection
+      resources.rs              # shared reads, budgets, deferred access
+      ranking.rs                # pure precedence rules
+    tiles/
+      plan.rs                   # lazy geometry and format plans
+      acquire.rs                # bounded concurrency, retries, partials
+      processing.rs             # shared pure processing algorithms
+    dzi/, iiif/, zoomify/, ...   # existing format knowledge, moved only as needed
+  dezoomify-native/src/
+    host.rs                     # NativeHost and injected interaction callbacks
+    http.rs, transport.rs       # existing concrete resource reading
+    pipeline.rs, sink.rs        # decoding, memory ownership, assembly
+    output.rs, cache.rs         # encoders, publication, resume cache
+  dezoomify-wasm/src/
+    lib.rs                      # invoke generated exports/Host binding hook
+
+packages/
+  browser-runtime/src/
+    app/
+      app.tsx                   # one web/extension application flow
+      invocation.ts             # lifetime, cancellation, pause, retirement
+      interactions.ts           # shared awaited actions and decisions
+    host.ts                     # one TypeScript Host implementation
+    capabilities.ts             # browser-product injection points
+    fetch-primitives.ts         # shared HTTP/body mechanics
+    browser-assembly.ts         # reusable canvas/image implementation
+    tile-decode.ts, tile-draw.ts
+    diagnostics.ts              # concrete browser observations
+  shared-ui/src/
+    components/                 # host-neutral translated views and controls
+    history.ts, queue.ts         # useful application utilities
+    i18n.ts, locales/            # existing shared visual language and text
+  wasm-bindings/                # generated declarations, never hand-maintained
+
+src/main.ts                     # website composition using shared browser app
+src/proxyTransport.ts            # website-specific transport policy
+apps/extension/src/
+  job/index.ts                  # extension composition using shared browser app
+  job/source-access.ts          # explicit scan and source-document binding
+  job/permissions.ts            # browser permission operation only
+  runtime/fetch.ts              # extension-specific transport policy
+apps/cli/src/                   # arguments, native composition, terminal output
+apps/desktop/src/               # shared UI plus actual native IPC
+apps/desktop/src-tauri/          # native composition and OS integration
+```
+
+The `app/` modules may import React and shared UI. Browser Host/image/transport
+modules receive callbacks and do not import React components. Update scoped
+import rules when adding this distinction to `packages/browser-runtime`.
+The Host owns resources, not a second application state. Desktop IPC remains
+at the real process boundary and uses the same domain values.
+
+### Libraries and their responsibilities
+
+Use workspace/lockfile versions; this migration is not a dependency-upgrade project.
+
+| Area | Libraries/APIs | Migration choice |
+|---|---|---|
+| Async shared algorithm | Rust `async`/`await`, `futures-util` | Add a direct dependency for bounded `FuturesUnordered`/stream coordination. No Tokio, browser globals, or ambient clock in shared algorithms. |
+| Native I/O and cancellation | Existing Tokio, reqwest, rustls; `tokio-util::sync::CancellationToken` | Keep native I/O. Add tokio-util as a direct dependency if using its cancellation token; keep this mechanism native-only. |
+| Native images/output | Existing image, tiff, sysinfo and native sink/cache code | Reuse real processing, resource accounting, encoders, and publication. |
+| WASM ABI and async conversion | wasm-bindgen, wasm-bindgen-futures, js-sys | Use generated imported methods and exported async functions; add direct dependencies where async bindings require them. |
+| Crossing values | serde, serde-wasm-bindgen, tsify | Generate TS types and use fallible value conversion. Use byte serialization/Uint8Array for bodies, adding serde_bytes where needed; no JSON-string transport or per-byte JS arrays. |
+| Host declaration | Project-local `host_interface!` macro, introduced in step 4 | Emit the Rust trait and a binding-generation hook from one member list. Support only the signatures needed here; count the generator in the reduction. |
+| Browser application | Existing React/React DOM, TypeScript, DOM APIs | Share the whole flow. AbortController and scoped promises implement browser lifetime. No DI container or second state-management framework. |
+| Product integration | Existing Vite, WXT, Tauri | Keep packaging and actual platform operations. Dependency injection is ordinary function/object construction. |
+| Verification | Existing Rust tests, Node test runner, Playwright, wasm-bindgen-test, Criterion, fixture server | Keep these lanes and fixtures; replace their obsolete subjects rather than adding a parallel test framework. |
+
+Native invocation futures can be driven on a Tokio `LocalSet` in the owned
+execution context, with decoding on the bounded blocking pool. Shared Host
+signatures do not impose `Send` on JavaScript values/futures. Prove native task
+ownership, cancellation, and performance in step 4 before fixing executor details.
+
+### One authored Host contract and one async function
+
+`host_interface!` below is the proposed project macro, **not** a feature supplied
+by wasm-bindgen. It emits the trait here and a hook used by the WASM crate for
+the generated JS delegation and declarations. Only this member list is authored.
+
+```rust
+// crates/dezoomify/src/host.rs
+host_interface! {
+    pub trait Host {
+        async fn fetch(&self, request: Request, interaction: Interaction)
+            -> Result<ResourceRead>;
+        async fn probe(&self, request: ProbeRequest) -> Result<ProbeResult>;
+        async fn acquire_tile(&self, tile: Tile) -> Result<TileReceipt>;
+        async fn finish(&self, request: FinishRequest) -> Result<Output>;
+        async fn choose_image(&self, catalog: Catalog) -> Result<ImageId>;
+        async fn choose_level(&self, image: Image) -> Result<LevelId>;
+        async fn choose_partial(&self, missing: MissingTiles) -> Result<PartialChoice>;
+        async fn checkpoint(&self, gate: Gate) -> Result<()>;
+        async fn sleep(&self, delay_ms: u32) -> Result<()>;
+        fn report(&self, progress: Progress);
+        async fn settle(&self);
+    }
+}
+```
+
+The crossing value is also authored once; tsify emits its tagged TS union:
+
+```rust
+#[derive(serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum ResourceRead {
+    Response { response: ResourceResponse },
+    NeedsAccess { origin: String },
+}
+```
+
+HTTP refusals are structured failures, not permission requests. `Interaction`
+allows or forbids user interaction. Automatic selection/partial policies execute
+in Rust; choice methods are awaited only when the configured policy needs a user.
+`Gate::Cancellation` checks cancellation without pausing discovery;
+`Gate::Acquisition` also waits for resume before scheduling another tile.
+
+```rust
+// crates/dezoomify/src/run.rs
+pub async fn dezoomify(
+    inputs: Inputs,
+    options: Options,
+    host: &impl Host,
+) -> Result<Output> {
+    let result = async {
+        host.checkpoint(Gate::Cancellation).await?;
+        let catalog = discovery::discover(inputs, &options, host).await?;
+        let selection = select_and_resolve(catalog, &options, host).await?;
+        let plan = tiles::plan::resolve(selection, host).await?;
+        let acquired = tiles::acquire::with_recovery(plan, &options, host).await?;
+        host.finish(acquired.into_finish_request()).await
+    }
+    .await;
+
+    // Stop/join unfinished work before returning success or failure.
+    // Published output and a completed browser preview remain user-owned.
+    host.settle().await;
+    result
+}
+```
+
+The acquisition function polls a bounded set of full acquire/process/place
+operations and retains the missing-tile ledger for partial decisions. It does not
+collect every tile URL or spawn an unbounded task per tile. Discovery's resource
+store shares reads between async resolvers and retains deferred readers; it is
+not a general-purpose task engine.
+
+Callers request cancellation through their scope and continue awaiting settlement.
+They do not drop the invocation and assume its resources stopped. `settle` cancels
+residual operations and awaits owned tasks without marking a successful result
+cancelled or revoking completed output. Final output retirement is a separate
+resource action when the user leaves/replaces that result.
+
+### What is generated at the WASM boundary
+
+The WASM entry file invokes the generated hook, conceptually:
+
+```rust
+// crates/dezoomify-wasm/src/lib.rs
+dezoomify::emit_host_bindings!(entry = dezoomify::dezoomify);
+```
+
+One generated imported-method declaration looks like this (an excerpt, not an
+additional handwritten contract):
+
+```rust
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(typescript_type = "Host")]
+    pub type JsHost;
+
+    #[wasm_bindgen(method, catch, js_name = fetch)]
+    async fn js_fetch(
+        this: &JsHost,
+        request: JsValue,
+        interaction: JsValue,
+    ) -> std::result::Result<JsValue, JsValue>;
+}
+```
+
+The generated `impl Host for JsHost` serializes arguments, awaits this method,
+and fallibly decodes its result or structured error. Invalid values produce a
+boundary error; they do not panic or become fabricated network failures.
+The same generation exports a concrete async entry point that converts inputs,
+calls `dezoomify::dezoomify`, and returns the output as a JS promise.
+
+```ts
+// Excerpt of generated declarations, not an authored TS interface.
+export interface Host {
+  fetch(request: Request, interaction: Interaction): Promise<ResourceRead>;
+  acquireTile(tile: Tile): Promise<TileReceipt>;
+  // Other members are emitted from the same Rust declaration.
+}
+export function dezoomify(
+  inputs: Inputs,
+  options: Options,
+  host: Host,
+): Promise<Output>;
+```
+
+There is no Session, dispatch result, effect ID, or manual promise registry at
+this boundary. See the upstream references for
+[importing/exporting async functions](https://wasm-bindgen.github.io/wasm-bindgen/reference/js-promises-and-rust-futures.html),
+[imported object methods](https://wasm-bindgen.github.io/wasm-bindgen/reference/attributes/on-js-imports/method.html),
+and [tsify data generation](https://docs.rs/tsify/latest/tsify/).
+
+### Browser dependency injection: share the flow, supply the differences
+
+The following is a TS-only composition interface. Domain argument/result types
+are imported from generated bindings; this object is never serialized to Rust.
+
+```ts
+// packages/browser-runtime/src/capabilities.ts
+interface BrowserCapabilities {
+  resolveInputs(submission: Submission, signal: AbortSignal): Promise<Inputs>;
+  readResource(request: Request, signal: AbortSignal): Promise<ResourceRead>;
+  requestAccess?(origin: string): Promise<boolean>;
+  saveOutput(blob: Blob, name: string, signal: AbortSignal): Promise<Output>;
+  indicateActivity?(progress: Progress): void;
+}
+```
+
+`Submission` is application input, such as a URL or the bound source tab. The
+extension capabilities close over source-document identity. Their lifetime is
+explicit, and stale source reads fail even if the tab navigates to the same URL.
+Both transport policies call shared HTTP/body helpers. They do not implement
+their own retry loops, interaction controllers, or copies of the browser app.
+
+This excerpt shows the browser Host's permission-aware read operation. `platform`,
+`invocation`, and `interactions` are captured once when constructing BrowserHost;
+`deniedOrigins` belongs to that invocation. `track` registers the actual promise
+for settlement and propagates the invocation signal to platform operations.
+
+```ts
+const deniedOrigins = new Set<string>();
+
+const fetch: Host["fetch"] = (request, interaction) =>
+  invocation.track(async () => {
+    const signal = invocation.signal;
+    signal.throwIfAborted();
+    const first = await platform.readResource(request, signal);
+    signal.throwIfAborted();
+    if (first.kind !== "needs-access" || interaction === "forbidden") return first;
+
+    const { origin } = first;
+    const requestAccess = platform.requestAccess;
+    if (!requestAccess || deniedOrigins.has(origin)) throw accessDenied(request, origin);
+    let granted: boolean;
+    try {
+      granted = await interactions.action({
+        kind: "grant-access",
+        origin,
+        signal,
+        run: () => requestAccess(origin),
+      });
+    } catch (cause) {
+      signal.throwIfAborted();
+      deniedOrigins.add(origin);
+      throw accessDenied(request, origin, cause);
+    }
+    signal.throwIfAborted();
+    if (!granted) {
+      deniedOrigins.add(origin);
+      throw accessDenied(request, origin);
+    }
+    const resumed = await platform.readResource(request, signal);
+    if (resumed.kind === "needs-access") {
+      deniedOrigins.add(origin);
+      throw accessDenied(request, origin);
+    }
+    return resumed;
+  });
+```
+
+The shared action component calls `run()` directly in its click handler, before
+any await. A capability rejection remains a structured failure; cancellation
+closes the action and prevents late answers from reaching another invocation.
+The remaining Host methods delegate directly to shared image/output operations,
+the same interaction implementation, and the invocation's gates and clock.
+
+```ts
+// Website entry point: no separate website interaction implementation.
+mountBrowserApp(root, {
+  resolveInputs: websiteInputs,
+  readResource: websiteRead,
+  saveOutput: websiteSave,
+});
+
+// Extension entry point: same application and Host, different capabilities.
+mountBrowserApp(root, {
+  resolveInputs: sourceInputs,
+  readResource: extensionRead,
+  requestAccess: (origin) => browser.permissions.request({ origins: [`${origin}/*`] }),
+  saveOutput: extensionSave,
+  indicateActivity: updateToolbar,
+});
+```
+
+Within the shared application's submit handler, the call is direct:
+
+```ts
+// The surrounding invocation scope owns errors, cancellation, and retirement.
+const inputs = await platform.resolveInputs(submission, invocation.signal);
+const host = createBrowserHost(platform, invocation, interactions);
+const output = await dezoomify(inputs, options, host);
+if (currentInvocation === invocation) showOutput(output);
+```
+
+The shared application owns start/retry/cancel, pending actions, result
+presentation, and final retirement once. Completion callbacks check that their
+invocation still owns the view. BrowserHost does not reconstruct that application
+state.
+
+### Native composition uses the same algorithm
+
+The CLI supplies progress printing and configured/headless interaction callbacks.
+The desktop supplies callbacks connected to the common UI through actual Tauri
+IPC. Both construct NativeHost over the same existing transport, cache, pipeline,
+and sink. Conceptually, their native execution site is:
+
+```rust
+let host = NativeHost::new(output_settings, controls, interaction_callbacks);
+let result = tokio::task::LocalSet::new()
+    .run_until(dezoomify::dezoomify(inputs, options, &host))
+    .await;
+```
+
+NativeHost's `fetch` reads HTTP/local resources; `acquire_tile` owns the bounded
+fetch/decode/place operation; `finish` performs publication; `settle` awaits
+quiescence. Callbacks never choose retry budgets or duplicate selection policy.
+The native execution context and blocking pool remain owned until settlement.
+
+### Example control flow: deferred permission without engine messages
+
+```mermaid
+sequenceDiagram
+    participant R as Rust discovery
+    participant H as BrowserHost
+    participant P as Extension capabilities
+    participant UI as Shared interaction UI
+    actor User
+    R->>H: await fetch(request, forbidden)
+    H->>P: readResource(request, signal)
+    P-->>H: NeedsAccess(origin)
+    H-->>R: NeedsAccess(origin)
+    Note over R: Retain reader; explore accessible alternatives
+    alt An accessible candidate wins
+        Note over R,H: Complete discovery without a permission action
+    else Automatic work is exhausted
+        R->>H: await fetch(same request, allowed)
+        H->>P: readResource(request, signal)
+        P-->>H: NeedsAccess(origin)
+        H->>UI: await action(origin, requestAccess callback)
+        User->>UI: Click grant
+        UI->>P: requestAccess(origin), synchronously
+        P-->>UI: Permission result
+        UI-->>H: Granted or denied
+        alt Granted
+            H->>P: readResource(request, signal)
+            P-->>H: Response or structured failure
+            H-->>R: Response or structured failure
+            Note over R: Settle original waiting reader
+        else Denied
+            H-->>R: Structured access failure
+        end
+    end
+```
+
+The resource store limits interaction attempts per resource; the browser Host
+remembers denied origins per invocation. Ordinary pending network work retains
+its ranking semantics. Rust needs the `NeedsAccess` fact, not browser permission
+API details or a second request/answer protocol for permission clicks.
