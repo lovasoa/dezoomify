@@ -34,6 +34,8 @@ One source-access object is bound to one source document. A loading event, tab c
 
 The source fetch operation uses a per-document abort-controller map in the extension isolated world. The job service's abort signal cancels an in-flight source fetch. Responses are streamed and capped at 8 MiB before they cross the script boundary as base64; the job page decodes and checks the payload once.
 
+Every source operation has a 30-second deadline covering browser API calls and response bodies. The job page settles on cancellation, navigation, disposal, or deadline even if `executeScript` never replies; late results cannot revive a retired operation. The injected fetch also aborts at its deadline. Timeouts remain typed transient failures for the engine retry policy rather than starting an unbounded second route.
+
 ## Fetching and permissions
 
 Each attempt owns `permissions.ensure(origin, signal)` around extension-origin fetching. Concurrent requests to an origin share a pending grant; other origins wait independently. The visible action calls the browser permission API synchronously, verifies the retained grant, and settles only that origin's waiters. Denial fails typed. Cancellation removes waiters, and late grants cannot affect replacement attempts. An upstream 401/403 never reopens a permission prompt. Shared runtime handles contain no permission coordination.

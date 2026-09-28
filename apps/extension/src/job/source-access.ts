@@ -6,7 +6,7 @@ import {
   SOURCE_FETCH_BYTE_LIMIT,
   validateEngineHeaders,
 } from "@dezoomify/browser-runtime";
-import type { ResourceRequest } from "@dezoomify/wasm-bindings";
+import type { FetchFailure, ResourceRequest } from "@dezoomify/wasm-bindings";
 import type { WxtBrowser } from "wxt/browser";
 import { cancelSourceFetch, collectCandidates, fetchSource } from "./source-operations.ts";
 
@@ -116,6 +116,7 @@ function validFetchResult(value: unknown, expectedUrl: string): value is FetchRe
 export function createSourceAccess(
   browserApi: SourceApi,
   reference: { tabId: number; documentUrl: string },
+  options: { timeoutMs?: number } = {},
 ) {
   if (!Number.isSafeInteger(reference.tabId) || reference.tabId < 0)
     throw failure("malformed", "invalid source tab id");
@@ -123,6 +124,8 @@ export function createSourceAccess(
     throw failure("malformed", "invalid source document URL");
 
   const { tabId, documentUrl } = reference;
+  const timeoutMs = options.timeoutMs ?? 30_000;
+  const lifetime = new AbortController();
   let invalidated = false;
   const onUpdated = (updatedTabId: number, changeInfo: { status?: string; url?: string }) => {
     if (updatedTabId !== tabId) return;
@@ -139,6 +142,7 @@ export function createSourceAccess(
   function invalidate() {
     if (invalidated) return;
     invalidated = true;
+    lifetime.abort(failure("source-document-lost", "source document changed"));
   }
   browserApi.tabs.onUpdated.addListener(onUpdated);
   browserApi.tabs.onRemoved.addListener(onRemoved);
@@ -147,12 +151,15 @@ export function createSourceAccess(
     if (invalidated) throw failure("source-document-lost", "source document changed");
   }
 
-  async function inject<Args extends unknown[], Result>(
+  async function injectUnchecked<Args extends unknown[], Result>(
     func: (...args: Args) => Result,
     args: Args,
+    signal: AbortSignal,
   ): Promise<Awaited<Result>> {
     assertLive();
+    signal.throwIfAborted();
     const tab = await browserApi.tabs.get(tabId).catch(() => null);
+    signal.throwIfAborted();
     if (!tab) {
       invalidate();
       throw failure("source-document-lost", "source tab is unavailable");
@@ -175,6 +182,7 @@ export function createSourceAccess(
           { cause },
         );
       });
+    signal.throwIfAborted();
     assertLive();
     if (!Array.isArray(results) || results.length !== 1 || results[0]?.frameId !== 0)
       throw failure("malformed", "source operation returned an invalid result");
@@ -192,6 +200,51 @@ export function createSourceAccess(
       throw failure("source-document-lost", "source result belongs to another document");
     }
     return result as Awaited<Result>;
+  }
+
+  /** Bound the whole browser operation, including a lost executeScript reply. */
+  async function inject<Args extends unknown[], Result>(
+    func: (...args: Args) => Result,
+    args: Args,
+    signal?: AbortSignal,
+    onAbort?: () => void,
+  ): Promise<Awaited<Result>> {
+    assertLive();
+    const deadline = new AbortController();
+    const timeout: FetchFailure = {
+      code: "TRANSPORT_TIMEOUT",
+      message: "The source operation timed out.",
+      retryable: true,
+      recovery: [],
+      transport: "browser-session",
+    };
+    const timer = setTimeout(() => deadline.abort(timeout), timeoutMs);
+    const combined = AbortSignal.any([
+      lifetime.signal,
+      deadline.signal,
+      ...(signal ? [signal] : []),
+    ]);
+    let rejectAbort: (reason: unknown) => void = () => {};
+    const aborted = new Promise<never>((_, reject) => {
+      rejectAbort = reject;
+    });
+    const abort = () => {
+      onAbort?.();
+      rejectAbort(
+        signal?.aborted ? failure("cancelled", "source fetch cancelled") : combined.reason,
+      );
+    };
+    combined.addEventListener("abort", abort, { once: true });
+    try {
+      if (combined.aborted) {
+        abort();
+        return await aborted;
+      }
+      return await Promise.race([injectUnchecked(func, args, combined), aborted]);
+    } finally {
+      clearTimeout(timer);
+      combined.removeEventListener("abort", abort);
+    }
   }
 
   async function scan(): Promise<CandidateSnapshot> {
@@ -220,10 +273,9 @@ export function createSourceAccess(
       method: "GET",
       headers,
       operationId,
+      timeoutMs,
     };
-    let aborted = false;
     const cancel = () => {
-      aborted = true;
       void browserApi.scripting
         .executeScript({
           target: { tabId, frameIds: [0] },
@@ -232,22 +284,16 @@ export function createSourceAccess(
         })
         .catch(() => undefined);
     };
-    signal.addEventListener("abort", cancel, { once: true });
-    try {
-      if (signal.aborted) cancel();
-      const result = await inject(fetchSource, [sourceRequest]);
-      if (aborted || signal.aborted) throw failure("cancelled", "source fetch cancelled");
-      assertLive();
-      if (!validFetchResult(result, documentUrl))
-        throw failure("malformed", "invalid source fetch result");
-      if (result.ok === false) throw result.error;
-      const bytes = decodeBase64Payload(result.data, SOURCE_FETCH_BYTE_LIMIT);
-      if (!bytes || bytes.byteLength !== result.bytes)
-        throw failure("malformed", "invalid source payload");
-      return { bytes, finalUri: result.url, http: result.status, contentType: result.contentType };
-    } finally {
-      signal.removeEventListener("abort", cancel);
-    }
+    const result = await inject(fetchSource, [sourceRequest], signal, cancel);
+    if (signal.aborted) throw failure("cancelled", "source fetch cancelled");
+    assertLive();
+    if (!validFetchResult(result, documentUrl))
+      throw failure("malformed", "invalid source fetch result");
+    if (result.ok === false) throw result.error;
+    const bytes = decodeBase64Payload(result.data, SOURCE_FETCH_BYTE_LIMIT);
+    if (!bytes || bytes.byteLength !== result.bytes)
+      throw failure("malformed", "invalid source payload");
+    return { bytes, finalUri: result.url, http: result.status, contentType: result.contentType };
   }
 
   function dispose() {
