@@ -691,6 +691,9 @@ pub struct TileFailure {
     pub retry_after_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    /// Original host-observed fetch facts, retained without adapter reformatting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed: Option<FetchFailure>,
 }
 
 /// Unit progress for the active phase (totals stay unknown until the plan

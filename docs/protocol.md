@@ -42,6 +42,8 @@ Commands, effects, events, config, errors, URLs, and handles cross as plain Java
 
 ## Errors
 
+Tile failure snapshots retain the canonical host `FetchFailure` in `observed`, alongside the engine's retry category. The WASM adapter passes this payload into the engine without discarding the transport, message, blocked reason, or server preview. Retained strings are bounded at the engine boundary. Non-fetch failures may omit `observed`.
+
 `Error`: stable code, phase, retryability, user message, recovery actions, plus optional request URI, transport, resource kind, blocked reason, HTTP status, bounded server signal, diagnostics. Browser fetch failures cross as `FetchFailure` with a generated `FetchFailureCode`; the Rust session adds the correlated request's phase, URI, and resource kind, so classifiers omit and invent nothing. The fetch code replaces the untyped fetch-code string and preserves its stable wire values. See [Errors and recovery](errors.md).
 
 Adapter faults (bad external input, session misuse) travel the separate `DispatchResult` error branch and never replace a job failure.

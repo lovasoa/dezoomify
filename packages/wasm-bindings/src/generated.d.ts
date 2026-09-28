@@ -202,6 +202,10 @@ export interface TileFailure {
     http?: number;
     retry_after_ms?: number;
     detail?: string;
+    /**
+     * Original host-observed fetch facts, retained without adapter reformatting.
+     */
+    observed?: FetchFailure;
 }
 
 /**

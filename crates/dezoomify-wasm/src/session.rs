@@ -565,13 +565,7 @@ impl Session {
                     .engine_job()?
                     .complete(
                         EngineEffectId(request),
-                        EngineEffectResult::TileFailed(EngineFailure {
-                            code: format!("{:?}", failure.code),
-                            http: failure.http,
-                            retry_after_ms: failure.retry_after_ms,
-                            transport: None,
-                            detail: failure.detail,
-                        }),
+                        EngineEffectResult::TileFailed(failure.into()),
                     )
                     .map_err(Self::engine_error)?;
                 Ok(self.drain_update(update))
@@ -621,6 +615,7 @@ impl Session {
                             retry_after_ms: failure.retry_after_ms,
                             transport: Some(transport),
                             detail: None,
+                            observed: None,
                         }),
                     )
                     .map_err(Self::engine_error)?;
