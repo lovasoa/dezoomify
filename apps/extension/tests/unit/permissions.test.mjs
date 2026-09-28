@@ -62,6 +62,14 @@ test("denial and unretained grants fail every waiter instead of reopening a prom
     await result;
     assert.equal(p.pending.length, 0);
     assert.equal(p.requests.length, 1);
+    await assert.rejects(p.ensure("https://a.example", controller.signal), {
+      code: "access-required",
+    });
+    assert.equal(
+      p.pending.length,
+      0,
+      "a second resource on the denied origin cannot reopen a prompt",
+    );
   }
 });
 

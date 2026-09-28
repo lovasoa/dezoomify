@@ -77,6 +77,14 @@ evaluated against all registered formats. A parent's rejection never prunes its
 children. Supplied documents and fetched responses share byte, request, and
 transition limits; request deduplication and navigation cycle guards span roots.
 
+A host-reported, grantable access block leaves parser continuations in the
+frontier, ineligible until resolved. Accessible sources and navigation continue.
+After they are exhausted, the operation exposes one blocked request in stable request
+order for access recovery. Granting access enables one fresh acquisition of that
+exact request; denial or a repeated block settles its original failure. A winning
+catalog discards blocked alternatives. HTTP refusals and non-grantable policy
+failures remain ordinary failures.
+
 To add a conventional format, define one `FormatSpec` with a metadata decoder,
 return an `ImagePlan` whose levels use `ResolvedLevel::grid`, and register the
 spec in `core::registry`. The decoder supplies image dimensions and a tile

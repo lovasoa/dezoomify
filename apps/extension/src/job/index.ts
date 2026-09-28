@@ -539,7 +539,8 @@ async function beginAttempt(inputs: JobInput[]) {
   const extensionTransport = {
     async fetchResource(request: ResourceRequest, signal: AbortSignal) {
       signal.throwIfAborted();
-      await permissions.ensure(new URL(request.uri).origin, signal);
+      if (request.purpose !== "metadata")
+        await permissions.ensure(new URL(request.uri).origin, signal);
       return fetcher.fetchResource(request, signal);
     },
   };
@@ -552,6 +553,10 @@ async function beginAttempt(inputs: JobInput[]) {
     diagnostics: attempt.diagnostics,
     createWorker: () => new Worker(new URL("./worker.js", import.meta.url), { type: "module" }),
     fetchResource,
+    requestResourceAccess: async (uri, signal) => {
+      await permissions.ensure(new URL(uri).origin, signal);
+      return true;
+    },
     loadDisplayImage: async (url, signal) => {
       const started = performance.now();
       attempt.diagnostics.count("requests");

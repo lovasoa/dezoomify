@@ -346,6 +346,7 @@ pub struct ResourceFailure {
 enum ResourceOutcome {
     Response(ResourceResponse),
     Failure(ResourceFailure),
+    Blocked(ResourceFailure),
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DiscoveryLimits {
@@ -960,6 +961,7 @@ struct ResourceRecord {
     request: Request,
     outcome: Option<ResourceOutcome>,
     navigation_expanded: bool,
+    access_attempted: bool,
 }
 impl ResourceRecord {
     fn resource(&self) -> Option<DiscoveryResource<'_>> {
@@ -1092,6 +1094,54 @@ impl DiscoveryOperation {
     pub fn provide_failure(&mut self, failure: ResourceFailure) -> Result<(), DiscoveryError> {
         self.provide_outcome(failure.id, ResourceOutcome::Failure(failure))
     }
+
+    /// Leave blocked interpretations on the frontier while accessible work proceeds.
+    pub fn provide_blocked(&mut self, failure: ResourceFailure) -> Result<(), DiscoveryError> {
+        if self
+            .requests
+            .get(failure.id.0)
+            .is_some_and(|record| record.access_attempted)
+        {
+            return self.provide_failure(failure);
+        }
+        self.provide_outcome(failure.id, ResourceOutcome::Blocked(failure))
+    }
+
+    /// Access is requested only after all accessible branches have settled.
+    pub fn access_needed(&mut self) -> Result<Option<ResourceNeed>, DiscoveryError> {
+        self.drive()?;
+        if self.is_complete() || self.outstanding_needs().next().is_some() {
+            return Ok(None);
+        }
+        Ok(self
+            .requests
+            .iter()
+            .enumerate()
+            .find_map(|(index, record)| {
+                matches!(record.outcome, Some(ResourceOutcome::Blocked(_))).then(|| ResourceNeed {
+                    id: RequestId(index),
+                    request: record.request.clone(),
+                })
+            }))
+    }
+
+    /// The same frontier entries resume; only the resource's acquisition state changes.
+    pub fn resolve_access(&mut self, id: RequestId, granted: bool) -> Result<(), DiscoveryError> {
+        let record = self
+            .requests
+            .get_mut(id.0)
+            .ok_or(DiscoveryError::UnknownRequest(id))?;
+        let Some(ResourceOutcome::Blocked(failure)) = &record.outcome else {
+            return Err(DiscoveryError::RequestAlreadyProvided(id));
+        };
+        record.outcome = if granted {
+            None
+        } else {
+            Some(ResourceOutcome::Failure(failure.clone()))
+        };
+        record.access_attempted = true;
+        self.drive()
+    }
     fn provide_outcome(
         &mut self,
         id: RequestId,
@@ -1184,11 +1234,28 @@ impl DiscoveryOperation {
             return Err(error.clone());
         }
         while self.catalog.is_none() {
-            let Some((position, work)) = self.frontier.pop_first() else {
+            let position = self.frontier.iter().find_map(|(position, work)| {
+                let blocked = match work {
+                    Work::Root(_) => false,
+                    Work::Parse(interpretation) => {
+                        let id = interpretation.history.last().expect("parser resource");
+                        matches!(
+                            self.requests[id.0].outcome,
+                            Some(ResourceOutcome::Blocked(_))
+                        )
+                    }
+                };
+                (!blocked).then_some(*position)
+            });
+            let Some(position) = position else {
+                if !self.frontier.is_empty() {
+                    return Ok(());
+                }
                 return Err(DiscoveryError::NoCandidateAccepted {
                     diagnostics: self.diagnostics.clone(),
                 });
             };
+            let work = self.frontier.remove(&position).expect("frontier work");
             match work {
                 Work::Root(input) => self.expand(position, input)?,
                 Work::Parse(interpretation) => {
@@ -1245,6 +1312,7 @@ impl DiscoveryOperation {
                 Some(handler) => handler(&context, &resource.request, failure),
                 None => Err(DiscoveryError::fetch_failed(failure.cause.clone())),
             },
+            ResourceOutcome::Blocked(_) => unreachable!("blocked work stays on the frontier"),
         }
     }
 
@@ -1377,6 +1445,7 @@ impl DiscoveryOperation {
             request,
             outcome: None,
             navigation_expanded: false,
+            access_attempted: false,
         });
         Some(id)
     }
@@ -1515,6 +1584,39 @@ mod tests {
         &[viewer(any()).extract_metadata(|r| branch(r, "memory://a"))];
     const HISTORY_B: &[DiscoveryRoute] =
         &[viewer(any()).extract_metadata(|r| branch(r, "memory://b"))];
+
+    #[test]
+    fn access_recovery_preserves_followed_request_headers_and_branch_history() {
+        let mut registry = Registry::new();
+        registry.register(FormatSpec::new("a", HISTORY_A));
+        let mut operation = registry.start_inputs(vec![
+            DiscoveryInput::new("memory://shared"),
+            DiscoveryInput::with_contents("memory://unrelated", b"invalid"),
+        ]);
+        let root = operation.next_priority_need().unwrap().unwrap();
+        operation
+            .provide(
+                ResourceResponse::new(root.id, b"shared").with_final_uri("memory://redirected"),
+            )
+            .unwrap();
+        let need = operation.next_priority_need().unwrap().unwrap();
+        operation
+            .provide_blocked(ResourceFailure {
+                id: need.id,
+                cause: FetchCause::new(FetchCode::TransportPolicyDenied, TransportKind::Direct),
+            })
+            .unwrap();
+        let access = operation.access_needed().unwrap().unwrap();
+        assert_eq!(access, need);
+        operation.resolve_access(access.id, true).unwrap();
+        let resumed = operation.next_priority_need().unwrap().unwrap();
+        assert_eq!(resumed.request.header("X-Test"), Some("preserved"));
+        // The shared branch decoder verifies the original requested/redirected history.
+        operation
+            .provide(ResourceResponse::new(resumed.id, b"ok"))
+            .unwrap();
+        assert!(operation.is_complete());
+    }
 
     #[test]
     fn shared_requests_preserve_history_headers_and_breadth_first_precedence() {

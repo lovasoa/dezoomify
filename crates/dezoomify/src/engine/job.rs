@@ -129,6 +129,7 @@ pub struct Job {
     effects: VecDeque<JobEffect>,
     /// Outstanding discovery resource fetches: request sequence -> core id.
     pending_discovery: HashMap<u32, usize>,
+    pending_access: Option<(u32, crate::core::discovery::RequestId)>,
     /// Core discovery operation while discovery is in flight.
     discovery: Option<DiscoveryOperation>,
     /// Finished core catalog.
@@ -217,6 +218,7 @@ impl Job {
             state: State::Created,
             effects: VecDeque::new(),
             pending_discovery: HashMap::new(),
+            pending_access: None,
             discovery: None,
             catalog: None,
             selection: Selection::AwaitingImage,
@@ -440,7 +442,15 @@ impl Job {
                 bytes,
                 final_uri,
             } => self.apply_resource_bytes(request, bytes, final_uri),
-            JobCommand::FetchFailure { request, cause } => self.apply_fetch_failure(request, cause),
+            JobCommand::FetchFailure { request, cause } => {
+                self.apply_fetch_outcome(request, cause, false)
+            }
+            JobCommand::FetchBlocked { request, cause } => {
+                self.apply_fetch_outcome(request, cause, true)
+            }
+            JobCommand::ResourceAccessResolved { request, granted } => {
+                self.apply_resource_access(request, granted)
+            }
             JobCommand::SelectImage { image } => self.apply_selected_image(image),
             JobCommand::FollowDeferred { image } => self.apply_follow_deferred(image),
             JobCommand::SelectLevel { level } => self.apply_selected_level(level),
@@ -468,7 +478,7 @@ impl Job {
     /// is reported until its outcome is provided, so this must never loop
     /// on `next_priority_need` waiting for an unanswered fetch. The batch
     /// form returns every outstanding request at once; an empty batch means
-    /// the catalog is complete.
+    /// discovery has a catalog or needs host access recovery.
     fn drive_discovery(&mut self) -> Result<(), JobError> {
         let needs = {
             let Some(operation) = self.discovery.as_mut() else {
@@ -480,6 +490,27 @@ impl Job {
             }
         };
         if needs.is_empty() {
+            if self.pending_access.is_some() {
+                return Ok(());
+            }
+            let access = match self
+                .discovery
+                .as_mut()
+                .map(DiscoveryOperation::access_needed)
+            {
+                Some(Ok(access)) => access,
+                Some(Err(error)) => return self.discovery_failed(error),
+                None => None,
+            };
+            if let Some(need) = access {
+                let wire = self.alloc_request_id()?;
+                self.pending_access = Some((wire, need.id));
+                self.push_effect(JobEffect::RequestResourceAccess {
+                    request: wire,
+                    uri: need.request.uri,
+                })?;
+                return Ok(());
+            }
             return self.finish_discovery();
         }
         for need in needs {
@@ -597,10 +628,30 @@ impl Job {
         Ok(Outcome::Applied)
     }
 
-    fn apply_fetch_failure(
+    fn apply_resource_access(&mut self, request: u32, granted: bool) -> Result<Outcome, JobError> {
+        let Some((wire, core_id)) = self.pending_access else {
+            return Ok(Outcome::Ignored);
+        };
+        if wire != request || self.state != State::Discovering {
+            return Ok(Outcome::Ignored);
+        }
+        self.pending_access = None;
+        let Some(operation) = self.discovery.as_mut() else {
+            return Ok(Outcome::Ignored);
+        };
+        if let Err(error) = operation.resolve_access(core_id, granted) {
+            self.discovery_failed(error)?;
+        } else {
+            self.drive_discovery()?;
+        }
+        Ok(Outcome::Applied)
+    }
+
+    fn apply_fetch_outcome(
         &mut self,
         request: u32,
         cause: FetchCause,
+        blocked: bool,
     ) -> Result<Outcome, JobError> {
         let Some(&core_id) = self.pending_discovery.get(&request) else {
             return Ok(Outcome::Ignored);
@@ -618,7 +669,12 @@ impl Job {
             let Some(operation) = self.discovery.as_mut() else {
                 return Err(JobError::invalid_state("discovery already finished"));
             };
-            operation.provide_failure(ResourceFailure { id: core_id, cause })
+            let failure = ResourceFailure { id: core_id, cause };
+            if blocked {
+                operation.provide_blocked(failure)
+            } else {
+                operation.provide_failure(failure)
+            }
         };
         self.pending_discovery.remove(&request);
         if let Err(e) = outcome {

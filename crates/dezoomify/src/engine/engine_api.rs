@@ -276,9 +276,9 @@ impl Effect {
             Self::AcquireResource { request } | Self::AcquireTile { request, .. } => {
                 Some(EffectId(request.id))
             }
-            Self::WaitRetryTimer { effect, .. } | Self::FinalizeOutput { effect, .. } => {
-                Some(EffectId(*effect))
-            }
+            Self::WaitRetryTimer { effect, .. }
+            | Self::FinalizeOutput { effect, .. }
+            | Self::RequestResourceAccess { effect, .. } => Some(EffectId(*effect)),
             Self::CancelWork | Self::RequestDecision { .. } => None,
         }
     }
@@ -338,6 +338,15 @@ impl Failure {
         failure.observed = self.observed;
         failure
     }
+
+    fn into_fetch_cause(self) -> FetchCause {
+        FetchCause {
+            code: FetchCode::from_string(self.code),
+            http: self.http,
+            transport: self.transport.unwrap_or(TransportKind::Direct),
+            reason: None,
+        }
+    }
 }
 
 impl From<crate::model::FetchFailure> for Failure {
@@ -365,6 +374,11 @@ impl From<crate::model::FetchFailure> for Failure {
 /// without readable bytes, and failures carry structured [`Failure`]s.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EffectResult {
+    /// Metadata is blocked by access the host can request. This is not an
+    /// HTTP refusal or an unrecoverable host-policy denial.
+    MetadataBlocked(Failure),
+    /// Host answer to the engine-selected access request.
+    ResourceAccessResolved { granted: bool },
     /// One tile acquired and decoded.
     TileAcquired,
     /// One tile shown as an ordinary image (no readable bytes).
@@ -433,6 +447,7 @@ pub type CompletionError = EngineError;
 /// Outstanding engine-minted effect awaiting its host completion.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Outstanding {
+    Access { request: u32 },
     Metadata { request: u32, uri: String },
     Tile { tile: u32 },
     Probe { tile: u32 },
@@ -949,6 +964,12 @@ impl EngineJob {
             )
         };
         match (outstanding, result) {
+            (Outstanding::Access { request }, EffectResult::ResourceAccessResolved { granted }) => {
+                Ok((
+                    InnerCommand::ResourceAccessResolved { request, granted },
+                    None,
+                ))
+            }
             (Outstanding::Tile { tile }, EffectResult::TileAcquired) => {
                 Ok((InnerCommand::TileAcquired { tile }, None))
             }
@@ -1001,15 +1022,21 @@ impl EngineJob {
                 },
                 None,
             )),
-            (Outstanding::Metadata { request, .. }, EffectResult::MetadataFailed(failure)) => {
-                let transport = failure.transport.unwrap_or(TransportKind::Direct);
-                let cause = FetchCause {
-                    code: FetchCode::from_string(failure.code.clone()),
-                    http: failure.http,
-                    transport,
-                    reason: None,
-                };
-                Ok((InnerCommand::FetchFailure { request, cause }, None))
+            (Outstanding::Metadata { request, .. }, EffectResult::MetadataFailed(failure)) => Ok((
+                InnerCommand::FetchFailure {
+                    request,
+                    cause: failure.into_fetch_cause(),
+                },
+                None,
+            )),
+            (Outstanding::Metadata { request, .. }, EffectResult::MetadataBlocked(failure)) => {
+                Ok((
+                    InnerCommand::FetchBlocked {
+                        request,
+                        cause: failure.into_fetch_cause(),
+                    },
+                    None,
+                ))
             }
             (Outstanding::Timer { tile, attempt }, EffectResult::TimerElapsed) => {
                 Ok((InnerCommand::RetryTimerElapsed { tile, attempt }, None))
@@ -1195,6 +1222,13 @@ impl EngineJob {
     fn issue_effect(&mut self, effect: InnerEffect) -> Result<Option<Effect>, EngineError> {
         let id = self.mint_effect()?;
         match effect {
+            InnerEffect::RequestResourceAccess { request, uri } => {
+                self.outstanding.insert(id, Outstanding::Access { request });
+                Ok(Some(Effect::RequestResourceAccess {
+                    effect: id.get(),
+                    uri,
+                }))
+            }
             InnerEffect::AcquireResource { request, uri, .. } => {
                 self.outstanding.insert(
                     id,

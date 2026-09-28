@@ -17,6 +17,13 @@ The shared runtime calls `fetchResource(request, signal)` with the generated `Re
 
 Extension fetches use the attempt signal and a local deadline. Aborting the attempt cancels pending body reads; a deadline remains a network timeout rather than a user cancellation. Streaming bodies are bounded before buffering and error previews consume at most 4 KiB. Request limits belong to the configured transport, never to reconstructed engine requests. Ordinary-image loads also receive the attempt signal.
 
+`request-resource-access` calls the product's optional `requestResourceAccess`
+with the same attempt signal. Unsupported access and rejected requests answer
+false. The host performs no fetch as part of this effect: a granted answer lets
+the engine issue the next acquisition. Disposal aborts the permission wait and
+drops late answers. The website supplies no permission callback; its direct and
+metadata proxy policies remain transport decisions.
+
 - `acquire-tile`: the website checks and shows the declared canvas before the first tile, then decodes and paints each good tile at once. The visible canvas is the output throughout, including while paused. Bad tiles fail the acquisition and flow into engine retry/partial handling; a surface failure (canvas limits, allocation, 2D context) fails the job typed at once and never becomes one tile's failure. Probes (`purpose: probe`) share the `probe.ts` helper; a probe kept for output also paints at once.
 - `finalize-output`: encodes the surface already on screen and returns the product's actual output disposition. The website reports `browser-save-ready` when its blob URL is ready for the user's save click; the extension reports `browser-save-initiated` after the browser download manager confirms its saved file. A tainted canvas reports `display-only`. Plans lacking declared dimensions size the surface from accumulated placements here. Over-limit dimensions fail typed (`PLAN_INVALID` plus a desktop handoff) before allocation; a refused allocation or 2D context fails typed the same way (`OUTPUT_ALLOCATION_FAILED`, `OUTPUT_SURFACE_UNAVAILABLE`), and PNG encoding fails as `OUTPUT_ENCODE_FAILED`. Every canvas output failure carries the desktop-app handoff action.
 - Tiles draw at planned placement, 1:1 scale. Pixels past the planned edge crop from right and bottom (padded edge tiles); short tiles leave the gap empty. Each bitmap closes right after painting.

@@ -51,6 +51,10 @@ export type WorkerHostMessage =
   | { type: "engine.rank"; requestId: number; urls: string[] }
   | { type: "engine.failure"; requestId: number; error: FetchFailure }
   | { type: "engine.timer-elapsed"; effect: number }
+  | {
+      type: "engine.access";
+      outcome: Extract<HostCompletion, { type: "resource-access-resolved" }>;
+    }
   | { type: "engine.command"; command: JobCommand }
   | {
       type: "engine.finalize";
@@ -181,6 +185,7 @@ export function createJobWorkerHost(deps: {
       complete({ type: "retry-timer-elapsed", effect: input.effect });
     },
     "engine.command": (input) => dispatch(input.command),
+    "engine.access": (input) => complete(input.outcome),
     "engine.finalize": (input) => complete(input.outcome),
     "engine.dispose": () => {
       disposed = true;

@@ -36,6 +36,13 @@ URLs are `observed-resource`. The WASM adapter preserves these kinds into the
 shared Rust discovery scheduler. The extension supplies evidence; format
 recognition, precedence, navigation, and job-wide discovery limits belong to Rust.
 
+Metadata transport attempts return missing access as a typed outcome instead of
+waiting for a permission click. The core continues discovery and requests access
+only when accessible alternatives are exhausted. The job page then exposes the
+existing explicit grant action for that origin. Denied origins stay denied for
+the attempt; a retry creates fresh permission state. Tile and probe acquisition
+retain their direct permission waits after discovery has selected an image.
+
 One source-access object is bound to one source document. A loading event, tab close, changed URL, or returned result from another document invalidates it. It discards results that finish after invalidation. A job that already has inputs can continue through the extension-origin transport when source-context access is lost; the source tab is never silently rebound after navigation. Firefox document IDs are not required, so the current Firefox 133 minimum remains supported.
 
 The source fetch operation uses a per-document abort-controller map in the extension isolated world. The job service's abort signal cancels an in-flight source fetch. Responses are streamed and capped at 8 MiB before they cross the script boundary as base64; the job page decodes and checks the payload once.
@@ -44,7 +51,7 @@ Every source operation has a 30-second deadline covering browser API calls and r
 
 ## Fetching and permissions
 
-Each attempt owns `permissions.ensure(origin, signal)` around extension-origin fetching. Concurrent requests to an origin share a pending grant; other origins wait independently. The visible action calls the browser permission API synchronously, verifies the retained grant, and settles only that origin's waiters. Denial fails typed. Cancellation removes waiters, and late grants cannot affect replacement attempts. An upstream 401/403 never reopens a permission prompt. Shared runtime handles contain no permission coordination.
+Each attempt owns `permissions.ensure(origin, signal)` for engine-requested metadata access and direct tile/probe permission waits. Concurrent requests to an origin share a pending grant; other origins wait independently. The visible action calls the browser permission API synchronously, verifies the retained grant, and settles only that origin's waiters. Denial fails typed. Cancellation removes waiters, and late grants cannot affect replacement attempts. An upstream 401/403 never reopens a permission prompt. Shared runtime handles contain no permission coordination.
 
 `activeTab` and `scripting` grant one explicit source-page scan after the toolbar click; `downloads` lets the job page confirm that its generated file finished saving. Same-origin reads carry the page's browser session, including its cookies. Metadata and requests for the source page's own origin use this context first. A source-context failure falls back to the extension-origin transport; a definitive HTTP refusal remains a typed failure. Cross-origin tiles use the extension-origin transport under an explicitly granted optional host permission. The permission request is made synchronously from the visible job-page action so the browser retains user activation. The job page checks and observes permissions directly; there is no permission mirror in the background.
 

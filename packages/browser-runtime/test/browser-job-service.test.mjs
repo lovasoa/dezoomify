@@ -409,3 +409,76 @@ test("processing calls transfer their buffer and settle on disposal", async () =
     },
   );
 });
+
+test("access recovery is an explicit correlated engine effect, with no implicit fetch", async () => {
+  for (const result of ["granted", "denied", "unsupported"]) {
+    const calls = [];
+    const p = product(
+      result === "unsupported"
+        ? {}
+        : {
+            requestResourceAccess: async (uri, signal) => {
+              calls.push(uri);
+              assert.equal(signal.aborted, false);
+              if (result === "denied") throw new Error("denied");
+              return true;
+            },
+          },
+    );
+    const service = createBrowserJobService(p.deps);
+    const handle = await service.start(startRequest(), sink([]));
+    assert.deepEqual(calls, []);
+    p.worker.receive(
+      received(snap(1, { lifecycle: "Discovering" }), [
+        {
+          type: "request-resource-access",
+          effect: 42,
+          uri: "https://image.test/art.dzi?token=test-double",
+        },
+      ]),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(
+      p.worker.posted.filter((message) => message.type === "engine.access"),
+      [
+        {
+          type: "engine.access",
+          outcome: { type: "resource-access-resolved", effect: 42, granted: result === "granted" },
+        },
+      ],
+    );
+    assert.equal(p.seen.fetches, 0, "the engine issues the resumed fetch separately");
+    await handle.dispose();
+  }
+});
+
+test("disposing a job aborts access recovery and drops a late grant", async () => {
+  let grant, signal;
+  const p = product({
+    requestResourceAccess: (_uri, attemptSignal) => {
+      signal = attemptSignal;
+      return new Promise((resolve) => {
+        grant = resolve;
+      });
+    },
+  });
+  const service = createBrowserJobService(p.deps);
+  const handle = await service.start(startRequest(), sink([]));
+  p.worker.receive(
+    received(snap(1, { lifecycle: "Discovering" }), [
+      {
+        type: "request-resource-access",
+        effect: 42,
+        uri: "https://image.test/art.dzi",
+      },
+    ]),
+  );
+  await handle.dispose();
+  assert.equal(signal.aborted, true);
+  grant(true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    p.worker.posted.some((message) => message.type === "engine.access"),
+    false,
+  );
+});

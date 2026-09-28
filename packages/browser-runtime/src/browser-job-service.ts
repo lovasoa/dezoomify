@@ -73,6 +73,8 @@ export interface BrowserProduct {
     request: ResourceRequest,
     signal: AbortSignal,
   ): Promise<{ bytes: Uint8Array; finalUri?: string }>;
+  /** Optional host access recovery selected by shared discovery. */
+  requestResourceAccess?(uri: string, signal: AbortSignal): Promise<boolean>;
   /** Absent: no display fallback (failed acquisitions fail the engine). */
   loadDisplayImage?: (url: string, signal: AbortSignal) => Promise<TileImageLike>;
   classifyFailure(error: unknown): HostFailure;
@@ -240,6 +242,9 @@ export function createBrowserJobService(product: BrowserProduct): BrowserJobServ
       worker: { postMessage: (message) => worker.postMessage(message) },
       jobId: () => id,
       fetchResource: (request) => product.fetchResource(request, attemptSignal.signal),
+      requestResourceAccess: product.requestResourceAccess
+        ? (uri) => product.requestResourceAccess!(uri, attemptSignal.signal)
+        : undefined,
       cancelFetch: () => {
         abortAttempt();
       },
