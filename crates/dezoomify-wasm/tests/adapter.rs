@@ -263,6 +263,40 @@ fn transient_timeout() -> FetchFailure {
     }
 }
 
+#[test]
+fn partial_snapshot_retains_the_observed_fetch_failure() {
+    let (mut session, tiles) = session_acquiring_tiles();
+    let error = FetchFailure {
+        code: dezoomify::model::FetchFailureCode::TRANSPORT_HTTP_ERROR,
+        retryable: false,
+        message: "The website refused this file.".into(),
+        transport: ErrorTransport::BrowserSession,
+        http: Some(403),
+        blocked_reason: Some(dezoomify::model::BlockedReason::Forbidden),
+        preview: Some("Access denied".into()),
+        detail: Some("source-document fetch".into()),
+        ..transient_timeout()
+    };
+    let (effects, _) = session
+        .complete(HostCompletion::ProvideFetchFailure {
+            request: tiles[0].1,
+            error: error.clone(),
+        })
+        .unwrap();
+    assert!(timer_of(&effects).is_none());
+    for (_, request) in tiles.iter().skip(1) {
+        session
+            .complete(HostCompletion::TileAcquired { request: *request })
+            .unwrap();
+    }
+    let snapshot = session.snapshot().unwrap();
+    let decision = snapshot.decision.unwrap();
+    assert_eq!(
+        decision.missing[0].failures[0].observed.as_ref(),
+        Some(&error)
+    );
+}
+
 fn timer_of(messages: &[HostEffect]) -> Option<(u32, u32, u32, u64)> {
     messages.iter().find_map(|message| match message {
         HostEffect::WaitRetryTimer {

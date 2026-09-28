@@ -1277,6 +1277,7 @@ fn feed_completion(
                         retry_after_ms: None,
                         transport: Some(cause.transport),
                         detail: None,
+                        observed: None,
                     }),
                 )?,
             };
@@ -1365,6 +1366,7 @@ fn feed_completion(
                             retry_after_ms: failure.retry_after_ms,
                             transport: None,
                             detail: Some(failure.error.message.clone()),
+                            observed: None,
                         }),
                     )
                 }

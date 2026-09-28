@@ -343,6 +343,8 @@ pub struct Failure {
     pub transport: Option<TransportKind>,
     /// Bounded diagnostic detail.
     pub detail: Option<String>,
+    /// Canonical fetch facts retained for presentation, independent of retry policy.
+    pub observed: Option<crate::model::FetchFailure>,
 }
 
 impl Failure {
@@ -355,11 +357,35 @@ impl Failure {
             retry_after_ms: None,
             transport: None,
             detail: None,
+            observed: None,
         }
     }
 
     fn into_inner(self) -> InnerFailure {
-        InnerFailure::new(self.code, self.http, self.retry_after_ms, self.detail)
+        let mut failure = InnerFailure::new(self.code, self.http, self.retry_after_ms, self.detail);
+        failure.observed = self.observed;
+        failure
+    }
+}
+
+impl From<crate::model::FetchFailure> for Failure {
+    fn from(mut observed: crate::model::FetchFailure) -> Self {
+        observed.message = observed.message.chars().take(4096).collect();
+        observed.preview = observed
+            .preview
+            .map(|text| text.chars().take(300).collect());
+        observed.detail = observed
+            .detail
+            .map(|text| text.chars().take(4096).collect());
+        observed.recovery.truncate(16);
+        Self {
+            code: format!("{:?}", observed.code),
+            http: observed.http,
+            retry_after_ms: observed.retry_after_ms,
+            transport: None,
+            detail: observed.detail.clone(),
+            observed: Some(observed),
+        }
     }
 }
 
@@ -1362,6 +1388,7 @@ impl EngineJob {
                                 http: failure.http,
                                 retry_after_ms: failure.retry_after_ms,
                                 detail: failure.detail.clone(),
+                                observed: failure.observed.clone(),
                             })
                             .collect(),
                     })

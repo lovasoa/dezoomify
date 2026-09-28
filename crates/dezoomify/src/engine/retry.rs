@@ -54,6 +54,8 @@ pub struct TileFailure {
     pub retry_after_ms: Option<u64>,
     /// Bounded diagnostic detail (server signal excerpt).
     pub detail: Option<String>,
+    /// Canonical host failure, when this attempt failed during fetching.
+    pub observed: Option<crate::model::FetchFailure>,
 }
 
 /// Maximum diagnostic detail characters kept per failure.
@@ -90,6 +92,7 @@ impl TileFailure {
             http,
             retry_after_ms,
             detail,
+            observed: None,
         }
     }
 
