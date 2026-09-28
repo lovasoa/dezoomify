@@ -41,6 +41,9 @@ pub struct ScenarioRoute {
     /// cookie values, so browser-session tests can assert outcomes only.
     #[serde(default)]
     pub required_cookies: HashMap<String, String>,
+    /// Exact request headers required for session/referrer regression fixtures.
+    #[serde(default)]
+    pub required_headers: HashMap<String, String>,
     #[serde(default)]
     pub payload: Option<String>,
     #[serde(default)]
@@ -161,6 +164,7 @@ fn mirror_routes(
                 status: 200,
                 headers,
                 required_cookies: HashMap::new(),
+                required_headers: HashMap::new(),
                 payload: Some(payload),
                 generator: None,
             },
@@ -391,6 +395,18 @@ impl RouteTable {
 }
 
 impl ScenarioRoute {
+    pub fn missing_required_header<'a>(
+        &'a self,
+        headers: &HeaderMap,
+        origin: &str,
+    ) -> Option<&'a str> {
+        self.required_headers.iter().find_map(|(name, expected)| {
+            let expected = expected.replace("{{origin}}", origin);
+            (headers.get(name).and_then(|value| value.to_str().ok()) != Some(expected.as_str()))
+                .then_some(name.as_str())
+        })
+    }
+
     /// Return the first missing or mismatched cookie name for auth diagnostics.
     pub fn missing_required_cookie<'a>(&'a self, headers: &HeaderMap) -> Option<&'a str> {
         let raw = headers

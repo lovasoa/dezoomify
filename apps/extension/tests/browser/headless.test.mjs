@@ -532,13 +532,13 @@ test("chromium: partial-output actions disappear after the terminal event", {
   }
 });
 
-test("chromium: packaged extension retains the browser session for protected metadata and tiles", {
+test("chromium: packaged extension retains session cookies and page referrer for protected tiles", {
   timeout: 180000,
 }, async () => {
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-cookie-session-"));
   try {
     // The fixture page creates an HttpOnly session cookie. Its metadata and
-    // every tile return 403 unless the browser attaches that cookie, while
+    // every tile return 403 unless the browser attaches that cookie and the page referrer, while
     // this test observes only the successful image, not request headers.
     assertPng(await runChromiumJob(fixtureServer.base, work, { scenario: "cookie-session" }));
   } finally {
@@ -586,7 +586,7 @@ test("firefox: packaged extension runs the job-tab engine flow", { timeout: 1800
   }
 });
 
-test("firefox: job page directly fetches authenticated source data and rejects navigation", {
+test("firefox: source fetching retains cookies and page referrer and rejects navigation", {
   timeout: 180000,
 }, async () => {
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-firefox-source-access-"));

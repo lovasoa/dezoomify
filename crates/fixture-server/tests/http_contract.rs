@@ -106,6 +106,10 @@ async fn protected_routes_require_a_session_without_logging_its_value() {
     let allowed = reqwest::Client::new()
         .get(&metadata)
         .header("cookie", "fixture_session=extension-e2e")
+        .header(
+            "referer",
+            format!("{}/target.html?scenario=cookie-session", srv.base),
+        )
         .send()
         .await
         .expect("authenticated metadata");
@@ -117,10 +121,27 @@ async fn protected_routes_require_a_session_without_logging_its_value() {
     let allowed = reqwest::Client::new()
         .get(tile)
         .header("cookie", "fixture_session=extension-e2e")
+        .header(
+            "referer",
+            format!("{}/target.html?scenario=cookie-session", srv.base),
+        )
         .send()
         .await
         .expect("authenticated tile");
     assert_eq!(allowed.status(), 200);
+
+    let wrong_context = reqwest::Client::new()
+        .get(&metadata)
+        .header("cookie", "fixture_session=extension-e2e")
+        .header("referer", "moz-extension://job/job.html")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        wrong_context.status(),
+        403,
+        "cookies alone do not satisfy the page context"
+    );
 
     let log = srv.log_text();
     assert!(log.contains("missing-required-cookie"));

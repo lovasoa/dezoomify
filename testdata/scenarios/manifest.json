@@ -511,8 +511,8 @@
       "path": "extension/cookie-session/routes.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "6f1c418a2a82c613d838131c40805e2e601bd242ac76f439866ec099cf654065",
-      "size": 2558,
+      "sha256": "ef0d684260b701553bcaa926b9a0ddf4c2f7edff694b4770cc7730ae120400c0",
+      "size": 3104,
       "source_path": "apps/extension/tests/browser/headless.test.mjs",
       "source_snapshot": "local deterministic fixture"
     },
