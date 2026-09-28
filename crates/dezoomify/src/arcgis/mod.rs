@@ -6,19 +6,18 @@ use serde::Deserialize;
 use url::Url;
 
 use crate::Vec2d;
+use crate::core::discovery::{metadata, url_matches};
 use crate::core::{
-    DiscoveryError, DiscoveryMatch, FormatSpec, ImagePlan, Request, ResolvedLevel, floor_index,
+    DiscoveryError, DiscoveryStep, FormatSpec, ImagePlan, Request, ResolvedLevel, floor_index,
 };
 
 pub const SPEC: FormatSpec = FormatSpec::new(
     "arcgis",
     &[
-        DiscoveryMatch::UrlPredicate(is_arcgis_url).map_url(metadata_url),
-        DiscoveryMatch::Any.decode(decode),
+        metadata(url_matches(is_arcgis_url)).resolve_metadata(metadata_url),
+        metadata(url_matches(is_arcgis_url)).decode(decode),
     ],
 )
-.recognizing(is_arcgis_url, "not an ArcGIS MapServer URL")
-.preferring(is_arcgis_url)
 .with_display_name("ArcGIS MapServer");
 
 fn is_arcgis_url(uri: &str) -> bool {
@@ -86,7 +85,8 @@ fn tile_parameters(input: &str) -> Result<String, DiscoveryError> {
     Ok(serializer.finish())
 }
 
-fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
+fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+    let (url, bytes) = (resource.final_uri(), resource.bytes());
     let mut metadata: Metadata = serde_json::from_slice(bytes).map_err(|error| {
         DiscoveryError::Session(format!(
             "unable to parse ArcGIS MapServer metadata: {error}"
@@ -106,7 +106,7 @@ fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
             "ArcGIS MapServer has no LODs".into(),
         ));
     }
-    Ok(ImagePlan::new(title, levels))
+    Ok(DiscoveryStep::Image(ImagePlan::new(title, levels)))
 }
 
 fn validate_metadata(metadata: Metadata) -> Result<(TileInfo, Extent), DiscoveryError> {

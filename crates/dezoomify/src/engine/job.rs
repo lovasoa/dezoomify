@@ -119,7 +119,6 @@ enum TileStatus {
 /// One end-to-end user request driven synchronously by explicit host inputs.
 pub struct Job {
     inputs: Vec<DiscoveryInput>,
-    input_index: usize,
     config: Config,
     /// Format selector: `None` auto-detects via `default_registry`;
     /// `Some(name)` selects the single named program via `registry_for`
@@ -213,7 +212,6 @@ impl Job {
         let visited_uris: HashSet<String> = inputs.iter().map(|input| input.url.clone()).collect();
         Self {
             inputs,
-            input_index: 0,
             config,
             format: None,
             state: State::Created,
@@ -380,69 +378,43 @@ impl Job {
             ));
         }
         self.set_state(State::Discovering)?;
-        self.start_current_input()?;
+        self.start_discovery()?;
         Ok(Outcome::Applied)
     }
 
-    fn start_current_input(&mut self) -> Result<(), JobError> {
-        let input = self.inputs[self.input_index].clone();
+    fn start_discovery(&mut self) -> Result<(), JobError> {
         let registry = match self.format.as_deref() {
-            None | Some("auto") => default_registry(&input.url),
+            None | Some("auto") => default_registry(),
             Some(name) => registry_for(name).expect("validated by start"),
         };
-        self.discovery = Some(registry.start(input.url.clone()));
-        if let Some(contents) = input.contents {
-            let len = u64::try_from(contents.len()).unwrap_or(u64::MAX);
-            if contents.is_empty() || len > self.config.max_bytes {
-                return self.try_next_input(DiscoveryError::MetadataSizeLimitExceeded);
-            }
-            let need = match self
-                .discovery
-                .as_mut()
-                .expect("set above")
-                .next_priority_need()
-            {
-                Ok(Some(need)) => need,
-                Ok(None) => return self.drive_discovery(),
-                Err(error) => return self.try_next_input(error),
-            };
-            let response = ResourceResponse::new(need.id, contents).with_final_uri(input.url);
-            if let Err(error) = self
-                .discovery
-                .as_mut()
-                .expect("set above")
-                .provide(response)
-            {
-                return self.try_next_input(error);
-            }
+        if self.inputs.iter().any(|input| {
+            input.contents.as_ref().is_some_and(|bytes| {
+                bytes.is_empty()
+                    || u64::try_from(bytes.len()).unwrap_or(u64::MAX) > self.config.max_bytes
+            })
+        }) {
+            return self.fail_via_cleanup(
+                "job.resource-limit",
+                "supplied document exceeds resource limits".into(),
+            );
         }
+        self.discovery = Some(registry.start_inputs(std::mem::take(&mut self.inputs)));
         self.drive_discovery()
     }
 
-    fn try_next_input(&mut self, error: DiscoveryError) -> Result<(), JobError> {
-        // A failed same-job deferred follow ends the job: there is no input
-        // list position to advance to, and the visited set already guards
-        // against retrying the same URI.
-        if self.following_deferred {
-            self.following_deferred = false;
-            self.pending_discovery.clear();
-            self.discovery = None;
-            return self.fail_via_cleanup("job.discovery-failed", error.engine_detail());
-        }
+    fn discovery_failed(&mut self, error: DiscoveryError) -> Result<(), JobError> {
         self.pending_discovery.clear();
         self.discovery = None;
-        self.input_index += 1;
-        if self.input_index < self.inputs.len() {
-            self.start_current_input()
+        let code = if matches!(error, DiscoveryError::NoCandidateAccepted { .. })
+            && self.format.is_none()
+            && !self.following_deferred
+        {
+            "job.no-images"
         } else {
-            let no_candidate = matches!(error, DiscoveryError::NoCandidateAccepted { .. });
-            let code = if no_candidate && self.format.is_none() {
-                "job.no-images"
-            } else {
-                "job.discovery-failed"
-            };
-            self.fail_via_cleanup(code, error.engine_detail())
-        }
+            "job.discovery-failed"
+        };
+        self.following_deferred = false;
+        self.fail_via_cleanup(code, error.engine_detail())
     }
 
     /// Drive one deterministic transition from an explicit host response.
@@ -563,10 +535,6 @@ impl Job {
         Ok(())
     }
 
-    fn discovery_failed(&mut self, error: DiscoveryError) -> Result<(), JobError> {
-        self.try_next_input(error)
-    }
-
     fn apply_resource_bytes(
         &mut self,
         request: u32,
@@ -621,7 +589,7 @@ impl Job {
         };
         if let Err(e) = outcome {
             self.pending_discovery.remove(&request);
-            self.try_next_input(e)?;
+            self.discovery_failed(e)?;
             return Ok(Outcome::Applied);
         }
         self.pending_discovery.remove(&request);
@@ -654,7 +622,7 @@ impl Job {
         };
         self.pending_discovery.remove(&request);
         if let Err(e) = outcome {
-            self.try_next_input(e)?;
+            self.discovery_failed(e)?;
             return Ok(Outcome::Applied);
         }
         self.drive_discovery()?;
@@ -738,7 +706,7 @@ impl Job {
         self.pending_discovery.clear();
         self.following_deferred = true;
         let registry = match self.format.as_deref() {
-            None | Some("auto") => default_registry(&uri),
+            None | Some("auto") => default_registry(),
             Some(name) => registry_for(name).expect("validated by start"),
         };
         self.discovery = Some(registry.start(uri));

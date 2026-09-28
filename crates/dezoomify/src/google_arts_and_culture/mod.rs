@@ -1,9 +1,10 @@
 //! Pure Google Arts & Culture two-stage discovery.
 
 use crate::Vec2d;
+use crate::core::discovery::{metadata, url_matches, url_suffix, viewer};
 use crate::core::{
-    DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
-    DiscoveryStep, FormatSpec, Grid, ImagePlan, ProcessingRecipe, Request, ResolvedLevel,
+    DiscoveryError, DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImagePlan,
+    ProcessingRecipe, Request, ResolvedLevel,
 };
 use std::sync::Arc;
 use tile_info::{PageInfo, TileInfo};
@@ -12,22 +13,18 @@ mod tile_info;
 mod url;
 
 const ROUTES: &[DiscoveryRoute] = &[
-    DiscoveryMatch::UrlSuffix("=g").then(parse_tile_information),
-    DiscoveryMatch::Any.then(parse_page),
+    metadata(url_suffix("=g")).continue_with(parse_tile_information),
+    viewer(url_matches(is_google_arts_url)).extract_metadata(parse_page),
 ];
 
-pub const SPEC: FormatSpec = FormatSpec::new("google_arts_and_culture", ROUTES)
-    .with_display_name("Arts & Culture")
-    .recognizing(is_google_arts_url, "not a Google Arts & Culture URL");
+pub const SPEC: FormatSpec =
+    FormatSpec::new("google_arts_and_culture", ROUTES).with_display_name("Arts & Culture");
 
 fn is_google_arts_url(uri: &str) -> bool {
     uri.contains("artsandculture.google.com") || uri.contains("g.co/arts/")
 }
 
-fn parse_page(
-    _context: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+fn parse_page(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
     let source = std::str::from_utf8(resource.bytes())
         .map_err(|error| DiscoveryError::Session(error.to_string()))?;
     let page = source
@@ -37,19 +34,17 @@ fn parse_page(
 }
 
 fn parse_tile_information(
-    context: &DiscoveryContext<'_>,
     resource: DiscoveryResource<'_>,
 ) -> Result<DiscoveryStep, DiscoveryError> {
-    let page = context
+    let page = resource
+        .context()
         .resources()
         .map(DiscoveryResource::bytes)
         .filter_map(|bytes| std::str::from_utf8(bytes).ok())
         .find_map(|source| source.parse::<PageInfo>().ok())
         .map(Arc::new)
         .ok_or_else(|| DiscoveryError::Session("Google Arts page metadata is missing".into()))?;
-    decode(&page, resource.bytes())?
-        .compile("google_arts_and_culture")
-        .map(DiscoveryStep::Complete)
+    decode(&page, resource.bytes()).map(DiscoveryStep::Image)
 }
 
 fn decode(page: &Arc<PageInfo>, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {

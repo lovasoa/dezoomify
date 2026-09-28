@@ -8,9 +8,10 @@ use serde::Deserialize;
 use url::Url;
 
 use crate::Vec2d;
+use crate::core::discovery::{metadata, url_matches, viewer};
 use crate::core::{
-    DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
-    DiscoveryStep, FormatSpec, ImagePlan, Request, ResolvedLevel, image_title,
+    DiscoveryError, DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, ImagePlan,
+    Request, ResolvedLevel, image_title,
 };
 
 static LAYER_URL_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -27,15 +28,16 @@ static FILES_ARRAY_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 const ROUTES: &[DiscoveryRoute] = &[
-    DiscoveryMatch::UrlPredicate(is_ecw_url).decode(decode),
-    DiscoveryMatch::ContentPredicate(contains_layer).then(follow_layer),
-    DiscoveryMatch::Any.decode(decode),
+    metadata(url_matches(is_ecw_url)).decode(decode),
+    metadata(url_matches(|uri| {
+        uri.contains("imagesize/") || uri.contains("/image/")
+    }))
+    .decode(decode),
+    viewer(url_matches(is_hungaricana_url)).extract_metadata(follow_layer),
 ];
 
-pub const SPEC: FormatSpec = FormatSpec::new("hungaricana", ROUTES)
-    .with_display_name("Hungaricana")
-    .recognizing(is_hungaricana_url, "not a Hungaricana URL")
-    .preferring(|uri| uri.to_ascii_lowercase().contains("hungaricana"));
+pub const SPEC: FormatSpec =
+    FormatSpec::new("hungaricana", ROUTES).with_display_name("Hungaricana");
 
 fn is_hungaricana_url(uri: &str) -> bool {
     let lower = uri.to_ascii_lowercase();
@@ -49,14 +51,7 @@ fn is_ecw_url(uri: &str) -> bool {
         .ends_with(".ecw")
 }
 
-fn contains_layer(bytes: &[u8]) -> bool {
-    LAYER_URL_RE.is_match(&String::from_utf8_lossy(bytes))
-}
-
-fn follow_layer(
-    _: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+fn follow_layer(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
     let page = resource.text_lossy();
     if let Some(files) = FILES_ARRAY_RE
         .captures(&page)
@@ -111,7 +106,8 @@ fn image_index(uri: &str) -> usize {
         .unwrap_or(0)
 }
 
-fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
+fn decode(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+    let (url, bytes) = (resource.final_uri(), resource.bytes());
     let metadata: Metadata = serde_json::from_slice(bytes).map_err(|error| {
         DiscoveryError::Session(format!(
             "unable to parse Hungaricana image metadata: {error}"
@@ -146,7 +142,10 @@ fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
             Request::new(format!("{origin}{hash}"))
         },
     )?;
-    Ok(ImagePlan::new(image_title(&path), vec![level]))
+    Ok(DiscoveryStep::Image(ImagePlan::new(
+        image_title(&path),
+        vec![level],
+    )))
 }
 
 #[derive(Debug, Deserialize)]

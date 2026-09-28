@@ -7,9 +7,10 @@ use serde_json::Value;
 use url::Url;
 
 use crate::Vec2d;
+use crate::core::discovery::{html_matches, metadata, url_matches, viewer};
 use crate::core::{
-    DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
-    DiscoveryStep, FormatSpec, ImagePlan, Request, ResolvedLevel, resolve_url_template,
+    DiscoveryError, DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, ImagePlan,
+    Request, ResolvedLevel, resolve_url_template,
 };
 use crate::web_page::decode_html_entities;
 
@@ -38,11 +39,11 @@ static DETAIL_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 const ROUTES: &[DiscoveryRoute] = &[
-    DiscoveryMatch::UrlPredicate(is_known_detail_url).map_url(known_detail_url),
-    DiscoveryMatch::ContentPredicate(contains_mediabank).then(follow_mediabank),
-    DiscoveryMatch::ContentPredicate(contains_thumbnail).then(follow_thumbnail),
-    DiscoveryMatch::UrlPredicate(is_media_api).then(follow_media),
-    DiscoveryMatch::ContentPredicate(contains_topviews).decode(decode),
+    viewer(url_matches(is_known_detail_url)).resolve_metadata(known_detail_url),
+    viewer(html_matches(contains_mediabank)).extract_metadata(follow_mediabank),
+    viewer(html_matches(contains_thumbnail)).extract_metadata(follow_thumbnail),
+    metadata(url_matches(is_media_api)).extract_metadata(follow_media),
+    metadata(html_matches(contains_topviews)).decode(decode),
 ];
 
 /// Institution URL prefixes and their Memorix image servers. Institution
@@ -80,9 +81,7 @@ fn known_detail_url(uri: &str) -> Result<Request, DiscoveryError> {
         .ok_or_else(|| DiscoveryError::Session("not a known Memorix detail URL".into()))
 }
 
-pub const SPEC: FormatSpec = FormatSpec::new("topviewer", ROUTES)
-    .with_display_name("TopViewer")
-    .preferring(|uri| uri.contains("topviewjson") || uri.contains("memorix"));
+pub const SPEC: FormatSpec = FormatSpec::new("topviewer", ROUTES).with_display_name("TopViewer");
 
 fn contains_topviews(bytes: &[u8]) -> bool {
     String::from_utf8_lossy(bytes).contains("\"topviews\"")
@@ -96,10 +95,7 @@ fn contains_mediabank(bytes: &[u8]) -> bool {
     MEDIABANK_TAG_RE.is_match(&String::from_utf8_lossy(bytes))
 }
 
-fn follow_thumbnail(
-    _: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+fn follow_thumbnail(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
     let page = resource.text_lossy();
     let captures = THUMBNAIL_RE
         .captures(&page)
@@ -117,10 +113,7 @@ fn follow_thumbnail(
     ))))
 }
 
-fn follow_mediabank(
-    _: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+fn follow_mediabank(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
     let page = resource.text_lossy();
     let tag = MEDIABANK_TAG_RE
         .find(&page)
@@ -193,10 +186,8 @@ fn is_media_api(uri: &str) -> bool {
     })
 }
 
-fn follow_media(
-    context: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+fn follow_media(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+    let context = resource.context();
     let value: Value = serde_json::from_slice(resource.bytes()).map_err(|error| {
         DiscoveryError::Session(format!("unable to parse TopViewer media response: {error}"))
     })?;
@@ -228,7 +219,8 @@ fn follow_media(
     Ok(resource.follow_relative(asset))
 }
 
-fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
+fn decode(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+    let (url, bytes) = (resource.final_uri(), resource.bytes());
     let value: Value = serde_json::from_slice(bytes).map_err(|error| {
         DiscoveryError::Session(format!("unable to parse TopViewer metadata: {error}"))
     })?;
@@ -276,7 +268,10 @@ fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
             Request::new(template.replace("{tile}", &tile_number.to_string()))
         },
     )?;
-    Ok(ImagePlan::new(filepath.and_then(image_title), vec![level]))
+    Ok(DiscoveryStep::Image(ImagePlan::new(
+        filepath.and_then(image_title),
+        vec![level],
+    )))
 }
 
 fn image_title(filepath: &str) -> Option<String> {

@@ -1,6 +1,6 @@
 import type { JobHandle } from "@dezoomify/app-model";
 import { suggestedNameFor } from "@dezoomify/app-model";
-import type { ResourceRequest } from "@dezoomify/wasm-bindings";
+import type { JobInput, ResourceRequest } from "@dezoomify/wasm-bindings";
 import { createAttemptPermissions, type PermissionWait } from "./permissions.ts";
 /** Dedicated extension job-tab integration. No webpage postMessage bridge. */
 
@@ -506,7 +506,7 @@ function stopAttempt() {
 }
 
 /** Start one WASM-backed attempt with source-tab access and extension-origin fallback. */
-async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
+async function beginAttempt(inputs: JobInput[]) {
   const attempt = currentAttempt;
   const source = sourceAccess;
   if (!source) return;

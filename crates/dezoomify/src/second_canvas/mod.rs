@@ -7,14 +7,15 @@ use serde::{Deserialize, de::IntoDeserializer};
 use url::Url;
 
 use crate::Vec2d;
+use crate::core::discovery::{html_matches, metadata, viewer};
 use crate::core::{
-    CatalogPlan, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
-    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImagePlan, Positioned, Request, ResolvedLevel,
+    CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec,
+    Grid, ImagePlan, Positioned, Request, ResolvedLevel,
 };
 
 const ROUTES: &[DiscoveryRoute] = &[
-    DiscoveryMatch::ContentPredicate(contains_gigapixel).catalog(decode_catalog),
-    DiscoveryMatch::ContentPredicate(contains_viewer_script).then(follow_viewer_config),
+    metadata(html_matches(contains_gigapixel)).decode(decode_catalog),
+    viewer(html_matches(contains_viewer_script)).extract_metadata(follow_viewer_config),
     DiscoveryRoute::html_relative_capture(&SECOND_CANVAS_IFRAME_RE, "src"),
 ];
 
@@ -47,10 +48,7 @@ static EMBEDDED_CONFIG_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     .expect("constant Second Canvas embedded configuration pattern")
 });
 
-fn follow_viewer_config(
-    _: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+fn follow_viewer_config(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
     Ok(DiscoveryStep::Follow(Request::new(viewer_config_uri(
         resource.final_uri(),
         resource.bytes(),
@@ -84,7 +82,8 @@ fn viewer_config_uri(viewer_uri: &str, viewer_bytes: &[u8]) -> Result<String, Di
     Ok(config.into())
 }
 
-fn decode_catalog(_: &str, bytes: &[u8]) -> Result<CatalogPlan, DiscoveryError> {
+fn decode_catalog(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+    let bytes = resource.bytes();
     let document: Document = serde_json::from_slice(bytes).map_err(|error| {
         DiscoveryError::Session(format!("unable to parse Second Canvas metadata: {error}"))
     })?;
@@ -128,12 +127,12 @@ fn decode_catalog(_: &str, bytes: &[u8]) -> Result<CatalogPlan, DiscoveryError> 
             ))
         })
         .collect::<Result<Vec<_>, DiscoveryError>>()?;
-    Ok(CatalogPlan::images(images))
+    Ok(DiscoveryStep::Catalog(CatalogPlan::images(images)))
 }
 
 #[cfg(test)]
 fn catalog(uri: &str, bytes: &[u8]) -> Result<crate::core::DiscoveryCatalog, DiscoveryError> {
-    decode_catalog(uri, bytes)?.compile("second_canvas")
+    decode_catalog(DiscoveryResource::new(uri, bytes))?.compile("second_canvas")
 }
 
 fn layer_size(size: Size, normal_level: u32, layer_level: u32) -> Result<Vec2d, DiscoveryError> {

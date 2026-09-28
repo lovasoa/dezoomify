@@ -4,27 +4,26 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use crate::Vec2d;
-use crate::core::{DiscoveryError, DiscoveryMatch, FormatSpec, ImagePlan, Request, ResolvedLevel};
+use crate::core::discovery::{image_url, metadata, url_matches};
+use crate::core::{DiscoveryError, DiscoveryStep, FormatSpec, ImagePlan, Request, ResolvedLevel};
 
 const META: &str = "&OBJ=Max-size&OBJ=Tile-size&OBJ=Resolution-number";
 
 pub const SPEC: FormatSpec = FormatSpec::new(
     "iipimage",
     &[
-        DiscoveryMatch::UrlPredicate(needs_metadata).map_url(metadata_url),
-        DiscoveryMatch::Any.decode(decode),
+        image_url(needs_metadata).resolve_metadata(metadata_url),
+        metadata(url_matches(is_iip)).decode(decode),
     ],
 )
-.with_display_name("IIPImage")
-.recognizing(is_iip, "not an IIPImage URL")
-.preferring(|uri| uri.to_ascii_lowercase().contains("?fif"));
+.with_display_name("IIPImage");
 
 fn is_iip(uri: &str) -> bool {
     uri.ends_with(META) || uri.to_ascii_lowercase().contains("?fif")
 }
 
 fn needs_metadata(uri: &str) -> bool {
-    !uri.ends_with(META)
+    is_iip(uri) && !uri.ends_with(META)
 }
 
 #[allow(clippy::unnecessary_wraps)]
@@ -39,7 +38,8 @@ fn metadata_url(input: &str) -> Result<Request, DiscoveryError> {
     )))
 }
 
-fn decode(uri: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
+fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+    let (uri, bytes) = (resource.final_uri(), resource.bytes());
     let metadata = Arc::new(Metadata::try_from(bytes)?);
     let base: Arc<str> = uri.trim_end_matches(META).into();
     let levels: Vec<_> = (0..metadata.levels)
@@ -53,7 +53,7 @@ fn decode(uri: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
             .with_title(Some(format!("IIP level {index}"))))
         })
         .collect::<Result<Vec<_>, DiscoveryError>>()?;
-    Ok(ImagePlan::new(None, levels))
+    Ok(DiscoveryStep::Image(ImagePlan::new(None, levels)))
 }
 
 #[derive(Clone, Debug)]
@@ -125,10 +125,10 @@ mod tests {
     #[test]
     fn parses_metadata_levels_and_iip_tile_geometry() {
         let metadata = b"Max-size:512 512\nTile-size:256 256\nResolution-number:2";
-        let catalog = decode(
+        let catalog = decode(crate::core::DiscoveryResource::new(
             "http://test.com/&OBJ=Max-size&OBJ=Tile-size&OBJ=Resolution-number",
             metadata,
-        )
+        ))
         .unwrap()
         .compile("iipimage")
         .unwrap();

@@ -337,12 +337,15 @@ impl Session {
         let mut options = EngineOptions::new(
             inputs
                 .into_iter()
-                .map(|input| match input.contents {
-                    Some(contents) => dezoomify::engine::DiscoveryInput::with_contents(
-                        input.url,
-                        contents.into_bytes(),
-                    ),
-                    None => dezoomify::engine::DiscoveryInput::new(input.url),
+                .map(|input| {
+                    (match input.contents {
+                        Some(contents) => dezoomify::engine::DiscoveryInput::with_contents(
+                            input.url,
+                            contents.into_bytes(),
+                        ),
+                        None => dezoomify::engine::DiscoveryInput::new(input.url),
+                    })
+                    .with_kind(input.kind.unwrap_or_default())
                 })
                 .collect(),
         );

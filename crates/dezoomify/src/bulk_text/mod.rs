@@ -1,13 +1,18 @@
 //! Pure discovery for text files containing deferred image URLs.
 
-use crate::core::{CatalogPlan, DeferredResource, DiscoveryError, DiscoveryMatch, FormatSpec};
+use crate::core::discovery::{metadata, url_matches};
+use crate::core::{CatalogPlan, DeferredResource, DiscoveryError, DiscoveryStep, FormatSpec};
 
-pub const SPEC: FormatSpec =
-    FormatSpec::new("bulk_text", &[DiscoveryMatch::Any.catalog(decode_catalog)])
-        .with_display_name("Bulk text")
-        .recognizing(is_bulk_file, "not a bulk URL-list file");
+pub const SPEC: FormatSpec = FormatSpec::new(
+    "bulk_text",
+    &[metadata(url_matches(is_bulk_file)).decode(decode_catalog)],
+)
+.with_display_name("Bulk text");
 
-fn decode_catalog(uri: &str, bytes: &[u8]) -> Result<CatalogPlan, DiscoveryError> {
+fn decode_catalog(
+    resource: crate::core::DiscoveryResource<'_>,
+) -> Result<DiscoveryStep, DiscoveryError> {
+    let (uri, bytes) = (resource.final_uri(), resource.bytes());
     let text = std::str::from_utf8(bytes).map_err(|error| {
         DiscoveryError::Session(format!("failed to parse bulk list as UTF-8: {error}"))
     })?;
@@ -17,18 +22,18 @@ fn decode_catalog(uri: &str, bytes: &[u8]) -> Result<CatalogPlan, DiscoveryError
             "no valid URLs found in text file".into(),
         ));
     }
-    Ok(CatalogPlan::deferred(images.into_iter().map(|image| {
-        DeferredResource {
+    Ok(DiscoveryStep::Catalog(CatalogPlan::deferred(
+        images.into_iter().map(|image| DeferredResource {
             uri: image.uri,
             title: image.title,
             warnings: Vec::new(),
-        }
-    })))
+        }),
+    )))
 }
 
 #[cfg(test)]
 fn catalog(uri: &str, bytes: &[u8]) -> Result<crate::core::DiscoveryCatalog, DiscoveryError> {
-    decode_catalog(uri, bytes)?.compile("bulk_text")
+    decode_catalog(crate::core::DiscoveryResource::new(uri, bytes))?.compile("bulk_text")
 }
 
 fn is_bulk_file(uri: &str) -> bool {

@@ -18,22 +18,33 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
   });
 
   const targetUrl =
-    scenario === ""
-      ? `${origin}/target.html`
-      : `${origin}/target.html?scenario=${encodeURIComponent(scenario)}`;
+    scenario === "observed-zoomify"
+      ? `${origin}/observed-zoomify/viewer.html`
+      : scenario === ""
+        ? `${origin}/target.html`
+        : `${origin}/target.html?scenario=${encodeURIComponent(scenario)}`;
   const target = await api.tabs.create({ url: targetUrl, active: true });
   if (typeof target?.id !== "number") throw new Error("extension E2E source tab did not open");
 
-  let loaded = target.status === "complete";
+  let loaded = target.status === "complete" && target.url === targetUrl;
   for (let attempt = 0; attempt < 100 && !loaded; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 100));
-    loaded = (await api.tabs.get(target.id))?.status === "complete";
+    const current = await api.tabs.get(target.id);
+    loaded = current?.status === "complete" && current.url === targetUrl;
   }
   if (!loaded) throw new Error("extension E2E source fixture did not load");
-  // The page load event does not wait for its simulated viewer fetch. The
-  // loopback response is immediate; this bounded grace period lets its
-  // resource-timing entry settle before the finite snapshot.
-  await new Promise((resolve) => setTimeout(resolve, 250));
+  // A completed page load does not imply its viewer's metadata fetch has
+  // settled. Wait for the fixture's explicit signal before the finite scan.
+  let viewerReady = false;
+  for (let attempt = 0; attempt < 100 && !viewerReady; attempt += 1) {
+    const results = await api.scripting.executeScript({
+      target: { tabId: target.id, frameIds: [0] },
+      func: () => document.documentElement.dataset.viewerReady === "true",
+    });
+    viewerReady = results.some((result) => result.result === true);
+    if (!viewerReady) await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  if (!viewerReady) throw new Error("extension E2E viewer did not finish its metadata fetch");
 
   const started = await api.runtime.sendMessage({
     type: "dezoomify-test-start-job",
@@ -104,3 +115,15 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
   })();
   return globalThis.__DEZOOMIFY_TEST_SOURCE_ACCESS_RESULT__;
 })();
+
+void globalThis.__DEZOOMIFY_TEST_RUN__.then(
+  () => {
+    document.body.dataset.driver = "ready";
+  },
+  (error) => {
+    document.body.dataset.driver = "failed";
+    document.body.append(
+      `Driver failed: ${String(error?.message ?? error)}\n${String(error?.stack ?? "")}`,
+    );
+  },
+);

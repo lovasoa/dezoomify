@@ -6,11 +6,12 @@ use regex::Regex;
 use serde::Deserialize;
 
 use crate::Vec2d;
+use crate::core::discovery::{metadata, url_matches, viewer};
 use crate::core::{
-    AdaptiveProgram, AdaptiveSource, DiscoverableStep, DiscoveryContext, DiscoveryError,
-    DiscoveryMatch, DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImagePlan,
-    ObservationResult, ProbeContinuation, Request, ResolvedLevel, TileRole, TileSourceError,
-    TileSpec, resolve_relative,
+    AdaptiveProgram, AdaptiveSource, DiscoverableStep, DiscoveryError, DiscoveryResource,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImagePlan, ObservationResult,
+    ProbeContinuation, Request, ResolvedLevel, TileRole, TileSourceError, TileSpec,
+    resolve_relative,
 };
 use crate::markup::attribute;
 use crate::web_page::page_title;
@@ -19,14 +20,11 @@ const TILE_SIZE: u32 = 512;
 static META_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?is)<meta\b[^>]*>").expect("constant pnav meta tag pattern"));
 const ROUTES: &[DiscoveryRoute] = &[
-    DiscoveryMatch::ContentPredicate(contains_image_meta).then(follow_image_json),
-    DiscoveryMatch::UrlPredicate(is_image_json).then(complete_from_json),
+    viewer(url_matches(is_pnav_url)).extract_metadata(follow_image_json),
+    metadata(url_matches(is_image_json)).continue_with(complete_from_json),
 ];
 
-pub const SPEC: FormatSpec = FormatSpec::new("pnav", ROUTES)
-    .with_display_name("pnav")
-    .recognizing(is_pnav_url, "not a pnav entity URL")
-    .preferring(is_pnav_url);
+pub const SPEC: FormatSpec = FormatSpec::new("pnav", ROUTES).with_display_name("pnav");
 
 fn is_pnav_url(uri: &str) -> bool {
     let path = uri.split_once(['?', '#']).map_or(uri, |(path, _)| path);
@@ -50,10 +48,6 @@ fn is_image_json(uri: &str) -> bool {
         .ends_with(".json")
 }
 
-fn contains_image_meta(bytes: &[u8]) -> bool {
-    extract_image_url(&String::from_utf8_lossy(bytes), "").is_some()
-}
-
 fn extract_image_url(page: &str, page_uri: &str) -> Option<String> {
     META_RE.captures_iter(page).find_map(|captures| {
         let tag = captures.get(0)?.as_str();
@@ -74,19 +68,14 @@ fn extract_image_url(page: &str, page_uri: &str) -> Option<String> {
     })
 }
 
-fn follow_image_json(
-    _: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+fn follow_image_json(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
     let image = extract_image_url(&resource.text_lossy(), resource.final_uri())
         .ok_or_else(|| DiscoveryError::Session("pnav page has no og:image URL".into()))?;
     Ok(DiscoveryStep::Follow(Request::new(json_url(&image)?)))
 }
 
-fn complete_from_json(
-    context: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+fn complete_from_json(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+    let context = resource.context();
     let metadata: Metadata = serde_json::from_slice(resource.bytes()).map_err(|error| {
         DiscoveryError::Session(format!("unable to parse pnav image metadata: {error}"))
     })?;
@@ -112,9 +101,10 @@ fn complete_from_json(
         width: metadata.width,
         height: metadata.height,
     });
-    ImagePlan::new(title, vec![ResolvedLevel::new(source)])
-        .compile("pnav")
-        .map(DiscoveryStep::Complete)
+    Ok(DiscoveryStep::Image(ImagePlan::new(
+        title,
+        vec![ResolvedLevel::new(source)],
+    )))
 }
 
 fn json_url(image: &str) -> Result<String, DiscoveryError> {

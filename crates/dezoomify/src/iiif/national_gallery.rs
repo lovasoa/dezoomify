@@ -1,4 +1,4 @@
-use crate::core::{DiscoveryContext, DiscoveryError, DiscoveryResource, DiscoveryStep};
+use crate::core::{DiscoveryError, DiscoveryResource, DiscoveryStep};
 use regex::bytes::Regex as BytesRegex;
 use std::sync::LazyLock;
 static IMAGE: LazyLock<BytesRegex> = LazyLock::new(|| {
@@ -11,7 +11,6 @@ pub(super) fn contains_image(contents: &[u8]) -> bool {
     IMAGE.is_match(contents)
 }
 pub(super) fn follow_image(
-    _: &DiscoveryContext<'_>,
     resource: DiscoveryResource<'_>,
 ) -> Result<DiscoveryStep, DiscoveryError> {
     let image = IMAGE

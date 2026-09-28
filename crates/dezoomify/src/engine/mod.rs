@@ -70,11 +70,9 @@ pub type CompletionError = EngineError;
 /// Ordered `(id, display name)` inventory of every built-in format, derived
 /// from the core registry in candidate precedence order.
 ///
-/// The unknown-URI registry keeps built-in priority order, so this snapshot
-/// is generated directly from the registry rather than a handwritten copy.
 #[must_use]
 pub fn format_inventory() -> Vec<(&'static str, &'static str)> {
-    crate::core::registry::default_registry("https://example.invalid/unknown").snapshot()
+    crate::core::registry::default_registry().snapshot()
 }
 
 #[cfg(test)]

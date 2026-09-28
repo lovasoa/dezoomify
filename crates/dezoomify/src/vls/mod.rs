@@ -6,7 +6,8 @@ use regex::Regex;
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::{DiscoveryError, DiscoveryMatch, FormatSpec, ImagePlan, Request, ResolvedLevel};
+use crate::core::discovery::{metadata, url_matches, viewer};
+use crate::core::{DiscoveryError, DiscoveryStep, FormatSpec, ImagePlan, Request, ResolvedLevel};
 use crate::markup::attribute;
 use crate::web_page::page_title;
 
@@ -26,12 +27,10 @@ static MAP_RE: LazyLock<Regex> = LazyLock::new(|| {
 pub const SPEC: FormatSpec = FormatSpec::new(
     "vls",
     &[
-        DiscoveryMatch::UrlPredicate(is_view_url).map_url(normalize_url),
-        DiscoveryMatch::Any.decode(decode),
+        viewer(url_matches(is_view_url)).resolve_metadata(normalize_url),
+        metadata(url_matches(is_view_url)).decode(decode),
     ],
 )
-.recognizing(is_view_url, "not a VLS viewer URL")
-.preferring(is_view_url)
 .with_display_name("VLS");
 
 fn is_view_url(uri: &str) -> bool {
@@ -45,7 +44,8 @@ fn normalize_url(uri: &str) -> Result<Request, DiscoveryError> {
     ))
 }
 
-fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
+fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+    let (url, bytes) = (resource.final_uri(), resource.bytes());
     let page = String::from_utf8_lossy(bytes);
     let map = MAP_RE
         .captures(&page)
@@ -91,7 +91,10 @@ fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
         Vec2d::square(1024),
         move |tile| Request::new(format!("{base}/{}/{}", tile.coord.column, tile.coord.row)),
     )?;
-    Ok(ImagePlan::new(page_title(&page), vec![level]))
+    Ok(DiscoveryStep::Image(ImagePlan::new(
+        page_title(&page),
+        vec![level],
+    )))
 }
 
 fn positive_attribute(tag: &str, name: &str) -> Option<u32> {
@@ -121,6 +124,12 @@ mod tests {
                 <var id="zoomTileSize" value="1024">"#,
             u32::MAX
         );
-        assert!(decode("https://example.test/pageview/1", page.as_bytes()).is_err());
+        assert!(
+            decode(crate::core::DiscoveryResource::new(
+                "https://example.test/pageview/1",
+                page.as_bytes()
+            ))
+            .is_err()
+        );
     }
 }

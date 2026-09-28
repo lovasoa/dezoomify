@@ -6,9 +6,12 @@ use dzi_file::DziFile;
 use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
+use crate::core::discovery::{
+    any, html_matches, image_url, metadata, url_matches, url_suffix, viewer,
+};
 use crate::core::{
-    CatalogPlan, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
-    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImagePlan, Request, ResolvedLevel,
+    CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec,
+    Grid, ImagePlan, Request, ResolvedLevel,
 };
 use crate::json_utils::all_json;
 
@@ -24,23 +27,23 @@ static SEADRAGON_EMBED: LazyLock<BytesRegex> = LazyLock::new(|| {
     .expect("constant Seadragon embed pattern")
 });
 const ROUTES: &[DiscoveryRoute] = &[
-    DiscoveryMatch::UrlPredicate(is_tile_url).map_url(tile_metadata),
-    DiscoveryMatch::UrlPredicate(is_bl_viewer_url).map_url(bl_metadata),
-    DiscoveryMatch::UrlPredicate(is_nla_view_url).map_url(nla_metadata),
-    DiscoveryMatch::UrlPredicate(is_polona_item_url).then(follow_polona_json),
-    DiscoveryMatch::UrlPredicate(is_polona_json_url).then(follow_polona_dzi),
+    image_url(is_tile_url).resolve_metadata(tile_metadata),
+    viewer(url_matches(is_bl_viewer_url)).resolve_metadata(bl_metadata),
+    viewer(url_matches(is_nla_view_url)).resolve_metadata(nla_metadata),
+    viewer(url_matches(is_polona_item_url)).extract_metadata(follow_polona_json),
+    metadata(url_matches(is_polona_json_url)).extract_metadata(follow_polona_dzi),
     paris::ARK_ROUTE,
     paris::MANIFEST_ROUTE,
-    DiscoveryMatch::ContentPredicate(contains_seadragon_embed).then(follow_seadragon_embed),
-    DiscoveryMatch::ContentPredicate(has_wdl_template).then(follow_wdl_template),
+    viewer(html_matches(contains_seadragon_embed)).extract_metadata(follow_seadragon_embed),
+    viewer(html_matches(has_wdl_template)).extract_metadata(follow_wdl_template),
     DiscoveryRoute::relative_capture(&DZI_LINK_RE, "url"),
     DiscoveryRoute::relative_capture(&DZI_ATTR_RE, "url"),
-    DiscoveryMatch::Any.catalog(decode_catalog),
+    metadata(url_suffix(".dzi")).decode(decode_catalog),
+    metadata(any()).decode(decode_catalog),
 ];
 
-pub const SPEC: FormatSpec = FormatSpec::new("deepzoom", ROUTES)
-    .with_display_name("Seadragon (Deep Zoom Image)")
-    .preferring(|uri| uri.contains(".dzi") || uri.contains("_files/") || paris::prefers(uri));
+pub const SPEC: FormatSpec =
+    FormatSpec::new("deepzoom", ROUTES).with_display_name("Seadragon (Deep Zoom Image)");
 
 fn is_tile_url(input: &str) -> bool {
     TILE_URL.is_match(input)
@@ -70,10 +73,7 @@ fn has_wdl_template(bytes: &[u8]) -> bool {
         .any(|window| window == b"dziUrlTemplate")
 }
 
-fn follow_wdl_template(
-    _: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+fn follow_wdl_template(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
     let template = WDL_TEMPLATE_RE
         .captures(resource.bytes())
         .and_then(|captures| captures.get(1))
@@ -140,10 +140,7 @@ fn is_polona_json_url(uri: &str) -> bool {
     uri.contains("polona.pl/resources/item/") && uri.contains("format=json")
 }
 
-fn follow_polona_json(
-    _: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+fn follow_polona_json(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
     static ITEM_RE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"polona\.pl/item/(\d+)/").expect("constant Polona item pattern")
     });
@@ -157,10 +154,8 @@ fn follow_polona_json(
     ))))
 }
 
-fn follow_polona_dzi(
-    context: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+fn follow_polona_dzi(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+    let context = resource.context();
     static PAGE_RE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"polona\.pl/item/\d+/(\d+)").expect("constant Polona page pattern")
     });
@@ -186,7 +181,6 @@ fn contains_seadragon_embed(contents: &[u8]) -> bool {
 }
 
 fn follow_seadragon_embed(
-    _: &DiscoveryContext<'_>,
     resource: DiscoveryResource<'_>,
 ) -> Result<DiscoveryStep, DiscoveryError> {
     let metadata = SEADRAGON_EMBED
@@ -201,7 +195,8 @@ fn follow_seadragon_embed(
 
 mod paris;
 
-fn decode_catalog(url: &str, contents: &[u8]) -> Result<CatalogPlan, DiscoveryError> {
+fn decode_catalog(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+    let (url, contents) = (resource.final_uri(), resource.bytes());
     let xml_result = serde_xml_rs::from_reader::<'_, DziFile, _>(contents);
     let xml_err = xml_result.as_ref().err().map(ToString::to_string);
     let parsed = xml_result
@@ -215,7 +210,7 @@ fn decode_catalog(url: &str, contents: &[u8]) -> Result<CatalogPlan, DiscoveryEr
             "unable to parse DZI metadata{detail}"
         )));
     }
-    catalog_from_dzi(url, parsed)
+    catalog_from_dzi(url, parsed).map(DiscoveryStep::Catalog)
 }
 
 fn catalog_from_dzi(
@@ -278,7 +273,7 @@ fn load_catalog(
     url: &str,
     contents: &[u8],
 ) -> Result<crate::core::DiscoveryCatalog, DiscoveryError> {
-    decode_catalog(url, contents)?.compile("deepzoom")
+    decode_catalog(DiscoveryResource::new(url, contents))?.compile("deepzoom")
 }
 
 #[cfg(test)]

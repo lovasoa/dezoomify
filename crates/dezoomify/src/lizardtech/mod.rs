@@ -6,8 +6,9 @@ use regex::Regex;
 use url::Url;
 
 use crate::Vec2d;
+use crate::core::discovery::{metadata, url_matches};
 use crate::core::{
-    DiscoveryError, DiscoveryMatch, FormatSpec, ImagePlan, Request, ResolvedLevel, image_title,
+    DiscoveryError, DiscoveryStep, FormatSpec, ImagePlan, Request, ResolvedLevel, image_title,
 };
 use crate::markup::attribute;
 
@@ -24,16 +25,18 @@ static PARAMETER_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?is)<Parameter\b([^>]*)>(.*?)</Parameter>")
         .expect("constant LizardTech parameter pattern")
 });
-pub const SPEC: FormatSpec = FormatSpec::new("lizardtech", &[DiscoveryMatch::Any.decode(decode)])
-    .with_display_name("LizardTech ImageServer")
-    .recognizing(is_lizardtech_url, "not a LizardTech ImageServer URL")
-    .preferring(|uri| uri.to_ascii_lowercase().contains("/lizardtech/iserv/"));
+pub const SPEC: FormatSpec = FormatSpec::new(
+    "lizardtech",
+    &[metadata(url_matches(is_lizardtech_url)).decode(decode)],
+)
+.with_display_name("LizardTech ImageServer");
 
 fn is_lizardtech_url(uri: &str) -> bool {
     uri.to_ascii_lowercase().contains("/lizardtech/iserv/")
 }
 
-fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
+fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+    let (url, bytes) = (resource.final_uri(), resource.bytes());
     let source_text = std::str::from_utf8(bytes)
         .map_err(|error| DiscoveryError::Session(format!("invalid LizardTech XML: {error}")))?;
     let server = SERVER_RE
@@ -83,7 +86,7 @@ fn decode(url: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
         .ok_or_else(|| DiscoveryError::Session("LizardTech XML has no image item".into()))?;
     let title = image_title(&item);
     let levels = build_levels(width, height, &origin, &catalog_name, &item)?;
-    Ok(ImagePlan::new(title, levels))
+    Ok(DiscoveryStep::Image(ImagePlan::new(title, levels)))
 }
 
 fn build_levels(

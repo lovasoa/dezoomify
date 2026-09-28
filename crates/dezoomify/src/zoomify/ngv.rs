@@ -3,8 +3,7 @@ use std::sync::LazyLock;
 use regex::bytes::Regex as BytesRegex;
 
 use crate::core::{
-    DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
-    DiscoveryStep, Request, resolve_relative,
+    DiscoveryError, DiscoveryResource, DiscoveryRoute, DiscoveryStep, Request, resolve_relative,
 };
 
 use super::{append_path_component, capture_text};
@@ -14,19 +13,15 @@ static IMAGE_PATH: LazyLock<BytesRegex> = LazyLock::new(|| {
         .expect("constant NGV Zoomify path pattern")
 });
 
+use crate::core::discovery::{url_matches, viewer};
 pub(super) const ROUTE: DiscoveryRoute =
-    DiscoveryMatch::UrlPredicate(is_work_page).then(follow_image_path);
-
-pub(super) fn prefers(uri: &str) -> bool {
-    is_work_page(uri)
-}
+    viewer(url_matches(is_work_page)).extract_metadata(follow_image_path);
 
 pub(super) fn is_work_page(uri: &str) -> bool {
     uri.contains("ngv.vic.gov.au/explore/collection/work")
 }
 
 pub(super) fn follow_image_path(
-    _: &DiscoveryContext<'_>,
     resource: DiscoveryResource<'_>,
 ) -> Result<DiscoveryStep, DiscoveryError> {
     let path = IMAGE_PATH

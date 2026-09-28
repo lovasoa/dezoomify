@@ -1,19 +1,19 @@
 /**
  * Source-page functions passed to scripting.executeScript() by the job page.
  *
- * These functions deliberately have no imports, closures, listeners, or
+ * These functions deliberately have no runtime imports, closures, listeners, or
  * document state. Firefox and Chromium receive the same operation and the
  * complete structured-cloneable result is returned before the invocation
  * ends, while fetch returns a single bounded payload to the privileged job
  * page that invoked it.
  */
 
-/**
- * Take one bounded snapshot of rendered document roots followed by retained
- * resource URLs. Same-origin iframe DOM is readable here; cross-origin frames
- * throw on access and are skipped.
- */
-import type { FetchFailure, FetchFailureCode } from "@dezoomify/wasm-bindings";
+import type {
+  DiscoveryInputKind,
+  FetchFailure,
+  FetchFailureCode,
+  JobInput,
+} from "@dezoomify/wasm-bindings";
 
 type SourceRequest = {
   url: string;
@@ -23,20 +23,25 @@ type SourceRequest = {
   timeoutMs?: number;
 };
 
+/**
+ * Take one bounded snapshot of rendered document roots followed by retained
+ * resource URLs. Same-origin iframe DOM is readable here; cross-origin frames
+ * throw on access and are skipped.
+ */
 export function collectCandidates(): {
   ok: true;
   documentUrl: string;
-  inputs: Array<{ url: string; contents?: string }>;
+  inputs: JobInput[];
   overflow: number;
 } {
   const MAX_URL_LENGTH = 2048;
   const MAX_CANDIDATES = 100;
   const MAX_DOM_BYTES = 8 * 1024 * 1024;
   const documentUrl = String(globalThis.location?.href ?? "");
-  const inputs: Array<{ url: string; contents?: string }> = [];
+  const inputs: JobInput[] = [];
   const seen = new Set<string>();
   let overflow = 0;
-  const append = (value: unknown, contents?: unknown) => {
+  const append = (value: unknown, kind: DiscoveryInputKind, contents?: unknown) => {
     if (typeof value !== "string" || value.length === 0 || value.length > MAX_URL_LENGTH) return;
     let parsed: URL;
     try {
@@ -59,16 +64,17 @@ export function collectCandidates(): {
     }
     inputs.push({
       url: value,
+      kind,
       ...(readableContents !== undefined ? { contents: readableContents } : {}),
     });
   };
 
-  const visit = (doc: Document, url: string) => {
+  const visit = (doc: Document, url: string, kind: DiscoveryInputKind) => {
     let html = "";
     try {
       html = String(doc.documentElement?.outerHTML ?? "");
     } catch {}
-    append(url, html);
+    append(url, kind, html);
     let frames: Element[] = [];
     try {
       frames = Array.from(doc.querySelectorAll?.("iframe") ?? []);
@@ -77,19 +83,20 @@ export function collectCandidates(): {
       try {
         const frame = element as HTMLIFrameElement;
         const child = frame.contentDocument;
-        if (child) visit(child, String(child.location?.href ?? frame.src ?? ""));
+        if (child)
+          visit(child, String(child.location?.href ?? frame.src ?? ""), "observed-document");
       } catch {}
     }
   };
   try {
-    visit(globalThis.document, documentUrl);
+    visit(globalThis.document, documentUrl, "source");
   } catch {
-    append(documentUrl);
+    append(documentUrl, "source");
   }
 
   try {
     for (const entry of globalThis.performance?.getEntriesByType?.("resource") ?? []) {
-      append(typeof entry === "string" ? entry : entry?.name);
+      append(typeof entry === "string" ? entry : entry?.name, "observed-resource");
     }
   } catch {}
   return { ok: true, documentUrl, inputs, overflow };

@@ -157,14 +157,28 @@ pub struct Catalog {
     pub entries: Vec<CatalogEntry>,
 }
 
-/// One ordered discovery root. `contents` is omitted when the host only has
-/// a reference and discovery should acquire it normally.
+/// The source of discovery evidence. Products report facts; core discovery
+/// decides when a supplied document or observed resource is relevant.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum DiscoveryInputKind {
+    #[default]
+    Source,
+    ObservedDocument,
+    ObservedResource,
+}
+
+/// One discovery input. An omitted kind is a user-supplied source for
+/// compatibility with products that have no browser observations.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct JobInput {
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contents: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<DiscoveryInputKind>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -186,6 +200,7 @@ impl JobInput {
         Self {
             url: url.into(),
             contents: None,
+            kind: None,
         }
     }
 }

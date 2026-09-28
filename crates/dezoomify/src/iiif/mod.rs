@@ -6,12 +6,14 @@ use tile_info::ImageInfo;
 use url::Url;
 
 use crate::Vec2d;
+use crate::core::discovery::{
+    any, html_matches, image_url, metadata, url_matches, url_suffix, viewer,
+};
 use crate::core::{
     AdaptiveProgram, AdaptiveSource, CatalogPlan, DeferredResource, DiscoverableStep,
-    DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
-    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, GridRequests, GridTile, ImagePlan,
-    ObservationResult, ProbeContinuation, Request, ResolvedLevel, TileRole, TileSourceError,
-    TileSpec, resolve_relative,
+    DiscoveryCatalog, DiscoveryError, DiscoveryResource, DiscoveryRoute, DiscoveryStep, FormatSpec,
+    Grid, GridRequests, GridTile, ImagePlan, ObservationResult, ProbeContinuation, Request,
+    ResolvedLevel, TileRole, TileSourceError, TileSpec, resolve_relative,
 };
 use crate::iiif::tile_info::TileSizeFormat;
 use crate::json_utils::all_json;
@@ -31,31 +33,29 @@ pub mod tile_info;
 mod title_tests;
 
 const ROUTES: &[DiscoveryRoute] = &[
-    DiscoveryMatch::UrlPredicate(|uri| image_request_info(uri).is_some())
-        .map_url(|uri| Ok(image_request_info(uri).expect("route matched IIIF image request"))),
-    DiscoveryMatch::UrlPredicate(has_manifest_parameter).map_url(manifest_parameter),
+    image_url(|uri| image_request_info(uri).is_some()).resolve_metadata(|uri| {
+        Ok(image_request_info(uri).expect("route matched IIIF image request"))
+    }),
+    viewer(url_matches(has_manifest_parameter)).resolve_metadata(manifest_parameter),
     onb::ROUTE,
     contentdm::RECORD_ROUTE,
     contentdm::METADATA_ROUTE,
     micrio::ROUTE,
-    DiscoveryMatch::ContentPredicate(national_gallery::contains_image)
-        .then(national_gallery::follow_image),
+    viewer(html_matches(national_gallery::contains_image))
+        .extract_metadata(national_gallery::follow_image),
     philadelphia::ROUTE,
-    DiscoveryMatch::ContentPredicate(has_info_json_url).then(follow_info_json_url),
-    DiscoveryMatch::Any.extract(catalog),
+    viewer(html_matches(has_info_json_url)).extract_metadata(follow_info_json_url),
+    metadata(url_suffix("/info.json")).decode(decode),
+    metadata(url_suffix("/manifest.json")).decode(decode),
+    metadata(any()).decode(decode),
 ];
 
 /// IIIF format. See <https://iiif.io/>.
-pub const SPEC: FormatSpec = FormatSpec::new("iiif", ROUTES)
-    .with_display_name("IIIF")
-    .preferring(|uri| {
-        uri.contains("info.json")
-            || uri.contains("iiif")
-            || uri.contains("manifest.json")
-            || has_manifest_parameter(uri)
-            || onb::prefers(uri)
-            || contentdm::prefers(uri)
-    });
+pub const SPEC: FormatSpec = FormatSpec::new("iiif", ROUTES).with_display_name("IIIF");
+
+fn decode(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+    catalog(resource.final_uri(), resource.bytes()).map(DiscoveryStep::Complete)
+}
 
 /// Determines the best title for an image from IIIF manifest metadata
 #[must_use]
@@ -219,10 +219,7 @@ fn page_base_uri(bytes: &[u8], final_uri: &str) -> String {
         )
 }
 
-fn follow_info_json_url(
-    _: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
+fn follow_info_json_url(resource: DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
     // Payloads that already parse as IIIF (info.json bodies, manifests)
     // keep the standard extractor; harvesting is for embedder pages.
     if let Ok(found) = catalog(resource.final_uri(), resource.bytes()) {

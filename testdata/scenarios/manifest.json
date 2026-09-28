@@ -1,6 +1,30 @@
 {
   "scenarios": [
     {
+      "content_type": "text/html",
+      "id": "extension/observed-zoomify/payloads/127.0.0.1/observed-zoomify/viewer.html",
+      "license_provenance": "local test fixture (generated, no third-party material)",
+      "path": "extension/observed-zoomify/payloads/127.0.0.1/observed-zoomify/viewer.html",
+      "sensitive": false,
+      "served_urls": [],
+      "sha256": "a5be672b9617d8df611f33b4c29e83005cd3cb6aee300c637daec01113aeb3f9",
+      "size": 558,
+      "source_path": "apps/extension/tests/browser/headless.test.mjs",
+      "source_snapshot": "local synthetic Museum Ludwig reproduction"
+    },
+    {
+      "content_type": "text/html",
+      "id": "extension/observed-zoomify/payloads/localhost/observed-zoomify/opt-out.html",
+      "license_provenance": "local test fixture (generated, no third-party material)",
+      "path": "extension/observed-zoomify/payloads/localhost/observed-zoomify/opt-out.html",
+      "sensitive": false,
+      "served_urls": [],
+      "sha256": "0cf18a004a96ba4a92043bcebfae818e89c441a0ad19465ab24516c3661e7956",
+      "size": 98,
+      "source_path": "apps/extension/tests/browser/headless.test.mjs",
+      "source_snapshot": "local synthetic Museum Ludwig reproduction"
+    },
+    {
       "content_type": "application/xml",
       "id": "desktop/basic-iiif-dir/payloads/fixtures.test/desktop/basic-iiif-dir/pyramid.dzi",
       "license_provenance": "local test fixture (generated, no third-party material)",
@@ -499,8 +523,8 @@
       "path": "extension/cookie-session/payloads/127.0.0.1/target.html",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "749f53b73f6dd22d30da72047b48b4363f9a501ced4eb1b400faa58c39dbccda",
-      "size": 487,
+      "sha256": "5e22a6a5ef3d136f6cfd65fc04dd9f7f7210af17b9a10fe87ceef6277f0e5c0b",
+      "size": 552,
       "source_path": "apps/extension/tests/browser/headless.test.mjs",
       "source_snapshot": "local deterministic fixture"
     },

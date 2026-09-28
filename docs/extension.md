@@ -30,6 +30,12 @@ const result = await source.fetch(request, signal);
 
 The module injects the self-contained functions in `job/source-operations.ts` with `scripting.executeScript({ target: { tabId, frameIds: [0] } })`. Their argument and return shapes come from `Parameters`, `Awaited`, and `ReturnType`; the job page validates URLs, headers, document identity, result shape, candidate and payload limits at this browser boundary.
 
+Scan inputs use the generated `JobInput` contract: the top document is a `source`,
+readable child frames are `observed-document`, and retained performance resource
+URLs are `observed-resource`. The WASM adapter preserves these kinds into the
+shared Rust discovery scheduler. The extension supplies evidence; format
+recognition, precedence, navigation, and job-wide discovery limits belong to Rust.
+
 One source-access object is bound to one source document. A loading event, tab close, changed URL, or returned result from another document invalidates it. It discards results that finish after invalidation. A job that already has inputs can continue through the extension-origin transport when source-context access is lost; the source tab is never silently rebound after navigation. Firefox document IDs are not required, so the current Firefox 133 minimum remains supported.
 
 The source fetch operation uses a per-document abort-controller map in the extension isolated world. The job service's abort signal cancels an in-flight source fetch. Responses are streamed and capped at 8 MiB before they cross the script boundary as base64; the job page decodes and checks the payload once.

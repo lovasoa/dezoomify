@@ -5,8 +5,9 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::Vec2d;
+use crate::core::discovery::{metadata, url_matches};
 use crate::core::{
-    DiscoveryError, DiscoveryMatch, FormatSpec, ImagePlan, Positioned, ProcessingRecipe, Request,
+    DiscoveryError, DiscoveryStep, FormatSpec, ImagePlan, Positioned, ProcessingRecipe, Request,
     ResolvedLevel, TileSourceError,
 };
 use crate::default_headers;
@@ -15,10 +16,11 @@ use crate::model::Header;
 mod tile_set;
 mod variable;
 
-pub const SPEC: FormatSpec = FormatSpec::new("custom", &[DiscoveryMatch::Any.decode(decode)])
-    .with_display_name("Custom tiles")
-    .recognizing(is_tiles_yaml, "not a tiles.yaml file")
-    .preferring(is_tiles_yaml);
+pub const SPEC: FormatSpec = FormatSpec::new(
+    "custom",
+    &[metadata(url_matches(is_tiles_yaml)).decode(decode)],
+)
+.with_display_name("Custom tiles");
 
 fn is_tiles_yaml(uri: &str) -> bool {
     uri.split(['?', '#'])
@@ -26,8 +28,8 @@ fn is_tiles_yaml(uri: &str) -> bool {
         .is_some_and(|path| path.ends_with("tiles.yaml"))
 }
 
-fn decode(_: &str, bytes: &[u8]) -> Result<ImagePlan, DiscoveryError> {
-    decode_yaml(bytes)
+fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<DiscoveryStep, DiscoveryError> {
+    decode_yaml(resource.bytes()).map(DiscoveryStep::Image)
 }
 
 #[derive(Deserialize)]
