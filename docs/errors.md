@@ -20,6 +20,8 @@ Hosts keep their own error chains internally; only the typed shape crosses the c
 
 Extension HTTP responses produce the generated `FetchFailure` at the fetch boundary. Source-script results carry that payload unchanged through validation, fallback selection, and the worker completion. HTTP status is never renamed or reconstructed from a JavaScript exception. The shared engine host accepts the generated payload directly; only unclassified host exceptions require classification.
 
+`FetchFailure` carries no retryability or recovery actions. The core's `classify_tile_failure` classifies its code and HTTP status for both tile retries and metadata error presentation. HTTP status takes precedence over the transport code. Job-level `Error` retains retryability and recovery actions for presentation. Output failures do not inherit fetch retry policy.
+
 Adapter faults (bad external objects, bad session use) are not job failures. They return the `DispatchResult` error branch and a contract-failure screen, and replace no accepted transport failure.
 
 ## Recovery actions

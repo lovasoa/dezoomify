@@ -53,7 +53,6 @@ function product(overrides = {}) {
       },
       classifyFailure: (error) => ({
         code: "browser.network",
-        retryable: true,
         message: String(error?.message ?? error),
         transport: "direct",
       }),
@@ -144,13 +143,11 @@ test("service sends one-attempt structured tile failures to the engine", async (
       name: "HTTP 403",
       status: 403,
       expectedCode: "TRANSPORT_HTTP_ERROR",
-      retryable: false,
       fetchImpl: async () => new Response("<p>Cloudflare challenge</p>", { status: 403 }),
     },
     {
       name: "transient network error",
       expectedCode: "TRANSPORT_NETWORK_ERROR",
-      retryable: true,
       fetchImpl: async () => {
         throw new Error("connection reset");
       },
@@ -159,7 +156,6 @@ test("service sends one-attempt structured tile failures to the engine", async (
       name: "HTTP 429 Retry-After",
       status: 429,
       expectedCode: "TRANSPORT_HTTP_ERROR",
-      retryable: true,
       retryAfterMs: 3000,
       fetchImpl: async () => new Response(null, { status: 429, headers: { "retry-after": "3" } }),
     },
@@ -187,7 +183,6 @@ test("service sends one-attempt structured tile failures to the engine", async (
         fetchResource: (request, signal) => fetcher.fetchResource(request, signal),
         classifyFailure: (error) => ({
           code: error.cause?.code ?? error.code,
-          retryable: error.retryable,
           message: error.message,
           preview: error.preview,
           transport: error.cause?.transport ?? "direct",
@@ -207,7 +202,7 @@ test("service sends one-attempt structured tile failures to the engine", async (
       );
       assert.ok(failureMessage);
       assert.equal(failureMessage.error.code, fixture.expectedCode);
-      assert.equal(failureMessage.error.retryable, fixture.retryable);
+      assert.equal(Object.hasOwn(failureMessage.error, "retryable"), false);
       assert.equal(failureMessage.error.transport, "direct");
       if (fixture.status) assert.equal(failureMessage.error.http, fixture.status);
       if (fixture.retryAfterMs)

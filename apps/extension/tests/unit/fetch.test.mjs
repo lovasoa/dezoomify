@@ -61,7 +61,7 @@ test("HTTP refusals and throttles retain status without becoming permission requ
     await assert.rejects(fetcher().fetchResource(resource(`/${status}`), signal()), (error) => {
       const failure = asFetchFailure(error);
       assert.equal(failure.http, status);
-      assert.equal(failure.retryable, status >= 429);
+      assert.equal(Object.hasOwn(failure, "retryable"), false);
       assert.notEqual(error.code, "permission-denied");
       if (status === 429) assert.equal(failure.retry_after_ms, 3000);
       return true;

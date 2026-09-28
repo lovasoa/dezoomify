@@ -546,14 +546,12 @@ pub enum ResourceKind {
     Output,
 }
 
+/// Host-observed fetch facts. Retry and recovery policy belongs to the engine.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct FetchFailure {
     pub code: FetchFailureCode,
-    pub retryable: bool,
     pub message: String,
-    #[serde(default)]
-    pub recovery: Vec<RecoveryAction>,
     pub transport: ErrorTransport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blocked_reason: Option<BlockedReason>,

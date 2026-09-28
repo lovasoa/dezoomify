@@ -16,8 +16,6 @@ test("definitive source refusals retain grouped diagnostics and honest request c
         throw {
           code: "TRANSPORT_HTTP_ERROR",
           http: 403,
-          retryable: false,
-          recovery: [],
           transport: "browser-session",
           message: "Refused",
         };
@@ -120,7 +118,6 @@ function harness({
     classifyFailure: (error) => ({
       blocked_reason: "network",
       code: error?.code ?? "extension.network",
-      retryable: true,
       message: String(error?.message ?? error),
       transport: "browser-session",
     }),
@@ -198,7 +195,6 @@ test("a granted-origin refusal fails typed without re-prompting for a grant", as
     classifyFailure: (error) => ({
       blocked_reason: error?.category ?? "network",
       code: "extension.network",
-      retryable: false,
       message: String(error?.message ?? error),
       transport: "browser-session",
     }),
@@ -257,9 +253,7 @@ test("a definitive source HTTP response is not retried through the extension ori
         throw {
           code: "TRANSPORT_HTTP_ERROR",
           http: 404,
-          retryable: false,
           message: "not found",
-          recovery: [],
           transport: "browser-session",
         };
       },

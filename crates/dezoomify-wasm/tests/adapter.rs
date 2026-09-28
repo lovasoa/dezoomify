@@ -55,9 +55,7 @@ fn typed_fetch_error_requires_and_preserves_context() {
         .expect("discovery request");
     let error = FetchFailure {
         code: dezoomify::model::FetchFailureCode::PROXY_ERROR,
-        retryable: true,
         message: "The metadata proxy failed.".into(),
-        recovery: Vec::new(),
         transport: ErrorTransport::MetadataProxy,
         blocked_reason: Some(BlockedReason::Network),
         http: Some(502),
@@ -251,9 +249,7 @@ fn browser_selection_is_explicit_and_manual_is_still_the_default() {
 fn transient_timeout() -> FetchFailure {
     FetchFailure {
         code: dezoomify::model::FetchFailureCode::TRANSPORT_TIMEOUT,
-        retryable: true,
         message: "tile fetch timed out".into(),
-        recovery: Vec::new(),
         transport: ErrorTransport::Direct,
         blocked_reason: None,
         http: None,
@@ -264,11 +260,60 @@ fn transient_timeout() -> FetchFailure {
 }
 
 #[test]
+fn fetch_facts_drive_the_same_policy_for_metadata_and_tiles() {
+    for (http, retryable) in [
+        (Some(401), false),
+        (Some(403), false),
+        (Some(404), false),
+        (Some(408), true),
+        (Some(425), true),
+        (Some(429), true),
+        (Some(503), true),
+        (Some(600), false),
+        (None, true),
+    ] {
+        // A timeout code with an HTTP status proves that status wins, without
+        // a host-supplied retry flag that could contradict the engine.
+        let failure = FetchFailure {
+            http,
+            ..transient_timeout()
+        };
+        let (mut tiles, requests) = session_acquiring_tiles();
+        let (effects, _) = tiles
+            .complete(HostCompletion::ProvideFetchFailure {
+                request: requests[0].1,
+                error: failure.clone(),
+            })
+            .unwrap();
+        assert_eq!(timer_of(&effects).is_some(), retryable, "tile {http:?}");
+
+        let mut metadata = session();
+        let effects = start_messages(&mut metadata);
+        let request = effects
+            .iter()
+            .find_map(|effect| match effect {
+                HostEffect::AcquireResource { request } => Some(request.id),
+                _ => None,
+            })
+            .unwrap();
+        let (_, snapshot) = metadata
+            .complete(HostCompletion::ProvideFetchFailure {
+                request,
+                error: failure,
+            })
+            .unwrap();
+        let Some(dezoomify::model::Terminal::Failed { error }) = snapshot.terminal else {
+            panic!("expected metadata failure");
+        };
+        assert_eq!(error.retryable, retryable, "metadata {http:?}");
+    }
+}
+
+#[test]
 fn partial_snapshot_retains_the_observed_fetch_failure() {
     let (mut session, tiles) = session_acquiring_tiles();
     let error = FetchFailure {
         code: dezoomify::model::FetchFailureCode::TRANSPORT_HTTP_ERROR,
-        retryable: false,
         message: "The website refused this file.".into(),
         transport: ErrorTransport::BrowserSession,
         http: Some(403),

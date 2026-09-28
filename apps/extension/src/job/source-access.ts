@@ -214,8 +214,6 @@ export function createSourceAccess(
     const timeout: FetchFailure = {
       code: "TRANSPORT_TIMEOUT",
       message: "The source operation timed out.",
-      retryable: true,
-      recovery: [],
       transport: "browser-session",
     };
     const timer = setTimeout(() => deadline.abort(timeout), timeoutMs);

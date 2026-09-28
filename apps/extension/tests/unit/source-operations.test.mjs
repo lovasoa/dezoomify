@@ -163,9 +163,7 @@ test("source fetch classifies failures without returning response details", asyn
       error: {
         code: "TRANSPORT_HTTP_ERROR",
         http: 403,
-        retryable: false,
         message: "The website refused this file.",
-        recovery: [],
         transport: "browser-session",
         blocked_reason: "forbidden",
       },

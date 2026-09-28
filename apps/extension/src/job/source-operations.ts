@@ -135,12 +135,7 @@ export async function fetchSource(request: SourceRequest): Promise<
     error: {
       code,
       message,
-      recovery: [],
       transport: "browser-session",
-      retryable:
-        http !== undefined
-          ? [408, 425, 429].includes(http) || http >= 500
-          : code === "TRANSPORT_NETWORK_ERROR",
       ...(http === undefined ? {} : { http }),
       ...(http === 401 || http === 403 ? { blocked_reason: "forbidden" as const } : {}),
     } satisfies FetchFailure,
@@ -255,9 +250,7 @@ export async function fetchSource(request: SourceRequest): Promise<
   } catch (error) {
     const caught = error as { code?: unknown; name?: unknown };
     if (timedOut) {
-      const result = fail("TRANSPORT_TIMEOUT", "The source request timed out.");
-      result.error.retryable = true;
-      return result;
+      return fail("TRANSPORT_TIMEOUT", "The source request timed out.");
     }
     if (caught?.code === "too-large")
       return fail("TRANSPORT_SIZE_LIMIT", "The source response exceeds the byte limit.");

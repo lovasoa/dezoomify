@@ -103,6 +103,24 @@ export interface TilePlacement {
 }
 
 /**
+ * Host-observed fetch facts. Retry and recovery policy belongs to the engine.
+ */
+export interface FetchFailure {
+    code: FetchFailureCode;
+    message: string;
+    transport: ErrorTransport;
+    blocked_reason?: BlockedReason;
+    http?: number;
+    /**
+     * Host-observed `retry-after` in milliseconds, when the response
+     * carried one. The engine waits at least this long before the retry.
+     */
+    retry_after_ms?: number;
+    preview?: string;
+    detail?: string;
+}
+
+/**
  * One ordered catalog slot: a ready image or a request to resolve one.
  */
 export type CatalogEntry = ({ kind: "image" } & Image) | ({ kind: "image-request" } & ImageRequest);
@@ -275,23 +293,6 @@ export interface Error {
     blocked_reason?: BlockedReason;
     resource_kind?: ResourceKind;
     http?: number;
-    preview?: string;
-    detail?: string;
-}
-
-export interface FetchFailure {
-    code: FetchFailureCode;
-    retryable: boolean;
-    message: string;
-    recovery?: RecoveryAction[];
-    transport: ErrorTransport;
-    blocked_reason?: BlockedReason;
-    http?: number;
-    /**
-     * Host-observed `retry-after` in milliseconds, when the response
-     * carried one. The engine waits at least this long before the retry.
-     */
-    retry_after_ms?: number;
     preview?: string;
     detail?: string;
 }

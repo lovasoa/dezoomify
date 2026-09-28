@@ -37,9 +37,6 @@ export function isFetchFailure(value: unknown): value is FetchFailure {
     Object.hasOwn(codes, v.code) &&
     typeof v.message === "string" &&
     v.message.length <= 4096 &&
-    typeof v.retryable === "boolean" &&
-    Array.isArray(v.recovery) &&
-    v.recovery.length === 0 &&
     ["direct", "metadata-proxy", "browser-session", "native", "display-only"].includes(
       String(v.transport),
     ) &&
