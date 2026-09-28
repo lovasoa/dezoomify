@@ -747,6 +747,17 @@ fn execute_effects(
 ) -> Result<(), NativeError> {
     for effect in effects {
         match effect {
+            EngineEffect::RequestResourceAccess { effect, .. } => {
+                // Native acquisition never reports a grantable browser
+                // permission. Unsupported access recovery stays denied.
+                let update = job
+                    .complete(
+                        EngineEffectId(effect),
+                        EngineEffectResult::ResourceAccessResolved { granted: false },
+                    )
+                    .map_err(|e| NativeError::new(e.code, e.message))?;
+                apply_update(pump, update);
+            }
             EngineEffect::AcquireResource { request } => {
                 if pump.snapshot.lifecycle != EngineLifecycle::Discovering {
                     continue;

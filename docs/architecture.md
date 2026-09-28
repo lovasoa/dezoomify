@@ -48,8 +48,8 @@ request. Named regex captures can use shared routes to resolve links, decode
 HTML entities, or fill a fixed resource URL before following it.
 
 Generic iframe navigation belongs to shared discovery, not individual formats.
-It retains bounded references in document order and waits until every
-format-specific path has failed before acquiring an embedded page. Each page
+It retains bounded references in document order and waits until accessible
+format-specific paths settle before acquiring an embedded page. Each page
 is evaluated against the registered formats afresh; sibling frames remain
 available after a failed path. Requests, retained bytes, transitions, and
 navigation cycles share the operation's limits.
@@ -63,6 +63,14 @@ paths; unclassified resource observations remain last-resort inputs. Broad forma
 preferences only order parsers and never promote traffic observations. Supplied
 documents count toward the same byte budget as fetched metadata, and all roots
 share request deduplication, resource counts, and transition limits.
+
+A host-reported, grantable access block suspends the resource and its parser
+continuations. Accessible sources, observations, and navigation continue. After
+they are exhausted, the operation exposes one blocked request in stable request
+order for access recovery. Granting access enables one fresh acquisition of that
+exact request; denial or a repeated block settles its original failure. A winning
+catalog discards suspended alternatives. HTTP refusals and non-grantable policy
+failures remain ordinary failures.
 
 To add a conventional format, define one `FormatSpec` with a metadata decoder,
 return an `ImagePlan` whose levels use `ResolvedLevel::grid`, and register the

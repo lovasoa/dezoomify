@@ -15,6 +15,7 @@ export function createAttemptPermissions(
   type Waiter = { finish(error?: unknown): void };
   type Entry = PermissionWait & { waiters: Set<Waiter> };
   const pending = new Map<string, Entry>();
+  const denied = new Set<string>();
   const publish = () => changed([...pending.values()]);
 
   async function ensure(origin: string, signal: AbortSignal): Promise<void> {
@@ -23,6 +24,8 @@ export function createAttemptPermissions(
     const granted = await api.contains({ origins });
     signal.throwIfAborted();
     if (granted) return;
+    if (denied.has(origin))
+      throw transportError("access-required", `Access to ${origin} was denied`);
     let entry = pending.get(origin);
     if (!entry) {
       const created: Entry = {
@@ -50,6 +53,7 @@ export function createAttemptPermissions(
       };
       const settle = (error?: unknown) => {
         if (pending.get(origin) !== created) return;
+        if (error !== undefined) denied.add(origin);
         for (const waiter of [...created.waiters]) waiter.finish(error);
       };
       pending.set(origin, created);

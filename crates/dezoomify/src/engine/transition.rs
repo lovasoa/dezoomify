@@ -59,6 +59,14 @@ pub enum Outcome {
 /// Deterministic host/user input. Correlation is local to one `Job`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum JobCommand {
+    ResourceAccessResolved {
+        request: u32,
+        granted: bool,
+    },
+    FetchBlocked {
+        request: u32,
+        cause: FetchCause,
+    },
     ResourceBytes {
         request: u32,
         bytes: Vec<u8>,
@@ -136,6 +144,10 @@ pub enum JobCommand {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum JobEffect {
+    RequestResourceAccess {
+        request: u32,
+        uri: String,
+    },
     AcquireResource {
         request: u32,
         uri: String,

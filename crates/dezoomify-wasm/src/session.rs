@@ -58,9 +58,9 @@ use dezoomify::engine::{
     Update as EngineUpdate, UserCommand as EngineUserCommand,
 };
 use dezoomify::model::{
-    BrowserSelectionLimits, Error, ErrorPhase, ErrorTransport, FetchFailure, HostCompletion,
-    HostEffect, JobCommand, JobState as ProtocolJobState, OutputDisposition, ProbeOutcome,
-    ProcessingRecipe, ResourceKind, SessionConfig,
+    BlockedReason, BrowserSelectionLimits, Error, ErrorPhase, ErrorTransport, FetchFailure,
+    FetchFailureCode, HostCompletion, HostEffect, JobCommand, JobState as ProtocolJobState,
+    OutputDisposition, ProbeOutcome, ProcessingRecipe, ResourceKind, SessionConfig,
 };
 
 /// One adapter session: exactly one engine job plus its request correlation.
@@ -258,6 +258,16 @@ impl Session {
         completion: HostCompletion,
     ) -> Result<Vec<HostEffect>, AdapterError> {
         match completion {
+            HostCompletion::ResourceAccessResolved { effect, granted } => {
+                let update = self
+                    .engine_job()?
+                    .complete(
+                        EngineEffectId(effect),
+                        EngineEffectResult::ResourceAccessResolved { granted },
+                    )
+                    .map_err(Self::engine_error)?;
+                Ok(self.drain_update(update))
+            }
             HostCompletion::ProvideResource {
                 request,
                 bytes,
@@ -585,6 +595,9 @@ impl Session {
                 if !self.is_discovering() {
                     return Ok(Vec::new());
                 }
+                let blocked = failure.code == FetchFailureCode::TRANSPORT_POLICY_DENIED
+                    && failure.blocked_reason == Some(BlockedReason::AccessRequired)
+                    && failure.http.is_none();
                 // Forward the host-observed failure context through the
                 // engine's retention: the engine groups discovery
                 // diagnostics on `(kind, cause)` and patches the terminal
@@ -614,18 +627,21 @@ impl Session {
                         detail: failure.detail.clone(),
                     },
                 );
+                let failure = EngineFailure {
+                    code: format!("{:?}", failure.code),
+                    http: failure.http,
+                    retry_after_ms: failure.retry_after_ms,
+                    transport: Some(transport),
+                    detail: None,
+                };
+                let result = if blocked {
+                    EngineEffectResult::MetadataBlocked(failure)
+                } else {
+                    EngineEffectResult::MetadataFailed(failure)
+                };
                 let update = self
                     .engine_job()?
-                    .complete(
-                        EngineEffectId(request),
-                        EngineEffectResult::MetadataFailed(EngineFailure {
-                            code: format!("{:?}", failure.code),
-                            http: failure.http,
-                            retry_after_ms: failure.retry_after_ms,
-                            transport: Some(transport),
-                            detail: None,
-                        }),
-                    )
+                    .complete(EngineEffectId(request), result)
                     .map_err(Self::engine_error)?;
                 Ok(self.drain_update(update))
             }

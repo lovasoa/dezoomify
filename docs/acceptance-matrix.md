@@ -43,6 +43,13 @@ tile redirects without granting analytics access in Chromium and Firefox
 (`cargo xtask test extension`); its declared viewer also runs through the native
 job service (`cargo xtask test native`).
 
+Blocked-path suspension, accessible alternatives, exact-request resumption,
+denial, ineffective grants, and cancellation are pinned in
+`crates/dezoomify/tests/engine_discovery_access.rs`. WASM adapter and browser job
+service tests pin the typed effect round trip and disposal. These run in
+`cargo xtask test`; the extension permission tests also prevent repeated prompts
+for a denied origin within one attempt.
+
 | Behavior | Corpus | Lane |
 |---|---|---|
 | Metadata trace, deferred catalog, 403 handling | `testdata/scenarios/native/cli-deferred`, `testdata/scenarios/native/cli-deferred-limit`, `testdata/scenarios/web/iiif-discovery` | `cargo xtask test scenario`, `cargo xtask test web` |

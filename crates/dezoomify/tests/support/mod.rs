@@ -356,6 +356,7 @@ impl ScriptedHost {
                     self.timer_effects_live.insert((*tile, *attempt), id);
                 }
                 Effect::FinalizeOutput { .. }
+                | Effect::RequestResourceAccess { .. }
                 | Effect::RequestDecision { .. }
                 | Effect::CancelWork => {}
             }

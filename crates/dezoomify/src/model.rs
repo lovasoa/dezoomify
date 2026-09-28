@@ -249,6 +249,12 @@ pub enum JobCommand {
 #[serde(tag = "type", rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum HostCompletion {
+    /// Answer one engine-selected access recovery. A grant resumes the
+    /// blocked metadata request with a fresh acquisition effect.
+    ResourceAccessResolved {
+        effect: u32,
+        granted: bool,
+    },
     ProvideResource {
         request: u32,
         /// Resource body, carried directly in the completion. Nothing is
@@ -317,6 +323,12 @@ pub enum HostCompletion {
 #[serde(tag = "type", rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum HostEffect {
+    /// Accessible discovery alternatives are exhausted. The host may ask
+    /// for access to this resource; unsupported or denied access returns false.
+    RequestResourceAccess {
+        effect: u32,
+        uri: String,
+    },
     AcquireResource {
         request: ResourceRequest,
     },

@@ -61,6 +61,10 @@ test("a disposed worker drops late bytes and commands; the retired job cannot mu
   await host.onMessage({ type: "engine.probe", requestId: 4, outcome: { status: "missing" } });
   await host.onMessage({ type: "engine.display", requestId: 5 });
   await host.onMessage({ type: "engine.acquired", requestId: 6 });
+  await host.onMessage({
+    type: "engine.access",
+    outcome: { type: "resource-access-resolved", effect: 7, granted: true },
+  });
   assert.equal(
     calls.length,
     dispatches + 1,

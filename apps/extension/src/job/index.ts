@@ -541,7 +541,8 @@ async function beginAttempt(inputs: JobInput[]) {
       signal.throwIfAborted();
       jobLog.debug("extension-fetch-start", `url=${url} purpose=${request.purpose}`);
       try {
-        await permissions.ensure(new URL(request.uri).origin, signal);
+        if (request.purpose !== "metadata")
+          await permissions.ensure(new URL(request.uri).origin, signal);
         const result = await fetcher.fetchResource(request, signal);
         if (!owns(attempt)) signal.throwIfAborted();
         if (owns(attempt))
@@ -574,6 +575,10 @@ async function beginAttempt(inputs: JobInput[]) {
   const service = createBrowserJobService({
     createWorker: () => new Worker(new URL("./worker.js", import.meta.url), { type: "module" }),
     fetchResource,
+    requestResourceAccess: async (uri, signal) => {
+      await permissions.ensure(new URL(uri).origin, signal);
+      return true;
+    },
     loadDisplayImage: (url, signal) => loadTileImage(url, { signal }),
     classifyFailure: asFetchFailure,
     createAssembly: (args) => {

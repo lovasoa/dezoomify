@@ -96,14 +96,21 @@ While paused the engine schedules no new `acquire-tile` effects, finishes in-fli
 
 Effects carry everything a host needs; hosts never re-derive job policy or tile geometry. Canonical here; [Browser runtime](browser-runtime.md#engine-effect-assembly) and [Native apps](native-apps.md#native-runtime) cover host-side execution only.
 
-- `acquire-metadata{id, uri}`: fetch one metadata resource; answer with `provide_metadata` (body) or `complete` with `MetadataFailed`.
+- `acquire-metadata{id, uri}`: fetch one metadata resource; answer with `provide_metadata` (body), `MetadataFailed`, or `MetadataBlocked` for host access that can be requested.
+- `request-resource-access{effect, uri}`: accessible discovery paths are exhausted; ask for host access and answer `ResourceAccessResolved{granted}`. Unsupported or denied access returns false. Granting access emits a fresh acquisition effect; the URI, headers, and parser continuation stay in the core. Each request receives at most one access recovery. Stale and wrong-kind replies use the same validation as other effects.
 - `acquire-tile`: effect id, engine tile id, request (URI, headers), output placement (position, planned extent, declared canvas, processing recipe, probe flag). Hosts decode during acquisition, so decode failures arrive as tile outcomes. Answer with `TileAcquired`, `TileDisplayed` (ordinary image, no readable bytes), or `TileFailed` with structured facts.
 - `wait-retry-timer{id, tile, attempt, delay_ms}`: the host waits `delay_ms` on its own clock and answers with `complete(id, TimerElapsed)`; no new acquisition for the tile starts before that completion.
 - `finalize-output{id, partial, canvas}`: the host validates its destination, assembles, encodes, saves or displays, and answers once with `OutputCommitted` (plus its disposition) or `OutputFailed`. Completion follows success only.
 - `request-partial-decision{id, generation, missing}`: answer with `command(AnswerPartial{decision})`.
 - `cancel-release{id}`: idempotent; cancel work and release kept resources after cancellation or failure.
 
-Discovery walks ordered roots in registry order. A root with bytes is evaluated directly; a URL-only root starts with an `acquire-metadata` effect. The first root yielding a catalog wins; failures advance to the next root. One `acquire-metadata` effect per outstanding core request; the same effect stays outstanding until answered, so the engine never spins on silence.
+Discovery schedules sources and observations under the shared precedence policy.
+A root with bytes is evaluated directly; a URL-only root starts with an
+`acquire-metadata` effect. The first accepted catalog wins. Failed paths advance
+the search; grantable access blocks suspend paths until accessible alternatives
+settle. One acquisition or access effect represents each outstanding core need;
+polling never duplicates it. Cancellation invalidates pending recovery and the
+host aborts any permission wait.
 
 A probe tile answered as available whose position the resolved plan reuses (`probe_output`) counts as already fetched; the host keeps the decoded probe. Other probes stay advisory and never enter retry or partial handling.
 

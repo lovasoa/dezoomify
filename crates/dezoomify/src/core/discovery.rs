@@ -346,6 +346,8 @@ pub struct ResourceFailure {
 enum ResourceOutcome {
     Response(ResourceResponse),
     Failure(ResourceFailure),
+    /// A host can request access, but only after accessible paths settle.
+    Blocked(ResourceFailure),
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DiscoveryLimits {
@@ -423,7 +425,7 @@ impl<'a> DiscoveryContext<'a> {
                         .filter(|uri| !uri.is_empty())
                         .unwrap_or(&record.request.uri),
                 }),
-                ResourceOutcome::Failure(_) => None,
+                ResourceOutcome::Failure(_) | ResourceOutcome::Blocked(_) => None,
             })
     }
     #[must_use]
@@ -976,6 +978,8 @@ pub struct DiscoveryOperation {
     input: String,
     specs: Vec<FormatSpec>,
     candidates: Vec<Candidate>,
+    suspended: Vec<Candidate>,
+    access_attempted: HashSet<RequestId>,
     inputs: VecDeque<DiscoveryInput>,
     unclassified_inputs: VecDeque<DiscoveryInput>,
     /// Generic references wait until every format-specific path settles.
@@ -1006,6 +1010,8 @@ impl DiscoveryOperation {
             input,
             specs: specs.to_vec(),
             candidates,
+            suspended: Vec::new(),
+            access_attempted: HashSet::new(),
             inputs: VecDeque::new(),
             unclassified_inputs: VecDeque::new(),
             navigation: BTreeMap::new(),
@@ -1069,7 +1075,7 @@ impl DiscoveryOperation {
         matches!(state, CandidateState::New)
             || matches!(state, CandidateState::Waiting(id) if self
                 .resource(id)
-                .is_some_and(|resource| resource.outcome.is_some()))
+                .is_some_and(|resource| matches!(resource.outcome, Some(ResourceOutcome::Response(_) | ResourceOutcome::Failure(_)))))
     }
     pub fn missing_resources(&mut self) -> Result<Vec<ResourceNeed>, DiscoveryError> {
         self.drive()?;
@@ -1112,6 +1118,58 @@ impl DiscoveryOperation {
     }
     pub fn provide_failure(&mut self, failure: ResourceFailure) -> Result<(), DiscoveryError> {
         self.provide_outcome(failure.id, ResourceOutcome::Failure(failure))
+    }
+
+    /// Suspend a permission-blocked request without rejecting its parsers.
+    /// A repeated block after a grant settles as a normal failure.
+    pub fn provide_blocked(&mut self, failure: ResourceFailure) -> Result<(), DiscoveryError> {
+        if self.access_attempted.contains(&failure.id) {
+            return self.provide_failure(failure);
+        }
+        self.provide_outcome(failure.id, ResourceOutcome::Blocked(failure))
+    }
+
+    /// One access request is eligible only after all accessible discovery
+    /// alternatives have settled. Repeated polls return the same need.
+    pub fn access_needed(&mut self) -> Result<Option<ResourceNeed>, DiscoveryError> {
+        self.drive()?;
+        if self.is_complete() || self.outstanding_needs().next().is_some() {
+            return Ok(None);
+        }
+        Ok(self
+            .requests
+            .iter()
+            .enumerate()
+            .find_map(|(index, record)| {
+                matches!(record.outcome, Some(ResourceOutcome::Blocked(_))).then(|| ResourceNeed {
+                    id: RequestId(index),
+                    request: record.request.clone(),
+                })
+            }))
+    }
+
+    /// Resolve host access and resume the exact parser continuations. A grant
+    /// enables one fresh fetch; denial feeds the original typed failure.
+    pub fn resolve_access(&mut self, id: RequestId, granted: bool) -> Result<(), DiscoveryError> {
+        let record = self
+            .requests
+            .get_mut(id.0)
+            .ok_or(DiscoveryError::UnknownRequest(id))?;
+        let Some(ResourceOutcome::Blocked(failure)) = &record.outcome else {
+            return Err(DiscoveryError::RequestAlreadyProvided(id));
+        };
+        record.outcome = if granted {
+            None
+        } else {
+            Some(ResourceOutcome::Failure(failure.clone()))
+        };
+        self.access_attempted.insert(id);
+        let (resuming, suspended) = self.suspended.drain(..).partition::<Vec<_>, _>(|candidate| {
+            matches!(candidate.state, CandidateState::Waiting(waiting) if waiting == id)
+        });
+        self.suspended = suspended;
+        self.candidates.extend(resuming);
+        self.drive()
     }
     fn provide_outcome(
         &mut self,
@@ -1199,11 +1257,7 @@ impl DiscoveryOperation {
                 .iter()
                 .position(|candidate| self.ready(candidate.state))
             else {
-                let pending = self.requests.iter().any(|r| r.outcome.is_none())
-                    || self
-                        .candidates
-                        .iter()
-                        .any(|c| !matches!(c.state, CandidateState::Rejected));
+                let pending = self.requests.iter().any(|r| r.outcome.is_none());
                 if pending {
                     return Ok(());
                 }
@@ -1212,6 +1266,13 @@ impl DiscoveryOperation {
                     || self.start_next_input(true)?
                 {
                     continue;
+                }
+                if self
+                    .requests
+                    .iter()
+                    .any(|record| matches!(record.outcome, Some(ResourceOutcome::Blocked(_))))
+                {
+                    return Ok(());
                 }
                 return Err(DiscoveryError::NoCandidateAccepted {
                     diagnostics: self.diagnostics.clone(),
@@ -1325,6 +1386,7 @@ impl DiscoveryOperation {
                 Some(handler) => handler(&context, request, failure),
                 None => Err(DiscoveryError::fetch_failed(failure.cause.clone())),
             },
+            ResourceOutcome::Blocked(_) => unreachable!("blocked candidates are never ready"),
         }
     }
 
@@ -1366,6 +1428,11 @@ impl DiscoveryOperation {
     }
 
     fn start_root(&mut self, uri: String) {
+        self.suspended.extend(
+            self.candidates
+                .drain(..)
+                .filter(|candidate| matches!(candidate.state, CandidateState::Waiting(_))),
+        );
         self.input = uri;
         self.candidates = self
             .specs

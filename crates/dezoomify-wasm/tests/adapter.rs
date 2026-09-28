@@ -83,6 +83,121 @@ fn typed_fetch_error_requires_and_preserves_context() {
     assert_eq!(failed.http, Some(502));
 }
 
+fn access_failure() -> FetchFailure {
+    FetchFailure {
+        code: dezoomify::model::FetchFailureCode::TRANSPORT_POLICY_DENIED,
+        retryable: false,
+        message: "Host access is required".into(),
+        recovery: Vec::new(),
+        transport: ErrorTransport::BrowserSession,
+        blocked_reason: Some(BlockedReason::AccessRequired),
+        http: None,
+        retry_after_ms: None,
+        preview: None,
+        detail: None,
+    }
+}
+
+#[test]
+fn access_recovery_round_trips_through_the_generated_session_contract() {
+    let mut session = session();
+    let messages = start_messages(&mut session);
+    let HostEffect::AcquireResource { request } = &messages[0] else {
+        panic!("metadata")
+    };
+    let initial = request.clone();
+    let (messages, _) = session
+        .complete(HostCompletion::ProvideFetchFailure {
+            request: initial.id,
+            error: access_failure(),
+        })
+        .unwrap();
+    let [HostEffect::RequestResourceAccess { effect, uri }] = messages.as_slice() else {
+        panic!("access effect: {messages:?}")
+    };
+    assert_eq!(uri, &initial.uri);
+    let (messages, _) = session
+        .complete(HostCompletion::ResourceAccessResolved {
+            effect: *effect,
+            granted: true,
+        })
+        .unwrap();
+    let [HostEffect::AcquireResource { request }] = messages.as_slice() else {
+        panic!("resumed acquisition")
+    };
+    assert_eq!(request.uri, initial.uri);
+    assert_ne!(request.id, initial.id);
+    let (_, snapshot) = session
+        .complete(HostCompletion::ProvideResource {
+            request: request.id,
+            bytes: DZI.to_vec(),
+            final_uri: None,
+        })
+        .unwrap();
+    assert_eq!(snapshot.lifecycle, JobState::AwaitingImageSelection);
+}
+
+#[test]
+fn observed_resource_survives_the_scan_contract_without_an_access_prompt() {
+    let mut session = session();
+    let mut observed = JobInput::new("https://example.test/observed.dzi");
+    observed.kind = Some(dezoomify::model::DiscoveryInputKind::ObservedResource);
+    let (messages, _) = session
+        .command(JobCommand::Start {
+            inputs: vec![JobInput::new("https://example.test/blocked.dzi"), observed],
+        })
+        .unwrap();
+    let HostEffect::AcquireResource { request } = &messages[0] else {
+        panic!("source")
+    };
+    let (messages, _) = session
+        .complete(HostCompletion::ProvideFetchFailure {
+            request: request.id,
+            error: access_failure(),
+        })
+        .unwrap();
+    let [HostEffect::AcquireResource { request }] = messages.as_slice() else {
+        panic!("accessible alternative: {messages:?}")
+    };
+    assert_eq!(request.uri, "https://example.test/observed.dzi");
+    let (messages, snapshot) = session
+        .complete(HostCompletion::ProvideResource {
+            request: request.id,
+            bytes: DZI.to_vec(),
+            final_uri: None,
+        })
+        .unwrap();
+    assert_eq!(snapshot.lifecycle, JobState::AwaitingImageSelection);
+    assert!(messages.is_empty());
+}
+
+#[test]
+fn http_and_non_grantable_policy_failures_do_not_request_permissions() {
+    for (reason, http) in [
+        (BlockedReason::AccessRequired, Some(403)),
+        (BlockedReason::Forbidden, None),
+    ] {
+        let mut session = session();
+        let messages = start_messages(&mut session);
+        let HostEffect::AcquireResource { request } = &messages[0] else {
+            panic!("metadata")
+        };
+        let mut error = access_failure();
+        error.blocked_reason = Some(reason);
+        error.http = http;
+        let (messages, snapshot) = session
+            .complete(HostCompletion::ProvideFetchFailure {
+                request: request.id,
+                error,
+            })
+            .unwrap();
+        assert_eq!(snapshot.lifecycle, JobState::Failed);
+        assert!(!messages
+            .iter()
+            .any(|message| matches!(message, HostEffect::RequestResourceAccess { .. })));
+    }
+}
+
 #[test]
 fn rejected_empty_metadata_body_keeps_the_effect_answerable() {
     let mut session = session();

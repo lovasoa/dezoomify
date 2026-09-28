@@ -84,6 +84,8 @@ export interface EngineHostDeps {
   jobId(): string;
   /** Fetch one effect resource as readable bytes (product transport). Single attempt; the engine owns retries. */
   fetchResource(request: ResourceRequest): Promise<{ bytes: Uint8Array; finalUri?: string }>;
+  /** Ask for host access only when the engine has exhausted accessible discovery paths. */
+  requestResourceAccess?(uri: string): Promise<boolean>;
   /** Cancel in-flight fetches (product transport). */
   cancelFetch(): void;
   assembly: EngineHostAssembly;
@@ -554,6 +556,25 @@ export function createEngineHost(deps: EngineHostDeps) {
   }
 
   const effectHandlers = {
+    "request-resource-access": (effect) => {
+      void (async () => {
+        let granted = false;
+        try {
+          granted = (await deps.requestResourceAccess?.(effect.uri)) ?? false;
+        } catch {
+          /* Denied and unsupported host access both settle the branch. */
+        }
+        if (!tornDown())
+          sendToEngine({
+            type: "engine.access",
+            outcome: {
+              type: "resource-access-resolved",
+              effect: effect.effect,
+              granted,
+            },
+          });
+      })();
+    },
     "acquire-resource": (effect) => {
       void acquire(effect);
     },
