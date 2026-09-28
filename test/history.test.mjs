@@ -50,7 +50,9 @@ test("history entries keep the full address", () => {
   assert.equal(entry.url, clean);
   assert.equal(entry.width, 512);
   assert.equal(entry.format, "png");
+  assert.equal(entry.at, 1700000000000);
   assert.equal(toHistoryEntry("file:///etc/passwd", {}), null);
+  assert.equal(toHistoryEntry("not a url", {}), null);
 });
 
 test("history push dedupes by full address and caps at 20", () => {

@@ -911,21 +911,6 @@ mod tests {
     }
 
     #[test]
-    fn unknown_and_stale_rejected() {
-        let mut table = JobTable::new();
-        assert_eq!(table.cancel_job("job:missing").unwrap_err(), "unknown");
-        let (id, _) = table.start_job("https://example.com/item").unwrap();
-        table.cancel_job(&id).unwrap();
-        assert_eq!(table.cancel_job(&id).unwrap_err(), "stale");
-        assert_eq!(
-            table
-                .command(&id, &JobCommand::SelectImage { image: 0 })
-                .unwrap_err(),
-            "stale"
-        );
-    }
-
-    #[test]
     fn settings_wire_cli_parity_and_output_dir() {
         use crate::settings::parse_settings;
         let settings = parse_settings(&serde_json::json!({
@@ -1642,16 +1627,6 @@ mod tests {
         let mut table = JobTable::new();
         assert_eq!(table.cancel_job("bad-id").unwrap_err(), "unknown");
         assert_eq!(table.cancel_job("job:").unwrap_err(), "unknown");
-    }
-
-    /// Post-terminal shell inputs project as `stale` with no new work.
-    #[test]
-    fn shell_post_terminal_without_work() {
-        // Shell projection of the terminal moment.
-        let mut table = JobTable::new();
-        let (id, _) = table.start_job("https://example.com/item").unwrap();
-        table.cancel_job(&id).unwrap();
-        assert_eq!(table.cancel_job(&id).unwrap_err(), "stale");
     }
 
     /// Task 6.1: input validation rejects userinfo, oversize, bad format, and

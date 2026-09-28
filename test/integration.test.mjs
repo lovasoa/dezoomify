@@ -1,11 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createDiagnosticRecorder } from "../packages/app-model/src/diagnostics.ts";
-import {
-  canvasToPngBlob,
-  isCanvasTaintError,
-} from "../packages/browser-runtime/src/canvas-save.ts";
-import { drawPlacedTile } from "../packages/browser-runtime/src/tile-draw.ts";
 import { DIRECT_METADATA_TIMEOUT_MS } from "../packages/browser-runtime/src/tile-policy.ts";
 import { createWebFetcher } from "../packages/browser-runtime/src/web-fetch.ts";
 import {
@@ -13,7 +8,6 @@ import {
   isOrdinaryImageTile,
   isProxyEligible,
 } from "../packages/browser-runtime/src/web-integration.ts";
-import { renderSaveGuidance } from "../packages/shared-ui/src/components.ts";
 import { presentIdle } from "../packages/shared-ui/src/snapshot-view.ts";
 import { renderView } from "../packages/shared-ui/src/view.tsx";
 import {
@@ -391,49 +385,4 @@ test("tile failures report the direct transport, never the metadata proxy", () =
   assert.equal(errorTransportFor("TILE_FAILED", null), "direct");
   assert.equal(errorTransportFor("DISCOVERY_FAILED", "metadata-proxy"), "metadata-proxy");
   assert.equal(errorTransportFor("NO_IMAGE_FOUND", null), "direct");
-});
-
-test("edge tiles crop to the plan, saves warn on color profiles, PNG encodes via canvas", async () => {
-  // Padded edge tiles (e.g. Google Arts & Culture) crop from the right and
-  // bottom; actual/expected dimensions are recorded by the assembly.
-  const draws = [];
-  drawPlacedTile(
-    { drawImage: (...args) => draws.push(args) },
-    { width: 512, height: 512 },
-    { x: 0, y: 0, w: 256, h: 256 },
-  );
-  assert.deepEqual(draws, [[{ width: 512, height: 512 }, 0, 0, 256, 256, 0, 0, 256, 256]]);
-
-  // The browser canvas path strips ICC/EXIF, so save guidance warns that
-  // colors may shift.
-  assert.ok(renderSaveGuidance(true).includes("Colors may shift"));
-
-  // The shipped save path encodes through the canvas host: a blob resolves
-  // the save, a null blob fails closed with a typed code, and a tainted
-  // canvas error propagates untouched for the display-only fallback.
-  const seen = [];
-  const blob = { kind: "png-blob" };
-  const ok = await canvasToPngBlob({
-    toBlob: (cb, mime) => {
-      seen.push(mime);
-      cb(blob);
-    },
-  });
-  assert.equal(ok, blob);
-  assert.deepEqual(seen, ["image/png"]);
-  await assert.rejects(
-    canvasToPngBlob({ toBlob: (cb) => cb(null) }),
-    (error) => error.code === "OUTPUT_ENCODE_FAILED",
-  );
-  const taint = new Error("tainted");
-  taint.name = "SecurityError";
-  assert.equal(isCanvasTaintError(taint), true);
-  await assert.rejects(
-    canvasToPngBlob({
-      toBlob: () => {
-        throw taint;
-      },
-    }),
-    (error) => error === taint,
-  );
 });

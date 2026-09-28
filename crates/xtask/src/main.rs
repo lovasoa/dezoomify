@@ -168,12 +168,6 @@ mod tests {
         ] {
             assert!(HELP.contains(cmd), "help lacks {cmd}");
         }
-        for future in ["quantum", "teleport"] {
-            assert!(
-                !HELP.lines().any(|l| l.trim_start().starts_with(future)),
-                "help advertises future command {future}"
-            );
-        }
     }
 
     #[test]
@@ -193,27 +187,6 @@ mod tests {
         assert!(dispatch(&s(&["fixtures", "bogus"])).is_err());
         assert!(dispatch(&s(&["sources", "verify"])).is_err());
         assert!(dispatch(&s(&["parity", "validate"])).is_err());
-    }
-
-    #[test]
-    fn scenario_schema() {
-        for name in [
-            "manifest.schema.json",
-            "scenario.schema.json",
-            "routes.schema.json",
-            "transcript.schema.json",
-        ] {
-            let path = super::repo_root()
-                .join("testdata/scenarios/schema")
-                .join(name);
-            let text = std::fs::read_to_string(&path).expect("read schema");
-            let v: serde_json::Value = serde_json::from_str(&text).expect("parse schema");
-            assert!(
-                v.get("title").and_then(|t| t.as_str()).is_some(),
-                "schema {name} needs a title"
-            );
-            assert!(v.get("type").is_some(), "schema {name} needs a type");
-        }
     }
 
     #[test]

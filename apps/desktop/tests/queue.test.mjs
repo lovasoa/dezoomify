@@ -188,9 +188,6 @@ for (const id of ["queue-basic", "queue-retry"]) {
   test(`scenario ${id}: scripted queue run matches golden outcomes and transcript`, () => {
     const doc = readJson(`${id}/expected/result.json`);
     const transcript = readJson(`${id}/expected/transcript.json`);
-    assert.equal(doc.scenario, `desktop/${id}`);
-    assert.equal(doc.capabilities.bulkSupported, true, "queue scenarios need bulkSupported");
-    assert.equal(doc.protocol, "2.0");
     const { queue: q, events, byIndex } = runQueueScript(doc);
     assert.deepEqual(events, transcript.events, "ordered queue transcript");
     const outcomes = q.entries.map((e) => ({

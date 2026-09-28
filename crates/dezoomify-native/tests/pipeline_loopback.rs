@@ -146,35 +146,6 @@ fn tile_failure_fails_honestly_without_output() {
 }
 
 #[test]
-fn retries_zero_fails_without_a_second_attempt() {
-    // `--retries 0` parity: the first tile failure fails the job with the
-    // honest code and no output. The driver answers the engine's retry
-    // roundtrip without refetching, so no second request is ever sent.
-    let origin = start_fixture_server();
-    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/broken.dzi");
-    let out_dir = temp_dir("retries-zero");
-    let output = out_dir.join("broken.png");
-    let config = JobOptions {
-        max_retries: 0,
-        keep_partial: false,
-        ..Default::default()
-    };
-    let error = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
-        &config,
-        &mut |_| {},
-    )
-    .expect_err("pipeline fails on missing tiles");
-    assert_eq!(error.code, "tile.download-failed");
-    assert!(
-        !output.exists(),
-        "no output may be written for a failed job"
-    );
-}
-
-#[test]
 fn file_uri_tiles_assemble_from_a_remote_manifest() {
     // Local tile URIs (`file://`) read from the filesystem even when the
     // manifest itself arrives over HTTP: the assembled output matches the

@@ -10,7 +10,13 @@ import { stableErrorCode } from "../src/failure.ts";
 
 test("canvasToPngBlob resolves the encoded blob", async () => {
   const encoded = new Blob(["png"], { type: "image/png" });
-  assert.equal(await canvasToPngBlob({ toBlob: (cb) => cb(encoded) }), encoded);
+  const result = await canvasToPngBlob({
+    toBlob: (cb, mime) => {
+      assert.equal(mime, "image/png");
+      cb(encoded);
+    },
+  });
+  assert.equal(result, encoded);
 });
 
 test("canvasToPngBlob maps null and throws to OUTPUT_ENCODE_FAILED", async () => {

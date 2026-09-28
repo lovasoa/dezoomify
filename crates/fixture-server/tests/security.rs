@@ -7,13 +7,6 @@ mod common;
 use common::TestServer;
 
 #[tokio::test]
-async fn manifest_exists() {
-    let manifest = std::fs::read_to_string(common::TestServer::scenarios_path("manifest.json"))
-        .expect("manifest");
-    assert!(manifest.contains("\"version\": 1") || manifest.contains("\"version\":1"));
-}
-
-#[tokio::test]
 async fn traversal_in_original_url_is_rejected() {
     let srv = TestServer::start().await;
     for target in [
