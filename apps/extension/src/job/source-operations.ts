@@ -20,6 +20,7 @@ type SourceRequest = {
   method?: string;
   headers: Array<{ name: string; value: string }>;
   operationId?: string;
+  timeoutMs?: number;
 };
 
 export function collectCandidates(): {
@@ -150,6 +151,11 @@ export async function fetchSource(request: SourceRequest): Promise<
   for (const header of request.headers) headers[header.name] = header.value;
 
   const controller = typeof AbortController === "function" ? new AbortController() : null;
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller?.abort();
+  }, request.timeoutMs ?? 30_000);
   if (controller && request.operationId) controllers.set(request.operationId, controller);
   try {
     const response = await fetch(request.url, {
@@ -248,6 +254,11 @@ export async function fetchSource(request: SourceRequest): Promise<
     };
   } catch (error) {
     const caught = error as { code?: unknown; name?: unknown };
+    if (timedOut) {
+      const result = fail("TRANSPORT_TIMEOUT", "The source request timed out.");
+      result.error.retryable = true;
+      return result;
+    }
     if (caught?.code === "too-large")
       return fail("TRANSPORT_SIZE_LIMIT", "The source response exceeds the byte limit.");
     return caught?.name === "AbortError"
@@ -257,6 +268,7 @@ export async function fetchSource(request: SourceRequest): Promise<
           error instanceof Error ? error.message.slice(0, 4096) : "The source fetch failed.",
         );
   } finally {
+    clearTimeout(timer);
     if (request.operationId) controllers.delete(request.operationId);
   }
 }

@@ -196,3 +196,43 @@ test("generated failure facts survive source validation and classification uncha
     source.dispose();
   }
 });
+
+test("a lost browser reply is bounded and returns a typed timeout", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const fake = fakeBrowser(() => new Promise(() => {}));
+  const source = createSourceAccess(
+    fake.api,
+    { tabId: 9, documentUrl: SOURCE_URL },
+    { timeoutMs: 30 },
+  );
+  const pending = source.fetch(
+    { uri: "https://gallery.example/tile.jpg", headers: [] },
+    new AbortController().signal,
+  );
+  const checked = assert.rejects(pending, { code: "TRANSPORT_TIMEOUT", retryable: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  t.mock.timers.tick(30);
+  await checked;
+  source.dispose();
+});
+
+test("cancellation and disposal settle even when source injection never replies", async () => {
+  for (const action of ["cancel", "dispose", "navigate"]) {
+    const fake = fakeBrowser(() => new Promise(() => {}));
+    const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+    const controller = new AbortController();
+    const pending = source.fetch(
+      { uri: "https://gallery.example/tile.jpg", headers: [] },
+      controller.signal,
+    );
+    const checked = assert.rejects(pending, {
+      code: action === "cancel" ? "cancelled" : "source-document-lost",
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    if (action === "cancel") controller.abort();
+    else if (action === "dispose") source.dispose();
+    else fake.listeners.updated[0](9, { status: "loading" });
+    await checked;
+    source.dispose();
+  }
+});

@@ -56,7 +56,12 @@ export function createEngineResourceFetcher(deps: {
             url: request.uri,
             duration_ms: performance.now() - started,
           });
-        if (signal.aborted || (isFetchFailure(error) && error.http !== undefined)) throw error;
+        if (
+          signal.aborted ||
+          (isFetchFailure(error) &&
+            (error.http !== undefined || error.code === "TRANSPORT_TIMEOUT"))
+        )
+          throw error;
         deps.diagnostics?.record("warn", "source-fetch-fallback", {
           ...asFetchFailure(error),
           request: request.id,
