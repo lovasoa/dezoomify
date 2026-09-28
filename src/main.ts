@@ -672,11 +672,27 @@ function submitQueuedUrl(url: string): void {
   const res = enqueueWebQueue(webQueue, url);
   webQueue = res.queue;
   if (res.code !== "ok" || !res.entry) {
+    if (!currentAttempt.activeSnapshot || currentAttempt.activeSnapshot.terminal) {
+      retireAttempt();
+      currentAttempt = newAttempt();
+    }
+    currentAttempt.diagnostics.context({ input: url });
+    currentAttempt.viewCtx.initialUrl = url;
+    currentAttempt.viewCtx.sourceUrl = url;
+    currentAttempt.viewCtx.desktopHandoffUrl = undefined;
+    const local = isLocalFileUrl(url);
     currentAttempt.hostFailure = {
       code: "INVALID_URL",
       category: "validation",
       retryable: false,
-      message: "Please enter a valid web address starting with http:// or https://",
+      message: local
+        ? "Local files cannot be opened on this website. Use the desktop app for files on your computer."
+        : "Please enter a valid web address starting with http:// or https://",
+      transport: "direct",
+      phase: "discovery",
+      ...(local
+        ? { detail: "Local file: open the desktop app and choose the file there; nothing is sent." }
+        : {}),
     };
     update();
     return;
@@ -733,6 +749,10 @@ function update(): void {
   if (!appContainer) return;
   const attempt = currentAttempt;
   const presentation = currentPresentation();
+  attempt.diagnostics.context({
+    presented_phase: presentation.phase,
+    presented_error: presentation.terminal?.error?.code ?? "",
+  });
   if (presentation.terminal?.error)
     attempt.diagnostics.finish("failed", presentation.terminal.error);
   // In-flight tile count rides the context; counts come from the snapshot.
@@ -759,36 +779,7 @@ function update(): void {
     appContainer,
     presentation,
     {
-      onSubmitUrl(url: string) {
-        if (isLocalFileUrl(url)) {
-          attempt.viewCtx.initialUrl = url;
-          attempt.viewCtx.sourceUrl = url;
-          attempt.viewCtx.desktopHandoffUrl = undefined;
-          attempt.hostFailure = {
-            code: "INVALID_URL",
-            category: "validation",
-            retryable: false,
-            message:
-              "Local files cannot be opened on this website. Use the desktop app for files on your computer.",
-            transport: "direct",
-            phase: "discovery",
-            detail: "Local file: open the desktop app and choose the file there; nothing is sent.",
-          };
-          update();
-          return;
-        }
-        if (!isValidInputUrl(url)) {
-          attempt.hostFailure = {
-            code: "INVALID_URL",
-            category: "validation",
-            retryable: false,
-            message: "Please enter a valid web address starting with http:// or https://",
-          };
-          update();
-          return;
-        }
-        submitQueuedUrl(url);
-      },
+      onSubmitUrl: submitQueuedUrl,
       onPause() {
         if (!owns(attempt)) return;
         // Pause v1: stop scheduling new tiles; in-flight finishes, the

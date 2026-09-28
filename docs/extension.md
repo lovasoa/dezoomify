@@ -62,4 +62,4 @@ Same engine and fixture contracts as web and desktop govern job behavior. See [T
 
 ## Diagnostics
 
-The job page and WASM worker log structured milestones for scans, source fetches, extension-origin fallback, permission prompts, engine commands, and failures. The job page mirrors accepted lines and `engine.log` entries into technical details and copied diagnostics. There is no background job log or cross-context trace protocol.
+Each attempt owns a bounded [diagnostic report](errors.md#diagnostic-reports). It retains the scanned document URL, candidate count and overflow, candidate URLs without DOM contents, the first tile request, source fetch status and content type, extension-origin fallback, permission prompts, commands, and failures. The report survives cancellation. Browser injection failures preserve their original cause; the worker has no separate logging channel.

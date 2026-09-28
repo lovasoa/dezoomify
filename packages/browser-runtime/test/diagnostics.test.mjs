@@ -52,6 +52,7 @@ test("reports retain grouped causes and outcome under load independently of cons
     },
   });
   d.context({ input: "https://host/image?page=2", version: "test" });
+  d.context({ scan: { candidates: 100, overflow: 70 } });
   d.record("warn", "request", {
     http: 403,
     url: "https://host/first",
@@ -68,6 +69,8 @@ test("reports retain grouped causes and outcome under load independently of cons
   assert.ok(Buffer.byteLength(JSON.stringify(report)) <= 1024 * 1024);
   assert.ok(report.records.length <= 1000 && report.omitted_records > 0);
   assert.equal(report.failures[0].count, 5001);
+  assert.equal(report.context["scan.candidates"], 100);
+  assert.equal(report.context["scan.overflow"], 70);
   assert.equal(report.failures[0].first.fields.preview, "Cloudflare challenge");
   assert.equal(report.failures[0].last.fields.url, "https://host/4999");
   assert.equal(report.outcome.event, "failed");

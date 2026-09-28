@@ -396,7 +396,12 @@ test("a failed site-origin source fetch falls back to the extension origin", asy
     sourceTransport: {
       async fetchResource() {
         sourceAttempts += 1;
-        throw Object.assign(new Error("cors"), { category: "network" });
+        throw Object.assign(
+          new Error("source operation could not run", {
+            cause: new Error("Missing host permission"),
+          }),
+          { category: "network" },
+        );
       },
     },
   });
@@ -409,10 +414,9 @@ test("a failed site-origin source fetch falls back to the extension origin", asy
   );
   const acquired = sent.find((message) => message.type === "engine.acquired");
   assert.equal(acquired?.requestId, 0);
-  assert.ok(
-    logs.some((log) => log.event === "source-fetch-fallback"),
-    "the source failure is logged before the fallback",
-  );
+  const cause = logs.find((log) => log.event === "source-fetch-fallback").fields;
+  assert.equal(cause["error.cause.message"], "Missing host permission");
+  assert.equal(cause.url, TILE_EFFECT.request.uri);
 });
 
 test("a cross-origin tile never touches source access", async () => {

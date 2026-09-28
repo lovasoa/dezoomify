@@ -110,21 +110,15 @@ fn fields(value: Value, truncated: &mut u32) -> BTreeMap<String, DiagnosticValue
                     } else {
                         format!("{key}.{name}")
                     };
-                    if matches!(
+                    let value = if matches!(
                         name.as_str(),
                         "path" | "destination" | "output_dir" | "cache_dir"
                     ) {
-                        visit(
-                            next,
-                            Value::String("[local path]".into()),
-                            depth + 1,
-                            left,
-                            truncated,
-                            out,
-                        );
+                        Value::String("[local path]".into())
                     } else {
-                        visit(next, value, depth + 1, left, truncated, out);
-                    }
+                        value
+                    };
+                    visit(next, value, depth + 1, left, truncated, out);
                 }
             }
             Value::Array(items) => {

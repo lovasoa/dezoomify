@@ -97,6 +97,9 @@ test("webapp discovers, downloads, assembles, and saves a real DZI pyramid", asy
   // The pipeline must reach the completed state with real dimensions.
   await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 60000 });
   await expect(page.locator(".dz-completed-section")).toContainText(/512/);
+  const report = await page.locator("#dz-job-diagnostics").textContent();
+  assert.match(report, /presented_phase: completed/);
+  assert.match(report, /first_tile.url: .*pyramid_files/);
   // Tiles paint live during acquisition, so the assembled
   // picture stays visible next to the save button on the clean path too.
   await expect(canvas).toBeVisible();
@@ -138,6 +141,12 @@ test("webapp fails honestly on a page without a zoomable signal", async ({ page 
   await expect(page.locator(".dz-error-section")).toBeVisible({ timeout: 30000 });
   const body = await page.locator("#app").innerText();
   assert.match(body, /No zoomable image was found/i);
+  await page.getByRole("button", { name: "Start over" }).click();
+  await input.fill("view-source:https://www.britishmuseum.org/collection/example");
+  await page.getByRole("button", { name: /find image/i }).click();
+  const report = await page.locator("#dz-job-diagnostics").textContent();
+  assert.match(report, /input: view-source:https:\/\/www.britishmuseum.org/);
+  assert.match(report, /code=INVALID_URL/);
 });
 
 const FAILED_METADATA_URL = "https://fixtures.test/errors/info.json";

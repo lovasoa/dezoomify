@@ -114,7 +114,7 @@ test("source fetch returns one bounded base64 payload", async () => {
       ok: true,
       status: 200,
       url: "https://gallery.example/info.json",
-      headers: { get: () => null },
+      headers: { get: (key) => (key === "content-type" ? "text/html" : null) },
       body: {
         getReader: () => {
           let done = false;
@@ -138,6 +138,7 @@ test("source fetch returns one bounded base64 payload", async () => {
     assert.deepEqual([...Buffer.from(result.data, "base64")], [1, 2, 3]);
     assert.equal(result.bytes, 3);
     assert.equal(result.status, 200);
+    assert.equal(result.contentType, "text/html", "HTML served as info.json remains diagnosable");
     // Credentials stay unset so the default same-origin policy applies: a
     // cross-origin server answering `Access-Control-Allow-Origin: *` rejects
     // a credentialed CORS request.

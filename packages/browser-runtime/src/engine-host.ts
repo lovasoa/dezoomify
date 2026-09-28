@@ -390,6 +390,8 @@ export function createEngineHost(deps: EngineHostDeps) {
       url: request.uri,
       ...(effect.type === "acquire-tile" ? { tile: effect.tile, placement: effect.placement } : {}),
     };
+    if (effect.type === "acquire-tile" && effect.tile === 0)
+      deps.diagnostics?.context({ first_tile: facts });
     deps.diagnostics?.record(request.purpose === "metadata" ? "debug" : "trace", "acquire", facts);
     for (;;) {
       if (tornDown()) return;
