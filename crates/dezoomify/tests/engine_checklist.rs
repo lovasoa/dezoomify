@@ -247,9 +247,16 @@ fn permanent_failure_advances_single_slot_lazy_plan() {
         }
     }
 
-    assert_eq!(job.snapshot().lifecycle, JobState::AwaitingPartialDecision);
+    assert_eq!(job.snapshot().lifecycle, JobState::Failed);
     assert_eq!(attempted, vec![0, 1, 2, 3]);
-    assert_eq!(job.snapshot().decision.expect("decision").missing.len(), 4);
+    assert!(job.snapshot().decision.is_none());
+    assert_eq!(job.snapshot().output.unwrap().missing.len(), 4);
+    let Some(Terminal::Failed { error }) = job.snapshot().terminal else {
+        panic!("expected failure")
+    };
+    assert_eq!(error.code, "job.no-usable-tiles");
+    assert_eq!(error.http, Some(403));
+    assert!(!error.retryable);
 }
 
 #[test]
@@ -301,6 +308,46 @@ fn partial_retry_requeues_exactly_failed_tiles_preserving_good() {
     job.complete(retry_id, EffectResult::TileAcquired)
         .expect("retried tile done");
     assert_eq!(job.snapshot().lifecycle, JobState::Finalizing);
+}
+
+#[test]
+fn zero_usable_tiles_fail_under_every_partial_policy() {
+    for policy in [
+        PartialPolicy::Prompt,
+        PartialPolicy::Keep,
+        PartialPolicy::Fail,
+    ] {
+        for cause in [permanent_403(), transient()] {
+            let mut options = dzi_options();
+            options.partial = policy;
+            options.max_retries = 0;
+            let (mut job, update) = EngineJob::start(options).unwrap();
+            job.provide_metadata(metadata_id(&update), ResponseMetadata::new(), DZI)
+                .unwrap();
+            let update = select_largest(&mut job);
+            let ids = tile_ids(&update);
+            for (index, id) in ids.iter().enumerate() {
+                let update = job
+                    .complete(*id, EffectResult::TileFailed(cause.clone()))
+                    .unwrap();
+                assert!(!update.effects.iter().any(|effect| matches!(
+                    effect,
+                    Effect::FinalizeOutput { .. } | Effect::RequestDecision { .. }
+                )));
+                if index + 1 < ids.len() {
+                    assert_eq!(update.snapshot.lifecycle, JobState::AcquiringTiles);
+                }
+            }
+            let snapshot = job.snapshot();
+            assert_eq!(snapshot.lifecycle, JobState::Failed);
+            assert!(snapshot.decision.is_none());
+            let Some(Terminal::Failed { error }) = snapshot.terminal else {
+                panic!("expected failure")
+            };
+            assert_eq!(error.code, "job.no-usable-tiles");
+            assert_eq!(error.retryable, cause.http.is_none());
+        }
+    }
 }
 
 #[test]

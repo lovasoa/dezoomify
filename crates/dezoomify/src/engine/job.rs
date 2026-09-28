@@ -1165,6 +1165,12 @@ impl Job {
         {
             return Ok(());
         }
+        if self.acquired_count == 0 {
+            return self.fail_via_cleanup(
+                "job.no-usable-tiles",
+                "None of the image could be retrieved.".to_string(),
+            );
+        }
         let generation = self.alloc_decision_generation()?;
         self.set_state(State::AwaitingPartialDecision)?;
         self.push_effect(JobEffect::RequestDecision { generation })?;

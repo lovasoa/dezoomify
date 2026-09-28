@@ -1434,6 +1434,35 @@ impl EngineJob {
                     .collect();
                 let phase = failure_phase_for(&code, !missing.is_empty());
                 let mut error = ProtocolError::new(code, phase, message);
+                if error.code == "job.no-usable-tiles" {
+                    let missing = self.inner.missing_detail();
+                    let failures: Vec<_> = missing
+                        .iter()
+                        .filter_map(|(_, failures)| failures.last())
+                        .collect();
+                    error.resource_kind = Some(crate::model::ResourceKind::Tile);
+                    error.retryable = !failures.is_empty()
+                        && failures.iter().all(|failure| failure.is_retryable());
+                    error.detail = Some(format!(
+                        "{} tiles failed; no usable tiles were acquired.",
+                        missing.len()
+                    ));
+                    if let Some(first) = failures.first()
+                        && failures
+                            .iter()
+                            .all(|failure| failure.code == first.code && failure.http == first.http)
+                    {
+                        error.http = first.http;
+                        if matches!(first.http, Some(401 | 403)) {
+                            error.message = "The website refused access to this image. None of the image could be retrieved.".into();
+                        }
+                        if let Some(observed) = &first.observed {
+                            error.transport = Some(observed.transport);
+                            error.blocked_reason = observed.blocked_reason;
+                            error.preview = observed.preview.clone();
+                        }
+                    }
+                }
                 // The retained host failure context patches the terminal
                 // error, so the absolute snapshot never discards what the
                 // event stream keeps.

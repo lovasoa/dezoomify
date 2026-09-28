@@ -76,6 +76,8 @@ Partial policy, picked up front:
 
 Partial results list every missing tile and keep the error behind each gap. A kept partial publishes only after successful encode and finalization. Metadata, permission, destination, encoding, and publication failures never become partial success.
 
+When acquisition settles with zero usable tiles, the job fails with `job.no-usable-tiles` under every partial policy. It emits no partial decision or finalization effect. The terminal preserves a common HTTP refusal and observed transport context when the failed tiles share that cause. Concurrent successes settle before this decision, so late usable tiles still permit genuine partial output.
+
 ## Pause v1 (suspend-acquisition)
 
 Pause is an overlay, not a state; the snapshot's `paused` flag reports it. `Pause` works in any non-terminal state (post-terminal inputs stay `job.post-terminal`); `Resume` without pause is `job.invalid-state`. Cancel wins while paused.
