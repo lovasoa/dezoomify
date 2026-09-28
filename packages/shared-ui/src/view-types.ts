@@ -7,6 +7,7 @@ import type { SnapshotPresentation } from "./snapshot-view.ts";
 export interface ViewCallbacks {
   onSubmitUrl(url: string): void;
   onCancel(): void;
+  onOpenSource?(): void;
   onReset?(): void;
   onRetrySameUrl?(): void;
   /** Restart the job at the maximum known resolution (browser products). */

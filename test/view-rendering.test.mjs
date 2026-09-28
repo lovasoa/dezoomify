@@ -215,7 +215,10 @@ test("partial choices return the generated decision generation unchanged", () =>
   act(() =>
     renderView(el, presentIdle(), callbacks, undefined, {
       after: createElement(PartialDecisionActions, {
-        decision: { generation: 17, missing: [] },
+        decision: {
+          generation: 17,
+          missing: [{ tile: 1, failures: [{ category: "transient", code: "TRANSPORT_TIMEOUT" }] }],
+        },
         onAnswer: (command) => answers.push(command),
       }),
     }),
@@ -230,6 +233,73 @@ test("partial choices return the generated decision generation unchanged", () =>
       decision,
     })),
   );
+});
+
+test("partial refusal is a static decision with useful actions before diagnostics", () => {
+  const el = container();
+  const decision = {
+    generation: 3,
+    missing: [
+      { tile: 1, failures: [{ code: "TRANSPORT_HTTP_ERROR", category: "permanent", http: 403 }] },
+    ],
+  };
+  const presentation = presentSnapshot(
+    dto({ lifecycle: "AwaitingPartialDecision", progress: { completed: 3, total: 4 }, decision }),
+    "browser-session",
+  );
+  act(() =>
+    renderView(
+      el,
+      presentation,
+      callbacks,
+      { diagnosticReport: createDiagnosticRecorder({ id: "partial", now: () => 0 }).report() },
+      {
+        after: createElement(PartialDecisionActions, { decision, onAnswer() {} }),
+      },
+    ),
+  );
+  assert.match(el.textContent, /The image is incomplete/);
+  assert.match(el.textContent, /3 of 4 tiles/);
+  assert.match(el.textContent, /website refused/);
+  assert.match(el.textContent, /Save incomplete image/);
+  assert.equal(el.querySelector("[role=progressbar]"), null);
+  assert.equal(el.querySelector(".dz-pulse"), null);
+  assert.equal(el.querySelector("[data-dz-partial-choice=retry]"), null);
+  assert.ok(
+    el.innerHTML.indexOf("data-dz-partial-decision") < el.innerHTML.indexOf("dz-job-diagnostics"),
+  );
+});
+
+test("zero-tile refusal has no partial controls and opens the source", () => {
+  const el = container();
+  let opened = false;
+  render(
+    el,
+    presentFailure(
+      {
+        code: "job.no-usable-tiles",
+        category: "transport",
+        message: "None retrieved",
+        http: 403,
+        retryable: false,
+      },
+      "browser-session",
+    ),
+    {
+      ...callbacks,
+      onOpenSource() {
+        opened = true;
+      },
+    },
+  );
+  assert.match(el.textContent, /website refused access/);
+  assert.match(el.textContent, /No file was saved/);
+  assert.equal(el.querySelector("[role=progressbar]"), null);
+  assert.equal(el.querySelector("[data-dz-partial-decision]"), null);
+  click(
+    [...el.querySelectorAll("button")].find((button) => button.textContent === "Open source page"),
+  );
+  assert.equal(opened, true);
 });
 
 test("slow discovery replaces the phase with one waiting status", () => {

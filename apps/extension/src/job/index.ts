@@ -38,7 +38,6 @@ import {
   presentSnapshot,
   presentStatus,
   renderView,
-  t,
 } from "@dezoomify/shared-ui";
 import { createElement } from "react";
 import { browser as api } from "wxt/browser";
@@ -216,6 +215,9 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
         if (owns(attempt)) closeJob();
       },
       onCopyDiagnostics: copyDiagnosticText,
+      onOpenSource: () => {
+        if (sourceTabId !== null) void api.tabs.update(sourceTabId, { active: true });
+      },
       onSaveDiagnostics: saveDiagnosticReport,
       onRetrySameUrl: () => {
         if (owns(attempt)) retryJob();
@@ -262,11 +264,6 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
         ? {
             after: createElement(PartialDecisionActions, {
               decision,
-              labels: {
-                keep: t("view.partial.extensionKeep"),
-                discard: t("view.partial.extensionDiscard"),
-                retry: t("view.partial.extensionRetry"),
-              },
               onAnswer: (command) => {
                 if (!owns(attempt)) return;
                 attempt.diagnostics.record("info", "partial-answer", {

@@ -109,6 +109,8 @@ export interface SnapshotPresentation {
   displayOnly: boolean;
   /** True for kept partials: finished, but with named gaps. */
   partial: boolean;
+  /** Authoritative missing-tile causes while a user decision is pending. */
+  decision?: JobSnapshot["decision"];
   /** Set when automatic selection chose a smaller known level than the maximum. */
   resolution?: ResolutionChoice;
 }
@@ -132,7 +134,7 @@ function headlineForState(state: JobState): {
     case "AcquiringTiles":
       return { key: "view.step.downloading" };
     case "AwaitingPartialDecision":
-      return { key: "view.step.saving", detail: "view.step.recoveryDetail" };
+      return { key: "view.partial.title" };
     case "Finalizing":
       return { key: "view.step.saving", detail: "view.step.encodingDetail" };
     case "Cancelling":
@@ -312,6 +314,7 @@ export function presentSnapshot(
     canReset: terminal !== null,
     displayOnly,
     partial,
+    ...(snapshot.decision ? { decision: snapshot.decision } : {}),
     ...(resolution ? { resolution } : {}),
   };
 }

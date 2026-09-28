@@ -29,6 +29,22 @@ export const de = {
     "Der Ordner konnte nicht geöffnet werden. Prüfen Sie, ob ein Dateimanager installiert ist.",
   "desktop.done.missingError": "Das gespeicherte Bild oder der Ordner ist nicht mehr vorhanden.",
   "view.partial.extensionKeep": "Teilbild behalten",
+  "view.partial.title": "Das Bild ist unvollständig",
+  "view.partial.summary": "{done} von {total} Kacheln wurden abgerufen.",
+  "view.partial.gaps":
+    "Das gespeicherte Bild wird Lücken haben. Es wurde noch keine Datei gespeichert.",
+  "view.partial.refused":
+    "Die Website hat die restlichen Kacheln verweigert. Das gespeicherte Bild wird Lücken haben.",
+  "view.partial.save": "Unvollständiges Bild speichern",
+  "view.partial.cancel": "Abbrechen",
+  "view.partial.retry": "Fehlgeschlagene Kacheln erneut abrufen",
+  "view.partial.accessDenied": "Die Website hat den Zugriff auf dieses Bild verweigert",
+  "view.partial.empty": "Das Bild konnte nicht abgerufen werden",
+  "view.partial.noneSaved":
+    "Kein Teil des Bildes konnte abgerufen werden. Es wurde keine Datei gespeichert.",
+  "view.partial.checkSource":
+    "Öffnen Sie die Quellseite und prüfen Sie, ob deren Bildbetrachter funktioniert.",
+  "view.partial.openSource": "Quellseite öffnen",
   "view.partial.extensionDiscard": "Teilbild verwerfen",
   "view.partial.extensionRetry": "Fehlende Kacheln erneut laden",
   // Modal chrome (shared view.ts openModal).

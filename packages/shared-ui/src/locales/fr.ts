@@ -28,6 +28,21 @@ export const fr = {
     "Impossible d’ouvrir le dossier. Vérifiez qu’un gestionnaire de fichiers est installé.",
   "desktop.done.missingError": "L’image ou le dossier n’existe plus.",
   "view.partial.extensionKeep": "Conserver l’image partielle",
+  "view.partial.title": "L’image est incomplète",
+  "view.partial.summary": "{done} tuiles sur {total} ont été récupérées.",
+  "view.partial.gaps":
+    "L’image enregistrée aura des zones manquantes. Aucun fichier n’a encore été enregistré.",
+  "view.partial.refused":
+    "Le site a refusé les tuiles restantes. L’image enregistrée aura des zones manquantes.",
+  "view.partial.save": "Enregistrer l’image incomplète",
+  "view.partial.cancel": "Annuler",
+  "view.partial.retry": "Réessayer les tuiles en échec",
+  "view.partial.accessDenied": "Le site a refusé l’accès à cette image",
+  "view.partial.empty": "L’image n’a pas pu être récupérée",
+  "view.partial.noneSaved":
+    "Aucune partie de l’image n’a pu être récupérée. Aucun fichier n’a été enregistré.",
+  "view.partial.checkSource": "Ouvrez la page source et vérifiez que sa visionneuse fonctionne.",
+  "view.partial.openSource": "Ouvrir la page source",
   "view.partial.extensionDiscard": "Supprimer l’image partielle",
   "view.partial.extensionRetry": "Réessayer les tuiles manquantes",
   // Modal chrome (shared view.ts openModal).

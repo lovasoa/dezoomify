@@ -922,6 +922,21 @@ abbr[title] {
   white-space: nowrap;
 }
 
+.dz-partial-section {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.dz-partial-section h2 {
+  margin: 0 0 1rem;
+  white-space: normal;
+}
+
+.dz-partial-section p {
+  margin: 0 0 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .dz-progress-percent,
 .dz-progress-count {
   font-variant-numeric: tabular-nums;
