@@ -536,11 +536,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn compression_maps_to_jpeg_quality_and_png_tiers() {
+    fn compression_maps_to_png_and_tiff_tiers() {
         use image::codecs::png::CompressionType;
         use tiff::encoder::compression::DeflateLevel;
-        assert_eq!(100u8.saturating_sub(5), 95);
-        assert_eq!(100u8.saturating_sub(5), JPEG_QUALITY);
         assert_eq!(png_compression_for(0), CompressionType::Fast);
         assert_eq!(png_compression_for(19), CompressionType::Fast);
         assert_eq!(png_compression_for(20), CompressionType::Default);
@@ -555,7 +553,6 @@ mod tests {
         assert_eq!(tiff_compression_for(60), DeflateLevel::Balanced);
         assert_eq!(tiff_compression_for(61), DeflateLevel::Best);
         assert_eq!(tiff_compression_for(100), DeflateLevel::Best);
-        assert_eq!(100u8.saturating_sub(100), 0);
     }
 
     #[test]

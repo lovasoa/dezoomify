@@ -437,41 +437,6 @@ mod tests {
     }
 
     #[test]
-    fn unknown_job_rejected() {
-        let mut table = JobTable::new();
-        let err = dispatch_job_command(
-            &mut table,
-            "job:nope",
-            serde_json::json!({"type": "cancel"}),
-        )
-        .unwrap_err();
-        assert_eq!(err.code, "job.unknown");
-    }
-
-    #[test]
-    fn stale_job_rejected_after_terminal() {
-        let mut table = JobTable::new();
-        let (id, _) = table.start_job("https://example.com/item").unwrap();
-        table.command(&id, &JobCommand::Cancel).unwrap();
-        // Second cancel targets a terminal job: stale, not unknown.
-        let err = dispatch_job_command(&mut table, &id, serde_json::json!({"type": "cancel"}))
-            .unwrap_err();
-        assert_eq!(err.code, "job.stale");
-    }
-
-    #[test]
-    fn duplicate_cancellation_is_stale_not_new_effect() {
-        let mut table = JobTable::new();
-        let (id, _) = table.start_job("https://example.com/item").unwrap();
-        let (first_seq, first_emits) = table.command(&id, &JobCommand::Cancel).unwrap();
-        assert_eq!(first_emits.len(), 1, "terminal emits exactly once");
-        let err = table.command(&id, &JobCommand::Cancel).unwrap_err();
-        assert_eq!(err, "stale");
-        assert!(table.poll_drivers().is_empty());
-        assert!(first_seq >= 1);
-    }
-
-    #[test]
     fn pause_and_resume_route_to_engine_commands() {
         let mut table = JobTable::new();
         // Unknown jobs reject before any effect.

@@ -35,8 +35,7 @@ impl TestServer {
     }
 
     async fn start_inner(static_dir: Option<std::path::PathBuf>) -> Self {
-        let scenarios_dir =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/scenarios");
+        let scenarios_dir = Self::scenarios_path("");
         let routes = RouteTable::load(&scenarios_dir).expect("load routes");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await

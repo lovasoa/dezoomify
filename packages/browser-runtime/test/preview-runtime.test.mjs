@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createPreviewControls, PREVIEW_ZOOM_STEP, setCanvasVisible } from "../src/preview.ts";
+import { createPreviewControls, setCanvasVisible } from "../src/preview.ts";
 
 function element(dimensions = {}) {
   return {
@@ -31,10 +31,6 @@ function doc() {
   };
   return { ids, getElementById: (id) => ids[id] ?? null };
 }
-
-test("preview zoom uses the configured step", () => {
-  assert.equal(PREVIEW_ZOOM_STEP, 1.25);
-});
 
 test("zoom and fit apply transform-only styles", () => {
   const d = doc();

@@ -507,17 +507,13 @@ mod tests {
     }
 
     #[test]
-    fn zero_tiles_are_incomplete() {
+    fn parses_zero_tile_completion() {
         let (format, width, height, tiles) = super::parse_completed(
             "{\"kind\":\"completed\",\"format\":\"krpano\",\"width\":955,\"height\":955,\"tileCount\":0}",
         );
         assert_eq!(
             (format.as_str(), width, height, tiles),
             ("krpano", 955, 955, 0)
-        );
-        assert!(
-            width == 0 || height == 0 || tiles == 0 || format == "unknown",
-            "zero-tile completions must fail the live completeness gate"
         );
     }
 

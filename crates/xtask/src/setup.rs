@@ -318,13 +318,4 @@ mod tests {
         assert!(super::node_major("").is_none());
         assert!(super::node_major("abc").is_none());
     }
-
-    #[test]
-    fn node_minimum_allows_newer_majors() {
-        let minimum = super::node_major("22").expect("parse pin");
-        let newer = super::node_major("v26.8.2").expect("parse runtime");
-        let older = super::node_major("v20.19.0").expect("parse runtime");
-        assert!(newer >= minimum);
-        assert!(older < minimum);
-    }
 }

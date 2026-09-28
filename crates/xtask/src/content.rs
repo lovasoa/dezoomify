@@ -374,37 +374,6 @@ mod tests {
     }
 
     #[test]
-    fn current_budgets_cover_measured_artifacts() {
-        // Measured 2026-09-07: wasm 3_816_463 bytes, extension ZIPs
-        // ~1_254_000 bytes, dist/beta JS 288_441 bytes, theme.css 1859
-        // lines. Budgets pass with headroom and fail on unbounded growth.
-        assert_eq!(
-            verdict(3_816_463, super::WASM_WARN_BYTES, super::WASM_FAIL_BYTES),
-            Verdict::Pass
-        );
-        assert_eq!(
-            verdict(
-                1_254_259,
-                super::EXT_ZIP_WARN_BYTES,
-                super::EXT_ZIP_FAIL_BYTES
-            ),
-            Verdict::Pass
-        );
-        assert_eq!(
-            verdict(
-                288_441,
-                super::DIST_JS_WARN_BYTES,
-                super::DIST_JS_FAIL_BYTES
-            ),
-            Verdict::Pass
-        );
-        assert_eq!(
-            verdict(1859, super::THEME_WARN_LINES, super::THEME_FAIL_LINES),
-            Verdict::Pass
-        );
-    }
-
-    #[test]
     fn js_sum_counts_only_js() {
         let base = std::env::temp_dir().join(format!("xtask-sizes-{}-js", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);

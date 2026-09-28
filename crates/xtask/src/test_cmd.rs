@@ -85,7 +85,14 @@ pub(crate) fn test_app_model(args: &[String]) -> Result<(), String> {
             args.join(" ")
         ));
     }
-    super::command::node_test(&["test/app-model.test.mjs"], true)
+    super::command::node_test(
+        &[
+            "test/app-model.test.mjs",
+            "test/history.test.mjs",
+            "packages/browser-runtime/test/naming.test.mjs",
+        ],
+        true,
+    )
 }
 
 fn node_test() -> Result<(), String> {

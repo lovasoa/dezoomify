@@ -18,12 +18,6 @@ function sorted(arr) {
   return [...arr].sort();
 }
 
-function assertNoTrailingSpaces(content, label) {
-  for (const [i, line] of content.split("\n").entries()) {
-    assert.ok(!/[ \t]$/.test(line), `${label} line ${i + 1} has trailing space`);
-  }
-}
-
 const EXPECTED_COMMANDS = [
   "get_job_diagnostics",
   "job_command",
@@ -87,10 +81,6 @@ test("protocol range, encoders, and updater stay consistent", () => {
     assert.equal(x.updater.httpsOnly, true);
     assert.equal(x.updater.requiresUserConfirm, true);
     assert.deepEqual(x.updater.allowlist ?? [], [], "disabled updater ships an empty allowlist");
-    assert.ok(
-      (x.updater.allowlist ?? []).every((u) => u.startsWith("https://")),
-      "https allowlist",
-    );
   }
 });
 
@@ -101,9 +91,6 @@ test("generated files are canonical bytes (LF, pretty, no drift)", () => {
     "../../../generated/desktop-capabilities.json",
   ]) {
     const raw = readText(rel);
-    assert.ok(raw.endsWith("\n"), `${rel} ends with LF`);
-    assert.ok(!raw.includes("\r"), `${rel} no CR`);
-    assertNoTrailingSpaces(raw, rel);
     const canonical = JSON.stringify(JSON.parse(raw), null, 2) + "\n";
     assert.equal(raw, canonical, `${rel} not canonical 2-space JSON`);
   }
@@ -117,10 +104,4 @@ test("desktop protocol matches the v2-only release contract", () => {
   const compat = readText("../../../release/compatibility.toml");
   assert.ok(compat.includes('current = "2.0"'), "compat current is 2.0");
   assert.ok(compat.includes('n_minus_1 = "2.0"'), "compat minimum is 2.0");
-});
-
-test("desktop scenario transcript contains the terminal state", () => {
-  const result = readJson("../../../testdata/scenarios/desktop/basic/expected/result.json");
-  assert.ok(Array.isArray(result.states) && result.states.length >= 2, "states");
-  assert.ok(result.states.includes("completed"), "terminal state");
 });

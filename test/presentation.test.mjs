@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { renderTransportLabel } from "@dezoomify/app-model";
 import {
   renderAppChoice,
   renderErrorSummary,
@@ -100,9 +99,7 @@ test("app-choice guidance is plain language with no jargon", () => {
   assert.ok(nat.includes("desktop app"));
 });
 
-test("components render transport/save/error/progress plainly", () => {
-  assert.equal(renderTransportLabel("direct"), "Direct from your browser");
-  assert.equal(renderTransportLabel("metadata-proxy"), "Metadata proxy");
+test("components render save/error/progress plainly", () => {
   assert.ok(renderSaveGuidance(false).includes("right-click"));
   assert.ok(renderSaveGuidance(false).includes("Save Image As"));
   assert.ok(renderSaveGuidance(true).includes("save this picture"));

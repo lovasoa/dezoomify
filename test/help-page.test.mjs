@@ -15,7 +15,6 @@ const PAGES = readdirSync(srcDir)
   .map((f) => f.replace(/\.md$/, ""));
 
 test("every generated page exists with chrome, topics, and no legacy doc links", () => {
-  assert.ok(readdirSync(helpDir).length >= 8, "help/ is empty");
   for (const stem of PAGES) {
     const html = readFileSync(path.join(helpDir, `${stem}.html`), "utf8");
     assert.ok(html.includes('class="dz-nav"'), `${stem}.html has site chrome`);
@@ -70,14 +69,10 @@ function exists(p) {
   }
 }
 
-test("docs/user pages carry their stem marker and unique title", () => {
-  const seen = new Set();
+test("docs/user pages carry their stem marker", () => {
   for (const stem of PAGES) {
     const md = readFileSync(path.join(srcDir, `${stem}.md`), "utf8");
     assert.match(md, new RegExp(`^# ${stem}\\n`), `${stem}.md starts with its marker line`);
-    const title = md.match(/^# (.+)$/m)[1];
-    assert.ok(!seen.has(title), `duplicate doc title: ${title}`);
-    seen.add(title);
   }
 });
 

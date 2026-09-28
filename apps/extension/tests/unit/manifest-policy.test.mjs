@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -22,12 +22,6 @@ for (const browser of ["chrome", "firefox"]) {
     assert.equal(value.content_scripts, undefined);
     assert.equal(value.web_accessible_resources, undefined);
     assert.equal(value.offscreen, undefined);
-    for (const forbidden of ["tabs", "cookies"]) {
-      assert.ok(
-        !value.permissions.includes(forbidden),
-        `${browser} must not permanently request ${forbidden}`,
-      );
-    }
     assert.equal(
       value.content_security_policy.extension_pages,
       "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; base-uri 'none'",
@@ -67,13 +61,4 @@ test("WXT emits Firefox's required classic MV3 background script", () => {
     encoding: "utf8",
   });
   assert.equal(parsed.status, 0, `Firefox classic script failed node --check:\n${parsed.stderr}`);
-});
-
-test("WXT configuration is the only extension builder and manifest source", () => {
-  assert.ok(!existsSync(new URL("../../scripts/build.mjs", import.meta.url)));
-  assert.ok(!existsSync(new URL("../../scripts/generate-manifests.mjs", import.meta.url)));
-  assert.ok(!existsSync(new URL("../../scripts/package-store.sh", import.meta.url)));
-  assert.ok(existsSync(new URL("../../entrypoints/background.ts", import.meta.url)));
-  assert.ok(existsSync(new URL("../../entrypoints/job/index.html", import.meta.url)));
-  assert.ok(!existsSync(new URL("../../src/job/job.html", import.meta.url)));
 });

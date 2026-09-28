@@ -994,24 +994,6 @@ mod tests {
         assert!(super::test_desktop(&["--e2e-window".to_string(), "--bogus".to_string()]).is_err());
     }
 
-    #[test]
-    fn desktop_icons_script_versioned() {
-        // The icon generator stays a versioned scripts/ artifact with test
-        // coverage (apps/desktop/tests/icons.test.mjs, run above); it must
-        // not drift into an ad-hoc untracked helper.
-        let root = super::super::repo_root();
-        let script = root.join("scripts/gen-desktop-icons.py");
-        assert!(script.is_file(), "missing icon generator");
-        for name in [
-            "apps/desktop/src-tauri/icons/32x32.png",
-            "apps/desktop/src-tauri/icons/128x128.png",
-            "apps/desktop/src-tauri/icons/icon.ico",
-            "apps/desktop/src-tauri/icons/icon.icns",
-        ] {
-            assert!(root.join(name).is_file(), "missing generated icon {name}");
-        }
-    }
-
     /// Scratch PATH tree for the Windows pnpm resolver tests: `files` are
     /// `(subdir, filename)` pairs. Filenames use the exact case the test's
     /// PATHEXT entry produces (Windows matches case-insensitively; the

@@ -24,7 +24,7 @@ sites; `cargo xtask test live --public` stays opt-in and advisory.
 |---|---|---|
 | Snapshots route to the owning observer only | `test/app-model.test.mjs` | `cargo xtask test app-model` |
 | Sequential queue, isolated failures, cancel-one/all/retry | `packages/browser-runtime/test/queue.test.mjs`, `test/queue.test.mjs`, `testdata/scenarios/desktop/queue-basic`, `testdata/scenarios/desktop/queue-retry` | `cargo xtask test browser`, `cargo xtask test`, `cargo xtask test desktop` |
-| Shared last-20 history over injected storage | `test/app-model.test.mjs`, `test/history.test.mjs` | `cargo xtask test app-model`, `cargo xtask test ui` |
+| Shared last-20 history over injected storage | `test/history.test.mjs` | `cargo xtask test app-model`, `cargo xtask test ui` |
 | Canonical labels and save names | `test/app-model.test.mjs`, `packages/browser-runtime/test/naming.test.mjs` | `cargo xtask test app-model`, `cargo xtask test browser` |
 
 ## Desktop frontend
