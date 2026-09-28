@@ -20,6 +20,8 @@ flowchart TD
 
 ## Components
 
+Inline OpenSeadragon Zoomify services build their pyramid from declared dimensions using floor-halving, including the smallest single-tile level. Tile groups count actual tiles in all preceding levels. XML `NUMTILES` compatibility heuristics apply only to XML metadata; inline services never synthesize that hint.
+
 ### `crates/dezoomify`
 
 The single pure Rust domain crate. `model` defines canonical public values;

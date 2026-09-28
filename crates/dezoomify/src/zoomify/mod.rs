@@ -8,7 +8,7 @@ use serde::{Deserialize, Deserializer};
 use url::Url;
 
 use crate::json_utils::all_json;
-use image_properties::ImageProperties;
+use image_properties::{ImageProperties, ZoomLevelInfo};
 use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
@@ -211,22 +211,38 @@ fn inline_tile_services<'a>(
         .take(MAX_INLINE_SERVICES)
 }
 
-/// Pyramid tile total using the same halving loop as the XML level builder,
-/// so synthesized metadata produces no count-mismatch warning.
-fn pyramid_tile_count(width: u32, height: u32, tile_size: u32) -> u32 {
-    let mut divisor = 1_u64;
-    let mut total = 0_u64;
-    while u64::from(width) > u64::from(tile_size) * divisor
-        || u64::from(height) > u64::from(tile_size) * divisor
-    {
-        total = total.saturating_add(
-            u64::from(width)
-                .div_ceil(u64::from(tile_size) * divisor)
-                .saturating_mul(u64::from(height).div_ceil(u64::from(tile_size) * divisor)),
-        );
-        divisor = divisor.saturating_mul(2);
+/// OpenSeadragon includes the smallest single-tile level and floors each
+/// halving. Inline services have no XML NUMTILES compatibility hint.
+fn inline_levels(width: u32, height: u32, tile_size: u32) -> Vec<ZoomLevelInfo> {
+    let tile_size = Vec2d::square(tile_size);
+    let mut size = Vec2d {
+        x: width,
+        y: height,
+    };
+    let mut levels = Vec::new();
+    loop {
+        levels.push(ZoomLevelInfo {
+            size,
+            tile_size,
+            tiles_before: 0,
+        });
+        if size.x <= tile_size.x && size.y <= tile_size.y {
+            break;
+        }
+        size = Vec2d {
+            x: (size.x / 2).max(1),
+            y: (size.y / 2).max(1),
+        };
     }
-    u32::try_from(total).unwrap_or(u32::MAX)
+    levels.reverse();
+    let mut tiles_before = 0_u32;
+    for level in &mut levels {
+        level.tiles_before = tiles_before;
+        tiles_before = tiles_before.saturating_add(
+            u32::try_from(level.size.ceil_div(tile_size).area()).unwrap_or(u32::MAX),
+        );
+    }
+    levels
 }
 
 fn inline_catalog(
@@ -242,15 +258,14 @@ fn inline_catalog(
     }
     let mut images = Vec::with_capacity(services.len());
     for service in &services {
-        let properties = ImageProperties {
-            width: service.width,
-            height: service.height,
-            tile_size: service.tile_size,
-            num_tiles: pyramid_tile_count(service.width, service.height, service.tile_size),
-        };
         images.push(
-            plan_from_properties(&service.tiles_url, &properties)
-                .map_err(|_| DiscoveryError::Session("invalid inline Zoomify geometry".into()))?,
+            plan_from_levels(
+                &service.tiles_url,
+                inline_levels(service.width, service.height, service.tile_size),
+                false,
+                Vec::new(),
+            )
+            .map_err(|_| DiscoveryError::Session("invalid inline Zoomify geometry".into()))?,
         );
     }
     Ok(DiscoveryStep::Catalog(CatalogPlan::images(images)))
@@ -474,14 +489,27 @@ fn plan_from_properties(
     base_url: &str,
     properties: &ImageProperties,
 ) -> Result<ImagePlan, DiscoveryError> {
+    let (levels, warnings) = properties.levels_with_warnings();
+    plan_from_levels(
+        base_url,
+        levels,
+        properties.is_full_resolution_only(),
+        warnings,
+    )
+}
+
+fn plan_from_levels(
+    base_url: &str,
+    level_info: Vec<ZoomLevelInfo>,
+    full_resolution_only: bool,
+    warnings: Vec<String>,
+) -> Result<ImagePlan, DiscoveryError> {
     let base_url: Arc<str> = base_url.into();
     let base_name = base_url
         .trim_end_matches('/')
         .rsplit('/')
         .next()
         .filter(|name| !name.is_empty());
-    let full_resolution_only = properties.is_full_resolution_only();
-    let (level_info, warnings) = properties.levels_with_warnings();
     let levels = level_info
         .into_iter()
         .enumerate()
@@ -704,6 +732,25 @@ mod tests {
     }
 
     #[test]
+    fn inline_pyramid_includes_single_tile_and_floors_odd_dimensions() {
+        for (width, height, expected) in [
+            (200, 100, vec![(200, 100, 0)]),
+            (513, 513, vec![(256, 256, 0), (513, 513, 1)]),
+            (
+                1027,
+                1027,
+                vec![(256, 256, 0), (513, 513, 1), (1027, 1027, 10)],
+            ),
+        ] {
+            let actual: Vec<_> = inline_levels(width, height, 256)
+                .into_iter()
+                .map(|level| (level.size.x, level.size.y, level.tiles_before))
+                .collect();
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
     fn inline_tile_service_completes_without_metadata_fetch() {
         // Mirrors the geographicus.com OpenSeadragon embed: geometry travels
         // with the page, so no ImageProperties.xml request may be emitted.
@@ -739,6 +786,19 @@ mod tests {
         assert!(first.warnings.is_empty());
         assert_eq!(first.title.as_deref(), Some("Cowboys-mora-1941-3"));
         assert_eq!(second.title.as_deref(), Some("Cowboys-mora-1941-3-image2"));
+        assert_eq!(first.levels.len(), 7);
+        let TileSource::Grid(full) = &first.levels[6].source else {
+            unreachable!()
+        };
+        let urls: Vec<_> = full
+            .tiles_row_major()
+            .map(|tile| tile.unwrap().request.uri)
+            .collect();
+        assert_eq!(urls.len(), 1036);
+        assert!(urls[0].ends_with("/TileGroup1/6-0-0.jpg"));
+        // Lower levels contain 365 tiles; group 2 begins at ordinal 147.
+        assert!(urls[146].ends_with("/TileGroup1/6-6-5.jpg"));
+        assert!(urls[147].ends_with("/TileGroup2/6-7-5.jpg"));
         for image in [first, second] {
             let TileSource::Grid(plan) = &image.levels[0].source else {
                 panic!("inline Zoomify levels must be grids");
