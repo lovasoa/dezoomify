@@ -212,10 +212,14 @@ test("a definitive source HTTP response is not retried through the extension ori
   const { controller, sent, seen } = harness({
     sourceTransport: {
       async fetchResource() {
-        throw Object.assign(new Error("not found"), {
-          category: "network",
-          sourceDefinitive: true,
-        });
+        throw {
+          code: "TRANSPORT_HTTP_ERROR",
+          http: 404,
+          retryable: false,
+          message: "not found",
+          recovery: [],
+          transport: "browser-session",
+        };
       },
     },
   });

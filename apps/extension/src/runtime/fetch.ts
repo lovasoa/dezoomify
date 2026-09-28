@@ -13,13 +13,14 @@ import type { HostFailure } from "@dezoomify/browser-runtime";
 import {
   blockedReason,
   forwardCoreHeaders,
+  isFetchFailure,
   isPublicHttpUrl,
   originOfUrl,
   readErrorPreview,
   readResponseBytes,
   retryAfterMs,
 } from "@dezoomify/browser-runtime";
-import type { FetchFailureCode, ResourceRequest } from "@dezoomify/wasm-bindings";
+import type { FetchFailure, FetchFailureCode, ResourceRequest } from "@dezoomify/wasm-bindings";
 
 export const PROXY_PATH = "/api/proxy";
 export const MAX_BYTES_DEFAULT = 8 * 1024 * 1024;
@@ -73,6 +74,7 @@ export function transportError(
 
 /** @param {unknown} error */
 export function asFetchFailure(error: unknown): HostFailure {
+  if (isFetchFailure(error)) return error;
   const candidate = error as {
     category?: unknown;
     code?: unknown;
@@ -105,7 +107,11 @@ export function asFetchFailure(error: unknown): HostFailure {
                   : "DISCOVERY_FAILED";
   return {
     code,
-    retryable: category === "network" || category === "throttled",
+    recovery: [],
+    retryable:
+      http !== undefined
+        ? [408, 425, 429].includes(http) || http >= 500
+        : category === "network" || category === "throttled",
     message:
       typeof candidate?.message === "string" ? candidate.message : "Extension transport failed",
     blocked_reason: category,
@@ -115,11 +121,6 @@ export function asFetchFailure(error: unknown): HostFailure {
       ? { retry_after_ms: candidate.retry_after_ms }
       : {}),
   };
-}
-
-/** Append a bounded server signal to a transport message (ASCII punctuation only). */
-function withSignal(message: string, signal: string): string {
-  return signal ? `${message}. Server said: "${signal}"` : message;
 }
 
 /** @param {string} url */
@@ -194,42 +195,21 @@ export function createExtensionFetcher(deps: FetchDeps) {
       );
       if (!response || typeof response.status !== "number")
         throw transportError("malformed", "malformed fetch response");
-      if (response.status === 429)
-        throw transportError(
-          "throttled",
-          withSignal(
-            "site is throttling requests",
-            await readErrorPreview(response, controller.signal),
-          ),
-          {
-            status: response.status,
-            retry_after_ms: retryAfterMs(response.headers.get("retry-after")),
-          },
-        );
-      if (response.status === 401 || response.status === 403) {
-        // The host grant is already held (checked above): this is an upstream
-        // refusal by the site, not a missing browser permission. It must never
-        // pause for another grant, or the job re-prompts in a loop.
-        throw transportError(
-          "forbidden",
-          withSignal(
-            response.status === 401
-              ? "unauthorized; the site refused this file"
-              : "forbidden; the site refused this file",
-            await readErrorPreview(response, controller.signal),
-          ),
-          { hosts: [origin], status: response.status },
-        );
+      if (!response.ok) {
+        throw {
+          code: "TRANSPORT_HTTP_ERROR",
+          http: response.status,
+          retryable: [408, 425, 429].includes(response.status) || response.status >= 500,
+          message: "The website refused this file.",
+          recovery: [],
+          transport: "browser-session",
+          ...(response.status === 401 || response.status === 403
+            ? { blocked_reason: "forbidden" }
+            : {}),
+          preview: await readErrorPreview(response, controller.signal),
+          retry_after_ms: retryAfterMs(response.headers.get("retry-after")),
+        } satisfies FetchFailure;
       }
-      if (response.status < 200 || response.status >= 300)
-        throw transportError(
-          "network",
-          withSignal(
-            `request failed with HTTP ${response.status}`,
-            await readErrorPreview(response, controller.signal),
-          ),
-          { status: response.status },
-        );
       const contentType = response.headers.get("content-type") ?? "";
       const accepted =
         request.purpose === "metadata"
@@ -265,6 +245,7 @@ export function createExtensionFetcher(deps: FetchDeps) {
           error,
         });
       }
+      if (isFetchFailure(error)) throw error;
       if (error && typeof error === "object" && "category" in error) throw error;
       if (
         error &&
