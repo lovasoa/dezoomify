@@ -107,11 +107,6 @@ export function asFetchFailure(error: unknown): HostFailure {
                   : "DISCOVERY_FAILED";
   return {
     code,
-    recovery: [],
-    retryable:
-      http !== undefined
-        ? [408, 425, 429].includes(http) || http >= 500
-        : category === "network" || category === "throttled",
     message:
       typeof candidate?.message === "string" ? candidate.message : "Extension transport failed",
     blocked_reason: category,
@@ -200,9 +195,7 @@ export function createExtensionFetcher(deps: FetchDeps) {
         throw {
           code: "TRANSPORT_HTTP_ERROR",
           http: response.status,
-          retryable: [408, 425, 429].includes(response.status) || response.status >= 500,
           message: "The website refused this file.",
-          recovery: [],
           transport: "browser-session",
           ...(response.status === 401 || response.status === 403
             ? { blocked_reason: "forbidden" }

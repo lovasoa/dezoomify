@@ -377,7 +377,6 @@ impl From<crate::model::FetchFailure> for Failure {
         observed.detail = observed
             .detail
             .map(|text| text.chars().take(4096).collect());
-        observed.recovery.truncate(16);
         Self {
             code: format!("{:?}", observed.code),
             http: observed.http,

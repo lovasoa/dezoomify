@@ -128,9 +128,7 @@ test("source fetch treats HTTP refusals as definitive and leaves fallback decisi
     error: {
       code: "TRANSPORT_HTTP_ERROR",
       http: 403,
-      retryable: false,
       message: "Refused",
-      recovery: [],
       transport: "browser-session",
     },
     documentUrl: SOURCE_URL,
@@ -141,7 +139,7 @@ test("source fetch treats HTTP refusals as definitive and leaves fallback decisi
       { uri: "https://gallery.example/private.xml", headers: [] },
       new AbortController().signal,
     ),
-    { code: "TRANSPORT_HTTP_ERROR", http: 403, retryable: false },
+    { code: "TRANSPORT_HTTP_ERROR", http: 403 },
   );
   source.dispose();
 });
@@ -169,9 +167,7 @@ test("generated failure facts survive source validation and classification uncha
   const error = {
     code: "TRANSPORT_HTTP_ERROR",
     http: 429,
-    retryable: true,
     message: "Busy",
-    recovery: [],
     transport: "browser-session",
     blocked_reason: "throttled",
     retry_after_ms: 3000,
@@ -209,7 +205,7 @@ test("a lost browser reply is bounded and returns a typed timeout", async (t) =>
     { uri: "https://gallery.example/tile.jpg", headers: [] },
     new AbortController().signal,
   );
-  const checked = assert.rejects(pending, { code: "TRANSPORT_TIMEOUT", retryable: true });
+  const checked = assert.rejects(pending, { code: "TRANSPORT_TIMEOUT" });
   await new Promise((resolve) => setImmediate(resolve));
   t.mock.timers.tick(30);
   await checked;
