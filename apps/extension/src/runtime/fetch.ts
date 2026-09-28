@@ -145,7 +145,6 @@ export function createExtensionFetcher(deps: FetchDeps) {
     deps.fetchImpl ?? (fetch as (url: string, init: RequestInit) => Promise<Response>);
   async function fetchResource(request: ResourceRequest, signal: AbortSignal) {
     const started = performance.now();
-    deps.diagnostics?.count("requests");
     signal.throwIfAborted();
     const parsed = checkedUrl(request.uri);
     const origin = originOfUrl(parsed.href);
@@ -155,6 +154,8 @@ export function createExtensionFetcher(deps: FetchDeps) {
         code: "permission-denied",
       });
     }
+    deps.diagnostics?.count("requests");
+    deps.diagnostics?.count("requests_pending");
     const controller = new AbortController();
     const abort = () => controller.abort(signal.reason);
     signal.addEventListener("abort", abort, { once: true });
@@ -223,6 +224,7 @@ export function createExtensionFetcher(deps: FetchDeps) {
         controller.signal,
       );
       deps.diagnostics?.count("bytes_fetched", bytes.byteLength);
+      deps.diagnostics?.count("requests_completed");
       deps.diagnostics?.record("trace", "body-read", {
         request: request.id,
         bytes: bytes.byteLength,
@@ -236,7 +238,8 @@ export function createExtensionFetcher(deps: FetchDeps) {
     } catch (error) {
       if (!signal.aborted) {
         deps.diagnostics?.count("request_failures");
-        deps.diagnostics?.record("debug", "request-failed", {
+        deps.diagnostics?.record("warn", "request-failed", {
+          ...asFetchFailure(error),
           request: request.id,
           purpose: request.purpose,
           transport: "extension-origin",
@@ -245,6 +248,7 @@ export function createExtensionFetcher(deps: FetchDeps) {
           error,
         });
       }
+      if (signal.aborted) deps.diagnostics?.count("requests_cancelled");
       if (isFetchFailure(error)) throw error;
       if (error && typeof error === "object" && "category" in error) throw error;
       if (
@@ -267,6 +271,7 @@ export function createExtensionFetcher(deps: FetchDeps) {
         error instanceof Error ? error.message : "network request failed",
       );
     } finally {
+      deps.diagnostics?.count("requests_pending", -1);
       (deps.clearTimeoutFn ?? clearTimeout)(timer);
       signal.removeEventListener("abort", abort);
     }

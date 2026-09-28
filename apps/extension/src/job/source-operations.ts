@@ -172,6 +172,33 @@ export async function fetchSource(request: SourceRequest): Promise<
         if (Number.isFinite(delay) && delay >= 0)
           Object.assign(result.error, { retry_after_ms: Math.min(300000, Math.floor(delay)) });
       }
+      // Error bodies are local diagnostic signals, never full retained pages.
+      const reader = response.body?.getReader?.();
+      if (reader) {
+        const decoder = new TextDecoder();
+        let text = "";
+        let remaining = 4096;
+        try {
+          while (remaining > 0) {
+            const part = await reader.read();
+            if (part.done) break;
+            const bytes = part.value.subarray(0, remaining);
+            text += decoder.decode(bytes, { stream: true });
+            remaining -= bytes.byteLength;
+          }
+          text += decoder.decode();
+          const preview = text
+            .replace(/<[^>]*>/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 300);
+          if (preview) Object.assign(result.error, { preview });
+        } catch {
+          // The HTTP refusal remains authoritative if its body is unreadable.
+        } finally {
+          void reader.cancel().catch(() => {});
+        }
+      }
       return result;
     }
     const responseUrl =

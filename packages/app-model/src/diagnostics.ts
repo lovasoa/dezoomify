@@ -84,7 +84,9 @@ export function formatDiagnosticReport(report: DiagnosticReport): string {
       .join("\n");
   return [
     `Dezoomify diagnostics v${report.schema_version} · ${report.id}`,
-    report.outcome ? `Outcome: ${formatDiagnosticRecord(report.outcome)}` : "Outcome: running",
+    report.outcome
+      ? `Outcome: ${formatDiagnosticRecord(report.outcome)}`
+      : `Status: ${report.context.lifecycle ?? "running"}`,
     fields(report.context),
     `Counts\n${fields(report.counters)}`,
     ...report.failures.map(
@@ -196,8 +198,10 @@ export function createDiagnosticRecorder(options: {
     state.context = Object.fromEntries(Object.entries(merged).slice(0, 128));
   }
   function observe(snapshot: Snapshot): void {
+    context({ lifecycle: snapshot.lifecycle });
     state.counters.tiles_completed = snapshot.progress.completed;
     if (snapshot.progress.total != null) state.counters.tiles_total = snapshot.progress.total;
+    if (snapshot.output) state.counters.tiles_failed = snapshot.output.missing.length;
     const next = `${snapshot.lifecycle}:${snapshot.paused}`;
     if (next !== phase) {
       phase = next;

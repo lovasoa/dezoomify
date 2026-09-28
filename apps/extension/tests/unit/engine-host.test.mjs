@@ -6,6 +6,48 @@ import { createEngineResourceFetcher } from "../../src/job/transport.ts";
 
 const SESSION_ID = "job:test-1";
 
+test("definitive source refusals retain grouped diagnostics and honest request counts", async () => {
+  const diagnostics = createDiagnosticRecorder({ id: "refused", now: () => 1000 });
+  const fetch = createEngineResourceFetcher({
+    diagnostics,
+    sourceAccess: {
+      origin: "https://source.test",
+      async fetch() {
+        throw {
+          code: "TRANSPORT_HTTP_ERROR",
+          http: 403,
+          retryable: false,
+          recovery: [],
+          transport: "browser-session",
+          message: "Refused",
+        };
+      },
+    },
+    extensionTransport: {
+      fetchResource() {
+        assert.fail("no extension retry for a refusal");
+      },
+    },
+  });
+  for (let id = 0; id < 1036; id++) {
+    await assert.rejects(
+      fetch(
+        { id, uri: `https://source.test/${id}.jpg`, headers: [], purpose: "tile" },
+        new AbortController().signal,
+      ),
+    );
+  }
+  const report = diagnostics.report();
+  assert.equal(report.counters.requests, 1036);
+  assert.equal(report.counters.request_failures, 1036);
+  assert.equal(report.counters.requests_pending, 0);
+  assert.equal(report.failures.length, 1);
+  assert.equal(report.failures[0].count, 1036);
+  assert.equal(report.failures[0].first.fields.http, 403);
+  assert.equal(report.failures[0].first.fields.transport, "source-document");
+  assert.equal(report.failures[0].last.fields.url, "https://source.test/1035.jpg");
+});
+
 function fakeAssembly() {
   const calls = [];
   return {

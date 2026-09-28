@@ -1513,21 +1513,12 @@ abbr[title] {
   font-family: var(--dz-font-mono);
   font-size: 0.84rem;
   line-height: 1.6;
-  padding: 0.9rem 1.15rem;
-  background: rgba(0, 0, 0, 0.03);
-  border: 1px solid var(--dz-surface-border);
-  border-radius: var(--dz-radius);
+  padding: 0.9rem 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
   color: var(--dz-text-secondary);
   margin: 0.5rem 0;
-}
-
-@media (prefers-color-scheme: dark) {
-  .dz-diagnostics {
-    background: rgba(255, 255, 255, 0.03);
-  }
 }
 
 .dz-diagnostics-report {

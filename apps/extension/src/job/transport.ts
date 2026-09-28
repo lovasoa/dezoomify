@@ -28,8 +28,10 @@ export function createEngineResourceFetcher(deps: {
     ) {
       const started = performance.now();
       deps.diagnostics?.count("requests");
+      deps.diagnostics?.count("requests_pending");
       try {
         const result = await deps.sourceAccess.fetch(request, signal);
+        deps.diagnostics?.count("requests_completed");
         deps.diagnostics?.count("bytes_fetched", result.bytes.byteLength);
         deps.diagnostics?.record(request.purpose === "metadata" ? "debug" : "trace", "request", {
           request: request.id,
@@ -44,7 +46,16 @@ export function createEngineResourceFetcher(deps: {
         });
         return result;
       } catch (error) {
-        if (!signal.aborted) deps.diagnostics?.count("request_failures");
+        deps.diagnostics?.count(signal.aborted ? "requests_cancelled" : "request_failures");
+        if (!signal.aborted)
+          deps.diagnostics?.record("warn", "request-failed", {
+            ...asFetchFailure(error),
+            request: request.id,
+            purpose: request.purpose,
+            transport: "source-document",
+            url: request.uri,
+            duration_ms: performance.now() - started,
+          });
         if (signal.aborted || (isFetchFailure(error) && error.http !== undefined)) throw error;
         deps.diagnostics?.record("warn", "source-fetch-fallback", {
           ...asFetchFailure(error),
@@ -55,6 +66,8 @@ export function createEngineResourceFetcher(deps: {
           duration_ms: performance.now() - started,
           error,
         });
+      } finally {
+        deps.diagnostics?.count("requests_pending", -1);
       }
     }
     return deps.extensionTransport.fetchResource(request, signal);
