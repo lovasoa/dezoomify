@@ -332,8 +332,8 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly applyProcessing: (a: any, b: number, c: number) => [number, number, number, number];
     readonly dezoomify: (a: any, b: any, c: any) => any;
-    readonly wasm_bindgen_2a67c6f173b08fad___convert__closures_____invoke___js_sys_c1f2febeb42441dd___Function_fn_wasm_bindgen_2a67c6f173b08fad___JsValue_____wasm_bindgen_2a67c6f173b08fad___sys__Undefined___js_sys_c1f2febeb42441dd___Function_fn_wasm_bindgen_2a67c6f173b08fad___JsValue_____wasm_bindgen_2a67c6f173b08fad___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
-    readonly wasm_bindgen_2a67c6f173b08fad___convert__closures_____invoke___wasm_bindgen_2a67c6f173b08fad___JsValue__core_ed718c3d60ebd546___result__Result_____wasm_bindgen_2a67c6f173b08fad___JsError___true_: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_277e17f42a474b60___convert__closures_____invoke___js_sys_8d24da1f7e09aecf___Function_fn_wasm_bindgen_277e17f42a474b60___JsValue_____wasm_bindgen_277e17f42a474b60___sys__Undefined___js_sys_8d24da1f7e09aecf___Function_fn_wasm_bindgen_277e17f42a474b60___JsValue_____wasm_bindgen_277e17f42a474b60___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
+    readonly wasm_bindgen_277e17f42a474b60___convert__closures_____invoke___wasm_bindgen_277e17f42a474b60___JsValue__core_ed718c3d60ebd546___result__Result_____wasm_bindgen_277e17f42a474b60___JsError___true_: (a: number, b: number, c: any) => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

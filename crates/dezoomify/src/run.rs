@@ -242,18 +242,22 @@ async fn discover(
                         }
                     }
                     if response.bytes.is_empty() {
-                        return Err(Error::new(
+                        let mut err = Error::new(
                             "job.empty-resource",
                             ErrorPhase::Discovery,
                             "metadata resource is empty",
-                        ));
+                        );
+                        err.request = response.final_uri.clone();
+                        return Err(err);
                     }
-                    if response.bytes.len() as u64 > options.max_bytes {
-                        return Err(Error::new(
+                    if u64::try_from(response.bytes.len()).unwrap_or(u64::MAX) > options.max_bytes {
+                        let mut err = Error::new(
                             "job.resource-limit",
                             ErrorPhase::Discovery,
                             "metadata resource exceeds max_bytes",
-                        ));
+                        );
+                        err.request = response.final_uri.clone();
+                        return Err(err);
                     }
                 }
                 Ok(result)
