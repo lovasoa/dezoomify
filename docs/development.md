@@ -81,13 +81,12 @@ Binding files derive from Rust; never hand-edit. Fixture and bindings commands a
 
 ```sh
 cargo xtask bindings generate
-cargo xtask bindings generate --check
 cargo xtask bindings check
 cargo xtask fixtures verify
 cargo xtask fixtures serve --port 0 --write-address target/fixture-server.addr
 ```
 
-`bindings generate` refreshes the checked-in bindings. `--check` compares against a declaration from a real WASM build in a temp dir; `bindings check` compiles the Rust contract, runs generated-package tests, and checks WASM portability. `fixtures verify` validates manifests, provenance, licenses, routes, and hashes.
+`bindings generate` refreshes the checked-in bindings; run it after changing the Rust contract. There is no byte-compare gate because `wasm-bindgen` output is only deterministic across an identical `wasm-bindgen` version, Rust version, and OS, so cross-platform regeneration shows glue-only differences. `bindings check` compiles the Rust contract, runs generated-package tests, and checks WASM portability. `fixtures verify` validates manifests, provenance, licenses, routes, and hashes.
 
 One Playwright version rules repo-wide via the `pnpm.overrides` pin in root `package.json`; website E2E and the extension gate share the browser binary. A Playwright bump moves override plus workspace specs together.
 
