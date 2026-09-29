@@ -47,7 +47,7 @@ export interface Image {
 
 /**
  * A still-deferred catalog entry: the resource to acquire before an image
- * can be planned. The host follows `uri` with a fresh bounded attempt.
+ * can be planned. The algorithm resolves `uri` within its deferred-follow limit.
  */
 export interface ImageRequest {
     title?: string;
@@ -183,7 +183,7 @@ export interface TileFailure {
 }
 
 /**
- * The requested browser output representation.
+ * The requested output encoding.
  */
 export type OutputFormat = "png" | "jpeg" | "tiff" | "zif" | "webp" | "iiif-dir";
 
