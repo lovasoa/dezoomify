@@ -91,8 +91,8 @@ impl ResolvedLevel {
         }
     }
 
-    /// A regular, non-overlapping level. Formats with overlap, custom tile
-    /// placement, or observation can still supply their own tile program.
+    /// A regular, non-overlapping level. Other tile sources support overlap,
+    /// custom placement, and geometry determined by probing.
     pub fn grid(
         image_size: Vec2d,
         tile_size: Vec2d,

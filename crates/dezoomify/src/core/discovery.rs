@@ -729,7 +729,7 @@ pub enum RejectionKind {
     InvalidMetadata,
     /// A resource the candidate needed could not be fetched.
     FetchFailed,
-    /// The candidate stopped for another reason (resource or transition
+    /// The candidate stopped for another reason (resource or traversal
     /// limits, or an internal invariant).
     Failed,
 }

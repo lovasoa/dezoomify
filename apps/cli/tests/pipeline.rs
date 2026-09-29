@@ -380,8 +380,8 @@ fn cli_full_flags_produce_golden_output() {
 fn cli_selection_gaps_are_real_no_warnings() {
     // `--format <named>`, `--logging <non-info>`, and `--retries 0` are
     // real: validated/passed through with zero warnings. The fetch still
-    // succeeds and hashes to the cli-dzi golden (`deepzoom` is the named
-    // program that parses the pyramid DZI; `iiif` would fail typed).
+    // succeeds and hashes to the cli-dzi golden (`deepzoom` parses the
+    // pyramid DZI; `iiif` would fail typed).
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("e2e-no-fallback-warnings");
@@ -693,7 +693,7 @@ fn cli_no_partial_discards_output() {
 
 #[test]
 fn cli_named_format_mismatch_fails_instead_of_detecting() {
-    // A known but wrong `--format` selects the single program and fails
+    // A known but wrong `--format` restricts discovery to that format and fails
     // typed instead of falling back to auto-detection.
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");

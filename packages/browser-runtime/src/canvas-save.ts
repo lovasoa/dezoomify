@@ -39,10 +39,7 @@ export function isCanvasTaintError(error: unknown): boolean {
 export function canvasToPngBlob(canvas: CanvasLike, signal?: AbortSignal): Promise<Blob> {
   signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
-    const abort = () => reject(signal?.reason);
-    signal?.addEventListener("abort", abort, { once: true });
     const finish = (blob: Blob | null) => {
-      signal?.removeEventListener("abort", abort);
       if (signal?.aborted) {
         reject(signal.reason);
         return;
@@ -62,7 +59,6 @@ export function canvasToPngBlob(canvas: CanvasLike, signal?: AbortSignal): Promi
     try {
       canvas.toBlob(finish, "image/png");
     } catch (e) {
-      signal?.removeEventListener("abort", abort);
       if (isCanvasTaintError(e)) {
         reject(e);
         return;

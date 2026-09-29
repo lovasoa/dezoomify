@@ -65,7 +65,7 @@ pub enum ProcessingRecipe {
     GoogleArtsDecrypt,
 }
 
-/// The requested browser output representation.
+/// The requested output encoding.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
@@ -128,7 +128,7 @@ pub struct Image {
 }
 
 /// A still-deferred catalog entry: the resource to acquire before an image
-/// can be planned. The host follows `uri` with a fresh bounded attempt.
+/// can be planned. The algorithm resolves `uri` within its deferred-follow limit.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]

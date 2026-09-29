@@ -19,6 +19,29 @@ test("canvasToPngBlob resolves the encoded blob", async () => {
   assert.equal(result, encoded);
 });
 
+test("cancelled encoding settles only after the native callback releases its pixels", async () => {
+  let complete;
+  const controller = new AbortController();
+  const encoding = canvasToPngBlob(
+    {
+      toBlob: (callback) => {
+        complete = callback;
+      },
+    },
+    controller.signal,
+  );
+  let settled = false;
+  const cancelled = assert.rejects(encoding, { name: "AbortError" }).then(() => {
+    settled = true;
+  });
+  controller.abort();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  complete(new Blob(["png"], { type: "image/png" }));
+  await cancelled;
+  assert.equal(settled, true);
+});
+
 test("canvasToPngBlob maps null and throws to OUTPUT_ENCODE_FAILED", async () => {
   await assert.rejects(
     () => canvasToPngBlob({ toBlob: (cb) => cb(null) }),

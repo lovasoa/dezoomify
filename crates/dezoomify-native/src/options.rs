@@ -21,7 +21,7 @@ pub struct JobOptions {
     pub input_url: String,
     pub output: OutputTarget,
     pub overwrite: bool,
-    /// Algorithm format selector (`None` auto-detects; named picks one program;
+    /// Algorithm format selector (`None` auto-detects; named picks one format;
     /// unknown names fail typed before any work).
     pub format: Option<String>,
     pub image_index: Option<usize>,

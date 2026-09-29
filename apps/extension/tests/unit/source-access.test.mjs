@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createSourceAccess } from "../../src/job/source-access.ts";
-import { collectCandidates, fetchSource } from "../../src/job/source-operations.ts";
+import {
+  cancelSourceFetch,
+  collectCandidates,
+  fetchSource,
+} from "../../src/job/source-operations.ts";
 import { asFetchFailure } from "../../src/runtime/fetch.ts";
 
 const SOURCE_URL = "https://gallery.example/page?view=1";
@@ -222,10 +226,94 @@ test("a lost browser reply is bounded and returns a typed timeout", async (t) =>
   source.dispose();
 });
 
-test("cancellation and disposal settle even when source injection never replies", async () => {
+test("source cancellation waits for acknowledgement that the page fetch has stopped", async () => {
+  let acknowledge;
+  const fake = fakeBrowser(
+    ({ func }) =>
+      new Promise((resolve) => {
+        if (func === cancelSourceFetch) acknowledge = resolve;
+      }),
+  );
+  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  const controller = new AbortController();
+  let settled = false;
+  const checked = assert
+    .rejects(
+      source.fetch({ uri: "https://gallery.example/tile.jpg", headers: [] }, controller.signal),
+      { code: "cancelled" },
+    )
+    .then(() => {
+      settled = true;
+    });
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  const request = fake.calls[0].args[0];
+  assert.deepEqual(fake.calls[1].args, [request.operationId, request.deadlineAt]);
+  acknowledge();
+  await checked;
+  source.dispose();
+});
+
+test("a rejected cancellation injection still waits for the original source operation", async () => {
+  let complete;
+  const fake = fakeBrowser(({ func }) => {
+    if (func === cancelSourceFetch) return Promise.reject(new Error("Injection failed"));
+    return new Promise((resolve) => {
+      complete = resolve;
+    });
+  });
+  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  const controller = new AbortController();
+  let settled = false;
+  const checked = assert
+    .rejects(
+      source.fetch({ uri: "https://gallery.example/tile.jpg", headers: [] }, controller.signal),
+      { code: "cancelled" },
+    )
+    .then(() => {
+      settled = true;
+    });
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  complete({ documentUrl: SOURCE_URL });
+  await checked;
+  source.dispose();
+});
+
+test("cancellation before source injection creates no page work or cancellation marker", async () => {
+  let checkedTab;
+  const fake = fakeBrowser(() => assert.fail("No source script should execute"));
+  fake.api.tabs.get = () =>
+    new Promise((resolve) => {
+      checkedTab = resolve;
+    });
+  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  const controller = new AbortController();
+  const checked = assert.rejects(
+    source.fetch({ uri: "https://gallery.example/tile.jpg", headers: [] }, controller.signal),
+    { code: "cancelled" },
+  );
+  controller.abort();
+  await checked;
+  checkedTab({ id: 9, url: SOURCE_URL });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(fake.calls.length, 0);
+  source.dispose();
+});
+
+test("cancellation and disposal remain bounded when source and cancellation replies disappear", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   for (const action of ["cancel", "dispose", "navigate"]) {
     const fake = fakeBrowser(() => new Promise(() => {}));
-    const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+    const source = createSourceAccess(
+      fake.api,
+      { tabId: 9, documentUrl: SOURCE_URL },
+      { timeoutMs: 30 },
+    );
     const controller = new AbortController();
     const pending = source.fetch(
       { uri: "https://gallery.example/tile.jpg", headers: [] },
@@ -238,6 +326,7 @@ test("cancellation and disposal settle even when source injection never replies"
     if (action === "cancel") controller.abort();
     else if (action === "dispose") source.dispose();
     else fake.listeners.updated[0](9, { status: "loading" });
+    t.mock.timers.tick(30);
     await checked;
     source.dispose();
   }

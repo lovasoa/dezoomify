@@ -1,8 +1,7 @@
 /**
  * Source-page functions passed to scripting.executeScript() by the job page.
  *
- * These functions deliberately have no runtime imports, closures, listeners, or
- * document state. Firefox and Chromium receive the same operation and the
+ * These functions have no runtime imports or closures. Firefox and Chromium receive the same operation and the
  * complete structured-cloneable result is returned before the invocation
  * ends, while fetch returns a single bounded payload to the privileged job
  * page that invoked it.
@@ -21,7 +20,10 @@ type SourceRequest = {
   headers: Array<{ name: string; value: string }>;
   operationId?: string;
   timeoutMs?: number;
+  deadlineAt?: number;
 };
+
+type SourceFetch = { controller: AbortController; finished: Promise<void> };
 
 /**
  * Take one bounded snapshot of rendered document roots followed by retained
@@ -130,7 +132,7 @@ export async function fetchSource(request: SourceRequest): Promise<
   const MAX_SOURCE_FETCH_BYTES = 8 * 1024 * 1024;
   const documentUrl = String(globalThis.location?.href ?? "");
   const world = globalThis as typeof globalThis & {
-    __dezoomifySourceFetches?: Map<string, AbortController>;
+    __dezoomifySourceFetches?: Map<string, SourceFetch | null>;
   };
   let controllers = world.__dezoomifySourceFetches;
   if (!controllers) {
@@ -152,13 +154,26 @@ export async function fetchSource(request: SourceRequest): Promise<
   const headers: Record<string, string> = {};
   for (const header of request.headers) headers[header.name] = header.value;
 
-  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const deadlineAt = request.deadlineAt ?? Date.now() + (request.timeoutMs ?? 30_000);
+  if (Date.now() >= deadlineAt) return fail("TRANSPORT_TIMEOUT", "The source request timed out.");
+  if (request.operationId && controllers.get(request.operationId) === null) {
+    controllers.delete(request.operationId);
+    return fail("TRANSPORT_CANCELLED", "The source fetch was cancelled.");
+  }
+  const controller = new AbortController();
+  let finish = () => {};
+  const finished = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
   let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    controller?.abort();
-  }, request.timeoutMs ?? 30_000);
-  if (controller && request.operationId) controllers.set(request.operationId, controller);
+  const timer = setTimeout(
+    () => {
+      timedOut = true;
+      controller.abort();
+    },
+    Math.max(0, deadlineAt - Date.now()),
+  );
+  if (request.operationId) controllers.set(request.operationId, { controller, finished });
   try {
     const response = await fetch(request.url, {
       method: request.method ?? "GET",
@@ -268,15 +283,32 @@ export async function fetchSource(request: SourceRequest): Promise<
           error instanceof Error ? error.message.slice(0, 4096) : "The source fetch failed.",
         );
   } finally {
+    controller.abort();
     clearTimeout(timer);
     if (request.operationId) controllers.delete(request.operationId);
+    finish();
   }
 }
 
 /** Cancel a live fetch in this extension's isolated world for this document. */
-export function cancelSourceFetch(operationId: string): void {
+export async function cancelSourceFetch(operationId: string, deadlineAt: number): Promise<void> {
   const world = globalThis as typeof globalThis & {
-    __dezoomifySourceFetches?: Map<string, AbortController>;
+    __dezoomifySourceFetches?: Map<string, SourceFetch | null>;
   };
-  world.__dezoomifySourceFetches?.get(operationId)?.abort();
+  world.__dezoomifySourceFetches ??= new Map();
+  const requests = world.__dezoomifySourceFetches;
+  const running = requests.get(operationId);
+  if (running) {
+    running.controller.abort();
+    await running.finished;
+  } else if (running === undefined && Date.now() < deadlineAt) {
+    // executeScript may deliver cancellation before the original fetch starts.
+    requests.set(operationId, null);
+    setTimeout(
+      () => {
+        if (requests.get(operationId) === null) requests.delete(operationId);
+      },
+      Math.max(0, deadlineAt - Date.now()),
+    );
+  }
 }

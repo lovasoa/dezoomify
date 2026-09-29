@@ -1,6 +1,6 @@
-//! Named format selector: `JobOptions::format` threads through the job
-//! driver to core registry selection. `None`/`auto` auto-detects;
-//! a named format selects the single program; unknown names fail typed.
+//! Named format selector: `JobOptions::format` selects the core registry.
+//! `None`/`auto` auto-detects; a named format restricts discovery to that
+//! format; unknown names fail typed.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};

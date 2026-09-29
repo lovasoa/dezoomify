@@ -95,7 +95,7 @@ fn complete_from_json(resource: DiscoveryResource<'_>) -> Result<ParsedResource,
         DiscoveryError::InvalidMetadata("pnav page is missing from discovery history".into())
     })?;
     let title = page_title(&page_text);
-    let source = AdaptiveSource::Pnav(PnavProgram {
+    let source = AdaptiveSource::Pnav(PnavSource {
         image_url: image,
         width: metadata.width,
         height: metadata.height,
@@ -122,13 +122,13 @@ fn json_url(image: &str) -> Result<String, DiscoveryError> {
 }
 
 #[derive(Clone, Debug)]
-pub struct PnavProgram {
+pub struct PnavSource {
     image_url: String,
     width: u32,
     height: u32,
 }
 
-impl PnavProgram {
+impl PnavSource {
     /// The size-probe request. A successful probe is also tile (0,0)'s output
     /// (`ProbeAndOutput`): the resolved grid must reuse this exact URL for the
     /// origin tile instead of recomputing its dimensions.
@@ -143,6 +143,7 @@ impl PnavProgram {
     pub(crate) async fn resolve(
         self,
         host: &impl crate::Host,
+        mut remaining_probes: u32,
     ) -> Result<Option<ResolvedGrid>, crate::model::Error> {
         let tile = TileSpec {
             ordinal: 0,
@@ -152,7 +153,7 @@ impl PnavProgram {
             processing: crate::core::ProcessingRecipe::None,
             role: TileRole::ProbeAndOutput,
         };
-        let result = crate::run::probe(host, tile).await?;
+        let result = crate::run::probe(host, tile, &mut remaining_probes).await?;
         Ok(self.geometry(result)?)
     }
     fn geometry(self, result: ObservationResult) -> Result<Option<ResolvedGrid>, TileSourceError> {
@@ -229,18 +230,18 @@ mod tests {
 
     #[test]
     fn edge_crop_dimensions_are_scaled_per_axis() {
-        let program = PnavProgram {
+        let source = PnavSource {
             image_url: "https://example.test/image.jpg".into(),
             width: 600,
             height: 700,
         };
-        let Some(ResolvedGrid { grid, .. }) = program
+        let Some(ResolvedGrid { grid, .. }) = source
             .geometry(ObservationResult::Available {
                 size: Vec2d::square(512),
             })
             .unwrap()
         else {
-            panic!("pnav program must resolve")
+            panic!("pnav source must resolve")
         };
         let requests: Vec<_> = grid
             .tiles_row_major()

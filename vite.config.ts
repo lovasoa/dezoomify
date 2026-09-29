@@ -1,13 +1,19 @@
+import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 // New website build. The deployed app serves below /beta/ while the legacy
-// site remains at / (assembled by scripts/build-site.mjs). The app's host
-// effects (worker, fetch policy, canvas assembly) stay in `src/`; Vite only
-// bundles the module graph and hashes assets.
+// site remains at / (assembled by scripts/build-site.mjs).
 export default defineConfig({
   base: "/beta/",
   plugins: [react()],
+  resolve: {
+    alias: {
+      "@dezoomify/wasm-bindings": fileURLToPath(
+        new URL("./wasm/dezoomify-wasm.js", import.meta.url),
+      ),
+    },
+  },
   define: { __DEZOOMIFY_VERSION__: JSON.stringify(process.env.DEZOOMIFY_VERSION ?? "development") },
   build: {
     target: "es2022",
@@ -26,8 +32,5 @@ export default defineConfig({
         terms: "terms.html",
       },
     },
-  },
-  worker: {
-    format: "es",
   },
 });

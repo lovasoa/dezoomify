@@ -19,7 +19,7 @@ pub struct Args {
     /// Format selector, `auto` detects. Named formats are validated
     /// CLI-side against the known format list; unknown names fail.
     /// Wired to native `format` (`None`/`auto` auto-detects, named selects
-    /// the single program, unknown fails typed).
+    /// only that format, unknown fails typed).
     pub format: String,
     /// Select the largest level. Maps to uncapped width plus the native
     /// largest flag (bulk-implied when no level cap was given).
