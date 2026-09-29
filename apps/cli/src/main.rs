@@ -1,4 +1,4 @@
-//! CLI entry point: argument parsing, real download pipeline, honest events.
+//! CLI argument parsing, native Host configuration, and progress reporting.
 
 // Failures map to stderr diagnostics and exit codes
 // instead of panicking (see `dezoomify::model` for the shared contract policy).
@@ -97,7 +97,7 @@ fn run_single_from_cli(parsed: Args) {
     }
     let output = match parsed.output.clone() {
         Some(output) => output,
-        None => single_auto_output(None, None),
+        None => single_auto_output(),
     };
     let mut parsed = Args {
         input: Some(input.clone()),
@@ -140,7 +140,7 @@ fn run_interactive_loop(base: Args) {
             has_errors = true;
             continue;
         }
-        let output = single_auto_output(None, None);
+        let output = single_auto_output();
         let mut parsed = Args {
             input: Some(input.clone()),
             output: Some(output.clone()),
@@ -184,9 +184,8 @@ fn apply_pickers(parsed: &mut Args) -> bool {
     true
 }
 
-/// Interactive image picker. The full title list needs native catalog
-/// support, so this prompts for an index without listing: any number is
-/// accepted and out-of-range uses the last image. Loops until a number or EOF.
+/// Prompt for an image index before starting the job. Out-of-range indices
+/// select the last image. Loops until a number or EOF.
 fn image_picker() -> Option<usize> {
     loop {
         let line = prompt_line("Which image do you want to download? ")?;
@@ -429,29 +428,15 @@ fn bulk_output_for(base: Option<&Path>, title: Option<&str>, index: usize) -> Pa
     PathBuf::from(format!("dezoomify_{}.png", index + 1))
 }
 
-/// Automatic output naming: sanitized title or `dezoomify` fallback, JPEG-fit
-/// extension, and `_0001` collision suffixes. The title and size are unknown
-/// before the native run, so callers pass `None` and the fallback plus PNG
-/// apply; the helper still honors titles and JPEG fit when given (tests).
-fn single_auto_output(title: Option<&str>, size: Option<(u32, u32)>) -> PathBuf {
+/// Choose a PNG path in the current directory, adding `_0001` collision suffixes.
+fn single_auto_output() -> PathBuf {
     let base_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let fits_in_jpg = size.is_some_and(|(x, y)| x.max(y) <= u16::MAX as u32);
-    let extension = if fits_in_jpg { "jpg" } else { "png" };
-    let base = title
-        .map(sanitize_title)
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "dezoomify".to_string());
-    let mut path = base_dir.join(format!("{base}.{extension}"));
+    let mut path = base_dir.join("dezoomify.png");
     if !path.exists() {
         return path;
     }
-    let stem = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("dezoomify")
-        .to_string();
     for i in 1.. {
-        let candidate = base_dir.join(format!("{stem}_{i:04}.{extension}"));
+        let candidate = base_dir.join(format!("dezoomify_{i:04}.png"));
         if !candidate.exists() {
             path = candidate;
             break;

@@ -255,24 +255,9 @@ const en = {
   "view.resolution.stop": "Stop",
   // Completion section.
   "view.done.ready": "Your image is ready.",
-  "view.done.savedDisk": "Saved to disk",
   "view.done.readyTitle": "Ready to save",
   "view.done.saveNow": "Save image now",
   "view.done.another": "Dezoomify another image",
-  // Already-saved completion (ViewContext.savedOutput): the host wrote the
-  // output before rendering (for example the extension blob-anchor save), so
-  // completion reads as saved with the file name and offers no second-click
-  // save button. Absent keeps the website ready plus save-now path.
-  "view.done.savedFile": "Saved",
-  "view.done.gaps": "Saved with gaps",
-  "view.done.savedFull": "Saved {name} ({w}x{h}).",
-  "view.done.savedPartial":
-    "Saved {name} ({w}x{h}, {done} of {total} tiles; {failed} tile(s) missing).",
-  // Gap map behind a kept partial: the missing-tile ledger renders inline
-  // with the completion summary, so a partial save never reads as silent
-  // gaps. `shown` lists the first ledger ids, `rest` names the overflow.
-  "view.done.gapMap": "Missing tiles ({failed} of {total}): {shown}{rest}.",
-  "view.done.gapMapMore": ", and {n} more",
   // Failure section.
   "view.fail.fallback": "Dezoomify could not find or save the zoomable image at this address.",
   "view.fail.title": "Could not dezoomify image",

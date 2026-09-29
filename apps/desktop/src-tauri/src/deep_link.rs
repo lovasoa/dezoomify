@@ -340,22 +340,6 @@ pub fn parse_deep_link(url: &str) -> Result<DeepLink, DeepLinkError> {
     })
 }
 
-/// Every accepted link requires independent user confirmation.
-pub fn requires_confirmation(_link: &DeepLink) -> bool {
-    true
-}
-
-pub fn apply_after_confirmation(
-    link: DeepLink,
-    confirmed: bool,
-) -> Result<DeepLink, DeepLinkError> {
-    if !confirmed {
-        return Err(DeepLinkError::MissingField("confirm"));
-    }
-    debug_assert!(requires_confirmation(&link));
-    Ok(link)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -370,7 +354,6 @@ mod tests {
         assert_eq!(cur.version, 2);
         let prev = parse_deep_link(&link("1", "https%3A%2F%2Fexample.com%2Fitem")).unwrap();
         assert_eq!(prev.version, 1);
-        assert!(requires_confirmation(&cur));
     }
 
     #[test]
@@ -556,12 +539,5 @@ mod tests {
         // Non-deep-link schemes are ignored.
         let other = vec!["app".to_string(), "https://example.com/x".to_string()];
         assert_eq!(find_deep_link_in_argv(&other), None);
-    }
-
-    #[test]
-    fn confirmation_precedes_io() {
-        let link = parse_deep_link(&link("2", "https%3A%2F%2Fexample.com%2Fitem")).unwrap();
-        assert!(apply_after_confirmation(link.clone(), false).is_err());
-        assert!(apply_after_confirmation(link, true).is_ok());
     }
 }

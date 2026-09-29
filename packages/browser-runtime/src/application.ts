@@ -25,6 +25,7 @@ import {
   type ViewContext,
 } from "@dezoomify/shared-ui";
 import type {
+  Error as JobError,
   JobInput,
   MissingTiles,
   Options,
@@ -63,7 +64,6 @@ export interface BrowserApplicationContext {
   view: ViewContext;
   update(): void;
   permission(pending: PermissionWait[]): void;
-  title(): string | undefined;
 }
 export interface BrowserCapabilities
   extends Pick<BrowserHostDependencies, "fetchResource" | "loadDisplayImage"> {
@@ -77,7 +77,7 @@ export interface BrowserCapabilities
     signal: AbortSignal,
     title?: string,
   ): Promise<BrowserSaveDisposition> | BrowserSaveDisposition;
-  transport(): string | null;
+  transport(): JobError["transport"] | null;
   saveOutput?(): void;
   openOutput?(): Promise<void>;
   revealOutput?(): Promise<void>;
@@ -135,7 +135,6 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       done: false,
       view: {
         sourceUrl: url,
-        originClean: true,
         history: [...history],
         jobActivity: activity.state,
       } as ViewContext,
@@ -148,16 +147,14 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
   function presentation(): Presentation {
     const a = current;
     if (!a) return idle;
-    const transport = a.capabilities?.transport() ?? null;
-    if (a.failure) return presentFailure(a.failure, transport);
-    if (a.output) return presentOutput(a.output, a.progress, transport);
-    if (a.controller.signal.aborted) return presentStatus("cancelled", { transport });
+    if (a.failure) return presentFailure(a.failure);
+    if (a.output) return presentOutput(a.output, a.progress);
+    if (a.controller.signal.aborted) return presentStatus("cancelled");
     const view = a.progress
-      ? presentProgress(a.progress, transport, {
+      ? presentProgress(a.progress, {
           paused: a.host?.paused,
-          displayOnly: a.view.originClean === false,
         })
-      : presentStatus("discovering", { transport });
+      : presentStatus("discovering");
     if (a.decision) {
       view.decision = a.decision.missing;
       view.headlineKey = "view.partial.title";
@@ -220,7 +217,6 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
             update();
           }
         },
-        title: () => a.progress?.title ?? undefined,
       });
       a.capabilities = capabilities;
       const [wasm, inputs] = await Promise.all([options.wasm(), capabilities.inputs(url)]);
@@ -242,7 +238,6 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
           capabilities.save(blob, width, height, signal, a.progress?.title ?? undefined),
         onDisplayOnly: () => {
           if (current === a) {
-            a.view.originClean = false;
             a.view.desktopHandoffUrl = desktopHandoffLink(url);
             update();
           }
@@ -307,7 +302,6 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       a.controller.signal.throwIfAborted();
       if (current !== a) return;
       a.output = output;
-      if (a.view.nativeSaved) a.view.nativeSaved.partial = !a.output.complete;
       a.diagnostics.finish(a.output.complete ? "completed" : "partial-completed", a.output);
       const entry = toHistoryEntry(url, {
         width: a.output.canvas?.width ?? 0,
@@ -325,25 +319,26 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       if (current !== a) return;
       outcome = a.controller.signal.aborted ? "cancelled" : "failed";
       if (outcome === "failed") {
-        const failure = error as Partial<import("@dezoomify/wasm-bindings").Error>;
-        a.failure = describeFailure({
-          code: failure?.code ?? "OUTPUT_FAILED",
-          ...(failure?.transport === "metadata-proxy" ? { message: failure.message } : {}),
-          detail: failure?.detail ?? failure?.message,
-          retryable: failure?.retryable,
-          phase: failure?.phase,
-          transport: failure?.transport ?? a.capabilities?.transport() ?? undefined,
-          url: failure?.request,
-          http: failure?.http,
-          preview: failure?.preview,
-          host: (() => {
+        const failure = error && typeof error === "object" ? (error as Partial<JobError>) : {};
+        a.failure = describeFailure(
+          {
+            ...failure,
+            code: failure?.code ?? "OUTPUT_FAILED",
+            message: failure?.message ?? String(error),
+            phase:
+              failure?.phase ??
+              (a.progress?.phase === "planning" ? "validation" : a.progress?.phase) ??
+              "discovery",
+            transport: failure?.transport ?? a.capabilities?.transport() ?? undefined,
+          },
+          (() => {
             try {
               return new URL(url).host;
             } catch {
               return "";
             }
           })(),
-        });
+        );
         a.view.desktopHandoffUrl = desktopHandoffLink(url);
       }
       a.diagnostics.finish(outcome, error);
@@ -365,15 +360,15 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
     url = url.trim();
     if (!isValidInputUrl(url)) {
       initialUrl = url;
-      const error = {
+      const error: JobError = {
         code: "INVALID_URL",
-        category: "validation",
+        phase: "validation",
         retryable: false,
         message: isLocalFileUrl(url)
           ? "Local files cannot be opened on this website. Use the desktop app for files on your computer."
           : "Please enter a valid web address starting with http:// or https://",
       };
-      idle = presentFailure(error, null);
+      idle = presentFailure(error);
       if (!current || current.done) {
         retire();
         const a = invocation(url);
@@ -397,7 +392,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       shown = presentation();
     a?.diagnostics.context({
       presented_phase: shown.phase,
-      presented_error: shown.terminal?.error?.code ?? "",
+      presented_error: shown.error?.code ?? "",
     });
     const report = a?.diagnostics.report();
     if (a)
@@ -434,7 +429,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
           update();
         }
       },
-      onSave: () => a?.capabilities?.saveOutput?.(),
+      onSave: a?.capabilities?.saveOutput,
       onOpenOutput: a?.output && a.capabilities?.openOutput ? a.capabilities.openOutput : undefined,
       onRevealOutput:
         a?.output && a.capabilities?.revealOutput ? a.capabilities.revealOutput : undefined,

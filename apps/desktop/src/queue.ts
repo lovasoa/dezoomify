@@ -2,7 +2,6 @@ import {
   createSequentialQueue,
   enqueueSequential,
   type QueueEntry,
-  type QueueSummary,
   retryQueueEntry,
   type SequentialQueue,
 } from "@dezoomify/shared-ui";
@@ -64,17 +63,11 @@ export function enqueueDesktopQueue(
   return { ...result, code: "ok" };
 }
 
-/** The active entry, if any. */
 function replaceEntry(queue: DesktopQueue, next: DesktopQueueEntry): DesktopQueue {
   const entries = queue.entries.map((entry) => (entry.id === next.id ? next : entry));
   return { ...queue, entries };
 }
 
-/**
- * Advance after the active job reaches a terminal outcome. Marks the active
- * entry done/failed/cancelled (with an error code when applicable) and promotes the
- * first queued entry, if any. Returns the next entry to start (or null).
- */
 /**
  * Fold monotonic progress for one live entry. Retries and cache hits never
  * move counts backwards; unknown totals stay 0 and never claim completeness.
@@ -105,11 +98,6 @@ export function recordDesktopProgress(
   return { queue: replaceEntry(queue, next), code: "ok" };
 }
 
-/**
- * Cancel one entry. Cancelling the active job marks it cancelled and promotes
- * the next queued entry (the caller cancels the invocation and removes
- * uncommitted output first). Cancelling a queued entry keeps the active job.
- */
 /** Re-queue a failed or cancelled entry behind the waiting line. */
 export function retryDesktopEntry(
   queue: DesktopQueue,
@@ -121,14 +109,4 @@ export function retryDesktopEntry(
     status,
     progress: { acquired: 0, total: 0 },
   }));
-}
-
-/** Machine totals record sharing the CLI `bulk-completed` shape. */
-export function machineDesktopQueueSummary(summary: QueueSummary): string {
-  return JSON.stringify({
-    kind: "bulk-completed",
-    total: summary.total,
-    succeeded: summary.succeeded,
-    failed: summary.failed,
-  });
 }

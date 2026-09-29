@@ -2,7 +2,7 @@
 
 - **Responsibility:** Define host-independent end-to-end scenarios as deterministic
   requests, responses, observed progress, results, and failures.
-- **Allowed dependencies:** Scenario schemas may reference public domain types
+- **Allowed dependencies:** Scenarios may reference public domain types
   and fixture-server route vocabulary, with payloads stored beside the scenario.
 - **Forbidden responsibilities:** No app implementation, real credentials,
   private URLs, uncontrolled timing, internet requirement, or host-specific
@@ -10,8 +10,8 @@
 - **Interfaces and tests:** Each scenario records purpose, provenance, routes,
   expected request order/headers, readable-fetch or ordinary image display,
   expected `originClean` transitions, outputs/errors, and license. Include
-  bounded extension scan/direct-fetch and validated handoff cases. Run schema
-  validation plus native and browser parity where applicable.
+  bounded extension scan/direct-fetch and validated handoff cases. Run fixture
+  verification plus native and browser tests where applicable.
 - **Sources:** Distill each scenario from the behavior of the real site it
   represents; preserve behavior, not any particular directory layout.
 
@@ -43,14 +43,16 @@ is the default route table:
   `license_provenance` in `manifest.json`; fixtures with unclear licenses,
   secrets, or personal data are blocked from the corpus.
 - **Adding a scenario:** create `testdata/scenarios/<id>/` with `scenario.json`
-  (see `schema/scenario.schema.json`), byte payloads under
-  `payloads/{host}{url-path}`, and expectations under `expected/`. Add
-  `routes.json` (see `schema/routes.schema.json`) only for the exceptions
-  above. Copy payload bytes exactly, record SHA-256 in `manifest.json`, and run
+  containing `id`, `description`, `source_evidence`, `input`, and `operation`.
+  The owning test defines its input and expected result shape. Store byte
+  payloads under `payloads/{host}{url-path}` and expectations under `expected/`.
+  Add `routes.json` only for the exceptions above. Copy payload bytes exactly,
+  record SHA-256 in `manifest.json`, and run
   `cargo xtask fixtures verify`.
 - **Routes and hashes:** explicit routes match exact method/host/path with
   optional exact query; the mirror covers the rest; host matching ignores
-  ephemeral ports. `cargo xtask fixtures verify` checks schemas, references,
+  ephemeral ports. `cargo xtask fixtures verify` checks required scenario fields,
+  directory IDs, typed manifest and route records, references,
   SHA-256, sizes, duplicate IDs, incompatible duplicate served URLs (explicit
   and mirrored), unlisted/missing files, traversal, and provenance.
   Verification never rewrites files.
@@ -59,10 +61,6 @@ is the default route table:
   address after listening. The server has no passthrough: unknown resources get
   a stable `fixture-missing` response and public egress is impossible by
   construction.
-- **Transcripts:** `expected/legacy-web.json` files are canonical expected
-  transcripts (UTF-8, LF, sorted keys, `127.0.0.1:PORT` and `blob:URL`
-  normalization). Regeneration must be byte-identical; review diffs before
-  accepting updates.
 - **Deterministic vs live:** everything here runs without public DNS or
   network. Live compatibility (`cargo xtask test live`) is advisory and never
   replaces scenario coverage.
@@ -70,11 +68,9 @@ is the default route table:
 - **Sensitivity vocabulary:** manifest `sensitive` is `false` for clean data,
   `true` for real secrets (never committed), or `review:<reason>` for
   synthetic test-doubles (e.g. `review:test-double-token` for a public demo
-  `apiKey`). `cargo xtask fixtures verify` accepts `false` and `review:*`
-  but fails closed on `true`. Expected transcripts containing the same
+  `apiKey`). Only clean data and reviewed synthetic values belong in the corpus.
+  Expected transcripts containing the same
   public test-double are covered by the same vocabulary.
 - **Transcript updates:** transcripts are compare-only expected data; tests
   fail on drift. Update them deliberately, then inspect `git diff` and
   `git status --porcelain -- testdata/scenarios` before accepting.
-  `lastTile` is order-independent (tiles sorted by x, y, url);
-  `tile_requests` are sorted.

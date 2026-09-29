@@ -1,17 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  renderAppChoice,
-  renderErrorSummary,
-  renderProgress,
-  renderSaveGuidance,
-} from "../packages/shared-ui/src/components.ts";
-import {
-  categoryFor,
-  describeFailure,
-  phaseFor,
-  plainMessageFor,
-} from "../packages/shared-ui/src/failure.ts";
+import { renderSaveGuidance } from "../packages/shared-ui/src/components.ts";
+import { describeFailure, plainMessageFor } from "../packages/shared-ui/src/failure.ts";
 import {
   presentFailure,
   presentIdle,
@@ -30,157 +20,122 @@ const output = (extra = {}) => ({
   ...extra,
 });
 
-test("idle, discovery, pause, and cancellation retain their controls", () => {
-  const idle = presentIdle();
-  assert.equal(idle.phase, "idle");
-  assert.equal(idle.canCancel, false);
-  const live = presentProgress(progress({ phase: "discovery" }), "direct", { paused: true });
+test("idle, discovery, pause, and cancellation describe the current work", () => {
+  assert.equal(presentIdle().phase, "idle");
+  const live = presentProgress(progress({ phase: "discovery" }), { paused: true });
+  assert.equal(live.phase, "job");
   assert.equal(live.headlineKey, "view.step.discovering");
-  assert.equal(live.canCancel, true);
-  assert.equal(live.canReset, false);
   assert.equal(live.paused, true);
-  assert.equal(live.transportLabel, "Direct from your browser");
   assert.equal(presentStatus("cancelled").headlineKey, "view.cancel.title");
 });
 
-test("completed output preserves acquired progress", () => {
-  const view = presentOutput(output(), progress({ completed: 1 }), "direct");
-  assert.equal(view.phase, "completed");
-  assert.equal(view.terminal.kind, "completed");
-  assert.deepEqual(view.progress, { current: 1, total: 4 });
+test("completed output preserves canonical output facts and acquired progress", () => {
+  for (const disposition of [
+    "browser-save-ready",
+    "browser-save-initiated",
+    "native-publication",
+  ]) {
+    const result = output({ disposition });
+    const view = presentOutput(result, progress({ completed: 1 }));
+    assert.equal(view.phase, "completed");
+    assert.equal(view.output, result);
+    assert.deepEqual(view.progress, { current: 1, total: 4 });
+  }
 });
 
 test("ordinary image display keeps progress during work and presents its final preview", () => {
-  const live = presentProgress(progress(), "browser-session", { displayOnly: true });
+  const live = presentProgress(progress());
   assert.equal(live.phase, "job");
   assert.equal(live.headlineKey, "view.step.downloading");
   assert.equal(live.progress.current, 2);
-  const done = presentOutput(
-    output({ disposition: "display-only" }),
-    progress(),
-    "browser-session",
-  );
+  const result = output({ disposition: "display-only" });
+  const done = presentOutput(result, progress());
   assert.equal(done.phase, "display-only");
-  assert.equal(done.displayOnly, true);
+  assert.equal(done.output, result);
   assert.equal(done.headlineKey, "view.display.title");
 });
 
-test("results render without catalog or progress and partials identify gaps", () => {
-  const done = presentOutput(output(), undefined, "native");
-  assert.equal(done.canReset, true);
-  assert.equal(done.canCancel, false);
-  const partial = presentOutput(
-    output({ complete: false, missing: [10, 11, 12] }),
-    undefined,
-    "native",
-  );
-  assert.equal(partial.partial, true);
-  assert.equal(partial.terminal.output.failedTiles, 3);
-  assert.equal(partial.terminal.gapCount, 3);
-  assert.match(partial.terminal.gapShown, /10/);
-  const failed = presentFailure(
-    { code: "tile.failed", message: "Three tiles failed.", category: "transport", retryable: true },
-    "native",
-  );
+test("results without progress retain partial output and exact missing tile identities", () => {
+  const result = output({
+    complete: false,
+    missing: [10, 11, 12],
+    disposition: "native-publication",
+  });
+  const partial = presentOutput(result, undefined);
+  assert.equal(partial.phase, "completed");
+  assert.equal(partial.progress, null);
+  assert.deepEqual(partial.output, result);
+});
+
+test("failed presentation retains the canonical failure", () => {
+  const error = {
+    code: "TRANSPORT_HTTP_ERROR",
+    phase: "acquisition",
+    message: "Three tiles failed.",
+    retryable: false,
+    transport: "native",
+    request: "https://example.test/tile?signature=exact",
+    resource_kind: "tile",
+    http: 403,
+  };
+  const failed = presentFailure(error);
   assert.equal(failed.phase, "failed");
-  assert.equal(failed.terminal.error.code, "tile.failed");
-  assert.equal(failed.terminal.output, undefined);
+  assert.equal(failed.error, error);
+  assert.equal(failed.output, undefined);
 });
 
-test("app-choice guidance is plain language with no jargon", () => {
-  const banned = [
-    "cors",
-    "origin-clean",
-    "originclean",
-    "wasm",
-    "ssrf",
-    "taint",
-    "metadata proxy",
-    "deep link",
-    "dezoomer",
-  ];
-  for (const cap of [
-    {},
-    { extensionAvailable: true },
-    { nativeAvailable: true },
-    { browserCanSave: false },
-  ]) {
-    const text = renderAppChoice(cap).toLowerCase();
-    for (const b of banned) {
-      assert.ok(!text.includes(b), `guidance contains jargon ${b}: ${text.slice(0, 120)}`);
-    }
-    assert.ok(text.includes("best next step"));
-  }
-  const ext = renderAppChoice({ extensionAvailable: true });
-  assert.ok(ext.includes("add-on"));
-  const nat = renderAppChoice({ nativeAvailable: true });
-  assert.ok(nat.includes("desktop app"));
-});
-
-test("components render save/error/progress plainly", () => {
+test("save guidance explains saving and browser color limitations", () => {
   assert.ok(renderSaveGuidance(false).includes("right-click"));
   assert.ok(renderSaveGuidance(false).includes("Save Image As"));
   assert.ok(renderSaveGuidance(true).includes("save this picture"));
-  assert.ok(
-    renderSaveGuidance(true).includes("Colors may shift"),
-    "browser save must warn that the color profile is not preserved",
-  );
-  const summary = renderErrorSummary({
-    code: "X",
-    category: "c",
-    retryable: true,
-    message: "The picture could not be opened.",
-  });
-  assert.ok(summary.includes("try again"));
-  assert.ok(renderProgress(1, 4).includes("1 of 4"));
+  assert.ok(renderSaveGuidance(true).includes("Colors may shift"));
 });
 
-test("failure presenter keeps the diagnostic detail out of the headline", () => {
-  const diagnostics =
-    " - iiif: Invalid IIIF info.json file: expected value at line 1 column 1\n" +
-    " - zoomify: HTTP 404 fetching this address\n" +
-    " - 12 other format(s) did not match this page address";
-  const error = describeFailure({
+test("failure wording keeps canonical diagnostic facts out of the headline", () => {
+  const facts = {
     code: "job.discovery-failed",
-    detail: diagnostics,
+    phase: "discovery",
+    message: "candidate formats rejected the metadata",
+    detail: " - iiif: Invalid IIIF info.json file\n - zoomify: HTTP 404 fetching this address",
     retryable: false,
-    host: "example.test",
-  });
-  // Prominent message: plain headline, never the block. The source host
-  // is host-provided provenance (extras), not table copy.
-  assert.equal(error.category, "discovery");
-  assert.equal(error.phase, "discovery");
-  assert.ok(!error.message.includes("iiif"));
+    transport: "browser-session",
+    request: "https://example.test/info.json?signed=exact",
+    resource_kind: "metadata",
+    blocked_reason: "forbidden",
+    http: 403,
+    retry_after_ms: 7000,
+    preview: "server refusal",
+  };
+  const error = describeFailure(facts, "example.test");
   assert.ok(error.message.includes("No zoomable image"));
-  // The diagnostic detail is the only thing in the technical detail.
-  assert.equal(error.detail, diagnostics);
+  assert.ok(!error.message.includes("iiif"));
+  assert.deepEqual({ ...error, message: facts.message }, facts);
 });
 
-test("a fetch failure keeps its classified headline", () => {
-  const error = describeFailure({
+test("metadata proxy guidance retains its precise upstream explanation", () => {
+  const facts = {
     code: "TRANSPORT_HTTP_ERROR",
+    phase: "discovery",
+    transport: "metadata-proxy",
     message:
       "The site refused to share this file (HTTP 403). It may block shared servers; the browser extension or the desktop app may still work.",
     retryable: false,
-  });
-  assert.equal(
-    error.message,
-    "The site refused to share this file (HTTP 403). It may block shared servers; the browser extension or the desktop app may still work.",
-  );
+    http: 403,
+  };
+  assert.deepEqual(describeFailure(facts), { ...facts, detail: facts.message });
 });
 
-test("failure classification derives from codes, never text", () => {
-  assert.equal(categoryFor("NO_IMAGE_FOUND"), "discovery");
-  assert.equal(categoryFor("INVALID_URL"), "validation");
-  assert.equal(categoryFor("OUTPUT_ENCODE_FAILED"), "output");
-  assert.equal(categoryFor("PLAN_INVALID"), "internal");
-  assert.equal(categoryFor("TILE_FAILED"), "transport");
-  assert.equal(categoryFor({ code: "OUTPUT_ENCODE_FAILED" }), "transport");
-  assert.equal(categoryFor(null), "transport");
-  assert.equal(phaseFor("NO_IMAGE_FOUND"), "discovery");
-  assert.equal(phaseFor("OUTPUT_DENIED"), "output");
-  assert.equal(phaseFor("TILE_FAILED"), "acquisition");
-  assert.equal(phaseFor({ code: "OUTPUT_DENIED" }), "acquisition");
+test("localizing an error preserves its phase and retryability", () => {
+  const facts = {
+    code: "tile.processing-failed",
+    phase: "processing",
+    message: "The encrypted tile has an invalid signature.",
+    retryable: false,
+  };
+  const localized = describeFailure(facts, "example.test");
+  assert.equal(localized.phase, "processing");
+  assert.equal(localized.retryable, false);
+  assert.equal(localized.detail, facts.message);
 });
 
 test("resolution downgrade remains visible after completion", () => {
@@ -188,15 +143,14 @@ test("resolution downgrade remains visible after completion", () => {
     selected: { width: 20000, height: 10000 },
     maximum: { width: 40000, height: 20000 },
   });
-  const live = presentProgress(current, "direct");
+  const live = presentProgress(current);
   assert.deepEqual(live.resolution, { selected: current.selected, maximum: current.maximum });
-  assert.deepEqual(presentOutput(output(), current, "direct").resolution, live.resolution);
+  assert.deepEqual(presentOutput(output(), current).resolution, live.resolution);
   assert.equal(
-    presentProgress(progress({ selected: current.maximum, maximum: current.maximum }), "direct")
-      .resolution,
+    presentProgress(progress({ selected: current.maximum, maximum: current.maximum })).resolution,
     undefined,
   );
-  assert.equal(presentProgress(progress(), "direct").resolution, undefined);
+  assert.equal(presentProgress(progress()).resolution, undefined);
 });
 
 test("canvas failure copy names the desktop app for every report", () => {

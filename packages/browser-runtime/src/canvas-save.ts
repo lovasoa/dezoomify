@@ -5,7 +5,6 @@
 // blindly. The canvas host is injected so node tests drive the encode path
 // with fakes.
 
-import { suggestedNameFor } from "../../shared-ui/src/labels.ts";
 import { outputError } from "./failure.ts";
 
 /** Warning logged beside every completed browser save (profile stripped). */
@@ -74,19 +73,12 @@ export function canvasToPngBlob(canvas: CanvasLike, signal?: AbortSignal): Promi
 
 /**
  * Save an already-encoded object URL through a blob anchor (the website save
- * needs no `downloads` permission). The suggested filename carries the
- * canvas dimensions; unknown dimensions fall back to the bare base name.
+ * needs no `downloads` permission).
  */
-export function saveBlobViaAnchor(
-  doc: DocumentLike,
-  blobUrl: string,
-  width?: unknown,
-  height?: unknown,
-  title?: unknown,
-): void {
+export function saveBlobViaAnchor(doc: DocumentLike, blobUrl: string, filename: string): void {
   const anchor = doc.createElement("a");
   anchor.href = blobUrl;
-  anchor.download = suggestedNameFor(width, height, "png", title);
+  anchor.download = filename;
   doc.body.appendChild(anchor);
   anchor.click();
   anchor.remove();

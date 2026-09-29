@@ -1,12 +1,13 @@
 // Host-neutral React views for progress, interaction, and output.
 
+import type { Error as JobError } from "@dezoomify/wasm-bindings";
 import type { ReactElement, ReactNode } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
 import type { HistoryEntry } from "./history.ts";
-import type { Presentation, ResolutionChoice, StructuredError } from "./presentation.ts";
+import type { Presentation, ResolutionChoice } from "./presentation.ts";
 import {
   displaySourceUrl,
   handoffOriginFor,
@@ -29,7 +30,6 @@ export {
 } from "./view-helpers.ts";
 export type {
   ConfirmModalArgs,
-  JobActivity,
   PlatformHints,
   ViewCallbacks,
   ViewContext,
@@ -619,11 +619,9 @@ function DisplayOnlyView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: V
 function CompletedView({
   presentation,
   callbacks,
-  ctx,
 }: {
   presentation: Presentation;
   callbacks: ViewCallbacks;
-  ctx?: ViewContext;
 }) {
   const [outputAction, setOutputAction] = useState<"open" | "folder" | null>(null);
   const [outputError, setOutputError] = useState<{
@@ -647,39 +645,23 @@ function CompletedView({
       setOutputAction(null);
     }
   }
-  const info = ctx?.completedInfo;
-  const saved = ctx?.savedOutput;
-  const isClean = ctx?.originClean ?? true;
-  let title = t("view.done.readyTitle");
-  let summary = info ? renderCompletion(info.width, info.height, info.mime) : t("view.done.ready");
-  let showSaveButton = isClean && !!callbacks.onSave;
-  if (saved) {
-    const partial = saved.failedTiles > 0;
-    title = partial ? t("view.done.gaps") : t("view.done.savedFile");
-    summary = partial
-      ? t("view.done.savedPartial", {
-          name: saved.name,
-          w: saved.width,
-          h: saved.height,
-          done: saved.doneTiles,
-          total: saved.totalTiles,
-          failed: saved.failedTiles,
-        })
-      : t("view.done.savedFull", { name: saved.name, w: saved.width, h: saved.height });
-    showSaveButton = false;
-  }
-  if (ctx?.nativeSaved) {
-    title = t(ctx.nativeSaved.partial ? "desktop.done.partial" : "desktop.done.title");
-    summary = info
-      ? t("desktop.done.size", { width: info.width, height: info.height })
-      : t("desktop.done.saved");
-    showSaveButton = false;
-  }
-  const guidance = ctx?.nativeSaved
-    ? t("desktop.done.saved")
-    : saved
-      ? ""
-      : renderSaveGuidance(isClean);
+  const output = presentation.output;
+  const canvas = output?.canvas;
+  const saved =
+    output?.disposition === "native-publication" ||
+    output?.disposition === "browser-save-initiated";
+  const title = saved
+    ? t(output.complete ? "desktop.done.title" : "desktop.done.partial")
+    : t("view.done.readyTitle");
+  const summary = saved
+    ? canvas
+      ? t("desktop.done.size", { width: canvas.width, height: canvas.height })
+      : t("desktop.done.saved")
+    : canvas
+      ? renderCompletion(canvas.width, canvas.height, `image/${output.format}`)
+      : t("view.done.ready");
+  const showSaveButton = output?.disposition === "browser-save-ready" && !!callbacks.onSave;
+  const guidance = saved ? t("desktop.done.saved") : renderSaveGuidance(true);
   return (
     <div className="dz-view-body dz-completed-section dz-fade-in">
       <div className="dz-completed-header">
@@ -788,9 +770,9 @@ function FailedView({
   callbacks: ViewCallbacks;
   ctx?: ViewContext;
 }) {
-  const error: StructuredError = presentation.terminal?.error ?? {
+  const error: JobError = presentation.error ?? {
     code: "UNKNOWN",
-    category: "unknown",
+    phase: "output",
     retryable: true,
     message: t("view.fail.fallback"),
   };
@@ -1005,12 +987,7 @@ function SharedView({
       ) : null}
       {phase === "display-only" ? <DisplayOnlyView callbacks={callbacks} ctx={ctx} /> : null}
       {phase === "completed" ? (
-        <CompletedView
-          key={ctx?.outputKey}
-          presentation={presentation}
-          callbacks={callbacks}
-          ctx={ctx}
-        />
+        <CompletedView key={ctx?.outputKey} presentation={presentation} callbacks={callbacks} />
       ) : null}
       {phase === "failed" ? (
         <FailedView presentation={presentation} callbacks={callbacks} ctx={ctx} />

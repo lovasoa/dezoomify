@@ -1,4 +1,5 @@
 export * from "./access-request.tsx";
+export * from "./activity.ts";
 export * from "./components.ts";
 export * from "./diagnostics.ts";
 export * from "./failure.ts";

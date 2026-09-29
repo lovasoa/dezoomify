@@ -1,73 +1,9 @@
-// Shared failure presentation: the single place every product turns a typed
-// failure into the `StructuredError` the error view renders.
-//
-// Error presentation (docs/errors.md): the prominent `message` is a plain,
-// jargon-free sentence naming the step and the next action; the Rust algorithm's raw
-// diagnostics (for discovery, the headline-free per-format bullet block) go to
-// the expandable `detail`, never the first message. Hosts pass the typed facts
-// and never re-implement the split.
-//
-// Erasable-syntax-only TypeScript (type aliases, plain functions) so node can
-// type-strip it directly in tests, exactly like `i18n.ts`.
-
+// Localized error headlines retain the complete generated error facts.
+import type { Error as JobError } from "@dezoomify/wasm-bindings";
 import { t } from "./i18n.ts";
-import type { StructuredError } from "./presentation.ts";
 
 // JPEG addresses at most 65535 px per side (copy interpolation only).
 const JPEG_MAX_SIDE = 65535;
-
-/** Stable error classification derived from the code, never from text. */
-export function categoryFor(code: unknown): string {
-  if (typeof code !== "string") return "transport";
-  if (code === "INVALID_URL" || code === "INVALID_SETTINGS") return "validation";
-  if (code === "NO_IMAGE_FOUND") return "discovery";
-  if (code.indexOf("OUTPUT_") === 0 || code === "OUTPUT_DENIED") return "output";
-  if (code === "PLAN_INVALID") return "internal";
-  const lower = code.toLowerCase();
-  if (lower.indexOf("handoff.rejected") === 0) return "validation";
-  if (lower.indexOf("discovery.") === 0 || lower.indexOf("job.discovery") >= 0) return "discovery";
-  if (lower.indexOf("output.") === 0) return "output";
-  if (lower.indexOf("internal") >= 0 || lower === "native.internal") return "internal";
-  if (lower.indexOf("job.invalid") >= 0) return "validation";
-  return "transport";
-}
-
-export function phaseFor(code: unknown): string {
-  if (typeof code !== "string") return "acquisition";
-  if (code === "NO_IMAGE_FOUND") return "discovery";
-  if (code.indexOf("OUTPUT_") === 0 || code === "OUTPUT_DENIED") return "output";
-  const lower = code.toLowerCase();
-  if (lower === "handoff.rejected") return "validation";
-  if (lower.indexOf("discovery.") === 0 || lower.indexOf("job.discovery") >= 0) return "discovery";
-  if (lower === "tile.decode-failed" || lower.indexOf("decode.") === 0) return "decode";
-  if (lower === "tile.processing-failed") return "processing";
-  if (lower.indexOf("output.") === 0) return "output";
-  if (lower === "job.cancelled") return "cleanup";
-  if (
-    lower.indexOf("job.resource") === 0 ||
-    lower.indexOf("job.plan") === 0 ||
-    lower.indexOf("job.probe") === 0
-  )
-    return "acquisition";
-  if (
-    lower.indexOf("job.invalid") >= 0 ||
-    lower.indexOf("job.unknown") >= 0 ||
-    lower.indexOf("job.stale") >= 0
-  )
-    return "validation";
-  return "acquisition";
-}
-
-/** Default retryability when a host does not supply the backend verdict. */
-export function retryableFor(code: unknown): boolean {
-  if (typeof code !== "string") return true;
-  return (
-    code !== "INVALID_URL" &&
-    code !== "INVALID_SETTINGS" &&
-    code !== "NO_IMAGE_FOUND" &&
-    code !== "OUTPUT_DENIED"
-  );
-}
 
 // Error copy: every code has plain jargon-free wording that names
 // the step, the picture source, and the single best next action. Technical
@@ -199,51 +135,14 @@ export function plainMessageFor(code: string, sourceMessage: string, host: strin
   return t("desktop.save.fallback", { host });
 }
 
-/** Typed facts every product hands to the shared presenter. */
-export interface FailureFacts {
-  code: string;
-  /** Job diagnostics (headline-free bullet block). Rendered only in details. */
-  detail?: string;
-  /** Extra host provenance appended to the Rust algorithm block in `detail`. */
-  extraDetail?: string;
-  /** Already-human sentence; when omitted the shared copy table selects one. */
-  message?: string;
-  category?: string;
-  phase?: string;
-  retryable?: boolean;
-  transport?: string;
-  url?: string;
-  http?: number;
-  preview?: string;
-  extras?: string[];
-  /** Source host used by copy interpolation. */
-  host?: string;
-}
-
-/**
- * Build the shared `StructuredError`: the plain headline in `message`, the
- * diagnostic detail in `detail`, stable classification, and the optional
- * on-device fetch context. Every product renders this through the same view.
- */
-export function describeFailure(facts: FailureFacts): StructuredError {
-  const code = String(facts.code ?? "");
-  const host = facts.host ?? "";
-  const sourceDetail = facts.detail ?? "";
-  const detail = [sourceDetail, facts.extraDetail]
-    .filter((part): part is string => typeof part === "string" && part !== "")
-    .join("\n\n");
-  const error: StructuredError = {
-    code,
-    category: facts.category ?? categoryFor(code),
-    retryable: facts.retryable ?? retryableFor(code),
-    message: facts.message ?? plainMessageFor(code, sourceDetail, host),
-    phase: facts.phase ?? phaseFor(code),
+/** Keep diagnostic facts intact while choosing the localized headline. */
+export function describeFailure(error: JobError, host = ""): JobError {
+  return {
+    ...error,
+    message:
+      error.transport === "metadata-proxy"
+        ? error.message
+        : plainMessageFor(error.code, error.message, host),
+    detail: error.detail ?? error.message,
   };
-  if (facts.transport) error.transport = facts.transport;
-  if (detail !== "") error.detail = detail;
-  if (facts.url) error.url = facts.url;
-  if (typeof facts.http === "number") error.http = facts.http;
-  if (facts.preview) error.preview = facts.preview;
-  if (facts.extras && facts.extras.length > 0) error.extras = facts.extras;
-  return error;
 }

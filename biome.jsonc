@@ -74,7 +74,7 @@
               "level": "error",
               "options": {
                 "deniedGlobals": {
-                  "window": "The shared UI is host-neutral; inject browser effects through its integration.",
+                  "window": "The shared UI is host-neutral; inject browser capabilities through its integration.",
                   "fetch": "The shared UI is host-neutral; inject fetching through its integration.",
                   "chrome": "The shared UI must not depend on extension globals.",
                   "tauri": "The shared UI must not depend on desktop globals."
@@ -131,7 +131,7 @@
       }
     },
     {
-      "includes": ["apps/desktop/src/*.ts"],
+      "includes": ["apps/desktop/src/**"],
       "linter": {
         "rules": {
           "style": {
@@ -143,6 +143,76 @@
                   "__TAURI_EVENT__": "Use the public @tauri-apps/api modules.",
                   "__TAURI__": "Use the public @tauri-apps/api modules."
                 }
+              }
+            },
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "dezoomify",
+                      "dezoomify/*",
+                      "@dezoomify/extension",
+                      "@dezoomify/extension/*",
+                      "**/extension/**"
+                    ],
+                    "message": "Products never import each other; shared code belongs in a package."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/**", "functions/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@dezoomify/desktop",
+                      "@dezoomify/desktop/*",
+                      "@dezoomify/extension",
+                      "@dezoomify/extension/*",
+                      "**/apps/desktop/**",
+                      "**/apps/extension/**"
+                    ],
+                    "message": "Products never import each other; shared code belongs in a package."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["apps/extension/src/**", "apps/extension/entrypoints/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "dezoomify",
+                      "dezoomify/*",
+                      "@dezoomify/desktop",
+                      "@dezoomify/desktop/*",
+                      "**/desktop/**"
+                    ],
+                    "message": "Products never import each other; shared code belongs in a package."
+                  }
+                ]
               }
             }
           }

@@ -1,10 +1,10 @@
 import type { ReactElement, ReactNode } from "react";
-import type { AppCapabilities } from "./components.ts";
+import type { JobActivity } from "./activity.ts";
 import type { DiagnosticReport } from "./diagnostics.ts";
 import type { HistoryEntry } from "./history.ts";
 import type { Presentation } from "./presentation.ts";
 
-/** Effects supplied by the graphical product that hosts the shared UI. */
+/** User actions supplied by the graphical product that hosts the shared UI. */
 export interface ViewCallbacks {
   onSubmitUrl(url: string): void;
   onCancel(): void;
@@ -26,49 +26,19 @@ export interface ViewCallbacks {
   onResume?(): void;
 }
 
-export interface JobActivity {
-  url?: string;
-  startedAt?: number;
-  now?: number;
-  stepLabel?: string;
-  detail?: string;
-  pendingRequests?: number;
-  completedRequests?: number;
-  failedRequests?: number;
-  longestPendingMs?: number;
-  timeoutMs?: number;
-  lastProgressAt?: number;
-  paused?: boolean;
-  pausedAt?: number;
-  pausedDurationMs?: number;
-}
-
 /**
- * Host presentation context. Counts, selection geometry, and terminal data
- * ride the Presentation; hosts set these fields from progress callbacks plus product-local surfaces (canvas blobs, saved files, history).
+ * Product-local view data alongside the generated progress, output, and errors.
  */
 export interface ViewContext {
   diagnosticReport?: DiagnosticReport;
-  capabilities?: AppCapabilities;
   currentProgress?: {
     active?: number;
     retrying?: number;
     estimatedTotalMs?: number;
     message?: string;
   };
-  completedInfo?: { width: number; height: number; mime: string; blobUrl?: string };
-  nativeSaved?: { partial: boolean };
   /** Stable identity of the completed result; resets pending output actions. */
   outputKey?: string;
-  savedOutput?: {
-    name: string;
-    width: number;
-    height: number;
-    doneTiles: number;
-    totalTiles: number;
-    failedTiles: number;
-  };
-  originClean?: boolean;
   jobActivity?: JobActivity;
   initialUrl?: string;
   sourceUrl?: string;

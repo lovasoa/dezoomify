@@ -22,6 +22,10 @@ while accessible alternatives run. When automatic work is exhausted, discovery
 awaits an interactive read of the same resource. Browser permission details stay
 inside the Host.
 
+Accepted catalogs send their format warnings to `host.warn`, once per distinct
+warning in that catalog. Hosts record these as bounded `discovery-warning`
+diagnostics; malformed sibling entries do not prevent using a valid image.
+
 ## Selection and planning
 
 Interactive choices are awaited Host calls carrying the actual catalog or image.

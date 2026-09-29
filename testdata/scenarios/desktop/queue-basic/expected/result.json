@@ -1,5 +1,5 @@
 {
-  "description": "Three desktop queue entries run sequentially; a failed middle entry never stops the rest, and totals match the CLI bulk contract.",
+  "description": "Three desktop queue entries run sequentially; a failed middle entry never stops the rest, and totals reflect all entries.",
   "entries": [
     {
       "url": "https://fixtures.test/desktop/basic/pyramid.dzi"
@@ -13,18 +13,12 @@
   ],
   "golden": {
     "human": "bulk: 2 succeeded, 1 failed, 3 total",
-    "machine": {
-      "failed": 1,
-      "kind": "bulk-completed",
-      "succeeded": 2,
-      "total": 3
-    },
     "outcomes": [
       {
         "status": "done"
       },
       {
-        "errorCode": "tile.download-failed",
+        "errorCode": "job.partial-discarded",
         "status": "failed"
       },
       {
@@ -64,7 +58,7 @@
       "total": 4
     },
     {
-      "errorCode": "tile.download-failed",
+      "errorCode": "job.partial-discarded",
       "op": "finish",
       "outcome": "failed"
     },

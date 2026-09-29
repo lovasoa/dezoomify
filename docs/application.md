@@ -1,8 +1,12 @@
 # Application
 
 The shared UI renders progress, awaited choices, errors, and completed output.
-Its presentation functions are pure. React components receive callbacks and
-never access host globals.
+Its presentation functions are pure. Completed views read the generated
+`Output` directly: its disposition determines whether saving is available or
+already initiated, and its completeness determines partial-output wording.
+Errors retain the generated diagnostic facts while presentation chooses a
+localized headline. React components receive callbacks and never access host
+globals.
 
 One browser application serves the website and extension. Products inject input
 acquisition, resource reading, explicit permission operations, saving, and

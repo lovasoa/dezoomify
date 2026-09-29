@@ -325,11 +325,6 @@ fn focus_main_window(app: &AppHandle) {
 fn handle_deep_link_url(app: &AppHandle, raw: &str) {
     match deep_link::parse_deep_link(raw) {
         Ok(link) => {
-            debug_assert!(deep_link::requires_confirmation(&link));
-            if deep_link::apply_after_confirmation(link.clone(), false).is_ok() {
-                eprintln!("deep-link rejected: confirmation gate broken");
-                return;
-            }
             // Validated fields are non-secret by construction: the parser
             // rejects userinfo and secret keys, enforces v1-2, the 2048-byte
             // bound, and strict percent-decoding. Only this validated triple

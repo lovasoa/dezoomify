@@ -240,14 +240,11 @@ impl<'a> NativeHost<'a> {
                 .ok()
                 .and_then(|url| url.host_str().map(str::to_string)),
         );
-        let sink = Sink::new(
-            &SinkOptions {
-                compression: options.compression,
-                retain_cap_bytes: options.output_retain_cap,
-                spool_cap_bytes: options.output_spool_cap,
-            },
-            format,
-        );
+        let sink = Sink::new(&SinkOptions {
+            compression: options.compression,
+            retain_cap_bytes: options.output_retain_cap,
+            spool_cap_bytes: options.output_spool_cap,
+        });
         Ok(Self {
             options,
             controls: Controls::default(),
@@ -444,9 +441,14 @@ impl<'a> NativeHost<'a> {
             crate::sink::tile_bytes(&decoded.image),
             sink.retain_cap_bytes(),
         ) {
-            return Err(crate::output::canvas_memory_unavailable(1, 1,
-                &format!("decoded tiles beyond the retain cap ({retained} retained, {inflight} in flight)"),
-                "the configured output retention"));
+            return Err(crate::output::canvas_memory_unavailable(
+                1,
+                1,
+                &format!(
+                    "decoded tiles beyond the retain cap ({retained} retained, {inflight} in flight)"
+                ),
+                "the configured output retention",
+            ));
         }
         sink.place(
             ordinal,
@@ -641,6 +643,14 @@ impl Host for NativeHost<'_> {
         }
         self.diagnostics.observe(&progress);
         (self.progress.borrow_mut())(progress);
+    }
+
+    fn warn(&self, message: String) {
+        self.diagnostics.record(
+            DiagnosticLevel::Warn,
+            "discovery-warning",
+            serde_json::json!({"message": message}),
+        );
     }
 
     async fn settle(&self) {

@@ -166,8 +166,6 @@ const app = createBrowserApplication({
           signal,
         );
         signal.throwIfAborted();
-        context.view.completedInfo = { width, height, mime: "image/png" };
-        context.view.nativeSaved = { partial: false };
         context.view.outputKey = String(downloadId);
         context.diagnostics.record("info", "save-confirmed", {
           download_id: downloadId,

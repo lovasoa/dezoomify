@@ -5,7 +5,7 @@ import { readNativeDiagnostics } from "../src/native.ts";
 
 test("desktop reads retained native diagnostics after a failed invocation", async () => {
   const d = createDiagnosticRecorder({ id: "native", now: () => 0 });
-  d.finish("failed", { code: "tile.download-failed", http: 403 });
+  d.finish("failed", { code: "TRANSPORT_HTTP_ERROR", http: 403 });
   const api = {
     invoke: async (command, args) => {
       assert.equal(command, "get_job_diagnostics");

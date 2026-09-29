@@ -15,7 +15,6 @@ import {
 import {
   createDesktopQueue,
   enqueueDesktopQueue,
-  machineDesktopQueueSummary,
   recordDesktopProgress,
   retryDesktopEntry,
 } from "../src/queue.ts";
@@ -69,12 +68,12 @@ test("progress per job is monotonic and never claims unknown totals", () => {
   assert.equal(unknown.code, "job.unknown");
 });
 
-test("failed entry does not stop the rest with CLI-parity summary", () => {
+test("failed entry does not stop the rest and totals reflect all entries", () => {
   let q = createDesktopQueue();
   q = enqueueDesktopQueue(q, "https://example.com/a").queue;
   q = enqueueDesktopQueue(q, "https://example.com/b").queue;
   q = enqueueDesktopQueue(q, "https://example.com/c").queue;
-  q = finishActiveDesktopEntry(q, "failed", "tile.download-failed").queue;
+  q = finishActiveDesktopEntry(q, "failed", "job.partial-discarded").queue;
   assert.equal(activeDesktopEntry(q).inputUrl, "https://example.com/b");
   q = finishActiveDesktopEntry(q, "done").queue;
   assert.equal(activeDesktopEntry(q).inputUrl, "https://example.com/c");
@@ -83,11 +82,6 @@ test("failed entry does not stop the rest with CLI-parity summary", () => {
   const summary = summarizeDesktopQueue(q);
   assert.deepEqual(summary, { total: 3, succeeded: 2, failed: 1, cancelled: 0, pending: 0 });
   assert.equal(humanDesktopQueueSummary(summary), "bulk: 2 succeeded, 1 failed, 3 total");
-  const machine = JSON.parse(machineDesktopQueueSummary(summary));
-  assert.equal(machine.kind, "bulk-completed");
-  assert.equal(machine.total, 3);
-  assert.equal(machine.succeeded, 2);
-  assert.equal(machine.failed, 1);
 });
 
 test("cancel one and cancel all stop issuing new work", () => {
@@ -111,7 +105,7 @@ test("retry failed moves behind the line and preserves the input URL", () => {
   let q = createDesktopQueue();
   q = enqueueDesktopQueue(q, "https://example.com/a?token=CANARY").queue;
   const active = activeDesktopEntry(q).id;
-  q = finishActiveDesktopEntry(q, "failed", "tile.download-failed").queue;
+  q = finishActiveDesktopEntry(q, "failed", "job.partial-discarded").queue;
   const retried = retryDesktopEntry(q, active);
   assert.equal(retried.code, "ok");
   q = retried.queue;
@@ -198,11 +192,6 @@ for (const id of ["queue-basic", "queue-retry"]) {
     const summary = summarizeDesktopQueue(q);
     assert.deepEqual(summary, doc.golden.summary, "totals");
     assert.equal(humanDesktopQueueSummary(summary), doc.golden.human, "human totals line");
-    assert.deepEqual(
-      JSON.parse(machineDesktopQueueSummary(summary)),
-      doc.golden.machine,
-      "machine totals",
-    );
     if (doc.golden.retriedIdDiffers) {
       const failedId = byIndex[1];
       const retried = q.entries.find((e) => e.status === "done" && e.id !== byIndex[0]);

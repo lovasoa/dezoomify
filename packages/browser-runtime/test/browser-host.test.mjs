@@ -65,6 +65,20 @@ test("acquisition decodes and paints readable bytes before returning", async () 
   assert.equal(h.painted[0][1], tile.placement);
 });
 
+test("discovery warnings reach diagnostics without changing progress and stop after cancellation", () => {
+  const h = setup();
+  h.host.warn("Some resolution information is missing.");
+  h.controller.abort();
+  h.host.warn("Cancelled work is no longer relevant.");
+  const warnings = h.diagnostics
+    .report()
+    .records.filter((entry) => entry.event === "discovery-warning");
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].level, "warn");
+  assert.deepEqual(warnings[0].fields, { message: "Some resolution information is missing." });
+  assert.deepEqual(h.reports, []);
+});
+
 test("HTTP failures retain status, retry hints and preview without ordinary-image fallback", async () => {
   for (const http of [403, 404, 429, 503]) {
     let reads = 0,

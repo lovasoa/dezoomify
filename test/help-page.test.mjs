@@ -93,15 +93,13 @@ test("failure guidance links the in-app image-address guide", () => {
   act(() =>
     renderView(
       el,
-      presentFailure(
-        {
-          code: "NO_IMAGE_FOUND",
-          category: "discovery",
-          retryable: false,
-          message: "No zoomable image could be found.",
-        },
-        "direct",
-      ),
+      presentFailure({
+        code: "job.discovery-failed",
+        phase: "discovery",
+        transport: "direct",
+        retryable: false,
+        message: "No zoomable image could be found.",
+      }),
       { onSubmitUrl: () => {}, onCancel: () => {}, onReset: () => {}, onSave: () => {} },
     ),
   );

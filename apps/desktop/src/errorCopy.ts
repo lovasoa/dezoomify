@@ -79,22 +79,6 @@ export function formatMissingSummary(missing: Array<string>, failedCount?: numbe
   return t("desktop.rec.missingList", { n: missing.length, plural, shown, rest });
 }
 
-export function encoderToMime(value: string | undefined, fallback: string): string {
-  if (!value) return fallback;
-  const lower = value.toLowerCase();
-  if (lower.indexOf("image/") === 0) return value;
-  if (lower === "png") return "image/png";
-  if (lower === "jpeg" || lower === "jpg") return "image/jpeg";
-  if (lower === "tiff" || lower === "tif") return "image/tiff";
-  if (lower === "webp") return "image/webp";
-  // ZIF is a TIFF-compatible multi-directory pyramid; IIIF trees are a
-  // directory of JPEG tiles with an `info.json` manifest, so both fall back
-  // to their closest single-file mime for the completed view.
-  if (lower === "zif") return "image/tiff";
-  if (lower === "iiif" || lower === "iiif-dir") return "application/json";
-  return fallback;
-}
-
 export interface ValidatedDeepLink {
   sourceUrl: string;
   hint: string | null;

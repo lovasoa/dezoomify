@@ -254,6 +254,7 @@ export interface Host {
     checkpoint(gate: Gate,): Promise<void>;
     sleep(delay_ms: number,): Promise<void>;
     report(progress: Progress): void;
+    warn(message: string): void;
     settle(): Promise<void>;
 }
 

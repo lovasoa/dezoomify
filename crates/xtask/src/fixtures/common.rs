@@ -2,7 +2,7 @@
 //!
 //! The `fixtures` command surface re-exports `verify`, `serve`, and
 //! `capture` from their stage modules; this module holds what they share:
-//! the manifest/routes documents, schema and traversal checks, directory
+//! the manifest/routes documents, traversal checks, directory
 //! collection, and hex encoding. Verification and capture stay read-only
 //! except for their declared outputs (see each stage module).
 
@@ -82,21 +82,6 @@ impl Route {
             .unwrap_or("route");
         format!("{host}-{target}")
     }
-}
-
-pub(crate) fn check_schemas(dir: &Path) -> Result<(), String> {
-    for name in [
-        "manifest.schema.json",
-        "scenario.schema.json",
-        "routes.schema.json",
-    ] {
-        let p = dir.join("schema").join(name);
-        let text =
-            std::fs::read_to_string(&p).map_err(|e| format!("cannot read schema {name}: {e}"))?;
-        serde_json::from_str::<serde_json::Value>(&text)
-            .map_err(|e| format!("bad schema {name}: {e}"))?;
-    }
-    Ok(())
 }
 
 pub(crate) fn load_manifest(dir: &Path) -> Result<Manifest, String> {

@@ -14,6 +14,7 @@ import {
   jobPageTitle,
   showDesktopAppGuidance,
   showExtensionGuidance,
+  suggestedNameFor,
 } from "@dezoomify/shared-ui";
 import { RATE_LIMITED_BY_SITE_MESSAGE, SITE_BUSY_MESSAGE } from "./discovery.ts";
 import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.ts";
@@ -77,7 +78,7 @@ const app = root
       capabilities(context) {
         const throttle = createTileThrottle();
         const hooks = {
-          onRequestStart: (label: string) => context.activity.noteRequestStart(label),
+          onRequestStart: () => context.activity.noteRequestStart(),
           onRequestEnd: (id: number, ok: boolean) => context.activity.noteRequestEnd(id, ok),
           onUpdate: context.update,
         };
@@ -94,6 +95,7 @@ const app = root
           throttle: (url) => throttle.throttle(url),
         });
         let blobUrl: string | undefined;
+        let saveName: string | undefined;
         return {
           inputs: async (url) => [{ url }],
           async fetchResource(request, signal) {
@@ -112,22 +114,15 @@ const app = root
             setCanvasVisible(document, true);
             preview.resetTransform(document);
           },
-          save(blob, width, height, signal) {
+          save(blob, width, height, signal, title) {
             signal.throwIfAborted();
             if (blobUrl) URL.revokeObjectURL(blobUrl);
             blobUrl = URL.createObjectURL(blob);
-            context.view.completedInfo = { width, height, mime: "image/png", blobUrl };
+            saveName = suggestedNameFor(width, height, "png", title);
             return "browser-save-ready";
           },
           saveOutput() {
-            if (blobUrl)
-              saveBlobViaAnchor(
-                document,
-                blobUrl,
-                context.view.completedInfo?.width,
-                context.view.completedInfo?.height,
-                context.title(),
-              );
+            if (blobUrl && saveName) saveBlobViaAnchor(document, blobUrl, saveName);
           },
           transport: () => fetcher.getActiveTransport(),
           dispose() {

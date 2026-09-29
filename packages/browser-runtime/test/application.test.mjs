@@ -149,7 +149,12 @@ test("the shared queue advances after failure and preserves successful history",
   await tick();
   assert.equal(h.calls.length, 1);
   act(() =>
-    h.calls[0].reject({ code: "discovery.no-images", message: "No image", retryable: false }),
+    h.calls[0].reject({
+      code: "job.discovery-failed",
+      phase: "discovery",
+      message: "No image",
+      retryable: false,
+    }),
   );
   await tick();
   assert.equal(h.calls[1].inputs[0].url, "https://two.test/image");
@@ -215,7 +220,18 @@ test("partial actions resolve the awaited choice and disappear before completed 
     call.host.report(progress);
     answer = call.host.choosePartial({
       missing: [
-        { tile: 2, failures: [{ retryable: false, code: "TRANSPORT_HTTP_ERROR", http: 403 }] },
+        {
+          tile: 2,
+          failures: [
+            {
+              retryable: false,
+              code: "TRANSPORT_HTTP_ERROR",
+              phase: "acquisition",
+              message: "The website refused this tile.",
+              http: 403,
+            },
+          ],
+        },
       ],
     });
   });
@@ -227,6 +243,6 @@ test("partial actions resolve the awaited choice and disappear before completed 
   act(() => call.resolve({ ...output, complete: false, missing: [2] }));
   await act(() => run);
   assert.equal(h.root.querySelector("[data-dz-partial-decision]"), null);
-  assert.equal(h.app.presentation().partial, true);
+  assert.deepEqual(h.app.presentation().output, { ...output, complete: false, missing: [2] });
   act(() => h.app.dispose());
 });

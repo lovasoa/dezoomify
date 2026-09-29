@@ -46,6 +46,9 @@ mod bindings {
         (()) => {
             "void"
         };
+        (String) => {
+            "string"
+        };
         ($name:ident) => {
             stringify!($name)
         };
@@ -54,7 +57,7 @@ mod bindings {
     // The member list also declares the native Rust trait.
     macro_rules! bind_host {
         (async { $( $method:ident => $js:ident( $( $arg:ident: $ty:tt ),* ) -> $out:tt; )* }
-         report($progress:ident: $progress_ty:tt); settle();) => {
+         sync { $( $notify:ident($value:ident: $value_ty:tt); )* } settle();) => {
             #[wasm_bindgen]
             extern "C" {
                 #[wasm_bindgen(typescript_type = "Host")]
@@ -63,8 +66,10 @@ mod bindings {
                     #[wasm_bindgen(method, catch, js_name = $js)]
                     async fn $method(this: &JsHost, $( $arg: JsValue ),*) -> Result<JsValue, JsValue>;
                 )*
-                #[wasm_bindgen(method, catch, js_name = report)]
-                fn js_report(this: &JsHost, progress: JsValue) -> Result<(), JsValue>;
+                $(
+                    #[wasm_bindgen(method, catch)]
+                    fn $notify(this: &JsHost, $value: JsValue) -> Result<(), JsValue>;
+                )*
                 #[wasm_bindgen(method, catch, js_name = settle)]
                 async fn js_settle(this: &JsHost) -> Result<JsValue, JsValue>;
             }
@@ -77,11 +82,13 @@ mod bindings {
                         decode(value)
                     }
                 )*
-                fn report(&self, progress: $progress_ty) {
-                    if let Ok(value) = encode(&progress) {
-                        let _ = self.js_report(value);
+                $(
+                    fn $notify(&self, $value: $value_ty) {
+                        if let Ok(value) = encode(&$value) {
+                            let _ = JsHost::$notify(self, value);
+                        }
                     }
-                }
+                )*
                 async fn settle(&self) {
                     let _ = self.js_settle().await;
                 }
@@ -92,7 +99,7 @@ mod bindings {
                 "export interface Host {\n",
                 $( stringify!($js), "(", $(stringify!($arg), ": ", ts_type!($ty), ",",)*
                    "): Promise<", ts_type!($out), ">;\n", )*
-                "report(progress: ", ts_type!($progress_ty), "): void;\n",
+                $( stringify!($notify), "(", stringify!($value), ": ", ts_type!($value_ty), "): void;\n", )*
                 "settle(): Promise<void>;\n}\n",
             );
         }
@@ -105,14 +112,16 @@ mod bindings {
         options: JsValue,
         host: JsHost,
     ) -> Result<JsValue, JsValue> {
-        let result = dezoomify::dezoomify(
-            decode::<Vec<JobInput>>(inputs).map_err(js_error)?,
-            decode(options).map_err(js_error)?,
-            &host,
-        )
-        .await
-        .map_err(js_error)?;
-        encode(&result).map_err(js_error)
+        let arguments = decode::<Vec<JobInput>>(inputs)
+            .and_then(|inputs| decode(options).map(|options| (inputs, options)));
+        let result = match arguments {
+            Ok((inputs, options)) => dezoomify::dezoomify(inputs, options, &host).await,
+            Err(error) => {
+                dezoomify::Host::settle(&host).await;
+                Err(error)
+            }
+        };
+        result.and_then(|output| encode(&output)).map_err(js_error)
     }
 
     #[wasm_bindgen(js_name = applyProcessing, skip_typescript)]

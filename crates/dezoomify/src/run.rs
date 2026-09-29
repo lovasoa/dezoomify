@@ -179,9 +179,7 @@ async fn discover(
             )
         })?,
     };
-    let first_failure = std::cell::RefCell::new(None);
-    let failure_observer = &first_failure;
-    registry
+    let catalog = registry
         .discover(
             inputs
                 .into_iter()
@@ -211,9 +209,6 @@ async fn discover(
                     .map_err(|error| {
                         let mut error = crate::retry::classify(error);
                         error.request.get_or_insert(uri);
-                        failure_observer
-                            .borrow_mut()
-                            .get_or_insert_with(|| error.clone());
                         error
                     })?;
                 if let ResourceRead::Response { response } = &result {
@@ -238,28 +233,51 @@ async fn discover(
         .await
         .map_err(|error| match error {
             core::DiscoveryError::Host(error) => *error,
-            core::DiscoveryError::NoCandidateAccepted { ref diagnostics }
-                if diagnostics.iter().all(|d| {
-                    matches!(
-                        d.kind,
-                        core::RejectionKind::FetchFailed | core::RejectionKind::DidNotMatchUrl
+            error => {
+                let cause = match &error {
+                    core::DiscoveryError::NoCandidateAccepted { diagnostics }
+                        if diagnostics.iter().all(|diagnostic| {
+                            matches!(
+                                diagnostic.kind,
+                                core::RejectionKind::FetchFailed
+                                    | core::RejectionKind::DidNotMatchUrl
+                            )
+                        }) =>
+                    {
+                        diagnostics
+                            .iter()
+                            .find_map(|diagnostic| diagnostic.cause.as_deref())
+                            .cloned()
+                    }
+                    _ => None,
+                };
+                let mut failure = cause.unwrap_or_else(|| {
+                    Error::new(
+                        "job.discovery-failed",
+                        ErrorPhase::Discovery,
+                        "No zoomable image was found",
                     )
-                }) && first_failure.borrow().is_some() =>
-            {
-                let mut failure = first_failure.borrow().clone().expect("observed failure");
+                });
                 failure.detail.get_or_insert_with(|| error.detail());
                 failure
             }
-            error => {
-                let mut failure = Error::new(
-                    "job.discovery-failed",
-                    ErrorPhase::Discovery,
-                    "No zoomable image was found",
-                );
-                failure.detail = Some(error.detail());
-                failure
+        })?;
+    let mut seen = HashSet::new();
+    for entry in catalog.entries() {
+        let (warnings, levels) = match entry {
+            DiscoveredEntry::Ready(image) => (image.warnings.as_slice(), image.levels.as_slice()),
+            DiscoveredEntry::Deferred(resource) => (resource.warnings.as_slice(), &[][..]),
+        };
+        for warning in warnings
+            .iter()
+            .chain(levels.iter().flat_map(|level| &level.warnings))
+        {
+            if seen.insert(warning) {
+                host.warn(warning.clone());
             }
-        })
+        }
+    }
+    Ok(catalog)
 }
 
 async fn select(
