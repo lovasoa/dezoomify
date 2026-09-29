@@ -49,7 +49,7 @@ const historyStore = {
     memory.delete(key);
   },
 };
-const wasm = import("../wasm/dezoomify-wasm.js").then(async (module) => {
+const wasm = import("@dezoomify/wasm-bindings").then(async (module) => {
   await module.default();
   return module;
 });

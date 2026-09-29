@@ -428,7 +428,7 @@ fn levels_from_info(url: &str, mut image_info: ImageInfo) -> Result<Vec<Resolved
                 .map_err(|error| IIIFError::GeometryError {
                     description: error.to_string(),
                 })?;
-                let adaptive = AdaptiveSource::Iiif(IIIFProbeProgram {
+                let adaptive = AdaptiveSource::Iiif(IiifProbe {
                     declared: source.clone(),
                     requests,
                 });
@@ -499,16 +499,17 @@ impl GridRequests for IIIFLevel {
 }
 
 #[derive(Clone, Debug)]
-pub struct IIIFProbeProgram {
+pub struct IiifProbe {
     pub(crate) declared: Grid,
     requests: IIIFLevel,
 }
 
-impl IIIFProbeProgram {
+impl IiifProbe {
     #[allow(clippy::result_large_err)]
     pub(crate) async fn resolve(
         self,
         host: &impl crate::Host,
+        mut remaining_probes: u32,
     ) -> Result<Option<ResolvedGrid>, crate::model::Error> {
         let tries = if self.requests.use_size_upscaling {
             2
@@ -533,6 +534,7 @@ impl IIIFProbeProgram {
                     role: TileRole::ProbeAndOutput,
                     ..tile
                 },
+                &mut remaining_probes,
             )
             .await?;
             if let ObservationResult::Available { size } = result

@@ -138,7 +138,7 @@ fn iiif_probe_falls_back_to_caret_size_and_preserves_probe_tile() {
             height: std::num::NonZeroU64::new(256).unwrap(),
         },
     ]);
-    let resolved = futures::executor::block_on(source.resolve(&host))
+    let resolved = futures::executor::block_on(source.resolve(&host, 2))
         .unwrap()
         .unwrap();
     let probes = host.probes.borrow();

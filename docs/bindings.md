@@ -8,6 +8,9 @@ the WASM imports, delegating implementation, and TypeScript Host interface.
 `cargo xtask bindings generate` builds real WASM and refreshes the tracked
 `packages/wasm-bindings/src/generated.d.ts`. Its `--check` form compares a
 fresh declaration byte-for-byte. Browser modules import these generated types.
+The website imports the package for both its types and runtime calls. Vite resolves
+that runtime import to the built WASM glue; typechecking uses the tracked declaration
+and works before the ignored build artifacts exist.
 
 ## Calls
 

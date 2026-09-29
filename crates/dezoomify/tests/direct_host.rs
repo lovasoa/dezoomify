@@ -213,29 +213,87 @@ fn display_only_tiles_produce_display_only_output() {
 }
 #[test]
 fn invalid_inputs_and_limits_are_rejected_before_host_reads() {
-    for options in [
-        Options {
-            max_concurrent: 0,
-            ..options()
-        },
-        Options {
-            max_tiles: 0,
-            ..options()
-        },
-        Options {
-            max_bytes: 1,
-            ..options()
-        },
-        Options {
-            max_retries: 1025,
-            ..options()
-        },
+    for (options, code) in [
+        (
+            Options {
+                max_concurrent: 0,
+                ..options()
+            },
+            "job.invalid-config",
+        ),
+        (
+            Options {
+                max_tiles: 0,
+                ..options()
+            },
+            "job.invalid-config",
+        ),
+        (
+            Options {
+                max_bytes: 0,
+                ..options()
+            },
+            "job.invalid-config",
+        ),
+        (
+            Options {
+                max_concurrent: 65,
+                ..options()
+            },
+            "job.resource-limit",
+        ),
+        (
+            Options {
+                max_tiles: 16_777_217,
+                ..options()
+            },
+            "job.resource-limit",
+        ),
+        (
+            Options {
+                max_bytes: 1,
+                ..options()
+            },
+            "job.resource-limit",
+        ),
+        (
+            Options {
+                max_bytes: 4_294_967_297,
+                ..options()
+            },
+            "job.resource-limit",
+        ),
+        (
+            Options {
+                max_retries: 1025,
+                ..options()
+            },
+            "job.resource-limit",
+        ),
+        (
+            Options {
+                max_deferred_follows: 65,
+                ..options()
+            },
+            "job.resource-limit",
+        ),
+        (
+            Options {
+                retry_base_delay_ms: 300_001,
+                ..options()
+            },
+            "job.resource-limit",
+        ),
+        (
+            Options {
+                max_tiles: 1,
+                ..options()
+            },
+            "job.invalid-config",
+        ),
     ] {
         let host = MemoryHost::default();
-        assert_eq!(
-            invoke(&host, options).unwrap_err().code,
-            "job.resource-limit"
-        );
+        assert_eq!(invoke(&host, options).unwrap_err().code, code);
         assert!(host.fetched.borrow().is_empty());
         assert_eq!(host.settled.get(), 1);
     }
@@ -247,6 +305,30 @@ fn invalid_inputs_and_limits_are_rejected_before_host_reads() {
         "job.invalid-input"
     );
     assert_eq!(host.settled.get(), 1);
+}
+#[test]
+fn supplied_documents_obey_resource_limits_before_host_io() {
+    for contents in [String::new(), "é".repeat(513)] {
+        let host = MemoryHost::default();
+        let error = futures::executor::block_on(dezoomify(
+            vec![JobInput {
+                contents: Some(contents),
+                ..input().remove(0)
+            }],
+            Options {
+                max_bytes: 1024,
+                ..options()
+            },
+            &host,
+        ))
+        .unwrap_err();
+        assert_eq!(error.code, "job.resource-limit");
+        assert!(host.fetched.borrow().is_empty());
+        assert!(host.probes.borrow().is_empty());
+        assert!(host.acquired.borrow().is_empty());
+        assert!(host.outputs.borrow().is_empty());
+        assert_eq!(host.settled.get(), 1);
+    }
 }
 #[test]
 fn image_and_level_choices_are_checked() {
@@ -371,6 +453,47 @@ fn generic_probes_reuse_placed_tiles_and_keep_boundaries() {
     assert!(host.acquired.borrow().is_empty());
     assert_eq!(host.probes.borrow().len(), 4);
     assert!(host.probes.borrow()[0].placement.probe_output);
+}
+
+#[test]
+fn probe_budget_stops_generic_search_and_iiif_fallback_before_excess_io() {
+    let metadata = r#"{"@context":"http://iiif.io/api/image/3/context.json","id":"https://tiles.test/iiif","type":"ImageService3","width":256,"height":256,"extraFeatures":["sizeUpscaling"],"tiles":[{"width":256,"scaleFactors":[1]}]}"#;
+    for (input, first_probe) in [
+        (
+            JobInput::new("https://tiles.test/{{X}}/{{Y}}.jpg"),
+            ProbeOutcome::Available {
+                width: NonZeroU64::new(256).unwrap(),
+                height: NonZeroU64::new(256).unwrap(),
+            },
+        ),
+        (
+            JobInput {
+                url: "https://tiles.test/iiif/info.json".into(),
+                contents: Some(metadata.into()),
+                kind: None,
+            },
+            ProbeOutcome::Missing,
+        ),
+    ] {
+        let host = MemoryHost::default();
+        host.probe_results.borrow_mut().push_back(first_probe);
+        let error = futures::executor::block_on(dezoomify(
+            vec![input],
+            Options {
+                max_tiles: 1,
+                max_concurrent: 1,
+                ..Default::default()
+            },
+            &host,
+        ))
+        .unwrap_err();
+        assert_eq!(error.code, "job.resource-limit");
+        assert_eq!(host.probes.borrow().len(), 1);
+        assert!(host.fetched.borrow().is_empty());
+        assert!(host.acquired.borrow().is_empty());
+        assert!(host.outputs.borrow().is_empty());
+        assert_eq!(host.settled.get(), 1);
+    }
 }
 
 #[test]

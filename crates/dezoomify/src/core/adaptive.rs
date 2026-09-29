@@ -84,8 +84,8 @@ pub struct DiscoverableGrid {
 /// A format whose decoded first tile supplies geometry.
 #[derive(Clone, Debug)]
 pub enum AdaptiveSource {
-    Iiif(crate::iiif::IIIFProbeProgram),
-    Pnav(crate::pnav::PnavProgram),
+    Iiif(crate::iiif::IiifProbe),
+    Pnav(crate::pnav::PnavSource),
 }
 
 #[derive(Debug)]
@@ -104,10 +104,11 @@ impl AdaptiveSource {
     pub async fn resolve(
         &self,
         host: &impl crate::Host,
+        max_probes: u32,
     ) -> Result<Option<ResolvedGrid>, crate::model::Error> {
         match self {
-            Self::Iiif(source) => source.clone().resolve(host).await,
-            Self::Pnav(source) => source.clone().resolve(host).await,
+            Self::Iiif(source) => source.clone().resolve(host, max_probes).await,
+            Self::Pnav(source) => source.clone().resolve(host, max_probes).await,
         }
     }
 }
@@ -121,13 +122,14 @@ impl DiscoverableGrid {
     pub async fn resolve(
         &self,
         host: &impl crate::Host,
+        mut remaining_probes: u32,
     ) -> Result<Option<ResolvedGrid>, crate::model::Error> {
         let mut search = GenericSearch::new(self.clone());
         loop {
             host.checkpoint(crate::model::Gate::Cancellation).await?;
             let point = search.next_point;
             let tile = search.tile()?;
-            let result = crate::run::probe(host, tile).await?;
+            let result = crate::run::probe(host, tile, &mut remaining_probes).await?;
             if search.observe(point, result)? {
                 return Ok(search.grid()?);
             }

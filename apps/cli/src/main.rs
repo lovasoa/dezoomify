@@ -248,7 +248,7 @@ fn job_options_for(parsed: &Args, input: &str, output: &Path) -> JobOptions {
     // mirroring the reference `should_use_largest` rule. The `largest` flag
     // itself is also passed through so size caps are ignored natively.
     // `--format` selects the native `format` (`auto` auto-detects, named
-    // selects the single program); `max_retries` (including 0),
+    // selects only that format); `max_retries` (including 0),
     // `retry_base_delay`, `parallelism`, and `min_interval` are passed
     // through unchanged. Partial output is kept by default
     // (reference `PartialDownload` file behavior); `--no-partial` discards

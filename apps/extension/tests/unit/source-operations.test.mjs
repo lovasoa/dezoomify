@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { collectCandidates, fetchSource } from "../../src/job/source-operations.ts";
+import {
+  cancelSourceFetch,
+  collectCandidates,
+  fetchSource,
+} from "../../src/job/source-operations.ts";
 
 // Test-only polyfill: the pinned Node 24 toolchain predates
 // Uint8Array.prototype.toBase64 (Baseline 2025), while the extension
@@ -107,6 +111,65 @@ test("candidate snapshot applies URL and count caps with overflow diagnostics", 
   } finally {
     globalThis.location = oldLocation;
     globalThis.performance = oldPerformance;
+  }
+});
+
+test("a queued source request cannot start after cancellation or its deadline", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async () => assert.fail("cancelled or expired work cannot fetch");
+  try {
+    const request = {
+      url: "https://gallery.example/info.json",
+      headers: [],
+      operationId: "queued",
+      deadlineAt: Date.now() + 30000,
+    };
+    await cancelSourceFetch(request.operationId, request.deadlineAt);
+    assert.equal((await fetchSource(request)).error.code, "TRANSPORT_CANCELLED");
+    assert.equal(
+      (await fetchSource({ ...request, operationId: "expired", deadlineAt: Date.now() - 1 })).error
+        .code,
+      "TRANSPORT_TIMEOUT",
+    );
+    await cancelSourceFetch("never-started", Date.now() + 10);
+    assert.equal(globalThis.__dezoomifySourceFetches.has("never-started"), true);
+    t.mock.timers.tick(10);
+    assert.equal(globalThis.__dezoomifySourceFetches.has("never-started"), false);
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("source cancellation acknowledges only after its fetch settles", async () => {
+  const oldFetch = globalThis.fetch;
+  let rejectFetch, signal;
+  globalThis.fetch = (_url, init) =>
+    new Promise((_, reject) => {
+      signal = init.signal;
+      rejectFetch = reject;
+    });
+  try {
+    const deadlineAt = Date.now() + 30000;
+    const pending = fetchSource({
+      url: "https://gallery.example/info.json",
+      headers: [],
+      operationId: "running",
+      deadlineAt,
+    });
+    let acknowledged = false;
+    const cancellation = cancelSourceFetch("running", deadlineAt).then(() => {
+      acknowledged = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(signal.aborted, true);
+    assert.equal(acknowledged, false);
+    rejectFetch(new DOMException("Cancelled", "AbortError"));
+    assert.equal((await pending).error.code, "TRANSPORT_CANCELLED");
+    await cancellation;
+    assert.equal(acknowledged, true);
+  } finally {
+    globalThis.fetch = oldFetch;
   }
 });
 

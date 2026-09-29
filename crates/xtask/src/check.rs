@@ -20,7 +20,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     // The disallowed API catalog lives in the workspace-level Clippy config,
     // but only the pure domain crate is subject to it. Run its production
     // library separately so semantic resolution catches aliases and re-exports
-    // without forbidding host capabilities in the effect-owning crates.
+    // without forbidding platform capabilities in the host crates.
     super::command::cargo(&[
         "clippy",
         "-p",

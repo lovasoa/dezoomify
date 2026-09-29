@@ -9,7 +9,8 @@ acquisition, resource reading, explicit permission operations, saving, and
 optional toolbar activity. A browser invocation owns its AbortController,
 pause gate, pending choices, diagnostics, and concrete cleanup.
 
-Starting a replacement retires the previous invocation. Every asynchronous
+Starting a replacement retires the previous invocation and waits for its resources
+before starting new work; the view updates immediately. Every asynchronous
 completion checks ownership before changing the view, history, queue, or output.
 Cancellation aborts active I/O and closes pending interactions; completion awaits
 cleanup. A completed preview remains available until the user retires that result.

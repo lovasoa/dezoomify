@@ -34,7 +34,7 @@ ignores caps).
 
 | You want to… | Option |
 |---|---|
-| Let the tool detect the format, or force one | `-d, --format auto` (default; a named format selects the single program, unknown names fail) |
+| Let the tool detect the format, or force one | `-d, --format auto` (default; a named format limits detection to that format, unknown names fail) |
 | Always take the highest resolution | `-l, --largest` (implied in bulk mode without level caps) |
 | Cap the resolution (e.g. 4000 pixels wide) | `-w, --max-width 4000` |
 | Cap the height | `-h, --max-height 800` |

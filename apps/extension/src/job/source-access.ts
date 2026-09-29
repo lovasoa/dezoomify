@@ -162,6 +162,7 @@ export function createSourceAccess(
     func: (...args: Args) => Result,
     args: Args,
     signal: AbortSignal,
+    onLaunch?: () => void,
   ): Promise<Awaited<Result>> {
     assertLive();
     signal.throwIfAborted();
@@ -176,6 +177,7 @@ export function createSourceAccess(
       throw failure("source-document-lost", "source document changed");
     }
     assertLive();
+    onLaunch?.();
     const results = await browserApi.scripting
       .executeScript<Args, Result>({
         target: { tabId, frameIds: [0] },
@@ -214,7 +216,8 @@ export function createSourceAccess(
     func: (...args: Args) => Result,
     args: Args,
     signal?: AbortSignal,
-    onAbort?: () => void,
+    onAbort?: () => Promise<void>,
+    deadlineAt = Date.now() + timeoutMs,
   ): Promise<Awaited<Result>> {
     assertLive();
     const deadline = new AbortController();
@@ -223,7 +226,17 @@ export function createSourceAccess(
       message: "The source operation timed out.",
       transport: "browser-session",
     };
-    const timer = setTimeout(() => deadline.abort(timeout), timeoutMs);
+    let reachDeadline = () => {};
+    const deadlineReached = new Promise<void>((resolve) => {
+      reachDeadline = resolve;
+    });
+    const timer = setTimeout(
+      () => {
+        deadline.abort(timeout);
+        reachDeadline();
+      },
+      Math.max(0, deadlineAt - Date.now()),
+    );
     const combined = AbortSignal.any([
       lifetime.signal,
       deadline.signal,
@@ -233,11 +246,20 @@ export function createSourceAccess(
     const aborted = new Promise<never>((_, reject) => {
       rejectAbort = reject;
     });
+    let launched = false;
+    let operationDone = Promise.resolve();
     const abort = () => {
-      onAbort?.();
-      rejectAbort(
-        signal?.aborted ? failure("cancelled", "source fetch cancelled") : combined.reason,
-      );
+      const reason = signal?.aborted
+        ? failure("cancelled", "source fetch cancelled")
+        : combined.reason;
+      if (onAbort && launched) {
+        const cleanup = Promise.resolve()
+          .then(onAbort)
+          .catch(() => operationDone);
+        void Promise.race([cleanup, operationDone, deadlineReached]).then(() =>
+          rejectAbort(reason),
+        );
+      } else rejectAbort(reason);
     };
     combined.addEventListener("abort", abort, { once: true });
     try {
@@ -245,7 +267,17 @@ export function createSourceAccess(
         abort();
         return await aborted;
       }
-      return await Promise.race([injectUnchecked(func, args, combined), aborted]);
+      const operation = injectUnchecked(func, args, combined, () => {
+        launched = true;
+      });
+      operationDone = operation.then(
+        () => {},
+        () => {},
+      );
+      return await Promise.race([operation, aborted]);
+    } catch (error) {
+      if (combined.aborted) return await aborted;
+      throw error;
     } finally {
       clearTimeout(timer);
       combined.removeEventListener("abort", abort);
@@ -273,23 +305,25 @@ export function createSourceAccess(
     if (!headers) throw failure("malformed", "invalid source request headers");
 
     const operationId = crypto.randomUUID();
+    const deadlineAt = Date.now() + timeoutMs;
     const sourceRequest: SourceRequest = {
       url: request.uri,
       method: "GET",
       headers,
       operationId,
       timeoutMs,
+      deadlineAt,
     };
     const cancel = () => {
-      void browserApi.scripting
+      return browserApi.scripting
         .executeScript({
           target: { tabId, frameIds: [0] },
           func: cancelSourceFetch,
-          args: [operationId],
+          args: [operationId, deadlineAt],
         })
-        .catch(() => undefined);
+        .then(() => undefined);
     };
-    const result = await inject(fetchSource, [sourceRequest], signal, cancel);
+    const result = await inject(fetchSource, [sourceRequest], signal, cancel, deadlineAt);
     if (signal.aborted) throw failure("cancelled", "source fetch cancelled");
     assertLive();
     if (!validFetchResult(result, documentUrl))

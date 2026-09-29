@@ -51,11 +51,17 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
     host.checkpoint(Gate::Cancellation).await?;
     let (source, previous) = match &image.levels[level].source {
         TileSource::Adaptive(source) => {
-            let resolved = source.resolve(host).await?.ok_or_else(empty_plan)?;
+            let resolved = source
+                .resolve(host, options.max_tiles)
+                .await?
+                .ok_or_else(empty_plan)?;
             (TileSource::Grid(resolved.grid), resolved.previously_output)
         }
         TileSource::Generic(source) => {
-            let resolved = source.resolve(host).await?.ok_or_else(empty_plan)?;
+            let resolved = source
+                .resolve(host, options.max_tiles)
+                .await?
+                .ok_or_else(empty_plan)?;
             (TileSource::Grid(resolved.grid), resolved.previously_output)
         }
         source => (source.clone(), Vec::new()),
@@ -446,7 +452,15 @@ fn portable_tile(tile: TileSpec, canvas: Option<Size>) -> Tile {
 pub(crate) async fn probe(
     host: &impl Host,
     tile: TileSpec,
+    remaining: &mut u32,
 ) -> Result<core::ObservationResult, Error> {
+    *remaining = remaining.checked_sub(1).ok_or_else(|| {
+        Error::new(
+            "job.resource-limit",
+            ErrorPhase::Acquisition,
+            "probe count exceeds max_tiles",
+        )
+    })?;
     host.checkpoint(Gate::Cancellation).await?;
     match host.probe(portable_tile(tile, None)).await? {
         ProbeOutcome::Missing => Ok(core::ObservationResult::Missing),
@@ -599,9 +613,14 @@ fn validate(inputs: &[JobInput], options: &Options) -> Result<(), Error> {
             "inputs require a user source and at most 256 valid URLs or local paths up to 2048 bytes",
         ));
     }
-    if options.max_concurrent == 0
-        || options.max_concurrent > 64
-        || options.max_tiles == 0
+    if options.max_concurrent == 0 || options.max_tiles == 0 || options.max_bytes == 0 {
+        return Err(Error::new(
+            "job.invalid-config",
+            ErrorPhase::Validation,
+            "concurrency, tile, and byte limits must be positive",
+        ));
+    }
+    if options.max_concurrent > 64
         || options.max_tiles > 16_777_216
         || options.max_retries > 1024
         || options.max_bytes < 1024
@@ -633,6 +652,17 @@ fn validate(inputs: &[JobInput], options: &Options) -> Result<(), Error> {
             "job.invalid-options",
             ErrorPhase::Validation,
             "canvas limits must be positive",
+        ));
+    }
+    if inputs.iter().any(|input| {
+        input.contents.as_ref().is_some_and(|contents| {
+            contents.is_empty() || contents.len() as u64 > options.max_bytes
+        })
+    }) {
+        return Err(Error::new(
+            "job.resource-limit",
+            ErrorPhase::Discovery,
+            "supplied document exceeds resource limits",
         ));
     }
     Ok(())

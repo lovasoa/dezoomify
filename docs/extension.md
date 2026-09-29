@@ -38,9 +38,9 @@ recognition, precedence, navigation, and job-wide discovery limits belong to Rus
 
 One source-access object is bound to one source document. A loading event, tab close, changed URL, or returned result from another document invalidates it. It discards results that finish after invalidation. A job that already has inputs can continue through the extension-origin transport when source-context access is lost; the source tab is never silently rebound after navigation. Firefox document IDs are not required, so the current Firefox 133 minimum remains supported.
 
-The source fetch operation uses a per-document abort-controller map in the extension isolated world. The invocation's abort signal cancels an in-flight source fetch. Responses are streamed and capped at 8 MiB before they cross the script boundary as base64; the job page decodes and checks the payload once.
+The source fetch operation tracks live requests in the extension isolated world. Cancellation aborts a live fetch and acknowledges its completion; cancellation delivered before the fetch starts prevents that request from starting. Responses are streamed and capped at 8 MiB before they cross the script boundary as base64; the job page decodes and checks the payload once.
 
-Every source operation has a 30-second deadline covering browser API calls and response bodies. The job page settles on cancellation, navigation, disposal, or deadline even if `executeScript` never replies; late results cannot revive a retired operation. The injected fetch also aborts at its deadline. Timeouts remain typed transient failures for the Rust invocation retry policy rather than starting an unbounded second route.
+Every source operation has one absolute 30-second deadline covering browser API calls and response bodies. Cancellation, navigation, and disposal wait for the fetch result or cancellation acknowledgement, bounded by that same deadline if browser replies disappear. Delayed injections cannot start an expired request, and late results cannot revive retired work. Timeouts remain typed transient failures for the Rust invocation retry policy rather than starting an unbounded second route.
 
 ## Fetching and permissions
 
