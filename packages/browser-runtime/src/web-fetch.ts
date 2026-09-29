@@ -390,7 +390,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         return { outcome: "too-large" };
       }
       const name = (e as { name?: string })?.name;
-      if (name === "TimeoutError" || (combined.timedOut && combined.timedOut())) {
+      if (name === "TimeoutError" || combined.timedOut?.()) {
         report({ outcome: "timeout", timeout_ms: ms, http: responseStatus, error: e });
         return { outcome: "network-error" };
       }

@@ -42,7 +42,7 @@ test("all help links resolve within the generated site", () => {
       const [rel, anchor] = href.split("#");
       const target = path.resolve(helpDir, rel);
       assert.ok(
-        !target.startsWith(webDir + path.sep + "docs"),
+        !target.startsWith(`${webDir + path.sep}docs`),
         `${file} must not link into docs/ source`,
       );
       assert.ok(

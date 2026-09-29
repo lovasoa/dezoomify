@@ -255,9 +255,8 @@ test("static accessibility contract: completed and display-only views keep every
 });
 
 test("static accessibility contract: modal dialogs are labelled, modal, and dismissible by name", () => {
-  let backdrop;
   act(() => openModal(document, "Title", "Subtitle", "Body"));
-  backdrop = document.querySelector(".dz-modal-backdrop");
+  const backdrop = document.querySelector(".dz-modal-backdrop");
   assert.ok(backdrop, "modal backdrop mounted");
   assert.equal(backdrop.getAttribute("role"), "dialog");
   assert.equal(backdrop.getAttribute("aria-modal"), "true");

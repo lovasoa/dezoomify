@@ -317,15 +317,15 @@ export function validateSettings(raw: unknown): SettingsValidation {
     return { ok: false, settings: null, errors: ["settings must be an object"] };
   }
   const obj = raw as Record<string, unknown>;
-  const output_format = parseOutputFormat(obj["output_format"], errors);
-  const compression = parseCompression(obj["compression"], errors);
-  const retries = parseRetries(obj["retries"], errors);
-  const network_profile = parseNetworkProfile(obj["network_profile"], errors);
-  const max_width = parseOptionalDimension(obj["max_width"], "max-width", errors);
-  const max_height = parseOptionalDimension(obj["max_height"], "max-height", errors);
-  const output_dir = parseOptionalDir(obj["output_dir"], "output dir", errors);
-  const cache_dir = parseOptionalDir(obj["cache_dir"], "cache dir", errors);
-  const headers = parseHeadersValue(obj["headers"], errors);
+  const output_format = parseOutputFormat(obj.output_format, errors);
+  const compression = parseCompression(obj.compression, errors);
+  const retries = parseRetries(obj.retries, errors);
+  const network_profile = parseNetworkProfile(obj.network_profile, errors);
+  const max_width = parseOptionalDimension(obj.max_width, "max-width", errors);
+  const max_height = parseOptionalDimension(obj.max_height, "max-height", errors);
+  const output_dir = parseOptionalDir(obj.output_dir, "output dir", errors);
+  const cache_dir = parseOptionalDir(obj.cache_dir, "cache dir", errors);
+  const headers = parseHeadersValue(obj.headers, errors);
   if (
     output_format === undefined ||
     compression === undefined ||
@@ -367,7 +367,7 @@ const memoryFallback: MemoryStore = {};
 
 function readStoredText(): string | null {
   try {
-    const ls = (globalThis as Record<string, unknown>)["localStorage"] as
+    const ls = (globalThis as Record<string, unknown>).localStorage as
       | { getItem?: (key: string) => string | null }
       | undefined;
     if (ls && typeof ls.getItem === "function") {
@@ -381,7 +381,7 @@ function readStoredText(): string | null {
 
 function writeStoredText(text: string): void {
   try {
-    const ls = (globalThis as Record<string, unknown>)["localStorage"] as
+    const ls = (globalThis as Record<string, unknown>).localStorage as
       | { setItem?: (key: string, value: string) => void }
       | undefined;
     if (ls && typeof ls.setItem === "function") {

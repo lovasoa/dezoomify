@@ -39,7 +39,7 @@ test("redirects retain their final URI and generated headers reach the network",
     ],
   };
   const result = await fetcher().fetchResource(request, signal());
-  assert.equal(result.finalUri, origin + "/image");
+  assert.equal(result.finalUri, `${origin}/image`);
   assert.equal(new TextDecoder().decode(result.bytes), "image bytes");
   assert.equal(requests.at(-1).headers.accept, "image/png");
   assert.equal(requests.at(-1).headers.authorization, undefined);

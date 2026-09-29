@@ -32,9 +32,10 @@
     }
   },
   "scripts": {
-    "lint": "biome lint .",
+    "lint": "biome lint --error-on-warnings .",
     "format": "biome check --write .",
     "check:biome": "biome check .",
+    "fix:biome": "biome lint --write --unsafe .",
     "typecheck": "tsc --noEmit && pnpm -r typecheck",
     "build": "vite build",
     "test": "node scripts/build-help.mjs && node --import ./test/tsx-loader.mjs --test-reporter=dot --test \"test/*.test.mjs\""

@@ -22,7 +22,7 @@ export function hostOf(url: string): string {
 // bare hash payloads. Invalid or secret-bearing candidates return null.
 export function readInitialUrl(): string | null {
   try {
-    const loc = (globalThis as Record<string, unknown>)["location"] as
+    const loc = (globalThis as Record<string, unknown>).location as
       | { search?: string; hash?: string }
       | undefined;
     if (!loc) return null;
@@ -35,7 +35,7 @@ export function readInitialUrl(): string | null {
       }
     }
     const hash = typeof loc.hash === "string" ? loc.hash : "";
-    if (hash && hash.startsWith("#")) {
+    if (hash?.startsWith("#")) {
       const body = hash.slice(1);
       if (body.startsWith("?")) {
         const params = new URLSearchParams(body.slice(1));
@@ -184,14 +184,14 @@ export function parseRawDeepLinkUrl(raw: string): ValidatedDeepLink | null {
 export function validateDeepLinkPayload(
   payload: Record<string, unknown>,
 ): ValidatedDeepLink | null {
-  const sourceRaw = payload["source_url"];
+  const sourceRaw = payload.source_url;
   if (typeof sourceRaw === "string" && sourceRaw.trim().startsWith("dezoomify://")) {
     return parseRawDeepLinkUrl(sourceRaw);
   }
-  const version = normalizeDeepLinkVersion(payload["version"]);
+  const version = normalizeDeepLinkVersion(payload.version);
   if (version === null) return null;
   if (!isValidDeepLinkSource(sourceRaw)) return null;
-  const hint = normalizeDeepLinkHint(payload["hint"] ?? null);
+  const hint = normalizeDeepLinkHint(payload.hint ?? null);
   if (hint === undefined) return null;
   return { sourceUrl: (sourceRaw as string).trim(), hint, version };
 }

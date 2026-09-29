@@ -1007,7 +1007,7 @@ function renderInto(container: HTMLElement, node: ReactElement): void {
     root = createRoot(container);
     roots.set(container, root);
   }
-  flushSync(() => root!.render(node));
+  flushSync(() => root?.render(node));
 }
 
 export function renderView(
@@ -1172,13 +1172,7 @@ function ConfirmDialog({
       subtitle={args.subtitle}
       showClose={false}
       onClose={() => decide(false)}
-      body={
-        <>
-          {args.bodyLines.map((line) => (
-            <p key={line}>{line}</p>
-          ))}
-        </>
-      }
+      body={args.bodyLines.map((line) => <p key={line}>{line}</p>)}
       actions={
         <>
           <button

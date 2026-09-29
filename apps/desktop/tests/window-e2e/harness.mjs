@@ -204,7 +204,7 @@ export async function startWindowApp(home) {
 // process tree, so a leaked app is still killed on a lane deadline; this makes
 // normal teardown deterministic instead of relying on that backstop.
 export async function stopWindowApp(app) {
-  if (!app || !app.proc) return;
+  if (!app?.proc) return;
   const { proc } = app;
   if (proc.exitCode !== null || proc.signalCode !== null) return;
   const exited = new Promise((resolve) => proc.once("exit", resolve));

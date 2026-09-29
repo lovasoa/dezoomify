@@ -76,7 +76,7 @@ export function finishActiveQueueEntry<E extends QueueEntry>(
   errorCode?: string,
 ): { queue: SequentialQueue<E>; next: E | null } {
   const active = activeQueueEntry(queue);
-  if (!active || active.status !== "active") return { queue, next: null };
+  if (active?.status !== "active") return { queue, next: null };
   let nextQueue = changeEntry(queue, active.id, outcome, errorCode);
   const waiting = nextQueue.entries.find((entry) => entry.status === "queued");
   if (!waiting) return { queue: { ...nextQueue, activeId: null }, next: null };

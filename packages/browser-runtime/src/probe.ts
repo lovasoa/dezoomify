@@ -1,14 +1,13 @@
 import type { ResourceRequest } from "@dezoomify/wasm-bindings";
 
-// Shared probe-size helper for browser hosts.
-//
-// Probing only needs decoded dimensions: fetch one tile as readable bytes,
-// decode it far enough to report its size, and fall back to a plain <img>
-// measurement when readable bytes are unavailable (CORS-blocked without a
-// grant). The website and the extension share this implementation so
-// probe-driven levels behave identically on both products.
-
-export type ProbeSize =
+/** Shared probe-size helper for browser hosts.
+ Probing only needs decoded dimensions: fetch one tile as readable bytes,
+ decode it far enough to report its size, and fall back to a plain <img>
+ measurement when readable bytes are unavailable (CORS-blocked without a
+ grant). The website and the extension share this implementation so
+ probe-driven levels behave identically on both products.
+**/
+export type ProbeResult =
   | { status: "missing" }
   | {
       status: "available";
@@ -47,7 +46,7 @@ function observedSize(
   width: number,
   height: number,
   retained: { bytes?: ArrayBuffer; image?: ProbeImage } = {},
-): ProbeSize {
+): ProbeResult {
   return width > 0 && height > 0
     ? { status: "available", width, height, ...retained }
     : { status: "missing" };
@@ -55,8 +54,8 @@ function observedSize(
 
 export function createProbeSize(
   deps: ProbeSizeDeps,
-): (request: ResourceRequest, signal: AbortSignal) => Promise<ProbeSize> {
-  return async (request: ResourceRequest, signal: AbortSignal): Promise<ProbeSize> => {
+): (request: ResourceRequest, signal: AbortSignal) => Promise<ProbeResult> {
+  return async (request: ResourceRequest, signal: AbortSignal): Promise<ProbeResult> => {
     signal.throwIfAborted();
     let bytes: ArrayBuffer;
     try {

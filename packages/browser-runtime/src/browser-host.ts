@@ -129,33 +129,43 @@ export class BrowserHost implements Host {
     try {
       const loadDisplayImage = this.deps.loadDisplayImage;
       const probe = createProbeSize({
-        fetchResource: async (request) => ({ bytes: await this.readable(request) }),
+        fetchResource: async (request) => ({
+          bytes: await this.readable(request),
+        }),
         decode: (bytes) => this.deps.decoder.decode(bytes, this.signal),
         ...(loadDisplayImage
           ? {
               loadImage: async (url: string, signal: AbortSignal) => {
                 const image = await loadDisplayImage(url, signal);
-                return { width: image.naturalWidth, height: image.naturalHeight, image };
+                return {
+                  width: image.naturalWidth,
+                  height: image.naturalHeight,
+                  image,
+                };
               },
             }
           : {}),
       });
-      const size = await probe(tile.request, this.signal);
-      if (size.status === "available" && tile.placement.probe_output) {
+      const tile_probe = await probe(tile.request, this.signal);
+      if (tile_probe.status === "available" && tile.placement.probe_output) {
         try {
           this.deps.assembly.prepare(tile.placement.canvas);
         } catch (error) {
           throw this.failure(error, undefined, "output");
         }
-        if (size.bytes)
-          await this.deps.assembly.acquireTile(tile.index, tile.placement, size.bytes);
-        else if (size.image)
-          this.deps.assembly.acquireDisplayTile(tile.index, tile.placement, size.image);
+        if (tile_probe.bytes)
+          await this.deps.assembly.acquireTile(tile.index, tile.placement, tile_probe.bytes);
+        else if (tile_probe.image)
+          this.deps.assembly.acquireDisplayTile(tile.index, tile.placement, tile_probe.image);
         else return { status: "missing" as const };
       }
-      return size.status === "missing"
-        ? size
-        : { status: "available" as const, width: size.width, height: size.height };
+      return tile_probe.status === "missing"
+        ? tile_probe
+        : {
+            status: "available" as const,
+            width: tile_probe.width,
+            height: tile_probe.height,
+          };
     } catch (error) {
       throw this.failure(error, tile.request);
     }

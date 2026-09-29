@@ -18,7 +18,6 @@ import {
   laneAppEnv,
   outputFiles,
   runOutputDir,
-  SCENARIOS_DIR,
   startFixtureServer,
   startFrontendServer,
   startWindowApp,

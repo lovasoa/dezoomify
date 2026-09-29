@@ -329,7 +329,7 @@ body {
   padding: 0 1.55rem 0 0.55rem;
   overflow: hidden;
   color: var(--dz-text-primary);
-  background-color: transparent !important;
+  background-color: transparent;
   border: 0;
   border-left: 1px solid color-mix(in srgb, var(--dz-surface-border) 78%, transparent);
   border-radius: 0;
@@ -608,6 +608,7 @@ body {
  * confirm. Shared actions (Dezoomify/Cancel/Save buttons, URL input) already
  * use the same token in theme.css; these rules cover the desktop aux,
  * settings, help, and deep-link DOM. One token only, no blur, no neon halo. */
+.dz-site-footer a:focus-visible,
 #dz-desktop-aux button:focus-visible,
 #dz-desktop-aux input:focus-visible,
 #dz-desktop-aux textarea:focus-visible,
@@ -620,8 +621,7 @@ body {
 #dz-desktop-settings summary:focus-visible,
 #dz-deep-link-confirm button:focus-visible,
 #dz-deep-link-confirm a:focus-visible,
-#dz-deep-link-confirm [tabindex]:focus-visible,
-.dz-site-footer a:focus-visible {
+#dz-deep-link-confirm [tabindex]:focus-visible {
   outline: none;
   box-shadow: var(--dz-focus-ring);
 }
