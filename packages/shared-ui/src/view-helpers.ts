@@ -37,21 +37,6 @@ export function jobPageTitle(url?: string): string {
   return `${DEFAULT_PAGE_TITLE} ${host}`;
 }
 
-/**
- * Whether a controller status counts as "while dezooming" for the tab title.
- * Covers the shared job phase; terminal and idle phases restore the base.
- */
-export function isActiveJobStatus(status: string): boolean {
-  return (
-    status === "discovering" ||
-    status === "choosing-image" ||
-    status === "choosing-level" ||
-    status === "preflighting" ||
-    status === "downloading" ||
-    status === "saving"
-  );
-}
-
 export function handoffOriginFor(handoffUrl?: string, sourceUrl?: string): string {
   const candidates = [sourceUrl];
   try {

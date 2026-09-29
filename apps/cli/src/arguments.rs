@@ -64,8 +64,7 @@ pub struct Args {
     /// manifests, best-effort). When present, one output per entry.
     pub bulk: Option<String>,
     /// Partial output policy: keep a partial image with blank regions when
-    /// some tiles fail after retries (default, reference `PartialDownload`
-    /// file behavior), published to a `.partial` sibling (`out.png` becomes
+    /// some tiles fail after retries (default), published to a `.partial` sibling (`out.png` becomes
     /// `out.partial.png`) so it never masquerades as a complete save.
     /// `--no-partial` discards instead with
     /// `tile.download-failed` and no output. `--keep-partial` is the
@@ -90,8 +89,7 @@ impl Args {
     }
 
     /// Default `Referer` is the bulk source or input URI when it is http(s),
-    /// mirroring the reference client default. Sent only when the user did
-    /// not pass an explicit `Referer` header.
+    /// unless the user supplied an explicit `Referer` header.
     #[must_use]
     pub fn request_referer(&self) -> Option<&str> {
         let candidate = if self.is_bulk_mode() {
@@ -103,7 +101,7 @@ impl Args {
     }
 
     /// Largest wins explicitly, or implicitly in bulk mode when no level
-    /// cap was given. Mirrors the reference `should_use_largest`.
+    /// cap was given.
     #[must_use]
     pub fn should_use_largest(&self) -> bool {
         self.largest || (self.is_bulk_mode() && !self.has_level_specifying_args())
@@ -453,7 +451,7 @@ fn validate_format(name: &str) -> Result<(), String> {
 }
 
 /// Validate a `--logging` value and normalize to lowercase.
-/// Real levels mirror the reference `init_log` verbosity: error, warn, info,
+/// Valid levels: error, warn, info,
 /// debug, trace (case-insensitive). Unknown values fail with a typed error.
 fn validate_logging(raw: &str) -> Result<String, String> {
     let normalized = raw.trim().to_ascii_lowercase();
@@ -466,7 +464,7 @@ fn validate_logging(raw: &str) -> Result<String, String> {
 }
 
 /// Parse durations like `50ms`, `2s`, `1min`, `1m`, `1h`, `100ns`.
-/// Bare `0` means no delay. Mirrors the reference `parse_duration`.
+/// Bare `0` means no delay.
 pub fn parse_duration(s: &str) -> Result<Duration, String> {
     let trimmed = s.trim();
     if trimmed == "0" {

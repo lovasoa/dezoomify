@@ -114,14 +114,14 @@ jobs:
             # HTML and probe that exact asset.
             main_asset=$(grep -oE '/beta/assets/index-[A-Za-z0-9_-]+\.js' dist/beta/index.html | head -1)
             main_js=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}${main_asset}" || true)
-            # Wasm glue must be served as real JS/wasm. A 200 text/html response
-            # masks a missing asset: Firefox then fails the worker with
-            # NS_ERROR_CORRUPTED_CONTENT and the site spins in "Finding the
-            # zoomable image..." forever.
+            # Check the actual WASM assets referenced by Vite's bundles. An
+            # HTML fallback for a missing asset must fail deployment verification.
+            wasm_js_asset=$(find dist/beta/assets -maxdepth 1 -name 'dezoomify-wasm-*.js' -printf '/beta/assets/%f\n' | head -1)
+            wasm_bin_asset=$(find dist/beta/assets -maxdepth 1 -name 'dezoomify-wasm_bg-*.wasm' -printf '/beta/assets/%f\n' | head -1)
             wasm_js=$(curl -sS -o /dev/null -w "%{http_code} %{content_type}" --max-time 20 \
-              "https://${{ env.SITE_HOST }}/beta/wasm/dezoomify-wasm.js" || true)
+              "https://${{ env.SITE_HOST }}${wasm_js_asset}" || true)
             wasm_bin=$(curl -sS -o /dev/null -w "%{http_code} %{content_type}" --max-time 20 \
-              "https://${{ env.SITE_HOST }}/beta/wasm/dezoomify-wasm_bg.wasm" || true)
+              "https://${{ env.SITE_HOST }}${wasm_bin_asset}" || true)
             # Both proxy functions must be bound: the new app's metadata relay
             # answers a blocked loopback target itself (403), and the legacy
             # proxy answers a missing url parameter itself (400); a static
@@ -143,7 +143,7 @@ jobs:
             cargo_toml_ct=$(curl -sS -o /dev/null -w "%{content_type}" --max-time 20 \
               "https://${{ env.SITE_HOST }}/crates/dezoomify-wasm/Cargo.toml" || true)
             repo_files_served=0
-            if grep -q "next-generation rewrite" <<<"$readme"; then repo_files_served=1; fi
+            if grep -qx '# Dezoomify' <<<"$readme"; then repo_files_served=1; fi
             if [ "$cargo_toml_ct" = "application/toml" ]; then repo_files_served=1; fi
             served_beta_hash="$(normalize_beta /tmp/beta.html 2>/dev/null | sha256sum | cut -d' ' -f1 || true)"
             if [ "$legacy" = "200" ] \

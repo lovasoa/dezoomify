@@ -1,7 +1,7 @@
 //! Content guards: stale limits, banned vocab, timeout spread, encoder drift,
 //! contract tense, staleness markers, and tracked size budgets.
 //!
-//! Size budgets (todo 6.3) pin the shipped bytes that prose guards cannot
+//! Size budgets pin the shipped bytes that prose guards cannot
 //! see: the WASM binding (`wasm/dezoomify-wasm_bg.wasm`, 5 MB warn / 6 MB
 //! fail), the extension store ZIPs (`target/extension/*.zip`, 3 MB warn /
 //! 4 MB fail), the served `dist/beta` JavaScript (750 kB warn / 1 MB fail),
@@ -11,15 +11,6 @@
 //! checkout; tracked sources fail closed.
 use std::path::Path;
 use std::process::Command;
-const ALLOW: &[&str] = &[
-    "--dezoomer",
-    "supportedDezoomers",
-    "ALL_DEZOOMERS",
-    "const dezoomers",
-    "dezoomers.forEach",
-    "dezoomer?:",
-    "Generic dezoomer",
-];
 pub fn verify(a: &[String]) -> Result<(), String> {
     if !a.is_empty() {
         return Err("usage: cargo xtask check (no options)".to_string());
@@ -41,12 +32,8 @@ pub fn verify(a: &[String]) -> Result<(), String> {
             "packages/shared-ui/src/components.ts",
         ],
     )?;
-    let v: Vec<&str> = o
-        .lines()
-        .filter(|l| !ALLOW.iter().any(|x| l.contains(x)))
-        .collect();
-    if !v.is_empty() {
-        return Err(format!("banned vocab outside allowlist:\n{}", v.join("\n")));
+    if !o.is_empty() {
+        return Err(format!("banned user-facing vocabulary:\n{o}"));
     }
     if g(
         &r,
@@ -88,11 +75,7 @@ pub fn verify(a: &[String]) -> Result<(), String> {
             b(&q)
         ));
     }
-    // Stale direct-first window: the shipped code waits 1500 ms (dto.rs
-    // METADATA_WINDOW_MS with its generated TypeScript projection, plus the
-    // browser-runtime fetch and policy modules). Contract docs and the root
-    // README agree with that window; older 250 ms notes survive only in code
-    // comments describing the history.
+    // Contract docs agree with DIRECT_METADATA_TIMEOUT_MS in browser-runtime/tile-policy.ts.
     f(
         &r,
         &["250 ?ms", "docs", "README.md"],
@@ -105,9 +88,7 @@ pub fn verify(a: &[String]) -> Result<(), String> {
         &["to `ng`", "docs"],
         "stale ng branch (canonical is master)",
     )?;
-    // Encoder truth: native ships six output formats (commands.rs
-    // SUPPORTED_FORMATS: PNG, JPEG, TIFF, ZIF, WebP, iiif-dir); no app or
-    // contract doc still promises single-PNG output.
+    // Native provides PNG, JPEG, TIFF, ZIF, WebP, and iiif-dir output.
     f(
         &r,
         &["single-PNG", "apps/README.md", "docs", "README.md"],

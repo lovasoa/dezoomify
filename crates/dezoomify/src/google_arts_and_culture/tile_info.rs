@@ -125,7 +125,7 @@ mod tests {
         use std::path::Path;
 
         let test_source_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata")
+            .join("../../testdata/scenarios/rs-core/formats/payloads")
             .join("google_arts_and_culture")
             .join(test_file_name);
         let test_html = fs::read_to_string(test_source_path).unwrap();

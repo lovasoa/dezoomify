@@ -6,7 +6,7 @@
 // with fakes.
 
 import { suggestedNameFor } from "../../shared-ui/src/labels.ts";
-import { failure } from "./failure.ts";
+import { outputError } from "./failure.ts";
 
 /** Warning logged beside every completed browser save (profile stripped). */
 export const BROWSER_SAVE_COLOR_WARNING =
@@ -47,11 +47,9 @@ export function canvasToPngBlob(canvas: CanvasLike, signal?: AbortSignal): Promi
       if (blob) resolve(blob);
       else
         reject(
-          failure(
+          outputError(
             "OUTPUT_ENCODE_FAILED",
             "The final picture could not be created from the saved pieces.",
-            false,
-            undefined,
             "canvas.toBlob returned null while encoding the PNG",
           ),
         );
@@ -64,11 +62,9 @@ export function canvasToPngBlob(canvas: CanvasLike, signal?: AbortSignal): Promi
         return;
       }
       reject(
-        failure(
+        outputError(
           "OUTPUT_ENCODE_FAILED",
           "The final picture could not be created from the saved pieces.",
-          false,
-          undefined,
           `canvas.toBlob threw while encoding the PNG: ${e instanceof Error ? e.message : String(e)}`,
         ),
       );

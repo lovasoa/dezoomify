@@ -1,7 +1,7 @@
 // Live job activity shared by browser products.
 // Drives the progressive-disclosure job view: pending-request clocks, the
 // longest-wait gauge and the delta-gated 500 ms
-// heartbeat whose paints are rAF-batched. The owning orchestrator supplies
+// heartbeat whose paints are rAF-batched. The browser application supplies
 // the state object shape (shared-ui ViewContext jobActivity) through the
 // returned tracker's `state` reference and a repaint callback; this module
 // never imports view code. Timers and the frame scheduler are injectable so

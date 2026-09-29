@@ -6,9 +6,8 @@
 //! always a slip rather than intent. This scan is the single enforcement
 //! point: it runs in `check` and the `check` CI lane.
 //!
-//! The scan deliberately skips the read-only evidence trees where imported
-//! history must stay byte-identical: `migration-sources/` and `testdata/`
-//! (their contents are captured verbatim from upstream and locked by SHA256).
+//! The scan skips `testdata/`, whose captured upstream payloads are locked
+//! by SHA256 and must stay byte-identical.
 //! It also skips binary files, which may legitimately contain the U+2014 byte
 //! sequence.
 
@@ -55,7 +54,7 @@ fn scan(base: &Path) -> Result<Vec<String>, String> {
         .filter(|name| !name.is_empty())
     {
         let name = std::str::from_utf8(name).map_err(|_| "non-utf8 source path")?;
-        if name.starts_with("migration-sources/") || name.starts_with("testdata/") {
+        if name.starts_with("testdata/") {
             continue;
         }
         let path = base.join(name);
@@ -71,7 +70,7 @@ fn scan(base: &Path) -> Result<Vec<String>, String> {
         }
         let bytes = std::fs::read(&path).map_err(|e| format!("cannot read {name}: {e}"))?;
         if std::str::from_utf8(&bytes).is_err() {
-            // Binary files (e.g. the committed wasm glue) may legitimately
+            // Binary files (e.g. image assets) may legitimately
             // contain the U+2014 byte sequence; only text files are policed.
             continue;
         }
@@ -124,12 +123,11 @@ mod tests {
     fn scan_skips_evidence_and_build_output_dirs() {
         let base = temp_tree("skip");
         fs::write(base.join(".gitignore"), "target/\n.output/\n").unwrap();
-        for dir in ["target", ".output", "migration-sources", "testdata"] {
+        for dir in ["target", ".output", "testdata"] {
             fs::create_dir_all(base.join(dir)).unwrap();
         }
         fs::write(base.join("target/t.txt"), "target \u{2014}\n").unwrap();
         fs::write(base.join(".output/bundle.js"), "bundle \u{2014}\n").unwrap();
-        fs::write(base.join("migration-sources/m.txt"), "migration \u{2014}\n").unwrap();
         fs::write(base.join("testdata/t.txt"), "testdata \u{2014}\n").unwrap();
         fs::write(base.join("kept.txt"), "kept \u{2014}\n").unwrap();
         assert_eq!(scan(&base).unwrap(), vec!["kept.txt"]);
@@ -140,7 +138,7 @@ mod tests {
     fn scan_skips_binary_files() {
         let base = temp_tree("binary");
         // A real binary: invalid UTF-8 (0xff) that also happens to contain the
-        // U+2014 byte sequence, exactly like the committed wasm glue.
+        // U+2014 byte sequence.
         fs::write(base.join("glue.wasm"), [0x00, 0xff, 0xe2, 0x80, 0x94]).unwrap();
         assert!(scan(&base).unwrap().is_empty());
         fs::remove_dir_all(&base).unwrap();

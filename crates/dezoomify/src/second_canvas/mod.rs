@@ -304,13 +304,13 @@ mod tests {
     fn fixture(name: &str) -> &'static [u8] {
         match name {
             "legacy" => include_bytes!(
-                "../../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/legacy.json"
+                "../../../../testdata/scenarios/rs-core/formats/payloads/second_canvas/legacy.json"
             ),
             "legacy-string" => include_bytes!(
-                "../../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/legacy-string-level.json"
+                "../../../../testdata/scenarios/rs-core/formats/payloads/second_canvas/legacy-string-level.json"
             ),
             "modern" => include_bytes!(
-                "../../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/modern.json"
+                "../../../../testdata/scenarios/rs-core/formats/payloads/second_canvas/modern.json"
             ),
             _ => panic!("unknown fixture"),
         }

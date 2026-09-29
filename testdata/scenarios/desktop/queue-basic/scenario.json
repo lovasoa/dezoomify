@@ -1,5 +1,5 @@
 {
-  "description": "Desktop queue basic: three validated single-job requests run one at a time through the single-job engine; the middle entry fails and never stops the rest",
+  "description": "Desktop queue runs three validated requests one at a time; the middle entry fails and never stops the rest",
   "id": "desktop/queue-basic",
   "input": {
     "mode": "queue",

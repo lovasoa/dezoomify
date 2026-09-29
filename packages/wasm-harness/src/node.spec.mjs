@@ -42,7 +42,6 @@ function host(overrides = {}) {
     async acquireTile(tile) {
       await Promise.resolve();
       observed.tiles.push(tile);
-      return { display_only: false };
     },
     async finish(request) {
       return {
@@ -50,7 +49,7 @@ function host(overrides = {}) {
         format: request.format,
         complete: request.missing.length === 0,
         missing: request.missing,
-        disposition: request.display_only ? "display-only" : "browser-save-ready",
+        disposition: "browser-save-ready",
       };
     },
     async chooseImage() {
@@ -98,7 +97,6 @@ test("structured Host rejection retains request facts", async () => {
     transport: "direct",
     resource_kind: "metadata",
     http: 403,
-    recovery: [],
   };
   const platform = host({
     async fetch() {
@@ -120,11 +118,11 @@ test("malformed JavaScript input and Host return values fail as typed errors", a
   });
   const platform = host({
     async acquireTile() {
-      return { display_only: "invalid" };
+      return "invalid";
     },
   });
   await assert.rejects(wasm.dezoomify([{ url }], options, platform), (error) => {
-    assert.ok(error.code);
+    assert.equal(error.code, "binding.invalid-value");
     assert.equal(platform.observed.settled, 1);
     return true;
   });
@@ -140,12 +138,56 @@ test("processing uses Uint8Array without numeric body arrays", () => {
   });
 });
 
+test("Rust classifies raw Host errors while retaining exact failure context", async () => {
+  const failure = {
+    code: "host.future-throttle",
+    phase: "acquisition",
+    message: "Original host message",
+    request: "https://redirected.example/tile?signed=exact",
+    transport: "native",
+    resource_kind: "tile",
+    blocked_reason: "throttled",
+    http: 429,
+    retry_after_ms: 900000,
+    preview: "Original response",
+    detail: "Original context",
+  };
+  const platform = host({
+    async acquireTile(tile) {
+      platform.observed.tiles.push(tile);
+      if (tile.index === 1) throw failure;
+    },
+    async choosePartial({ missing }) {
+      assert.equal(missing.length, 1);
+      assert.equal(missing[0].tile, 1);
+      assert.deepEqual(missing[0].failures, [
+        { ...failure, retryable: true },
+        { ...failure, retryable: true },
+      ]);
+      return "keep";
+    },
+  });
+  const output = await wasm.dezoomify(
+    [{ url }],
+    { ...options, partial: "prompt", max_retries: 1 },
+    platform,
+  );
+  assert.deepEqual(platform.observed.delays, [300000]);
+  assert.deepEqual(output.missing, [1]);
+  assert.equal(output.complete, false);
+});
+
 test("concurrent invocations use distinct Host objects and settle each once", async () => {
   const left = host();
   const right = host({
-    async acquireTile(tile) {
-      right.observed.tiles.push(tile);
-      return { display_only: true };
+    async finish(request) {
+      return {
+        canvas: request.canvas,
+        format: request.format,
+        complete: request.missing.length === 0,
+        missing: request.missing,
+        disposition: "display-only",
+      };
     },
   });
   const [a, b] = await Promise.all([
@@ -166,13 +208,12 @@ test("malformed tile processing remains a permanent missing tile eligible for pa
       platform.observed.tiles.push(tile);
       if (tile.index === 1)
         wasm.applyProcessing("google-arts-decrypt", Uint8Array.of(10, 10, 10, 10));
-      return { display_only: false };
     },
     async choosePartial({ missing }) {
       assert.equal(missing.length, 1);
       assert.equal(missing[0].tile, 1);
       assert.equal(missing[0].failures[0].code, "tile.processing-failed");
-      assert.equal(missing[0].failures[0].category, "permanent");
+      assert.equal(missing[0].failures[0].retryable, false);
       return "keep";
     },
   });
@@ -215,7 +256,6 @@ test("cancelled invocation settles late reads before returning and never saves",
           phase: "cleanup",
           retryable: false,
           message: "Cancelled",
-          recovery: [],
         };
     },
     async finish() {

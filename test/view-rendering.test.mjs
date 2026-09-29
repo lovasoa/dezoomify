@@ -46,8 +46,6 @@ const callbacks = {
 test("presentStatus maps host steps onto render phases", () => {
   assert.equal(presentStatus("idle").phase, "idle");
   assert.equal(presentStatus("discovering").phase, "job");
-  assert.equal(presentStatus("choosing-image").phase, "job");
-  assert.equal(presentStatus("choosing-level").phase, "job");
   assert.equal(presentStatus("preflighting").phase, "job");
   assert.equal(presentStatus("downloading").phase, "job");
   assert.equal(presentStatus("saving").phase, "job");
@@ -195,7 +193,7 @@ test("partial controls return the selected choice", () => {
     renderView(el, presentIdle(), callbacks, undefined, {
       after: createElement(PartialDecisionActions, {
         decision: {
-          missing: [{ tile: 1, failures: [{ category: "transient", code: "TRANSPORT_TIMEOUT" }] }],
+          missing: [{ tile: 1, failures: [{ retryable: true, code: "TRANSPORT_TIMEOUT" }] }],
         },
         onAnswer: (command) => answers.push(command),
       }),
@@ -210,7 +208,7 @@ test("partial refusal is a static decision with useful actions before diagnostic
   const el = container();
   const decision = {
     missing: [
-      { tile: 1, failures: [{ code: "TRANSPORT_HTTP_ERROR", category: "permanent", http: 403 }] },
+      { tile: 1, failures: [{ code: "TRANSPORT_HTTP_ERROR", retryable: false, http: 403 }] },
     ],
   };
   const presentation = {

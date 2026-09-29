@@ -1,5 +1,5 @@
 {
-  "description": "CLI/native pipeline stops at the next effect boundary when cancelled, reports job.cancelled, and writes no output",
+  "description": "NativeHost cancels pending work, reports job.cancelled, and writes no output",
   "id": "native/cli-cancel",
   "input": {
     "mode": "gateway",

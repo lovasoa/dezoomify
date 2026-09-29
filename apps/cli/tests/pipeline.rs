@@ -628,7 +628,7 @@ fn cli_auto_naming_avoids_collision() {
 
 #[test]
 fn cli_keep_partial_default_keeps_output() {
-    // Default `Keep` (reference `PartialDownload` file behavior): corrupt
+    // Default `Keep`: corrupt
     // tiles keep a partial output instead of failing. Pixel-exact blank
     // region checks live in native `partial_keep_policy_encodes_acquired_tiles`;
     // here the kept file existing with a real PNG body is the contract.

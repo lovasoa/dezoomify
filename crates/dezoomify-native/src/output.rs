@@ -6,68 +6,22 @@
 
 use std::path::Path;
 
-use crate::error::NativeError;
+use dezoomify::model::{Error, ErrorPhase, OutputFormat};
 
 /// One rendered `iiif-dir` tile set: `(relative path, bytes)` pairs in
-/// sorted relative-path order for a deterministic digest.
+/// sorted relative-path order.
 pub type IiifTiles = Vec<(String, Vec<u8>)>;
 
-/// Output format inferred from the destination path. File formats map from
-/// the destination extension; [`OutputFormat::IiifDir`] maps from an
-/// extensionless path (or an existing directory) and writes many files.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OutputFormat {
-    Png,
-    Jpeg,
-    Tiff,
-    Zif,
-    Webp,
-    IiifDir,
-}
-
-impl OutputFormat {
-    /// Stable lowercase id used in docs, capability negotiation, and digests.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            OutputFormat::Png => "png",
-            OutputFormat::Jpeg => "jpeg",
-            OutputFormat::Tiff => "tiff",
-            OutputFormat::Zif => "zif",
-            OutputFormat::Webp => "webp",
-            OutputFormat::IiifDir => "iiif-dir",
-        }
+pub fn infer_from_path(path: &Path) -> Result<OutputFormat, Error> {
+    if path.is_dir() {
+        return Ok(OutputFormat::IiifDir);
     }
-
-    /// Preferred filename extension for an automatically named output.
-    #[must_use]
-    pub fn extension(self) -> &'static str {
-        match self {
-            OutputFormat::Png => "png",
-            OutputFormat::Jpeg => "jpg",
-            OutputFormat::Tiff => "tif",
-            OutputFormat::Zif => "zif",
-            OutputFormat::Webp => "webp",
-            OutputFormat::IiifDir => "iiif",
-        }
-    }
-
-    /// True for directory destinations (many files); false for single files.
-    #[must_use]
-    pub fn is_directory(self) -> bool {
-        matches!(self, OutputFormat::IiifDir)
-    }
-
-    pub fn infer_from_path(path: &Path) -> Result<Self, NativeError> {
-        if path.is_dir() {
-            return Ok(OutputFormat::IiifDir);
-        }
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        match ext.as_str() {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
             "png" => Ok(OutputFormat::Png),
             "jpg" | "jpeg" => Ok(OutputFormat::Jpeg),
             "tif" | "tiff" => Ok(OutputFormat::Tiff),
@@ -75,11 +29,10 @@ impl OutputFormat {
             "webp" => Ok(OutputFormat::Webp),
             "iiif" => Ok(OutputFormat::IiifDir),
             "" => Ok(OutputFormat::IiifDir),
-            other => Err(NativeError::unsupported_extension(format!(
+            other => Err(crate::output::unsupported_extension(format!(
                 "unsupported output extension .{other}; use .png, .jpg, .jpeg, .tif, .tiff, .zif, .webp, .iiif, or an extensionless directory path for iiif-dir"
             ))),
         }
-    }
 }
 
 /// Image extensions that always name a single file, never an `iiif-dir`
@@ -100,86 +53,86 @@ pub fn validate_destination(
     path: &Path,
     format: &OutputFormat,
     overwrite: bool,
-) -> Result<(), NativeError> {
+) -> Result<(), Error> {
     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
         if name.contains("..") || name.contains('/') || name.contains('\\') {
-            return Err(NativeError::destination_denied("path traversal rejected"));
+            return Err(crate::output::destination_denied("path traversal rejected"));
         }
     }
     match format {
         OutputFormat::Png => {
             if path.is_dir() {
-                return Err(NativeError::destination_denied(
+                return Err(crate::output::destination_denied(
                     "destination is a directory, not a png file",
                 ));
             }
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
             if !ext.eq_ignore_ascii_case("png") {
-                return Err(NativeError::destination_denied(
+                return Err(crate::output::destination_denied(
                     "extension does not match format",
                 ));
             }
         }
         OutputFormat::Jpeg => {
             if path.is_dir() {
-                return Err(NativeError::destination_denied(
+                return Err(crate::output::destination_denied(
                     "destination is a directory, not a jpeg file",
                 ));
             }
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
             if !(ext.eq_ignore_ascii_case("jpg") || ext.eq_ignore_ascii_case("jpeg")) {
-                return Err(NativeError::destination_denied(
+                return Err(crate::output::destination_denied(
                     "extension does not match format",
                 ));
             }
         }
         OutputFormat::Tiff => {
             if path.is_dir() {
-                return Err(NativeError::destination_denied(
+                return Err(crate::output::destination_denied(
                     "destination is a directory, not a tiff file",
                 ));
             }
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
             if !(ext.eq_ignore_ascii_case("tif") || ext.eq_ignore_ascii_case("tiff")) {
-                return Err(NativeError::destination_denied(
+                return Err(crate::output::destination_denied(
                     "extension does not match format",
                 ));
             }
         }
         OutputFormat::Zif => {
             if path.is_dir() {
-                return Err(NativeError::destination_denied(
+                return Err(crate::output::destination_denied(
                     "destination is a directory, not a zif file",
                 ));
             }
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
             if !ext.eq_ignore_ascii_case("zif") {
-                return Err(NativeError::destination_denied(
+                return Err(crate::output::destination_denied(
                     "extension does not match format",
                 ));
             }
         }
         OutputFormat::Webp => {
             if path.is_dir() {
-                return Err(NativeError::destination_denied(
+                return Err(crate::output::destination_denied(
                     "destination is a directory, not a webp file",
                 ));
             }
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
             if !ext.eq_ignore_ascii_case("webp") {
-                return Err(NativeError::destination_denied(
+                return Err(crate::output::destination_denied(
                     "extension does not match format",
                 ));
             }
         }
         OutputFormat::IiifDir => {
             if path.is_file() && !overwrite {
-                return Err(NativeError::destination_denied(
+                return Err(crate::output::destination_denied(
                     "destination is a file, not a directory",
                 ));
             }
             if is_single_file_extension(path) && !path.is_dir() {
-                return Err(NativeError::destination_denied(
+                return Err(crate::output::destination_denied(
                     "extension does not match format",
                 ));
             }
@@ -188,13 +141,13 @@ pub fn validate_destination(
                     .map(|mut entries| entries.next().is_some())
                     .unwrap_or(false);
                 if non_empty {
-                    return Err(NativeError::output_exists());
+                    return Err(crate::output::output_exists());
                 }
             }
         }
     }
     if !format.is_directory() && path.exists() && !overwrite {
-        return Err(NativeError::output_exists());
+        return Err(crate::output::output_exists());
     }
     Ok(())
 }
@@ -203,10 +156,10 @@ pub fn validate_destination(
 /// last extension when one exists (`out.png` becomes `out.partial.png`,
 /// `tiles.iiif` becomes `tiles.partial.iiif`), else appends `.partial`
 /// (`out` becomes `out.partial` for extensionless `iiif-dir` destinations).
-/// A kept partial stays distinguishable from complete success on disk, not
-/// just via the `partial: true` outcome flag; `--no-partial` writes nothing.
+/// A kept partial stays distinguishable from complete success on disk;
+/// `--no-partial` writes nothing.
 #[must_use]
-pub fn partial_path_for(path: &Path, _format: OutputFormat) -> std::path::PathBuf {
+pub(crate) fn partial_path_for(path: &Path) -> std::path::PathBuf {
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
@@ -223,68 +176,72 @@ pub fn partial_path_for(path: &Path, _format: OutputFormat) -> std::path::PathBu
     }
 }
 
-pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), NativeError> {
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| NativeError::write_failed(format!("output write failed: {e}")))?;
-        }
-    }
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes)
-        .map_err(|e| NativeError::write_failed(format!("output write failed: {e}")))?;
-    std::fs::rename(&tmp, path)
-        .map_err(|e| NativeError::write_failed(format!("output write failed: {e}")))?;
-    Ok(())
-}
-
 /// Write one `iiif-dir` destination: `info.json` plus JPEG tiles at
 /// `<scale>/<col>_<row>.jpg`, each file committed via temp-write plus
 /// rename. `tiles` must arrive in sorted relative-path order; `info.json`
 /// is written last so a half-written directory never carries a manifest.
-/// Returns the digest preimage (`info.json` bytes followed by tile bytes in
-/// the given order) for the caller to hash.
-pub fn write_iiif_dir(
-    dir: &Path,
-    info_json: &[u8],
-    tiles: &IiifTiles,
-) -> Result<Vec<u8>, NativeError> {
+pub fn write_iiif_dir(dir: &Path, info_json: &[u8], tiles: &IiifTiles) -> Result<(), Error> {
     // Validation granted overwrite before this runs: a stale file at the
-    // directory path (e.g. from a previous `.iiif` file output) is replaced,
-    // mirroring the reference encoder removing the destination file first.
+    // directory path is replaced before the tile tree is written.
     if dir.is_file() {
         std::fs::remove_file(dir)
-            .map_err(|e| NativeError::write_failed(format!("output write failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
     }
     std::fs::create_dir_all(dir)
-        .map_err(|e| NativeError::write_failed(format!("output write failed: {e}")))?;
-    let mut preimage = Vec::with_capacity(info_json.len());
-    preimage.extend_from_slice(info_json);
+        .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
     for (relative, bytes) in tiles {
         if relative.contains("..") || relative.contains('\\') || Path::new(relative).is_absolute() {
-            return Err(NativeError::destination_denied(
+            return Err(crate::output::destination_denied(
                 "tile path escapes the destination",
             ));
         }
         let dest = dir.join(relative);
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| NativeError::write_failed(format!("output write failed: {e}")))?;
+                .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
         }
         let tmp = dest.with_extension("tmp");
         std::fs::write(&tmp, bytes)
-            .map_err(|e| NativeError::write_failed(format!("output write failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
         std::fs::rename(&tmp, &dest)
-            .map_err(|e| NativeError::write_failed(format!("output write failed: {e}")))?;
-        preimage.extend_from_slice(bytes);
+            .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
     }
     let manifest = dir.join("info.json");
     let tmp = manifest.with_extension("tmp");
     std::fs::write(&tmp, info_json)
-        .map_err(|e| NativeError::write_failed(format!("output write failed: {e}")))?;
+        .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
     std::fs::rename(&tmp, &manifest)
-        .map_err(|e| NativeError::write_failed(format!("output write failed: {e}")))?;
-    Ok(preimage)
+        .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+    Ok(())
+}
+
+pub(crate) fn canvas_memory_unavailable(
+    width: u32,
+    height: u32,
+    required: &str,
+    available: &str,
+) -> Error {
+    Error::new("output.canvas-limit", ErrorPhase::Output, format!("composed image {width}x{height} needs {required} of canvas memory, but only {available} is currently available; save a smaller level with --max-width"))
+}
+
+fn output_exists() -> Error {
+    Error::new(
+        "output.exists",
+        ErrorPhase::Output,
+        "output exists (refusing overwrite); choose a different destination or confirm overwrite",
+    )
+}
+
+fn destination_denied(detail: impl Into<String>) -> Error {
+    Error::new("output.destination-denied", ErrorPhase::Output, detail)
+}
+
+fn unsupported_extension(detail: impl Into<String>) -> Error {
+    Error::new("output.unsupported-extension", ErrorPhase::Output, detail)
+}
+
+pub(crate) fn write_failed(detail: impl Into<String>) -> Error {
+    Error::new("output.write-failed", ErrorPhase::Output, detail)
 }
 
 #[cfg(test)]
@@ -294,29 +251,26 @@ mod tests {
     #[test]
     fn partial_path_inserts_partial_before_the_extension() {
         assert_eq!(
-            partial_path_for(Path::new("out.png"), OutputFormat::Png),
+            partial_path_for(Path::new("out.png")),
             std::path::PathBuf::from("out.partial.png"),
         );
         assert_eq!(
-            partial_path_for(Path::new("/tmp/a/out.jpg"), OutputFormat::Jpeg),
+            partial_path_for(Path::new("/tmp/a/out.jpg")),
             std::path::PathBuf::from("/tmp/a/out.partial.jpg"),
         );
         assert_eq!(
-            partial_path_for(Path::new("tiles.iiif"), OutputFormat::IiifDir),
+            partial_path_for(Path::new("tiles.iiif")),
             std::path::PathBuf::from("tiles.partial.iiif"),
         );
         assert_eq!(
-            partial_path_for(Path::new("out"), OutputFormat::IiifDir),
+            partial_path_for(Path::new("out")),
             std::path::PathBuf::from("out.partial"),
         );
         // The partial sibling keeps its own encoder extension, so the output
         // file name still selects the encoder on a later inspection.
         assert_eq!(
-            OutputFormat::infer_from_path(&partial_path_for(
-                Path::new("out.png"),
-                OutputFormat::Png
-            ))
-            .expect("partial png still infers"),
+            crate::output::infer_from_path(&partial_path_for(Path::new("out.png")))
+                .expect("partial png still infers"),
             OutputFormat::Png,
         );
     }

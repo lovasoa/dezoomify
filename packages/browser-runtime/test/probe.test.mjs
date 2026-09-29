@@ -65,9 +65,8 @@ test("probe reports missing when every route fails", async () => {
 
 test("probe propagates transport policy failures without ordinary-image fallback", async () => {
   const probe = createProbeSize({
-    classifyFailure: () => ({ code: "TRANSPORT_POLICY_DENIED" }),
     fetchResource: async () => {
-      throw Object.assign(new Error("grant"), { code: "permission-denied" });
+      throw { code: "TRANSPORT_POLICY_DENIED", message: "grant", transport: "browser-session" };
     },
     decode: async () => {
       throw new Error("unreachable");
@@ -80,6 +79,6 @@ test("probe propagates transport policy failures without ordinary-image fallback
         { uri: "https://cdn.test/0.jpg", headers: [], purpose: "probe" },
         new AbortController().signal,
       ),
-    /grant/,
+    { code: "TRANSPORT_POLICY_DENIED", message: "grant" },
   );
 });

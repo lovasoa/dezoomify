@@ -208,14 +208,11 @@ const en = {
   "view.idle.submit": "Dezoomify !",
   // Job step labels.
   "view.step.discovering": "Finding the zoomable image…",
-  "view.step.choosingImage": "Image found; picking the best one…",
-  "view.step.choosingLevel": "Choosing the highest resolution…",
   "view.step.preflighting": "Checking the image size…",
   "view.step.downloading": "Saving image tiles…",
   "view.step.saving": "Assembling the final picture…",
   "view.step.working": "Working…",
   "view.step.contactingDetail": "Contacting the image host…",
-  "view.step.recoveryDetail": "A recovery decision needs attention before the job can continue.",
   "view.step.encodingDetail": "Encoding in the app.",
   "view.step.cleanupDetail": "Cleaning up unfinished files…",
   // Live job section.
@@ -379,7 +376,6 @@ const en = {
   "desktop.save.fallback": "Could not save this picture from {host}. Try again.",
   "desktop.job.failedFallback": "The job failed.",
   "desktop.invoke.startFallback": "Could not start the job.",
-  "desktop.invoke.retry": "The retry request was rejected.",
   "desktop.invoke.partial": "The partial-image choice was rejected.",
   "desktop.invoke.destination": "Could not request the save destination.",
   "desktop.invoke.cancel": "Could not cancel the job.",
@@ -413,9 +409,6 @@ const en = {
   "desktop.link.note": "Nothing runs until you confirm. Declining does nothing.",
   "desktop.link.dismiss": "Dismiss",
   "desktop.link.open": "Open image",
-  "desktop.rec.partialTitle": "Some tiles could not be saved",
-  "desktop.rec.partialDesc":
-    "Part of the image is missing. {summary} Keep the partial image (blank areas stay empty), discard it, or retry the failed tiles.",
   "desktop.rec.missing": "Missing tiles: {shown}{rest}.",
   "desktop.rec.more": " and {n} more",
   "desktop.rec.destTitle": "Save destination needs attention",

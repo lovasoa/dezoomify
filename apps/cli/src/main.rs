@@ -1,6 +1,6 @@
 //! CLI entry point: argument parsing, real download pipeline, honest events.
 
-// 6.1 unwrap policy: failures map to stderr diagnostics and exit codes
+// Failures map to stderr diagnostics and exit codes
 // instead of panicking (see `dezoomify::model` for the shared contract policy).
 #![deny(clippy::unwrap_used)]
 
@@ -14,9 +14,7 @@ use std::time::{Duration, Instant};
 use arguments::Args;
 use dezoomify_native::{JobOptions, NativeHost, OutputTarget};
 
-/// Minimum-interval pacing between bulk images. Ports the reference
-/// `Throttler` idea synchronously for bulk image pacing; per-tile request
-/// staggering is native (`JobOptions::min_interval`).
+/// Minimum-interval pacing between bulk images.
 struct Throttler {
     last: Option<Instant>,
     min_interval: Duration,
@@ -118,7 +116,7 @@ fn run_single_from_cli(parsed: Args) {
     }
 }
 
-/// No-args terminal loop, mirroring the reference `main.rs:32-60`: repeat
+/// No-args terminal loop: repeat
 /// prompts until EOF, continue after failures, exit 1 when any run failed.
 fn run_interactive_loop(base: Args) {
     use std::io::IsTerminal as _;
@@ -188,8 +186,7 @@ fn apply_pickers(parsed: &mut Args) -> bool {
 
 /// Interactive image picker. The full title list needs native catalog
 /// support, so this prompts for an index without listing: any number is
-/// accepted and out-of-range uses the last image, mirroring the reference
-/// `resolve_index` fallback. Loops until a number or EOF.
+/// accepted and out-of-range uses the last image. Loops until a number or EOF.
 fn image_picker() -> Option<usize> {
     loop {
         let line = prompt_line("Which image do you want to download? ")?;
@@ -215,7 +212,7 @@ fn level_picker() -> Option<usize> {
 }
 
 /// Prompt for the input URI when a terminal is present. Returns `None` on
-/// non-TTY or EOF. Mirrors the reference `choose_input_uri` prompt.
+/// non-TTY or EOF.
 fn prompt_input() -> Option<String> {
     use std::io::IsTerminal as _;
     if !std::io::stdin().is_terminal() {
@@ -244,15 +241,7 @@ fn job_options_for(parsed: &Args, input: &str, output: &Path) -> JobOptions {
             user_headers.insert("referer".to_string(), referer.to_string());
         }
     }
-    // `--largest` (or bulk-implied largest) selects the uncapped level,
-    // mirroring the reference `should_use_largest` rule. The `largest` flag
-    // itself is also passed through so size caps are ignored natively.
-    // `--format` selects the native `format` (`auto` auto-detects, named
-    // selects only that format); `max_retries` (including 0),
-    // `retry_base_delay`, `parallelism`, and `min_interval` are passed
-    // through unchanged. Partial output is kept by default
-    // (reference `PartialDownload` file behavior); `--no-partial` discards
-    // instead.
+    // Largest-image selection ignores dimension caps.
     let max_width = if parsed.should_use_largest() {
         None
     } else {
@@ -287,90 +276,43 @@ fn job_options_for(parsed: &Args, input: &str, output: &Path) -> JobOptions {
 fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
     let level = parsed.logging.as_str();
     let json = parsed.json;
-    let sequence = std::cell::Cell::new(1u64);
     let job_id = format!("job:cli-{}", std::process::id());
-    let started = Instant::now();
-    let mut progress_gate = report::ProgressGate::default();
-    let host = match NativeHost::with_diagnostics(
-        job_options_for(parsed, input, output),
-        report::job_diagnostics(level),
-    ) {
-        Ok(host) => host,
-        Err(error) => {
-            eprintln!("error: {} ({})", error.message, error.code);
-            return false;
-        }
-    };
-    print_progress(
-        json,
-        &job_id,
-        sequence.get(),
-        "started",
-        &BTreeMap::new(),
-        level,
-    );
-    host.on_progress(|progress| {
-        let (kind, detail) = progress_view(&progress);
-        if json || progress_gate.allow(kind, started.elapsed()) {
-            sequence.set(sequence.get() + 1);
-            print_progress(json, &job_id, sequence.get(), kind, &detail, level);
-        }
-    });
-    let result = host
-        .transport
-        .block_on(dezoomify::dezoomify(
-            host.inputs(),
-            host.algorithm_options(),
-            &host,
-        ))
-        .map_err(dezoomify_native::NativeError::from)
-        .and_then(|_| {
-            host.publication().ok_or_else(|| {
-                dezoomify_native::NativeError::new("native.internal", "output was not published")
-            })
-        });
-    if let Err(error) = &result {
-        host.diagnostics.finish(
-            if error.code == "job.cancelled" {
-                "cancelled"
-            } else {
-                "failed"
-            },
-            serde_json::json!({"code": error.code, "message": error.message}),
-        );
-    }
-    let terminal_seq = sequence.get() + 1;
+    let result = run_native(parsed, input, output, true);
     match result {
-        Ok(summary) => {
+        Ok((summary, terminal_seq)) => {
+            let Some(size) = summary.output.canvas.as_ref() else {
+                eprintln!("error: saved output has no dimensions (native.internal)");
+                return false;
+            };
             if json {
                 println!(
                     "{}",
                     report::machine_completed(&report::CompletedOutput {
                         job: &job_id,
                         seq: terminal_seq,
-                        format: &summary.format,
-                        width: summary.width,
-                        height: summary.height,
+                        format: &summary.source_format,
+                        width: size.width,
+                        height: size.height,
                         tile_count: summary.tile_count,
-                        partial: summary.partial,
+                        partial: !summary.output.complete,
                     })
                 );
             } else if report::show_success(level) {
-                if summary.partial {
+                if !summary.output.complete {
                     eprintln!(
                         "kept partial {} ({} tiles, {}x{}) (missing tiles left blank)",
                         summary.path.display(),
                         summary.tile_count,
-                        summary.width,
-                        summary.height,
+                        size.width,
+                        size.height,
                     );
                 } else {
                     eprintln!(
                         "saved {} ({} tiles, {}x{})",
                         summary.path.display(),
                         summary.tile_count,
-                        summary.width,
-                        summary.height,
+                        size.width,
+                        size.height,
                     );
                 }
             }
@@ -381,7 +323,11 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
             false
         }
         Err(error) => {
-            eprintln!("error: {} ({})", error.message, error.code);
+            eprintln!(
+                "error: {} ({})",
+                error.message,
+                report::error_code(&error.code)
+            );
             false
         }
     }
@@ -483,8 +429,7 @@ fn bulk_output_for(base: Option<&Path>, title: Option<&str>, index: usize) -> Pa
     PathBuf::from(format!("dezoomify_{}.png", index + 1))
 }
 
-/// Single-image auto-naming, porting `output_file::get_outname` for the
-/// omitted-output case: sanitized title or `dezoomify` fallback, JPEG-fit
+/// Automatic output naming: sanitized title or `dezoomify` fallback, JPEG-fit
 /// extension, and `_0001` collision suffixes. The title and size are unknown
 /// before the native run, so callers pass `None` and the fallback plus PNG
 /// apply; the helper still honors titles and JPEG fit when given (tests).
@@ -516,8 +461,7 @@ fn single_auto_output(title: Option<&str>, size: Option<(u32, u32)>) -> PathBuf 
 }
 
 fn sanitize_title(title: &str) -> String {
-    // Keep readable titles: ": " becomes " - " before sanitizing, mirroring
-    // the reference `filename_from_title`. Remaining illegal characters
+    // Keep readable titles: ": " becomes " - ". Remaining illegal characters
     // (path separators, Windows-reserved `<>:\"/\\|?*`, controls, NUL)
     // become underscores.
     let dashed = title.replace(": ", " - ");
@@ -548,18 +492,36 @@ fn run_one_bulk_image(
     url: &str,
     output: &str,
 ) -> Result<(usize, String), (String, String)> {
+    run_native(parsed, url, Path::new(output), false)
+        .map(|(publication, _)| {
+            (
+                publication.tile_count,
+                publication.path.to_string_lossy().into_owned(),
+            )
+        })
+        .map_err(|error| (report::error_code(&error.code).into(), error.message))
+}
+
+#[allow(clippy::result_large_err)] // Preserve the shared error until CLI presentation.
+fn run_native(
+    parsed: &Args,
+    input: &str,
+    output: &Path,
+    individual: bool,
+) -> Result<(dezoomify_native::Publication, u64), dezoomify::model::Error> {
+    use dezoomify::model::{Error, ErrorPhase};
     let started = Instant::now();
     let mut progress_gate = report::ProgressGate::default();
     let sequence = std::cell::Cell::new(1u64);
     let job_id = format!("job:cli-{}", std::process::id());
+    let visible = individual || !parsed.json;
     let host = NativeHost::with_diagnostics(
-        job_options_for(parsed, url, Path::new(output)),
+        job_options_for(parsed, input, output),
         report::job_diagnostics(&parsed.logging),
-    )
-    .map_err(|error| (error.code, error.message))?;
-    if !parsed.json {
+    )?;
+    if visible {
         print_progress(
-            false,
+            parsed.json,
             &job_id,
             1,
             "started",
@@ -569,10 +531,10 @@ fn run_one_bulk_image(
     }
     host.on_progress(|progress| {
         let (kind, detail) = progress_view(&progress);
-        if !parsed.json && progress_gate.allow(kind, started.elapsed()) {
+        if visible && (parsed.json || progress_gate.allow(kind, started.elapsed())) {
             sequence.set(sequence.get() + 1);
             print_progress(
-                false,
+                parsed.json,
                 &job_id,
                 sequence.get(),
                 kind,
@@ -587,8 +549,7 @@ fn run_one_bulk_image(
             host.algorithm_options(),
             &host,
         ))
-        .map_err(dezoomify_native::NativeError::from)
-        .map_err(|error| {
+        .inspect_err(|error| {
             host.diagnostics.finish(
                 if error.code == "job.cancelled" {
                     "cancelled"
@@ -597,15 +558,15 @@ fn run_one_bulk_image(
                 },
                 serde_json::json!({"code": error.code, "message": error.message}),
             );
-            (error.code, error.message)
         })?;
-    let summary = host
-        .publication()
-        .ok_or_else(|| ("native.internal".into(), "output was not published".into()))?;
-    Ok((
-        summary.tile_count,
-        summary.path.to_string_lossy().into_owned(),
-    ))
+    let publication = host.publication().ok_or_else(|| {
+        Error::new(
+            "native.internal",
+            ErrorPhase::Output,
+            "output was not published",
+        )
+    })?;
+    Ok((publication, sequence.get() + 1))
 }
 
 fn print_progress(
@@ -705,7 +666,7 @@ fn fetch_bulk_url(
         ..FetchLimits::default()
     };
     let outcome =
-        fetch(url, &BTreeMap::new(), Some(&user), None, &limits).map_err(|e| e.message.clone())?;
+        fetch(url, &BTreeMap::new(), Some(&user), &limits).map_err(|e| e.message.clone())?;
     if !(200..300).contains(&outcome.status) {
         return Err(format!(
             "bulk fetch failed with http status {}",

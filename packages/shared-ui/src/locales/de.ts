@@ -126,14 +126,11 @@ export const de = {
   "view.idle.submit": "Dezoomify !",
   // Job step labels.
   "view.step.discovering": "Zoombares Bild wird gesucht…",
-  "view.step.choosingImage": "Bild gefunden; bestes wird gewahlt…",
-  "view.step.choosingLevel": "Hochste Auflosung wird gewahlt…",
   "view.step.preflighting": "Bildgrosse wird geprueft…",
   "view.step.downloading": "Bildkacheln werden gespeichert…",
   "view.step.saving": "Endbild wird zusammengesetzt…",
   "view.step.working": "Arbeitet…",
   "view.step.contactingDetail": "Bildhost wird kontaktiert…",
-  "view.step.recoveryDetail": "Eine Wiederherstellungsentscheidung ist erforderlich.",
   "view.step.encodingDetail": "Wird in der App kodiert.",
   "view.step.cleanupDetail": "Unfertige Dateien werden aufgeraumt…",
   // Live job section.
@@ -302,7 +299,6 @@ export const de = {
     "Dieses Bild von {host} konnte nicht gespeichert werden. Versuchen Sie es erneut.",
   "desktop.job.failedFallback": "Der Auftrag ist fehlgeschlagen.",
   "desktop.invoke.startFallback": "Der Auftrag konnte nicht gestartet werden.",
-  "desktop.invoke.retry": "Die Wiederholungsanfrage wurde abgelehnt.",
   "desktop.invoke.partial": "Die Teilbildwahl wurde abgelehnt.",
   "desktop.invoke.destination": "Das Speicherziel konnte nicht angefragt werden.",
   "desktop.invoke.cancel": "Der Auftrag konnte nicht abgebrochen werden.",
@@ -337,9 +333,6 @@ export const de = {
   "desktop.link.note": "Nichts lauft, bis Sie bestatigen. Ablehnen bewirkt nichts.",
   "desktop.link.dismiss": "Verwerfen",
   "desktop.link.open": "Bild offnen",
-  "desktop.rec.partialTitle": "Einige Kacheln konnten nicht gespeichert werden",
-  "desktop.rec.partialDesc":
-    "Ein Teil des Bildes fehlt. {summary} Behalten Sie das Teilbild (leere Flachen bleiben leer), verwerfen Sie es oder versuchen Sie die fehlenden Kacheln erneut.",
   "desktop.rec.missing": "Fehlende Kacheln: {shown}{rest}.",
   "desktop.rec.more": " und {n} weitere",
   "desktop.rec.destTitle": "Speicherziel braucht Aufmerksamkeit",

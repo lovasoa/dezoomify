@@ -3,13 +3,12 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::commands::{self, CommandError};
+use crate::commands;
 use crate::deep_link;
 use crate::jobs::JobTable;
 use crate::settings::parse_settings;
-use dezoomify_native::{output::OutputFormat, NativeHost, OutputTarget};
-
-const COMMANDS: &[&str] = commands::COMMANDS;
+use dezoomify::model::{Error, ErrorPhase, OutputFormat};
+use dezoomify_native::{NativeHost, OutputTarget};
 
 #[cfg(all(test, target_os = "linux"))]
 mod output_tests {
@@ -86,14 +85,17 @@ async fn open_saved_output(
     table: State<'_, Mutex<JobTable>>,
     job: String,
     reveal: bool,
-) -> Result<(), CommandFailure> {
+) -> Result<(), Error> {
     let path = table
         .lock()
         .ok()
         .and_then(|table| table.saved_output_for(&job))
-        .ok_or_else(|| CommandFailure {
-            code: "output.unavailable".into(),
-            message: "The saved image is unavailable.".into(),
+        .ok_or_else(|| {
+            Error::new(
+                "output.unavailable",
+                ErrorPhase::Output,
+                "The saved image is unavailable.",
+            )
         })?;
     // Launch off the async executor and check the launcher's result. The
     // opener plugin's detached path reports success before the launcher exits;
@@ -101,31 +103,39 @@ async fn open_saved_output(
     // Opening the parent uses the user's default folder handler instead.
     tauri::async_runtime::spawn_blocking(move || launch_saved_output(path, reveal))
         .await
-        .map_err(|_| CommandFailure {
-            code: "output.launch-task-failed".into(),
-            message: "The file-opening task could not finish.".into(),
+        .map_err(|_| {
+            Error::new(
+                "output.launch-task-failed",
+                ErrorPhase::Output,
+                "The file-opening task could not finish.",
+            )
         })?
 }
 
-fn launch_saved_output(path: std::path::PathBuf, reveal: bool) -> Result<(), CommandFailure> {
+fn launch_saved_output(path: std::path::PathBuf, reveal: bool) -> Result<(), Error> {
     let target = if reveal {
         path.parent()
-            .ok_or_else(|| CommandFailure {
-                code: "output.no-parent".into(),
-                message: "The saved image has no containing folder.".into(),
+            .ok_or_else(|| {
+                Error::new(
+                    "output.no-parent",
+                    ErrorPhase::Output,
+                    "The saved image has no containing folder.",
+                )
             })?
             .to_path_buf()
     } else {
         path
     };
-    std::fs::metadata(&target).map_err(|error| CommandFailure {
-        code: if error.kind() == std::io::ErrorKind::NotFound {
-            "output.not-found"
-        } else {
-            "output.not-accessible"
-        }
-        .into(),
-        message: "The saved image or folder is not accessible.".into(),
+    std::fs::metadata(&target).map_err(|error| {
+        Error::new(
+            if error.kind() == std::io::ErrorKind::NotFound {
+                "output.not-found"
+            } else {
+                "output.not-accessible"
+            },
+            ErrorPhase::Output,
+            "The saved image or folder is not accessible.",
+        )
     })?;
     // `open::that` stops after an installed launcher exits unsuccessfully.
     // Try the remaining platform launchers on both spawn and exit failures.
@@ -139,33 +149,22 @@ fn launch_saved_output(path: std::path::PathBuf, reveal: bool) -> Result<(), Com
             return Ok(());
         }
     }
-    Err(CommandFailure {
-        code: "output.launch-failed".into(),
-        message: "The system could not launch the default application.".into(),
-    })
-}
-
-#[derive(Debug, Serialize)]
-struct CommandFailure {
-    code: String,
-    message: String,
-}
-
-impl From<CommandError> for CommandFailure {
-    fn from(err: CommandError) -> Self {
-        Self {
-            code: err.code,
-            message: err.message,
-        }
-    }
+    Err(Error::new(
+        "output.launch-failed",
+        ErrorPhase::Output,
+        "The system could not launch the default application.",
+    ))
 }
 
 fn lock_table<'a>(
     state: &'a State<'_, Mutex<JobTable>>,
-) -> Result<std::sync::MutexGuard<'a, JobTable>, CommandFailure> {
-    state.lock().map_err(|_| CommandFailure {
-        code: "shell.lock".into(),
-        message: "native resources unavailable".into(),
+) -> Result<std::sync::MutexGuard<'a, JobTable>, Error> {
+    state.lock().map_err(|_| {
+        Error::new(
+            "shell.lock",
+            ErrorPhase::Output,
+            "native resources unavailable",
+        )
     })
 }
 
@@ -177,7 +176,6 @@ async fn dezoomify(
     input_url: String,
     settings: Option<serde_json::Value>,
 ) -> Result<dezoomify::model::Output, dezoomify::model::Error> {
-    use dezoomify::model::{Error, ErrorPhase};
     let invalid =
         |message: String| Error::new("job.invalid-input", ErrorPhase::Validation, message);
     if !commands::is_valid_input_url(&input_url) {
@@ -218,7 +216,7 @@ async fn dezoomify(
                     "failed",
                     serde_json::json!({"code": error.code, "message": error.message}),
                 );
-                return Err(dezoomify_native::host::native_error(error));
+                return Err(error);
             }
         };
         host.controls = registration.controls.clone();
@@ -267,17 +265,17 @@ async fn dezoomify(
 }
 
 #[tauri::command]
-async fn cancel_job(state: State<'_, Mutex<JobTable>>, job: String) -> Result<(), CommandFailure> {
+async fn cancel_job(state: State<'_, Mutex<JobTable>>, job: String) -> Result<(), Error> {
     lock_table(&state)?.live(&job)?.controls.cancel();
     Ok(())
 }
 #[tauri::command]
-async fn pause_job(state: State<'_, Mutex<JobTable>>, job: String) -> Result<(), CommandFailure> {
+async fn pause_job(state: State<'_, Mutex<JobTable>>, job: String) -> Result<(), Error> {
     lock_table(&state)?.live(&job)?.controls.pause();
     Ok(())
 }
 #[tauri::command]
-async fn resume_job(state: State<'_, Mutex<JobTable>>, job: String) -> Result<(), CommandFailure> {
+async fn resume_job(state: State<'_, Mutex<JobTable>>, job: String) -> Result<(), Error> {
     lock_table(&state)?.live(&job)?.controls.resume();
     Ok(())
 }
@@ -287,14 +285,14 @@ async fn answer_partial(
     job: String,
     question: u64,
     answer: dezoomify::model::RecoveryChoice,
-) -> Result<(), CommandFailure> {
+) -> Result<(), Error> {
     lock_table(&state)?
         .live(&job)?
         .answer_partial(question, answer)?;
     Ok(())
 }
 #[tauri::command]
-async fn release_job(state: State<'_, Mutex<JobTable>>, job: String) -> Result<(), CommandFailure> {
+async fn release_job(state: State<'_, Mutex<JobTable>>, job: String) -> Result<(), Error> {
     lock_table(&state)?.release_job(&job);
     Ok(())
 }
@@ -302,18 +300,11 @@ async fn release_job(state: State<'_, Mutex<JobTable>>, job: String) -> Result<(
 async fn get_job_diagnostics(
     state: State<'_, Mutex<JobTable>>,
     job: String,
-) -> Result<dezoomify::model::DiagnosticReport, CommandFailure> {
+) -> Result<dezoomify::model::DiagnosticReport, Error> {
     lock_table(&state)?
         .diagnostic_report(&job)
-        .ok_or_else(|| commands::CommandError::unknown_job(&job).into())
+        .ok_or_else(|| crate::jobs::unknown_job(&job))
 }
-#[tauri::command]
-async fn query_capabilities() -> Result<serde_json::Value, CommandFailure> {
-    Ok(
-        serde_json::json!({"native_available": true, "encoders": commands::SUPPORTED_FORMATS, "commands": COMMANDS}),
-    )
-}
-
 #[derive(Serialize, Clone)]
 struct DeepLinkPendingPayload {
     source_url: String,
@@ -398,7 +389,7 @@ pub fn run() {
         .unwrap_or_else(|e| {
             // Startup-only: without a built shell there is no window to
             // report into, so fail closed with a clean message and a
-            // non-zero exit instead of panicking (6.1 unwrap policy).
+            // non-zero exit instead of panicking.
             eprintln!("error: cannot start the Dezoomify desktop shell: {e}");
             std::process::exit(1);
         })

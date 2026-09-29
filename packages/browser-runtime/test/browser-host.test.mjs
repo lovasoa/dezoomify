@@ -50,12 +50,6 @@ function setup(overrides = {}) {
       kind: "response",
       response: { bytes: new Uint8Array([1, 2]), final_uri: null },
     }),
-    classifyFailure: (error) => ({
-      code: "TRANSPORT_NETWORK_ERROR",
-      transport: "direct",
-      message: "Failed",
-      ...error,
-    }),
     onProgress: (p) => reports.push(p),
     choosePartial: async () => "keep",
     ...overrides,
@@ -65,7 +59,7 @@ function setup(overrides = {}) {
 
 test("acquisition decodes and paints readable bytes before returning", async () => {
   const h = setup();
-  assert.deepEqual(await h.host.acquireTile(tile), { display_only: false });
+  assert.equal(await h.host.acquireTile(tile), undefined);
   assert.deepEqual([...new Uint8Array(h.painted[0][2])], [1, 2]);
   assert.equal(h.painted[0][0], 0);
   assert.equal(h.painted[0][1], tile.placement);
@@ -117,7 +111,7 @@ test("an unreadable origin is classified once across concurrent ordinary tiles",
   );
   assert.equal(reads, 1);
   assert.equal(displays, 3);
-  assert.ok(results.every((result) => result.display_only));
+  assert.ok(results.every((result) => result === undefined));
   await h.host.acquireTile({ ...tile, index: 3 });
   assert.equal(reads, 1);
 });
@@ -165,7 +159,7 @@ test("output waits for saving and preserves actual disposition and missing tiles
     });
   let finished = false;
   const pending = h.host
-    .finish({ canvas: tile.placement.canvas, format: "png", missing: [2], display_only: false })
+    .finish({ canvas: tile.placement.canvas, format: "png", missing: [2] })
     .then((output) => {
       finished = true;
       return output;
@@ -205,6 +199,60 @@ test("surface and output failures retain their typed code", async () => {
   };
   await assert.rejects(h.host.finish({ missing: [], format: "png" }), {
     code: "OUTPUT_ENCODE_FAILED",
+    phase: "output",
+  });
+});
+
+test("output errors retain the original diagnostic details", async () => {
+  const h = setup();
+  h.assembly.finalizeOutput = async () => {
+    throw {
+      code: "OUTPUT_FAILED",
+      message: "The browser could not save the image.",
+      detail: "FILE_NO_SPACE",
+      phase: "output",
+      retryable: false,
+    };
+  };
+  await assert.rejects(h.host.finish({ missing: [], format: "png" }), {
+    code: "OUTPUT_FAILED",
+    detail: "FILE_NO_SPACE",
+    phase: "output",
+    retryable: false,
+  });
+});
+
+test("canonical failures retain their precise request and affected resource", async () => {
+  const h = setup({
+    fetchResource: async () => {
+      throw {
+        code: "TRANSPORT_HTTP_ERROR",
+        message: "The redirected file was refused.",
+        http: 403,
+        request: "https://redirect.test/actual.jpg",
+        resource_kind: "tile",
+        phase: "acquisition",
+        retryable: false,
+      };
+    },
+  });
+  await assert.rejects(h.host.acquireTile(tile), {
+    request: "https://redirect.test/actual.jpg",
+    resource_kind: "tile",
+    http: 403,
+  });
+  h.assembly.prepare = () => {
+    throw {
+      code: "OUTPUT_SURFACE_UNAVAILABLE",
+      message: "The output cannot be allocated.",
+      resource_kind: "output",
+      phase: "output",
+      retryable: false,
+    };
+  };
+  await assert.rejects(h.host.acquireTile(tile), {
+    code: "OUTPUT_SURFACE_UNAVAILABLE",
+    resource_kind: "output",
     phase: "output",
   });
 });
@@ -349,17 +397,16 @@ test("settlement cancels a permission interaction and suppresses a late image", 
   assert.deepEqual(h.painted, []);
 });
 
-test("classified permission failures retain their stable code", async () => {
+test("permission failures retain their canonical facts", async () => {
   const h = setup({
     fetchResource: async () => {
-      throw { code: "access-required", category: "access-required", message: "Denied" };
+      throw {
+        code: "TRANSPORT_POLICY_DENIED",
+        message: "Denied",
+        transport: "browser-session",
+        blocked_reason: "access-required",
+      };
     },
-    classifyFailure: () => ({
-      code: "TRANSPORT_POLICY_DENIED",
-      message: "Denied",
-      transport: "browser-session",
-      blocked_reason: "access-required",
-    }),
     loadDisplayImage: async () => assert.fail("denied permission is not display-only"),
   });
   await assert.rejects(h.host.acquireTile(tile), { code: "TRANSPORT_POLICY_DENIED" });

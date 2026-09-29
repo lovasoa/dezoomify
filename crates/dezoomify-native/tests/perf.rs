@@ -3,7 +3,7 @@
 //! actual bounded pipeline instrumentation plus a 20 percent regression
 //! bound on encoded byte sizes versus `perf-baseline.json`.
 
-use dezoomify_native::pipeline::{
+use dezoomify_native::imaging::{
     encode_jpeg, encode_png, encode_tiff, exceeds_available_memory, required_memory_bytes,
     MAX_CONCURRENT,
 };

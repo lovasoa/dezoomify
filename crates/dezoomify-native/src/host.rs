@@ -15,12 +15,10 @@ use std::{
 use crate::{
     diagnostics::Diagnostics,
     http::{FetchLimits, FetchOutcome, TlsPolicy, UserHeaders},
+    imaging::{load_image_with_metadata, DecodedTile},
     options::{JobOptions, OutputTarget},
-    output::OutputFormat as NativeFormat,
-    pipeline::{load_image_with_metadata, DecodedTile},
     sink::{Sink, SinkOptions},
     transport::NativeTransport,
-    NativeError,
 };
 use dezoomify::{host::Host, model::*, Vec2d};
 
@@ -76,26 +74,12 @@ pub struct Instrumentation {
 
 /// Honest native publication record: what was actually written.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct OutputSummary {
+pub struct Publication {
     pub path: PathBuf,
     pub tile_count: usize,
-    pub width: u32,
-    pub height: u32,
-    pub format: String,
-    pub partial: bool,
-    pub missing: Vec<String>,
+    pub source_format: String,
+    pub output: Output,
     pub instrumentation: Instrumentation,
-}
-
-fn extension_for(format: NativeFormat) -> &'static str {
-    match format {
-        NativeFormat::Png => "png",
-        NativeFormat::Jpeg => "jpg",
-        NativeFormat::Tiff => "tif",
-        NativeFormat::Zif => "zif",
-        NativeFormat::Webp => "webp",
-        NativeFormat::IiifDir => "iiif",
-    }
 }
 
 fn safe_output_stem(title: Option<&str>) -> String {
@@ -129,9 +113,9 @@ fn safe_output_stem(title: Option<&str>) -> String {
     }
 }
 
-fn auto_output_path(output_dir: &Path, title: Option<&str>, format: NativeFormat) -> PathBuf {
+fn auto_output_path(output_dir: &Path, title: Option<&str>, format: OutputFormat) -> PathBuf {
     let stem = safe_output_stem(title);
-    let extension = extension_for(format);
+    let extension = format.extension();
     let first = output_dir.join(format!("{stem}.{extension}"));
     if !first.exists() {
         return first;
@@ -201,33 +185,29 @@ pub struct NativeHost<'a> {
     pub transport: NativeTransport,
     fetch_limits: FetchLimits,
     user: UserHeaders,
-    format: NativeFormat,
+    format: OutputFormat,
     sink: RefCell<Sink>,
     acquired: RefCell<BTreeSet<u32>>,
-    attempted: RefCell<BTreeSet<u32>>,
     instrumentation: RefCell<Instrumentation>,
     inflight: Cell<usize>,
     decode_tails: Arc<DecodeTails>,
     throttle: tokio::sync::Mutex<Option<Instant>>,
     progress: RefCell<Box<dyn FnMut(Progress) + 'a>>,
     partial: RefCell<Option<PartialCallback<'a>>>,
-    published: RefCell<Option<OutputSummary>>,
+    published: RefCell<Option<Publication>>,
     source_format: RefCell<Option<String>>,
 }
 
 #[allow(clippy::result_large_err)] // Platform operations return the canonical Host error value.
 impl<'a> NativeHost<'a> {
-    pub fn new(options: JobOptions) -> Result<Self, NativeError> {
+    pub fn new(options: JobOptions) -> Result<Self, Error> {
         Self::with_diagnostics(
             options,
             Diagnostics::new("native", env!("CARGO_PKG_VERSION")),
         )
     }
 
-    pub fn with_diagnostics(
-        options: JobOptions,
-        diagnostics: Diagnostics,
-    ) -> Result<Self, NativeError> {
+    pub fn with_diagnostics(options: JobOptions, diagnostics: Diagnostics) -> Result<Self, Error> {
         let options = options.normalized();
         options.validate()?;
         diagnostics.context(serde_json::json!({"input": options.input_url, "settings": {
@@ -240,7 +220,7 @@ impl<'a> NativeHost<'a> {
             "max_tiles": options.max_tiles, "max_bytes": options.max_bytes
         }}));
         let format = match &options.output {
-            OutputTarget::File(path) => NativeFormat::infer_from_path(path)?,
+            OutputTarget::File(path) => crate::output::infer_from_path(path)?,
             OutputTarget::AutoDir { format, .. } => *format,
         };
         let fetch_limits = FetchLimits {
@@ -278,7 +258,6 @@ impl<'a> NativeHost<'a> {
             format,
             sink: RefCell::new(sink),
             acquired: RefCell::default(),
-            attempted: RefCell::default(),
             instrumentation: RefCell::default(),
             inflight: Cell::new(0),
             decode_tails: Arc::default(),
@@ -298,7 +277,7 @@ impl<'a> NativeHost<'a> {
         *self.partial.borrow_mut() = Some(Box::new(callback));
     }
 
-    pub fn publication(&self) -> Option<OutputSummary> {
+    pub fn publication(&self) -> Option<Publication> {
         self.published.borrow().clone()
     }
 
@@ -309,14 +288,7 @@ impl<'a> NativeHost<'a> {
     pub fn algorithm_options(&self) -> Options {
         Options {
             format: self.options.format.clone(),
-            output: match self.format {
-                NativeFormat::Png => OutputFormat::Png,
-                NativeFormat::Jpeg => OutputFormat::Jpeg,
-                NativeFormat::Tiff => OutputFormat::Tiff,
-                NativeFormat::Zif => OutputFormat::Zif,
-                NativeFormat::Webp => OutputFormat::Webp,
-                NativeFormat::IiifDir => OutputFormat::IiifDir,
-            },
+            output: self.format,
             selection: SelectionPolicy::Automatic {
                 image_index: self.options.image_index.unwrap_or(0),
                 largest: self.options.largest,
@@ -350,21 +322,23 @@ impl<'a> NativeHost<'a> {
         let outcome = self
             .controlled(async {
                 self.transport
-                    .fetch_resource(request, Some(&self.user), None, &self.fetch_limits)
+                    .fetch_resource(request, Some(&self.user), &self.fetch_limits)
                     .await
-                    .map_err(native_error)
             })
-            .await?;
+            .await
+            .map_err(|error| resource_context(error, request))?;
         self.instrumentation.borrow_mut().bytes_fetched += outcome.body.len() as u64;
         if !outcome.ok() {
-            let mut error = native_error(NativeError::new(
+            let mut error = Error::new(
                 "TRANSPORT_HTTP_ERROR",
-                crate::pipeline::describe_http_failure(&outcome),
-            ));
+                ErrorPhase::Acquisition,
+                crate::imaging::describe_http_failure(&outcome),
+            );
             error.http = Some(outcome.status);
+            error.request = Some(outcome.final_uri);
             error.retry_after_ms = outcome.retry_after_ms;
-            error.retryable = matches!(outcome.status, 408 | 425 | 429 | 500..=599);
-            return Err(error);
+            error.retryable = dezoomify::retry::is_retryable(&error.code, error.http);
+            return Err(resource_context(error, request));
         }
         Ok(outcome)
     }
@@ -379,13 +353,20 @@ impl<'a> NativeHost<'a> {
         self.controlled(async {
             tokio::task::spawn_blocking(move || {
                 let _permit = permit;
-                let bytes = processing.apply(bytes).map_err(NativeError::from)?;
+                let bytes = processing.apply(bytes).map_err(|error| {
+                    Error::new(
+                        "tile.processing-failed",
+                        ErrorPhase::Processing,
+                        error.to_string(),
+                    )
+                })?;
                 if let Some((dir, namespace, uri)) = store {
                     let _ = crate::cache::store(&dir, &namespace, &uri, &bytes);
                 }
-                let image = load_image_with_metadata(&bytes)
-                    .map_err(|error| NativeError::new("tile.decode-failed", error.to_string()))?;
-                Ok::<_, NativeError>(DecodedTile {
+                let image = load_image_with_metadata(&bytes).map_err(|error| {
+                    Error::new("TILE_DECODE_FAILED", ErrorPhase::Decode, error.to_string())
+                })?;
+                Ok::<_, Error>(DecodedTile {
                     image: image.image.to_rgba8(),
                     icc_profile: image.icc_profile,
                     exif_metadata: image.exif_metadata,
@@ -393,12 +374,12 @@ impl<'a> NativeHost<'a> {
             })
             .await
             .map_err(|_| {
-                native_error(NativeError::new(
+                Error::new(
                     "native.internal",
+                    ErrorPhase::Acquisition,
                     "tile decode task failed",
-                ))
+                )
             })?
-            .map_err(native_error)
         })
         .await
     }
@@ -410,7 +391,7 @@ impl<'a> NativeHost<'a> {
             .options
             .cache_dir
             .clone()
-            .unwrap_or_else(crate::pipeline::default_tile_cache_dir);
+            .unwrap_or_else(crate::imaging::default_tile_cache_dir);
         if let Some(bytes) = crate::cache::load(&dir, &namespace, &tile.request.uri) {
             self.diagnostics.count("cache_reads", 1.0);
             if let Ok(decoded) = self.decode(bytes, Default::default(), None).await {
@@ -463,9 +444,9 @@ impl<'a> NativeHost<'a> {
             crate::sink::tile_bytes(&decoded.image),
             sink.retain_cap_bytes(),
         ) {
-            return Err(native_error(NativeError::canvas_memory_unavailable(1, 1,
+            return Err(crate::output::canvas_memory_unavailable(1, 1,
                 &format!("decoded tiles beyond the retain cap ({retained} retained, {inflight} in flight)"),
-                "the configured output retention")));
+                "the configured output retention"));
         }
         sink.place(
             ordinal,
@@ -475,8 +456,7 @@ impl<'a> NativeHost<'a> {
             },
             tile.placement.expected_size.as_ref().map(size),
             decoded,
-        )
-        .map_err(native_error)?;
+        )?;
         self.acquired.borrow_mut().insert(ordinal);
         self.instrumentation.borrow_mut().acquired = self.acquired.borrow().len() as u64;
         Ok(())
@@ -504,21 +484,30 @@ impl Host for NativeHost<'_> {
                 let width = std::num::NonZeroU64::new(u64::from(decoded.image.width()));
                 let height = std::num::NonZeroU64::new(u64::from(decoded.image.height()));
                 if tile.placement.probe_output {
-                    self.place(&tile, decoded)?;
+                    self.place(&tile, decoded)
+                        .map_err(|error| resource_context(error, &tile.request))?;
                 }
                 match (width, height) {
                     (Some(width), Some(height)) => Ok(ProbeOutcome::Available { width, height }),
                     _ => Ok(ProbeOutcome::Missing),
                 }
             }
-            Err(error) if error.code == "job.cancelled" => Err(error),
+            Err(error) if error.code == "job.cancelled" => {
+                Err(resource_context(error, &tile.request))
+            }
             Err(_) => Ok(ProbeOutcome::Missing),
         }
     }
 
-    async fn acquire_tile(&self, tile: Tile) -> Result<TileReceipt, Error> {
-        self.attempted.borrow_mut().insert(tile.index);
-        let decoded = self.tile(&tile).await.inspect_err(|error| {
+    async fn acquire_tile(&self, tile: Tile) -> Result<(), Error> {
+        async {
+            let decoded = self.tile(&tile).await?;
+            self.controls.checkpoint(false).await?;
+            self.place(&tile, decoded)
+        }
+        .await
+        .map_err(|error| resource_context(error, &tile.request))
+        .inspect_err(|error| {
             let mut stats = self.instrumentation.borrow_mut();
             if error.retryable {
                 stats.failed_transient += 1;
@@ -526,21 +515,9 @@ impl Host for NativeHost<'_> {
                 stats.failed_permanent += 1;
             }
             if error.code != "job.cancelled" {
-                self.diagnostics.record(
-                    DiagnosticLevel::Warn,
-                    "tile",
-                    serde_json::json!({
-                        "url": tile.request.uri, "code": error.code, "phase": error.phase,
-                        "message": error.message, "detail": error.detail,
-                        "transport": error.transport, "http": error.http,
-                    }),
-                );
+                self.diagnostics
+                    .record(DiagnosticLevel::Warn, "tile", serde_json::json!(error));
             }
-        })?;
-        self.controls.checkpoint(false).await?;
-        self.place(&tile, decoded)?;
-        Ok(TileReceipt {
-            display_only: false,
         })
     }
 
@@ -555,30 +532,15 @@ impl Host for NativeHost<'_> {
         let mut sink = self.sink.borrow_mut();
         sink.note_declared(request.canvas.as_ref().map(size));
         let acquired = self.acquired.borrow();
-        let order: Vec<String> = self
-            .attempted
-            .borrow()
-            .union(&acquired)
-            .map(u32::to_string)
-            .collect();
-        let (image_size, _, _) = sink
-            .assemble(&order, &|id| {
-                id.parse().is_ok_and(|id| acquired.contains(&id))
-            })
-            .map_err(native_error)?;
+        let image_size = sink.assemble()?;
         let partial = !request.missing.is_empty();
-        let published = sink
-            .commit(crate::sink::CommitParams {
-                dest: &destination,
-                format: self.format,
-                overwrite: self.options.overwrite,
-                cancelled: &self.controls.0.cancelled,
-                partial,
-                missing: request.missing.iter().map(u32::to_string).collect(),
-                tile_count: acquired.len(),
-                image_size,
-            })
-            .map_err(native_error)?;
+        let published = sink.commit(crate::sink::CommitParams {
+            dest: &destination,
+            format: self.format,
+            overwrite: self.options.overwrite,
+            cancelled: &self.controls.0.cancelled,
+            partial,
+        })?;
         let stats = sink.stats();
         let mut instrumentation = self.instrumentation.borrow().clone();
         instrumentation.peak_retained_bytes = stats.peak_retained_bytes;
@@ -592,19 +554,7 @@ impl Host for NativeHost<'_> {
             .canvas_bytes
             .saturating_add(stats.peak_retained_bytes)
             .saturating_add(stats.encoded_bytes);
-        *self.published.borrow_mut() = Some(OutputSummary {
-            path: published.output_path,
-            tile_count: published.tile_count,
-            width: image_size.x,
-            height: image_size.y,
-            format: self.source_format.borrow().clone().unwrap_or_default(),
-            partial,
-            missing: published.missing,
-            instrumentation,
-        });
-        self.diagnostics.finish(if partial { "partial-completed" } else { "completed" },
-            serde_json::json!({"width": image_size.x, "height": image_size.y, "format": self.format.as_str(), "missing": request.missing.len()}));
-        Ok(Output {
+        let output = Output {
             canvas: Some(Size {
                 width: image_size.x,
                 height: image_size.y,
@@ -613,21 +563,33 @@ impl Host for NativeHost<'_> {
             complete: !partial,
             missing: request.missing,
             disposition: OutputDisposition::NativePublication,
-        })
+        };
+        self.diagnostics.finish(if partial { "partial-completed" } else { "completed" },
+            serde_json::json!({"width": image_size.x, "height": image_size.y, "format": self.format.as_str(), "missing": output.missing.len()}));
+        *self.published.borrow_mut() = Some(Publication {
+            path: published,
+            tile_count: acquired.len(),
+            source_format: self.source_format.borrow().clone().unwrap_or_default(),
+            output: output.clone(),
+            instrumentation,
+        });
+        Ok(output)
     }
 
     async fn choose_image(&self, _catalog: Catalog) -> Result<u32, Error> {
-        Err(native_error(NativeError::new(
+        Err(Error::new(
             "discovery.no-image",
+            ErrorPhase::Discovery,
             "native image selection requires a configured policy",
-        )))
+        ))
     }
 
     async fn choose_level(&self, _image: Image) -> Result<u32, Error> {
-        Err(native_error(NativeError::new(
+        Err(Error::new(
             "discovery.no-level",
+            ErrorPhase::Discovery,
             "native level selection requires a configured policy",
-        )))
+        ))
     }
 
     async fn choose_partial(&self, missing: MissingTiles) -> Result<RecoveryChoice, Error> {
@@ -695,6 +657,23 @@ impl Host for NativeHost<'_> {
     }
 }
 
+fn resource_context(mut error: Error, request: &ResourceRequest) -> Error {
+    let kind = match request.purpose {
+        RequestPurpose::Metadata => {
+            if error.phase == ErrorPhase::Acquisition {
+                error.phase = ErrorPhase::Discovery;
+            }
+            ResourceKind::Metadata
+        }
+        RequestPurpose::Tile => ResourceKind::Tile,
+        RequestPurpose::Probe => ResourceKind::Probe,
+    };
+    error.request.get_or_insert_with(|| request.uri.clone());
+    error.resource_kind.get_or_insert(kind);
+    error.transport.get_or_insert(ErrorTransport::Native);
+    error
+}
+
 fn size(size: &Size) -> Vec2d {
     Vec2d {
         x: size.width,
@@ -707,36 +686,6 @@ fn cancelled() -> Error {
         ErrorPhase::Cleanup,
         "job cancelled before completion",
     )
-}
-
-pub fn native_error(error: NativeError) -> Error {
-    let code = match error.code.as_str() {
-        "transport.timeout" => "TRANSPORT_TIMEOUT",
-        "transport.network-error" => "TRANSPORT_NETWORK_ERROR",
-        "transport.size-limit" => "TRANSPORT_SIZE_LIMIT",
-        "transport.bad-url" => "TRANSPORT_BAD_URL",
-        "transport.bad-redirect" => "TRANSPORT_BAD_REDIRECT",
-        "transport.redirect-limit" => "TRANSPORT_REDIRECT_LIMIT",
-        "tile.decode-failed" => "TILE_DECODE_FAILED",
-        code => code,
-    };
-    let mut result = Error::new(
-        code,
-        match error.phase() {
-            "discovery" => ErrorPhase::Discovery,
-            "acquisition" => ErrorPhase::Acquisition,
-            "decode" => ErrorPhase::Decode,
-            "processing" => ErrorPhase::Processing,
-            "output" => ErrorPhase::Output,
-            "publication" => ErrorPhase::Publication,
-            "cleanup" => ErrorPhase::Cleanup,
-            _ => ErrorPhase::Validation,
-        },
-        error.message.clone(),
-    );
-    result.retryable = error.retryable();
-    result.transport = Some(ErrorTransport::Native);
-    result
 }
 
 #[derive(Default)]

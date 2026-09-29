@@ -1,13 +1,12 @@
-// Website fetch orchestration shared by browser products.
+// Website fetching with direct reads and metadata proxy fallback.
 // Direct browser fetch first; the metadata CORS proxy is an automatic
 // fallback for eligible public metadata only (never tiles, never
 // credentials). The single-policy proxy transport instance is supplied by
 // the caller. Progress and diagnostics callbacks update the job view.
 
-import type { FetchFailureCode, ResourceRequest } from "@dezoomify/wasm-bindings";
+import type { FetchFailure, ResourceRequest } from "@dezoomify/wasm-bindings";
 import type { DiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
-import type { FetchCause, StructuredFailure } from "./failure.ts";
-import { blockedReason, fetchFailure } from "./failure.ts";
+import { blockedReason } from "./failure.ts";
 import { readErrorPreview, readResponseBytes, retryAfterMs } from "./response-body.ts";
 import {
   combineTimeout,
@@ -15,7 +14,6 @@ import {
   proxyRateLimitDelayMs,
   REQUEST_TIMEOUT_MS,
   sleep,
-  tileFailedError,
 } from "./tile-policy.ts";
 
 const SIGNED_QUERY_KEYS = new Set([
@@ -127,7 +125,7 @@ export interface ProxyEligibility {
   reason: string;
 }
 
-/** Live job-view hooks owned by the orchestrator (activity + repaint). */
+/** Request activity and repaint callbacks from the browser application. */
 export interface WebFetchHooks {
   onRequestStart(label: string): number;
   onRequestEnd(id: number, ok: boolean): void;
@@ -160,13 +158,12 @@ export interface WebFetcher {
     signal: AbortSignal,
   ): Promise<{ bytes: Uint8Array; finalUri?: string }>;
   getActiveTransport(): string | null;
-  resetActiveTransport(): void;
 }
 
 /**
  * Plain words for a relay policy `reason`.
  * Keeps the prominent message specific without leaking jargon: the exact
- * `reason` still travels in the technical chain.
+ * `reason` still appears in diagnostic details.
  */
 export function proxyPolicyReasonText(reason?: string): string | null {
   switch (reason) {
@@ -198,120 +195,64 @@ export function proxyPolicyReasonText(reason?: string): string | null {
   }
 }
 
-export interface ClassifiedProxyFailure {
-  code: FetchFailureCode;
-  message: string;
-  retryable: boolean;
-  /** Typed cause for the Rust algorithm: the diagnostics grouping key. */
-  cause: FetchCause;
-}
-
-/**
- * Classify a failed proxy result into a user sentence plus a typed cause.
- * Our policy denial and an upstream HTTP refusal are genuinely different
- * (retrying a 403 from the viewed site never helps, while a 502 might), so
- * they never share a message or a retryable flag. The exact relay `reason`
- * travels inside the cause, never as free text.
- */
+/** Preserve the relay's observed facts with product wording. */
 export function classifyProxyFailure(proxied: {
   status: number;
   code?: string;
   reason?: string;
-}): ClassifiedProxyFailure {
+  preview?: string;
+  retryAfterMs?: number;
+}): FetchFailure {
   const code = proxied.code ?? "PROXY_ERROR";
-  const status = proxied.status || 0;
-  const cause: FetchCause = { code, transport: "metadata-proxy" };
-  if (status > 0) cause.http = status;
-  const reason = blockedReason(proxied.reason);
-  if (reason) cause.reason = reason;
+  const http = proxied.status || undefined;
+  const facts = {
+    transport: "metadata-proxy" as const,
+    detail: `proxy failure: ${code}${proxied.reason ? ` (${proxied.reason})` : ""}`,
+    ...(http ? { http } : {}),
+    ...(blockedReason(proxied.reason) ? { blocked_reason: blockedReason(proxied.reason) } : {}),
+    ...(proxied.preview ? { preview: proxied.preview } : {}),
+    ...(proxied.retryAfterMs !== undefined ? { retry_after_ms: proxied.retryAfterMs } : {}),
+  };
   if (code === "PROXY_POLICY_DENIED") {
     const hint = proxyPolicyReasonText(proxied.reason) ?? "Check the address and try again.";
     return {
+      ...facts,
       code: "TRANSPORT_POLICY_DENIED",
-      message:
-        `This address cannot be opened through the website. ${hint} ` +
-        "The browser extension or the desktop app may still work.",
-      retryable: false,
-      cause: { ...cause, code: "TRANSPORT_POLICY_DENIED" },
+      message: `This address cannot be opened through the website. ${hint} The browser extension or the desktop app may still work.`,
     };
   }
-  if (code === "PROXY_BUDGET_EXCEEDED") {
+  if (code === "PROXY_BUDGET_EXCEEDED")
     return {
-      code: "PROXY_BUDGET_EXCEEDED",
+      ...facts,
+      code,
       message: "This page is too large to check here. Try the desktop app for very large images.",
-      retryable: false,
-      cause,
     };
-  }
-  if (code === "TRANSPORT_HTTP_ERROR" || status === 401 || status === 403) {
-    if (status === 404) {
-      return {
-        code: "TRANSPORT_HTTP_ERROR",
-        message: "This page could not be found. Check the address and try again.",
-        retryable: false,
-        cause: { ...cause, code: "TRANSPORT_HTTP_ERROR" },
-      };
-    }
-    if (status === 401 || status === 403 || status === 406) {
-      return {
-        code: "TRANSPORT_HTTP_ERROR",
-        message:
-          `The site refused to share this file (HTTP ${status}). It may block shared servers; ` +
-          "the browser extension or the desktop app may still work.",
-        retryable: false,
-        cause: { ...cause, code: "TRANSPORT_HTTP_ERROR" },
-      };
-    }
-    if (status >= 500 && status <= 599) {
-      return {
-        code: "TRANSPORT_HTTP_ERROR",
-        message: "The site had a problem opening this page. Try again shortly.",
-        retryable: true,
-        cause: { ...cause, code: "TRANSPORT_HTTP_ERROR" },
-      };
-    }
-    if (status >= 400 && status <= 499) {
-      return {
-        code: "TRANSPORT_HTTP_ERROR",
-        message: "This page could not be opened. Check the address and try again.",
-        retryable: false,
-        cause: { ...cause, code: "TRANSPORT_HTTP_ERROR" },
-      };
-    }
-  }
-  if (
-    code === "TRANSPORT_NETWORK_ERROR" ||
-    code === "PROXY_NETWORK_ERROR" ||
-    code === "PROXY_ERROR"
-  ) {
-    return {
-      code: "PROXY_ERROR",
-      message: "The metadata proxy could not fetch this address. Try again shortly.",
-      retryable: true,
-      cause: { ...cause, code: "PROXY_ERROR" },
-    };
+  if (code === "TRANSPORT_HTTP_ERROR" || http === 401 || http === 403) {
+    const message =
+      http === 404
+        ? "This page could not be found. Check the address and try again."
+        : http === 401 || http === 403 || http === 406
+          ? `The site refused to share this file (HTTP ${http}). It may block shared servers; the browser extension or the desktop app may still work.`
+          : http !== undefined && http >= 500
+            ? "The site had a problem opening this page. Try again shortly."
+            : "This page could not be opened. Check the address and try again.";
+    return { ...facts, code: "TRANSPORT_HTTP_ERROR", message };
   }
   return {
+    ...facts,
     code: "PROXY_ERROR",
     message: "The metadata proxy could not fetch this address. Try again shortly.",
-    retryable: status >= 500 || status === 0,
-    cause,
   };
 }
 
-function cancelledFailure(url: string): StructuredFailure {
-  return fetchFailure("The request was cancelled.", false, {
-    cause: { code: "TRANSPORT_CANCELLED", transport: "direct" },
+function cancelledFailure(): FetchFailure {
+  return {
     code: "TRANSPORT_CANCELLED",
-    url,
-    transportKind: "direct",
-  });
+    message: "The request was cancelled.",
+    transport: "direct",
+  };
 }
 
-/**
- * Wait out a retry backoff unless the job is cancelled first. Returns true
- * when the wait was abandoned so the caller stops without another attempt.
- */
 async function sleepUnlessAborted(
   ms: number,
   sleepFn: (ms: number) => Promise<void>,
@@ -482,7 +423,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     if (signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
     // Proxy admission budget lives in exactly one owner: the injected
     // product transport (`src/proxyTransport.ts`, server limits
-    // authoritative). This orchestration never re-gates it.
+    // authoritative).
     const reqId = hooks.onRequestStart("proxy");
     const combined = combineTimeout(signal, requestMs);
     try {
@@ -545,46 +486,17 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     }
   }
 
-  /**
-   * Fetch one metadata resource for discovery: direct first with a 1500 ms
-   * head start, then the eligible metadata proxy after a classified network
-   * failure. Direct settles before the proxy starts, so the two transports
-   * never overlap on the same resource; a caller abort before or during the
-   * fetch rejects as cancelled with no proxy fallback. Every readable payload reaches the WASM
-   * core, which is the single authority for discovery. The substring
-   * classifier is a UI hint only and never gates.
-   *
-   * Eligibility stays owned by the caller (isProxyEligible on a metadata
-   * request). Tiles never use the proxy. A transient PROXY_RATE_LIMITED
-   * retries once after Retry-After/backoff; a persistent throttle fails fast
-   * with extension/desktop guidance.
-   *
-   * Every thrown failure carries its typed cause: `message` is a plain,
-   * actionable sentence for the prominent UI slot, while `cause`
-   * (transport, HTTP status, proxy code, policy reason) plus `url` and
-   * the bounded `preview` server signal feed the Rust algorithm diagnostics and
-   * the technical-details section. User copy stays in the presentation.
-   */
+  /** Fetch metadata directly, then use the eligible metadata proxy after unreadable responses. */
   async function fetchMetadataFor(
     request: ResourceRequest,
     signal?: AbortSignal,
-  ): Promise<{ bytes: ArrayBuffer; finalUri?: string; via: string }> {
-    const url = request.uri;
-    // A retired job performs no fetch and never falls back to the proxy.
-    if (signal?.aborted) throw cancelledFailure(url);
+  ): Promise<{ bytes: ArrayBuffer; finalUri?: string }> {
+    if (signal?.aborted) throw cancelledFailure();
     activeTransport = "direct";
     const direct = await fetchDirect(request, signal, metadataMs, DIRECT_METADATA_MAX_BYTES);
-
-    let via = "direct";
-    let bytes: ArrayBuffer | null = null;
-    // Post-redirect base for relative tile URLs. Direct fetches report
-    // res.url; proxied fetches must fall back to the requested URL (the relay
-    // follows redirects internally without exposing the upstream final URL).
-    let finalUri: string = url;
-    if (direct.outcome === "readable" && direct.bytes) {
-      bytes = direct.bytes;
-      if (typeof direct.finalUrl === "string" && direct.finalUrl !== "") finalUri = direct.finalUrl;
-    } else if (
+    if (direct.outcome === "readable" && direct.bytes)
+      return { bytes: direct.bytes, finalUri: direct.finalUrl || request.uri };
+    if (
       direct.outcome === "network-error" &&
       !signal?.aborted &&
       deps.isProxyEligible(request).eligible
@@ -594,130 +506,86 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         from: "direct",
         to: "metadata-proxy",
         reason: direct.outcome,
-        url,
+        url: request.uri,
       });
-      via = "proxy";
       let proxied = await fetchViaProxy(request, signal);
-
-      // Retry-After + backoff: one bounded retry converts a transient
-      // token-bucket 429 into success. A persistent throttle, or a
-      // Retry-After beyond the UX budget, still fails fast below with the
-      // extension/desktop guidance (never tiles, never wider eligibility).
       if (!proxied.ok && proxied.code === "PROXY_RATE_LIMITED") {
         const delay = proxyRateLimitDelayMs(proxied.retryAfterMs);
         if (delay !== null) {
-          deps.diagnostics?.record("debug", "proxy-retry", {
-            delay_ms: delay,
-          });
-          if (await sleepUnlessAborted(delay, sleepFn, signal)) throw cancelledFailure(url);
+          deps.diagnostics?.record("debug", "proxy-retry", { delay_ms: delay });
+          if (await sleepUnlessAborted(delay, sleepFn, signal)) throw cancelledFailure();
           proxied = await fetchViaProxy(request, signal);
         }
       }
-      if (!proxied.ok || !proxied.bytes) {
-        if (signal?.aborted || proxied.code === "TRANSPORT_CANCELLED") throw cancelledFailure(url);
-        if (proxied.code === "PROXY_RATE_LIMITED") {
-          throw fetchFailure(deps.messages.rateLimitedBySite, true, {
-            cause: { code: "UPSTREAM_RATE_LIMITED", http: 429, transport: "metadata-proxy" },
-            code: "UPSTREAM_RATE_LIMITED",
-            url,
-          });
-        }
-        const classified = classifyProxyFailure(proxied);
-        throw fetchFailure(classified.message, classified.retryable, {
-          cause: classified.cause,
-          code: classified.code,
-          url,
-          transportKind: "metadata-proxy",
-          preview: proxied.preview,
-        });
-      }
-      bytes = proxied.bytes;
-      if (typeof proxied.finalUrl === "string" && proxied.finalUrl !== "")
-        finalUri = proxied.finalUrl;
-    } else if (direct.outcome === "cancelled" || signal?.aborted) {
-      // A retired job never falls back to the proxy and never reports a
-      // retryable discovery failure for its own cancellation.
-      throw cancelledFailure(url);
-    } else if (direct.outcome === "too-large") {
-      throw fetchFailure("This page is too large to check here. Try the desktop app.", false, {
-        cause: { code: "TRANSPORT_SIZE_LIMIT", transport: "direct" },
-        code: "TRANSPORT_SIZE_LIMIT",
-        url,
-        transportKind: "direct",
-      });
-    } else if (direct.outcome === "http-error") {
-      // The typed cause carries the HTTP status and the bounded server
-      // signal in the diagnostic report.
-      if (direct.status === 429) {
-        // A direct fetch uses the user's own connection, so this throttle is
-        // on their IP, not on our server; the fix is waiting, not another app.
-        throw fetchFailure(deps.messages.siteBusy, true, {
-          cause: { code: "UPSTREAM_RATE_LIMITED", http: 429, transport: "direct" },
+      if (signal?.aborted || proxied.code === "TRANSPORT_CANCELLED") throw cancelledFailure();
+      if (proxied.ok && proxied.bytes)
+        return { bytes: proxied.bytes, finalUri: proxied.finalUrl || request.uri };
+      if (proxied.code === "PROXY_RATE_LIMITED")
+        throw {
           code: "UPSTREAM_RATE_LIMITED",
-          url,
-          preview: direct.preview,
-          transportKind: "direct",
-        });
-      }
-      throw fetchFailure("This page could not be opened. Check the address and try again.", false, {
-        cause: {
-          code: "DISCOVERY_HTTP_ERROR",
-          ...(direct.status ? { http: direct.status } : {}),
-          transport: "direct",
-        },
-        code: "DISCOVERY_HTTP_ERROR",
-        url,
-        preview: direct.preview,
-        transportKind: "direct",
-      });
-    } else {
-      throw fetchFailure(deps.messages.discoveryFailed(via), true, {
-        cause: { code: "DISCOVERY_FAILED", transport: "direct" },
-        code: "DISCOVERY_FAILED",
-        url,
-        transportKind: "direct",
-      });
+          message: deps.messages.rateLimitedBySite,
+          http: 429,
+          transport: "metadata-proxy",
+          retry_after_ms: proxied.retryAfterMs,
+        } satisfies FetchFailure;
+      throw classifyProxyFailure(proxied);
     }
-    return { bytes: bytes as ArrayBuffer, finalUri, via };
+    if (direct.outcome === "cancelled" || signal?.aborted) throw cancelledFailure();
+    if (direct.outcome === "too-large")
+      throw {
+        code: "TRANSPORT_SIZE_LIMIT",
+        message: "This page is too large to check here. Try the desktop app.",
+        transport: "direct",
+      } satisfies FetchFailure;
+    if (direct.outcome === "http-error")
+      throw {
+        code: direct.status === 429 ? "UPSTREAM_RATE_LIMITED" : "DISCOVERY_HTTP_ERROR",
+        message:
+          direct.status === 429
+            ? deps.messages.siteBusy
+            : "This page could not be opened. Check the address and try again.",
+        http: direct.status,
+        transport: "direct",
+        preview: direct.preview,
+        retry_after_ms: direct.retryAfterMs,
+      } satisfies FetchFailure;
+    throw {
+      code: "DISCOVERY_FAILED",
+      message: deps.messages.discoveryFailed("direct"),
+      transport: "direct",
+    } satisfies FetchFailure;
   }
 
   async function fetchTileFor(
     request: ResourceRequest,
     signal?: AbortSignal,
   ): Promise<{ bytes: ArrayBuffer; finalUri?: string }> {
-    const url = request.uri;
-    if (signal?.aborted) throw cancelledFailure(url);
-    if (deps.throttle) {
-      try {
-        await deps.throttle(url);
-      } catch {
-        // Throttle waits must never fail a tile.
-      }
-    }
-    if (signal?.aborted) throw cancelledFailure(url);
+    if (signal?.aborted) throw cancelledFailure();
+    if (deps.throttle) await deps.throttle(request.uri);
+    if (signal?.aborted) throw cancelledFailure();
     const direct = await fetchDirect(request, signal, requestMs);
     if (direct.outcome === "readable" && direct.bytes)
       return { bytes: direct.bytes, finalUri: direct.finalUrl };
-    if (direct.outcome === "cancelled" || signal?.aborted) throw cancelledFailure(url);
-    if (direct.outcome === "too-large") {
-      throw fetchFailure("This tile is too large for the browser.", false, {
-        cause: { code: "TRANSPORT_SIZE_LIMIT", transport: "direct" },
+    if (direct.outcome === "cancelled" || signal?.aborted) throw cancelledFailure();
+    if (direct.outcome === "too-large")
+      throw {
         code: "TRANSPORT_SIZE_LIMIT",
-        url,
-        transportKind: "direct",
-      });
-    }
-    const failure = tileFailedError(direct.outcome, direct.status, url, direct.retryAfterMs);
-    if (direct.preview) Object.assign(failure, { preview: direct.preview });
-    throw failure;
+        message: "This tile is too large for the browser.",
+        transport: "direct",
+      } satisfies FetchFailure;
+    throw {
+      code: direct.status ? "TRANSPORT_HTTP_ERROR" : "TRANSPORT_NETWORK_ERROR",
+      message: "Part of the image could not be saved. Try again in a moment.",
+      http: direct.status,
+      transport: "direct",
+      preview: direct.preview,
+      retry_after_ms: direct.retryAfterMs,
+      detail: `tile fetch: ${direct.outcome} (HTTP ${direct.status ?? "n/a"})`,
+    } satisfies FetchFailure;
   }
 
   function getActiveTransport(): string | null {
     return activeTransport;
-  }
-
-  function resetActiveTransport(): void {
-    activeTransport = null;
   }
 
   async function fetchResource(request: ResourceRequest, signal: AbortSignal) {
@@ -729,5 +597,5 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     return { bytes: new Uint8Array(result.bytes), finalUri: result.finalUri };
   }
 
-  return { fetchResource, getActiveTransport, resetActiveTransport };
+  return { fetchResource, getActiveTransport };
 }

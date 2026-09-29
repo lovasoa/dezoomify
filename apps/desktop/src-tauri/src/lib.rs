@@ -2,7 +2,10 @@
 // tests are exempt via `allow-unwrap-in-tests` in the workspace
 // `clippy.toml`; integration `tests/` targets never inherit this attribute.
 #![deny(clippy::unwrap_used)]
+// IPC and native operations share the domain error value.
+#![allow(clippy::result_large_err)]
 
+#[cfg(feature = "tauri")]
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/desktop_commands.rs"));
 
 /// Version shared by every app built from this revision.

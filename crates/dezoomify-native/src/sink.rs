@@ -11,8 +11,7 @@
 //!   tiles (no extent intersection with any seen tile) paint immediately
 //!   and release their pixels, so one slow tile never blocks unrelated
 //!   non-overlapping tiles. Overlapping tiles are retained and painted in
-//!   plan order at finalization, preserving byte-identical pixels with the
-//!   old retain-everything publisher. Retention is bounded
+//!   plan order at finalization for deterministic pixels. Retention is bounded
 //!   (`output_retain_cap`); unknown canvas dimensions spool decoded tiles
 //!   to job-owned temp files (bounded by `output_spool_cap`) and assemble
 //!   at finalization without retaining every tile in RAM.
@@ -39,12 +38,12 @@ use std::path::{Path, PathBuf};
 use dezoomify::Vec2d;
 use image::RgbaImage;
 
-use crate::error::NativeError;
-use crate::output::{partial_path_for, validate_destination, write_iiif_dir, OutputFormat};
-use crate::pipeline::{
+use crate::imaging::{
     blit_onto, encode_jpeg, encode_png, encode_tiff, encode_webp, encode_zif_pyramid,
     render_iiif_dir, DecodedTile,
 };
+use crate::output::{partial_path_for, validate_destination, write_iiif_dir};
+use dezoomify::model::{Error, ErrorPhase, OutputFormat};
 
 /// Encoder and buffering settings owned by the output sink.
 #[derive(Clone, Debug)]
@@ -101,28 +100,13 @@ pub struct SinkStats {
     pub late_repaints: u64,
 }
 
-/// Successfully committed output.
-pub struct Published {
-    pub output_path: PathBuf,
-    pub tile_count: usize,
-    pub image_size: Vec2d,
-    pub partial: bool,
-    pub missing: Vec<String>,
-    pub encoded_bytes: u64,
-}
-
-/// Grouped [`Sink::commit`] arguments. Keeps the single commit point to two
-/// parameters so the arity stays within the lint budget as output
-/// bookkeeping grows; behavior is identical to the previous flat list.
+/// Filesystem publication options.
 pub struct CommitParams<'a> {
     pub dest: &'a Path,
     pub format: OutputFormat,
     pub overwrite: bool,
     pub cancelled: &'a std::sync::atomic::AtomicBool,
     pub partial: bool,
-    pub missing: Vec<String>,
-    pub tile_count: usize,
-    pub image_size: Vec2d,
 }
 
 pub struct Sink {
@@ -220,26 +204,26 @@ impl Sink {
 
     /// Allocate the canvas after the explicit memory pre-check. Fails
     /// `output.canvas-limit` before allocating, never after.
-    fn allocate(&mut self, width: u32, height: u32) -> Result<(), NativeError> {
+    fn allocate(&mut self, width: u32, height: u32) -> Result<(), Error> {
         let width = width.max(1);
         let height = height.max(1);
         if self.canvas.is_some() {
             return Ok(());
         }
-        let available = crate::pipeline::available_memory_bytes();
+        let available = crate::imaging::available_memory_bytes();
         let required = u64::from(width)
             .checked_mul(u64::from(height))
             .and_then(|pixels| pixels.checked_mul(4));
         let Some(bytes) = required else {
-            return Err(NativeError::canvas_memory_unavailable(
+            return Err(crate::output::canvas_memory_unavailable(
                 width,
                 height,
                 "over 16 EiB",
                 &describe_bytes(available),
             ));
         };
-        if crate::pipeline::exceeds_available_memory(bytes, available) {
-            return Err(NativeError::canvas_memory_unavailable(
+        if crate::imaging::exceeds_available_memory(bytes, available) {
+            return Err(crate::output::canvas_memory_unavailable(
                 width,
                 height,
                 &describe_bytes(bytes),
@@ -262,7 +246,7 @@ impl Sink {
         destination: Vec2d,
         extent: Option<Vec2d>,
         tile: DecodedTile,
-    ) -> Result<(), NativeError> {
+    ) -> Result<(), Error> {
         if !self.plan.contains(&ordinal) {
             self.plan.push(ordinal);
         }
@@ -295,14 +279,14 @@ impl Sink {
         if overlaps {
             let bytes = tile_bytes(&tile.image);
             if self.retained_bytes.saturating_add(bytes) > self.retain_cap_bytes {
-                return Err(NativeError::canvas_memory_unavailable(
+                return Err(crate::output::canvas_memory_unavailable(
                     self.width,
                     self.height,
                     &format!(
                         "overlapping-tile retention beyond {}",
                         describe_bytes(self.retain_cap_bytes)
                     ),
-                    &describe_bytes(crate::pipeline::available_memory_bytes()),
+                    &describe_bytes(crate::imaging::available_memory_bytes()),
                 ));
             }
             self.retained_bytes += bytes;
@@ -334,7 +318,7 @@ impl Sink {
         self.painted_count += 1;
     }
 
-    fn spool_dir(&mut self) -> Result<PathBuf, NativeError> {
+    fn spool_dir(&mut self) -> Result<PathBuf, Error> {
         if let Some(dir) = self.spool_dir.clone() {
             return Ok(dir);
         }
@@ -344,7 +328,7 @@ impl Sink {
             unique_suffix()
         ));
         std::fs::create_dir_all(&dir)
-            .map_err(|e| NativeError::write_failed(format!("spool dir failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed(format!("spool dir failed: {e}")))?;
         self.spool_dir = Some(dir.clone());
         Ok(dir)
     }
@@ -358,14 +342,14 @@ impl Sink {
         destination: Vec2d,
         extent: Option<Vec2d>,
         tile: DecodedTile,
-    ) -> Result<(), NativeError> {
+    ) -> Result<(), Error> {
         let bytes = tile_bytes(&tile.image);
         if self.spool_bytes.saturating_add(bytes) > self.spool_cap_bytes {
-            return Err(NativeError::canvas_memory_unavailable(
+            return Err(crate::output::canvas_memory_unavailable(
                 1,
                 1,
                 &format!("tile spool beyond {}", describe_bytes(self.spool_cap_bytes)),
-                &describe_bytes(crate::pipeline::available_memory_bytes()),
+                &describe_bytes(crate::imaging::available_memory_bytes()),
             ));
         }
         let dir = self.spool_dir()?;
@@ -384,14 +368,14 @@ impl Sink {
             header.extend_from_slice(&v.to_le_bytes());
         }
         let mut file = std::fs::File::create(&tmp)
-            .map_err(|e| NativeError::write_failed(format!("spool write failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed(format!("spool write failed: {e}")))?;
         use std::io::Write as _;
         file.write_all(&header)
             .and_then(|()| file.write_all(tile.image.as_raw()))
-            .map_err(|e| NativeError::write_failed(format!("spool write failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed(format!("spool write failed: {e}")))?;
         drop(file);
         std::fs::rename(&tmp, &path)
-            .map_err(|e| NativeError::write_failed(format!("spool write failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed(format!("spool write failed: {e}")))?;
         self.spool_bytes += bytes;
         self.stats.peak_spool_bytes = self.stats.peak_spool_bytes.max(self.spool_bytes);
         self.spooled.push(SpooledTile {
@@ -406,12 +390,8 @@ impl Sink {
 
     /// Assemble the final canvas: allocate (declared or max-extent sized),
     /// replay spooled tiles, then paint retained overlapping tiles in plan
-    /// order. Returns the missing-tile ids for a kept partial.
-    pub fn assemble(
-        &mut self,
-        order: &[String],
-        decoded_present: &dyn Fn(&str) -> bool,
-    ) -> Result<(Vec2d, bool, Vec<String>), NativeError> {
+    /// order.
+    pub fn assemble(&mut self) -> Result<Vec2d, Error> {
         // Size the canvas: declared wins; otherwise max extents (spooled or
         // retained geometries); degenerate jobs get 1x1.
         let (mut width, mut height) = self
@@ -448,24 +428,23 @@ impl Sink {
                 .map(|dir| dir.join(format!("tile-{}.raw", tile.ordinal)))
                 .unwrap_or_default();
             let bytes = std::fs::read(&path)
-                .map_err(|e| NativeError::write_failed(format!("spool read failed: {e}")))?;
+                .map_err(|e| crate::output::write_failed(format!("spool read failed: {e}")))?;
             if bytes.len() < 24 {
-                return Err(NativeError::write_failed("spool entry truncated"));
+                return Err(crate::output::write_failed("spool entry truncated"));
             }
             let w = u32::from_le_bytes(bytes[0..4].try_into().unwrap_or([0; 4]));
             let h = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
             let pixels = &bytes[24..];
             let expected = (w as usize).saturating_mul(h as usize).saturating_mul(4);
             if pixels.len() != expected || w == 0 || h == 0 {
-                return Err(NativeError::write_failed("spool entry corrupt"));
+                return Err(crate::output::write_failed("spool entry corrupt"));
             }
             let image = RgbaImage::from_raw(w, h, pixels.to_vec())
-                .ok_or_else(|| NativeError::write_failed("spool entry corrupt"))?;
+                .ok_or_else(|| crate::output::write_failed("spool entry corrupt"))?;
             self.paint(tile.ordinal, &image, tile.destination, tile.extent);
         }
         self.remove_spool_dir();
-        // Paint retained overlapping tiles in plan order for deterministic
-        // pixels identical to the old retain-everything publisher.
+        // Paint retained overlapping tiles in plan order for deterministic pixels.
         let mut ordinals: Vec<u32> = self.pending.keys().copied().collect();
         ordinals.sort_by_key(|o| self.plan.iter().position(|p| p == o).unwrap_or(usize::MAX));
         for ordinal in ordinals {
@@ -478,23 +457,10 @@ impl Sink {
                 self.paint(ordinal, &tile.image, destination, extent);
             }
         }
-        // Missing = plan ids never placed (kept-partial holes stay blank).
-        let mut missing: Vec<String> = order
-            .iter()
-            .filter(|id| !decoded_present(id))
-            .cloned()
-            .collect();
-        missing.sort();
-        missing.dedup();
-        let partial = !missing.is_empty();
-        Ok((
-            Vec2d {
-                x: self.width,
-                y: self.height,
-            },
-            partial,
-            missing,
-        ))
+        Ok(Vec2d {
+            x: self.width,
+            y: self.height,
+        })
     }
 
     /// Deterministic first-tile metadata: the lowest-ordinal tile carrying
@@ -523,7 +489,7 @@ impl Sink {
     /// The single commit point. Ordering is explicit: cancellation first
     /// (a lost race publishes nothing), then destination validation, then
     /// exactly one atomic publication. Returns the honest published record.
-    pub fn commit(&mut self, params: CommitParams<'_>) -> Result<Published, NativeError> {
+    pub fn commit(&mut self, params: CommitParams<'_>) -> Result<PathBuf, Error> {
         use std::sync::atomic::Ordering;
         let CommitParams {
             dest: dest_path,
@@ -531,20 +497,18 @@ impl Sink {
             overwrite,
             cancelled,
             partial,
-            missing,
-            tile_count,
-            image_size,
         } = params;
         if cancelled.load(Ordering::SeqCst) {
-            return Err(NativeError::new(
+            return Err(Error::new(
                 "job.cancelled",
+                ErrorPhase::Cleanup,
                 "job cancelled before completion",
             ));
         }
         // Kept partials publish to the `.partial` sibling so a partial file
         // never masquerades as a complete save. Fail-closed on collision.
         let dest: PathBuf = if partial {
-            let sibling = partial_path_for(dest_path, format);
+            let sibling = partial_path_for(dest_path);
             validate_destination(&sibling, &format, overwrite)?;
             sibling
         } else {
@@ -552,7 +516,11 @@ impl Sink {
         };
         validate_destination(&dest, &format, overwrite)?;
         let canvas = self.canvas.clone().ok_or_else(|| {
-            NativeError::new("native.internal", "commit without assembled canvas")
+            Error::new(
+                "native.internal",
+                ErrorPhase::Acquisition,
+                "commit without assembled canvas",
+            )
         })?;
         let (icc, exif) = self.first_meta();
         let encoded_len: u64;
@@ -560,7 +528,7 @@ impl Sink {
             OutputFormat::Png => {
                 let encoded = encode_png(
                     &canvas,
-                    crate::pipeline::png_compression_for(self.compression),
+                    crate::imaging::png_compression_for(self.compression),
                     icc.as_deref(),
                     exif.as_deref(),
                 )?;
@@ -604,14 +572,7 @@ impl Sink {
         self.canvas = None;
         self.pending.clear();
         self.retained_bytes = 0;
-        Ok(Published {
-            output_path: dest,
-            tile_count,
-            image_size,
-            partial,
-            missing,
-            encoded_bytes: encoded_len,
-        })
+        Ok(dest)
     }
 
     /// Release retained pixel buffers without publishing. Spool files stay
@@ -651,27 +612,27 @@ impl Sink {
 
 /// Stream bytes to a temp sibling in chunks with fsync, then atomically
 /// rename into place. Only the temp path is ever uncommitted.
-fn commit_bytes(dest: &Path, bytes: &[u8]) -> Result<(), NativeError> {
+fn commit_bytes(dest: &Path, bytes: &[u8]) -> Result<(), Error> {
     if let Some(parent) = dest.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| NativeError::write_failed(format!("output write failed: {e}")))?;
+                .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
         }
     }
     let tmp = temp_sibling(dest);
     {
         use std::io::Write as _;
         let mut file = std::fs::File::create(&tmp)
-            .map_err(|e| NativeError::write_failed(format!("output write failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
         for chunk in bytes.chunks(64 << 10) {
             file.write_all(chunk)
-                .map_err(|e| NativeError::write_failed(format!("output write failed: {e}")))?;
+                .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
         }
         file.sync_all()
-            .map_err(|e| NativeError::write_failed(format!("output write failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
     }
     std::fs::rename(&tmp, dest)
-        .map_err(|e| NativeError::write_failed(format!("output write failed: {e}")))?;
+        .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
     Ok(())
 }
 
@@ -681,18 +642,16 @@ fn commit_iiif_dir(
     dest: &Path,
     info_json: &[u8],
     tiles: &crate::output::IiifTiles,
-) -> Result<(), NativeError> {
+) -> Result<(), Error> {
     let staging = temp_sibling(dest);
-    // A stale file at the destination (e.g. a previous `.iiif` file output)
-    // is replaced at commit, mirroring the reference encoder removing the
-    // destination file first. Validation already granted overwrite.
+    // An existing file is replaced at commit before the tile tree is written. Validation already granted overwrite.
     write_iiif_dir(&staging, info_json, tiles)?;
     if dest.is_file() {
         std::fs::remove_file(dest)
-            .map_err(|e| NativeError::write_failed(format!("output write failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
     }
     std::fs::rename(&staging, dest)
-        .map_err(|e| NativeError::write_failed(format!("output write failed: {e}")))?;
+        .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
     Ok(())
 }
 
@@ -739,5 +698,24 @@ fn describe_bytes(bytes: u64) -> String {
         format!("{:.1} MiB ({bytes} bytes)", approx / MIB)
     } else {
         format!("{bytes} bytes")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn publication_uses_its_own_temp_file_and_preserves_unrelated_files() {
+        let dir = std::env::temp_dir().join(format!("dezoomify-publication-{}", unique_suffix()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let output = dir.join("output.png");
+        let unrelated = dir.join("output.tmp");
+        std::fs::write(&unrelated, b"unrelated").unwrap();
+        commit_bytes(&output, b"image bytes").unwrap();
+        assert_eq!(std::fs::read(&output).unwrap(), b"image bytes");
+        assert_eq!(std::fs::read(&unrelated).unwrap(), b"unrelated");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

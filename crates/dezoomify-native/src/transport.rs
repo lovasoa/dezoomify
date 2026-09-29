@@ -1,22 +1,19 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use crate::auth::EphemeralAuthorization;
 use crate::client::{build_request, rebuild_for_redirect, EffectiveRequest};
-use crate::error::NativeError;
 use crate::http::{FetchLimits, FetchOutcome, UserHeaders};
+use dezoomify::model::{Error, ErrorPhase};
 
 /// Redirect statuses followed manually, one hop at a time, so every hop can
-/// revalidate the target and rescope credentials. Mirrors the previous
-/// transport's list exactly (including `300`).
+/// revalidate the target and rescope credentials.
 const REDIRECT_CODES: [u16; 6] = [301, 302, 303, 307, 308, 300];
 
 /// Idle connections are kept per host for 15 s, matching the documented
 /// native keep-alive behavior.
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Worker threads driving sockets for one transport. Tile threads block on
-/// their own threads; these workers only multiplex async I/O.
+/// Worker threads multiplexing sockets for one invocation.
 const RUNTIME_WORKERS: usize = 2;
 
 /// One reusable HTTP scope: Tokio runtime plus a single connection-pooling
@@ -31,13 +28,19 @@ impl NativeTransport {
     /// Build a transport from the fetch limits. Timeouts, pool sizing, and
     /// the TLS hatch come from `limits`; per-fetch byte/deadline bounds stay
     /// per call so one transport serves a whole job.
-    pub fn new(limits: &FetchLimits) -> Result<Self, NativeError> {
+    pub fn new(limits: &FetchLimits) -> Result<Self, Error> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .worker_threads(RUNTIME_WORKERS)
             .thread_name("dezoomify-transport")
             .build()
-            .map_err(|e| NativeError::new("native.internal", format!("transport runtime: {e}")))?;
+            .map_err(|e| {
+                Error::new(
+                    "native.internal",
+                    ErrorPhase::Acquisition,
+                    format!("transport runtime: {e}"),
+                )
+            })?;
         let mut builder = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(limits.connect_timeout)
@@ -49,9 +52,13 @@ impl NativeTransport {
         } else {
             builder = builder.use_preconfigured_tls(tls_config());
         }
-        let client = builder
-            .build()
-            .map_err(|e| NativeError::new("native.internal", format!("transport client: {e}")))?;
+        let client = builder.build().map_err(|e| {
+            Error::new(
+                "native.internal",
+                ErrorPhase::Acquisition,
+                format!("transport client: {e}"),
+            )
+        })?;
         Ok(Self {
             runtime,
             client,
@@ -64,31 +71,23 @@ impl NativeTransport {
         self
     }
 
-    /// Ephemeral one-shot transport for out-of-band fetches (bulk-list reads).
-    /// Hot paths must use a job-scoped transport so connections are reused.
-    pub fn oneshot(limits: &FetchLimits) -> Result<Self, NativeError> {
-        Self::new(limits)
-    }
-
     pub fn fetch(
         &self,
         uri: &str,
         extra_headers: &BTreeMap<String, String>,
         user: Option<&UserHeaders>,
-        auth: Option<&EphemeralAuthorization>,
         limits: &FetchLimits,
-    ) -> Result<FetchOutcome, NativeError> {
+    ) -> Result<FetchOutcome, Error> {
         self.runtime
-            .block_on(self.fetch_async(uri, extra_headers, user, auth, limits))
+            .block_on(self.fetch_async(uri, extra_headers, user, limits))
     }
 
     pub async fn fetch_resource(
         &self,
         request: &dezoomify::model::ResourceRequest,
         user: Option<&UserHeaders>,
-        auth: Option<&EphemeralAuthorization>,
         limits: &FetchLimits,
-    ) -> Result<FetchOutcome, NativeError> {
+    ) -> Result<FetchOutcome, Error> {
         let mut headers: BTreeMap<String, String> = dezoomify::default_headers()
             .into_iter()
             .map(|(name, value)| (name.to_ascii_lowercase(), value))
@@ -97,9 +96,7 @@ impl NativeTransport {
             headers.insert(header.name.to_ascii_lowercase(), header.value.clone());
         }
         let started = Instant::now();
-        let result = self
-            .fetch_async(&request.uri, &headers, user, auth, limits)
-            .await;
+        let result = self.fetch_async(&request.uri, &headers, user, limits).await;
         if let Some(diagnostics) = &self.diagnostics {
             use dezoomify::model::DiagnosticLevel;
             diagnostics.count("requests", 1.0);
@@ -148,19 +145,18 @@ impl NativeTransport {
         uri: &str,
         extra_headers: &BTreeMap<String, String>,
         user: Option<&UserHeaders>,
-        auth: Option<&EphemeralAuthorization>,
         limits: &FetchLimits,
-    ) -> Result<FetchOutcome, NativeError> {
+    ) -> Result<FetchOutcome, Error> {
         if !is_http_uri(uri) {
             return fetch_local(uri, limits);
         }
-        let mut request = build_request(uri, extra_headers, auth)?;
+        let mut request = build_request(uri, extra_headers)?;
         reject_userinfo_uri(uri)?;
         if let Some(user) = user {
             user.apply(&mut request);
         }
         let deadline = Instant::now() + limits.timeout;
-        fetch_loop(&self.client, request, auth, user, limits, &deadline).await
+        fetch_loop(&self.client, request, user, limits, &deadline).await
     }
 
     /// Block the calling (non-runtime) thread on one future. Never called
@@ -174,7 +170,7 @@ impl NativeTransport {
 }
 
 /// Mozilla roots plus the process-default provider (ring, per the workspace
-/// rustls build): the same trust bundle the previous client used.
+/// rustls build).
 fn tls_config() -> rustls::ClientConfig {
     let mut roots = rustls::RootCertStore::empty();
     roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
@@ -189,11 +185,20 @@ fn is_http_uri(uri: &str) -> bool {
 
 /// Reject credential-bearing userinfo in the request URI itself, mirroring
 /// the redirect-target rule.
-fn reject_userinfo_uri(uri: &str) -> Result<(), NativeError> {
-    let parsed = url::Url::parse(uri)
-        .map_err(|e| NativeError::new("transport.bad-url", format!("bad url: {e}")))?;
+fn reject_userinfo_uri(uri: &str) -> Result<(), Error> {
+    let parsed = url::Url::parse(uri).map_err(|e| {
+        Error::new(
+            "TRANSPORT_BAD_URL",
+            ErrorPhase::Validation,
+            format!("bad url: {e}"),
+        )
+    })?;
     if !parsed.username().is_empty() {
-        return Err(NativeError::new("transport.bad-url", "userinfo rejected"));
+        return Err(Error::new(
+            "TRANSPORT_BAD_URL",
+            ErrorPhase::Validation,
+            "userinfo rejected",
+        ));
     }
     Ok(())
 }
@@ -201,19 +206,20 @@ fn reject_userinfo_uri(uri: &str) -> Result<(), NativeError> {
 async fn fetch_loop(
     client: &reqwest::Client,
     mut request: EffectiveRequest,
-    auth: Option<&EphemeralAuthorization>,
     user: Option<&UserHeaders>,
     limits: &FetchLimits,
     deadline: &Instant,
-) -> Result<FetchOutcome, NativeError> {
+) -> Result<FetchOutcome, Error> {
     let mut redirects: usize = 0;
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
-            return Err(NativeError::new(
-                "transport.timeout",
+            return Err(Error::new(
+                "TRANSPORT_TIMEOUT",
+                ErrorPhase::Acquisition,
                 "fetch deadline exceeded",
-            ));
+            )
+            .with_retryable(true));
         }
         let response = fetch_once(client, &request, remaining).await?;
         let status = response.status().as_u16();
@@ -248,14 +254,15 @@ async fn fetch_loop(
             });
         }
         if redirects >= limits.max_redirects {
-            return Err(NativeError::new(
-                "transport.redirect-limit",
+            return Err(Error::new(
+                "TRANSPORT_REDIRECT_LIMIT",
+                ErrorPhase::Acquisition,
                 format!("redirect limit of {} exceeded", limits.max_redirects),
             ));
         }
         redirects += 1;
         let next = resolve_redirect(&request.uri, &location.unwrap_or_default())?;
-        request = rebuild_for_redirect(&request, &next, auth)?;
+        request = rebuild_for_redirect(&request, &next);
         if let Some(user) = user {
             user.apply(&mut request);
         }
@@ -283,31 +290,46 @@ async fn fetch_once(
     client: &reqwest::Client,
     request: &EffectiveRequest,
     timeout: Duration,
-) -> Result<reqwest::Response, NativeError> {
+) -> Result<reqwest::Response, Error> {
     let mut call = client.get(request.uri.as_str()).timeout(timeout);
     for (name, value) in &request.headers {
-        let parsed_name: reqwest::header::HeaderName = name
-            .parse()
-            .map_err(|_| NativeError::new("transport.network-error", "invalid request header"))?;
-        let parsed_value: reqwest::header::HeaderValue = value
-            .parse()
-            .map_err(|_| NativeError::new("transport.network-error", "invalid request header"))?;
+        let parsed_name: reqwest::header::HeaderName = name.parse().map_err(|_| {
+            Error::new(
+                "TRANSPORT_NETWORK_ERROR",
+                ErrorPhase::Acquisition,
+                "invalid request header",
+            )
+            .with_retryable(true)
+        })?;
+        let parsed_value: reqwest::header::HeaderValue = value.parse().map_err(|_| {
+            Error::new(
+                "TRANSPORT_NETWORK_ERROR",
+                ErrorPhase::Acquisition,
+                "invalid request header",
+            )
+            .with_retryable(true)
+        })?;
         call = call.header(parsed_name, parsed_value);
     }
     match call.send().await {
         Ok(response) => Ok(response),
-        Err(error) if error.is_timeout() => Err(NativeError::new(
-            "transport.timeout",
+        Err(error) if error.is_timeout() => Err(Error::new(
+            "TRANSPORT_TIMEOUT",
+            ErrorPhase::Acquisition,
             "fetch request timed out",
-        )),
-        Err(error) if error.is_builder() => Err(NativeError::new(
-            "transport.bad-url",
+        )
+        .with_retryable(true)),
+        Err(error) if error.is_builder() => Err(Error::new(
+            "TRANSPORT_BAD_URL",
+            ErrorPhase::Validation,
             "bad request url or header",
         )),
-        Err(error) => Err(NativeError::new(
-            "transport.network-error",
+        Err(error) => Err(Error::new(
+            "TRANSPORT_NETWORK_ERROR",
+            ErrorPhase::Acquisition,
             format!("network failure: {error}"),
-        )),
+        )
+        .with_retryable(true)),
     }
 }
 
@@ -316,11 +338,12 @@ async fn fetch_once(
 async fn read_body_capped(
     mut response: reqwest::Response,
     limits: &FetchLimits,
-) -> Result<Vec<u8>, NativeError> {
+) -> Result<Vec<u8>, Error> {
     if let Some(declared) = response.content_length() {
         if declared > limits.max_bytes {
-            return Err(NativeError::new(
-                "transport.size-limit",
+            return Err(Error::new(
+                "TRANSPORT_SIZE_LIMIT",
+                ErrorPhase::Acquisition,
                 format!("response exceeds {}-byte limit", limits.max_bytes),
             ));
         }
@@ -331,18 +354,21 @@ async fn read_body_capped(
             Ok(Some(chunk)) => {
                 body.extend_from_slice(&chunk);
                 if body.len() as u64 > limits.max_bytes {
-                    return Err(NativeError::new(
-                        "transport.size-limit",
+                    return Err(Error::new(
+                        "TRANSPORT_SIZE_LIMIT",
+                        ErrorPhase::Acquisition,
                         format!("response exceeds {}-byte limit", limits.max_bytes),
                     ));
                 }
             }
             Ok(None) => break,
             Err(e) => {
-                return Err(NativeError::new(
-                    "transport.network-error",
+                return Err(Error::new(
+                    "TRANSPORT_NETWORK_ERROR",
+                    ErrorPhase::Acquisition,
                     format!("body read failed: {e}"),
-                ));
+                )
+                .with_retryable(true));
             }
         }
     }
@@ -354,27 +380,42 @@ fn parse_retry_after_ms(value: &str) -> Option<u64> {
     Some(seconds.saturating_mul(1000).min(300_000))
 }
 
-fn resolve_redirect(base: &str, location: &str) -> Result<String, NativeError> {
+fn resolve_redirect(base: &str, location: &str) -> Result<String, Error> {
     if location.is_empty() {
-        return Err(NativeError::new("transport.bad-redirect", "empty location"));
+        return Err(Error::new(
+            "TRANSPORT_BAD_REDIRECT",
+            ErrorPhase::Acquisition,
+            "empty location",
+        ));
     }
-    let base = url::Url::parse(base)
-        .map_err(|e| NativeError::new("transport.bad-url", format!("bad base url: {e}")))?;
-    let next = base
-        .join(location)
-        .map_err(|e| NativeError::new("transport.bad-redirect", format!("bad location: {e}")))?;
+    let base = url::Url::parse(base).map_err(|e| {
+        Error::new(
+            "TRANSPORT_BAD_URL",
+            ErrorPhase::Validation,
+            format!("bad base url: {e}"),
+        )
+    })?;
+    let next = base.join(location).map_err(|e| {
+        Error::new(
+            "TRANSPORT_BAD_REDIRECT",
+            ErrorPhase::Acquisition,
+            format!("bad location: {e}"),
+        )
+    })?;
     if matches!(next.scheme(), "http" | "https") && !next.cannot_be_a_base() {
         if next.username().is_empty() {
             Ok(next.to_string())
         } else {
-            Err(NativeError::new(
-                "transport.bad-redirect",
+            Err(Error::new(
+                "TRANSPORT_BAD_REDIRECT",
+                ErrorPhase::Acquisition,
                 "userinfo rejected",
             ))
         }
     } else {
-        Err(NativeError::new(
-            "transport.bad-redirect",
+        Err(Error::new(
+            "TRANSPORT_BAD_REDIRECT",
+            ErrorPhase::Acquisition,
             "unsupported redirect scheme",
         ))
     }
@@ -384,7 +425,7 @@ fn resolve_redirect(base: &str, location: &str) -> Result<String, NativeError> {
 /// (`file:///abs/path` and `file://localhost/abs/path` both name an absolute
 /// path; any other `file://` host is rejected), while anything else is
 /// already a local path and passes through unchanged.
-fn local_path_for_uri(uri: &str) -> Result<&str, NativeError> {
+fn local_path_for_uri(uri: &str) -> Result<&str, Error> {
     if let Some(rest) = uri.strip_prefix("file://") {
         if let Some(path) = rest.strip_prefix("localhost") {
             if path.is_empty() {
@@ -396,8 +437,9 @@ fn local_path_for_uri(uri: &str) -> Result<&str, NativeError> {
         } else if rest.starts_with('/') {
             return Ok(rest);
         }
-        return Err(NativeError::new(
-            "transport.bad-url",
+        return Err(Error::new(
+            "TRANSPORT_BAD_URL",
+            ErrorPhase::Validation,
             "file uri must name a local absolute path",
         ));
     }
@@ -406,19 +448,22 @@ fn local_path_for_uri(uri: &str) -> Result<&str, NativeError> {
 
 /// Read a local resource with the same outcome shape as an HTTP 200: the
 /// final URI stays the input URI. Oversize files report
-/// `transport.size-limit`; unreadable paths report `transport.network-error`
+/// `TRANSPORT_SIZE_LIMIT`; unreadable paths report `TRANSPORT_NETWORK_ERROR`
 /// carrying only the OS message (never the path text).
-fn fetch_local(uri: &str, limits: &FetchLimits) -> Result<FetchOutcome, NativeError> {
+fn fetch_local(uri: &str, limits: &FetchLimits) -> Result<FetchOutcome, Error> {
     let path = local_path_for_uri(uri)?;
     let body = std::fs::read(path).map_err(|e| {
-        NativeError::new(
-            "transport.network-error",
+        Error::new(
+            "TRANSPORT_NETWORK_ERROR",
+            ErrorPhase::Acquisition,
             format!("local file read failed: {e}"),
         )
+        .with_retryable(true)
     })?;
     if body.len() as u64 > limits.max_bytes {
-        return Err(NativeError::new(
-            "transport.size-limit",
+        return Err(Error::new(
+            "TRANSPORT_SIZE_LIMIT",
+            ErrorPhase::Acquisition,
             format!("local file exceeds {}-byte limit", limits.max_bytes),
         ));
     }

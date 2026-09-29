@@ -18,7 +18,7 @@ export function PartialDecisionActions({
   };
   const canRetry =
     decision.missing.length > 0 &&
-    decision.missing.every(({ failures }) => failures.at(-1)?.category === "transient");
+    decision.missing.every(({ failures }) => failures.at(-1)?.retryable);
   const answer = onAnswer;
   return (
     <div className="dz-actions-row" data-dz-partial-decision="true">

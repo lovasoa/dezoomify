@@ -76,7 +76,7 @@ fn generated_requests_keep_headers_and_redirect_results_for_every_purpose() {
             }],
         };
         let result = transport
-            .block_on(transport.fetch_resource(&request, None, None, &limits()))
+            .block_on(transport.fetch_resource(&request, None, &limits()))
             .unwrap();
         assert_eq!(result.final_uri, format!("{origin}/final"));
         assert_eq!(result.body, b"resource");
@@ -179,7 +179,6 @@ fn http_refusal_returns_once_without_retry() {
             &format!("http://127.0.0.1:{port}/tile.png"),
             &BTreeMap::new(),
             None,
-            None,
             &limits(),
         )
         .expect("refusal returns as outcome");
@@ -211,11 +210,10 @@ fn redirect_rejects_userinfo_and_unsupported_schemes() {
             &format!("http://127.0.0.1:{port}/start"),
             &BTreeMap::new(),
             None,
-            None,
             &limits(),
         )
         .expect_err("userinfo redirect rejected");
-    assert_eq!(error.code, "transport.bad-redirect");
+    assert_eq!(error.code, "TRANSPORT_BAD_REDIRECT");
     server.join().expect("server exits after one connection");
     assert_eq!(requests.load(Ordering::SeqCst), 1);
 }
@@ -273,7 +271,6 @@ fn redirect_drops_credentials_across_hosts() {
             &format!("http://127.0.0.1:{hop1_port}/start"),
             &BTreeMap::new(),
             Some(&user),
-            None,
             &limits(),
         )
         .expect("redirect followed");
@@ -310,7 +307,6 @@ fn retry_after_seconds_hint_flows_to_the_outcome() {
         .fetch(
             &format!("http://127.0.0.1:{port}/limited"),
             &BTreeMap::new(),
-            None,
             None,
             &limits(),
         )

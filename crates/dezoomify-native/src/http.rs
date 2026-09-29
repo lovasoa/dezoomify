@@ -47,8 +47,7 @@ impl UserHeaders {
     }
 }
 
-use crate::auth::EphemeralAuthorization;
-use crate::error::NativeError;
+use dezoomify::model::Error;
 
 /// TLS policy for one logical fetch. `accept_invalid_certs` is
 /// explicitly requested by the user via the CLI
@@ -61,15 +60,12 @@ pub struct TlsPolicy {
 #[derive(Clone, Debug)]
 pub struct FetchLimits {
     pub max_bytes: u64,
-    /// Max time for one logical fetch including redirects (default 30s,
-    /// matching the reference `--timeout` default).
+    /// Max time for one logical fetch including redirects (default 30s).
     pub timeout: Duration,
-    /// Max time to establish a connection (default 6s, matching the
-    /// reference `--connect-timeout` default).
+    /// Max time to establish a connection (default 6s).
     pub connect_timeout: Duration,
     pub max_redirects: usize,
-    /// Max idle connections kept per host (default 32, matching the
-    /// reference `--max-idle-per-host` default).
+    /// Max idle connections kept per host (default 32).
     pub max_idle_per_host: usize,
     pub tls: TlsPolicy,
 }
@@ -112,14 +108,7 @@ pub fn fetch(
     uri: &str,
     extra_headers: &BTreeMap<String, String>,
     user: Option<&UserHeaders>,
-    auth: Option<&EphemeralAuthorization>,
     limits: &FetchLimits,
-) -> Result<FetchOutcome, NativeError> {
-    crate::transport::NativeTransport::oneshot(limits)?.fetch(
-        uri,
-        extra_headers,
-        user,
-        auth,
-        limits,
-    )
+) -> Result<FetchOutcome, Error> {
+    crate::transport::NativeTransport::new(limits)?.fetch(uri, extra_headers, user, limits)
 }

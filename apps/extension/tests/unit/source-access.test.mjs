@@ -6,7 +6,6 @@ import {
   collectCandidates,
   fetchSource,
 } from "../../src/job/source-operations.ts";
-import { asFetchFailure } from "../../src/runtime/fetch.ts";
 
 const SOURCE_URL = "https://gallery.example/page?view=1";
 
@@ -109,7 +108,7 @@ test("source scan rejects a malformed boundary result", async () => {
     inputs: [{ url: "javascript:alert(1)" }],
   }));
   const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
-  await assert.rejects(source.scan(), { code: "malformed" });
+  await assert.rejects(source.scan(), { code: "TRANSPORT_BAD_URL" });
   source.dispose();
 });
 
@@ -121,8 +120,14 @@ test("navigation invalidates access and discards an in-flight scan result", asyn
   await new Promise((resolve) => setImmediate(resolve));
   fake.listeners.updated[0](9, { status: "loading", url: SOURCE_URL });
   finish(snapshot());
-  await assert.rejects(pending, { code: "source-document-lost" });
-  await assert.rejects(source.scan(), { code: "source-document-lost" });
+  await assert.rejects(pending, {
+    code: "DISCOVERY_FAILED",
+    blocked_reason: "source-document-lost",
+  });
+  await assert.rejects(source.scan(), {
+    code: "DISCOVERY_FAILED",
+    blocked_reason: "source-document-lost",
+  });
   source.dispose();
 });
 
@@ -132,7 +137,7 @@ test("source scan rejects unknown observation kinds", async () => {
     inputs: [{ url: SOURCE_URL, kind: "trusted-image" }],
   }));
   const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
-  await assert.rejects(source.scan(), { code: "malformed" });
+  await assert.rejects(source.scan(), { code: "TRANSPORT_BAD_URL" });
   source.dispose();
 });
 
@@ -162,7 +167,10 @@ test("source access refuses a tab whose URL no longer matches its bound document
   const fake = fakeBrowser(async () => snapshot());
   fake.setUrl("https://gallery.example/other-page");
   const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
-  await assert.rejects(source.scan(), { code: "source-document-lost" });
+  await assert.rejects(source.scan(), {
+    code: "DISCOVERY_FAILED",
+    blocked_reason: "source-document-lost",
+  });
   assert.equal(fake.calls.length, 0);
   source.dispose();
 });
@@ -173,11 +181,11 @@ test("source injection errors retain the browser's cause", async () => {
     throw cause;
   });
   const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
-  await assert.rejects(source.scan(), { code: "network", cause });
+  await assert.rejects(source.scan(), { code: "TRANSPORT_NETWORK_ERROR", detail: cause.message });
   source.dispose();
 });
 
-test("generated failure facts survive source validation and classification unchanged", async () => {
+test("generated failure facts survive source validation unchanged", async () => {
   const error = {
     code: "TRANSPORT_HTTP_ERROR",
     http: 429,
@@ -198,7 +206,6 @@ test("generated failure facts survive source validation and classification uncha
       ),
       (caught) => {
         assert.equal(caught, error);
-        assert.equal(asFetchFailure(caught), error);
         return true;
       },
     );
@@ -240,7 +247,7 @@ test("source cancellation waits for acknowledgement that the page fetch has stop
   const checked = assert
     .rejects(
       source.fetch({ uri: "https://gallery.example/tile.jpg", headers: [] }, controller.signal),
-      { code: "cancelled" },
+      { code: "TRANSPORT_CANCELLED" },
     )
     .then(() => {
       settled = true;
@@ -270,7 +277,7 @@ test("a rejected cancellation injection still waits for the original source oper
   const checked = assert
     .rejects(
       source.fetch({ uri: "https://gallery.example/tile.jpg", headers: [] }, controller.signal),
-      { code: "cancelled" },
+      { code: "TRANSPORT_CANCELLED" },
     )
     .then(() => {
       settled = true;
@@ -295,7 +302,7 @@ test("cancellation before source injection creates no page work or cancellation 
   const controller = new AbortController();
   const checked = assert.rejects(
     source.fetch({ uri: "https://gallery.example/tile.jpg", headers: [] }, controller.signal),
-    { code: "cancelled" },
+    { code: "TRANSPORT_CANCELLED" },
   );
   controller.abort();
   await checked;
@@ -320,7 +327,7 @@ test("cancellation and disposal remain bounded when source and cancellation repl
       controller.signal,
     );
     const checked = assert.rejects(pending, {
-      code: action === "cancel" ? "cancelled" : "source-document-lost",
+      code: action === "cancel" ? "TRANSPORT_CANCELLED" : "DISCOVERY_FAILED",
     });
     await new Promise((resolve) => setImmediate(resolve));
     if (action === "cancel") controller.abort();

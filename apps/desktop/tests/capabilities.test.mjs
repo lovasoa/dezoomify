@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { OUTPUT_FORMATS } from "../src/settings.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -40,7 +41,6 @@ const EXPECTED_COMMANDS = [
   "resume_job",
   "open_saved_output",
   "release_job",
-  "query_capabilities",
 ];
 const EXPECTED_CHANNELS = [
   "dezoomify://progress",
@@ -88,6 +88,7 @@ test("encoders and updater stay consistent", () => {
   for (const doc of [DESKTOP_META, desktopCap]) {
     const x = xdezoomify(doc);
     assert.deepEqual(sorted(x.encoders), sorted(EXPECTED_ENCODERS));
+    assert.deepEqual(sorted(x.outputFormats), sorted(OUTPUT_FORMATS));
     assert.equal(x.updater.enabled, false);
     assert.equal(x.updater.httpsOnly, true);
     assert.equal(x.updater.requiresUserConfirm, true);

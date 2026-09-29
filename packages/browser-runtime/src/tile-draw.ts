@@ -159,20 +159,3 @@ export function loadTileImage(
     img.src = url;
   });
 }
-
-/**
- * Encrypted-tile processing (e.g. Google Arts and Culture containers) goes
- * through one serialized queue. Tile fetches run concurrently, so processing
- * calls are serialized here: fetching stays parallel, only the short decrypt
- * step queues.
- */
-export function createProcessQueue<Recipe>(
-  processTile: (recipe: Recipe, bytes: ArrayBuffer) => Promise<ArrayBuffer>,
-): (recipe: Recipe, bytes: ArrayBuffer) => Promise<ArrayBuffer> {
-  let tail: Promise<unknown> = Promise.resolve();
-  return (recipe: Recipe, bytes: ArrayBuffer): Promise<ArrayBuffer> => {
-    const run = tail.then(() => processTile(recipe, bytes));
-    tail = run.catch(() => undefined);
-    return run;
-  };
-}

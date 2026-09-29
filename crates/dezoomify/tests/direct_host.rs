@@ -204,12 +204,12 @@ fn cancellation_and_publication_failure_always_settle() {
     assert_eq!(host.settled.get(), 1);
 }
 #[test]
-fn display_only_tiles_produce_display_only_output() {
+fn host_reports_the_actual_output_disposition() {
     let host = MemoryHost::default();
     host.display_only.set(true);
     let output = invoke(&host, options()).unwrap();
     assert_eq!(output.disposition, OutputDisposition::DisplayOnly);
-    assert!(host.outputs.borrow()[0].display_only);
+    assert_eq!(host.outputs.borrow().len(), 1);
 }
 #[test]
 fn invalid_inputs_and_limits_are_rejected_before_host_reads() {
@@ -619,22 +619,25 @@ fn unsupported_schemes_and_zero_canvas_limits_are_rejected() {
 }
 
 #[test]
-fn missing_tile_details_preserve_observed_transport_and_refusal() {
+fn missing_tiles_preserve_the_complete_original_host_error() {
     let host = MemoryHost::default();
     let mut error = failure(403);
-    error.transport = Some(ErrorTransport::BrowserSession);
+    error.code = "native.future-refusal".into();
+    error.transport = Some(ErrorTransport::Native);
+    error.request = Some("https://redirected.test/image?signature=precise".into());
+    error.resource_kind = Some(ResourceKind::Tile);
+    error.retry_after_ms = Some(5000);
     error.blocked_reason = Some(BlockedReason::Forbidden);
     error.preview = Some("denied body".into());
-    fail(&host, 0, [error]);
+    error.detail = Some("original diagnostic context".into());
+    fail(&host, 0, [error.clone()]);
     host.choices.borrow_mut().push_back(RecoveryChoice::Keep);
     invoke(&host, options()).unwrap();
     let partials = host.partials.borrow();
-    let observed = partials[0].missing[0].failures[0]
-        .observed
-        .as_ref()
-        .unwrap();
-    assert_eq!(observed.http, Some(403));
-    assert_eq!(observed.transport, ErrorTransport::BrowserSession);
-    assert_eq!(observed.blocked_reason, Some(BlockedReason::Forbidden));
-    assert_eq!(observed.preview.as_deref(), Some("denied body"));
+    assert_eq!(partials[0].missing[0].failures[0], error);
+    assert!(!partials[0].missing[0].failures[0].retryable);
+    assert_eq!(
+        partials[0].missing[0].failures[0].retry_after_ms,
+        Some(5000)
+    );
 }

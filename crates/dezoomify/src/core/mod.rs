@@ -1,7 +1,4 @@
-//! Pure values used by the dezooming core.
-//!
-//! This module deliberately contains no protocol client, runtime, image, or
-//! filesystem types.  It describes work for an application to perform.
+//! Format discovery, image geometry, and tile planning.
 
 pub mod adaptive;
 pub mod discovery;

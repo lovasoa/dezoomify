@@ -33,7 +33,7 @@ See [Bindings](bindings.md) and [Algorithm](algorithm.md).
 Formats register in one ordered registry. Registry order breaks ties between
 equally relevant format matches. `ImagePlan` validates ready images and their
 tile counts. `CatalogPlan` collects multiple ready images or deferred links.
-`ResolvedLevel::grid` provides regular geometry; format-owned tile programs
+`ResolvedLevel::grid` provides regular geometry; format-owned tile sources
 provide overlap, padding, probes, and custom placement. Tile requests are lazy.
 
 Formats declare metadata, image-address, and viewer routes. Decoders receive the
@@ -93,4 +93,4 @@ implementation. See [Browser runtime](browser-runtime.md) and [Security](securit
 - Shared UI imports domain declarations and local utilities, with no host globals.
 - Browser application modules may compose UI and Host; image and transport modules remain independent of UI.
 - Crossing values derive from Rust declarations. URLs, headers, errors, and geometry retain their exact meaning.
-- Errors carry stable codes and typed recovery actions; callers never branch on display text.
+- Errors carry stable codes and structured context; callers never branch on display text.

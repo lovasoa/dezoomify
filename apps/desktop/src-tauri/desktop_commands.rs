@@ -13,8 +13,7 @@ macro_rules! desktop_commands {
             answer_partial,
             open_saved_output,
             release_job,
-            get_job_diagnostics,
-            query_capabilities
+            get_job_diagnostics
         )
     };
 }

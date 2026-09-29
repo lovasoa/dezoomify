@@ -590,9 +590,7 @@ body {
   }
 }
 
-/* Recovery dialog wrapper: flat flow, never a nested bordered box. The
- * role="dialog" semantics live in main.tsx; visuals stay inline. */
-#dz-desktop-aux .dz-recovery-dialog,
+/* Partial output details remain inline with the completed result. */
 #dz-desktop-aux .dz-partial-note {
   display: flex;
   flex-direction: column;

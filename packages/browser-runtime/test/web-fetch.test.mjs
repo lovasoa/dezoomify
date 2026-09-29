@@ -107,7 +107,7 @@ test("a stalled error preview preserves the HTTP refusal without proxy fallback"
   deadline.abort(new DOMException("Timed out", "TimeoutError"));
   await assert.rejects(pending, (error) => {
     assert.equal(error.code, "DISCOVERY_HTTP_ERROR");
-    assert.equal(error.cause.http, 403);
+    assert.equal(error.http, 403);
     return true;
   });
   assert.equal(proxyCalls, 0);
@@ -137,8 +137,8 @@ test("a proxy deadline reports a network failure rather than job cancellation", 
   await new Promise((resolve) => setImmediate(resolve));
   deadline.abort(new DOMException("Timed out", "TimeoutError"));
   await assert.rejects(pending, (error) => {
-    assert.equal(error.cause.code, "PROXY_ERROR");
-    assert.equal(error.retryable, true);
+    assert.equal(error.code, "PROXY_ERROR");
+    assert.equal(error.transport, "metadata-proxy");
     return true;
   });
 });
@@ -238,6 +238,6 @@ test("proxy policy denials stay distinct from upstream refusals", () => {
   const upstream = classifyProxyFailure({ status: 403, code: "TRANSPORT_HTTP_ERROR" });
   assert.equal(policy.code, "TRANSPORT_POLICY_DENIED");
   assert.equal(upstream.code, "TRANSPORT_HTTP_ERROR");
-  assert.equal(policy.retryable, false);
-  assert.equal(upstream.retryable, false);
+  assert.equal(policy.http, 403);
+  assert.equal(upstream.http, 403);
 });

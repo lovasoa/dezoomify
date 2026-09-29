@@ -1,50 +1,16 @@
 //! Native scenario tests: header scope, redirects, cache, limits.
 
-use dezoomify_native::auth::{AuthorizationScope, EphemeralAuthorization};
+use dezoomify::model::OutputFormat;
 use dezoomify_native::cache;
 use dezoomify_native::client;
-use dezoomify_native::output::{self, OutputFormat};
-use std::collections::{BTreeMap, HashMap};
-
-#[test]
-fn auth_reaches_only_matching_requests() {
-    let scope = AuthorizationScope {
-        scheme: "https".into(),
-        host: "fixtures.test".into(),
-        port: None,
-        path_prefix: "/private/".into(),
-        job_id: None,
-    };
-    let auth = EphemeralAuthorization::new(
-        scope,
-        HashMap::from([("session".to_string(), "CANARY".to_string())]),
-    )
-    .unwrap();
-    let matching = client::build_request(
-        "https://fixtures.test/private/item",
-        &BTreeMap::new(),
-        Some(&auth),
-    )
-    .unwrap();
-    assert!(matching.headers.contains_key("cookie"));
-    let sibling = client::build_request(
-        "https://other.test/private/item",
-        &BTreeMap::new(),
-        Some(&auth),
-    )
-    .unwrap();
-    assert!(!sibling.headers.contains_key("cookie"));
-    let redirect =
-        client::rebuild_for_redirect(&matching, "https://evil.test/private/item", Some(&auth))
-            .unwrap();
-    assert!(!redirect.headers.contains_key("cookie"));
-}
+use dezoomify_native::output;
+use std::collections::BTreeMap;
 
 #[test]
 fn public_headers_reject_cookie_and_authorization() {
     let mut extra = BTreeMap::new();
     extra.insert("Cookie".to_string(), "x=1".to_string());
-    assert!(client::build_request("https://fixtures.test/x", &extra, None).is_err());
+    assert!(client::build_request("https://fixtures.test/x", &extra).is_err());
 }
 
 #[test]
@@ -121,7 +87,7 @@ fn cache_namespaces_isolate_jobs_and_reject_traversal() {
 }
 
 #[test]
-fn output_refuses_mismatch_without_overwrite_and_replaces_stale_temp() {
+fn output_refuses_mismatch_and_requires_overwrite() {
     let dir = std::env::temp_dir().join(format!("dz-out-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -135,13 +101,7 @@ fn output_refuses_mismatch_without_overwrite_and_replaces_stale_temp() {
     let tif = dir.join("out.tif");
     assert!(output::validate_destination(&tif, &OutputFormat::Tiff, false).is_ok());
     assert!(output::validate_destination(&tif, &OutputFormat::Png, true).is_err());
-    // A stale temp file left by an interrupted write must not leak into the
-    // next write: the atomic write replaces both the temp and the output.
-    let stale_tmp = path.with_extension("tmp");
-    std::fs::write(&stale_tmp, b"stale-garbage").unwrap();
-    output::write_atomic(&path, b"png-bytes").unwrap();
-    assert_eq!(std::fs::read(&path).unwrap(), b"png-bytes");
-    assert!(!stale_tmp.exists(), "temp file must be gone after rename");
+    std::fs::write(&path, b"existing output").unwrap();
     assert!(output::validate_destination(&path, &OutputFormat::Png, false).is_err());
     assert!(output::validate_destination(&path, &OutputFormat::Png, true).is_ok());
     let _ = std::fs::remove_dir_all(&dir);
@@ -151,61 +111,59 @@ fn output_refuses_mismatch_without_overwrite_and_replaces_stale_temp() {
 fn output_format_follows_the_destination_extension() {
     use std::path::Path;
     assert_eq!(
-        output::OutputFormat::infer_from_path(Path::new("painting.png")),
-        Ok(output::OutputFormat::Png)
+        output::infer_from_path(Path::new("painting.png")),
+        Ok(OutputFormat::Png)
     );
     assert_eq!(
-        output::OutputFormat::infer_from_path(Path::new("painting.jpg")),
-        Ok(output::OutputFormat::Jpeg)
+        output::infer_from_path(Path::new("painting.jpg")),
+        Ok(OutputFormat::Jpeg)
     );
     assert_eq!(
-        output::OutputFormat::infer_from_path(Path::new("painting.jpeg")),
-        Ok(output::OutputFormat::Jpeg)
+        output::infer_from_path(Path::new("painting.jpeg")),
+        Ok(OutputFormat::Jpeg)
     );
     assert_eq!(
-        output::OutputFormat::infer_from_path(Path::new("painting.tif")),
-        Ok(output::OutputFormat::Tiff)
+        output::infer_from_path(Path::new("painting.tif")),
+        Ok(OutputFormat::Tiff)
     );
     assert_eq!(
-        output::OutputFormat::infer_from_path(Path::new("painting.tiff")),
-        Ok(output::OutputFormat::Tiff)
+        output::infer_from_path(Path::new("painting.tiff")),
+        Ok(OutputFormat::Tiff)
     );
     // `.zif` selects the ZIF pyramid encoder (TIFF-compatible
     // multi-directory output); `.iiif` selects an `iiif-dir` tree at that
-    // path. Both triggers mirror the reference extensions while `iiif-dir`
-    // keeps working too.
+    // path.
     assert_eq!(
-        output::OutputFormat::infer_from_path(Path::new("painting.zif")),
-        Ok(output::OutputFormat::Zif)
+        output::infer_from_path(Path::new("painting.zif")),
+        Ok(OutputFormat::Zif)
     );
     assert_eq!(
-        output::OutputFormat::infer_from_path(Path::new("painting.ZIF")),
-        Ok(output::OutputFormat::Zif)
+        output::infer_from_path(Path::new("painting.ZIF")),
+        Ok(OutputFormat::Zif)
     );
     assert_eq!(
-        output::OutputFormat::infer_from_path(Path::new("painting.webp")),
-        Ok(output::OutputFormat::Webp)
+        output::infer_from_path(Path::new("painting.webp")),
+        Ok(OutputFormat::Webp)
     );
     assert_eq!(
-        output::OutputFormat::infer_from_path(Path::new("painting.WEBP")),
-        Ok(output::OutputFormat::Webp)
+        output::infer_from_path(Path::new("painting.WEBP")),
+        Ok(OutputFormat::Webp)
     );
     assert_eq!(
-        output::OutputFormat::infer_from_path(Path::new("painting.iiif")),
-        Ok(output::OutputFormat::IiifDir)
+        output::infer_from_path(Path::new("painting.iiif")),
+        Ok(OutputFormat::IiifDir)
     );
     // Extensionless paths name an iiif-dir directory destination.
     assert_eq!(
-        output::OutputFormat::infer_from_path(Path::new("painting")),
-        Ok(output::OutputFormat::IiifDir)
+        output::infer_from_path(Path::new("painting")),
+        Ok(OutputFormat::IiifDir)
     );
     // Unknown extensions fail before any work starts, instead of writing a
     // mislabeled file. The error names every supported extension.
-    let bmp = output::OutputFormat::infer_from_path(Path::new("painting.bmp"));
+    let bmp = output::infer_from_path(Path::new("painting.bmp"));
     let error = bmp.expect_err("bmp stays unsupported");
     assert_eq!(error.code, "output.unsupported-extension");
-    assert_eq!(error.phase(), "output");
-    assert_eq!(error.recovery(), "choose-output");
+    assert_eq!(error.phase, dezoomify::model::ErrorPhase::Output);
     for supported in [".png", ".jpg", ".tif", ".zif", ".webp", ".iiif"] {
         assert!(
             error.message.contains(supported),
@@ -217,41 +175,37 @@ fn output_format_follows_the_destination_extension() {
     let dir = std::env::temp_dir().join(format!("dz-infer-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    assert_eq!(
-        output::OutputFormat::infer_from_path(&dir),
-        Ok(output::OutputFormat::IiifDir)
-    );
+    assert_eq!(output::infer_from_path(&dir), Ok(OutputFormat::IiifDir));
     // An image extension never validates as a directory destination and a
     // directory never validates as a single file.
     assert!(
-        output::validate_destination(&dir.join("x.png"), &output::OutputFormat::IiifDir, true)
-            .is_err()
+        output::validate_destination(&dir.join("x.png"), &OutputFormat::IiifDir, true).is_err()
     );
-    assert!(output::validate_destination(&dir, &output::OutputFormat::Png, true).is_err());
+    assert!(output::validate_destination(&dir, &OutputFormat::Png, true).is_err());
     // A non-empty directory refuses without overwrite, like a file does.
     std::fs::write(dir.join("info.json"), b"{}").unwrap();
-    assert!(output::validate_destination(&dir, &output::OutputFormat::IiifDir, false).is_err());
-    assert!(output::validate_destination(&dir, &output::OutputFormat::IiifDir, true).is_ok());
+    assert!(output::validate_destination(&dir, &OutputFormat::IiifDir, false).is_err());
+    assert!(output::validate_destination(&dir, &OutputFormat::IiifDir, true).is_ok());
     // A `.zif` path validates as ZIF (never as single-image TIFF or PNG);
     // a `.iiif` path validates as a directory destination and never as a
     // single file.
     let zif = dir.join("out.zif");
-    assert!(output::validate_destination(&zif, &output::OutputFormat::Zif, false).is_ok());
-    assert!(output::validate_destination(&zif, &output::OutputFormat::Tiff, true).is_err());
-    assert!(output::validate_destination(&zif, &output::OutputFormat::Png, true).is_err());
+    assert!(output::validate_destination(&zif, &OutputFormat::Zif, false).is_ok());
+    assert!(output::validate_destination(&zif, &OutputFormat::Tiff, true).is_err());
+    assert!(output::validate_destination(&zif, &OutputFormat::Png, true).is_err());
     // A `.webp` path validates as WebP and never as another single file.
     let webp = dir.join("out.webp");
-    assert!(output::validate_destination(&webp, &output::OutputFormat::Webp, false).is_ok());
-    assert!(output::validate_destination(&webp, &output::OutputFormat::Jpeg, true).is_err());
-    assert!(output::validate_destination(&webp, &output::OutputFormat::IiifDir, true).is_err());
+    assert!(output::validate_destination(&webp, &OutputFormat::Webp, false).is_ok());
+    assert!(output::validate_destination(&webp, &OutputFormat::Jpeg, true).is_err());
+    assert!(output::validate_destination(&webp, &OutputFormat::IiifDir, true).is_err());
     let iiif = dir.join("out.iiif");
-    assert!(output::validate_destination(&iiif, &output::OutputFormat::IiifDir, false).is_ok());
-    assert!(output::validate_destination(&iiif, &output::OutputFormat::Tiff, true).is_err());
+    assert!(output::validate_destination(&iiif, &OutputFormat::IiifDir, false).is_ok());
+    assert!(output::validate_destination(&iiif, &OutputFormat::Tiff, true).is_err());
     // A stale file at a `.iiif` path refuses without overwrite but is
-    // replaced with overwrite (reference removes the file first).
+    // replaced with overwrite.
     std::fs::write(&iiif, b"stale").unwrap();
-    assert!(output::validate_destination(&iiif, &output::OutputFormat::IiifDir, false).is_err());
-    assert!(output::validate_destination(&iiif, &output::OutputFormat::IiifDir, true).is_ok());
+    assert!(output::validate_destination(&iiif, &OutputFormat::IiifDir, false).is_err());
+    assert!(output::validate_destination(&iiif, &OutputFormat::IiifDir, true).is_ok());
     output::write_iiif_dir(&iiif, b"{}", &Vec::new()).unwrap();
     assert!(iiif.is_dir());
     assert!(iiif.join("info.json").is_file());
@@ -260,7 +214,7 @@ fn output_format_follows_the_destination_extension() {
 
 #[test]
 fn jpeg_and_tiff_encode_and_decode_round_trip() {
-    use dezoomify_native::pipeline::{encode_jpeg, encode_tiff, JPEG_QUALITY};
+    use dezoomify_native::imaging::{encode_jpeg, encode_tiff, JPEG_QUALITY};
     let mut image = image::RgbaImage::new(16, 16);
     for (x, y, pixel) in image.enumerate_pixels_mut() {
         *pixel = image::Rgba([(x * 16) as u8, (y * 16) as u8, 128, 255]);
@@ -283,7 +237,7 @@ fn jpeg_and_tiff_encode_and_decode_round_trip() {
 }
 
 #[test]
-fn transport_and_concurrency_defaults_match_reference_tuning() {
+fn transport_and_concurrency_defaults_match_documented_limits() {
     use dezoomify_native::http::FetchLimits;
     use dezoomify_native::JobOptions;
     let config = JobOptions::default();
@@ -298,7 +252,7 @@ fn transport_and_concurrency_defaults_match_reference_tuning() {
 
 #[test]
 fn jpeg_rejects_canvases_beyond_its_side_limit() {
-    use dezoomify_native::pipeline::encode_jpeg;
+    use dezoomify_native::imaging::encode_jpeg;
     // A 1x1 stand-in cannot allocate gigapixels; assert the guard directly
     // through the dimension check on a wide image instead.
     let wide = image::RgbaImage::new(65_536, 1);

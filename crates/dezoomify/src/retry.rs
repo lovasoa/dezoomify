@@ -1,7 +1,5 @@
 //! Retry classification and bounded backoff.
-use crate::model::{FailureCategory, TileFailure};
-/// Maximum diagnostic detail characters kept per failure.
-pub const MAX_FAILURE_DETAIL_CHARS: usize = 300;
+use crate::model::Error;
 /// Maximum honored `retry-after` hint (5 minutes); larger values clamp.
 pub const MAX_RETRY_AFTER_MS: u64 = 300_000;
 /// Backoff base delay for the first retry (1 second).
@@ -9,43 +7,12 @@ pub const RETRY_BASE_DELAY_MS: u64 = 1_000;
 /// Backoff ceiling (30 seconds).
 pub const RETRY_MAX_DELAY_MS: u64 = 30_000;
 
-impl TileFailure {
-    /// Build a classified failure, truncating `detail` to the bounded
-    /// cap and clamping `retry_after_ms` to the honored maximum.
-    #[must_use]
-    pub fn new(
-        code: impl Into<String>,
-        http: Option<u16>,
-        retry_after_ms: Option<u64>,
-        detail: Option<String>,
-    ) -> Self {
-        let code = code.into();
-        let category = classify_tile_failure(&code, http);
-        let retry_after_ms = retry_after_ms
-            .filter(|_| category == FailureCategory::Transient)
-            .map(|value| value.min(MAX_RETRY_AFTER_MS));
-        let detail = detail.map(|text| {
-            let truncated: String = text.chars().take(MAX_FAILURE_DETAIL_CHARS).collect();
-            truncated
-        });
-        Self {
-            code,
-            category,
-            http,
-            retry_after_ms,
-            detail,
-            observed: None,
-        }
-    }
-
-    /// Whether the shared algorithm may schedule another attempt for this failure.
-    #[must_use]
-    pub const fn is_retryable(&self) -> bool {
-        matches!(self.category, FailureCategory::Transient)
-    }
+pub(crate) fn classify(mut error: Error) -> Error {
+    error.retryable = is_retryable(&error.code, error.http);
+    error
 }
 
-/// Classify one structured tile failure.
+/// Whether a failed resource acquisition may be retried.
 ///
 /// HTTP status dominates when present: 408/425/429 and 5xx are transient
 /// (429 honors `retry-after`); every other 4xx (including 403 auth
@@ -54,26 +21,21 @@ impl TileFailure {
 /// deterministic decode failures, unknown codes) is permanent so novel
 /// failures fail closed instead of burning the retry budget.
 #[must_use]
-pub fn classify_tile_failure(code: &str, http: Option<u16>) -> FailureCategory {
+pub fn is_retryable(code: &str, http: Option<u16>) -> bool {
     if let Some(status) = http {
-        return match status {
-            408 | 425 | 429 => FailureCategory::Transient,
-            400..=499 => FailureCategory::Permanent,
-            500..=599 => FailureCategory::Transient,
-            _ => FailureCategory::Permanent,
-        };
+        return matches!(status, 408 | 425 | 429 | 500..=599);
     }
-    match code {
+    matches!(
+        code,
         "TRANSPORT_TIMEOUT"
-        | "TRANSPORT_NETWORK_ERROR"
-        | "UPSTREAM_RATE_LIMITED"
-        | "PROXY_RATE_LIMITED"
-        | "PROXY_NETWORK_ERROR"
-        | "PROXY_ERROR"
-        | "TRANSPORT_HTTP_ERROR"
-        | "DISCOVERY_HTTP_ERROR" => FailureCategory::Transient,
-        _ => FailureCategory::Permanent,
-    }
+            | "TRANSPORT_NETWORK_ERROR"
+            | "UPSTREAM_RATE_LIMITED"
+            | "PROXY_RATE_LIMITED"
+            | "PROXY_NETWORK_ERROR"
+            | "PROXY_ERROR"
+            | "TRANSPORT_HTTP_ERROR"
+            | "DISCOVERY_HTTP_ERROR"
+    )
 }
 
 /// Deterministic backoff delay in milliseconds for retry `attempt`
@@ -100,26 +62,16 @@ mod tests {
 
     #[test]
     fn forbidden_is_permanent_single_attempt() {
-        assert_eq!(
-            classify_tile_failure("TRANSPORT_HTTP_ERROR", Some(403)),
-            FailureCategory::Permanent
-        );
-        assert_eq!(
-            classify_tile_failure("anything", Some(404)),
-            FailureCategory::Permanent
-        );
-        assert_eq!(
-            classify_tile_failure("anything", Some(401)),
-            FailureCategory::Permanent
-        );
+        assert!(!is_retryable("TRANSPORT_HTTP_ERROR", Some(403)));
+        assert!(!is_retryable("anything", Some(404)));
+        assert!(!is_retryable("anything", Some(401)));
     }
 
     #[test]
     fn transient_statuses_retry() {
         for status in [408, 425, 429, 500, 502, 503] {
-            assert_eq!(
-                classify_tile_failure("TRANSPORT_HTTP_ERROR", Some(status)),
-                FailureCategory::Transient,
+            assert!(
+                is_retryable("TRANSPORT_HTTP_ERROR", Some(status)),
                 "status {status}"
             );
         }
@@ -130,25 +82,15 @@ mod tests {
             "PROXY_RATE_LIMITED",
             "PROXY_NETWORK_ERROR",
         ] {
-            assert_eq!(
-                classify_tile_failure(code, None),
-                FailureCategory::Transient,
-                "code {code}"
-            );
+            assert!(is_retryable(code, None), "code {code}");
         }
     }
 
     #[test]
     fn unknown_and_decode_codes_fail_closed() {
-        assert_eq!(
-            classify_tile_failure("extension.network", None),
-            FailureCategory::Permanent
-        );
-        assert_eq!(
-            classify_tile_failure("decode.unsupported", None),
-            FailureCategory::Permanent
-        );
-        assert_eq!(classify_tile_failure("", None), FailureCategory::Permanent);
+        assert!(!is_retryable("extension.network", None));
+        assert!(!is_retryable("decode.unsupported", None));
+        assert!(!is_retryable("", None));
     }
 
     #[test]
@@ -167,23 +109,5 @@ mod tests {
             MAX_RETRY_AFTER_MS
         );
         assert_eq!(retry_delay_ms(1, None, 2_000), 2_000);
-    }
-
-    #[test]
-    fn permanent_failure_drops_retry_hint_and_bounds_diagnostics() {
-        let long = "x".repeat(10_000);
-        let failure = TileFailure::new("TRANSPORT_HTTP_ERROR", Some(403), Some(5_000), Some(long));
-        assert_eq!(failure.category, FailureCategory::Permanent);
-        // Permanent failures drop the retry hint: nothing to wait for.
-        assert_eq!(failure.retry_after_ms, None);
-        assert_eq!(failure.detail.as_ref().map(String::len), Some(300));
-        assert!(!failure.is_retryable());
-    }
-
-    #[test]
-    fn transient_failure_keeps_clamped_hint() {
-        let failure = TileFailure::new("TRANSPORT_TIMEOUT", Some(503), Some(u64::MAX), None);
-        assert_eq!(failure.retry_after_ms, Some(MAX_RETRY_AFTER_MS));
-        assert!(failure.is_retryable());
     }
 }

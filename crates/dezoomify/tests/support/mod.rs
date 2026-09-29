@@ -56,7 +56,7 @@ impl Host for MemoryHost {
             .pop_front()
             .unwrap_or(ProbeOutcome::Missing))
     }
-    async fn acquire_tile(&self, tile: Tile) -> Result<TileReceipt, Error> {
+    async fn acquire_tile(&self, tile: Tile) -> Result<(), Error> {
         self.active.set(self.active.get() + 1);
         self.peak.set(self.peak.get().max(self.active.get()));
         let _active = Active(&self.active);
@@ -97,9 +97,7 @@ impl Host for MemoryHost {
         {
             self.cancelled.set(true);
         }
-        Ok(TileReceipt {
-            display_only: self.display_only.get(),
-        })
+        Ok(())
     }
     async fn finish(&self, request: FinishRequest) -> Result<Output, Error> {
         if let Some(error) = self.finish_error.borrow_mut().take() {
@@ -110,7 +108,7 @@ impl Host for MemoryHost {
             format: request.format,
             complete: request.missing.is_empty(),
             missing: request.missing.clone(),
-            disposition: if request.display_only {
+            disposition: if self.display_only.get() {
                 OutputDisposition::DisplayOnly
             } else {
                 OutputDisposition::BrowserSaveReady

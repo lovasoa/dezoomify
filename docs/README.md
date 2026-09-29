@@ -39,7 +39,7 @@ Each fact lives once; every other page links to it:
 | Fact | Canonical home |
 |---|---|
 | Transport policy (direct browser fetch first, automatic metadata proxy fallback) | [Browser runtime](browser-runtime.md#request-order) |
-| Metadata window constant (`METADATA_WINDOW_MS`) | `packages/browser-runtime/src/tile-policy.ts` |
+| Metadata window constant (`DIRECT_METADATA_TIMEOUT_MS`) | `packages/browser-runtime/src/tile-policy.ts` |
 | Native output formats and encoder behavior | [Native apps](native-apps.md#native-runtime) |
 | Capability baselines | `crates/dezoomify/src/model.rs` and manifests under `generated/` |
 | Canvas and save limits | [Compatibility](compatibility.md#canvas-and-save-limits) |
@@ -54,5 +54,5 @@ Each fact lives once; every other page links to it:
 - One shared [UI](architecture.md#shared-ui-and-application) (React TSX) serves the website, desktop app, and extension.
 - Browser and native runtimes implement the same capabilities honestly; unsupported operations are reported before a job starts.
 - The extension never transfers browser cookies to another app. Desktop deep links are revalidated and confirmed before they start work.
-- Every user-visible failure has a stable error code and zero or more typed [recovery actions](errors.md#recovery-actions).
+- Every user-visible failure has a stable error code and structured context for [recovery](errors.md#recovery-actions).
 - Contract pages use present tense as invariants and carry no staleness markers. Open work lives in [`plans/`](../plans/), including the [legacy retirement](../plans/legacy-retirement.md) day-of-switch plan.

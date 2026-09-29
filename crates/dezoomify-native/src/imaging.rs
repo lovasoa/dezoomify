@@ -1,11 +1,12 @@
+//! Image decoding, metadata, encoders, and memory limits.
 use std::path::PathBuf;
 
 use dezoomify::Vec2d;
 
-use crate::error::NativeError;
+use dezoomify::model::{Error, ErrorPhase};
 
 /// Default JPEG quality for `.jpg` output and `iiif-dir` tiles: `100`
-/// minus the default compression 5, matching the reference default.
+/// minus the default compression 5.
 pub const JPEG_QUALITY: u8 = 95;
 
 /// JPEG (ISO 10918-1) caps both dimensions at 65535 px; larger canvases must
@@ -67,11 +68,7 @@ pub fn default_tile_cache_dir() -> PathBuf {
     std::env::temp_dir().join("dezoomify-tile-cache")
 }
 
-/// Effective cache directory: the configured dir, or the default on-disk
-/// cache when `cache_dir` is `None`. The tile cache is on by default.
-#[must_use]
-/// PNG deflate tier for a `--compression` value (reference
-/// `png_encoder.rs:30-34`).
+/// PNG deflate tier for a `--compression` value.
 pub(crate) fn png_compression_for(compression: u8) -> image::codecs::png::CompressionType {
     use image::codecs::png::CompressionType;
     match compression {
@@ -95,18 +92,7 @@ pub(crate) fn tiff_compression_for(compression: u8) -> tiff::encoder::compressio
     }
 }
 
-/// Fetch one tile with resume-cache support. When `cache` carries
-/// `(cache_dir, job_namespace)`, stored bytes that still decode skip the
-/// fetch; a fresh fetch stores its processed body for later runs. Stored
-/// entries hold response bodies only, never headers or cookies. A corrupt
-/// entry quietly falls back to a fresh fetch, and a failed store never fails
-/// the tile: the cache stays best-effort.
-///
-/// The decoded tile carries the first-seen ICC profile and EXIF metadata
-/// alongside the pixels (reference `tile.rs:186-219`); metadata extraction
-/// failures fall back to `None` while decode failures fail the tile.
-/// Decoded tile pixels plus first-seen ICC/EXIF metadata. Pub for the
-/// output sink, which owns painting order and deterministic metadata.
+/// Decoded pixels and embedded metadata, retained by the output sink.
 pub struct DecodedTile {
     pub image: image::RgbaImage,
     pub icc_profile: Option<Vec<u8>>,
@@ -114,7 +100,7 @@ pub struct DecodedTile {
 }
 
 /// Decode image bytes while preserving the available ICC profile and EXIF
-/// metadata, mirroring `load_image_with_metadata` in the reference.
+/// metadata.
 pub(crate) struct ImageWithMetadata {
     pub image: image::DynamicImage,
     pub icc_profile: Option<Vec<u8>>,
@@ -173,19 +159,13 @@ pub(crate) fn blit_onto(
     );
 }
 
-/// Encode the assembled canvas as PNG at the configured deflate tier.
-/// The default tier is fast, matching the previous fixed encoder byte for
-/// byte; higher `--compression` values trade smaller files for slower
-/// encodes (reference `png_encoder.rs:30-34`). The first tile's ICC profile
-/// and EXIF metadata ride in the header when present (reference
-/// `png_encoder.rs:45-117`); tiles without metadata encode identically to
-/// before.
+/// Encode PNG at the configured deflate tier, preserving ICC and EXIF metadata.
 pub fn encode_png(
     image: &image::RgbaImage,
     compression: image::codecs::png::CompressionType,
     icc_profile: Option<&[u8]>,
     exif_metadata: Option<&[u8]>,
-) -> Result<Vec<u8>, NativeError> {
+) -> Result<Vec<u8>, Error> {
     use image::codecs::png::FilterType;
     let mut bytes = Vec::new();
     let mut encoder = image::codecs::png::PngEncoder::new_with_quality(
@@ -206,7 +186,13 @@ pub fn encode_png(
         image.height(),
         image::ExtendedColorType::Rgba8,
     )
-    .map_err(|e| NativeError::new("output.encode-failed", format!("png encode failed: {e}")))?;
+    .map_err(|e| {
+        Error::new(
+            "output.encode-failed",
+            ErrorPhase::Output,
+            format!("png encode failed: {e}"),
+        )
+    })?;
     Ok(bytes)
 }
 
@@ -214,17 +200,14 @@ pub fn encode_png(
 /// [`JPEG_QUALITY`]). Sides beyond [`JPEG_MAX_SIDE`] fail with typed
 /// `output.encode-failed`: JPEG cannot address them. JPEG carries no alpha,
 /// so transparent canvas regions (kept-partial holes) save as black. The
-/// first tile's ICC profile is embedded when present (reference
-/// `canvas.rs:124-137`); EXIF is not written to JPEG output, matching the
-/// reference canvas writer.
+/// first tile's ICC profile is embedded when present. EXIF is not written.
 pub fn encode_jpeg(
     image: &image::RgbaImage,
     quality: u8,
     icc_profile: Option<&[u8]>,
-) -> Result<Vec<u8>, NativeError> {
+) -> Result<Vec<u8>, Error> {
     if image.width() > JPEG_MAX_SIDE || image.height() > JPEG_MAX_SIDE {
-        return Err(NativeError::new(
-            "output.encode-failed",
+        return Err(Error::new("output.encode-failed", ErrorPhase::Output,
             format!(
                 "jpeg output {}x{} exceeds the 65535px per-side jpeg limit; save as png, tiff, or iiif-dir",
                 image.width(),
@@ -248,7 +231,13 @@ pub fn encode_jpeg(
         rgb.height(),
         image::ExtendedColorType::Rgb8,
     )
-    .map_err(|e| NativeError::new("output.encode-failed", format!("jpeg encode failed: {e}")))?;
+    .map_err(|e| {
+        Error::new(
+            "output.encode-failed",
+            ErrorPhase::Output,
+            format!("jpeg encode failed: {e}"),
+        )
+    })?;
     Ok(bytes)
 }
 
@@ -257,12 +246,12 @@ pub fn encode_jpeg(
 /// default 5 selects fast), with no side limit. The output stays lossless
 /// at every level: higher compression only trades slower encodes for
 /// smaller files, never quality. The first tile's ICC profile is embedded
-/// when present (reference `canvas.rs:180-189`).
+/// when present.
 pub fn encode_tiff(
     image: &image::RgbaImage,
     compression: u8,
     icc_profile: Option<&[u8]>,
-) -> Result<Vec<u8>, NativeError> {
+) -> Result<Vec<u8>, Error> {
     let mut cursor = std::io::Cursor::new(Vec::new());
     {
         let mut encoder = tiff::encoder::TiffEncoder::new(&mut cursor)
@@ -300,7 +289,7 @@ pub fn encode_zif_pyramid(
     image: &image::RgbaImage,
     compression: u8,
     icc_profile: Option<&[u8]>,
-) -> Result<Vec<u8>, NativeError> {
+) -> Result<Vec<u8>, Error> {
     let mut cursor = std::io::Cursor::new(Vec::new());
     {
         let mut encoder = tiff::encoder::TiffEncoder::new(&mut cursor)
@@ -327,9 +316,10 @@ pub fn encode_zif_pyramid(
     Ok(cursor.into_inner())
 }
 
-fn tiff_failed(error: tiff::TiffError) -> NativeError {
-    NativeError::new(
+fn tiff_failed(error: tiff::TiffError) -> Error {
+    Error::new(
         "output.encode-failed",
+        ErrorPhase::Output,
         format!("tiff encode failed: {error}"),
     )
 }
@@ -342,7 +332,7 @@ fn write_tiff_directory<W: std::io::Write + std::io::Seek>(
     encoder: &mut tiff::encoder::TiffEncoder<W>,
     image: &image::RgbaImage,
     icc_profile: Option<&[u8]>,
-) -> Result<(), NativeError> {
+) -> Result<(), Error> {
     let mut directory = encoder
         .new_image::<tiff::encoder::colortype::RGBA8>(image.width(), image.height())
         .map_err(tiff_failed)?;
@@ -358,14 +348,10 @@ fn write_tiff_directory<W: std::io::Write + std::io::Seek>(
 /// [`WEBP_MAX_SIDE`]; sides beyond it fail with typed
 /// `output.encode-failed`). WebP lossless has no quality knob, so
 /// `--compression` does not apply here; the first tile's ICC profile is
-/// embedded when present (reference `canvas.rs:190-199`).
-pub fn encode_webp(
-    image: &image::RgbaImage,
-    icc_profile: Option<&[u8]>,
-) -> Result<Vec<u8>, NativeError> {
+/// embedded when present.
+pub fn encode_webp(image: &image::RgbaImage, icc_profile: Option<&[u8]>) -> Result<Vec<u8>, Error> {
     if image.width() > WEBP_MAX_SIDE || image.height() > WEBP_MAX_SIDE {
-        return Err(NativeError::new(
-            "output.encode-failed",
+        return Err(Error::new("output.encode-failed", ErrorPhase::Output,
             format!(
                 "webp output {}x{} exceeds the 16383px per-side webp limit; save as png, tiff, zif, or iiif-dir",
                 image.width(),
@@ -385,7 +371,13 @@ pub fn encode_webp(
         image.height(),
         image::ExtendedColorType::Rgba8,
     )
-    .map_err(|e| NativeError::new("output.encode-failed", format!("webp encode failed: {e}")))?;
+    .map_err(|e| {
+        Error::new(
+            "output.encode-failed",
+            ErrorPhase::Output,
+            format!("webp encode failed: {e}"),
+        )
+    })?;
     Ok(bytes)
 }
 
@@ -433,14 +425,14 @@ pub(crate) fn iiif_info_json(id: &str, width: u32, height: u32) -> Vec<u8> {
 /// Render one `iiif-dir` destination from the assembled canvas: the manifest
 /// plus JPEG tiles, each stored at its real IIIF request path
 /// (`{x},{y},{w},{h}/{tw},/0/default.jpg`, size-by-width) with one
-/// `full/max/0/default.jpg` overview. Files arrive sorted by relative path
-/// for a deterministic digest; tiles encode at `jpeg_quality` without
-/// embedded profiles (retiled output, matching the reference tile saver).
+/// `full/max/0/default.jpg` overview. Files arrive sorted by relative path;
+/// tiles encode at `jpeg_quality` without
+/// embedded profiles.
 pub(crate) fn render_iiif_dir(
     image: &image::RgbaImage,
     id: &str,
     jpeg_quality: u8,
-) -> Result<(Vec<u8>, crate::output::IiifTiles), NativeError> {
+) -> Result<(Vec<u8>, crate::output::IiifTiles), Error> {
     let (width, height) = (image.width(), image.height());
     let mut files: crate::output::IiifTiles = Vec::new();
     for scale in iiif_scale_factors(width, height) {

@@ -79,6 +79,35 @@ pub enum OutputFormat {
     IiifDir,
 }
 
+impl OutputFormat {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Jpeg => "jpeg",
+            Self::Tiff => "tiff",
+            Self::Zif => "zif",
+            Self::Webp => "webp",
+            Self::IiifDir => "iiif-dir",
+        }
+    }
+
+    #[must_use]
+    pub const fn extension(self) -> &'static str {
+        match self {
+            Self::Jpeg => "jpg",
+            Self::Tiff => "tif",
+            Self::IiifDir => "iiif",
+            format => format.as_str(),
+        }
+    }
+
+    #[must_use]
+    pub const fn is_directory(self) -> bool {
+        matches!(self, Self::IiifDir)
+    }
+}
+
 /// Host-neutral placement of one tile in the output image, projected from
 /// the core tile plan. `position` is the top-left output corner;
 /// `expected_size` is the planned extent when the plan declares it (absent
@@ -123,7 +152,6 @@ pub struct Image {
     pub format: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<Size>,
-    pub source_kind: String,
     pub levels: Vec<Level>,
 }
 
@@ -209,33 +237,6 @@ pub enum RecoveryChoice {
     Keep,
     Retry,
     Discard,
-}
-
-// ---------------------------------------------------------------------------
-// Recovery (typed actions, never message parsing)
-// ---------------------------------------------------------------------------
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum RecoveryKind {
-    Retry,
-    EditInput,
-    ChooseOutput,
-    GrantPermission,
-    ChangeTransport,
-    KeepPartial,
-    DiscardPartial,
-    HandoffToNative,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub struct RecoveryAction {
-    pub id: String,
-    pub kind: RecoveryKind,
-    pub scope: String,
-    pub rationale: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -410,10 +411,9 @@ pub struct Error {
     pub retry_after_ms: Option<u64>,
     pub code: String,
     pub phase: ErrorPhase,
+    #[serde(default)]
     pub retryable: bool,
     pub message: String,
-    #[serde(default)]
-    pub recovery: Vec<RecoveryAction>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -439,7 +439,6 @@ impl Error {
             phase,
             retryable: false,
             message: message.into(),
-            recovery: Vec::new(),
             request: None,
             transport: None,
             blocked_reason: None,
@@ -461,32 +460,12 @@ impl Error {
         self.resource_kind = Some(kind);
         self
     }
-}
 
-/// Closed retry category for one classified tile failure.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum FailureCategory {
-    Permanent,
-    Transient,
-}
-
-/// Structured facts for one failed tile attempt (bounded diagnostics).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub struct TileFailure {
-    pub code: String,
-    pub category: FailureCategory,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub http: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub retry_after_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub detail: Option<String>,
-    /// Original host-observed fetch facts, retained without reformatting.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub observed: Option<FetchFailure>,
+    #[must_use]
+    pub fn with_retryable(mut self, retryable: bool) -> Self {
+        self.retryable = retryable;
+        self
+    }
 }
 
 /// Unit progress for the active phase (totals stay unknown until the plan
@@ -522,7 +501,7 @@ impl Default for Progress {
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct MissingTile {
     pub tile: u32,
-    pub failures: Vec<TileFailure>,
+    pub failures: Vec<Error>,
 }
 
 /// Honest output disposition reported by the host that performed the save.
@@ -665,12 +644,6 @@ pub struct Tile {
     pub placement: TilePlacement,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub struct TileReceipt {
-    pub display_only: bool,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct FinishRequest {
@@ -678,7 +651,6 @@ pub struct FinishRequest {
     pub format: OutputFormat,
     pub title: Option<String>,
     pub missing: Vec<u32>,
-    pub display_only: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

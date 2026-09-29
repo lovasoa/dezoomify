@@ -9,7 +9,6 @@ import {
   isMobileClient,
   MAXIMUM_SELECTION_LIMITS,
   probeLimits,
-  safeArea,
   selectionLimitsFor,
 } from "../src/limits.ts";
 
@@ -42,12 +41,10 @@ test("exact boundary is ok, one over requires native", () => {
 test("gigapixel requires native without overflow", () => {
   const d = probeLimits({ width: 100000, height: 100000 }, LIMITS);
   assert.equal(d.verdict, "native-required");
-  assert.equal(safeArea(100000, 100000), 100000 * 100000);
   assert.equal(
     probeLimits({ width: Number.MAX_SAFE_INTEGER, height: 2 }, LIMITS).verdict,
     "native-required",
   );
-  assert.equal(safeArea(Number.MAX_SAFE_INTEGER, 2), null);
 });
 
 test("normal fixture is ok; memory over budget is browser-risk", () => {
@@ -57,13 +54,6 @@ test("normal fixture is ok; memory over budget is browser-risk", () => {
     LIMITS,
   );
   assert.equal(risky.verdict, "browser-risk");
-});
-
-test("safeArea rejects invalid", () => {
-  assert.equal(safeArea(0, 10), null);
-  assert.equal(safeArea(-1, 10), null);
-  assert.equal(safeArea(NaN, 10), null);
-  assert.equal(safeArea(1.5, 10), null);
 });
 
 test("client hints pick the mobile tier: hints first, iOS/Android UA fallback", () => {

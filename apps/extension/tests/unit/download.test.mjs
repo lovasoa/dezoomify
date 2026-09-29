@@ -72,7 +72,7 @@ test("an interrupted save rejects with the browser's diagnostic", async () => {
   api.emit({ id: 7, state: { current: "interrupted" }, error: { current: "FILE_NO_SPACE" } });
   await assert.rejects(saved, (error) => {
     assert.equal(error.code, "OUTPUT_FAILED");
-    assert.match(error.technical, /FILE_NO_SPACE/);
+    assert.match(error.detail, /FILE_NO_SPACE/);
     return true;
   });
 });

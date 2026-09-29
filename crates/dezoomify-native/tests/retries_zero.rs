@@ -132,7 +132,7 @@ fn retries_zero_sends_no_second_request() {
         options.keep_partial = false;
     })
     .expect_err("missing tile fails");
-    assert_eq!(error.code, "tile.download-failed");
+    assert_eq!(error.code, "job.partial-discarded");
     assert!(!output.exists());
     let counts = counts.lock().expect("lock");
     // The missing tile is never refetched with retries=0.

@@ -314,8 +314,7 @@ impl DiscoveryCatalog {
         Self(entries)
     }
 
-    /// Canonical public catalog paired with this catalog's private tile
-    /// programs. Array positions are preserved exactly.
+    /// Ordered image choices for an interactive host.
     #[must_use]
     pub fn public_catalog(&self) -> Catalog {
         Catalog {
@@ -323,48 +322,7 @@ impl DiscoveryCatalog {
                 .0
                 .iter()
                 .map(|entry| match entry {
-                    DiscoveredEntry::Ready(image) => {
-                        let levels: Vec<_> = image
-                            .levels
-                            .iter()
-                            .enumerate()
-                            .map(|(position, level)| Level {
-                                label: level.display_label(position),
-                                size: level.source.image_size().map(|value| Size {
-                                    width: value.x,
-                                    height: value.y,
-                                }),
-                                tile_size: level.source.tile_size().map(|value| Size {
-                                    width: value.x,
-                                    height: value.y,
-                                }),
-                            })
-                            .collect();
-                        let size = levels.iter().filter_map(|level| level.size.as_ref()).fold(
-                            None,
-                            |largest: Option<Size>, size| {
-                                Some(Size {
-                                    width: largest
-                                        .as_ref()
-                                        .map_or(size.width, |value| value.width.max(size.width)),
-                                    height: largest
-                                        .as_ref()
-                                        .map_or(size.height, |value| value.height.max(size.height)),
-                                })
-                            },
-                        );
-                        PublicCatalogEntry::Image(Image {
-                            title: image.title.clone(),
-                            format: image.format.to_string(),
-                            size,
-                            source_kind: image
-                                .levels
-                                .first()
-                                .map_or("unknown", |level| level.source.kind_name())
-                                .into(),
-                            levels,
-                        })
-                    }
+                    DiscoveredEntry::Ready(image) => PublicCatalogEntry::Image(image.into()),
                     DiscoveredEntry::Deferred(image) => {
                         PublicCatalogEntry::ImageRequest(ImageRequest {
                             title: image.title.clone(),
@@ -394,6 +352,46 @@ impl DiscoveryCatalog {
     #[must_use]
     pub fn into_entries(self) -> Vec<DiscoveredEntry> {
         self.0
+    }
+}
+
+impl From<&ResolvedImage> for Image {
+    fn from(image: &ResolvedImage) -> Self {
+        let levels: Vec<_> = image
+            .levels
+            .iter()
+            .enumerate()
+            .map(|(position, level)| Level {
+                label: level.display_label(position),
+                size: level.source.image_size().map(|value| Size {
+                    width: value.x,
+                    height: value.y,
+                }),
+                tile_size: level.source.tile_size().map(|value| Size {
+                    width: value.x,
+                    height: value.y,
+                }),
+            })
+            .collect();
+        let size = levels.iter().filter_map(|level| level.size.as_ref()).fold(
+            None,
+            |largest: Option<Size>, size| {
+                Some(Size {
+                    width: largest
+                        .as_ref()
+                        .map_or(size.width, |value| value.width.max(size.width)),
+                    height: largest
+                        .as_ref()
+                        .map_or(size.height, |value| value.height.max(size.height)),
+                })
+            },
+        );
+        Self {
+            title: image.title.clone(),
+            format: image.format.to_string(),
+            size,
+            levels,
+        }
     }
 }
 

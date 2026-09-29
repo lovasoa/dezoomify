@@ -197,9 +197,58 @@ pub fn show_progress(level: &str) -> bool {
     log_level_rank(level) >= 2
 }
 
+/// Stable codes printed by the command-line interface.
+pub fn error_code(code: &str) -> &str {
+    match code {
+        "job.invalid-input"
+        | "job.discovery-failed"
+        | "job.catalog-invalid"
+        | "job.empty-resource" => "discovery.failed",
+        "job.no-images" => "discovery.no-image",
+        "job.unknown-format" => "discovery.unknown-format",
+        "job.resource-limit" => "tile.limit",
+        "job.deferred-limit" => "discovery.deferred",
+        "job.plan-invalid" => "discovery.tile-plan",
+        "job.plan-empty" => "discovery.no-level",
+        "job.partial-discarded" | "job.no-usable-tiles" => "tile.download-failed",
+        "TRANSPORT_TIMEOUT" => "transport.timeout",
+        "TRANSPORT_NETWORK_ERROR" => "transport.network-error",
+        "TRANSPORT_SIZE_LIMIT" => "transport.size-limit",
+        "TRANSPORT_BAD_URL" => "transport.bad-url",
+        "TRANSPORT_BAD_REDIRECT" => "transport.bad-redirect",
+        "TRANSPORT_REDIRECT_LIMIT" => "transport.redirect-limit",
+        "TRANSPORT_HTTP_ERROR" => "tile.http-error",
+        "TILE_DECODE_FAILED" => "tile.decode-failed",
+        code => code,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failure_codes_match_the_published_scenario_results() {
+        for (scenario, code) in [
+            ("cli-corrupt-tile", "job.partial-discarded"),
+            ("cli-tile-failure", "job.partial-discarded"),
+            ("cli-deferred-limit", "job.deferred-limit"),
+            ("cli-destination-denied", "output.exists"),
+            ("cli-cancel", "job.cancelled"),
+        ] {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../testdata/scenarios/native")
+                .join(scenario)
+                .join("expected/result.json");
+            let expected: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            assert_eq!(
+                error_code(code),
+                expected["code"].as_str().unwrap(),
+                "{scenario}"
+            );
+        }
+    }
 
     #[test]
     fn log_levels_gate_human_output() {

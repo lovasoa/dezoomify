@@ -33,7 +33,7 @@ responses preserve bytes and redirected addresses. Tile values carry their
 index, exact request, placement, declared canvas, and processing recipe.
 Missing tiles preserve observed fetch failures and attempt details.
 
-Errors carry stable codes, phases, retryability, user wording, typed recovery,
+Errors carry stable codes, phases, retryability, user wording,
 and optional request, transport, HTTP status, and bounded server context.
 Progress reports work and geometry; Output reports completeness, missing tiles,
 canvas, format, and actual save disposition.

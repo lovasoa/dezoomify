@@ -1,6 +1,5 @@
-import type { Error as JobError, MissingTiles, Output, Progress } from "@dezoomify/wasm-bindings";
+import type { MissingTiles, Output, Progress } from "@dezoomify/wasm-bindings";
 import { splitGapLedger } from "./components.ts";
-import { categoryFor } from "./failure.ts";
 import { type I18nKey, t } from "./i18n.ts";
 import { renderTransportLabel } from "./labels.ts";
 
@@ -26,8 +25,6 @@ export interface ResolutionChoice {
 export type PresentationStatus =
   | "idle"
   | "discovering"
-  | "choosing-image"
-  | "choosing-level"
   | "preflighting"
   | "downloading"
   | "saving"
@@ -38,7 +35,6 @@ export type PresentationStatus =
 
 export interface Presentation {
   phase: "idle" | "job" | "display-only" | "completed" | "failed" | "cancelled";
-  stateLabel: string | null;
   headlineKey: I18nKey;
   headlineVars?: Record<string, string | number>;
   detailKey?: I18nKey;
@@ -72,8 +68,6 @@ export interface Presentation {
 const headlines: Record<PresentationStatus, I18nKey> = {
   idle: "view.idle.submit",
   discovering: "view.step.discovering",
-  "choosing-image": "view.step.choosingImage",
-  "choosing-level": "view.step.choosingLevel",
   preflighting: "view.step.preflighting",
   downloading: "view.step.downloading",
   saving: "view.step.saving",
@@ -83,22 +77,6 @@ const headlines: Record<PresentationStatus, I18nKey> = {
   cancelled: "view.cancel.title",
 };
 
-export function structuredErrorOf(error: JobError): StructuredError {
-  return {
-    code: error.code,
-    category: categoryFor(error.code),
-    retryable: error.retryable,
-    message: error.message,
-    phase: error.phase,
-    ...(error.detail ? { detail: error.detail } : {}),
-    ...(error.transport ? { transport: error.transport } : {}),
-    ...(error.request ? { url: error.request } : {}),
-    ...(error.http != null ? { http: error.http } : {}),
-    ...(error.preview ? { preview: error.preview } : {}),
-    ...(error.resource_kind ? { extras: [`Resource: ${error.resource_kind}`] } : {}),
-  };
-}
-
 export function presentStatus(
   status: PresentationStatus,
   opts?: { transport?: string | null; error?: StructuredError; partial?: boolean },
@@ -107,7 +85,6 @@ export function presentStatus(
   const finished = ["completed", "failed", "cancelled", "display-only"].includes(status);
   return {
     phase: status === "idle" || finished ? (status as Presentation["phase"]) : "job",
-    stateLabel: status,
     headlineKey: headlines[status],
     ...(status === "discovering" ? { detailKey: "view.step.contactingDetail" as const } : {}),
     progress: null,

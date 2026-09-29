@@ -1,7 +1,4 @@
-// Desktop error copy (todo 2.2 split from main.tsx).
-// Layered presentation helpers plus the payload/deep-link validators.
-// Pure: the host string and controller status arrive as parameters, so this
-// module owns no job state. File move, no behavior change.
+// Error presentation and deep-link validation for the desktop UI.
 
 import { isValidDeepLinkSource, isValidInputUrl, t } from "@dezoomify/shared-ui";
 

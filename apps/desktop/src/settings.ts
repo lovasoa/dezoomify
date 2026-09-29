@@ -17,12 +17,13 @@
 // Keep erasable syntax only so node type-stripping can read this file. No
 // imports from apps/web, apps/extension, or browser-runtime. No fetch/XHR.
 
+import type { OutputFormat } from "@dezoomify/wasm-bindings";
 import { invoke } from "@tauri-apps/api/core";
 import { downloadDir } from "@tauri-apps/api/path";
 
 export interface DesktopSettings {
   readonly output_dir: string | null;
-  readonly output_format: DesktopOutputFormat;
+  readonly output_format: OutputFormat;
   readonly compression: number;
   readonly max_width: number | null;
   readonly max_height: number | null;
@@ -33,11 +34,7 @@ export interface DesktopSettings {
 }
 
 export const SETTINGS_STORAGE_KEY = "dezoomify.desktop.settings.v1" as const;
-// Encoder picker choices. Must stay identical to NATIVE_FORMATS in
-// desktopIntegration.ts (the radio group) and a subset of SUPPORTED_FORMATS
-// in apps/desktop/src-tauri/src/commands.rs (the grant gate).
-export type DesktopOutputFormat = "png" | "jpeg" | "tiff" | "zif" | "webp" | "iiif-dir";
-export const OUTPUT_FORMATS: ReadonlyArray<DesktopOutputFormat> = [
+export const OUTPUT_FORMATS: ReadonlyArray<OutputFormat> = [
   "png",
   "jpeg",
   "tiff",
@@ -45,7 +42,7 @@ export const OUTPUT_FORMATS: ReadonlyArray<DesktopOutputFormat> = [
   "webp",
   "iiif-dir",
 ] as const;
-export const DEFAULT_OUTPUT_FORMAT: DesktopOutputFormat = "png" as const;
+export const DEFAULT_OUTPUT_FORMAT: OutputFormat = "png" as const;
 export const DEFAULT_COMPRESSION = 5 as const;
 export const DEFAULT_RETRIES = 3 as const;
 export type NetworkProfile = "maximum" | "balanced" | "gentle";
@@ -200,12 +197,12 @@ function parseOptionalDimension(
   return undefined;
 }
 
-function parseOutputFormat(raw: unknown, errors: Array<string>): DesktopOutputFormat | undefined {
+function parseOutputFormat(raw: unknown, errors: Array<string>): OutputFormat | undefined {
   if (raw === undefined || raw === null) return DEFAULT_OUTPUT_FORMAT;
   if (typeof raw === "string") {
     const lower = raw.trim().toLowerCase();
     if ((OUTPUT_FORMATS as ReadonlyArray<string>).includes(lower)) {
-      return lower as DesktopOutputFormat;
+      return lower as OutputFormat;
     }
   }
   errors.push("output format must be one of png, jpeg, tiff, zif, webp, iiif-dir");
@@ -435,18 +432,10 @@ export function saveSettings(settings: DesktopSettings): Array<string> {
   return [];
 }
 
-export function settingsToInvokeArgs(settings: DesktopSettings): Record<string, unknown> {
-  return {
-    output_format: settings.output_format,
-    compression: settings.compression,
-    retries: settings.retries,
-    network_profile: settings.network_profile,
-    max_width: settings.max_width,
-    max_height: settings.max_height,
-    output_dir: settings.output_dir,
-    cache_dir: settings.cache_dir,
-    headers: { ...settings.headers },
-  };
+export function resetSettings(): DesktopSettings {
+  const settings = defaultSettings();
+  saveSettings(settings);
+  return settings;
 }
 
 // Native directory picker via the Tauri dialog plugin (`dialog:allow-open`).
@@ -454,36 +443,12 @@ export function settingsToInvokeArgs(settings: DesktopSettings): Record<string, 
 // cancelled. Never throws. Hosts without the dialog plugin reject, which
 // maps to null (manual entry) below.
 export async function pickDirectory(current: string | null): Promise<string | null> {
-  const attempts: Array<Record<string, unknown>> = [
-    { directory: true, multiple: false },
-    { directory: true },
-  ];
-  for (const options of attempts) {
-    try {
-      // The dialog plugin receives its configuration under `options`; sending
-      // it at the top level is silently rejected by the native command.
-      const raw = await invoke("plugin:dialog|open", {
-        options: {
-          ...options,
-          ...(current ? { defaultPath: current } : {}),
-        },
-      });
-      if (typeof raw === "string" && raw.length > 0) return raw;
-      if (Array.isArray(raw) && typeof raw[0] === "string" && (raw[0] as string).length > 0) {
-        return raw[0] as string;
-      }
-      if (raw !== null && typeof raw === "object") {
-        const obj = raw as Record<string, unknown>;
-        for (const key of ["path", "filePath", "directory", "value"]) {
-          const v = obj[key];
-          if (typeof v === "string" && v.length > 0) return v;
-        }
-      }
-      // Cancelled (null) stops further attempts.
-      if (raw === null || raw === undefined) return null;
-    } catch {
-      // Try the next shape, then fall back to manual entry.
-    }
+  try {
+    const result = await invoke("plugin:dialog|open", {
+      options: { directory: true, multiple: false, ...(current ? { defaultPath: current } : {}) },
+    });
+    return typeof result === "string" ? result : null;
+  } catch {
+    return null;
   }
-  return null;
 }

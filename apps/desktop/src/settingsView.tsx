@@ -1,7 +1,8 @@
 import { t } from "@dezoomify/shared-ui";
+import type { OutputFormat } from "@dezoomify/wasm-bindings";
 import type { ReactElement, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import type { DesktopOutputFormat, DesktopSettings, NetworkProfile } from "./settings.ts";
+import type { DesktopSettings, NetworkProfile } from "./settings.ts";
 import {
   headersToEditableText,
   parseHeadersText,
@@ -16,7 +17,7 @@ interface Props {
   onReset(): void;
 }
 
-const formats: Array<{ value: DesktopOutputFormat; label: string }> = [
+const formats: Array<{ value: OutputFormat; label: string }> = [
   { value: "png", label: "PNG" },
   { value: "jpeg", label: "JPEG" },
   { value: "tiff", label: "TIFF" },
@@ -141,7 +142,7 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
             aria-label={t("desktop.quick.format")}
             value={settings.output_format}
             onChange={(event) =>
-              commit({ output_format: event.currentTarget.value as DesktopOutputFormat })
+              commit({ output_format: event.currentTarget.value as OutputFormat })
             }
           >
             {formats.map((format) => (

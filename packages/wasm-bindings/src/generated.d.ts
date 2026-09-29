@@ -41,7 +41,6 @@ export interface Image {
     title?: string;
     format: string;
     size?: Size;
-    sourceKind: string;
     levels: Level[];
 }
 
@@ -53,11 +52,6 @@ export interface ImageRequest {
     title?: string;
     uri: string;
 }
-
-/**
- * Closed retry category for one classified tile failure.
- */
-export type FailureCategory = "permanent" | "transient";
 
 /**
  * Honest output disposition reported by the host that performed the save.
@@ -133,7 +127,7 @@ export interface ResourceRequest {
  */
 export interface MissingTile {
     tile: number;
-    failures: TileFailure[];
+    failures: Error[];
 }
 
 /**
@@ -165,21 +159,6 @@ export type FetchFailureCode = "TRANSPORT_HTTP_ERROR" | "DISCOVERY_HTTP_ERROR" |
  */
 export interface Catalog {
     entries: CatalogEntry[];
-}
-
-/**
- * Structured facts for one failed tile attempt (bounded diagnostics).
- */
-export interface TileFailure {
-    code: string;
-    category: FailureCategory;
-    http?: number;
-    retry_after_ms?: number;
-    detail?: string;
-    /**
-     * Original host-observed fetch facts, retained without reformatting.
-     */
-    observed?: FetchFailure;
 }
 
 /**
@@ -241,9 +220,8 @@ export interface Error {
     retry_after_ms?: number;
     code: string;
     phase: ErrorPhase;
-    retryable: boolean;
+    retryable?: boolean;
     message: string;
-    recovery?: RecoveryAction[];
     request?: string;
     transport?: ErrorTransport;
     blocked_reason?: BlockedReason;
@@ -258,7 +236,6 @@ export interface FinishRequest {
     format: OutputFormat;
     title: string | undefined;
     missing: number[];
-    display_only: boolean;
 }
 
 export interface Header {
@@ -269,7 +246,7 @@ export interface Header {
 export interface Host {
     fetch(request: ResourceRequest,interaction: Interaction,): Promise<ResourceRead>;
     probe(tile: Tile,): Promise<ProbeOutcome>;
-    acquireTile(tile: Tile,): Promise<TileReceipt>;
+    acquireTile(tile: Tile,): Promise<void>;
     finish(request: FinishRequest,): Promise<Output>;
     chooseImage(catalog: Catalog,): Promise<number>;
     chooseLevel(image: Image,): Promise<number>;
@@ -304,21 +281,10 @@ export interface Options {
     retry_base_delay_ms?: number;
 }
 
-export interface RecoveryAction {
-    id: string;
-    kind: RecoveryKind;
-    scope: string;
-    rationale: string;
-}
-
 export interface Tile {
     index: number;
     request: ResourceRequest;
     placement: TilePlacement;
-}
-
-export interface TileReceipt {
-    display_only: boolean;
 }
 
 export type BlockedReason = "access-required" | "blocked-ipv4" | "blocked-ipv6" | "cancelled" | "content-type" | "dns-rebinding" | "dns-rebinding-v6" | "forbidden" | "invalid-url" | "limit-exceeded" | "loopback-host" | "malformed" | "malformed-body" | "method" | "network" | "non-standard-port" | "origin" | "private-host" | "protocol-version" | "redirect-limit" | "redirect-target" | "scheme" | "signed-query" | "source-document-lost" | "throttled" | "userinfo";
@@ -342,8 +308,6 @@ export type ProbeOutcome = { status: "missing" } | { status: "available"; width:
 export type ProgressPhase = "discovery" | "planning" | "acquisition" | "output";
 
 export type RecoveryChoice = "keep" | "retry" | "discard";
-
-export type RecoveryKind = "retry" | "edit-input" | "choose-output" | "grant-permission" | "change-transport" | "keep-partial" | "discard-partial" | "handoff-to-native";
 
 export type ResourceKind = "metadata" | "tile" | "probe" | "output";
 

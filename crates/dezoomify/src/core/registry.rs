@@ -188,7 +188,7 @@ mod tests {
     }
 
     #[test]
-    fn every_builtin_name_resolves_to_a_single_program() {
+    fn every_builtin_name_resolves_to_one_format() {
         for name in builtin_names() {
             let registry = registry_for(name).unwrap_or_else(|| {
                 panic!("built-in `{name}` must resolve");

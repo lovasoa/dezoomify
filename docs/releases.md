@@ -18,7 +18,7 @@ One version names a tested source revision across all apps. `cargo xtask release
 
 ## Compatibility
 
-Deep-link input carries its app version; receivers reject unsupported or expired data before confirmation or effects. Handoff input is bounded and contains no browser credentials.
+Deep-link input carries its app version; receivers reject unsupported or expired data before confirmation or starting a job. Handoff input is bounded and contains no browser credentials.
 
 ### Compatibility break
 

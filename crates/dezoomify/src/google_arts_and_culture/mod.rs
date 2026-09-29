@@ -101,13 +101,13 @@ mod tests {
             &[
                 (
                     include_bytes!(
-                        "../../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/google_arts_and_culture/page_source.html"
+                        "../../../../testdata/scenarios/rs-core/formats/payloads/google_arts_and_culture/page_source.html"
                     ),
                     None,
                 ),
                 (
                     include_bytes!(
-                        "../../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/google_arts_and_culture/tile_info.xml"
+                        "../../../../testdata/scenarios/rs-core/formats/payloads/google_arts_and_culture/tile_info.xml"
                     ),
                     None,
                 ),
@@ -218,7 +218,7 @@ mod tests {
             &[
                 (
                     include_bytes!(
-                        "../../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/google_arts_and_culture/page_source.html"
+                        "../../../../testdata/scenarios/rs-core/formats/payloads/google_arts_and_culture/page_source.html"
                     ),
                     None,
                 ),
