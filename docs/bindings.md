@@ -33,7 +33,8 @@ invocations receive independent Host objects.
 Inputs preserve URLs, optional source contents, and evidence kind. Resource
 responses preserve bytes and redirected addresses. Tile values carry their
 index, exact request, placement, declared canvas, and processing recipe.
-Missing tiles preserve the complete errors from their acquisition attempts.
+The finish request identifies acquired probes by their final tile index and
+position. Missing tiles preserve the complete errors from their acquisition attempts.
 
 Errors carry stable codes, phases, retryability, user wording,
 and optional request, transport, HTTP status, and bounded server context.

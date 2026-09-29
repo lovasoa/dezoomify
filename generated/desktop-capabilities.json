@@ -37,7 +37,8 @@
   "eventChannels": [
     "dezoomify://deep-link-pending",
     "dezoomify://partial",
-    "dezoomify://progress"
+    "dezoomify://progress",
+    "dezoomify://registered"
   ],
   "updater": {
     "allowlist": [],

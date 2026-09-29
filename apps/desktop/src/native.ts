@@ -52,12 +52,20 @@ export async function invokeNative(
   }
   const id = `job:desktop-${Date.now()}-${++nextInvocation}`;
   let retired = false;
+  let acknowledgeRegistration: (() => void) | undefined;
+  const registration = new Promise<void>((resolve) => {
+    acknowledgeRegistration = resolve;
+  });
   const unlisten: Array<() => void> = [];
   const releaseListeners = () => {
     for (const stop of unlisten.splice(0)) stop();
   };
   try {
-    for (const channel of ["dezoomify://progress", "dezoomify://partial"]) {
+    for (const channel of [
+      "dezoomify://registered",
+      "dezoomify://progress",
+      "dezoomify://partial",
+    ]) {
       const stop = await api.listen(channel, ({ payload }) => {
         if (
           retired ||
@@ -68,6 +76,7 @@ export async function invokeNative(
         )
           return;
         assertNoTileBytes(payload);
+        if (channel === "dezoomify://registered") acknowledgeRegistration?.();
         if (channel === "dezoomify://progress" && "progress" in payload)
           callbacks.progress(payload.progress as Progress);
         if (
@@ -100,6 +109,9 @@ export async function invokeNative(
       return output as Output;
     })
     .finally(releaseListeners);
+  // Controls may reach Rust on a different task from the dezoomify command.
+  // Its acknowledgement (or final response) proves the job table is ready.
+  await Promise.race([registration, finished]);
   return {
     id,
     finished,

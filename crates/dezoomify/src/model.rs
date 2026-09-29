@@ -644,6 +644,14 @@ pub struct Tile {
     pub placement: TilePlacement,
 }
 
+/// Final plan position and index of a tile already acquired during probing.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct ReusedTile {
+    pub index: u32,
+    pub position: Point,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct FinishRequest {
@@ -651,6 +659,7 @@ pub struct FinishRequest {
     pub format: OutputFormat,
     pub title: Option<String>,
     pub missing: Vec<u32>,
+    pub reused_tiles: Vec<ReusedTile>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

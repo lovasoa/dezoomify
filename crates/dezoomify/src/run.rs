@@ -7,7 +7,7 @@ use crate::{
 };
 use core::discovery::{DiscoveryInput, DiscoveryLimits};
 use futures_util::{StreamExt, stream};
-use std::collections::HashSet;
+use std::{cell::RefCell, collections::HashSet};
 
 /// Dezoom one input using the platform capabilities owned by `host`.
 /// Settlement runs before every return, including validation and cancellation.
@@ -28,8 +28,15 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
         total: None,
         ..Default::default()
     });
-    let catalog = discover(inputs, options, host).await?;
-    let (image, level) = select(catalog, options, host).await?;
+    let followed = RefCell::new(
+        inputs
+            .iter()
+            .filter(|input| input.kind.unwrap_or_default() == DiscoveryInputKind::Source)
+            .map(|input| input.url.clone())
+            .collect(),
+    );
+    let catalog = discover(inputs, options, host, &followed).await?;
+    let (image, level) = select(catalog, options, host, &followed).await?;
     let mut progress = Progress {
         phase: ProgressPhase::Planning,
         source_format: Some(image.format.into()),
@@ -85,11 +92,23 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
     progress.total = Some(total);
     progress.completed = previous.len() as u64;
     host.report(progress.clone());
+    let mut reused_tiles = Vec::with_capacity(previous.len());
     let tiles = tiles
         .filter(|tile| {
-            !tile
-                .as_ref()
-                .is_ok_and(|tile| previous.contains(&tile.destination))
+            if let Ok(tile) = tile
+                && previous.contains(&tile.destination)
+            {
+                reused_tiles.push(ReusedTile {
+                    index: tile.ordinal,
+                    position: Point {
+                        x: tile.destination.x,
+                        y: tile.destination.y,
+                    },
+                });
+                false
+            } else {
+                true
+            }
         })
         .map(|tile| {
             tile.map(|tile| portable_tile(tile, canvas.clone()))
@@ -160,6 +179,7 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
         format: options.output,
         title: image.title,
         missing: missing.into_iter().map(|(tile, _)| tile.index).collect(),
+        reused_tiles,
     })
     .await
 }
@@ -168,6 +188,7 @@ async fn discover(
     inputs: Vec<JobInput>,
     options: &Options,
     host: &impl Host,
+    followed: &RefCell<HashSet<String>>,
 ) -> Result<DiscoveryCatalog, Error> {
     let registry = match options.format.as_deref() {
         None | Some("auto") => core::default_registry(),
@@ -208,10 +229,18 @@ async fn discover(
                     .await
                     .map_err(|error| {
                         let mut error = crate::retry::classify(error);
-                        error.request.get_or_insert(uri);
+                        error.request.get_or_insert_with(|| uri.clone());
                         error
                     })?;
                 if let ResourceRead::Response { response } = &result {
+                    if let Some(final_uri) =
+                        response.final_uri.as_ref().filter(|uri| !uri.is_empty())
+                    {
+                        let mut followed = followed.borrow_mut();
+                        if followed.contains(&uri) {
+                            followed.insert(final_uri.clone());
+                        }
+                    }
                     if response.bytes.is_empty() {
                         return Err(Error::new(
                             "job.empty-resource",
@@ -284,8 +313,9 @@ async fn select(
     mut catalog: DiscoveryCatalog,
     options: &Options,
     host: &impl Host,
+    followed: &RefCell<HashSet<String>>,
 ) -> Result<(core::ResolvedImage, usize), Error> {
-    let mut followed = HashSet::new();
+    let mut remaining_follows = options.max_deferred_follows;
     loop {
         host.checkpoint(Gate::Cancellation).await?;
         if catalog.is_empty() {
@@ -325,16 +355,16 @@ async fn select(
         };
         match entry {
             DiscoveredEntry::Deferred(resource) => {
-                if followed.len() >= options.max_deferred_follows as usize
-                    || !followed.insert(resource.uri.clone())
-                {
+                if remaining_follows == 0 || !followed.borrow_mut().insert(resource.uri.clone()) {
                     return Err(Error::new(
                         "job.deferred-limit",
                         ErrorPhase::Discovery,
                         "deferred image follow limit or cycle",
                     ));
                 }
-                catalog = discover(vec![JobInput::new(&resource.uri)], options, host).await?;
+                remaining_follows -= 1;
+                catalog =
+                    discover(vec![JobInput::new(&resource.uri)], options, host, followed).await?;
             }
             DiscoveredEntry::Ready(image) => {
                 let level = match &options.selection {

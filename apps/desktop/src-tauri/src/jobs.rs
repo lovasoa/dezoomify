@@ -11,6 +11,7 @@ use std::{
     },
 };
 
+pub const CHANNEL_REGISTERED: &str = "dezoomify://registered";
 pub const CHANNEL_PROGRESS: &str = "dezoomify://progress";
 pub const CHANNEL_PARTIAL: &str = "dezoomify://partial";
 pub const CHANNEL_DEEP_LINK: &str = "dezoomify://deep-link-pending";
@@ -178,6 +179,49 @@ mod tests {
         table.release_job("job:test");
         assert!(registration.controls.is_cancelled());
         assert!(table.saved_output_for("job:test").is_none());
+    }
+    #[test]
+    fn cancellation_after_registration_prevents_native_work_and_publication() {
+        use dezoomify_native::{JobOptions, NativeHost, OutputTarget};
+
+        for release in [false, true] {
+            let work = std::env::temp_dir().join(format!(
+                "dezoomify-desktop-registration-{}-{release}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&work).unwrap();
+            let output = work.join("image.png");
+            let mut table = JobTable::new();
+            let registration = table.insert("job:test").unwrap();
+            // The frontend can now cancel or retire while the native worker
+            // is still waiting to start on the blocking executor.
+            if release {
+                table.release_job("job:test");
+            } else {
+                table.live("job:test").unwrap().controls.cancel();
+            }
+            let mut host = NativeHost::new(JobOptions {
+                input_url: work.join("image.dzi").to_string_lossy().into_owned(),
+                output: OutputTarget::File(output.clone()),
+                cache_dir: Some(work.join("cache")),
+                ..JobOptions::default()
+            })
+            .unwrap();
+            host.controls = registration.controls.clone();
+            let error = host
+                .transport
+                .block_on(dezoomify::dezoomify(
+                    host.inputs(),
+                    host.algorithm_options(),
+                    &host,
+                ))
+                .unwrap_err();
+            assert_eq!(error.code, "job.cancelled");
+            assert!(host.publication().is_none());
+            assert!(!output.exists());
+            drop(host);
+            std::fs::remove_dir_all(work).unwrap();
+        }
     }
     #[test]
     fn expired_interaction_cannot_answer_a_new_question() {

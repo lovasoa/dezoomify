@@ -68,8 +68,10 @@ returns the same Output value as the shared algorithm. Progress and awaited
 partial choices use generated values associated with the owning invocation.
 Dedicated pause, resume, cancel, answer, and release calls control that task.
 
-The frontend subscribes before starting. Retired tasks cannot update a replacement
-view. Releasing unfinished work cancels it; the invocation completes after cleanup.
+The frontend subscribes before starting and waits for native registration before
+exposing task controls. A quick cancel or replacement therefore reaches the
+registered task. Retired tasks cannot update a replacement view. Releasing
+unfinished work cancels it; the invocation completes after cleanup.
 A completed result keeps its output handle until retirement, without deleting the
 published file.
 
