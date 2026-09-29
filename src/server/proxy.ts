@@ -205,8 +205,8 @@ export async function handleProxyRequest(
     // (cookies, auth, and caller referer/origin never flow upstream).
     // Referer is always the target (legacy /proxy parity).
     const upstreamHeaders = stripUpstreamHeaders(forwardedClientHeaders(req.headers ?? {}));
-    if (upstreamHeaders["accept"] === undefined) upstreamHeaders["accept"] = "application/json";
-    upstreamHeaders["referer"] = req.targetUrl;
+    if (upstreamHeaders.accept === undefined) upstreamHeaders.accept = "application/json";
+    upstreamHeaders.referer = req.targetUrl;
     const ifNoneMatch = req.ifNoneMatch ?? headerCase(req.headers ?? {}, "if-none-match");
     if (ifNoneMatch) upstreamHeaders["if-none-match"] = ifNoneMatch;
     const ifModifiedSince =
@@ -239,7 +239,7 @@ export async function handleProxyRequest(
       const notModifiedExposed: string[] = [];
       const notModifiedEtag = res.headers.get("etag");
       if (notModifiedEtag) {
-        notModifiedHeaders["etag"] = notModifiedEtag;
+        notModifiedHeaders.etag = notModifiedEtag;
         notModifiedExposed.push("etag");
       }
       const notModifiedLastModified = res.headers.get("last-modified");
@@ -343,7 +343,7 @@ export async function handleProxyRequest(
     const exposed = [PROXY_UPSTREAM_URL_HEADER];
     const etag = res.headers.get("etag");
     if (etag) {
-      outHeaders["etag"] = etag;
+      outHeaders.etag = etag;
       exposed.push("etag");
     }
     const lastModified = res.headers.get("last-modified");

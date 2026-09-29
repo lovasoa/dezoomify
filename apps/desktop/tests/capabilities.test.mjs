@@ -104,7 +104,7 @@ test("generated files are canonical bytes (LF, pretty, no drift)", () => {
     "../../../generated/desktop-capabilities.json",
   ]) {
     const raw = readText(rel);
-    const canonical = JSON.stringify(JSON.parse(raw), null, 2) + "\n";
+    const canonical = `${JSON.stringify(JSON.parse(raw), null, 2)}\n`;
     assert.equal(raw, canonical, `${rel} not canonical 2-space JSON`);
   }
 });

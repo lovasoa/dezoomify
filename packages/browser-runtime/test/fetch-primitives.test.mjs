@@ -98,7 +98,7 @@ test("base64 payload decoding round-trips and enforces bounds", () => {
   const data = Buffer.from(bytes).toString("base64");
   assert.deepEqual(decodeBase64Payload(data, 8), bytes);
   assert.equal(decodeBase64Payload(data, 3), null);
-  for (const bad of ["", null, 42, "!!!", "A".repeat(10) + "!", data.slice(0, -1) + "%"]) {
+  for (const bad of ["", null, 42, "!!!", `${"A".repeat(10)}!`, `${data.slice(0, -1)}%`]) {
     assert.equal(decodeBase64Payload(bad, 1024), null, String(bad)?.slice(0, 20));
   }
 });

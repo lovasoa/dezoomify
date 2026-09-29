@@ -123,7 +123,7 @@
 }
 
 [hidden] {
-  display: none !important;
+  display: none;
 }
 
 html {
@@ -1031,10 +1031,10 @@ abbr[title] {
     animation: none;
   }
   .dz-pulse {
-    animation: none !important;
+    animation: none;
   }
   .dz-indeterminate .dz-progress-done {
-    animation: none !important;
+    animation: none;
   }
 }
 
@@ -1385,17 +1385,6 @@ abbr[title] {
   color: inherit;
 }
 
-.dz-guidance-item:visited .dz-guidance-item-title,
-.dz-suggestion-card:visited .dz-suggestion-title {
-  color: var(--dz-link-color);
-}
-
-.dz-guidance-item:focus-visible,
-.dz-suggestion-card:focus-visible {
-  outline: none;
-  box-shadow: var(--dz-focus-ring);
-}
-
 .dz-guidance-item-header,
 .dz-suggestion-title {
   font-weight: 600;
@@ -1406,6 +1395,17 @@ abbr[title] {
   align-items: center;
   gap: 0.5rem;
   transition: color 0.15s ease;
+}
+
+.dz-guidance-item:visited .dz-guidance-item-title,
+.dz-suggestion-card:visited .dz-suggestion-title {
+  color: var(--dz-link-color);
+}
+
+.dz-guidance-item:focus-visible,
+.dz-suggestion-card:focus-visible {
+  outline: none;
+  box-shadow: var(--dz-focus-ring);
 }
 
 .dz-guidance-item:hover .dz-guidance-item-title,

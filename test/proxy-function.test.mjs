@@ -81,12 +81,12 @@ test("cross-origin request gets no CORS grant (browser blocks read)", async (t) 
   assert.equal(res.headers.get("access-control-allow-origin"), null);
 });
 
-test("malformed JSON body -> 400", async (t) => {
+test("malformed JSON body -> 400", async (_t) => {
   const res = await onRequestPost({ request: postRequest("{not json") });
   assert.equal(res.status, 400);
 });
 
-test("missing fields -> 422", async (t) => {
+test("missing fields -> 422", async (_t) => {
   const res = await onRequestPost({ request: postRequest('{"protocolVersion":1}') });
   assert.equal(res.status, 422);
   assert.equal((await res.json()).code, "PROXY_POLICY_DENIED");
@@ -232,7 +232,7 @@ test("relay exposes the post-redirect upstream URL for relative tile bases", asy
   assert.match(exposed.toLowerCase(), /x-proxy-upstream-url/);
 });
 
-test("OPTIONS preflight: same origin allowed, cross origin refused", async (t) => {
+test("OPTIONS preflight: same origin allowed, cross origin refused", async (_t) => {
   const ok = await onRequestOptions({
     request: new Request(SITE_URL, {
       method: "OPTIONS",

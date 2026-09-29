@@ -114,7 +114,7 @@ const desktopMemoryFallback = new Map<string, string>();
 const desktopHistoryStore = {
   getItem(key: string): string | null {
     try {
-      const storage = (globalThis as Record<string, unknown>)["localStorage"] as
+      const storage = (globalThis as Record<string, unknown>).localStorage as
         | { getItem?: (key: string) => string | null }
         | undefined;
       if (storage && typeof storage.getItem === "function") {
@@ -125,7 +125,7 @@ const desktopHistoryStore = {
   },
   setItem(key: string, value: string): void {
     try {
-      const storage = (globalThis as Record<string, unknown>)["localStorage"] as
+      const storage = (globalThis as Record<string, unknown>).localStorage as
         | { setItem?: (key: string, value: string) => void }
         | undefined;
       if (storage && typeof storage.setItem === "function") {
@@ -137,7 +137,7 @@ const desktopHistoryStore = {
   },
   removeItem(key: string): void {
     try {
-      const storage = (globalThis as Record<string, unknown>)["localStorage"] as
+      const storage = (globalThis as Record<string, unknown>).localStorage as
         | { removeItem?: (key: string) => void }
         | undefined;
       if (storage && typeof storage.removeItem === "function") {

@@ -158,7 +158,7 @@ export function createDiagnosticRecorder(options: {
       (state.records.length >= DIAGNOSTIC_MAX_RECORDS || recordBytes + bytes > 256 * 1024)
     ) {
       state.records.shift();
-      recordBytes -= sizes.shift()!;
+      recordBytes -= sizes.shift() ?? 0;
       state.omitted_records++;
     }
     if (bytes <= 256 * 1024) {
@@ -217,7 +217,14 @@ export function createDiagnosticRecorder(options: {
     state.outcome = make(event.endsWith("failed") ? "error" : "info", event, fields);
   }
   context(options.context);
-  return { record, context, count, observe, finish, report: () => boundDiagnosticReport(state) };
+  return {
+    record,
+    context,
+    count,
+    observe,
+    finish,
+    report: () => boundDiagnosticReport(state),
+  };
 }
 
 /** Also apply the total budget after joining native and frontend context. */
@@ -231,8 +238,10 @@ export function boundDiagnosticReport(report: DiagnosticReport): DiagnosticRepor
     result.failures.pop();
     result.omitted_records++;
   }
-  while (size(result) > DIAGNOSTIC_MAX_BYTES && Object.keys(result.context).length > 0) {
-    delete result.context[Object.keys(result.context).at(-1)!];
+  const context_entries = Object.entries(result.context);
+  while (size(result) > DIAGNOSTIC_MAX_BYTES && context_entries.length > 0) {
+    context_entries.pop();
+    result.context = Object.fromEntries(context_entries);
     result.truncated_fields++;
   }
   return result;

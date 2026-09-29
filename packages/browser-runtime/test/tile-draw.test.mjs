@@ -17,7 +17,7 @@ function hooks() {
 function ctx2d(drawn = []) {
   return {
     drawn,
-    drawImage(source, sx, sy, sw, sh, dx, dy, dw, dh) {
+    drawImage(_source, _sx, _sy, sw, sh, dx, dy, dw, dh) {
       drawn.push({ sw, sh, dx, dy, dw, dh });
     },
   };
@@ -101,7 +101,7 @@ test("loadTileImage resolves on load and rejects on error", async () => {
     addEventListener(type, fn) {
       this.handlers[type] = fn;
     }
-    set src(v) {
+    set src(_v) {
       this.handlers.load?.();
     }
   }
@@ -116,7 +116,7 @@ test("loadTileImage resolves on load and rejects on error", async () => {
     addEventListener(type, fn) {
       if (type === "error") queueMicrotask(fn);
     }
-    set src(v) {}
+    set src(_v) {}
   }
   await assert.rejects(
     loadTileImage("https://a.test/2.png", {

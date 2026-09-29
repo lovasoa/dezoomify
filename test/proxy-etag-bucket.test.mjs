@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { clearProxyOriginBuckets, handleProxyRequest } from "../src/server/proxy.ts";
-import { proxyOriginKey, stripUpstreamHeaders } from "../src/server/security.ts";
+import { proxyOriginKey } from "../src/server/security.ts";
 
 function hdr(obj) {
   const lower = {};
@@ -24,7 +24,7 @@ test("conditional headers flow upstream and validators return with no-store", as
     {
       websiteOrigin: "https://site.test",
       disableOriginBucket: true,
-      fetchUpstream: async (url, init) => {
+      fetchUpstream: async (_url, init) => {
         seenHeaders = init.headers;
         return {
           status: 200,
@@ -43,7 +43,7 @@ test("conditional headers flow upstream and validators return with no-store", as
   assert.equal(res.status, 200);
   assert.equal(res.headers["cache-control"], "no-store");
   assert.equal(seenHeaders["if-none-match"], '"abc123"');
-  assert.equal(res.headers["etag"], '"abc123"');
+  assert.equal(res.headers.etag, '"abc123"');
   assert.equal(res.headers["last-modified"], "Wed, 01 Jan 2025 00:00:00 GMT");
   const exposed = res.headers["access-control-expose-headers"] ?? "";
   assert.match(exposed.toLowerCase(), /etag/);
@@ -73,7 +73,7 @@ test("upstream 304 returns without a body and keeps no-store", async () => {
   assert.equal(res.status, 304);
   assert.equal(res.body, undefined);
   assert.equal(res.headers["cache-control"], "no-store");
-  assert.equal(res.headers["etag"], '"abc123"');
+  assert.equal(res.headers.etag, '"abc123"');
 });
 
 test("per-origin bucket fails closed with 429 without recording URLs", async () => {

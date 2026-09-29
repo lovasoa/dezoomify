@@ -13,7 +13,7 @@ export function extensionForSaveFormat(format: unknown): string {
 // Control characters (U+0000-U+001F) are illegal in portable file stems.
 // The class is built from character codes so the source stays plain ASCII.
 const STEM_CONTROL_CLASS = new RegExp(
-  "[" + String.fromCharCode(0) + "-" + String.fromCharCode(31) + "]",
+  `[${String.fromCharCode(0)}-${String.fromCharCode(31)}]`,
   "g",
 );
 

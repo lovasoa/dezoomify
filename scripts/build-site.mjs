@@ -119,7 +119,7 @@ function main() {
   // 4. Assemble the legacy site at /, help below /beta/, and Function routes.
   copyLegacy();
   copyTree("help", path.join(BETA, "help"));
-  fs.writeFileSync(path.join(DIST, "_routes.json"), JSON.stringify(ROUTES, null, 2) + "\n");
+  fs.writeFileSync(path.join(DIST, "_routes.json"), `${JSON.stringify(ROUTES, null, 2)}\n`);
 
   // 5. Sanity: the served tree must contain the deployed contract's keys.
   for (const must of [

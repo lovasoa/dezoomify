@@ -93,21 +93,21 @@ export function pushHistory(
 function isValidEntry(raw: unknown): raw is HistoryEntry {
   if (!raw || typeof raw !== "object") return false;
   const entry = raw as Record<string, unknown>;
-  if (typeof entry["origin"] !== "string" || (entry["origin"] as string) === "") return false;
+  if (typeof entry.origin !== "string" || (entry.origin as string) === "") return false;
   try {
-    const parsed = new URL(entry["origin"] as string);
+    const parsed = new URL(entry.origin as string);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
   } catch {
     return false;
   }
-  if (typeof entry["url"] !== "string" || (entry["url"] as string).trim() === "") return false;
+  if (typeof entry.url !== "string" || (entry.url as string).trim() === "") return false;
   try {
-    const parsedUrl = new URL((entry["url"] as string).trim());
+    const parsedUrl = new URL((entry.url as string).trim());
     if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") return false;
   } catch {
     return false;
   }
-  if (typeof entry["at"] !== "number" || !Number.isFinite(entry["at"] as number)) return false;
+  if (typeof entry.at !== "number" || !Number.isFinite(entry.at as number)) return false;
   for (const key of ["width", "height"] as const) {
     const value = entry[key];
     if (
@@ -117,7 +117,7 @@ function isValidEntry(raw: unknown): raw is HistoryEntry {
       return false;
     }
   }
-  if (entry["format"] !== undefined && typeof entry["format"] !== "string") return false;
+  if (entry.format !== undefined && typeof entry.format !== "string") return false;
   return true;
 }
 
