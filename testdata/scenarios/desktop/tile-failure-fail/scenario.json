@@ -1,5 +1,5 @@
 {
-  "description": "Desktop fail-closed tiles: missing tiles with the fail policy report tile.download-failed and write no output",
+  "description": "Desktop discard choice: missing tiles report job.partial-discarded and write no output",
   "id": "desktop/tile-failure-fail",
   "input": {
     "mode": "gateway",

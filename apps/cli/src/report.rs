@@ -33,9 +33,8 @@ pub fn machine_event_detail(
     serde_json::json!({"job": job, "seq": seq, "kind": kind, "detail": detail}).to_string()
 }
 
-/// Fields for the terminal machine-readable completion record. A struct
-/// (not eight positional args) keeps `clippy::too_many_arguments` quiet
-/// while the record stays additive: `partial` distinguishes a kept
+/// Fields for the terminal machine-readable completion record.
+/// `partial` distinguishes a kept
 /// `.partial` sibling (`partial-completed`) from a complete save.
 pub struct CompletedOutput<'a> {
     pub job: &'a str,
@@ -151,7 +150,7 @@ pub fn job_diagnostics(level: &str) -> Diagnostics {
             DiagnosticLevel::Debug => 3,
             DiagnosticLevel::Trace => 4,
         };
-        // Existing human progress and final output own these milestones.
+        // Human progress and final output report these milestones.
         if rank > threshold
             || matches!(
                 record.event.as_str(),

@@ -28,7 +28,7 @@ const options = {
 };
 
 function host(overrides = {}) {
-  const observed = { reads: [], tiles: [], progress: [], delays: [], settled: 0 };
+  const observed = { reads: [], tiles: [], progress: [], warnings: [], delays: [], settled: 0 };
   return {
     observed,
     async fetch(request) {
@@ -67,6 +67,9 @@ function host(overrides = {}) {
     },
     report(progress) {
       observed.progress.push(progress);
+    },
+    warn(message) {
+      observed.warnings.push(message);
     },
     async settle() {
       observed.settled += 1;
@@ -112,10 +115,18 @@ test("structured Host rejection retains request facts", async () => {
   assert.equal(platform.observed.settled, 1);
 });
 
-test("malformed JavaScript input and Host return values fail as typed errors", async () => {
-  await assert.rejects(wasm.dezoomify("invalid", options, host()), {
-    code: "binding.invalid-value",
-  });
+test("malformed JavaScript arguments and Host returns fail as typed errors and settle", async () => {
+  for (const [inputs, configuration] of [
+    ["invalid", options],
+    [[{ url }], "invalid"],
+  ]) {
+    const platform = host();
+    await assert.rejects(wasm.dezoomify(inputs, configuration, platform), {
+      code: "binding.invalid-value",
+    });
+    assert.equal(platform.observed.settled, 1);
+    assert.deepEqual(platform.observed.reads, []);
+  }
   const platform = host({
     async acquireTile() {
       return "invalid";
@@ -136,6 +147,26 @@ test("processing uses Uint8Array without numeric body arrays", () => {
   assert.throws(() => wasm.applyProcessing("unknown-recipe", bytes), {
     code: "binding.invalid-value",
   });
+});
+
+test("accepted format warnings reach the Host without preventing output", async () => {
+  const platform = host();
+  const output = await wasm.dezoomify(
+    [
+      {
+        url: "https://images.test/ImageProperties.xml",
+        contents:
+          '<IMAGE_PROPERTIES WIDTH="500" HEIGHT="500" NUMTILES="9" NUMIMAGES="1" VERSION="1.8" TILESIZE="256"/>',
+      },
+    ],
+    { ...options, format: "zoomify" },
+    platform,
+  );
+  assert.equal(output.complete, true);
+  assert.deepEqual(platform.observed.warnings, [
+    "Zoomify tile count mismatch: computed 5, metadata declares 9",
+  ]);
+  assert.equal(platform.observed.settled, 1);
 });
 
 test("Rust classifies raw Host errors while retaining exact failure context", async () => {

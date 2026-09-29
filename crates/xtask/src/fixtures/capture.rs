@@ -240,8 +240,6 @@ fn check_capture_out(out: &str) -> Result<(), String> {
         || out.ends_with('/')
         || out.contains("..")
         || out.contains('\\')
-        || out == "schema"
-        || out.starts_with("schema/")
     {
         return Err(format!("bad --out scenario id '{out}'"));
     }
@@ -545,7 +543,6 @@ mod tests {
             "127.0.0.1"
         );
         assert!(check_capture_out("../evil").is_err());
-        assert!(check_capture_out("schema").is_err());
         assert!(check_capture_out("Web/Upper").is_err());
     }
 

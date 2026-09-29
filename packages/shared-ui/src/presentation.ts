@@ -1,21 +1,5 @@
-import type { MissingTiles, Output, Progress } from "@dezoomify/wasm-bindings";
-import { splitGapLedger } from "./components.ts";
+import type { Error as JobError, MissingTiles, Output, Progress } from "@dezoomify/wasm-bindings";
 import { type I18nKey, t } from "./i18n.ts";
-import { renderTransportLabel } from "./labels.ts";
-
-export interface StructuredError {
-  code: string;
-  category: string;
-  retryable: boolean;
-  message: string;
-  detail?: string;
-  transport?: string;
-  phase?: string;
-  url?: string;
-  http?: number;
-  preview?: string;
-  extras?: string[];
-}
 
 export interface ResolutionChoice {
   selected: { width: number; height: number };
@@ -41,26 +25,8 @@ export interface Presentation {
   detailVars?: Record<string, string | number>;
   progress: { current: number; total: number | null } | null;
   paused: boolean;
-  terminal: {
-    kind: "completed" | "partial-completed" | "failed" | "cancelled";
-    error?: StructuredError;
-    output?: {
-      doneTiles: number;
-      totalTiles: number | null;
-      failedTiles: number;
-      partial: boolean;
-      missingTiles: string[];
-    };
-    gapShown?: string;
-    gapRest?: number;
-    gapCount?: number;
-  } | null;
-  transport: string | null;
-  transportLabel: string | null;
-  canCancel: boolean;
-  canReset: boolean;
-  displayOnly: boolean;
-  partial: boolean;
+  error?: JobError;
+  output?: Output;
   decision?: MissingTiles;
   resolution?: ResolutionChoice;
 }
@@ -79,9 +45,8 @@ const headlines: Record<PresentationStatus, I18nKey> = {
 
 export function presentStatus(
   status: PresentationStatus,
-  opts?: { transport?: string | null; error?: StructuredError; partial?: boolean },
+  opts?: { error?: JobError },
 ): Presentation {
-  const transport = opts?.transport ?? null;
   const finished = ["completed", "failed", "cancelled", "display-only"].includes(status);
   return {
     phase: status === "idle" || finished ? (status as Presentation["phase"]) : "job",
@@ -89,36 +54,19 @@ export function presentStatus(
     ...(status === "discovering" ? { detailKey: "view.step.contactingDetail" as const } : {}),
     progress: null,
     paused: false,
-    terminal:
+    error:
       status === "failed"
-        ? {
-            kind: "failed",
-            error: opts?.error ?? {
-              code: "UNKNOWN",
-              category: "unknown",
-              retryable: true,
-              message: t("view.fail.fallback"),
-            },
-          }
-        : status === "cancelled"
-          ? { kind: "cancelled" }
-          : status === "completed"
-            ? { kind: opts?.partial ? "partial-completed" : "completed" }
-            : null,
-    transport,
-    transportLabel: transport === null ? null : renderTransportLabel(transport),
-    canCancel: !finished && status !== "idle",
-    canReset: finished,
-    displayOnly: status === "display-only",
-    partial: opts?.partial === true,
+        ? (opts?.error ?? {
+            code: "UNKNOWN",
+            phase: "output",
+            retryable: true,
+            message: t("view.fail.fallback"),
+          })
+        : undefined,
   };
 }
 
-export function presentProgress(
-  progress: Progress,
-  transport: string | null,
-  opts?: { paused?: boolean; displayOnly?: boolean },
-): Presentation {
+export function presentProgress(progress: Progress, opts?: { paused?: boolean }): Presentation {
   const status = {
     discovery: "discovering",
     planning: "preflighting",
@@ -128,53 +76,31 @@ export function presentProgress(
   const selected = progress.selected;
   const maximum = progress.maximum;
   return {
-    ...presentStatus(status[progress.phase], { transport }),
+    ...presentStatus(status[progress.phase]),
     progress:
       progress.total != null || progress.completed > 0
         ? { current: progress.completed, total: progress.total ?? null }
         : null,
     paused: opts?.paused === true,
-    displayOnly: opts?.displayOnly === true,
     ...(selected && maximum && selected.width * selected.height < maximum.width * maximum.height
       ? { resolution: { selected, maximum } }
       : {}),
   };
 }
 
-export function presentOutput(
-  output: Output,
-  progress: Progress | undefined,
-  transport: string | null,
-): Presentation {
+export function presentOutput(output: Output, progress: Progress | undefined): Presentation {
   const displayOnly = output.disposition === "display-only";
-  const missingTiles = output.missing.map(String);
-  const gap = splitGapLedger(missingTiles);
-  const presented = presentStatus(displayOnly ? "display-only" : "completed", {
-    transport,
-    partial: !output.complete,
-  });
+  const presented = presentStatus(displayOnly ? "display-only" : "completed");
   return {
     ...presented,
     progress: progress ? { current: progress.completed, total: progress.total ?? null } : null,
-    ...(progress ? { resolution: presentProgress(progress, transport).resolution } : {}),
-    terminal: {
-      kind: output.complete ? "completed" : "partial-completed",
-      output: {
-        doneTiles: progress?.completed ?? 0,
-        totalTiles: progress?.total ?? null,
-        failedTiles: missingTiles.length,
-        partial: !output.complete,
-        missingTiles,
-      },
-      gapShown: gap.shown,
-      gapRest: gap.rest,
-      gapCount: gap.count,
-    },
+    ...(progress ? { resolution: presentProgress(progress).resolution } : {}),
+    output,
   };
 }
 
-export function presentFailure(error: StructuredError, transport: string | null): Presentation {
-  return presentStatus("failed", { error, transport });
+export function presentFailure(error: JobError): Presentation {
+  return presentStatus("failed", { error });
 }
 
 export function presentIdle(): Presentation {

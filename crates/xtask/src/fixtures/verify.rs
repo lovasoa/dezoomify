@@ -1,13 +1,11 @@
 //! `cargo xtask fixtures verify`: read-only scenario-corpus validation.
 //!
-//! Checks schemas, route/payload references, byte hashes, sizes, duplicate
+//! Checks scenario metadata, route/payload references, byte hashes, sizes, duplicate
 //! IDs, incompatible duplicate served URLs, unlisted/missing files, unsafe
 //! traversal, provenance, and sensitive flags. Pure validation: no network,
 //! no writes, no side effects.
 
-use super::common::{
-    check_schemas, check_traversal, collect_files, hex, load_manifest, Route, RoutesFile,
-};
+use super::common::{check_traversal, collect_files, hex, load_manifest, Route, RoutesFile};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -18,7 +16,6 @@ pub fn verify(args: &[String]) -> Result<(), String> {
     }
     let root = crate::repo_root();
     let dir = root.join("testdata/scenarios");
-    check_schemas(&dir)?;
     let manifest = load_manifest(&dir)?;
     if manifest.version != 1 {
         return Err("manifest version must be 1".to_string());
@@ -86,9 +83,6 @@ pub fn verify(args: &[String]) -> Result<(), String> {
     }
     let mut scenario_count = 0;
     for scenario in &scenario_dirs {
-        if scenario == "schema" {
-            continue;
-        }
         let sdir = dir.join(scenario);
         if !sdir.is_dir() {
             return Err(format!("scenario dir missing: {scenario}"));
@@ -197,15 +191,12 @@ pub fn verify(args: &[String]) -> Result<(), String> {
             ));
         }
     }
-    // Unlisted files: walk scenario dirs, excluding schema/ and manifest.json.
+    // Unlisted files: walk scenario dirs, excluding manifest.json.
     let mut actual = BTreeSet::new();
     collect_files(&dir, &dir, &mut actual)?;
     actual.remove("manifest.json");
     // Root documentation is owned content, not fixture data.
     actual.remove("README.md");
-    for f in actual.iter().filter(|f| f.starts_with("schema/")) {
-        seen_files.insert(f.clone());
-    }
     // scenario.json/routes.json/expected/pixels are referenced implicitly.
     for f in actual.iter() {
         if f.ends_with("/scenario.json")

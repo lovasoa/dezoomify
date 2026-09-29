@@ -1,33 +1,4 @@
-// Canonical presentation labels and save-name helpers.
-// Pure, dependency-free, erasable-syntax-only: every product renders
-// transports and suggested file names through these values, never a local
-// duplicate.
-
-export const DIRECT_TRANSPORT_LABEL = "Direct from your browser" as const;
-export const PROXY_TRANSPORT_LABEL = "Metadata proxy" as const;
-export const DISPLAY_TRANSPORT_LABEL = "Display only" as const;
-export const BROWSER_SESSION_TRANSPORT_LABEL = "Browser session" as const;
-export const NATIVE_TRANSPORT_LABEL = "Native" as const;
-
-export function renderTransportLabel(transport: string): string {
-  if (transport === "direct") return DIRECT_TRANSPORT_LABEL;
-  if (transport === "metadata-proxy") return PROXY_TRANSPORT_LABEL;
-  if (transport === "display-only") return DISPLAY_TRANSPORT_LABEL;
-  if (transport === "browser-session") return BROWSER_SESSION_TRANSPORT_LABEL;
-  if (transport === "native") return NATIVE_TRANSPORT_LABEL;
-  return transport;
-}
-
-export type SaveNameFormat =
-  | "png"
-  | "jpeg"
-  | "jpg"
-  | "tiff"
-  | "tif"
-  | "zif"
-  | "webp"
-  | "iiif"
-  | "iiif-dir";
+// Portable suggested file names shared by the graphical products.
 
 export function extensionForSaveFormat(format: unknown): string {
   const lower = typeof format === "string" ? format.toLowerCase() : "png";

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { suggestedNameFor } from "../../shared-ui/src/labels.ts";
 import {
   BROWSER_SAVE_COLOR_WARNING,
   canvasToPngBlob,
@@ -77,23 +78,39 @@ test("canvasToPngBlob preserves a taint SecurityError for display-only fallback"
   assert.equal(isCanvasTaintError(taint), true);
 });
 
-test("saveBlobViaAnchor downloads the core title or suggested WxH fallback", () => {
-  const appended = [];
-  const anchor = {
-    href: "",
-    download: "",
-    clicked: false,
-    click() {
-      this.clicked = true;
-    },
-    remove() {},
-  };
-  const doc = { createElement: () => anchor, body: { appendChild: (el) => appended.push(el) } };
-  saveBlobViaAnchor(doc, "blob:abc", 800, 600, "An image");
-  assert.equal(anchor.href, "blob:abc");
-  assert.equal(anchor.download, "An image.png");
-  assert.equal(anchor.clicked, true);
-  assert.equal(appended.length, 1);
+test("saveBlobViaAnchor uses the prepared filename and removes its temporary anchor", () => {
+  for (const [title, expectedName] of [
+    ["An image", "An image.png"],
+    [undefined, "dezoomify-800x600.png"],
+  ]) {
+    const events = [];
+    const anchor = {
+      href: "",
+      download: "",
+      click() {
+        events.push("click");
+      },
+      remove() {
+        events.push("remove");
+      },
+    };
+    const doc = {
+      createElement: (tag) => {
+        assert.equal(tag, "a");
+        return anchor;
+      },
+      body: {
+        appendChild: (el) => {
+          assert.equal(el, anchor);
+          events.push("append");
+        },
+      },
+    };
+    saveBlobViaAnchor(doc, "blob:abc", suggestedNameFor(800, 600, "png", title));
+    assert.equal(anchor.href, "blob:abc");
+    assert.equal(anchor.download, expectedName);
+    assert.deepEqual(events, ["append", "click", "remove"]);
+  }
 });
 
 test("browser saves warn about the stripped color profile", () => {

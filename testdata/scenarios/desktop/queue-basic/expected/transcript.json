@@ -34,7 +34,7 @@
     },
     {
       "entry": "jobq:1",
-      "errorCode": "tile.download-failed",
+      "errorCode": "job.partial-discarded",
       "transition": "failed"
     },
     {

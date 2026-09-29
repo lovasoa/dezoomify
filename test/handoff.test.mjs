@@ -3,7 +3,7 @@ import test from "node:test";
 import { validateDeepLinkPayload } from "../apps/desktop/src/errorCopy.ts";
 import { desktopHandoffLink } from "../packages/browser-runtime/src/plan-gates.ts";
 import { EN, t } from "../packages/shared-ui/src/i18n.ts";
-import { presentFailure, presentStatus } from "../packages/shared-ui/src/presentation.ts";
+import { presentFailure, presentOutput } from "../packages/shared-ui/src/presentation.ts";
 import {
   handoffOriginFor,
   isFileHandoffSource,
@@ -102,15 +102,13 @@ const viewCallbacks = {
   onSave: () => {},
 };
 
-const failedState = presentFailure(
-  {
-    code: "PLAN_INVALID",
-    category: "discovery",
-    retryable: false,
-    message: "This picture is too large for a browser tab.",
-  },
-  "direct",
-);
+const failedState = presentFailure({
+  code: "PLAN_INVALID",
+  phase: "output",
+  transport: "direct",
+  retryable: false,
+  message: "This picture is too large for a browser tab.",
+});
 
 test("failed and display-only views offer the desktop deep link", () => {
   const link = desktopHandoffLink("https://example.com/view?page=1");
@@ -134,7 +132,16 @@ test("failed and display-only views offer the desktop deep link", () => {
   act(() =>
     renderView(
       displayOnly,
-      presentStatus("display-only", { transport: "browser-session" }),
+      presentOutput(
+        {
+          canvas: { width: 512, height: 512 },
+          format: "png",
+          complete: true,
+          missing: [],
+          disposition: "display-only",
+        },
+        undefined,
+      ),
       viewCallbacks,
       {
         sourceUrl: "https://example.com/view?page=1",

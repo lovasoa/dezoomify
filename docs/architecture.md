@@ -94,3 +94,8 @@ implementation. See [Browser runtime](browser-runtime.md) and [Security](securit
 - Browser application modules may compose UI and Host; image and transport modules remain independent of UI.
 - Crossing values derive from Rust declarations. URLs, headers, errors, and geometry retain their exact meaning.
 - Errors carry stable codes and structured context; callers never branch on display text.
+
+Biome rejects product package and sibling-app imports. The architecture test in
+`test/architecture.test.mjs` checks the compiled import inventory of authored
+product code, resolving relative paths at any directory depth. Shared packages
+and the website's deployed proxy entrypoints remain valid dependencies.

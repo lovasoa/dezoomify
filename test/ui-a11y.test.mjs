@@ -5,8 +5,8 @@ import { createDiagnosticRecorder } from "../packages/shared-ui/src/diagnostics.
 import {
   presentFailure,
   presentIdle,
+  presentOutput,
   presentProgress,
-  presentStatus,
 } from "../packages/shared-ui/src/presentation.ts";
 import {
   openConfirmModal,
@@ -29,7 +29,7 @@ function render(el, presentation, cb, ctx, options) {
     now: () => 0,
     context: { input: ctx?.sourceUrl },
   });
-  if (presentation.terminal?.error) d.finish("failed", presentation.terminal.error);
+  if (presentation.error) d.finish("failed", presentation.error);
   act(() =>
     renderView(
       el,
@@ -42,7 +42,7 @@ function render(el, presentation, cb, ctx, options) {
 }
 
 function progressPresentation(current, total) {
-  return presentProgress({ phase: "acquisition", completed: current, total }, "direct");
+  return presentProgress({ phase: "acquisition", completed: current, total });
 }
 
 /** Every button must expose a non-empty accessible name (text or aria-label). */
@@ -103,10 +103,12 @@ test("static accessibility contract: failed view layers guidance with named reco
   const el = makeContainer();
   render(
     el,
-    presentFailure(
-      { code: "X", category: "c", retryable: true, message: "No zoomable image could be found." },
-      "direct",
-    ),
+    presentFailure({
+      code: "X",
+      phase: "discovery",
+      retryable: true,
+      message: "No zoomable image could be found.",
+    }),
     callbacks,
     { sourceUrl: "https://museum.example.org/viewer?page=1" },
   );
@@ -137,12 +139,14 @@ test("native completion opens saved output without browser save guidance", () =>
   const el = makeContainer();
   render(
     el,
-    presentStatus("completed", { transport: "native" }),
+    presentOutput({
+      disposition: "native-publication",
+      format: "png",
+      complete: true,
+      missing: [],
+      canvas: { width: 100, height: 80 },
+    }),
     { ...callbacks, onOpenOutput() {}, onRevealOutput() {} },
-    {
-      nativeSaved: { partial: false },
-      completedInfo: { width: 100, height: 80, mime: "image/png" },
-    },
   );
   assert.equal(el.querySelector("#dz-btn-save"), null);
   assert.equal(el.querySelector("#dz-btn-open").textContent.trim(), "Open image");
@@ -195,34 +199,58 @@ test("idle product content renders between the URL input and recent pictures", (
   );
 });
 
-test("completion treats saved filenames as text", () => {
-  const el = makeContainer();
-  render(el, presentStatus("completed"), callbacks, {
-    savedOutput: {
-      name: "<img src=x onerror=alert(1)>",
-      width: 10,
-      height: 10,
-      doneTiles: 1,
-      totalTiles: 1,
-      failedTiles: 0,
-    },
-  });
-  assert.equal(el.querySelector(".dz-completed-summary").querySelector("img"), null);
+test("confirmed partial saves name the incomplete output and never offer another save", () => {
+  for (const disposition of ["native-publication", "browser-save-initiated"]) {
+    const el = makeContainer();
+    render(
+      el,
+      presentOutput({
+        disposition,
+        format: "png",
+        complete: false,
+        missing: [1],
+        canvas: { width: 100, height: 80 },
+      }),
+      callbacks,
+    );
+    assert.equal(el.querySelector(".dz-completed-title").textContent, "Image saved with gaps");
+    assert.equal(el.querySelector("#dz-btn-save"), null);
+    assertButtonsNamed(el, disposition);
+  }
 });
 
 test("static accessibility contract: completed and display-only views keep every action named", () => {
   const done = makeContainer();
-  render(done, presentStatus("completed", { transport: "direct" }), callbacks, {
-    completedInfo: { width: 100, height: 80, mime: "image/png" },
-    originClean: true,
-  });
+  render(
+    done,
+    presentOutput({
+      disposition: "browser-save-ready",
+      format: "png",
+      complete: true,
+      missing: [],
+      canvas: { width: 100, height: 80 },
+    }),
+    callbacks,
+  );
+  assert.ok(done.querySelector("#dz-btn-save"));
   assertButtonsNamed(done.querySelector(".dz-card"), "completed");
 
   const preview = makeContainer();
-  render(preview, presentStatus("display-only", { transport: "display" }), callbacks, {
-    originClean: false,
-    desktopHandoffUrl: "dezoomify://open?v=2&src=https%3A%2F%2Fx",
-  });
+  render(
+    preview,
+    presentOutput({
+      disposition: "display-only",
+      format: "png",
+      complete: true,
+      missing: [],
+      canvas: { width: 100, height: 80 },
+    }),
+    callbacks,
+    {
+      desktopHandoffUrl: "dezoomify://open?v=2&src=https%3A%2F%2Fx",
+    },
+  );
+  assert.equal(preview.querySelector("#dz-btn-save"), null);
   assertButtonsNamed(preview.querySelector(".dz-card"), "display-only");
 });
 

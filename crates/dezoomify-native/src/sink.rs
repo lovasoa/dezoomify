@@ -86,8 +86,6 @@ struct SpooledTile {
 /// Honest sink accounting, folded into the job instrumentation.
 #[derive(Clone, Debug, Default)]
 pub struct SinkStats {
-    /// Peak retained (unpainted, overlapping) tiles.
-    pub peak_retained_tiles: usize,
     /// Peak retained pixel bytes.
     pub peak_retained_bytes: u64,
     /// Canvas bytes (4 bytes per pixel).
@@ -131,13 +129,12 @@ pub struct Sink {
     spooled: Vec<SpooledTile>,
     spool_bytes: u64,
     stats: SinkStats,
-    painted_count: usize,
 }
 
 impl Sink {
     /// Create an empty sink. No allocation happens here; the canvas
     /// allocates on [`Sink::ensure_canvas`] after the memory pre-check.
-    pub(crate) fn new(options: &SinkOptions, _format: OutputFormat) -> Self {
+    pub(crate) fn new(options: &SinkOptions) -> Self {
         Self {
             compression: options.compression,
             jpeg_quality: 100u8.saturating_sub(options.compression),
@@ -158,7 +155,6 @@ impl Sink {
             spooled: Vec::new(),
             spool_bytes: 0,
             stats: SinkStats::default(),
-            painted_count: 0,
         }
     }
 
@@ -175,18 +171,6 @@ impl Sink {
     /// Bound on retained tile bytes (`output_retain_cap`).
     pub fn retain_cap_bytes(&self) -> u64 {
         self.retain_cap_bytes
-    }
-
-    /// Current canvas dimensions, once allocated or declared.
-    pub fn dimensions(&self) -> Option<Vec2d> {
-        if self.width > 0 && self.height > 0 {
-            Some(Vec2d {
-                x: self.width,
-                y: self.height,
-            })
-        } else {
-            self.declared
-        }
     }
 
     fn tile_rect(destination: Vec2d, extent: Option<Vec2d>, image: &RgbaImage) -> Rect {
@@ -291,7 +275,6 @@ impl Sink {
             }
             self.retained_bytes += bytes;
             self.pending.insert(ordinal, tile);
-            self.stats.peak_retained_tiles = self.stats.peak_retained_tiles.max(self.pending.len());
             self.stats.peak_retained_bytes =
                 self.stats.peak_retained_bytes.max(self.retained_bytes);
             return Ok(());
@@ -315,7 +298,6 @@ impl Sink {
             self.max_painted_ordinal
                 .map_or(ordinal, |max| max.max(ordinal)),
         );
-        self.painted_count += 1;
     }
 
     fn spool_dir(&mut self) -> Result<PathBuf, Error> {
@@ -602,11 +584,6 @@ impl Sink {
 
     pub fn stats(&self) -> SinkStats {
         self.stats.clone()
-    }
-
-    /// Tiles painted so far (acquired work that reached the canvas).
-    pub fn painted_count(&self) -> usize {
-        self.painted_count
     }
 }
 

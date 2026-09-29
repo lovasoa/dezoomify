@@ -17,7 +17,10 @@ macro_rules! host_members {
                 checkpoint => checkpoint(gate: Gate) -> ();
                 sleep => sleep(delay_ms: u32) -> ();
             }
-            report(progress: Progress);
+            sync {
+                report(progress: Progress);
+                warn(message: String);
+            }
             settle();
         }
     };
@@ -25,11 +28,11 @@ macro_rules! host_members {
 
 macro_rules! declare_host {
     (async { $( $method:ident => $js:ident( $( $arg:ident: $ty:ty ),* ) -> $out:ty; )* }
-     report($progress:ident: $progress_ty:ty); settle();) => {
+     sync { $( $notify:ident($value:ident: $value_ty:ty); )* } settle();) => {
         #[allow(async_fn_in_trait)]
         pub trait Host {
             $( async fn $method(&self, $( $arg: $ty ),*) -> Result<$out, Error>; )*
-            fn report(&self, $progress: $progress_ty);
+            $( fn $notify(&self, $value: $value_ty); )*
             async fn settle(&self);
         }
     }

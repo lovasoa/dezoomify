@@ -77,15 +77,8 @@ test("i18n: substitution renders per locale and degrades safely", () => {
     assert.equal(t("view.job.manyImages", { count: 3 }), "3 images");
     assert.equal(t("view.job.countsFull", { current: 2, total: 9 }), "2 of 9 tiles");
     assert.equal(
-      t("view.done.savedPartial", {
-        name: "dezoomify-4x4.png",
-        w: 4,
-        h: 4,
-        done: 14,
-        total: 16,
-        failed: 2,
-      }),
-      "Saved dezoomify-4x4.png (4x4, 14 of 16 tiles; 2 tile(s) missing).",
+      t("view.partial.summary", { done: 14, total: 16 }),
+      "14 of 16 tiles were retrieved.",
     );
     // Per-locale rendering through the same keys.
     assert.equal(t("view.modal.ok", undefined, "fr"), "Compris");
@@ -97,8 +90,8 @@ test("i18n: substitution renders per locale and degrades safely", () => {
     assert.equal(t("view.job.manyImages", { count: 3 }, "de"), "3 Bilder");
     assert.equal(t("view.job.manyImages", { count: 3 }, "fr"), "3 images");
     assert.equal(
-      t("view.done.savedFull", { name: "a.png", w: 4, h: 4 }, "it"),
-      "a.png salvata (4x4).",
+      t("view.partial.summary", { done: 14, total: 16 }, "it"),
+      "Sono stati recuperati 14 riquadri su 16.",
     );
     assert.ok(
       t("view.job.stalled", { host: "example.test" }, "fr").includes("example.test"),

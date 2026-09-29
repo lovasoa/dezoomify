@@ -20,12 +20,11 @@ function makeFetcher(fetchImpl, extra = {}) {
     fetchImpl,
     isProxyEligible: () => ({ eligible: false, reason: "test" }),
     hooks: {
-      onRequestStart(label) {
-        events.push(label);
+      onRequestStart() {
+        events.push("started");
         return events.length;
       },
       onRequestEnd: (_id, ok) => events.push(ok ? "ok" : "failed"),
-      onLog: () => {},
       onUpdate: () => {},
     },
     messages,
@@ -51,7 +50,7 @@ test("direct metadata keeps the final URI and readable bytes", async () => {
   );
   assert.equal(result.finalUri, "https://a.test/final.json");
   assert.deepEqual([...result.bytes], [1, 2]);
-  assert.deepEqual(events, ["direct", "ok"]);
+  assert.deepEqual(events, ["started", "ok"]);
 });
 
 test("direct metadata never proxies an upstream refusal and bounds its preview", async () => {

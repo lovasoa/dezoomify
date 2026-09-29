@@ -9,6 +9,7 @@ use std::{
 #[derive(Default)]
 pub struct MemoryHost {
     pub resources: HashMap<String, ResourceResponse>,
+    pub fetch_failures: HashMap<String, Error>,
     pub fetched: RefCell<Vec<ResourceRequest>>,
     pub probes: RefCell<Vec<Tile>>,
     pub probe_results: RefCell<VecDeque<ProbeOutcome>>,
@@ -19,6 +20,7 @@ pub struct MemoryHost {
     pub partials: RefCell<Vec<MissingTiles>>,
     pub sleeps: RefCell<Vec<u32>>,
     pub progress: RefCell<Vec<Progress>>,
+    pub warnings: RefCell<Vec<String>>,
     pub outputs: RefCell<Vec<FinishRequest>>,
     pub finish_error: RefCell<Option<Error>>,
     pub settled: Cell<u32>,
@@ -43,7 +45,11 @@ impl Drop for Active<'_> {
 impl Host for MemoryHost {
     async fn fetch(&self, request: ResourceRequest, _: Interaction) -> Result<ResourceRead, Error> {
         let result = self.resources.get(&request.uri).cloned();
+        let failure = self.fetch_failures.get(&request.uri).cloned();
         self.fetched.borrow_mut().push(request);
+        if let Some(error) = failure {
+            return Err(error);
+        }
         result
             .map(|response| ResourceRead::Response { response })
             .ok_or_else(|| Error::new("DISCOVERY_FAILED", ErrorPhase::Discovery, "missing fixture"))
@@ -155,6 +161,9 @@ impl Host for MemoryHost {
     }
     fn report(&self, progress: Progress) {
         self.progress.borrow_mut().push(progress);
+    }
+    fn warn(&self, message: String) {
+        self.warnings.borrow_mut().push(message);
     }
     async fn settle(&self) {
         assert_eq!(self.active.get(), 0);

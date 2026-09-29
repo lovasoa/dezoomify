@@ -1,11 +1,3 @@
-export const DESKTOP_EVENT_CHANNELS = [
-  "dezoomify://progress",
-  "dezoomify://partial",
-  "dezoomify://deep-link-pending",
-] as const;
-
-export type DesktopEventChannel = (typeof DESKTOP_EVENT_CHANNELS)[number];
-
 const FORBIDDEN_IPC_KEYS = new Set([
   "tilebytes",
   "tile_bytes",
@@ -18,10 +10,6 @@ const FORBIDDEN_IPC_KEYS = new Set([
   "image_bytes",
   "imagedata",
 ]);
-
-export function isDesktopEventChannel(value: string): value is DesktopEventChannel {
-  return (DESKTOP_EVENT_CHANNELS as readonly string[]).includes(value);
-}
 
 function containsForbiddenKey(value: unknown, seen: Set<unknown>): boolean {
   if (value === null || value === undefined) return false;

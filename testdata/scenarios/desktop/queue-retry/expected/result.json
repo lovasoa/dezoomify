@@ -10,12 +10,6 @@
   ],
   "golden": {
     "human": "bulk: 2 succeeded, 0 failed, 2 total",
-    "machine": {
-      "failed": 0,
-      "kind": "bulk-completed",
-      "succeeded": 2,
-      "total": 2
-    },
     "outcomes": [
       {
         "status": "done"
@@ -49,7 +43,7 @@
       "outcome": "done"
     },
     {
-      "errorCode": "tile.download-failed",
+      "errorCode": "job.partial-discarded",
       "op": "finish",
       "outcome": "failed"
     },

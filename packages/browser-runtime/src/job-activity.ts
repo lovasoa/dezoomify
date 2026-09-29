@@ -1,27 +1,5 @@
-// Live job activity shared by browser products.
-// Drives the progressive-disclosure job view: pending-request clocks, the
-// longest-wait gauge and the delta-gated 500 ms
-// heartbeat whose paints are rAF-batched. The browser application supplies
-// the state object shape (shared-ui ViewContext jobActivity) through the
-// returned tracker's `state` reference and a repaint callback; this module
-// never imports view code. Timers and the frame scheduler are injectable so
-// node tests run deterministically. Keep erasable-syntax-only.
-export interface ActivityLog {
-  url?: string;
-  startedAt?: number;
-  now?: number;
-  stepLabel?: string;
-  detail?: string;
-  pendingRequests?: number;
-  completedRequests?: number;
-  failedRequests?: number;
-  longestPendingMs?: number;
-  timeoutMs?: number;
-  lastProgressAt?: number;
-  paused?: boolean;
-  pausedAt?: number;
-  pausedDurationMs?: number;
-}
+// Browser clocks and frame batching for the shared job activity display.
+import type { JobActivity } from "../../shared-ui/src/activity.ts";
 
 export interface ActivityHooks {
   onUpdate(): void;
@@ -31,12 +9,12 @@ export interface ActivityHooks {
   nowFn?(): number;
 }
 
-export interface JobActivity {
-  readonly state: ActivityLog;
+export interface JobActivityTracker {
+  readonly state: JobActivity;
   scheduleUpdate(): void;
   reset(url: string, timeoutMs: number): void;
   touchProgress(): void;
-  noteRequestStart(label: string): number;
+  noteRequestStart(): number;
   noteRequestEnd(id: number, ok: boolean): void;
   refreshLongestPending(): void;
   reportHeartbeat(now?: number): boolean;
@@ -46,7 +24,7 @@ export interface JobActivity {
   resume(): void;
 }
 
-export function createJobActivity(hooks: ActivityHooks): JobActivity {
+export function createJobActivity(hooks: ActivityHooks): JobActivityTracker {
   const now = hooks.nowFn ?? Date.now;
   const frame =
     hooks.requestFrame ??
@@ -62,16 +40,16 @@ export function createJobActivity(hooks: ActivityHooks): JobActivity {
   const clearEvery =
     hooks.clearIntervalFn ?? ((t: unknown) => clearTimeout(t as ReturnType<typeof setInterval>));
 
-  const state: ActivityLog = {};
+  const state: JobActivity = {};
   let requestSeq = 0;
-  const pendingStarts = new Map<number, { startedAt: number; label: string }>();
+  const pendingStarts = new Map<number, number>();
   let completedRequests = 0;
   let failedRequests = 0;
   let heartbeatTimer: unknown = null;
   let batchedUpdateQueued = false;
   let lastHeartbeatKey = "";
 
-  function ensure(): ActivityLog {
+  function ensure(): JobActivity {
     if (!state.timeoutMs) state.timeoutMs = 30000;
     return state;
   }
@@ -122,9 +100,9 @@ export function createJobActivity(hooks: ActivityHooks): JobActivity {
     ensure().lastProgressAt = now();
   }
 
-  function noteRequestStart(label: string): number {
+  function noteRequestStart(): number {
     const id = ++requestSeq;
-    pendingStarts.set(id, { startedAt: now(), label });
+    pendingStarts.set(id, now());
     const a = ensure();
     a.pendingRequests = pendingStarts.size;
     refreshLongestPending();
@@ -148,7 +126,7 @@ export function createJobActivity(hooks: ActivityHooks): JobActivity {
     const at = a.pausedAt ?? now();
     a.now = at;
     let longest = 0;
-    for (const { startedAt } of pendingStarts.values()) {
+    for (const startedAt of pendingStarts.values()) {
       longest = Math.max(longest, at - startedAt);
     }
     a.longestPendingMs = longest;
@@ -212,7 +190,7 @@ export function createJobActivity(hooks: ActivityHooks): JobActivity {
     state.pausedDurationMs = (state.pausedDurationMs ?? 0) + pausedFor;
     state.lastProgressAt = (state.lastProgressAt ?? at) + pausedFor;
     state.now = at;
-    for (const pending of pendingStarts.values()) pending.startedAt += pausedFor;
+    for (const [id, startedAt] of pendingStarts) pendingStarts.set(id, startedAt + pausedFor);
     startHeartbeat();
   }
 

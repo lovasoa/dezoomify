@@ -349,6 +349,10 @@ export class BrowserHost implements Host {
       this.deps.onProgress(progress);
     }
   }
+  warn(message: string): void {
+    if (!this.signal.aborted)
+      this.deps.diagnostics?.record("warn", "discovery-warning", { message });
+  }
   private async own<T>(operation: () => Promise<T>): Promise<T> {
     if (this.signal.aborted) throw this.failure(this.signal.reason);
     const promise = operation();

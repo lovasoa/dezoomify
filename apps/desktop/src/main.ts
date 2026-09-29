@@ -26,7 +26,6 @@ import {
   presentStatus,
   pushHistory,
   renderView,
-  type StructuredError,
   saveHistory as saveHistoryStore,
   summarizeQueue,
   t,
@@ -42,7 +41,6 @@ import type {
 import { createElement } from "react";
 import type { ValidatedDeepLink } from "./errorCopy.ts";
 import {
-  encoderToMime,
   formatMissingSummary,
   hostOf,
   isValidInputUrl,
@@ -75,12 +73,6 @@ import {
 import { DesktopSettingsView } from "./settingsView.tsx";
 
 const root = typeof document !== "undefined" ? document.getElementById("root") : null;
-const capabilities = {
-  nativeAvailable: true,
-  extensionAvailable: false,
-  browserCanSave: true,
-  proxyAllowed: false,
-};
 
 const DESKTOP_DOCS_BASE = "https://dezoomify.ophir.dev";
 
@@ -103,12 +95,11 @@ function newAttempt() {
     output: null as Output | null,
     partial: null as { question: number; value: MissingTiles } | null,
     paused: false,
-    localFailure: null as StructuredError | null,
+    localFailure: null as JobError | null,
     lastInputUrl: "",
     activeQueueId: null as string | null,
     heartbeatTimer: null as ReturnType<typeof setInterval> | null,
-    outputActionError: undefined as { action: "open" | "folder"; code: string } | undefined,
-    viewCtx: createViewContext(),
+    viewCtx: {} as ViewContext,
   };
 }
 type DesktopAttempt = ReturnType<typeof newAttempt>;
@@ -246,22 +237,30 @@ function failLocally(
   opts?: Partial<JobError> & { settle?: boolean },
 ): void {
   const sourceUrl = currentAttempt.lastInputUrl || activity().url || "";
-  currentAttempt.localFailure = describeFailure({
-    code,
-    detail: trimTechnical(message || ""),
-    extraDetail: opts?.detail && opts.detail !== message ? trimTechnical(opts.detail) : undefined,
-    retryable: opts?.retryable,
-    transport: opts?.transport ?? NATIVE_TRANSPORT,
-    phase: opts?.phase,
-    url: opts?.request ?? (sourceUrl || undefined),
-    http: opts?.http,
-    preview: opts?.preview,
-    host: hostOf(sourceUrl),
-    extras: [`Status: ${currentAttempt.progress?.phase ?? "idle"}`, `URL: ${sourceUrl || "n/a"}`],
-  });
+  const { settle, ...facts } = opts ?? {};
+  currentAttempt.localFailure = describeFailure(
+    {
+      ...facts,
+      code,
+      message,
+      detail: [message, opts?.detail === message ? undefined : opts?.detail]
+        .filter((part): part is string => Boolean(part))
+        .map((part) => trimTechnical(part))
+        .join("\n\n"),
+      transport: opts?.transport ?? NATIVE_TRANSPORT,
+      phase:
+        opts?.phase ??
+        (currentAttempt.progress?.phase === "planning"
+          ? "validation"
+          : currentAttempt.progress?.phase) ??
+        "validation",
+      request: opts?.request ?? (sourceUrl || undefined),
+    },
+    hostOf(sourceUrl),
+  );
   currentAttempt.diagnostics.finish("failed", { code, message, ...opts });
   stopHeartbeat();
-  if (opts?.settle !== false) settleActiveQueue("failed", { errorCode: code });
+  if (settle !== false) settleActiveQueue("failed", { errorCode: code });
   update();
 }
 
@@ -301,17 +300,12 @@ async function applyPlatformOutputDefault(): Promise<void> {
 }
 
 function currentPresentation(): Presentation {
-  if (currentAttempt.localFailure)
-    return presentFailure(currentAttempt.localFailure, NATIVE_TRANSPORT);
+  if (currentAttempt.localFailure) return presentFailure(currentAttempt.localFailure);
   if (currentAttempt.output)
-    return presentOutput(
-      currentAttempt.output,
-      currentAttempt.progress ?? undefined,
-      NATIVE_TRANSPORT,
-    );
-  if (currentAttempt.settled) return presentStatus("cancelled", { transport: NATIVE_TRANSPORT });
+    return presentOutput(currentAttempt.output, currentAttempt.progress ?? undefined);
+  if (currentAttempt.settled) return presentStatus("cancelled");
   if (!currentAttempt.progress) return presentIdle();
-  const presentation = presentProgress(currentAttempt.progress, NATIVE_TRANSPORT, {
+  const presentation = presentProgress(currentAttempt.progress, {
     paused: currentAttempt.paused,
   });
   if (currentAttempt.partial) presentation.decision = currentAttempt.partial.value;
@@ -319,9 +313,7 @@ function currentPresentation(): Presentation {
 }
 
 function clearJobViewState(): void {
-  currentAttempt.outputActionError = undefined;
   currentAttempt.viewCtx.currentProgress = undefined;
-  currentAttempt.viewCtx.completedInfo = undefined;
   currentAttempt.viewCtx.jobActivity = undefined;
 
   stopHeartbeat();
@@ -648,7 +640,9 @@ function handlePause(): void {
     },
     (error: unknown) => {
       if (!owns(attempt)) return;
-      failLocally("PAUSE_FAILED", invokeErrorMessage(error, "The pause request was rejected."));
+      failLocally("PAUSE_FAILED", invokeErrorMessage(error, "The pause request was rejected."), {
+        retryable: true,
+      });
     },
   );
 }
@@ -667,7 +661,9 @@ function handleResume(): void {
     },
     (error: unknown) => {
       if (!owns(attempt)) return;
-      failLocally("RESUME_FAILED", invokeErrorMessage(error, "The resume request was rejected."));
+      failLocally("RESUME_FAILED", invokeErrorMessage(error, "The resume request was rejected."), {
+        retryable: true,
+      });
     },
   );
 }
@@ -676,7 +672,6 @@ async function handleOpenOutput(attempt: DesktopAttempt, reveal: boolean): Promi
   if (!owns(attempt)) return;
   const handle = attempt.activeHandle;
   if (!handle) return;
-  attempt.outputActionError = undefined;
   try {
     await handle.openOutput(reveal);
   } catch (error) {
@@ -686,9 +681,9 @@ async function handleOpenOutput(attempt: DesktopAttempt, reveal: boolean): Promi
       typeof rawCode === "string" && /^output\.[a-z-]+$/.test(rawCode)
         ? rawCode
         : "output.invoke-failed";
-    attempt.outputActionError = { action: reveal ? "folder" : "open", code };
-    attempt.diagnostics.context({ output_action_error: attempt.outputActionError });
-    attempt.diagnostics.record("error", "output-action-failed", attempt.outputActionError);
+    const failure = { action: reveal ? "folder" : "open", code };
+    attempt.diagnostics.context({ output_action_error: failure });
+    attempt.diagnostics.record("error", "output-action-failed", failure);
     throw error;
   }
 }
@@ -709,7 +704,9 @@ function answerPartial(
     },
     (error: unknown) => {
       if (!owns(attempt) || attempt.partial !== partial) return;
-      failLocally("CHOICE_FAILED", invokeErrorMessage(error, t("desktop.invoke.partial")));
+      failLocally("CHOICE_FAILED", invokeErrorMessage(error, t("desktop.invoke.partial")), {
+        retryable: true,
+      });
     },
   );
 }
@@ -733,10 +730,6 @@ function handleOpenExternalLink(url: string): void {
   );
 }
 
-function grantedMime(): string {
-  return encoderToMime(desktopSettings.output_format, "image/png");
-}
-
 function showDeepLinkConfirm(info: ValidatedDeepLink): void {
   if (typeof document === "undefined") return;
   void openConfirmModal(document, {
@@ -754,10 +747,6 @@ function showDeepLinkConfirm(info: ValidatedDeepLink): void {
   }).then((confirmed) => {
     if (confirmed) handleSubmitUrl(info.sourceUrl);
   });
-}
-
-function createViewContext(): ViewContext {
-  return { capabilities };
 }
 
 function initInitialUrl(): void {
@@ -783,7 +772,8 @@ function ensureDesktopAuxPanel(): void {
   const presentation = currentPresentation();
   const doc = root.ownerDocument;
   doc.getElementById("dz-desktop-aux")?.remove();
-  const showPartialDone = presentation.phase === "completed" && presentation.partial;
+  const showPartialDone =
+    presentation.phase === "completed" && presentation.output?.complete === false;
   const showCancelledNote = presentation.phase === "cancelled";
   const showQueue = presentation.phase !== "completed" && desktopQueue.entries.length > 1;
   if (!showPartialDone && !showCancelledNote && !showQueue) return;
@@ -904,20 +894,8 @@ function update() {
   const attempt = currentAttempt;
   const presentation = currentPresentation();
   const partial = presentation.decision ? attempt.partial : null;
-  const caps = capabilities;
   if (currentAttempt.viewCtx.jobActivity && presentation.phase === "job") {
     activity().now = Date.now();
-  }
-
-  const canvas = currentAttempt.output?.canvas;
-  if (presentation.phase === "completed" && canvas) {
-    currentAttempt.viewCtx.completedInfo = {
-      width: canvas.width,
-      height: canvas.height,
-      mime: encoderToMime(currentAttempt.output?.format, grantedMime()),
-    };
-  } else if (presentation.phase !== "completed") {
-    currentAttempt.viewCtx.completedInfo = undefined;
   }
 
   renderView(
@@ -984,24 +962,13 @@ function update() {
       },
     },
     {
-      capabilities: {
-        nativeAvailable: caps.nativeAvailable,
-        extensionAvailable: caps.extensionAvailable,
-        browserCanSave: caps.browserCanSave,
-        proxyAllowed: caps.proxyAllowed,
-      },
       diagnosticReport: attempt.diagnostics.report(),
-      ...(presentation.phase === "completed"
-        ? { nativeSaved: { partial: presentation.partial }, outputKey: attempt.activeHandle?.id }
-        : {}),
+      ...(presentation.phase === "completed" ? { outputKey: attempt.activeHandle?.id } : {}),
       ...(currentAttempt.viewCtx.jobActivity
         ? { jobActivity: currentAttempt.viewCtx.jobActivity }
         : {}),
       ...(currentAttempt.viewCtx.initialUrl
         ? { initialUrl: currentAttempt.viewCtx.initialUrl }
-        : {}),
-      ...(currentAttempt.viewCtx.completedInfo
-        ? { completedInfo: currentAttempt.viewCtx.completedInfo }
         : {}),
       history: [...desktopHistory],
     },

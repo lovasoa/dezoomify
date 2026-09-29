@@ -66,6 +66,53 @@ fn full_output_uses_lazy_geometry_and_honest_disposition() {
             .ends_with("/image_files/9/1_1.jpg")
     );
 }
+
+#[test]
+fn discovery_preserves_the_rejected_lookup_cause_after_a_failed_alternative() {
+    let mut host = MemoryHost::default();
+    host.resources.insert(
+        "https://images.test/tour.xml".into(),
+        ResourceResponse {
+            bytes: b"<encrypted>not-valid-krpano-data</encrypted>".to_vec(),
+            final_uri: None,
+        },
+    );
+    let mut earlier = failure(403);
+    earlier.phase = ErrorPhase::Discovery;
+    host.fetch_failures
+        .insert("https://images.test/first.js".into(), earlier);
+    let mut rejected = failure(429);
+    rejected.phase = ErrorPhase::Discovery;
+    rejected.message = "the final viewer lookup was throttled".into();
+    rejected.transport = Some(ErrorTransport::BrowserSession);
+    rejected.blocked_reason = Some(BlockedReason::Throttled);
+    rejected.resource_kind = Some(ResourceKind::Metadata);
+    rejected.retry_after_ms = Some(7000);
+    rejected.preview = Some("slow down".into());
+    rejected.detail = Some("final lookup details".into());
+    host.fetch_failures
+        .insert("https://images.test/second.js".into(), rejected.clone());
+    let error = futures::executor::block_on(dezoomify(
+        vec![JobInput {
+            url: "https://images.test/index.html".into(),
+            contents: Some(
+                r#"<html><script src="first.js"></script><script src="second.js"></script><script>embedpano({xml:"tour.xml"});</script></html>"#.into(),
+            ),
+            kind: None,
+        }],
+        Options {
+            format: Some("krpano".into()),
+            ..Default::default()
+        },
+        &host,
+    ))
+    .unwrap_err();
+    rejected.retryable = true;
+    rejected.request = Some("https://images.test/second.js".into());
+    assert_eq!(error, rejected);
+    assert_eq!(host.fetched.borrow().len(), 3);
+    assert_eq!(host.settled.get(), 1);
+}
 #[test]
 fn concurrency_remains_bounded_across_acquisition() {
     for concurrency in [1, 2, 3, 4] {
@@ -81,6 +128,42 @@ fn concurrency_remains_bounded_across_acquisition() {
         .unwrap();
         assert_eq!(host.peak.get(), concurrency);
     }
+}
+
+#[test]
+fn accepted_catalog_warns_once_for_malformed_siblings_and_keeps_valid_images() {
+    let host = MemoryHost::default();
+    let output = futures::executor::block_on(dezoomify(
+        vec![JobInput {
+            url: "https://images.test/tour.xml".into(),
+            contents: Some(
+                r#"<krpano>
+                <scene name="bad1"><image><level tiledimagewidth="100" tiledimageheight="100"><flat url="missing.jpg"/></level></image></scene>
+                <scene name="good"><image tilesize="100"><level tiledimagewidth="100" tiledimageheight="100"><flat url="tile.jpg"/></level></image></scene>
+                <scene name="bad2"><image><level tiledimagewidth="100" tiledimageheight="100"><flat url="missing.jpg"/></level></image></scene>
+                </krpano>"#.into(),
+            ),
+            kind: None,
+        }],
+        Options {
+            format: Some("krpano".into()),
+            selection: SelectionPolicy::Fitting {
+                max_width: 1000,
+                max_height: 1000,
+                max_area: 1_000_000,
+            },
+            ..Default::default()
+        },
+        &host,
+    ))
+    .unwrap();
+    assert!(output.complete);
+    assert_eq!(host.acquired.borrow().len(), 1);
+    assert_eq!(host.outputs.borrow()[0].title.as_deref(), Some("good"));
+    assert_eq!(
+        *host.warnings.borrow(),
+        ["bad krpano level: missing tile size"]
+    );
 }
 #[test]
 fn transient_failures_honor_exact_budget_and_retry_after() {

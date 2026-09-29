@@ -173,24 +173,9 @@ export const de = {
   "view.resolution.stop": "Stoppen",
   // Completion section.
   "view.done.ready": "Ihr Bild ist bereit.",
-  "view.done.savedDisk": "Auf der Festplatte gespeichert",
   "view.done.readyTitle": "Bereit zum Speichern",
   "view.done.saveNow": "Bild jetzt speichern",
   "view.done.another": "Weiteres Bild dezoomifizieren",
-  // Already-saved completion (ViewContext.savedOutput): the host wrote the
-  // output before rendering (for example the extension blob-anchor save), so
-  // completion reads as saved with the file name and offers no second-click
-  // save button. Absent keeps the website ready plus save-now path.
-  "view.done.savedFile": "Gespeichert",
-  "view.done.gaps": "Mit Luecken gespeichert",
-  "view.done.savedFull": "{name} gespeichert ({w}x{h}).",
-  "view.done.savedPartial":
-    "{name} gespeichert ({w}x{h}, {done} von {total} Kacheln; {failed} Kachel(n) fehlen).",
-  // Gap map behind a kept partial: the missing-tile ledger renders inline
-  // with the completion summary, so a partial save never reads as silent
-  // gaps. `shown` lists the first ledger ids, `rest` names the overflow.
-  "view.done.gapMap": "Fehlende Kacheln ({failed} von {total}): {shown}{rest}.",
-  "view.done.gapMapMore": ", und {n} weitere",
   // Failure section.
   "view.fail.fallback":
     "Dezoomify konnte das zoombare Bild unter dieser Adresse nicht finden oder speichern.",

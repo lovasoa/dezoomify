@@ -13,7 +13,7 @@ export interface TileImageLike {
 }
 
 export interface TileDrawHooks {
-  onRequestStart(label: string): number;
+  onRequestStart(): number;
   onRequestEnd(id: number, ok: boolean): void;
   onUpdate(): void;
 }
@@ -99,7 +99,7 @@ export function loadTileImage(
   deps.signal?.throwIfAborted();
   const ms = deps.ms ?? 30000;
   const hooks = deps.hooks;
-  const reqId = hooks ? hooks.onRequestStart("img") : -1;
+  const reqId = hooks ? hooks.onRequestStart() : -1;
   return new Promise((resolve, reject) => {
     // Ordinary image elements only: dependency-injected in tests, otherwise
     // the host Image constructor directly (never a CORS opt-in, so no grant

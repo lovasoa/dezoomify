@@ -171,24 +171,9 @@ export const fr = {
   "view.resolution.stop": "Arrêter",
   // Completion section.
   "view.done.ready": "Votre image est prete.",
-  "view.done.savedDisk": "Enregistre sur le disque",
   "view.done.readyTitle": "Pret a enregistrer",
   "view.done.saveNow": "Enregistrer l image maintenant",
   "view.done.another": "Dezoomifier une autre image",
-  // Already-saved completion (ViewContext.savedOutput): the host wrote the
-  // output before rendering (for example the extension blob-anchor save), so
-  // completion reads as saved with the file name and offers no second-click
-  // save button. Absent keeps the website ready plus save-now path.
-  "view.done.savedFile": "Enregistre",
-  "view.done.gaps": "Enregistre avec des manques",
-  "view.done.savedFull": "{name} enregistre ({w}x{h}).",
-  "view.done.savedPartial":
-    "{name} enregistre ({w}x{h}, {done} tuiles sur {total} ; {failed} tuile(s) manquante(s)).",
-  // Gap map behind a kept partial: the missing-tile ledger renders inline
-  // with the completion summary, so a partial save never reads as silent
-  // gaps. `shown` lists the first ledger ids, `rest` names the overflow.
-  "view.done.gapMap": "Tuiles manquantes ({failed} sur {total}) : {shown}{rest}.",
-  "view.done.gapMapMore": ", et {n} de plus",
   // Failure section.
   "view.fail.fallback":
     "Dezoomify n a pas pu trouver ni enregistrer l image zoomable a cette adresse.",

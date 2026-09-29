@@ -554,18 +554,6 @@
     },
     {
       "content_type": "application/json",
-      "id": "extension/recognition/expected/legacy-web.json",
-      "license_provenance": "GPL-3.0-or-later (extension test)",
-      "path": "extension/recognition/expected/legacy-web.json",
-      "sensitive": false,
-      "served_urls": [],
-      "sha256": "66766cf9d7703ea229bcf3135236ba359b513a571232f312ba4df66bf95af452",
-      "size": 2767,
-      "source_path": "test/url-recognition.test.js",
-      "source_snapshot": "d231dd0"
-    },
-    {
-      "content_type": "application/json",
       "id": "extension/recognition/routes.json",
       "license_provenance": "GPL-3.0-or-later (extension test)",
       "path": "extension/recognition/routes.json",
@@ -3362,18 +3350,6 @@
     },
     {
       "content_type": "application/json",
-      "id": "web/assembly/expected/legacy-web.json",
-      "license_provenance": "GPL-2.0-or-later (web fixture)",
-      "path": "web/assembly/expected/legacy-web.json",
-      "sensitive": false,
-      "served_urls": [],
-      "sha256": "77fdcbbf8b1d4017a7c7f9ea3010dca49e8ea865c92cdb8ce547fe465a4d42df",
-      "size": 3491,
-      "source_path": "tests/dezoomers.spec.js renderAssembly",
-      "source_snapshot": "f7caa07"
-    },
-    {
-      "content_type": "application/json",
       "id": "web/assembly/routes.json",
       "license_provenance": "GPL-2.0-or-later (web fixture)",
       "path": "web/assembly/routes.json",
@@ -3394,18 +3370,6 @@
       "sha256": "8470c65c8c4cc8e3cdc4db41f8a376601748ef7243ba0aa0ab18f58bedab63fb",
       "size": 309,
       "source_path": "tests/dezoomers.spec.js renderAssembly",
-      "source_snapshot": "f7caa07"
-    },
-    {
-      "content_type": "application/json",
-      "id": "web/auto-cycle/expected/legacy-web.json",
-      "license_provenance": "GPL-2.0-or-later (web fixture)",
-      "path": "web/auto-cycle/expected/legacy-web.json",
-      "sensitive": false,
-      "served_urls": [],
-      "sha256": "f88d645193cd3d0ef6d4a182de322205f43a8c8d64abb203d87af7c854de4d8f",
-      "size": 1090,
-      "source_path": "tests/dezoomers.spec.js cycle",
       "source_snapshot": "f7caa07"
     },
     {
@@ -3469,18 +3433,6 @@
       "source_snapshot": "f7caa07"
     },
     {
-      "content_type": "application/json",
-      "id": "web/auto-precedence/expected/legacy-web.json",
-      "license_provenance": "GPL-2.0-or-later (web fixture)",
-      "path": "web/auto-precedence/expected/legacy-web.json",
-      "sensitive": false,
-      "served_urls": [],
-      "sha256": "d7ee7b543b8974cc133d3855fff45b6c44c6595baf87439fa95c85e97db40a92",
-      "size": 459,
-      "source_path": "tests/dezoomers.spec.js precedence",
-      "source_snapshot": "f7caa07"
-    },
-    {
       "content_type": "text/html",
       "id": "web/auto-precedence/payloads/fixtures.test/automatic/precedence.html",
       "license_provenance": "GPL-2.0-or-later (web fixture)",
@@ -3513,18 +3465,6 @@
       "served_urls": [],
       "sha256": "6723f078fb8d428733ff72b5e42a62bd886c292e187fd4db3a30acfd1409a3f9",
       "size": 7923,
-      "source_path": "tests/dezoomers.spec.js coreCases",
-      "source_snapshot": "f7caa07"
-    },
-    {
-      "content_type": "application/json",
-      "id": "web/core-discovery/expected/legacy-web.json",
-      "license_provenance": "GPL-2.0-or-later (web fixture)",
-      "path": "web/core-discovery/expected/legacy-web.json",
-      "sensitive": false,
-      "served_urls": [],
-      "sha256": "3da9ca5fb23d2f836960d7f400408e25bed7adf5754a7ed926f28b764e02275a",
-      "size": 21835,
       "source_path": "tests/dezoomers.spec.js coreCases",
       "source_snapshot": "f7caa07"
     },
@@ -3890,18 +3830,6 @@
     },
     {
       "content_type": "application/json",
-      "id": "web/generic-probing/expected/legacy-web.json",
-      "license_provenance": "GPL-2.0-or-later (web fixture)",
-      "path": "web/generic-probing/expected/legacy-web.json",
-      "sensitive": false,
-      "served_urls": [],
-      "sha256": "c4b7278ebb066fa7c3a2b21fa6a906e5852954e18f02ff06ee22f192c77367db",
-      "size": 10915,
-      "source_path": "tests/dezoomers.spec.js probeGeneric",
-      "source_snapshot": "f7caa07"
-    },
-    {
-      "content_type": "application/json",
       "id": "web/generic-probing/routes.json",
       "license_provenance": "GPL-2.0-or-later (web fixture)",
       "path": "web/generic-probing/routes.json",
@@ -3981,18 +3909,6 @@
       "served_urls": [],
       "sha256": "2b7d6ded2578e8b152e89ec173eceabef63dd9626c62c84ea7a692867f97d4ed",
       "size": 1176,
-      "source_path": "tests/dezoomers.spec.js iiifCases",
-      "source_snapshot": "f7caa07"
-    },
-    {
-      "content_type": "application/json",
-      "id": "web/iiif-discovery/expected/legacy-web.json",
-      "license_provenance": "GPL-2.0-or-later (web fixture)",
-      "path": "web/iiif-discovery/expected/legacy-web.json",
-      "sensitive": false,
-      "served_urls": [],
-      "sha256": "7652cd47cf49e7cfe5e2523eb87b4730f5d0ef5b32f75ce371d907365b1d9cd3",
-      "size": 15990,
       "source_path": "tests/dezoomers.spec.js iiifCases",
       "source_snapshot": "f7caa07"
     },
@@ -4370,18 +4286,6 @@
     },
     {
       "content_type": "application/json",
-      "id": "web/proxy/expected/legacy-web.json",
-      "license_provenance": "GPL-2.0-or-later (web fixture)",
-      "path": "web/proxy/expected/legacy-web.json",
-      "sensitive": false,
-      "served_urls": [],
-      "sha256": "e917ce22ff0ce9a0d40c94d15536b7f96af2336f6adec82f1c8de3c1dda186eb",
-      "size": 426,
-      "source_path": "tests/proxy-function.spec.js",
-      "source_snapshot": "f7caa07"
-    },
-    {
-      "content_type": "application/json",
       "id": "web/proxy/routes.json",
       "license_provenance": "GPL-2.0-or-later (web fixture)",
       "path": "web/proxy/routes.json",
@@ -4402,18 +4306,6 @@
       "sha256": "041c38b36ed8955b591288d79036279b9593c83c8d91f19028f2cee5afba0f5e",
       "size": 305,
       "source_path": "tests/proxy-function.spec.js",
-      "source_snapshot": "f7caa07"
-    },
-    {
-      "content_type": "application/json",
-      "id": "web/query-params/expected/legacy-web.json",
-      "license_provenance": "GPL-2.0-or-later (web fixture)",
-      "path": "web/query-params/expected/legacy-web.json",
-      "sensitive": false,
-      "served_urls": [],
-      "sha256": "4d7ab7b13a20684149054c5b0ab33a60528b62fa485329e306c0449397b55bb9",
-      "size": 2199,
-      "source_path": "tests/dezoomers.spec.js query params",
       "source_snapshot": "f7caa07"
     },
     {
@@ -4497,18 +4389,6 @@
       "served_urls": [],
       "sha256": "d8aa1e537334b46cdbf98938d047b8bc0b1959292e0e58cd7dd480aec622f193",
       "size": 1484,
-      "source_path": "tests/dezoomers.spec.js seadragonCases",
-      "source_snapshot": "f7caa07"
-    },
-    {
-      "content_type": "application/json",
-      "id": "web/seadragon-pages/expected/legacy-web.json",
-      "license_provenance": "GPL-2.0-or-later (web fixture)",
-      "path": "web/seadragon-pages/expected/legacy-web.json",
-      "sensitive": false,
-      "served_urls": [],
-      "sha256": "5b26843ef3eab748a70fdab52607daa54e896f0ae0637870991d8b53294eb354",
-      "size": 10968,
       "source_path": "tests/dezoomers.spec.js seadragonCases",
       "source_snapshot": "f7caa07"
     },
@@ -4753,18 +4633,6 @@
       "source_snapshot": "f7caa07"
     },
     {
-      "content_type": "application/json",
-      "id": "web/site-adapters/expected/legacy-web.json",
-      "license_provenance": "GPL-2.0-or-later (web fixture)",
-      "path": "web/site-adapters/expected/legacy-web.json",
-      "sensitive": false,
-      "served_urls": [],
-      "sha256": "7fd8d1fe7ca5220d35752e77742aa38e4ad341d31c5023d61acadb0133451834",
-      "size": 6608,
-      "source_path": "tests/dezoomers.spec.js remaining adapters",
-      "source_snapshot": "f7caa07"
-    },
-    {
       "content_type": "application/xml",
       "id": "web/site-adapters/payloads/artsandculture.google.com/arts/path=g.xml",
       "license_provenance": "GPL-2.0-or-later (web fixture)",
@@ -4958,18 +4826,6 @@
     },
     {
       "content_type": "application/json",
-      "id": "web/topviewer/expected/legacy-web.json",
-      "license_provenance": "GPL-2.0-or-later (web fixture)",
-      "path": "web/topviewer/expected/legacy-web.json",
-      "sensitive": false,
-      "served_urls": [],
-      "sha256": "f7bbf75d79bdffe74279e609713e37d8681195530eac630ee6edc04274900839",
-      "size": 6566,
-      "source_path": "tests/dezoomers.spec.js topviewer",
-      "source_snapshot": "f7caa07"
-    },
-    {
-      "content_type": "application/json",
       "id": "web/topviewer/payloads/fixtures.test/topviewer/data.json",
       "license_provenance": "GPL-2.0-or-later (web fixture)",
       "path": "web/topviewer/payloads/fixtures.test/topviewer/data.json",
@@ -5049,18 +4905,6 @@
       "served_urls": [],
       "sha256": "d53872e213342f5f97c348096eb2a1796ed63800173fcfc7ed78a12378791c7e",
       "size": 1349,
-      "source_path": "tests/dezoomers.spec.js zoomifyCases",
-      "source_snapshot": "f7caa07"
-    },
-    {
-      "content_type": "application/json",
-      "id": "web/zoomify-pages/expected/legacy-web.json",
-      "license_provenance": "GPL-2.0-or-later (web fixture)",
-      "path": "web/zoomify-pages/expected/legacy-web.json",
-      "sensitive": false,
-      "served_urls": [],
-      "sha256": "e3719f43c546764669bf9a1ed7274b98e84f24eee4e0e6058cd8c279d6d288cb",
-      "size": 11741,
       "source_path": "tests/dezoomers.spec.js zoomifyCases",
       "source_snapshot": "f7caa07"
     },

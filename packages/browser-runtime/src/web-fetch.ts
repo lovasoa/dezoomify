@@ -4,7 +4,7 @@
 // credentials). The single-policy proxy transport instance is supplied by
 // the caller. Progress and diagnostics callbacks update the job view.
 
-import type { FetchFailure, ResourceRequest } from "@dezoomify/wasm-bindings";
+import type { ErrorTransport, FetchFailure, ResourceRequest } from "@dezoomify/wasm-bindings";
 import type { DiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
 import { blockedReason } from "./failure.ts";
 import { readErrorPreview, readResponseBytes, retryAfterMs } from "./response-body.ts";
@@ -127,7 +127,7 @@ export interface ProxyEligibility {
 
 /** Request activity and repaint callbacks from the browser application. */
 export interface WebFetchHooks {
-  onRequestStart(label: string): number;
+  onRequestStart(): number;
   onRequestEnd(id: number, ok: boolean): void;
   onUpdate(): void;
 }
@@ -157,7 +157,7 @@ export interface WebFetcher {
     request: ResourceRequest,
     signal: AbortSignal,
   ): Promise<{ bytes: Uint8Array; finalUri?: string }>;
-  getActiveTransport(): string | null;
+  getActiveTransport(): ErrorTransport | null;
 }
 
 /**
@@ -290,7 +290,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
   const sleepFn = deps.sleepFn ?? sleep;
   const now = deps.nowFn ?? Date.now;
   const hooks = deps.hooks;
-  let activeTransport: string | null = null;
+  let activeTransport: ErrorTransport | null = null;
 
   async function fetchDirect(
     request: ResourceRequest,
@@ -301,7 +301,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     const url = request.uri;
     const started = now();
     deps.diagnostics?.count("requests");
-    const reqId = hooks.onRequestStart("direct");
+    const reqId = hooks.onRequestStart();
     const combined = combineTimeout(signal, ms);
     let responseStatus: number | undefined;
     let ended = false;
@@ -424,7 +424,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     // Proxy admission budget lives in exactly one owner: the injected
     // product transport (`src/proxyTransport.ts`, server limits
     // authoritative).
-    const reqId = hooks.onRequestStart("proxy");
+    const reqId = hooks.onRequestStart();
     const combined = combineTimeout(signal, requestMs);
     try {
       const res = await deps.proxyTransport.fetchViaProxy(request, { signal: combined.signal });
@@ -584,7 +584,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     } satisfies FetchFailure;
   }
 
-  function getActiveTransport(): string | null {
+  function getActiveTransport(): ErrorTransport | null {
     return activeTransport;
   }
 

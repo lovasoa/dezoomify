@@ -328,7 +328,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     }
     let output = outfile_option.or(positional_output);
     validate_format(&format)?;
-    // Single mode allows a missing output for title-based auto-naming;
+    // Single mode allows a missing output for automatic PNG naming;
     // a missing input prompts when a terminal is present, else prints help.
     // Bulk mode already allows missing positionals.
     Ok(Args {

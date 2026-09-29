@@ -42,7 +42,7 @@ test("reset initializes the job view state", () => {
 test("request clocks drive pending and longest-wait gauges", () => {
   const t = tracker();
   t.activity.reset("https://a.test/", 30000);
-  const id = t.activity.noteRequestStart("direct");
+  const id = t.activity.noteRequestStart();
   assert.equal(t.activity.state.pendingRequests, 1);
   t.now.at += 1200;
   t.activity.refreshLongestPending();
@@ -50,7 +50,7 @@ test("request clocks drive pending and longest-wait gauges", () => {
   t.activity.noteRequestEnd(id, true);
   assert.equal(t.activity.state.pendingRequests, 0);
   assert.equal(t.activity.state.completedRequests, 1);
-  t.activity.noteRequestEnd(t.activity.noteRequestStart("proxy"), false);
+  t.activity.noteRequestEnd(t.activity.noteRequestStart(), false);
   assert.equal(t.activity.state.failedRequests, 1);
 });
 
@@ -83,7 +83,7 @@ test("heartbeat repaints only on real change", () => {
   assert.equal(t.frames.length, 0);
   assert.equal(t.updates, painted);
   // A new request changes the delta key and repaints.
-  t.activity.noteRequestStart("direct");
+  t.activity.noteRequestStart();
   t.now.at += 1100;
   tick();
   assert.equal(t.frames.length, 1);
@@ -94,7 +94,7 @@ test("pause excludes paused time from elapsed and pending clocks", () => {
   const t = tracker();
   t.activity.reset("https://a.test/", 30000);
   t.activity.startHeartbeat();
-  const id = t.activity.noteRequestStart("tile");
+  const id = t.activity.noteRequestStart();
   t.now.at += 500;
   t.activity.pause();
   assert.equal(t.activity.state.paused, true);

@@ -24,6 +24,3 @@ pub mod settings;
 // stays pure standard-library logic with no SDK or webview requirements.
 #[cfg(feature = "tauri")]
 pub mod tauri_shell;
-
-/// Deep-link protocol scheme.
-pub const PROTOCOL_SCHEME: &str = "dezoomify";

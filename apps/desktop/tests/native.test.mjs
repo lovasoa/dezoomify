@@ -108,7 +108,7 @@ test("retired invocation rejects controls and ignores late progress", async () =
 test("typed failure and partial output retain the native outcome", async () => {
   for (const result of [
     { ...output, complete: false, missing: [3] },
-    { code: "tile.download-failed", message: "failed" },
+    { code: "job.partial-discarded", phase: "acquisition", retryable: false, message: "failed" },
   ]) {
     const api = platform();
     const handle = await invokeNative(request(), { progress() {}, partial() {} }, api);

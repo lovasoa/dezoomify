@@ -54,17 +54,12 @@ Other extensions fail typed before any work. JPEG caps at 65535 px per side, Web
 Post-retry failures can save a gappy result at a `.partial` sibling
 (`out.png` → `out.partial.png`). The intended complete destination stays
 untouched. Retry acquires only missing tiles with a fresh budget and preserves
-good tiles. Discard writes nothing and reports the stable tile failure.
+good tiles. Discard writes nothing and reports `job.partial-discarded`; CLI
+reporting uses its public `tile.download-failed` code.
 
 The CLI applies its configured partial policy immediately. The desktop awaits
 a user keep/discard/retry choice and applies the configured default after
 60 seconds. Missing-tile details and partial naming remain visible in the result.
-
-### Capability baseline
-
-Native reports encoders `[png, jpeg, tiff, zif, webp]`, destination modes
-`[file, iiif-dir]`, storage modes `[cache]`, maximum concurrency 16, bulk support,
-and pause support. See [Bindings](bindings.md#domain-values).
 
 ## Desktop
 

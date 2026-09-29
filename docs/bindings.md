@@ -16,11 +16,13 @@ and works before the ignored build artifacts exist.
 
 `dezoomify(inputs, options, host): Promise<Output>` invokes the shared Rust
 algorithm. The supplied Host implements fetch, probe, tile acquisition, output,
-image/level/partial choices, checkpoints, sleep, progress, and settlement.
+image/level/partial choices, checkpoints, sleep, progress, warnings, and settlement.
+`warn(message)` writes format warnings to the Host's bounded diagnostic recorder.
 
 Calls return their values through ordinary futures and promises. A rejected
 capability preserves a structured domain Error. Invalid JavaScript values
-produce `binding.invalid-value` with diagnostic detail.
+produce `binding.invalid-value` with diagnostic detail. Invalid arguments also
+await Host settlement before the invocation rejects.
 
 Metadata bytes use `Uint8Array` through serde_bytes. Pure tile processing uses
 `applyProcessing(recipe, bytes)` and returns `Uint8Array`. Independent
@@ -31,15 +33,15 @@ invocations receive independent Host objects.
 Inputs preserve URLs, optional source contents, and evidence kind. Resource
 responses preserve bytes and redirected addresses. Tile values carry their
 index, exact request, placement, declared canvas, and processing recipe.
-Missing tiles preserve observed fetch failures and attempt details.
+Missing tiles preserve the complete errors from their acquisition attempts.
 
 Errors carry stable codes, phases, retryability, user wording,
 and optional request, transport, HTTP status, and bounded server context.
 Progress reports work and geometry; Output reports completeness, missing tiles,
 canvas, format, and actual save disposition.
 
-The website baseline reports encoders `[png]`. Native capabilities and
-formats are defined in [Native apps](native-apps.md#capability-baseline).
+Browser products save PNG. Native output formats are defined in
+[Native apps](native-apps.md#output-naming-and-encoders).
 
 ## Handoff and diagnostics
 
