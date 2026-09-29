@@ -2,8 +2,7 @@
 //
 // The root suite runs on bare `node --test`; this module installs linkedom as
 // the global DOM and re-exports React's `act` so tests can mount components,
-// dispatch events, and assert on the rendered tree. It replaces the hand-rolled
-// mock DOM the imperative renderer used to require.
+// dispatch events, and assert on the rendered tree.
 import { parseHTML } from "linkedom";
 import { act } from "react";
 

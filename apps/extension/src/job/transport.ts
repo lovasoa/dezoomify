@@ -1,7 +1,6 @@
 import { isFetchFailure, originOfUrl } from "@dezoomify/browser-runtime";
 import type { DiagnosticRecorder } from "@dezoomify/shared-ui";
 import type { Interaction, ResourceRead, ResourceRequest } from "@dezoomify/wasm-bindings";
-import { asFetchFailure } from "../runtime/fetch.ts";
 import type { createSourceAccess } from "./source-access.ts";
 
 type SourceAccess = ReturnType<typeof createSourceAccess>;
@@ -50,7 +49,7 @@ export function createResourceFetcher(deps: {
         deps.diagnostics?.count(signal.aborted ? "requests_cancelled" : "request_failures");
         if (!signal.aborted)
           deps.diagnostics?.record("warn", "request-failed", {
-            ...asFetchFailure(error),
+            ...(isFetchFailure(error) ? error : {}),
             purpose: request.purpose,
             transport: "source-document",
             url: request.uri,
@@ -63,7 +62,7 @@ export function createResourceFetcher(deps: {
         )
           throw error;
         deps.diagnostics?.record("warn", "source-fetch-fallback", {
-          ...asFetchFailure(error),
+          ...(isFetchFailure(error) ? error : {}),
           purpose: request.purpose,
           transport: "source-document",
           url: request.uri,

@@ -1,4 +1,4 @@
-import { failure } from "@dezoomify/browser-runtime";
+import { outputError } from "@dezoomify/browser-runtime";
 import type { browser } from "wxt/browser";
 
 type Downloads = Pick<typeof browser.downloads, "download" | "search" | "cancel" | "onChanged">;
@@ -30,7 +30,7 @@ export function saveExtensionBlob(
       else reject(result.error);
     };
     const failed = (detail: string) =>
-      failure("OUTPUT_FAILED", "The browser could not save the image.", false, undefined, detail);
+      outputError("OUTPUT_FAILED", "The browser could not save the image.", detail);
     const onChanged = (delta: DownloadDelta) => {
       if (delta.state?.current !== "complete" && delta.state?.current !== "interrupted") return;
       if (id === null) {

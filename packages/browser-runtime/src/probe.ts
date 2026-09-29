@@ -1,4 +1,4 @@
-import type { FetchFailure, ResourceRequest } from "@dezoomify/wasm-bindings";
+import type { ResourceRequest } from "@dezoomify/wasm-bindings";
 
 // Shared probe-size helper for browser hosts.
 //
@@ -32,7 +32,6 @@ export interface ProbeBitmap {
 }
 
 export interface ProbeSizeDeps {
-  classifyFailure?(error: unknown): FetchFailure;
   /** Fetch one tile as readable bytes.  */
   fetchResource(request: ResourceRequest, signal: AbortSignal): Promise<{ bytes: Uint8Array }>;
   /** Decode fetched bytes far enough to report dimensions. */
@@ -66,7 +65,13 @@ export function createProbeSize(
       signal.throwIfAborted();
     } catch (error) {
       signal.throwIfAborted();
-      if (deps.classifyFailure?.(error).code === "TRANSPORT_POLICY_DENIED") throw error;
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === "TRANSPORT_POLICY_DENIED"
+      )
+        throw error;
       if (!deps.loadImage) return { status: "missing" };
       try {
         const observed = await deps.loadImage(request.uri, signal);

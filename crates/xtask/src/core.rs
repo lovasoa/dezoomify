@@ -1,4 +1,4 @@
-//! `cargo xtask test core [--purity|--parity]`: phase-04 core target.
+//! `cargo xtask test core [--purity|--parity]`: core algorithm and parser tests.
 //! Bare target runs all fast core suites. `--purity` and `--parity` select
 //! their owning integration-test targets.
 

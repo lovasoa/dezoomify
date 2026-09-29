@@ -19,13 +19,8 @@ debug = 0
 inherits = "dev"
 debug = 2
 
-# Shared lint policy: `[workspace.lints]` is the authored default
-# (`missing_docs`/`pedantic` warn so legacy debt stays visible; `nursery`
-# stays allowed until audited). NOTE (cargo 1.98): `[lints] workspace = true`
-# cannot be combined with per-lint overrides in the same manifest, so only
-# debt-free crates inherit it bare; crates with legacy debt carry manual
-# `[lints.*]` tables mirroring this policy plus dated `allow` notes, and
-# switch back to `workspace = true` once their debt clears.
+# Shared lint defaults. Crates either inherit these tables or declare their
+# own policy: Cargo does not combine workspace inheritance with per-lint overrides.
 # `clippy::unwrap_used` is deliberately NOT in this table: a workspace deny
 # would also lint integration `tests/` targets, while the policy is "deny
 # in shipped `src`, allow in tests". Each crate therefore denies it at its

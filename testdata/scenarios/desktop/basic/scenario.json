@@ -1,5 +1,5 @@
 {
-  "description": "Desktop happy path: start_job plus request_destination drives the shared native pipeline over loopback and publishes a 512x512 PNG",
+  "description": "Desktop uses NativeHost over loopback and saves a 512x512 PNG",
   "id": "desktop/basic",
   "input": {
     "mode": "gateway",

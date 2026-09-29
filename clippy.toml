@@ -3,15 +3,14 @@
 # - `allow-unwrap-in-tests`: `clippy::unwrap_used` still fires in shipped
 #   code (denied per crate through `[workspace.lints]`), but test code may
 #   use `unwrap`/`expect` for fixture setup and assertions. Shipped code
-#   must map failures to typed domain errors (`Error`, `NativeError`,
-#   `handoff.rejected`) instead of panicking.
+#   must return structured domain errors instead of panicking.
 allow-unwrap-in-tests = true
 
 # The pure domain crate denies these semantic Clippy lints in non-test builds.
 # Clippy resolves aliases and re-exports before comparing paths.
 # `cargo xtask check` allows these two
 # lints during its general workspace pass, then runs a dedicated strict Clippy
-# pass over the `dezoomify` production library. Effect-owning host crates may
+# pass over the `dezoomify` production library. Platform Host crates may
 # therefore use these capabilities while the domain boundary stays enforced.
 disallowed-methods = [
   { path = "std::env::args", reason = "hosts supply all input explicitly" },
@@ -67,8 +66,8 @@ disallowed-types = [
   { path = "std::process::Child", reason = "hosts own subprocesses" },
   { path = "std::process::Command", reason = "hosts own subprocesses" },
   { path = "std::process::Stdio", reason = "hosts own subprocesses" },
-  { path = "std::sync::Mutex", reason = "the deterministic engine has no locks" },
-  { path = "std::sync::RwLock", reason = "the deterministic engine has no locks" },
+  { path = "std::sync::Mutex", reason = "hosts own synchronization" },
+  { path = "std::sync::RwLock", reason = "hosts own synchronization" },
   { path = "std::thread::Builder", reason = "hosts own scheduling" },
   { path = "std::thread::JoinHandle", reason = "hosts own scheduling" },
   { path = "std::time::Instant", reason = "hosts own clocks" },

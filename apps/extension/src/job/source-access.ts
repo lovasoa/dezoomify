@@ -8,6 +8,7 @@ import {
 } from "@dezoomify/browser-runtime";
 import type { FetchFailure, ResourceRequest } from "@dezoomify/wasm-bindings";
 import type { WxtBrowser } from "wxt/browser";
+import { transportError } from "../runtime/fetch.ts";
 import { cancelSourceFetch, collectCandidates, fetchSource } from "./source-operations.ts";
 
 type SourceApi = Pick<WxtBrowser, "tabs" | "scripting">;
@@ -20,29 +21,6 @@ const MAX_URL_LENGTH = 2048;
 const MAX_CANDIDATES = 100;
 const MAX_DOM_BYTES = 8 * 1024 * 1024;
 const MAX_BASE64_CHARS = Math.ceil((SOURCE_FETCH_BYTE_LIMIT + 2) / 3) * 4;
-
-export type SourceAccessErrorCode =
-  | "source-document-lost"
-  | "cancelled"
-  | "malformed"
-  | "network"
-  | "http-error"
-  | "limit-exceeded";
-
-export type SourceAccessError = Error & {
-  code: SourceAccessErrorCode;
-  category: SourceAccessErrorCode;
-  status?: number;
-  sourceDefinitive?: boolean;
-};
-
-function failure(
-  code: SourceAccessErrorCode,
-  message: string,
-  extra: Partial<Pick<SourceAccessError, "status" | "sourceDefinitive">> = {},
-): SourceAccessError {
-  return Object.assign(new Error(message), { code, category: code, ...extra });
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -126,9 +104,9 @@ export function createSourceAccess(
   options: { timeoutMs?: number } = {},
 ) {
   if (!Number.isSafeInteger(reference.tabId) || reference.tabId < 0)
-    throw failure("malformed", "invalid source tab id");
+    throw transportError("TRANSPORT_BAD_URL", "invalid source tab id");
   if (!isPublicHttpUrl(reference.documentUrl) || reference.documentUrl.length > MAX_URL_LENGTH)
-    throw failure("malformed", "invalid source document URL");
+    throw transportError("TRANSPORT_BAD_URL", "invalid source document URL");
 
   const { tabId, documentUrl } = reference;
   const timeoutMs = options.timeoutMs ?? 30_000;
@@ -149,13 +127,16 @@ export function createSourceAccess(
   function invalidate() {
     if (invalidated) return;
     invalidated = true;
-    lifetime.abort(failure("source-document-lost", "source document changed"));
+    lifetime.abort(
+      transportError("DISCOVERY_FAILED", "source document changed", "source-document-lost"),
+    );
   }
   browserApi.tabs.onUpdated.addListener(onUpdated);
   browserApi.tabs.onRemoved.addListener(onRemoved);
 
   function assertLive() {
-    if (invalidated) throw failure("source-document-lost", "source document changed");
+    if (invalidated)
+      throw transportError("DISCOVERY_FAILED", "source document changed", "source-document-lost");
   }
 
   async function injectUnchecked<Args extends unknown[], Result>(
@@ -170,11 +151,11 @@ export function createSourceAccess(
     signal.throwIfAborted();
     if (!tab) {
       invalidate();
-      throw failure("source-document-lost", "source tab is unavailable");
+      throw transportError("DISCOVERY_FAILED", "source tab is unavailable", "source-document-lost");
     }
     if (!tab.url || !sameDocumentUrl(tab.url, documentUrl)) {
       invalidate();
-      throw failure("source-document-lost", "source document changed");
+      throw transportError("DISCOVERY_FAILED", "source document changed", "source-document-lost");
     }
     assertLive();
     onLaunch?.();
@@ -186,19 +167,19 @@ export function createSourceAccess(
       })
       .catch((cause: unknown) => {
         assertLive();
-        throw Object.assign(
-          failure("network", "source operation could not run", { sourceDefinitive: false }),
-          { cause },
-        );
+        throw {
+          ...transportError("TRANSPORT_NETWORK_ERROR", "source operation could not run", "network"),
+          detail: cause instanceof Error ? cause.message : String(cause),
+        };
       });
     signal.throwIfAborted();
     assertLive();
     if (!Array.isArray(results) || results.length !== 1 || results[0]?.frameId !== 0)
-      throw failure("malformed", "source operation returned an invalid result");
+      throw transportError("TRANSPORT_BAD_URL", "source operation returned an invalid result");
     const tabAfter = await browserApi.tabs.get(tabId).catch(() => null);
     if (!tabAfter?.url || !sameDocumentUrl(tabAfter.url, documentUrl)) {
       invalidate();
-      throw failure("source-document-lost", "source document changed");
+      throw transportError("DISCOVERY_FAILED", "source document changed", "source-document-lost");
     }
     assertLive();
     const result = results[0].result;
@@ -206,7 +187,11 @@ export function createSourceAccess(
       isRecord(result) && typeof result.documentUrl === "string" ? result.documentUrl : null;
     if (!resultDocumentUrl || !sameDocumentUrl(resultDocumentUrl, documentUrl)) {
       invalidate();
-      throw failure("source-document-lost", "source result belongs to another document");
+      throw transportError(
+        "DISCOVERY_FAILED",
+        "source result belongs to another document",
+        "source-document-lost",
+      );
     }
     return result as Awaited<Result>;
   }
@@ -250,7 +235,7 @@ export function createSourceAccess(
     let operationDone = Promise.resolve();
     const abort = () => {
       const reason = signal?.aborted
-        ? failure("cancelled", "source fetch cancelled")
+        ? transportError("TRANSPORT_CANCELLED", "source fetch cancelled", "cancelled")
         : combined.reason;
       if (onAbort && launched) {
         const cleanup = Promise.resolve()
@@ -287,22 +272,23 @@ export function createSourceAccess(
   async function scan(signal?: AbortSignal): Promise<CandidateSnapshot> {
     const snapshot = await inject(collectCandidates, [], signal);
     if (!validSnapshot(snapshot, documentUrl))
-      throw failure("malformed", "invalid source scan result");
+      throw transportError("TRANSPORT_BAD_URL", "invalid source scan result");
     assertLive();
     return snapshot;
   }
 
   async function fetch(request: Pick<ResourceRequest, "uri" | "headers">, signal: AbortSignal) {
     assertLive();
-    if (signal.aborted) throw failure("cancelled", "source fetch cancelled");
+    if (signal.aborted)
+      throw transportError("TRANSPORT_CANCELLED", "source fetch cancelled", "cancelled");
     if (
       typeof request.uri !== "string" ||
       request.uri.length > MAX_URL_LENGTH ||
       !isPublicHttpUrl(request.uri)
     )
-      throw failure("malformed", "invalid source request URL");
+      throw transportError("TRANSPORT_BAD_URL", "invalid source request URL");
     const headers = validateRequestHeaders(request.headers ?? []);
-    if (!headers) throw failure("malformed", "invalid source request headers");
+    if (!headers) throw transportError("TRANSPORT_BAD_URL", "invalid source request headers");
 
     const operationId = crypto.randomUUID();
     const deadlineAt = Date.now() + timeoutMs;
@@ -324,14 +310,15 @@ export function createSourceAccess(
         .then(() => undefined);
     };
     const result = await inject(fetchSource, [sourceRequest], signal, cancel, deadlineAt);
-    if (signal.aborted) throw failure("cancelled", "source fetch cancelled");
+    if (signal.aborted)
+      throw transportError("TRANSPORT_CANCELLED", "source fetch cancelled", "cancelled");
     assertLive();
     if (!validFetchResult(result, documentUrl))
-      throw failure("malformed", "invalid source fetch result");
+      throw transportError("TRANSPORT_BAD_URL", "invalid source fetch result");
     if (result.ok === false) throw result.error;
     const bytes = decodeBase64Payload(result.data, SOURCE_FETCH_BYTE_LIMIT);
     if (!bytes || bytes.byteLength !== result.bytes)
-      throw failure("malformed", "invalid source payload");
+      throw transportError("TRANSPORT_BAD_URL", "invalid source payload");
     return { bytes, finalUri: result.url, http: result.status, contentType: result.contentType };
   }
 

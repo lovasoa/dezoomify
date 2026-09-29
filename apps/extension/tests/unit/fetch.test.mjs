@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import test from "node:test";
-import { asFetchFailure, createExtensionFetcher } from "../../src/runtime/fetch.ts";
+import { createExtensionFetcher } from "../../src/runtime/fetch.ts";
 
 let origin;
 const requests = [];
@@ -50,20 +50,18 @@ test("metadata accepts viewer HTML but tiles reject it", async () => {
     (await fetcher().fetchResource(resource("/html", "metadata"), signal())).bytes.length,
     11,
   );
-  await assert.rejects(
-    fetcher().fetchResource(resource("/html"), signal()),
-    /unsupported response type/,
+  await assert.rejects(fetcher().fetchResource(resource("/html"), signal()), (error) =>
+    /unsupported response type/.test(error.message),
   );
 });
 
 test("HTTP refusals and throttles retain status without becoming permission requests", async () => {
   for (const status of [401, 403, 429, 503]) {
     await assert.rejects(fetcher().fetchResource(resource(`/${status}`), signal()), (error) => {
-      const failure = asFetchFailure(error);
-      assert.equal(failure.http, status);
-      assert.equal(Object.hasOwn(failure, "retryable"), false);
-      assert.notEqual(error.code, "permission-denied");
-      if (status === 429) assert.equal(failure.retry_after_ms, 3000);
+      assert.equal(error.http, status);
+      assert.equal(Object.hasOwn(error, "retryable"), false);
+      assert.notEqual(error.code, "TRANSPORT_POLICY_DENIED");
+      if (status === 429) assert.equal(error.retry_after_ms, 3000);
       return true;
     });
   }
@@ -73,19 +71,22 @@ test("missing grants and forbidden URLs do not perform network requests", async 
   const before = requests.length;
   await assert.rejects(
     fetcher({ hasPermission: () => false }).fetchResource(resource("/image"), signal()),
-    { code: "permission-denied" },
+    { code: "TRANSPORT_POLICY_DENIED" },
   );
-  await assert.rejects(fetcher().fetchResource(resource("/api/proxy?u=secret"), signal()), /proxy/);
+  await assert.rejects(
+    fetcher().fetchResource(resource("/api/proxy?u=secret"), signal()),
+    (error) => /proxy/.test(error.message),
+  );
   await assert.rejects(
     fetcher().fetchResource({ ...resource("/image"), uri: "file:///etc/passwd" }, signal()),
-    /scheme/,
+    (error) => /scheme/.test(error.message),
   );
   assert.equal(requests.length, before);
 });
 
 test("oversized response bodies fail before becoming image bytes", async () => {
   await assert.rejects(fetcher({ maxBytes: 4 }).fetchResource(resource("/image"), signal()), {
-    category: "limit-exceeded",
+    code: "TRANSPORT_SIZE_LIMIT",
   });
 });
 
@@ -95,7 +96,7 @@ test("the attempt signal cancels a stalled real request", async () => {
   const pending = fetcher().fetchResource(resource("/stall"), controller.signal);
   await arrived;
   controller.abort();
-  await assert.rejects(pending, { category: "cancelled" });
+  await assert.rejects(pending, { code: "TRANSPORT_CANCELLED" });
 });
 
 test("a request deadline stays distinguishable from user cancellation", async () => {
@@ -112,6 +113,6 @@ test("a request deadline stays distinguishable from user cancellation", async ()
   expire();
   await assert.rejects(
     pending,
-    (error) => error.category === "network" && error.message === "fetch timeout",
+    (error) => error.code === "TRANSPORT_TIMEOUT" && error.message === "fetch timeout",
   );
 });

@@ -5,15 +5,13 @@
 // serves /beta. The website-deploy workflow runs this on GitHub Actions and
 // uploads dist/ to Cloudflare Pages with wrangler; `cargo xtask build web`
 // runs the same script locally. Nothing under dist/ is committed. See
-// plans/website-deploy.md for the deployment contract.
+// docs/development.md for the deployment contract.
 //
 // Usage:
 //   node scripts/build-site.mjs            # full build (help, wasm glue,
 //                                           # Vite app, dist/)
 //   node scripts/build-site.mjs --no-wasm  # help + Vite + dist/, using the
-//                                           # existing wasm/ glue (used by
-//                                           # test lanes that never load the
-//                                           # worker)
+//                                           # existing wasm/ glue)
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -51,23 +49,13 @@ function run(cmd, args, opts = {}) {
   }
 }
 
-function copy(rel, prefix = "") {
-  const src = path.join(ROOT, rel);
-  if (!fs.existsSync(src)) {
-    throw new Error(`site asset missing: ${rel} (run with the wasm build, or fix the reference)`);
-  }
-  const dest = path.join(DIST, prefix, rel);
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.copyFileSync(src, dest);
-}
-
 // Copy a whole source tree into dist/ (destRel drops the source prefix).
 function copyTree(srcRel, destRel) {
   fs.cpSync(path.join(ROOT, srcRel), path.join(DIST, destRel), { recursive: true });
 }
 
 // The legacy site serves /: everything in legacy/ except dev tooling,
-// copied byte-identical (plans/website-deploy.md WD5).
+// copied byte-identical.
 function copyLegacy() {
   const legacyRoot = path.join(ROOT, "legacy");
   if (!fs.existsSync(path.join(legacyRoot, "functions", "proxy.js"))) {
@@ -79,11 +67,14 @@ function copyLegacy() {
   }
 }
 
-/** True when Vite emitted at least one hashed JS asset under dist/beta/assets. */
-function hasViteJsAsset() {
+/** The entry bundle, imported glue, and referenced binary must all be present. */
+function hasViteAssets() {
   const assets = path.join(DIST, BETA, "assets");
   if (!fs.existsSync(assets)) return false;
-  return fs.readdirSync(assets).some((name) => name.endsWith(".js"));
+  const names = fs.readdirSync(assets);
+  return [/^index-.+\.js$/, /^dezoomify-wasm-.+\.js$/, /^dezoomify-wasm_bg-.+\.wasm$/].every(
+    (pattern) => names.some((name) => pattern.test(name)),
+  );
 }
 
 function main() {
@@ -121,18 +112,13 @@ function main() {
     ]);
   }
 
-  // 3. Vite production build: hashed assets, worker, and the wasm glue the
-  //    worker imports (emitted under dist/beta/).
+  // 3. Vite production build: hashed JavaScript and WASM assets under dist/beta/.
   fs.rmSync(DIST, { recursive: true, force: true });
   run(process.execPath, ["node_modules/vite/bin/vite.js", "build"]);
 
-  // 4. Assemble the rest of dist/: the legacy site at / (verbatim), help and
-  //    the canonical wasm paths below dist/beta/, and the Functions routing
-  //    manifest.
+  // 4. Assemble the legacy site at /, help below /beta/, and Function routes.
   copyLegacy();
   copyTree("help", path.join(BETA, "help"));
-  copy("wasm/dezoomify-wasm.js", BETA);
-  copy("wasm/dezoomify-wasm_bg.wasm", BETA);
   fs.writeFileSync(path.join(DIST, "_routes.json"), JSON.stringify(ROUTES, null, 2) + "\n");
 
   // 5. Sanity: the served tree must contain the deployed contract's keys.
@@ -144,8 +130,6 @@ function main() {
     path.join(BETA, "index.html"),
     path.join(BETA, "privacy.html"),
     path.join(BETA, "terms.html"),
-    path.join(BETA, "wasm", "dezoomify-wasm.js"),
-    path.join(BETA, "wasm", "dezoomify-wasm_bg.wasm"),
     path.join(BETA, "help", "index.html"),
     "_routes.json",
   ]) {
@@ -153,8 +137,8 @@ function main() {
       throw new Error(`assembled dist/ is missing ${must}`);
     }
   }
-  if (!hasViteJsAsset()) {
-    throw new Error("assembled dist/beta/assets is missing the Vite JavaScript bundle");
+  if (!hasViteAssets()) {
+    throw new Error("assembled dist/beta/assets is missing the entry bundle or WASM assets");
   }
   const count = spawnSync("find", [DIST, "-type", "f"], { encoding: "utf8" });
   const files = count.stdout.trim().split("\n").length;

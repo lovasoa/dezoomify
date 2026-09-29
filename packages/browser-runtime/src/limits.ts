@@ -1,5 +1,10 @@
 // Browser resource limits with overflow-safe arithmetic.
-import type { BrowserLimits } from "./types.ts";
+export interface BrowserLimits {
+  maxWidth: number;
+  maxHeight: number;
+  maxArea: number;
+  maxBytes: number;
+}
 
 export type LimitVerdict = "ok" | "browser-risk" | "native-required";
 
@@ -85,16 +90,6 @@ export const MAXIMUM_SELECTION_LIMITS: SelectionLimits = {
 
 /** Upper bound on tiles materialized into one website plan (allocation guard). */
 export const BROWSER_MAX_PLAN_TILES = 100_000;
-
-export function safeArea(width: number, height: number): number | null {
-  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
-  if (!Number.isInteger(width) || !Number.isInteger(height)) return null;
-  if (width <= 0 || height <= 0) return null;
-  // Overflow-safe: check division before multiplying. JS is float64 but we
-  // guard against exceeding MAX_SAFE_INTEGER as well.
-  if (width > Number.MAX_SAFE_INTEGER / height) return null;
-  return width * height;
-}
 
 export function probeLimits(
   req: { width: number; height: number; estimatedBytes?: number },

@@ -6,7 +6,6 @@
     "get_job_diagnostics",
     "open_saved_output",
     "pause_job",
-    "query_capabilities",
     "release_job",
     "resume_job"
   ],
@@ -21,6 +20,14 @@
     "tiff",
     "zif",
     "webp"
+  ],
+  "outputFormats": [
+    "png",
+    "jpeg",
+    "tiff",
+    "zif",
+    "webp",
+    "iiif-dir"
   ],
   "eventChannels": [
     "dezoomify://deep-link-pending",

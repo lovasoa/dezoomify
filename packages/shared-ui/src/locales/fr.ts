@@ -123,14 +123,11 @@ export const fr = {
   "view.idle.submit": "Dezoomify !",
   // Job step labels.
   "view.step.discovering": "Recherche de l image zoomable…",
-  "view.step.choosingImage": "Image trouvee ; choix de la meilleure…",
-  "view.step.choosingLevel": "Choix de la plus haute resolution…",
   "view.step.preflighting": "Verification de la taille de l image…",
   "view.step.downloading": "Enregistrement des tuiles…",
   "view.step.saving": "Assemblage de l image finale…",
   "view.step.working": "En cours…",
   "view.step.contactingDetail": "Contact de l'hote de l'image…",
-  "view.step.recoveryDetail": "Une decision de recuperation est requise avant de continuer.",
   "view.step.encodingDetail": "Encodage dans l'application.",
   "view.step.cleanupDetail": "Nettoyage des fichiers inacheves…",
   // Live job section.
@@ -300,7 +297,6 @@ export const fr = {
   "desktop.save.fallback": "Impossible d enregistrer cette image depuis {host}. Reessayez.",
   "desktop.job.failedFallback": "La tache a echoue.",
   "desktop.invoke.startFallback": "Impossible de demarrer la tache.",
-  "desktop.invoke.retry": "La demande de nouvel essai a ete refusee.",
   "desktop.invoke.partial": "Le choix d image partielle a ete refuse.",
   "desktop.invoke.destination": "Impossible de demander la destination d enregistrement.",
   "desktop.invoke.cancel": "Impossible d annuler la tache.",
@@ -335,9 +331,6 @@ export const fr = {
   "desktop.link.note": "Rien ne s execute avant votre confirmation. Refuser ne fait rien.",
   "desktop.link.dismiss": "Ignorer",
   "desktop.link.open": "Ouvrir l image",
-  "desktop.rec.partialTitle": "Certaines tuiles n ont pas pu etre enregistrees",
-  "desktop.rec.partialDesc":
-    "Une partie de l image manque. {summary} Conservez l image partielle (les zones vides restent vides), abandonnez-la ou reessayez les tuiles manquees.",
   "desktop.rec.missing": "Tuiles manquantes : {shown}{rest}.",
   "desktop.rec.more": " et {n} de plus",
   "desktop.rec.destTitle": "La destination d enregistrement demande votre attention",

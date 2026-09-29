@@ -5,47 +5,18 @@ import {
   createTileThrottle,
   DIRECT_METADATA_TIMEOUT_MS,
   hostOf,
-  pickTileConcurrency,
   proxyRateLimitDelayMs,
   REQUEST_TIMEOUT_MS,
-  TILE_CONCURRENCY_CAP,
-  TILE_CONCURRENCY_FLOOR,
-  TILE_CONCURRENCY_MAX,
-  TILE_CONCURRENCY_MIN,
   TILE_MAX_REQUESTS_PER_SECOND,
   TILE_MIN_INTERVAL_MS,
-  tileFailedError,
-  websiteTileConcurrency,
 } from "../src/tile-policy.ts";
 
 test("tile tuning constants match the browser runtime limits", () => {
+  assert.equal(BROWSER_MAX_CONCURRENCY, 6);
   assert.equal(REQUEST_TIMEOUT_MS, 30000);
   assert.equal(DIRECT_METADATA_TIMEOUT_MS, 1500);
   assert.equal(TILE_MAX_REQUESTS_PER_SECOND, 5);
   assert.equal(TILE_MIN_INTERVAL_MS, 200);
-  assert.equal(TILE_CONCURRENCY_FLOOR, 4);
-  assert.equal(TILE_CONCURRENCY_MIN, 6);
-  assert.equal(TILE_CONCURRENCY_MAX, 12);
-  assert.equal(TILE_CONCURRENCY_CAP, 12);
-});
-
-test("pickTileConcurrency adapts to cores and RTT within 6-12 plus floor", () => {
-  assert.equal(pickTileConcurrency({ hardwareConcurrency: 2 }), 6);
-  assert.equal(pickTileConcurrency({ hardwareConcurrency: 4 }), 8);
-  assert.equal(pickTileConcurrency({ hardwareConcurrency: 8 }), 10);
-  assert.equal(pickTileConcurrency({ hardwareConcurrency: 64 }), 12);
-  assert.equal(pickTileConcurrency({ hardwareConcurrency: 8, rttMs: 400 }), 9);
-  assert.equal(pickTileConcurrency({ hardwareConcurrency: 8, rttMs: 800 }), 8);
-  assert.equal(pickTileConcurrency({ hardwareConcurrency: 64, maxConcurrent: 4 }), 4);
-  assert.equal(pickTileConcurrency({}), 8);
-});
-
-test("websiteTileConcurrency limits browser requests to six", () => {
-  assert.equal(BROWSER_MAX_CONCURRENCY, 6);
-  assert.equal(websiteTileConcurrency({ hardwareConcurrency: 2 }), 6);
-  assert.equal(websiteTileConcurrency({ hardwareConcurrency: 16, connection: { rtt: 900 } }), 6);
-  assert.equal(websiteTileConcurrency({}), 6);
-  assert.equal(websiteTileConcurrency({ hardwareConcurrency: 64 }), 6);
 });
 
 test("proxyRateLimitDelayMs honors Retry-After within the UX budget", () => {
@@ -81,15 +52,4 @@ test("createTileThrottle staggers starts per host", async () => {
 test("hostOf stays readable", () => {
   assert.equal(hostOf("https://example.test/x"), "example.test");
   assert.equal(hostOf("bogus"), "the server");
-});
-
-test("tileFailedError carries typed one-attempt facts for the Rust algorithm", () => {
-  const error = tileFailedError("http-error", 403, "https://a.test/1.png");
-  assert.equal(error.code, "TILE_FAILED");
-  assert.equal(error.retryable, false);
-  assert.equal(error.http, 403);
-  assert.equal(error.transportKind, "direct");
-  assert.equal(error.cause?.code, "TRANSPORT_HTTP_ERROR");
-  assert.equal(error.cause?.http, 403);
-  assert.match(error.technical ?? "", /1 attempt/);
 });

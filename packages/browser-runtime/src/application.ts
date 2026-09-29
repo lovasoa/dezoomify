@@ -53,6 +53,7 @@ import {
 import type { PermissionWait } from "./permissions.ts";
 import { desktopHandoffLink, isLocalFileUrl } from "./plan-gates.ts";
 import { createTileDecoder } from "./tile-decode.ts";
+import { BROWSER_MAX_CONCURRENCY } from "./tile-policy.ts";
 
 type WasmModule = Pick<typeof import("@dezoomify/wasm-bindings"), "dezoomify" | "applyProcessing">;
 export interface BrowserApplicationContext {
@@ -65,7 +66,7 @@ export interface BrowserApplicationContext {
   title(): string | undefined;
 }
 export interface BrowserCapabilities
-  extends Pick<BrowserHostDependencies, "fetchResource" | "loadDisplayImage" | "classifyFailure"> {
+  extends Pick<BrowserHostDependencies, "fetchResource" | "loadDisplayImage"> {
   inputs(url: string): Promise<JobInput[]>;
   canvas(): HTMLCanvasElement;
   showCanvas?(canvas: HTMLCanvasElement): void;
@@ -89,7 +90,6 @@ export interface BrowserApplicationOptions {
   wasm(): Promise<WasmModule>;
   capabilities(context: BrowserApplicationContext): BrowserCapabilities;
   partial: Options["partial"];
-  concurrency?: number;
   history?: { store: HistoryStore; key: string };
   resetToIdle?: boolean;
   onStart?(url: string): void;
@@ -233,7 +233,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         signal: a.controller.signal,
         decoder,
         sourceUrl: url,
-        processTile: async (recipe, bytes) =>
+        processTile: (recipe, bytes) =>
           wasm.applyProcessing(recipe, new Uint8Array(bytes)).slice().buffer,
         canvas: capabilities.canvas,
         showCanvas: capabilities.showCanvas,
@@ -255,7 +255,6 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         decoder,
         fetchResource: capabilities.fetchResource,
         loadDisplayImage: capabilities.loadDisplayImage,
-        classifyFailure: capabilities.classifyFailure,
         onProgress: (progress) => {
           if (current === a) {
             a.progress = progress;
@@ -296,7 +295,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
           },
           partial: options.partial,
           output: "png",
-          max_concurrent: options.concurrency ?? 6,
+          max_concurrent: BROWSER_MAX_CONCURRENCY,
           max_tiles: BROWSER_MAX_PLAN_TILES,
           max_retries: 3,
           max_bytes: 64 * 1024 * 1024,

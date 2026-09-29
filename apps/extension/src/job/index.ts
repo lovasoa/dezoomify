@@ -3,7 +3,7 @@ import { createBrowserApplication } from "@dezoomify/browser-runtime/application
 import { jobPageTitle, suggestedNameFor } from "@dezoomify/shared-ui";
 import type { ResourceRead } from "@dezoomify/wasm-bindings";
 import { browser as api } from "wxt/browser";
-import { asFetchFailure, createExtensionFetcher } from "../runtime/fetch.ts";
+import { createExtensionFetcher } from "../runtime/fetch.ts";
 import { saveExtensionBlob } from "./download.ts";
 import { createSourceAccess } from "./source-access.ts";
 import { createResourceFetcher } from "./transport.ts";
@@ -86,7 +86,9 @@ const app = createBrowserApplication({
         if (!source) {
           if (sourceTabId === null)
             throw {
-              code: "source-document-lost",
+              code: "DISCOVERY_FAILED",
+              blocked_reason: "source-document-lost",
+              phase: "discovery",
               message: "Could not find the source tab for this job.",
               retryable: false,
             };
@@ -94,7 +96,9 @@ const app = createBrowserApplication({
           context.signal.throwIfAborted();
           if (typeof tab.url !== "string" || originOfUrl(tab.url) === "")
             throw {
-              code: "source-document-lost",
+              code: "DISCOVERY_FAILED",
+              blocked_reason: "source-document-lost",
+              phase: "discovery",
               message: "The source tab no longer has a readable web page.",
               retryable: false,
             };
@@ -153,7 +157,6 @@ const app = createBrowserApplication({
         return fetchResource(request, signal, interaction);
       },
       loadDisplayImage: (url, signal) => loadTileImage(url, { signal }),
-      classifyFailure: asFetchFailure,
       canvas: () => document.createElement("canvas"),
       async save(blob, width, height, signal, title) {
         downloadId = await saveExtensionBlob(
@@ -245,6 +248,10 @@ api.runtime.onMessage.addListener((message: unknown) => {
           error && typeof error === "object" && "code" in error
             ? String(error.code)
             : "unknown-error",
+        blocked_reason:
+          error && typeof error === "object" && "blocked_reason" in error
+            ? error.blocked_reason
+            : undefined,
       }),
     );
 });

@@ -64,7 +64,6 @@ fn follows_redirect_across_hosts() {
         &format!("http://127.0.0.1:{start_port}/start"),
         &BTreeMap::new(),
         None,
-        None,
         &limits(),
     )
     .expect("fetch follows redirect");
@@ -91,11 +90,10 @@ fn rejects_redirect_beyond_limit() {
         &format!("http://127.0.0.1:{port}/start"),
         &BTreeMap::new(),
         None,
-        None,
         &tight,
     )
     .expect_err("redirect limit");
-    assert_eq!(error.code, "transport.redirect-limit");
+    assert_eq!(error.code, "TRANSPORT_REDIRECT_LIMIT");
     server.join().expect("server");
 }
 
@@ -116,7 +114,6 @@ fn allows_exactly_max_redirects() {
     let outcome = fetch(
         &format!("http://127.0.0.1:{port}/start"),
         &BTreeMap::new(),
-        None,
         None,
         &wide,
     )
@@ -141,11 +138,10 @@ fn rejects_redirect_when_limit_is_exceeded_by_one() {
         &format!("http://127.0.0.1:{port}/start"),
         &BTreeMap::new(),
         None,
-        None,
         &tight,
     )
     .expect_err("limit+1 redirects must fail");
-    assert_eq!(error.code, "transport.redirect-limit");
+    assert_eq!(error.code, "TRANSPORT_REDIRECT_LIMIT");
     server.join().expect("server");
 }
 
@@ -156,11 +152,10 @@ fn reset_connection_fails_after_a_single_attempt() {
         &format!("http://127.0.0.1:{port}/dead"),
         &BTreeMap::new(),
         None,
-        None,
         &limits(),
     )
     .expect_err("reset connection fails");
-    assert_eq!(error.code, "transport.network-error");
+    assert_eq!(error.code, "TRANSPORT_NETWORK_ERROR");
     server.join().expect("server");
 }
 
@@ -176,11 +171,10 @@ fn connection_refused_is_network_error() {
         &format!("http://127.0.0.1:{port}/nothing"),
         &BTreeMap::new(),
         None,
-        None,
         &limits(),
     )
     .expect_err("connection refused");
-    assert_eq!(error.code, "transport.network-error");
+    assert_eq!(error.code, "TRANSPORT_NETWORK_ERROR");
 }
 
 #[test]
@@ -214,7 +208,6 @@ fn credentials_never_leave_the_input_origin() {
         &format!("http://127.0.0.1:{port}/a"),
         &BTreeMap::new(),
         Some(&same),
-        None,
         &limits(),
     )
     .expect("same-origin fetch");
@@ -224,7 +217,6 @@ fn credentials_never_leave_the_input_origin() {
         &format!("http://127.0.0.1:{port}/b"),
         &BTreeMap::new(),
         Some(&foreign),
-        None,
         &limits(),
     )
     .expect("foreign-origin fetch");
@@ -257,7 +249,6 @@ fn exposes_http_error_status() {
         &format!("http://127.0.0.1:{port}/absent"),
         &BTreeMap::new(),
         None,
-        None,
         &limits(),
     )
     .expect("outcome returned");
@@ -275,7 +266,7 @@ fn reads_plain_local_paths_without_http() {
     std::fs::write(&file, b"<Image/>").expect("write temp file");
     let path = file.to_str().expect("utf8 path").to_string();
 
-    let outcome = fetch(&path, &BTreeMap::new(), None, None, &limits()).expect("local read");
+    let outcome = fetch(&path, &BTreeMap::new(), None, &limits()).expect("local read");
     assert_eq!(outcome.status, 200);
     assert!(outcome.ok());
     assert_eq!(outcome.final_uri, path);
@@ -293,7 +284,7 @@ fn reads_file_uris_as_local_paths() {
     let path = file.to_str().expect("utf8 path").to_string();
 
     for uri in [format!("file://{path}"), format!("file://localhost{path}")] {
-        let outcome = fetch(&uri, &BTreeMap::new(), None, None, &limits()).expect("file read");
+        let outcome = fetch(&uri, &BTreeMap::new(), None, &limits()).expect("file read");
         assert_eq!(outcome.status, 200);
         assert_eq!(outcome.final_uri, uri);
         assert_eq!(outcome.body, b"tile-bytes");
@@ -303,21 +294,19 @@ fn reads_file_uris_as_local_paths() {
         "file://other.test/tile.png",
         &BTreeMap::new(),
         None,
-        None,
         &limits(),
     )
     .expect_err("remote file host rejected");
-    assert_eq!(error.code, "transport.bad-url");
+    assert_eq!(error.code, "TRANSPORT_BAD_URL");
     // Missing local files fail honestly without a path leak.
     let missing = dir.join("absent.png");
     let error = fetch(
         missing.to_str().expect("utf8 path"),
         &BTreeMap::new(),
         None,
-        None,
         &limits(),
     )
     .expect_err("missing file fails");
-    assert_eq!(error.code, "transport.network-error");
+    assert_eq!(error.code, "TRANSPORT_NETWORK_ERROR");
     let _ = std::fs::remove_dir_all(&dir);
 }

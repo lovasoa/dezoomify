@@ -1,17 +1,11 @@
 // Canvas decoding, painting, and PNG output for browser capabilities.
-import type {
-  OutputDisposition,
-  OutputFormat,
-  ProcessingRecipe,
-  TilePlacement,
-} from "@dezoomify/wasm-bindings";
-import { failure } from "./failure.ts";
-import { BROWSER_LIMITS, probeLimits, safeArea } from "./limits.ts";
+import type { OutputDisposition, TilePlacement } from "@dezoomify/wasm-bindings";
+import { outputError } from "./failure.ts";
+import { BROWSER_LIMITS, type BrowserLimits, probeLimits } from "./limits.ts";
 import { canvasTooLargeFailure } from "./plan-gates.ts";
 import type { TileBitmap } from "./tile-decode.ts";
 import type { Canvas2DLike, PlacedTileGeometry, TileImageLike } from "./tile-draw.ts";
-import { createProcessQueue, drawPlacedTile } from "./tile-draw.ts";
-import type { BrowserLimits } from "./types.ts";
+import { drawPlacedTile } from "./tile-draw.ts";
 
 export type BrowserSaveDisposition = Extract<
   OutputDisposition,
@@ -29,15 +23,13 @@ export interface AssemblyCanvas {
 export interface CanvasAssemblyDeps<C extends AssemblyCanvas = AssemblyCanvas> {
   diagnostics?: import("../../shared-ui/src/diagnostics.ts").DiagnosticRecorder;
   signal?: AbortSignal;
-  disposeDecoder?(): void;
   /** Decode acquired tile bytes into a bitmap (tile-decode's decoder). */
   decode(bytes: ArrayBuffer): Promise<TileBitmap>;
   /**
    * Apply one core processing recipe (e.g. `google-arts-decrypt`) to raw
-   * tile bytes before decoding. Hosts call the WASM
-   * pure `applyProcessing` op; calls are serialized by the assembly.
+   * tile bytes before decoding with the pure WASM `applyProcessing` function.
    */
-  processTile?: (recipe: ProcessingRecipe, bytes: ArrayBuffer) => Promise<ArrayBuffer>;
+  processTile(recipe: TilePlacement["processing"], bytes: ArrayBuffer): ArrayBuffer;
   /** Allocate the output surface; called only after limit validation. */
   createCanvas(width: number, height: number): C;
   /** Encode the assembled surface (canvas-to-blob on the job tab). */
@@ -74,8 +66,6 @@ export interface CanvasAssembly {
    * display-only (no pixel reads, no programmatic save).
    */
   acquireDisplayTile(tile: number, placement: TilePlacement, image: TileImageLike): void;
-  /** Whether any display-only tile was acquired (output is tainted). */
-  isTainted(): boolean;
   /** Output dimensions from the declared canvas or accumulated placements. */
   dimensions(): { width: number; height: number } | null;
   /**
@@ -84,8 +74,6 @@ export interface CanvasAssembly {
    * Throws a typed failure when the output cannot be produced.
    */
   finalizeOutput(
-    partial: boolean,
-    format: OutputFormat,
     canvas?: { width: number; height: number } | null,
   ): Promise<BrowserOutputDisposition>;
   /** Close every retained tile resource (idempotent). */
@@ -109,7 +97,6 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
   const placements = new Map<number, TilePlacement>();
   const bitmaps = new Map<number, TileBitmap>();
   const displayImages = new Map<number, TileImageLike>();
-  const processQueue = deps.processTile ? createProcessQueue(deps.processTile) : null;
   let canvas: C | null = null;
   let canvasSize: { width: number; height: number } | null = null;
   let tainted = false;
@@ -136,20 +123,14 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
     signal.throwIfAborted();
     if (!declared || canvas) return;
     if (!(declared.width > 0 && declared.height > 0)) {
-      throw failure(
+      throw outputError(
         "PLAN_INVALID",
         "The image size could not be determined.",
-        false,
-        undefined,
         `declared an empty canvas ${declared.width}x${declared.height}`,
       );
     }
     allocate(declared);
     flushHeld();
-  }
-
-  function recordPlacement(tile: number, placement: TilePlacement): void {
-    placements.set(tile, placement);
   }
 
   async function acquireTile(
@@ -158,22 +139,9 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
     bytes: ArrayBuffer,
   ): Promise<void> {
     signal.throwIfAborted();
-    recordPlacement(tile, placement);
-    let input = bytes;
-    if (placement.processing !== "none") {
-      if (!processQueue) {
-        // No processing executor: fail typed instead of silently dropping
-        // the recipe.
-        throw failure(
-          "TILE_PROCESSING_UNAVAILABLE",
-          "This image needs a processing step this app cannot run yet. Use the desktop app for it.",
-          false,
-          undefined,
-          `tile ${tile} requires processing recipe ${placement.processing}`,
-        );
-      }
-      input = await processQueue(placement.processing, bytes);
-    }
+    placements.set(tile, placement);
+    const input =
+      placement.processing === "none" ? bytes : deps.processTile(placement.processing, bytes);
     signal.throwIfAborted();
     const bitmap = await deps.decode(input);
     const mismatch =
@@ -240,17 +208,13 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
 
   function acquireDisplayTile(tile: number, placement: TilePlacement, image: TileImageLike): void {
     signal.throwIfAborted();
-    recordPlacement(tile, placement);
+    placements.set(tile, placement);
     if (canvas) {
       drawPlacedTile(canvas.ctx2d, image, placementGeometry(placement, undefined));
     } else {
       displayImages.set(tile, image);
     }
     markDisplayOnly();
-  }
-
-  function isTainted(): boolean {
-    return tainted;
   }
 
   function dimensions(): { width: number; height: number } | null {
@@ -287,17 +251,13 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
   }
 
   async function finalizeOutput(
-    _partial: boolean,
-    _format: OutputFormat,
     declared?: { width: number; height: number } | null,
   ): Promise<BrowserOutputDisposition> {
     signal.throwIfAborted();
     if (finalized) {
-      throw failure(
+      throw outputError(
         "OUTPUT_STATE",
         "The output surface is already open.",
-        false,
-        undefined,
         "output was finalized twice",
       );
     }
@@ -305,11 +265,9 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
     if (!surface) {
       const size = outputSize(declared);
       if (!(size.width > 0 && size.height > 0)) {
-        throw failure(
+        throw outputError(
           "PLAN_INVALID",
           "The image size could not be determined.",
-          false,
-          undefined,
           `output had an empty canvas ${size.width}x${size.height}`,
         );
       }
@@ -354,7 +312,6 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
   function release(): void {
     if (lifetime.signal.aborted) return;
     lifetime.abort();
-    deps.disposeDecoder?.();
     for (const bitmap of bitmaps.values()) {
       try {
         bitmap.close();
@@ -371,15 +328,8 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
     prepare,
     acquireTile,
     acquireDisplayTile,
-    isTainted,
     dimensions,
     finalizeOutput,
     release,
   };
-}
-
-/** Overflow-safe area of a declared level size (null when invalid). */
-export function declaredArea(size: { width?: number; height?: number }): number | null {
-  if (typeof size?.width !== "number" || typeof size?.height !== "number") return null;
-  return safeArea(size.width, size.height);
 }

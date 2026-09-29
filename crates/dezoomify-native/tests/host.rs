@@ -10,6 +10,68 @@ use dezoomify_native::{JobOptions, NativeHost, OutputTarget};
 mod support;
 
 #[test]
+fn http_failures_retain_the_resource_and_discovery_phase() {
+    use dezoomify::{host::Host, model::*};
+
+    let routes = Arc::new(Mutex::new(HashMap::from([(
+        "/blocked".to_string(),
+        http_response("403 Forbidden", "text/plain", b"access denied"),
+    )])));
+    let base = serve_counted(routes, Arc::default());
+    let uri = format!("{base}/blocked");
+    let work = temp_dir("request-facts");
+    let host = NativeHost::new(JobOptions {
+        input_url: uri.clone(),
+        output: OutputTarget::File(work.join("image.png")),
+        cache_dir: Some(work.join("cache")),
+        ..Default::default()
+    })
+    .unwrap();
+    host.transport.block_on(async {
+        let request = ResourceRequest {
+            uri: uri.clone(),
+            headers: Vec::new(),
+            purpose: RequestPurpose::Metadata,
+        };
+        let metadata = host
+            .fetch(request.clone(), Interaction::Forbidden)
+            .await
+            .unwrap_err();
+        assert_eq!(metadata.phase, ErrorPhase::Discovery);
+        assert_eq!(metadata.resource_kind, Some(ResourceKind::Metadata));
+        let tile = host
+            .acquire_tile(Tile {
+                index: 0,
+                request: ResourceRequest {
+                    purpose: RequestPurpose::Tile,
+                    ..request
+                },
+                placement: TilePlacement {
+                    position: Point { x: 0, y: 0 },
+                    expected_size: None,
+                    canvas: None,
+                    processing: ProcessingRecipe::None,
+                    probe_output: false,
+                },
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(tile.phase, ErrorPhase::Acquisition);
+        assert_eq!(tile.resource_kind, Some(ResourceKind::Tile));
+        for error in [&metadata, &tile] {
+            assert_eq!(error.code, "TRANSPORT_HTTP_ERROR");
+            assert_eq!(error.request.as_deref(), Some(uri.as_str()));
+            assert_eq!(error.transport, Some(ErrorTransport::Native));
+            assert_eq!(error.http, Some(403));
+            assert!(!error.retryable);
+            assert!(error.message.contains("403"));
+        }
+        host.settle().await;
+    });
+    std::fs::remove_dir_all(work).unwrap();
+}
+
+#[test]
 fn malformed_encrypted_tile_retains_processing_failure_and_good_partial_pixels() {
     use dezoomify::{host::Host, model::*};
     use image::GenericImageView;
@@ -57,10 +119,14 @@ fn malformed_encrypted_tile_retains_processing_failure_and_good_partial_pixels()
         let error = host.acquire_tile(tile(1, "bad.bin")).await.unwrap_err();
         assert_eq!(error.code, "tile.processing-failed");
         assert_eq!(error.phase, ErrorPhase::Processing);
+        assert_eq!(
+            error.request,
+            Some(work.join("bad.bin").to_string_lossy().into_owned())
+        );
+        assert_eq!(error.resource_kind, Some(ResourceKind::Tile));
+        assert_eq!(error.transport, Some(ErrorTransport::Native));
         assert!(!error.retryable);
         assert!(error.message.contains("unencrypted header"));
-        let failure = TileFailure::new(error.code, error.http, None, Some(error.message));
-        assert_eq!(failure.category, FailureCategory::Permanent);
         let mut corrupt_image = tile(1, "bad.bin");
         corrupt_image.placement.processing = ProcessingRecipe::None;
         let decode_error = host.acquire_tile(corrupt_image).await.unwrap_err();
@@ -70,7 +136,7 @@ fn malformed_encrypted_tile_retains_processing_failure_and_good_partial_pixels()
             .choose_partial(MissingTiles {
                 missing: vec![MissingTile {
                     tile: 1,
-                    failures: vec![failure],
+                    failures: vec![error],
                 }],
             })
             .await
@@ -82,7 +148,6 @@ fn malformed_encrypted_tile_retains_processing_failure_and_good_partial_pixels()
                 format: OutputFormat::Png,
                 title: None,
                 missing: vec![1],
-                display_only: false,
             })
             .await
             .unwrap();
@@ -128,7 +193,7 @@ fn automatic_output_uses_the_selected_title_and_avoids_overwriting() {
         input_url: manifest.to_string_lossy().into_owned(),
         output: OutputTarget::AutoDir {
             dir: work.clone(),
-            format: dezoomify_native::output::OutputFormat::Png,
+            format: dezoomify::model::OutputFormat::Png,
         },
         ..Default::default()
     };
@@ -278,7 +343,7 @@ fn serve_counted_with_tile_delay(
 
 fn temp_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
-        "dezoomify-native-consolidation-{}-{name}",
+        "dezoomify-native-host-{}-{name}",
         std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&dir);
@@ -406,8 +471,8 @@ fn partial_retry_preserves_good_tiles() {
     let summary = support::run_host(&host).expect("retry heals the job");
     assert!(answered.get(), "partial decision surfaced for retry");
     assert_eq!(summary.tile_count, 4);
-    assert!(summary.missing.is_empty());
-    assert!(!summary.partial);
+    assert!(summary.output.missing.is_empty());
+    assert!(summary.output.complete);
     assert!(output.exists());
     let counts = counts.lock().expect("lock");
     // Good tiles are never refetched after the retry: successes preserved.
@@ -568,7 +633,7 @@ fn cancel_publication_race_orders_commit_or_nothing() {
                 http_response("200 OK", "image/png", &bytes),
             );
         }
-        // One tile never arrives: the driver parks in the partial wait where
+        // One tile never arrives: the invocation awaits a partial choice where
         // the cancel race is deterministic.
         map.insert(
             "/pyr_files/9/1_1.png".to_string(),

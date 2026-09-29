@@ -53,7 +53,7 @@ fn invalid_flag_fails() {
         .expect("run cli");
     // Unknown flags are argument errors: exit 2 with the typed message on
     // stderr (main.rs prints `error: {message}` for parse failures, with the
-    // `(code)` suffix reserved for pipeline NativeErrors). stdout must stay
+    // `(code)` suffix reserved for native errors). stdout must stay
     // clean so machine JSON is never polluted.
     assert_eq!(out.status.code(), Some(2), "unknown flag must exit 2");
     let stdout = String::from_utf8(out.stdout).unwrap();
@@ -110,8 +110,8 @@ fn unknown_flags_still_fail() {
 }
 
 #[test]
-fn ported_flags_are_known() {
-    // Ported selection flags must not fail as unknown. Without positionals
+fn selection_flags_are_known() {
+    // Selection flags must not fail as unknown. Without positionals
     // they print help (exit 0); without a value they report a missing value
     // (exit 2) but never `unknown flag`.
     let help_flags: &[&[&str]] = &[

@@ -50,11 +50,6 @@ function harness(resetToIdle = true, fetchResource = async () => assert.fail("un
         return {
           inputs: async (url) => [{ url }],
           fetchResource,
-          classifyFailure: () => ({
-            code: "TRANSPORT_NETWORK_ERROR",
-            message: "Failed",
-            transport: "direct",
-          }),
           canvas: () => document.createElement("canvas"),
           save: () => "browser-save-ready",
           transport: () => "direct",
@@ -220,7 +215,7 @@ test("partial actions resolve the awaited choice and disappear before completed 
     call.host.report(progress);
     answer = call.host.choosePartial({
       missing: [
-        { tile: 2, failures: [{ category: "permanent", code: "TRANSPORT_HTTP_ERROR", http: 403 }] },
+        { tile: 2, failures: [{ retryable: false, code: "TRANSPORT_HTTP_ERROR", http: 403 }] },
       ],
     });
   });

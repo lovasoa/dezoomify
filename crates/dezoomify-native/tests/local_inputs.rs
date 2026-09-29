@@ -64,8 +64,14 @@ fn plain_path_input_with_file_uri_tiles_assembles() {
             )
         });
     assert_eq!(outcome.tile_count, 4);
-    assert_eq!((outcome.width, outcome.height), (512, 512));
-    assert!(!outcome.partial);
+    assert_eq!(
+        (
+            outcome.output.canvas.as_ref().unwrap().width,
+            outcome.output.canvas.as_ref().unwrap().height
+        ),
+        (512, 512)
+    );
+    assert!(outcome.output.complete);
 }
 
 #[test]
@@ -82,7 +88,13 @@ fn file_uri_input_with_plain_path_tiles_assembles() {
     let outcome = support::run_file(&file_uri, &output, |_| {})
         .unwrap_or_else(|e| panic!("file:// local input succeeds: {} ({})", e.message, e.code));
     assert_eq!(outcome.tile_count, 4);
-    assert_eq!((outcome.width, outcome.height), (512, 512));
+    assert_eq!(
+        (
+            outcome.output.canvas.as_ref().unwrap().width,
+            outcome.output.canvas.as_ref().unwrap().height
+        ),
+        (512, 512)
+    );
 }
 
 #[test]
@@ -91,8 +103,7 @@ fn file_uri_with_remote_host_is_rejected_typed() {
     let output = work.join("out.png");
     let error = support::run_file("file://other.test/tile.png", &output, |_| {})
         .expect_err("remote file host must be rejected");
-    // `Job::new` rejects it as invalid input, mapped to a stable native code.
-    assert_eq!(error.code, "discovery.failed");
+    assert_eq!(error.code, "job.invalid-input");
     assert!(
         !error.message.contains("other.test"),
         "error must not leak the rejected host: {}",

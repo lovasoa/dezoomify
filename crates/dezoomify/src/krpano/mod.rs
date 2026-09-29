@@ -13,9 +13,7 @@ use krpano_decrypt::{decrypt_xml, is_encrypted_xml};
 use krpano_metadata::{KrpanoMetadata, XY, all_sides};
 
 use crate::Vec2d;
-use crate::core::discovery::{
-    ResourceFailure, html_matches, metadata, url_matches, url_suffix, viewer,
-};
+use crate::core::discovery::{html_matches, metadata, url_matches, url_suffix, viewer};
 use crate::core::resolve_relative;
 use crate::core::{
     CatalogPlan, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryResource,
@@ -112,16 +110,14 @@ fn handle_viewer_js(resource: DiscoveryResource<'_>) -> Result<ParsedResource, D
 fn handle_failure(
     context: &DiscoveryContext<'_>,
     request: &Request,
-    failure: &ResourceFailure,
+    failure: &crate::model::Error,
 ) -> Result<ParsedResource, DiscoveryError> {
     if let Some(xml) = find_xml(context)
         && let Some(uri) = next_viewer_after_failure(context, request.uri.as_str(), xml.final_uri())
     {
         return Ok(ParsedResource::Follow(Request::new(uri)));
     }
-    // No recovery left: retain the typed cause. Hosts record requests and
-    // outcomes; the pure format performs no ambient logging.
-    Err(DiscoveryError::fetch_failed(failure.cause.clone()))
+    Err(DiscoveryError::fetch_failed(failure.clone()))
 }
 
 fn find_xml<'a>(context: &DiscoveryContext<'a>) -> Option<DiscoveryResource<'a>> {
@@ -535,9 +531,7 @@ impl GridRequests for KrpanoLevel {
 mod tests {
     use super::*;
     use crate::core::DiscoveredEntry;
-    use crate::core::discovery::{
-        DiscoveryError, FetchCause, FetchCode, RejectionKind, TransportKind,
-    };
+    use crate::core::discovery::{DiscoveryError, RejectionKind};
     use crate::core::{ResolvedImage, TileSource};
 
     fn image(catalog: DiscoveryCatalog) -> ResolvedImage {
@@ -733,14 +727,14 @@ mod tests {
     #[test]
     fn explicit_levels_expand_level_placeholder() {
         let data =
-            std::fs::read("../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/krpano/pba_lille_gigapixels_1515_bellegambe.xml").unwrap();
+            std::fs::read("../../testdata/scenarios/rs-core/formats/payloads/krpano/pba_lille_gigapixels_1515_bellegambe.xml").unwrap();
         assert_bellegambe_levels(&image(catalog_from_xml(BELLEGAMBE_XML_URL, &data)).levels);
     }
 
     #[test]
     fn explicit_levels_expand_level_placeholder_in_discovery() {
         let data =
-            std::fs::read("../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/krpano/pba_lille_gigapixels_1515_bellegambe.xml").unwrap();
+            std::fs::read("../../testdata/scenarios/rs-core/formats/payloads/krpano/pba_lille_gigapixels_1515_bellegambe.xml").unwrap();
         assert_bellegambe_levels(&image(discover_single_resource(BELLEGAMBE_XML_URL, data)).levels);
     }
 
@@ -764,7 +758,10 @@ mod tests {
 
     #[test]
     fn test_multiple_scenes_remain_separate() {
-        let data = std::fs::read("../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/krpano/krpano_scenes.xml").unwrap();
+        let data = std::fs::read(
+            "../../testdata/scenarios/rs-core/formats/payloads/krpano/krpano_scenes.xml",
+        )
+        .unwrap();
         let titles = catalog_from_xml("http://test.com/scenes.xml", &data)
             .into_entries()
             .into_iter()
@@ -778,9 +775,9 @@ mod tests {
 
     #[test]
     fn encrypted_xml_decrypted_without_js() {
-        let xml = std::fs::read("../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/krpano/encrypted/2013-08-09-B/tour.xml").unwrap();
+        let xml = std::fs::read("../../testdata/scenarios/rs-core/formats/payloads/krpano/encrypted/2013-08-09-B/tour.xml").unwrap();
         let expected =
-            std::fs::read_to_string("../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/krpano/encrypted/2013-08-09-B/plaintext.xml")
+            std::fs::read_to_string("../../testdata/scenarios/rs-core/formats/payloads/krpano/encrypted/2013-08-09-B/plaintext.xml")
                 .unwrap()
                 .replace("\r\n", "\n");
         let plaintext = String::from_utf8(decrypt_xml(&xml, None).unwrap()).unwrap();
@@ -1023,15 +1020,10 @@ mod tests {
         };
         let diagnostic = diagnostics.iter().find(|d| d.format == "krpano").unwrap();
         assert_eq!(diagnostic.kind, RejectionKind::FetchFailed);
-        assert_eq!(
-            diagnostic.cause,
-            Some(FetchCause {
-                code: FetchCode::TransportHttpError,
-                http: Some(403),
-                transport: TransportKind::Direct,
-                reason: None
-            })
-        );
+        let cause = diagnostic.cause.as_ref().unwrap();
+        assert_eq!(cause.code, "TRANSPORT_HTTP_ERROR");
+        assert_eq!(cause.http, Some(403));
+        assert_eq!(cause.transport, Some(crate::model::ErrorTransport::Direct));
         assert!(
             error
                 .detail()

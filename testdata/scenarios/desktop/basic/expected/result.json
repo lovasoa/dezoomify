@@ -1,8 +1,0 @@
-{
-  "states": [
-    "idle",
-    "downloading",
-    "saving",
-    "completed"
-  ]
-}

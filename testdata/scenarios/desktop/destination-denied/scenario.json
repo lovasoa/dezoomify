@@ -1,5 +1,5 @@
 {
-  "description": "Desktop destination denied: request_destination without overwrite refuses an existing output before any work",
+  "description": "Desktop refuses an existing output without overwrite before any work",
   "id": "desktop/destination-denied",
   "input": {
     "mode": "gateway",

@@ -1,21 +1,20 @@
 #![allow(dead_code)]
+#![allow(clippy::result_large_err)]
 use dezoomify::model::Progress;
-use dezoomify_native::{
-    Controls, JobOptions, NativeError, NativeHost, OutputSummary, OutputTarget,
-};
+use dezoomify_native::{Controls, JobOptions, NativeHost, OutputTarget, Publication};
 use std::path::Path;
 
 pub fn run_options_observed(
     options: JobOptions,
     mut observe: impl FnMut(&Controls, &Progress),
-) -> Result<OutputSummary, NativeError> {
+) -> Result<Publication, dezoomify::model::Error> {
     let host = NativeHost::new(options)?;
     let controls = host.controls.clone();
     host.on_progress(move |progress| observe(&controls, &progress));
     run_host(&host)
 }
 
-pub fn run_host(host: &NativeHost<'_>) -> Result<OutputSummary, NativeError> {
+pub fn run_host(host: &NativeHost<'_>) -> Result<Publication, dezoomify::model::Error> {
     let result = host.transport.block_on(dezoomify::dezoomify(
         host.inputs(),
         host.algorithm_options(),
@@ -31,16 +30,21 @@ pub fn run_host(host: &NativeHost<'_>) -> Result<OutputSummary, NativeError> {
             serde_json::json!({"code": error.code, "message": error.message}),
         );
     }
-    result.map_err(NativeError::from)?;
-    host.publication()
-        .ok_or_else(|| NativeError::new("native.internal", "output was not published"))
+    result?;
+    host.publication().ok_or_else(|| {
+        dezoomify::model::Error::new(
+            "native.internal",
+            dezoomify::model::ErrorPhase::Output,
+            "output was not published",
+        )
+    })
 }
 
 pub fn run_file(
     input_url: &str,
     output: &Path,
     configure: impl FnOnce(&mut JobOptions),
-) -> Result<OutputSummary, NativeError> {
+) -> Result<Publication, dezoomify::model::Error> {
     let mut options = JobOptions {
         input_url: input_url.to_string(),
         output: OutputTarget::File(output.to_path_buf()),
@@ -56,7 +60,7 @@ pub fn run_with_options(
     overwrite: bool,
     options: &JobOptions,
     on_progress: &mut dyn FnMut(&Progress),
-) -> Result<OutputSummary, NativeError> {
+) -> Result<Publication, dezoomify::model::Error> {
     run_options_observed(
         options_for_target(input_url, output, overwrite, options),
         |_, progress| on_progress(progress),
@@ -69,7 +73,7 @@ pub fn run_with_options_observed(
     overwrite: bool,
     options: &JobOptions,
     observe: impl FnMut(&Controls, &Progress),
-) -> Result<OutputSummary, NativeError> {
+) -> Result<Publication, dezoomify::model::Error> {
     run_options_observed(
         options_for_target(input_url, output, overwrite, options),
         observe,

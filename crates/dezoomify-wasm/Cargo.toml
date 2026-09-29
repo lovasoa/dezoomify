@@ -17,8 +17,7 @@ wasm-bindgen-futures = "0.4"
 serde-wasm-bindgen.workspace = true
 tsify.workspace = true
 
-# Manual lint tables until legacy debt clears (see the workspace policy
-# note in the root Cargo.toml).
+# Portable bindings use the workspace's explicit lint policy.
 [lints.rust]
 missing_docs = "allow"
 

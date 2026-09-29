@@ -17,6 +17,7 @@ import {
   type HistoryEntry,
   loadHistory as loadHistoryStore,
   openConfirmModal,
+  PartialDecisionActions,
   type Presentation,
   presentFailure,
   presentIdle,
@@ -31,10 +32,14 @@ import {
   t,
   toHistoryEntry,
 } from "@dezoomify/shared-ui";
-import type { MissingTiles, Output, Progress } from "@dezoomify/wasm-bindings";
+import type {
+  Error as JobError,
+  MissingTiles,
+  Output,
+  Progress,
+  RecoveryChoice,
+} from "@dezoomify/wasm-bindings";
 import { createElement } from "react";
-import type { NativeFormat } from "./desktopIntegration.ts";
-import { createDesktopIntegration, NATIVE_FORMATS } from "./desktopIntegration.ts";
 import type { ValidatedDeepLink } from "./errorCopy.ts";
 import {
   encoderToMime,
@@ -49,7 +54,7 @@ import {
   invokeNative,
   listenDeepLinks,
   type NativeInvocation,
-  queryNativeCapabilities,
+  openExternalLink,
   readNativeDiagnostics,
 } from "./native.ts";
 import type { DesktopQueue } from "./queue.ts";
@@ -60,12 +65,22 @@ import {
   retryDesktopEntry,
 } from "./queue.ts";
 import type { DesktopSettings } from "./settings.ts";
-import { defaultOutputDirectory, loadSettings, saveSettings } from "./settings.ts";
-import { getEffectiveSettings, resetDesktopSettings } from "./settingsPanel.ts";
+import {
+  defaultOutputDirectory,
+  loadSettings,
+  resetSettings,
+  saveSettings,
+  validateSettings,
+} from "./settings.ts";
 import { DesktopSettingsView } from "./settingsView.tsx";
 
 const root = typeof document !== "undefined" ? document.getElementById("root") : null;
-const integration = createDesktopIntegration();
+const capabilities = {
+  nativeAvailable: true,
+  extensionAvailable: false,
+  browserCanSave: true,
+  proxyAllowed: false,
+};
 
 const DESKTOP_DOCS_BASE = "https://dezoomify.ophir.dev";
 
@@ -93,8 +108,6 @@ function newAttempt() {
     activeQueueId: null as string | null,
     heartbeatTimer: null as ReturnType<typeof setInterval> | null,
     outputActionError: undefined as { action: "open" | "folder"; code: string } | undefined,
-    recoveryReturnFocus: null as HTMLElement | null,
-    lastRecoveryKey: null as string | null,
     viewCtx: createViewContext(),
   };
 }
@@ -104,16 +117,7 @@ function owns(attempt: DesktopAttempt): boolean {
   return currentAttempt === attempt && !attempt.retired;
 }
 
-let grantedFormat: NativeFormat = "png";
-
 let desktopQueue: DesktopQueue = createDesktopQueue();
-function desktopQueueEnabled(): boolean {
-  try {
-    return integration.getCapabilities().bulkSupported === true;
-  } catch {
-    return true;
-  }
-}
 
 const desktopMemoryFallback = new Map<string, string>();
 const desktopHistoryStore = {
@@ -169,77 +173,9 @@ function recordDesktopHistory(url: string, width?: number, height?: number, form
   saveHistoryStore(desktopHistoryStore, HISTORY_KEY_DESKTOP, desktopHistory);
 }
 
-function normalizeNativeFormat(value: unknown): NativeFormat {
-  if (typeof value === "string") {
-    const lower = value.toLowerCase();
-    if ((NATIVE_FORMATS as readonly string[]).includes(lower)) {
-      return lower as NativeFormat;
-    }
-    if (lower === "iiif") return "iiif-dir";
-  }
-  return "png";
-}
-
 let desktopSettings: DesktopSettings = loadSettings();
-grantedFormat = normalizeNativeFormat(desktopSettings.output_format);
 
 let settingsError: string | null = null;
-
-interface PendingDecision {
-  missingTiles: Array<number>;
-  failedCount: number;
-  totalCount?: number;
-  question: number;
-}
-
-function pendingDecisionOf(): PendingDecision | null {
-  if (currentAttempt.localFailure) return null;
-  const partial = currentAttempt.partial;
-  if (!partial || currentAttempt.settled) return null;
-  const missingTiles = partial.value.missing.map((entry) => entry.tile);
-  return {
-    missingTiles,
-    failedCount: missingTiles.length,
-    ...(typeof currentAttempt.progress?.total === "number"
-      ? { totalCount: currentAttempt.progress.total }
-      : {}),
-    question: partial.question,
-  };
-}
-
-const FOCUSABLE_SELECTOR =
-  "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), " +
-  "textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
-
-function focusableIn(container: HTMLElement): Array<HTMLElement> {
-  const nodes = container.querySelectorAll(FOCUSABLE_SELECTOR);
-  const out: Array<HTMLElement> = [];
-  for (const node of Array.from(nodes)) {
-    const el = node as HTMLElement;
-    if (el.tabIndex < 0 && el.getAttribute("tabindex") === "-1") continue;
-    out.push(el);
-  }
-  return out;
-}
-
-function activeElementOf(doc: Document): HTMLElement | null {
-  const active = doc.activeElement;
-  if (active && active instanceof HTMLElement) return active;
-  return null;
-}
-
-function restoreFocus(target: HTMLElement | null): void {
-  if (!target) return;
-  try {
-    if (target.isConnected && typeof target.focus === "function") target.focus();
-  } catch {}
-}
-
-function recoveryKeyFor(decision: PendingDecision | null): string | null {
-  if (!decision) return null;
-  const missing = decision.missingTiles.join(",");
-  return `${decision.question}:${missing}:${decision.failedCount}:${decision.totalCount ?? ""}`;
-}
 
 function isTerminalNow(): boolean {
   return currentAttempt.localFailure !== null || currentAttempt.settled;
@@ -307,13 +243,7 @@ function touchProgress(): void {
 function failLocally(
   code: string,
   message: string,
-  opts?: {
-    phase?: string;
-    retryable?: boolean;
-    detail?: string;
-    transport?: string;
-    settle?: boolean;
-  },
+  opts?: Partial<JobError> & { settle?: boolean },
 ): void {
   const sourceUrl = currentAttempt.lastInputUrl || activity().url || "";
   currentAttempt.localFailure = describeFailure({
@@ -323,7 +253,9 @@ function failLocally(
     retryable: opts?.retryable,
     transport: opts?.transport ?? NATIVE_TRANSPORT,
     phase: opts?.phase,
-    url: sourceUrl || undefined,
+    url: opts?.request ?? (sourceUrl || undefined),
+    http: opts?.http,
+    preview: opts?.preview,
     host: hostOf(sourceUrl),
     extras: [`Status: ${currentAttempt.progress?.phase ?? "idle"}`, `URL: ${sourceUrl || "n/a"}`],
   });
@@ -353,8 +285,7 @@ function runPersistSettingsFromPanel(): void {
 }
 
 function runResetDesktopSettings(): void {
-  desktopSettings = resetDesktopSettings();
-  grantedFormat = normalizeNativeFormat(desktopSettings.output_format);
+  desktopSettings = resetSettings();
   settingsError = null;
   update();
   void applyPlatformOutputDefault();
@@ -402,7 +333,7 @@ function handleSubmitUrl(url: string): void {
     failLocally("INVALID_URL", t("desktop.url.invalid"), { settle: false });
     return;
   }
-  if (desktopQueueEnabled() && !isTerminalNow()) {
+  if (!isTerminalNow()) {
     const res = enqueueDesktopQueue(desktopQueue, trimmed);
     desktopQueue = res.queue;
     if (res.code !== "ok" || !res.entry) {
@@ -457,7 +388,7 @@ function launchNativeJob(trimmed: string): void {
   });
   resetActivity(trimmed);
 
-  const effective = getEffectiveSettings(desktopSettings);
+  const effective = validateSettings(desktopSettings);
   if (!effective.ok || !effective.settings) {
     const detail = effective.errors.join("; ") || "Invalid settings.";
     settingsError = detail;
@@ -513,7 +444,7 @@ function launchNativeJob(trimmed: string): void {
           attempt.lastInputUrl,
           output.canvas?.width,
           output.canvas?.height,
-          grantedFormat,
+          output.format,
         );
       settleActiveQueue("done");
       if (owns(attempt)) update();
@@ -532,7 +463,11 @@ function launchNativeJob(trimmed: string): void {
         update();
         return;
       }
-      failLocally(code, invokeErrorMessage(error, t("desktop.invoke.startFallback")));
+      failLocally(
+        code,
+        invokeErrorMessage(error, t("desktop.invoke.startFallback")),
+        error && typeof error === "object" ? (error as Partial<JobError>) : undefined,
+      );
     });
 }
 
@@ -616,7 +551,6 @@ function desktopQueueStatusLabel(status: string): string {
 }
 
 function appendDesktopQueuePanel(aux: HTMLElement, doc: Document): void {
-  if (!desktopQueueEnabled()) return;
   if (desktopQueue.entries.length === 0) return;
   const box = doc.createElement("div");
   box.className = "dz-queue-panel";
@@ -759,40 +693,22 @@ async function handleOpenOutput(attempt: DesktopAttempt, reveal: boolean): Promi
   }
 }
 
-function handleRecoveryRetry(): void {
-  const attempt = currentAttempt;
-  const decision = pendingDecisionOf();
-  const handle = currentAttempt.activeHandle;
-  if (!decision || !handle || isTerminalNow()) return;
-  void handle.answer(decision.question, "retry").then(
+function answerPartial(
+  attempt: DesktopAttempt,
+  partial: NonNullable<DesktopAttempt["partial"]>,
+  choice: RecoveryChoice,
+): void {
+  const handle = attempt.activeHandle;
+  if (!owns(attempt) || attempt.partial !== partial || !handle || isTerminalNow()) return;
+  void handle.answer(partial.question, choice).then(
     () => {
-      if (!owns(attempt)) return;
+      if (!owns(attempt) || attempt.partial !== partial) return;
       attempt.partial = null;
       touchProgress();
       update();
     },
     (error: unknown) => {
-      if (!owns(attempt)) return;
-      failLocally("CHOICE_FAILED", invokeErrorMessage(error, t("desktop.invoke.retry")));
-    },
-  );
-}
-
-function handlePartialChoice(keep: boolean): void {
-  const attempt = currentAttempt;
-  const decision = pendingDecisionOf();
-  const handle = currentAttempt.activeHandle;
-  if (!decision || !handle) return;
-  if (isTerminalNow()) return;
-  void handle.answer(decision.question, keep ? "keep" : "discard").then(
-    () => {
-      if (!owns(attempt)) return;
-      attempt.partial = null;
-      touchProgress();
-      update();
-    },
-    (error: unknown) => {
-      if (!owns(attempt)) return;
+      if (!owns(attempt) || attempt.partial !== partial) return;
       failLocally("CHOICE_FAILED", invokeErrorMessage(error, t("desktop.invoke.partial")));
     },
   );
@@ -803,9 +719,6 @@ function handleReset(): void {
 
   desktopQueue = createDesktopQueue();
   currentAttempt.activeQueueId = null;
-  dismissDeepLinkConfirm(false);
-  currentAttempt.recoveryReturnFocus = null;
-  currentAttempt.lastRecoveryKey = null;
 
   const prefilled = readInitialUrl();
   if (prefilled) currentAttempt.viewCtx.initialUrl = prefilled;
@@ -814,18 +727,14 @@ function handleReset(): void {
 }
 
 function handleOpenExternalLink(url: string): void {
-  void integration.openExternalLink(url).then(
+  void openExternalLink(url).then(
     () => undefined,
     () => undefined,
   );
 }
 
 function grantedMime(): string {
-  return encoderToMime(grantedFormat, "image/png");
-}
-
-function dismissDeepLinkConfirm(restore = true): void {
-  void restore;
+  return encoderToMime(desktopSettings.output_format, "image/png");
 }
 
 function showDeepLinkConfirm(info: ValidatedDeepLink): void {
@@ -847,21 +756,8 @@ function showDeepLinkConfirm(info: ValidatedDeepLink): void {
   });
 }
 
-function queryCapabilitiesAtBoot(): void {
-  void queryNativeCapabilities().catch((error) =>
-    currentAttempt.diagnostics.record("error", "capability.unavailable", error),
-  );
-}
-
 function createViewContext(): ViewContext {
-  return {
-    capabilities: {
-      nativeAvailable: integration.getCapabilities().nativeAvailable,
-      extensionAvailable: integration.getCapabilities().extensionAvailable,
-      browserCanSave: integration.getCapabilities().browserCanSave,
-      proxyAllowed: integration.getCapabilities().proxyAllowed,
-    },
-  };
+  return { capabilities };
 }
 
 function initInitialUrl(): void {
@@ -886,126 +782,19 @@ function ensureDesktopAuxPanel(): void {
   if (typeof document === "undefined" || !root) return;
   const presentation = currentPresentation();
   const doc = root.ownerDocument;
-  const decision = pendingDecisionOf();
-  const decisionKey = recoveryKeyFor(decision);
-  const prevKey = currentAttempt.lastRecoveryKey;
-  const existing = doc.getElementById("dz-desktop-aux");
-  const focusedInside =
-    existing && existing.contains(doc.activeElement) ? (doc.activeElement as HTMLElement) : null;
-  const focusedLabel =
-    focusedInside && focusedInside instanceof HTMLButtonElement ? focusedInside.textContent : null;
-  if (decisionKey && decisionKey !== prevKey && !currentAttempt.recoveryReturnFocus) {
-    const opener = activeElementOf(doc);
-    currentAttempt.recoveryReturnFocus = opener && existing?.contains(opener) ? null : opener;
-    if (currentAttempt.recoveryReturnFocus === null && opener && !existing?.contains(opener)) {
-      currentAttempt.recoveryReturnFocus = opener;
-    }
-    if (existing && existing.contains(opener as Node) && prevKey === null) {
-      currentAttempt.recoveryReturnFocus = null;
-    }
-  }
-  existing?.remove();
+  doc.getElementById("dz-desktop-aux")?.remove();
   const showPartialDone = presentation.phase === "completed" && presentation.partial;
   const showCancelledNote = presentation.phase === "cancelled";
-  if (!decision && !showPartialDone && !showCancelledNote) {
-    if (prevKey !== null) {
-      restoreFocus(currentAttempt.recoveryReturnFocus);
-      currentAttempt.recoveryReturnFocus = null;
-    }
-    currentAttempt.lastRecoveryKey = decisionKey;
-    return;
-  }
+  const showQueue = presentation.phase !== "completed" && desktopQueue.entries.length > 1;
+  if (!showPartialDone && !showCancelledNote && !showQueue) return;
   const card = root.querySelector(".dz-card");
-  if (!card) {
-    currentAttempt.lastRecoveryKey = decisionKey;
-    return;
-  }
+  if (!card) return;
 
   const aux = doc.createElement("div");
   aux.id = "dz-desktop-aux";
   aux.className = "dz-view-body dz-desktop-aux";
   aux.setAttribute("role", "region");
   aux.setAttribute("aria-label", t("desktop.panel.jobActions"));
-
-  let decisionBox: HTMLElement | null = null;
-
-  if (decision) {
-    decisionBox = doc.createElement("div");
-    decisionBox.className = "dz-recovery-dialog";
-    decisionBox.setAttribute("role", "dialog");
-    decisionBox.setAttribute("aria-modal", "false");
-    decisionBox.setAttribute("aria-labelledby", "dz-recovery-title");
-    decisionBox.setAttribute("aria-describedby", "dz-recovery-desc");
-    const title = doc.createElement("h2");
-    title.className = "dz-notice-title";
-    title.id = "dz-recovery-title";
-    title.tabIndex = -1;
-    const desc = doc.createElement("p");
-    desc.className = "dz-notice-message";
-    desc.id = "dz-recovery-desc";
-    desc.setAttribute("aria-live", "assertive");
-    const row = doc.createElement("div");
-    row.className = "dz-actions-row";
-
-    function addButton(label: string, primary: boolean, onClick: () => void): void {
-      const btn = doc.createElement("button");
-      btn.type = "button";
-      btn.className = primary ? "dz-btn-tactile" : "dz-btn-secondary";
-      btn.textContent = label;
-      btn.addEventListener("click", onClick);
-      row.appendChild(btn);
-    }
-
-    title.textContent = t("desktop.rec.partialTitle");
-    const missing = decision.missingTiles.map(String);
-    const summary = formatMissingSummary(missing, decision.failedCount);
-    desc.textContent = t("desktop.rec.partialDesc", { summary });
-    decisionBox.append(title, desc);
-    if (missing.length > 0) {
-      const list = doc.createElement("p");
-      list.className = "dz-notice-message dz-missing-list";
-      const shown = missing.slice(0, 20).join(", ");
-      const rest = missing.length > 20 ? t("desktop.rec.more", { n: missing.length - 20 }) : "";
-      list.textContent = t("desktop.rec.missing", { shown, rest });
-      decisionBox.appendChild(list);
-    }
-    decisionBox.appendChild(row);
-    addButton(t("desktop.rec.keep"), true, () => handlePartialChoice(true));
-    addButton(t("desktop.rec.discard"), false, () => handlePartialChoice(false));
-    addButton(t("desktop.rec.retryTiles"), false, () => handleRecoveryRetry());
-    decisionBox.addEventListener("keydown", (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        const cancelBtn = doc.getElementById("dz-btn-cancel") as HTMLElement | null;
-        if (cancelBtn && typeof cancelBtn.focus === "function") cancelBtn.focus();
-        else {
-          const firstOutside = focusableIn(aux).filter((el) => !decisionBox?.contains(el))[0];
-          if (firstOutside) firstOutside.focus();
-        }
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const box = decisionBox as HTMLElement;
-      const focusables = focusableIn(box);
-      if (focusables.length === 0) {
-        e.preventDefault();
-        return;
-      }
-      const first = focusables[0] as HTMLElement;
-      const last = focusables[focusables.length - 1] as HTMLElement;
-      const active = doc.activeElement as HTMLElement | null;
-      if (e.shiftKey) {
-        if (active === first || !box.contains(active)) {
-          e.preventDefault();
-          last.focus();
-        }
-      } else if (active === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    });
-    aux.appendChild(decisionBox);
-  }
 
   if (showPartialDone) {
     const completedMissing = (currentAttempt.output?.missing ?? []).map(String);
@@ -1045,39 +834,9 @@ function ensureDesktopAuxPanel(): void {
     aux.appendChild(note);
   }
 
-  if (presentation.phase !== "completed" && desktopQueue.entries.length > 1)
-    appendDesktopQueuePanel(aux, doc);
+  if (showQueue) appendDesktopQueuePanel(aux, doc);
 
   card.appendChild(aux);
-  if (decisionKey && decisionKey !== prevKey) {
-    const primary = decisionBox?.querySelector("button.dz-btn-tactile") as HTMLElement | null;
-    if (primary && typeof primary.focus === "function") primary.focus();
-    else {
-      const firstBtn = decisionBox ? focusableIn(decisionBox)[0] : undefined;
-      if (firstBtn) firstBtn.focus();
-    }
-  } else if (focusedLabel && decisionBox) {
-    const candidates = focusableIn(decisionBox);
-    for (const candidate of candidates) {
-      if (candidate.textContent === focusedLabel && typeof candidate.focus === "function") {
-        candidate.focus();
-        break;
-      }
-    }
-  } else if (focusedLabel) {
-    const candidates = focusableIn(aux);
-    for (const candidate of candidates) {
-      if (candidate.textContent === focusedLabel && typeof candidate.focus === "function") {
-        candidate.focus();
-        break;
-      }
-    }
-  }
-  if (!decisionKey && prevKey !== null) {
-    restoreFocus(currentAttempt.recoveryReturnFocus);
-    currentAttempt.recoveryReturnFocus = null;
-  }
-  currentAttempt.lastRecoveryKey = decisionKey;
 }
 
 function resolveDesktopExternalUrl(href: string): string | null {
@@ -1140,19 +899,12 @@ function ensureDesktopExternalNav(): void {
   );
 }
 
-function ensureDesktopFooter(): void {
-  if (typeof document === "undefined") return;
-  const footer = document.querySelector(".dz-site-footer");
-  if (!footer) return;
-  if (footer.getAttribute("data-dz-wired") === "true") return;
-  footer.setAttribute("data-dz-wired", "true");
-}
-
 function update() {
   if (!root) return;
   const attempt = currentAttempt;
   const presentation = currentPresentation();
-  const caps = integration.getCapabilities();
+  const partial = presentation.decision ? attempt.partial : null;
+  const caps = capabilities;
   if (currentAttempt.viewCtx.jobActivity && presentation.phase === "job") {
     activity().now = Date.now();
   }
@@ -1253,28 +1005,41 @@ function update() {
         : {}),
       history: [...desktopHistory],
     },
-    presentation.phase === "idle"
-      ? {
-          idleBeforeHistory: createElement(DesktopSettingsView, {
-            settings: desktopSettings,
-            error: settingsError,
-            onChange: (settings: DesktopSettings) => {
-              desktopSettings = settings;
-              grantedFormat = normalizeNativeFormat(settings.output_format);
-              runPersistSettingsFromPanel();
-            },
-            onReset: runResetDesktopSettings,
-          }),
-        }
-      : undefined,
+    {
+      ...(presentation.phase === "idle"
+        ? {
+            idleBeforeHistory: createElement(DesktopSettingsView, {
+              settings: desktopSettings,
+              error: settingsError,
+              onChange: (settings: DesktopSettings) => {
+                desktopSettings = settings;
+                runPersistSettingsFromPanel();
+              },
+              onReset: runResetDesktopSettings,
+            }),
+          }
+        : {}),
+      ...(partial
+        ? {
+            after: createElement(PartialDecisionActions, {
+              key: `${attempt.activeHandle?.id}:${partial.question}`,
+              decision: partial.value,
+              onAnswer: (choice: RecoveryChoice) => answerPartial(attempt, partial, choice),
+              labels: {
+                keep: t("desktop.rec.keep"),
+                discard: t("desktop.rec.discard"),
+                retry: t("desktop.rec.retryTiles"),
+              },
+            }),
+          }
+        : {}),
+    },
   );
   ensureDesktopAuxPanel();
   ensureDesktopExternalNav();
-  ensureDesktopFooter();
 }
 
 initInitialUrl();
-queryCapabilitiesAtBoot();
 
 if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
   window.addEventListener("hashchange", () => syncInitialUrlFromLocation());
@@ -1289,12 +1054,4 @@ function getCurrentJobId(): string | null {
   return currentAttempt.activeHandle?.id ?? null;
 }
 
-export {
-  dismissDeepLinkConfirm,
-  getCurrentJobId,
-  getEffectiveSettings,
-  integration,
-  showDeepLinkConfirm,
-  update,
-  validateDeepLinkPayload,
-};
+export { getCurrentJobId, showDeepLinkConfirm, update, validateDeepLinkPayload };

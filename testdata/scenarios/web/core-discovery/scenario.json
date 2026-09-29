@@ -1,5 +1,5 @@
 {
-  "description": "Core protocol fixtures for all 16 formats (AUTO)",
+  "description": "Core discovery fixtures for all 16 formats with automatic format selection",
   "id": "web/core-discovery",
   "input": {
     "mode": "automatic",

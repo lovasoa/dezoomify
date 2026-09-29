@@ -101,7 +101,7 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
     for (let attempt = 0; attempt < 100; attempt += 1) {
       try {
         const result = await api.runtime.sendMessage({ type: "dezoomify-test-source-navigation" });
-        if (result?.code === "source-document-lost") return true;
+        if (result?.blocked_reason === "source-document-lost") return true;
         if (result?.code === "source-access-stayed-live") {
           throw new Error("source access remained live after source navigation");
         }

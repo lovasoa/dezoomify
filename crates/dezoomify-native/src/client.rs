@@ -1,11 +1,9 @@
-//! Effective request construction: core tile requests + safe defaults +
-//! optional scoped authorization. `Cookie`/`Authorization` are forbidden
+//! Request construction with safe defaults. `Cookie`/`Authorization` are forbidden
 //! through public untrusted fields; redirects rebuild headers per URL.
 
 use std::collections::BTreeMap;
 
-use crate::auth::EphemeralAuthorization;
-use crate::error::NativeError;
+use dezoomify::model::{Error, ErrorPhase};
 
 #[derive(Clone, Debug)]
 pub struct EffectiveRequest {
@@ -16,12 +14,12 @@ pub struct EffectiveRequest {
 pub fn build_request(
     uri: &str,
     extra: &BTreeMap<String, String>,
-    auth: Option<&EphemeralAuthorization>,
-) -> Result<EffectiveRequest, NativeError> {
+) -> Result<EffectiveRequest, Error> {
     for key in extra.keys() {
         if key.eq_ignore_ascii_case("cookie") || key.eq_ignore_ascii_case("authorization") {
-            return Err(NativeError::new(
+            return Err(Error::new(
                 "auth.forbidden-header",
+                ErrorPhase::Validation,
                 "cookie/authorization forbidden in public headers",
             ));
         }
@@ -33,55 +31,19 @@ pub fn build_request(
     for (name, value) in extra {
         headers.insert(name.to_ascii_lowercase(), value.clone());
     }
-    if let Some(auth) = auth {
-        let (scheme, host, port, path) = split_url(uri)?;
-        if let Some(cookie) = auth.header_for(&scheme, &host, port, &path) {
-            headers.insert("cookie".to_string(), cookie);
-        }
-    }
     Ok(EffectiveRequest {
         uri: uri.to_string(),
         headers,
     })
 }
 
-/// Rebuild headers for a redirect target: authorization only survives when
-/// the new URL remains inside the original scope.
-pub fn rebuild_for_redirect(
-    previous: &EffectiveRequest,
-    next_uri: &str,
-    auth: Option<&EphemeralAuthorization>,
-) -> Result<EffectiveRequest, NativeError> {
+/// Remove credentials before scoped user headers are applied to a redirect.
+pub fn rebuild_for_redirect(previous: &EffectiveRequest, next_uri: &str) -> EffectiveRequest {
     let mut headers = previous.headers.clone();
     headers.remove("cookie");
-    if let Some(auth) = auth {
-        let (scheme, host, port, path) = split_url(next_uri)?;
-        if let Some(cookie) = auth.header_for(&scheme, &host, port, &path) {
-            headers.insert("cookie".to_string(), cookie);
-        }
-    }
-    Ok(EffectiveRequest {
+    headers.remove("authorization");
+    EffectiveRequest {
         uri: next_uri.to_string(),
         headers,
-    })
-}
-
-fn split_url(uri: &str) -> Result<(String, String, Option<u16>, String), NativeError> {
-    let (scheme, rest) = uri
-        .split_once("://")
-        .ok_or_else(|| NativeError::new("transport.bad-url", "bad url"))?;
-    let (authority, path) = match rest.find('/') {
-        Some(i) => (&rest[..i], rest[i..].to_string()),
-        None => (rest, "/".to_string()),
-    };
-    if authority.contains('@') {
-        return Err(NativeError::new("transport.bad-url", "userinfo rejected"));
     }
-    let (host, port) = match authority.rsplit_once(':') {
-        Some((h, p)) if p.bytes().all(|b| b.is_ascii_digit()) => {
-            (h.to_string(), p.parse::<u16>().ok())
-        }
-        _ => (authority.to_string(), None),
-    };
-    Ok((scheme.to_string(), host, port, path))
 }

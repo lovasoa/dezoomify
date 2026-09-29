@@ -691,7 +691,10 @@ mod test {
     #[test]
     fn parse_factum_arte() {
         // See https://github.com/lovasoa/dezoomify-rs/issues/100#issuecomment-767048175
-        let bytes = std::fs::read("../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/krpano/krpano_scenes.xml").unwrap();
+        let bytes = std::fs::read(
+            "../../testdata/scenarios/rs-core/formats/payloads/krpano/krpano_scenes.xml",
+        )
+        .unwrap();
         let parsed = KrpanoMetadata::from_bytes(&bytes).unwrap();
         let infos: Vec<ImageInfo> = parsed.into_image_iter().collect();
         assert_eq!(infos.len(), 3);
@@ -705,7 +708,10 @@ mod test {
     #[test]
     fn parse_360cities() {
         // title: St George Hotel Dubai Tip Top English Disco by 360emirates
-        let bytes = std::fs::read("../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/krpano/krpano_360cities.xml").unwrap();
+        let bytes = std::fs::read(
+            "../../testdata/scenarios/rs-core/formats/payloads/krpano/krpano_360cities.xml",
+        )
+        .unwrap();
         let parsed = KrpanoMetadata::from_bytes(&bytes).unwrap();
         let infos: Vec<ImageInfo> = parsed.into_image_iter().collect();
         assert_eq!(infos.len(), 1);
@@ -714,7 +720,10 @@ mod test {
 
     #[test]
     fn parse_geografiche_panotour() {
-        let bytes = std::fs::read("../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/krpano/geografiche.xml").unwrap();
+        let bytes = std::fs::read(
+            "../../testdata/scenarios/rs-core/formats/payloads/krpano/geografiche.xml",
+        )
+        .unwrap();
         let parsed = KrpanoMetadata::from_bytes(&bytes).unwrap();
         let infos: Vec<ImageInfo> = parsed.into_image_iter().collect();
         assert_eq!(infos.len(), 13);

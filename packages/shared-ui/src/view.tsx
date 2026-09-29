@@ -24,7 +24,6 @@ import type {
 export {
   DEFAULT_PAGE_TITLE,
   handoffOriginFor,
-  isActiveJobStatus,
   isFileHandoffSource,
   jobPageTitle,
 } from "./view-helpers.ts";

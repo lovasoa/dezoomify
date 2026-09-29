@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use dezoomify_native::pipeline::{encode_jpeg, encode_png, encode_tiff};
+use dezoomify_native::imaging::{encode_jpeg, encode_png, encode_tiff};
 use dezoomify_native::{JobOptions, OutputTarget};
 use std::hint::black_box;
 

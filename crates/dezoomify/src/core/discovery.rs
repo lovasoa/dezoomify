@@ -6,12 +6,11 @@ use std::fmt;
 use std::sync::LazyLock;
 
 use regex::bytes::Regex as BytesRegex;
-use serde::{Deserialize, Serialize};
 
 use super::model::{CatalogPlan, DiscoveryCatalog, ImagePlan, Request};
 use super::tile_plan::TileSourceError;
 use super::uri::resolve_relative;
-use crate::model::DiscoveryInputKind;
+use crate::model::{DiscoveryInputKind, Error};
 
 /// User source or host observation supplied to the shared discovery search.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -47,257 +46,6 @@ impl DiscoveryInput {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum TransportKind {
-    Direct,
-    MetadataProxy,
-    BrowserSession,
-    Native,
-    DisplayOnly,
-}
-
-/// Stable code of one fetch failure. Variant names mirror the codes the
-/// hosts already emit, so the browser passes its strings through
-/// unmapped; [`FetchCode::Unknown`] exists only to decode foreign codes
-/// (another host's vocabulary) without falling back to rendered text.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum FetchCode {
-    TransportHttpError,
-    DiscoveryHttpError,
-    UpstreamRateLimited,
-    TransportPolicyDenied,
-    ProxyBudgetExceeded,
-    ProxyError,
-    ProxyNetworkError,
-    ProxyRateLimited,
-    DiscoveryFailed,
-    TransportTimeout,
-    TransportNetworkError,
-    TransportBadUrl,
-    TransportBadRedirect,
-    TransportRedirectLimit,
-    TransportSizeLimit,
-    Unknown(String),
-}
-
-impl FetchCode {
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::TransportHttpError => "TRANSPORT_HTTP_ERROR",
-            Self::DiscoveryHttpError => "DISCOVERY_HTTP_ERROR",
-            Self::UpstreamRateLimited => "UPSTREAM_RATE_LIMITED",
-            Self::TransportPolicyDenied => "TRANSPORT_POLICY_DENIED",
-            Self::ProxyBudgetExceeded => "PROXY_BUDGET_EXCEEDED",
-            Self::ProxyError => "PROXY_ERROR",
-            Self::ProxyNetworkError => "PROXY_NETWORK_ERROR",
-            Self::ProxyRateLimited => "PROXY_RATE_LIMITED",
-            Self::DiscoveryFailed => "DISCOVERY_FAILED",
-            Self::TransportTimeout => "TRANSPORT_TIMEOUT",
-            Self::TransportNetworkError => "TRANSPORT_NETWORK_ERROR",
-            Self::TransportBadUrl => "TRANSPORT_BAD_URL",
-            Self::TransportBadRedirect => "TRANSPORT_BAD_REDIRECT",
-            Self::TransportRedirectLimit => "TRANSPORT_REDIRECT_LIMIT",
-            Self::TransportSizeLimit => "TRANSPORT_SIZE_LIMIT",
-            Self::Unknown(raw) => raw,
-        }
-    }
-
-    /// Decode a host code string; anything unrecognized stays typed as
-    /// [`FetchCode::Unknown`] so grouping keeps working on the raw code.
-    #[must_use]
-    pub fn from_string(value: impl Into<String>) -> Self {
-        let value = value.into();
-        match value.as_str() {
-            "TRANSPORT_HTTP_ERROR" => Self::TransportHttpError,
-            "DISCOVERY_HTTP_ERROR" => Self::DiscoveryHttpError,
-            "UPSTREAM_RATE_LIMITED" => Self::UpstreamRateLimited,
-            "TRANSPORT_POLICY_DENIED" => Self::TransportPolicyDenied,
-            "PROXY_BUDGET_EXCEEDED" => Self::ProxyBudgetExceeded,
-            "PROXY_ERROR" => Self::ProxyError,
-            "PROXY_NETWORK_ERROR" => Self::ProxyNetworkError,
-            "PROXY_RATE_LIMITED" => Self::ProxyRateLimited,
-            "DISCOVERY_FAILED" => Self::DiscoveryFailed,
-            "TRANSPORT_TIMEOUT" => Self::TransportTimeout,
-            "TRANSPORT_NETWORK_ERROR" => Self::TransportNetworkError,
-            "TRANSPORT_BAD_URL" => Self::TransportBadUrl,
-            "TRANSPORT_BAD_REDIRECT" => Self::TransportBadRedirect,
-            "TRANSPORT_REDIRECT_LIMIT" => Self::TransportRedirectLimit,
-            "TRANSPORT_SIZE_LIMIT" => Self::TransportSizeLimit,
-            _ => Self::Unknown(value),
-        }
-    }
-}
-
-impl fmt::Display for FetchCode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl Serialize for FetchCode {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for FetchCode {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(Self::from_string(String::deserialize(deserializer)?))
-    }
-}
-
-/// Why the metadata proxy (or a host-side fetch policy) refused an
-/// address. Kebab strings mirror the relay's closed reason vocabulary;
-/// [`PolicyReason::Unknown`] decodes reasons added by a newer relay.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum PolicyReason {
-    InvalidUrl,
-    Scheme,
-    Userinfo,
-    SignedQuery,
-    NonStandardPort,
-    ProtocolVersion,
-    MalformedBody,
-    Method,
-    LoopbackHost,
-    PrivateHost,
-    BlockedIpv4,
-    BlockedIpv6,
-    DnsRebinding,
-    DnsRebindingV6,
-    ContentType,
-    RedirectLimit,
-    RedirectTarget,
-    Origin,
-    Unknown(String),
-}
-
-impl PolicyReason {
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::InvalidUrl => "invalid-url",
-            Self::Scheme => "scheme",
-            Self::Userinfo => "userinfo",
-            Self::SignedQuery => "signed-query",
-            Self::NonStandardPort => "non-standard-port",
-            Self::ProtocolVersion => "protocol-version",
-            Self::MalformedBody => "malformed-body",
-            Self::Method => "method",
-            Self::LoopbackHost => "loopback-host",
-            Self::PrivateHost => "private-host",
-            Self::BlockedIpv4 => "blocked-ipv4",
-            Self::BlockedIpv6 => "blocked-ipv6",
-            Self::DnsRebinding => "dns-rebinding",
-            Self::DnsRebindingV6 => "dns-rebinding-v6",
-            Self::ContentType => "content-type",
-            Self::RedirectLimit => "redirect-limit",
-            Self::RedirectTarget => "redirect-target",
-            Self::Origin => "origin",
-            Self::Unknown(raw) => raw,
-        }
-    }
-
-    /// Decode a relay reason string; unrecognized values stay typed.
-    #[must_use]
-    pub fn from_string(value: impl Into<String>) -> Self {
-        let value = value.into();
-        match value.as_str() {
-            "invalid-url" => Self::InvalidUrl,
-            "scheme" => Self::Scheme,
-            "userinfo" => Self::Userinfo,
-            "signed-query" => Self::SignedQuery,
-            "non-standard-port" => Self::NonStandardPort,
-            "protocol-version" => Self::ProtocolVersion,
-            "malformed-body" => Self::MalformedBody,
-            "method" => Self::Method,
-            "loopback-host" => Self::LoopbackHost,
-            "private-host" => Self::PrivateHost,
-            "blocked-ipv4" => Self::BlockedIpv4,
-            "blocked-ipv6" => Self::BlockedIpv6,
-            "dns-rebinding" => Self::DnsRebinding,
-            "dns-rebinding-v6" => Self::DnsRebindingV6,
-            "content-type" => Self::ContentType,
-            "redirect-limit" => Self::RedirectLimit,
-            "redirect-target" => Self::RedirectTarget,
-            "origin" => Self::Origin,
-            _ => Self::Unknown(value),
-        }
-    }
-}
-
-impl fmt::Display for PolicyReason {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl Serialize for PolicyReason {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for PolicyReason {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(Self::from_string(String::deserialize(deserializer)?))
-    }
-}
-
-/// Typed cause of one failed host fetch: the discovery grouping key.
-/// Free text (server signals, host sentences) never enters it, so
-/// identical causes always compare equal.
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub struct FetchCause {
-    pub code: FetchCode,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub http: Option<u16>,
-    pub transport: TransportKind,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<PolicyReason>,
-}
-
-impl FetchCause {
-    /// Cause with no HTTP status and no policy reason.
-    #[must_use]
-    pub fn new(code: FetchCode, transport: TransportKind) -> Self {
-        Self {
-            code,
-            http: None,
-            transport,
-            reason: None,
-        }
-    }
-
-    /// Attach an HTTP status.
-    #[must_use]
-    pub fn with_http(mut self, status: u16) -> Self {
-        self.http = Some(status);
-        self
-    }
-
-    /// One rendering of this failure for discovery diagnostics. The request
-    /// URL is deliberately absent: callers place it once, outside the
-    /// per-format bullets.
-    #[must_use]
-    pub fn describe(&self) -> String {
-        let status = match self.http {
-            Some(status) => format!("HTTP {status}"),
-            None => self.code.to_string(),
-        };
-        match &self.reason {
-            Some(reason) => format!("{status} fetching this address, reason={reason}"),
-            None => format!("{status} fetching this address"),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ResourceFailure {
-    pub cause: FetchCause,
-}
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DiscoveryLimits {
     pub max_parses: usize,
@@ -404,7 +152,7 @@ type Decoder = for<'a> fn(DiscoveryResource<'a>) -> Result<ParsedResource, Disco
 type FailureHandler = for<'a> fn(
     &DiscoveryContext<'a>,
     &'a Request,
-    &'a ResourceFailure,
+    &'a Error,
 ) -> Result<ParsedResource, DiscoveryError>;
 type UrlMapper = fn(&str) -> Result<Request, DiscoveryError>;
 type UrlPredicate = fn(&str) -> bool;
@@ -734,13 +482,12 @@ pub enum RejectionKind {
     Failed,
 }
 
-/// One rejected candidate's diagnostic. Fetch failures carry a typed
-/// [`FetchCause`]; other rejections carry a minimized free-text detail.
+/// One rejected candidate's diagnostic, retaining the original host error.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CandidateDiagnostic {
     pub format: String,
     pub kind: RejectionKind,
-    pub cause: Option<FetchCause>,
+    pub cause: Option<Box<Error>>,
     pub detail: Option<String>,
 }
 
@@ -755,7 +502,7 @@ pub enum DiscoveryError {
     /// free-text detail.
     Rejected {
         kind: RejectionKind,
-        cause: Option<FetchCause>,
+        cause: Option<Box<Error>>,
         detail: Option<String>,
     },
     /// A format handler or extractor failed without a typed rejection.
@@ -782,51 +529,51 @@ impl DiscoveryError {
     }
 
     /// A resource a candidate needed could not be fetched.
-    pub(crate) fn fetch_failed(cause: FetchCause) -> Self {
+    pub(crate) fn fetch_failed(cause: Error) -> Self {
         Self::Rejected {
             kind: RejectionKind::FetchFailed,
-            cause: Some(cause),
+            cause: Some(Box::new(cause)),
             detail: None,
         }
     }
 }
 
-/// Grouping key of one rejection: the typed kind plus whichever payload
-/// the kind carries (fetch causes group on the cause, other rejections
-/// on their minimized free-text detail).
-type RejectionKey<'a> = (RejectionKind, Option<&'a FetchCause>, Option<&'a str>);
-
-/// Per-format diagnostic bullets: fetch rejections group by their typed
-/// `(kind, cause)` key, other rejections by `(kind, detail)`, and
-/// URL-shape misses collapse to one count line. Identical causes read
-/// identically regardless of which format reported them. ASCII only.
+/// Fetch rejections group by code, HTTP status, transport, and policy reason;
+/// other rejections group by detail. URL-shape misses collapse to one count.
 #[must_use]
 pub fn diagnostic_bullets(diagnostics: &[CandidateDiagnostic]) -> Vec<String> {
     let mut url_misses = 0_usize;
-    let mut grouped: Vec<(RejectionKey<'_>, Vec<&str>)> = Vec::new();
+    let mut grouped: Vec<(&CandidateDiagnostic, Vec<&str>)> = Vec::new();
     for diagnostic in diagnostics {
         if diagnostic.kind == RejectionKind::DidNotMatchUrl {
             url_misses += 1;
             continue;
         }
-        let key = (
-            diagnostic.kind,
-            diagnostic.cause.as_ref(),
-            diagnostic.detail.as_deref(),
-        );
-        match grouped.iter_mut().find(|(existing, _)| *existing == key) {
+        let group = grouped.iter_mut().find(|(existing, _)| {
+            existing.kind == diagnostic.kind
+                && match (&existing.cause, &diagnostic.cause) {
+                    (Some(a), Some(b)) => {
+                        (&a.code, a.http, a.transport, a.blocked_reason)
+                            == (&b.code, b.http, b.transport, b.blocked_reason)
+                    }
+                    (None, None) => existing.detail == diagnostic.detail,
+                    _ => false,
+                }
+        });
+        match group {
             Some((_, names)) => names.push(diagnostic.format.as_str()),
-            None => grouped.push((key, vec![diagnostic.format.as_str()])),
+            None => grouped.push((diagnostic, vec![diagnostic.format.as_str()])),
         }
     }
     let mut lines = Vec::new();
-    for ((_, cause, detail), names) in &grouped {
-        let text = if let Some(cause) = cause {
-            cause.describe()
-        } else if let Some(detail) = detail {
-            (*detail).to_string()
+    for (diagnostic, names) in grouped {
+        let text = if let Some(cause) = &diagnostic.cause {
+            describe_fetch(cause)
         } else {
-            "rejected".to_string()
+            diagnostic
+                .detail
+                .clone()
+                .unwrap_or_else(|| "rejected".into())
         };
         lines.push(format!(" - {}: {}", names.join(", "), text));
     }
@@ -836,6 +583,16 @@ pub fn diagnostic_bullets(diagnostics: &[CandidateDiagnostic]) -> Vec<String> {
         ));
     }
     lines
+}
+
+fn describe_fetch(error: &Error) -> String {
+    let status = error
+        .http
+        .map_or_else(|| error.code.clone(), |http| format!("HTTP {http}"));
+    match error.blocked_reason {
+        Some(reason) => format!("{status} fetching this address, reason={}", reason.as_str()),
+        None => format!("{status} fetching this address"),
+    }
 }
 
 impl fmt::Display for DiscoveryError {
@@ -851,7 +608,7 @@ impl fmt::Display for DiscoveryError {
             }
             Self::Rejected {
                 cause: Some(cause), ..
-            } => f.write_str(&cause.describe()),
+            } => f.write_str(&describe_fetch(cause)),
             Self::Rejected {
                 detail: Some(detail),
                 ..
@@ -1100,27 +857,9 @@ where
                     return Err(DiscoveryError::Host(error));
                 }
                 Err(DiscoveryError::Host(error)) => {
-                    let failure = ResourceFailure {
-                        cause: FetchCause {
-                            code: FetchCode::from_string(error.code),
-                            http: error.http,
-                            transport: match error.transport {
-                                Some(crate::model::ErrorTransport::MetadataProxy) => {
-                                    TransportKind::MetadataProxy
-                                }
-                                Some(crate::model::ErrorTransport::BrowserSession) => {
-                                    TransportKind::BrowserSession
-                                }
-                                _ => TransportKind::Direct,
-                            },
-                            reason: error
-                                .blocked_reason
-                                .map(|r| PolicyReason::from_string(r.as_str())),
-                        },
-                    };
                     parsed = match spec.on_failure {
-                        Some(handler) => handler(&context, &request, &failure)?,
-                        None => return Err(DiscoveryError::fetch_failed(failure.cause)),
+                        Some(handler) => handler(&context, &request, &error)?,
+                        None => return Err(DiscoveryError::fetch_failed(*error)),
                     };
                     history.push(ReadResource {
                         request,
@@ -1378,13 +1117,17 @@ mod tests {
     use super::*;
     #[test]
     fn diagnostics_group_by_typed_cause_and_collapse_url_misses() {
-        let http_cause = |status: u16| FetchCause {
-            code: FetchCode::TransportHttpError,
-            http: Some(status),
-            transport: TransportKind::Direct,
-            reason: None,
+        let http_cause = |status: u16| {
+            let mut error = Error::new(
+                "TRANSPORT_HTTP_ERROR",
+                crate::model::ErrorPhase::Discovery,
+                "forbidden",
+            )
+            .with_transport(crate::model::ErrorTransport::Direct);
+            error.http = Some(status);
+            Box::new(error)
         };
-        let diagnostic = |format: &str, kind, cause: Option<FetchCause>, detail: Option<&str>| {
+        let diagnostic = |format: &str, kind, cause: Option<Box<Error>>, detail: Option<&str>| {
             CandidateDiagnostic {
                 format: format.into(),
                 kind,
@@ -1443,92 +1186,90 @@ mod tests {
     }
 
     #[test]
-    fn different_causes_never_merge() {
-        let fetch = |cause: FetchCause| CandidateDiagnostic {
-            format: "iiif".into(),
-            kind: RejectionKind::FetchFailed,
-            cause: Some(cause),
-            detail: None,
-        };
+    fn distinct_codes_statuses_transports_and_reasons_never_merge() {
+        use crate::model::{BlockedReason, ErrorPhase, ErrorTransport};
         let causes = [
-            FetchCause {
-                code: FetchCode::TransportHttpError,
-                http: Some(403),
-                transport: TransportKind::Direct,
-                reason: None,
-            },
-            FetchCause {
-                code: FetchCode::TransportHttpError,
-                http: Some(404),
-                transport: TransportKind::Direct,
-                reason: None,
-            },
-            FetchCause {
-                code: FetchCode::TransportHttpError,
-                http: Some(403),
-                transport: TransportKind::MetadataProxy,
-                reason: None,
-            },
-            FetchCause {
-                code: FetchCode::TransportPolicyDenied,
-                http: None,
-                transport: TransportKind::MetadataProxy,
-                reason: Some(PolicyReason::SignedQuery),
-            },
-            FetchCause {
-                code: FetchCode::TransportPolicyDenied,
-                http: None,
-                transport: TransportKind::MetadataProxy,
-                reason: Some(PolicyReason::PrivateHost),
-            },
-            FetchCause {
-                code: FetchCode::from_string("extension.network"),
-                http: None,
-                transport: TransportKind::BrowserSession,
-                reason: None,
-            },
+            (
+                "TRANSPORT_HTTP_ERROR",
+                Some(403),
+                ErrorTransport::Direct,
+                None,
+            ),
+            (
+                "TRANSPORT_HTTP_ERROR",
+                Some(404),
+                ErrorTransport::Direct,
+                None,
+            ),
+            (
+                "TRANSPORT_HTTP_ERROR",
+                Some(403),
+                ErrorTransport::MetadataProxy,
+                None,
+            ),
+            (
+                "TRANSPORT_HTTP_ERROR",
+                Some(403),
+                ErrorTransport::Native,
+                None,
+            ),
+            (
+                "TRANSPORT_HTTP_ERROR",
+                Some(403),
+                ErrorTransport::DisplayOnly,
+                None,
+            ),
+            (
+                "TRANSPORT_POLICY_DENIED",
+                None,
+                ErrorTransport::MetadataProxy,
+                Some(BlockedReason::SignedQuery),
+            ),
+            (
+                "TRANSPORT_POLICY_DENIED",
+                None,
+                ErrorTransport::MetadataProxy,
+                Some(BlockedReason::PrivateHost),
+            ),
+            (
+                "extension.network",
+                None,
+                ErrorTransport::BrowserSession,
+                None,
+            ),
         ];
-        let error = DiscoveryError::NoCandidateAccepted {
-            diagnostics: causes.iter().map(|cause| fetch(cause.clone())).collect(),
-        };
-        let rendered = error.to_string();
-        let bullets = rendered.lines().skip(1).count();
-        assert_eq!(
-            bullets,
-            causes.len(),
-            "every distinct typed cause keeps its own bullet"
+        let diagnostics: Vec<_> = causes
+            .into_iter()
+            .map(|(code, http, transport, reason)| {
+                let mut error = Error::new(code, ErrorPhase::Discovery, "unavailable")
+                    .with_transport(transport);
+                error.http = http;
+                error.blocked_reason = reason;
+                CandidateDiagnostic {
+                    format: "iiif".into(),
+                    kind: RejectionKind::FetchFailed,
+                    cause: Some(Box::new(error)),
+                    detail: None,
+                }
+            })
+            .collect();
+        let rendered = diagnostic_bullets(&diagnostics);
+        assert_eq!(rendered.len(), causes.len());
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("reason=signed-query"))
         );
-        assert!(rendered.contains("reason=signed-query"));
-        assert!(rendered.contains("TRANSPORT_POLICY_DENIED fetching this address"));
-        assert!(rendered.contains("extension.network fetching this address"));
-    }
-
-    #[test]
-    fn fetch_causes_round_trip_through_json() {
-        let cause = FetchCause {
-            code: FetchCode::TransportHttpError,
-            http: Some(503),
-            transport: TransportKind::MetadataProxy,
-            reason: Some(PolicyReason::from_string("future-reason")),
-        };
-        let json = serde_json::to_string(&cause).unwrap();
-        assert_eq!(
-            json,
-            "{\"code\":\"TRANSPORT_HTTP_ERROR\",\"http\":503,\
-             \"transport\":\"metadata-proxy\",\"reason\":\"future-reason\"}"
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("extension.network fetching this address"))
         );
-        let decoded: FetchCause = serde_json::from_str(&json).unwrap();
-        assert_eq!(decoded, cause);
-        // Foreign host codes and unknown transports decode, never fail.
-        let lenient: FetchCause =
-            serde_json::from_str("{\"code\":\"extension.throttled\",\"transport\":\"direct\"}")
-                .unwrap();
+        let mut different_text = diagnostics[0].clone();
+        different_text.cause.as_mut().unwrap().message = "another format's explanation".into();
         assert_eq!(
-            lenient.code,
-            FetchCode::Unknown("extension.throttled".into())
+            diagnostic_bullets(&[diagnostics[0].clone(), different_text]).len(),
+            1
         );
-        assert_eq!(lenient.transport, TransportKind::Direct);
-        assert_eq!(lenient.http, None);
-        assert_eq!(lenient.reason, None);
     }
 }

@@ -1,6 +1,6 @@
 {
   "id": "desktop/basic-zif",
-  "description": "Desktop happy path (basic-zif): start_job plus request_destination drives the shared native pipeline over loopback and publishes a 512x512 ZIF pyramid (TIFF-compatible multi-directory file, full resolution plus halved levels)",
+  "description": "Desktop uses NativeHost over loopback and saves a 512x512 ZIF pyramid (TIFF-compatible multi-directory file, full resolution plus halved levels)",
   "input": {
     "mode": "gateway",
     "url": "http://{{origin}}/fetch?url=https://fixtures.test/basic-zif/pyramid.dzi"

@@ -282,3 +282,40 @@ fn live_resource_concurrency_stays_within_the_declared_bound() {
     .unwrap();
     assert!(peak.get() <= 2);
 }
+
+#[test]
+fn rejected_candidates_retain_native_and_unknown_host_failure_facts() {
+    use dezoomify::model::{BlockedReason, ErrorTransport, ResourceKind};
+    for transport in [ErrorTransport::Native, ErrorTransport::DisplayOnly] {
+        let mut failure = Error::new(
+            "host.new-policy",
+            ErrorPhase::Discovery,
+            "exact host message",
+        )
+        .with_transport(transport)
+        .with_resource(ResourceKind::Metadata)
+        .with_retryable(true);
+        failure.http = Some(429);
+        failure.request = Some("https://redirected.test/metadata?access=exact".into());
+        failure.blocked_reason = Some(BlockedReason::Throttled);
+        failure.retry_after_ms = Some(9000);
+        failure.preview = Some("original response".into());
+        failure.detail = Some("original explanation".into());
+        let registry = registry();
+        let error = futures::executor::block_on(registry.discover(
+            vec![DiscoveryInput::new("https://test/root")],
+            Default::default(),
+            |_, _| futures::future::ready(Err(failure.clone())),
+        ))
+        .unwrap_err();
+        let DiscoveryError::NoCandidateAccepted { diagnostics } = error else {
+            panic!("expected candidate diagnostics")
+        };
+        let failures: Vec<_> = diagnostics
+            .iter()
+            .filter_map(|entry| entry.cause.as_deref())
+            .collect();
+        assert!(!failures.is_empty());
+        assert!(failures.into_iter().all(|cause| cause == &failure));
+    }
+}

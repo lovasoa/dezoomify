@@ -414,14 +414,6 @@ pub enum TileSource {
     Generic(DiscoverableGrid),
 }
 impl TileSource {
-    pub fn kind_name(&self) -> &'static str {
-        match self {
-            Self::Grid(_) => "grid",
-            Self::Positioned(_) => "positioned",
-            Self::Adaptive(_) => "adaptive",
-            Self::Generic(_) => "discoverable-grid",
-        }
-    }
     pub fn image_size(&self) -> Option<Vec2d> {
         match self {
             Self::Grid(grid) => Some(grid.image_size()),

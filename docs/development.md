@@ -9,7 +9,7 @@ One monorepo: Rust crates, generated WASM bindings, shared UI, hosts, extension 
 - `crates/dezoomify/src/model.rs`: contract source;
   `packages/wasm-bindings` tracks the emitted declaration.
 - `crates/dezoomify-native`: NativeHost operations for CLI and Tauri.
-- `crates/dezoomify-wasm`: core and job behavior for browser hosts.
+- `crates/dezoomify-wasm`: generated Host calls and value conversion for browsers.
 - `packages/shared-ui`: shared React UI; `packages/browser-runtime`: the shared browser application, Host operations, decoding, canvases, and saving.
 - `crates/fixture-server`: controlled origins; `testdata/scenarios`: shared scenarios; `crates/xtask`: repository tasks.
 

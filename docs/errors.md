@@ -6,12 +6,11 @@ Every runtime reports failures the same way: a typed error naming what failed, n
 
 Each error includes:
 
-- a stable namespaced code such as `fetch.cors_blocked` or `decode.unsupported`;
+- a stable code such as `TRANSPORT_HTTP_ERROR` or `TILE_DECODE_FAILED`;
 - the job phase and affected resource or tile when safe;
 - the attempted and active transport when relevant and safe;
 - whether retry is valid;
 - a concise user message;
-- an ordered set of permitted recovery actions;
 - optional request, transport, blocked-reason, resource-kind, HTTP status, bounded server signal, and diagnostic detail.
 
 Codes are stable API; messages improve freely. Diagnostic reports retain exact URLs, paths, and settings under the [diagnostic capture contract](security.md#credentials).
@@ -20,12 +19,12 @@ Hosts keep their own error chains internally; only the typed shape crosses the c
 
 Extension HTTP responses produce the generated `FetchFailure` at the fetch boundary. Source-script results carry that payload unchanged through validation and transport choice. BrowserHost rejects with the structured domain error. HTTP status and request context remain intact; only unclassified host exceptions require classification.
 
-`FetchFailure` carries no retryability or recovery actions. The core's `classify_tile_failure` classifies its code and HTTP status for both tile retries and metadata error presentation. HTTP status takes precedence over the transport code. Job-level `Error` retains retryability and recovery actions for presentation. Output failures do not inherit fetch retry policy.
+`FetchFailure` describes observed browser fetch facts. The core's `retry::is_retryable` classifies the code and HTTP status for tile retries and metadata error presentation. HTTP status takes precedence over the transport code. `Error` retains retryability for presentation; missing tiles retain these errors for each failed attempt. Output failures do not inherit fetch retry policy.
 
 
 ## Recovery actions
 
-Recovery is data, not text for the UI to parse. Each action carries an id, one kind (`retry`, `edit-input`, `choose-output`, `grant-permission`, `change-transport`, `keep-partial`, `discard-partial`, `handoff-to-native`), a scope, and a rationale. Pending interactions belong to one invocation and close when it retires.
+Products choose recovery controls from stable error codes, structured context, and available capabilities. They never parse user-facing text. The algorithm awaits the Host's keep, discard, or retry choice when tiles remain missing. Pending interactions belong to one invocation and close when it retires.
 
 ```mermaid
 flowchart TD
@@ -45,13 +44,13 @@ The website transport transition is automatic for eligible metadata (no per-atte
 
 ## User presentation
 
-Messages follow the layered rules in [Product](product.md#progressive-disclosure):
+Messages follow the presentation rules in [Product](product.md#progressive-disclosure):
 
 - First: one specific plain sentence (what failed for this job, which step and resource, which route) plus the single best next action. No shared generic template across causes.
 - Jargon waits for expandable details and linked docs. Wording is driven by structured context (code, phase, transport, kind, blocked reason, source origin), so identical causes read identically everywhere.
 - A fetch failure is the job outcome: plain message plus stable code up front; discovery diagnostics (for discovery, the headline-free per-format bullets) only inside expandable details.
-- User and technical wording never mix. Each fetch failure carries a generated `FetchFailureCode`, a plain sentence for the user, and a typed `FetchCause` (code, HTTP status, transport kind, policy reason) for the algorithm. Product wording uses the classified sentence; it never parses a stable code. Discovery diagnostics group on the typed `(kind, cause)` key, never on rendered text. A proxy-denied cause names relay code, HTTP status, and policy reason, so policy denials never read as upstream refusals and vice versa.
-- Details stay on the device in the diagnostic report: full request URL, observed HTTP status, bounded server signal, and discovery failure context. Format URL-shape misses (`DidNotMatchUrl`, nothing fetched) collapse to a count; fetch rejections group by typed `(kind, cause)` under format names; other rejections group by `(kind, detail)`.
+- User and technical wording never mix. Fetch failures preserve code, HTTP status, transport, policy reason, and diagnostic detail in the generated domain types. Product wording uses a plain sentence derived from those facts. Discovery diagnostics group by code, HTTP status, transport, and policy reason, never by rendered text. A proxy denial retains the proxy code, HTTP status, and policy reason, so policy denials never read as upstream refusals and vice versa.
+- Details stay on the device in the diagnostic report: full request URL, observed HTTP status, bounded server signal, and discovery failure context. Format URL-shape misses (`DidNotMatchUrl`, nothing fetched) collapse to a count; fetch rejections group by their structured facts under format names; other rejections group by `(kind, detail)`.
 - Every code has user wording; a code without wording is a release defect. Only transient failures invite retry; policy denials and upstream 4xx name the next app or address fix instead. Retry re-runs the same request, never a reset. Start over exists only where a new address is accepted (website, desktop); the extension job tab stays bound to the scanned page.
 
 ## Failure policy

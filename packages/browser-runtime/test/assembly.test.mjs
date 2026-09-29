@@ -31,6 +31,7 @@ function harness(overrides = {}) {
   const ctx2d = fakeCtx();
   const diagnostics = createDiagnosticRecorder({ id: "assembly", now: () => 0 });
   const deps = {
+    processTile: (_recipe, bytes) => bytes,
     decode: async (bytes) => {
       const size = new DataView(bytes.buffer ?? bytes).getUint16(0, true);
       events.decoded.push(size);
@@ -78,7 +79,7 @@ test("declared output paints progressively before finalization, then encodes and
   assert.equal(ctx2d.draws.length, 1, "the first tile is visible while acquisition continues");
   await assembly.acquireTile(1, placement(16, 0), bytes16(16));
   assert.equal(ctx2d.draws.length, 2, "each acquired tile paints immediately");
-  const disposition = await assembly.finalizeOutput(false, "png", { width: 32, height: 32 });
+  const disposition = await assembly.finalizeOutput({ width: 32, height: 32 });
   assembly.release();
 
   assert.equal(disposition, "browser-save-ready");
@@ -119,7 +120,7 @@ test("declared output paints progressively before finalization, then encodes and
 
 test("finalize-output returns the disposition supplied by the product save operation", async () => {
   const { assembly } = harness({ saveDisposition: "browser-save-initiated" });
-  const disposition = await assembly.finalizeOutput(false, "png", { width: 32, height: 32 });
+  const disposition = await assembly.finalizeOutput({ width: 32, height: 32 });
   assert.equal(disposition, "browser-save-initiated");
 });
 
@@ -130,16 +131,16 @@ test("a probe held before canvas allocation is painted when the canvas appears",
   assembly.prepare({ width: 32, height: 32 });
   assert.deepEqual(events.created, [{ width: 32, height: 32 }]);
   assert.equal(ctx2d.draws.length, 1, "the retained first tile becomes visible immediately");
-  await assembly.finalizeOutput(false, "png", { width: 32, height: 32 });
+  await assembly.finalizeOutput({ width: 32, height: 32 });
   assert.equal(ctx2d.draws.length, 1, "the retained tile is not painted twice");
 });
 
 test("finalize-output rejects a second call and release is idempotent", async () => {
   const { assembly, events } = harness();
   await assembly.acquireTile(0, placement(0, 0), bytes16(16));
-  await assembly.finalizeOutput(false, "png", { width: 32, height: 32 });
+  await assembly.finalizeOutput({ width: 32, height: 32 });
   await assert.rejects(
-    assembly.finalizeOutput(false, "png", { width: 32, height: 32 }),
+    assembly.finalizeOutput({ width: 32, height: 32 }),
     (error) => error.code === "OUTPUT_STATE",
   );
   assembly.release();
@@ -157,7 +158,7 @@ test("a decoded padded edge tile is cropped to the planned extent and records ac
     }),
     bytes16(512),
   );
-  await assembly.finalizeOutput(false, "png", { width: 2988, height: 2244 });
+  await assembly.finalizeOutput({ width: 2988, height: 2244 });
   assert.deepEqual(ctx2d.draws[0], {
     source: ctx2d.draws[0].source,
     sx: 0,
@@ -184,7 +185,7 @@ test("undeclared canvas derives the output size from placements", async () => {
     placement(16, 16, { canvas: null, expected_size: null }),
     bytes16(16),
   );
-  await assembly.finalizeOutput(false, "png", null);
+  await assembly.finalizeOutput(null);
   // tile:1 has no planned extent: its decoded 16x16 at (16,16) sets the size.
   assert.deepEqual(events.created, [{ width: 32, height: 32 }]);
 });
@@ -205,7 +206,7 @@ test("canvas limits are validated before allocation", async () => {
 test("processing recipes run through the injected processor", async () => {
   const processed = [];
   const { assembly, events } = harness({
-    processTile: async (recipe, bytes) => {
+    processTile: (recipe, bytes) => {
       processed.push(recipe);
       return bytes;
     },
@@ -217,18 +218,6 @@ test("processing recipes run through the injected processor", async () => {
   );
   assert.deepEqual(processed, ["google-arts-decrypt"]);
   assert.equal(events.decoded.length, 1);
-});
-
-test("processing recipes without an executor fail typed instead of dropping the recipe", async () => {
-  const { assembly } = harness();
-  await assert.rejects(
-    assembly.acquireTile(0, placement(0, 0, { processing: "google-arts-decrypt" }), bytes16(16)),
-    (error) => {
-      assert.equal(error.code, "TILE_PROCESSING_UNAVAILABLE");
-      assert.equal(error.retryable, false);
-      return true;
-    },
-  );
 });
 
 test("decode failures propagate so acquisition outcomes stay honest", async () => {
@@ -243,7 +232,7 @@ test("decode failures propagate so acquisition outcomes stay honest", async () =
 test("an empty output plan fails before allocating a canvas", async () => {
   const fresh = harness();
   await assert.rejects(
-    fresh.assembly.finalizeOutput(false, "png", { width: 0, height: 0 }),
+    fresh.assembly.finalizeOutput({ width: 0, height: 0 }),
     (error) => error.code === "PLAN_INVALID",
   );
   assert.deepEqual(fresh.events.created, []);
@@ -254,14 +243,13 @@ test("partial output leaves missing regions empty without failing assembly", asy
   assembly.prepare({ width: 32, height: 32 });
   await assembly.acquireTile(0, placement(0, 0), bytes16(16));
   // tile:1 never arrived (failed acquisition): only tile:0 draws.
-  await assembly.finalizeOutput(true, "png", { width: 32, height: 32 });
+  await assembly.finalizeOutput({ width: 32, height: 32 });
   assert.equal(ctx2d.draws.length, 1);
 });
 
 test("display-only output draws ordinary images and skips encoding", async () => {
   let displayOnly = 0;
   const ctx2d = fakeCtx();
-  const diagnostics = createDiagnosticRecorder({ id: "assembly", now: () => 0 });
   const encoded = [];
   const saved = [];
   const local = createCanvasAssembly({
@@ -280,10 +268,9 @@ test("display-only output draws ordinary images and skips encoding", async () =>
   });
   local.prepare({ width: 32, height: 32 });
   local.acquireDisplayTile(0, placement(0, 0), { naturalWidth: 16, naturalHeight: 16 });
-  assert.equal(local.isTainted(), true);
   assert.equal(displayOnly, 1);
   assert.equal(ctx2d.draws.length, 1, "display-only tiles paint during acquisition");
-  const disposition = await local.finalizeOutput(false, "png", { width: 32, height: 32 });
+  const disposition = await local.finalizeOutput({ width: 32, height: 32 });
   assert.equal(ctx2d.draws.length, 1);
   assert.equal(encoded.length, 0, "a tainted canvas is never encoded");
   assert.equal(saved.length, 0, "a tainted canvas is never saved");
@@ -320,7 +307,7 @@ test("retiring an assembly during encoding never saves its late Blob", async () 
       }),
   });
   assembly.prepare({ width: 16, height: 16 });
-  const pending = assembly.finalizeOutput(false, "png");
+  const pending = assembly.finalizeOutput();
   assembly.release();
   finish(new Blob(["png"]));
   await assert.rejects(pending, { name: "AbortError" });

@@ -1,6 +1,5 @@
 import type {
   Catalog,
-  FetchFailure,
   FinishRequest,
   Gate,
   Host,
@@ -9,13 +8,11 @@ import type {
   Error as JobError,
   MissingTiles,
   Output,
-  ProcessingRecipe,
   Progress,
   RecoveryChoice,
   ResourceRead,
   ResourceRequest,
   Tile,
-  TileReceipt,
 } from "@dezoomify/wasm-bindings";
 import type { DiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
 import type { CanvasAssembly } from "./assembly.ts";
@@ -35,17 +32,8 @@ export interface BrowserHostDependencies {
     interaction: Interaction,
   ): Promise<ResourceRead>;
   loadDisplayImage?(url: string, signal: AbortSignal): Promise<TileImageLike>;
-  classifyFailure(error: unknown): FetchFailure;
   onProgress(progress: Progress): void;
   choosePartial(missing: MissingTiles, signal: AbortSignal): Promise<RecoveryChoice>;
-}
-
-export interface BrowserAssemblyArgs {
-  diagnostics?: DiagnosticRecorder;
-  signal: AbortSignal;
-  decoder: TileDecoder;
-  sourceUrl: string;
-  processTile(recipe: ProcessingRecipe, bytes: ArrayBuffer): Promise<ArrayBuffer>;
 }
 
 /** Concrete browser capabilities for one cancellable invocation. */
@@ -77,27 +65,25 @@ export class BrowserHost implements Host {
         phase,
         message: "The job was cancelled.",
         retryable: false,
-        recovery: [],
       };
-    const observed = this.deps.classifyFailure(error);
-    const own = error && typeof error === "object" ? (error as Partial<JobError>) : {};
-    const http = own.http ?? observed.http;
+    const facts = error && typeof error === "object" ? (error as Partial<JobError>) : {};
     return {
-      ...observed,
+      ...facts,
       code:
-        typeof own.code === "string" && (own.phase || phase === "output")
-          ? own.code
-          : observed.code,
-      message: typeof own.message === "string" ? own.message : observed.message,
-      phase: own.phase ?? phase,
-      retryable:
-        own.retryable ??
-        (http !== undefined
-          ? http === 408 || http === 429 || http >= 500
-          : observed.code !== "TRANSPORT_POLICY_DENIED"),
-      recovery: own.recovery ?? [],
-      ...(request ? { request: request.uri, resource_kind: request.purpose } : {}),
-      ...(own.detail ? { detail: own.detail } : {}),
+        typeof facts.code === "string"
+          ? facts.code
+          : phase === "output"
+            ? "OUTPUT_FAILED"
+            : "TRANSPORT_NETWORK_ERROR",
+      message: typeof facts.message === "string" ? facts.message : String(error),
+      phase: facts.phase ?? phase,
+      retryable: facts.retryable ?? false,
+      ...(request
+        ? {
+            request: facts.request ?? request.uri,
+            resource_kind: facts.resource_kind ?? request.purpose,
+          }
+        : {}),
     };
   }
 
@@ -131,7 +117,6 @@ export class BrowserHost implements Host {
         message: `Access to ${result.origin} is required.`,
         retryable: false,
         phase: "acquisition",
-        recovery: [],
       };
     return new Uint8Array(result.response.bytes);
   }
@@ -145,7 +130,6 @@ export class BrowserHost implements Host {
       const loadDisplayImage = this.deps.loadDisplayImage;
       const probe = createProbeSize({
         fetchResource: async (request) => ({ bytes: await this.readable(request) }),
-        classifyFailure: this.deps.classifyFailure,
         decode: (bytes) => this.deps.decoder.decode(bytes, this.signal),
         ...(loadDisplayImage
           ? {
@@ -177,7 +161,7 @@ export class BrowserHost implements Host {
     }
   }
 
-  private async display(tile: Tile): Promise<TileReceipt> {
+  private async display(tile: Tile): Promise<void> {
     this.deps.diagnostics?.count("requests");
     this.deps.diagnostics?.count("requests_pending");
     try {
@@ -189,7 +173,7 @@ export class BrowserHost implements Host {
       this.displayOrigins.add(originOfUrl(tile.request.uri));
       this.deps.diagnostics?.count("requests_completed");
       this.deps.diagnostics?.count("displayed_tiles");
-      return { display_only: true };
+      return;
     } catch (error) {
       this.deps.diagnostics?.count(this.signal.aborted ? "requests_cancelled" : "request_failures");
       if (!this.signal.aborted)
@@ -205,11 +189,11 @@ export class BrowserHost implements Host {
     }
   }
 
-  acquireTile(tile: Tile): Promise<TileReceipt> {
+  acquireTile(tile: Tile): Promise<void> {
     return this.own(() => this.paintTile(tile));
   }
 
-  private async paintTile(tile: Tile): Promise<TileReceipt> {
+  private async paintTile(tile: Tile): Promise<void> {
     const origin = originOfUrl(tile.request.uri);
     const ordinary =
       tile.placement.processing === "none" && this.deps.loadDisplayImage !== undefined;
@@ -246,7 +230,7 @@ export class BrowserHost implements Host {
         const bytes = await this.readable(tile.request);
         classified?.(false);
         await this.deps.assembly.acquireTile(tile.index, tile.placement, bytes.slice().buffer);
-        return { display_only: false };
+        return;
       } catch (error) {
         const failure = this.failure(error, tile.request);
         if (
@@ -255,9 +239,9 @@ export class BrowserHost implements Host {
           failure.code !== "TRANSPORT_POLICY_DENIED" &&
           !this.signal.aborted
         ) {
-          const receipt = await this.display(tile);
+          await this.display(tile);
           classified?.(true);
-          return receipt;
+          return;
         }
         throw failure;
       }
@@ -284,11 +268,7 @@ export class BrowserHost implements Host {
 
   private async saveOutput(request: FinishRequest): Promise<Output> {
     try {
-      const disposition = await this.deps.assembly.finalizeOutput(
-        request.missing.length > 0,
-        request.format,
-        request.canvas,
-      );
+      const disposition = await this.deps.assembly.finalizeOutput(request.canvas);
       this.signal.throwIfAborted();
       return {
         canvas: this.deps.assembly.dimensions() ?? undefined,

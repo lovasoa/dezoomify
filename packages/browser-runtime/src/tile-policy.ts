@@ -1,12 +1,7 @@
 // Browser tile policy: politeness, resilience, and timeouts.
 //
-// This module owns every tile-fetch tuning constant plus the per-host throttle,
-// the adaptive concurrency picker, combined timeout signal, and proxy
-// rate-limit delay. Tile retries belong to the Rust algorithm. Pure and dependency
-// injected where the host clock is involved, so node tests use fakes.
-
-import type { StructuredFailure } from "./failure.ts";
-import { failure } from "./failure.ts";
+// Request limits, per-host spacing, timeout signals, and proxy retry delays.
+// Tile retries belong to the Rust algorithm. Tests inject the throttle clock.
 
 /** Per-request timeout applied to every individual HTTP request (30 s). */
 export const REQUEST_TIMEOUT_MS = 30000;
@@ -14,8 +9,7 @@ export const REQUEST_TIMEOUT_MS = 30000;
 /**
  * Head-start window for the direct metadata fetch: if the site does not
  * answer within 1500 ms, the eligible metadata proxy takes over
- * automatically. 250 ms proved too aggressive on slow sites and caused false
- * proxy fallback; 1500 ms keeps direct-first while failing over promptly.
+ * automatically after the direct request settles.
  * Tiles keep the full 30 s timeout (they never use the proxy).
  */
 export const DIRECT_METADATA_TIMEOUT_MS = 1500;
@@ -24,84 +18,8 @@ export const DIRECT_METADATA_TIMEOUT_MS = 1500;
 export const TILE_MAX_REQUESTS_PER_SECOND = 5;
 export const TILE_MIN_INTERVAL_MS = 1000 / TILE_MAX_REQUESTS_PER_SECOND;
 
-/** Adaptive concurrency bounds, with a smaller limit for browser products. */
-export const TILE_CONCURRENCY_FLOOR = 4;
-export const TILE_CONCURRENCY_MIN = 6;
-export const TILE_CONCURRENCY_MAX = 12;
-export const TILE_CONCURRENCY_CAP = 12;
 /** Maximum concurrent tile requests in browser products. */
 export const BROWSER_MAX_CONCURRENCY = 6;
-export const TILE_RTT_MEDIUM_MS = 400;
-export const TILE_RTT_SLOW_MS = 800;
-
-/**
- * Pure adaptive concurrency: base from core count, minus for slow RTT,
- * clamped to 6-12, then within the requested limit with a floor of 4.
- * Slow networks back off so extra requests do not pile onto timeouts.
- */
-export function pickTileConcurrency(opts?: {
-  hardwareConcurrency?: unknown;
-  rttMs?: unknown;
-  maxConcurrent?: unknown;
-}): number {
-  let cap = TILE_CONCURRENCY_CAP;
-  if (typeof opts?.maxConcurrent === "number" && Number.isFinite(opts.maxConcurrent as number)) {
-    cap = Math.floor(opts.maxConcurrent as number);
-  }
-  let cores = 4;
-  if (
-    typeof opts?.hardwareConcurrency === "number" &&
-    Number.isFinite(opts.hardwareConcurrency as number)
-  ) {
-    cores = Math.floor(opts.hardwareConcurrency as number);
-  }
-  let base: number;
-  if (cores <= 2) base = TILE_CONCURRENCY_MIN;
-  else if (cores <= 4) base = 8;
-  else if (cores <= 8) base = 10;
-  else base = TILE_CONCURRENCY_MAX;
-  const rtt = opts?.rttMs;
-  if (typeof rtt === "number" && Number.isFinite(rtt)) {
-    if (rtt >= TILE_RTT_SLOW_MS) base -= 2;
-    else if (rtt >= TILE_RTT_MEDIUM_MS) base -= 1;
-  }
-  const clamped = Math.min(Math.max(base, TILE_CONCURRENCY_MIN), TILE_CONCURRENCY_MAX);
-  return Math.max(TILE_CONCURRENCY_FLOOR, Math.min(clamped, cap));
-}
-
-export interface HostConcurrencyHints {
-  hardwareConcurrency?: unknown;
-  connection?: { rtt?: unknown };
-}
-
-/** Choose website concurrency from hardware and connection hints, capped at six. */
-export function websiteTileConcurrency(host?: HostConcurrencyHints): number {
-  let cores = 4;
-  let rtt: number | undefined;
-  try {
-    const nav =
-      host ??
-      (typeof navigator !== "undefined"
-        ? (navigator as unknown as HostConcurrencyHints)
-        : undefined);
-    if (
-      nav &&
-      typeof nav.hardwareConcurrency === "number" &&
-      Number.isFinite(nav.hardwareConcurrency)
-    ) {
-      cores = Math.floor(nav.hardwareConcurrency);
-    }
-    const connRtt = nav?.connection?.rtt;
-    if (typeof connRtt === "number" && Number.isFinite(connRtt)) rtt = connRtt;
-  } catch {
-    // Host globals are best-effort; defaults keep the floor.
-  }
-  return pickTileConcurrency({
-    hardwareConcurrency: cores,
-    rttMs: rtt,
-    maxConcurrent: BROWSER_MAX_CONCURRENCY,
-  });
-}
 
 export function tileHostOf(url: string): string {
   try {
@@ -122,7 +40,7 @@ export interface ThrottleClock {
 
 /**
  * Stagger tile request starts per host to <=5/s. Chained per host so the
- * parallel workers share one spacing clock: each starter waits for the
+ * concurrent requests share one spacing clock: each starter waits for the
  * previous starter for that host, enforces the 200 ms gap, then releases
  * the next waiter. The clock is injectable so tests assert spacing without
  * wall-clock waits.
@@ -248,35 +166,4 @@ export function hostOf(url: string): string {
   } catch {
     return "the server";
   }
-}
-
-/** One failed tile attempt maps to a typed failure with retry facts. */
-export function tileFailedError(
-  lastOutcome: string,
-  lastStatus: number | undefined,
-  _url: string,
-  retryAfterMs?: number,
-): StructuredFailure {
-  const httpFailure = typeof lastStatus === "number" && lastStatus > 0;
-  const causeCode = httpFailure ? "TRANSPORT_HTTP_ERROR" : "TRANSPORT_NETWORK_ERROR";
-  const error = failure(
-    "TILE_FAILED",
-    "Part of the image could not be saved. Try again in a moment.",
-    !httpFailure || lastStatus === 429 || lastStatus >= 500,
-    undefined,
-    `tile fetch: ${lastOutcome} (HTTP ${lastStatus ?? "n/a"}) after 1 attempt`,
-  );
-  error.transportKind = "direct";
-  error.fetchFailureCode = httpFailure ? "TRANSPORT_HTTP_ERROR" : "TRANSPORT_NETWORK_ERROR";
-  error.url = _url;
-  error.cause = {
-    code: causeCode,
-    ...(httpFailure ? { http: lastStatus } : {}),
-    transport: "direct",
-  };
-  if (httpFailure) error.http = lastStatus;
-  if (typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs) && retryAfterMs >= 0) {
-    error.retry_after_ms = retryAfterMs;
-  }
-  return error;
 }

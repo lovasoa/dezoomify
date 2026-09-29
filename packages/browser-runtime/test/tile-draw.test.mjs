@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createProcessQueue, drawPlacedTile, loadTileImage } from "../src/tile-draw.ts";
+import { drawPlacedTile, loadTileImage } from "../src/tile-draw.ts";
 
 function hooks() {
   let seq = 0;
@@ -90,19 +90,6 @@ test("image timeout settles once even when clearing src fires an error", async (
   timeout();
   await assert.rejects(pending, /timed out/);
   assert.equal(completions, 1);
-});
-
-test("createProcessQueue serializes processing while fetching stays parallel", async () => {
-  const order = [];
-  const run = createProcessQueue(async (recipe, bytes) => {
-    order.push(`start-${bytes.byteLength}`);
-    await new Promise((r) => setTimeout(r, 5));
-    order.push(`end-${bytes.byteLength}`);
-    return bytes;
-  });
-  const [a, b] = await Promise.all([run("r", new ArrayBuffer(1)), run("r", new ArrayBuffer(2))]);
-  assert.ok(a instanceof ArrayBuffer && b instanceof ArrayBuffer);
-  assert.deepEqual(order, ["start-1", "end-1", "start-2", "end-2"]);
 });
 
 test("loadTileImage resolves on load and rejects on error", async () => {

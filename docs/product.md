@@ -9,7 +9,7 @@ dezoomify turns tiled, zoomable images into portable files. A user supplies a UR
 - **Desktop app**: native runtime for large images and local sources, one file or `iiif-dir` per job; see [Native apps](native-apps.md).
 - **CLI**: same native behavior for scripts; see the [Command-line guide](user/command-line.md).
 
-One React TSX shared UI presents the same job concepts in every app. Capability negotiation changes available actions, never their meaning. See [Architecture](architecture.md) and [Bindings](bindings.md).
+One React TSX shared UI presents the same job concepts in the graphical apps. Each product supplies the actions its Host supports. See [Architecture](architecture.md) and [Bindings](bindings.md).
 
 ## Choosing an app
 
@@ -17,7 +17,7 @@ Users pick an app under time pressure and without background knowledge. Every ap
 
 - Actions and outcomes, never mechanism words. User copy avoids network policies, headers, permission APIs, transport names.
 - Limits read as facts about the app, never as faults of site or user. Example: "this website shows the image but saves no copy because the site serves it only to its own pages; the browser extension saves it with your approval for that site."
-- The comparison renders from the same negotiated capabilities the app runs on. An app never recommends what it fails to verify as available, and never rules out what it fails to verify as unavailable.
+- The comparison describes each product's implemented capabilities and limits. An app offers only actions its Host supports.
 - The same guidance appears in docs and in every app; wording adapts to context, substance never changes.
 
 This page speaks to implementers; user copy derived from it keeps the plain-language rules above.
@@ -36,13 +36,13 @@ flowchart TD
 2. **"What happened":** expandable plain-language cause plus honest alternatives, still no jargon.
 3. **Technical detail:** copyable diagnostics and linked docs, for users choosing to look.
 
-Nothing important hides in an unreachable tier, and every failure leaves at least one next action. Structured context is captured at error time (code, phase, transport, kind, blocked reason, source origin, capability snapshot), so messages and reports stay specific without interrogating the user. See [Errors](errors.md#user-presentation).
+Nothing important hides in an unreachable tier, and every failure leaves at least one next action. Structured context is captured at error time (code, phase, transport, kind, blocked reason, and source origin), so messages and reports stay specific without interrogating the user. See [Errors](errors.md#user-presentation).
 
 ## Core workflow
 
-1. The runtime discovers one or more image catalogs from an input.
-2. The user selects an image, resolution level, processing recipe, and output.
-3. The Rust algorithm validates input and options.
+1. The product supplies input, settings, and a Host to the Rust algorithm.
+2. The algorithm validates input and discovers image catalogs.
+3. The algorithm selects an image and level according to settings, awaiting a Host choice when interactive selection is requested. Formats determine tile processing.
 4. The algorithm awaits bounded tile acquisition through Host capabilities and reports progress.
 5. The algorithm awaits Host output and cleanup, returning the actual result.
 

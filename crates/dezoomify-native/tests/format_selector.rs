@@ -47,11 +47,12 @@ fn temp_dir(name: &str) -> PathBuf {
     dir
 }
 
+#[allow(clippy::result_large_err)] // Exercise the same error type as the Host API.
 fn run_with_format(
     input: &str,
     output: &std::path::Path,
     format: Option<String>,
-) -> Result<dezoomify_native::OutputSummary, dezoomify_native::NativeError> {
+) -> Result<dezoomify_native::Publication, dezoomify::model::Error> {
     support::run_file(input, output, |options| options.format = format)
 }
 
@@ -68,9 +69,9 @@ fn named_deepzoom_selects_the_single_program() {
     let output = out_dir.join("named.png");
     let outcome = run_with_format(&input, &output, Some("deepzoom".to_string()))
         .expect("named deepzoom succeeds");
-    assert_eq!(outcome.format, "deepzoom");
+    assert_eq!(outcome.source_format, "deepzoom");
     assert_eq!(outcome.tile_count, 4);
-    assert!(!outcome.partial);
+    assert!(outcome.output.complete);
     assert!(output.is_file());
 }
 
@@ -82,7 +83,7 @@ fn named_format_matches_case_insensitively() {
     let output = out_dir.join("named.png");
     let outcome = run_with_format(&input, &output, Some("DeepZoom".to_string()))
         .expect("case-insensitive named format succeeds");
-    assert_eq!(outcome.format, "deepzoom");
+    assert_eq!(outcome.source_format, "deepzoom");
 }
 
 #[test]
@@ -93,7 +94,7 @@ fn explicit_auto_behaves_like_default() {
     let output = out_dir.join("auto.png");
     let outcome =
         run_with_format(&input, &output, Some("auto".to_string())).expect("explicit auto succeeds");
-    assert_eq!(outcome.format, "deepzoom");
+    assert_eq!(outcome.source_format, "deepzoom");
     assert_eq!(outcome.tile_count, 4);
 }
 
@@ -107,7 +108,7 @@ fn named_mismatch_fails_instead_of_auto_detecting() {
     let output = out_dir.join("mismatch.png");
     let error = run_with_format(&input, &output, Some("iiif".to_string()))
         .expect_err("iiif-only registry cannot parse DZI");
-    assert_eq!(error.code, "discovery.failed");
+    assert_eq!(error.code, "job.discovery-failed");
     assert!(!output.exists(), "failed jobs write no output");
 }
 
@@ -120,7 +121,7 @@ fn unknown_format_fails_typed_without_output() {
     let error = run_with_format(&input, &output, Some("nope".to_string()))
         .expect_err("unknown format must fail");
     // Stable code, never display-string matching.
-    assert_eq!(error.code, "discovery.unknown-format");
+    assert_eq!(error.code, "job.unknown-format");
     assert!(
         error.message.contains("nope"),
         "message names the bad format without credentials: {}",

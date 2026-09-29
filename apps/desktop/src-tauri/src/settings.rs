@@ -1,19 +1,4 @@
-// Minimal desktop settings: validated bounds with CLI parity, fail closed.
-//
-// Fields (see task 3.5):
-// - output dir (native dir picker; selects the destination directory for the
-//   derived output path until the 1.4 dialog path owns it)
-// - compression 0-100, default 5 (JPEG quality 100-x, PNG tier)
-// - max-width / max-height caps, optional positive ints
-// - retries, default 3 (0 allowed = no retries), bounded 0-100
-// - cache-dir, optional resume cache (response bodies only, never headers)
-// - user headers (-H, trusted, origin-scoped)
-//
-// Wiring: `pipeline_config_for` mirrors `apps/cli/src/main.rs`
-// `pipeline_config_for` for the fixed transport (parallelism 16, timeout 30s,
-// connect 6s, max_idle 32, max_tiles 1M, available-memory canvas preflight).
-// Validation fails
-// closed on any out-of-bounds or malformed value.
+//! Desktop settings with validated bounds and scoped user headers.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -21,7 +6,7 @@ use std::time::Duration;
 
 use dezoomify_native::JobOptions;
 
-/// Default compression (reference `--compression`, JPEG quality 100-5 = 95).
+/// Default compression; JPEG quality is 100-5 = 95.
 pub const DEFAULT_COMPRESSION: u8 = 5;
 /// Default tile retry budget (`0` means no retries).
 pub const DEFAULT_RETRIES: u32 = 3;

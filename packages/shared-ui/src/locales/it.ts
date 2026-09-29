@@ -122,14 +122,11 @@ export const it = {
   "view.idle.submit": "Dezoomify !",
   // Job step labels.
   "view.step.discovering": "Ricerca dell immagine zoomabile…",
-  "view.step.choosingImage": "Immagine trovata; scelta della migliore…",
-  "view.step.choosingLevel": "Scelta della risoluzione piu alta…",
   "view.step.preflighting": "Controllo delle dimensioni…",
   "view.step.downloading": "Salvataggio dei riquadri…",
   "view.step.saving": "Composizione dell immagine finale…",
   "view.step.working": "Elaborazione…",
   "view.step.contactingDetail": "Contatto dell'host dell'immagine…",
-  "view.step.recoveryDetail": "E richiesta una decisione di ripristino prima di continuare.",
   "view.step.encodingDetail": "Codifica nell'app.",
   "view.step.cleanupDetail": "Pulizia dei file non finiti…",
   // Live job section.
@@ -293,7 +290,6 @@ export const it = {
   "desktop.save.fallback": "Impossibile salvare questa immagine da {host}. Riprova.",
   "desktop.job.failedFallback": "L attivita non e riuscita.",
   "desktop.invoke.startFallback": "Impossibile avviare l attivita.",
-  "desktop.invoke.retry": "La richiesta di nuovo tentativo e stata rifiutata.",
   "desktop.invoke.partial": "La scelta di immagine parziale e stata rifiutata.",
   "desktop.invoke.destination": "Impossibile richiedere la destinazione di salvataggio.",
   "desktop.invoke.cancel": "Impossibile annullare l attivita.",
@@ -327,9 +323,6 @@ export const it = {
   "desktop.link.note": "Nulla avviene finche non confermi. Rifiutare non fa nulla.",
   "desktop.link.dismiss": "Ignora",
   "desktop.link.open": "Apri l immagine",
-  "desktop.rec.partialTitle": "Alcuni riquadri non si sono potuti salvare",
-  "desktop.rec.partialDesc":
-    "Manca parte dell immagine. {summary} Conserva l immagine parziale (le aree vuote restano vuote), scartala oppure riprova i riquadri mancanti.",
   "desktop.rec.missing": "Riquadri mancanti: {shown}{rest}.",
   "desktop.rec.more": " e altri {n}",
   "desktop.rec.destTitle": "La destinazione di salvataggio richiede attenzione",

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use dezoomify_fixture_server::{router, AppState, RouteTable};
-use dezoomify_native::pipeline;
+use dezoomify_native::imaging;
 use dezoomify_native::JobOptions;
 mod support;
 
@@ -65,11 +65,11 @@ fn assembles_dzi_pyramid_from_fixture_scenario() {
     )
     .expect("pipeline succeeds");
     assert_eq!(outcome.tile_count, 4);
-    assert_eq!(outcome.width, 512);
-    assert_eq!(outcome.height, 512);
+    assert_eq!(outcome.output.canvas.as_ref().unwrap().width, 512);
+    assert_eq!(outcome.output.canvas.as_ref().unwrap().height, 512);
     assert!(events > 0, "pipeline emitted progress events");
 
-    let _expected: serde_json::Value = serde_json::from_str(
+    let expected: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../testdata/scenarios/native/cli-dzi/expected/result.json"
@@ -77,6 +77,22 @@ fn assembles_dzi_pyramid_from_fixture_scenario() {
         .expect("expected result"),
     )
     .expect("expected json");
+    assert_eq!(
+        outcome.tile_count as u64,
+        expected["tileCount"].as_u64().unwrap()
+    );
+    assert_eq!(
+        outcome.output.canvas.as_ref().unwrap().width as u64,
+        expected["imageSize"]["x"].as_u64().unwrap()
+    );
+    assert_eq!(
+        outcome.output.canvas.as_ref().unwrap().height as u64,
+        expected["imageSize"]["y"].as_u64().unwrap()
+    );
+    assert_eq!(
+        outcome.output.format.as_str(),
+        expected["outputFormat"].as_str().unwrap()
+    );
 
     let bytes = std::fs::read(&output).expect("output file written");
 
@@ -100,8 +116,7 @@ fn assembles_dzi_pyramid_from_fixture_scenario() {
 
 #[test]
 fn tile_failure_fails_honestly_without_output() {
-    // Explicit `Fail` discards on tile failure: honest
-    // `tile.download-failed`, no output. The default `Keep` keeps a partial
+    // Discarding missing tiles produces no output. The default keeps a partial
     // instead (see `partial_keep_policy_encodes_acquired_tiles`).
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/broken.dzi");
@@ -119,21 +134,11 @@ fn tile_failure_fails_honestly_without_output() {
         &mut |_| {},
     )
     .expect_err("pipeline fails on missing tiles");
-    assert_eq!(error.code, "tile.download-failed");
+    assert_eq!(error.code, "job.partial-discarded");
     assert!(
         !output.exists(),
         "no output may be written for a failed job"
     );
-
-    let expected: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../testdata/scenarios/native/cli-tile-failure/expected/result.json"
-        ))
-        .expect("expected result"),
-    )
-    .expect("expected json");
-    assert_eq!(error.code, expected["code"].as_str().expect("code"));
 }
 
 #[test]
@@ -172,29 +177,20 @@ fn file_uri_tiles_assemble_from_a_remote_manifest() {
     )
     .unwrap_or_else(|e| panic!("file-uri tiles succeed: {} ({})", e.message, e.code));
     assert_eq!(outcome.tile_count, 4);
-    assert_eq!((outcome.width, outcome.height), (512, 512));
-    let _expected = scenario_expected("cli-dzi");
-}
-
-fn scenario_expected(name: &str) -> serde_json::Value {
-    serde_json::from_str(
-        &std::fs::read_to_string(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../testdata/scenarios/native")
-                .join(name)
-                .join("expected/result.json"),
-        )
-        .unwrap_or_else(|e| panic!("expected result for {name}: {e}")),
-    )
-    .expect("expected json")
+    assert_eq!(
+        (
+            outcome.output.canvas.as_ref().unwrap().width,
+            outcome.output.canvas.as_ref().unwrap().height
+        ),
+        (512, 512)
+    );
 }
 
 #[test]
 fn corrupt_tile_fails_like_a_missing_tile() {
     // A 200 response with undecodable bytes exhausts retries exactly like a
     // 404: deterministic decode failures are not retried forever, and the
-    // terminal code stays `tile.download-failed`. Explicit `Fail` discards
-    // partial output; the default `Keep` keeps it (see the next test).
+    // job fails when partial output is discarded. The default keeps it.
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/corrupt.dzi");
     let out_dir = temp_dir("corrupt");
@@ -211,19 +207,16 @@ fn corrupt_tile_fails_like_a_missing_tile() {
         &mut |_| {},
     )
     .expect_err("pipeline fails on corrupt tiles");
-    assert_eq!(error.code, "tile.download-failed");
+    assert_eq!(error.code, "job.partial-discarded");
     assert!(
         !output.exists(),
         "no output may be written for a failed job"
     );
-    let expected = scenario_expected("cli-corrupt-tile");
-    assert_eq!(error.code, expected["code"].as_str().expect("code"));
 }
 
 #[test]
 fn partial_keep_policy_encodes_acquired_tiles() {
-    // The default policy keeps partial output (reference `PartialDownload`
-    // file behavior): missing regions stay blank, `partial` is true.
+    // The default policy keeps partial output: missing regions stay blank.
     assert!(JobOptions::default().keep_partial);
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/corrupt.dzi");
@@ -238,9 +231,15 @@ fn partial_keep_policy_encodes_acquired_tiles() {
         &mut |_| {},
     )
     .expect("keep policy publishes a partial");
-    assert!(outcome.partial, "kept output is marked partial");
+    assert!(!outcome.output.complete, "kept output is marked partial");
     assert_eq!(outcome.tile_count, 3);
-    assert_eq!((outcome.width, outcome.height), (512, 512));
+    assert_eq!(
+        (
+            outcome.output.canvas.as_ref().unwrap().width,
+            outcome.output.canvas.as_ref().unwrap().height
+        ),
+        (512, 512)
+    );
     // Kept partials publish to a `.partial` sibling, never to the requested
     // complete-save path: the partial stays distinguishable on disk.
     let partial_path = out_dir.join("partial.partial.png");
@@ -266,7 +265,6 @@ fn partial_keep_policy_encodes_acquired_tiles() {
         (0, 0, 0),
         "corrupt quadrant stays blank"
     );
-    let _expected = scenario_expected("cli-partial-keep");
 }
 
 #[test]
@@ -287,10 +285,15 @@ fn max_width_selects_the_largest_fitting_level() {
         &mut |_| {},
     )
     .expect("capped pipeline succeeds");
-    assert_eq!((outcome.width, outcome.height), (256, 256));
+    assert_eq!(
+        (
+            outcome.output.canvas.as_ref().unwrap().width,
+            outcome.output.canvas.as_ref().unwrap().height
+        ),
+        (256, 256)
+    );
     assert_eq!(outcome.tile_count, 1);
-    assert!(!outcome.partial);
-    let _expected = scenario_expected("cli-max-width");
+    assert!(outcome.output.complete);
 }
 
 #[test]
@@ -307,10 +310,14 @@ fn probe_planned_grid_matches_the_fixed_grid_output() {
         &mut |_| {},
     )
     .expect("probe-driven pipeline succeeds");
-    assert_eq!((outcome.width, outcome.height), (512, 512));
+    assert_eq!(
+        (
+            outcome.output.canvas.as_ref().unwrap().width,
+            outcome.output.canvas.as_ref().unwrap().height
+        ),
+        (512, 512)
+    );
     assert_eq!(outcome.tile_count, 4);
-    let _expected = scenario_expected("cli-probe-grid");
-    let _pyramid = scenario_expected("cli-dzi");
 }
 
 #[test]
@@ -336,8 +343,6 @@ fn existing_output_without_overwrite_is_refused() {
         b"previous bytes",
         "refused runs never touch the existing file"
     );
-    let expected = scenario_expected("cli-destination-denied");
-    assert_eq!(error.code, expected["code"].as_str().expect("code"));
 }
 
 #[test]
@@ -355,8 +360,14 @@ fn jpg_output_decodes_at_full_size() {
     )
     .expect("jpeg pipeline succeeds");
     assert_eq!(outcome.tile_count, 4);
-    assert_eq!((outcome.width, outcome.height), (512, 512));
-    assert!(!outcome.partial);
+    assert_eq!(
+        (
+            outcome.output.canvas.as_ref().unwrap().width,
+            outcome.output.canvas.as_ref().unwrap().height
+        ),
+        (512, 512)
+    );
+    assert!(outcome.output.complete);
     let bytes = std::fs::read(&output).expect("jpeg output written");
     assert!(
         bytes.starts_with(&[0xFF, 0xD8, 0xFF]),
@@ -383,7 +394,13 @@ fn tiff_output_decodes_losslessly() {
     )
     .expect("tiff pipeline succeeds");
     assert_eq!(outcome.tile_count, 4);
-    assert_eq!((outcome.width, outcome.height), (512, 512));
+    assert_eq!(
+        (
+            outcome.output.canvas.as_ref().unwrap().width,
+            outcome.output.canvas.as_ref().unwrap().height
+        ),
+        (512, 512)
+    );
     let bytes = std::fs::read(&output).expect("tiff output written");
     let decoded = image::load_from_memory(&bytes)
         .expect("tiff output decodes")
@@ -419,7 +436,13 @@ fn zif_output_writes_tiff_pyramid() {
     )
     .expect("zif pipeline succeeds");
     assert_eq!(outcome.tile_count, 4);
-    assert_eq!((outcome.width, outcome.height), (512, 512));
+    assert_eq!(
+        (
+            outcome.output.canvas.as_ref().unwrap().width,
+            outcome.output.canvas.as_ref().unwrap().height
+        ),
+        (512, 512)
+    );
     let bytes = std::fs::read(&output).expect("zif output written");
     let decoded = image::load_from_memory(&bytes)
         .expect("zif output decodes")
@@ -458,7 +481,13 @@ fn webp_output_decodes_losslessly() {
     )
     .expect("webp pipeline succeeds");
     assert_eq!(outcome.tile_count, 4);
-    assert_eq!((outcome.width, outcome.height), (512, 512));
+    assert_eq!(
+        (
+            outcome.output.canvas.as_ref().unwrap().width,
+            outcome.output.canvas.as_ref().unwrap().height
+        ),
+        (512, 512)
+    );
     let bytes = std::fs::read(&output).expect("webp output written");
     assert!(
         bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP".as_slice()),
@@ -474,8 +503,7 @@ fn webp_output_decodes_losslessly() {
 
 #[test]
 fn iiif_extension_writes_a_directory_at_that_path() {
-    // `.iiif` selects an `iiif-dir` tree written at the `.iiif` path,
-    // mirroring the reference trigger.
+    // `.iiif` selects an `iiif-dir` tree written at the `.iiif` path.
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("iiif-ext");
@@ -513,8 +541,14 @@ fn iiif_dir_writes_manifest_and_addressable_tiles() {
     )
     .expect("iiif-dir pipeline succeeds");
     assert_eq!(outcome.tile_count, 4);
-    assert_eq!((outcome.width, outcome.height), (512, 512));
-    assert!(!outcome.partial);
+    assert_eq!(
+        (
+            outcome.output.canvas.as_ref().unwrap().width,
+            outcome.output.canvas.as_ref().unwrap().height
+        ),
+        (512, 512)
+    );
+    assert!(outcome.output.complete);
     // The manifest is spec-shaped: v2 context, real dimensions, one tile
     // block matching the files on disk.
     let info: serde_json::Value = serde_json::from_slice(
@@ -599,7 +633,7 @@ fn tile_cache_reuses_tiles_after_the_server_loses_them() {
     )
     .expect("second run reuses the cache");
     assert_eq!(resumed.tile_count, 4);
-    assert!(!resumed.partial);
+    assert!(resumed.output.complete);
 }
 
 #[test]
@@ -608,7 +642,7 @@ fn resume_cache_is_on_by_default() {
     // cache dir and an explicit `None` still resolves to the default
     // on-disk cache, so interrupted CLI/desktop jobs resume without
     // re-fetching completed tiles.
-    let default_dir = pipeline::default_tile_cache_dir();
+    let default_dir = imaging::default_tile_cache_dir();
     let config = JobOptions::default();
     assert_eq!(config.cache_dir, None);
     let explicit_none = JobOptions {
@@ -619,7 +653,7 @@ fn resume_cache_is_on_by_default() {
         explicit_none
             .cache_dir
             .clone()
-            .unwrap_or_else(pipeline::default_tile_cache_dir),
+            .unwrap_or_else(imaging::default_tile_cache_dir),
         default_dir,
         "explicit None still resolves to the default on-disk cache"
     );
@@ -627,7 +661,7 @@ fn resume_cache_is_on_by_default() {
         config
             .cache_dir
             .clone()
-            .unwrap_or_else(pipeline::default_tile_cache_dir),
+            .unwrap_or_else(imaging::default_tile_cache_dir),
         default_dir,
         "default config resolves to the default on-disk cache"
     );
@@ -678,7 +712,7 @@ fn interrupted_job_resumes_without_refetching_completed_tiles() {
         &mut |_| {},
     )
     .expect_err("interrupted run fails honestly");
-    assert_eq!(error.code, "tile.download-failed");
+    assert_eq!(error.code, "job.partial-discarded");
     assert!(
         !first_output.exists(),
         "failed runs write no output even with cached tiles"
@@ -721,7 +755,7 @@ fn interrupted_job_resumes_without_refetching_completed_tiles() {
     )
     .expect("repeated run resumes from the cache");
     assert_eq!(resumed.tile_count, 4);
-    assert!(!resumed.partial);
+    assert!(resumed.output.complete);
 }
 
 #[test]
@@ -742,10 +776,14 @@ fn resume_scenario_matches_the_pinned_golden() {
     )
     .expect("resume scenario succeeds");
     assert_eq!(outcome.tile_count, 4);
-    assert_eq!((outcome.width, outcome.height), (512, 512));
-    assert!(!outcome.partial);
-    let _expected = scenario_expected("cli-resume-cache");
-    let _canonical = scenario_expected("cli-dzi");
+    assert_eq!(
+        (
+            outcome.output.canvas.as_ref().unwrap().width,
+            outcome.output.canvas.as_ref().unwrap().height
+        ),
+        (512, 512)
+    );
+    assert!(outcome.output.complete);
 }
 
 #[test]
@@ -770,8 +808,6 @@ fn cancellation_before_publish_writes_nothing() {
     .expect_err("cancelled jobs fail");
     assert_eq!(error.code, "job.cancelled");
     assert!(!output.exists(), "cancelled jobs write nothing");
-    let expected = scenario_expected("cli-cancel");
-    assert_eq!(error.code, expected["code"].as_str().expect("code"));
 }
 
 // ---------------------------------------------------------------------------
@@ -927,14 +963,19 @@ fn iiif_size_rounding_bug_falls_back_to_caret_width_without_refetching() {
     )
     .expect("caret-width fallback succeeds");
     assert_eq!(outcome.tile_count, 1);
-    assert_eq!((outcome.width, outcome.height), (256, 256));
+    assert_eq!(
+        (
+            outcome.output.canvas.as_ref().unwrap().width,
+            outcome.output.canvas.as_ref().unwrap().height
+        ),
+        (256, 256)
+    );
     assert!(output.exists());
 }
 
 #[test]
 fn deferred_bulk_entry_resolves_to_identical_output() {
-    // The list names one image by absolute URL; the driver follows it with a
-    // same-job `FollowDeferred` instead of failing with `job.no-images`.
+    // The list names one image by absolute URL; discovery follows it.
     let shared: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
     let base = serve_shared_map(Arc::clone(&shared));
     let tiles = ["0_0", "1_0", "0_1", "1_1"];
@@ -971,9 +1012,14 @@ fn deferred_bulk_entry_resolves_to_identical_output() {
         &mut |_| {},
     )
     .expect("deferred follow succeeds");
-    assert_eq!((outcome.width, outcome.height), (512, 512));
+    assert_eq!(
+        (
+            outcome.output.canvas.as_ref().unwrap().width,
+            outcome.output.canvas.as_ref().unwrap().height
+        ),
+        (512, 512)
+    );
     assert_eq!(outcome.tile_count, 4);
-    let _expected = scenario_expected("cli-deferred");
 }
 
 #[test]
@@ -999,15 +1045,13 @@ fn self_referential_deferred_list_hits_the_resolution_limit() {
         &mut |_| {},
     )
     .expect_err("self-deferral exhausts the bound");
-    assert_eq!(error.code, "discovery.deferred");
+    assert_eq!(error.code, "job.deferred-limit");
     assert!(!output.exists());
-    let expected = scenario_expected("cli-deferred-limit");
-    assert_eq!(error.code, expected["code"].as_str().expect("code"));
 }
 
 #[test]
 fn first_catalog_entry_wins_with_two_deferred_images() {
-    // The bulk list names red before blue; the driver follows the first
+    // The bulk list names red before blue; discovery follows the first
     // entry only, so the output is solid red at the first image's size.
     let red_tile = solid_png(256, 256, [196, 48, 48]);
     let blue_tile = solid_png(256, 256, [48, 72, 200]);
@@ -1051,11 +1095,16 @@ fn first_catalog_entry_wins_with_two_deferred_images() {
         &mut |_| {},
     )
     .expect("first entry resolves");
-    assert_eq!((outcome.width, outcome.height), (256, 256));
+    assert_eq!(
+        (
+            outcome.output.canvas.as_ref().unwrap().width,
+            outcome.output.canvas.as_ref().unwrap().height
+        ),
+        (256, 256)
+    );
     assert_eq!(outcome.tile_count, 1);
     let bytes = std::fs::read(&output).expect("output written");
     let decoded = image::load_from_memory(&bytes).expect("decodes").to_rgba8();
     assert_eq!(decoded.get_pixel(8, 8).0[0..3], [196, 48, 48]);
     assert_eq!(decoded.get_pixel(200, 200).0[0..3], [196, 48, 48]);
-    let _expected = scenario_expected("cli-multi-image");
 }

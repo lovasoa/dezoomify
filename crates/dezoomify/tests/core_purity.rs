@@ -1,4 +1,4 @@
-//! Guards the consolidated crate's dependency and host-capability policy.
+//! Guards the core's dependency and host-capability policy.
 //!
 //! Dependency checks consume Cargo's structured metadata. Host capabilities
 //! are enforced semantically by Clippy's `disallowed_methods` and

@@ -9,12 +9,15 @@ inject transport, source acquisition, permission operations, and save behavior
 into one application. Selection, tile retries, ordering, and partial-output
 policy belong to the shared [algorithm](algorithm.md).
 
-The shared runtime calls `fetchResource(request, signal)` with the generated `ResourceRequest`, preserving its identity, purpose, URI, and headers. Results contain readable bytes and the final redirect URI. The runtime composes probes from the same fetch, decoder, and ordinary-image loader as acquisition. The website callback performs one direct tile fetch; the extension retains its source-to-extension fallback, with each selected route attempted once. Typed failures preserve the stable transport code, HTTP status, route, and any `Retry-After` hint in milliseconds; the algorithm alone decides whether and when to retry. Metadata keeps its direct-first fetch and eligible proxy fallback policy below, including its bounded proxy rate-limit retry.
+Browser products acquire at most six tiles concurrently and pace request starts
+per host. Each acquisition includes fetching, processing, decoding, and painting.
+
+The shared runtime calls `fetchResource(request, signal)` with the generated `ResourceRequest`, preserving its purpose, URI, and headers. Results contain readable bytes and the final redirect URI. The runtime composes probes from the same fetch, decoder, and ordinary-image loader as acquisition. The website callback performs one direct tile fetch; the extension retains its source-to-extension fallback, with each selected route attempted once. Typed failures preserve the stable transport code, HTTP status, route, and any `Retry-After` hint in milliseconds; the algorithm alone decides whether and when to retry. Metadata keeps its direct-first fetch and eligible proxy fallback policy below, including its bounded proxy rate-limit retry.
 
 Extension fetches use the attempt signal and a local deadline. Aborting the attempt cancels pending body reads; a deadline remains a network timeout rather than a user cancellation. Streaming bodies are bounded before buffering and error previews consume at most 4 KiB. Request limits belong to the configured transport, never to reconstructed algorithm requests. Ordinary-image loads also receive the attempt signal.
 
 - `acquireTile`: the website checks and shows the declared canvas before the first tile, then decodes and paints each good tile at once. The visible canvas is the output throughout, including while paused. Bad tiles fail the acquisition and flow into algorithm retry/partial handling; a surface failure (canvas limits, allocation, 2D context) fails the job typed at once and never becomes one tile's failure. Probes (`purpose: probe`) share the `probe.ts` helper; a probe kept for output also paints at once.
-- `finish`: encodes the surface already on screen and returns the product's actual output disposition. The website reports `browser-save-ready` when its blob URL is ready for the user's save click; the extension reports `browser-save-initiated` after the browser download manager confirms its saved file. A tainted canvas reports `display-only`. Plans lacking declared dimensions size the surface from accumulated placements here. Over-limit dimensions fail typed (`PLAN_INVALID` plus a desktop handoff) before allocation; a refused allocation or 2D context fails typed the same way (`OUTPUT_ALLOCATION_FAILED`, `OUTPUT_SURFACE_UNAVAILABLE`), and PNG encoding fails as `OUTPUT_ENCODE_FAILED`. Every canvas output failure carries the desktop-app handoff action.
+- `finish`: encodes the surface already on screen and returns the product's actual output disposition. The website reports `browser-save-ready` when its blob URL is ready for the user's save click; the extension reports `browser-save-initiated` after the browser download manager confirms its saved file. A tainted canvas reports `display-only`. Plans lacking declared dimensions size the surface from accumulated placements here. Over-limit dimensions fail typed (`PLAN_INVALID` plus a desktop handoff) before allocation; a refused allocation or 2D context fails typed the same way (`OUTPUT_ALLOCATION_FAILED`, `OUTPUT_SURFACE_UNAVAILABLE`), and PNG encoding fails as `OUTPUT_ENCODE_FAILED`. The shared UI offers the desktop app for every canvas output failure.
 - Tiles draw at planned placement, 1:1 scale. Pixels past the planned edge crop from right and bottom (padded edge tiles); short tiles leave the gap empty. Each bitmap closes right after painting.
 - A clean output reports the product's actual save disposition. The website retains a Blob URL for a later save click. The extension awaits the download manager's confirmation and retains the saved-file identity for open/reveal actions. A tainted display-only canvas skips encoding.
 
@@ -35,7 +38,7 @@ Hosts consume the ordered generated `Catalog` as is. `Image` entries carry optio
 
 A readable HTTP failure goes directly to the algorithm without an ordinary-image fallback. That fallback addresses unreadable browser responses, not missing files or server error responses; any retry of a known HTTP failure belongs to the algorithm.
 
-`createBrowserAssembly` owns production canvas allocation, 2D context creation, decoding, processing, painting, PNG encoding, and decoder cleanup. Products supply canvas placement, visibility, diagnostics, and `save(Blob, width, height, signal)`. The runtime shares its decoder with probes. Release aborts unfinished execution idempotently while retaining completed dimensions and product-owned output access. Released decoders never restart through fallback, and late bitmaps close without painting. Settlement waits for native decoding and PNG encoding callbacks, while cancellation updates the UI immediately. Encoding and save continuations check the attempt signal before publishing output.
+`createBrowserAssembly` owns production canvas allocation, 2D context creation, processing, painting, and PNG encoding. Products supply canvas placement, visibility, diagnostics, and `save(Blob, width, height, signal)`. BrowserHost shares its decoder between probes and assembly, and disposes it during settlement. Release aborts unfinished execution idempotently while retaining completed dimensions and product-owned output access. Released decoders never restart through fallback, and late bitmaps close without painting. Settlement waits for native decoding and PNG encoding callbacks, while cancellation updates the UI immediately. Encoding and save continuations check the attempt signal before publishing output.
 
 For ordinary website tiles with `ProcessingRecipe::None`, the runtime loads through `<img>` and draws into a canvas even when the source taints it. The picture stays visible (browser right-click save where available).
 
@@ -59,18 +62,18 @@ flowchart TD
     D -->|success| DONE[readable bytes]
     D -->|classified CORS or network failure<br/>or 1500 ms metadata window expiry| E{Eligible public<br/>non-credential metadata?}
     E -->|yes| P[2. Automatic metadata CORS proxy<br/>no per-attempt consent]
-    E -->|no| F[typed failure + recovery action]
+    E -->|no| F[typed failure]
     P -->|success| DONE
     P -->|failure| F
     T[Unprocessed ordinary tile<br/>without readable bytes] --> IMG[3. Ordinary img fallback<br/>first readable attempt classifies origin]
     IMG --> DISP[display-only tainted canvas]
-    F --> H[4. Typed recovery action:<br/>extension or native app]
+    F --> H[4. Offer extension or native app]
 ```
 
 1. Direct browser fetch with cookies, `Authorization`, and browser credentials omitted.
 2. After a classified CORS or network failure, or a direct fetch not completing within the 1500 ms metadata window, automatic metadata CORS proxy fallback when the metadata request is public and non-credential.
 3. For unprocessed ordinary tiles, one direct readable attempt classifies each origin. A successful ordinary `<img>` fallback marks that origin display-only for the job, so later ordinary tiles load directly through `<img>`.
-4. A typed recovery action offering the [extension](extension.md) or [native app](native-apps.md) when no accepted browser route supplies readable bytes.
+4. The UI offers the [extension](extension.md) or [native app](native-apps.md) when no accepted browser route supplies readable bytes.
 
 The website always shows the active transport, including the automatic switch after a classified direct failure. No per-attempt consent exists. An HTTP error remains an HTTP error when its diagnostic body times out; it never triggers proxy fallback. A proxy deadline reports a retryable transport failure, while cancelling the job reports cancellation.
 

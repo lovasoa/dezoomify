@@ -7,8 +7,9 @@ import type {
 } from "@dezoomify/wasm-bindings";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { assertNoTileBytes } from "./events.ts";
-import { type DesktopSettings, settingsToInvokeArgs, validateSettings } from "./settings.ts";
+import { type DesktopSettings, validateSettings } from "./settings.ts";
 
 export interface DesktopIpc {
   invoke(command: string, args?: Record<string, unknown>): Promise<unknown>;
@@ -92,7 +93,7 @@ export async function invokeNative(
     .invoke("dezoomify", {
       job: id,
       inputUrl: request.inputUrl,
-      settings: settingsToInvokeArgs(request.settings),
+      settings: { ...request.settings, headers: { ...request.settings.headers } },
     })
     .then((output) => {
       assertNoTileBytes(output);
@@ -125,14 +126,17 @@ export async function readNativeDiagnostics(
   return report as DiagnosticReport;
 }
 
-export function queryNativeCapabilities(): Promise<unknown> {
-  return ipc.invoke("query_capabilities");
-}
-
 export async function listenDeepLinks(
   callback: (payload: Record<string, unknown>) => void,
 ): Promise<void> {
   await ipc.listen("dezoomify://deep-link-pending", ({ payload }) => {
     if (payload && typeof payload === "object") callback(payload as Record<string, unknown>);
   });
+}
+
+/** Open explicitly requested HTTPS links outside the app window. */
+export async function openExternalLink(url: string): Promise<void> {
+  const address = new URL(url);
+  if (address.protocol !== "https:" || address.username || address.password) return;
+  await openUrl(url);
 }

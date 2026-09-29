@@ -5,10 +5,8 @@ import {
   createWebFetcher,
   isProxyEligible,
   loadTileImage,
-  type StructuredFailure,
   saveBlobViaAnchor,
   setCanvasVisible,
-  websiteTileConcurrency,
 } from "@dezoomify/browser-runtime";
 import { createBrowserApplication } from "@dezoomify/browser-runtime/application";
 import {
@@ -62,7 +60,6 @@ const app = root
       wasm: () => wasm,
       partial: "discard",
       resetToIdle: true,
-      concurrency: websiteTileConcurrency(),
       history: { store: historyStore, key: HISTORY_KEY_WEBSITE },
       onStart(url) {
         window.location.hash = buildHash(url);
@@ -107,21 +104,6 @@ const app = root
             };
           },
           loadDisplayImage: (url, signal) => loadTileImage(url, { signal, hooks }),
-          classifyFailure(error) {
-            const value = error as Partial<StructuredFailure>;
-            return {
-              code: value.fetchFailureCode ?? "DISCOVERY_FAILED",
-              message: value.message ?? "The browser could not read this resource.",
-              transport: value.transportKind ?? value.cause?.transport ?? "direct",
-              ...(value.cause?.reason ? { blocked_reason: value.cause.reason } : {}),
-              ...((value.http ?? value.cause?.http)
-                ? { http: value.http ?? value.cause?.http }
-                : {}),
-              ...(value.retry_after_ms != null ? { retry_after_ms: value.retry_after_ms } : {}),
-              ...(value.preview ? { preview: value.preview } : {}),
-              ...(value.detail ? { detail: value.detail } : {}),
-            };
-          },
           canvas() {
             const canvas = document.getElementById("rendering-canvas");
             return canvas instanceof HTMLCanvasElement ? canvas : document.createElement("canvas");

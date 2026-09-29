@@ -12,7 +12,6 @@
     "dezoomify:allow-get-job-diagnostics",
     "dezoomify:allow-open-saved-output",
     "dezoomify:allow-pause-job",
-    "dezoomify:allow-query-capabilities",
     "dezoomify:allow-release-job",
     "dezoomify:allow-resume-job"
   ],
@@ -27,7 +26,6 @@
       "get_job_diagnostics",
       "open_saved_output",
       "pause_job",
-      "query_capabilities",
       "release_job",
       "resume_job"
     ],
@@ -42,6 +40,14 @@
       "tiff",
       "zif",
       "webp"
+    ],
+    "outputFormats": [
+      "png",
+      "jpeg",
+      "tiff",
+      "zif",
+      "webp",
+      "iiif-dir"
     ],
     "eventChannels": [
       "dezoomify://deep-link-pending",

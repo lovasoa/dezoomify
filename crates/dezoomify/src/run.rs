@@ -30,20 +30,17 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
     });
     let catalog = discover(inputs, options, host).await?;
     let (image, level) = select(catalog, options, host).await?;
-    let public = DiscoveryCatalog::new([DiscoveredEntry::Ready(image.clone())]).public_catalog();
-    let CatalogEntry::Image(public) = &public.entries[0] else {
-        unreachable!()
-    };
     let mut progress = Progress {
         phase: ProgressPhase::Planning,
         source_format: Some(image.format.into()),
         title: image.title.clone(),
         selected: image.levels[level].source.image_size().map(size),
-        maximum: public
+        maximum: image
             .levels
             .iter()
-            .filter_map(|l| l.size.clone())
-            .max_by_key(area),
+            .filter_map(|level| level.source.image_size())
+            .max_by_key(|size| size.area())
+            .map(size),
         completed: 0,
         total: None,
     };
@@ -88,7 +85,6 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
     progress.total = Some(total);
     progress.completed = previous.len() as u64;
     host.report(progress.clone());
-    let mut display_only = false;
     let tiles = tiles
         .filter(|tile| {
             !tile
@@ -99,24 +95,20 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
             tile.map(|tile| portable_tile(tile, canvas.clone()))
                 .map_err(Error::from)
         });
-    let mut missing = acquire_round(tiles, host, options, &mut progress, &mut display_only).await?;
+    let mut missing = acquire_round(tiles, host, options, &mut progress).await?;
     if progress.completed == 0 {
-        let mut error = Error::new(
-            "job.no-usable-tiles",
-            ErrorPhase::Acquisition,
-            "no usable tiles were acquired",
-        );
-        if let Some((tile, failures)) = missing.first()
-            && let Some(failure) = failures.first()
-        {
-            error.request = Some(tile.request.uri.clone());
-            error.http = failure.http;
-            error.detail = failure.detail.clone();
-            if let Some(observed) = &failure.observed {
-                error.transport = Some(observed.transport);
-                error.blocked_reason = observed.blocked_reason;
-                error.preview = observed.preview.clone();
-            }
+        let mut error = missing
+            .first()
+            .and_then(|(_, failures)| failures.first())
+            .cloned()
+            .unwrap_or_else(empty_plan);
+        error.code = "job.no-usable-tiles".into();
+        error.phase = ErrorPhase::Acquisition;
+        error.message = "no usable tiles were acquired".into();
+        if let Some((tile, _)) = missing.first() {
+            error
+                .request
+                .get_or_insert_with(|| tile.request.uri.clone());
         }
         return Err(error);
     }
@@ -155,7 +147,6 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
                     host,
                     options,
                     &mut progress,
-                    &mut display_only,
                 )
                 .await?;
             }
@@ -169,7 +160,6 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
         format: options.output,
         title: image.title,
         missing: missing.into_iter().map(|(tile, _)| tile.index).collect(),
-        display_only,
     })
     .await
 }
@@ -218,7 +208,8 @@ async fn discover(
                         interaction,
                     )
                     .await
-                    .map_err(|mut error| {
+                    .map_err(|error| {
+                        let mut error = crate::retry::classify(error);
                         error.request.get_or_insert(uri);
                         failure_observer
                             .borrow_mut()
@@ -279,27 +270,26 @@ async fn select(
     let mut followed = HashSet::new();
     loop {
         host.checkpoint(Gate::Cancellation).await?;
-        let public = catalog.public_catalog();
-        if public.entries.is_empty() {
+        if catalog.is_empty() {
             return Err(empty_plan());
         }
         let index = match &options.selection {
-            SelectionPolicy::Interactive => host.choose_image(public.clone()).await? as usize,
-            SelectionPolicy::Automatic { image_index, .. } => {
-                (*image_index).min(public.entries.len() - 1)
+            SelectionPolicy::Interactive => {
+                host.choose_image(catalog.public_catalog()).await? as usize
             }
-            SelectionPolicy::Fitting { .. } => public
-                .entries
+            SelectionPolicy::Automatic { image_index, .. } => (*image_index).min(catalog.len() - 1),
+            SelectionPolicy::Fitting { .. } => catalog
+                .entries()
                 .iter()
                 .enumerate()
                 .filter_map(|(index, entry)| match entry {
-                    CatalogEntry::Image(image) => Some((
+                    DiscoveredEntry::Ready(image) => Some((
                         index,
                         image
                             .levels
                             .iter()
-                            .filter_map(|l| l.size.as_ref())
-                            .map(area)
+                            .filter_map(|level| level.source.image_size())
+                            .map(|size| size.area())
                             .max()
                             .unwrap_or(0),
                     )),
@@ -308,7 +298,7 @@ async fn select(
                 .max_by_key(|(_, area)| *area)
                 .map_or(0, |(index, _)| index),
         };
-        let Some(entry) = catalog.entries().get(index) else {
+        let Some(entry) = catalog.into_entries().into_iter().nth(index) else {
             return Err(Error::new(
                 "job.invalid-selection",
                 ErrorPhase::Validation,
@@ -329,14 +319,11 @@ async fn select(
                 catalog = discover(vec![JobInput::new(&resource.uri)], options, host).await?;
             }
             DiscoveredEntry::Ready(image) => {
-                let CatalogEntry::Image(public) = public.entries[index].clone() else {
-                    unreachable!()
-                };
                 let level = match &options.selection {
                     SelectionPolicy::Interactive => {
-                        host.choose_level(public.clone()).await? as usize
+                        host.choose_level((&image).into()).await? as usize
                     }
-                    policy => select_level(&public, policy).ok_or_else(empty_plan)?,
+                    policy => select_level(&image, policy).ok_or_else(empty_plan)?,
                 };
                 if level >= image.levels.len() {
                     return Err(Error::new(
@@ -345,16 +332,13 @@ async fn select(
                         "level selection is out of range",
                     ));
                 }
-                return Ok((image.clone(), level));
+                return Ok((image, level));
             }
         }
     }
 }
 
-fn area(size: &Size) -> u64 {
-    u64::from(size.width) * u64::from(size.height)
-}
-fn select_level(image: &Image, policy: &SelectionPolicy) -> Option<usize> {
+fn select_level(image: &core::ResolvedImage, policy: &SelectionPolicy) -> Option<usize> {
     let levels = &image.levels;
     match policy {
         SelectionPolicy::Fitting {
@@ -364,18 +348,16 @@ fn select_level(image: &Image, policy: &SelectionPolicy) -> Option<usize> {
         } => {
             let sizes = || {
                 levels.iter().enumerate().filter_map(|(i, l)| {
-                    l.size
-                        .as_ref()
-                        .filter(|s| s.width > 0 && s.height > 0)
+                    l.source
+                        .image_size()
+                        .filter(|s| s.x > 0 && s.y > 0)
                         .map(|s| (i, s))
                 })
             };
             sizes()
-                .filter(|(_, s)| {
-                    s.width <= *max_width && s.height <= *max_height && area(s) <= *max_area
-                })
-                .max_by_key(|(_, s)| area(s))
-                .or_else(|| sizes().min_by_key(|(_, s)| area(s)))
+                .filter(|(_, s)| s.x <= *max_width && s.y <= *max_height && s.area() <= *max_area)
+                .max_by_key(|(_, s)| s.area())
+                .or_else(|| sizes().min_by_key(|(_, s)| s.area()))
                 .map(|(i, _)| i)
                 .or_else(|| levels.len().checked_sub(1))
         }
@@ -393,25 +375,25 @@ fn select_level(image: &Image, policy: &SelectionPolicy) -> Option<usize> {
                 return levels
                     .iter()
                     .enumerate()
-                    .max_by_key(|(_, l)| l.size.as_ref().map_or(0, area))
+                    .max_by_key(|(_, l)| l.source.image_size().map_or(0, |size| size.area()))
                     .map(|(i, _)| i);
             }
             levels
                 .iter()
                 .enumerate()
                 .filter(|(_, l)| {
-                    l.size.as_ref().is_some_and(|s| {
-                        max_width.is_none_or(|cap| s.width > 0 && s.width <= cap)
-                            && max_height.is_none_or(|cap| s.height > 0 && s.height <= cap)
+                    l.source.image_size().is_some_and(|s| {
+                        max_width.is_none_or(|cap| s.x > 0 && s.x <= cap)
+                            && max_height.is_none_or(|cap| s.y > 0 && s.y <= cap)
                     })
                 })
-                .max_by_key(|(_, l)| l.size.as_ref().map_or(0, area))
+                .max_by_key(|(_, l)| l.source.image_size().map_or(0, |size| size.area()))
                 .map(|(i, _)| i)
                 .or_else(|| {
                     levels
                         .iter()
                         .enumerate()
-                        .min_by_key(|(_, l)| l.size.as_ref().map_or(u32::MAX, |s| s.width))
+                        .min_by_key(|(_, l)| l.source.image_size().map_or(u32::MAX, |s| s.x))
                         .map(|(i, _)| i)
                 })
         }
@@ -462,7 +444,11 @@ pub(crate) async fn probe(
         )
     })?;
     host.checkpoint(Gate::Cancellation).await?;
-    match host.probe(portable_tile(tile, None)).await? {
+    match host
+        .probe(portable_tile(tile, None))
+        .await
+        .map_err(crate::retry::classify)?
+    {
         ProbeOutcome::Missing => Ok(core::ObservationResult::Missing),
         ProbeOutcome::Available { width, height } => Ok(core::ObservationResult::Available {
             size: Vec2d {
@@ -480,18 +466,16 @@ async fn acquire_round(
     host: &impl Host,
     options: &Options,
     progress: &mut Progress,
-    display_only: &mut bool,
-) -> Result<Vec<(Tile, Vec<TileFailure>)>, Error> {
+) -> Result<Vec<(Tile, Vec<Error>)>, Error> {
     let mut missing = Vec::new();
     let mut pending = stream::iter(tiles.map(|tile| async { acquire(host, tile?, options).await }))
         .buffer_unordered(options.max_concurrent as usize);
     while let Some(result) = pending.next().await {
-        let (tile, receipt, failures) = result?;
-        if let Some(receipt) = receipt {
-            *display_only |= receipt.display_only;
-            progress.completed += 1;
-        } else {
+        let (tile, failures) = result?;
+        if let Some(failures) = failures {
             missing.push((tile, failures));
+        } else {
+            progress.completed += 1;
         }
         host.report(progress.clone());
     }
@@ -502,12 +486,12 @@ async fn acquire(
     host: &impl Host,
     tile: Tile,
     options: &Options,
-) -> Result<(Tile, Option<TileReceipt>, Vec<TileFailure>), Error> {
+) -> Result<(Tile, Option<Vec<Error>>), Error> {
     let mut failures = Vec::new();
     for attempt in 0..=options.max_retries {
         host.checkpoint(Gate::Acquisition).await?;
         match host.acquire_tile(tile.clone()).await {
-            Ok(receipt) => return Ok((tile, Some(receipt), failures)),
+            Ok(()) => return Ok((tile, None)),
             Err(error)
                 if error.code == "job.cancelled"
                     || error.code == "TRANSPORT_CANCELLED"
@@ -517,37 +501,14 @@ async fn acquire(
                 return Err(error);
             }
             Err(error) => {
-                let observed = error.transport.and_then(|transport| {
-                    serde_json::from_value::<FetchFailureCode>(serde_json::Value::String(
-                        error.code.clone(),
-                    ))
-                    .ok()
-                    .map(|code| FetchFailure {
-                        code,
-                        message: error.message.clone(),
-                        transport,
-                        blocked_reason: error.blocked_reason,
-                        http: error.http,
-                        retry_after_ms: error.retry_after_ms,
-                        preview: error.preview.clone(),
-                        detail: error.detail.clone(),
-                    })
-                });
-                let mut failure = TileFailure::new(
-                    error.code,
-                    error.http,
-                    error.retry_after_ms,
-                    error.detail.or(Some(error.message)),
-                );
-                failure.observed = observed;
-                let retry =
-                    failure.category == FailureCategory::Transient && attempt < options.max_retries;
+                let error = crate::retry::classify(error);
+                let retry = error.retryable && attempt < options.max_retries;
                 let delay = crate::retry::retry_delay_ms(
                     attempt + 1,
-                    failure.retry_after_ms,
+                    error.retry_after_ms,
                     options.retry_base_delay_ms,
                 );
-                failures.push(failure);
+                failures.push(error);
                 if !retry {
                     break;
                 }
@@ -556,7 +517,7 @@ async fn acquire(
             }
         }
     }
-    Ok((tile, None, failures))
+    Ok((tile, Some(failures)))
 }
 
 fn empty_plan() -> Error {

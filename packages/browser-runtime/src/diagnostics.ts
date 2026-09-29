@@ -9,7 +9,7 @@ let sequence = 0;
 declare const __DEZOOMIFY_VERSION__: string;
 const completed: DiagnosticReport[] = [];
 
-/** One recorder per product attempt, allocated before service validation. */
+/** One recorder per product attempt, allocated before input validation. */
 export function createAttemptDiagnostics(
   product: string,
   version = typeof __DEZOOMIFY_VERSION__ === "string" ? __DEZOOMIFY_VERSION__ : "development",

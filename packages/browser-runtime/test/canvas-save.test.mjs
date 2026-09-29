@@ -6,7 +6,6 @@ import {
   isCanvasTaintError,
   saveBlobViaAnchor,
 } from "../src/canvas-save.ts";
-import { stableErrorCode } from "../src/failure.ts";
 
 test("canvasToPngBlob resolves the encoded blob", async () => {
   const encoded = new Blob(["png"], { type: "image/png" });
@@ -76,12 +75,6 @@ test("canvasToPngBlob preserves a taint SecurityError for display-only fallback"
     (e) => e === taint,
   );
   assert.equal(isCanvasTaintError(taint), true);
-});
-
-test("stableErrorCode ignores browser exception numeric codes", () => {
-  assert.equal(stableErrorCode({ code: 18, name: "SecurityError" }), "DISCOVERY_FAILED");
-  assert.equal(stableErrorCode({ code: "TILE_FAILED" }), "TILE_FAILED");
-  assert.equal(stableErrorCode(null), "DISCOVERY_FAILED");
 });
 
 test("saveBlobViaAnchor downloads the core title or suggested WxH fallback", () => {

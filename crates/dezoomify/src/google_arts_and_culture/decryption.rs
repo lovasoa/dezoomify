@@ -114,7 +114,7 @@ mod tests {
     #[test]
     fn test_decrypt_sample_tile() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata")
+            .join("../../testdata/scenarios/rs-core/formats/payloads")
             .join("google_arts_and_culture");
         let encrypted = fs::read(root.join("tile_encrypted.bin")).unwrap();
         let decrypted: Vec<u8> = fs::read(root.join("tile.jpg")).unwrap();

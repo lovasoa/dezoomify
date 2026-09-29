@@ -1,28 +1,5 @@
 {
-  "capabilities": {
-    "bulkSupported": true,
-    "canvasBytes": 8589934592,
-    "decoders": [
-      "png",
-      "jpeg",
-      "tiff"
-    ],
-    "destinationModes": [
-      "file",
-      "iiif-dir"
-    ],
-    "encoders": [
-      "png",
-      "jpeg",
-      "tiff"
-    ],
-    "handoff": true,
-    "maxConcurrency": 16,
-    "storageModes": [
-      "cache"
-    ]
-  },
-  "description": "Desktop queue retry over the integration-layer queue: the failed entry retries behind the line under a fresh id and succeeds, so the totals recover.",
+  "description": "A failed desktop queue entry retries at the back under a fresh id and succeeds, so the totals recover.",
   "entries": [
     {
       "url": "https://fixtures.test/desktop/basic/pyramid.dzi"
@@ -56,7 +33,6 @@
       "total": 2
     }
   },
-  "protocol": "2.0",
   "provenance": "fixture",
   "scenario": "desktop/queue-retry",
   "script": [

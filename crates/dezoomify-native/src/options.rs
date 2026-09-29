@@ -1,8 +1,6 @@
 //! Native input, transport, and output settings.
-use crate::{
-    output::{validate_destination, OutputFormat},
-    NativeError,
-};
+use crate::output::validate_destination;
+use dezoomify::model::{Error, ErrorPhase, OutputFormat};
 use std::{collections::BTreeMap, path::PathBuf, time::Duration};
 
 /// Where the finished output goes.
@@ -41,8 +39,7 @@ pub struct JobOptions {
     pub connect_timeout: Duration,
     pub max_idle_per_host: usize,
     pub accept_invalid_certs: bool,
-    /// Max concurrent tile fetches (default 16, the reference async
-    /// `buffer_unordered(parallelism)` width). Bounds one algorithm slot per
+    /// Max concurrent tile fetches (default 16). Bounds one algorithm slot per
     /// tile covering the full fetch/decode/place path.
     pub max_concurrent: usize,
     /// Maximum number of planned tiles accepted by the algorithm.
@@ -80,7 +77,7 @@ impl Default for JobOptions {
             connect_timeout: Duration::from_secs(6),
             max_idle_per_host: 32,
             accept_invalid_certs: false,
-            max_concurrent: crate::pipeline::MAX_CONCURRENT,
+            max_concurrent: crate::imaging::MAX_CONCURRENT,
             max_tiles: 1 << 20,
             max_bytes: 64 << 20,
             min_interval: Duration::ZERO,
@@ -106,17 +103,18 @@ impl JobOptions {
             self.format = None;
         }
         self.cache_dir
-            .get_or_insert_with(crate::pipeline::default_tile_cache_dir);
+            .get_or_insert_with(crate::imaging::default_tile_cache_dir);
         self
     }
 
     /// Typed pre-flight validation: input shape, output-format support, and
     /// an early destination check. The commit point validates again to close
     /// races between start and publication.
-    pub fn validate(&self) -> Result<(), NativeError> {
+    pub fn validate(&self) -> Result<(), Error> {
         if self.input_url.is_empty() || self.input_url.len() > 2048 {
-            return Err(NativeError::new(
+            return Err(Error::new(
                 "job.invalid-input",
+                ErrorPhase::Validation,
                 "input must be 1..2048 bytes",
             ));
         }
@@ -134,15 +132,16 @@ impl JobOptions {
                 .next()
                 .unwrap_or("");
             if authority.contains('@') {
-                return Err(NativeError::new(
+                return Err(Error::new(
                     "job.invalid-input",
+                    ErrorPhase::Validation,
                     "input must not contain userinfo",
                 ));
             }
         }
         match &self.output {
             OutputTarget::File(path) => {
-                let format = OutputFormat::infer_from_path(path)?;
+                let format = crate::output::infer_from_path(path)?;
                 validate_destination(path, &format, self.overwrite)?;
             }
             OutputTarget::AutoDir { dir: _, format: _ } => {}

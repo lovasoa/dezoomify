@@ -1,5 +1,5 @@
 {
-  "description": "Desktop cancel: cancel_job at the next effect boundary reports job.cancelled and writes no output",
+  "description": "Desktop cancel_job cancels pending work, reports job.cancelled, and writes no output",
   "id": "desktop/cancel",
   "input": {
     "mode": "gateway",

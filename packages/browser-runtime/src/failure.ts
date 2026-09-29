@@ -1,9 +1,9 @@
 // Structured failures shared by browser operations.
 import type {
   BlockedReason,
-  ErrorTransport,
   FetchFailure,
   FetchFailureCode,
+  Error as JobError,
 } from "@dezoomify/wasm-bindings";
 
 /** Validate the observed-failure payload at browser boundaries, without rebuilding it. */
@@ -49,65 +49,6 @@ export function isFetchFailure(value: unknown): value is FetchFailure {
   );
 }
 
-export interface StructuredFailure extends Error {
-  code: string;
-  retryable: boolean;
-  /** Raw job diagnostics for the technical-details section; never shown prominently. */
-  detail?: string;
-  /**
-   * Dense technical diagnostics (transport, HTTP status, failure chain) for
-   * logs, the Rust algorithm, and bug reports. `message` stays the hand-holding UI
-   * sentence; `technical` never reaches the prominent error slot.
-   */
-  technical?: string;
-  /**
-   * Typed fetch cause (the core wire shape `{code, http?, transport,
-   * reason?}`). Discovery diagnostics group on it, never on rendered
-   * text; user copy never enters it.
-   */
-  cause?: FetchCause;
-  /** Full request URL of the failed fetch; rendered verbatim in the on-device details. */
-  url?: string;
-  /** HTTP status when the failure is an HTTP refusal. */
-  http?: number;
-  /** Host-observed Retry-After hint in milliseconds for a retryable response. */
-  retry_after_ms?: number;
-  /** Transport kind id (`direct`, `metadata-proxy`, ...). */
-  transportKind?: ErrorTransport;
-  /** Generated fetch code used for product wording; never inferred from diagnostic text. */
-  fetchFailureCode?: FetchFailureCode;
-  /** Bounded single-line server signal captured from an HTTP error body. */
-  preview?: string;
-}
-
-/** Typed fetch cause passed to the Rust algorithm. */
-export interface FetchCause {
-  code: string;
-  http?: number;
-  transport: ErrorTransport;
-  reason?: BlockedReason;
-}
-
-export function errorTransport(value: unknown): ErrorTransport | undefined {
-  switch (value) {
-    case "direct":
-      return "direct";
-    case "metadata-proxy":
-    case "metadata proxy":
-    case "proxy":
-      return "metadata-proxy";
-    case "browser-session":
-    case "extension-origin":
-      return "browser-session";
-    case "native":
-      return "native";
-    case "display-only":
-      return "display-only";
-    default:
-      return undefined;
-  }
-}
-
 export function blockedReason(value: unknown): BlockedReason | undefined {
   switch (value) {
     case "access-required":
@@ -142,51 +83,7 @@ export function blockedReason(value: unknown): BlockedReason | undefined {
   }
 }
 
-/** Return a stable string code from an arbitrary host-side failure. */
-export function stableErrorCode(error: unknown, fallback = "DISCOVERY_FAILED"): string {
-  if (!error || typeof error !== "object") return fallback;
-  const code = (error as { code?: unknown }).code;
-  return typeof code === "string" && code !== "" ? code : fallback;
-}
-
-export function failure(
-  code: string,
-  message: string,
-  retryable = true,
-  detail?: string,
-  technical?: string,
-): StructuredFailure {
-  const error = new Error(message) as StructuredFailure;
-  error.code = code;
-  error.retryable = retryable;
-  if (detail) error.detail = detail;
-  if (technical) error.technical = technical;
-  return error;
-}
-
-/**
- * Build a fetch failure carrying its typed cause plus the structured
- * context the details renderer needs. Free-text technical chains are
- * replaced by these fields: the Rust algorithm gets `cause`, the renderer gets
- * `url`/`http`/`preview`.
- */
-export function fetchFailure(
-  message: string,
-  retryable: boolean,
-  context: {
-    cause: FetchCause;
-    code: FetchFailureCode;
-    url?: string;
-    preview?: string;
-    transportKind?: ErrorTransport;
-  },
-): StructuredFailure {
-  const error = failure(context.code, message, retryable);
-  error.cause = context.cause;
-  error.fetchFailureCode = context.code;
-  if (context.url) error.url = context.url;
-  if (context.preview) error.preview = context.preview;
-  if (context.transportKind) error.transportKind = context.transportKind;
-  if (typeof context.cause.http === "number") error.http = context.cause.http;
-  return error;
+/** Typed output failure with its diagnostic cause retained in the domain error. */
+export function outputError(code: string, message: string, detail?: string): JobError {
+  return { code, message, phase: "output", retryable: false, ...(detail ? { detail } : {}) };
 }
