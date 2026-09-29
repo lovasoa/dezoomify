@@ -51,7 +51,7 @@ cargo xtask test scenario
 cargo xtask build desktop --unsigned-test
 cargo xtask dev extension --browser chromium
 cargo xtask ci local
-cargo xtask bindings generate --check
+cargo xtask bindings generate
 cargo xtask fixtures serve --port 0 --write-address target/fixture-server.addr
 ```
 
