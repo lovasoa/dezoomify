@@ -10,6 +10,102 @@ use dezoomify_native::{JobOptions, NativeHost, OutputTarget};
 mod support;
 
 #[test]
+fn generic_probe_metadata_uses_final_tile_order_without_refetching() {
+    use image::codecs::png::CompressionType;
+    use image::ImageDecoder as _;
+
+    let work = temp_dir("probe-metadata");
+    let colors = [
+        [255, 0, 0, 255],
+        [0, 255, 0, 255],
+        [0, 0, 255, 255],
+        [255, 255, 0, 255],
+    ];
+    let mut routes = HashMap::new();
+    let mut profiles = Vec::new();
+    let mut metadata = Vec::new();
+    for (index, color) in colors.into_iter().enumerate() {
+        let profile = vec![
+            0,
+            0,
+            2,
+            12,
+            b'a',
+            b'd',
+            b's',
+            b'p',
+            index as u8,
+            0,
+            0,
+            0,
+            b'm',
+            b'n',
+            b't',
+            b'r',
+            b'R',
+            b'G',
+            b'B',
+            b' ',
+        ];
+        let exif = vec![b'E', b'x', b'i', b'f', 0, 0, b'M', b'M', 0, 42, index as u8];
+        let image = image::RgbaImage::from_pixel(2, 2, image::Rgba(color));
+        let png = dezoomify_native::imaging::encode_png(
+            &image,
+            CompressionType::Fast,
+            Some(&profile),
+            Some(&exif),
+        )
+        .unwrap();
+        routes.insert(
+            format!("/tile-{}_{}.png", index % 2, index / 2),
+            http_response("200 OK", "image/png", &png),
+        );
+        profiles.push(profile);
+        metadata.push(exif);
+    }
+    let counts = Arc::new(Mutex::new(HashMap::new()));
+    let base = serve_counted(Arc::new(Mutex::new(routes)), Arc::clone(&counts));
+    let output = work.join("image.png");
+    let host = NativeHost::new(JobOptions {
+        input_url: format!("{base}/tile-{{{{X}}}}_{{{{Y}}}}.png"),
+        output: OutputTarget::File(output.clone()),
+        cache_dir: Some(work.join("cache")),
+        ..Default::default()
+    })
+    .unwrap();
+    host.transport
+        .block_on(dezoomify::dezoomify(
+            host.inputs(),
+            host.algorithm_options(),
+            &host,
+        ))
+        .unwrap();
+    let publication = host.publication().unwrap();
+    assert_eq!(publication.tile_count, 4);
+    assert!(publication.output.complete);
+    let mut saved =
+        image::codecs::png::PngDecoder::new(std::io::Cursor::new(std::fs::read(output).unwrap()))
+            .unwrap();
+    assert_eq!(saved.icc_profile().unwrap(), Some(profiles[0].clone()));
+    assert_eq!(saved.exif_metadata().unwrap(), Some(metadata[0].clone()));
+    let pixels = image::DynamicImage::from_decoder(saved).unwrap().to_rgba8();
+    assert_eq!(pixels.dimensions(), (4, 4));
+    for (index, color) in colors.into_iter().enumerate() {
+        assert_eq!(
+            pixels
+                .get_pixel((index as u32 % 2) * 2, (index as u32 / 2) * 2)
+                .0,
+            color
+        );
+        assert_eq!(
+            counts.lock().unwrap()[&format!("/tile-{}_{}.png", index % 2, index / 2)],
+            1
+        );
+    }
+    std::fs::remove_dir_all(work).unwrap();
+}
+
+#[test]
 fn http_failures_retain_the_resource_and_discovery_phase() {
     use dezoomify::{host::Host, model::*};
 
@@ -148,6 +244,7 @@ fn malformed_encrypted_tile_retains_processing_failure_and_good_partial_pixels()
                 format: OutputFormat::Png,
                 title: None,
                 missing: vec![1],
+                reused_tiles: Vec::new(),
             })
             .await
             .unwrap();

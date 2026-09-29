@@ -425,8 +425,9 @@ impl<'a> NativeHost<'a> {
     }
 
     fn place(&self, tile: &Tile, decoded: DecodedTile) -> Result<(), Error> {
-        // Probe order is independent of the resolved row-major tile order.
-        let ordinal = if tile.placement.probe_output {
+        // Separate resource slots prevent probe indices from colliding with
+        // final plan indices. Finish supplies the plan order of reused probes.
+        let storage_index = if tile.placement.probe_output {
             (self.options.max_tiles as u32).saturating_add(tile.index)
         } else {
             tile.index
@@ -451,7 +452,7 @@ impl<'a> NativeHost<'a> {
             ));
         }
         sink.place(
-            ordinal,
+            storage_index,
             Vec2d {
                 x: tile.placement.position.x,
                 y: tile.placement.position.y,
@@ -459,7 +460,7 @@ impl<'a> NativeHost<'a> {
             tile.placement.expected_size.as_ref().map(size),
             decoded,
         )?;
-        self.acquired.borrow_mut().insert(ordinal);
+        self.acquired.borrow_mut().insert(storage_index);
         self.instrumentation.borrow_mut().acquired = self.acquired.borrow().len() as u64;
         Ok(())
     }
@@ -542,6 +543,7 @@ impl Host for NativeHost<'_> {
             overwrite: self.options.overwrite,
             cancelled: &self.controls.0.cancelled,
             partial,
+            reused_tiles: &request.reused_tiles,
         })?;
         let stats = sink.stats();
         let mut instrumentation = self.instrumentation.borrow().clone();

@@ -3,7 +3,7 @@ import test from "node:test";
 import { invokeNative } from "../src/native.ts";
 import { defaultSettings } from "../src/settings.ts";
 
-function platform() {
+function platform({ deferRegistration = false } = {}) {
   const handlers = new Map();
   const calls = [];
   let resolve;
@@ -12,18 +12,30 @@ function platform() {
     resolve = yes;
     reject = no;
   });
+  const dispatched = Promise.withResolvers();
+  let registered = false;
   return {
     handlers,
     calls,
     resolve,
     reject,
+    dispatched: dispatched.promise,
+    register() {
+      registered = true;
+      this.emit("dezoomify://registered", { job: calls[0].args.job });
+    },
     async listen(channel, handler) {
       handlers.set(channel, handler);
       return () => handlers.delete(channel);
     },
     async invoke(command, args) {
       calls.push({ command, args });
-      if (command === "dezoomify") return completion;
+      if (command === "dezoomify") {
+        dispatched.resolve();
+        if (!deferRegistration) this.register();
+        return completion;
+      }
+      assert.ok(registered, `${command} reached Rust before registration`);
     },
     emit(channel, payload) {
       handlers.get(channel)?.({ payload });
@@ -103,6 +115,60 @@ test("retired invocation rejects controls and ignores late progress", async () =
   await assert.rejects(handle.pause(), (error) => error.code === "desktop.result-retired");
   api.reject({ code: "job.cancelled", message: "cancelled" });
   await assert.rejects(handle.finished, (error) => error.code === "job.cancelled");
+});
+
+test("early cancellation and replacement wait for native registration", async () => {
+  for (const control of ["cancel", "dispose"]) {
+    const api = platform({ deferRegistration: true });
+    const progress = [];
+    let exposed = false;
+    const starting = invokeNative(
+      request(),
+      { progress: (value) => progress.push(value), partial() {} },
+      api,
+    );
+    // A replaced view disposes the handle as soon as invokeNative returns it.
+    const stopped = starting.then(async (handle) => {
+      exposed = true;
+      await handle[control]();
+      return handle;
+    });
+    await api.dispatched;
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(exposed, false);
+    assert.deepEqual(
+      api.calls.map(({ command }) => command),
+      ["dezoomify"],
+    );
+    api.emit("dezoomify://registered", { job: "job:other" });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(exposed, false, "another invocation cannot acknowledge this one");
+
+    api.register();
+    const handle = await stopped;
+    assert.equal(api.calls.at(-1).command, control === "cancel" ? "cancel_job" : "release_job");
+    const cancelled = { code: "job.cancelled", message: "cancelled before publication" };
+    api.reject(cancelled);
+    await assert.rejects(handle.finished, (error) => error === cancelled);
+    api.emit("dezoomify://progress", { job: handle.id, progress: { phase: "output" } });
+    assert.deepEqual(progress, []);
+    assert.equal(api.handlers.size, 0);
+  }
+});
+
+test("failure before native registration rejects startup and removes all listeners", async () => {
+  const api = platform({ deferRegistration: true });
+  const starting = invokeNative(request(), { progress() {}, partial() {} }, api);
+  const failure = { code: "job.invalid-input", message: "invalid settings", detail: "width" };
+  const rejected = assert.rejects(starting, (error) => error === failure);
+  await api.dispatched;
+  api.reject(failure);
+  await rejected;
+  assert.equal(api.handlers.size, 0);
+  assert.deepEqual(
+    api.calls.map(({ command }) => command),
+    ["dezoomify"],
+  );
 });
 
 test("typed failure and partial output retain the native outcome", async () => {

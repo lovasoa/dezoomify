@@ -192,6 +192,17 @@ async fn dezoomify(
         .map_err(|error| invalid(error.message))?
         .insert(&job)
         .map_err(|error| invalid(error.message))?;
+    if let Err(error) = app.emit(
+        crate::jobs::CHANNEL_REGISTERED,
+        serde_json::json!({"job": job}),
+    ) {
+        lock_table(&state)?.release_job(&job);
+        return Err(Error::new(
+            "desktop.registration-failed",
+            ErrorPhase::Validation,
+            format!("The native invocation could not be acknowledged: {error}"),
+        ));
+    }
     let mut options = crate::settings::job_options_for(&settings);
     options.input_url = input_url;
     let format = match settings.output_format.as_str() {

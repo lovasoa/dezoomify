@@ -35,9 +35,11 @@ ordering. Browser selection chooses a ready image and a level fitting canvas
 limits; progress includes maximum and selected dimensions for the UI notice.
 
 Deferred catalog entries resolve within the invocation with bounded follows and
-cycle detection. Planning retains lazy tile generation, validated geometry,
-processing recipes, and adaptive probing. Reusable successful probes count toward
-the final image.
+cycle detection against chosen source URLs and their redirect destinations. Observed
+resources remain eligible when selected later. Planning retains lazy tile
+generation, validated geometry, processing recipes, and adaptive probing.
+Reusable successful probes count toward the final image and retain their final
+tile order for output metadata selection.
 
 ## Retry and progress
 

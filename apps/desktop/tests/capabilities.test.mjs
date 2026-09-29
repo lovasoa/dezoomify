@@ -43,6 +43,7 @@ const EXPECTED_COMMANDS = [
   "release_job",
 ];
 const EXPECTED_CHANNELS = [
+  "dezoomify://registered",
   "dezoomify://progress",
   "dezoomify://partial",
   "dezoomify://deep-link-pending",

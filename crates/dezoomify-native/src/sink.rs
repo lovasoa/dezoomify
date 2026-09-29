@@ -15,8 +15,9 @@
 //!   (`output_retain_cap`); unknown canvas dimensions spool decoded tiles
 //!   to job-owned temp files (bounded by `output_spool_cap`) and assemble
 //!   at finalization without retaining every tile in RAM.
-//! * First-tile ICC/EXIF metadata is deterministic: the lowest-ordinal
-//!   tile carrying a profile wins, independent of arrival order.
+//! * First-tile ICC/EXIF metadata is deterministic: the earliest tile in
+//!   final plan order carrying each metadata block wins, including reused
+//!   probes and independently of arrival order or resource storage slots.
 //! * Encoders render one transient in-memory buffer (buffered codecs are
 //!   honestly accounted in [`SinkStats`]); bytes stream to temp files in
 //!   chunks with fsync before the atomic rename. `iiif-dir` stages into a
@@ -43,7 +44,7 @@ use crate::imaging::{
     render_iiif_dir, DecodedTile,
 };
 use crate::output::{partial_path_for, validate_destination, write_iiif_dir};
-use dezoomify::model::{Error, ErrorPhase, OutputFormat};
+use dezoomify::model::{Error, ErrorPhase, OutputFormat, ReusedTile};
 
 /// Encoder and buffering settings owned by the output sink.
 #[derive(Clone, Debug)]
@@ -105,6 +106,7 @@ pub struct CommitParams<'a> {
     pub overwrite: bool,
     pub cancelled: &'a std::sync::atomic::AtomicBool,
     pub partial: bool,
+    pub reused_tiles: &'a [ReusedTile],
 }
 
 pub struct Sink {
@@ -445,11 +447,21 @@ impl Sink {
         })
     }
 
-    /// Deterministic first-tile metadata: the lowest-ordinal tile carrying
-    /// a profile wins, independent of arrival order.
-    fn first_meta(&self) -> TileMetadata {
+    /// The earliest final-plan tile carrying metadata wins, independently of
+    /// arrival order or the resource slot used while probing its geometry.
+    fn first_meta(&self, reused_tiles: &[ReusedTile]) -> TileMetadata {
+        let reused: HashMap<_, _> = reused_tiles
+            .iter()
+            .map(|tile| ((tile.position.x, tile.position.y), tile.index))
+            .collect();
         let mut ordinals: Vec<u32> = self.meta.keys().copied().collect();
-        ordinals.sort_unstable();
+        ordinals.sort_unstable_by_key(|ordinal| {
+            self.extents
+                .get(ordinal)
+                .and_then(|rect| reused.get(&(rect.x, rect.y)))
+                .copied()
+                .unwrap_or(*ordinal)
+        });
         let mut icc = None;
         let mut exif = None;
         for ordinal in ordinals {
@@ -479,6 +491,7 @@ impl Sink {
             overwrite,
             cancelled,
             partial,
+            reused_tiles,
         } = params;
         if cancelled.load(Ordering::SeqCst) {
             return Err(Error::new(
@@ -504,7 +517,7 @@ impl Sink {
                 "commit without assembled canvas",
             )
         })?;
-        let (icc, exif) = self.first_meta();
+        let (icc, exif) = self.first_meta(reused_tiles);
         let encoded_len: u64;
         match format {
             OutputFormat::Png => {

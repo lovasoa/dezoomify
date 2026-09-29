@@ -54,6 +54,14 @@ export interface ImageRequest {
 }
 
 /**
+ * Final plan position and index of a tile already acquired during probing.
+ */
+export interface ReusedTile {
+    index: number;
+    position: Point;
+}
+
+/**
  * Honest output disposition reported by the host that performed the save.
  */
 export type OutputDisposition = "native-publication" | "browser-save-initiated" | "browser-save-ready" | "display-only";
@@ -236,6 +244,7 @@ export interface FinishRequest {
     format: OutputFormat;
     title: string | undefined;
     missing: number[];
+    reused_tiles: ReusedTile[];
 }
 
 export interface Header {

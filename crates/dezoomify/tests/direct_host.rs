@@ -619,12 +619,20 @@ fn automatic_selection_follows_catalog_entries_and_rejects_cycles() {
             final_uri: None,
         },
     );
-    let inputs = vec![JobInput {
-        url: "https://images.test/list.txt".into(),
-        contents: Some("https://images.test/image.dzi".into()),
-        kind: None,
-    }];
+    let inputs = vec![
+        JobInput {
+            url: "https://images.test/list.txt".into(),
+            contents: Some("https://images.test/image.dzi".into()),
+            kind: None,
+        },
+        JobInput {
+            url: "https://images.test/image.dzi".into(),
+            contents: None,
+            kind: Some(DiscoveryInputKind::ObservedResource),
+        },
+    ];
     let opts = Options {
+        max_deferred_follows: 1,
         selection: SelectionPolicy::Fitting {
             max_width: 300,
             max_height: 300,
@@ -667,7 +675,46 @@ fn automatic_selection_follows_catalog_entries_and_rejects_cycles() {
     ))
     .unwrap_err();
     assert_eq!(error.code, "job.deferred-limit");
+    assert_eq!(host.fetched.borrow().len(), 1);
     assert!(host.outputs.borrow().is_empty());
+}
+
+#[test]
+fn deferred_cycles_do_not_reacquire_supplied_sources_or_their_redirected_addresses() {
+    const SOURCE: &str = "https://images.test/list.txt";
+    const REDIRECTED: &str = "https://images.test/catalog/list.txt";
+    for (supplied, final_uri, target) in [
+        (true, None, SOURCE),
+        (false, Some(REDIRECTED), SOURCE),
+        (false, Some(REDIRECTED), REDIRECTED),
+    ] {
+        let mut host = MemoryHost::default();
+        host.resources.insert(
+            SOURCE.into(),
+            ResourceResponse {
+                bytes: target.as_bytes().to_vec(),
+                final_uri: final_uri.map(str::to_owned),
+            },
+        );
+        let error = futures::executor::block_on(dezoomify(
+            vec![JobInput {
+                url: SOURCE.into(),
+                contents: supplied.then(|| target.to_owned()),
+                kind: None,
+            }],
+            Options {
+                format: Some("bulk_text".into()),
+                ..Default::default()
+            },
+            &host,
+        ))
+        .unwrap_err();
+        assert_eq!(error.code, "job.deferred-limit");
+        assert_eq!(error.phase, ErrorPhase::Discovery);
+        assert_eq!(host.fetched.borrow().len(), usize::from(!supplied));
+        assert!(host.outputs.borrow().is_empty());
+        assert_eq!(host.settled.get(), 1);
+    }
 }
 
 #[test]

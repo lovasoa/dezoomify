@@ -88,7 +88,7 @@ implementation. See [Browser runtime](browser-runtime.md) and [Security](securit
 ## Boundaries
 
 - Products never import each other.
-- Parsers and geometry import domain values; orchestration calls injected Host methods.
+- Parsers and geometry import domain values; the shared algorithm calls injected Host methods.
 - Platform implementations own I/O, resources, and clocks, with no duplicate selection or retry policy.
 - Shared UI imports domain declarations and local utilities, with no host globals.
 - Browser application modules may compose UI and Host; image and transport modules remain independent of UI.
