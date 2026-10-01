@@ -81,7 +81,7 @@ test("async Host reads binary metadata and saves the full selected image", async
   const platform = host();
   const output = await wasm.dezoomify([{ url }], options, platform);
   assert.deepEqual(output.canvas, { width: 512, height: 512 });
-  assert.equal(output.complete, true);
+  assert.deepEqual(output.missing, []);
   assert.equal(output.disposition, "browser-save-ready");
   assert.equal(platform.observed.tiles.length, 4);
   assert.equal(platform.observed.settled, 1);
@@ -91,14 +91,15 @@ test("async Host reads binary metadata and saves the full selected image", async
 
 test("structured Host rejection retains request facts", async () => {
   const failure = {
-    code: "TRANSPORT_HTTP_ERROR",
-    phase: "discovery",
-    retryable: false,
-    message: "Fixture metadata refused.",
+    kind: "resource",
     request: url,
-    transport: "direct",
     resource_kind: "metadata",
-    http: 403,
+    source: {
+      kind: "http-error",
+      status: 403,
+      transport: "direct",
+      detail: "Fixture metadata refused.",
+    },
   };
   const platform = host({
     async fetch() {
@@ -106,9 +107,12 @@ test("structured Host rejection retains request facts", async () => {
     },
   });
   await assert.rejects(wasm.dezoomify([{ url }], options, platform), (error) => {
-    assert.equal(error.code, failure.code);
-    assert.equal(error.http, 403);
-    assert.equal(error.request, url);
+    assert.equal(error.kind, "discovery-failed");
+    assert.equal(error.cause.kind, "resource");
+    assert.equal(error.cause.request, url);
+    assert.equal(error.cause.resource_kind, "metadata");
+    assert.equal(error.cause.source.kind, "http-error");
+    assert.equal(error.cause.source.status, 403);
     return true;
   });
   assert.equal(platform.observed.settled, 1);
@@ -121,7 +125,7 @@ test("malformed JavaScript arguments and Host returns fail as typed errors and s
   ]) {
     const platform = host();
     await assert.rejects(wasm.dezoomify(inputs, configuration, platform), {
-      code: "binding.invalid-value",
+      kind: "binding-invalid-value",
     });
     assert.equal(platform.observed.settled, 1);
     assert.deepEqual(platform.observed.reads, []);
@@ -132,7 +136,7 @@ test("malformed JavaScript arguments and Host returns fail as typed errors and s
     },
   });
   await assert.rejects(wasm.dezoomify([{ url }], options, platform), (error) => {
-    assert.equal(error.code, "binding.invalid-value");
+    assert.equal(error.kind, "binding-invalid-value");
     assert.equal(platform.observed.settled, 1);
     return true;
   });
@@ -144,7 +148,7 @@ test("processing uses Uint8Array without numeric body arrays", () => {
   assert.ok(result instanceof Uint8Array);
   assert.deepEqual(result, bytes);
   assert.throws(() => wasm.applyProcessing("unknown-recipe", bytes), {
-    code: "binding.invalid-value",
+    kind: "binding-invalid-value",
   });
 });
 
@@ -161,7 +165,7 @@ test("accepted format warnings reach the Host without preventing output", async 
     { ...options, format: "zoomify" },
     platform,
   );
-  assert.equal(output.complete, true);
+  assert.deepEqual(output.missing, []);
   assert.deepEqual(platform.observed.warnings, [
     "Zoomify tile count mismatch: computed 5, metadata declares 9",
   ]);
@@ -170,17 +174,15 @@ test("accepted format warnings reach the Host without preventing output", async 
 
 test("Rust classifies raw Host errors while retaining exact failure context", async () => {
   const failure = {
-    code: "host.future-throttle",
-    phase: "acquisition",
-    message: "Original host message",
+    kind: "resource",
     request: "https://redirected.example/tile?signed=exact",
-    transport: "native",
     resource_kind: "tile",
-    blocked_reason: "throttled",
-    http: 429,
-    retry_after_ms: 900000,
-    preview: "Original response",
-    detail: "Original context",
+    source: {
+      kind: "rate-limited",
+      transport: "native",
+      retry_after_ms: 900000,
+      detail: "Original context",
+    },
   };
   const platform = host({
     async acquireTile(tile) {
@@ -190,10 +192,7 @@ test("Rust classifies raw Host errors while retaining exact failure context", as
     async choosePartial({ missing }) {
       assert.equal(missing.length, 1);
       assert.equal(missing[0].tile, 1);
-      assert.deepEqual(missing[0].failures, [
-        { ...failure, retryable: true },
-        { ...failure, retryable: true },
-      ]);
+      assert.deepEqual(missing[0].failures, [failure, failure]);
       return "keep";
     },
   });
@@ -204,7 +203,6 @@ test("Rust classifies raw Host errors while retaining exact failure context", as
   );
   assert.deepEqual(platform.observed.delays, [300000]);
   assert.deepEqual(output.missing, [1]);
-  assert.equal(output.complete, false);
 });
 
 test("concurrent invocations use distinct Host objects and settle each once", async () => {
@@ -214,7 +212,6 @@ test("concurrent invocations use distinct Host objects and settle each once", as
       return {
         canvas: request.canvas,
         format: request.format,
-        complete: request.missing.length === 0,
         missing: request.missing,
         disposition: "display-only",
       };
@@ -242,21 +239,19 @@ test("malformed tile processing remains a permanent missing tile eligible for pa
     async choosePartial({ missing }) {
       assert.equal(missing.length, 1);
       assert.equal(missing[0].tile, 1);
-      assert.equal(missing[0].failures[0].code, "tile.processing-failed");
-      assert.equal(missing[0].failures[0].retryable, false);
+      // Permanence is derived from the kind; pinned by policy-vectors.json.
+      assert.equal(missing[0].failures[0].kind, "processing-failed");
       return "keep";
     },
   });
   assert.throws(() => wasm.applyProcessing("google-arts-decrypt", Uint8Array.of(10, 10, 10, 10)), {
-    code: "tile.processing-failed",
-    phase: "processing",
+    kind: "processing-failed",
   });
   const output = await wasm.dezoomify(
     [{ url }],
     { ...options, partial: "prompt", max_retries: 3 },
     platform,
   );
-  assert.equal(output.complete, false);
   assert.deepEqual(output.missing, [1]);
   assert.equal(platform.observed.tiles.length, 4);
   assert.equal(platform.observed.delays.length, 0);
@@ -280,13 +275,7 @@ test("cancelled invocation settles late reads before returning and never saves",
       return { kind: "response", response: { bytes: document, final_uri: request.uri } };
     },
     async checkpoint() {
-      if (cancelled)
-        throw {
-          code: "job.cancelled",
-          phase: "cleanup",
-          retryable: false,
-          message: "Cancelled",
-        };
+      if (cancelled) throw { kind: "cancelled" };
     },
     async finish() {
       assert.fail("cancelled invocation cannot save");
@@ -296,7 +285,7 @@ test("cancelled invocation settles late reads before returning and never saves",
   await entered;
   cancelled = true;
   release();
-  await assert.rejects(running, { code: "job.cancelled" });
+  await assert.rejects(running, { kind: "cancelled" });
   assert.equal(platform.observed.settled, 1);
   assert.equal(platform.observed.tiles.length, 0);
 });
