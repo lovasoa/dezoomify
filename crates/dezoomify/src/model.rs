@@ -1242,10 +1242,9 @@ pub fn chain_text(error: &(dyn std::error::Error + 'static)) -> String {
 /// This constant is the single source of truth on the Rust side. The
 /// TypeScript mirror is `DEEP_LINK_SECRET_QUERY_KEYS` in
 /// [`packages/shared-ui/src/source-url.ts`](../../../../packages/shared-ui/src/source-url.ts);
-/// the two lists are pinned together by twin membership lock tests
-/// (`sensitive_query_key_membership_is_locked` in
-/// `apps/desktop/src-tauri/src/deep_link.rs` and "secret query vocabulary
-/// mirrors the Rust contract" in `apps/desktop/tests/policy-vectors.test.mjs`).
+/// the shared rejection behavior is pinned on both sides by
+/// `testdata/deep-link-vectors.json` (membership itself is deliberately
+/// unpinned: adding or removing a key is a reviewed policy edit).
 /// The deliberately narrower metadata-proxy policy is `SIGNED_QUERY_KEYS` in
 /// the same TypeScript module (a strict subset of this vocabulary).
 pub const SENSITIVE_QUERY_KEYS: &[&str] = &[

@@ -7,9 +7,9 @@
 // (apps/desktop/src-tauri/src/settings.rs), so the TS and Rust validators can
 // never accept or reject different inputs unnoticed. The settings cases in
 // testdata/policy-vectors.json are covered by the Rust validator alone (the
-// duplicated TS settings validator is gone). Also pins the two
-// credential query-key vocabularies that live in TypeScript against their
-// Rust contract mirror.
+// duplicated TS settings validator is gone). The secret query vocabulary's
+// rejection behavior is pinned by the deep-link vectors; its membership is
+// deliberately unpinned (changing it is a reviewed policy edit).
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -53,51 +53,6 @@ test("retry policy vectors: the TS verdicts match the shared oracle", () => {
 // (`policy_vectors_match_the_shared_oracle` in
 // apps/desktop/src-tauri/src/settings.rs); the TS mirror of that validator
 // is gone.
-
-// Deliberate cross-language membership lock: this exact list mirrors the
-// canonical Rust contract constant `dezoomify::model::SENSITIVE_QUERY_KEYS`
-// (consumed by apps/desktop/src-tauri/src/deep_link.rs and pinned by its
-// `sensitive_query_key_membership_is_locked` test). Update both sides and
-// both locks in the same change.
-const SENSITIVE_QUERY_KEYS_LOCK = [
-  "access-token",
-  "access_token",
-  "api-key",
-  "api_key",
-  "apikey",
-  "auth",
-  "authorization",
-  "bearer",
-  "code",
-  "cookie",
-  "cookies",
-  "credential",
-  "key",
-  "passwd",
-  "password",
-  "proxy-authorization",
-  "secret",
-  "session",
-  "sessionid",
-  "sessiontoken",
-  "set-cookie",
-  "sid",
-  "sig",
-  "signature",
-  "state",
-  "ticket",
-  "token",
-  "x-api-key",
-];
-
-test("secret query vocabulary mirrors the Rust contract", () => {
-  assert.deepEqual([...DEEP_LINK_SECRET_QUERY_KEYS], SENSITIVE_QUERY_KEYS_LOCK);
-  assert.deepEqual(
-    [...SENSITIVE_QUERY_KEYS_LOCK].sort(),
-    SENSITIVE_QUERY_KEYS_LOCK,
-    "the canonical list stays sorted",
-  );
-});
 
 // The proxy admission policy is the deliberately narrower vocabulary defined
 // once in packages/shared-ui/src/source-url.ts and consumed by

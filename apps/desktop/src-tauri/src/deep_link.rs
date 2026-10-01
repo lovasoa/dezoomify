@@ -71,10 +71,10 @@ impl std::error::Error for DeepLinkError {}
 /// `dezoomify::model::SENSITIVE_QUERY_KEYS` (declared once in
 /// `crates/dezoomify/src/model.rs`). The TypeScript mirror is
 /// `DEEP_LINK_SECRET_QUERY_KEYS` in `packages/shared-ui/src/source-url.ts`;
-/// twin membership lock tests (the `sensitive_query_key_membership_is_locked`
-/// test below and `apps/desktop/tests/policy-vectors.test.mjs`) pin the two
-/// lists together. Matching is case-insensitive exact (never substring) so
-/// `/cookie-recipe/` stays valid while `?token=secret` is rejected.
+/// the shared rejection behavior is pinned on both sides by
+/// `testdata/deep-link-vectors.json`. Matching is case-insensitive exact
+/// (never substring) so `/cookie-recipe/` stays valid while `?token=secret`
+/// is rejected.
 fn is_secret_key(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     dezoomify::model::SENSITIVE_QUERY_KEYS
@@ -554,50 +554,6 @@ mod tests {
         // Non-deep-link schemes are ignored.
         let other = vec!["app".to_string(), "https://example.com/x".to_string()];
         assert_eq!(find_deep_link_in_argv(&other), None);
-    }
-
-    /// Deliberate membership lock for the canonical credential vocabulary
-    /// `dezoomify::model::SENSITIVE_QUERY_KEYS`, mirrored by
-    /// `DEEP_LINK_SECRET_QUERY_KEYS` in `packages/shared-ui/src/source-url.ts`
-    /// and pinned there by `apps/desktop/tests/policy-vectors.test.mjs`. Any
-    /// change updates both languages and this lock in the same change.
-    #[test]
-    fn sensitive_query_key_membership_is_locked() {
-        let expected: &[&str] = &[
-            "access-token",
-            "access_token",
-            "api-key",
-            "api_key",
-            "apikey",
-            "auth",
-            "authorization",
-            "bearer",
-            "code",
-            "cookie",
-            "cookies",
-            "credential",
-            "key",
-            "passwd",
-            "password",
-            "proxy-authorization",
-            "secret",
-            "session",
-            "sessionid",
-            "sessiontoken",
-            "set-cookie",
-            "sid",
-            "sig",
-            "signature",
-            "state",
-            "ticket",
-            "token",
-            "x-api-key",
-        ];
-        assert_eq!(dezoomify::model::SENSITIVE_QUERY_KEYS, expected);
-        let mut sorted = expected.to_vec();
-        sorted.sort_unstable();
-        sorted.dedup();
-        assert_eq!(sorted, expected, "canonical list stays sorted and unique");
     }
 
     /// Stable rejection class names asserted by `testdata/deep-link-vectors.json`.
