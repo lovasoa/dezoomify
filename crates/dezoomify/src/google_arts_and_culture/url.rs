@@ -5,8 +5,6 @@ use hmac::{KeyInit, Mac, SimpleHmac};
 use sha1::Sha1;
 
 use super::tile_info::PageInfo;
-#[cfg(test)]
-use super::tile_info::PageInfoParts;
 use std::ops::Deref;
 
 type HmacSha1 = SimpleHmac<Sha1>;
@@ -19,10 +17,10 @@ pub struct TileCoord {
     pub z: usize,
 }
 
-pub fn compute_url(page: &PageInfo, coord: TileCoord) -> String {
+pub fn compute_url(page: &PageInfo, path: &str, coord: TileCoord) -> String {
     let mut url = format!("{}=x{}-y{}-z{}-t", page.base_url, coord.x, coord.y, coord.z);
 
-    let mut sign_path = page.path().to_owned();
+    let mut sign_path = path.to_owned();
     write!(sign_path, "=x{}-y{}-z{}-t", coord.x, coord.y, coord.z).unwrap();
     sign_path.push_str(&page.token);
 
@@ -46,14 +44,14 @@ fn mac_digest(b: &[u8]) -> impl Deref<Target = [u8]> {
 fn test_compute_url() {
     let base_url = "https://lh3.googleusercontent.com/wGcDNN8L-2COcm9toX5BTp6HPxpMPPPuxrMU-ZL-W-nDHW8I_L4R5vlBJ6ITtlmONQ".into();
     let token = "KwCgJ1QIfgprHn0a93x7Q-HhJ04".into();
-    let page = PageInfo::try_from(PageInfoParts {
+    let page = PageInfo {
         base_url,
         token,
         name: String::new(),
-    })
-    .unwrap();
+    };
+    let path = page.path().expect("fixture base url has a path");
     assert_eq!(
-        compute_url(&page, TileCoord { x: 0, y: 0, z: 7 }),
+        compute_url(&page, path, TileCoord { x: 0, y: 0, z: 7 }),
         "https://lh3.googleusercontent.com/wGcDNN8L-2COcm9toX5BTp6HPxpMPPPuxrMU-ZL-W-nDHW8I_L4R5vlBJ6ITtlmONQ=x0-y0-z7-tHeJ3xylnSyyHPGwMZimI4EV3JP8"
     );
 }
@@ -64,14 +62,14 @@ fn test_compute_url_flowers() {
     let base_url =
         "https://lh5.ggpht.com/D0sqZ0sJbzoQeYFoySoXLJqgLMfXhi8-gGVGRqD_UEYUqkqk9Eqdxx5NNaw".into();
     let token = "mcOPEQJmk1514hP_dJkpwVwIhPU".into();
-    let page = PageInfo::try_from(PageInfoParts {
+    let page = PageInfo {
         base_url,
         token,
         name: String::new(),
-    })
-    .unwrap();
+    };
+    let path = page.path().expect("fixture base url has a path");
     assert_eq!(
-        compute_url(&page, TileCoord { x: 0, y: 0, z: 7 }),
+        compute_url(&page, path, TileCoord { x: 0, y: 0, z: 7 }),
         "https://lh5.ggpht.com/D0sqZ0sJbzoQeYFoySoXLJqgLMfXhi8-gGVGRqD_UEYUqkqk9Eqdxx5NNaw=x0-y0-z7-tBJ_NeDnzAKjz3ZbOzN_uFRRIbS0"
     );
 }

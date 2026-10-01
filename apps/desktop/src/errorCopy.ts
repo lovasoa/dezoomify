@@ -112,109 +112,20 @@ export function normalizeDeepLinkVersion(version: unknown): number | null {
   return null;
 }
 
-// Re-parse one raw `dezoomify://open` URL in the frontend (defense in depth:
-// the Rust shell already validated it with `deep_link::parse_deep_link`).
-// This is a strict mirror of the Rust parser: the shared oracle is
-// `testdata/deep-link-vectors.json`, asserted by both
-// `apps/desktop/tests/policy-vectors.test.mjs` (here) and the Rust test
-// `deep_link_vectors_match_the_shared_oracle` in
-// `apps/desktop/src-tauri/src/deep_link.rs`, so the two parsers can never
-// accept or reject different inputs unnoticed. Rejects oversize envelopes,
-// non-literal scheme/host, userinfo, duplicate/unknown/secret fields,
-// unsupported or padded versions, oversize fields, secret-bearing sources, and
-// malformed percent-encoding. Null means reject.
-export function parseRawDeepLinkUrl(raw: string): ValidatedDeepLink | null {
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim();
-  if (trimmed.length === 0 || utf8Length(trimmed) > 2048) return null;
-  // Envelope shape mirrors `parse_deep_link` literally: only lowercase
-  // `dezoomify://open` followed by `?`, `/`, or `/?`.
-  const prefix = "dezoomify://open";
-  if (
-    !(
-      trimmed === prefix ||
-      trimmed.startsWith(`${prefix}?`) ||
-      trimmed.startsWith(`${prefix}/`) ||
-      trimmed.startsWith(`${prefix}/?`)
-    )
-  )
-    return null;
-  const queryStart = trimmed.indexOf("?");
-  const query = queryStart < 0 ? "" : (trimmed.slice(queryStart + 1).split("#")[0] ?? "");
-  if (query.length === 0) return null;
-  let versionRaw: string | null = null;
-  let srcRaw: string | null = null;
-  let hintRaw: string | null = null;
-  let seenV = false;
-  let seenSrc = false;
-  let seenHint = false;
-  for (const pair of query.split("&")) {
-    if (pair.length === 0) continue;
-    const eq = pair.indexOf("=");
-    if (eq < 0) return null;
-    const name = pair.slice(0, eq);
-    const value = pair.slice(eq + 1);
-    // Field names are literal; encoded names are rejected as malformed.
-    if (name.includes("%")) return null;
-    if (name === "v") {
-      if (seenV) return null;
-      seenV = true;
-      versionRaw = value;
-    } else if (name === "src") {
-      if (seenSrc) return null;
-      seenSrc = true;
-      srcRaw = value;
-    } else if (name === "hint") {
-      if (seenHint) return null;
-      seenHint = true;
-      hintRaw = value;
-    } else {
-      return null;
-    }
-  }
-  // Rust accepts plain integers 1..=2 only, so the only valid spellings are
-  // "1" and "2"; `02`, `+2`, `1.0`, and `2_0` are rejected there too.
-  if (versionRaw !== "1" && versionRaw !== "2") return null;
-  if (srcRaw === null) return null;
-  let sourceUrl: string;
-  try {
-    sourceUrl = decodeURIComponent(srcRaw.replace(/\+/g, " ")).trim();
-  } catch {
-    return null;
-  }
-  if (sourceUrl.length === 0 || utf8Length(sourceUrl) > 1024) return null;
-  if (!isValidDeepLinkSource(sourceUrl)) return null;
-  let hint: string | null = null;
-  if (hintRaw !== null) {
-    let decoded: string;
-    try {
-      decoded = decodeURIComponent(hintRaw.replace(/\+/g, " "));
-    } catch {
-      return null;
-    }
-    const normalized = normalizeDeepLinkHint(decoded);
-    if (normalized === undefined) return null;
-    hint = normalized;
-  }
-  return { sourceUrl, hint, version: Number(versionRaw) };
-}
-
 // Validate a `dezoomify://deep-link-pending` payload again in the frontend
 // before showing the confirm UI. Accepts exactly the validated
-// `{source_url, hint, version}` triple emitted by the Rust shell, or a raw
-// `dezoomify://open` URL value re-validated strictly below.
-// Null means reject (no-op).
+// `{source_url, hint, version}` triple emitted by the Rust shell — raw
+// `dezoomify://` values are refused (the shell's parser is the single
+// validator, pinned by testdata/deep-link-vectors.json). Null means
+// reject (no-op).
 export function validateDeepLinkPayload(
   payload: Record<string, unknown>,
 ): ValidatedDeepLink | null {
-  const sourceRaw = payload.source_url;
-  if (typeof sourceRaw === "string" && sourceRaw.trim().startsWith("dezoomify://")) {
-    return parseRawDeepLinkUrl(sourceRaw);
-  }
+  const sourceUrl = payload.source_url;
   const version = normalizeDeepLinkVersion(payload.version);
   if (version === null) return null;
-  if (!isValidDeepLinkSource(sourceRaw)) return null;
+  if (!isValidDeepLinkSource(sourceUrl)) return null;
   const hint = normalizeDeepLinkHint(payload.hint ?? null);
   if (hint === undefined) return null;
-  return { sourceUrl: (sourceRaw as string).trim(), hint, version };
+  return { sourceUrl: (sourceUrl as string).trim(), hint, version };
 }

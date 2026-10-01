@@ -32,46 +32,21 @@ pub struct PageInfo {
     pub base_url: String,
     pub token: String,
     pub name: String,
-    path: String,
-}
-
-/// Parsed page identity, grouped so construction never mixes bare strings.
-/// [`PageInfo`] validates and derives the signing path from it.
-pub struct PageInfoParts {
-    pub base_url: String,
-    pub token: String,
-    pub name: String,
-}
-
-impl TryFrom<PageInfoParts> for PageInfo {
-    type Error = PageParseError;
-
-    fn try_from(parts: PageInfoParts) -> Result<Self, Self::Error> {
-        // The base url is something like
-        // "https://lh3.googleusercontent.com/ci/xxx", and we need to
-        // extract the "ci/xxx" part. Parsing once here keeps
-        // [`Self::path`] total on server-controlled URLs.
-        let path = parts
-            .base_url
-            .splitn(4, '/')
-            .nth(3)
-            .ok_or(PageParseError::MalformedBase)?
-            .to_string();
-        Ok(Self {
-            base_url: parts.base_url,
-            token: parts.token,
-            name: parts.name,
-            path,
-        })
-    }
 }
 
 impl PageInfo {
     pub fn tile_info_url(&self) -> String {
         self.base_url.clone() + "=g"
     }
-    pub fn path(&self) -> &str {
-        &self.path
+
+    /// The signing path: the `ci/xxx` part of a base url like
+    /// `https://lh3.googleusercontent.com/ci/xxx`. Fallible because the
+    /// base url is server-controlled text.
+    pub fn path(&self) -> Result<&str, PageParseError> {
+        self.base_url
+            .splitn(4, '/')
+            .nth(3)
+            .ok_or(PageParseError::MalformedBase)
     }
 }
 
@@ -114,7 +89,7 @@ impl FromStr for PageInfo {
 
         let name = get_name_from_gap_html(s);
 
-        PageInfo::try_from(PageInfoParts {
+        Ok(PageInfo {
             base_url,
             token,
             name,

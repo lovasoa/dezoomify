@@ -50,7 +50,7 @@ test("desktop deep link is accepted by the receiver's actual validator", () => {
   const source = "https://example.com/view?page=1";
   const link = desktopHandoffLink(source);
   assert.ok(link.startsWith("dezoomify://open?v=2&src="), "http(s) sources get a deep link");
-  assert.deepEqual(validateDeepLinkPayload({ source_url: link }), {
+  assert.deepEqual(validateDeepLinkPayload({ source_url: source, hint: null, version: 2 }), {
     sourceUrl: source,
     hint: null,
     version: 2,

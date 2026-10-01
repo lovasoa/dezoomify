@@ -160,6 +160,19 @@ fn validate_source(src: &str) -> Result<(), DeepLinkError> {
             "scheme must be http or https".to_string(),
         ));
     }
+    // Downstream scheme dispatch is case-sensitive; keep the accepted form
+    // normalized so an uppercase scheme cannot be accepted and then refused.
+    let src_owned: String;
+    let src = if src.starts_with("http://") || src.starts_with("https://") {
+        src
+    } else {
+        src_owned = format!(
+            "{}{}",
+            &scheme_lower[..scheme_lower.find(':').unwrap_or(0) + 3],
+            &src[scheme_lower.find(':').unwrap_or(0) + 3..]
+        );
+        src_owned.as_str()
+    };
     // userinfo credentials must never travel in a deep link.
     if has_userinfo(src) {
         return Err(DeepLinkError::UserinfoForbidden);
@@ -192,9 +205,9 @@ pub fn find_deep_link_in_argv(argv: &[String]) -> Option<String> {
 /// (`?%74oken=1`) are caught like `?token=secret`. Matching stays exact per
 /// key (case-insensitive), never substring.
 fn smuggled_secret_key(source: &str) -> Option<String> {
-    let before_fragment = source.split('#').next().unwrap_or(source);
+    let before_fragment = source.split_once('#').map_or(source, |(b, _)| b);
     let query = before_fragment.split_once('?').map_or("", |(_, q)| q);
-    let fragment = source.split('#').nth(1).unwrap_or("");
+    let fragment = source.split_once('#').map_or("", |(_, f)| f);
     for region in [query, fragment] {
         for pair in region.split('&') {
             if pair.is_empty() {
@@ -635,8 +648,7 @@ mod tests {
                 assert_eq!(error_class(&err), reject, "{name}: wrong rejection class");
             } else {
                 let accept = &case["accept"];
-                let parsed =
-                    parse_deep_link(raw).unwrap_or_else(|e| panic!("{name} must accept: {e}"));
+                let parsed = parse_deep_link(raw).unwrap_or_else(|_| panic!("{name} must accept"));
                 assert_eq!(
                     parsed.source_url,
                     accept["sourceUrl"].as_str().expect("sourceUrl"),

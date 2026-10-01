@@ -70,6 +70,12 @@ fn decode(page: &Arc<PageInfo>, bytes: &[u8]) -> Result<ImagePlan, DiscoveryErro
                 x: tile_width,
                 y: tile_height,
             };
+            // A page without a signing path cannot tile; reject it once
+            // here instead of failing per tile.
+            let sign_path = page
+                .path()
+                .map_err(|error| DiscoveryError::InvalidMetadata(error.to_string()))?
+                .to_owned();
             let request_page = Arc::clone(page);
             let source = Grid::with_processed_requests(
                 size,
@@ -80,6 +86,7 @@ fn decode(page: &Arc<PageInfo>, bytes: &[u8]) -> Result<ImagePlan, DiscoveryErro
                     let cell: Vec2d = tile.coord.into();
                     Request::new(url::compute_url(
                         &request_page,
+                        &sign_path,
                         url::TileCoord {
                             x: cell.x,
                             y: cell.y,

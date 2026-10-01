@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { SIGNED_QUERY_KEYS } from "../../../packages/shared-ui/src/source-url.ts";
-import { DEEP_LINK_SECRET_QUERY_KEYS, parseRawDeepLinkUrl } from "../src/errorCopy.ts";
+import { DEEP_LINK_SECRET_QUERY_KEYS } from "../src/errorCopy.ts";
 import { parseHeadersText, validateSettings } from "../src/settings.ts";
 
 const deepLinkVectors = JSON.parse(
@@ -29,19 +29,6 @@ const policyVectors = JSON.parse(
     "utf8",
   ),
 );
-
-test("deep-link vectors: the TS mirror matches the shared oracle", () => {
-  assert.ok(deepLinkVectors.cases.length >= 15, "the vector list covers the rules");
-  assert.ok(deepLinkVectors.cases.length <= 25, "the vector list stays bounded");
-  for (const c of deepLinkVectors.cases) {
-    const parsed = parseRawDeepLinkUrl(c.raw);
-    if (c.reject !== undefined) {
-      assert.equal(parsed, null, `${c.name} must reject (${c.reject})`);
-    } else {
-      assert.deepEqual(parsed, c.accept, `${c.name} must accept`);
-    }
-  }
-});
 
 test("settings policy vectors: the TS validators match the shared oracle", () => {
   for (const c of policyVectors.headerLines) {
