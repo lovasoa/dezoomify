@@ -282,22 +282,13 @@ pub enum RecoveryChoice {
 }
 
 // ---------------------------------------------------------------------------
-// Errors (stable codes + safe structured context for specific UI guidance)
+// Errors: one closed enum. The serde tag `kind` (the kebab-case variant name)
+// is the single stable machine identifier; `#[error(...)]` messages are plain
+// sentences rendered from structured fields only, so identical causes read
+// identically everywhere and no message text is stored or parsed. Both sides
+// of the Rust/TypeScript boundary raise the same shapes: serde round-trips the
+// tag. Match on variants; never on display text.
 // ---------------------------------------------------------------------------
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum ErrorPhase {
-    Validation,
-    Discovery,
-    Acquisition,
-    Decode,
-    Processing,
-    Output,
-    Publication,
-    Cleanup,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -357,316 +348,6 @@ pub enum BlockedReason {
     SourceDocumentLost,
     Throttled,
     Userinfo,
-}
-
-/// Stable error code. Codes are a closed, type-checked API: each variant's
-/// serde rename is the exact wire value, so structured codes never live in
-/// free strings, every code is known to have user wording, and adding one
-/// is a deliberate contract change. Match on variants; never on text.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum ErrorCode {
-    // Fetch and transport observations (shared with [`FetchFailureCode`]).
-    #[serde(rename = "TRANSPORT_HTTP_ERROR")]
-    TransportHttpError,
-    #[serde(rename = "DISCOVERY_HTTP_ERROR")]
-    DiscoveryHttpError,
-    #[serde(rename = "UPSTREAM_RATE_LIMITED")]
-    UpstreamRateLimited,
-    #[serde(rename = "TRANSPORT_POLICY_DENIED")]
-    TransportPolicyDenied,
-    #[serde(rename = "PROXY_BUDGET_EXCEEDED")]
-    ProxyBudgetExceeded,
-    #[serde(rename = "PROXY_ERROR")]
-    ProxyError,
-    #[serde(rename = "PROXY_NETWORK_ERROR")]
-    ProxyNetworkError,
-    #[serde(rename = "PROXY_RATE_LIMITED")]
-    ProxyRateLimited,
-    #[serde(rename = "PROXY_POLICY_DENIED")]
-    ProxyPolicyDenied,
-    #[serde(rename = "DISCOVERY_FAILED")]
-    DiscoveryFailed,
-    #[serde(rename = "TRANSPORT_TIMEOUT")]
-    TransportTimeout,
-    #[serde(rename = "TRANSPORT_NETWORK_ERROR")]
-    TransportNetworkError,
-    #[serde(rename = "TRANSPORT_CANCELLED")]
-    TransportCancelled,
-    #[serde(rename = "TRANSPORT_BAD_URL")]
-    TransportBadUrl,
-    #[serde(rename = "TRANSPORT_BAD_REDIRECT")]
-    TransportBadRedirect,
-    #[serde(rename = "TRANSPORT_REDIRECT_LIMIT")]
-    TransportRedirectLimit,
-    #[serde(rename = "TRANSPORT_SIZE_LIMIT")]
-    TransportSizeLimit,
-
-    // Job lifecycle.
-    #[serde(rename = "job.cancelled")]
-    JobCancelled,
-    #[serde(rename = "job.invalid-input")]
-    JobInvalidInput,
-    #[serde(rename = "job.invalid-config")]
-    JobInvalidConfig,
-    #[serde(rename = "job.invalid-options")]
-    JobInvalidOptions,
-    #[serde(rename = "job.invalid-selection")]
-    JobInvalidSelection,
-    #[serde(rename = "job.invalid-state")]
-    JobInvalidState,
-    #[serde(rename = "job.duplicate")]
-    JobDuplicate,
-    #[serde(rename = "job.discovery-failed")]
-    JobDiscoveryFailed,
-    #[serde(rename = "job.empty-resource")]
-    JobEmptyResource,
-    #[serde(rename = "job.deferred-limit")]
-    JobDeferredLimit,
-    #[serde(rename = "job.plan-empty")]
-    JobPlanEmpty,
-    #[serde(rename = "job.plan-invalid")]
-    JobPlanInvalid,
-    #[serde(rename = "job.no-images")]
-    JobNoImages,
-    #[serde(rename = "job.no-usable-tiles")]
-    JobNoUsableTiles,
-    #[serde(rename = "job.partial-discarded")]
-    JobPartialDiscarded,
-    #[serde(rename = "job.resource-limit")]
-    JobResourceLimit,
-    #[serde(rename = "job.unknown")]
-    JobUnknown,
-    #[serde(rename = "job.stale")]
-    JobStale,
-    #[serde(rename = "job.unknown-format")]
-    JobUnknownFormat,
-
-    // Discovery and planning presentation codes.
-    #[serde(rename = "discovery.no-image")]
-    DiscoveryNoImage,
-    #[serde(rename = "discovery.no-level")]
-    DiscoveryNoLevel,
-
-    // Tiles and processing.
-    #[serde(rename = "TILE_DECODE_FAILED")]
-    TileDecodeFailed,
-    #[serde(rename = "tile.processing-failed")]
-    TileProcessingFailed,
-
-    // Native and desktop output.
-    #[serde(rename = "output.canvas-limit")]
-    OutputCanvasLimit,
-    #[serde(rename = "output.encode-failed")]
-    OutputEncodeFailed,
-    #[serde(rename = "output.write-failed")]
-    OutputWriteFailed,
-    #[serde(rename = "output.exists")]
-    OutputExists,
-    #[serde(rename = "output.destination-denied")]
-    OutputDestinationDenied,
-    #[serde(rename = "output.unsupported-extension")]
-    OutputUnsupportedExtension,
-    #[serde(rename = "output.unavailable")]
-    OutputUnavailable,
-    #[serde(rename = "output.no-parent")]
-    OutputNoParent,
-    #[serde(rename = "output.launch-failed")]
-    OutputLaunchFailed,
-    #[serde(rename = "output.launch-task-failed")]
-    OutputLaunchTaskFailed,
-    #[serde(rename = "output.denied")]
-    OutputDenied,
-    #[serde(rename = "output.not-found")]
-    OutputNotFound,
-    #[serde(rename = "output.invoke-failed")]
-    OutputInvokeFailed,
-
-    // Browser canvas and display-only output family.
-    #[serde(rename = "PLAN_INVALID")]
-    CanvasPlanInvalid,
-    #[serde(rename = "OUTPUT_ALLOCATION_FAILED")]
-    CanvasAllocationFailed,
-    #[serde(rename = "OUTPUT_SURFACE_UNAVAILABLE")]
-    CanvasSurfaceUnavailable,
-    #[serde(rename = "OUTPUT_ENCODE_FAILED")]
-    CanvasEncodeFailed,
-    #[serde(rename = "OUTPUT_FAILED")]
-    CanvasFailed,
-    #[serde(rename = "OUTPUT_DENIED")]
-    DesktopOutputDenied,
-
-    // Product control failures.
-    #[serde(rename = "START_FAILED")]
-    StartFailed,
-    #[serde(rename = "CHOICE_FAILED")]
-    ChoiceFailed,
-    #[serde(rename = "INVALID_URL")]
-    InvalidUrl,
-    #[serde(rename = "INVALID_SETTINGS")]
-    InvalidSettings,
-    #[serde(rename = "NO_IMAGE_FOUND")]
-    NoImageFound,
-    #[serde(rename = "handoff.rejected")]
-    HandoffRejected,
-    #[serde(rename = "desktop.invalid-settings")]
-    DesktopInvalidSettings,
-    #[serde(rename = "desktop.invalid-source")]
-    DesktopInvalidSource,
-    #[serde(rename = "desktop.result-retired")]
-    DesktopResultRetired,
-    #[serde(rename = "desktop.registration-failed")]
-    DesktopRegistrationFailed,
-
-    // Host and binding internals.
-    #[serde(rename = "native.internal")]
-    HostInternal,
-    #[serde(rename = "shell.lock")]
-    ShellLock,
-    #[serde(rename = "binding.invalid-value")]
-    BindingInvalidValue,
-    #[serde(rename = "interaction.expired")]
-    InteractionExpired,
-    #[serde(rename = "auth.forbidden-header")]
-    AuthForbiddenHeader,
-}
-
-impl ErrorCode {
-    /// The exact stable wire value of this code.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::TransportHttpError => "TRANSPORT_HTTP_ERROR",
-            Self::DiscoveryHttpError => "DISCOVERY_HTTP_ERROR",
-            Self::UpstreamRateLimited => "UPSTREAM_RATE_LIMITED",
-            Self::TransportPolicyDenied => "TRANSPORT_POLICY_DENIED",
-            Self::ProxyBudgetExceeded => "PROXY_BUDGET_EXCEEDED",
-            Self::ProxyError => "PROXY_ERROR",
-            Self::ProxyNetworkError => "PROXY_NETWORK_ERROR",
-            Self::ProxyRateLimited => "PROXY_RATE_LIMITED",
-            Self::ProxyPolicyDenied => "PROXY_POLICY_DENIED",
-            Self::DiscoveryFailed => "DISCOVERY_FAILED",
-            Self::TransportTimeout => "TRANSPORT_TIMEOUT",
-            Self::TransportNetworkError => "TRANSPORT_NETWORK_ERROR",
-            Self::TransportCancelled => "TRANSPORT_CANCELLED",
-            Self::TransportBadUrl => "TRANSPORT_BAD_URL",
-            Self::TransportBadRedirect => "TRANSPORT_BAD_REDIRECT",
-            Self::TransportRedirectLimit => "TRANSPORT_REDIRECT_LIMIT",
-            Self::TransportSizeLimit => "TRANSPORT_SIZE_LIMIT",
-            Self::JobCancelled => "job.cancelled",
-            Self::JobInvalidInput => "job.invalid-input",
-            Self::JobInvalidConfig => "job.invalid-config",
-            Self::JobInvalidOptions => "job.invalid-options",
-            Self::JobInvalidSelection => "job.invalid-selection",
-            Self::JobInvalidState => "job.invalid-state",
-            Self::JobDuplicate => "job.duplicate",
-            Self::JobDiscoveryFailed => "job.discovery-failed",
-            Self::JobEmptyResource => "job.empty-resource",
-            Self::JobDeferredLimit => "job.deferred-limit",
-            Self::JobPlanEmpty => "job.plan-empty",
-            Self::JobPlanInvalid => "job.plan-invalid",
-            Self::JobNoImages => "job.no-images",
-            Self::JobNoUsableTiles => "job.no-usable-tiles",
-            Self::JobPartialDiscarded => "job.partial-discarded",
-            Self::JobResourceLimit => "job.resource-limit",
-            Self::JobUnknown => "job.unknown",
-            Self::JobStale => "job.stale",
-            Self::JobUnknownFormat => "job.unknown-format",
-            Self::DiscoveryNoImage => "discovery.no-image",
-            Self::DiscoveryNoLevel => "discovery.no-level",
-            Self::TileDecodeFailed => "TILE_DECODE_FAILED",
-            Self::TileProcessingFailed => "tile.processing-failed",
-            Self::OutputCanvasLimit => "output.canvas-limit",
-            Self::OutputEncodeFailed => "output.encode-failed",
-            Self::OutputWriteFailed => "output.write-failed",
-            Self::OutputExists => "output.exists",
-            Self::OutputDestinationDenied => "output.destination-denied",
-            Self::OutputUnsupportedExtension => "output.unsupported-extension",
-            Self::OutputUnavailable => "output.unavailable",
-            Self::OutputNoParent => "output.no-parent",
-            Self::OutputLaunchFailed => "output.launch-failed",
-            Self::OutputLaunchTaskFailed => "output.launch-task-failed",
-            Self::OutputDenied => "output.denied",
-            Self::OutputNotFound => "output.not-found",
-            Self::OutputInvokeFailed => "output.invoke-failed",
-            Self::CanvasPlanInvalid => "PLAN_INVALID",
-            Self::CanvasAllocationFailed => "OUTPUT_ALLOCATION_FAILED",
-            Self::CanvasSurfaceUnavailable => "OUTPUT_SURFACE_UNAVAILABLE",
-            Self::CanvasEncodeFailed => "OUTPUT_ENCODE_FAILED",
-            Self::CanvasFailed => "OUTPUT_FAILED",
-            Self::DesktopOutputDenied => "OUTPUT_DENIED",
-            Self::StartFailed => "START_FAILED",
-            Self::ChoiceFailed => "CHOICE_FAILED",
-            Self::InvalidUrl => "INVALID_URL",
-            Self::InvalidSettings => "INVALID_SETTINGS",
-            Self::NoImageFound => "NO_IMAGE_FOUND",
-            Self::HandoffRejected => "handoff.rejected",
-            Self::DesktopInvalidSettings => "desktop.invalid-settings",
-            Self::DesktopInvalidSource => "desktop.invalid-source",
-            Self::DesktopResultRetired => "desktop.result-retired",
-            Self::DesktopRegistrationFailed => "desktop.registration-failed",
-            Self::HostInternal => "native.internal",
-            Self::ShellLock => "shell.lock",
-            Self::BindingInvalidValue => "binding.invalid-value",
-            Self::InteractionExpired => "interaction.expired",
-            Self::AuthForbiddenHeader => "auth.forbidden-header",
-        }
-    }
-}
-
-impl std::fmt::Display for ErrorCode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl From<FetchFailureCode> for ErrorCode {
-    fn from(code: FetchFailureCode) -> Self {
-        match code {
-            FetchFailureCode::TRANSPORT_HTTP_ERROR => Self::TransportHttpError,
-            FetchFailureCode::DISCOVERY_HTTP_ERROR => Self::DiscoveryHttpError,
-            FetchFailureCode::UPSTREAM_RATE_LIMITED => Self::UpstreamRateLimited,
-            FetchFailureCode::TRANSPORT_POLICY_DENIED => Self::TransportPolicyDenied,
-            FetchFailureCode::PROXY_BUDGET_EXCEEDED => Self::ProxyBudgetExceeded,
-            FetchFailureCode::PROXY_ERROR => Self::ProxyError,
-            FetchFailureCode::PROXY_NETWORK_ERROR => Self::ProxyNetworkError,
-            FetchFailureCode::PROXY_RATE_LIMITED => Self::ProxyRateLimited,
-            FetchFailureCode::DISCOVERY_FAILED => Self::DiscoveryFailed,
-            FetchFailureCode::TRANSPORT_TIMEOUT => Self::TransportTimeout,
-            FetchFailureCode::TRANSPORT_NETWORK_ERROR => Self::TransportNetworkError,
-            FetchFailureCode::TRANSPORT_CANCELLED => Self::TransportCancelled,
-            FetchFailureCode::TRANSPORT_BAD_URL => Self::TransportBadUrl,
-            FetchFailureCode::TRANSPORT_BAD_REDIRECT => Self::TransportBadRedirect,
-            FetchFailureCode::TRANSPORT_REDIRECT_LIMIT => Self::TransportRedirectLimit,
-            FetchFailureCode::TRANSPORT_SIZE_LIMIT => Self::TransportSizeLimit,
-        }
-    }
-}
-
-/// Stable code for a host-observed fetch failure.
-///
-/// Variant identifiers are the serialized values, so this enum
-/// preserves stable error codes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-#[allow(non_camel_case_types)]
-pub enum FetchFailureCode {
-    TRANSPORT_HTTP_ERROR,
-    DISCOVERY_HTTP_ERROR,
-    UPSTREAM_RATE_LIMITED,
-    TRANSPORT_POLICY_DENIED,
-    PROXY_BUDGET_EXCEEDED,
-    PROXY_ERROR,
-    PROXY_NETWORK_ERROR,
-    PROXY_RATE_LIMITED,
-    DISCOVERY_FAILED,
-    TRANSPORT_TIMEOUT,
-    TRANSPORT_NETWORK_ERROR,
-    TRANSPORT_CANCELLED,
-    TRANSPORT_BAD_URL,
-    TRANSPORT_BAD_REDIRECT,
-    TRANSPORT_REDIRECT_LIMIT,
-    TRANSPORT_SIZE_LIMIT,
 }
 
 impl BlockedReason {
@@ -744,115 +425,488 @@ pub struct LimitContext {
     pub bytes_available: Option<u64>,
 }
 
-/// Host-observed fetch facts. Retry and recovery policy belongs to the shared algorithm.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// One typed failure. Grouped by domain: transport and fetch, discovery,
+/// job and planning, tiles, output, control, internals, and the composable
+/// [`Error::Resource`] context wrapper that preserves the exact URI and
+/// resource kind of any underlying failure.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub struct FetchFailure {
-    pub code: FetchFailureCode,
-    pub message: String,
-    pub transport: ErrorTransport,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub blocked_reason: Option<BlockedReason>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub http: Option<u16>,
-    /// Host-observed `retry-after` in milliseconds, when the response
-    /// carried one. The shared algorithm waits at least this long before the retry.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub retry_after_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub preview: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub detail: Option<String>,
+pub enum Error {
+    // ---- Transport and fetch ----
+    #[error(
+        "request to {} returned HTTP {status}",
+        request.as_deref().unwrap_or("<unknown address>")
+    )]
+    HttpError {
+        status: u16,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        request: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retry_after_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        preview: Option<String>,
+        transport: ErrorTransport,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error(
+        "request to {} was rate limited",
+        request.as_deref().unwrap_or("<unknown address>")
+    )]
+    RateLimited {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        request: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retry_after_ms: Option<u64>,
+        transport: ErrorTransport,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error(
+        "request to {} timed out",
+        request.as_deref().unwrap_or("<unknown address>")
+    )]
+    Timeout {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        request: Option<String>,
+        transport: ErrorTransport,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("the request failed{}", detail_suffix(.detail))]
+    NetworkFailure {
+        transport: ErrorTransport,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("the request was blocked by policy: {}{}", .blocked_reason.as_str(), detail_suffix(.detail))]
+    PolicyDenied {
+        blocked_reason: BlockedReason,
+        transport: ErrorTransport,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("the request address is invalid{}", detail_suffix(.detail))]
+    BadUrl {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("the redirect target is invalid{}", detail_suffix(.detail))]
+    BadRedirect {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("redirect limit of {max} exceeded")]
+    RedirectLimit { max: u32 },
+    #[error("the response exceeds the {max_bytes}-byte limit")]
+    SizeLimit { max_bytes: u64 },
+    #[error("the job was cancelled")]
+    Cancelled,
+    #[error("the metadata proxy budget is exhausted")]
+    ProxyBudgetExceeded,
+    #[error("the metadata proxy could not fetch the address{}", detail_suffix(.detail))]
+    ProxyError {
+        transport: ErrorTransport,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+
+    // ---- Discovery ----
+    #[error("no zoomable image was found{}", detail_suffix(.detail))]
+    NoImageFound {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("the metadata could not be parsed{}", detail_suffix(.detail))]
+    MalformedMetadata {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("unknown format: {format}")]
+    UnknownFormat { format: String },
+    #[error("the metadata resource is empty")]
+    EmptyResource,
+    #[error("a resource limit was reached{}", detail_suffix(.detail))]
+    ResourceLimit {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("the deferred image follow limit of {max} was reached (or a loop)")]
+    DeferredLimit { max: u32 },
+    #[error("discovery failed{}", detail_suffix(.detail))]
+    DiscoveryFailed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+        /// The representative fetch failure when every candidate failed on
+        /// observed facts: its context and retry verdict stay authoritative.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[source]
+        cause: Option<Box<Error>>,
+    },
+
+    // ---- Job and planning ----
+    #[error("the input is not usable{}", detail_suffix(.detail))]
+    InvalidInput {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("the options are not usable{}", detail_suffix(.detail))]
+    InvalidOptions {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("the request does not match the job state{}", detail_suffix(.detail))]
+    InvalidState {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("a job with this identity is already running")]
+    Duplicate,
+    #[error("the job result has been retired")]
+    Stale,
+    #[error("the selected level has no tiles")]
+    PlanEmpty,
+    #[error("the tile plan is invalid{}", detail_suffix(.detail))]
+    PlanInvalid {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("no usable tiles were acquired")]
+    NoUsableTiles { failures: Vec<Error> },
+    #[error("partial output was discarded")]
+    PartialDiscarded { failures: Vec<Error> },
+
+    // ---- Tiles ----
+    #[error("a tile could not be decoded{}", detail_suffix(.detail))]
+    DecodeFailed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("a tile could not be processed{}", detail_suffix(.detail))]
+    ProcessingFailed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+
+    // ---- Output ----
+    #[error("the output exceeds a supported limit{}", limit_facts(.limit))]
+    LimitExceeded { limit: LimitContext },
+    #[error("the output could not be encoded{}", detail_suffix(.detail))]
+    EncodeFailed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("the output could not be written{}", detail_suffix(.detail))]
+    WriteFailed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("the output file already exists (refusing overwrite)")]
+    OutputExists,
+    #[error("the output destination is not writable{}", detail_suffix(.detail))]
+    DestinationDenied {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("the output file extension is not supported{}", detail_suffix(.detail))]
+    UnsupportedExtension {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("the saved image is unavailable{}", detail_suffix(.detail))]
+    OutputUnavailable {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("the output path has no containing folder")]
+    OutputNoParent,
+    #[error("the system could not open the output{}", detail_suffix(.detail))]
+    LaunchFailed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("no output location was chosen")]
+    OutputDenied,
+    #[error("the output file is missing")]
+    OutputNotFound,
+    #[error("the output action failed")]
+    InvokeFailed,
+
+    // ---- Control ----
+    #[error("the job could not be started{}", detail_suffix(.detail))]
+    StartFailed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("the image or level choice failed{}", detail_suffix(.detail))]
+    ChoiceFailed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("the address is not a usable web address")]
+    InvalidUrl,
+    #[error("the output settings are not usable{}", detail_suffix(.detail))]
+    InvalidSettings {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("the handoff was rejected{}", detail_suffix(.detail))]
+    HandoffRejected {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("the app could not register the request{}", detail_suffix(.detail))]
+    RegistrationFailed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+
+    // ---- Internal ----
+    #[error("internal error{}", detail_suffix(.detail))]
+    Internal {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("native resources are unavailable")]
+    ShellLock,
+    #[error("the host sent an invalid value{}", detail_suffix(.detail))]
+    BindingInvalidValue {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    #[error("the question is no longer open")]
+    InteractionExpired,
+    #[error("cookie or authorization headers are forbidden in public requests")]
+    AuthForbiddenHeader,
+
+    // ---- Composition ----
+    /// The exact request context for any underlying failure: URI and
+    /// resource kind are preserved for diagnostics and the cause stays
+    /// reachable through the error chain.
+    #[error("{request}: {source}")]
+    Resource {
+        request: String,
+        resource_kind: ResourceKind,
+        #[source]
+        source: Box<Error>,
+    },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub struct Error {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub retry_after_ms: Option<u64>,
-    /// Stable error code. Rewrite through [`Error::with_code`] so the
-    /// derived `retryable` verdict never disagrees with it.
-    pub code: ErrorCode,
-    pub phase: ErrorPhase,
-    /// Derived from `code` and `http` by [`crate::retry::is_retryable`]
-    /// (job-level aggregates derive it from their retained failure set via
-    /// [`crate::retry::aggregate_retryable`]); every construction and
-    /// rewrite recomputes it so it never contradicts its facts.
-    #[serde(default)]
-    pub retryable: bool,
-    pub message: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub limit: Option<LimitContext>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub request: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub transport: Option<ErrorTransport>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub blocked_reason: Option<BlockedReason>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resource_kind: Option<ResourceKind>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub http: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub preview: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub detail: Option<String>,
+/// Bounded diagnostic suffix for plain message templates.
+fn detail_suffix(detail: &Option<String>) -> String {
+    detail
+        .as_deref()
+        .map_or_else(String::new, |text| format!(": {text}"))
+}
+
+/// Bounded request text for error fields: server-controlled addresses are
+/// capped at 2048 bytes with an ellipsis marker on a UTF-8 char boundary.
+#[must_use]
+pub fn bounded_uri(uri: impl Into<String>) -> String {
+    let mut uri = uri.into();
+    if uri.len() > 2_048 {
+        let mut cut = 2_048;
+        while cut > 0 && !uri.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        uri.truncate(cut);
+        uri.push_str("...");
+    }
+    uri
+}
+
+/// Structured limit facts for message templates; the localized copy layer
+/// reads the same fields and never parses this text.
+fn limit_facts(limit: &LimitContext) -> String {
+    let reason = match limit.reason {
+        LimitReason::Memory => "memory",
+        LimitReason::JpegSide => "jpeg per-side",
+        LimitReason::WebpSide => "webp per-side",
+    };
+    let mut facts = vec![reason.to_string()];
+    if let Some(dimensions) = &limit.dimensions {
+        facts.push(format!("{}x{}", dimensions.width, dimensions.height));
+    }
+    if let Some(bytes_required) = limit.bytes_required {
+        facts.push(format!("{bytes_required} bytes required"));
+    }
+    if let Some(bytes_available) = limit.bytes_available {
+        facts.push(format!("{bytes_available} bytes available"));
+    }
+    format!(" ({})", facts.join(", "))
 }
 
 impl Error {
+    /// Attach the exact request context to any failure. This replaces
+    /// ad-hoc request decoration: the URI and resource kind ride along with
+    /// the underlying failure instead of being flattened into fields.
     #[must_use]
-    pub fn new(code: ErrorCode, phase: ErrorPhase, message: impl Into<String>) -> Self {
-        let retryable = crate::retry::is_retryable(code, None);
-        Self {
-            retry_after_ms: None,
-            code,
-            phase,
-            retryable,
-            message: message.into(),
-            limit: None,
-            request: None,
-            transport: None,
-            blocked_reason: None,
-            resource_kind: None,
-            http: None,
-            preview: None,
-            detail: None,
+    pub fn resource(self, request: impl Into<String>, kind: ResourceKind) -> Self {
+        Self::Resource {
+            request: bounded_uri(request),
+            resource_kind: kind,
+            source: Box::new(self),
         }
     }
 
-    /// Rewrite the code (and therefore the retry verdict) while keeping the
-    /// structured failure context.
+    /// The underlying failure, seen through the composition wrappers:
+    /// [`Self::Resource`] request context and [`Self::DiscoveryFailed`]'s
+    /// retained cause.
     #[must_use]
-    pub fn with_code(mut self, code: ErrorCode) -> Self {
-        self.code = code;
-        self.retryable = crate::retry::is_retryable(self.code, self.http);
-        self
+    pub fn cause(&self) -> &Self {
+        match self {
+            Self::Resource { source, .. } => source.cause(),
+            Self::DiscoveryFailed {
+                cause: Some(cause), ..
+            } => cause.cause(),
+            other => other,
+        }
     }
 
-    /// Attach the bounded diagnostic detail (for example the preserved
-    /// error-chain text of the underlying cause).
+    /// The stable machine identifier: exactly the serialized `kind` tag.
+    /// The arm text equals the kebab-case variant name; no variant renames
+    /// itself with `#[serde(rename)]`.
     #[must_use]
-    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
-        self.detail = Some(detail.into());
-        self
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::HttpError { .. } => "http-error",
+            Self::RateLimited { .. } => "rate-limited",
+            Self::Timeout { .. } => "timeout",
+            Self::NetworkFailure { .. } => "network-failure",
+            Self::PolicyDenied { .. } => "policy-denied",
+            Self::BadUrl { .. } => "bad-url",
+            Self::BadRedirect { .. } => "bad-redirect",
+            Self::RedirectLimit { .. } => "redirect-limit",
+            Self::SizeLimit { .. } => "size-limit",
+            Self::Cancelled => "cancelled",
+            Self::ProxyBudgetExceeded => "proxy-budget-exceeded",
+            Self::ProxyError { .. } => "proxy-error",
+            Self::NoImageFound { .. } => "no-image-found",
+            Self::MalformedMetadata { .. } => "malformed-metadata",
+            Self::UnknownFormat { .. } => "unknown-format",
+            Self::EmptyResource => "empty-resource",
+            Self::ResourceLimit { .. } => "resource-limit",
+            Self::DeferredLimit { .. } => "deferred-limit",
+            Self::DiscoveryFailed { .. } => "discovery-failed",
+            Self::InvalidInput { .. } => "invalid-input",
+            Self::InvalidOptions { .. } => "invalid-options",
+            Self::InvalidState { .. } => "invalid-state",
+            Self::Duplicate => "duplicate",
+            Self::Stale => "stale",
+            Self::PlanEmpty => "plan-empty",
+            Self::PlanInvalid { .. } => "plan-invalid",
+            Self::NoUsableTiles { .. } => "no-usable-tiles",
+            Self::PartialDiscarded { .. } => "partial-discarded",
+            Self::DecodeFailed { .. } => "decode-failed",
+            Self::ProcessingFailed { .. } => "processing-failed",
+            Self::LimitExceeded { .. } => "limit-exceeded",
+            Self::EncodeFailed { .. } => "encode-failed",
+            Self::WriteFailed { .. } => "write-failed",
+            Self::OutputExists => "output-exists",
+            Self::DestinationDenied { .. } => "destination-denied",
+            Self::UnsupportedExtension { .. } => "unsupported-extension",
+            Self::OutputUnavailable { .. } => "output-unavailable",
+            Self::OutputNoParent => "output-no-parent",
+            Self::LaunchFailed { .. } => "launch-failed",
+            Self::OutputDenied => "output-denied",
+            Self::OutputNotFound => "output-not-found",
+            Self::InvokeFailed => "invoke-failed",
+            Self::StartFailed { .. } => "start-failed",
+            Self::ChoiceFailed { .. } => "choice-failed",
+            Self::InvalidUrl => "invalid-url",
+            Self::InvalidSettings { .. } => "invalid-settings",
+            Self::HandoffRejected { .. } => "handoff-rejected",
+            Self::RegistrationFailed { .. } => "registration-failed",
+            Self::Internal { .. } => "internal",
+            Self::ShellLock => "shell-lock",
+            Self::BindingInvalidValue { .. } => "binding-invalid-value",
+            Self::InteractionExpired => "interaction-expired",
+            Self::AuthForbiddenHeader => "auth-forbidden-header",
+            Self::Resource { .. } => "resource",
+        }
     }
 
+    /// Whether the same request may be retried. Transient HTTP statuses
+    /// (408/425/429 and 5xx) and transient transport/service failures retry;
+    /// everything else is permanent so novel failures fail closed instead of
+    /// burning the retry budget. Aggregates retry when any retained
+    /// constituent is transient; [`Self::Resource`] delegates to its source.
+    /// Pure function of the variant and status: there is no stored verdict
+    /// that could contradict its facts.
     #[must_use]
-    pub fn with_transport(mut self, transport: ErrorTransport) -> Self {
-        self.transport = Some(transport);
-        self
+    pub fn retryable(&self) -> bool {
+        match self {
+            Self::HttpError { status, .. } => matches!(*status, 408 | 425 | 429 | 500..=599),
+            Self::RateLimited { .. }
+            | Self::Timeout { .. }
+            | Self::NetworkFailure { .. }
+            | Self::ProxyError { .. } => true,
+            Self::Resource { source, .. } => source.retryable(),
+            Self::DiscoveryFailed {
+                cause: Some(cause), ..
+            } => cause.retryable(),
+            Self::NoUsableTiles { failures } | Self::PartialDiscarded { failures } => {
+                failures.iter().any(Self::retryable)
+            }
+            _ => false,
+        }
     }
 
+    /// Host-observed `retry-after` hint in milliseconds, when the response
+    /// carried one; the retrying loop waits at least this long. Aggregates
+    /// report the largest retained hint.
     #[must_use]
-    pub fn with_resource(mut self, kind: ResourceKind) -> Self {
-        self.resource_kind = Some(kind);
-        self
+    pub fn retry_after_ms(&self) -> Option<u64> {
+        match self {
+            Self::HttpError {
+                retry_after_ms: Some(hint),
+                ..
+            }
+            | Self::RateLimited {
+                retry_after_ms: Some(hint),
+                ..
+            } => Some(*hint),
+            Self::Resource { source, .. } => source.retry_after_ms(),
+            Self::DiscoveryFailed {
+                cause: Some(cause), ..
+            } => cause.retry_after_ms(),
+            Self::NoUsableTiles { failures } | Self::PartialDiscarded { failures } => {
+                failures.iter().filter_map(Self::retry_after_ms).max()
+            }
+            _ => None,
+        }
     }
 
+    /// Failures that end the whole job instead of settling one resource:
+    /// cancellation and binding-layer refusals.
     #[must_use]
-    pub fn with_limit(mut self, limit: LimitContext) -> Self {
-        self.limit = Some(limit);
-        self
+    pub fn is_terminal(&self) -> bool {
+        matches!(
+            self.cause(),
+            Self::Cancelled | Self::BindingInvalidValue { .. }
+        )
+    }
+
+    /// Output/save failures settle the job typed at once and are never one
+    /// tile's failure.
+    #[must_use]
+    pub fn is_output(&self) -> bool {
+        matches!(
+            self.cause(),
+            Self::LimitExceeded { .. }
+                | Self::EncodeFailed { .. }
+                | Self::WriteFailed { .. }
+                | Self::OutputExists
+                | Self::DestinationDenied { .. }
+                | Self::UnsupportedExtension { .. }
+                | Self::OutputUnavailable { .. }
+                | Self::OutputNoParent
+                | Self::LaunchFailed { .. }
+                | Self::OutputDenied
+                | Self::OutputNotFound
+                | Self::InvokeFailed
+        )
     }
 }
 
@@ -1126,16 +1180,9 @@ impl Default for Options {
     }
 }
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.code, self.message)
-    }
-}
-impl std::error::Error for Error {}
-
-/// Bounded error-chain text for [`Error::detail`]: the cause chain is
-/// preserved as diagnostic detail instead of being pasted into `message`
-/// or thrown away. Truncated with an ellipsis marker past 512 bytes.
+/// Bounded error-chain text for error `detail` fields: the cause chain is
+/// preserved as diagnostic detail instead of being pasted into display
+/// messages or thrown away. Truncated with an ellipsis marker past 512 bytes.
 #[must_use]
 pub fn chain_text(error: &(dyn std::error::Error + 'static)) -> String {
     const LIMIT: usize = 512;

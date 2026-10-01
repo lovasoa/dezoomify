@@ -20,7 +20,6 @@ use crate::{
     sink::{Sink, SinkOptions},
     transport::NativeTransport,
 };
-use dezoomify::model::ErrorCode;
 use dezoomify::{host::Host, model::*, Vec2d};
 
 /// Shared cancellation and pause controls, independent of the calling executor.
@@ -327,15 +326,14 @@ impl<'a> NativeHost<'a> {
             .map_err(|error| resource_context(error, request))?;
         self.instrumentation.borrow_mut().bytes_fetched += outcome.body.len() as u64;
         if !outcome.ok() {
-            let mut error = Error::new(
-                ErrorCode::TransportHttpError,
-                ErrorPhase::Acquisition,
-                crate::imaging::describe_http_failure(&outcome),
-            );
-            error.http = Some(outcome.status);
-            error.request = Some(outcome.final_uri);
-            error.retry_after_ms = outcome.retry_after_ms;
-            let error = dezoomify::retry::classify(error);
+            let error = Error::HttpError {
+                status: outcome.status,
+                request: Some(dezoomify::model::bounded_uri(outcome.final_uri.clone())),
+                retry_after_ms: outcome.retry_after_ms,
+                preview: None,
+                transport: ErrorTransport::Native,
+                detail: None,
+            };
             return Err(resource_context(error, request));
         }
         Ok(outcome)
@@ -351,23 +349,18 @@ impl<'a> NativeHost<'a> {
         self.controlled(async {
             tokio::task::spawn_blocking(move || {
                 let _permit = permit;
-                let bytes = processing.apply(bytes).map_err(|error| {
-                    Error::new(
-                        ErrorCode::TileProcessingFailed,
-                        ErrorPhase::Processing,
-                        error.to_string(),
-                    )
-                })?;
+                let bytes = processing
+                    .apply(bytes)
+                    .map_err(|error| Error::ProcessingFailed {
+                        detail: Some(error.to_string()),
+                    })?;
                 if let Some((dir, namespace, uri)) = store {
                     let _ = crate::cache::store(&dir, &namespace, &uri, &bytes);
                 }
-                let image = load_image_with_metadata(&bytes).map_err(|error| {
-                    Error::new(
-                        ErrorCode::TileDecodeFailed,
-                        ErrorPhase::Decode,
-                        error.to_string(),
-                    )
-                })?;
+                let image =
+                    load_image_with_metadata(&bytes).map_err(|error| Error::DecodeFailed {
+                        detail: Some(error.to_string()),
+                    })?;
                 Ok::<_, Error>(DecodedTile {
                     image: image.image.to_rgba8(),
                     icc_profile: image.icc_profile,
@@ -375,12 +368,8 @@ impl<'a> NativeHost<'a> {
                 })
             })
             .await
-            .map_err(|_| {
-                Error::new(
-                    ErrorCode::HostInternal,
-                    ErrorPhase::Acquisition,
-                    "tile decode task failed",
-                )
+            .map_err(|_| Error::Internal {
+                detail: Some("tile decode task failed".into()),
             })?
         })
         .await
@@ -447,21 +436,16 @@ impl<'a> NativeHost<'a> {
             crate::sink::tile_bytes(&decoded.image),
             sink.retain_cap_bytes(),
         ) {
-            return Err(crate::output::memory_limit(
-                format!(
-                    "decoded tiles beyond the retain cap ({retained} retained, {inflight} in flight)"
+            return Err(crate::output::memory_limit(LimitContext {
+                reason: LimitReason::Memory,
+                dimensions: None,
+                bytes_required: Some(
+                    retained
+                        .saturating_add(inflight)
+                        .saturating_add(crate::sink::tile_bytes(&decoded.image)),
                 ),
-                LimitContext {
-                    reason: LimitReason::Memory,
-                    dimensions: None,
-                    bytes_required: Some(
-                        retained
-                            .saturating_add(inflight)
-                            .saturating_add(crate::sink::tile_bytes(&decoded.image)),
-                    ),
-                    bytes_available: Some(sink.retain_cap_bytes()),
-                },
-            ));
+                bytes_available: Some(sink.retain_cap_bytes()),
+            }));
         }
         sink.place(
             storage_index,
@@ -479,10 +463,6 @@ impl<'a> NativeHost<'a> {
 }
 
 impl Host for NativeHost<'_> {
-    async fn transport(&self) -> Result<ActiveTransport, Error> {
-        Ok(Some(ErrorTransport::Native))
-    }
-
     async fn fetch(
         &self,
         request: ResourceRequest,
@@ -511,7 +491,7 @@ impl Host for NativeHost<'_> {
                     _ => Ok(ProbeOutcome::Missing),
                 }
             }
-            Err(error) if error.code == dezoomify::model::ErrorCode::JobCancelled => {
+            Err(error) if matches!(error.cause(), Error::Cancelled) => {
                 Err(resource_context(error, &tile.request))
             }
             Err(_) => Ok(ProbeOutcome::Missing),
@@ -528,12 +508,12 @@ impl Host for NativeHost<'_> {
         .map_err(|error| resource_context(error, &tile.request))
         .inspect_err(|error| {
             let mut stats = self.instrumentation.borrow_mut();
-            if error.retryable {
+            if error.retryable() {
                 stats.failed_transient += 1;
             } else {
                 stats.failed_permanent += 1;
             }
-            if error.code != dezoomify::model::ErrorCode::JobCancelled {
+            if !matches!(error.cause(), Error::Cancelled) {
                 self.diagnostics
                     .record(DiagnosticLevel::Warn, "tile", serde_json::json!(error));
             }
@@ -596,19 +576,15 @@ impl Host for NativeHost<'_> {
     }
 
     async fn choose_image(&self, _catalog: Catalog) -> Result<u32, Error> {
-        Err(Error::new(
-            ErrorCode::DiscoveryNoImage,
-            ErrorPhase::Discovery,
-            "native image selection requires a configured policy",
-        ))
+        Err(Error::ChoiceFailed {
+            detail: Some("native image selection requires a configured policy".into()),
+        })
     }
 
     async fn choose_level(&self, _image: Image) -> Result<u32, Error> {
-        Err(Error::new(
-            ErrorCode::DiscoveryNoLevel,
-            ErrorPhase::Discovery,
-            "native level selection requires a configured policy",
-        ))
+        Err(Error::ChoiceFailed {
+            detail: Some("native level selection requires a configured policy".into()),
+        })
     }
 
     async fn choose_partial(&self, missing: MissingTiles) -> Result<RecoveryChoice, Error> {
@@ -684,21 +660,19 @@ impl Host for NativeHost<'_> {
     }
 }
 
-fn resource_context(mut error: Error, request: &ResourceRequest) -> Error {
-    let kind = match request.purpose {
-        RequestPurpose::Metadata => {
-            if error.phase == ErrorPhase::Acquisition {
-                error.phase = ErrorPhase::Discovery;
-            }
-            ResourceKind::Metadata
+fn resource_context(error: Error, request: &ResourceRequest) -> Error {
+    match error {
+        // Host operations wrap their failures once: never stack contexts.
+        Error::Resource { .. } => error,
+        error => {
+            let kind = match request.purpose {
+                RequestPurpose::Metadata => ResourceKind::Metadata,
+                RequestPurpose::Tile => ResourceKind::Tile,
+                RequestPurpose::Probe => ResourceKind::Probe,
+            };
+            error.resource(request.uri.clone(), kind)
         }
-        RequestPurpose::Tile => ResourceKind::Tile,
-        RequestPurpose::Probe => ResourceKind::Probe,
-    };
-    error.request.get_or_insert_with(|| request.uri.clone());
-    error.resource_kind.get_or_insert(kind);
-    error.transport.get_or_insert(ErrorTransport::Native);
-    error
+    }
 }
 
 fn size(size: &Size) -> Vec2d {
@@ -708,11 +682,7 @@ fn size(size: &Size) -> Vec2d {
     }
 }
 fn cancelled() -> Error {
-    Error::new(
-        dezoomify::model::ErrorCode::JobCancelled,
-        ErrorPhase::Cleanup,
-        "job cancelled before completion",
-    )
+    Error::Cancelled
 }
 
 #[derive(Default)]
@@ -788,7 +758,7 @@ mod tests {
                 () = std::future::ready(()) => {}
             }
             controls.cancel();
-            assert_eq!(acquisition.await.unwrap_err().code, ErrorCode::JobCancelled);
+            assert_eq!(acquisition.await.unwrap_err(), Error::Cancelled);
         });
     }
 

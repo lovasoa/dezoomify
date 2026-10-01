@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use dezoomify::model::{Error, ErrorCode, ErrorPhase, LimitContext, OutputFormat};
+use dezoomify::model::{Error, LimitContext, OutputFormat};
 
 /// One rendered `iiif-dir` tile set: `(relative path, bytes)` pairs in
 /// sorted relative-path order.
@@ -215,43 +215,41 @@ pub fn write_iiif_dir(dir: &Path, info_json: &[u8], tiles: &IiifTiles) -> Result
     Ok(())
 }
 
-/// A memory-budget refusal with structured facts for host copy; `message`
-/// prose is presentation only and never a data channel.
-pub(crate) fn memory_limit(message: String, limit: LimitContext) -> Error {
-    Error::new(ErrorCode::OutputCanvasLimit, ErrorPhase::Output, message).with_limit(limit)
+/// A memory- or format-budget refusal with structured facts for host copy;
+/// display prose is presentation only and never a data channel.
+pub(crate) fn memory_limit(limit: LimitContext) -> Error {
+    Error::LimitExceeded { limit }
 }
 
 fn output_exists() -> Error {
-    Error::new(
-        ErrorCode::OutputExists,
-        ErrorPhase::Output,
-        "output exists (refusing overwrite); choose a different destination or confirm overwrite",
-    )
+    Error::OutputExists
 }
 
 fn destination_denied(detail: impl Into<String>) -> Error {
-    Error::new(
-        ErrorCode::OutputDestinationDenied,
-        ErrorPhase::Output,
-        detail,
-    )
+    Error::DestinationDenied {
+        detail: Some(detail.into()),
+    }
 }
 
 fn unsupported_extension(detail: impl Into<String>) -> Error {
-    Error::new(
-        ErrorCode::OutputUnsupportedExtension,
-        ErrorPhase::Output,
-        detail,
-    )
+    Error::UnsupportedExtension {
+        detail: Some(detail.into()),
+    }
 }
 
-/// Output write failure with the cause chain preserved in `detail`.
+/// Output write failure with the failing step and cause chain preserved in
+/// `detail`.
 pub(crate) fn write_failed(
     message: impl Into<String>,
     cause: &(dyn std::error::Error + 'static),
 ) -> Error {
-    Error::new(ErrorCode::OutputWriteFailed, ErrorPhase::Output, message)
-        .with_detail(dezoomify::model::chain_text(cause))
+    Error::WriteFailed {
+        detail: Some(format!(
+            "{}: {}",
+            message.into(),
+            dezoomify::model::chain_text(cause)
+        )),
+    }
 }
 
 #[cfg(test)]

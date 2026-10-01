@@ -166,10 +166,9 @@ fn cli_fails_honestly_on_missing_tiles() {
     assert!(!run.status.success(), "cli must fail on tile errors");
     assert!(!output.exists(), "no output on failure");
     let stderr = String::from_utf8_lossy(&run.stderr);
-    assert!(
-        stderr.contains("tile.download-failed"),
-        "honest code: {stderr}"
-    );
+    let golden = expected_result("native/cli-tile-failure");
+    let code = golden["code"].as_str().expect("golden code");
+    assert!(stderr.contains(code), "honest code {code:?}: {stderr}");
 }
 
 #[test]
@@ -802,10 +801,9 @@ fn cli_no_partial_discards_output() {
         "no .partial sibling when discarding partial"
     );
     let stderr = String::from_utf8_lossy(&run.stderr);
-    assert!(
-        stderr.contains("tile.download-failed"),
-        "honest code: {stderr}"
-    );
+    let golden = expected_result("native/cli-corrupt-tile");
+    let code = golden["code"].as_str().expect("golden code");
+    assert!(stderr.contains(code), "honest code {code:?}: {stderr}");
 }
 
 #[test]
@@ -831,15 +829,15 @@ fn cli_named_format_mismatch_fails_instead_of_detecting() {
     assert!(!output.exists(), "failed jobs write no output");
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
-        stderr.contains("discovery."),
+        stderr.contains("malformed-metadata"),
         "typed discovery failure: {stderr}"
     );
 }
 
-/// The `native/edge-*` failure goldens pin the CLI's published display codes
-/// (`report::error_code`); the typed error fields behind the same goldens are
-/// asserted by `dezoomify-native`'s `edge_scenarios` test. This test drives
-/// each scenario through the real binary and checks the published code.
+/// The `native/edge-*` failure goldens pin the typed error's stable `kind`
+/// (also asserted against the typed error by `dezoomify-native`'s
+/// `edge_scenarios` test). This test drives each scenario through the real
+/// binary and checks the published identifier.
 #[test]
 fn edge_failures_publish_their_golden_codes() {
     let origin = start_fixture_server();

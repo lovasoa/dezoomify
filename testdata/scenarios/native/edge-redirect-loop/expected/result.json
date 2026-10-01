@@ -1,6 +1,6 @@
 {
   "outcome": "failed",
-  "code": "transport.redirect-limit",
+  "code": "redirect-limit",
   "recovery": "edit-input",
   "phase": "discovery",
   "retryable": false,

@@ -2,7 +2,6 @@
 //! stderr = human progress. Never mixed.
 
 use dezoomify::model::DiagnosticLevel;
-use dezoomify::model::ErrorCode;
 use dezoomify_native::diagnostics::Diagnostics;
 use std::collections::BTreeMap;
 
@@ -62,14 +61,16 @@ pub fn machine_completed(summary: &CompletedOutput<'_>) -> String {
     .to_string()
 }
 
-/// One bulk entry outcome for summaries: `ok`, or `failed` with a stable error code.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// One bulk entry outcome for summaries: `ok`, or `failed` carrying the
+/// serialized typed error (its `kind` names the failure).
+#[derive(Clone, Debug)]
 pub struct BulkItem {
     pub index: usize,
     pub url: String,
     pub output: String,
     pub status: String,
     pub detail: String,
+    pub error: Option<serde_json::Value>,
 }
 
 impl BulkItem {
@@ -81,17 +82,19 @@ impl BulkItem {
             output: output.to_string(),
             status: "ok".to_string(),
             detail: String::new(),
+            error: None,
         }
     }
 
     #[must_use]
-    pub fn failed(index: usize, url: &str, output: &str, code: &str, message: &str) -> Self {
+    pub fn failed(index: usize, url: &str, output: &str, error: &dezoomify::model::Error) -> Self {
         Self {
             index,
             url: url.to_string(),
             output: output.to_string(),
             status: "failed".to_string(),
-            detail: format!("{code}: {message}"),
+            detail: format!("{}: {}", error.cause().kind(), error),
+            error: Some(serde_json::to_value(error).unwrap_or(serde_json::Value::Null)),
         }
     }
 }
@@ -114,15 +117,18 @@ pub fn machine_bulk_summary(total: usize, succeeded: usize, failed: usize) -> St
 
 #[must_use]
 pub fn machine_bulk_item(item: &BulkItem) -> String {
-    serde_json::json!({
+    let mut event = serde_json::json!({
         "kind": "bulk-item",
         "index": item.index,
         "url": item.url,
         "output": item.output,
         "status": item.status,
         "detail": item.detail,
-    })
-    .to_string()
+    });
+    if let Some(error) = &item.error {
+        event["error"] = error.clone();
+    }
+    event.to_string()
 }
 
 /// Log verbosity rank for `--logging`: error=0, warn=1, info=2, debug=3,
@@ -197,59 +203,9 @@ pub fn show_progress(level: &str) -> bool {
     log_level_rank(level) >= 2
 }
 
-/// Stable codes printed by the command-line interface. The published
-/// strings are presentation labels mapped from the typed domain codes.
-#[must_use]
-pub fn error_code(code: ErrorCode) -> &'static str {
-    match code {
-        ErrorCode::JobInvalidInput
-        | ErrorCode::JobDiscoveryFailed
-        | ErrorCode::JobEmptyResource => "discovery.failed",
-        ErrorCode::JobNoImages => "discovery.no-image",
-        ErrorCode::JobUnknownFormat => "discovery.unknown-format",
-        ErrorCode::JobResourceLimit => "tile.limit",
-        ErrorCode::JobDeferredLimit => "discovery.deferred",
-        ErrorCode::JobPlanInvalid => "discovery.tile-plan",
-        ErrorCode::JobPlanEmpty => "discovery.no-level",
-        ErrorCode::JobPartialDiscarded | ErrorCode::JobNoUsableTiles => "tile.download-failed",
-        ErrorCode::TransportTimeout => "transport.timeout",
-        ErrorCode::TransportNetworkError => "transport.network-error",
-        ErrorCode::TransportSizeLimit => "transport.size-limit",
-        ErrorCode::TransportBadUrl => "transport.bad-url",
-        ErrorCode::TransportBadRedirect => "transport.bad-redirect",
-        ErrorCode::TransportRedirectLimit => "transport.redirect-limit",
-        ErrorCode::TransportHttpError => "tile.http-error",
-        ErrorCode::TileDecodeFailed => "tile.decode-failed",
-        code => code.as_str(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn failure_codes_match_the_published_scenario_results() {
-        for (scenario, code) in [
-            ("cli-corrupt-tile", ErrorCode::JobPartialDiscarded),
-            ("cli-tile-failure", ErrorCode::JobPartialDiscarded),
-            ("cli-deferred-limit", ErrorCode::JobDeferredLimit),
-            ("cli-destination-denied", ErrorCode::OutputExists),
-            ("cli-cancel", ErrorCode::JobCancelled),
-        ] {
-            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../testdata/scenarios/native")
-                .join(scenario)
-                .join("expected/result.json");
-            let expected: serde_json::Value =
-                serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
-            assert_eq!(
-                error_code(code),
-                expected["code"].as_str().unwrap(),
-                "{scenario}"
-            );
-        }
-    }
 
     #[test]
     fn log_levels_gate_human_output() {

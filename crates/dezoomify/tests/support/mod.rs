@@ -1,5 +1,4 @@
 #![allow(dead_code)]
-use dezoomify::model::ErrorCode;
 use dezoomify::{Host, model::*};
 use std::{
     cell::{Cell, RefCell},
@@ -44,10 +43,6 @@ impl Drop for Active<'_> {
     }
 }
 impl Host for MemoryHost {
-    async fn transport(&self) -> Result<ActiveTransport, Error> {
-        Ok(Some(ErrorTransport::DisplayOnly))
-    }
-
     async fn fetch(&self, request: ResourceRequest, _: Interaction) -> Result<ResourceRead, Error> {
         let result = self.resources.get(&request.uri).cloned();
         let failure = self.fetch_failures.get(&request.uri).cloned();
@@ -57,12 +52,9 @@ impl Host for MemoryHost {
         }
         result
             .map(|response| ResourceRead::Response { response })
-            .ok_or_else(|| {
-                Error::new(
-                    ErrorCode::DiscoveryFailed,
-                    ErrorPhase::Discovery,
-                    "missing fixture",
-                )
+            .ok_or_else(|| Error::DiscoveryFailed {
+                detail: Some("missing fixture".into()),
+                cause: None,
             })
     }
     async fn probe(&self, tile: Tile) -> Result<ProbeOutcome, Error> {
@@ -149,11 +141,7 @@ impl Host for MemoryHost {
     }
     async fn checkpoint(&self, gate: Gate) -> Result<(), Error> {
         if self.cancelled.get() {
-            Err(Error::new(
-                ErrorCode::JobCancelled,
-                ErrorPhase::Acquisition,
-                "cancelled",
-            ))
+            Err(Error::Cancelled)
         } else if gate == Gate::Acquisition && self.paused.get() {
             let resume = self.resume.borrow_mut().take();
             resume

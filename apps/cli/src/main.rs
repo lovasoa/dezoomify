@@ -280,7 +280,7 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
     match result {
         Ok((summary, terminal_seq)) => {
             let Some(size) = summary.output.canvas.as_ref() else {
-                eprintln!("error: saved output has no dimensions (native.internal)");
+                eprintln!("error: saved output has no dimensions (internal)");
                 return false;
             };
             if json {
@@ -317,16 +317,8 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
             }
             true
         }
-        Err(error) if error.code == dezoomify::model::ErrorCode::JobCancelled => {
-            eprintln!("error: job cancelled before completion (job.cancelled)");
-            false
-        }
         Err(error) => {
-            eprintln!(
-                "error: {} ({})",
-                error.message,
-                report::error_code(error.code)
-            );
+            eprintln!("error: {error} ({})", error.cause().kind());
             false
         }
     }
@@ -386,12 +378,15 @@ fn run_bulk(parsed: Args) {
                 }
                 items.push(item);
             }
-            Err((code, message)) => {
-                let item = report::BulkItem::failed(index, url, &output_str, &code, &message);
+            Err(error) => {
+                let item = report::BulkItem::failed(index, url, &output_str, &error);
                 if parsed.json {
                     println!("{}", report::machine_bulk_item(&item));
                 } else {
-                    eprintln!("failed {url} -> {output_str}: {code}: {message}");
+                    eprintln!(
+                        "failed {url} -> {output_str}: {error} ({})",
+                        error.cause().kind()
+                    );
                 }
                 items.push(item);
             }
@@ -476,15 +471,13 @@ fn run_one_bulk_image(
     parsed: &Args,
     url: &str,
     output: &str,
-) -> Result<(usize, String), (String, String)> {
-    run_native(parsed, url, Path::new(output), false)
-        .map(|(publication, _)| {
-            (
-                publication.tile_count,
-                publication.path.to_string_lossy().into_owned(),
-            )
-        })
-        .map_err(|error| (report::error_code(error.code).into(), error.message))
+) -> Result<(usize, String), dezoomify::model::Error> {
+    run_native(parsed, url, Path::new(output), false).map(|(publication, _)| {
+        (
+            publication.tile_count,
+            publication.path.to_string_lossy().into_owned(),
+        )
+    })
 }
 
 #[allow(clippy::result_large_err)] // Preserve the shared error until CLI presentation.
@@ -494,7 +487,7 @@ fn run_native(
     output: &Path,
     individual: bool,
 ) -> Result<(dezoomify_native::Publication, u64), dezoomify::model::Error> {
-    use dezoomify::model::{Error, ErrorCode, ErrorPhase};
+    use dezoomify::model::Error;
     let started = Instant::now();
     let mut progress_gate = report::ProgressGate::default();
     let sequence = std::cell::Cell::new(1u64);
@@ -536,20 +529,16 @@ fn run_native(
         ))
         .inspect_err(|error| {
             host.diagnostics.finish(
-                if error.code == dezoomify::model::ErrorCode::JobCancelled {
+                if matches!(error.cause(), Error::Cancelled) {
                     "cancelled"
                 } else {
                     "failed"
                 },
-                serde_json::json!({"code": error.code, "message": error.message}),
+                serde_json::json!({ "error": error }),
             );
         })?;
-    let publication = host.publication().ok_or_else(|| {
-        Error::new(
-            ErrorCode::HostInternal,
-            ErrorPhase::Output,
-            "output was not published",
-        )
+    let publication = host.publication().ok_or_else(|| Error::Internal {
+        detail: Some("output was not published".into()),
     })?;
     Ok((publication, sequence.get() + 1))
 }
@@ -650,8 +639,7 @@ fn fetch_bulk_url(
         },
         ..FetchLimits::default()
     };
-    let outcome =
-        fetch(url, &BTreeMap::new(), Some(&user), &limits).map_err(|e| e.message.clone())?;
+    let outcome = fetch(url, &BTreeMap::new(), Some(&user), &limits).map_err(|e| e.to_string())?;
     if !(200..300).contains(&outcome.status) {
         return Err(format!(
             "bulk fetch failed with http status {}",

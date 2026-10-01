@@ -16,7 +16,6 @@ macro_rules! host_members {
                 choose_partial => choosePartial(missing: MissingTiles) -> RecoveryChoice;
                 checkpoint => checkpoint(gate: Gate) -> ();
                 sleep => sleep(delay_ms: u32) -> ();
-                transport => transport() -> ActiveTransport;
             }
             sync {
                 report(progress: Progress);

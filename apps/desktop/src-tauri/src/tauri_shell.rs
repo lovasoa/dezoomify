@@ -7,7 +7,7 @@ use crate::commands;
 use crate::deep_link;
 use crate::jobs::JobTable;
 use crate::settings::parse_settings;
-use dezoomify::model::{Error, ErrorCode, ErrorPhase, OutputFormat};
+use dezoomify::model::{Error, OutputFormat};
 use dezoomify_native::{NativeHost, OutputTarget};
 
 #[cfg(all(test, target_os = "linux"))]
@@ -26,18 +26,16 @@ mod output_tests {
         launch_saved_output(image.clone(), true).unwrap();
         fs::remove_file(&image).unwrap();
         assert_eq!(
-            launch_saved_output(image.clone(), false).unwrap_err().code,
-            "output.not-found"
+            launch_saved_output(image.clone(), false).unwrap_err(),
+            dezoomify::model::Error::OutputNotFound
         );
         // A moved image does not prevent opening its containing directory.
         launch_saved_output(image, true).unwrap();
         fs::write(root.join("gio"), "#!/bin/sh\nexit 1\n").unwrap();
-        assert_eq!(
-            launch_saved_output(root.join("missing.png"), true)
-                .unwrap_err()
-                .code,
-            "output.launch-failed"
-        );
+        assert!(matches!(
+            launch_saved_output(root.join("missing.png"), true).unwrap_err(),
+            dezoomify::model::Error::LaunchFailed { .. }
+        ));
     }
 
     #[test]
@@ -90,52 +88,32 @@ async fn open_saved_output(
         .lock()
         .ok()
         .and_then(|table| table.saved_output_for(&job))
-        .ok_or_else(|| {
-            Error::new(
-                ErrorCode::OutputUnavailable,
-                ErrorPhase::Output,
-                "The saved image is unavailable.",
-            )
-        })?;
+        .ok_or_else(|| Error::OutputUnavailable { detail: None })?;
     // Launch off the async executor and check the launcher's result. The
     // opener plugin's detached path reports success before the launcher exits;
     // its Linux reveal API also requires a FileManager1/portal D-Bus service.
     // Opening the parent uses the user's default folder handler instead.
     tauri::async_runtime::spawn_blocking(move || launch_saved_output(path, reveal))
         .await
-        .map_err(|_| {
-            Error::new(
-                ErrorCode::OutputLaunchTaskFailed,
-                ErrorPhase::Output,
-                "The file-opening task could not finish.",
-            )
+        .map_err(|_| Error::LaunchFailed {
+            detail: Some("the file-opening task could not finish".into()),
         })?
 }
 
 fn launch_saved_output(path: std::path::PathBuf, reveal: bool) -> Result<(), Error> {
     let target = if reveal {
-        path.parent()
-            .ok_or_else(|| {
-                Error::new(
-                    ErrorCode::OutputNoParent,
-                    ErrorPhase::Output,
-                    "The saved image has no containing folder.",
-                )
-            })?
-            .to_path_buf()
+        path.parent().ok_or(Error::OutputNoParent)?.to_path_buf()
     } else {
         path
     };
     std::fs::metadata(&target).map_err(|error| {
-        Error::new(
-            if error.kind() == std::io::ErrorKind::NotFound {
-                "output.not-found"
-            } else {
-                "output.not-accessible"
-            },
-            ErrorPhase::Output,
-            "The saved image or folder is not accessible.",
-        )
+        if error.kind() == std::io::ErrorKind::NotFound {
+            Error::OutputNotFound
+        } else {
+            Error::OutputUnavailable {
+                detail: Some(dezoomify::model::chain_text(&error)),
+            }
+        }
     })?;
     // `open::that` stops after an installed launcher exits unsuccessfully.
     // Try the remaining platform launchers on both spawn and exit failures.
@@ -149,23 +127,15 @@ fn launch_saved_output(path: std::path::PathBuf, reveal: bool) -> Result<(), Err
             return Ok(());
         }
     }
-    Err(Error::new(
-        ErrorCode::OutputLaunchFailed,
-        ErrorPhase::Output,
-        "The system could not launch the default application.",
-    ))
+    Err(Error::LaunchFailed {
+        detail: Some("the system could not launch the default application".into()),
+    })
 }
 
 fn lock_table<'a>(
     state: &'a State<'_, Mutex<JobTable>>,
 ) -> Result<std::sync::MutexGuard<'a, JobTable>, Error> {
-    state.lock().map_err(|_| {
-        Error::new(
-            ErrorCode::ShellLock,
-            ErrorPhase::Output,
-            "native resources unavailable",
-        )
-    })
+    state.lock().map_err(|_| Error::ShellLock)
 }
 
 #[tauri::command]
@@ -176,12 +146,12 @@ async fn dezoomify(
     input_url: String,
     settings: Option<serde_json::Value>,
 ) -> Result<dezoomify::model::Output, dezoomify::model::Error> {
-    let invalid =
-        |message: String| Error::new(ErrorCode::JobInvalidInput, ErrorPhase::Validation, message);
     if !commands::is_valid_input_url(&input_url) {
-        return Err(invalid(
-            "input_url must be an http(s) URL up to 2048 bytes without userinfo".into(),
-        ));
+        return Err(Error::InvalidInput {
+            detail: Some(
+                "input_url must be an http(s) URL up to 2048 bytes without userinfo".into(),
+            ),
+        });
     }
     let settings = settings
         .map(|value| parse_settings(&value))
@@ -197,11 +167,11 @@ async fn dezoomify(
         serde_json::json!({"job": job}),
     ) {
         lock_table(&state)?.release_job(&job);
-        return Err(Error::new(
-            ErrorCode::DesktopRegistrationFailed,
-            ErrorPhase::Validation,
-            format!("The native invocation could not be acknowledged: {error}"),
-        ));
+        return Err(Error::RegistrationFailed {
+            detail: Some(format!(
+                "the native invocation could not be acknowledged: {error}"
+            )),
+        });
     }
     let mut options = crate::settings::job_options_for(&settings);
     options.input_url = input_url;
@@ -243,15 +213,7 @@ async fn dezoomify(
                 crate::jobs::CHANNEL_PARTIAL,
                 serde_json::json!({"job": job, "question": question, "missing": missing}),
             );
-            Box::pin(async move {
-                answer.await.map_err(|_| {
-                    Error::new(
-                        ErrorCode::InteractionExpired,
-                        ErrorPhase::Acquisition,
-                        "The question is no longer open.",
-                    )
-                })
-            })
+            Box::pin(async move { answer.await.map_err(|_| Error::InteractionExpired) })
         });
         let result = host.transport.block_on(dezoomify::dezoomify(
             host.inputs(),
@@ -261,23 +223,19 @@ async fn dezoomify(
         registration.finish(host.publication().map(|output| output.path));
         if let Err(error) = &result {
             registration.diagnostics.finish(
-                if error.code == dezoomify::model::ErrorCode::JobCancelled {
+                if matches!(error.cause(), Error::Cancelled) {
                     "cancelled"
                 } else {
                     "failed"
                 },
-                serde_json::json!({"code": error.code, "message": error.message}),
+                serde_json::json!({ "error": error }),
             );
         }
         result
     })
     .await
-    .map_err(|_| {
-        Error::new(
-            ErrorCode::HostInternal,
-            ErrorPhase::Cleanup,
-            "native task failed",
-        )
+    .map_err(|_| Error::Internal {
+        detail: Some("native task failed".into()),
     })?
 }
 

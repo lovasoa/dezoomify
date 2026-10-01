@@ -1,59 +1,42 @@
-use dezoomify::model::ErrorCode;
+use dezoomify::model::Error;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use dezoomify_fixture_server::{router, AppState, RouteTable};
 use dezoomify_native::imaging;
 use dezoomify_native::JobOptions;
 mod support;
-
-fn start_fixture_server() -> String {
-    let scenarios_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/scenarios");
-    let routes = RouteTable::load(&scenarios_dir).expect("load routes");
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .expect("tokio runtime");
-    let _guard = rt.enter();
-    let listener = rt
-        .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
-        .expect("bind loopback");
-    let bound = listener.local_addr().expect("addr");
-    let state = AppState {
-        routes: Arc::new(routes),
-        scenarios_dir,
-        static_dir: None,
-        origin: format!("http://{bound}"),
-        log: Arc::new(Mutex::new(Vec::new())),
-        log_path: None,
-    };
-    tokio::spawn(async move {
-        axum::serve(listener, router(state))
-            .await
-            .expect("fixture server");
-    });
-    // The runtime must outlive the server; leak it for the process lifetime.
-    std::mem::forget(rt);
-    format!("http://{bound}")
-}
-
-fn temp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "dezoomify-native-pipeline-{}-{name}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    dir
-}
+use support::{http_response, scenario_payload, start_fixture_server, temp_dir, DZI_256, DZI_512};
 
 /// Assert the published result against the scenario's `expected/result.json`
 /// golden: image size, tile count, output format, and (when the golden pins
 /// one) the partial disposition and `ok` outcome. The `recovery` field in
 /// success goldens documents the resume mechanism in prose, not a typed fact.
+/// Assert the published failure contract of `expected/result.json`: the
+/// scenario fails and its recorded `code` is the typed error's stable kind
+/// (`error.cause().kind()`), the same identifier the CLI human line prints.
+fn assert_failure_golden(scenario: &str, error: &Error) {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../testdata/scenarios")
+        .join(scenario)
+        .join("expected/result.json");
+    let expected: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("expected result"))
+            .expect("expected json");
+    assert_eq!(
+        expected["outcome"].as_str(),
+        Some("failed"),
+        "{scenario} golden pins a failure"
+    );
+    assert_eq!(
+        error.cause().kind(),
+        expected["code"].as_str().expect("golden code"),
+        "{scenario} publishes its golden kind: {error}"
+    );
+}
+
 fn assert_result_golden(scenario: &str, outcome: &dezoomify_native::Publication) {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../testdata/scenarios")
@@ -156,7 +139,8 @@ fn tile_failure_fails_honestly_without_output() {
         &mut |_| {},
     )
     .expect_err("pipeline fails on missing tiles");
-    assert_eq!(error.code, ErrorCode::JobPartialDiscarded);
+    assert_failure_golden("native/cli-tile-failure", &error);
+    assert!(matches!(error, Error::PartialDiscarded { .. }));
     assert!(
         !output.exists(),
         "no output may be written for a failed job"
@@ -197,7 +181,7 @@ fn file_uri_tiles_assemble_from_a_remote_manifest() {
         &JobOptions::default(),
         &mut |_| {},
     )
-    .unwrap_or_else(|e| panic!("file-uri tiles succeed: {} ({})", e.message, e.code));
+    .unwrap_or_else(|e| panic!("file-uri tiles succeed: {e} ({})", e.cause().kind()));
     assert_eq!(outcome.tile_count, 4);
     assert_eq!(
         (
@@ -229,7 +213,8 @@ fn corrupt_tile_fails_like_a_missing_tile() {
         &mut |_| {},
     )
     .expect_err("pipeline fails on corrupt tiles");
-    assert_eq!(error.code, ErrorCode::JobPartialDiscarded);
+    assert_failure_golden("native/cli-corrupt-tile", &error);
+    assert!(matches!(error, Error::PartialDiscarded { .. }));
     assert!(
         !output.exists(),
         "no output may be written for a failed job"
@@ -347,7 +332,8 @@ fn existing_output_without_overwrite_is_refused() {
         &mut |_| events += 1,
     )
     .expect_err("overwrite refusal fails");
-    assert_eq!(error.code, ErrorCode::OutputExists);
+    assert_failure_golden("native/cli-destination-denied", &error);
+    assert_eq!(error, Error::OutputExists);
     assert_eq!(events, 0, "refusal happens before any work");
     assert_eq!(
         std::fs::read(&output).expect("output preserved"),
@@ -723,7 +709,7 @@ fn interrupted_job_resumes_without_refetching_completed_tiles() {
         &mut |_| {},
     )
     .expect_err("interrupted run fails honestly");
-    assert_eq!(error.code, ErrorCode::JobPartialDiscarded);
+    assert!(matches!(error, Error::PartialDiscarded { .. }));
     assert!(
         !first_output.exists(),
         "failed runs write no output even with cached tiles"
@@ -810,7 +796,8 @@ fn cancellation_before_publish_writes_nothing() {
         },
     )
     .expect_err("cancelled jobs fail");
-    assert_eq!(error.code, ErrorCode::JobCancelled);
+    assert_failure_golden("native/cli-cancel", &error);
+    assert!(matches!(error.cause(), Error::Cancelled));
     assert!(!output.exists(), "cancelled jobs write nothing");
 }
 
@@ -818,16 +805,6 @@ fn cancellation_before_publish_writes_nothing() {
 // Raw-TCP loopback: deferred follows need runtime-port absolute URLs, which
 // committed fixtures cannot express.
 // ---------------------------------------------------------------------------
-
-fn http_response(status: &str, content_type: &str, body: &[u8]) -> Vec<u8> {
-    let mut out = Vec::new();
-    out.extend_from_slice(format!("HTTP/1.1 {status}\r\n").as_bytes());
-    out.extend_from_slice(format!("content-type: {content_type}\r\n").as_bytes());
-    out.extend_from_slice(format!("content-length: {}\r\n", body.len()).as_bytes());
-    out.extend_from_slice(b"connection: close\r\n\r\n");
-    out.extend_from_slice(body);
-    out
-}
 
 /// Serve a shared path → response map on loopback with one thread per
 /// connection (tile fetches run concurrently). Unknown paths 404. The map
@@ -875,15 +852,6 @@ fn serve_shared_map(shared: Arc<Mutex<HashMap<String, Vec<u8>>>>) -> String {
     format!("http://127.0.0.1:{port}")
 }
 
-fn scenario_payload(name: &str) -> Vec<u8> {
-    std::fs::read(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../testdata/scenarios/native/cli-dzi/payloads/fixtures.test/cli")
-            .join(name),
-    )
-    .unwrap_or_else(|e| panic!("read payload {name}: {e}"))
-}
-
 fn solid_png(width: u32, height: u32, rgb: [u8; 3]) -> Vec<u8> {
     let mut image = image::RgbaImage::new(width, height);
     for pixel in image.pixels_mut() {
@@ -901,18 +869,6 @@ fn solid_png(width: u32, height: u32, rgb: [u8; 3]) -> Vec<u8> {
     .expect("encode solid tile");
     bytes
 }
-
-const DZI_512: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
-<Image TileSize="256" Format="png" Overlap="0" xmlns="http://schemas.microsoft.com/deepzoom/2008">
-  <Size Width="512" Height="512"/>
-</Image>
-"#;
-
-const DZI_256: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
-<Image TileSize="256" Format="png" Overlap="0" xmlns="http://schemas.microsoft.com/deepzoom/2008">
-  <Size Width="256" Height="256"/>
-</Image>
-"#;
 
 #[test]
 fn iiif_size_rounding_bug_falls_back_to_caret_width_without_refetching() {
@@ -1042,7 +998,8 @@ fn self_referential_deferred_list_hits_the_resolution_limit() {
         &mut |_| {},
     )
     .expect_err("self-deferral exhausts the bound");
-    assert_eq!(error.code, ErrorCode::JobDeferredLimit);
+    assert_failure_golden("native/cli-deferred-limit", &error);
+    assert!(matches!(error, Error::DeferredLimit { .. }));
     assert!(!output.exists());
 }
 

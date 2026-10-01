@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use dezoomify::core::discovery::{DiscoveryInput, DiscoveryLimits};
 use dezoomify::core::{DiscoveredEntry, Grid, ResolvedImage, TileSource, default_registry};
-use dezoomify::model::{Error, ErrorCode, ErrorPhase, ResourceRead, ResourceResponse};
+use dezoomify::model::{Error, ResourceRead, ResourceResponse};
 
 /// Origin substituted for the `{{origin}}` placeholder in payloads. The
 /// goldens pin their tile URIs to the runtime fixture-server origin, which
@@ -222,12 +222,9 @@ fn discover_once(scenario: &str, input: &str) -> Result<DiscoveredEntry, String>
                             final_uri: None,
                         },
                     })
-                    .ok_or_else(|| {
-                        Error::new(
-                            ErrorCode::DiscoveryFailed,
-                            ErrorPhase::Discovery,
-                            format!("no mirrored payload: {}", request.uri),
-                        )
+                    .ok_or_else(|| Error::DiscoveryFailed {
+                        detail: Some(format!("no mirrored payload: {}", request.uri)),
+                        cause: None,
                     })
             }
         },

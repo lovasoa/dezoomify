@@ -533,7 +533,6 @@ mod tests {
     use crate::core::DiscoveredEntry;
     use crate::core::discovery::{DiscoveryError, RejectionKind};
     use crate::core::{ResolvedImage, TileSource};
-    use crate::model::ErrorCode;
 
     fn image(catalog: DiscoveryCatalog) -> ResolvedImage {
         match catalog.into_entries().into_iter().next().unwrap() {
@@ -999,15 +998,13 @@ mod tests {
     fn viewer_failures(
         http_failure: bool,
     ) -> (Result<DiscoveryCatalog, DiscoveryError>, Vec<Request>) {
-        use crate::model::{
-            Error, ErrorCode, ErrorPhase, ErrorTransport, ResourceRead, ResourceResponse,
-        };
+        use crate::model::{Error, ErrorTransport, ResourceRead, ResourceResponse};
         let requests = std::cell::RefCell::new(Vec::new());
         let registry = crate::core::registry_for("krpano").unwrap();
         let result=futures::executor::block_on(registry.discover(vec![crate::core::discovery::DiscoveryInput::new("https://example.com/pano/index.html")],Default::default(),|request,_| {
             let uri=request.uri.clone();requests.borrow_mut().push(request);
             async move {
-                let bytes:&[u8]=if uri.ends_with("index.html") {br#"<html><script src="first.js"></script><script src="second.js"></script><script>embedpano({xml:"tour.xml"});</script></html>"#.as_slice()} else if uri.ends_with("tour.xml") {b"<encrypted>not-valid-krpano-data</encrypted>"} else if !http_failure {b"invalid viewer JavaScript"} else {let mut error=Error::new(ErrorCode::TransportHttpError,ErrorPhase::Discovery,"forbidden");error.http=Some(403);error.transport=Some(ErrorTransport::Direct);return Err(error);};
+                let bytes:&[u8]=if uri.ends_with("index.html") {br#"<html><script src="first.js"></script><script src="second.js"></script><script>embedpano({xml:"tour.xml"});</script></html>"#.as_slice()} else if uri.ends_with("tour.xml") {b"<encrypted>not-valid-krpano-data</encrypted>"} else if !http_failure {b"invalid viewer JavaScript"} else {return Err(Error::HttpError {status:403,request:None,retry_after_ms:None,preview:None,transport:ErrorTransport::Direct,detail:None});};
                 Ok(ResourceRead::Response {response:ResourceResponse {bytes:bytes.to_vec(),final_uri:None}})
             }
         }));
@@ -1024,9 +1021,17 @@ mod tests {
         let diagnostic = diagnostics.iter().find(|d| d.format == "krpano").unwrap();
         assert_eq!(diagnostic.kind, RejectionKind::FetchFailed);
         let cause = diagnostic.cause.as_ref().unwrap();
-        assert_eq!(cause.code, ErrorCode::TransportHttpError);
-        assert_eq!(cause.http, Some(403));
-        assert_eq!(cause.transport, Some(crate::model::ErrorTransport::Direct));
+        assert_eq!(
+            **cause,
+            crate::model::Error::HttpError {
+                status: 403,
+                request: None,
+                retry_after_ms: None,
+                preview: None,
+                transport: crate::model::ErrorTransport::Direct,
+                detail: None,
+            }
+        );
         assert!(
             error
                 .detail()

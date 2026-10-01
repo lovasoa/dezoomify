@@ -10,7 +10,7 @@ use regex::bytes::Regex as BytesRegex;
 use super::model::{CatalogPlan, DiscoveryCatalog, ImagePlan, Request};
 use super::tile_plan::TileSourceError;
 use super::uri::resolve_relative;
-use crate::model::{DiscoveryInputKind, Error, ErrorCode};
+use crate::model::{DiscoveryInputKind, Error};
 
 /// User source or host observation supplied to the shared discovery search.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -542,8 +542,38 @@ impl DiscoveryError {
     }
 }
 
-/// Fetch rejections group by code, HTTP status, transport, and policy reason;
-/// other rejections group by detail. URL-shape misses collapse to one count.
+/// The observed fetch facts that define one diagnostic group: variant
+/// identity plus HTTP status, transport, and policy reason. Bounded detail
+/// and previews are diagnostics, never grouping facts.
+fn observed_cause(
+    cause: &Error,
+) -> (
+    &'static str,
+    Option<u16>,
+    Option<crate::model::ErrorTransport>,
+    Option<crate::model::BlockedReason>,
+) {
+    let cause = cause.cause();
+    match cause {
+        Error::HttpError {
+            status, transport, ..
+        } => (cause.kind(), Some(*status), Some(*transport), None),
+        Error::PolicyDenied {
+            blocked_reason,
+            transport,
+            ..
+        } => (cause.kind(), None, Some(*transport), Some(*blocked_reason)),
+        Error::RateLimited { transport, .. }
+        | Error::Timeout { transport, .. }
+        | Error::NetworkFailure { transport, .. }
+        | Error::ProxyError { transport, .. } => (cause.kind(), None, Some(*transport), None),
+        other => (other.kind(), None, None, None),
+    }
+}
+
+/// Fetch rejections group by their observed facts (variant, HTTP status,
+/// transport, and policy reason); other rejections group by detail.
+/// URL-shape misses collapse to one count.
 #[must_use]
 pub fn diagnostic_bullets(diagnostics: &[CandidateDiagnostic]) -> Vec<String> {
     let mut url_misses = 0_usize;
@@ -556,10 +586,7 @@ pub fn diagnostic_bullets(diagnostics: &[CandidateDiagnostic]) -> Vec<String> {
         let group = grouped.iter_mut().find(|(existing, _)| {
             existing.kind == diagnostic.kind
                 && match (&existing.cause, &diagnostic.cause) {
-                    (Some(a), Some(b)) => {
-                        (&a.code, a.http, a.transport, a.blocked_reason)
-                            == (&b.code, b.http, b.transport, b.blocked_reason)
-                    }
+                    (Some(a), Some(b)) => observed_cause(a) == observed_cause(b),
                     (None, None) => existing.detail == diagnostic.detail,
                     _ => false,
                 }
@@ -590,12 +617,19 @@ pub fn diagnostic_bullets(diagnostics: &[CandidateDiagnostic]) -> Vec<String> {
 }
 
 fn describe_fetch(error: &Error) -> String {
-    let status = error
-        .http
-        .map_or_else(|| error.code.to_string(), |http| format!("HTTP {http}"));
-    match error.blocked_reason {
-        Some(reason) => format!("{status} fetching this address, reason={}", reason.as_str()),
-        None => format!("{status} fetching this address"),
+    let error = error.cause();
+    let status = match error {
+        Error::HttpError { status, .. } => format!("HTTP {status}"),
+        other => other.kind().to_string(),
+    };
+    match error {
+        Error::PolicyDenied { blocked_reason, .. } => {
+            format!(
+                "{status} fetching this address, reason={}",
+                blocked_reason.as_str()
+            )
+        }
+        _ => format!("{status} fetching this address"),
     }
 }
 
@@ -768,12 +802,8 @@ where
                             .get()
                             .checked_add(response.bytes.len())
                             .filter(|total| *total <= limit)
-                            .ok_or_else(|| {
-                                crate::model::Error::new(
-                                    ErrorCode::JobResourceLimit,
-                                    crate::model::ErrorPhase::Discovery,
-                                    "discovery metadata size limit exceeded",
-                                )
+                            .ok_or_else(|| crate::model::Error::ResourceLimit {
+                                detail: Some("discovery metadata size limit exceeded".to_string()),
                             })?;
                         retained.set(total);
                         let response = std::sync::Arc::new(response);
@@ -853,8 +883,8 @@ where
                     response: Some(response),
                 },
                 Err(DiscoveryError::Host(error))
-                    if crate::retry::is_terminal_failure(error.code)
-                        || error.code == ErrorCode::JobResourceLimit =>
+                    if error.is_terminal()
+                        || matches!(error.cause(), Error::ResourceLimit { .. }) =>
                 {
                     return Err(DiscoveryError::Host(error));
                 }
@@ -1117,18 +1147,21 @@ fn record_diagnostic(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{BlockedReason, ErrorTransport};
+
+    fn http_cause(status: u16, transport: ErrorTransport) -> Box<Error> {
+        Box::new(Error::HttpError {
+            status,
+            request: Some("https://example.test/metadata".into()),
+            retry_after_ms: None,
+            preview: None,
+            transport,
+            detail: None,
+        })
+    }
+
     #[test]
     fn diagnostics_group_by_typed_cause_and_collapse_url_misses() {
-        let http_cause = |status: u16| {
-            let mut error = Error::new(
-                ErrorCode::TransportHttpError,
-                crate::model::ErrorPhase::Discovery,
-                "forbidden",
-            )
-            .with_transport(crate::model::ErrorTransport::Direct);
-            error.http = Some(status);
-            Box::new(error)
-        };
         let diagnostic = |format: &str, kind, cause: Option<Box<Error>>, detail: Option<&str>| {
             CandidateDiagnostic {
                 format: format.into(),
@@ -1148,13 +1181,13 @@ mod tests {
                 diagnostic(
                     "iiif",
                     RejectionKind::FetchFailed,
-                    Some(http_cause(403)),
+                    Some(http_cause(403, ErrorTransport::Direct)),
                     None,
                 ),
                 diagnostic(
                     "zoomify",
                     RejectionKind::FetchFailed,
-                    Some(http_cause(403)),
+                    Some(http_cause(403, ErrorTransport::Direct)),
                     None,
                 ),
                 diagnostic(
@@ -1188,71 +1221,35 @@ mod tests {
     }
 
     #[test]
-    fn distinct_codes_statuses_transports_and_reasons_never_merge() {
-        use crate::model::{BlockedReason, ErrorPhase, ErrorTransport};
+    fn distinct_causes_never_merge_and_detail_never_splits() {
         let causes = [
-            (
-                ErrorCode::TransportHttpError,
-                Some(403),
-                ErrorTransport::Direct,
-                None,
-            ),
-            (
-                ErrorCode::TransportHttpError,
-                Some(404),
-                ErrorTransport::Direct,
-                None,
-            ),
-            (
-                ErrorCode::TransportHttpError,
-                Some(403),
-                ErrorTransport::MetadataProxy,
-                None,
-            ),
-            (
-                ErrorCode::TransportHttpError,
-                Some(403),
-                ErrorTransport::Native,
-                None,
-            ),
-            (
-                ErrorCode::TransportHttpError,
-                Some(403),
-                ErrorTransport::DisplayOnly,
-                None,
-            ),
-            (
-                ErrorCode::TransportPolicyDenied,
-                None,
-                ErrorTransport::MetadataProxy,
-                Some(BlockedReason::SignedQuery),
-            ),
-            (
-                ErrorCode::TransportPolicyDenied,
-                None,
-                ErrorTransport::MetadataProxy,
-                Some(BlockedReason::PrivateHost),
-            ),
-            (
-                ErrorCode::TransportNetworkError,
-                None,
-                ErrorTransport::BrowserSession,
-                None,
-            ),
+            http_cause(403, ErrorTransport::Direct),
+            http_cause(404, ErrorTransport::Direct),
+            http_cause(403, ErrorTransport::MetadataProxy),
+            http_cause(403, ErrorTransport::Native),
+            http_cause(403, ErrorTransport::DisplayOnly),
+            Box::new(Error::PolicyDenied {
+                blocked_reason: BlockedReason::SignedQuery,
+                transport: ErrorTransport::MetadataProxy,
+                detail: None,
+            }),
+            Box::new(Error::PolicyDenied {
+                blocked_reason: BlockedReason::PrivateHost,
+                transport: ErrorTransport::MetadataProxy,
+                detail: None,
+            }),
+            Box::new(Error::NetworkFailure {
+                transport: ErrorTransport::BrowserSession,
+                detail: None,
+            }),
         ];
         let diagnostics: Vec<_> = causes
-            .into_iter()
-            .map(|(code, http, transport, reason)| {
-                let mut error = Error::new(code, ErrorPhase::Discovery, "unavailable")
-                    .with_transport(transport);
-                error.http = http;
-                error.blocked_reason = reason;
-                CandidateDiagnostic {
-                    format: "iiif".into(),
-                    kind: RejectionKind::FetchFailed,
-                    cause: Some(Box::new(error)),
-                    detail: None,
-                }
+            .iter()
+            .map(|cause| CandidateDiagnostic {
+                format: "iiif".into(),
+                kind: RejectionKind::FetchFailed,
+                cause: Some(cause.clone()),
+                detail: None,
             })
             .collect();
         let rendered = diagnostic_bullets(&diagnostics);
@@ -1265,10 +1262,15 @@ mod tests {
         assert!(
             rendered
                 .iter()
-                .any(|line| line.contains("TRANSPORT_NETWORK_ERROR fetching this address"))
+                .any(|line| line.contains("network-failure fetching this address"))
         );
+        // Bounded detail is a diagnostic, never a grouping fact.
         let mut different_text = diagnostics[0].clone();
-        different_text.cause.as_mut().unwrap().message = "another format's explanation".into();
+        if let Some(cause) = &mut different_text.cause
+            && let Error::HttpError { detail, .. } = cause.as_mut()
+        {
+            *detail = Some("another format's explanation".into());
+        }
         assert_eq!(
             diagnostic_bullets(&[diagnostics[0].clone(), different_text]).len(),
             1

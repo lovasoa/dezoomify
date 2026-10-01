@@ -1,58 +1,18 @@
 //! Golden-driven edge scenario runs: every `native/edge-*` scenario is
 //! driven end-to-end over the fixture server and asserted against its
 //! `expected/result.json` contract (success geometry or typed failure
-//! context). The goldens' `code` field holds the CLI's published display
-//! codes (`report::error_code` in the CLI); that mapping is asserted against
-//! these goldens by `apps/cli/tests/pipeline.rs` (`edge_*_match_goldens`),
-//! while this test pins the typed `Error` fields the mapping consumes.
+//! context). The goldens' `code` field holds the typed error's stable
+//! `kind` — the same identifier the CLI human line prints and
+//! `apps/cli/tests/pipeline.rs` publishes through the real binary.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use dezoomify::model::ErrorPhase;
-use dezoomify_fixture_server::{router, AppState, RouteTable};
+use dezoomify::model::Error;
 use dezoomify_native::diagnostics::Diagnostics;
 use dezoomify_native::{JobOptions, NativeHost, OutputTarget};
 mod support;
-
-fn start_fixture_server() -> String {
-    let scenarios_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/scenarios");
-    let routes = RouteTable::load(&scenarios_dir).expect("load routes");
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .expect("tokio runtime");
-    let _guard = rt.enter();
-    let listener = rt
-        .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
-        .expect("bind loopback");
-    let bound = listener.local_addr().expect("addr");
-    let state = AppState {
-        routes: Arc::new(routes),
-        scenarios_dir,
-        static_dir: None,
-        origin: format!("http://{bound}"),
-        log: Arc::new(Mutex::new(Vec::new())),
-        log_path: None,
-    };
-    tokio::spawn(async move {
-        axum::serve(listener, router(state))
-            .await
-            .expect("fixture server");
-    });
-    std::mem::forget(rt);
-    format!("http://{bound}")
-}
-
-fn temp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "dezoomify-native-edge-{}-{name}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    dir
-}
+use support::{start_fixture_server, temp_dir};
 
 struct Scenario {
     input: String,
@@ -83,16 +43,31 @@ fn load_scenario(id: &str, origin: &str) -> Scenario {
     }
 }
 
-fn phase_str(phase: &ErrorPhase) -> &'static str {
-    match phase {
-        ErrorPhase::Validation => "validation",
-        ErrorPhase::Discovery => "discovery",
-        ErrorPhase::Acquisition => "acquisition",
-        ErrorPhase::Decode => "decode",
-        ErrorPhase::Processing => "processing",
-        ErrorPhase::Output => "output",
-        ErrorPhase::Publication => "publication",
-        ErrorPhase::Cleanup => "cleanup",
+/// The job step the golden records, derived from the typed failure:
+/// metadata work (including discovery aggregates) is discovery; tile work
+/// and tile-failure aggregates are acquisition.
+fn phase_of(error: &Error) -> &'static str {
+    match error {
+        Error::Resource {
+            resource_kind: dezoomify::model::ResourceKind::Metadata,
+            ..
+        } => "discovery",
+        Error::Resource {
+            resource_kind:
+                dezoomify::model::ResourceKind::Tile | dezoomify::model::ResourceKind::Probe,
+            ..
+        } => "acquisition",
+        Error::Resource { source, .. } => phase_of(source),
+        Error::PartialDiscarded { failures } | Error::NoUsableTiles { failures } => {
+            failures.first().map_or("acquisition", phase_of)
+        }
+        Error::NoImageFound { .. }
+        | Error::MalformedMetadata { .. }
+        | Error::DiscoveryFailed { .. }
+        | Error::EmptyResource
+        | Error::ResourceLimit { .. }
+        | Error::DeferredLimit { .. } => "discovery",
+        _ => "output",
     }
 }
 
@@ -129,7 +104,7 @@ fn edge_success_scenarios_match_their_result_goldens() {
             &options,
             &mut |_| {},
         )
-        .unwrap_or_else(|error| panic!("{id} succeeds: {} ({})", error.message, error.code));
+        .unwrap_or_else(|error| panic!("{id} succeeds: {error} ({})", error.cause().kind()));
         let expected = &scenario.expected;
         // `code: "ok"` pins success, and the golden geometry matches the
         // published output (the EXIF-preserving note in `edge-exif` is
@@ -226,10 +201,19 @@ fn match_failure_scenario(id: &str, origin: &str, mismatches: &mut Vec<String>) 
     if expected["outcome"].as_str() != Some("failed") {
         fail("outcome", format!("golden outcome {}", expected["outcome"]));
     }
-    if phase_str(&error.phase) != expected["phase"].as_str().unwrap_or_default() {
+    if phase_of(&error) != expected["phase"].as_str().unwrap_or_default() {
         fail(
             "phase",
-            format!("{:?} != golden {}", error.phase, expected["phase"]),
+            format!("{} != golden {}", phase_of(&error), expected["phase"]),
+        );
+    }
+    // `code` is the typed error's stable kind: the identifier the CLI human
+    // line prints and `apps/cli/tests/pipeline.rs` publishes (also asserted
+    // here directly). `underlying`/`note` are documentation prose.
+    if error.cause().kind() != expected["code"].as_str().unwrap_or_default() {
+        fail(
+            "code",
+            format!("{} != golden {}", error.cause().kind(), expected["code"]),
         );
     }
     let requests: Vec<serde_json::Value> = records
@@ -251,44 +235,23 @@ fn match_failure_scenario(id: &str, origin: &str, mismatches: &mut Vec<String>) 
             ),
         );
     }
-    // `retryable` is the documented job-level verdict: the retained failed
-    // requests classified by `retry::is_retryable(code, http)` and combined
-    // like `retry::aggregate_retryable` (any transient constituent keeps
-    // retry available).
-    let failed: Vec<&serde_json::Value> = requests
-        .iter()
-        .filter(|record| record["code"].is_string())
-        .collect();
-    let mut retryable = false;
-    for record in &failed {
-        match serde_json::from_value::<dezoomify::model::ErrorCode>(record["code"].clone()) {
-            Ok(code) => {
-                retryable |= dezoomify::retry::is_retryable(
-                    code,
-                    record["http"].as_f64().map(|status| status as u16),
-                );
-            }
-            Err(error) => fail(
-                "code",
-                format!("unparseable failure code {}: {error}", record["code"]),
-            ),
-        }
-    }
+    // `retryable` is the derived job-level verdict: a pure function of the
+    // retained failure set (any transient constituent keeps retry
+    // available), never a stored flag.
+    let retryable = error.retryable();
     if retryable != expected["retryable"].as_bool().unwrap_or_default() {
         fail(
             "retryable",
-            format!(
-                "{retryable} != golden {} (failed requests: {failed:?})",
-                expected["retryable"]
-            ),
+            format!("{retryable} != golden {}", expected["retryable"]),
         );
     }
     // Recovery follows the documented action flow (docs/errors.md): an
     // acquisition failure leaves the keep/discard/retry choice, while an
     // input/address failure is edit-input.
-    let recovery = match error.phase {
-        ErrorPhase::Acquisition => "retry",
-        _ => "edit-input",
+    let recovery = if phase_of(&error) == "acquisition" {
+        "retry"
+    } else {
+        "edit-input"
     };
     if recovery != expected["recovery"].as_str().unwrap_or_default() {
         fail(
@@ -296,7 +259,4 @@ fn match_failure_scenario(id: &str, origin: &str, mismatches: &mut Vec<String>) 
             format!("{recovery} != golden {}", expected["recovery"]),
         );
     }
-    // `code` is the CLI's published display code (asserted through the
-    // real CLI against these goldens in apps/cli/tests/pipeline.rs) and
-    // `underlying`/`note` are documentation prose, not typed fields.
 }

@@ -1,6 +1,5 @@
 //! Native resources retained for a desktop invocation and its saved result.
-use dezoomify::model::{DiagnosticReport, ErrorCode, RecoveryChoice};
-use dezoomify::model::{Error, ErrorPhase};
+use dezoomify::model::{DiagnosticReport, Error, RecoveryChoice};
 use dezoomify_native::{diagnostics::Diagnostics, Controls};
 use std::{
     collections::HashMap,
@@ -53,20 +52,10 @@ impl Registration {
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         if !pending.as_ref().is_some_and(|(id, _)| *id == question) {
-            return Err(Error::new(
-                ErrorCode::InteractionExpired,
-                ErrorPhase::Validation,
-                "The question is no longer open.",
-            ));
+            return Err(Error::InteractionExpired);
         }
         if let Some((_, send)) = pending.take() {
-            send.send(answer).map_err(|_| {
-                Error::new(
-                    ErrorCode::InteractionExpired,
-                    ErrorPhase::Validation,
-                    "The question is no longer open.",
-                )
-            })?;
+            send.send(answer).map_err(|_| Error::InteractionExpired)?;
         }
         Ok(())
     }
@@ -101,18 +90,12 @@ impl JobTable {
     }
     pub fn insert(&mut self, id: &str) -> Result<Arc<Registration>, Error> {
         if !crate::commands::is_valid_job_id(id) {
-            return Err(Error::new(
-                ErrorCode::JobInvalidInput,
-                ErrorPhase::Validation,
-                "job id must look like job:<suffix>",
-            ));
+            return Err(Error::InvalidInput {
+                detail: Some("job id must look like job:<suffix>".into()),
+            });
         }
         if self.jobs.contains_key(id) {
-            return Err(Error::new(
-                ErrorCode::JobDuplicate,
-                ErrorPhase::Validation,
-                "An invocation with this identity already exists.",
-            ));
+            return Err(Error::Duplicate);
         }
         let entry = Arc::new(Registration::new());
         self.jobs.insert(id.into(), Arc::clone(&entry));
@@ -124,11 +107,7 @@ impl JobTable {
     pub fn live(&self, id: &str) -> Result<Arc<Registration>, Error> {
         let entry = self.get(id)?;
         if entry.completed.load(Ordering::SeqCst) {
-            return Err(Error::new(
-                ErrorCode::JobStale,
-                ErrorPhase::Cleanup,
-                format!("the invocation {id} has finished"),
-            ));
+            return Err(Error::Stale);
         }
         Ok(entry)
     }
@@ -156,11 +135,11 @@ impl Drop for JobTable {
 }
 
 pub fn unknown_job(id: &str) -> Error {
-    Error::new(
-        ErrorCode::JobUnknown,
-        ErrorPhase::Validation,
-        format!("unknown job id {id}; the invocation never existed or belongs to a closed window"),
-    )
+    Error::InvalidState {
+        detail: Some(format!(
+            "unknown job id {id}; the invocation never existed or belongs to a closed window"
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -216,7 +195,7 @@ mod tests {
                     &host,
                 ))
                 .unwrap_err();
-            assert_eq!(error.code, ErrorCode::JobCancelled);
+            assert_eq!(error, Error::Cancelled);
             assert!(host.publication().is_none());
             assert!(!output.exists());
             drop(host);

@@ -9,11 +9,9 @@ mod bindings {
     use wasm_bindgen::prelude::*;
 
     fn boundary_error(detail: impl std::fmt::Display) -> Error {
-        Error::new(
-            ErrorCode::BindingInvalidValue,
-            ErrorPhase::Validation,
-            detail.to_string(),
-        )
+        Error::BindingInvalidValue {
+            detail: Some(detail.to_string()),
+        }
     }
 
     fn encode(value: &impl Serialize) -> Result<JsValue, Error> {
@@ -36,7 +34,7 @@ mod bindings {
     }
 
     fn js_error(error: Error) -> JsValue {
-        encode(&error).unwrap_or_else(|_| JsValue::from_str(&error.message))
+        encode(&error).unwrap_or_else(|_| JsValue::from_str(&error.to_string()))
     }
 
     macro_rules! ts_type {
@@ -48,9 +46,6 @@ mod bindings {
         };
         (String) => {
             "string"
-        };
-        (ActiveTransport) => {
-            "ErrorTransport | null"
         };
         ($name:ident) => {
             stringify!($name)
@@ -133,11 +128,9 @@ mod bindings {
             .map_err(js_error)?
             .apply(bytes.to_vec())
             .map_err(|error| {
-                js_error(Error::new(
-                    ErrorCode::TileProcessingFailed,
-                    ErrorPhase::Processing,
-                    error.to_string(),
-                ))
+                js_error(Error::ProcessingFailed {
+                    detail: Some(error.to_string()),
+                })
             })
     }
 

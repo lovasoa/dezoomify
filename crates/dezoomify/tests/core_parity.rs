@@ -5,9 +5,7 @@
 
 use dezoomify::Vec2d;
 use dezoomify::core::discovery::{DiscoveryError, DiscoveryInput, DiscoveryLimits};
-use dezoomify::model::{
-    Error, ErrorCode, ErrorPhase, ProbeOutcome, ResourceRead, ResourceResponse,
-};
+use dezoomify::model::{Error, ProbeOutcome, ResourceRead, ResourceResponse};
 mod support;
 use dezoomify::core::{
     DiscoveredEntry, DiscoveryCatalog, Grid, Registry, ResolvedLevel, TileSource, default_registry,
@@ -49,12 +47,9 @@ fn discover_with(
                             final_uri: None,
                         },
                     })
-                    .ok_or_else(|| {
-                        Error::new(
-                            ErrorCode::DiscoveryFailed,
-                            ErrorPhase::Discovery,
-                            format!("no fixture: {}", request.uri),
-                        )
+                    .ok_or_else(|| Error::DiscoveryFailed {
+                        detail: Some(format!("no fixture: {}", request.uri)),
+                        cause: None,
                     })
             }
         },
@@ -247,7 +242,7 @@ fn automatic_discovery_selects_every_ready_format() {
 
     let input = "https://artsandculture.google.com/asset/test";
     let catalog=futures::executor::block_on(default_registry().discover(vec![DiscoveryInput::new(input)],Default::default(),|request,_|async move {
-        let bytes=if request.uri==input {include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/google_arts_and_culture/page_source.html").as_slice()} else if request.uri.ends_with("=g") {include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/google_arts_and_culture/tile_info.xml").as_slice()} else {return Err(Error::new(ErrorCode::DiscoveryFailed,ErrorPhase::Discovery,"missing fixture"));};
+        let bytes=if request.uri==input {include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/google_arts_and_culture/page_source.html").as_slice()} else if request.uri.ends_with("=g") {include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/google_arts_and_culture/tile_info.xml").as_slice()} else {return Err(Error::DiscoveryFailed {detail:Some("missing fixture".into()),cause:None});};
         Ok(ResourceRead::Response {response:ResourceResponse {bytes:bytes.to_vec(),final_uri:None}})
     })).unwrap();
     assert_eq!(ready_image(catalog).format, "google_arts_and_culture");

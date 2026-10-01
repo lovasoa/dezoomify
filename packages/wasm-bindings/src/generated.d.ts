@@ -87,24 +87,6 @@ export interface TilePlacement {
 }
 
 /**
- * Host-observed fetch facts. Retry and recovery policy belongs to the shared algorithm.
- */
-export interface FetchFailure {
-    code: FetchFailureCode;
-    message: string;
-    transport: ErrorTransport;
-    blocked_reason?: BlockedReason;
-    http?: number;
-    /**
-     * Host-observed `retry-after` in milliseconds, when the response
-     * carried one. The shared algorithm waits at least this long before the retry.
-     */
-    retry_after_ms?: number;
-    preview?: string;
-    detail?: string;
-}
-
-/**
  * How an acquired tile participates in probing and final output. The two
  * facts are orthogonal and consumed independently: `probe` marks
  * adaptive-probe acquisitions (fetched to observe dimensions, where a miss
@@ -155,6 +137,14 @@ export interface MissingTile {
 }
 
 /**
+ * One typed failure. Grouped by domain: transport and fetch, discovery,
+ * job and planning, tiles, output, control, internals, and the composable
+ * [`Error::Resource`] context wrapper that preserves the exact URI and
+ * resource kind of any underlying failure.
+ */
+export type Error = { kind: "http-error"; status: number; request?: string; retry_after_ms?: number; preview?: string; transport: ErrorTransport; detail?: string } | { kind: "rate-limited"; request?: string; retry_after_ms?: number; transport: ErrorTransport; detail?: string } | { kind: "timeout"; request?: string; transport: ErrorTransport; detail?: string } | { kind: "network-failure"; transport: ErrorTransport; detail?: string } | { kind: "policy-denied"; blocked_reason: BlockedReason; transport: ErrorTransport; detail?: string } | { kind: "bad-url"; detail?: string } | { kind: "bad-redirect"; detail?: string } | { kind: "redirect-limit"; max: number } | { kind: "size-limit"; max_bytes: number } | { kind: "cancelled" } | { kind: "proxy-budget-exceeded" } | { kind: "proxy-error"; transport: ErrorTransport; detail?: string } | { kind: "no-image-found"; detail?: string } | { kind: "malformed-metadata"; detail?: string } | { kind: "unknown-format"; format: string } | { kind: "empty-resource" } | { kind: "resource-limit"; detail?: string } | { kind: "deferred-limit"; max: number } | { kind: "discovery-failed"; detail?: string; cause?: Error } | { kind: "invalid-input"; detail?: string } | { kind: "invalid-options"; detail?: string } | { kind: "invalid-state"; detail?: string } | { kind: "duplicate" } | { kind: "stale" } | { kind: "plan-empty" } | { kind: "plan-invalid"; detail?: string } | { kind: "no-usable-tiles"; failures: Error[] } | { kind: "partial-discarded"; failures: Error[] } | { kind: "decode-failed"; detail?: string } | { kind: "processing-failed"; detail?: string } | { kind: "limit-exceeded"; limit: LimitContext } | { kind: "encode-failed"; detail?: string } | { kind: "write-failed"; detail?: string } | { kind: "output-exists" } | { kind: "destination-denied"; detail?: string } | { kind: "unsupported-extension"; detail?: string } | { kind: "output-unavailable"; detail?: string } | { kind: "output-no-parent" } | { kind: "launch-failed"; detail?: string } | { kind: "output-denied" } | { kind: "output-not-found" } | { kind: "invoke-failed" } | { kind: "start-failed"; detail?: string } | { kind: "choice-failed"; detail?: string } | { kind: "invalid-url" } | { kind: "invalid-settings"; detail?: string } | { kind: "handoff-rejected"; detail?: string } | { kind: "registration-failed"; detail?: string } | { kind: "internal"; detail?: string } | { kind: "shell-lock" } | { kind: "binding-invalid-value"; detail?: string } | { kind: "interaction-expired" } | { kind: "auth-forbidden-header" } | { kind: "resource"; request: string; resource_kind: ResourceKind; source: Error };
+
+/**
  * Output summary: geometry, completeness, and the honest disposition.
  */
 export interface Output {
@@ -168,22 +158,6 @@ export interface Output {
  * Purpose of a resource request (metadata vs tile vs probe).
  */
 export type RequestPurpose = "metadata" | "tile" | "probe";
-
-/**
- * Stable code for a host-observed fetch failure.
- *
- * Variant identifiers are the serialized values, so this enum
- * preserves stable error codes.
- */
-export type FetchFailureCode = "TRANSPORT_HTTP_ERROR" | "DISCOVERY_HTTP_ERROR" | "UPSTREAM_RATE_LIMITED" | "TRANSPORT_POLICY_DENIED" | "PROXY_BUDGET_EXCEEDED" | "PROXY_ERROR" | "PROXY_NETWORK_ERROR" | "PROXY_RATE_LIMITED" | "DISCOVERY_FAILED" | "TRANSPORT_TIMEOUT" | "TRANSPORT_NETWORK_ERROR" | "TRANSPORT_CANCELLED" | "TRANSPORT_BAD_URL" | "TRANSPORT_BAD_REDIRECT" | "TRANSPORT_REDIRECT_LIMIT" | "TRANSPORT_SIZE_LIMIT";
-
-/**
- * Stable error code. Codes are a closed, type-checked API: each variant's
- * serde rename is the exact wire value, so structured codes never live in
- * free strings, every code is known to have user wording, and adding one
- * is a deliberate contract change. Match on variants; never on text.
- */
-export type ErrorCode = "TRANSPORT_HTTP_ERROR" | "DISCOVERY_HTTP_ERROR" | "UPSTREAM_RATE_LIMITED" | "TRANSPORT_POLICY_DENIED" | "PROXY_BUDGET_EXCEEDED" | "PROXY_ERROR" | "PROXY_NETWORK_ERROR" | "PROXY_RATE_LIMITED" | "PROXY_POLICY_DENIED" | "DISCOVERY_FAILED" | "TRANSPORT_TIMEOUT" | "TRANSPORT_NETWORK_ERROR" | "TRANSPORT_CANCELLED" | "TRANSPORT_BAD_URL" | "TRANSPORT_BAD_REDIRECT" | "TRANSPORT_REDIRECT_LIMIT" | "TRANSPORT_SIZE_LIMIT" | "job.cancelled" | "job.invalid-input" | "job.invalid-config" | "job.invalid-options" | "job.invalid-selection" | "job.invalid-state" | "job.duplicate" | "job.discovery-failed" | "job.empty-resource" | "job.deferred-limit" | "job.plan-empty" | "job.plan-invalid" | "job.no-images" | "job.no-usable-tiles" | "job.partial-discarded" | "job.resource-limit" | "job.unknown" | "job.stale" | "job.unknown-format" | "discovery.no-image" | "discovery.no-level" | "TILE_DECODE_FAILED" | "tile.processing-failed" | "output.canvas-limit" | "output.encode-failed" | "output.write-failed" | "output.exists" | "output.destination-denied" | "output.unsupported-extension" | "output.unavailable" | "output.no-parent" | "output.launch-failed" | "output.launch-task-failed" | "output.denied" | "output.not-found" | "output.invoke-failed" | "PLAN_INVALID" | "OUTPUT_ALLOCATION_FAILED" | "OUTPUT_SURFACE_UNAVAILABLE" | "OUTPUT_ENCODE_FAILED" | "OUTPUT_FAILED" | "OUTPUT_DENIED" | "START_FAILED" | "CHOICE_FAILED" | "INVALID_URL" | "INVALID_SETTINGS" | "NO_IMAGE_FOUND" | "handoff.rejected" | "desktop.invalid-settings" | "desktop.invalid-source" | "desktop.result-retired" | "desktop.registration-failed" | "native.internal" | "shell.lock" | "binding.invalid-value" | "interaction.expired" | "auth.forbidden-header";
 
 /**
  * Stable ordered catalog projection (never exposes private core enums).
@@ -266,32 +240,6 @@ export interface DiagnosticRecord {
     fields: Record<string, DiagnosticValue>;
 }
 
-export interface Error {
-    retry_after_ms?: number;
-    /**
-     * Stable error code. Rewrite through [`Error::with_code`] so the
-     * derived `retryable` verdict never disagrees with it.
-     */
-    code: ErrorCode;
-    phase: ErrorPhase;
-    /**
-     * Derived from `code` and `http` by [`crate::retry::is_retryable`]
-     * (job-level aggregates derive it from their retained failure set via
-     * [`crate::retry::aggregate_retryable`]); every construction and
-     * rewrite recomputes it so it never contradicts its facts.
-     */
-    retryable?: boolean;
-    message: string;
-    limit?: LimitContext;
-    request?: string;
-    transport?: ErrorTransport;
-    blocked_reason?: BlockedReason;
-    resource_kind?: ResourceKind;
-    http?: number;
-    preview?: string;
-    detail?: string;
-}
-
 export interface FinishRequest {
     canvas: Size | undefined;
     format: OutputFormat;
@@ -315,7 +263,6 @@ export interface Host {
     choosePartial(missing: MissingTiles,): Promise<RecoveryChoice>;
     checkpoint(gate: Gate,): Promise<void>;
     sleep(delay_ms: number,): Promise<void>;
-    transport(): Promise<ErrorTransport | null>;
     report(progress: Progress): void;
     warn(message: string): void;
     settle(): Promise<void>;
@@ -356,8 +303,6 @@ export type BlockedReason = "access-required" | "blocked-ipv4" | "blocked-ipv6" 
 export type DiagnosticLevel = "trace" | "debug" | "info" | "warn" | "error";
 
 export type DiagnosticValue = string | number | boolean;
-
-export type ErrorPhase = "validation" | "discovery" | "acquisition" | "decode" | "processing" | "output" | "publication" | "cleanup";
 
 export type ErrorTransport = "direct" | "metadata-proxy" | "browser-session" | "native" | "display-only";
 

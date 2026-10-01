@@ -2,29 +2,10 @@
 //! flow through validation, filesystem fetch, and assembly with scoped
 //! credential scope and typed errors preserved.
 
-use dezoomify::model::ErrorCode;
-use std::path::PathBuf;
+use dezoomify::model::Error;
 
 mod support;
-
-fn temp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "dezoomify-native-local-{}-{name}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    dir
-}
-
-fn scenario_payload(name: &str) -> Vec<u8> {
-    std::fs::read(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../testdata/scenarios/native/cli-dzi/payloads/fixtures.test/cli")
-            .join(name),
-    )
-    .unwrap_or_else(|e| panic!("read payload {name}: {e}"))
-}
+use support::{scenario_payload, temp_dir};
 
 fn write_tiles(work: &std::path::Path) {
     for tile in ["0_0", "1_0", "0_1", "1_1"] {
@@ -61,7 +42,8 @@ fn plain_path_input_with_file_uri_tiles_assembles() {
         .unwrap_or_else(|e| {
             panic!(
                 "plain-path local input succeeds: {} ({})",
-                e.message, e.code
+                e,
+                e.cause().kind()
             )
         });
     assert_eq!(outcome.tile_count, 4);
@@ -87,7 +69,7 @@ fn file_uri_input_with_plain_path_tiles_assembles() {
     let file_uri = format!("file://{}", manifest.to_str().expect("utf8 input"));
     let output = work.join("local.png");
     let outcome = support::run_file(&file_uri, &output, |_| {})
-        .unwrap_or_else(|e| panic!("file:// local input succeeds: {} ({})", e.message, e.code));
+        .unwrap_or_else(|e| panic!("file:// local input succeeds: {e} ({})", e.cause().kind()));
     assert_eq!(outcome.tile_count, 4);
     assert_eq!(
         (
@@ -104,11 +86,11 @@ fn file_uri_with_remote_host_is_rejected_typed() {
     let output = work.join("out.png");
     let error = support::run_file("file://other.test/tile.png", &output, |_| {})
         .expect_err("remote file host must be rejected");
-    assert_eq!(error.code, ErrorCode::JobInvalidInput);
+    assert!(matches!(error, Error::InvalidInput { .. }));
     assert!(
-        !error.message.contains("other.test"),
+        !error.to_string().contains("other.test"),
         "error must not leak the rejected host: {}",
-        error.message
+        error
     );
     assert!(!output.exists());
 }

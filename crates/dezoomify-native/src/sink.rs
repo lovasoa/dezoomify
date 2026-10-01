@@ -41,9 +41,7 @@ use crate::imaging::{
     render_iiif_dir, DecodedTile,
 };
 use crate::output::{partial_path_for, validate_destination, write_iiif_dir};
-use dezoomify::model::{
-    Error, ErrorCode, ErrorPhase, LimitContext, LimitReason, OutputFormat, ReusedTile, Size,
-};
+use dezoomify::model::{Error, LimitContext, LimitReason, OutputFormat, ReusedTile, Size};
 use dezoomify::Vec2d;
 use image::RgbaImage;
 
@@ -202,33 +200,20 @@ impl Sink {
             .checked_mul(u64::from(height))
             .and_then(|pixels| pixels.checked_mul(4));
         let Some(bytes) = required else {
-            return Err(crate::output::memory_limit(
-                format!(
-                    "composed image {width}x{height} needs over 16 EiB of canvas memory, but only {} is currently available; save a smaller level with --max-width",
-                    describe_bytes(available)
-                ),
-                LimitContext {
-                    reason: LimitReason::Memory,
-                    dimensions: Some(Size { width, height }),
-                    bytes_required: None,
-                    bytes_available: Some(available),
-                },
-            ));
+            return Err(crate::output::memory_limit(LimitContext {
+                reason: LimitReason::Memory,
+                dimensions: Some(Size { width, height }),
+                bytes_required: None,
+                bytes_available: Some(available),
+            }));
         };
         if crate::imaging::exceeds_available_memory(bytes, available) {
-            return Err(crate::output::memory_limit(
-                format!(
-                    "composed image {width}x{height} needs {} of canvas memory, but only {} is currently available; save a smaller level with --max-width",
-                    describe_bytes(bytes),
-                    describe_bytes(available)
-                ),
-                LimitContext {
-                    reason: LimitReason::Memory,
-                    dimensions: Some(Size { width, height }),
-                    bytes_required: Some(bytes),
-                    bytes_available: Some(available),
-                },
-            ));
+            return Err(crate::output::memory_limit(LimitContext {
+                reason: LimitReason::Memory,
+                dimensions: Some(Size { width, height }),
+                bytes_required: Some(bytes),
+                bytes_available: Some(available),
+            }));
         }
         self.stats.canvas_bytes = bytes;
         self.width = width;
@@ -279,24 +264,15 @@ impl Sink {
         if overlaps {
             let bytes = tile_bytes(&tile.image);
             if self.retained_bytes.saturating_add(bytes) > self.retain_cap_bytes {
-                return Err(crate::output::memory_limit(
-                    format!(
-                        "overlapping-tile retention of a {}x{} image needs {}, but only {} of retention is configured; save a smaller level with --max-width",
-                        self.width,
-                        self.height,
-                        describe_bytes(self.retained_bytes.saturating_add(bytes)),
-                        describe_bytes(self.retain_cap_bytes)
-                    ),
-                    LimitContext {
-                        reason: LimitReason::Memory,
-                        dimensions: Some(Size {
-                            width: self.width,
-                            height: self.height,
-                        }),
-                        bytes_required: Some(self.retained_bytes.saturating_add(bytes)),
-                        bytes_available: Some(self.retain_cap_bytes),
-                    },
-                ));
+                return Err(crate::output::memory_limit(LimitContext {
+                    reason: LimitReason::Memory,
+                    dimensions: Some(Size {
+                        width: self.width,
+                        height: self.height,
+                    }),
+                    bytes_required: Some(self.retained_bytes.saturating_add(bytes)),
+                    bytes_available: Some(self.retain_cap_bytes),
+                }));
             }
             self.retained_bytes += bytes;
             self.pending.insert(ordinal, tile);
@@ -352,19 +328,12 @@ impl Sink {
     ) -> Result<(), Error> {
         let bytes = tile_bytes(&tile.image);
         if self.spool_bytes.saturating_add(bytes) > self.spool_cap_bytes {
-            return Err(crate::output::memory_limit(
-                format!(
-                    "tile spooling needs {}, but only {} of spooling budget is configured; save a smaller level with --max-width",
-                    describe_bytes(self.spool_bytes.saturating_add(bytes)),
-                    describe_bytes(self.spool_cap_bytes)
-                ),
-                LimitContext {
-                    reason: LimitReason::Memory,
-                    dimensions: None,
-                    bytes_required: Some(self.spool_bytes.saturating_add(bytes)),
-                    bytes_available: Some(self.spool_cap_bytes),
-                },
-            ));
+            return Err(crate::output::memory_limit(LimitContext {
+                reason: LimitReason::Memory,
+                dimensions: None,
+                bytes_required: Some(self.spool_bytes.saturating_add(bytes)),
+                bytes_available: Some(self.spool_cap_bytes),
+            }));
         }
         let dir = self.spool_dir()?;
         let path = dir.join(format!("tile-{ordinal}.raw"));
@@ -444,30 +413,23 @@ impl Sink {
             let bytes = std::fs::read(&path)
                 .map_err(|e| crate::output::write_failed("spool read failed", &e))?;
             if bytes.len() < 24 {
-                return Err(Error::new(
-                    ErrorCode::OutputWriteFailed,
-                    ErrorPhase::Output,
-                    "spool entry truncated",
-                ));
+                return Err(Error::WriteFailed {
+                    detail: Some("spool entry truncated".into()),
+                });
             }
             let w = u32::from_le_bytes(bytes[0..4].try_into().unwrap_or([0; 4]));
             let h = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
             let pixels = &bytes[24..];
             let expected = (w as usize).saturating_mul(h as usize).saturating_mul(4);
             if pixels.len() != expected || w == 0 || h == 0 {
-                return Err(Error::new(
-                    ErrorCode::OutputWriteFailed,
-                    ErrorPhase::Output,
-                    "spool entry corrupt",
-                ));
+                return Err(Error::WriteFailed {
+                    detail: Some("spool entry corrupt".into()),
+                });
             }
-            let image = RgbaImage::from_raw(w, h, pixels.to_vec()).ok_or_else(|| {
-                Error::new(
-                    ErrorCode::OutputWriteFailed,
-                    ErrorPhase::Output,
-                    "spool entry corrupt",
-                )
-            })?;
+            let image =
+                RgbaImage::from_raw(w, h, pixels.to_vec()).ok_or_else(|| Error::WriteFailed {
+                    detail: Some("spool entry corrupt".into()),
+                })?;
             self.paint(tile.ordinal, &image, tile.destination, tile.extent);
         }
         self.remove_spool_dir();
@@ -537,11 +499,7 @@ impl Sink {
             reused_tiles,
         } = params;
         if cancelled.load(Ordering::SeqCst) {
-            return Err(Error::new(
-                dezoomify::model::ErrorCode::JobCancelled,
-                ErrorPhase::Cleanup,
-                "job cancelled before completion",
-            ));
+            return Err(Error::Cancelled);
         }
         // Kept partials publish to the `.partial` sibling so a partial file
         // never masquerades as a complete save. Fail-closed on collision.
@@ -553,12 +511,8 @@ impl Sink {
             dest_path.to_path_buf()
         };
         validate_destination(&dest, &format, overwrite)?;
-        let canvas = self.canvas.clone().ok_or_else(|| {
-            Error::new(
-                ErrorCode::HostInternal,
-                ErrorPhase::Acquisition,
-                "commit without assembled canvas",
-            )
+        let canvas = self.canvas.clone().ok_or_else(|| Error::Internal {
+            detail: Some("commit without assembled canvas".into()),
         })?;
         let (icc, exif) = self.first_meta(reused_tiles);
         let encoded_len: u64;
@@ -717,21 +671,6 @@ pub(crate) fn tile_bytes(image: &RgbaImage) -> u64 {
     u64::from(image.width())
         .saturating_mul(u64::from(image.height()))
         .saturating_mul(4)
-}
-
-/// Human-readable byte counts for limit errors (exact bytes plus a
-/// GiB/MiB approximation).
-fn describe_bytes(bytes: u64) -> String {
-    const GIB: f64 = (1u64 << 30) as f64;
-    const MIB: f64 = (1u64 << 20) as f64;
-    let approx = bytes as f64;
-    if approx >= GIB {
-        format!("{:.1} GiB ({bytes} bytes)", approx / GIB)
-    } else if approx >= MIB {
-        format!("{:.1} MiB ({bytes} bytes)", approx / MIB)
-    } else {
-        format!("{bytes} bytes")
-    }
 }
 
 #[cfg(test)]
