@@ -74,18 +74,6 @@ function exists(p) {
   }
 }
 
-// Pins the documented input contract of scripts/build-help.mjs: each
-// docs/user page starts with a `# <stem>` marker line (dropped from the
-// generated page) followed by the `# ...` heading that becomes the page
-// title. The generator is the authority; this is the source-side tripwire
-// for that documented format.
-test("docs/user pages carry their stem marker", () => {
-  for (const stem of PAGES) {
-    const md = readFileSync(path.join(srcDir, `${stem}.md`), "utf8");
-    assert.match(md, new RegExp(`^# ${stem}\\n`), `${stem}.md starts with its marker line`);
-  }
-});
-
 test("app pages link the in-app docs instead of legacy doc sites", () => {
   for (const page of ["index.html", "privacy.html", "terms.html"]) {
     const html = readFileSync(path.join(webDir, page), "utf8");

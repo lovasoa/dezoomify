@@ -603,10 +603,20 @@ pub enum Error {
         #[serde(flatten)]
         failure: Failure,
     },
+    /// The derived verdict and largest hint of the settled failure set;
+    /// the evidence itself lives in `missing[]` and the diagnostics report.
     #[error("no usable tiles were acquired")]
-    NoUsableTiles { failures: Vec<Error> },
+    NoUsableTiles {
+        transient: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retry_after_ms: Option<u64>,
+    },
     #[error("partial output was discarded")]
-    PartialDiscarded { failures: Vec<Error> },
+    PartialDiscarded {
+        transient: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retry_after_ms: Option<u64>,
+    },
 
     // ---- Tiles ----
     #[error("a tile could not be decoded{}", .failure.suffix())]
@@ -871,8 +881,8 @@ impl Error {
             Self::DiscoveryFailed {
                 cause: Some(cause), ..
             } => cause.retryable(),
-            Self::NoUsableTiles { failures } | Self::PartialDiscarded { failures } => {
-                failures.iter().any(Self::retryable)
+            Self::NoUsableTiles { transient, .. } | Self::PartialDiscarded { transient, .. } => {
+                *transient
             }
             _ => false,
         }
@@ -891,14 +901,19 @@ impl Error {
             | Self::RateLimited {
                 retry_after_ms: Some(hint),
                 ..
+            }
+            | Self::NoUsableTiles {
+                retry_after_ms: Some(hint),
+                ..
+            }
+            | Self::PartialDiscarded {
+                retry_after_ms: Some(hint),
+                ..
             } => Some(*hint),
             Self::Resource { source, .. } => source.retry_after_ms(),
             Self::DiscoveryFailed {
                 cause: Some(cause), ..
             } => cause.retry_after_ms(),
-            Self::NoUsableTiles { failures } | Self::PartialDiscarded { failures } => {
-                failures.iter().filter_map(Self::retry_after_ms).max()
-            }
             _ => None,
         }
     }
@@ -1391,13 +1406,8 @@ mod tests {
         assert_eq!(throttled.cause().kind(), "rate-limited");
         // Aggregates report the largest retained hint.
         let aggregate = Error::NoUsableTiles {
-            failures: vec![
-                throttled.clone(),
-                Error::Timeout {
-                    transport: ErrorTransport::Native,
-                    failure: Failure::default(),
-                },
-            ],
+            transient: true,
+            retry_after_ms: Some(9_000),
         };
         assert_eq!(aggregate.retry_after_ms(), Some(9_000));
     }

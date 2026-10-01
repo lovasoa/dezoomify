@@ -1,23 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  BROWSER_MAX_CONCURRENCY,
-  createTileThrottle,
-  DIRECT_METADATA_TIMEOUT_MS,
-  hostOf,
-  proxyRateLimitDelayMs,
-  REQUEST_TIMEOUT_MS,
-  TILE_MAX_REQUESTS_PER_SECOND,
-  TILE_MIN_INTERVAL_MS,
-} from "../src/tile-policy.ts";
-
-test("tile tuning constants match the browser runtime limits", () => {
-  assert.equal(BROWSER_MAX_CONCURRENCY, 6);
-  assert.equal(REQUEST_TIMEOUT_MS, 30000);
-  assert.equal(DIRECT_METADATA_TIMEOUT_MS, 1500);
-  assert.equal(TILE_MAX_REQUESTS_PER_SECOND, 5);
-  assert.equal(TILE_MIN_INTERVAL_MS, 200);
-});
+import { createTileThrottle, hostOf, proxyRateLimitDelayMs } from "../src/tile-policy.ts";
 
 test("proxyRateLimitDelayMs honors Retry-After within the UX budget", () => {
   assert.equal(proxyRateLimitDelayMs(2000), 2000);

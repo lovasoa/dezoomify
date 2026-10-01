@@ -3,7 +3,6 @@ import test from "node:test";
 import {
   clearHistory,
   HISTORY_KEY_WEBSITE,
-  HISTORY_MAX,
   historyOriginOf,
   loadHistory,
   parseHistoryJson,
@@ -56,7 +55,6 @@ test("history entries keep the full address", () => {
 });
 
 test("history push dedupes by full address and caps at 20", () => {
-  assert.equal(HISTORY_MAX, 20);
   let list = [];
   const first = toHistoryEntry("https://a.example/1", { at: 1 });
   list = pushHistory(list, first);

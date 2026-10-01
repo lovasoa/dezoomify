@@ -48,7 +48,10 @@ fn rejects_unknown_tasks_targets_and_lanes() {
         &["ci", "bogus"],
         &["release", "bogus"],
         &["test", "bogus"],
+        &["test", "--live"],
         &["test", "live"],
+        &["sources", "verify"],
+        &["parity", "validate"],
     ];
     for args in cases {
         let out = xtask(args);
