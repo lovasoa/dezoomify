@@ -13,7 +13,8 @@
     "dezoomify:allow-open-saved-output",
     "dezoomify:allow-pause-job",
     "dezoomify:allow-release-job",
-    "dezoomify:allow-resume-job"
+    "dezoomify:allow-resume-job",
+    "dezoomify:allow-validate-settings"
   ],
   "windows": [
     "main"
@@ -27,7 +28,8 @@
       "open_saved_output",
       "pause_job",
       "release_job",
-      "resume_job"
+      "resume_job",
+      "validate_settings"
     ],
     "decoders": [
       "png",

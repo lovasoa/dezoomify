@@ -10,6 +10,7 @@ import {
   boundDiagnosticReport,
   cancelAllQueueEntries,
   cancelQueueEntry,
+  causeOf,
   clearHistory as clearHistoryStore,
   detailOf,
   finishActiveQueueEntry,
@@ -52,6 +53,7 @@ import {
   type NativeInvocation,
   openExternalLink,
   readNativeDiagnostics,
+  validateSettings,
 } from "./native.ts";
 import type { DesktopQueue } from "./queue.ts";
 import {
@@ -247,9 +249,23 @@ function invokeDetail(error: unknown, fallback: string): string {
         : fallback;
 }
 
-function runPersistSettingsFromPanel(): void {
-  const errors = saveSettings(desktopSettings);
-  settingsError = errors.length ? errors.join("; ") : null;
+// Rust (`parse_settings`) is the single validator: an edit is validated
+// before it is persisted, a refused edit persists nothing (fail closed,
+// keeps the last good payload), and its typed reason is shown until the
+// next accepted change.
+async function runPersistSettingsFromPanel(): Promise<void> {
+  const candidate = desktopSettings;
+  try {
+    await validateSettings(candidate);
+    if (desktopSettings !== candidate) return;
+    const errors = saveSettings(candidate);
+    settingsError = errors.length ? errors.join("; ") : null;
+  } catch (error) {
+    if (desktopSettings !== candidate) return;
+    settingsError = isJobError(error)
+      ? (detailOf(error) ?? t("desktop.settings.invalidSubmit"))
+      : invokeDetail(error, t("desktop.settings.invalidSubmit"));
+  }
   update();
 }
 
@@ -410,7 +426,7 @@ function launchNativeJob(trimmed: string): void {
       if (!owns(attempt)) return;
       attempt.settled = true;
       attempt.partial = null;
-      if (isJobError(error) && error.kind === "cancelled") {
+      if (isJobError(error) && causeOf(error).kind === "cancelled") {
         stopHeartbeat();
         settleActiveQueue("cancelled");
         update();
@@ -952,7 +968,7 @@ function update() {
               error: settingsError,
               onChange: (settings: DesktopSettings) => {
                 desktopSettings = settings;
-                runPersistSettingsFromPanel();
+                void runPersistSettingsFromPanel();
               },
               onReset: runResetDesktopSettings,
             }),

@@ -84,6 +84,18 @@ fn is_retryable(error: dezoomify::model::Error) -> bool {
     error.retryable()
 }
 
+/// Validate raw settings without starting a job: `parse_settings` is the
+/// single validator, so the webview persists an edit only after the shell
+/// accepts it and never mirrors its rules.
+#[tauri::command]
+fn validate_settings(settings: serde_json::Value) -> Result<(), Error> {
+    parse_settings(&settings)
+        .map(|_| ())
+        .map_err(|message| Error::InvalidSettings {
+            failure: message.into(),
+        })
+}
+
 #[tauri::command]
 async fn open_saved_output(
     table: State<'_, Mutex<JobTable>>,
@@ -166,12 +178,11 @@ async fn dezoomify(
     let settings = settings
         .map(|value| parse_settings(&value))
         .transpose()
-        .map_err(invalid)?
+        .map_err(|message| Error::InvalidSettings {
+            failure: message.into(),
+        })?
         .unwrap_or_else(crate::settings::DesktopSettings::with_defaults);
-    let registration = lock_table(&state)
-        .map_err(|error| invalid(error.message))?
-        .insert(&job)
-        .map_err(|error| invalid(error.message))?;
+    let registration = lock_table(&state)?.insert(&job)?;
     if let Err(error) = app.emit(
         crate::jobs::CHANNEL_REGISTERED,
         serde_json::json!({"job": job}),
@@ -201,10 +212,9 @@ async fn dezoomify(
             Ok(host) => host,
             Err(error) => {
                 registration.finish(None);
-                registration.diagnostics.finish(
-                    "failed",
-                    serde_json::json!({"code": error.code, "message": error.message}),
-                );
+                registration
+                    .diagnostics
+                    .finish("failed", serde_json::json!({ "error": error }));
                 return Err(error);
             }
         };

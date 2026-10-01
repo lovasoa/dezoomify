@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import test from "node:test";
 import { act, click, makeContainer } from "../../../test/react-dom.mjs";
+import { loadSettings } from "../src/settings.ts";
 
 // linkedom documents lack `oninput`, which keeps React's text-input change
 // detection disabled. Arm it before react-dom loads (through main.ts) so
@@ -71,6 +72,7 @@ registerHooks({
           export const listenDeepLinks = async () => {};
           export const openExternalLink = async () => {};
           export const readNativeDiagnostics = async () => { throw new Error("No native report"); };
+          export const validateSettings = async (settings) => { await globalThis.desktopTestNative.validateSettings?.(settings); };
         `,
       };
     return nextLoad(url, context);
@@ -221,4 +223,21 @@ test("a typed Rust save rejection shows its reason and persists nothing", async 
   const settingsError = root.querySelector("#dz-settings-error");
   assert.ok(settingsError, "the settings panel surfaces the Rust rejection reason");
   assert.match(settingsError.textContent, /invalid header: bad name/);
+});
+
+test("a refused settings edit shows the shell reason and persists nothing", async () => {
+  const retries = root.querySelector('input[aria-label="Retries"]');
+  assert.ok(retries, "retries stay in the settings panel");
+  globalThis.desktopTestNative.validateSettings = async (settings) => {
+    if (settings.retries > 100) throw { kind: "invalid-settings", detail: "invalid retries: 101" };
+  };
+  typeInto(retries, 5);
+  await tick();
+  assert.equal(loadSettings().retries, 5, "an accepted edit is persisted");
+  typeInto(retries, 101);
+  await tick();
+  const settingsError = root.querySelector("#dz-settings-error");
+  assert.match(settingsError.textContent, /invalid retries: 101/);
+  assert.equal(loadSettings().retries, 5, "the refused edit persists nothing");
+  delete globalThis.desktopTestNative.validateSettings;
 });
