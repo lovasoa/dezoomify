@@ -137,19 +137,34 @@ mod tests {
         let DiscoveredEntry::Ready(image) = catalog.into_entries().pop().unwrap() else {
             panic!("IIP metadata did not produce an image")
         };
+        let sizes: Vec<_> = image
+            .levels
+            .iter()
+            .map(|level| level.source.image_size())
+            .collect();
+        assert_eq!(
+            sizes,
+            [
+                Some(Vec2d { x: 256, y: 256 }),
+                Some(Vec2d { x: 512, y: 512 })
+            ]
+        );
         assert_eq!(image.levels.len(), 2);
-        assert_eq!(
-            image.levels[0].source.image_size(),
-            Some(Vec2d { x: 256, y: 256 })
-        );
-        assert_eq!(
-            image.levels[1].source.image_size(),
-            Some(Vec2d { x: 512, y: 512 })
-        );
         let TileSource::Grid(low_plan) = &image.levels[0].source else {
             panic!("IIP levels must be grids")
         };
         assert_eq!(low_plan.count(), 1);
+        let TileSource::Grid(plan) = &image.levels[1].source else {
+            panic!("IIP levels must be grids")
+        };
+        assert_eq!(plan.count(), 4);
+        let urls: Vec<_> = plan
+            .tiles_row_major()
+            .map(Result::unwrap)
+            .map(|tile| tile.request.uri)
+            .collect();
+        assert_eq!(urls[0], "http://test.com/&JTL=1,0");
+        assert_eq!(urls[2], "http://test.com/&JTL=1,2");
         assert_eq!(
             low_plan
                 .tiles_row_major()
@@ -160,13 +175,6 @@ mod tests {
                 .uri,
             "http://test.com/&JTL=0,0"
         );
-        let TileSource::Grid(plan) = &image.levels[1].source else {
-            panic!("IIP levels must be grids")
-        };
-        assert_eq!(plan.count(), 4);
-        let tiles: Vec<_> = plan.tiles_row_major().map(Result::unwrap).collect();
-        assert_eq!(tiles[0].request.uri, "http://test.com/&JTL=1,0");
-        assert_eq!(tiles[2].request.uri, "http://test.com/&JTL=1,2");
     }
 
     #[test]

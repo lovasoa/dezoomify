@@ -7,9 +7,8 @@ use std::{
 };
 
 // ── shared discovery stubs ────────────────────────────────────────
-// One fetch stub and plan helpers for every core test, in-crate and
-// integration. The bodies live in `src/test_support.rs`; this module
-// re-exposes them under `support::` and adds the full Host stub below.
+// The single fetch stub and plan helpers live in `src/test_support.rs`
+// (shared with in-crate format tests); this module adds the Host stub.
 pub use dezoomify::{core, model};
 #[path = "../../src/test_support.rs"]
 mod stub;

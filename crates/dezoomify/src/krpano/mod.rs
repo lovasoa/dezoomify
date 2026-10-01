@@ -562,13 +562,7 @@ mod tests {
         // so relative galleria_04.tiles/* URLs resolved against the app page
         // (/beta/) and every tile 404'd. The core must fall back to the
         // request URI, keeping tiles on krpano.com.
-        let xml = br#"<krpano version="1.16">
-            <image type="CUBE" multires="true" tilesize="512" progressive="false">
-                <level tiledimagewidth="955" tiledimageheight="955">
-                    <cube url="galleria_04.tiles/mres_%s/l2/%v/l2_%s_%v_%h.jpg" />
-                </level>
-            </image>
-        </krpano>"#;
+        let xml = br#"<krpano version="1.16"><image type="CUBE" multires="true" tilesize="512" progressive="false"><level tiledimagewidth="955" tiledimageheight="955"><cube url="galleria_04.tiles/mres_%s/l2/%v/l2_%s_%v_%h.jpg" /></level></image></krpano>"#;
         for with_empty in [false, true] {
             let uri = "https://krpano.com/panos/andreabiffi/galleria_04.xml";
             let (catalog, _) =
@@ -585,14 +579,7 @@ mod tests {
 
     #[test]
     fn inline_preview_does_not_trigger_an_include_request() {
-        let xml = br#"<krpano>
-            <include url="%VIEWER%/plugins/minimap_zoomrect.xml"/>
-            <layer name="minimap" url="minimap.jpg"/>
-            <image>
-                <preview url="https://krpano.com/panos/eiffeltower/eiffeltower.tiles/preview.jpg"/>
-                <flat url="https://krpano.com/panos/eiffeltower/eiffeltower.tiles/l%l/%00v/l%l_%00v_%00h.jpg" multires="512,512x844,1152x1898,2176x3586,4352x7172,8832x14554,17664x29110,35328x58220"/>
-            </image>
-        </krpano>"#;
+        let xml = br#"<krpano><include url="%VIEWER%/plugins/minimap_zoomrect.xml"/><layer name="minimap" url="minimap.jpg"/><image><preview url="https://krpano.com/panos/eiffeltower/eiffeltower.tiles/preview.jpg"/><flat url="https://krpano.com/panos/eiffeltower/eiffeltower.tiles/l%l/%00v/l%l_%00v_%00h.jpg" multires="512,512x844,1152x1898,2176x3586,4352x7172,8832x14554,17664x29110,35328x58220"/></image></krpano>"#;
         let image = image(discover_single_resource(
             "https://krpano.com/releases/1.24/viewer/examples/minimap/eiffeltower_minimap.xml",
             xml.to_vec(),
@@ -606,16 +593,7 @@ mod tests {
 
     #[test]
     fn test_cube() {
-        let image = image(catalog_from_xml(
-            "http://test.com",
-            br#"<krpano showerrors="false" logkey="false">
-            <image type="cube" multires="true" tilesize="512" progressive="false" multiresthreshold="-0.3">
-                <level download="view" decode="view" tiledimagewidth="1000" tiledimageheight="100">
-                    <cube url="http://example.com/%s/%r/%c.jpg"/>
-                </level>
-            </image>
-            </krpano>"#,
-        ));
+        let image = image(catalog_from_xml("http://test.com", br#"<krpano showerrors="false" logkey="false"><image type="cube" multires="true" tilesize="512" progressive="false" multiresthreshold="-0.3"><level download="view" decode="view" tiledimagewidth="1000" tiledimageheight="100"><cube url="http://example.com/%s/%r/%c.jpg"/></level></image></krpano>"#));
         assert_eq!(image.levels.len(), 6);
         assert_eq!(
             image.levels[0].source.image_size(),
@@ -636,15 +614,21 @@ mod tests {
             format_level_label("Cube", "forward", ""),
             "Krpano Cube forward"
         );
+        let requests = tile_requests(&image.levels[0], 2);
         assert_eq!(
-            tile_requests(&image.levels[0], 2),
-            vec![
-                ("http://example.com/f/1/1.jpg".into(), Vec2d { x: 0, y: 0 }),
-                (
-                    "http://example.com/f/1/2.jpg".into(),
-                    Vec2d { x: 512, y: 0 }
-                ),
-            ]
+            requests
+                .iter()
+                .map(|(uri, _)| uri.as_str())
+                .collect::<Vec<_>>()
+                .join(","),
+            "http://example.com/f/1/1.jpg,http://example.com/f/1/2.jpg"
+        );
+        assert_eq!(
+            requests
+                .iter()
+                .map(|(_, at)| (at.x, at.y))
+                .collect::<Vec<_>>(),
+            [(0, 0), (512, 0)]
         );
     }
 
@@ -661,18 +645,21 @@ mod tests {
             Some(Vec2d { x: 3, y: 4 })
         );
         assert_eq!(format_level_label("Flat", "", ""), "Krpano Flat");
+        let requests = tile_requests(&image.levels[1], 2);
         assert_eq!(
-            tile_requests(&image.levels[1], 2),
-            vec![
-                (
-                    "http://test.com/level=2%20x=01%20y=01".into(),
-                    Vec2d { x: 0, y: 0 }
-                ),
-                (
-                    "http://test.com/level=2%20x=01%20y=02".into(),
-                    Vec2d { x: 0, y: 3 }
-                ),
-            ]
+            requests
+                .iter()
+                .map(|(uri, _)| uri.as_str())
+                .collect::<Vec<_>>()
+                .join(","),
+            "http://test.com/level=2%20x=01%20y=01,http://test.com/level=2%20x=01%20y=02"
+        );
+        assert_eq!(
+            requests
+                .iter()
+                .map(|(_, at)| (at.x, at.y))
+                .collect::<Vec<_>>(),
+            [(0, 0), (0, 3)]
         );
     }
 
@@ -692,27 +679,22 @@ mod tests {
             (94976, 63392),
         ];
         assert_eq!(levels.len(), expected_sizes.len());
-        assert_eq!(
-            levels
-                .iter()
-                .map(|level| level.source.image_size())
-                .collect::<Vec<_>>(),
-            expected_sizes
-                .into_iter()
-                .map(|(x, y)| Some(Vec2d { x, y }))
-                .collect::<Vec<_>>()
-        );
+        let sizes: Vec<_> = levels
+            .iter()
+            .map(|level| level.source.image_size())
+            .collect();
+        let expected: Vec<_> = expected_sizes
+            .into_iter()
+            .map(|(x, y)| Some(Vec2d { x, y }))
+            .collect();
+        assert_eq!(sizes, expected);
         let TileSource::Grid(plan) = &levels[7].source else {
             unreachable!()
         };
         assert_eq!(plan.count(), 5859);
+        let first = plan.tiles_row_major().next().unwrap().unwrap();
         assert_eq!(
-            plan.tiles_row_major()
-                .next()
-                .unwrap()
-                .unwrap()
-                .request
-                .header("Referer"),
+            first.request.header("Referer"),
             Some(
                 "https://pba.lille.fr/gigapixels/Gigapixelweb/gigapixels_1515_bellegambe/gigapixels.tiles/l8/001/l8_001_001.jpg"
             )
@@ -758,10 +740,7 @@ mod tests {
     #[test]
     fn encrypted_xml_decrypted_without_js() {
         let xml = std::fs::read("../../testdata/scenarios/rs-core/formats/payloads/krpano/encrypted/2013-08-09-B/tour.xml").unwrap();
-        let expected =
-            std::fs::read_to_string("../../testdata/scenarios/rs-core/formats/payloads/krpano/encrypted/2013-08-09-B/plaintext.xml")
-                .unwrap()
-                .replace("\r\n", "\n");
+        let expected = std::fs::read_to_string("../../testdata/scenarios/rs-core/formats/payloads/krpano/encrypted/2013-08-09-B/plaintext.xml").unwrap().replace("\r\n", "\n");
         let plaintext = String::from_utf8(decrypt_xml(&xml, None).unwrap()).unwrap();
         assert_eq!(
             plaintext, expected,
@@ -851,7 +830,11 @@ mod tests {
                 "https://example.com/panos/map_core.js,https://example.com/panos/tour.js,https://example.com/panos/krpano.js",
             ),
         ] {
-            assert_eq!(viewer_js_candidates_for_xml(xml).join(","), expected, "{xml}");
+            assert_eq!(
+                viewer_js_candidates_for_xml(xml).join(","),
+                expected,
+                "{xml}"
+            );
         }
     }
 
@@ -887,40 +870,10 @@ mod tests {
     #[test]
     fn viewer_pages_follow_their_declared_krpano_sources() {
         let cases: &[(&str, &[(&[u8], Option<&str>)], &str)] = &[
-            (
-                "https://example.com/viewer/krpano.html?xml=examples/tour.xml",
-                &[(
-                    br#"<html><script src="krpano.js"></script><script>
-                    embedpano({xml:"krpano.xml", passQueryParameters:"xml"});
-                </script></html>"#,
-                    None,
-                )],
-                "https://example.com/viewer/examples/tour.xml",
-            ),
-            (
-                "https://example.com/krpano.js",
-                &[(b"function embedpano(opts) { /* krpano viewer */ }", None)],
-                "https://example.com/tour.xml",
-            ),
-            (
-                "https://example.com/pano/index.html",
-                &[(
-                    br#"<html><script>
-                    function embedpano(opts) { return opts; }
-                    embedpano({xml: "scenes/custom.xml", target: "pano"});
-                </script></html>"#,
-                    None,
-                )],
-                "https://example.com/pano/scenes/custom.xml",
-            ),
-            (
-                "https://example.com/viewer.js",
-                &[(
-                    b"function createPanoViewer(opts) { return buildViewer(opts); }",
-                    None,
-                )],
-                "https://example.com/tour.xml",
-            ),
+            ("https://example.com/viewer/krpano.html?xml=examples/tour.xml", &[(br#"<html><script src="krpano.js"></script><script>embedpano({xml:"krpano.xml", passQueryParameters:"xml"});</script></html>"#, None)], "https://example.com/viewer/examples/tour.xml"),
+            ("https://example.com/krpano.js", &[(b"function embedpano(opts) { /* krpano viewer */ }", None)], "https://example.com/tour.xml"),
+            ("https://example.com/pano/index.html", &[(br#"<html><script>function embedpano(opts) { return opts; } embedpano({xml: "scenes/custom.xml", target: "pano"});</script></html>"#, None)], "https://example.com/pano/scenes/custom.xml"),
+            ("https://example.com/viewer.js", &[(b"function createPanoViewer(opts) { return buildViewer(opts); }", None)], "https://example.com/tour.xml"),
         ];
         for (input, replies, next) in cases {
             let (_, requests) = crate::test_support::discover(SPEC, input, replies);
@@ -951,16 +904,12 @@ mod tests {
         for http_failure in [false, true] {
             let (result, requests) = viewer_failures(http_failure);
             assert!(result.is_err());
-            assert!(
-                requests
-                    .iter()
-                    .any(|request| request.uri == "https://example.com/pano/first.js")
-            );
-            assert!(
-                requests
-                    .iter()
-                    .any(|request| request.uri == "https://example.com/pano/second.js")
-            );
+            let uris: Vec<_> = requests
+                .iter()
+                .map(|request| request.uri.as_str())
+                .collect();
+            assert!(uris.contains(&"https://example.com/pano/first.js"));
+            assert!(uris.contains(&"https://example.com/pano/second.js"));
         }
     }
     fn viewer_failures(

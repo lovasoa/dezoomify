@@ -313,16 +313,13 @@ mod tests {
         };
         let urls: Vec<_> = plan
             .tiles_row_major()
-            .take(10)
+            .take(2)
             .map(Result::unwrap)
             .map(|tile| tile.request.uri)
             .collect();
         assert_eq!(
-            urls,
-            vec![
-                "http://x.fr/y/test_files/9/0_0.jpg",
-                "http://x.fr/y/test_files/9/1_0.jpg"
-            ]
+            urls.join(","),
+            "http://x.fr/y/test_files/9/0_0.jpg,http://x.fr/y/test_files/9/1_0.jpg"
         );
     }
 

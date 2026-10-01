@@ -11,10 +11,8 @@ use super::core::{
 use super::model::{Error, ResourceRead, ResourceResponse};
 use std::cell::RefCell;
 
-/// Discovery over an injected byte lookup: the one fetch stub. `lookup` maps
-/// request URIs to `Ok((bytes, final_uri))` replies or an explicit error; a
-/// miss fails `discovery-failed` naming the URI it could not find. Every
-/// request is logged in order alongside the result.
+/// Discovery over an injected byte lookup: the one fetch stub. Misses fail
+/// `discovery-failed` naming the URI; every request is logged in order.
 pub fn discover_with_responses(
     registry: Registry,
     input: &str,
@@ -61,8 +59,7 @@ pub fn discover_with(
     .0
 }
 
-/// Discovery with positional replies (by request order) and optional final
-/// URIs, for single-format unit tests.
+/// Discovery with positional replies (by request order) and final URIs.
 pub fn discover(
     spec: FormatSpec,
     uri: &str,
@@ -80,8 +77,7 @@ pub fn discover(
     })
 }
 
-/// The catalog's single ready image: a deferred entry or an empty catalog
-/// is a stub-level bug, not a case outcome.
+/// The catalog's single ready image; deferred or empty is a stub-level bug.
 pub fn ready_image(catalog: DiscoveryCatalog) -> ResolvedImage {
     match catalog.into_entries().into_iter().next() {
         Some(DiscoveredEntry::Ready(image)) => image,
@@ -92,8 +88,7 @@ pub fn ready_image(catalog: DiscoveryCatalog) -> ResolvedImage {
     }
 }
 
-/// The level's grid: a plain grid source or an adaptive source's declared
-/// grid. Fallible so callers can skip probe-only levels.
+/// The level's grid, or an adaptive source's declared grid.
 pub fn grid(level: &ResolvedLevel) -> Result<&Grid, String> {
     match &level.source {
         TileSource::Grid(grid) => Ok(grid),
