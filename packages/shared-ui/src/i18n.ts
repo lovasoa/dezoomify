@@ -1,33 +1,13 @@
 // Shared-UI message dictionary (English plus French, German, Italian).
 //
-// User-facing copy renders through `t(key, vars)` against one table per
-// locale. English (`en`) is the canonical source: every other locale mirrors
-// it key for key with identical `{placeholders}`. Lookups fall back to
-// English per key, so a missing translation never renders `undefined`.
-// There is deliberately one lookup path only: a new locale adds a sibling
-// table under `locales/` plus a `SUPPORTED_LOCALES` entry, never a second
-// dictionary shape.
+// English (`en`) is the canonical source: every other locale mirrors it key
+// for key with identical `{placeholders}`, and lookups fall back to English
+// per key. Rules for user copy: `packages/shared-ui/AGENTS.md`.
 //
-// Locale selection: hosts call `setLocale()` with an explicit picker choice,
-// or `pickLocale()` with an `Accept-Language` header value or a
-// `navigator.languages` list. Unknown tags fail closed to English.
-// The website documents the picker in `docs/user/website.md`; help bodies
-// stay English and regenerate via `scripts/build-help.mjs`.
-//
-// Rules (see `packages/shared-ui/AGENTS.md`):
-// - User copy goes through `t()`; stable codes, diagnostics, technical logs,
-//   URLs, transport codes, and protocol strings stay literal English.
-// - Brand and product names ("Dezoomify", "Chrome Web Store", "GitHub
-//   Releases", format names such as "PNG") stay literal in code; translators
-//   never rewrite them.
-// - Interpolation is `{name}` substitution only (no plural rules, no
-//   markup). Callers escape with `escapeHtml` when composing `innerHTML`.
-// - Hosts bundle the shared UI directly; there is no `.js` codegen mirror.
-//   `test/ui-i18n.test.mjs` fails when a renderer uses a key outside this
-//   table, when a locale drops a key, or when placeholders diverge per locale.
-//
-// This module is erasable-syntax-only TypeScript (type aliases, plain
-// functions) so node can type-strip it directly in tests.
+// Locale selection: hosts call `setLocale()` (explicit picker choice) or
+// `pickLocale()` (`Accept-Language` / `navigator.languages`); unknown tags
+// fail closed to English. This module is erasable-syntax-only TypeScript so
+// node can type-strip it directly in tests.
 
 import { de } from "./locales/de.ts";
 import { fr } from "./locales/fr.ts";
@@ -200,23 +180,6 @@ const en = {
   "view.access.requesting": "Requesting access…",
   "view.access.allow": "Allow access and continue",
   // Idle input section.
-  "view.idle.intro": "allows you to save",
-  "view.idle.zoomable": "zoomable images",
-  "view.idle.zoomableTitle": "Large images in which you can navigate inside a webpage.",
-  "view.idle.enterThe": "Enter the",
-  "view.idle.urlAbbr": "URL",
-  "view.idle.urlTitle": "Uniform Resource Locator, the address of a webpage",
-  "view.idle.body":
-    'of such an image in the text field below. The image will be saved at maximal resolution. You can then right-click on the image, and choose "Save As" in order to save it as a PNG file on your computer. If it doesn\'t work, read our',
-  "view.idle.troubleLink": "troubleshooting guide",
-  "view.idle.moreInfo": "If you want more information, read our",
-  "view.idle.projectLink": "project page",
-  "view.idle.license1": "This script is released under the",
-  "view.idle.gplLink": "GPL",
-  "view.idle.sourceLink": "See the source code",
-  "view.idle.termsLink": "We decline any responsibility for an illegal use of this software",
-  "view.idle.urlPlaceholder": "URL of the webpage containing your image",
-  "view.idle.urlAria": "URL of the webpage containing your zoomable image",
   "view.idle.clearTitle": "Clear input",
   "view.idle.submit": "Dezoomify !",
   // Job step labels.
@@ -224,22 +187,10 @@ const en = {
   "view.step.preflighting": "Checking the image size…",
   "view.step.downloading": "Saving image tiles…",
   "view.step.saving": "Assembling the final picture…",
-  "view.step.working": "Working…",
   "view.step.contactingDetail": "Contacting the image host…",
-  "view.step.encodingDetail": "Encoding in the app.",
-  "view.step.cleanupDetail": "Cleaning up unfinished files…",
   // Live job section.
-  "view.job.workingOn": "Working on",
-  "view.job.cancel": "Cancel",
-  "view.job.change": "Change",
   "view.job.techDetails": "Technical details & logs",
-  "view.job.oneImage": "1 image",
   "view.job.manyImages": "{count} images",
-  "view.job.autoChoiceFull":
-    "Found {noun}, saving largest that fits ({width}×{height}, {tiles} tiles).",
-  "view.job.autoChoiceDims": "Found {noun}, saving largest that fits ({width}×{height}).",
-  "view.job.autoChoiceTiles": "Found {noun}, saving largest that fits ({tiles} tiles).",
-  "view.job.autoChoiceBare": "Found {noun}, saving largest that fits.",
   "view.job.paused": "Paused",
   "view.job.retryingTiles": "Retrying tiles ({count})…",
   "view.job.waiting": "Waiting for {host}…",
@@ -277,14 +228,12 @@ const en = {
   "view.done.saveNow": "Save image now",
   "view.done.another": "Dezoomify another image",
   // Failure section.
-  "view.fail.fallback": "Dezoomify could not find or save the zoomable image at this address.",
   "view.fail.title": "Could not dezoomify image",
   "view.fail.deskDescLimits":
     "For images that exceed browser memory limits, subject to available memory. Processes natively on your computer.",
   "view.fail.helpTitle": "Help & URL Extraction",
   "view.fail.helpDesc":
     "How to find the image address on museum & archive sites, and what to try when nothing is found.",
-  "view.fail.techDetails": "Technical error details & bug report",
   "view.fail.reportBug": "Report a bug on GitHub",
   "view.fail.retry": "Try again",
   // Browser canvas failure family (allocation, 2D context):
@@ -297,11 +246,8 @@ const en = {
   "view.cancel.title": "Save cancelled",
   "view.cancel.message": "The image save was stopped.",
   // Job section and share chrome.
-  "view.job.shareTitle": "Copies the page address for this job, not the image file itself",
   "view.job.countsFull": "{current} of {total} tiles",
   "view.job.countsActive": "{current} of {total} tiles · {active} in progress",
-  "view.job.countsElapsed": "{current} of {total} tiles · {elapsed} elapsed",
-  "view.job.elapsedOnly": "{elapsed} elapsed",
   // Recent-jobs history (todo 5.2): local-only ledger.
   "view.history.title": "Recent pictures",
   "view.history.empty": "No recent pictures yet. Saved pictures appear here.",
@@ -343,21 +289,14 @@ const en = {
   // Desktop app user copy (apps/desktop/src/main.tsx). Logs and technical
   // diagnostics stay literal English and never use these keys.
   "desktop.url.invalid": "Please enter a valid web address starting with http:// or https://",
-  "desktop.url.notWebPage":
-    "That address does not look like a web page address. Enter an address starting with http:// or https://.",
   "desktop.settings.unusable":
     "These download settings cannot be used. Adjust the highlighted settings and try again.",
   "desktop.settings.invalidSubmit":
     "These download settings are invalid. Adjust them and try again.",
   "desktop.output.deniedPick":
     "The save destination was not accepted. Choose a different file to continue.",
-  "desktop.output.deniedFallback": "The save destination was denied.",
   "desktop.handoff.rejected":
     "This link cannot be opened from {host}. Try a different address without sign-in details.",
-  "desktop.handoff.acceptedDetail":
-    "This picture can be handed to another app. You are already in the native app, so you can continue here.",
-  "desktop.handoff.rejectedDetail":
-    "This picture cannot be handed to another app. Continue here or try a different picture.",
   "desktop.output.exists":
     "A file already exists at the save destination from {host}. Choose a different file or confirm overwriting to continue.",
   "desktop.output.destDenied":
@@ -376,8 +315,6 @@ const en = {
     "The partial picture was discarded so no file was kept. Try again from {host} with a steady connection.",
   "desktop.tile.partialChoice":
     "Some pieces of this picture from {host} could not be saved. Retry the failed pieces, or keep the partial picture with blank areas.",
-  "desktop.discovery.none":
-    "Could not find a zoomable image at this address from {host}. Try a different page or check the address.",
   "view.discovery.none":
     "No zoomable image was found at this address. Try a page that contains a zoom viewer, or try the browser extension.",
   "desktop.plan.none":
@@ -392,34 +329,8 @@ const en = {
   "desktop.internal.error":
     "Something unexpected stopped this save from {host}. Try again, and copy diagnostics if it keeps happening.",
   "desktop.save.fallback": "Could not save this picture from {host}. Try again.",
-  "desktop.job.failedFallback": "The job failed.",
   "desktop.invoke.startFallback": "Could not start the job.",
   "desktop.invoke.partial": "The partial-image choice was rejected.",
-  "desktop.invoke.destination": "Could not request the save destination.",
-  "desktop.invoke.cancel": "Could not cancel the job.",
-  "desktop.step.chooseWhere": "Choose where to save…",
-  "desktop.step.chooseWhereDetail":
-    "The save destination needs attention before the job can continue.",
-  "desktop.step.pickOutput": "Pick the output file to continue.",
-  "desktop.step.partialTitle": "Some tiles could not be saved…",
-  "desktop.step.partialDetail": "Choose whether to keep the partial image, discard it, or retry.",
-  "desktop.step.displayPreview": "Display-only preview…",
-  "desktop.step.displayDetail": "This picture can only be viewed here.",
-  "desktop.step.cleanupDetail": "Cleaning up… removing unfinished file…",
-  "desktop.step.cleaningShort": "Cleaning up…",
-  "desktop.step.encodingNative": "Encoding in the native app",
-  "desktop.step.encodingPartial": "Encoding partial image in the native app",
-  "desktop.step.discardingPartial": "Discarding partial image",
-  "desktop.step.retrying": "Retrying",
-  "desktop.step.appAutoDetail":
-    "The app saves the first image automatically; no picker is offered.",
-  "desktop.step.foundFits": "Found {noun}, saving largest that fits…",
-  "desktop.step.tilesAtFull": "{current} of {total} tiles at full resolution",
-  "desktop.step.savedDims": "Saved {width} by {height} pixels",
-  "desktop.step.partialDims": "Partial image {width} by {height} pixels; {summary}",
-  "desktop.step.partialSaved": "Partial image saved; {summary}",
-  "desktop.step.savedWord": "Saved",
-  "desktop.step.contacting": "Contacting {host}…",
   "desktop.link.title": "Another app wants to open an image in Dezoomify.",
   "desktop.link.source": "Source: {url}",
   "desktop.link.prov": "Provenance: dezoomify:// link (v{version})",
@@ -429,13 +340,9 @@ const en = {
   "desktop.link.open": "Open image",
   "desktop.rec.missing": "Missing tiles: {shown}{rest}.",
   "desktop.rec.more": " and {n} more",
-  "desktop.rec.destTitle": "Save destination needs attention",
-  "desktop.rec.destDesc":
-    "The save destination was not accepted. Choose an output file, try again, or use another app.",
   "desktop.rec.keep": "Keep partial image",
   "desktop.rec.discard": "Discard partial",
   "desktop.rec.retryTiles": "Retry failed tiles",
-  "view.partial.extensionKeep": "Keep the partial image",
   "view.partial.title": "The image is incomplete",
   "view.partial.summary": "{done} of {total} tiles were retrieved.",
   "view.partial.gaps": "The saved image will have gaps. No file has been saved yet.",
@@ -449,11 +356,6 @@ const en = {
   "view.partial.noneSaved": "None of the image could be retrieved. No file was saved.",
   "view.partial.checkSource": "Open the source page and check that its image viewer works.",
   "view.partial.openSource": "Open source page",
-  "view.partial.extensionDiscard": "Discard the partial image",
-  "view.partial.extensionRetry": "Retry the missing tiles",
-  "desktop.rec.chooseOutput": "Choose output…",
-  "desktop.rec.tryAgain": "Try again",
-  "desktop.rec.useOther": "Use another app",
   "desktop.rec.missingSome": "Some tiles could not be saved.",
   "desktop.rec.missingCount": "{count} tile{plural} could not be saved.",
   "desktop.rec.missingList": "{n} tile{plural} missing: {shown}{rest}.",
@@ -477,36 +379,7 @@ const en = {
   "desktop.queue.retry": "Retry",
   "desktop.queue.summary": "{succeeded} done, {failed} failed, {total} total",
   "desktop.queue.progress": "{current} of {total} tiles",
-  "desktop.queue.unknownOrigin": "the server",
-  "desktop.panel.outputFormat": "Output format",
   "desktop.panel.jobActions": "Desktop job actions",
-  "desktop.help.title": "Help and about",
-  "desktop.help.help": "Help",
-  "desktop.help.desktopGuide": "Desktop guide",
-  "desktop.help.troubleshooting": "Troubleshooting",
-  "desktop.help.faq": "FAQ",
-  "desktop.help.privacy": "Privacy",
-  "desktop.help.terms": "Terms",
-  "desktop.help.donate": "Donate",
-  "desktop.settings.title": "Customize",
-  "desktop.settings.desc":
-    "Minimal download settings. Saved on this device and used for the next job. Headers are sent to the image origin only.",
-  "desktop.settings.fileGroup": "File",
-  "desktop.settings.imageGroup": "Image",
-  "desktop.settings.networkGroup": "Network and recovery",
-  "desktop.settings.outputDir": "Output directory (optional)",
-  "desktop.settings.compression": "Compression 0-100 (default 5)",
-  "desktop.settings.maxWidth": "Max width px (optional)",
-  "desktop.settings.maxHeight": "Max height px (optional)",
-  "desktop.settings.retries": "Retries 0-100 (default 3, 0 = none)",
-  "desktop.settings.cacheDir": "Cache directory (optional resume cache)",
-  "desktop.settings.emptyLargest": "empty = largest",
-  "desktop.settings.browse": "Browse…",
-  "desktop.settings.browseOutput": "Browse for output directory",
-  "desktop.settings.browseCache": "Browse for cache directory",
-  "desktop.settings.headersAdv": "Advanced: request headers (trusted)",
-  "desktop.settings.headersLabel":
-    "Request headers, one per line as Name: value (optional, trusted)",
   "desktop.settings.reset": "Reset settings",
   "desktop.quick.folder": "Folder",
   "desktop.quick.askEachTime": "Ask each time",
@@ -547,19 +420,6 @@ const en = {
   // shape; log and diagnostics lines stay literal English and never use these
   // keys. `test/ui-i18n.test.mjs` fails when the page renders a key outside
   // this table.
-  "page.step.scanning": "Scanning page…",
-  "page.step.finding": "Finding the zoomable image ({done}/{total})…",
-  "page.step.choosing": "Choosing the highest resolution…",
-  "page.step.saving": "Saving image tiles…",
-  "page.step.assembling": "Assembling the final picture…",
-  "page.step.done": "Done",
-  "page.step.cancelled": "Cancelled",
-  "page.step.cancelling": "Cancelling…",
-  "page.step.displaying": "Displaying the image…",
-  "page.tabs.scan": "Scan {label}",
-  "page.tabs.hint":
-    "Open a page with a zoomable image, then click the Dezoomify toolbar button to scan that tab.",
-  "page.ui.techDetails": "Technical details & logs",
 } as const;
 
 export type I18nKey = keyof typeof en;

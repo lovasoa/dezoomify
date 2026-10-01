@@ -1,11 +1,9 @@
 //! Golden-driven discovery/plan checks for `web/*/expected/core.json`.
 //!
-//! Every case in the scenario goldens is planned end-to-end from bytes under
-//! that scenario's `payloads/` directory (directory-mirror convention from
-//! `testdata/scenarios/README.md`) and asserted against the golden's format,
-//! image size, tile count, and first/last planned tile URIs. Cases that
-//! cannot run offline are listed in `SKIPPED` with their reason; a case that
-//! is neither asserted nor listed fails the run.
+//! Every case is planned from its scenario's `payloads/` bytes and asserted
+//! against the golden's format, image size, tile count, and first/last tile
+//! URIs. Offline-impossible cases are listed in `SKIPPED`; a case that is
+//! neither asserted nor listed fails the run.
 
 use std::path::{Path, PathBuf};
 
@@ -13,10 +11,8 @@ use dezoomify::core::{DiscoveredEntry, ResolvedImage, default_registry};
 mod support;
 use support::grid;
 
-/// Origin substituted for the `{{origin}}` placeholder in payloads. The
-/// goldens pin their tile URIs to the runtime fixture-server origin, which
-/// they record as `http://127.0.0.1:PORT`; expected URIs are normalized to
-/// this origin before comparison.
+/// Origin substituted for `{{origin}}` in payloads; goldens pin tile URIs to
+/// `http://127.0.0.1:PORT` and are normalized to this origin before comparison.
 const ORIGIN: &str = "http://127.0.0.1";
 
 /// Every `web/*/expected/core.json` golden, one line each.
@@ -146,10 +142,8 @@ fn payloads_dir(scenario: &str) -> PathBuf {
 }
 
 /// Directory-mirror lookup (`payloads/{host}{url-path}`, query ignored),
-/// with the corpus's content-type-suffix spellings (a URL path `/arcgis/
-/// MapServer` stored as `MapServer.json`) and directory index spellings
-/// (`.../3867/` stored as `.../3867/index.html`) resolved as documented
-/// fallbacks.
+/// with the corpus's suffix (`MapServer.json`) and index (`.../index.html`)
+/// spellings resolved as documented fallbacks.
 fn mirrored_payload(payloads: &Path, uri: &str) -> Option<Vec<u8>> {
     let url = url::Url::parse(uri).ok()?;
     let host = url.host_str()?;

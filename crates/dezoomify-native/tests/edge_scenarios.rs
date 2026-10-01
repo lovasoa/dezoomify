@@ -1,9 +1,6 @@
-//! Golden-driven edge scenario runs: every `native/edge-*` scenario is
-//! driven end-to-end over the fixture server and asserted against its
-//! `expected/result.json` contract (success geometry or typed failure
-//! context). The goldens' `code` field holds the typed error's stable
-//! `kind`: the same identifier the CLI human line prints and
-//! `apps/cli/tests/pipeline.rs` publishes through the real binary.
+//! Golden-driven edge scenario runs: every `native/edge-*` scenario runs
+//! end-to-end over the fixture server and asserts its `expected/result.json`
+//! contract. The goldens' `code` field is the typed error's stable `kind`.
 
 use std::sync::{Arc, Mutex};
 
@@ -87,9 +84,7 @@ fn run_edge_scenario(id: &str, origin: &str, mismatches: &mut Vec<String>) {
     }
     let out_dir = temp_dir(id);
     let output = out_dir.join("out.png");
-    // Hermetic cache (never the user's default) and the `Fail` partial
-    // policy: the published `tile.download-failed` contract discards the
-    // partial and fails honestly.
+    // Hermetic cache; `Fail` partial policy discards on tile failure.
     let options = JobOptions {
         input_url: input,
         output: OutputTarget::File(output.clone()),
@@ -98,10 +93,8 @@ fn run_edge_scenario(id: &str, origin: &str, mismatches: &mut Vec<String>) {
         keep_partial: false,
         ..Default::default()
     };
-    // Capture the typed per-request diagnostics: the goldens' `transport`
-    // and `resourceKind` describe the resource class the job failed on
-    // (docs/errors.md error shape), which the request records carry as
-    // `transport`/`purpose` alongside the failure `code` and `http` status.
+    // Per-request records carry `transport`/`purpose`, which the goldens'
+    // `transport`/`resourceKind` name (docs/errors.md error shape).
     let records = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
     let sink = Arc::clone(&records);
     let diagnostics = Diagnostics::new("edge-scenarios-test", "0");
@@ -122,10 +115,8 @@ fn run_edge_scenario(id: &str, origin: &str, mismatches: &mut Vec<String>) {
                 return;
             }
         };
-        // `code: "ok"` pins success (the shared result comparison treats
-        // the code as optional), and the golden geometry matches the
-        // published output (the EXIF-preserving note in `edge-exif` is
-        // prose; pixel/EXIF fidelity lives in the native imaging tests).
+        // Golden geometry matches the published output (pixel/EXIF
+        // fidelity lives in the native imaging tests).
         mismatches.extend(dezoomify_fixture_server::result_golden_mismatches(
             &entry,
             &support::golden_result(&outcome),
@@ -144,11 +135,8 @@ fn run_edge_scenario(id: &str, origin: &str, mismatches: &mut Vec<String>) {
     if output.exists() {
         mismatches.push(format!("{id} outcome: failed run wrote an output"));
     }
-    // `retryable` is the derived job-level verdict (any transient retained
-    // constituent keeps retry available, never a stored flag); recovery
-    // follows the documented action flow (docs/errors.md): an acquisition
-    // failure leaves the keep/discard/retry choice, while an input/address
-    // failure is edit-input.
+    // `retryable` is the derived job-level verdict; `recovery` follows
+    // the documented action flow (docs/errors.md).
     mismatches.extend(dezoomify_fixture_server::golden_mismatches(
         id,
         &[
@@ -193,9 +181,6 @@ fn run_edge_scenario(id: &str, origin: &str, mismatches: &mut Vec<String>) {
             expected["resourceKind"], expected["transport"]
         ));
     }
-    // `code` is the typed error's stable kind: the identifier the CLI human
-    // line prints and `apps/cli/tests/pipeline.rs` publishes (also asserted
-    // here directly). `underlying`/`note` are documentation prose.
     mismatches.extend(dezoomify_fixture_server::failure_golden_mismatches(
         &entry,
         error.cause().kind(),

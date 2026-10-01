@@ -1,9 +1,7 @@
-// Localized error headlines and derived verdicts for the typed error
-// contract (`Error` in `@dezoomify/wasm-bindings`). Copy is chosen from the
-// discriminated union's structured facts (kind, status, limit facts); no
-// message text is ever parsed. The retry verdict is not computed here: each
-// host boundary stamps it onto errors as a plain `retryable` hint from the
-// one policy in Rust (`Error::retryable`).
+// Localized error headlines for the typed error contract (`Error` in
+// `@dezoomify/wasm-bindings`): copy comes from structured facts only; no
+// message text is parsed. The retry verdict is stamped by host boundaries
+// from the one policy in Rust (`Error::retryable`).
 import type { Error as JobError } from "@dezoomify/wasm-bindings";
 import { type I18nKey, t } from "./i18n.ts";
 
@@ -23,11 +21,8 @@ function formatBytes(bytes: number): string {
 }
 
 /**
- * One headline key per error kind. Complete at compile time: adding a Rust
- * variant makes this record incomplete until it is listed, and every value
- * is checked against the i18n table. The lookup fills `{host}` for keys
- * that use it. Kinds whose copy needs extra facts (`http-error` statuses,
- * transport-branded rates, limit facts, policy hints, local sources) resolve
+ * One headline key per error kind; adding a Rust variant makes this record
+ * incomplete until it is listed. Kinds whose copy needs extra facts resolve
  * in `plainMessageFor` first; their entry here is the plain fallback.
  */
 const COPY = {
@@ -145,9 +140,9 @@ const BLOCKED_REASONS = new Set([
 ]);
 const LIMIT_REASONS = new Set(["memory", "jpeg-side", "webp-side"]);
 
-/** Structural guard per variant: the required fields consumers read must
- * exist with the right shape before the payload narrows to the generated
- * union (wrappers recurse within the same depth bound). */
+/** Structural guard per variant: required fields must exist with the right
+ * shape before the payload narrows to the generated union (wrappers recurse
+ * within the same depth bound). */
 function isJobErrorAt(value: unknown, depth: number): boolean {
   if (!value || typeof value !== "object" || depth > 8) return false;
   const record = value as Record<string, unknown>;

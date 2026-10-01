@@ -6,11 +6,8 @@ use std::process::Command;
 
 use dezoomify_fixture_server::{scenario_input, start as start_fixture_server, temp_dir};
 
-/// Thin driver adapter over the shared corpus goldens: map the CLI's
-/// completion event and the bytes it wrote into the shared golden
-/// comparison. The byte-level PNG probes and the event-kind checks stay
-/// here; the golden comparison lives in the fixture server (it owns the
-/// corpus).
+/// Map the CLI's completion event and written bytes into the shared golden
+/// comparison; PNG probes stay here, golden comparison stays in the corpus.
 fn assert_result_golden(entry: &serde_json::Value, stdout: &str, output: &Path) {
     let scenario = entry["id"].as_str().expect("scenario id");
     let expected = &entry["expected"];
@@ -97,9 +94,7 @@ fn cli_downloads_and_saves_real_output() {
 
 #[test]
 fn cli_fails_honestly_on_missing_tiles() {
-    // Explicit `--no-partial` discards on tile failure: no output, honest
-    // `tile.download-failed`, exit 1. The default `--keep-partial` keeps a
-    // partial instead (see the next test).
+    // `--no-partial` discards on tile failure: no output, exit 1.
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/broken.dzi");
     let out_dir = temp_dir("e2e-failure");
@@ -120,9 +115,7 @@ fn cli_fails_honestly_on_missing_tiles() {
 
 #[test]
 fn cli_max_width_flag_caps_output() {
-    // `--max-width 300` on the 512px pyramid downloads the largest fitting
-    // level: the run reports (and the produced PNG carries) the 256x256
-    // one-tile geometry pinned by the `native/cli-max-width` golden.
+    // `--max-width 300` selects the 256x256 level (`native/cli-max-width`).
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("e2e-max-width");
@@ -150,9 +143,7 @@ fn cli_max_width_flag_caps_output() {
 
 #[test]
 fn cli_forwards_user_headers() {
-    // `-H` headers flow into the pipeline without breaking the fetch: the
-    // run's reported geometry and the produced PNG still match the
-    // `native/cli-dzi` golden.
+    // `-H` headers flow through without breaking the fetch (`native/cli-dzi`).
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("e2e-headers");
@@ -255,8 +246,7 @@ fn cli_bulk_saves_each_entry_with_summary() {
 
 #[test]
 fn cli_bulk_continues_after_failure() {
-    // Explicit `--no-partial` keeps the strict bulk contract: the good entry
-    // saves, the broken entry writes nothing, totals count 1/1, exit 1.
+    // `--no-partial` bulk: good entry saves, broken entry writes nothing.
     let origin = start_fixture_server();
     let good = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let bad = format!("{origin}/fetch?url=https://fixtures.test/cli/broken.dzi");
@@ -341,11 +331,8 @@ fn cli_bulk_json_emits_item_lines() {
 
 #[test]
 fn cli_full_flags_produce_golden_output() {
-    // Every wired flag flows through without breaking the fetch: the run's
-    // reported geometry and the produced PNG still match the `native/cli-dzi`
-    // golden. Values are chosen to preserve the largest level (wide caps,
-    // out-of-range zoom-level falls back to last, explicit defaults for
-    // timing/pooling/compression).
+    // Every wired flag flows through without breaking the fetch (`native/cli-dzi`);
+    // values preserve the largest level (wide caps, out-of-range zoom falls back).
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("e2e-full-flags");
@@ -427,11 +414,8 @@ fn cli_full_flags_produce_golden_output() {
 
 #[test]
 fn cli_selection_gaps_are_real_no_warnings() {
-    // `--format <named>`, `--logging <non-info>`, and `--retries 0` are
-    // real: validated/passed through with zero warnings. The fetch still
-    // succeeds and the run's reported geometry and produced PNG match the
-    // `native/cli-dzi` golden (`deepzoom` parses the pyramid DZI; `iiif`
-    // would fail typed).
+    // `--format`, `--logging`, `--retries 0` validate and pass through
+    // with zero warnings (`native/cli-dzi`).
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("e2e-no-fallback-warnings");
@@ -482,8 +466,7 @@ fn cli_selection_gaps_are_real_no_warnings() {
 fn cli_logging_levels_control_human_verbosity() {
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
-    // error suppresses success lines; info shows them; debug adds diagnostics;
-    // trace adds individual tile requests. Machine JSON stays untouched (see next test).
+    // error hides success lines; info shows; debug adds diagnostics; trace adds tiles.
     let out_error = temp_dir("e2e-log-error");
     let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
         .arg("--logging")
@@ -638,9 +621,7 @@ fn cli_unknown_format_fails_with_typed_error() {
 
 #[test]
 fn cli_auto_names_output_when_omitted() {
-    // Single runs without an output auto-name to `dezoomify.png` in the
-    // working directory; that file's reported geometry and bytes match the
-    // `native/cli-dzi` golden.
+    // Single runs without an output auto-name to `dezoomify.png` (`native/cli-dzi`).
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("e2e-auto-name");
@@ -691,10 +672,8 @@ fn cli_auto_naming_avoids_collision() {
 
 #[test]
 fn cli_keep_partial_default_keeps_output() {
-    // Default `Keep`: corrupt
-    // tiles keep a partial output instead of failing. Pixel-exact blank
-    // region checks live in native `partial_keep_policy_encodes_acquired_tiles`;
-    // here the kept file existing with a real PNG body is the contract.
+    // Default `Keep`: corrupt tiles keep a real PNG partial (blank-region
+    // pixels live in native `partial_keep_policy_encodes_acquired_tiles`).
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/corrupt.dzi");
     let out_dir = temp_dir("e2e-keep-default");
@@ -709,8 +688,7 @@ fn cli_keep_partial_default_keeps_output() {
         "keep-partial default should succeed: stderr={:?}",
         String::from_utf8_lossy(&run.stderr),
     );
-    // Kept partials publish to a `.partial` sibling, never to the requested
-    // complete-save path.
+    // Kept partials publish to a `.partial` sibling, never the complete path.
     let partial = out_dir.join("partial.partial.png");
     assert!(
         !output.exists(),
@@ -726,8 +704,7 @@ fn cli_keep_partial_default_keeps_output() {
 
 #[test]
 fn cli_no_partial_discards_output() {
-    // Explicit `--no-partial` selects `Fail`: corrupt tiles fail with
-    // `tile.download-failed` and no output.
+    // `--no-partial` selects `Fail`: `tile.download-failed`, no output.
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/corrupt.dzi");
     let out_dir = temp_dir("e2e-no-partial");
@@ -755,8 +732,7 @@ fn cli_no_partial_discards_output() {
 
 #[test]
 fn cli_named_format_mismatch_fails_instead_of_detecting() {
-    // A known but wrong `--format` restricts discovery to that format and fails
-    // typed instead of falling back to auto-detection.
+    // A wrong `--format` restricts discovery and fails typed, never auto-detects.
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("e2e-format-mismatch");
@@ -781,10 +757,8 @@ fn cli_named_format_mismatch_fails_instead_of_detecting() {
     );
 }
 
-/// The `native/edge-*` failure goldens pin the typed error's stable `kind`
-/// (also asserted against the typed error by `dezoomify-native`'s
-/// `edge_scenarios` test). This test drives each scenario through the real
-/// binary and checks the published identifier.
+/// Drive each `native/edge-*` failure golden through the real binary and
+/// check the typed error's stable `kind` identifier.
 #[test]
 fn edge_failures_publish_their_golden_codes() {
     let origin = start_fixture_server();
@@ -822,9 +796,8 @@ fn edge_failures_publish_their_golden_codes() {
     }
 }
 
-/// The `native/edge-*` success goldens pin the geometry and disposition the
-/// CLI reports (EXIF/redirect/cache prose in the goldens documents the edge
-/// behavior; native pixel fidelity lives in the imaging tests).
+/// The `native/edge-*` success goldens pin the geometry and disposition
+/// the CLI reports (native pixel fidelity lives in the imaging tests).
 #[test]
 fn edge_successes_match_their_result_goldens() {
     let origin = start_fixture_server();
