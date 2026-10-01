@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![allow(unused_imports)]
 #![allow(clippy::result_large_err)]
 use dezoomify::model::Progress;
 use dezoomify_native::{Controls, JobOptions, NativeHost, OutputTarget, Publication};
