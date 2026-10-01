@@ -39,7 +39,7 @@ const COPY = {
   "bad-url": "desktop.transport.stalled",
   "bad-redirect": "desktop.transport.stalled",
   "redirect-limit": "desktop.transport.stalled",
-  "size-limit": "desktop.save.fallback",
+  "size-limit": "view.fail.proxyBudget",
   cancelled: "desktop.job.cancelledMsg",
   "proxy-budget-exceeded": "view.fail.proxyBudget",
   "proxy-error": "view.fail.proxyFetch",
@@ -113,6 +113,37 @@ const TRANSPORTS = new Set([
   "display-only",
 ]);
 const RESOURCE_KINDS = new Set(["metadata", "tile", "probe", "output"]);
+// Closed enums mirrored from the generated contract (`BlockedReason`,
+// `LimitReason`): an unknown member is a binding error waiting to happen.
+const BLOCKED_REASONS = new Set([
+  "access-required",
+  "blocked-ipv4",
+  "blocked-ipv6",
+  "cancelled",
+  "content-type",
+  "dns-rebinding",
+  "dns-rebinding-v6",
+  "forbidden",
+  "invalid-url",
+  "limit-exceeded",
+  "loopback-host",
+  "malformed",
+  "malformed-body",
+  "method",
+  "network",
+  "non-standard-port",
+  "origin",
+  "private-host",
+  "protocol-version",
+  "redirect-limit",
+  "redirect-target",
+  "scheme",
+  "signed-query",
+  "source-document-lost",
+  "throttled",
+  "userinfo",
+]);
+const LIMIT_REASONS = new Set(["memory", "jpeg-side", "webp-side"]);
 
 /** Structural guard per variant: the required fields consumers read must
  * exist with the right shape before the payload narrows to the generated
@@ -126,6 +157,15 @@ function isJobErrorAt(value: unknown, depth: number): boolean {
   }
   const num = (field: unknown) => typeof field === "number" && Number.isFinite(field);
   const transport = (field: unknown) => typeof field === "string" && TRANSPORTS.has(field);
+  const size = (field: unknown) => {
+    const dimensions = field as Record<string, unknown> | undefined;
+    return (
+      dimensions !== undefined &&
+      typeof dimensions === "object" &&
+      num(dimensions.width) &&
+      num(dimensions.height)
+    );
+  };
   switch (kind) {
     case "http-error":
       return num(record.status) && transport(record.transport);
@@ -138,7 +178,7 @@ function isJobErrorAt(value: unknown, depth: number): boolean {
       return (
         transport(record.transport) &&
         typeof record.blocked_reason === "string" &&
-        record.blocked_reason.length > 0
+        BLOCKED_REASONS.has(record.blocked_reason)
       );
     case "redirect-limit":
     case "deferred-limit":
@@ -147,8 +187,18 @@ function isJobErrorAt(value: unknown, depth: number): boolean {
       return num(record.max_bytes);
     case "unknown-format":
       return typeof record.format === "string" && record.format.length > 0;
-    case "limit-exceeded":
-      return !!record.limit && typeof record.limit === "object";
+    case "limit-exceeded": {
+      const limit = record.limit as Record<string, unknown> | undefined;
+      return (
+        !!limit &&
+        typeof limit === "object" &&
+        typeof limit.reason === "string" &&
+        LIMIT_REASONS.has(limit.reason) &&
+        (limit.dimensions === undefined || size(limit.dimensions)) &&
+        (limit.bytes_required === undefined || num(limit.bytes_required)) &&
+        (limit.bytes_available === undefined || num(limit.bytes_available))
+      );
+    }
     case "no-usable-tiles":
     case "partial-discarded":
       return typeof record.transient === "boolean";
