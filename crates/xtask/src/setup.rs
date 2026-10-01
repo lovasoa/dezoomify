@@ -209,23 +209,14 @@ fn check_wasm_bindgen() -> Result<(), String> {
 /// Resolve the `wasm-bindgen` crate version from `Cargo.lock`.
 fn lock_wasm_bindgen_version() -> Option<String> {
     let text = std::fs::read_to_string(super::repo_root().join("Cargo.lock")).ok()?;
-    let mut lines = text.lines();
-    while let Some(line) = lines.next() {
-        if line.trim() == "name = \"wasm-bindgen\"" {
-            for next in lines.by_ref() {
-                let trimmed = next.trim();
-                if let Some(rest) = trimmed.strip_prefix("version = \"") {
-                    if let Some(version) = rest.strip_suffix('"') {
-                        return Some(version.to_string());
-                    }
-                }
-                if trimmed.starts_with("name = ") || trimmed.starts_with('[') {
-                    break;
-                }
-            }
-        }
-    }
-    None
+    let lock: toml::Value = toml::from_str(&text).ok()?;
+    lock.get("package")?
+        .as_array()?
+        .iter()
+        .find(|p| p.get("name").and_then(toml::Value::as_str) == Some("wasm-bindgen"))
+        .and_then(|p| p.get("version"))
+        .and_then(toml::Value::as_str)
+        .map(str::to_owned)
 }
 
 /// Report Playwright availability. Informational only: never fails the

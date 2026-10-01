@@ -4,7 +4,6 @@
 //! TypeScript declaration consumed by browser products.
 
 use std::path::PathBuf;
-use std::process::Command;
 
 const TRACKED_DECLARATION: &str = "packages/wasm-bindings/src/generated.d.ts";
 
@@ -37,17 +36,7 @@ fn generate(args: &[String]) -> Result<(), String> {
 }
 
 fn emit_declaration() -> Result<PathBuf, String> {
-    super::command::cargo(&[
-        "build",
-        "--quiet",
-        "--release",
-        "-p",
-        "dezoomify-wasm",
-        "--target",
-        "wasm32-unknown-unknown",
-    ])?;
-    let target = super::cargo_target_directory()?;
-    let input = target.join("wasm32-unknown-unknown/release/dezoomify_wasm.wasm");
+    let input = super::wasm::build_wasm_artifact(true)?;
     let output =
         std::env::temp_dir().join(format!("dezoomify-wasm-bindings-{}", std::process::id()));
     if output.exists() {
@@ -56,23 +45,7 @@ fn emit_declaration() -> Result<PathBuf, String> {
     }
     std::fs::create_dir_all(&output)
         .map_err(|e| format!("create temporary binding directory: {e}"))?;
-    let status = Command::new("wasm-bindgen")
-        .args([
-            "--target",
-            "web",
-            "--typescript",
-            "--out-name",
-            "dezoomify-wasm",
-        ])
-        .arg("--out-dir")
-        .arg(&output)
-        .arg(&input)
-        .current_dir(super::repo_root())
-        .status()
-        .map_err(|e| format!("run wasm-bindgen (run `cargo xtask setup`): {e}"))?;
-    if !status.success() {
-        return Err("wasm-bindgen failed while generating the typed ABI".to_string());
-    }
+    super::wasm::run_wasm_bindgen(&input, "web", &output, "dezoomify-wasm", true)?;
     Ok(output.join("dezoomify-wasm.d.ts"))
 }
 

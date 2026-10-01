@@ -40,7 +40,7 @@ Focused aliases remain available for iteration:
 | `core [--purity\|--parity]` | core crate, with optional purity or format-parity focus |
 | `bindings` | generated-artifact comparison, Rust and TypeScript contracts, and WASM portability |
 | `wasm [--browser chromium]` | WASM Host ABI and generated Node harness; optional Chromium website E2E |
-| `browser [--build-only\|--browser chromium]` | browser-runtime Node contracts; a browser selection adds website Chromium E2E (`--scenario` is rejected: scenario focus is not supported) |
+| `browser [--build-only\|--browser chromium]` | browser-runtime Node contracts; a browser selection adds website Chromium E2E |
 | `ui` | shared-UI presentation and product-agnostic view contract |
 | `web [--e2e]` | website Node suite; `--e2e` adds Chromium Playwright |
 | `native` | native runtime and CLI Rust suites |

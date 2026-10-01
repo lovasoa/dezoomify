@@ -115,55 +115,18 @@ fn run_wxt(browser: &str, command: &str) -> Result<(), String> {
 /// existence alone says nothing about freshness.
 pub(crate) fn build_wasm_glue() -> Result<(), String> {
     let root = super::repo_root();
-    let target_dir = std::env::var_os("CARGO_TARGET_DIR")
-        .map(std::path::PathBuf::from)
-        .map(|path| {
-            if path.is_absolute() {
-                path
-            } else {
-                root.join(path)
-            }
-        })
-        .unwrap_or_else(|| root.join("target"));
-    let glue = root.join("wasm/dezoomify-wasm.js");
-    let wasm = root.join("wasm/dezoomify-wasm_bg.wasm");
-    let status = Command::new("cargo")
-        .args([
-            "build",
-            "--quiet",
-            "-p",
-            "dezoomify-wasm",
-            "--release",
-            "--target",
-            "wasm32-unknown-unknown",
-        ])
-        .current_dir(&root)
-        .status()
-        .map_err(|e| format!("failed to run cargo: {e}"))?;
-    if !status.success() {
-        return Err("wasm core build failed".to_string());
-    }
-    let status = Command::new("wasm-bindgen")
-        .args([
-            "--target",
-            "web",
-            "--out-dir",
-            "wasm",
-            "--out-name",
-            "dezoomify-wasm",
-            &target_dir
-                .join("wasm32-unknown-unknown/release/dezoomify_wasm.wasm")
-                .display()
-                .to_string(),
-        ])
-        .current_dir(&root)
-        .status()
-        .map_err(|e| format!("failed to run wasm-bindgen (is wasm-bindgen-cli installed?): {e}"))?;
-    if !status.success() {
-        return Err("wasm-bindgen failed".to_string());
-    }
-    check_size_budget(&glue, WASM_JS_BUDGET_BYTES, "wasm glue JS")?;
-    check_size_budget(&wasm, WASM_FAIL_BYTES, "wasm binary")?;
+    let input = super::wasm::build_wasm_artifact(true)?;
+    super::wasm::run_wasm_bindgen(&input, "web", &root.join("wasm"), "dezoomify-wasm", false)?;
+    check_size_budget(
+        &root.join("wasm/dezoomify-wasm.js"),
+        WASM_JS_BUDGET_BYTES,
+        "wasm glue JS",
+    )?;
+    check_size_budget(
+        &root.join("wasm/dezoomify-wasm_bg.wasm"),
+        WASM_FAIL_BYTES,
+        "wasm binary",
+    )?;
     Ok(())
 }
 

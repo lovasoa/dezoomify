@@ -30,8 +30,7 @@ fn help_lists_the_stable_surface() {
     assert!(out.status.success(), "help failed: {}", stderr_text(&out));
     let help = stdout_text(&out);
     for token in [
-        "setup", "check", "fixtures", "bindings", "build", "dev", "ci", "release", "test",
-        "digest",
+        "setup", "check", "fixtures", "bindings", "build", "dev", "ci", "release", "test", "digest",
     ] {
         assert!(help.contains(token), "help lacks {token}");
     }
@@ -93,20 +92,6 @@ fn rejects_unknown_flags_without_running_suites() {
             "rejection for {args:?} carries no usage guidance: {detail}"
         );
     }
-}
-
-#[test]
-fn browser_scenario_focus_fails_loudly() {
-    // `test browser --scenario` must never claim to focus a scenario and then
-    // run the generic matrix: scenario focus is unsupported, and the flag
-    // says so explicitly.
-    let out = xtask(&["test", "browser", "--scenario", "foo"]);
-    assert!(!out.status.success(), "accepted --scenario focus");
-    let detail = stderr_text(&out);
-    assert!(
-        detail.contains("scenario focus is not supported"),
-        "rejection lacks the unsupported-focus explanation: {detail}"
-    );
 }
 
 #[test]
