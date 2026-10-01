@@ -14,7 +14,8 @@ macro_rules! desktop_commands {
             open_saved_output,
             release_job,
             get_job_diagnostics,
-            validate_settings
+            validate_settings,
+            is_retryable
         )
     };
 }

@@ -161,6 +161,10 @@ fn lock_table<'a>(
 }
 
 #[tauri::command]
+// Each parameter is one IPC field of the command payload (same reason the
+// fixture server's axum extractors are exempt): bundling them into a struct
+// would obscure the wire shape, not simplify it.
+#[allow(clippy::too_many_arguments)]
 async fn dezoomify(
     state: State<'_, Mutex<JobTable>>,
     app: AppHandle,
