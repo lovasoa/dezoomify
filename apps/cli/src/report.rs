@@ -68,6 +68,20 @@ pub fn machine_completed(summary: &CompletedOutput<'_>) -> String {
     .to_string()
 }
 
+/// The terminal machine-readable failure record for a single job: `failed`,
+/// or `cancelled`, carrying the serialized typed error (its `kind` names the
+/// failure).
+#[must_use]
+pub fn machine_failed(job: &str, error: &dezoomify::model::Error) -> String {
+    use dezoomify::model::Error;
+    serde_json::json!({
+        "job": job,
+        "kind": if matches!(error.cause(), Error::Cancelled) { "cancelled" } else { "failed" },
+        "error": serde_json::to_value(error).unwrap_or(serde_json::Value::Null),
+    })
+    .to_string()
+}
+
 /// One bulk entry outcome for summaries: `ok`, or `failed` carrying the
 /// serialized typed error (its `kind` names the failure).
 #[derive(Clone, Debug)]
@@ -230,6 +244,24 @@ mod tests {
         assert!(!show_progress("warn"));
         assert!(show_progress("info"));
         assert!(show_progress("debug"));
+    }
+
+    #[test]
+    fn terminal_failure_record_carries_the_typed_error() {
+        use dezoomify::model::Error;
+        let failed: serde_json::Value = serde_json::from_str(&machine_failed(
+            "job:cli-1",
+            &Error::SizeLimit { max_bytes: 8 },
+        ))
+        .expect("json");
+        assert_eq!(failed["job"], "job:cli-1");
+        assert_eq!(failed["kind"], "failed");
+        assert_eq!(failed["error"]["kind"], "size-limit");
+        assert_eq!(failed["error"]["max_bytes"], 8);
+        let cancelled: serde_json::Value =
+            serde_json::from_str(&machine_failed("job:cli-1", &Error::Cancelled)).expect("json");
+        assert_eq!(cancelled["kind"], "cancelled");
+        assert_eq!(cancelled["error"]["kind"], "cancelled");
     }
 
     #[test]

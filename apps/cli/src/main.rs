@@ -276,12 +276,23 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
     let level = parsed.logging.as_str();
     let json = parsed.json;
     let job_id = format!("job:cli-{}", std::process::id());
+    // Every single-job failure ends the `--json` stream with one terminal
+    // record carrying the typed error, so machine consumers never see an
+    // unterminated event stream.
+    let fail = |error: &dezoomify::model::Error| {
+        if json {
+            println!("{}", report::machine_failed(&job_id, error));
+        }
+        eprintln!("error: {error} ({})", error.cause().kind());
+        false
+    };
     let result = run_native(parsed, input, output, true);
     match result {
         Ok((summary, terminal_seq)) => {
             let Some(size) = summary.output.canvas.as_ref() else {
-                eprintln!("error: saved output has no dimensions (internal)");
-                return false;
+                return fail(&dezoomify::model::Error::Internal {
+                    failure: "saved output has no dimensions".to_string().into(),
+                });
             };
             if json {
                 println!(
@@ -317,10 +328,7 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
             }
             true
         }
-        Err(error) => {
-            eprintln!("error: {error} ({})", error.cause().kind());
-            false
-        }
+        Err(error) => fail(&error),
     }
 }
 
