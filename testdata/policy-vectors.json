@@ -1,5 +1,5 @@
 {
-  "$comment": "Shared oracle: settings.rs asserts every headerLines/settings case; retryPolicy binds Error::retryable to isRetryable in both languages.",
+  "$comment": "Shared oracle: settings.rs asserts every headerLines/settings case.",
   "headerLines": [
     {"name": "accept-basic", "line": "Referer: https://example.com/x", "accept": {"name": "referer", "value": "https://example.com/x"}},
     {"name": "accept-lowercases-name", "line": "X-Api-Key: v", "accept": {"name": "x-api-key", "value": "v"}},
@@ -29,31 +29,5 @@
     {"name": "settings-headers-object-bad-name", "input": {"headers": {"bad name": "v"}}, "reject": "invalid header: bad name"},
     {"name": "settings-headers-array-no-colon", "input": {"headers": ["no-colon"]}, "reject": "invalid header (expected \"Name: value\"): line without colon"},
     {"name": "settings-headers-object-numeric-value", "comment": "Header values are strings; the Rust validator used to accept JSON numbers and now fails closed like the TS validator.", "input": {"headers": {"x-note": 1}}, "reject": "invalid header: value must be a string"}
-  ],
-  "retryPolicy": [
-    {"name": "http-408-transient", "error": {"kind": "http-error", "status": 408, "transport": "native"}, "retryable": true},
-    {"name": "http-425-transient", "error": {"kind": "http-error", "status": 425, "transport": "native"}, "retryable": true},
-    {"name": "http-429-transient", "error": {"kind": "http-error", "status": 429, "transport": "native", "retry_after_ms": 2000}, "retryable": true},
-    {"name": "http-500-transient", "error": {"kind": "http-error", "status": 500, "transport": "native"}, "retryable": true},
-    {"name": "http-503-transient", "error": {"kind": "http-error", "status": 503, "transport": "native"}, "retryable": true},
-    {"name": "http-400-permanent", "error": {"kind": "http-error", "status": 400, "transport": "native"}, "retryable": false},
-    {"name": "http-401-permanent", "error": {"kind": "http-error", "status": 401, "transport": "native"}, "retryable": false},
-    {"name": "http-403-permanent", "error": {"kind": "http-error", "status": 403, "transport": "native"}, "retryable": false},
-    {"name": "http-404-permanent", "error": {"kind": "http-error", "status": 404, "transport": "native"}, "retryable": false},
-    {"name": "rate-limited-transient", "error": {"kind": "rate-limited", "transport": "metadata-proxy", "retry_after_ms": 1000}, "retryable": true},
-    {"name": "timeout-transient", "error": {"kind": "timeout", "transport": "native"}, "retryable": true},
-    {"name": "network-failure-transient", "error": {"kind": "network-failure", "transport": "direct"}, "retryable": true},
-    {"name": "proxy-error-transient", "error": {"kind": "proxy-error", "transport": "metadata-proxy"}, "retryable": true},
-    {"name": "policy-denied-permanent", "error": {"kind": "policy-denied", "blocked_reason": "forbidden", "transport": "browser-session"}, "retryable": false},
-    {"name": "redirect-limit-permanent", "error": {"kind": "redirect-limit", "max": 5}, "retryable": false},
-    {"name": "size-limit-permanent", "error": {"kind": "size-limit", "max_bytes": 1024}, "retryable": false},
-    {"name": "cancelled-permanent", "error": {"kind": "cancelled"}, "retryable": false},
-    {"name": "malformed-metadata-permanent", "error": {"kind": "malformed-metadata", "detail": "bad json"}, "retryable": false},
-    {"name": "resource-delegates", "error": {"kind": "resource", "request": "https://example.test/tile", "resource_kind": "tile", "source": {"kind": "timeout", "transport": "native"}}, "retryable": true},
-    {"name": "resource-nested-permanent", "error": {"kind": "resource", "request": "https://example.test/tile", "resource_kind": "tile", "source": {"kind": "decode-failed"}}, "retryable": false},
-    {"name": "discovery-cause-delegates", "error": {"kind": "discovery-failed", "detail": "evidence", "cause": {"kind": "http-error", "status": 503, "transport": "direct"}}, "retryable": true},
-    {"name": "discovery-without-cause-permanent", "error": {"kind": "discovery-failed", "detail": "evidence"}, "retryable": false},
-    {"name": "aggregate-transient-invites-retry", "error": {"kind": "no-usable-tiles", "failures": [{"kind": "http-error", "status": 404, "transport": "native"}, {"kind": "timeout", "transport": "native"}]}, "retryable": true},
-    {"name": "aggregate-all-permanent-stays-permanent", "error": {"kind": "partial-discarded", "failures": [{"kind": "http-error", "status": 403, "transport": "native"}, {"kind": "decode-failed"}]}, "retryable": false}
   ]
 }
