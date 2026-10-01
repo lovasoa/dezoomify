@@ -55,6 +55,13 @@ export const fr = {
     "Application native haute performance pour les oeuvres museales gigapixels et les numerisations locales",
   "view.desktop.installer": "L’{installer} non signé pour {platform} est disponible sur",
   "view.desktop.releasesLink": "GitHub Releases",
+  "view.desktop.releasesNote":
+    "Pas de mise à jour automatique ; consultez GitHub Releases manuellement.",
+  "view.desktop.installerMsi": "installeur .msi",
+  "view.desktop.installerDmg": "installeur .dmg Apple silicon",
+  "view.desktop.installerDeb": "installeur .deb",
+  "view.desktop.installerGeneric": "installeur",
+  "view.desktop.platformGeneric": "votre plateforme",
   "view.desktop.whyTitle": "Pourquoi utiliser l application de bureau ?",
   "view.desktop.why1Title": "Prend en charge les oeuvres tres grandes :",
   "view.desktop.why1Body":
@@ -99,6 +106,13 @@ export const fr = {
     "Rendez-vous sur la page du musee ou de la bibliotheque qui montre votre oeuvre, en vous connectant si besoin.",
   "view.ext.step3":
     "Cliquez sur l icone Dezoomify dans la barre d outils de votre navigateur pour detecter et extraire automatiquement l image en pleine resolution !",
+  // Access request (browser-session file access), shared access-request.tsx.
+  "view.access.title": "Autoriser l’accès pour continuer",
+  "view.access.usesOrigin": "Cette image utilise des fichiers de {origin}.",
+  "view.access.needAccess":
+    "Dezoomify a besoin d’accès pour lire ces fichiers et assembler votre image dans ce navigateur.",
+  "view.access.requesting": "Demande d’accès en cours…",
+  "view.access.allow": "Autoriser l’accès et continuer",
   // Idle input section.
   "view.idle.intro": "permet d enregistrer",
   "view.idle.zoomable": "des images zoomables",
@@ -144,11 +158,16 @@ export const fr = {
   "view.job.autoChoiceTiles":
     "{noun} trouvee, enregistrement de la plus grande possible ({tiles} tuiles).",
   "view.job.autoChoiceBare": "{noun} trouvee, enregistrement de la plus grande possible.",
-  "view.job.stalled":
-    "Toujours en cours, {host} tarde a repondre. Vous pouvez attendre, ou annuler et reessayer plus tard.",
+  "view.job.paused": "En pause",
+  "view.job.retryingTiles": "Nouvelle tentative sur les tuiles ({count})…",
+  "view.job.waiting": "En attente de {host}…",
+  "view.job.sourceLabel": "Source",
+  "view.job.pause": "Pause",
+  "view.job.resume": "Reprendre",
+  "view.job.stopReturn": "Arrêter et revenir au début",
+  "view.job.progressValue": "{done} terminées, {active} en cours, {remaining} restantes",
   // Display-only section.
   "view.display.title": "Apercu affiche, non enregistre",
-  "view.display.openDesktop": "Ouvrir dans l application de bureau",
   // Desktop handoff uses the ordinary, user-confirmed dezoomify:// link.
   "view.handoff.send": "Envoyer vers l application de bureau",
   "view.handoff.sendOrigin": "Envoyer vers l application de bureau ({origin})",
@@ -195,14 +214,11 @@ export const fr = {
   // Cancelled section.
   "view.cancel.title": "Enregistrement annule",
   "view.cancel.message": "L enregistrement de l image a ete interrompu.",
-  // Generic fallback for unknown phases (debug surface; status codes stay raw).
-  "view.generic.status": "Etat :",
-  "view.generic.reset": "Reinitialiser",
   // Job section and share chrome.
   "view.job.shareTitle":
     "Copie l adresse de la page pour cette tache, pas le fichier image lui-meme",
-  "view.job.shareLink": "Copier le lien vers cette tache",
   "view.job.countsFull": "{current} tuiles sur {total}",
+  "view.job.countsActive": "{current} tuiles sur {total} · {active} en cours",
   "view.job.countsElapsed": "{current} tuiles sur {total} · {elapsed} ecoulees",
   "view.job.elapsedOnly": "{elapsed} ecoulees",
   // Recent-jobs history (todo 5.2): local-only ledger.
@@ -210,7 +226,6 @@ export const fr = {
   "view.history.empty":
     "Aucune image recente pour le moment. Les images enregistrees apparaissent ici.",
   "view.history.localOnly": "Conserve uniquement sur cet appareil.",
-  "view.history.open": "Rouvrir",
   "view.history.clear": "Effacer l historique",
   "view.history.dims": "{w} par {h} pixels",
   "view.input.description":
@@ -218,8 +233,7 @@ export const fr = {
   "view.input.placeholder": "Collez l adresse d une visionneuse ou d un manifeste",
   "view.input.aria": "Adresse de la page contenant votre image zoomable",
   "view.input.start": "Trouver l image",
-  // Failure "What happened" explainer.
-  "view.fail.whatHappened": "Ce qui s est passe",
+  // Rate-limit explainers (see view.tsx failureMessageOf).
   "view.fail.rateProxy":
     "Le site qui heberge cette image limite le nombre de pages que notre serveur peut lui demander, et cette limite vient d etre atteinte, donc la page n a pas pu etre ouverte. L extension de navigateur et l application de bureau telechargent depuis votre propre connexion au lieu de notre serveur, elles ne sont donc pas concernees par cette limite.",
   "view.fail.rateDirect":

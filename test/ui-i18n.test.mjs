@@ -71,8 +71,8 @@ test("i18n: substitution renders per locale and degrades safely", () => {
     assert.equal(t("view.modal.ok"), "Got it");
     assert.equal(t("view.step.discovering"), "Finding the zoomable image…");
     assert.equal(
-      t("view.job.stalled", { host: "artsandculture.google.com" }),
-      "Still working, artsandculture.google.com is slow to answer. You can wait, or cancel and try again later.",
+      t("view.job.waiting", { host: "artsandculture.google.com" }),
+      "Waiting for artsandculture.google.com…",
     );
     assert.equal(t("view.job.manyImages", { count: 3 }), "3 images");
     assert.equal(t("view.job.countsFull", { current: 2, total: 9 }), "2 of 9 tiles");
@@ -94,7 +94,7 @@ test("i18n: substitution renders per locale and degrades safely", () => {
       "Sono stati recuperati 14 riquadri su 16.",
     );
     assert.ok(
-      t("view.job.stalled", { host: "example.test" }, "fr").includes("example.test"),
+      t("view.job.waiting", { host: "example.test" }, "fr").includes("example.test"),
       "fr substitution carries the host var",
     );
     // Active-locale rendering follows setLocale.

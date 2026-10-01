@@ -57,6 +57,12 @@ export const de = {
     "Leistungsstarke native Anwendung fuer gigapixelgrosse Museumsbilder und lokale Scans",
   "view.desktop.installer": "Das unsignierte {installer} fuer {platform} ist verfuegbar auf",
   "view.desktop.releasesLink": "GitHub Releases",
+  "view.desktop.releasesNote": "Keine automatischen Updates; prüfen Sie GitHub Releases manuell.",
+  "view.desktop.installerMsi": ".msi-Installationsprogramm",
+  "view.desktop.installerDmg": ".dmg für Apple silicon",
+  "view.desktop.installerDeb": ".deb-Installationsprogramm",
+  "view.desktop.installerGeneric": "Installationsprogramm",
+  "view.desktop.platformGeneric": "Ihre Plattform",
   "view.desktop.whyTitle": "Warum die Desktop-App verwenden?",
   "view.desktop.why1Title": "Bewaltigt grossere Kunstwerke:",
   "view.desktop.why1Body":
@@ -102,6 +108,13 @@ export const de = {
     "Offnen Sie die Museums- oder Bibliotheksseite mit Ihrem Kunstwerk und melden Sie sich bei Bedarf an.",
   "view.ext.step3":
     "Klicken Sie auf das Dezoomify-Symbol in der Symbolleiste, um das vollaufgeloste Bild automatisch zu erkennen und zu speichern!",
+  // Access request (browser-session file access), shared access-request.tsx.
+  "view.access.title": "Zugriff erlauben, um fortzufahren",
+  "view.access.usesOrigin": "Dieses Bild verwendet Dateien von {origin}.",
+  "view.access.needAccess":
+    "Dezoomify braucht Zugriff, um diese Dateien zu lesen und Ihr Bild in diesem Browser zusammenzusetzen.",
+  "view.access.requesting": "Zugriff wird angefordert…",
+  "view.access.allow": "Zugriff erlauben und fortfahren",
   // Idle input section.
   "view.idle.intro": "ermoglicht das Speichern",
   "view.idle.zoomable": "zoombarer Bilder",
@@ -147,11 +160,16 @@ export const de = {
   "view.job.autoChoiceTiles":
     "{noun} gefunden, grosste passende wird gespeichert ({tiles} Kacheln).",
   "view.job.autoChoiceBare": "{noun} gefunden, grosste passende wird gespeichert.",
-  "view.job.stalled":
-    "Lauft noch, {host} antwortet langsam. Sie konnen warten oder abbrechen und es spater erneut versuchen.",
+  "view.job.paused": "Pausiert",
+  "view.job.retryingTiles": "Kacheln werden erneut versucht ({count})…",
+  "view.job.waiting": "Warte auf {host}…",
+  "view.job.sourceLabel": "Quelle",
+  "view.job.pause": "Pause",
+  "view.job.resume": "Fortsetzen",
+  "view.job.stopReturn": "Stoppen und zum Anfang zurückkehren",
+  "view.job.progressValue": "{done} fertig, {active} in Arbeit, {remaining} verbleibend",
   // Display-only section.
   "view.display.title": "Vorschau wird gezeigt, noch nicht gespeichert",
-  "view.display.openDesktop": "In der Desktop-App offnen",
   // Desktop handoff uses the ordinary, user-confirmed dezoomify:// link.
   "view.handoff.send": "An die Desktop-App senden",
   "view.handoff.sendOrigin": "An die Desktop-App senden ({origin})",
@@ -197,21 +215,17 @@ export const de = {
   // Cancelled section.
   "view.cancel.title": "Speichern abgebrochen",
   "view.cancel.message": "Das Speichern des Bildes wurde gestoppt.",
-  // Generic fallback for unknown phases (debug surface; status codes stay raw).
-  "view.generic.status": "Status:",
-  "view.generic.reset": "Zuruecksetzen",
   // Job section and share chrome.
   "view.job.shareTitle":
     "Kopiert die Seitenadresse fuer diesen Auftrag, nicht die Bilddatei selbst",
-  "view.job.shareLink": "Link zu diesem Auftrag kopieren",
   "view.job.countsFull": "{current} von {total} Kacheln",
+  "view.job.countsActive": "{current} von {total} Kacheln · {active} in Arbeit",
   "view.job.countsElapsed": "{current} von {total} Kacheln · {elapsed} vergangen",
   "view.job.elapsedOnly": "{elapsed} vergangen",
   // Recent-jobs history (todo 5.2): local-only ledger.
   "view.history.title": "Zuletzt gespeicherte Bilder",
   "view.history.empty": "Noch keine gespeicherten Bilder. Gespeicherte Bilder erscheinen hier.",
   "view.history.localOnly": "Nur auf diesem Gerat behalten.",
-  "view.history.open": "Erneut offnen",
   "view.history.clear": "Verlauf loschen",
   "view.history.dims": "{w} mal {h} Pixel",
   "view.input.description":
@@ -219,8 +233,7 @@ export const de = {
   "view.input.placeholder": "Adresse eines Bildbetrachters oder Manifests einfuegen",
   "view.input.aria": "Adresse der Webseite mit dem zoombaren Bild",
   "view.input.start": "Bild finden",
-  // Failure "What happened" explainer.
-  "view.fail.whatHappened": "Was geschehen ist",
+  // Rate-limit explainers (see view.tsx failureMessageOf).
   "view.fail.rateProxy":
     "Die Website, die dieses Bild hostet, begrenzt, wie viele Seiten unser Server bei ihr anfordern darf, und diese Grenze wurde gerade erreicht, daher konnte die Seite nicht geoffnet werden. Die Browser-Erweiterung und die Desktop-App laden ueber Ihre eigene Verbindung statt ueber unseren Server und sind von dieser Grenze nicht betroffen.",
   "view.fail.rateDirect":

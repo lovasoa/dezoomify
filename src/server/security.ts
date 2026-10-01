@@ -1,22 +1,15 @@
 // Pure proxy security helpers (no server framework) so node:test can import them.
 
+import { SIGNED_QUERY_KEYS } from "../../packages/shared-ui/src/source-url.ts";
+
 export const PROXY_MAX_REDIRECTS = 5;
 export const PROXY_MAX_BYTES = 2 * 1024 * 1024;
 
-const SENSITIVE_QUERY_KEYS = new Set([
-  "token",
-  "signature",
-  "sig",
-  "auth",
-  "key",
-  "session",
-  "sid",
-  "ticket",
-  "secret",
-  "password",
-  "credential",
-  "access_token",
-]);
+// Signed/credential query keys deny proxying: URLs whose signature would
+// break, or that carry credentials, must never be proxied. The vocabulary is
+// defined once in `packages/shared-ui/src/source-url.ts` (`SIGNED_QUERY_KEYS`)
+// and shared with the browser's proxy-fallback gate in
+// `packages/browser-runtime/src/web-fetch.ts`.
 
 const HOP_BY_HOP = new Set([
   "connection",
@@ -221,7 +214,7 @@ export function isBlockedIPv6(host: string): boolean {
 
 export function hasSensitiveQuery(url: URL): boolean {
   for (const k of url.searchParams.keys()) {
-    if (SENSITIVE_QUERY_KEYS.has(k.toLowerCase())) return true;
+    if (SIGNED_QUERY_KEYS.has(k.toLowerCase())) return true;
   }
   return false;
 }

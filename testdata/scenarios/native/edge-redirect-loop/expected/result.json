@@ -1,10 +1,9 @@
 {
   "outcome": "failed",
-  "code": "discovery.failed",
+  "code": "transport.redirect-limit",
   "recovery": "edit-input",
   "phase": "discovery",
   "retryable": false,
   "transport": "native",
-  "resourceKind": "metadata",
-  "underlying": "transport.redirect-limit"
+  "resourceKind": "metadata"
 }

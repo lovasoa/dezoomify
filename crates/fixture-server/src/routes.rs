@@ -1,7 +1,7 @@
 //! Scenario route table: loading, matching, and payload rendering.
 
 use axum::http::{HeaderMap, HeaderValue};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -50,7 +50,7 @@ pub struct ScenarioRoute {
     pub generator: Option<GeneratorSpec>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum GeneratorSpec {
     #[serde(rename = "arts-tile")]
@@ -89,28 +89,27 @@ pub struct RenderedRoute {
     pub bytes: Vec<u8>,
 }
 
-/// Route id for a route that omitted one: stable, human-readable, derived
-/// from the match shape. Used only in logs and error messages.
-fn derive_route_id(route: &ScenarioRoute) -> String {
-    fn slug(s: &str) -> String {
-        s.chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() {
-                    c.to_ascii_lowercase()
-                } else {
-                    '-'
-                }
-            })
-            .collect()
+/// Canonical route-id derivation, shared by the server (derived ids for logs
+/// and error messages), the xtask fixture tooling (duplicate detection and
+/// capture), so the three cannot drift from one another. Stable and
+/// human-readable: lowercase ASCII alphanumerics with runs of anything else
+/// collapsed to a single dash, trimmed, and truncated to 100 characters.
+pub fn derive_route_id(host: &str, target: &str) -> String {
+    let mut id = String::new();
+    for ch in format!("{host}-{target}").chars() {
+        if ch.is_ascii_alphanumeric() {
+            id.push(ch.to_ascii_lowercase());
+        } else if !id.is_empty() && !id.ends_with('-') {
+            id.push('-');
+        }
     }
-    let host = route.host.as_deref().unwrap_or("any");
-    let target = route
-        .path
-        .as_deref()
-        .or(route.path_prefix.as_deref())
-        .or(route.path_regex.as_deref())
-        .unwrap_or("route");
-    format!("{}-{}", slug(host), slug(target))
+    while id.ends_with('-') {
+        id.pop();
+    }
+    if id.is_empty() {
+        return "route".to_string();
+    }
+    id.chars().take(100).collect()
 }
 
 /// Directory-mirror convention: any payload laid out as
@@ -149,7 +148,7 @@ fn mirror_routes(
         let mut headers = HashMap::new();
         headers.insert(
             "Content-Type".to_string(),
-            route_content_type(&url_path).to_string(),
+            super::content_type(&url_path).to_string(),
         );
         routes.push((
             scenario,
@@ -204,28 +203,6 @@ fn collect_payloads(
         }
     }
     Ok(())
-}
-
-/// Content type for a mirrored payload by URL extension. Matches the
-/// `application/xml` convention fixtures use for `.xml`/`.dzi`.
-fn route_content_type(path: &str) -> &'static str {
-    let file = path.rsplit('/').next().unwrap_or(path);
-    let ext = file.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
-    match ext.to_ascii_lowercase().as_str() {
-        "html" => "text/html",
-        "js" | "mjs" => "application/javascript",
-        "css" => "text/css",
-        "json" => "application/json",
-        "xml" | "dzi" => "application/xml",
-        "txt" => "text/plain",
-        "svg" => "image/svg+xml",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "wasm" => "application/wasm",
-        "ico" => "image/x-icon",
-        "yaml" | "yml" => "application/yaml",
-        _ => "application/octet-stream",
-    }
 }
 
 impl RouteTable {
@@ -291,7 +268,7 @@ impl RouteTable {
             }
             for mut route in file.routes {
                 if route.route_id.is_empty() {
-                    route.route_id = derive_route_id(&route);
+                    route.route_id = route.effective_id();
                 }
                 if let Some(payload) = &route.payload {
                     if payload.contains("..") || payload.starts_with('/') {
@@ -395,6 +372,24 @@ impl RouteTable {
 }
 
 impl ScenarioRoute {
+    /// A stable id for a route that omitted `route_id`: derived from its
+    /// match shape by the shared [`derive_route_id`], the same derivation the
+    /// xtask fixture tooling uses, so duplicate detection stays meaningful
+    /// across the server and the tooling.
+    pub fn effective_id(&self) -> String {
+        if !self.route_id.is_empty() {
+            return self.route_id.clone();
+        }
+        let host = self.host.as_deref().unwrap_or("any");
+        let target = self
+            .path
+            .as_deref()
+            .or(self.path_prefix.as_deref())
+            .or(self.path_regex.as_deref())
+            .unwrap_or("route");
+        derive_route_id(host, target)
+    }
+
     pub fn missing_required_header<'a>(
         &'a self,
         headers: &HeaderMap,

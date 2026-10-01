@@ -143,6 +143,12 @@ const en = {
     "High-performance native application for gigapixel museum artworks and local scans",
   "view.desktop.installer": "The unsigned {installer} for {platform} is on",
   "view.desktop.releasesLink": "GitHub Releases",
+  "view.desktop.releasesNote": "No auto-update; check GitHub Releases manually.",
+  "view.desktop.installerMsi": ".msi installer",
+  "view.desktop.installerDmg": "Apple silicon .dmg",
+  "view.desktop.installerDeb": ".deb installer",
+  "view.desktop.installerGeneric": "installer",
+  "view.desktop.platformGeneric": "your platform",
   "view.desktop.whyTitle": "Why use the Desktop App?",
   "view.desktop.why1Title": "Handles Larger Artworks:",
   "view.desktop.why1Body":
@@ -186,6 +192,13 @@ const en = {
     "Navigate to the museum or library page displaying your artwork, logging in if needed.",
   "view.ext.step3":
     "Click the Dezoomify icon in your browser toolbar to automatically detect and extract the full-resolution image!",
+  // Access request (browser-session file access), shared access-request.tsx.
+  "view.access.title": "Allow access to continue",
+  "view.access.usesOrigin": "This image uses files from {origin}.",
+  "view.access.needAccess":
+    "Dezoomify needs access to read those files and assemble your image in this browser.",
+  "view.access.requesting": "Requesting access…",
+  "view.access.allow": "Allow access and continue",
   // Idle input section.
   "view.idle.intro": "allows you to save",
   "view.idle.zoomable": "zoomable images",
@@ -227,11 +240,16 @@ const en = {
   "view.job.autoChoiceDims": "Found {noun}, saving largest that fits ({width}×{height}).",
   "view.job.autoChoiceTiles": "Found {noun}, saving largest that fits ({tiles} tiles).",
   "view.job.autoChoiceBare": "Found {noun}, saving largest that fits.",
-  "view.job.stalled":
-    "Still working, {host} is slow to answer. You can wait, or cancel and try again later.",
+  "view.job.paused": "Paused",
+  "view.job.retryingTiles": "Retrying tiles ({count})…",
+  "view.job.waiting": "Waiting for {host}…",
+  "view.job.sourceLabel": "Source",
+  "view.job.pause": "Pause",
+  "view.job.resume": "Resume",
+  "view.job.stopReturn": "Stop and return to start",
+  "view.job.progressValue": "{done} done, {active} in progress, {remaining} remaining",
   // Display-only section.
   "view.display.title": "Showing preview – not saved yet",
-  "view.display.openDesktop": "Open in desktop app",
   // Desktop handoff uses the ordinary, user-confirmed dezoomify:// link.
   "view.handoff.send": "Send to desktop app",
   "view.handoff.sendOrigin": "Send to desktop app ({origin})",
@@ -280,20 +298,16 @@ const en = {
   // Cancelled section.
   "view.cancel.title": "Save cancelled",
   "view.cancel.message": "The image save was stopped.",
-  // Generic fallback for unknown phases (debug surface; status codes stay raw).
-  "view.generic.status": "Status:",
-  "view.generic.reset": "Reset",
   // Job section and share chrome.
   "view.job.shareTitle": "Copies the page address for this job, not the image file itself",
-  "view.job.shareLink": "Copy link to this job",
   "view.job.countsFull": "{current} of {total} tiles",
+  "view.job.countsActive": "{current} of {total} tiles · {active} in progress",
   "view.job.countsElapsed": "{current} of {total} tiles · {elapsed} elapsed",
   "view.job.elapsedOnly": "{elapsed} elapsed",
   // Recent-jobs history (todo 5.2): local-only ledger.
   "view.history.title": "Recent pictures",
   "view.history.empty": "No recent pictures yet. Saved pictures appear here.",
   "view.history.localOnly": "Kept only on this device.",
-  "view.history.open": "Open again",
   "view.history.clear": "Clear history",
   "view.history.dims": "{w} by {h} pixels",
   "view.input.description":
@@ -301,8 +315,10 @@ const en = {
   "view.input.placeholder": "Paste an image viewer or manifest URL",
   "view.input.aria": "Address of the webpage containing your zoomable image",
   "view.input.start": "Find image",
-  // Failure "What happened" explainer.
-  "view.fail.whatHappened": "What happened",
+  // Rate-limit explainers, rendered by stable error code at display time
+  // (see `failureMessageOf` in view.tsx): an upstream 429 through the metadata
+  // proxy means OUR server was throttled; a direct 429 means the user's own
+  // connection was throttled. The two cases name different fixes.
   "view.fail.rateProxy":
     "The website hosting this image limits how many pages our server may request from it, and that limit was just reached, so the page could not be opened. The browser extension and the desktop app download from your own internet connection instead of our server, so they are not affected by this limit.",
   "view.fail.rateDirect":

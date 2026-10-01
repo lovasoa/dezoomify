@@ -66,10 +66,6 @@ export function activeQueueEntry<E extends QueueEntry>(queue: SequentialQueue<E>
   return queue.entries.find((entry) => entry.id === queue.activeId) ?? null;
 }
 
-export function pendingQueueEntries<E extends QueueEntry>(queue: SequentialQueue<E>): E[] {
-  return queue.entries.filter((entry) => entry.status === "queued");
-}
-
 export function finishActiveQueueEntry<E extends QueueEntry>(
   queue: SequentialQueue<E>,
   outcome: "done" | "failed" | "cancelled",
@@ -147,12 +143,4 @@ export function summarizeQueue<E extends QueueEntry>(queue: SequentialQueue<E>):
     else pending += 1;
   }
   return { total: queue.entries.length, succeeded, failed, cancelled, pending };
-}
-
-export function humanQueueSummary(summary: {
-  succeeded: number;
-  failed: number;
-  total: number;
-}): string {
-  return `bulk: ${summary.succeeded} succeeded, ${summary.failed} failed, ${summary.total} total`;
 }

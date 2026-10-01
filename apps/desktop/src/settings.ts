@@ -87,6 +87,14 @@ export async function defaultOutputDirectory(): Promise<string | null> {
 
 const HEADER_NAME_RE = /^[a-z0-9!#$%&'*+\-.^_`|~]+$/;
 
+const utf8Encoder = new TextEncoder();
+
+// Header value bounds count UTF-8 bytes, matching the Rust re-validation in
+// `apps/desktop/src-tauri/src/settings.rs`.
+function utf8Length(text: string): number {
+  return utf8Encoder.encode(text).length;
+}
+
 function isValidHeaderName(name: string): boolean {
   if (name.length === 0 || name.length > 128) return false;
   return HEADER_NAME_RE.test(name);
@@ -118,7 +126,7 @@ export function parseHeadersText(text: string): HeadersParse {
       errors.push(`headers line ${i + 1}: bad header name`);
       continue;
     }
-    if (value.length > 4096) {
+    if (utf8Length(value) > 4096) {
       errors.push(`headers line ${i + 1}: value too long`);
       continue;
     }
@@ -285,7 +293,7 @@ function parseHeadersValue(
       }
       const value = val.trim();
       if (
-        value.length > 4096 ||
+        utf8Length(value) > 4096 ||
         value.includes("\r") ||
         value.includes("\n") ||
         value.includes("\0")

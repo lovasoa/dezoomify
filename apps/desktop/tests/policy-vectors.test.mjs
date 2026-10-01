@@ -1,0 +1,145 @@
+// Shared-oracle tests for security-sensitive parsing duplicated across
+// languages. Every case in testdata/deep-link-vectors.json and
+// testdata/policy-vectors.json is asserted here (TS side) and by the Rust
+// tests `deep_link_vectors_match_the_shared_oracle`
+// (apps/desktop/src-tauri/src/deep_link.rs) and
+// `policy_vectors_match_the_shared_oracle`
+// (apps/desktop/src-tauri/src/settings.rs), so the TS and Rust validators can
+// never accept or reject different inputs unnoticed. Also pins the two
+// credential query-key vocabularies that live in TypeScript against their
+// Rust contract mirror.
+
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { SIGNED_QUERY_KEYS } from "../../../packages/shared-ui/src/source-url.ts";
+import { DEEP_LINK_SECRET_QUERY_KEYS, parseRawDeepLinkUrl } from "../src/errorCopy.ts";
+import { parseHeadersText, validateSettings } from "../src/settings.ts";
+
+const deepLinkVectors = JSON.parse(
+  readFileSync(
+    fileURLToPath(new URL("../../../testdata/deep-link-vectors.json", import.meta.url)),
+    "utf8",
+  ),
+);
+const policyVectors = JSON.parse(
+  readFileSync(
+    fileURLToPath(new URL("../../../testdata/policy-vectors.json", import.meta.url)),
+    "utf8",
+  ),
+);
+
+test("deep-link vectors: the TS mirror matches the shared oracle", () => {
+  assert.ok(deepLinkVectors.cases.length >= 15, "the vector list covers the rules");
+  assert.ok(deepLinkVectors.cases.length <= 25, "the vector list stays bounded");
+  for (const c of deepLinkVectors.cases) {
+    const parsed = parseRawDeepLinkUrl(c.raw);
+    if (c.reject !== undefined) {
+      assert.equal(parsed, null, `${c.name} must reject (${c.reject})`);
+    } else {
+      assert.deepEqual(parsed, c.accept, `${c.name} must accept`);
+    }
+  }
+});
+
+test("settings policy vectors: the TS validators match the shared oracle", () => {
+  for (const c of policyVectors.headerLines) {
+    const parsed = parseHeadersText(c.line);
+    if (c.reject !== undefined) {
+      assert.deepEqual(parsed.errors, [c.reject.ts], `${c.name} must reject`);
+    } else if (c.accept === null) {
+      assert.deepEqual(parsed, { headers: {}, errors: [] }, `${c.name} must be ignored`);
+    } else {
+      assert.deepEqual(parsed.errors, [], `${c.name} must accept`);
+      assert.deepEqual(
+        parsed.headers,
+        { [c.accept.name]: c.accept.value },
+        `${c.name} must accept`,
+      );
+    }
+  }
+  for (const c of policyVectors.settings) {
+    const validated = validateSettings(c.input);
+    if (c.reject !== undefined) {
+      assert.equal(validated.ok, false, `${c.name} must reject`);
+      assert.equal(validated.errors[0], c.reject.ts, `${c.name} rejection reason`);
+    } else {
+      assert.equal(validated.ok, true, `${c.name} must accept (${validated.errors})`);
+      assert.ok(validated.settings, `${c.name} produces settings`);
+      for (const [field, value] of Object.entries(c.accept)) {
+        assert.deepEqual(validated.settings[field], value, `${c.name}: ${field}`);
+      }
+    }
+  }
+});
+
+// Deliberate cross-language membership lock: this exact list mirrors the
+// canonical Rust contract constant `dezoomify::model::SENSITIVE_QUERY_KEYS`
+// (consumed by apps/desktop/src-tauri/src/deep_link.rs and pinned by its
+// `sensitive_query_key_membership_is_locked` test). Update both sides and
+// both locks in the same change.
+const SENSITIVE_QUERY_KEYS_LOCK = [
+  "access-token",
+  "access_token",
+  "api-key",
+  "api_key",
+  "apikey",
+  "auth",
+  "authorization",
+  "bearer",
+  "code",
+  "cookie",
+  "cookies",
+  "credential",
+  "key",
+  "passwd",
+  "password",
+  "proxy-authorization",
+  "secret",
+  "session",
+  "sessionid",
+  "sessiontoken",
+  "set-cookie",
+  "sid",
+  "sig",
+  "signature",
+  "state",
+  "ticket",
+  "token",
+  "x-api-key",
+];
+
+test("secret query vocabulary mirrors the Rust contract", () => {
+  assert.deepEqual([...DEEP_LINK_SECRET_QUERY_KEYS], SENSITIVE_QUERY_KEYS_LOCK);
+  assert.deepEqual(
+    [...SENSITIVE_QUERY_KEYS_LOCK].sort(),
+    SENSITIVE_QUERY_KEYS_LOCK,
+    "the canonical list stays sorted",
+  );
+});
+
+// The proxy admission policy is the deliberately narrower vocabulary defined
+// once in packages/shared-ui/src/source-url.ts and consumed by
+// packages/browser-runtime/src/web-fetch.ts and src/server/security.ts.
+const SIGNED_QUERY_KEYS_LOCK = [
+  "access_token",
+  "auth",
+  "credential",
+  "key",
+  "password",
+  "secret",
+  "session",
+  "sid",
+  "sig",
+  "signature",
+  "ticket",
+  "token",
+];
+
+test("signed-params proxy policy is the single shared vocabulary", () => {
+  assert.deepEqual([...SIGNED_QUERY_KEYS], SIGNED_QUERY_KEYS_LOCK);
+  for (const key of SIGNED_QUERY_KEYS_LOCK) {
+    assert.ok(DEEP_LINK_SECRET_QUERY_KEYS.has(key), `${key} stays in the secret vocabulary`);
+  }
+});

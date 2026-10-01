@@ -67,43 +67,19 @@ impl std::fmt::Display for DeepLinkError {
 
 impl std::error::Error for DeepLinkError {}
 
-/// Single shared credential-query vocabulary. Mirrors the canonical
-/// `dezoomify::model::SENSITIVE_QUERY_KEYS` and the generated Rust bindings.
-/// Matching is case-insensitive exact (never substring) so `/cookie-recipe/`
-/// stays valid while `?token=secret` is rejected. This file stays std-only by
-/// design (lean shell); keep the list in sync with the model source.
+/// Credential-query lookup over the canonical contract vocabulary
+/// `dezoomify::model::SENSITIVE_QUERY_KEYS` (declared once in
+/// `crates/dezoomify/src/model.rs`). The TypeScript mirror is
+/// `DEEP_LINK_SECRET_QUERY_KEYS` in `packages/shared-ui/src/source-url.ts`;
+/// twin membership lock tests (the `sensitive_query_key_membership_is_locked`
+/// test below and `apps/desktop/tests/policy-vectors.test.mjs`) pin the two
+/// lists together. Matching is case-insensitive exact (never substring) so
+/// `/cookie-recipe/` stays valid while `?token=secret` is rejected.
 fn is_secret_key(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "access-token"
-            | "access_token"
-            | "api-key"
-            | "api_key"
-            | "apikey"
-            | "auth"
-            | "authorization"
-            | "bearer"
-            | "code"
-            | "cookie"
-            | "cookies"
-            | "credential"
-            | "key"
-            | "passwd"
-            | "password"
-            | "proxy-authorization"
-            | "secret"
-            | "session"
-            | "sessionid"
-            | "sessiontoken"
-            | "set-cookie"
-            | "sid"
-            | "sig"
-            | "signature"
-            | "state"
-            | "ticket"
-            | "token"
-            | "x-api-key"
-    )
+    let lower = name.to_ascii_lowercase();
+    dezoomify::model::SENSITIVE_QUERY_KEYS
+        .iter()
+        .any(|key| *key == lower)
 }
 
 /// Local-path markers that never travel in a deep link (separate from secret
@@ -176,7 +152,10 @@ fn validate_source(src: &str) -> Result<(), DeepLinkError> {
             "src must be 1..1024 bytes".to_string(),
         ));
     }
-    if !(src.starts_with("http://") || src.starts_with("https://")) {
+    // URI schemes are case-insensitive (`HTTPS://` is the same scheme as
+    // `https://`), matching the TS mirror's URL-based scheme check.
+    let scheme_lower = src.to_ascii_lowercase();
+    if !(scheme_lower.starts_with("http://") || scheme_lower.starts_with("https://")) {
         return Err(DeepLinkError::InvalidSource(
             "scheme must be http or https".to_string(),
         ));
@@ -204,7 +183,48 @@ pub fn find_deep_link_in_argv(argv: &[String]) -> Option<String> {
     None
 }
 
+/// The first credential key smuggled into a decoded source URL's own query or
+/// fragment, if any. Regions mirror the TS `hasSecretQueryParams` in
+/// `packages/shared-ui/src/source-url.ts`: the query runs from the first `?`
+/// up to the first `#`; the fragment runs from the first `#`. A pair's key is
+/// the text before its first `=` (or the whole pair) and counts whether or not
+/// a value follows, so bare keys (`?token`) and percent-encoded spellings
+/// (`?%74oken=1`) are caught like `?token=secret`. Matching stays exact per
+/// key (case-insensitive), never substring.
+fn smuggled_secret_key(source: &str) -> Option<String> {
+    let before_fragment = source.split('#').next().unwrap_or(source);
+    let query = before_fragment.split_once('?').map_or("", |(_, q)| q);
+    let fragment = source.split('#').nth(1).unwrap_or("");
+    for region in [query, fragment] {
+        for pair in region.split('&') {
+            if pair.is_empty() {
+                continue;
+            }
+            let raw_key = pair.split_once('=').map_or(pair, |(k, _)| k);
+            let key = raw_key.trim_start_matches(['?', '#']);
+            if key.is_empty() {
+                continue;
+            }
+            if is_secret_key(key) {
+                return Some(key.to_string());
+            }
+            // Percent-encoded spellings decode like form data (`%74oken` is
+            // `token`); a malformed escape can never decode to a key name, so
+            // decoding failures are skipped.
+            if let Ok(decoded) = percent_decode(key) {
+                if decoded != key && is_secret_key(&decoded) {
+                    return Some(decoded);
+                }
+            }
+        }
+    }
+    None
+}
+
 pub fn parse_deep_link(url: &str) -> Result<DeepLink, DeepLinkError> {
+    // Surrounding whitespace never travels in the envelope (the argv scan and
+    // the TS mirror `parseRawDeepLinkUrl` both trim first).
+    let url = url.trim();
     if url.len() > MAX_DEEP_LINK_LEN {
         return Err(DeepLinkError::Oversize);
     }
@@ -278,39 +298,29 @@ pub fn parse_deep_link(url: &str) -> Result<DeepLink, DeepLinkError> {
     }
     let version_raw = version_raw.ok_or(DeepLinkError::MissingField("v"))?;
     let src_raw = src_raw.ok_or(DeepLinkError::MissingField("src"))?;
-    // Version must be a plain integer; dotted or signed forms are rejected.
+    // Version must be a plain unsigned integer: digits only, with no sign and
+    // no leading zero, so `+2`, `02`, `1.0`, and `2_0` are rejected exactly
+    // like the TS mirror (`parseRawDeepLinkUrl` accepts only "1" and "2").
     // Supported: 2 (current) and 1 (N-1). Rejected: 0 (N-2) and 3+ (future).
-    let version: u32 = version_raw
-        .parse()
-        .map_err(|_| DeepLinkError::UnsupportedVersion(version_raw.clone()))?;
+    let plain_digits = !version_raw.is_empty()
+        && version_raw.bytes().all(|b| b.is_ascii_digit())
+        && (version_raw == "0" || !version_raw.starts_with('0'));
+    let version: u32 = match (plain_digits, version_raw.parse::<u32>()) {
+        (true, Ok(version)) => version,
+        _ => return Err(DeepLinkError::UnsupportedVersion(version_raw)),
+    };
     if !(DEEP_LINK_MIN_SUPPORTED_VERSION..=DEEP_LINK_CURRENT_VERSION).contains(&version) {
         return Err(DeepLinkError::UnsupportedVersion(version_raw));
     }
     let source_url = percent_decode(&src_raw).map_err(DeepLinkError::MalformedEncoding)?;
+    // Surrounding whitespace in the decoded source is normalized away, like
+    // the TS mirror's `.trim()`.
+    let source_url = source_url.trim().to_string();
     validate_source(&source_url)?;
-    // Secret query keys inside the decoded source are also forbidden
-    // (cookie-param style smuggling). Matching is exact per key
-    // (case-insensitive), never substring, matching the model field.
-    if let Some(q) = source_url.split('?').nth(1) {
-        let query = q.split('#').next().unwrap_or(q);
-        for pair in query.split('&') {
-            if let Some((k, _)) = pair.split_once('=') {
-                if is_secret_key(k) {
-                    return Err(DeepLinkError::SecretForbidden(k.to_string()));
-                }
-            }
-        }
-    }
-    // Handoff validation applies to fragment parameters too.
-    if let Some(fragment) = source_url.split('#').nth(1) {
-        for pair in fragment.split('&') {
-            if let Some((k, _)) = pair.split_once('=') {
-                let key = k.trim_start_matches(['?', '#']);
-                if is_secret_key(key) {
-                    return Err(DeepLinkError::SecretForbidden(key.to_string()));
-                }
-            }
-        }
+    // Secret query or fragment keys inside the decoded source are also
+    // forbidden (cookie-param style smuggling).
+    if let Some(key) = smuggled_secret_key(&source_url) {
+        return Err(DeepLinkError::SecretForbidden(key));
     }
     let hint = match hint_raw {
         Some(raw) => {
@@ -539,5 +549,111 @@ mod tests {
         // Non-deep-link schemes are ignored.
         let other = vec!["app".to_string(), "https://example.com/x".to_string()];
         assert_eq!(find_deep_link_in_argv(&other), None);
+    }
+
+    /// Deliberate membership lock for the canonical credential vocabulary
+    /// `dezoomify::model::SENSITIVE_QUERY_KEYS`, mirrored by
+    /// `DEEP_LINK_SECRET_QUERY_KEYS` in `packages/shared-ui/src/source-url.ts`
+    /// and pinned there by `apps/desktop/tests/policy-vectors.test.mjs`. Any
+    /// change updates both languages and this lock in the same change.
+    #[test]
+    fn sensitive_query_key_membership_is_locked() {
+        let expected: &[&str] = &[
+            "access-token",
+            "access_token",
+            "api-key",
+            "api_key",
+            "apikey",
+            "auth",
+            "authorization",
+            "bearer",
+            "code",
+            "cookie",
+            "cookies",
+            "credential",
+            "key",
+            "passwd",
+            "password",
+            "proxy-authorization",
+            "secret",
+            "session",
+            "sessionid",
+            "sessiontoken",
+            "set-cookie",
+            "sid",
+            "sig",
+            "signature",
+            "state",
+            "ticket",
+            "token",
+            "x-api-key",
+        ];
+        assert_eq!(dezoomify::model::SENSITIVE_QUERY_KEYS, expected);
+        let mut sorted = expected.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted, expected, "canonical list stays sorted and unique");
+    }
+
+    /// Stable rejection class names asserted by `testdata/deep-link-vectors.json`.
+    fn error_class(err: &DeepLinkError) -> &'static str {
+        match err {
+            DeepLinkError::Oversize => "oversize",
+            DeepLinkError::InvalidScheme => "invalid-scheme",
+            DeepLinkError::MissingField(_) => "missing-field",
+            DeepLinkError::DuplicateField(_) => "duplicate-field",
+            DeepLinkError::UnknownField(_) => "unknown-field",
+            DeepLinkError::UnsupportedVersion(_) => "unsupported-version",
+            DeepLinkError::MalformedEncoding(_) => "malformed-encoding",
+            DeepLinkError::UserinfoForbidden => "userinfo-forbidden",
+            DeepLinkError::SecretForbidden(_) => "secret-forbidden",
+            DeepLinkError::InvalidSource(_) => "invalid-source",
+        }
+    }
+
+    /// Shared cross-language oracle: every case in
+    /// `testdata/deep-link-vectors.json` is asserted here and by
+    /// `apps/desktop/tests/policy-vectors.test.mjs` against the TS mirror
+    /// `parseRawDeepLinkUrl`, so the two parsers can never accept or reject
+    /// different inputs unnoticed.
+    #[test]
+    fn deep_link_vectors_match_the_shared_oracle() {
+        let doc: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../testdata/deep-link-vectors.json"))
+                .expect("testdata/deep-link-vectors.json parses");
+        let cases = doc["cases"].as_array().expect("cases array");
+        assert!(
+            (15..=25).contains(&cases.len()),
+            "the vector list stays bounded ({} cases)",
+            cases.len()
+        );
+        for case in cases {
+            let name = case["name"].as_str().expect("case name");
+            let raw = case["raw"].as_str().expect("case raw");
+            if let Some(reject) = case["reject"].as_str() {
+                let err = parse_deep_link(raw).expect_err(&format!("{name} must reject"));
+                assert_eq!(error_class(&err), reject, "{name}: wrong rejection class");
+            } else {
+                let accept = &case["accept"];
+                let parsed =
+                    parse_deep_link(raw).unwrap_or_else(|e| panic!("{name} must accept: {e}"));
+                assert_eq!(
+                    parsed.source_url,
+                    accept["sourceUrl"].as_str().expect("sourceUrl"),
+                    "{name}: source_url"
+                );
+                assert_eq!(
+                    parsed.version,
+                    u32::try_from(accept["version"].as_u64().expect("version")).expect("u32"),
+                    "{name}: version"
+                );
+                let hint = if accept["hint"].is_null() {
+                    None
+                } else {
+                    Some(accept["hint"].as_str().expect("hint").to_string())
+                };
+                assert_eq!(parsed.hint, hint, "{name}: hint");
+            }
+        }
     }
 }

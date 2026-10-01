@@ -13,6 +13,9 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 toml.workspace = true
+# Fixture tooling shares the fixture server's route schema, content-type
+# mapping, and route-id derivation so the two cannot drift.
+dezoomify-fixture-server = { path = "../fixture-server" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

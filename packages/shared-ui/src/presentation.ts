@@ -57,7 +57,7 @@ export function presentStatus(
     error:
       status === "failed"
         ? (opts?.error ?? {
-            code: "UNKNOWN",
+            code: "native.internal",
             phase: "output",
             retryable: true,
             message: t("view.fail.fallback"),

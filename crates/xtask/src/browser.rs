@@ -35,27 +35,18 @@ pub fn test_browser(args: &[String]) -> Result<(), String> {
         }
     }
     if let Some(id) = scenario {
-        // Scenario focus: the scenario must exist with a parsed expected
-        // result; the deterministic unit matrix then runs as usual.
-        let candidates = [
-            format!("testdata/scenarios/website/{id}/expected/result.json"),
-            format!("testdata/scenarios/browser-runtime/{id}/expected/result.json"),
-        ];
-        let mut ok = false;
-        for rel in &candidates {
-            if let Ok(text) = std::fs::read_to_string(super::repo_root().join(rel)) {
-                let _: serde_json::Value =
-                    serde_json::from_str(&text).map_err(|e| format!("bad scenario {id}: {e}"))?;
-                ok = true;
-            }
-        }
-        if !ok {
-            return Err(format!("unknown scenario '{id}'"));
-        }
-        // Scenario focus: website and browser-runtime scenarios are
-        // expectation contracts without executable inputs; their described
-        // flows run end-to-end in the real Chromium E2E below (explicit via
-        // --browser, or in test web).
+        // Scenario focus is not supported: `test browser` runs the generic
+        // browser-runtime unit matrix plus (with `--browser`) the full webapp
+        // Chromium E2E, and none of those suites has a per-scenario
+        // executable filter. Fail with a clear error instead of pretending to
+        // narrow the run: a command must not claim validation it does not
+        // perform.
+        return Err(format!(
+            "scenario focus is not supported by `test browser` ('{id}'): \
+             the browser suites have no per-scenario executable filter; \
+             run `cargo xtask test scenario` for scenario suites or \
+             `cargo xtask test web --e2e` for the full Chromium E2E"
+        ));
     }
     if build_only {
         return build_only_check();
@@ -527,5 +518,15 @@ mod tests {
         );
         assert!(super::parse_dev_site_args("dev web", &["--bogus".to_string()]).is_err());
         assert!(super::parse_dev_site_args("dev ui", &["--bogus".to_string()]).is_err());
+    }
+
+    #[test]
+    fn scenario_focus_fails_loudly_without_running_suites() {
+        let err = super::test_browser(&["--scenario".to_string(), "foo".to_string()])
+            .expect_err("--scenario must not claim focus it cannot perform");
+        assert!(
+            err.contains("scenario focus is not supported"),
+            "rejection lacks the unsupported-focus explanation: {err}"
+        );
     }
 }

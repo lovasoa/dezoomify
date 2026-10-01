@@ -77,8 +77,8 @@ test("static accessibility contract: live job region announces progress with a l
   render(el, progressPresentation(3, 12), callbacks, {
     jobActivity: {
       url: "https://museum.example.org/x",
-      startedAt: Date.now() - 3000,
-      now: Date.now(),
+      startedAt: 0,
+      now: 3_000,
     },
   });
   const card = el.querySelector(".dz-card");

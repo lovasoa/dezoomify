@@ -811,3 +811,53 @@ impl std::fmt::Display for Error {
     }
 }
 impl std::error::Error for Error {}
+
+// ---------------------------------------------------------------------------
+// Credential vocabulary (cross-language constants)
+// ---------------------------------------------------------------------------
+
+/// Canonical secret/credential query-key vocabulary. These keys must never
+/// travel in a handoff deep link (they are rejected before use) and never
+/// enter diagnostics. Matching is case-insensitive exact, never substring, so
+/// `/cookie-recipe/` stays valid while `?token=secret` is rejected. Sorted and
+/// unique.
+///
+/// This constant is the single source of truth on the Rust side. The
+/// TypeScript mirror is `DEEP_LINK_SECRET_QUERY_KEYS` in
+/// [`packages/shared-ui/src/source-url.ts`](../../../../packages/shared-ui/src/source-url.ts);
+/// the two lists are pinned together by twin membership lock tests
+/// (`sensitive_query_key_membership_is_locked` in
+/// `apps/desktop/src-tauri/src/deep_link.rs` and "secret query vocabulary
+/// mirrors the Rust contract" in `apps/desktop/tests/policy-vectors.test.mjs`).
+/// The deliberately narrower metadata-proxy policy is `SIGNED_QUERY_KEYS` in
+/// the same TypeScript module (a strict subset of this vocabulary).
+pub const SENSITIVE_QUERY_KEYS: &[&str] = &[
+    "access-token",
+    "access_token",
+    "api-key",
+    "api_key",
+    "apikey",
+    "auth",
+    "authorization",
+    "bearer",
+    "code",
+    "cookie",
+    "cookies",
+    "credential",
+    "key",
+    "passwd",
+    "password",
+    "proxy-authorization",
+    "secret",
+    "session",
+    "sessionid",
+    "sessiontoken",
+    "set-cookie",
+    "sid",
+    "sig",
+    "signature",
+    "state",
+    "ticket",
+    "token",
+    "x-api-key",
+];

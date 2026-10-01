@@ -28,10 +28,3 @@ export function formatElapsed(ms: number): string {
   const rest = s % 60;
   return rest === 0 ? `${m} min` : `${m} min ${rest} s`;
 }
-
-/** Remaining time against the per-request timeout, for pending requests. */
-export function formatRemaining(elapsedMs: number, timeoutMs: number): string {
-  const remaining = Math.max(0, timeoutMs - elapsedMs);
-  const s = Math.ceil(remaining / 1000);
-  return `${s} s left`;
-}

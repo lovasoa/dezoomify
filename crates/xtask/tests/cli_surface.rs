@@ -88,6 +88,20 @@ fn rejects_unknown_flags_without_running_suites() {
 }
 
 #[test]
+fn browser_scenario_focus_fails_loudly() {
+    // `test browser --scenario` must never claim to focus a scenario and then
+    // run the generic matrix: scenario focus is unsupported, and the flag
+    // says so explicitly.
+    let out = xtask(&["test", "browser", "--scenario", "foo"]);
+    assert!(!out.status.success(), "accepted --scenario focus");
+    let detail = stderr_text(&out);
+    assert!(
+        detail.contains("scenario focus is not supported"),
+        "rejection lacks the unsupported-focus explanation: {detail}"
+    );
+}
+
+#[test]
 fn digest_round_trip_attests_inputs() {
     let out = xtask(&["ci", "digest"]);
     assert!(

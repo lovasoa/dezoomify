@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement } from "react";
 import { createDiagnosticRecorder } from "../packages/shared-ui/src/diagnostics.ts";
+import { setLocale, t } from "../packages/shared-ui/src/i18n.ts";
 import { PartialDecisionActions } from "../packages/shared-ui/src/partial-decision.tsx";
 import {
   presentFailure,
@@ -70,7 +71,8 @@ test("renderView mounts card and updates job section in place without DOM destru
   const ctx = {
     jobActivity: {
       url: "https://museum.example.org/artwork/1",
-      startedAt: Date.now() - 3000,
+      startedAt: 0,
+      now: 3_000,
     },
   };
 
@@ -108,7 +110,7 @@ test("renderView mounts card and updates job section in place without DOM destru
   // The step line renders the presentation headline, never host copy.
   assert.equal(stepTextEl.textContent, "Saving image tiles…");
   const countsEl = card.querySelector("#dz-job-counts");
-  assert.equal(countsEl.textContent, "15 done / 60");
+  assert.equal(countsEl.textContent, "15 of 60 tiles");
   const barEl = card.querySelector("#dz-job-bar");
   assert.equal(barEl.style.width, "25%");
 
@@ -260,7 +262,7 @@ test("zero-tile refusal has no partial controls and opens the source", () => {
 
 test("slow discovery replaces the phase with one waiting status", () => {
   const el = container();
-  const now = Date.now();
+  const now = 20_000;
   const ctx = {
     jobActivity: {
       url: "https://artsandculture.google.com/project/1",
@@ -275,6 +277,38 @@ test("slow discovery replaces the phase with one waiting status", () => {
   assert.ok(step, "job status shown while stalled");
   assert.equal(step.textContent, "Waiting for artsandculture.google.com…");
   assert.doesNotMatch(step.textContent, /museum/i);
+});
+
+test("rate-limit failures render the localized explainer by stable code at display time", () => {
+  const el = container();
+  const proxy = failurePresentation({
+    code: "UPSTREAM_RATE_LIMITED",
+    phase: "discovery",
+    retryable: true,
+    message: "stale injected English copy",
+    transport: "metadata-proxy",
+  });
+  render(el, proxy, callbacks);
+  assert.equal(el.querySelector("#dz-error-message").textContent, t("view.fail.rateProxy"));
+  const direct = failurePresentation({
+    code: "UPSTREAM_RATE_LIMITED",
+    phase: "discovery",
+    retryable: true,
+    message: "stale injected English copy",
+    transport: "direct",
+  });
+  render(el, direct, callbacks);
+  assert.equal(el.querySelector("#dz-error-message").textContent, t("view.fail.rateDirect"));
+  try {
+    assert.equal(setLocale("fr"), true);
+    render(el, proxy, callbacks);
+    assert.equal(
+      el.querySelector("#dz-error-message").textContent,
+      t("view.fail.rateProxy", undefined, "fr"),
+    );
+  } finally {
+    setLocale("en");
+  }
 });
 
 test("failed state updates error details in place without destroying error container", () => {

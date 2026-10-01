@@ -50,9 +50,9 @@ test("metadata accepts viewer HTML but tiles reject it", async () => {
     (await fetcher().fetchResource(resource("/html", "metadata"), signal())).bytes.length,
     11,
   );
-  await assert.rejects(fetcher().fetchResource(resource("/html"), signal()), (error) =>
-    /unsupported response type/.test(error.message),
-  );
+  await assert.rejects(fetcher().fetchResource(resource("/html"), signal()), {
+    code: "TRANSPORT_BAD_URL",
+  });
 });
 
 test("HTTP refusals and throttles retain status without becoming permission requests", async () => {
@@ -73,13 +73,12 @@ test("missing grants and forbidden URLs do not perform network requests", async 
     fetcher({ hasPermission: () => false }).fetchResource(resource("/image"), signal()),
     { code: "TRANSPORT_POLICY_DENIED" },
   );
-  await assert.rejects(
-    fetcher().fetchResource(resource("/api/proxy?u=secret"), signal()),
-    (error) => /proxy/.test(error.message),
-  );
+  await assert.rejects(fetcher().fetchResource(resource("/api/proxy?u=secret"), signal()), {
+    code: "TRANSPORT_BAD_URL",
+  });
   await assert.rejects(
     fetcher().fetchResource({ ...resource("/image"), uri: "file:///etc/passwd" }, signal()),
-    (error) => /scheme/.test(error.message),
+    { code: "TRANSPORT_BAD_URL" },
   );
   assert.equal(requests.length, before);
 });
@@ -111,8 +110,5 @@ test("a request deadline stays distinguishable from user cancellation", async ()
   }).fetchResource(resource("/stall"), signal());
   await arrived;
   expire();
-  await assert.rejects(
-    pending,
-    (error) => error.code === "TRANSPORT_TIMEOUT" && error.message === "fetch timeout",
-  );
+  await assert.rejects(pending, { code: "TRANSPORT_TIMEOUT" });
 });

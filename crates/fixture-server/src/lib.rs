@@ -13,7 +13,7 @@ mod b64;
 mod routes;
 mod svg;
 
-pub use routes::{RouteTable, ScenarioRoute};
+pub use routes::{derive_route_id, RouteTable, ScenarioRoute};
 
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
@@ -475,7 +475,7 @@ async fn serve_static(
     match std::fs::read(&full) {
         Ok(bytes) => {
             let mut headers = HeaderMap::new();
-            let ctype = content_type(full.extension().and_then(|e| e.to_str()).unwrap_or(""));
+            let ctype = content_type(&full.to_string_lossy());
             headers.insert("content-type", HeaderValue::from_str(ctype).expect("ctype"));
             bytes_response(200, headers, bytes, head_only)
         }
@@ -483,19 +483,25 @@ async fn serve_static(
     }
 }
 
-fn content_type(ext: &str) -> &'static str {
-    match ext {
+/// Content type inferred from the final path segment's extension. The single
+/// mapping for static files, mirrored payload routes, and the xtask fixture
+/// tooling (capture), so none of them can drift from the others.
+/// `.xml`/`.dzi` are `application/xml`, the convention documented in
+/// `testdata/scenarios/README.md`.
+pub fn content_type(path: &str) -> &'static str {
+    let file = path.rsplit('/').next().unwrap_or(path);
+    let ext = file.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
+    match ext.to_ascii_lowercase().as_str() {
         "html" => "text/html",
-        "js" => "application/javascript",
+        "js" | "mjs" => "application/javascript",
         "css" => "text/css",
         "json" => "application/json",
-        "xml" | "dzi" => "text/xml",
+        "xml" | "dzi" => "application/xml",
         "txt" => "text/plain",
         "svg" => "image/svg+xml",
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
         "wasm" => "application/wasm",
-        "mjs" => "application/javascript",
         "ico" => "image/x-icon",
         "yaml" | "yml" => "application/yaml",
         _ => "application/octet-stream",

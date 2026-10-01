@@ -6,6 +6,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
+import type { JobActivity } from "./activity.ts";
 import type { HistoryEntry } from "./history.ts";
 import type { Presentation, ResolutionChoice } from "./presentation.ts";
 import {
@@ -157,12 +158,13 @@ function ResolutionNotice({
   choice,
   callbacks,
   running,
+  hostDocument,
 }: {
   choice: ResolutionChoice;
   callbacks: ViewCallbacks;
   running: boolean;
+  hostDocument: Document;
 }) {
-  const hostDoc = globalThis.document;
   const dims = (size: { width: number; height: number }) => `${size.width}×${size.height}`;
   return (
     <div className="dz-resolution-notice" id="dz-resolution-notice">
@@ -196,7 +198,7 @@ function ResolutionNotice({
           type="button"
           className="dz-resolution-download"
           id="dz-btn-download-desktop"
-          onClick={() => showDesktopAppGuidance(hostDoc)}
+          onClick={() => showDesktopAppGuidance(hostDocument)}
         >
           <svg
             width="18"
@@ -246,10 +248,18 @@ function resolutionNoticeOf(
   presentation: Presentation,
   callbacks: ViewCallbacks,
   running: boolean,
+  hostDocument: Document,
 ): ReactElement | null {
   const choice = callbacks.onTryMaximum ? presentation.resolution : undefined;
   if (!choice) return null;
-  return <ResolutionNotice choice={choice} callbacks={callbacks} running={running} />;
+  return (
+    <ResolutionNotice
+      choice={choice}
+      callbacks={callbacks}
+      running={running}
+      hostDocument={hostDocument}
+    />
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -343,7 +353,9 @@ interface JobDerived {
 }
 
 function deriveJob(presentation: Presentation, ctx?: ViewContext): JobDerived {
-  const activity = ctx?.jobActivity ?? {};
+  // Clock readings are host-injected through `jobActivity.now`; the view never
+  // reads a global clock. Hosts without job timing get the zero epoch.
+  const activity: JobActivity = ctx?.jobActivity ?? { now: 0 };
   const current = presentation.progress?.current ?? 0;
   const total = presentation.progress?.total ?? 0;
   const determinate = total > 0;
@@ -354,7 +366,7 @@ function deriveJob(presentation: Presentation, ctx?: ViewContext): JobDerived {
   const activePct = determinate ? (active / total) * 100 : 0;
   const retrying = Math.max(0, Math.min(ctx?.currentProgress?.retrying ?? 0, active));
   const paused = presentation.paused || activity.paused === true;
-  const now = activity.now ?? Date.now();
+  const now = activity.now;
   const startedAt = activity.startedAt ?? now;
   const timerNow = activity.pausedAt ?? now;
   const elapsedMs = Math.max(0, timerNow - startedAt - (activity.pausedDurationMs ?? 0));
@@ -366,11 +378,11 @@ function deriveJob(presentation: Presentation, ctx?: ViewContext): JobDerived {
     ? t(presentation.detailKey, presentation.detailVars)
     : undefined;
   const step = paused
-    ? "Paused"
+    ? t("view.job.paused")
     : retrying > 0
-      ? `Retrying ${retrying} tile${retrying === 1 ? "" : "s"}…`
+      ? t("view.job.retryingTiles", { count: retrying })
       : showStalled
-        ? `Waiting for ${hostFromUrl(activity.url)}…`
+        ? t("view.job.waiting", { host: hostFromUrl(activity.url) })
         : t(presentation.headlineKey, presentation.headlineVars);
   const sourceUrl = activity.url ? displaySourceUrl(activity.url) : "";
   const estimatedTotalMs =
@@ -382,7 +394,9 @@ function deriveJob(presentation: Presentation, ctx?: ViewContext): JobDerived {
     ? `${elapsed}${typeof estimatedTotalMs === "number" && estimatedTotalMs > elapsedMs ? ` / ~${formatElapsed(estimatedTotalMs)}` : ""}`
     : "";
   const countsText = determinate
-    ? `${current} done${active > 0 ? ` + ${active} in progress` : ""} / ${total}`
+    ? active > 0
+      ? t("view.job.countsActive", { current, total, active })
+      : t("view.job.countsFull", { current, total })
     : "";
   return {
     paused,
@@ -404,10 +418,12 @@ function JobView({
   presentation,
   callbacks,
   ctx,
+  hostDocument,
 }: {
   presentation: Presentation;
   callbacks: ViewCallbacks;
   ctx?: ViewContext;
+  hostDocument: Document;
 }) {
   const d = deriveJob(presentation, ctx);
   if (presentation.decision) {
@@ -440,7 +456,7 @@ function JobView({
         style={{ display: d.sourceUrl ? "" : "none" }}
         title={d.sourceUrl}
       >
-        <span className="dz-job-source-label">Source</span>
+        <span className="dz-job-source-label">{t("view.job.sourceLabel")}</span>
         <span className="dz-source-url" id="dz-job-source-url">
           {d.sourceUrl}
         </span>
@@ -471,8 +487,8 @@ function JobView({
             className="dz-progress-control"
             id="dz-btn-pause"
             style={{ display: showPause ? "" : "none" }}
-            aria-label="Pause"
-            title="Pause"
+            aria-label={t("view.job.pause")}
+            title={t("view.job.pause")}
             onClick={() => callbacks.onPause?.()}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -485,8 +501,8 @@ function JobView({
             className="dz-progress-control"
             id="dz-btn-resume"
             style={{ display: showResume ? "" : "none" }}
-            aria-label="Resume"
-            title="Resume"
+            aria-label={t("view.job.resume")}
+            title={t("view.job.resume")}
             onClick={() => callbacks.onResume?.()}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -497,8 +513,8 @@ function JobView({
             type="button"
             className="dz-progress-control dz-stop-control"
             id="dz-btn-cancel"
-            aria-label="Stop and return to start"
-            title="Stop and return to start"
+            aria-label={t("view.job.stopReturn")}
+            title={t("view.job.stopReturn")}
             onClick={() => callbacks.onCancel()}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -516,7 +532,11 @@ function JobView({
           aria-label={d.step}
           aria-valuetext={
             d.determinate
-              ? `${d.current} done, ${d.active} in progress, ${Math.max(0, d.total - d.current - d.active)} remaining`
+              ? t("view.job.progressValue", {
+                  done: d.current,
+                  active: d.active,
+                  remaining: Math.max(0, d.total - d.current - d.active),
+                })
               : d.step
           }
         >
@@ -535,7 +555,7 @@ function JobView({
           />
         </div>
       </div>
-      {resolutionNoticeOf(presentation, callbacks, true)}
+      {resolutionNoticeOf(presentation, callbacks, true, hostDocument)}
     </div>
   );
 }
@@ -544,7 +564,15 @@ function JobView({
 // Display-only, completed, failed, cancelled, generic.
 // ---------------------------------------------------------------------------
 
-function DisplayOnlyView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: ViewContext }) {
+function DisplayOnlyView({
+  callbacks,
+  ctx,
+  hostDocument,
+}: {
+  callbacks: ViewCallbacks;
+  ctx?: ViewContext;
+  hostDocument: Document;
+}) {
   const guidance = renderSaveGuidance(false);
   const handoffUrl = typeof ctx?.desktopHandoffUrl === "string" ? ctx.desktopHandoffUrl : "";
   const handoffSource = typeof ctx?.sourceUrl === "string" ? ctx.sourceUrl : "";
@@ -553,7 +581,6 @@ function DisplayOnlyView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: V
     handoffOrigin !== ""
       ? t("view.handoff.sendOrigin", { origin: handoffOrigin })
       : t("view.handoff.send");
-  const hostDoc = globalThis.document;
   return (
     <div className="dz-view-body dz-notice-section dz-fade-in">
       <div className="dz-notice-header">
@@ -577,9 +604,9 @@ function DisplayOnlyView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: V
       <div className="dz-guidance-section">
         <h3 className="dz-guidance-title">{t("view.display.waysTitle")}</h3>
         <div className="dz-guidance-grid">
-          <ExtensionGuideButton onOpen={() => showExtensionGuidance(hostDoc)} />
+          <ExtensionGuideButton onOpen={() => showExtensionGuidance(hostDocument)} />
           <DesktopGuideButton
-            onOpen={() => showDesktopAppGuidance(hostDoc)}
+            onOpen={() => showDesktopAppGuidance(hostDocument)}
             description={t("view.display.deskDescClean")}
           />
         </div>
@@ -619,9 +646,11 @@ function DisplayOnlyView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: V
 function CompletedView({
   presentation,
   callbacks,
+  hostDocument,
 }: {
   presentation: Presentation;
   callbacks: ViewCallbacks;
+  hostDocument: Document;
 }) {
   const [outputAction, setOutputAction] = useState<"open" | "folder" | null>(null);
   const [outputError, setOutputError] = useState<{
@@ -684,7 +713,7 @@ function CompletedView({
         </div>
       </div>
       <p className="dz-completed-guidance">{guidance}</p>
-      {resolutionNoticeOf(presentation, callbacks, false)}
+      {resolutionNoticeOf(presentation, callbacks, false, hostDocument)}
       <div className="dz-actions-row">
         {callbacks.onOpenOutput ? (
           <button
@@ -761,14 +790,29 @@ function CompletedView({
   );
 }
 
+/**
+ * Rate-limit failures render their localized explainer by stable code at
+ * display time (the proxy and direct cases name different fixes). Every other
+ * failure keeps the message the host produced. Codes and diagnostics stay raw.
+ */
+function failureMessageOf(error: JobError): string {
+  const code = String(error.code ?? "");
+  if (code === "UPSTREAM_RATE_LIMITED" || code === "PROXY_RATE_LIMITED") {
+    return t(error.transport === "metadata-proxy" ? "view.fail.rateProxy" : "view.fail.rateDirect");
+  }
+  return error.message;
+}
+
 function FailedView({
   presentation,
   callbacks,
   ctx,
+  hostDocument,
 }: {
   presentation: Presentation;
   callbacks: ViewCallbacks;
   ctx?: ViewContext;
+  hostDocument: Document;
 }) {
   const error: JobError = presentation.error ?? {
     code: "UNKNOWN",
@@ -786,7 +830,6 @@ function FailedView({
   const isFile = isFileHandoffSource(source);
   const origin = isFile ? "" : handoffOriginFor(handoffUrl, source);
   const label = origin !== "" ? t("view.handoff.sendOrigin", { origin }) : t("view.handoff.send");
-  const hostDoc = globalThis.document;
   if (error.code === "job.no-usable-tiles") {
     const refused = error.http === 401 || error.http === 403;
     return (
@@ -834,16 +877,16 @@ function FailedView({
         <div>
           <h2 className="dz-error-title">{t("view.fail.title")}</h2>
           <p className="dz-error-message" id="dz-error-message">
-            {error.message}
+            {failureMessageOf(error)}
           </p>
         </div>
       </div>
       <div className="dz-guidance-section">
         <h3 className="dz-guidance-title">{t("view.display.waysTitle")}</h3>
         <div className="dz-guidance-grid">
-          <ExtensionGuideButton onOpen={() => showExtensionGuidance(hostDoc)} />
+          <ExtensionGuideButton onOpen={() => showExtensionGuidance(hostDocument)} />
           <DesktopGuideButton
-            onOpen={() => showDesktopAppGuidance(hostDoc)}
+            onOpen={() => showDesktopAppGuidance(hostDocument)}
             description={t("view.fail.deskDescLimits")}
           />
           <a
@@ -953,11 +996,13 @@ function SharedView({
   callbacks,
   ctx,
   options,
+  hostDocument,
 }: {
   presentation: Presentation;
   callbacks: ViewCallbacks;
   ctx?: ViewContext;
   options?: ViewRenderOptions;
+  hostDocument: Document;
 }) {
   const phase = presentation.phase;
   const diagnostics = ctx?.diagnosticReport ? (
@@ -983,14 +1028,31 @@ function SharedView({
       {phase === "idle" ? options?.idleBeforeHistory : null}
       {phase === "idle" ? <HistorySection callbacks={callbacks} ctx={ctx} /> : null}
       {phase === "job" ? (
-        <JobView presentation={presentation} callbacks={callbacks} ctx={ctx} />
+        <JobView
+          presentation={presentation}
+          callbacks={callbacks}
+          ctx={ctx}
+          hostDocument={hostDocument}
+        />
       ) : null}
-      {phase === "display-only" ? <DisplayOnlyView callbacks={callbacks} ctx={ctx} /> : null}
+      {phase === "display-only" ? (
+        <DisplayOnlyView callbacks={callbacks} ctx={ctx} hostDocument={hostDocument} />
+      ) : null}
       {phase === "completed" ? (
-        <CompletedView key={ctx?.outputKey} presentation={presentation} callbacks={callbacks} />
+        <CompletedView
+          key={ctx?.outputKey}
+          presentation={presentation}
+          callbacks={callbacks}
+          hostDocument={hostDocument}
+        />
       ) : null}
       {phase === "failed" ? (
-        <FailedView presentation={presentation} callbacks={callbacks} ctx={ctx} />
+        <FailedView
+          presentation={presentation}
+          callbacks={callbacks}
+          ctx={ctx}
+          hostDocument={hostDocument}
+        />
       ) : null}
       {phase === "cancelled" ? <CancelledView callbacks={callbacks} /> : null}
       {options?.after}
@@ -1019,7 +1081,13 @@ export function renderView(
 ): void {
   renderInto(
     container,
-    <SharedView presentation={presentation} callbacks={callbacks} ctx={ctx} options={options} />,
+    <SharedView
+      presentation={presentation}
+      callbacks={callbacks}
+      ctx={ctx}
+      options={options}
+      hostDocument={container.ownerDocument}
+    />,
   );
 }
 
@@ -1033,6 +1101,7 @@ function ModalCard({
   subtitle,
   body,
   actions,
+  hostDocument,
   showClose = true,
   onClose,
 }: {
@@ -1041,6 +1110,7 @@ function ModalCard({
   subtitle?: string;
   body: ReactNode;
   actions?: ReactNode;
+  hostDocument: Document;
   showClose?: boolean;
   onClose(): void;
 }) {
@@ -1048,9 +1118,9 @@ function ModalCard({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    hostDocument.addEventListener("keydown", onKey);
+    return () => hostDocument.removeEventListener("keydown", onKey);
+  }, [hostDocument, onClose]);
   return (
     <div
       id={id}
@@ -1119,6 +1189,7 @@ export function openModal(
     <ModalCard
       title={title}
       subtitle={subtitle}
+      hostDocument={hostDocument}
       onClose={close}
       body={<div>{content}</div>}
       actions={
@@ -1143,7 +1214,7 @@ export function openModal(
 export function openConfirmModal(hostDocument: Document, args: ConfirmModalArgs): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     mountOverlay(hostDocument, (close) => (
-      <ConfirmDialog args={args} close={close} resolve={resolve} />
+      <ConfirmDialog args={args} close={close} resolve={resolve} hostDocument={hostDocument} />
     ));
   });
 }
@@ -1152,10 +1223,12 @@ function ConfirmDialog({
   args,
   close,
   resolve,
+  hostDocument,
 }: {
   args: ConfirmModalArgs;
   close(): void;
   resolve(value: boolean): void;
+  hostDocument: Document;
 }) {
   const declineRef = useRef<HTMLButtonElement>(null);
   useLayoutEffect(() => {
@@ -1170,6 +1243,7 @@ function ConfirmDialog({
       id={args.id}
       title={args.title}
       subtitle={args.subtitle}
+      hostDocument={hostDocument}
       showClose={false}
       onClose={() => decide(false)}
       body={args.bodyLines.map((line) => <p key={line}>{line}</p>)}
@@ -1204,12 +1278,15 @@ function detectPlatform(hints?: PlatformHints): { name: string; installer: strin
   const ua = (hints?.userAgent ?? "").toLowerCase();
   const platform = (hints?.platform ?? "").toLowerCase();
   if (ua.includes("win") || platform.includes("win"))
-    return { name: "Windows", installer: ".msi installer" };
+    return { name: "Windows", installer: t("view.desktop.installerMsi") };
   if (ua.includes("mac") || platform.includes("mac"))
-    return { name: "macOS", installer: "Apple silicon .dmg" };
+    return { name: "macOS", installer: t("view.desktop.installerDmg") };
   if (ua.includes("linux") || platform.includes("linux"))
-    return { name: "Linux", installer: ".deb installer" };
-  return { name: "your platform", installer: "installer" };
+    return { name: "Linux", installer: t("view.desktop.installerDeb") };
+  return {
+    name: t("view.desktop.platformGeneric"),
+    installer: t("view.desktop.installerGeneric"),
+  };
 }
 
 const RELEASES_URL = "https://github.com/lovasoa/dezoomify/releases/latest";
@@ -1218,13 +1295,13 @@ export function showDesktopAppGuidance(hostDocument: Document, hints?: PlatformH
   const p = detectPlatform(hints);
   const releases = (
     <a href={RELEASES_URL} target="_blank" rel="noopener">
-      GitHub Releases
+      {t("view.desktop.releasesLink")}
     </a>
   );
   const downloadNote = (
     <>
-      {t("view.desktop.installer", { platform: p.name, installer: p.installer })} {releases}. No
-      auto-update; check Releases manually.
+      {t("view.desktop.installer", { platform: p.name, installer: p.installer })} {releases}.{" "}
+      {t("view.desktop.releasesNote")}
     </>
   );
   const stepOne = t("view.desktop.step1", { platform: p.name, installer: p.installer });
@@ -1232,6 +1309,7 @@ export function showDesktopAppGuidance(hostDocument: Document, hints?: PlatformH
     <ModalCard
       title={t("view.desktop.title")}
       subtitle={t("view.desktop.subtitle")}
+      hostDocument={hostDocument}
       onClose={close}
       body={
         <>
@@ -1313,6 +1391,7 @@ export function showExtensionGuidance(hostDocument: Document): void {
     <ModalCard
       title={t("view.ext.title")}
       subtitle={t("view.ext.subtitle")}
+      hostDocument={hostDocument}
       onClose={close}
       body={
         <>

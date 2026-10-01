@@ -3,8 +3,24 @@
 // IP was throttled, so the fix is an app that fetches from the user's own IP.
 // A direct 429 means the user's own connection was throttled, so waiting is
 // the only fix. Keep both free of jargon (no "HTTP 429", "upstream", "proxy").
-export const RATE_LIMITED_BY_SITE_MESSAGE =
-  "The website hosting this image limits how many pages our server may request from it, and that limit was just reached, so the page could not be opened. " +
-  "The browser extension and the desktop app download from your own internet connection instead of our server, so they are not affected by this limit: try one of them below, or try again later.";
-export const SITE_BUSY_MESSAGE =
-  "The website hosting this image is receiving too many requests right now. Wait a few minutes and try again.";
+//
+// The shared UI renders the localized copy at display time from the stable
+// error codes (`UPSTREAM_RATE_LIMITED` / `PROXY_RATE_LIMITED`, distinguished by
+// the transport that saw them; see `failureMessageOf` in
+// packages/shared-ui/src/view.tsx). These English strings come from the
+// canonical i18n table and only back the thrown error facts: diagnostics and
+// bug reports, which stay literal English. They are never the rendered copy.
+import { t } from "@dezoomify/shared-ui";
+
+/** `createWebFetcher` message contract, sourced from the i18n English table. */
+export function webFetchMessages(): {
+  rateLimitedBySite: string;
+  siteBusy: string;
+  discoveryFailed(via: string): string;
+} {
+  return {
+    rateLimitedBySite: t("view.fail.rateProxy", undefined, "en"),
+    siteBusy: t("view.fail.rateDirect", undefined, "en"),
+    discoveryFailed: () => t("view.discovery.none", undefined, "en"),
+  };
+}

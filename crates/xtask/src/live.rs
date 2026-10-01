@@ -17,6 +17,7 @@
 
 use std::process::Command;
 
+#[derive(Debug, Clone, Copy)]
 struct LiveTarget {
     /// Short identifier used in output and `--site` filtering.
     name: &'static str,
@@ -251,12 +252,68 @@ const TARGETS: &[LiveTarget] = &[
     },
 ];
 
+/// Offline validation of the target inventory. No network and no CLI spawn:
+/// every target URL is absolute `http`/`https` with a non-empty,
+/// userinfo-free authority and no whitespace (both schemes are deliberate;
+/// see the module docs; there is no http/https distinction), names are
+/// unique, and header names/values are well-formed.
+fn validate(target_list: &[LiveTarget]) -> Result<usize, String> {
+    use std::collections::BTreeSet;
+    let mut names: BTreeSet<&str> = BTreeSet::new();
+    for target in target_list {
+        if target.name.is_empty()
+            || !target
+                .name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        {
+            return Err(format!("bad live target name '{}'", target.name));
+        }
+        if !names.insert(target.name) {
+            return Err(format!("duplicate live target name '{}'", target.name));
+        }
+        let rest = target
+            .url
+            .strip_prefix("https://")
+            .or_else(|| target.url.strip_prefix("http://"))
+            .ok_or_else(|| {
+                format!(
+                    "live target '{}' url must be an absolute http(s) URL: {}",
+                    target.name, target.url
+                )
+            })?;
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+        if authority.is_empty() || authority.contains('@') || target.url.contains(' ') {
+            return Err(format!(
+                "live target '{}' url has a bad authority: {}",
+                target.name, target.url
+            ));
+        }
+        for (name, value) in target.headers {
+            let token = !name.is_empty()
+                && name
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b));
+            if !token || value.contains(['\r', '\n', '\0']) {
+                return Err(format!(
+                    "bad header '{name}' on live target '{}'",
+                    target.name
+                ));
+            }
+        }
+    }
+    Ok(target_list.len())
+}
+
 pub fn test_live(args: &[String]) -> Result<(), String> {
     if args == ["--dry-run", "--fixtures"] {
-        // No network: validate the target list.
+        // No network: actually validate the target inventory before
+        // claiming it is validated.
+        let count = validate(TARGETS)?;
         println!(
-            "test live --dry-run --fixtures: ok ({} targets validated, no public targets hit)",
-            TARGETS.len()
+            "test live --dry-run --fixtures: ok ({count} targets validated: \
+             absolute http(s) URLs, unique names, well-formed headers; \
+             no public targets hit)"
         );
         return Ok(());
     }
@@ -485,6 +542,56 @@ mod tests {
             "nope".to_string()
         ])
         .is_err());
+    }
+
+    #[test]
+    fn dry_run_validates_the_inventory() {
+        assert!(super::validate(super::TARGETS).is_ok());
+        assert!(super::test_live(&["--dry-run".to_string(), "--fixtures".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn validation_rejects_bad_targets() {
+        use super::LiveTarget;
+        let good = LiveTarget {
+            name: "ok_site",
+            url: "https://example.test/a",
+            headers: &[("Cookie", "js_enabled=2")],
+            accept_invalid_certs: false,
+        };
+        assert_eq!(super::validate(&[good]).ok(), Some(1));
+        let cases: Vec<Vec<LiveTarget>> = vec![
+            // Not an absolute http(s) URL.
+            vec![LiveTarget {
+                url: "example.test/a",
+                ..good
+            }],
+            // Userinfo in the authority.
+            vec![LiveTarget {
+                url: "https://user@example.test/a",
+                ..good
+            }],
+            // Duplicate names.
+            vec![good, good],
+            // Bad name.
+            vec![LiveTarget {
+                name: "bad name",
+                ..good
+            }],
+            // Malformed header name.
+            vec![LiveTarget {
+                headers: &[("Bad Name", "v")],
+                ..good
+            }],
+            // Header value with a newline.
+            vec![LiveTarget {
+                headers: &[("X-A", "a\r\nb")],
+                ..good
+            }],
+        ];
+        for case in cases {
+            assert!(super::validate(&case).is_err(), "accepted {case:?}");
+        }
     }
 
     #[test]

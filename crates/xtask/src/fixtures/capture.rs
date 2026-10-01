@@ -309,24 +309,6 @@ fn split_capture_url(url: &str) -> Result<CaptureUrl, String> {
     })
 }
 
-fn route_id_for(host: &str, path: &str) -> String {
-    let mut id = String::new();
-    for ch in format!("{host}{path}").chars() {
-        if ch.is_ascii_alphanumeric() {
-            id.push(ch.to_ascii_lowercase());
-        } else if !id.ends_with('-') && !id.is_empty() {
-            id.push('-');
-        }
-    }
-    while id.ends_with('-') {
-        id.pop();
-    }
-    if id.is_empty() {
-        id.push_str("capture");
-    }
-    id.chars().take(100).collect()
-}
-
 /// On-disk payload path under the scenario dir. Colons become `%3A` so the
 /// tree checks out on Windows; a query hash disambiguates resources
 /// whose paths collide.
@@ -425,18 +407,9 @@ fn content_type_for(path: &str, fetched: &str) -> String {
     if !fetched.is_empty() {
         return fetched.split(';').next().unwrap_or("").trim().to_string();
     }
-    match path
-        .rsplit_once('.')
-        .map(|(_, ext)| ext.to_ascii_lowercase())
-    {
-        Some(ext) if ext == "json" => "application/json".to_string(),
-        Some(ext) if ext == "xml" || ext == "dzi" => "application/xml".to_string(),
-        Some(ext) if ext == "html" => "text/html".to_string(),
-        Some(ext) if ext == "txt" => "text/plain".to_string(),
-        Some(ext) if ext == "png" => "image/png".to_string(),
-        Some(ext) if ext == "jpg" || ext == "jpeg" => "image/jpeg".to_string(),
-        _ => "application/octet-stream".to_string(),
-    }
+    // Same mapping the fixture server serves with, so captured routes and
+    // payloads replay with identical headers.
+    dezoomify_fixture_server::content_type(path).to_string()
 }
 
 fn merge_capture_routes(
@@ -456,7 +429,7 @@ fn merge_capture_routes(
     for item in fetched {
         let content_type = content_type_for(&item.parsed.path, &item.content_type);
         let route = serde_json::json!({
-            "route_id": route_id_for(&item.parsed.host, &item.parsed.path),
+            "route_id": dezoomify_fixture_server::derive_route_id(&item.parsed.host, &item.parsed.path),
             "method": "GET",
             "host": item.parsed.host,
             "path": item.parsed.path,
@@ -482,18 +455,7 @@ fn merge_capture_routes(
 fn manifest_entry(opts: &CaptureOptions, name: &str, bytes: &[u8]) -> serde_json::Value {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    let content_type = match name
-        .rsplit_once('.')
-        .map(|(_, ext)| ext.to_ascii_lowercase())
-    {
-        Some(ext) if ext == "json" => "application/json",
-        Some(ext) if ext == "html" => "text/html",
-        Some(ext) if ext == "xml" || ext == "dzi" => "application/xml",
-        Some(ext) if ext == "txt" => "text/plain",
-        Some(ext) if ext == "png" => "image/png",
-        Some(ext) if ext == "jpg" || ext == "jpeg" => "image/jpeg",
-        _ => "application/octet-stream",
-    };
+    let content_type = dezoomify_fixture_server::content_type(name);
     let path = format!("{}/{}", opts.out, name);
     serde_json::json!({
         "id": path,
@@ -562,7 +524,7 @@ mod tests {
         assert!(!with_query.contains(".."));
         assert!(!with_query.contains(':'));
         assert_eq!(
-            route_id_for("Example.TEST", "/a/B.json"),
+            dezoomify_fixture_server::derive_route_id("Example.TEST", "/a/B.json"),
             "example-test-a-b-json"
         );
     }

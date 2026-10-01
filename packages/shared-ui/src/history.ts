@@ -47,7 +47,8 @@ export interface HistoryDetails {
   width?: number;
   height?: number;
   format?: string;
-  at?: number;
+  /** Host clock reading for the entry; the ledger itself never reads a clock. */
+  at: number;
 }
 
 /** Build one ledger entry keeping the full source address. */
@@ -59,10 +60,7 @@ export function toHistoryEntry(url: string, details: HistoryDetails): HistoryEnt
   const entry: HistoryEntry = {
     origin,
     url: trimmed,
-    at:
-      typeof details.at === "number" && Number.isFinite(details.at)
-        ? Math.floor(details.at)
-        : Date.now(),
+    at: Math.floor(details.at),
   };
   if (typeof details.width === "number" && Number.isFinite(details.width) && details.width > 0) {
     entry.width = Math.floor(details.width);

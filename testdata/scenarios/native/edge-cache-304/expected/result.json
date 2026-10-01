@@ -3,7 +3,7 @@
   "code": "tile.download-failed",
   "recovery": "retry",
   "phase": "acquisition",
-  "retryable": true,
+  "retryable": false,
   "transport": "native",
   "resourceKind": "tile"
 }

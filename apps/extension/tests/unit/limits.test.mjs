@@ -7,9 +7,9 @@ import * as ext from "../../../../packages/browser-runtime/src/limits.ts";
 // policy numbers and tile-plan bound used by the Rust algorithm/runtime.
 
 test("extension limits use the canonical browser-runtime policy", () => {
+  // Deliberate policy tripwires: these numbers are compatibility decisions
+  // (see packages/browser-runtime/src/limits.ts), never renames.
   assert.equal(ext.BROWSER_MAX_PLAN_TILES, 100_000);
-  assert.ok(ext.BROWSER_MAX_CANVAS_SIDE > 0);
-  assert.ok(ext.BROWSER_MAX_CANVAS_AREA > 0);
-  assert.equal(ext.BROWSER_LIMITS.maxArea, ext.BROWSER_MAX_CANVAS_AREA);
-  assert.equal(ext.BROWSER_LIMITS.maxWidth, ext.BROWSER_MAX_CANVAS_SIDE);
+  assert.equal(ext.BROWSER_MAX_CANVAS_SIDE, 32768);
+  assert.equal(ext.BROWSER_MAX_CANVAS_AREA, 268435456);
 });

@@ -17,8 +17,13 @@ const PAGES = readdirSync(srcDir)
 test("every generated page exists with chrome, topics, and no legacy doc links", () => {
   for (const stem of PAGES) {
     const html = readFileSync(path.join(helpDir, `${stem}.html`), "utf8");
-    assert.ok(html.includes('class="dz-nav"'), `${stem}.html has site chrome`);
-    assert.ok(html.includes('class="dz-help-topics"'), `${stem}.html lists topics`);
+    // Structure checks use tag names and links only: renaming CSS classes
+    // or other implementation details must not break them.
+    assert.ok(html.includes("<header"), `${stem}.html has site chrome`);
+    assert.ok(html.includes("<nav"), `${stem}.html has site navigation`);
+    for (const topic of PAGES) {
+      assert.ok(html.includes(`href="${topic}.html"`), `${stem}.html lists the ${topic} topic`);
+    }
     const h1s = [...html.matchAll(/<h1 id="[^"]*">/g)].length;
     assert.equal(h1s, 1, `${stem}.html has exactly one h1 (marker line dropped)`);
     for (const legacy of [
@@ -69,6 +74,11 @@ function exists(p) {
   }
 }
 
+// Pins the documented input contract of scripts/build-help.mjs: each
+// docs/user page starts with a `# <stem>` marker line (dropped from the
+// generated page) followed by the `# ...` heading that becomes the page
+// title. The generator is the authority; this is the source-side tripwire
+// for that documented format.
 test("docs/user pages carry their stem marker", () => {
   for (const stem of PAGES) {
     const md = readFileSync(path.join(srcDir, `${stem}.md`), "utf8");
