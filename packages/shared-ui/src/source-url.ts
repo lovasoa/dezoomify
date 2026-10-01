@@ -30,10 +30,9 @@ export function isValidInputUrl(url: string): boolean {
  * the single TypeScript source; it mirrors the canonical Rust contract
  * constant `dezoomify::model::SENSITIVE_QUERY_KEYS` in
  * `crates/dezoomify/src/model.rs` (consumed by
- * `apps/desktop/src-tauri/src/deep_link.rs`). The two lists are pinned
- * together by twin membership lock tests: `sensitive_query_key_membership_is_locked`
- * in `deep_link.rs` and "secret query vocabulary mirrors the Rust contract" in
- * `apps/desktop/tests/policy-vectors.test.mjs`. Update both sides together.
+ * `apps/desktop/src-tauri/src/deep_link.rs`). Rejection behavior is pinned
+ * on both sides by `testdata/deep-link-vectors.json`; membership itself is
+ * deliberately unpinned (adding or removing a key is a reviewed policy edit).
  */
 export const DEEP_LINK_SECRET_QUERY_KEYS = new Set([
   "access-token",

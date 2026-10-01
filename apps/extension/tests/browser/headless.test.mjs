@@ -139,7 +139,10 @@ function assertPng(bytes) {
     "saved image dimensions",
   );
   for (const { tile, center } of QUADRANTS) {
-    const expected = pixelAt(decodePngPixels(readFileSync(path.join(TILE_DIR, tile))), ...center);
+    // Each tile file is sampled at its own center; the saved output at the
+    // tile's placement center.
+    const tilePixels = decodePngPixels(readFileSync(path.join(TILE_DIR, tile)));
+    const expected = pixelAt(tilePixels, tilePixels.width >> 1, tilePixels.height >> 1);
     const actual = pixelAt(decoded, ...center);
     assert.deepEqual(actual, expected, `${tile} center pixel`);
   }
