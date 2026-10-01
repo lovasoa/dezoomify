@@ -5,6 +5,9 @@
 
 export type QueueStatus = "queued" | "active" | "done" | "failed" | "cancelled";
 
+/** Outcome of a queue mutation: `ok`, or the named refusal. */
+export type QueueResultCode = "ok" | "job.unknown" | "job.stale" | "job.invalid-state";
+
 export interface QueueEntry {
   readonly id: string;
   readonly status: QueueStatus;
@@ -84,7 +87,7 @@ export function finishActiveQueueEntry<E extends QueueEntry>(
 export function cancelQueueEntry<E extends QueueEntry>(
   queue: SequentialQueue<E>,
   id: string,
-): { queue: SequentialQueue<E>; next: E | null; code: string } {
+): { queue: SequentialQueue<E>; next: E | null; code: QueueResultCode } {
   const found = queue.entries.find((entry) => entry.id === id);
   if (!found) return { queue, next: null, code: "job.unknown" };
   if (found.status === "done" || found.status === "failed" || found.status === "cancelled") {
@@ -110,7 +113,7 @@ export function retryQueueEntry<E extends QueueEntry>(
   queue: SequentialQueue<E>,
   id: string,
   makeEntry: (id: string, previous: E, status: QueueStatus) => E,
-): { queue: SequentialQueue<E>; entry: E | null; code: string } {
+): { queue: SequentialQueue<E>; entry: E | null; code: QueueResultCode } {
   const found = queue.entries.find((entry) => entry.id === id);
   if (!found) return { queue, entry: null, code: "job.unknown" };
   if (found.status !== "failed" && found.status !== "cancelled") {

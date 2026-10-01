@@ -263,6 +263,8 @@ export const it = {
     "Questa immagine e troppo grande per essere composta su questo computer ({dims},{need} a 4 byte per pixel, limite {limit}). Salva una versione piu piccola con Larghezza max (CLI: --max-width). Nota: il JPEG accetta al piu {jpegMax} pixel per lato; usa il PNG per immagini piu grandi. Da {host}.",
   "desktop.output.jpegLimit":
     "Questa immagine ({dims}) e troppo grande per il JPEG, che accetta al piu {jpegMax} pixel per lato. Salvala invece come PNG. Da {host}.",
+  "desktop.output.webpLimit":
+    "Questa immagine ({dims}) e troppo grande per il WebP, che accetta al piu {webpMax} pixel per lato. Salvala invece come PNG. Da {host}.",
   "desktop.tile.partialDiscarded":
     "L immagine parziale e stata scartata, nessun file conservato. Riprova da {host} con una connessione stabile.",
   "desktop.tile.partialChoice":

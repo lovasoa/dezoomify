@@ -270,6 +270,8 @@ export const de = {
     "Dieses Bild ist zu gross, um es auf diesem Rechner zusammenzusetzen ({dims},{need} bei 4 Byte je Pixel, Grenze {limit}). Speichern Sie eine kleinere Fassung mit Max. Breite (CLI: --max-width). Hinweis: JPEG erlaubt hochstens {jpegMax} Pixel je Seite; behalten Sie PNG fuer grossere Bilder. Von {host}.",
   "desktop.output.jpegLimit":
     "Dieses Bild ({dims}) ist zu gross fuer JPEG, das hochstens {jpegMax} Pixel je Seite erlaubt. Speichern Sie es stattdessen als PNG. Von {host}.",
+  "desktop.output.webpLimit":
+    "Dieses Bild ({dims}) ist zu gross fuer WebP, das hochstens {webpMax} Pixel je Seite erlaubt. Speichern Sie es stattdessen als PNG. Von {host}.",
   "desktop.tile.partialDiscarded":
     "Das Teilbild wurde verworfen, sodass keine Datei blieb. Versuchen Sie es von {host} aus mit stabiler Verbindung erneut.",
   "desktop.tile.partialChoice":

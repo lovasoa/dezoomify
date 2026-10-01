@@ -2,6 +2,7 @@ import {
   createSequentialQueue,
   enqueueSequential,
   type QueueEntry,
+  type QueueResultCode,
   retryQueueEntry,
   type SequentialQueue,
 } from "@dezoomify/shared-ui";
@@ -17,6 +18,9 @@ export interface DesktopQueueEntry extends QueueEntry {
 }
 
 export type DesktopQueue = SequentialQueue<DesktopQueueEntry>;
+
+/** Queue mutation outcomes; `job.invalid-input` adds the enqueue refusal. */
+export type DesktopQueueResult = QueueResultCode | "job.invalid-input";
 
 /** Empty queue. */
 export function createDesktopQueue(): DesktopQueue {
@@ -49,7 +53,7 @@ function isValidDesktopQueueUrl(url: string): boolean {
 export function enqueueDesktopQueue(
   queue: DesktopQueue,
   inputUrl: string,
-): { queue: DesktopQueue; entry: DesktopQueueEntry | null; code: string } {
+): { queue: DesktopQueue; entry: DesktopQueueEntry | null; code: DesktopQueueResult } {
   const trimmed = typeof inputUrl === "string" ? inputUrl.trim() : "";
   if (!isValidDesktopQueueUrl(trimmed)) {
     return { queue, entry: null, code: "job.invalid-input" };
@@ -77,7 +81,7 @@ export function recordDesktopProgress(
   id: string,
   acquired: number,
   total: number,
-): { queue: DesktopQueue; code: string } {
+): { queue: DesktopQueue; code: DesktopQueueResult } {
   const found = queue.entries.find((entry) => entry.id === id) ?? null;
   if (!found) return { queue, code: "job.unknown" };
   if (found.status === "done" || found.status === "failed" || found.status === "cancelled") {
@@ -102,7 +106,7 @@ export function recordDesktopProgress(
 export function retryDesktopEntry(
   queue: DesktopQueue,
   id: string,
-): { queue: DesktopQueue; entry: DesktopQueueEntry | null; code: string } {
+): { queue: DesktopQueue; entry: DesktopQueueEntry | null; code: DesktopQueueResult } {
   return retryQueueEntry(queue, id, (freshId, previous, status) => ({
     id: freshId,
     inputUrl: previous.inputUrl,

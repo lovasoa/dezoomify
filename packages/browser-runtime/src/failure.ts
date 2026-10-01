@@ -1,53 +1,9 @@
-// Structured failures shared by browser operations.
-import type {
-  BlockedReason,
-  FetchFailure,
-  FetchFailureCode,
-  Error as JobError,
-} from "@dezoomify/wasm-bindings";
+// Structured failures shared by browser operations. Hosts throw plain
+// objects matching the generated `Error` shapes: serde round-trips them
+// across the Rust/TypeScript boundary unchanged.
+import type { BlockedReason, Error as JobError } from "@dezoomify/wasm-bindings";
 
-/** Validate the observed-failure payload at browser boundaries, without rebuilding it. */
-export function isFetchFailure(value: unknown): value is FetchFailure {
-  if (!value || typeof value !== "object") return false;
-  const v = value as Record<string, unknown>;
-  const codes = {
-    TRANSPORT_HTTP_ERROR: true,
-    DISCOVERY_HTTP_ERROR: true,
-    UPSTREAM_RATE_LIMITED: true,
-    TRANSPORT_POLICY_DENIED: true,
-    PROXY_BUDGET_EXCEEDED: true,
-    PROXY_ERROR: true,
-    PROXY_NETWORK_ERROR: true,
-    PROXY_RATE_LIMITED: true,
-    DISCOVERY_FAILED: true,
-    TRANSPORT_TIMEOUT: true,
-    TRANSPORT_NETWORK_ERROR: true,
-    TRANSPORT_CANCELLED: true,
-    TRANSPORT_BAD_URL: true,
-    TRANSPORT_BAD_REDIRECT: true,
-    TRANSPORT_REDIRECT_LIMIT: true,
-    TRANSPORT_SIZE_LIMIT: true,
-  } satisfies Record<FetchFailureCode, true>;
-  return (
-    typeof v.code === "string" &&
-    Object.hasOwn(codes, v.code) &&
-    typeof v.message === "string" &&
-    v.message.length <= 4096 &&
-    ["direct", "metadata-proxy", "browser-session", "native", "display-only"].includes(
-      String(v.transport),
-    ) &&
-    (v.blocked_reason === undefined || blockedReason(v.blocked_reason) !== undefined) &&
-    (v.http === undefined ||
-      (typeof v.http === "number" && Number.isInteger(v.http) && v.http >= 100 && v.http <= 599)) &&
-    (v.retry_after_ms === undefined ||
-      (typeof v.retry_after_ms === "number" &&
-        Number.isSafeInteger(v.retry_after_ms) &&
-        v.retry_after_ms >= 0)) &&
-    [v.detail, v.preview].every(
-      (text) => text === undefined || (typeof text === "string" && text.length <= 4096),
-    )
-  );
-}
+export { isJobError } from "../../shared-ui/src/failure.ts";
 
 export function blockedReason(value: unknown): BlockedReason | undefined {
   switch (value) {
@@ -83,7 +39,17 @@ export function blockedReason(value: unknown): BlockedReason | undefined {
   }
 }
 
-/** Typed output failure with its diagnostic cause retained in the domain error. */
-export function outputError(code: ErrorCode, message: string, detail?: string): JobError {
-  return { code, message, phase: "output", retryable: false, ...(detail ? { detail } : {}) };
+/** Typed output failure with its diagnostic cause retained in `detail`. */
+export function outputError(
+  kind: "plan-invalid" | "output-unavailable" | "encode-failed" | "write-failed" | "internal",
+  detail?: string,
+): JobError {
+  switch (kind) {
+    case "plan-invalid":
+    case "output-unavailable":
+    case "encode-failed":
+    case "write-failed":
+    case "internal":
+      return detail === undefined ? { kind } : { kind, detail };
+  }
 }

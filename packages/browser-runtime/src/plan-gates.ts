@@ -13,24 +13,15 @@ export function desktopHandoffLink(sourceUrl: string): string {
   return `dezoomify://open?v=2&src=${encodeURIComponent(sourceUrl.trim())}`;
 }
 
-/** Plain sentence shared by every too-large-for-this-tab report. */
-export const CANVAS_TOO_LARGE_MESSAGE =
-  "This image is too large for this browser tab. Use the desktop app for the full-size image.";
-
 function canvasFailure(
-  code: string,
-  message: string,
+  kind: "plan-invalid" | "output-unavailable",
   width: number,
   height: number,
   sourceUrl: string,
   stage: string,
 ): JobError {
   const handoff = desktopHandoffLink(sourceUrl);
-  return outputError(
-    code,
-    message,
-    `canvas ${width}x${height} ${stage}; open in the desktop app: ${handoff}`,
-  );
+  return outputError(kind, `canvas ${width}x${height} ${stage}; open in the desktop app: ${handoff}`);
 }
 
 /** The plan's declared canvas exceeds the browser canvas limits. */
@@ -44,7 +35,7 @@ export function canvasTooLargeFailure(
   const detail = extra
     ? `canvas ${width}x${height} exceeds the browser limit (${extra}); desktop handoff ${handoff}`
     : `canvas ${width}x${height} exceeds the browser limit; desktop handoff ${handoff}`;
-  return outputError("PLAN_INVALID", CANVAS_TOO_LARGE_MESSAGE, detail);
+  return outputError("plan-invalid", detail);
 }
 
 /** The browser refused to allocate the output canvas at this size. */
@@ -53,26 +44,12 @@ export function canvasAllocationFailure(
   height: number,
   sourceUrl: string,
 ): JobError {
-  return canvasFailure(
-    "OUTPUT_ALLOCATION_FAILED",
-    CANVAS_TOO_LARGE_MESSAGE,
-    width,
-    height,
-    sourceUrl,
-    "allocation failed",
-  );
+  return canvasFailure("output-unavailable", width, height, sourceUrl, "allocation failed");
 }
 
 /** The browser gave no 2D context for the output canvas at this size. */
 export function canvasSurfaceFailure(width: number, height: number, sourceUrl: string): JobError {
-  return canvasFailure(
-    "OUTPUT_SURFACE_UNAVAILABLE",
-    "This browser could not create the output surface.",
-    width,
-    height,
-    sourceUrl,
-    "2D context unavailable",
-  );
+  return canvasFailure("output-unavailable", width, height, sourceUrl, "2D context unavailable");
 }
 
 /** True for `file:` URLs pasted into the website input. The website cannot

@@ -124,8 +124,7 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
     if (!declared || canvas) return;
     if (!(declared.width > 0 && declared.height > 0)) {
       throw outputError(
-        "PLAN_INVALID",
-        "The image size could not be determined.",
+        "plan-invalid",
         `declared an empty canvas ${declared.width}x${declared.height}`,
       );
     }
@@ -255,19 +254,14 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
   ): Promise<BrowserOutputDisposition> {
     signal.throwIfAborted();
     if (finalized) {
-      throw outputError(
-        "OUTPUT_STATE",
-        "The output surface is already open.",
-        "output was finalized twice",
-      );
+      throw outputError("internal", "output was finalized twice");
     }
     let surface = canvas;
     if (!surface) {
       const size = outputSize(declared);
       if (!(size.width > 0 && size.height > 0)) {
         throw outputError(
-          "PLAN_INVALID",
-          "The image size could not be determined.",
+          "plan-invalid",
           `output had an empty canvas ${size.width}x${size.height}`,
         );
       }

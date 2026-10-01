@@ -45,10 +45,10 @@ export async function invokeNative(
     input.password ||
     request.inputUrl.length > 2048
   ) {
-    throw { code: "desktop.invalid-source", message: "The image address is not usable." };
+    throw { kind: "invalid-input", detail: "the image address is not usable" };
   }
   if (!validateSettings(request.settings).ok) {
-    throw { code: "desktop.invalid-settings", message: "The output settings are not valid." };
+    throw { kind: "invalid-settings", detail: "the output settings are not valid" };
   }
   const id = `job:desktop-${Date.now()}-${++nextInvocation}`;
   let retired = false;
@@ -95,7 +95,7 @@ export async function invokeNative(
     throw error;
   }
   const call = async (command: string, args?: Record<string, unknown>): Promise<void> => {
-    if (retired) throw { code: "desktop.result-retired", message: "The result has been retired." };
+    if (retired) throw { kind: "stale" };
     await api.invoke(command, { job: id, ...args });
   };
   const finished = api

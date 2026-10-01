@@ -16,7 +16,6 @@ import {
   showExtensionGuidance,
   suggestedNameFor,
 } from "@dezoomify/shared-ui";
-import { webFetchMessages } from "./discovery.ts";
 import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.ts";
 import { createProxyTransport, PROXY_METADATA_MAX_BYTES } from "./proxyTransport.ts";
 
@@ -87,7 +86,6 @@ const app = root
           proxyTransport,
           isProxyEligible,
           hooks,
-          messages: webFetchMessages(),
           throttle: (url) => throttle.throttle(url),
         });
         let blobUrl: string | undefined;

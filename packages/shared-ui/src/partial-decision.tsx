@@ -1,5 +1,6 @@
 import type { MissingTiles, RecoveryChoice } from "@dezoomify/wasm-bindings";
 import type { ReactElement } from "react";
+import { isRetryable } from "./failure.ts";
 import { t } from "./i18n.ts";
 
 export function PartialDecisionActions({
@@ -18,7 +19,10 @@ export function PartialDecisionActions({
   };
   const canRetry =
     decision.missing.length > 0 &&
-    decision.missing.every(({ failures }) => failures.at(-1)?.retryable);
+    decision.missing.every(({ failures }) => {
+      const failure = failures.at(-1);
+      return failure !== undefined && isRetryable(failure);
+    });
   const answer = onAnswer;
   return (
     <div className="dz-actions-row" data-dz-partial-decision="true">

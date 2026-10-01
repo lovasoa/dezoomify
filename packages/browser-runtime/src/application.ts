@@ -3,7 +3,6 @@ import {
   clearHistory,
   createSequentialQueue,
   type DiagnosticRecorder,
-  describeFailure,
   enqueueSequential,
   finishActiveQueueEntry,
   type HistoryEntry,
@@ -26,6 +25,7 @@ import {
 } from "@dezoomify/shared-ui";
 import type {
   Error as JobError,
+  ErrorTransport,
   JobInput,
   MissingTiles,
   Options,
@@ -37,6 +37,7 @@ import { createElement } from "react";
 import type { BrowserSaveDisposition } from "./assembly.ts";
 import { createBrowserAssembly } from "./browser-assembly.ts";
 import { BrowserHost, type BrowserHostDependencies } from "./browser-host.ts";
+import { isJobError } from "../../shared-ui/src/failure.ts";
 import {
   copyDiagnosticText,
   createAttemptDiagnostics,
@@ -52,7 +53,7 @@ import {
   selectionLimitsFor,
 } from "./limits.ts";
 import type { PermissionWait } from "./permissions.ts";
-import { desktopHandoffLink, isLocalFileUrl } from "./plan-gates.ts";
+import { desktopHandoffLink } from "./plan-gates.ts";
 import { createTileDecoder } from "./tile-decode.ts";
 import { BROWSER_MAX_CONCURRENCY } from "./tile-policy.ts";
 
@@ -77,7 +78,7 @@ export interface BrowserCapabilities
     signal: AbortSignal,
     title?: string,
   ): Promise<BrowserSaveDisposition> | BrowserSaveDisposition;
-  transport(): JobError["transport"] | null;
+  transport(): ErrorTransport | null;
   saveOutput?(): void;
   openOutput?(): Promise<void>;
   revealOutput?(): Promise<void>;
@@ -128,7 +129,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       capabilities: undefined as BrowserCapabilities | undefined,
       progress: undefined as Progress | undefined,
       output: undefined as Output | undefined,
-      failure: undefined as ReturnType<typeof describeFailure> | undefined,
+      failure: undefined as JobError | undefined,
       decision: undefined as
         | { missing: MissingTiles; answer(choice: RecoveryChoice): void }
         | undefined,
@@ -258,6 +259,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
             a.activity.scheduleUpdate();
           }
         },
+        transport: () => capabilities.transport(),
         choosePartial: (missing, signal) =>
           new Promise((resolve, reject) => {
             const abort = () => reject(signal.reason);
@@ -323,26 +325,9 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       if (current !== a) return;
       outcome = a.controller.signal.aborted ? "cancelled" : "failed";
       if (outcome === "failed") {
-        const failure = error && typeof error === "object" ? (error as Partial<JobError>) : {};
-        a.failure = describeFailure(
-          {
-            ...failure,
-            code: failure?.code ?? "OUTPUT_FAILED",
-            message: failure?.message ?? String(error),
-            phase:
-              failure?.phase ??
-              (a.progress?.phase === "planning" ? "validation" : a.progress?.phase) ??
-              "discovery",
-            transport: failure?.transport ?? a.capabilities?.transport() ?? undefined,
-          },
-          (() => {
-            try {
-              return new URL(url).host;
-            } catch {
-              return "";
-            }
-          })(),
-        );
+        a.failure = isJobError(error)
+          ? error
+          : { kind: "internal", detail: String(error).slice(0, 2048) };
         a.view.desktopHandoffUrl = desktopHandoffLink(url);
       }
       a.diagnostics.finish(outcome, error);
@@ -364,14 +349,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
     url = url.trim();
     if (!isValidInputUrl(url)) {
       initialUrl = url;
-      const error: JobError = {
-        code: "INVALID_URL",
-        phase: "validation",
-        retryable: false,
-        message: isLocalFileUrl(url)
-          ? "Local files cannot be opened on this website. Use the desktop app for files on your computer."
-          : "Please enter a valid web address starting with http:// or https://",
-      };
+      const error: JobError = { kind: "invalid-url" };
       idle = presentFailure(error);
       if (!current || current.done) {
         retire();
@@ -396,7 +374,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       shown = presentation();
     a?.diagnostics.context({
       presented_phase: shown.phase,
-      presented_error: shown.error?.code ?? "",
+      presented_error: shown.error?.kind ?? "",
     });
     const report = a?.diagnostics.report();
     if (a)

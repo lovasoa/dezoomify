@@ -7,6 +7,7 @@ import { flushSync } from "react-dom";
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
 import type { JobActivity } from "./activity.ts";
+import { httpStatusOf, isRetryable, plainMessageFor } from "./failure.ts";
 import type { HistoryEntry } from "./history.ts";
 import type { Presentation, ResolutionChoice } from "./presentation.ts";
 import {
@@ -432,7 +433,8 @@ function JobView({
       missing.length > 0 &&
       missing.every(({ failures }) => {
         const failure = failures.at(-1);
-        return failure?.http === 401 || failure?.http === 403;
+        const status = failure ? httpStatusOf(failure) : undefined;
+        return status === 401 || status === 403;
       });
     return (
       <section className="dz-view-body dz-partial-section" aria-labelledby="dz-partial-title">
@@ -655,7 +657,7 @@ function CompletedView({
   const [outputAction, setOutputAction] = useState<"open" | "folder" | null>(null);
   const [outputError, setOutputError] = useState<{
     action: "open" | "folder";
-    code: string;
+    kind: string;
   } | null>(null);
   async function runOutputAction(action: "open" | "folder", callback?: () => Promise<void>) {
     if (!callback || outputAction) return;
@@ -664,12 +666,11 @@ function CompletedView({
     try {
       await callback();
     } catch (error) {
-      const rawCode = error && typeof error === "object" && "code" in error ? error.code : null;
-      const code =
-        typeof rawCode === "string" && /^output\.[a-z-]+$/.test(rawCode)
-          ? rawCode
-          : "output.invoke-failed";
-      setOutputError({ action, code });
+      const kind =
+        error && typeof error === "object" && "kind" in error && typeof error.kind === "string"
+          ? error.kind
+          : "invoke-failed";
+      setOutputError({ action, kind });
     } finally {
       setOutputAction(null);
     }
@@ -777,30 +778,17 @@ function CompletedView({
       {outputError ? (
         <p id="dz-open-error" role="alert">
           {t(
-            outputError.code === "output.not-found"
+            outputError.kind === "output-not-found"
               ? "desktop.done.missingError"
               : outputError.action === "folder"
                 ? "desktop.done.folderError"
                 : "desktop.done.openError",
           )}{" "}
-          ({outputError.code})
+          ({outputError.kind})
         </p>
       ) : null}
     </div>
   );
-}
-
-/**
- * Rate-limit failures render their localized explainer by stable code at
- * display time (the proxy and direct cases name different fixes). Every other
- * failure keeps the message the host produced. Codes and diagnostics stay raw.
- */
-function failureMessageOf(error: JobError): string {
-  const code = String(error.code ?? "");
-  if (code === "UPSTREAM_RATE_LIMITED" || code === "PROXY_RATE_LIMITED") {
-    return t(error.transport === "metadata-proxy" ? "view.fail.rateProxy" : "view.fail.rateDirect");
-  }
-  return error.message;
 }
 
 function FailedView({
@@ -814,12 +802,7 @@ function FailedView({
   ctx?: ViewContext;
   hostDocument: Document;
 }) {
-  const error: JobError = presentation.error ?? {
-    code: "UNKNOWN",
-    phase: "output",
-    retryable: true,
-    message: t("view.fail.fallback"),
-  };
+  const error: JobError = presentation.error ?? { kind: "internal" };
   const handoffUrl = typeof ctx?.desktopHandoffUrl === "string" ? ctx.desktopHandoffUrl : "";
   const source =
     typeof ctx?.sourceUrl === "string"
@@ -830,8 +813,9 @@ function FailedView({
   const isFile = isFileHandoffSource(source);
   const origin = isFile ? "" : handoffOriginFor(handoffUrl, source);
   const label = origin !== "" ? t("view.handoff.sendOrigin", { origin }) : t("view.handoff.send");
-  if (error.code === "job.no-usable-tiles") {
-    const refused = error.http === 401 || error.http === 403;
+  if (error.kind === "no-usable-tiles") {
+    const status = httpStatusOf(error);
+    const refused = status === 401 || status === 403;
     return (
       <section className="dz-view-body dz-error-section">
         <h2>{t(refused ? "view.partial.accessDenied" : "view.partial.empty")}</h2>
@@ -843,7 +827,7 @@ function FailedView({
               {t("view.partial.openSource")}
             </button>
           ) : null}
-          {error.retryable && callbacks.onRetrySameUrl ? (
+          {isRetryable(error) && callbacks.onRetrySameUrl ? (
             <button type="button" className="dz-btn-secondary" onClick={callbacks.onRetrySameUrl}>
               {t("view.fail.retry")}
             </button>
@@ -877,7 +861,7 @@ function FailedView({
         <div>
           <h2 className="dz-error-title">{t("view.fail.title")}</h2>
           <p className="dz-error-message" id="dz-error-message">
-            {failureMessageOf(error)}
+            {plainMessageFor(error, hostFromUrl(source), source)}
           </p>
         </div>
       </div>
@@ -917,7 +901,7 @@ function FailedView({
         </div>
       </div>
       <div className="dz-actions-row">
-        {error.retryable && callbacks.onRetrySameUrl ? (
+        {isRetryable(error) && callbacks.onRetrySameUrl ? (
           <button
             type="button"
             className="dz-btn-tactile"

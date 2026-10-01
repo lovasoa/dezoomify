@@ -315,10 +315,11 @@ const en = {
   "view.input.placeholder": "Paste an image viewer or manifest URL",
   "view.input.aria": "Address of the webpage containing your zoomable image",
   "view.input.start": "Find image",
-  // Rate-limit explainers, rendered by stable error code at display time
-  // (see `failureMessageOf` in view.tsx): an upstream 429 through the metadata
-  // proxy means OUR server was throttled; a direct 429 means the user's own
-  // connection was throttled. The two cases name different fixes.
+  // Rate-limit explainers, rendered from the typed `rate-limited` failure at
+  // display time (see `plainMessageFor` in failure.ts): an upstream 429
+  // through the metadata proxy means OUR server was throttled; a direct 429
+  // means the user's own connection was throttled. The two cases name
+  // different fixes.
   "view.fail.rateProxy":
     "The website hosting this image limits how many pages our server may request from it, and that limit was just reached, so the page could not be opened. The browser extension and the desktop app download from your own internet connection instead of our server, so they are not affected by this limit.",
   "view.fail.rateDirect":
@@ -353,6 +354,8 @@ const en = {
     "This picture is too large to assemble on this computer ({dims},{need} at 4 bytes per pixel, limit {limit}). Save a smaller version with Max width (CLI: --max-width). Note: JPEG saves at most {jpegMax} pixels per side; keep PNG for larger pictures. From {host}.",
   "desktop.output.jpegLimit":
     "This picture ({dims}) is too large for JPEG, which allows at most {jpegMax} pixels per side. Save it as PNG instead. From {host}.",
+  "desktop.output.webpLimit":
+    "This picture ({dims}) is too large for WebP, which allows at most {webpMax} pixels per side. Save it as PNG instead. From {host}.",
   "desktop.tile.partialDiscarded":
     "The partial picture was discarded so no file was kept. Try again from {host} with a steady connection.",
   "desktop.tile.partialChoice":

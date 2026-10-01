@@ -270,6 +270,8 @@ export const fr = {
     "Cette image est trop grande pour etre assemblee sur cet ordinateur ({dims},{need} a 4 octets par pixel, limite {limit}). Enregistrez une version plus petite avec Largeur max (CLI : --max-width). Note : le JPEG accepte au plus {jpegMax} pixels par cote ; gardez le PNG pour les images plus grandes. Depuis {host}.",
   "desktop.output.jpegLimit":
     "Cette image ({dims}) est trop grande pour le JPEG, qui accepte au plus {jpegMax} pixels par cote. Enregistrez-la en PNG a la place. Depuis {host}.",
+  "desktop.output.webpLimit":
+    "Cette image ({dims}) est trop grande pour le WebP, qui accepte au plus {webpMax} pixels par cote. Enregistrez-la en PNG a la place. Depuis {host}.",
   "desktop.tile.partialDiscarded":
     "L image partielle a ete abandonnee, aucun fichier n a ete conserve. Reessayez depuis {host} avec une connexion stable.",
   "desktop.tile.partialChoice":

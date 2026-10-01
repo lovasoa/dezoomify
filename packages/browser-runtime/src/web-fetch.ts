@@ -4,10 +4,10 @@
 // credentials). The single-policy proxy transport instance is supplied by
 // the caller. Progress and diagnostics callbacks update the job view.
 
-import type { ErrorTransport, FetchFailure, ResourceRequest } from "@dezoomify/wasm-bindings";
+import type { Error as JobError, ErrorTransport, ResourceRequest } from "@dezoomify/wasm-bindings";
 import type { DiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
 import { SIGNED_QUERY_KEYS } from "../../shared-ui/src/source-url.ts";
-import { blockedReason } from "./failure.ts";
+import { blockedReason, isJobError } from "./failure.ts";
 import { readErrorPreview, readResponseBytes, retryAfterMs } from "./response-body.ts";
 import {
   combineTimeout,
@@ -125,20 +125,12 @@ export interface WebFetchHooks {
   onUpdate(): void;
 }
 
-/** Caller-owned UI copy plus the readable-bytes hint (never gates). */
-export interface WebFetchMessages {
-  rateLimitedBySite: string;
-  siteBusy: string;
-  discoveryFailed: (via: string) => string;
-}
-
 export interface WebFetchDeps {
   diagnostics?: DiagnosticRecorder;
   fetchImpl?: FetchImplLike;
   proxyTransport?: ProxyTransportLike;
   isProxyEligible(req: ResourceRequest): ProxyEligibility;
   hooks: WebFetchHooks;
-  messages: WebFetchMessages;
   sleepFn?: (ms: number) => Promise<void>;
   nowFn?: () => number;
   throttle?: (url: string) => Promise<void>;
@@ -188,62 +180,49 @@ export function proxyPolicyReasonText(reason?: string): string | null {
   }
 }
 
-/** Preserve the relay's observed facts with product wording. */
+/** Preserve the relay's observed facts in the typed error contract. */
 export function classifyProxyFailure(proxied: {
   status: number;
   code?: string;
   reason?: string;
   preview?: string;
   retryAfterMs?: number;
-}): FetchFailure {
+}): JobError {
   const code = proxied.code ?? "PROXY_ERROR";
-  const http = proxied.status || undefined;
-  const facts = {
-    transport: "metadata-proxy" as const,
-    detail: `proxy failure: ${code}${proxied.reason ? ` (${proxied.reason})` : ""}`,
-    ...(http ? { http } : {}),
-    ...(blockedReason(proxied.reason) ? { blocked_reason: blockedReason(proxied.reason) } : {}),
-    ...(proxied.preview ? { preview: proxied.preview } : {}),
-    ...(proxied.retryAfterMs !== undefined ? { retry_after_ms: proxied.retryAfterMs } : {}),
-  };
-  if (code === "PROXY_POLICY_DENIED") {
-    const hint = proxyPolicyReasonText(proxied.reason) ?? "Check the address and try again.";
+  const detail = `proxy failure: ${code}${proxied.reason ? ` (${proxied.reason})` : ""}`;
+  const reason = blockedReason(proxied.reason);
+  const preview = proxied.preview || undefined;
+  const retry_after_ms = proxied.retryAfterMs;
+  if (code === "PROXY_POLICY_DENIED")
     return {
-      ...facts,
-      code: "TRANSPORT_POLICY_DENIED",
-      message: `This address cannot be opened through the website. ${hint} The browser extension or the desktop app may still work.`,
+      kind: "policy-denied",
+      blocked_reason: reason ?? "malformed",
+      transport: "metadata-proxy",
+      detail,
+    };
+  if (code === "PROXY_BUDGET_EXCEEDED") return { kind: "proxy-budget-exceeded" };
+  if (code === "PROXY_RATE_LIMITED")
+    return {
+      kind: "rate-limited",
+      transport: "metadata-proxy",
+      ...(retry_after_ms === undefined ? {} : { retry_after_ms }),
+      detail,
+    };
+  if (code === "TRANSPORT_HTTP_ERROR" || proxied.status === 401 || proxied.status === 403) {
+    return {
+      kind: "http-error",
+      status: proxied.status || 502,
+      transport: "metadata-proxy",
+      ...(preview ? { preview } : {}),
+      ...(retry_after_ms === undefined ? {} : { retry_after_ms }),
+      detail,
     };
   }
-  if (code === "PROXY_BUDGET_EXCEEDED")
-    return {
-      ...facts,
-      code,
-      message: "This page is too large to check here. Try the desktop app for very large images.",
-    };
-  if (code === "TRANSPORT_HTTP_ERROR" || http === 401 || http === 403) {
-    const message =
-      http === 404
-        ? "This page could not be found. Check the address and try again."
-        : http === 401 || http === 403 || http === 406
-          ? `The site refused to share this file (HTTP ${http}). It may block shared servers; the browser extension or the desktop app may still work.`
-          : http !== undefined && http >= 500
-            ? "The site had a problem opening this page. Try again shortly."
-            : "This page could not be opened. Check the address and try again.";
-    return { ...facts, code: "TRANSPORT_HTTP_ERROR", message };
-  }
-  return {
-    ...facts,
-    code: "PROXY_ERROR",
-    message: "The metadata proxy could not fetch this address. Try again shortly.",
-  };
+  return { kind: "proxy-error", transport: "metadata-proxy", detail };
 }
 
-function cancelledFailure(): FetchFailure {
-  return {
-    code: "TRANSPORT_CANCELLED",
-    message: "The request was cancelled.",
-    transport: "direct",
-  };
+function cancelledFailure(): JobError {
+  return { kind: "cancelled" };
 }
 
 async function sleepUnlessAborted(
@@ -378,7 +357,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       end(false);
       if (signal?.aborted) return { outcome: "cancelled" };
       deps.diagnostics?.count("request_failures");
-      if ((e as { code?: string })?.code === "TRANSPORT_SIZE_LIMIT") {
+      if (isJobError(e) && e.kind === "size-limit") {
         report({ outcome: "too-large", limit_bytes: maxBytes, http: responseStatus });
         return { outcome: "too-large" };
       }
@@ -513,40 +492,44 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       if (signal?.aborted || proxied.code === "TRANSPORT_CANCELLED") throw cancelledFailure();
       if (proxied.ok && proxied.bytes)
         return { bytes: proxied.bytes, finalUri: proxied.finalUrl || request.uri };
-      if (proxied.code === "PROXY_RATE_LIMITED")
+      if (proxied.code === "PROXY_RATE_LIMITED") {
         throw {
-          code: "UPSTREAM_RATE_LIMITED",
-          message: deps.messages.rateLimitedBySite,
-          http: 429,
+          kind: "rate-limited",
           transport: "metadata-proxy",
-          retry_after_ms: proxied.retryAfterMs,
-        } satisfies FetchFailure;
+          ...(proxied.retryAfterMs === undefined ? {} : { retry_after_ms: proxied.retryAfterMs }),
+        } satisfies JobError;
+      }
       throw classifyProxyFailure(proxied);
     }
     if (direct.outcome === "cancelled" || signal?.aborted) throw cancelledFailure();
     if (direct.outcome === "too-large")
       throw {
-        code: "TRANSPORT_SIZE_LIMIT",
-        message: "This page is too large to check here. Try the desktop app.",
-        transport: "direct",
-      } satisfies FetchFailure;
-    if (direct.outcome === "http-error")
+        kind: "size-limit",
+        max_bytes: DIRECT_METADATA_MAX_BYTES,
+      } satisfies JobError;
+    if (direct.outcome === "http-error" && direct.status === 429) {
       throw {
-        code: direct.status === 429 ? "UPSTREAM_RATE_LIMITED" : "DISCOVERY_HTTP_ERROR",
-        message:
-          direct.status === 429
-            ? deps.messages.siteBusy
-            : "This page could not be opened. Check the address and try again.",
-        http: direct.status,
+        kind: "rate-limited",
         transport: "direct",
-        preview: direct.preview,
-        retry_after_ms: direct.retryAfterMs,
-      } satisfies FetchFailure;
+        ...(direct.retryAfterMs === undefined ? {} : { retry_after_ms: direct.retryAfterMs }),
+      } satisfies JobError;
+    }
+    if (direct.outcome === "http-error") {
+      throw {
+        kind: "http-error",
+        status: direct.status ?? 502,
+        request: request.uri,
+        transport: "direct",
+        ...(direct.preview ? { preview: direct.preview } : {}),
+        ...(direct.retryAfterMs === undefined ? {} : { retry_after_ms: direct.retryAfterMs }),
+        detail: `metadata fetch: ${direct.outcome}`,
+      } satisfies JobError;
+    }
     throw {
-      code: "DISCOVERY_FAILED",
-      message: deps.messages.discoveryFailed("direct"),
+      kind: "network-failure",
       transport: "direct",
-    } satisfies FetchFailure;
+      detail: `metadata fetch: ${direct.outcome}`,
+    } satisfies JobError;
   }
 
   async function fetchTileFor(
@@ -562,19 +545,25 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     if (direct.outcome === "cancelled" || signal?.aborted) throw cancelledFailure();
     if (direct.outcome === "too-large")
       throw {
-        code: "TRANSPORT_SIZE_LIMIT",
-        message: "This tile is too large for the browser.",
+        kind: "size-limit",
+        max_bytes: DIRECT_TILE_MAX_BYTES,
+      } satisfies JobError;
+    if (direct.status) {
+      throw {
+        kind: "http-error",
+        status: direct.status,
+        request: request.uri,
         transport: "direct",
-      } satisfies FetchFailure;
+        ...(direct.preview ? { preview: direct.preview } : {}),
+        ...(direct.retryAfterMs === undefined ? {} : { retry_after_ms: direct.retryAfterMs }),
+        detail: `tile fetch: ${direct.outcome} (HTTP ${direct.status})`,
+      } satisfies JobError;
+    }
     throw {
-      code: direct.status ? "TRANSPORT_HTTP_ERROR" : "TRANSPORT_NETWORK_ERROR",
-      message: "Part of the image could not be saved. Try again in a moment.",
-      http: direct.status,
+      kind: "network-failure",
       transport: "direct",
-      preview: direct.preview,
-      retry_after_ms: direct.retryAfterMs,
-      detail: `tile fetch: ${direct.outcome} (HTTP ${direct.status ?? "n/a"})`,
-    } satisfies FetchFailure;
+      detail: `tile fetch: ${direct.outcome} (HTTP n/a)`,
+    } satisfies JobError;
   }
 
   function getActiveTransport(): ErrorTransport | null {

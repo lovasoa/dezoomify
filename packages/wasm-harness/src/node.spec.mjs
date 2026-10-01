@@ -47,7 +47,6 @@ function host(overrides = {}) {
       return {
         canvas: request.canvas,
         format: request.format,
-        complete: request.missing.length === 0,
         missing: request.missing,
         disposition: "browser-save-ready",
       };

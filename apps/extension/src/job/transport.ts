@@ -1,4 +1,4 @@
-import { isFetchFailure, originOfUrl } from "@dezoomify/browser-runtime";
+import { isJobError, originOfUrl } from "@dezoomify/browser-runtime";
 import type { DiagnosticRecorder } from "@dezoomify/shared-ui";
 import type { Interaction, ResourceRead, ResourceRequest } from "@dezoomify/wasm-bindings";
 import type { createSourceAccess } from "./source-access.ts";
@@ -49,7 +49,7 @@ export function createResourceFetcher(deps: {
         deps.diagnostics?.count(signal.aborted ? "requests_cancelled" : "request_failures");
         if (!signal.aborted)
           deps.diagnostics?.record("warn", "request-failed", {
-            ...(isFetchFailure(error) ? error : {}),
+            ...(isJobError(error) ? error : {}),
             purpose: request.purpose,
             transport: "source-document",
             url: request.uri,
@@ -57,12 +57,11 @@ export function createResourceFetcher(deps: {
           });
         if (
           signal.aborted ||
-          (isFetchFailure(error) &&
-            (error.http !== undefined || error.code === "TRANSPORT_TIMEOUT"))
+          (isJobError(error) && (error.kind === "http-error" || error.kind === "timeout"))
         )
           throw error;
         deps.diagnostics?.record("warn", "source-fetch-fallback", {
-          ...(isFetchFailure(error) ? error : {}),
+          ...(isJobError(error) ? error : {}),
           purpose: request.purpose,
           transport: "source-document",
           url: request.uri,

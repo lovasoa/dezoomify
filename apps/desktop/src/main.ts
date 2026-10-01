@@ -9,9 +9,10 @@ import type { ViewContext } from "@dezoomify/shared-ui";
 import {
   boundDiagnosticReport,
   cancelAllQueueEntries,
+  isJobError,
   cancelQueueEntry,
   clearHistory as clearHistoryStore,
-  describeFailure,
+  detailOf,
   finishActiveQueueEntry,
   HISTORY_KEY_DESKTOP,
   type HistoryEntry,
@@ -42,7 +43,6 @@ import { createElement } from "react";
 import type { ValidatedDeepLink } from "./errorCopy.ts";
 import {
   formatMissingSummary,
-  hostOf,
   isValidInputUrl,
   readInitialUrl,
   trimTechnical,
@@ -76,7 +76,6 @@ const root = typeof document !== "undefined" ? document.getElementById("root") :
 
 const DESKTOP_DOCS_BASE = "https://dezoomify.ophir.dev";
 
-const NATIVE_TRANSPORT = "native";
 
 const REQUEST_TIMEOUT_MS = 30000;
 
@@ -231,49 +230,29 @@ function touchProgress(): void {
   a.lastProgressAt = now;
 }
 
-function failLocally(
-  code: string,
-  message: string,
-  opts?: Partial<JobError> & { settle?: boolean },
-): void {
-  const sourceUrl = currentAttempt.lastInputUrl || activity().url || "";
-  const { settle, ...facts } = opts ?? {};
-  currentAttempt.localFailure = describeFailure(
-    {
-      ...facts,
-      code,
-      message,
-      detail: [message, opts?.detail === message ? undefined : opts?.detail]
-        .filter((part): part is string => Boolean(part))
-        .map((part) => trimTechnical(part))
-        .join("\n\n"),
-      transport: opts?.transport ?? NATIVE_TRANSPORT,
-      phase:
-        opts?.phase ??
-        (currentAttempt.progress?.phase === "planning"
-          ? "validation"
-          : currentAttempt.progress?.phase) ??
-        "validation",
-      request: opts?.request ?? (sourceUrl || undefined),
-    },
-    hostOf(sourceUrl),
-  );
-  currentAttempt.diagnostics.finish("failed", { code, message, ...opts });
+function failLocally(error: JobError, opts?: { detail?: string; settle?: boolean }): void {
+  const { settle, detail } = opts ?? {};
+  const base = detailOf(error);
+  const parts = [base, detail && detail !== base ? detail : undefined]
+    .filter((part): part is string => Boolean(part))
+    .map((part) => trimTechnical(part));
+  currentAttempt.localFailure = {
+    ...error,
+    ...(parts.length > 0 ? { detail: parts.join("\n\n") } : {}),
+  };
+  currentAttempt.diagnostics.finish("failed", { error: currentAttempt.localFailure });
   stopHeartbeat();
-  if (settle !== false) settleActiveQueue("failed", { errorCode: code });
+  if (settle !== false) settleActiveQueue("failed", { errorCode: error.kind });
   update();
 }
 
-function invokeErrorMessage(error: unknown, fallback: string): string {
+function invokeDetail(error: unknown, fallback: string): string {
   return error instanceof Error
     ? error.message
     : typeof error === "string"
       ? error
-      : error &&
-          typeof error === "object" &&
-          "message" in error &&
-          typeof error.message === "string"
-        ? error.message
+      : error && typeof error === "object" && "detail" in error && typeof error.detail === "string"
+        ? error.detail
         : fallback;
 }
 
@@ -322,14 +301,14 @@ function clearJobViewState(): void {
 function handleSubmitUrl(url: string): void {
   const trimmed = typeof url === "string" ? url.trim() : "";
   if (!isValidInputUrl(trimmed)) {
-    failLocally("INVALID_URL", t("desktop.url.invalid"), { settle: false });
+    failLocally({ kind: "invalid-url" }, { settle: false });
     return;
   }
   if (!isTerminalNow()) {
     const res = enqueueDesktopQueue(desktopQueue, trimmed);
     desktopQueue = res.queue;
     if (res.code !== "ok" || !res.entry) {
-      failLocally("INVALID_URL", t("desktop.url.invalid"), { settle: false });
+      failLocally({ kind: "invalid-url" }, { settle: false });
       return;
     }
     if (res.entry.status === "queued") {
@@ -384,7 +363,7 @@ function launchNativeJob(trimmed: string): void {
   if (!effective.ok || !effective.settings) {
     const detail = effective.errors.join("; ") || "Invalid settings.";
     settingsError = detail;
-    failLocally("INVALID_SETTINGS", t("desktop.settings.invalidSubmit"), { detail });
+    failLocally({ kind: "invalid-settings", detail });
     return;
   }
   settingsError = null;
@@ -445,20 +424,19 @@ function launchNativeJob(trimmed: string): void {
       if (!owns(attempt)) return;
       attempt.settled = true;
       attempt.partial = null;
-      const code =
-        error && typeof error === "object" && "code" in error && typeof error.code === "string"
-          ? error.code
-          : "START_FAILED";
-      if (code === "job.cancelled") {
+      if (isJobError(error) && error.kind === "cancelled") {
         stopHeartbeat();
         settleActiveQueue("cancelled");
         update();
         return;
       }
       failLocally(
-        code,
-        invokeErrorMessage(error, t("desktop.invoke.startFallback")),
-        error && typeof error === "object" ? (error as Partial<JobError>) : undefined,
+        isJobError(error)
+          ? error
+          : {
+              kind: "start-failed",
+              detail: invokeDetail(error, t("desktop.invoke.startFallback")),
+            },
       );
     });
 }
@@ -640,8 +618,9 @@ function handlePause(): void {
     },
     (error: unknown) => {
       if (!owns(attempt)) return;
-      failLocally("PAUSE_FAILED", invokeErrorMessage(error, "The pause request was rejected."), {
-        retryable: true,
+      failLocally({
+        kind: "choice-failed",
+        detail: invokeDetail(error, "the pause request was rejected"),
       });
     },
   );
@@ -661,8 +640,9 @@ function handleResume(): void {
     },
     (error: unknown) => {
       if (!owns(attempt)) return;
-      failLocally("RESUME_FAILED", invokeErrorMessage(error, "The resume request was rejected."), {
-        retryable: true,
+      failLocally({
+        kind: "choice-failed",
+        detail: invokeDetail(error, "the resume request was rejected"),
       });
     },
   );
@@ -676,12 +656,10 @@ async function handleOpenOutput(attempt: DesktopAttempt, reveal: boolean): Promi
     await handle.openOutput(reveal);
   } catch (error) {
     if (!owns(attempt) || handle !== attempt.activeHandle) return;
-    const rawCode = error && typeof error === "object" && "code" in error ? error.code : null;
-    const code =
-      typeof rawCode === "string" && /^output\.[a-z-]+$/.test(rawCode)
-        ? rawCode
-        : "output.invoke-failed";
-    const failure = { action: reveal ? "folder" : "open", code };
+    const failure = {
+      action: reveal ? "folder" : "open",
+      kind: isJobError(error) ? error.kind : "invoke-failed",
+    };
     attempt.diagnostics.context({ output_action_error: failure });
     attempt.diagnostics.record("error", "output-action-failed", failure);
     throw error;
@@ -704,8 +682,9 @@ function answerPartial(
     },
     (error: unknown) => {
       if (!owns(attempt) || attempt.partial !== partial) return;
-      failLocally("CHOICE_FAILED", invokeErrorMessage(error, t("desktop.invoke.partial")), {
-        retryable: true,
+      failLocally({
+        kind: "choice-failed",
+        detail: invokeDetail(error, t("desktop.invoke.partial")),
       });
     },
   );

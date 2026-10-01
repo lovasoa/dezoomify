@@ -8,10 +8,7 @@ export async function readResponseBytes(
   prefix = false,
 ): Promise<Uint8Array<ArrayBuffer>> {
   signal?.throwIfAborted();
-  const oversized = () =>
-    Object.assign(new Error(`response exceeds ${maxBytes} byte limit`), {
-      code: "TRANSPORT_SIZE_LIMIT",
-    });
+  const oversized = () => ({ kind: "size-limit", max_bytes: maxBytes });
   if (!prefix && Number(response.headers.get("content-length")) > maxBytes) {
     void response.body?.cancel().catch(() => {});
     throw oversized();
