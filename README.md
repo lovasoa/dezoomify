@@ -23,7 +23,7 @@ cargo xtask test all  # add generated WASM and browser integration (no public ne
 ```
 
 The fast test does not run `check`, generated WASM bindings, packaging, or
-browsers. Node 24 is the minimum supported Node version. `test all` adds the
+browsers. Node 24.15.0 is the minimum supported Node version. `test all` adds the
 generated WASM Node harness, Chromium website E2E, and full Chromium/Firefox
 extension integration without rerunning the fast matrix; the desktop real
 window remains explicit.
