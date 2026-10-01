@@ -24,15 +24,10 @@ export function isValidInputUrl(url: string): boolean {
 }
 
 /**
- * Canonical secret/credential query-key vocabulary (28 keys, sorted): query or
- * fragment keys that must never travel in a handoff deep link or enter
- * diagnostics. Matching is case-insensitive exact, never substring. This is
- * the single TypeScript source; it mirrors the canonical Rust contract
- * constant `dezoomify::model::SENSITIVE_QUERY_KEYS` in
- * `crates/dezoomify/src/model.rs` (consumed by
- * `apps/desktop/src-tauri/src/deep_link.rs`). Rejection behavior is pinned
- * on both sides by `testdata/deep-link-vectors.json`; membership itself is
- * deliberately unpinned (adding or removing a key is a reviewed policy edit).
+ * Secret/credential query keys that never travel in a handoff deep link or
+ * enter diagnostics (case-insensitive exact match). Mirrors the canonical
+ * Rust `dezoomify::model::SENSITIVE_QUERY_KEYS`; rejection is pinned by
+ * `testdata/deep-link-vectors.json` on both sides.
  */
 export const DEEP_LINK_SECRET_QUERY_KEYS = new Set([
   "access-token",
@@ -66,15 +61,11 @@ export const DEEP_LINK_SECRET_QUERY_KEYS = new Set([
 ]);
 
 /**
- * Signed/credential query-key policy for metadata CORS proxy admission: URLs
- * whose signature would break, or that carry credentials, must never be
- * proxied. Deliberately narrower than `DEEP_LINK_SECRET_QUERY_KEYS` (a strict
- * subset): OAuth handoff parameters such as `code` and `state` are not
- * signed-fetch credentials, and rejecting them would break legitimate metadata
- * URLs. Defined once here; consumed by `packages/browser-runtime/src/web-fetch.ts`
- * (the browser's proxy-fallback gate) and `src/server/security.ts` (the
- * metadata CORS proxy validator). Locked by
- * `apps/desktop/tests/policy-vectors.test.mjs`.
+ * Signed/credential query keys rejected from metadata CORS proxy admission
+ * (a strict subset of `DEEP_LINK_SECRET_QUERY_KEYS`: OAuth handoff params
+ * such as `code`/`state` are not signed-fetch credentials). Consumed by
+ * `web-fetch.ts` (proxy-fallback gate) and `src/server/security.ts`
+ * (metadata proxy validator); locked by `apps/desktop/tests/policy-vectors.test.mjs`.
  */
 export const SIGNED_QUERY_KEYS = new Set([
   "access_token",
@@ -95,12 +86,9 @@ const SECRET_FRAGMENT_KEY_RE = /^[?#]+/;
 
 /**
  * Secret-bearing query or fragment keys in a source URL. Regions mirror the
- * Rust `smuggled_secret_key` in `apps/desktop/src-tauri/src/deep_link.rs`: the
- * query runs from the first `?` up to the first `#`; the fragment runs from
- * the first `#`. A pair's key is the text before its first `=` (or the whole
- * pair) and counts whether or not a value follows, so bare keys (`?token`) and
- * percent-encoded spellings (`?%74oken=1`) are caught like `?token=secret`.
- * Unparseable URLs count as secret-bearing (fail closed).
+ * Rust `smuggled_secret_key` (`deep_link.rs`); a pair's key is the text before
+ * its first `=`, so bare keys (`?token`) and percent-encoded spellings are
+ * caught like `?token=secret`. Unparseable URLs count as secret-bearing.
  */
 export function hasSecretQueryParams(urlString: string): boolean {
   let parsed: URL;
@@ -140,9 +128,8 @@ export function isValidDeepLinkSource(source: unknown): source is string {
 }
 
 // Idle prefill: read an initial URL from the launch location without ever
-// treating it as a started job. Supports ?url=/ ?src= and #url= or bare
-// hash payloads. Invalid or secret-bearing candidates return null. The host
-// passes its own location; shared UI reads no host globals.
+// treating it as a started job (`?url=`/`?src=`, `#url=`, or bare hash).
+// Invalid or secret-bearing candidates return null.
 export function readInitialUrl(loc?: { search?: string; hash?: string }): string | null {
   try {
     if (!loc) return null;
@@ -217,11 +204,9 @@ export function normalizeDeepLinkVersion(version: unknown): number | null {
 }
 
 // Validate a `dezoomify://deep-link-pending` payload again in the frontend
-// before showing the confirm UI. Accepts exactly the validated
-// `{source_url, hint, version}` triple emitted by the Rust shell; raw
-// `dezoomify://` values are refused (the shell's parser is the single
-// validator, pinned by testdata/deep-link-vectors.json). Null means
-// reject (no-op).
+// before showing the confirm UI: exactly the `{source_url, hint, version}`
+// triple the Rust shell emits (its parser is the single validator, pinned by
+// testdata/deep-link-vectors.json). Null means reject (no-op).
 export function validateDeepLinkPayload(
   payload: Record<string, unknown>,
 ): ValidatedDeepLink | null {

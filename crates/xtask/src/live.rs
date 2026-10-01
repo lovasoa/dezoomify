@@ -252,11 +252,8 @@ const TARGETS: &[LiveTarget] = &[
     },
 ];
 
-/// Offline validation of the target inventory. No network and no CLI spawn:
-/// every target URL is absolute `http`/`https` with a non-empty,
-/// userinfo-free authority and no whitespace (both schemes are deliberate;
-/// see the module docs; there is no http/https distinction), names are
-/// unique, and header names/values are well-formed.
+/// Offline validation of the target inventory: absolute `http`/`https` URLs
+/// with non-empty userinfo-free authorities, unique names, well-formed headers.
 fn validate(target_list: &[LiveTarget]) -> Result<usize, String> {
     use std::collections::BTreeSet;
     let mut names: BTreeSet<&str> = BTreeSet::new();

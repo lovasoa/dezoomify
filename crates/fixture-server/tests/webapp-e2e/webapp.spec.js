@@ -15,16 +15,14 @@ const {
 const ADDR = process.env.DEZOOMIFY_E2E_ADDR;
 
 test("webapp discovers, downloads, assembles, and saves a real DZI pyramid", async ({ page }) => {
-  // Hold tile responses long enough to observe the acquisition state. The
-  // canvas must be the live output surface, visible before those responses
-  // complete, rather than an artifact allocated only during finalization.
+  // Hold tile responses long enough to observe the acquisition state: the
+  // canvas is the live output surface, visible before those responses complete.
   await page.route((url) => url.href.includes("pyramid_files"), async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 500));
     await route.continue();
   });
-  // website/direct-success flow contract: the metadata is fetched directly
-  // and the metadata CORS proxy is never involved; a successful save proves
-  // the assembled canvas is origin-clean (a tainted canvas cannot export).
+  // website/direct-success: metadata goes direct, the proxy stays unused;
+  // the save proves the canvas is origin-clean (tainted cannot export).
   const golden = JSON.parse(
     fs.readFileSync(
       path.resolve(__dirname, "../../../../testdata/scenarios/website/direct-success/expected/result.json"),
@@ -82,10 +80,7 @@ test("webapp discovers, downloads, assembles, and saves a real DZI pyramid", asy
   const bytes = fs.readFileSync(target);
   assertSavedPyramid(bytes);
 
-  // website/direct-success: one direct metadata attempt, zero metadata
-  // proxy requests, and an origin-clean save. (`tilePolicy` and `transport`
-  // in the golden name the policy vocabulary; the readable-save outcome
-  // above observes them.)
+  // website/direct-success: one direct metadata attempt, zero proxy requests.
   assert.deepEqual(attempts, golden.attempts, "website/direct-success attempts");
   assert.equal(proxyRequests, golden.proxyRequests, "website/direct-success proxyRequests");
   assert.equal(golden.originClean, true, "website/direct-success originClean (save exported bytes)");
@@ -141,10 +136,9 @@ test("metadata proxy failure reaches the error UI with its complete typed contex
   await expect(page.locator("#app")).toContainText(/The site refused to share this file \(HTTP 406\)/i);
 });
 
-// Production topology of a Google Arts & Culture asset page: no CORS grant
-// on the page (the direct browser fetch fails) while the tile-info XML and
-// the signed, AES-CBC-encrypted tiles are readable. The metadata CORS proxy
-// relays the page; the browser decrypts tiles via the WASM function.
+// Production topology of a Google Arts & Culture asset page: the page is
+// not CORS-readable (direct fetch fails) while tile-info and signed,
+// AES-CBC-encrypted tiles are; the metadata proxy relays the page.
 const ARTS_PAGE_URL = "https://artsandculture.google.com/asset/liza-kottou-0113.html";
 
 test("webapp downloads a Google Arts & Culture image through the metadata proxy", async ({ page }) => {
@@ -152,9 +146,7 @@ test("webapp downloads a Google Arts & Culture image through the metadata proxy"
   // production, so discovery must fall back to the metadata proxy.
   await page.route((url) => url.href === ARTS_PAGE_URL, (route) => route.abort());
 
-  // Test double of the /api/proxy Pages Function: same wire contract,
-  // relayed against the deterministic fixture server on loopback. The relay
-  // is always a GET regardless of the intercepted request's method.
+  // Test double of the /api/proxy Pages Function (always relays as GET).
   const proxyTargets = [];
   const relayToFixture = async (route, targetUrl) => {
     const response = await route.fetch({
@@ -169,10 +161,8 @@ test("webapp downloads a Google Arts & Culture image through the metadata proxy"
     await relayToFixture(route, body.targetUrl);
   });
 
-  // fixtures.test never resolves (RFC 2606): metadata fetches therefore take
-  // the proxy fallback above, while tiles are never proxied by policy; this
-  // interception stands in for direct tile egress against the same fixture
-  // server, preserving the signed-URL and encrypted-payload semantics.
+  // fixtures.test never resolves (RFC 2606): metadata takes the proxy
+  // fallback while this interception stands in for direct tile egress.
   await page.route(
     (url) => url.host === "fixtures.test" && url.pathname.startsWith("/arts/gap/path=x"),
     async (route) => {

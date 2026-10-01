@@ -68,13 +68,10 @@ impl std::fmt::Display for DeepLinkError {
 impl std::error::Error for DeepLinkError {}
 
 /// Credential-query lookup over the canonical contract vocabulary
-/// `dezoomify::model::SENSITIVE_QUERY_KEYS` (declared once in
-/// `crates/dezoomify/src/model.rs`). The TypeScript mirror is
-/// `DEEP_LINK_SECRET_QUERY_KEYS` in `packages/shared-ui/src/source-url.ts`;
-/// the shared rejection behavior is pinned on both sides by
-/// `testdata/deep-link-vectors.json`. Matching is case-insensitive exact
-/// (never substring) so `/cookie-recipe/` stays valid while `?token=secret`
-/// is rejected.
+/// `dezoomify::model::SENSITIVE_QUERY_KEYS` (TypeScript mirror:
+/// `DEEP_LINK_SECRET_QUERY_KEYS`; both pinned by
+/// `testdata/deep-link-vectors.json`). Case-insensitive exact match, never
+/// substring, so `/cookie-recipe/` stays valid while `?token=secret` fails.
 fn is_secret_key(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     dezoomify::model::SENSITIVE_QUERY_KEYS
@@ -82,10 +79,8 @@ fn is_secret_key(name: &str) -> bool {
         .any(|key| *key == lower)
 }
 
-/// Local-path markers that never travel in a deep link (separate from secret
-/// query keys above, which are enforced by URL parsing). Substring checks are
-/// confined to these path markers; credential keys always use exact-match URL
-/// parsing so `/cookie-recipe/` stays valid.
+/// Local-path markers that never travel in a deep link. Substring checks are
+/// confined to these; credential keys always use exact-match URL parsing.
 fn source_contains_local_path(text: &str) -> Option<String> {
     let lower = text.to_ascii_lowercase();
     for needle in ["file://", "/etc/", "c:\\"] {
