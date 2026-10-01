@@ -39,9 +39,7 @@ fn assembles_dzi_pyramid_from_fixture_scenario() {
     let output = out_dir.join("pyramid.png");
     let mut events = 0usize;
     let outcome = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(&input, output.to_str().expect("utf8 output"), false),
         &JobOptions::default(),
         &mut |_| events += 1,
     )
@@ -85,9 +83,7 @@ fn tile_failure_fails_honestly_without_output() {
         ..Default::default()
     };
     let error = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(&input, output.to_str().expect("utf8 output"), false),
         &config,
         &mut |_| {},
     )
@@ -128,9 +124,11 @@ fn file_uri_tiles_assemble_from_a_remote_manifest() {
     );
     let output = work.join("local.png");
     let outcome = support::run_with_options(
-        &format!("{base}/local-tiles.yaml"),
-        output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(
+            &format!("{base}/local-tiles.yaml"),
+            output.to_str().expect("utf8 output"),
+            false,
+        ),
         &JobOptions::default(),
         &mut |_| {},
     )
@@ -159,9 +157,7 @@ fn corrupt_tile_fails_like_a_missing_tile() {
         ..Default::default()
     };
     let error = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(&input, output.to_str().expect("utf8 output"), false),
         &config,
         &mut |_| {},
     )
@@ -184,9 +180,7 @@ fn partial_keep_policy_encodes_acquired_tiles() {
     let output = out_dir.join("partial.png");
     let config = JobOptions::default();
     let outcome = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(&input, output.to_str().expect("utf8 output"), false),
         &config,
         &mut |_| {},
     )
@@ -234,9 +228,7 @@ fn max_width_selects_the_largest_fitting_level() {
         ..Default::default()
     };
     let outcome = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(&input, output.to_str().expect("utf8 output"), false),
         &config,
         &mut |_| {},
     )
@@ -259,9 +251,7 @@ fn probe_planned_grid_matches_the_fixed_grid_output() {
     let out_dir = temp_dir("probe");
     let output = out_dir.join("probe.png");
     let outcome = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(&input, output.to_str().expect("utf8 output"), false),
         &JobOptions::default(),
         &mut |_| {},
     )
@@ -278,9 +268,7 @@ fn existing_output_without_overwrite_is_refused() {
     std::fs::write(&output, b"previous bytes").expect("pre-existing output");
     let mut events = 0usize;
     let error = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(&input, output.to_str().expect("utf8 output"), false),
         &JobOptions::default(),
         &mut |_| events += 1,
     )
@@ -302,9 +290,7 @@ fn jpg_output_decodes_at_full_size() {
     let out_dir = temp_dir("jpg");
     let output = out_dir.join("pyramid.jpg");
     let outcome = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(&input, output.to_str().expect("utf8 output"), false),
         &JobOptions::default(),
         &mut |_| {},
     )
@@ -336,9 +322,7 @@ fn tiff_output_decodes_losslessly() {
     let out_dir = temp_dir("tiff");
     let output = out_dir.join("pyramid.tif");
     let outcome = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(&input, output.to_str().expect("utf8 output"), false),
         &JobOptions::default(),
         &mut |_| {},
     )
@@ -378,9 +362,7 @@ fn zif_output_writes_tiff_pyramid() {
     let out_dir = temp_dir("zif");
     let output = out_dir.join("pyramid.zif");
     let outcome = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(&input, output.to_str().expect("utf8 output"), false),
         &JobOptions::default(),
         &mut |_| {},
     )
@@ -423,9 +405,7 @@ fn webp_output_decodes_losslessly() {
     let out_dir = temp_dir("webp");
     let output = out_dir.join("pyramid.webp");
     let outcome = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(&input, output.to_str().expect("utf8 output"), false),
         &JobOptions::default(),
         &mut |_| {},
     )
@@ -459,9 +439,7 @@ fn iiif_extension_writes_a_directory_at_that_path() {
     let out_dir = temp_dir("iiif-ext");
     let output = out_dir.join("pyramid.iiif");
     let outcome = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(&input, output.to_str().expect("utf8 output"), false),
         &JobOptions::default(),
         &mut |_| {},
     )
@@ -483,9 +461,7 @@ fn iiif_dir_writes_manifest_and_addressable_tiles() {
     let out_dir = temp_dir("iiif-dir");
     let output = out_dir.join("pyramid");
     let outcome = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(&input, output.to_str().expect("utf8 output"), false),
         &JobOptions::default(),
         &mut |_| {},
     )
@@ -554,9 +530,7 @@ fn tile_cache_reuses_tiles_after_the_server_loses_them() {
     };
     let first = out_dir.join("first.png");
     let _outcome = support::run_with_options(
-        &input,
-        first.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(&input, first.to_str().expect("utf8 output"), false),
         &config,
         &mut |_| {},
     )
@@ -575,9 +549,7 @@ fn tile_cache_reuses_tiles_after_the_server_loses_them() {
     }
     let second = out_dir.join("second.png");
     let resumed = support::run_with_options(
-        &input,
-        second.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(&input, second.to_str().expect("utf8 output"), false),
         &config,
         &mut |_| {},
     )
@@ -655,9 +627,7 @@ fn interrupted_job_resumes_without_refetching_completed_tiles() {
     };
     let first_output = out_dir.join("first.png");
     let error = support::run_with_options(
-        &input,
-        first_output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(&input, first_output.to_str().expect("utf8 output"), false),
         &failing,
         &mut |_| {},
     )
@@ -694,9 +664,7 @@ fn interrupted_job_resumes_without_refetching_completed_tiles() {
     }
     let second_output = out_dir.join("second.png");
     let resumed = support::run_with_options(
-        &input,
-        second_output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(&input, second_output.to_str().expect("utf8 output"), false),
         &JobOptions {
             cache_dir: Some(cache_dir.clone()),
             ..Default::default()
@@ -718,9 +686,7 @@ fn resume_scenario_matches_the_pinned_golden() {
     let out_dir = temp_dir("resume-scenario");
     let output = out_dir.join("resume.png");
     let outcome = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(&input, output.to_str().expect("utf8 output"), false),
         &JobOptions::default(),
         &mut |_| {},
     )
@@ -737,9 +703,7 @@ fn cancellation_before_publish_writes_nothing() {
     let output = out_dir.join("cancelled.png");
     let mut cancelled = false;
     let error = support::run_with_options_observed(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(&input, output.to_str().expect("utf8 output"), false),
         &JobOptions::default(),
         |controls, progress| {
             if !cancelled && progress.phase == dezoomify::model::ProgressPhase::Acquisition {
@@ -868,9 +832,11 @@ fn iiif_size_rounding_bug_falls_back_to_caret_width_without_refetching() {
     let out_dir = temp_dir("iiif-size-rounding");
     let output = out_dir.join("result.png");
     let outcome = support::run_with_options(
-        &format!("{base}/iiif/info.json"),
-        output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(
+            &format!("{base}/iiif/info.json"),
+            output.to_str().expect("utf8 output"),
+            false,
+        ),
         &JobOptions::default(),
         &mut |_| {},
     )
@@ -918,9 +884,11 @@ fn deferred_bulk_entry_resolves_to_identical_output() {
     let out_dir = temp_dir("deferred");
     let output = out_dir.join("deferred.png");
     let outcome = support::run_with_options(
-        &format!("{base}/list.txt"),
-        output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(
+            &format!("{base}/list.txt"),
+            output.to_str().expect("utf8 output"),
+            false,
+        ),
         &JobOptions::default(),
         &mut |_| {},
     )
@@ -944,9 +912,11 @@ fn self_referential_deferred_list_hits_the_resolution_limit() {
     let out_dir = temp_dir("deferred-limit");
     let output = out_dir.join("loop.png");
     let error = support::run_with_options(
-        &format!("{base}/self.txt"),
-        output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(
+            &format!("{base}/self.txt"),
+            output.to_str().expect("utf8 output"),
+            false,
+        ),
         &JobOptions::default(),
         &mut |_| {},
     )
@@ -995,9 +965,11 @@ fn first_catalog_entry_wins_with_two_deferred_images() {
     let out_dir = temp_dir("multi-image");
     let output = out_dir.join("first.png");
     let outcome = support::run_with_options(
-        &format!("{base}/two.txt"),
-        output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(
+            &format!("{base}/two.txt"),
+            output.to_str().expect("utf8 output"),
+            false,
+        ),
         &JobOptions::default(),
         &mut |_| {},
     )

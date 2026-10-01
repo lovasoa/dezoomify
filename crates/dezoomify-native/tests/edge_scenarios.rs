@@ -96,9 +96,11 @@ fn edge_success_scenarios_match_their_result_goldens() {
             ..Default::default()
         };
         let outcome = support::run_with_options(
-            &scenario.input,
-            output.to_str().expect("utf8 output"),
-            false,
+            &support::Target::new(
+                &scenario.input,
+                output.to_str().expect("utf8 output"),
+                false,
+            ),
             &options,
             &mut |_| {},
         )

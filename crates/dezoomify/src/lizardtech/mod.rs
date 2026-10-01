@@ -88,20 +88,36 @@ fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<ParsedResource
         DiscoveryError::InvalidMetadata("LizardTech XML has no image item".into())
     })?;
     let title = image_title(&item);
-    let levels = build_levels(width, height, &origin, &catalog_name, &item)?;
+    let levels = build_levels(
+        Vec2d {
+            x: width,
+            y: height,
+        },
+        &origin,
+        CatalogItem {
+            catalog: &catalog_name,
+            item: &item,
+        },
+    )?;
     Ok(ParsedResource::Image(ImagePlan::new(title, levels)))
 }
 
+/// One image's catalog path: its collection and item names.
+#[derive(Clone, Copy)]
+struct CatalogItem<'a> {
+    catalog: &'a str,
+    item: &'a str,
+}
+
 fn build_levels(
-    original_width: u32,
-    original_height: u32,
+    original: Vec2d,
     origin: &Arc<str>,
-    catalog: &str,
-    item: &str,
+    named: CatalogItem<'_>,
 ) -> Result<Vec<ResolvedLevel>, DiscoveryError> {
+    let CatalogItem { catalog, item } = named;
     let mut levels = Vec::new();
-    let mut width = original_width;
-    let mut height = original_height;
+    let mut width = original.x;
+    let mut height = original.y;
     let mut service_level = 0_u32;
     loop {
         levels.push((width, height, service_level));

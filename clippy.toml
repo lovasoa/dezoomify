@@ -6,6 +6,20 @@
 #   must return structured domain errors instead of panicking.
 allow-unwrap-in-tests = true
 
+# - `too-many-arguments-threshold`: guards against primitive-obsessed
+#   parameter lists. `clippy::too_many_arguments` is type-blind (it cannot
+#   target primitives specifically) and counts `self`, so small argument
+#   lists become structured types or named constructors (`GridGeometry`,
+#   `FetchPlan`, `Placement`, `Call`, `Event`, `Budget`, `Target`, `Stub`,
+#   ranges, ...) instead of growing past three parameters. 4 is the lowest
+#   value that passes: the remaining four-parameter signatures are the
+#   fixture server's axum extractor handlers (one typed extractor per
+#   parameter; bundling them loses rejection semantics) and the core's
+#   positional geometry and protocol constructors that every format decoder
+#   calls (`Grid::new`, `Registry::discover`), where a wrapper struct would
+#   obscure pure values and churn the whole format surface.
+too-many-arguments-threshold = 4
+
 # The pure domain crate denies these semantic Clippy lints in non-test builds.
 # Clippy resolves aliases and re-exports before comparing paths.
 # `cargo xtask check` allows these two

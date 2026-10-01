@@ -84,6 +84,14 @@ pub struct RouteTable {
     entries: Vec<(String, ScenarioRoute, Option<regex::Regex>)>,
 }
 
+/// One route lookup: the request's host, path, and query text.
+#[derive(Clone, Copy)]
+pub struct Lookup<'a> {
+    pub host: &'a str,
+    pub path: &'a str,
+    pub query: Option<&'a str>,
+}
+
 pub struct RenderedRoute {
     pub headers: HeaderMap,
     pub bytes: Vec<u8>,
@@ -301,8 +309,9 @@ impl RouteTable {
         Ok(RouteTable { entries })
     }
 
-    pub fn lookup(&self, host: &str, path: &str, query: Option<&str>) -> Option<RouteHit<'_>> {
-        if let Some(hit) = self.lookup_exact(host, path, query) {
+    pub fn lookup(&self, at: &Lookup<'_>) -> Option<RouteHit<'_>> {
+        let Lookup { path, .. } = *at;
+        if let Some(hit) = self.lookup_exact(at) {
             return Some(hit);
         }
         // Legacy-compatible suffix/index fallback for fixture-style routes.
@@ -312,28 +321,26 @@ impl RouteTable {
             } else {
                 format!("{path}{suffix}")
             };
-            if let Some(hit) = self.lookup_exact(host, &candidate, query) {
+            if let Some(hit) = self.lookup_exact(&Lookup {
+                path: &candidate,
+                ..*at
+            }) {
                 return Some(hit);
             }
         }
         None
     }
 
-    fn lookup_exact(&self, host: &str, path: &str, query: Option<&str>) -> Option<RouteHit<'_>> {
+    fn lookup_exact(&self, at: &Lookup<'_>) -> Option<RouteHit<'_>> {
         // Exact path matches beat prefix/regex wildcards, regardless of load
         // order: directory-mirror routes are appended last, and a concrete
         // payload must not be shadowed by an earlier wildcard fallback.
-        self.match_entries(host, path, query, true)
-            .or_else(|| self.match_entries(host, path, query, false))
+        self.match_entries(at, true)
+            .or_else(|| self.match_entries(at, false))
     }
 
-    fn match_entries(
-        &self,
-        host: &str,
-        path: &str,
-        query: Option<&str>,
-        exact_path: bool,
-    ) -> Option<RouteHit<'_>> {
+    fn match_entries(&self, at: &Lookup<'_>, exact_path: bool) -> Option<RouteHit<'_>> {
+        let Lookup { host, path, query } = *at;
         self.entries.iter().find_map(|(scenario, route, compiled)| {
             if !route.method.eq_ignore_ascii_case("GET") {
                 return None;

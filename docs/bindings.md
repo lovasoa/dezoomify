@@ -40,8 +40,11 @@ Errors are one closed enum with an internally tagged `kind` (the kebab-case
 variant name): the single stable identifier across the boundary. Variants
 carry structured facts (HTTP status, request address, retry hint, bounded
 server preview, policy reason, attempted transport, structured limit facts,
-and bounded diagnostic detail) plus the `resource` composition variant (exact
-URI and resource kind over a nested cause). Display messages render from
+and bounded diagnostic detail): `request` and `detail` ride on one flattened
+`Failure` context shared by every variant and serialize inline, so the wire
+shape stays flat. The `resource` composition variant (exact URI and resource
+kind over a nested cause) and `discovery-failed`'s retained cause keep their
+underlying error through `#[source]` chains. Display messages render from
 those fields only and never cross as stored text; the derived retry verdict
 (`Error::retryable`) is a method, not a field. Both sides raise the same
 shapes: JavaScript hosts throw plain objects matching variant shapes and

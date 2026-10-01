@@ -5,8 +5,16 @@
 
 export type QueueStatus = "queued" | "active" | "done" | "failed" | "cancelled";
 
-/** Outcome of a queue mutation: `ok`, or the named refusal. */
-export type QueueResultCode = "ok" | "job.unknown" | "job.stale" | "job.invalid-state";
+/** Queue mutation outcomes: `ok`, or the named refusal. `job.invalid-input`
+ * refuses enqueue validation and `job.duplicate` refuses an entry whose
+ * identity is already running. One vocabulary for every queue mutation. */
+export type QueueResultCode =
+  | "ok"
+  | "job.unknown"
+  | "job.stale"
+  | "job.invalid-state"
+  | "job.invalid-input"
+  | "job.duplicate";
 
 export interface QueueEntry {
   readonly id: string;

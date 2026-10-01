@@ -78,9 +78,11 @@ fn decode(page: &Arc<PageInfo>, bytes: &[u8]) -> Result<ImagePlan, DiscoveryErro
                 .to_owned();
             let request_page = Arc::clone(page);
             let source = Grid::with_processed_requests(
-                size,
-                tile_size,
-                Vec2d::default(),
+                crate::core::tile_plan::GridGeometry {
+                    image_size: size,
+                    tile_size,
+                    overlap: Vec2d::default(),
+                },
                 ProcessingRecipe::GoogleArtsDecrypt,
                 move |tile| {
                     let cell: Vec2d = tile.coord.into();

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use crate::client::{build_request, rebuild_for_redirect, EffectiveRequest};
-use crate::http::{FetchLimits, FetchOutcome, UserHeaders};
+use crate::http::{FetchLimits, FetchOutcome, FetchPlan};
 use dezoomify::model::{bounded_uri, Error, ErrorTransport, Failure};
 
 /// Local carrier enabling `?`-chaining from platform error types into the
@@ -164,18 +164,16 @@ impl NativeTransport {
         &self,
         uri: &str,
         extra_headers: &BTreeMap<String, String>,
-        user: Option<&UserHeaders>,
-        limits: &FetchLimits,
+        plan: &FetchPlan<'_>,
     ) -> Result<FetchOutcome, Error> {
         self.runtime
-            .block_on(self.fetch_async(uri, extra_headers, user, limits))
+            .block_on(self.fetch_async(uri, extra_headers, plan))
     }
 
     pub async fn fetch_resource(
         &self,
         request: &dezoomify::model::ResourceRequest,
-        user: Option<&UserHeaders>,
-        limits: &FetchLimits,
+        plan: &FetchPlan<'_>,
     ) -> Result<FetchOutcome, Error> {
         let mut headers: BTreeMap<String, String> = dezoomify::default_headers()
             .into_iter()
@@ -185,7 +183,7 @@ impl NativeTransport {
             headers.insert(header.name.to_ascii_lowercase(), header.value.clone());
         }
         let started = Instant::now();
-        let result = self.fetch_async(&request.uri, &headers, user, limits).await;
+        let result = self.fetch_async(&request.uri, &headers, plan).await;
         if let Some(diagnostics) = &self.diagnostics {
             use dezoomify::model::DiagnosticLevel;
             diagnostics.count("requests", 1.0);
@@ -233,19 +231,18 @@ impl NativeTransport {
         &self,
         uri: &str,
         extra_headers: &BTreeMap<String, String>,
-        user: Option<&UserHeaders>,
-        limits: &FetchLimits,
+        plan: &FetchPlan<'_>,
     ) -> Result<FetchOutcome, Error> {
         if !is_http_uri(uri) {
-            return fetch_local(uri, limits);
+            return fetch_local(uri, plan.limits);
         }
         let mut request = build_request(uri, extra_headers)?;
         reject_userinfo_uri(uri)?;
-        if let Some(user) = user {
+        if let Some(user) = plan.user {
             user.apply(&mut request);
         }
-        let deadline = Instant::now() + limits.timeout;
-        fetch_loop(&self.client, request, user, limits, &deadline).await
+        let deadline = Instant::now() + plan.limits.timeout;
+        fetch_loop(&self.client, request, plan, &deadline).await
     }
 
     /// Block the calling (non-runtime) thread on one future. Never called
@@ -287,10 +284,10 @@ fn reject_userinfo_uri(uri: &str) -> Result<(), Error> {
 async fn fetch_loop(
     client: &reqwest::Client,
     mut request: EffectiveRequest,
-    user: Option<&UserHeaders>,
-    limits: &FetchLimits,
+    plan: &FetchPlan<'_>,
     deadline: &Instant,
 ) -> Result<FetchOutcome, Error> {
+    let FetchPlan { user, limits } = *plan;
     let mut redirects: usize = 0;
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());

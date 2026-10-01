@@ -104,6 +104,14 @@ pub struct Grid {
     requests: Arc<dyn GridRequests>,
 }
 
+/// A grid's geometry: canvas size, tile size, and overlap travel together.
+#[derive(Clone, Copy)]
+pub(crate) struct GridGeometry {
+    pub image_size: Vec2d,
+    pub tile_size: Vec2d,
+    pub overlap: Vec2d,
+}
+
 impl fmt::Debug for Grid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Grid")
@@ -162,25 +170,25 @@ impl Grid {
         requests: impl Fn(GridTile) -> Request + Send + Sync + 'static,
     ) -> Result<Self, TileSourceError> {
         Self::with_processed_requests(
-            image_size,
-            tile_size,
-            overlap,
+            GridGeometry {
+                image_size,
+                tile_size,
+                overlap,
+            },
             ProcessingRecipe::None,
             requests,
         )
     }
 
     pub(crate) fn with_processed_requests(
-        image_size: Vec2d,
-        tile_size: Vec2d,
-        overlap: Vec2d,
+        geometry: GridGeometry,
         processing: ProcessingRecipe,
         requests: impl Fn(GridTile) -> Request + Send + Sync + 'static,
     ) -> Result<Self, TileSourceError> {
         Self::new(
-            image_size,
-            tile_size,
-            overlap,
+            geometry.image_size,
+            geometry.tile_size,
+            geometry.overlap,
             ClosureRequests {
                 request: requests,
                 processing,

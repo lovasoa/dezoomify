@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::thread;
 
 use dezoomify::model::Error;
-use dezoomify_native::http::{FetchLimits, UserHeaders};
+use dezoomify_native::http::{FetchLimits, FetchPlan, UserHeaders};
 use dezoomify_native::transport::NativeTransport;
 
 fn limits() -> FetchLimits {
@@ -77,7 +77,13 @@ fn generated_requests_keep_headers_and_redirect_results_for_every_purpose() {
             }],
         };
         let result = transport
-            .block_on(transport.fetch_resource(&request, None, &limits()))
+            .block_on(transport.fetch_resource(
+                &request,
+                &FetchPlan {
+                    user: None,
+                    limits: &limits(),
+                },
+            ))
             .unwrap();
         assert_eq!(result.final_uri, format!("{origin}/final"));
         assert_eq!(result.body, b"resource");
@@ -179,8 +185,10 @@ fn http_refusal_returns_once_without_retry() {
         .fetch(
             &format!("http://127.0.0.1:{port}/tile.png"),
             &BTreeMap::new(),
-            None,
-            &limits(),
+            &FetchPlan {
+                user: None,
+                limits: &limits(),
+            },
         )
         .expect("refusal returns as outcome");
     assert_eq!(outcome.status, 403);
@@ -210,8 +218,10 @@ fn redirect_rejects_userinfo_and_unsupported_schemes() {
         .fetch(
             &format!("http://127.0.0.1:{port}/start"),
             &BTreeMap::new(),
-            None,
-            &limits(),
+            &FetchPlan {
+                user: None,
+                limits: &limits(),
+            },
         )
         .expect_err("userinfo redirect rejected");
     assert!(matches!(error, Error::BadRedirect { .. }));
@@ -271,8 +281,10 @@ fn redirect_drops_credentials_across_hosts() {
         .fetch(
             &format!("http://127.0.0.1:{hop1_port}/start"),
             &BTreeMap::new(),
-            Some(&user),
-            &limits(),
+            &FetchPlan {
+                user: Some(&user),
+                limits: &limits(),
+            },
         )
         .expect("redirect followed");
     assert_eq!(outcome.status, 200);
@@ -308,8 +320,10 @@ fn retry_after_seconds_hint_flows_to_the_outcome() {
         .fetch(
             &format!("http://127.0.0.1:{port}/limited"),
             &BTreeMap::new(),
-            None,
-            &limits(),
+            &FetchPlan {
+                user: None,
+                limits: &limits(),
+            },
         )
         .expect("429 returns as outcome");
     assert_eq!(outcome.status, 429);

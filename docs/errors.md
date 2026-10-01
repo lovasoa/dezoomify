@@ -17,13 +17,19 @@ composition variant.
 - Display messages are plain sentences rendered by `#[error(...)]` templates
   from structured fields only. No message text is stored, so identical
   causes read identically everywhere and prose can never be parsed.
-- Structured facts per failure: HTTP status, exact request address,
-  `retry-after` hint, bounded server preview, the policy reason for policy
-  denials, the attempted transport on fetch failures, structured limit facts
-  (limit reason, dimensions, required and available bytes) for output-limit
-  refusals, and bounded diagnostic detail including preserved cause chains.
+- Structured facts per failure: HTTP status, `retry-after` hint, bounded
+  server preview, the policy reason for policy denials, the attempted
+  transport on fetch failures, and structured limit facts (limit reason,
+  dimensions, required and available bytes) for output-limit refusals.
+- Every variant carries one flattened `Failure` context instead of
+  per-variant fields: `request` preserves the exact URI when known and
+  `detail` holds bounded diagnostic text, usually the preserved cause
+  chain. The context serializes inline, so the wire shape is flat.
 - `resource` composes request context (exact URI and resource kind) over any
-  underlying failure, which stays reachable through the error chain.
+  underlying failure, and `discovery-failed` retains a representative cause;
+  both keep their underlying error through `#[source]`, so the real chain
+  stays reachable (`Error::cause()` in Rust, the `source`/`cause` fields in
+  TypeScript).
 
 The retry verdict is derived, never stored. `Error::retryable` and
 `Error::retry_after_ms` are pure functions of the variant and its facts:

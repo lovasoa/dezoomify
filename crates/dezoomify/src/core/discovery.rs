@@ -688,6 +688,17 @@ impl DiscoveryError {
 
 impl std::error::Error for DiscoveryError {}
 
+#[derive(Clone, Copy)]
+/// One resolution target: the format to follow, the resource to read, and
+/// the scheduling slot its reads report into.
+struct Resolve<'a> {
+    spec: FormatSpec,
+    uri: &'a str,
+    interactive: bool,
+    priority: &'a std::cell::Cell<Priority>,
+    base: Priority,
+}
+
 #[derive(Clone, Debug)]
 struct ReadResource {
     request: Request,
@@ -829,14 +840,20 @@ where
             .map_err(|error| DiscoveryError::Host(Box::new(error)))
     }
 
+    /// Resolve one target through shared, bounded asynchronous reads: the
+    /// format to follow, the resource to read, and the scheduling slot its
+    /// reads report into.
     async fn resolve(
         &self,
-        spec: FormatSpec,
-        uri: &str,
-        interactive: bool,
-        priority: &std::cell::Cell<Priority>,
-        base: Priority,
+        target: Resolve<'_>,
     ) -> Result<Option<(usize, DiscoveryCatalog)>, DiscoveryError> {
+        let Resolve {
+            spec,
+            uri,
+            interactive,
+            priority,
+            base,
+        } = target;
         let mut history = Vec::new();
         let mut parsed = ParsedResource::Follow(Request::new(uri));
         loop {
@@ -1011,7 +1028,15 @@ where
                         *rank,
                         *spec,
                         uri.clone(),
-                        resources.resolve(*spec, uri, false, priority, *rank).await,
+                        resources
+                            .resolve(Resolve {
+                                spec: *spec,
+                                uri,
+                                interactive: false,
+                                priority,
+                                base: *rank,
+                            })
+                            .await,
                     )
                 }
             },
@@ -1110,7 +1135,13 @@ where
     blocked.sort_by_key(|(rank, _, _)| *rank);
     for (rank, spec, uri) in blocked {
         match resources
-            .resolve(spec, &uri, true, &std::cell::Cell::new(rank), rank)
+            .resolve(Resolve {
+                spec,
+                uri: &uri,
+                interactive: true,
+                priority: &std::cell::Cell::new(rank),
+                base: rank,
+            })
             .await
         {
             Ok(Some((_, catalog))) => return Ok(catalog),

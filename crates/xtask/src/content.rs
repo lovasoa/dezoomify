@@ -231,16 +231,24 @@ fn verdict(actual: u64, warn: u64, fail: u64) -> Verdict {
     }
 }
 
-/// One gitignored build output against its budget. A missing file skips
-/// with the rebuild note; a present file warns or fails by the verdict.
-fn budget_file(
-    r: &Path,
-    rel: &str,
+/// One artifact's byte budget and its rebuild hint.
+#[derive(Clone, Copy)]
+struct Budget {
     warn: u64,
     fail: u64,
-    unit: &str,
-    hint: &str,
-) -> Result<(), String> {
+    unit: &'static str,
+    hint: &'static str,
+}
+
+/// One gitignored build output against its budget. A missing file skips
+/// with the rebuild note; a present file warns or fails by the verdict.
+fn budget_file(r: &Path, rel: &str, budget: &Budget) -> Result<(), String> {
+    let Budget {
+        warn,
+        fail,
+        unit,
+        hint,
+    } = *budget;
     let path = r.join(rel);
     let Ok(meta) = std::fs::metadata(&path) else {
         println!("sizes: {rel} missing ({hint}); skipped");
@@ -297,19 +305,23 @@ fn verify_sizes(r: &Path) -> Result<(), String> {
     budget_file(
         r,
         "wasm/dezoomify-wasm_bg.wasm",
-        WASM_WARN_BYTES,
-        WASM_FAIL_BYTES,
-        "bytes",
-        "run `cargo xtask build web`",
+        &Budget {
+            warn: WASM_WARN_BYTES,
+            fail: WASM_FAIL_BYTES,
+            unit: "bytes",
+            hint: "run `cargo xtask build web`",
+        },
     )?;
     for name in ["dezoomify-chromium.zip", "dezoomify-firefox.zip"] {
         budget_file(
             r,
             &format!("target/extension/{name}"),
-            EXT_ZIP_WARN_BYTES,
-            EXT_ZIP_FAIL_BYTES,
-            "bytes",
-            "run `cargo xtask build extension`",
+            &Budget {
+                warn: EXT_ZIP_WARN_BYTES,
+                fail: EXT_ZIP_FAIL_BYTES,
+                unit: "bytes",
+                hint: "run `cargo xtask build extension`",
+            },
         )?;
     }
     match dist_js_bytes(r)? {

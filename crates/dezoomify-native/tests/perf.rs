@@ -99,9 +99,7 @@ fn host_bounds_inflight_to_max_concurrent() {
         ..JobOptions::default()
     };
     let outcome = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
+        &support::Target::new(&input, output.to_str().expect("utf8 output"), false),
         &config,
         &mut |_| {},
     )
@@ -193,9 +191,7 @@ fn host_scales_with_bounded_inflight_across_increasing_tile_counts() {
         };
         let start = Instant::now();
         let outcome = support::run_with_options(
-            &input,
-            output.to_str().expect("utf8 output"),
-            false,
+            &support::Target::new(&input, output.to_str().expect("utf8 output"), false),
             &config,
             &mut |_| {},
         )

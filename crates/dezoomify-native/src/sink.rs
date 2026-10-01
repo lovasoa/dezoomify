@@ -108,6 +108,15 @@ pub struct CommitParams<'a> {
     pub reused_tiles: &'a [ReusedTile],
 }
 
+/// One tile's placement facts at the sink: where it lands, its extent, and
+/// the final plan index it records under.
+#[derive(Clone, Copy)]
+pub struct Placement {
+    pub ordinal: u32,
+    pub destination: Vec2d,
+    pub extent: Option<Vec2d>,
+}
+
 pub struct Sink {
     compression: u8,
     jpeg_quality: u8,
@@ -225,13 +234,12 @@ impl Sink {
     /// Place one decoded tile: paint immediately when isolated, retain for
     /// plan-order painting at finalization when overlapping, spool to disk
     /// when canvas dimensions are still unknown.
-    pub fn place(
-        &mut self,
-        ordinal: u32,
-        destination: Vec2d,
-        extent: Option<Vec2d>,
-        tile: DecodedTile,
-    ) -> Result<(), Error> {
+    pub fn place(&mut self, at: Placement, tile: DecodedTile) -> Result<(), Error> {
+        let Placement {
+            ordinal,
+            destination,
+            extent,
+        } = at;
         if !self.plan.contains(&ordinal) {
             self.plan.push(ordinal);
         }
@@ -245,7 +253,7 @@ impl Sink {
         }
         // Unknown dimensions: spool to job-owned temp files, bounded.
         if self.declared.is_none() && self.canvas.is_none() {
-            return self.spool(ordinal, destination, extent, tile);
+            return self.spool(at, tile);
         }
         if self.canvas.is_none() {
             let declared = self.declared.unwrap_or(Vec2d { x: 1, y: 1 });
@@ -280,17 +288,16 @@ impl Sink {
                 self.stats.peak_retained_bytes.max(self.retained_bytes);
             return Ok(());
         }
-        self.paint(ordinal, &tile.image, destination, extent);
+        self.paint(at, &tile.image);
         Ok(())
     }
 
-    fn paint(
-        &mut self,
-        ordinal: u32,
-        image: &RgbaImage,
-        destination: Vec2d,
-        extent: Option<Vec2d>,
-    ) {
+    fn paint(&mut self, at: Placement, image: &RgbaImage) {
+        let Placement {
+            ordinal,
+            destination,
+            extent,
+        } = at;
         if let Some(target) = self.canvas.as_mut() {
             blit_onto(target, destination, extent, image);
         }
@@ -319,13 +326,12 @@ impl Sink {
     /// Spool one tile to job-owned temp files (raw header + RGBA bytes).
     /// Bounded by the spool cap; the directory is removed on
     /// commit/rollback, never the destination.
-    fn spool(
-        &mut self,
-        ordinal: u32,
-        destination: Vec2d,
-        extent: Option<Vec2d>,
-        tile: DecodedTile,
-    ) -> Result<(), Error> {
+    fn spool(&mut self, at: Placement, tile: DecodedTile) -> Result<(), Error> {
+        let Placement {
+            ordinal,
+            destination,
+            extent,
+        } = at;
         let bytes = tile_bytes(&tile.image);
         if self.spool_bytes.saturating_add(bytes) > self.spool_cap_bytes {
             return Err(crate::output::memory_limit(LimitContext {
@@ -430,7 +436,14 @@ impl Sink {
                 RgbaImage::from_raw(w, h, pixels.to_vec()).ok_or_else(|| Error::WriteFailed {
                     failure: "spool entry corrupt".to_string().into(),
                 })?;
-            self.paint(tile.ordinal, &image, tile.destination, tile.extent);
+            self.paint(
+                Placement {
+                    ordinal: tile.ordinal,
+                    destination: tile.destination,
+                    extent: tile.extent,
+                },
+                &image,
+            );
         }
         self.remove_spool_dir();
         // Paint retained overlapping tiles in plan order for deterministic pixels.
@@ -443,7 +456,14 @@ impl Sink {
                 let (destination, extent) = geom
                     .map(|r| (Vec2d { x: r.x, y: r.y }, Some(Vec2d { x: r.w, y: r.h })))
                     .unwrap_or((Vec2d::default(), None));
-                self.paint(ordinal, &tile.image, destination, extent);
+                self.paint(
+                    Placement {
+                        ordinal,
+                        destination,
+                        extent,
+                    },
+                    &tile.image,
+                );
             }
         }
         Ok(Vec2d {

@@ -96,7 +96,7 @@ fn assert_result_golden(entry: &serde_json::Value, stdout: &str, output: &Path) 
         );
     }
     dezoomify_fixture_server::assert_result_golden(
-        &entry,
+        entry,
         dezoomify_fixture_server::GoldenResult {
             image_size: (
                 completed["width"].as_u64().expect("event width"),
