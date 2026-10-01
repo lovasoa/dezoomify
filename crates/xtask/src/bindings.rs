@@ -45,7 +45,15 @@ fn emit_declaration() -> Result<PathBuf, String> {
     }
     std::fs::create_dir_all(&output)
         .map_err(|e| format!("create temporary binding directory: {e}"))?;
-    super::wasm::run_wasm_bindgen(&input, "web", &output, "dezoomify-wasm", true)?;
+    super::wasm::run_wasm_bindgen(
+        &input,
+        &super::wasm::Bindgen {
+            target: "web",
+            out_dir: &output,
+            out_name: "dezoomify-wasm",
+            typescript: true,
+        },
+    )?;
     Ok(output.join("dezoomify-wasm.d.ts"))
 }
 

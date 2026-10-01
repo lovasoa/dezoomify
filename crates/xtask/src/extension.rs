@@ -116,7 +116,15 @@ fn run_wxt(browser: &str, command: &str) -> Result<(), String> {
 pub(crate) fn build_wasm_glue() -> Result<(), String> {
     let root = super::repo_root();
     let input = super::wasm::build_wasm_artifact(true)?;
-    super::wasm::run_wasm_bindgen(&input, "web", &root.join("wasm"), "dezoomify-wasm", false)?;
+    super::wasm::run_wasm_bindgen(
+        &input,
+        &super::wasm::Bindgen {
+            target: "web",
+            out_dir: &root.join("wasm"),
+            out_name: "dezoomify-wasm",
+            typescript: false,
+        },
+    )?;
     check_size_budget(
         &root.join("wasm/dezoomify-wasm.js"),
         WASM_JS_BUDGET_BYTES,

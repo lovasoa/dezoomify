@@ -27,19 +27,28 @@ pub(crate) fn build_wasm_artifact(release: bool) -> Result<PathBuf, String> {
     )))
 }
 
+/// One generated tree of the shared wasm-bindgen pipeline: the `--target`,
+/// output directory, output name, and declaration switch.
+pub(crate) struct Bindgen<'a> {
+    pub(crate) target: &'a str,
+    pub(crate) out_dir: &'a Path,
+    pub(crate) out_name: &'a str,
+    pub(crate) typescript: bool,
+}
+
 /// Run `wasm-bindgen` over a built artifact: the only place the CLI is
 /// invoked, so every generated tree (web glue, typed declarations, Node
 /// harness) comes from one pipeline.
-pub(crate) fn run_wasm_bindgen(
-    input: &Path,
-    bindgen_target: &str,
-    out_dir: &Path,
-    out_name: &str,
-    typescript: bool,
-) -> Result<(), String> {
+pub(crate) fn run_wasm_bindgen(input: &Path, bindgen: &Bindgen<'_>) -> Result<(), String> {
+    let Bindgen {
+        target,
+        out_dir,
+        out_name,
+        typescript,
+    } = bindgen;
     let mut command = Command::new("wasm-bindgen");
-    command.args(["--target", bindgen_target]);
-    if typescript {
+    command.args(["--target", target]);
+    if *typescript {
         command.arg("--typescript");
     }
     let status = command
@@ -107,7 +116,15 @@ pub(crate) fn run_node_harness() -> Result<(), String> {
 fn generate_node_bindings() -> Result<(), String> {
     let input = build_wasm_artifact(false)?;
     let output = super::cargo_target_directory()?.join("wasm-node-harness");
-    run_wasm_bindgen(&input, "nodejs", &output, "dezoomify_wasm", false)?;
+    run_wasm_bindgen(
+        &input,
+        &Bindgen {
+            target: "nodejs",
+            out_dir: &output,
+            out_name: "dezoomify_wasm",
+            typescript: false,
+        },
+    )?;
     // The `nodejs` target emits CommonJS, but the generated tree lives under
     // the repository's `target/`, which would inherit the root package's
     // `"type": "module"`. Pin the directory so Node never reparses the
