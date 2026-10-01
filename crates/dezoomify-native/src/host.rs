@@ -334,7 +334,7 @@ impl<'a> NativeHost<'a> {
             error.http = Some(outcome.status);
             error.request = Some(outcome.final_uri);
             error.retry_after_ms = outcome.retry_after_ms;
-            error.retryable = dezoomify::retry::is_retryable(&error.code, error.http);
+            let error = dezoomify::retry::classify(error);
             return Err(resource_context(error, request));
         }
         Ok(outcome)
@@ -427,7 +427,7 @@ impl<'a> NativeHost<'a> {
     fn place(&self, tile: &Tile, decoded: DecodedTile) -> Result<(), Error> {
         // Separate resource slots prevent probe indices from colliding with
         // final plan indices. Finish supplies the plan order of reused probes.
-        let storage_index = if tile.placement.probe_output {
+        let storage_index = if tile.placement.role == TileRole::ProbeAndOutput {
             (self.options.max_tiles as u32).saturating_add(tile.index)
         } else {
             tile.index
@@ -442,13 +442,17 @@ impl<'a> NativeHost<'a> {
             crate::sink::tile_bytes(&decoded.image),
             sink.retain_cap_bytes(),
         ) {
-            return Err(crate::output::canvas_memory_unavailable(
-                1,
-                1,
-                &format!(
+            return Err(crate::output::memory_limit(
+                format!(
                     "decoded tiles beyond the retain cap ({retained} retained, {inflight} in flight)"
                 ),
-                "the configured output retention",
+                None,
+                Some(
+                    retained
+                        .saturating_add(inflight)
+                        .saturating_add(crate::sink::tile_bytes(&decoded.image)),
+                ),
+                Some(sink.retain_cap_bytes()),
             ));
         }
         sink.place(
@@ -486,7 +490,7 @@ impl Host for NativeHost<'_> {
             Ok(decoded) => {
                 let width = std::num::NonZeroU64::new(u64::from(decoded.image.width()));
                 let height = std::num::NonZeroU64::new(u64::from(decoded.image.height()));
-                if tile.placement.probe_output {
+                if tile.placement.role == TileRole::ProbeAndOutput {
                     self.place(&tile, decoded)
                         .map_err(|error| resource_context(error, &tile.request))?;
                 }
@@ -564,7 +568,6 @@ impl Host for NativeHost<'_> {
                 height: image_size.y,
             }),
             format: request.format,
-            complete: !partial,
             missing: request.missing,
             disposition: OutputDisposition::NativePublication,
         };

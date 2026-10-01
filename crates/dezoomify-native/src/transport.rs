@@ -218,8 +218,7 @@ async fn fetch_loop(
                 "TRANSPORT_TIMEOUT",
                 ErrorPhase::Acquisition,
                 "fetch deadline exceeded",
-            )
-            .with_retryable(true));
+            ));
         }
         let response = fetch_once(client, &request, remaining).await?;
         let status = response.status().as_u16();
@@ -299,7 +298,6 @@ async fn fetch_once(
                 ErrorPhase::Acquisition,
                 "invalid request header",
             )
-            .with_retryable(true)
         })?;
         let parsed_value: reqwest::header::HeaderValue = value.parse().map_err(|_| {
             Error::new(
@@ -307,7 +305,6 @@ async fn fetch_once(
                 ErrorPhase::Acquisition,
                 "invalid request header",
             )
-            .with_retryable(true)
         })?;
         call = call.header(parsed_name, parsed_value);
     }
@@ -317,8 +314,7 @@ async fn fetch_once(
             "TRANSPORT_TIMEOUT",
             ErrorPhase::Acquisition,
             "fetch request timed out",
-        )
-        .with_retryable(true)),
+        )),
         Err(error) if error.is_builder() => Err(Error::new(
             "TRANSPORT_BAD_URL",
             ErrorPhase::Validation,
@@ -328,8 +324,7 @@ async fn fetch_once(
             "TRANSPORT_NETWORK_ERROR",
             ErrorPhase::Acquisition,
             format!("network failure: {error}"),
-        )
-        .with_retryable(true)),
+        )),
     }
 }
 
@@ -367,8 +362,7 @@ async fn read_body_capped(
                     "TRANSPORT_NETWORK_ERROR",
                     ErrorPhase::Acquisition,
                     format!("body read failed: {e}"),
-                )
-                .with_retryable(true));
+                ));
             }
         }
     }
@@ -458,7 +452,6 @@ fn fetch_local(uri: &str, limits: &FetchLimits) -> Result<FetchOutcome, Error> {
             ErrorPhase::Acquisition,
             format!("local file read failed: {e}"),
         )
-        .with_retryable(true)
     })?;
     if body.len() as u64 > limits.max_bytes {
         return Err(Error::new(

@@ -13,7 +13,7 @@ const tile = {
     processing: "none",
     canvas: { width: 256, height: 256 },
     expected_size: null,
-    probe_output: false,
+    role: "output",
   },
 };
 function setup(overrides = {}) {
@@ -157,7 +157,7 @@ test("probe output is painted from its first fetch without reacquisition", async
     },
   });
   assert.deepEqual(
-    await h.host.probe({ ...tile, placement: { ...tile.placement, probe_output: true } }),
+    await h.host.probe({ ...tile, placement: { ...tile.placement, role: "probe-and-output" } }),
     { status: "available", width: 256, height: 256 },
   );
   assert.equal(reads, 1);
@@ -185,7 +185,6 @@ test("output waits for saving and preserves actual disposition and missing tiles
     canvas: tile.placement.canvas,
     format: "png",
     missing: [2],
-    complete: false,
     disposition: "browser-save-initiated",
   });
 });
@@ -201,7 +200,7 @@ test("surface and output failures retain their typed code", async () => {
     retryable: false,
   });
   await assert.rejects(
-    h.host.probe({ ...tile, placement: { ...tile.placement, probe_output: true } }),
+    h.host.probe({ ...tile, placement: { ...tile.placement, role: "probe-and-output" } }),
     {
       code: "OUTPUT_SURFACE_UNAVAILABLE",
       phase: "output",

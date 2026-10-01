@@ -71,7 +71,7 @@ fn plain_path_input_with_file_uri_tiles_assembles() {
         ),
         (512, 512)
     );
-    assert!(outcome.output.complete);
+    assert!(outcome.output.is_complete());
 }
 
 #[test]

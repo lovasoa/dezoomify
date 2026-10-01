@@ -36,15 +36,14 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use dezoomify::Vec2d;
-use image::RgbaImage;
-
 use crate::imaging::{
     blit_onto, encode_jpeg, encode_png, encode_tiff, encode_webp, encode_zif_pyramid,
     render_iiif_dir, DecodedTile,
 };
 use crate::output::{partial_path_for, validate_destination, write_iiif_dir};
-use dezoomify::model::{Error, ErrorPhase, OutputFormat, ReusedTile};
+use dezoomify::model::{Error, ErrorPhase, OutputFormat, ReusedTile, Size};
+use dezoomify::Vec2d;
+use image::RgbaImage;
 
 /// Encoder and buffering settings owned by the output sink.
 #[derive(Clone, Debug)]
@@ -201,19 +200,26 @@ impl Sink {
             .checked_mul(u64::from(height))
             .and_then(|pixels| pixels.checked_mul(4));
         let Some(bytes) = required else {
-            return Err(crate::output::canvas_memory_unavailable(
-                width,
-                height,
-                "over 16 EiB",
-                &describe_bytes(available),
+            return Err(crate::output::memory_limit(
+                format!(
+                    "composed image {width}x{height} needs over 16 EiB of canvas memory, but only {} is currently available; save a smaller level with --max-width",
+                    describe_bytes(available)
+                ),
+                Some(Size { width, height }),
+                None,
+                Some(available),
             ));
         };
         if crate::imaging::exceeds_available_memory(bytes, available) {
-            return Err(crate::output::canvas_memory_unavailable(
-                width,
-                height,
-                &describe_bytes(bytes),
-                &describe_bytes(available),
+            return Err(crate::output::memory_limit(
+                format!(
+                    "composed image {width}x{height} needs {} of canvas memory, but only {} is currently available; save a smaller level with --max-width",
+                    describe_bytes(bytes),
+                    describe_bytes(available)
+                ),
+                Some(Size { width, height }),
+                Some(bytes),
+                Some(available),
             ));
         }
         self.stats.canvas_bytes = bytes;
@@ -265,14 +271,20 @@ impl Sink {
         if overlaps {
             let bytes = tile_bytes(&tile.image);
             if self.retained_bytes.saturating_add(bytes) > self.retain_cap_bytes {
-                return Err(crate::output::canvas_memory_unavailable(
-                    self.width,
-                    self.height,
-                    &format!(
-                        "overlapping-tile retention beyond {}",
+                return Err(crate::output::memory_limit(
+                    format!(
+                        "overlapping-tile retention of a {}x{} image needs {}, but only {} of retention is configured; save a smaller level with --max-width",
+                        self.width,
+                        self.height,
+                        describe_bytes(self.retained_bytes.saturating_add(bytes)),
                         describe_bytes(self.retain_cap_bytes)
                     ),
-                    &describe_bytes(crate::imaging::available_memory_bytes()),
+                    Some(Size {
+                        width: self.width,
+                        height: self.height,
+                    }),
+                    Some(self.retained_bytes.saturating_add(bytes)),
+                    Some(self.retain_cap_bytes),
                 ));
             }
             self.retained_bytes += bytes;
@@ -329,11 +341,15 @@ impl Sink {
     ) -> Result<(), Error> {
         let bytes = tile_bytes(&tile.image);
         if self.spool_bytes.saturating_add(bytes) > self.spool_cap_bytes {
-            return Err(crate::output::canvas_memory_unavailable(
-                1,
-                1,
-                &format!("tile spool beyond {}", describe_bytes(self.spool_cap_bytes)),
-                &describe_bytes(crate::imaging::available_memory_bytes()),
+            return Err(crate::output::memory_limit(
+                format!(
+                    "tile spooling needs {}, but only {} of spooling budget is configured; save a smaller level with --max-width",
+                    describe_bytes(self.spool_bytes.saturating_add(bytes)),
+                    describe_bytes(self.spool_cap_bytes)
+                ),
+                None,
+                Some(self.spool_bytes.saturating_add(bytes)),
+                Some(self.spool_cap_bytes),
             ));
         }
         let dir = self.spool_dir()?;

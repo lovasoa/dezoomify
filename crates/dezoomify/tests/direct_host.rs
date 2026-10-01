@@ -42,7 +42,7 @@ fn full_output_uses_lazy_geometry_and_honest_disposition() {
     let host = MemoryHost::default();
     host.yield_tiles.set(true);
     let output = invoke(&host, options()).unwrap();
-    assert!(output.complete);
+    assert!(output.is_complete());
     assert_eq!(
         output.canvas,
         Some(Size {
@@ -157,7 +157,7 @@ fn accepted_catalog_warns_once_for_malformed_siblings_and_keeps_valid_images() {
         &host,
     ))
     .unwrap();
-    assert!(output.complete);
+    assert!(output.is_complete());
     assert_eq!(host.acquired.borrow().len(), 1);
     assert_eq!(host.outputs.borrow()[0].title.as_deref(), Some("good"));
     assert_eq!(
@@ -185,7 +185,7 @@ fn forbidden_is_permanent_and_partial_is_asked_after_all_tiles_settle() {
     fail(&host, 0, [failure(403)]);
     host.choices.borrow_mut().push_back(RecoveryChoice::Keep);
     let output = invoke(&host, options()).unwrap();
-    assert!(!output.complete);
+    assert!(!output.is_complete());
     assert_eq!(output.missing, [0]);
     assert_eq!(host.attempts.borrow().len(), 4);
     assert!(host.sleeps.borrow().is_empty());
@@ -208,7 +208,7 @@ fn partial_retry_only_reacquires_missing_tiles_with_a_fresh_budget() {
         },
     )
     .unwrap();
-    assert!(output.complete);
+    assert!(output.is_complete());
     assert_eq!(
         host.attempts.borrow().iter().filter(|i| **i == 1).count(),
         4
@@ -535,7 +535,10 @@ fn generic_probes_reuse_placed_tiles_and_keep_boundaries() {
     );
     assert!(host.acquired.borrow().is_empty());
     assert_eq!(host.probes.borrow().len(), 4);
-    assert!(host.probes.borrow()[0].placement.probe_output);
+    assert_eq!(
+        host.probes.borrow()[0].placement.role,
+        TileRole::ProbeAndOutput
+    );
 }
 
 #[test]
@@ -603,7 +606,7 @@ fn pause_blocks_new_acquisition_and_retry_waits_until_resume() {
         assert!(host.outputs.borrow().is_empty());
         host.paused.set(false);
         resume.send(()).unwrap();
-        assert!(futures::executor::block_on(future).unwrap().complete);
+        assert!(futures::executor::block_on(future).unwrap().is_complete());
         assert_eq!(host.acquired.borrow().len(), 4);
         assert_eq!(host.sleeps.borrow().len(), usize::from(failed));
     }
@@ -752,7 +755,7 @@ fn unsupported_schemes_and_zero_canvas_limits_are_rejected() {
 fn missing_tiles_preserve_the_complete_original_host_error() {
     let host = MemoryHost::default();
     let mut error = failure(403);
-    error.code = "native.future-refusal".into();
+    error = error.with_code("native.future-refusal");
     error.transport = Some(ErrorTransport::Native);
     error.request = Some("https://redirected.test/image?signature=precise".into());
     error.resource_kind = Some(ResourceKind::Tile);

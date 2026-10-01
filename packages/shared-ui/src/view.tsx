@@ -651,7 +651,7 @@ function CompletedView({
     output?.disposition === "native-publication" ||
     output?.disposition === "browser-save-initiated";
   const title = saved
-    ? t(output.complete ? "desktop.done.title" : "desktop.done.partial")
+    ? t(output.missing.length === 0 ? "desktop.done.title" : "desktop.done.partial")
     : t("view.done.readyTitle");
   const summary = saved
     ? canvas

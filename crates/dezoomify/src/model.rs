@@ -108,6 +108,25 @@ impl OutputFormat {
     }
 }
 
+/// How an acquired tile participates in adaptive probing and final output.
+/// This is the single role vocabulary shared by the core tile plan and the
+/// portable wire contract; `RequestPurpose` on a tile request is derived
+/// from it and never disagrees.
+#[derive(
+    Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
+)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum TileRole {
+    /// Part of the final output plan only.
+    #[default]
+    Output,
+    /// A probe which must not be added to the output canvas.
+    Probe,
+    /// A successful probe is output; a missing probe is not an output failure.
+    ProbeAndOutput,
+}
+
 /// Host-neutral placement of one tile in the output image, projected from
 /// the core tile plan. `position` is the top-left output corner;
 /// `expected_size` is the planned extent when the plan declares it (absent
@@ -122,9 +141,7 @@ pub struct TilePlacement {
     pub expected_size: Option<Size>,
     pub canvas: Option<Size>,
     pub processing: ProcessingRecipe,
-    /// Whether a successful probe is also part of the final output plan.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub probe_output: bool,
+    pub role: TileRole,
 }
 
 // ---------------------------------------------------------------------------
@@ -383,6 +400,37 @@ pub enum ResourceKind {
     Output,
 }
 
+/// Which output limit refused the job. Structured limit facts live in
+/// [`LimitContext`]; `message` prose is presentation only and is never a
+/// data channel between languages.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum LimitReason {
+    /// Output assembly (canvas, tile retention, or spooling) exceeded a
+    /// memory budget.
+    Memory,
+    /// A side exceeded the JPEG 65535 px bound.
+    JpegSide,
+    /// A side exceeded the WebP 16383 px bound.
+    WebpSide,
+}
+
+/// Structured facts behind an output-limit refusal. Every field is optional
+/// because only some limits know some facts; absent facts never fabricate
+/// display text.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct LimitContext {
+    pub reason: LimitReason,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dimensions: Option<Size>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bytes_required: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bytes_available: Option<u64>,
+}
+
 /// Host-observed fetch facts. Retry and recovery policy belongs to the shared algorithm.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
@@ -409,11 +457,18 @@ pub struct FetchFailure {
 pub struct Error {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_after_ms: Option<u64>,
+    /// Stable error code. Rewrite through [`Error::with_code`] so the
+    /// derived `retryable` verdict never disagrees with it.
     pub code: String,
     pub phase: ErrorPhase,
+    /// Derived from `code` and `http` by [`crate::retry::is_retryable`];
+    /// every construction and rewrite recomputes it so the pair never
+    /// disagrees.
     #[serde(default)]
     pub retryable: bool,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<LimitContext>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -433,12 +488,15 @@ pub struct Error {
 impl Error {
     #[must_use]
     pub fn new(code: impl Into<String>, phase: ErrorPhase, message: impl Into<String>) -> Self {
+        let code = code.into();
+        let retryable = crate::retry::is_retryable(&code, None);
         Self {
             retry_after_ms: None,
-            code: code.into(),
+            code,
             phase,
-            retryable: false,
+            retryable,
             message: message.into(),
+            limit: None,
             request: None,
             transport: None,
             blocked_reason: None,
@@ -447,6 +505,15 @@ impl Error {
             preview: None,
             detail: None,
         }
+    }
+
+    /// Rewrite the code (and therefore the retry verdict) while keeping the
+    /// structured failure context.
+    #[must_use]
+    pub fn with_code(mut self, code: impl Into<String>) -> Self {
+        self.code = code.into();
+        self.retryable = crate::retry::is_retryable(&self.code, self.http);
+        self
     }
 
     #[must_use]
@@ -462,8 +529,8 @@ impl Error {
     }
 
     #[must_use]
-    pub fn with_retryable(mut self, retryable: bool) -> Self {
-        self.retryable = retryable;
+    pub fn with_limit(mut self, limit: LimitContext) -> Self {
+        self.limit = Some(limit);
         self
     }
 }
@@ -521,9 +588,16 @@ pub enum OutputDisposition {
 pub struct Output {
     pub canvas: Option<Size>,
     pub format: OutputFormat,
-    pub complete: bool,
     pub missing: Vec<u32>,
     pub disposition: OutputDisposition,
+}
+
+impl Output {
+    /// Complete output has no missing tiles; the two cannot disagree.
+    #[must_use]
+    pub fn is_complete(&self) -> bool {
+        self.missing.is_empty()
+    }
 }
 
 // Bounded diagnostic observations.

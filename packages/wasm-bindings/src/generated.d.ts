@@ -80,10 +80,7 @@ export interface TilePlacement {
     expected_size: Size | undefined;
     canvas: Size | undefined;
     processing: ProcessingRecipe;
-    /**
-     * Whether a successful probe is also part of the final output plan.
-     */
-    probe_output?: boolean;
+    role: TileRole;
 }
 
 /**
@@ -103,6 +100,14 @@ export interface FetchFailure {
     preview?: string;
     detail?: string;
 }
+
+/**
+ * How an acquired tile participates in adaptive probing and final output.
+ * This is the single role vocabulary shared by the core tile plan and the
+ * portable wire contract; `RequestPurpose` on a tile request is derived
+ * from it and never disagrees.
+ */
+export type TileRole = "output" | "probe" | "probe-and-output";
 
 /**
  * One discovery input. An omitted kind is a user-supplied source for
@@ -144,7 +149,6 @@ export interface MissingTile {
 export interface Output {
     canvas: Size | undefined;
     format: OutputFormat;
-    complete: boolean;
     missing: number[];
     disposition: OutputDisposition;
 }
@@ -167,6 +171,18 @@ export type FetchFailureCode = "TRANSPORT_HTTP_ERROR" | "DISCOVERY_HTTP_ERROR" |
  */
 export interface Catalog {
     entries: CatalogEntry[];
+}
+
+/**
+ * Structured facts behind an output-limit refusal. Every field is optional
+ * because only some limits know some facts; absent facts never fabricate
+ * display text.
+ */
+export interface LimitContext {
+    reason: LimitReason;
+    dimensions?: Size;
+    bytes_required?: number;
+    bytes_available?: number;
 }
 
 /**
@@ -209,6 +225,13 @@ export interface DiagnosticReport {
     truncated_fields: number;
 }
 
+/**
+ * Which output limit refused the job. Structured limit facts live in
+ * [`LimitContext`]; `message` prose is presentation only and is never a
+ * data channel between languages.
+ */
+export type LimitReason = "memory" | "jpeg-side" | "webp-side";
+
 export interface DiagnosticFailureGroup {
     key: string;
     count: number;
@@ -228,8 +251,14 @@ export interface Error {
     retry_after_ms?: number;
     code: string;
     phase: ErrorPhase;
+    /**
+     * Derived from `code` and `http` by [`crate::retry::is_retryable`];
+     * every construction and rewrite recomputes it so the pair never
+     * disagrees.
+     */
     retryable?: boolean;
     message: string;
+    limit?: LimitContext;
     request?: string;
     transport?: ErrorTransport;
     blocked_reason?: BlockedReason;
@@ -332,8 +361,8 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly applyProcessing: (a: any, b: number, c: number) => [number, number, number, number];
     readonly dezoomify: (a: any, b: any, c: any) => any;
-    readonly wasm_bindgen_277e17f42a474b60___convert__closures_____invoke___js_sys_8d24da1f7e09aecf___Function_fn_wasm_bindgen_277e17f42a474b60___JsValue_____wasm_bindgen_277e17f42a474b60___sys__Undefined___js_sys_8d24da1f7e09aecf___Function_fn_wasm_bindgen_277e17f42a474b60___JsValue_____wasm_bindgen_277e17f42a474b60___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
-    readonly wasm_bindgen_277e17f42a474b60___convert__closures_____invoke___wasm_bindgen_277e17f42a474b60___JsValue__core_ed718c3d60ebd546___result__Result_____wasm_bindgen_277e17f42a474b60___JsError___true_: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_2a67c6f173b08fad___convert__closures_____invoke___js_sys_c1f2febeb42441dd___Function_fn_wasm_bindgen_2a67c6f173b08fad___JsValue_____wasm_bindgen_2a67c6f173b08fad___sys__Undefined___js_sys_c1f2febeb42441dd___Function_fn_wasm_bindgen_2a67c6f173b08fad___JsValue_____wasm_bindgen_2a67c6f173b08fad___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
+    readonly wasm_bindgen_2a67c6f173b08fad___convert__closures_____invoke___wasm_bindgen_2a67c6f173b08fad___JsValue__core_ed718c3d60ebd546___result__Result_____wasm_bindgen_2a67c6f173b08fad___JsError___true_: (a: number, b: number, c: any) => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

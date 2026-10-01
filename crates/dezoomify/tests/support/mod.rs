@@ -112,7 +112,6 @@ impl Host for MemoryHost {
         let output = Output {
             canvas: request.canvas.clone(),
             format: request.format,
-            complete: request.missing.is_empty(),
             missing: request.missing.clone(),
             disposition: if self.display_only.get() {
                 OutputDisposition::DisplayOnly

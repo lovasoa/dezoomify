@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use dezoomify::Vec2d;
 
-use dezoomify::model::{Error, ErrorPhase};
+use dezoomify::model::{Error, ErrorPhase, LimitContext, LimitReason, Size};
 
 /// Default JPEG quality for `.jpg` output and `iiif-dir` tiles: `100`
 /// minus the default compression 5.
@@ -127,7 +127,13 @@ pub(crate) fn load_image_with_metadata(
 pub(crate) fn describe_http_failure(outcome: &crate::http::FetchOutcome) -> String {
     let mut requested = outcome.final_uri.clone();
     if requested.len() > 2_048 {
-        requested.truncate(2_048);
+        // Truncate on a UTF-8 char boundary: `String::truncate` panics
+        // mid-character and `final_uri` is server-controlled text.
+        let mut cut = 2_048;
+        while cut > 0 && !requested.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        requested.truncate(cut);
         requested.push_str("...");
     }
     format!("request to {requested} returned HTTP {}", outcome.status)
@@ -207,13 +213,24 @@ pub fn encode_jpeg(
     icc_profile: Option<&[u8]>,
 ) -> Result<Vec<u8>, Error> {
     if image.width() > JPEG_MAX_SIDE || image.height() > JPEG_MAX_SIDE {
-        return Err(Error::new("output.encode-failed", ErrorPhase::Output,
+        return Err(Error::new(
+            "output.encode-failed",
+            ErrorPhase::Output,
             format!(
                 "jpeg output {}x{} exceeds the 65535px per-side jpeg limit; save as png, tiff, or iiif-dir",
                 image.width(),
                 image.height()
             ),
-        ));
+        )
+        .with_limit(LimitContext {
+            reason: LimitReason::JpegSide,
+            dimensions: Some(Size {
+                width: image.width(),
+                height: image.height(),
+            }),
+            bytes_required: None,
+            bytes_available: None,
+        }));
     }
     let mut bytes = Vec::new();
     let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, quality);
@@ -351,13 +368,24 @@ fn write_tiff_directory<W: std::io::Write + std::io::Seek>(
 /// embedded when present.
 pub fn encode_webp(image: &image::RgbaImage, icc_profile: Option<&[u8]>) -> Result<Vec<u8>, Error> {
     if image.width() > WEBP_MAX_SIDE || image.height() > WEBP_MAX_SIDE {
-        return Err(Error::new("output.encode-failed", ErrorPhase::Output,
+        return Err(Error::new(
+            "output.encode-failed",
+            ErrorPhase::Output,
             format!(
                 "webp output {}x{} exceeds the 16383px per-side webp limit; save as png, tiff, zif, or iiif-dir",
                 image.width(),
                 image.height()
             ),
-        ));
+        )
+        .with_limit(LimitContext {
+            reason: LimitReason::WebpSide,
+            dimensions: Some(Size {
+                width: image.width(),
+                height: image.height(),
+            }),
+            bytes_required: None,
+            bytes_available: None,
+        }));
     }
     let mut bytes = Vec::new();
     let mut encoder = image::codecs::webp::WebPEncoder::new_lossless(&mut bytes);

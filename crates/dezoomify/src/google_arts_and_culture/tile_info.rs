@@ -32,19 +32,33 @@ pub struct PageInfo {
     pub base_url: String,
     pub token: String,
     pub name: String,
+    path: String,
 }
 
 impl PageInfo {
+    /// Build a page record, rejecting base URLs without the path segment the
+    /// signing scheme requires (`ci/xxx` in `https://host/ci/xxx`). Parsing
+    /// once here keeps [`Self::path`] total on server-controlled URLs.
+    pub fn new(base_url: String, token: String, name: String) -> Result<Self, PageParseError> {
+        // The base url is something like "https://lh3.googleusercontent.com/ci/xxx",
+        // and we need to extract the "ci/xxx" part.
+        let path = base_url
+            .splitn(4, '/')
+            .nth(3)
+            .ok_or(PageParseError::MalformedBase)?
+            .to_string();
+        Ok(Self {
+            base_url,
+            token,
+            name,
+            path,
+        })
+    }
     pub fn tile_info_url(&self) -> String {
         self.base_url.clone() + "=g"
     }
     pub fn path(&self) -> &str {
-        // The base url is something like "https://lh3.googleusercontent.com/ci/xxx",
-        // and we need to extract the "ci/xxx" part.
-        self.base_url
-            .splitn(4, '/')
-            .nth(3)
-            .expect("Google Arts base_url is malformed")
+        &self.path
     }
 }
 
@@ -87,11 +101,7 @@ impl FromStr for PageInfo {
 
         let name = get_name_from_gap_html(s);
 
-        Ok(PageInfo {
-            base_url,
-            token,
-            name,
-        })
+        PageInfo::new(base_url, token, name)
     }
 }
 
@@ -99,6 +109,8 @@ impl FromStr for PageInfo {
 pub enum PageParseError {
     #[error("Unable to find the token in the page")]
     NoToken,
+    #[error("The Google Arts base URL has no path component")]
+    MalformedBase,
 }
 
 #[cfg(test)]

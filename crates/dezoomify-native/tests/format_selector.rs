@@ -71,7 +71,7 @@ fn named_deepzoom_selects_the_single_program() {
         .expect("named deepzoom succeeds");
     assert_eq!(outcome.source_format, "deepzoom");
     assert_eq!(outcome.tile_count, 4);
-    assert!(outcome.output.complete);
+    assert!(outcome.output.is_complete());
     assert!(output.is_file());
 }
 

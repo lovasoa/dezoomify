@@ -5,13 +5,29 @@ import { t } from "./i18n.ts";
 // JPEG addresses at most 65535 px per side (copy interpolation only).
 const JPEG_MAX_SIDE = 65535;
 
+// Human-readable byte counts for limit copy (exact bytes plus a
+// GiB/MiB approximation).
+function formatBytes(bytes: number): string {
+  const GIB = 1024 ** 3;
+  const MIB = 1024 ** 2;
+  if (bytes >= GIB) return `${(bytes / GIB).toFixed(1)} GiB (${bytes} bytes)`;
+  if (bytes >= MIB) return `${(bytes / MIB).toFixed(1)} MiB (${bytes} bytes)`;
+  return `${bytes} bytes`;
+}
+
 // Error copy: every code has plain jargon-free wording that names
 // the step, the picture source, and the single best next action. Technical
 // vocabulary (transport names, statuses, raw failure chains) stays out of
 // this sentence; it belongs in the collapsible detail built beside it.
-export function plainMessageFor(code: string, sourceMessage: string, host: string): string {
-  const message = String(sourceMessage ?? "");
+export function plainMessageFor(error: JobError, host: string): string {
+  const { code, limit } = error;
   const lowerCode = String(code ?? "").toLowerCase();
+  const dims = limit?.dimensions
+    ? t("desktop.msg.dimsPixels", {
+        a: String(limit.dimensions.width),
+        b: String(limit.dimensions.height),
+      })
+    : t("desktop.msg.thisPicture");
   // Browser canvas failure family (allocation, 2D context, PNG encoding):
   // the plain sentence names the desktop app before any generic branch.
   if (code === "PLAN_INVALID" || code === "OUTPUT_ALLOCATION_FAILED") {
@@ -45,26 +61,25 @@ export function plainMessageFor(code: string, sourceMessage: string, host: strin
     return t("desktop.job.gone", { host });
   }
   if (lowerCode === "output.canvas-limit" || lowerCode.indexOf("canvas-limit") >= 0) {
-    const dim = message.match(/(\d+)\s*x\s*(\d+)/);
-    const needMatch = message.match(/needs\s+([0-9.]+\s*GiB[^,;]*|[0-9,]+\s*bytes[^,;]*)/i);
-    const dims = dim
-      ? t("desktop.msg.dimsPixels", { a: dim[1], b: dim[2] })
-      : t("desktop.msg.thisPicture");
-    const need = needMatch ? t("desktop.msg.needAbout", { need: needMatch[1].trim() }) : "";
-    const availableMatch = message.match(/only\s+([^;]+)\s+is currently available/i);
+    // Structured limit facts come from `Error::limit`; `message` is
+    // presentation only and is never parsed.
+    const need =
+      limit?.bytes_required !== undefined
+        ? t("desktop.msg.needAbout", { need: formatBytes(limit.bytes_required) })
+        : "";
+    const available =
+      limit?.bytes_available !== undefined
+        ? formatBytes(limit.bytes_available)
+        : "currently available memory";
     return t("desktop.output.canvasLimit", {
       dims,
       need,
-      limit: availableMatch ? availableMatch[1].trim() : "currently available memory",
+      limit: available,
       jpegMax: JPEG_MAX_SIDE,
       host,
     });
   }
-  if (lowerCode === "output.encode-failed" && /65535|jpeg/i.test(message)) {
-    const dim = message.match(/(\d+)\s*x\s*(\d+)/);
-    const dims = dim
-      ? t("desktop.msg.dimsPixels", { a: dim[1], b: dim[2] })
-      : t("desktop.msg.thisPicture");
+  if (lowerCode === "output.encode-failed" && limit?.reason === "jpeg-side") {
     return t("desktop.output.jpegLimit", { dims, jpegMax: JPEG_MAX_SIDE, host });
   }
   if (
@@ -129,7 +144,7 @@ export function plainMessageFor(code: string, sourceMessage: string, host: strin
     if (code === "CHOICE_FAILED") return t("desktop.choice.failed");
     return t("desktop.save.generic", { host });
   }
-  if (lowerCode.indexOf("internal") >= 0 || code === "PLAN_INVALID") {
+  if (lowerCode.indexOf("internal") >= 0) {
     return t("desktop.internal.error", { host });
   }
   return t("desktop.save.fallback", { host });
@@ -139,10 +154,7 @@ export function plainMessageFor(code: string, sourceMessage: string, host: strin
 export function describeFailure(error: JobError, host = ""): JobError {
   return {
     ...error,
-    message:
-      error.transport === "metadata-proxy"
-        ? error.message
-        : plainMessageFor(error.code, error.message, host),
+    message: error.transport === "metadata-proxy" ? error.message : plainMessageFor(error, host),
     detail: error.detail ?? error.message,
   };
 }

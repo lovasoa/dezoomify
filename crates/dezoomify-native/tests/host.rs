@@ -82,7 +82,7 @@ fn generic_probe_metadata_uses_final_tile_order_without_refetching() {
         .unwrap();
     let publication = host.publication().unwrap();
     assert_eq!(publication.tile_count, 4);
-    assert!(publication.output.complete);
+    assert!(publication.output.is_complete());
     let mut saved =
         image::codecs::png::PngDecoder::new(std::io::Cursor::new(std::fs::read(output).unwrap()))
             .unwrap();
@@ -147,7 +147,7 @@ fn http_failures_retain_the_resource_and_discovery_phase() {
                     expected_size: None,
                     canvas: None,
                     processing: ProcessingRecipe::None,
-                    probe_output: false,
+                    role: TileRole::Output,
                 },
             })
             .await
@@ -207,7 +207,7 @@ fn malformed_encrypted_tile_retains_processing_failure_and_good_partial_pixels()
             }),
             canvas: Some(canvas.clone()),
             processing: ProcessingRecipe::GoogleArtsDecrypt,
-            probe_output: false,
+            role: TileRole::Output,
         },
     };
     host.transport.block_on(async {
@@ -248,7 +248,7 @@ fn malformed_encrypted_tile_retains_processing_failure_and_good_partial_pixels()
             })
             .await
             .unwrap();
-        assert!(!result.complete);
+        assert!(!result.is_complete());
         assert_eq!(result.missing, vec![1]);
         host.settle().await;
     });
@@ -569,7 +569,7 @@ fn partial_retry_preserves_good_tiles() {
     assert!(answered.get(), "partial decision surfaced for retry");
     assert_eq!(summary.tile_count, 4);
     assert!(summary.output.missing.is_empty());
-    assert!(summary.output.complete);
+    assert!(summary.output.is_complete());
     assert!(output.exists());
     let counts = counts.lock().expect("lock");
     // Good tiles are never refetched after the retry: successes preserved.

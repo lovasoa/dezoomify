@@ -773,7 +773,9 @@ function ensureDesktopAuxPanel(): void {
   const doc = root.ownerDocument;
   doc.getElementById("dz-desktop-aux")?.remove();
   const showPartialDone =
-    presentation.phase === "completed" && presentation.output?.complete === false;
+    presentation.phase === "completed" &&
+    presentation.output !== undefined &&
+    presentation.output.missing.length > 0;
   const showCancelledNote = presentation.phase === "cancelled";
   const showQueue = presentation.phase !== "completed" && desktopQueue.entries.length > 1;
   if (!showPartialDone && !showCancelledNote && !showQueue) return;

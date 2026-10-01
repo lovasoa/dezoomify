@@ -231,7 +231,10 @@ fn partial_keep_policy_encodes_acquired_tiles() {
         &mut |_| {},
     )
     .expect("keep policy publishes a partial");
-    assert!(!outcome.output.complete, "kept output is marked partial");
+    assert!(
+        !outcome.output.is_complete(),
+        "kept output is marked partial"
+    );
     assert_eq!(outcome.tile_count, 3);
     assert_eq!(
         (
@@ -293,7 +296,7 @@ fn max_width_selects_the_largest_fitting_level() {
         (256, 256)
     );
     assert_eq!(outcome.tile_count, 1);
-    assert!(outcome.output.complete);
+    assert!(outcome.output.is_complete());
 }
 
 #[test]
@@ -367,7 +370,7 @@ fn jpg_output_decodes_at_full_size() {
         ),
         (512, 512)
     );
-    assert!(outcome.output.complete);
+    assert!(outcome.output.is_complete());
     let bytes = std::fs::read(&output).expect("jpeg output written");
     assert!(
         bytes.starts_with(&[0xFF, 0xD8, 0xFF]),
@@ -548,7 +551,7 @@ fn iiif_dir_writes_manifest_and_addressable_tiles() {
         ),
         (512, 512)
     );
-    assert!(outcome.output.complete);
+    assert!(outcome.output.is_complete());
     // The manifest is spec-shaped: v2 context, real dimensions, one tile
     // block matching the files on disk.
     let info: serde_json::Value = serde_json::from_slice(
@@ -633,7 +636,7 @@ fn tile_cache_reuses_tiles_after_the_server_loses_them() {
     )
     .expect("second run reuses the cache");
     assert_eq!(resumed.tile_count, 4);
-    assert!(resumed.output.complete);
+    assert!(resumed.output.is_complete());
 }
 
 #[test]
@@ -755,7 +758,7 @@ fn interrupted_job_resumes_without_refetching_completed_tiles() {
     )
     .expect("repeated run resumes from the cache");
     assert_eq!(resumed.tile_count, 4);
-    assert!(resumed.output.complete);
+    assert!(resumed.output.is_complete());
 }
 
 #[test]
@@ -783,7 +786,7 @@ fn resume_scenario_matches_the_pinned_golden() {
         ),
         (512, 512)
     );
-    assert!(outcome.output.complete);
+    assert!(outcome.output.is_complete());
 }
 
 #[test]

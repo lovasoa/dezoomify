@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use dezoomify::model::{Error, ErrorPhase, OutputFormat};
+use dezoomify::model::{Error, ErrorPhase, LimitContext, LimitReason, OutputFormat, Size};
 
 /// One rendered `iiif-dir` tile set: `(relative path, bytes)` pairs in
 /// sorted relative-path order.
@@ -215,13 +215,20 @@ pub fn write_iiif_dir(dir: &Path, info_json: &[u8], tiles: &IiifTiles) -> Result
     Ok(())
 }
 
-pub(crate) fn canvas_memory_unavailable(
-    width: u32,
-    height: u32,
-    required: &str,
-    available: &str,
+/// A memory-budget refusal with structured facts for host copy; `message`
+/// prose is presentation only and never a data channel.
+pub(crate) fn memory_limit(
+    message: String,
+    dimensions: Option<Size>,
+    bytes_required: Option<u64>,
+    bytes_available: Option<u64>,
 ) -> Error {
-    Error::new("output.canvas-limit", ErrorPhase::Output, format!("composed image {width}x{height} needs {required} of canvas memory, but only {available} is currently available; save a smaller level with --max-width"))
+    Error::new("output.canvas-limit", ErrorPhase::Output, message).with_limit(LimitContext {
+        reason: LimitReason::Memory,
+        dimensions,
+        bytes_required,
+        bytes_available,
+    })
 }
 
 fn output_exists() -> Error {

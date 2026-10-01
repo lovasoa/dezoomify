@@ -293,14 +293,14 @@ fn rejected_candidates_retain_native_and_unknown_host_failure_facts() {
             "exact host message",
         )
         .with_transport(transport)
-        .with_resource(ResourceKind::Metadata)
-        .with_retryable(true);
+        .with_resource(ResourceKind::Metadata);
         failure.http = Some(429);
         failure.request = Some("https://redirected.test/metadata?access=exact".into());
         failure.blocked_reason = Some(BlockedReason::Throttled);
         failure.retry_after_ms = Some(9000);
         failure.preview = Some("original response".into());
         failure.detail = Some("original explanation".into());
+        let failure = dezoomify::retry::classify(failure);
         let registry = registry();
         let error = futures::executor::block_on(registry.discover(
             vec![DiscoveryInput::new("https://test/root")],

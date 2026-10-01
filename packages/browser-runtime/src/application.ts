@@ -302,7 +302,10 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       a.controller.signal.throwIfAborted();
       if (current !== a) return;
       a.output = output;
-      a.diagnostics.finish(a.output.complete ? "completed" : "partial-completed", a.output);
+      a.diagnostics.finish(
+        a.output.missing.length === 0 ? "completed" : "partial-completed",
+        a.output,
+      );
       const entry = toHistoryEntry(url, {
         width: a.output.canvas?.width ?? 0,
         height: a.output.canvas?.height ?? 0,

@@ -7,7 +7,11 @@ pub const RETRY_BASE_DELAY_MS: u64 = 1_000;
 /// Backoff ceiling (30 seconds).
 pub const RETRY_MAX_DELAY_MS: u64 = 30_000;
 
-pub(crate) fn classify(mut error: Error) -> Error {
+/// Recompute `Error::retryable` from its `(code, http)` facts. Every code
+/// rewrite goes through here (or [`crate::model::Error::with_code`]) so the
+/// stored verdict never disagrees with [`is_retryable`].
+#[must_use]
+pub fn classify(mut error: Error) -> Error {
     error.retryable = is_retryable(&error.code, error.http);
     error
 }

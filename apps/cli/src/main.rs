@@ -293,11 +293,11 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
                         width: size.width,
                         height: size.height,
                         tile_count: summary.tile_count,
-                        partial: !summary.output.complete,
+                        partial: !summary.output.is_complete(),
                     })
                 );
             } else if report::show_success(level) {
-                if !summary.output.complete {
+                if !summary.output.is_complete() {
                     eprintln!(
                         "kept partial {} ({} tiles, {}x{}) (missing tiles left blank)",
                         summary.path.display(),

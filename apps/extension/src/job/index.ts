@@ -146,9 +146,8 @@ const app = createBrowserApplication({
         });
         if (scan.inputs.length === 0)
           throw {
-            code: "no-candidates",
+            code: "job.no-images",
             message: "No image references were found on this page.",
-            retryable: true,
           };
         return scan.inputs;
       },

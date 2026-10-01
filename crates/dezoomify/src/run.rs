@@ -68,7 +68,8 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
                 .ok_or_else(empty_plan)?;
             (TileSource::Grid(resolved.grid), resolved.previously_output)
         }
-        source => (source.clone(), Vec::new()),
+        TileSource::Grid(grid) => (TileSource::Grid(grid.clone()), Vec::new()),
+        TileSource::Positioned(source) => (TileSource::Positioned(source.clone()), Vec::new()),
     };
     let total = source.count().ok_or_else(empty_plan)?;
     if total == 0 {
@@ -85,7 +86,7 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
     let tiles: Box<dyn Iterator<Item = Result<TileSpec, core::TileSourceError>>> = match source {
         TileSource::Grid(grid) => Box::new(grid.tiles_row_major()),
         TileSource::Positioned(source) => Box::new(source.tiles()),
-        _ => unreachable!("geometry is resolved"),
+        TileSource::Adaptive(_) | TileSource::Generic(_) => unreachable!("geometry is resolved"),
     };
     progress.phase = ProgressPhase::Acquisition;
     progress.selected = canvas.clone();
@@ -120,8 +121,8 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
             .first()
             .and_then(|(_, failures)| failures.first())
             .cloned()
-            .unwrap_or_else(empty_plan);
-        error.code = "job.no-usable-tiles".into();
+            .unwrap_or_else(empty_plan)
+            .with_code("job.no-usable-tiles");
         error.phase = ErrorPhase::Acquisition;
         error.message = "no usable tiles were acquired".into();
         if let Some((tile, _)) = missing.first() {
@@ -479,7 +480,7 @@ fn portable_tile(tile: TileSpec, canvas: Option<Size>) -> Tile {
             expected_size: tile.expected_size.map(size),
             canvas,
             processing: tile.processing,
-            probe_output: tile.role == TileRole::ProbeAndOutput,
+            role: tile.role,
         },
     }
 }

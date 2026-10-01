@@ -406,28 +406,10 @@ fn take_value(
         .ok_or_else(|| format!("missing value for {flag}"))
 }
 
+/// Built-in format names (single source: the core registry).
 #[must_use]
-pub fn known_formats() -> &'static [&'static str] {
-    &[
-        "custom",
-        "google_arts_and_culture",
-        "zoomify",
-        "iiif",
-        "deepzoom",
-        "generic",
-        "krpano",
-        "iipimage",
-        "xlimage",
-        "topviewer",
-        "fsi",
-        "lizardtech",
-        "vls",
-        "hungaricana",
-        "wmts",
-        "arcgis",
-        "pnav",
-        "bulk_text",
-    ]
+pub fn known_formats() -> Vec<&'static str> {
+    dezoomify::core::builtin_names().collect()
 }
 
 /// Validate a `--format` value: `auto` or a known format (case-insensitive,

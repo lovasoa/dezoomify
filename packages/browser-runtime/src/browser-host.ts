@@ -147,7 +147,7 @@ export class BrowserHost implements Host {
           : {}),
       });
       const tile_probe = await probe(tile.request, this.signal);
-      if (tile_probe.status === "available" && tile.placement.probe_output) {
+      if (tile_probe.status === "available" && tile.placement.role === "probe-and-output") {
         try {
           this.deps.assembly.prepare(tile.placement.canvas);
         } catch (error) {
@@ -283,7 +283,6 @@ export class BrowserHost implements Host {
       return {
         canvas: this.deps.assembly.dimensions() ?? undefined,
         format: request.format,
-        complete: request.missing.length === 0,
         missing: request.missing,
         disposition,
       };

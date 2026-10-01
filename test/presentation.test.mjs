@@ -160,6 +160,6 @@ test("canvas failure copy names the desktop app for every report", () => {
     "OUTPUT_SURFACE_UNAVAILABLE",
     "OUTPUT_ENCODE_FAILED",
   ]) {
-    assert.match(plainMessageFor(code, "", "example.test"), /desktop app/i, code);
+    assert.match(plainMessageFor({ code }, "example.test"), /desktop app/i, code);
   }
 });
