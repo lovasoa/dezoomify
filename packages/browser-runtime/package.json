@@ -12,7 +12,7 @@
   "dependencies": {
     "@dezoomify/shared-ui": "workspace:*",
     "@dezoomify/wasm-bindings": "workspace:*",
-    "react": "^19.0.0"
+    "react": "^19.3.0"
   },
   "scripts": {
     "test": "node --test-reporter=dot --test \"test/*.test.mjs\"",

@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "tests for dezoomify",
   "devDependencies": {
-    "@playwright/test": "^1.60.0"
+    "@playwright/test": "^1.63.0"
   },
   "scripts": {
     "test": "playwright test --reporter=dot",

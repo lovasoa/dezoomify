@@ -37,9 +37,9 @@ jobs:
           fetch-depth: 0
       - id: commit
         run: echo "value=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # pinned
         with:
-          toolchain: 1.98.0
+          toolchain: 1.98.1
       - name: Require green CI for a numbered release
         if: github.event_name == 'workflow_dispatch'
         env:
@@ -96,9 +96,9 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
         with:
           install: true
-      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # pinned
         with:
-          toolchain: 1.98.0
+          toolchain: 1.98.1
           targets: wasm32-unknown-unknown
       - uses: ./.github/actions/setup-wasm-bindgen
       - name: Install Linux desktop tools
@@ -153,9 +153,9 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.commit }}
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # pinned
         with:
-          toolchain: 1.98.0
+          toolchain: 1.98.1
       - name: Reassemble artifacts
         env:
           GH_TOKEN: ${{ github.token }}
@@ -186,9 +186,9 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.commit }}
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # pinned
         with:
-          toolchain: 1.98.0
+          toolchain: 1.98.1
       - name: Download verified artifacts
         env:
           GH_TOKEN: ${{ github.token }}
