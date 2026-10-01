@@ -64,12 +64,9 @@ export function createProbeSize(
       signal.throwIfAborted();
     } catch (error) {
       signal.throwIfAborted();
-      if (
-        error &&
-        typeof error === "object" &&
-        "code" in error &&
-        error.code === "TRANSPORT_POLICY_DENIED"
-      )
+      // A policy denial (declined permission, blocked target) is final:
+      // rethrow it instead of degrading to ordinary-image probing.
+      if (error && typeof error === "object" && "kind" in error && error.kind === "policy-denied")
         throw error;
       if (!deps.loadImage) return { status: "missing" };
       try {

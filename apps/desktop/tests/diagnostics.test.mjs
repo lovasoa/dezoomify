@@ -9,7 +9,7 @@ function fakeApi(invoke) {
 
 test("desktop requests job diagnostics by job id and returns the report unchanged", async () => {
   const d = createDiagnosticRecorder({ id: "native", now: () => 0 });
-  d.finish("failed", { code: "TRANSPORT_HTTP_ERROR", http: 403 });
+  d.finish("failed", { kind: "http-error", status: 403, transport: "native" });
   const report = d.report();
   const calls = [];
   const api = fakeApi(async (command, args) => {
