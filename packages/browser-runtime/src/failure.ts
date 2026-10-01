@@ -2,8 +2,9 @@
 // objects matching the generated `Error` shapes: serde round-trips them
 // across the Rust/TypeScript boundary unchanged.
 import type { BlockedReason, Error as JobError } from "@dezoomify/wasm-bindings";
+import { isJobError } from "../../shared-ui/src/failure.ts";
 
-export { isJobError } from "../../shared-ui/src/failure.ts";
+export { isJobError };
 
 export function blockedReason(value: unknown): BlockedReason | undefined {
   switch (value) {
@@ -37,6 +38,14 @@ export function blockedReason(value: unknown): BlockedReason | undefined {
     default:
       return undefined;
   }
+}
+
+/** Typed tile failure with its diagnostic cause retained in `detail`.
+ * Already-typed causes pass through unchanged; decoding and processing
+ * failures are deterministic, so they never degrade to the retryable
+ * transport fallback. */
+export function tileError(kind: "decode-failed" | "processing-failed", cause: unknown): JobError {
+  return isJobError(cause) ? cause : { kind, detail: String(cause).slice(0, 2048) };
 }
 
 /** Typed output failure with its diagnostic cause retained in `detail`. */

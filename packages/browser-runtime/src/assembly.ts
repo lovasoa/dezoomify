@@ -1,6 +1,6 @@
 // Canvas decoding, painting, and PNG output for browser capabilities.
 import type { OutputDisposition, TilePlacement } from "@dezoomify/wasm-bindings";
-import { outputError } from "./failure.ts";
+import { outputError, tileError } from "./failure.ts";
 import { BROWSER_LIMITS, type BrowserLimits, probeLimits } from "./limits.ts";
 import { canvasTooLargeFailure } from "./plan-gates.ts";
 import type { TileBitmap } from "./tile-decode.ts";
@@ -139,10 +139,24 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
   ): Promise<void> {
     signal.throwIfAborted();
     placements.set(tile, placement);
-    const input =
-      placement.processing === "none" ? bytes : deps.processTile(placement.processing, bytes);
+    // Processing and decoding failures are typed at their source so they
+    // classify as tile failures instead of the retryable fetch fallback.
+    let input: ArrayBuffer;
+    try {
+      input =
+        placement.processing === "none" ? bytes : deps.processTile(placement.processing, bytes);
+    } catch (error) {
+      signal.throwIfAborted();
+      throw tileError("processing-failed", error);
+    }
     signal.throwIfAborted();
-    const bitmap = await deps.decode(input);
+    let bitmap: TileBitmap;
+    try {
+      bitmap = await deps.decode(input);
+    } catch (error) {
+      signal.throwIfAborted();
+      throw tileError("decode-failed", error);
+    }
     const mismatch =
       placement.expected_size &&
       (placement.expected_size.width !== bitmap.width ||
