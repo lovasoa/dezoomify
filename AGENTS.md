@@ -26,7 +26,7 @@ compilation. Use `--profile dev-debug` only when a diagnosis needs symbols.
 
 - `cargo xtask test live --public` is the only command that contacts real
   websites; it is opt-in and advisory.
-- Node 24 is the minimum supported Node version.
+- Node 24.15.0 is the minimum supported Node version.
 - Iterate with `check` plus bare `test`, run the narrowest focused lane after
   each change, and finish with `test all` plus `cargo xtask ci local`.
 - Full grammar: `cargo xtask --help`, [`docs/development.md`](docs/development.md),

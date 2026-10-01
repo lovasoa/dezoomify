@@ -39,10 +39,13 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 # Real window shell (optional; see the `tauri` feature below).
-tauri = { version = "2", optional = true , features = [] }
-tauri-plugin-dialog = { version = "2", optional = true }
-tauri-plugin-opener = { version = "2", optional = true }
-tauri-plugin-single-instance = { version = "2", optional = true }
+# Tauri 2.12 moved to WebView2 0.39 / windows 0.62, but the test-only
+# WebDriver plugin 1.4.0 still uses WebView2 0.38 / windows 0.61. Keep this
+# stack on the latest compatible 2.11 line until the plugin catches up.
+tauri = { version = "=2.11.5", optional = true , features = [] }
+tauri-plugin-dialog = { version = "=2.7.3", optional = true }
+tauri-plugin-opener = { version = "=2.5.5", optional = true }
+tauri-plugin-single-instance = { version = "=2.4.5", optional = true }
 # Embedded W3C WebDriver server for the real-window E2E only. Registered
 # behind the non-default `testing-webdriver` feature so release bundles never
 # open a WebDriver port (the plugin starts its server unconditionally on init).

@@ -16,7 +16,7 @@ cargo xtask test extension
 cargo xtask test all
 ```
 
-Node 24 is the minimum supported Node version. Direct Cargo and pnpm commands are valid for debugging an individual component, but `cargo xtask` remains the unified front door and defines repository coverage.
+Node 24.15.0 is the minimum supported Node version. Direct Cargo and pnpm commands are valid for debugging an individual component, but `cargo xtask` remains the unified front door and defines repository coverage.
 
 Bare `cargo xtask test` is the fast aggregate:
 

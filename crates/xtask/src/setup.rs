@@ -52,13 +52,13 @@ fn configure_git_hooks() -> Result<(), String> {
     }
 }
 
-/// Verify `node --version` meets the minimum major pinned in `.node-version`.
+/// Verify `node --version` meets the minimum version pinned in `.node-version`.
 fn check_node() -> Result<(), String> {
     let pin_path = super::repo_root().join(".node-version");
     let pin = std::fs::read_to_string(&pin_path)
         .map_err(|e| {
             format!(
-                "cannot read {}: {e} (restore the minimum Node major, e.g. `24`)",
+                "cannot read {}: {e} (restore the minimum Node version, e.g. `24.15.0`)",
                 pin_path.display()
             )
         })?
@@ -66,22 +66,25 @@ fn check_node() -> Result<(), String> {
         .to_string();
     if pin.is_empty() {
         return Err(
-            ".node-version is empty (expected the minimum Node major, e.g. `24`)".to_string(),
+            ".node-version is empty (expected the minimum Node version, e.g. `24.15.0`)"
+                .to_string(),
         );
     }
     println!("node minimum (.node-version): {pin}");
     let node = version_of("node", &["--version"])
         .map_err(|e| format!("{e} (install Node {pin} or newer so `node --version` works)"))?;
     println!("node: {node}");
-    let minimum = node_major(&pin).ok_or_else(|| {
-        format!("cannot parse Node major from .node-version pin `{pin}` (expected e.g. `24`)")
+    let minimum = node_version(&pin).ok_or_else(|| {
+        format!(
+            "cannot parse Node version from .node-version pin `{pin}` (expected e.g. `24.15.0`)"
+        )
     })?;
-    let found = node_major(&node).ok_or_else(|| {
-        format!("cannot parse `node --version` output `{node}` (install Node {minimum} or newer)")
+    let found = node_version(&node).ok_or_else(|| {
+        format!("cannot parse `node --version` output `{node}` (install Node {pin} or newer)")
     })?;
     if found < minimum {
         return Err(format!(
-            "node version too old: .node-version requires >={minimum} (pin `{pin}`), found `{node}`. Install Node {minimum} or newer and ensure `node --version` reports v{minimum} or above."
+            "node version too old: .node-version requires >={pin}, found `{node}`. Install Node {pin} or newer and ensure `node --version` reports v{pin} or above."
         ));
     }
     Ok(())
@@ -285,15 +288,17 @@ fn report_playwright_browsers() {
     }
 }
 
-/// Extract the leading numeric major from a version string such as `22`,
-/// `22.12.0`, `v22.12.0`, or `22.x`.
-fn node_major(version: &str) -> Option<u64> {
+/// Parse a full numeric Node version such as `24.15.0` or `v24.15.0`.
+fn node_version(version: &str) -> Option<(u64, u64, u64)> {
     let stripped = version.trim().strip_prefix('v').unwrap_or(version.trim());
-    let major = stripped.split(['.', 'x', 'X']).next()?.trim();
-    if major.is_empty() || !major.chars().all(|c| c.is_ascii_digit()) {
+    let mut parts = stripped.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
         return None;
     }
-    major.parse::<u64>().ok()
+    Some((major, minor, patch))
 }
 
 fn version_of(cmd: &str, args: &[&str]) -> Result<String, String> {
@@ -310,12 +315,24 @@ fn version_of(cmd: &str, args: &[&str]) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn node_major_parses_pinned_and_runtime_forms() {
-        assert_eq!(super::node_major("22"), Some(22));
-        assert_eq!(super::node_major("v22.12.0"), Some(22));
-        assert_eq!(super::node_major("26.8.2"), Some(26));
-        assert_eq!(super::node_major("22.x"), Some(22));
-        assert!(super::node_major("").is_none());
-        assert!(super::node_major("abc").is_none());
+    fn node_version_parses_pinned_and_runtime_forms() {
+        assert_eq!(super::node_version("24.15.0"), Some((24, 15, 0)));
+        assert_eq!(super::node_version("v24.15.0"), Some((24, 15, 0)));
+        assert_eq!(super::node_version("v26.8.2"), Some((26, 8, 2)));
+        assert!(super::node_version("24").is_none());
+        assert!(super::node_version("24.15").is_none());
+        assert!(super::node_version("24.x").is_none());
+        assert!(super::node_version("").is_none());
+        assert!(super::node_version("abc").is_none());
+    }
+
+    #[test]
+    fn node_version_comparison_enforces_minor_and_patch_minimums() {
+        let minimum = super::node_version("24.15.0").unwrap();
+        assert!(super::node_version("v24.14.99").unwrap() < minimum);
+        assert!(super::node_version("v24.15.0").unwrap() >= minimum);
+        assert!(super::node_version("v24.15.1").unwrap() >= minimum);
+        assert!(super::node_version("v25.0.0").unwrap() >= minimum);
+        assert!(super::node_version("v26.0.0").unwrap() >= minimum);
     }
 }
