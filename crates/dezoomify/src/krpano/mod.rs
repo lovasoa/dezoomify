@@ -869,14 +869,14 @@ mod tests {
 
     #[test]
     fn viewer_pages_follow_their_declared_krpano_sources() {
-        let cases: &[(&str, &[(&[u8], Option<&str>)], &str)] = &[
-            ("https://example.com/viewer/krpano.html?xml=examples/tour.xml", &[(br#"<html><script src="krpano.js"></script><script>embedpano({xml:"krpano.xml", passQueryParameters:"xml"});</script></html>"#, None)], "https://example.com/viewer/examples/tour.xml"),
-            ("https://example.com/krpano.js", &[(b"function embedpano(opts) { /* krpano viewer */ }", None)], "https://example.com/tour.xml"),
-            ("https://example.com/pano/index.html", &[(br#"<html><script>function embedpano(opts) { return opts; } embedpano({xml: "scenes/custom.xml", target: "pano"});</script></html>"#, None)], "https://example.com/pano/scenes/custom.xml"),
-            ("https://example.com/viewer.js", &[(b"function createPanoViewer(opts) { return buildViewer(opts); }", None)], "https://example.com/tour.xml"),
+        let cases: &[(&str, &[u8], &str)] = &[
+            ("https://example.com/viewer/krpano.html?xml=examples/tour.xml", br#"<html><script src="krpano.js"></script><script>embedpano({xml:"krpano.xml", passQueryParameters:"xml"});</script></html>"#, "https://example.com/viewer/examples/tour.xml"),
+            ("https://example.com/krpano.js", b"function embedpano(opts) { /* krpano viewer */ }", "https://example.com/tour.xml"),
+            ("https://example.com/pano/index.html", br#"<html><script>function embedpano(opts) { return opts; } embedpano({xml: "scenes/custom.xml", target: "pano"});</script></html>"#, "https://example.com/pano/scenes/custom.xml"),
+            ("https://example.com/viewer.js", b"function createPanoViewer(opts) { return buildViewer(opts); }", "https://example.com/tour.xml"),
         ];
-        for (input, replies, next) in cases {
-            let (_, requests) = crate::test_support::discover(SPEC, input, replies);
+        for (input, page, next) in cases {
+            let (_, requests) = crate::test_support::discover(SPEC, input, &[(page, None)]);
             assert_eq!(requests[1].uri, *next, "{input}");
         }
     }
