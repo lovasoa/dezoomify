@@ -238,6 +238,27 @@ export const de = {
     "Die Website, die dieses Bild hostet, begrenzt, wie viele Seiten unser Server bei ihr anfordern darf, und diese Grenze wurde gerade erreicht, daher konnte die Seite nicht geoffnet werden. Die Browser-Erweiterung und die Desktop-App laden ueber Ihre eigene Verbindung statt ueber unseren Server und sind von dieser Grenze nicht betroffen.",
   "view.fail.rateDirect":
     "Die Website, die dieses Bild hostet, erhalt gerade zu viele Anfragen von Ihrer eigenen Verbindung. Wenige Minuten Wartezeit klaren dies meist, und Erweiterung oder Desktop-App sehen bis dahin dasselbe Besetztzeichen.",
+  // Fetch-failure family (see failure.ts plainMessageFor).
+  "view.fail.httpNotFound":
+    "Diese Seite wurde nicht gefunden. Pruefen Sie die Adresse und versuchen Sie es erneut.",
+  "view.fail.httpRefused":
+    "Die Website hat die Freigabe dieser Datei verweigert (HTTP {http}). Sie blockiert moeglicherweise gemeinsam genutzte Server; die Browser-Erweiterung oder die Desktop-App funktionieren moeglicherweise trotzdem.",
+  "view.fail.httpSiteProblem":
+    "Die Website hatte ein Problem beim Oeffnen dieser Seite. Versuchen Sie es in Kuerze erneut.",
+  "view.fail.httpNotOpened":
+    "Diese Seite konnte nicht geoeffnet werden. Pruefen Sie die Adresse und versuchen Sie es erneut.",
+  "view.fail.policyBlocked":
+    "Diese Adresse kann ueber die Website nicht geoeffnet werden. {hint} Die Browser-Erweiterung oder die Desktop-App funktionieren moeglicherweise trotzdem.",
+  "view.fail.hintAddress": "Pruefen Sie die Adresse und versuchen Sie es erneut.",
+  "view.fail.hintPrivate": "Die Website kann keine privaten oder lokalen Adressen oeffnen.",
+  "view.fail.hintContentType":
+    "Die Website hat mit einem Dateityp geantwortet, den sie hier nicht prueft.",
+  "view.fail.hintRedirect":
+    "Die Website hat so umgeleitet, wie es die Website nicht nachvollziehen kann.",
+  "view.fail.proxyBudget":
+    "Diese Seite ist zum Pruefen hier zu gross. Versuchen Sie es mit der Desktop-App fuer sehr grosse Bilder.",
+  "view.fail.proxyFetch":
+    "Der Metadaten-Proxy konnte diese Adresse nicht abrufen. Versuchen Sie es in Kuerze erneut.",
   // Desktop app user copy (apps/desktop/src/main.tsx). Logs and technical
   // diagnostics stay literal English and never use these keys.
   "desktop.url.invalid":
@@ -291,8 +312,6 @@ export const de = {
   "desktop.start.failed":
     "Das Speichern dieses Bildes von {host} konnte nicht gestartet werden. Versuchen Sie es erneut.",
   "desktop.choice.failed": "Diese Wahl wurde nicht angenommen. Versuchen Sie es erneut.",
-  "desktop.save.generic":
-    "Dieses Bild von {host} konnte nicht gespeichert werden. Versuchen Sie es mit einer anderen Adresse erneut.",
   "desktop.internal.error":
     "Etwas Unerwartetes hat dieses Speichern von {host} gestoppt. Versuchen Sie es erneut und kopieren Sie die Diagnose, falls es erneut geschieht.",
   "desktop.save.fallback":

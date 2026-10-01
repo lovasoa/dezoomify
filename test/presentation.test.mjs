@@ -101,7 +101,7 @@ test("failure wording keeps diagnostic facts out of the headline", () => {
   };
   // The typed cause drives the wording; the per-format evidence stays in
   // the collapsible detail and never enters the headline.
-  assert.match(plainMessageFor(facts, "example.test"), /Could not save this picture/);
+  assert.match(plainMessageFor(facts, "example.test"), /refused to share this file \(HTTP 403\)/i);
   assert.ok(!plainMessageFor(facts, "example.test").includes("iiif"));
   assert.match(
     plainMessageFor({ kind: "discovery-failed", detail: facts.detail }, "example.test"),

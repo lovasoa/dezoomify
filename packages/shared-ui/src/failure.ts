@@ -169,6 +169,30 @@ export function detailOf(error: JobError): string | undefined {
   return parts.length > 0 ? [...new Set(parts)].join("\n") : undefined;
 }
 
+/** Plain next-fix hint for a policy denial's reason. The exact reason stays
+ * in diagnostics; the hint names the next action without jargon. */
+function policyHintFor(
+  reason: Extract<JobError, { kind: "policy-denied" }>["blocked_reason"],
+): string {
+  switch (reason) {
+    case "blocked-ipv4":
+    case "blocked-ipv6":
+    case "dns-rebinding":
+    case "dns-rebinding-v6":
+    case "loopback-host":
+    case "private-host":
+      return t("view.fail.hintPrivate");
+    case "content-type":
+      return t("view.fail.hintContentType");
+    case "redirect-limit":
+    case "redirect-target":
+    case "origin":
+      return t("view.fail.hintRedirect");
+    default:
+      return t("view.fail.hintAddress");
+  }
+}
+
 /**
  * Error copy: plain jargon-free wording that names the step, the picture
  * source, and the single best next action. Technical vocabulary (transport
@@ -221,13 +245,20 @@ export function plainMessageFor(error: JobError, host: string, source = ""): str
       return t(
         cause.transport === "metadata-proxy" ? "view.fail.rateProxy" : "view.fail.rateDirect",
       );
-    case "http-error":
-      if (cause.status === 429) {
+    case "http-error": {
+      const status = cause.status;
+      if (status === 429) {
         return t(
           cause.transport === "metadata-proxy" ? "view.fail.rateProxy" : "view.fail.rateDirect",
         );
       }
-      return t("desktop.save.generic", { host });
+      if (status === 404) return t("view.fail.httpNotFound");
+      if (status === 401 || status === 403 || status === 406) {
+        return t("view.fail.httpRefused", { http: String(status) });
+      }
+      if (status >= 500) return t("view.fail.httpSiteProblem");
+      return t("view.fail.httpNotOpened");
+    }
     case "invalid-url":
       return source.startsWith("file:") ? t("view.handoff.localNote") : t("desktop.url.invalid");
     case "invalid-settings":
@@ -266,7 +297,6 @@ export function plainMessageFor(error: JobError, host: string, source = ""): str
     case "redirect-limit":
     case "timeout":
     case "network-failure":
-    case "proxy-error":
       return t("desktop.transport.stalled", { host });
     case "write-failed":
     case "output-not-found":
@@ -287,11 +317,14 @@ export function plainMessageFor(error: JobError, host: string, source = ""): str
     case "registration-failed":
       return t("desktop.internal.error", { host });
     case "policy-denied":
-      return t("desktop.save.generic", { host });
+      return t("view.fail.policyBlocked", { hint: policyHintFor(cause.blocked_reason) });
+    case "proxy-error":
+      return t("view.fail.proxyFetch");
+    case "proxy-budget-exceeded":
+      return t("view.fail.proxyBudget");
     case "invalid-input":
     case "invalid-options":
     case "size-limit":
-    case "proxy-budget-exceeded":
     case "duplicate":
       return t("desktop.save.fallback", { host });
     default: {

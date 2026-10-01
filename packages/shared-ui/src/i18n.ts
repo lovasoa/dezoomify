@@ -324,6 +324,24 @@ const en = {
     "The website hosting this image limits how many pages our server may request from it, and that limit was just reached, so the page could not be opened. The browser extension and the desktop app download from your own internet connection instead of our server, so they are not affected by this limit.",
   "view.fail.rateDirect":
     "The website hosting this image is receiving too many requests from your own connection right now. Waiting a few minutes usually clears it, and the browser extension or desktop app will see the same busy signal until it does.",
+  // Fetch-failure family, rendered from the typed facts at display time
+  // (see `plainMessageFor` in failure.ts): every observed cause names its
+  // own next fix, so identical causes read identically everywhere.
+  "view.fail.httpNotFound": "This page could not be found. Check the address and try again.",
+  "view.fail.httpRefused":
+    "The site refused to share this file (HTTP {http}). It may block shared servers; the browser extension or the desktop app may still work.",
+  "view.fail.httpSiteProblem": "The site had a problem opening this page. Try again shortly.",
+  "view.fail.httpNotOpened": "This page could not be opened. Check the address and try again.",
+  "view.fail.policyBlocked":
+    "This address cannot be opened through the website. {hint} The browser extension or the desktop app may still work.",
+  "view.fail.hintAddress": "Check the address and try again.",
+  "view.fail.hintPrivate": "The website cannot open private or local addresses.",
+  "view.fail.hintContentType":
+    "The site answered with a file type the website does not check here.",
+  "view.fail.hintRedirect": "The site redirected in a way the website cannot follow.",
+  "view.fail.proxyBudget":
+    "This page is too large to check here. Try the desktop app for very large images.",
+  "view.fail.proxyFetch": "The metadata proxy could not fetch this address. Try again shortly.",
   // Desktop app user copy (apps/desktop/src/main.tsx). Logs and technical
   // diagnostics stay literal English and never use these keys.
   "desktop.url.invalid": "Please enter a valid web address starting with http:// or https://",
@@ -373,8 +391,6 @@ const en = {
   "desktop.job.cancelledMsg": "The image save was stopped. Any unfinished file was removed.",
   "desktop.start.failed": "Could not start saving this picture from {host}. Try again.",
   "desktop.choice.failed": "That choice was not accepted. Try again.",
-  "desktop.save.generic":
-    "Could not save this picture from {host}. Try again with a different address.",
   "desktop.internal.error":
     "Something unexpected stopped this save from {host}. Try again, and copy diagnostics if it keeps happening.",
   "desktop.save.fallback": "Could not save this picture from {host}. Try again.",

@@ -238,6 +238,24 @@ export const fr = {
     "Le site qui heberge cette image limite le nombre de pages que notre serveur peut lui demander, et cette limite vient d etre atteinte, donc la page n a pas pu etre ouverte. L extension de navigateur et l application de bureau telechargent depuis votre propre connexion au lieu de notre serveur, elles ne sont donc pas concernees par cette limite.",
   "view.fail.rateDirect":
     "Le site qui heberge cette image recoit actuellement trop de demandes depuis votre propre connexion. Attendre quelques minutes suffit generalement, et l extension de navigateur ou l application de bureau verront le meme signal d encombrement jusque-la.",
+  // Fetch-failure family (see failure.ts plainMessageFor).
+  "view.fail.httpNotFound": "Cette page est introuvable. Verifiez l adresse et reessayez.",
+  "view.fail.httpRefused":
+    "Le site a refuse de partager ce fichier (HTTP {http}). Il bloque peut-etre les serveurs partages ; l extension de navigateur ou l application de bureau peuvent peut-etre encore fonctionner.",
+  "view.fail.httpSiteProblem":
+    "Le site a rencontre un probleme pour ouvrir cette page. Reessayez bientot.",
+  "view.fail.httpNotOpened": "Cette page n a pas pu etre ouverte. Verifiez l adresse et reessayez.",
+  "view.fail.policyBlocked":
+    "Cette adresse ne peut pas etre ouverte via le site. {hint} L extension de navigateur ou l application de bureau peuvent peut-etre encore fonctionner.",
+  "view.fail.hintAddress": "Verifiez l adresse et reessayez.",
+  "view.fail.hintPrivate": "Le site ne peut pas ouvrir les adresses privees ou locales.",
+  "view.fail.hintContentType":
+    "Le site a repondu avec un type de fichier que le site ne verifie pas ici.",
+  "view.fail.hintRedirect": "Le site a redirige d une maniere que le site ne peut pas suivre.",
+  "view.fail.proxyBudget":
+    "Cette page est trop volumineuse a verifier ici. Essayez l application de bureau pour les tres grandes images.",
+  "view.fail.proxyFetch":
+    "Le proxy de metadonnees n a pas pu recuperer cette adresse. Reessayez bientot.",
   // Desktop app user copy (apps/desktop/src/main.tsx). Logs and technical
   // diagnostics stay literal English and never use these keys.
   "desktop.url.invalid":
@@ -291,8 +309,6 @@ export const fr = {
   "desktop.start.failed":
     "Impossible de demarrer l enregistrement de cette image depuis {host}. Reessayez.",
   "desktop.choice.failed": "Ce choix n a pas ete accepte. Reessayez.",
-  "desktop.save.generic":
-    "Impossible d enregistrer cette image depuis {host}. Reessayez avec une autre adresse.",
   "desktop.internal.error":
     "Un probleme inattendu a interrompu cet enregistrement depuis {host}. Reessayez, et copiez les diagnostics si cela se reproduit.",
   "desktop.save.fallback": "Impossible d enregistrer cette image depuis {host}. Reessayez.",

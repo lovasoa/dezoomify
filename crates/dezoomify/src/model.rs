@@ -914,12 +914,15 @@ impl Error {
     }
 
     /// Output/save failures settle the job typed at once and are never one
-    /// tile's failure.
+    /// tile's failure. The browser's canvas refusals (`plan-invalid`, the
+    /// declared canvas exceeding the browser limits) are raised while
+    /// outputting and settle the same way.
     #[must_use]
     pub fn is_output(&self) -> bool {
         matches!(
             self.cause(),
-            Self::LimitExceeded { .. }
+            Self::PlanInvalid { .. }
+                | Self::LimitExceeded { .. }
                 | Self::EncodeFailed { .. }
                 | Self::WriteFailed { .. }
                 | Self::OutputExists
@@ -1368,6 +1371,14 @@ mod tests {
                 failure: Failure::default()
             }
             .is_terminal()
+        );
+        // The browser's canvas refusal settles the job typed at once; it is
+        // never one tile's failure.
+        assert!(
+            Error::PlanInvalid {
+                failure: Failure::default()
+            }
+            .is_output()
         );
         let throttled = Error::RateLimited {
             retry_after_ms: Some(9_000),

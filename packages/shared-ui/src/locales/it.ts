@@ -232,6 +232,24 @@ export const it = {
     "Il sito che ospita questa immagine limita quante pagine il nostro server puo chiedergli, e quel limite e stato appena raggiunto, quindi la pagina non si e potuta aprire. L estensione del browser e l applicazione desktop scaricano dalla tua connessione invece che dal nostro server, quindi non sono toccate da questo limite.",
   "view.fail.rateDirect":
     "Il sito che ospita questa immagine sta ricevendo troppe richieste dalla tua connessione in questo momento. Attendere qualche minuto di solito risolve, e l estensione o l applicazione desktop vedranno lo stesso segnale occupato fino ad allora.",
+  // Fetch-failure family (see failure.ts plainMessageFor).
+  "view.fail.httpNotFound": "Questa pagina non e stata trovata. Controlla l indirizzo e riprova.",
+  "view.fail.httpRefused":
+    "Il sito ha rifiutato di condividere questo file (HTTP {http}). Potrebbe bloccare i server condivisi; l estensione del browser o l app desktop potrebbero comunque funzionare.",
+  "view.fail.httpSiteProblem":
+    "Il sito ha avuto un problema nell aprire questa pagina. Riprova a breve.",
+  "view.fail.httpNotOpened": "Questa pagina non e stata aperta. Controlla l indirizzo e riprova.",
+  "view.fail.policyBlocked":
+    "Questo indirizzo non puo essere aperto tramite il sito. {hint} L estensione del browser o l app desktop potrebbero comunque funzionare.",
+  "view.fail.hintAddress": "Controlla l indirizzo e riprova.",
+  "view.fail.hintPrivate": "Il sito non puo aprire indirizzi privati o locali.",
+  "view.fail.hintContentType":
+    "Il sito ha risposto con un tipo di file che il sito non controlla qui.",
+  "view.fail.hintRedirect": "Il sito ha reindirizzato in un modo che il sito non puo seguire.",
+  "view.fail.proxyBudget":
+    "Questa pagina e troppo grande da controllare qui. Prova l app desktop per le immagini molto grandi.",
+  "view.fail.proxyFetch":
+    "Il proxy dei metadati non ha potuto recuperare questo indirizzo. Riprova a breve.",
   // Desktop app user copy (apps/desktop/src/main.tsx). Logs and technical
   // diagnostics stay literal English and never use these keys.
   "desktop.url.invalid": "Inserisci un indirizzo web valido che inizi con http:// o https://",
@@ -284,8 +302,6 @@ export const it = {
   "desktop.start.failed":
     "Impossibile avviare il salvataggio di questa immagine da {host}. Riprova.",
   "desktop.choice.failed": "Questa scelta non e stata accettata. Riprova.",
-  "desktop.save.generic":
-    "Impossibile salvare questa immagine da {host}. Riprova con un altro indirizzo.",
   "desktop.internal.error":
     "Un problema imprevisto ha interrotto questo salvataggio da {host}. Riprova e copia la diagnostica se ricapita.",
   "desktop.save.fallback": "Impossibile salvare questa immagine da {host}. Riprova.",
