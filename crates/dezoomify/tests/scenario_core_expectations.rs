@@ -9,9 +9,9 @@
 
 use std::path::{Path, PathBuf};
 
-use dezoomify::core::discovery::{DiscoveryInput, DiscoveryLimits};
-use dezoomify::core::{DiscoveredEntry, Grid, ResolvedImage, TileSource, default_registry};
-use dezoomify::model::{Error, ResourceRead, ResourceResponse};
+use dezoomify::core::{DiscoveredEntry, ResolvedImage, default_registry};
+mod support;
+use support::grid;
 
 /// Origin substituted for the `{{origin}}` placeholder in payloads. The
 /// goldens pin their tile URIs to the runtime fixture-server origin, which
@@ -209,42 +209,14 @@ fn discover(scenario: &str, input: &str) -> Result<ResolvedImage, String> {
 
 fn discover_once(scenario: &str, input: &str) -> Result<DiscoveredEntry, String> {
     let payloads = payloads_dir(scenario);
-    let catalog = futures::executor::block_on(default_registry().discover(
-        vec![DiscoveryInput::new(input)],
-        DiscoveryLimits::default(),
-        |request, _| {
-            let bytes = mirrored_payload(&payloads, &request.uri);
-            async move {
-                bytes
-                    .map(|bytes| ResourceRead::Response {
-                        response: ResourceResponse {
-                            bytes,
-                            final_uri: None,
-                        },
-                    })
-                    .ok_or_else(|| Error::DiscoveryFailed {
-                        failure: format!("no mirrored payload: {}", request.uri).into(),
-                        cause: None,
-                    })
-            }
-        },
-    ))
-    .map_err(|error| format!("discovery failed: {error:?}"))?;
-    catalog
-        .into_entries()
-        .into_iter()
-        .next()
-        .ok_or_else(|| "no image discovered".to_string())
-}
-
-fn grid(source: &TileSource) -> Result<&Grid, String> {
-    match source {
-        TileSource::Grid(grid) => Ok(grid),
-        TileSource::Adaptive(source) => source
-            .declared_grid()
-            .ok_or_else(|| "adaptive source has no declared grid".to_string()),
-        source => Err(format!("golden case produced non-grid source {source:?}")),
-    }
+    support::discover_with(default_registry(), input, |uri| {
+        mirrored_payload(&payloads, uri)
+    })
+    .map_err(|error| format!("discovery failed: {error:?}"))?
+    .into_entries()
+    .into_iter()
+    .next()
+    .ok_or_else(|| "no image discovered".to_string())
 }
 
 fn plan_case(scenario: &str, case: &serde_json::Value) -> Result<(), String> {
@@ -263,7 +235,7 @@ fn plan_case(scenario: &str, case: &serde_json::Value) -> Result<(), String> {
         .levels
         .iter()
         .find(|level| {
-            grid(&level.source).is_ok_and(|grid| {
+            grid(level).is_ok_and(|grid| {
                 let size = grid.image_size();
                 u64::from(size.x) == width && u64::from(size.y) == height
             })
@@ -272,18 +244,15 @@ fn plan_case(scenario: &str, case: &serde_json::Value) -> Result<(), String> {
             let sizes: Vec<_> = image
                 .levels
                 .iter()
-                .map(|level| match grid(&level.source) {
+                .map(|level| match grid(level) {
                     Ok(grid) => format!("{:?}", grid.image_size()),
                     Err(reason) => reason,
                 })
                 .collect();
             format!("no level at golden size {width}x{height}; levels: {sizes:?}")
         })?;
-    let tiles: Vec<String> = grid(&level.source)
-        .map_err(|reason| format!("level at golden size: {reason}"))?
-        .tiles_row_major()
-        .map(|tile| tile.expect("grid tile").request.uri)
-        .collect();
+    let tiles: Vec<String> =
+        support::tile_urls(level).map_err(|reason| format!("level at golden size: {reason}"))?;
     let count = case["tileCount"].as_u64().expect("case tileCount");
     if tiles.len() as u64 != count {
         return Err(format!("tile count {} != golden {count}", tiles.len()));

@@ -233,7 +233,7 @@ export const de = {
   "view.input.placeholder": "Adresse eines Bildbetrachters oder Manifests einfuegen",
   "view.input.aria": "Adresse der Webseite mit dem zoombaren Bild",
   "view.input.start": "Bild finden",
-  // Rate-limit explainers (see view.tsx failureMessageOf).
+  // Rate-limit explainers (see failure.ts plainMessageFor).
   "view.fail.rateProxy":
     "Die Website, die dieses Bild hostet, begrenzt, wie viele Seiten unser Server bei ihr anfordern darf, und diese Grenze wurde gerade erreicht, daher konnte die Seite nicht geoffnet werden. Die Browser-Erweiterung und die Desktop-App laden ueber Ihre eigene Verbindung statt ueber unseren Server und sind von dieser Grenze nicht betroffen.",
   "view.fail.rateDirect":

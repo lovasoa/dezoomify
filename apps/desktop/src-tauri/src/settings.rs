@@ -486,51 +486,36 @@ mod tests {
     /// carries both strings plus a comment.
     #[test]
     fn policy_vectors_match_the_shared_oracle() {
-        let doc: serde_json::Value =
-            serde_json::from_str(include_str!("../../../../testdata/policy-vectors.json"))
-                .expect("testdata/policy-vectors.json parses");
-        let header_lines = doc["headerLines"].as_array().expect("headerLines array");
-        let settings_cases = doc["settings"].as_array().expect("settings array");
+        let header_lines = crate::test_vectors::cases("policy-vectors.json", "headerLines");
         assert!(
             (15..=25).contains(&header_lines.len()),
             "the header-line list stays bounded ({} cases)",
             header_lines.len()
         );
+        for case in header_lines {
+            let name = case["name"].as_str().expect("case name");
+            let line = case["line"].as_str().expect("case line");
+            let result = parse_header_line(line);
+            crate::test_vectors::assert_case(&case, result, |accept, entry| {
+                if accept.is_null() {
+                    assert_eq!(entry, None, "{name} blank line is ignored");
+                } else {
+                    let entry = entry.expect("entry");
+                    assert_eq!(entry.0, accept["name"].as_str().expect("name"), "{name}");
+                    assert_eq!(entry.1, accept["value"].as_str().expect("value"), "{name}");
+                }
+            });
+        }
+        let settings_cases = crate::test_vectors::cases("policy-vectors.json", "settings");
         assert!(
             (5..=25).contains(&settings_cases.len()),
             "the settings list stays bounded ({} cases)",
             settings_cases.len()
         );
-        for case in header_lines {
-            let name = case["name"].as_str().expect("case name");
-            let line = case["line"].as_str().expect("case line");
-            if let Some(reject) = case["reject"].as_object() {
-                let err = parse_header_line(line).expect_err(&format!("{name} must reject"));
-                assert_eq!(err, reject["rust"].as_str().expect("rust reason"), "{name}");
-            } else if case["accept"].is_null() {
-                assert_eq!(
-                    parse_header_line(line).expect("blank line is ignored"),
-                    None,
-                    "{name}"
-                );
-            } else {
-                let accept = &case["accept"];
-                let entry = parse_header_line(line)
-                    .expect("line parses")
-                    .expect("entry");
-                assert_eq!(entry.0, accept["name"].as_str().expect("name"), "{name}");
-                assert_eq!(entry.1, accept["value"].as_str().expect("value"), "{name}");
-            }
-        }
         for case in settings_cases {
             let name = case["name"].as_str().expect("case name");
-            let input = &case["input"];
-            if let Some(reject) = case["reject"].as_object() {
-                let err = parse_settings(input).expect_err(&format!("{name} must reject"));
-                assert_eq!(err, reject["rust"].as_str().expect("rust reason"), "{name}");
-            } else {
-                let accept = &case["accept"];
-                let parsed = parse_settings(input).expect("settings parse");
+            let result = parse_settings(&case["input"]);
+            crate::test_vectors::assert_case(&case, result, |accept, parsed| {
                 if let Some(retries) = accept["retries"].as_u64() {
                     assert_eq!(u64::from(parsed.retries), retries, "{name}: retries");
                 }
@@ -544,7 +529,7 @@ mod tests {
                         );
                     }
                 }
-            }
+            });
         }
     }
 }

@@ -12,60 +12,79 @@ use dezoomify::model::{bounded_uri, Error, ErrorTransport, Failure};
 /// boundary. Never flatten causes into display messages.
 pub struct TransportError(pub Error);
 
+/// Build one classified domain error carrying the preserved cause chain as
+/// its failure detail: the single spelling of cause attachment across the
+/// platform conversions below. Each conversion keeps its classification
+/// (the chosen variant and its facts) visible at its call site.
+fn caused(
+    classify: impl FnOnce(Failure) -> Error,
+    cause: &(dyn std::error::Error + 'static),
+) -> TransportError {
+    TransportError(classify(dezoomify::model::chain_text(cause).into()))
+}
+
 impl From<reqwest::Error> for TransportError {
     fn from(error: reqwest::Error) -> Self {
-        let detail = dezoomify::model::chain_text(&error);
-        let error = if error.is_timeout() {
-            Error::Timeout {
-                transport: ErrorTransport::Native,
-                failure: detail.into(),
-            }
-        } else if error.is_builder() {
-            Error::BadUrl {
-                failure: detail.into(),
-            }
-        } else {
-            Error::NetworkFailure {
-                transport: ErrorTransport::Native,
-                failure: detail.into(),
-            }
-        };
-        Self(error)
+        caused(
+            |failure| {
+                if error.is_timeout() {
+                    Error::Timeout {
+                        transport: ErrorTransport::Native,
+                        failure,
+                    }
+                } else if error.is_builder() {
+                    Error::BadUrl { failure }
+                } else {
+                    Error::NetworkFailure {
+                        transport: ErrorTransport::Native,
+                        failure,
+                    }
+                }
+            },
+            &error,
+        )
     }
 }
 
 impl From<url::ParseError> for TransportError {
     fn from(error: url::ParseError) -> Self {
-        Self(Error::BadUrl {
-            failure: dezoomify::model::chain_text(&error).into(),
-        })
+        caused(|failure| Error::BadUrl { failure }, &error)
     }
 }
 
 impl From<reqwest::header::InvalidHeaderName> for TransportError {
     fn from(error: reqwest::header::InvalidHeaderName) -> Self {
-        Self(Error::NetworkFailure {
-            transport: ErrorTransport::Native,
-            failure: dezoomify::model::chain_text(&error).into(),
-        })
+        caused(
+            |failure| Error::NetworkFailure {
+                transport: ErrorTransport::Native,
+                failure,
+            },
+            &error,
+        )
     }
 }
 
 impl From<reqwest::header::InvalidHeaderValue> for TransportError {
     fn from(error: reqwest::header::InvalidHeaderValue) -> Self {
-        Self(Error::NetworkFailure {
-            transport: ErrorTransport::Native,
-            failure: dezoomify::model::chain_text(&error).into(),
-        })
+        caused(
+            |failure| Error::NetworkFailure {
+                transport: ErrorTransport::Native,
+                failure,
+            },
+            &error,
+        )
     }
 }
 
 impl From<std::io::Error> for TransportError {
     fn from(error: std::io::Error) -> Self {
-        Self(Error::NetworkFailure {
-            transport: ErrorTransport::Native,
-            failure: dezoomify::model::chain_text(&error).into(),
-        })
+        caused(
+            |failure| Error::NetworkFailure {
+                transport: ErrorTransport::Native,
+                failure,
+            },
+            &error,
+        )
     }
 }
 

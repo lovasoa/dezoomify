@@ -5,7 +5,6 @@
 //! `kind`: the same identifier the CLI human line prints and
 //! `apps/cli/tests/pipeline.rs` publishes through the real binary.
 
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use dezoomify::model::Error;
@@ -14,32 +13,31 @@ use dezoomify_native::{JobOptions, NativeHost, OutputTarget};
 mod support;
 use support::{start_fixture_server, temp_dir};
 
+/// The loopback-side view of one corpus entry: the thin per-driver adapter
+/// over [`dezoomify_fixture_server::scenario`] (the shared corpus load)
+/// that substitutes the fixture origin into the input URL.
 struct Scenario {
+    entry: serde_json::Value,
     input: String,
-    operation: String,
-    expected: serde_json::Value,
 }
 
-fn load_scenario(id: &str, origin: &str) -> Scenario {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../testdata/scenarios/native")
-        .join(id);
-    let scenario: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(dir.join("scenario.json")).expect("scenario"),
-    )
-    .expect("scenario json");
-    let expected: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(dir.join("expected/result.json")).expect("expected result"),
-    )
-    .expect("expected json");
-    let input = scenario["input"]["url"]
-        .as_str()
-        .expect("scenario input url")
-        .replace("http://{{origin}}", origin);
-    Scenario {
-        input,
-        operation: scenario["operation"].as_str().expect("operation").into(),
-        expected,
+impl Scenario {
+    /// Load one `native/edge-*` corpus entry by its bare family name.
+    fn load(id: &str, origin: &str) -> Self {
+        let entry = dezoomify_fixture_server::scenario(&format!("native/{id}"));
+        let input = entry["input"]["url"]
+            .as_str()
+            .expect("scenario input url")
+            .replace("http://{{origin}}", origin);
+        Self { entry, input }
+    }
+
+    fn operation(&self) -> &str {
+        self.entry["operation"].as_str().expect("operation")
+    }
+
+    fn expected(&self) -> &serde_json::Value {
+        &self.entry["expected"]
     }
 }
 
@@ -88,8 +86,8 @@ const FAILURE_SCENARIOS: &[&str] = &[
 fn edge_success_scenarios_match_their_result_goldens() {
     let origin = start_fixture_server();
     for id in SUCCESS_SCENARIOS {
-        let scenario = load_scenario(id, &origin);
-        assert_eq!(scenario.operation, "download", "{id}");
+        let scenario = Scenario::load(id, &origin);
+        assert_eq!(scenario.operation(), "download", "{id}");
         let out_dir = temp_dir(id);
         let output = out_dir.join("out.png");
         // Hermetic cache: the job never touches the user's default cache.
@@ -105,31 +103,14 @@ fn edge_success_scenarios_match_their_result_goldens() {
             &mut |_| {},
         )
         .unwrap_or_else(|error| panic!("{id} succeeds: {error} ({})", error.cause().kind()));
-        let expected = &scenario.expected;
-        // `code: "ok"` pins success, and the golden geometry matches the
+        // `code: "ok"` pins success (the shared result comparison treats
+        // the code as optional), and the golden geometry matches the
         // published output (the EXIF-preserving note in `edge-exif` is
         // prose; pixel/EXIF fidelity lives in the native imaging tests).
-        assert_eq!(expected["code"].as_str(), Some("ok"), "{id}");
-        assert_eq!(
-            (
-                outcome.output.canvas.as_ref().unwrap().width,
-                outcome.output.canvas.as_ref().unwrap().height
-            ),
-            (
-                expected["imageSize"]["x"].as_u64().unwrap() as u32,
-                expected["imageSize"]["y"].as_u64().unwrap() as u32
-            ),
-            "{id} image size"
-        );
-        assert_eq!(
-            outcome.tile_count as u64,
-            expected["tileCount"].as_u64().unwrap(),
-            "{id} tile count"
-        );
-        assert_eq!(
-            outcome.output.format.as_str(),
-            expected["outputFormat"].as_str().unwrap(),
-            "{id} output format"
+        assert_eq!(scenario.expected()["code"].as_str(), Some("ok"), "{id}");
+        dezoomify_fixture_server::assert_result_golden(
+            &scenario.entry,
+            support::golden_result(&outcome),
         );
     }
 }
@@ -149,14 +130,14 @@ fn edge_failure_scenarios_match_their_result_goldens() {
 }
 
 fn match_failure_scenario(id: &str, origin: &str, mismatches: &mut Vec<String>) {
-    let scenario = load_scenario(id, origin);
+    let scenario = Scenario::load(id, origin);
     let mut fail = |field: &str, detail: String| {
         mismatches.push(format!("{id} {field}: {detail}"));
     };
-    if scenario.operation != "download-failure" {
+    if scenario.operation() != "download-failure" {
         fail(
             "operation",
-            format!("{} != download-failure", scenario.operation),
+            format!("{} != download-failure", scenario.operation()),
         );
     }
     let out_dir = temp_dir(id);
@@ -194,26 +175,14 @@ fn match_failure_scenario(id: &str, origin: &str, mismatches: &mut Vec<String>) 
             return;
         }
     };
-    let expected = &scenario.expected;
+    let expected = scenario.expected();
     if output.exists() {
         fail("outcome", "failed run wrote an output".into());
-    }
-    if expected["outcome"].as_str() != Some("failed") {
-        fail("outcome", format!("golden outcome {}", expected["outcome"]));
     }
     if phase_of(&error) != expected["phase"].as_str().unwrap_or_default() {
         fail(
             "phase",
             format!("{} != golden {}", phase_of(&error), expected["phase"]),
-        );
-    }
-    // `code` is the typed error's stable kind: the identifier the CLI human
-    // line prints and `apps/cli/tests/pipeline.rs` publishes (also asserted
-    // here directly). `underlying`/`note` are documentation prose.
-    if error.cause().kind() != expected["code"].as_str().unwrap_or_default() {
-        fail(
-            "code",
-            format!("{} != golden {}", error.cause().kind(), expected["code"]),
         );
     }
     let requests: Vec<serde_json::Value> = records
@@ -259,4 +228,11 @@ fn match_failure_scenario(id: &str, origin: &str, mismatches: &mut Vec<String>) 
             format!("{recovery} != golden {}", expected["recovery"]),
         );
     }
+    // `code` is the typed error's stable kind: the identifier the CLI human
+    // line prints and `apps/cli/tests/pipeline.rs` publishes (also asserted
+    // here directly). `underlying`/`note` are documentation prose.
+    mismatches.extend(dezoomify_fixture_server::failure_golden_mismatches(
+        &scenario.entry,
+        error.cause().kind(),
+    ));
 }

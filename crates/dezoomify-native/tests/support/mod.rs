@@ -115,11 +115,22 @@ pub fn http_response(status: &str, content_type: &str, body: &[u8]) -> Vec<u8> {
 
 pub fn scenario_payload(name: &str) -> Vec<u8> {
     std::fs::read(
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../testdata/scenarios/native/cli-dzi/payloads/fixtures.test/cli")
+        dezoomify_fixture_server::scenarios_dir()
+            .join("native/cli-dzi/payloads/fixtures.test/cli")
             .join(name),
     )
     .unwrap_or_else(|e| panic!("read payload {name}: {e}"))
+}
+
+/// Thin adapter: one published result as the shared golden records it.
+pub fn golden_result(outcome: &Publication) -> dezoomify_fixture_server::GoldenResult {
+    let canvas = outcome.output.canvas.as_ref().expect("published canvas");
+    dezoomify_fixture_server::GoldenResult {
+        image_size: (canvas.width as u64, canvas.height as u64),
+        tile_count: outcome.tile_count as u64,
+        output_format: outcome.output.format.as_str().to_string(),
+        partial: !outcome.output.is_complete(),
+    }
 }
 
 pub const DZI_512: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -191,8 +202,7 @@ pub fn serve_counted(
 
 /// The whole scenario corpus served on an allocated loopback port.
 pub fn start_fixture_server() -> String {
-    let scenarios_dir =
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/scenarios");
+    let scenarios_dir = dezoomify_fixture_server::scenarios_dir();
     let routes = dezoomify_fixture_server::RouteTable::load(&scenarios_dir).expect("load routes");
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

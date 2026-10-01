@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
-use dezoomify_fixture_server::{router, AppState, RouteTable};
+use dezoomify_fixture_server::{router, scenarios_dir, AppState, RouteTable};
 
 fn start_fixture_server() -> String {
-    let scenarios_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/scenarios");
+    let scenarios_dir = scenarios_dir();
     let routes = RouteTable::load(&scenarios_dir).expect("load routes");
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -43,22 +43,14 @@ fn temp_dir(name: &str) -> PathBuf {
     dir
 }
 
-/// Load a scenario's `expected/result.json` golden from the corpus.
-fn expected_result(scenario: &str) -> serde_json::Value {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../testdata/scenarios")
-        .join(scenario)
-        .join("expected/result.json");
-    serde_json::from_str(&std::fs::read_to_string(&path).expect("expected result"))
-        .expect("expected json")
-}
-
-/// Assert a `--json` run's completion event and the bytes it wrote against
-/// the scenario golden: reported image size and tile count, the produced
-/// file's actual pixel dimensions, its output format, and (when the golden
-/// pins one) the partial/`ok` disposition.
-fn assert_result_golden(scenario: &str, stdout: &str, output: &Path) {
-    let expected = expected_result(scenario);
+/// Thin driver adapter over the shared corpus goldens: map the CLI's
+/// completion event and the bytes it wrote into the shared golden
+/// comparison. The byte-level PNG probes and the event-kind checks stay
+/// here; the golden comparison lives in the fixture server (it owns the
+/// corpus).
+fn assert_result_golden(entry: &serde_json::Value, stdout: &str, output: &Path) {
+    let scenario = entry["id"].as_str().expect("scenario id");
+    let expected = &entry["expected"];
     let completed = stdout
         .lines()
         .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
@@ -69,27 +61,7 @@ fn assert_result_golden(scenario: &str, stdout: &str, output: &Path) {
             )
         })
         .unwrap_or_else(|| panic!("{scenario}: completed event present in stdout: {stdout}"));
-    assert_eq!(
-        completed["width"].as_u64(),
-        expected["imageSize"]["x"].as_u64(),
-        "{scenario} reported width"
-    );
-    assert_eq!(
-        completed["height"].as_u64(),
-        expected["imageSize"]["y"].as_u64(),
-        "{scenario} reported height"
-    );
-    assert_eq!(
-        completed["tileCount"].as_u64(),
-        expected["tileCount"].as_u64(),
-        "{scenario} reported tile count"
-    );
-    // The produced file is really the golden format at the golden size.
-    assert_eq!(
-        expected["outputFormat"].as_str(),
-        Some("png"),
-        "{scenario}: golden pins a png output"
-    );
+    // The produced file is really a PNG at the golden size.
     let bytes = std::fs::read(output).expect("output file written");
     assert!(
         bytes.starts_with(&[0x89, b'P', b'N', b'G']),
@@ -123,6 +95,18 @@ fn assert_result_golden(scenario: &str, stdout: &str, output: &Path) {
             "{scenario} complete completion event"
         );
     }
+    dezoomify_fixture_server::assert_result_golden(
+        &entry,
+        dezoomify_fixture_server::GoldenResult {
+            image_size: (
+                completed["width"].as_u64().expect("event width"),
+                completed["height"].as_u64().expect("event height"),
+            ),
+            tile_count: completed["tileCount"].as_u64().expect("event tile count"),
+            output_format: "png".to_string(),
+            partial: completed["partial"].as_bool().unwrap_or(false),
+        },
+    );
 }
 
 #[test]
@@ -166,8 +150,8 @@ fn cli_fails_honestly_on_missing_tiles() {
     assert!(!run.status.success(), "cli must fail on tile errors");
     assert!(!output.exists(), "no output on failure");
     let stderr = String::from_utf8_lossy(&run.stderr);
-    let golden = expected_result("native/cli-tile-failure");
-    let code = golden["code"].as_str().expect("golden code");
+    let golden = dezoomify_fixture_server::scenario("native/cli-tile-failure");
+    let code = golden["expected"]["code"].as_str().expect("golden code");
     assert!(stderr.contains(code), "honest code {code:?}: {stderr}");
 }
 
@@ -195,7 +179,7 @@ fn cli_max_width_flag_caps_output() {
         String::from_utf8_lossy(&run.stderr),
     );
     assert_result_golden(
-        "native/cli-max-width",
+        &dezoomify_fixture_server::scenario("native/cli-max-width"),
         &String::from_utf8_lossy(&run.stdout),
         &output,
     );
@@ -225,7 +209,7 @@ fn cli_forwards_user_headers() {
         String::from_utf8_lossy(&run.stderr),
     );
     assert_result_golden(
-        "native/cli-dzi",
+        &dezoomify_fixture_server::scenario("native/cli-dzi"),
         &String::from_utf8_lossy(&run.stdout),
         &output,
     );
@@ -472,7 +456,7 @@ fn cli_full_flags_produce_golden_output() {
 
     assert!(cache.exists(), "tile cache folder created");
     assert_result_golden(
-        "native/cli-dzi",
+        &dezoomify_fixture_server::scenario("native/cli-dzi"),
         &String::from_utf8_lossy(&run.stdout),
         &output,
     );
@@ -525,7 +509,7 @@ fn cli_selection_gaps_are_real_no_warnings() {
         "logging no longer warns fixed verbosity: {stderr}"
     );
     assert_result_golden(
-        "native/cli-dzi",
+        &dezoomify_fixture_server::scenario("native/cli-dzi"),
         &String::from_utf8_lossy(&run.stdout),
         &output,
     );
@@ -711,7 +695,7 @@ fn cli_auto_names_output_when_omitted() {
     let output = out_dir.join("dezoomify.png");
     assert!(output.exists(), "auto-named output written");
     assert_result_golden(
-        "native/cli-dzi",
+        &dezoomify_fixture_server::scenario("native/cli-dzi"),
         &String::from_utf8_lossy(&run.stdout),
         &output,
     );
@@ -801,8 +785,8 @@ fn cli_no_partial_discards_output() {
         "no .partial sibling when discarding partial"
     );
     let stderr = String::from_utf8_lossy(&run.stderr);
-    let golden = expected_result("native/cli-corrupt-tile");
-    let code = golden["code"].as_str().expect("golden code");
+    let golden = dezoomify_fixture_server::scenario("native/cli-corrupt-tile");
+    let code = golden["expected"]["code"].as_str().expect("golden code");
     assert!(stderr.contains(code), "honest code {code:?}: {stderr}");
 }
 
@@ -851,18 +835,12 @@ fn edge_failures_publish_their_golden_codes() {
         "edge-throttle-429",
         "edge-zero-tile",
     ] {
-        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../testdata/scenarios/native")
-            .join(id);
-        let scenario: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(dir.join("scenario.json")).expect("scenario"),
-        )
-        .expect("scenario json");
-        let input = scenario["input"]["url"]
+        let entry = dezoomify_fixture_server::scenario(&format!("native/{id}"));
+        let input = entry["input"]["url"]
             .as_str()
             .expect("scenario input url")
             .replace("http://{{origin}}", &origin);
-        let expected = expected_result(&format!("native/{id}"));
+        let expected = &entry["expected"];
         assert_eq!(
             expected["outcome"].as_str(),
             Some("failed"),
@@ -892,14 +870,8 @@ fn edge_failures_publish_their_golden_codes() {
 fn edge_successes_match_their_result_goldens() {
     let origin = start_fixture_server();
     for id in ["edge-exif", "edge-redirect-chain", "edge-resume-offline"] {
-        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../testdata/scenarios/native")
-            .join(id);
-        let scenario: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(dir.join("scenario.json")).expect("scenario"),
-        )
-        .expect("scenario json");
-        let input = scenario["input"]["url"]
+        let entry = dezoomify_fixture_server::scenario(&format!("native/{id}"));
+        let input = entry["input"]["url"]
             .as_str()
             .expect("scenario input url")
             .replace("http://{{origin}}", &origin);
@@ -919,10 +891,6 @@ fn edge_successes_match_their_result_goldens() {
             "{id} must succeed: {:?}",
             String::from_utf8_lossy(&run.stderr)
         );
-        assert_result_golden(
-            &format!("native/{id}"),
-            &String::from_utf8_lossy(&run.stdout),
-            &output,
-        );
+        assert_result_golden(&entry, &String::from_utf8_lossy(&run.stdout), &output);
     }
 }

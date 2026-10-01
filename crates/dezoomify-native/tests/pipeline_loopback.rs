@@ -2,7 +2,6 @@ use dezoomify::model::Error;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use dezoomify_native::imaging;
@@ -10,72 +9,26 @@ use dezoomify_native::JobOptions;
 mod support;
 use support::{http_response, scenario_payload, start_fixture_server, temp_dir, DZI_256, DZI_512};
 
-/// Assert the published result against the scenario's `expected/result.json`
-/// golden: image size, tile count, output format, and (when the golden pins
-/// one) the partial disposition and `ok` outcome. The `recovery` field in
-/// success goldens documents the resume mechanism in prose, not a typed fact.
-/// Assert the published failure contract of `expected/result.json`: the
-/// scenario fails and its recorded `code` is the typed error's stable kind
-/// (`error.cause().kind()`), the same identifier the CLI human line prints.
-fn assert_failure_golden(scenario: &str, error: &Error) {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../testdata/scenarios")
-        .join(scenario)
-        .join("expected/result.json");
-    let expected: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&path).expect("expected result"))
-            .expect("expected json");
-    assert_eq!(
-        expected["outcome"].as_str(),
-        Some("failed"),
-        "{scenario} golden pins a failure"
-    );
-    assert_eq!(
-        error.cause().kind(),
-        expected["code"].as_str().expect("golden code"),
-        "{scenario} publishes its golden kind: {error}"
+/// Thin driver adapter over the shared corpus goldens: assert the
+/// published result against the scenario's `expected/result.json`
+/// contract. [`support::golden_result`] maps the publication once; the
+/// shared comparison lives in the fixture server (it owns the corpus).
+fn assert_result_golden(scenario: &str, outcome: &dezoomify_native::Publication) {
+    dezoomify_fixture_server::assert_result_golden(
+        &dezoomify_fixture_server::scenario(scenario),
+        support::golden_result(outcome),
     );
 }
 
-fn assert_result_golden(scenario: &str, outcome: &dezoomify_native::Publication) {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../testdata/scenarios")
-        .join(scenario)
-        .join("expected/result.json");
-    let expected: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&path).expect("expected result"))
-            .expect("expected json");
-    let canvas = outcome.output.canvas.as_ref().expect("published canvas");
-    assert_eq!(
-        canvas.width as u64,
-        expected["imageSize"]["x"].as_u64().expect("golden width"),
-        "{scenario} image width"
+/// Thin driver adapter: assert the published failure contract of the
+/// scenario's `expected/result.json`: its recorded `code` is the typed
+/// error's stable kind (`error.cause().kind()`), the same identifier the
+/// CLI human line prints.
+fn assert_failure_golden(scenario: &str, error: &Error) {
+    dezoomify_fixture_server::assert_failure_golden(
+        &dezoomify_fixture_server::scenario(scenario),
+        error.cause().kind(),
     );
-    assert_eq!(
-        canvas.height as u64,
-        expected["imageSize"]["y"].as_u64().expect("golden height"),
-        "{scenario} image height"
-    );
-    assert_eq!(
-        outcome.tile_count as u64,
-        expected["tileCount"].as_u64().expect("golden tile count"),
-        "{scenario} tile count"
-    );
-    assert_eq!(
-        outcome.output.format.as_str(),
-        expected["outputFormat"].as_str().expect("golden format"),
-        "{scenario} output format"
-    );
-    if let Some(partial) = expected.get("partial") {
-        assert_eq!(
-            &serde_json::json!(!outcome.output.is_complete()),
-            partial,
-            "{scenario} partial disposition"
-        );
-    }
-    if let Some(code) = expected.get("code") {
-        assert_eq!(code, "ok", "{scenario} success outcome");
-    }
 }
 
 #[test]

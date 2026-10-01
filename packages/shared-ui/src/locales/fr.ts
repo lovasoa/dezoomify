@@ -233,7 +233,7 @@ export const fr = {
   "view.input.placeholder": "Collez l adresse d une visionneuse ou d un manifeste",
   "view.input.aria": "Adresse de la page contenant votre image zoomable",
   "view.input.start": "Trouver l image",
-  // Rate-limit explainers (see view.tsx failureMessageOf).
+  // Rate-limit explainers (see failure.ts plainMessageFor).
   "view.fail.rateProxy":
     "Le site qui heberge cette image limite le nombre de pages que notre serveur peut lui demander, et cette limite vient d etre atteinte, donc la page n a pas pu etre ouverte. L extension de navigateur et l application de bureau telechargent depuis votre propre connexion au lieu de notre serveur, elles ne sont donc pas concernees par cette limite.",
   "view.fail.rateDirect":

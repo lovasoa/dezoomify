@@ -507,3 +507,124 @@ pub fn content_type(path: &str) -> &'static str {
         _ => "application/octet-stream",
     }
 }
+
+// ---------------------------------------------------------------------------
+// Scenario corpus access: this test-tool crate owns testdata/scenarios.
+// ---------------------------------------------------------------------------
+
+/// The shared scenario corpus under `testdata/scenarios`.
+#[must_use]
+pub fn scenarios_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/scenarios")
+}
+
+/// One scenario's corpus entry: its documented `scenario.json` with the
+/// `expected/result.json` golden attached under `expected`.
+#[must_use]
+pub fn scenario(id: &str) -> serde_json::Value {
+    let dir = scenarios_dir().join(id);
+    let mut entry: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.join("scenario.json")).expect("scenario"),
+    )
+    .expect("scenario json");
+    entry["expected"] = serde_json::from_str(
+        &std::fs::read_to_string(dir.join("expected/result.json")).expect("expected result"),
+    )
+    .expect("expected json");
+    entry
+}
+
+/// One completed job as its golden records it. Each driver adapts its own
+/// observation (native publication, CLI event JSON) into this shape once.
+#[derive(Clone, Debug)]
+pub struct GoldenResult {
+    /// Assembled image size `(width, height)`.
+    pub image_size: (u64, u64),
+    /// Tiles the job acquired.
+    pub tile_count: u64,
+    /// Output format name as the model spells it (`png`, `jpeg`, ...).
+    pub output_format: String,
+    /// Whether the published output is partial.
+    pub partial: bool,
+}
+
+/// Success-golden mismatches: image size, tile count, output format, and
+/// (when the golden pins one) the partial disposition and the `ok` code.
+/// Empty when the run matches its golden. `recovery` in success goldens
+/// documents the mechanism in prose and is never a typed fact.
+#[must_use]
+pub fn result_golden_mismatches(entry: &serde_json::Value, result: &GoldenResult) -> Vec<String> {
+    let id = entry["id"].as_str().unwrap_or("<scenario>");
+    let golden = &entry["expected"];
+    let mut mismatches = Vec::new();
+    let width = golden["imageSize"]["x"].as_u64().expect("golden width");
+    let height = golden["imageSize"]["y"].as_u64().expect("golden height");
+    if result.image_size != (width, height) {
+        mismatches.push(format!(
+            "{id} image size: {:?} != golden ({width}, {height})",
+            result.image_size
+        ));
+    }
+    let tile_count = golden["tileCount"].as_u64().expect("golden tile count");
+    if result.tile_count != tile_count {
+        mismatches.push(format!(
+            "{id} tile count: {} != golden {tile_count}",
+            result.tile_count
+        ));
+    }
+    let format = golden["outputFormat"].as_str().expect("golden format");
+    if result.output_format != format {
+        mismatches.push(format!(
+            "{id} output format: {} != golden {format}",
+            result.output_format
+        ));
+    }
+    if let Some(partial) = golden.get("partial") {
+        if partial.as_bool() != Some(result.partial) {
+            mismatches.push(format!(
+                "{id} partial disposition: {} != golden {partial}",
+                result.partial
+            ));
+        }
+    }
+    if let Some(code) = golden.get("code") {
+        if code != "ok" {
+            mismatches.push(format!("{id} success outcome: golden code {code} != ok"));
+        }
+    }
+    mismatches
+}
+
+/// Failure-golden mismatches: the run failed and the golden's `code`
+/// records the typed error's stable kind (the same identifier the CLI
+/// human line prints). `underlying`/`note`/`recovery` are documentation
+/// prose, never typed facts.
+#[must_use]
+pub fn failure_golden_mismatches(entry: &serde_json::Value, kind: &str) -> Vec<String> {
+    let id = entry["id"].as_str().unwrap_or("<scenario>");
+    let golden = &entry["expected"];
+    let mut mismatches = Vec::new();
+    if golden["outcome"].as_str() != Some("failed") {
+        mismatches.push(format!(
+            "{id} outcome: golden pins a failure, found {}",
+            golden["outcome"]
+        ));
+    }
+    if golden["code"].as_str().unwrap_or_default() != kind {
+        mismatches.push(format!("{id} code: {kind} != golden {}", golden["code"]));
+    }
+    mismatches
+}
+
+/// Assert [`result_golden_mismatches`] is empty. Drivers that report a
+/// batch of scenarios at once call the mismatch form and collect.
+pub fn assert_result_golden(entry: &serde_json::Value, result: GoldenResult) {
+    let mismatches = result_golden_mismatches(entry, &result);
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+}
+
+/// Assert [`failure_golden_mismatches`] is empty.
+pub fn assert_failure_golden(entry: &serde_json::Value, kind: &str) {
+    let mismatches = failure_golden_mismatches(entry, kind);
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+}

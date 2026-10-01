@@ -623,10 +623,7 @@ mod tests {
     /// different inputs unnoticed.
     #[test]
     fn deep_link_vectors_match_the_shared_oracle() {
-        let doc: serde_json::Value =
-            serde_json::from_str(include_str!("../../../../testdata/deep-link-vectors.json"))
-                .expect("testdata/deep-link-vectors.json parses");
-        let cases = doc["cases"].as_array().expect("cases array");
+        let cases = crate::test_vectors::cases("deep-link-vectors.json", "cases");
         assert!(
             (15..=25).contains(&cases.len()),
             "the vector list stays bounded ({} cases)",
@@ -635,12 +632,8 @@ mod tests {
         for case in cases {
             let name = case["name"].as_str().expect("case name");
             let raw = case["raw"].as_str().expect("case raw");
-            if let Some(reject) = case["reject"].as_str() {
-                let err = parse_deep_link(raw).expect_err(&format!("{name} must reject"));
-                assert_eq!(error_class(&err), reject, "{name}: wrong rejection class");
-            } else {
-                let accept = &case["accept"];
-                let parsed = parse_deep_link(raw).unwrap_or_else(|_| panic!("{name} must accept"));
+            let result = parse_deep_link(raw).map_err(|error| error_class(&error).to_string());
+            crate::test_vectors::assert_case(&case, result, |accept, parsed| {
                 assert_eq!(
                     parsed.source_url,
                     accept["sourceUrl"].as_str().expect("sourceUrl"),
@@ -657,7 +650,7 @@ mod tests {
                     Some(accept["hint"].as_str().expect("hint").to_string())
                 };
                 assert_eq!(parsed.hint, hint, "{name}: hint");
-            }
+            });
         }
     }
 }

@@ -19,6 +19,8 @@ pub mod deep_link;
 pub mod install_integration;
 pub mod jobs;
 pub mod settings;
+#[cfg(test)]
+pub(crate) mod test_vectors;
 
 // The real window shell is behind the `tauri` feature; the default build
 // stays pure standard-library logic with no SDK or webview requirements.

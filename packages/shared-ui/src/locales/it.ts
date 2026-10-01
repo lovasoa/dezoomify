@@ -227,7 +227,7 @@ export const it = {
   "view.input.placeholder": "Incolla l indirizzo di un visualizzatore o manifesto",
   "view.input.aria": "Indirizzo della pagina con l immagine ingrandibile",
   "view.input.start": "Trova immagine",
-  // Rate-limit explainers (see view.tsx failureMessageOf).
+  // Rate-limit explainers (see failure.ts plainMessageFor).
   "view.fail.rateProxy":
     "Il sito che ospita questa immagine limita quante pagine il nostro server puo chiedergli, e quel limite e stato appena raggiunto, quindi la pagina non si e potuta aprire. L estensione del browser e l applicazione desktop scaricano dalla tua connessione invece che dal nostro server, quindi non sono toccate da questo limite.",
   "view.fail.rateDirect":
