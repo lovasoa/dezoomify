@@ -146,7 +146,7 @@ fn has_userinfo(src: &str) -> bool {
     false
 }
 
-fn validate_source(src: &str) -> Result<(), DeepLinkError> {
+fn validate_source(src: &str) -> Result<String, DeepLinkError> {
     if src.is_empty() || src.len() > MAX_FIELD_LEN {
         return Err(DeepLinkError::InvalidSource(
             "src must be 1..1024 bytes".to_string(),
@@ -160,8 +160,9 @@ fn validate_source(src: &str) -> Result<(), DeepLinkError> {
             "scheme must be http or https".to_string(),
         ));
     }
-    // Downstream scheme dispatch is case-sensitive; keep the accepted form
-    // normalized so an uppercase scheme cannot be accepted and then refused.
+    // Downstream scheme dispatch is case-sensitive; the accepted source is
+    // returned with its scheme normalized so an uppercase scheme cannot be
+    // accepted and then refused.
     let (scheme, rest) = src.split_once("://").expect("scheme checked above");
     let normalized = format!("{}://{}", scheme.to_ascii_lowercase(), rest);
     let src = normalized.as_str();
@@ -175,7 +176,7 @@ fn validate_source(src: &str) -> Result<(), DeepLinkError> {
     if let Some(needle) = source_contains_local_path(src) {
         return Err(DeepLinkError::SecretForbidden(needle));
     }
-    Ok(())
+    Ok(normalized)
 }
 
 pub fn find_deep_link_in_argv(argv: &[String]) -> Option<String> {
@@ -321,7 +322,10 @@ pub fn parse_deep_link(url: &str) -> Result<DeepLink, DeepLinkError> {
     // Surrounding whitespace in the decoded source is normalized away, like
     // the TS mirror's `.trim()`.
     let source_url = source_url.trim().to_string();
-    validate_source(&source_url)?;
+    // `validate_source` returns the accepted source with its scheme
+    // normalized to lowercase: downstream scheme dispatch is case-sensitive,
+    // so an uppercase scheme must never be accepted and then refused.
+    let source_url = validate_source(&source_url)?;
     // Secret query or fragment keys inside the decoded source are also
     // forbidden (cookie-param style smuggling).
     if let Some(key) = smuggled_secret_key(&source_url) {
@@ -473,6 +477,13 @@ mod tests {
         assert_eq!(
             parse_deep_link(&plus).unwrap().source_url,
             "https://example.com/a b"
+        );
+        // Accepted uppercase schemes are stored normalized: the downstream
+        // scheme dispatch is case-sensitive.
+        let upper = link("2", "HTTPS%3A%2F%2Fexample.com%2Fx");
+        assert_eq!(
+            parse_deep_link(&upper).unwrap().source_url,
+            "https://example.com/x"
         );
         // Non-http(s) source schemes are rejected.
         let ftp = link("2", "ftp%3A%2F%2Fexample.com%2Fx");

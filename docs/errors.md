@@ -66,7 +66,7 @@ never reads as an upstream refusal.
 
 ## Recovery actions
 
-Products choose recovery controls from stable error codes, structured context, and available capabilities. They never parse user-facing text. The algorithm awaits the Host's keep, discard, or retry choice when tiles remain missing. Pending interactions belong to one invocation and close when it retires.
+Products choose recovery controls from the typed `kind`, the structured context, and available capabilities. They never parse user-facing text. The algorithm awaits the Host's keep, discard, or retry choice when tiles remain missing. Pending interactions belong to one invocation and close when it retires.
 
 ```mermaid
 flowchart TD
