@@ -149,32 +149,22 @@ mod tests {
                 Some(Vec2d { x: 512, y: 512 })
             ]
         );
-        assert_eq!(image.levels.len(), 2);
         let TileSource::Grid(low_plan) = &image.levels[0].source else {
             panic!("IIP levels must be grids")
         };
-        assert_eq!(low_plan.count(), 1);
         let TileSource::Grid(plan) = &image.levels[1].source else {
             panic!("IIP levels must be grids")
         };
-        assert_eq!(plan.count(), 4);
-        let urls: Vec<_> = plan
-            .tiles_row_major()
-            .map(Result::unwrap)
-            .map(|tile| tile.request.uri)
-            .collect();
-        assert_eq!(urls[0], "http://test.com/&JTL=1,0");
-        assert_eq!(urls[2], "http://test.com/&JTL=1,2");
+        assert_eq!((low_plan.count(), plan.count()), (1, 4));
         assert_eq!(
-            low_plan
-                .tiles_row_major()
-                .next()
-                .unwrap()
-                .unwrap()
-                .request
-                .uri,
+            crate::test_support::tile_urls(&image.levels[0])
+                .expect("grid")
+                .join(","),
             "http://test.com/&JTL=0,0"
         );
+        let urls = crate::test_support::tile_urls(&image.levels[1]).expect("grid");
+        assert_eq!(urls[0], "http://test.com/&JTL=1,0");
+        assert_eq!(urls[2], "http://test.com/&JTL=1,2");
     }
 
     #[test]
