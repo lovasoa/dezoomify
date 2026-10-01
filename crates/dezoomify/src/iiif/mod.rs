@@ -943,17 +943,7 @@ fn level_with_scale(levels: &[ResolvedLevel], scale_factor: u32) -> &ResolvedLev
 
 #[cfg(test)]
 fn tile_urls(level: &ResolvedLevel) -> Vec<String> {
-    let plan = match &level.source {
-        crate::core::TileSource::Grid(plan) => plan,
-        crate::core::TileSource::Adaptive(source) => source
-            .declared_grid()
-            .expect("IIIF adaptive levels retain declared grids"),
-        _ => panic!("IIIF levels have declared grids"),
-    };
-    plan.tiles_row_major()
-        .map(Result::unwrap)
-        .map(|tile| tile.request.uri)
-        .collect()
+    crate::test_support::tile_urls(level).expect("IIIF levels have declared grids")
 }
 
 #[test]

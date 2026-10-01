@@ -289,14 +289,8 @@ fn load_catalog(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{DiscoveredEntry, DiscoveryCatalog, ResolvedImage, TileSource};
-
-    fn ready_image(catalog: DiscoveryCatalog) -> ResolvedImage {
-        match catalog.into_entries().pop().unwrap() {
-            DiscoveredEntry::Ready(image) => image,
-            DiscoveredEntry::Deferred(_) => panic!("DZI is resolved"),
-        }
-    }
+    use crate::core::{DiscoveredEntry, TileSource};
+    use crate::test_support::ready_image;
 
     #[test]
     fn panorama_preserves_urls_overlap_and_normalized_level_order() {

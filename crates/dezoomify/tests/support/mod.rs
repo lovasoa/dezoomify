@@ -1,8 +1,4 @@
 #![allow(dead_code)]
-use dezoomify::core::discovery::{DiscoveryError, DiscoveryInput, DiscoveryLimits};
-use dezoomify::core::{
-    DiscoveredEntry, DiscoveryCatalog, Grid, Registry, ResolvedImage, ResolvedLevel, TileSource,
-};
 use dezoomify::{Host, model::*};
 use std::{
     cell::{Cell, RefCell},
@@ -11,69 +7,14 @@ use std::{
 };
 
 // ── shared discovery stubs ────────────────────────────────────────
-// One fetch stub and plan helpers for every core integration test.
-
-/// Discovery over an injected byte lookup: the shared fetch stub. The
-/// lookup maps request URIs to payload bytes; a miss fails
-/// `discovery-failed` naming the URI it could not find.
-pub fn discover_with(
-    registry: Registry,
-    input: &str,
-    lookup: impl Fn(&str) -> Option<Vec<u8>>,
-) -> Result<DiscoveryCatalog, DiscoveryError> {
-    futures::executor::block_on(registry.discover(
-        vec![DiscoveryInput::new(input)],
-        DiscoveryLimits::default(),
-        move |request, _| {
-            let bytes = lookup(&request.uri);
-            async move {
-                bytes
-                    .map(|bytes| ResourceRead::Response {
-                        response: ResourceResponse {
-                            bytes,
-                            final_uri: None,
-                        },
-                    })
-                    .ok_or_else(|| Error::DiscoveryFailed {
-                        failure: format!("no fixture: {}", request.uri).into(),
-                        cause: None,
-                    })
-            }
-        },
-    ))
-}
-
-/// The catalog's single ready image: a deferred entry or an empty catalog
-/// is a stub-level bug, not a case outcome.
-pub fn ready_image(catalog: DiscoveryCatalog) -> ResolvedImage {
-    match catalog.into_entries().into_iter().next() {
-        Some(DiscoveredEntry::Ready(image)) => image,
-        Some(DiscoveredEntry::Deferred(image)) => {
-            panic!("expected a ready image, got deferred URI {}", image.uri)
-        }
-        None => panic!("expected one image"),
-    }
-}
-
-/// The level's grid: a plain grid source or an adaptive source's declared
-/// grid. Fallible so callers can skip probe-only levels.
-pub fn grid(level: &ResolvedLevel) -> Result<&Grid, String> {
-    match &level.source {
-        TileSource::Grid(grid) => Ok(grid),
-        TileSource::Adaptive(source) => source
-            .declared_grid()
-            .ok_or_else(|| "adaptive source has no declared grid".to_string()),
-        source => Err(format!("expected a grid source, got {source:?}")),
-    }
-}
-
-/// Every planned tile URI of the level's grid, row-major.
-pub fn tile_urls(level: &ResolvedLevel) -> Result<Vec<String>, String> {
-    Ok(grid(level)?
-        .tiles_row_major()
-        .map(|tile| tile.expect("grid tile").request.uri)
-        .collect())
-}
+// One fetch stub and plan helpers for every core test, in-crate and
+// integration. The bodies live in `src/test_support.rs`; this module
+// re-exposes them under `support::` and adds the full Host stub below.
+pub use dezoomify::{core, model};
+#[path = "../../src/test_support.rs"]
+mod stub;
+#[allow(unused_imports)]
+pub use stub::*;
 
 #[derive(Default)]
 pub struct MemoryHost {

@@ -530,16 +530,9 @@ impl GridRequests for KrpanoLevel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::DiscoveredEntry;
     use crate::core::discovery::{DiscoveryError, RejectionKind};
-    use crate::core::{ResolvedImage, TileSource};
-
-    fn image(catalog: DiscoveryCatalog) -> ResolvedImage {
-        match catalog.into_entries().into_iter().next().unwrap() {
-            DiscoveredEntry::Ready(image) => image,
-            DiscoveredEntry::Deferred(_) => panic!("krpano XML is ready"),
-        }
-    }
+    use crate::core::{DiscoveredEntry, TileSource};
+    use crate::test_support::ready_image as image;
 
     fn tile_requests(level: &ResolvedLevel, count: usize) -> Vec<(String, Vec2d)> {
         let TileSource::Grid(plan) = &level.source else {
