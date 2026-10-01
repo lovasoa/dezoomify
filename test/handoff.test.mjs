@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateDeepLinkPayload } from "../apps/desktop/src/errorCopy.ts";
 import { desktopHandoffLink } from "../packages/browser-runtime/src/plan-gates.ts";
 import { EN, t } from "../packages/shared-ui/src/i18n.ts";
 import { presentFailure, presentOutput } from "../packages/shared-ui/src/presentation.ts";
+import { validateDeepLinkPayload } from "../packages/shared-ui/src/source-url.ts";
 import {
   handoffOriginFor,
   isFileHandoffSource,

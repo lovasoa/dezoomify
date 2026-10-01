@@ -1,3 +1,4 @@
+import { isValidInputUrl } from "@dezoomify/shared-ui";
 import type {
   DiagnosticReport,
   MissingTiles,
@@ -38,13 +39,7 @@ export async function invokeNative(
   },
   api: DesktopIpc = ipc,
 ): Promise<NativeInvocation> {
-  const input = new URL(request.inputUrl);
-  if (
-    !["http:", "https:"].includes(input.protocol) ||
-    input.username ||
-    input.password ||
-    request.inputUrl.length > 2048
-  ) {
+  if (!isValidInputUrl(request.inputUrl)) {
     throw { kind: "invalid-input", detail: "the image address is not usable" };
   }
   const id = `job:desktop-${Date.now()}-${++nextInvocation}`;

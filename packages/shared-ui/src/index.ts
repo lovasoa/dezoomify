@@ -12,3 +12,4 @@ export * from "./sequential-queue.ts";
 export * from "./source-url.ts";
 export * from "./url-input.tsx";
 export * from "./view.tsx";
+export * from "./view-helpers.ts";

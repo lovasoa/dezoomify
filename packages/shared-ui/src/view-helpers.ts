@@ -1,8 +1,26 @@
+import { t } from "./i18n.ts";
+
 export function truncateMiddle(value: string, max = 90): string {
   const text = String(value ?? "");
   if (text.length <= max) return text;
   const half = Math.floor((max - 1) / 2);
   return `${text.slice(0, half)}…${text.slice(text.length - half)}`;
+}
+
+// Bound free-form technical text while preserving the original details.
+export function trimTechnical(text: string, max = 2000): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}…`;
+}
+
+export function formatMissingSummary(missing: Array<string>, failedCount?: number): string {
+  const count = missing.length > 0 ? missing.length : (failedCount ?? 0);
+  if (count <= 0) return t("desktop.rec.missingSome");
+  const plural = count === 1 ? "" : "s";
+  if (missing.length === 0) return t("desktop.rec.missingCount", { count, plural });
+  const shown = missing.slice(0, 20).join(", ");
+  const rest = missing.length > 20 ? t("desktop.rec.more", { n: missing.length - 20 }) : "";
+  return t("desktop.rec.missingList", { n: missing.length, plural, shown, rest });
 }
 
 export function displaySourceUrl(value: string): string {

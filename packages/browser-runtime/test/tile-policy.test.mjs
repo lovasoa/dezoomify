@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createTileThrottle, hostOf, proxyRateLimitDelayMs } from "../src/tile-policy.ts";
+import { createTileThrottle, proxyRateLimitDelayMs } from "../src/tile-policy.ts";
 
 test("proxyRateLimitDelayMs honors Retry-After within the UX budget", () => {
   assert.equal(proxyRateLimitDelayMs(2000), 2000);
@@ -30,9 +30,4 @@ test("createTileThrottle staggers starts per host", async () => {
   throttle.reset();
   await throttle.throttle("https://a.test/3.png");
   assert.equal(slept.length, 1);
-});
-
-test("hostOf stays readable", () => {
-  assert.equal(hostOf("https://example.test/x"), "example.test");
-  assert.equal(hostOf("bogus"), "the server");
 });

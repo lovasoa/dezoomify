@@ -13,9 +13,11 @@ import {
   clearHistory as clearHistoryStore,
   detailOf,
   finishActiveQueueEntry,
+  formatMissingSummary,
   HISTORY_KEY_DESKTOP,
   type HistoryEntry,
   isJobError,
+  isValidInputUrl,
   loadHistory as loadHistoryStore,
   openConfirmModal,
   PartialDecisionActions,
@@ -26,11 +28,15 @@ import {
   presentProgress,
   presentStatus,
   pushHistory,
+  readInitialUrl,
   renderView,
   saveHistory as saveHistoryStore,
   summarizeQueue,
   t,
   toHistoryEntry,
+  trimTechnical,
+  type ValidatedDeepLink,
+  validateDeepLinkPayload,
 } from "@dezoomify/shared-ui";
 import type {
   Error as JobError,
@@ -40,14 +46,6 @@ import type {
   RecoveryChoice,
 } from "@dezoomify/wasm-bindings";
 import { createElement } from "react";
-import type { ValidatedDeepLink } from "./errorCopy.ts";
-import {
-  formatMissingSummary,
-  isValidInputUrl,
-  readInitialUrl,
-  trimTechnical,
-  validateDeepLinkPayload,
-} from "./errorCopy.ts";
 import {
   invokeNative,
   listenDeepLinks,
@@ -689,7 +687,7 @@ function handleReset(): void {
   desktopQueue = createDesktopQueue();
   currentAttempt.activeQueueId = null;
 
-  const prefilled = readInitialUrl();
+  const prefilled = readInitialUrl(globalThis.location);
   if (prefilled) currentAttempt.viewCtx.initialUrl = prefilled;
   else currentAttempt.viewCtx.initialUrl = undefined;
   update();
@@ -722,13 +720,13 @@ function showDeepLinkConfirm(info: ValidatedDeepLink): void {
 }
 
 function initInitialUrl(): void {
-  const prefilled = readInitialUrl();
+  const prefilled = readInitialUrl(globalThis.location);
   if (prefilled) currentAttempt.viewCtx.initialUrl = prefilled;
 }
 
 function syncInitialUrlFromLocation(): void {
   if (currentAttempt.progress !== null || currentAttempt.localFailure !== null) return;
-  const prefilled = readInitialUrl();
+  const prefilled = readInitialUrl(globalThis.location);
   const current = currentAttempt.viewCtx.initialUrl;
   if (prefilled && prefilled !== current) {
     currentAttempt.viewCtx.initialUrl = prefilled;

@@ -1,6 +1,7 @@
 import {
   createSequentialQueue,
   enqueueSequential,
+  isValidInputUrl,
   type QueueEntry,
   type QueueResultCode,
   retryQueueEntry,
@@ -24,24 +25,6 @@ export function createDesktopQueue(): DesktopQueue {
   return createSequentialQueue<DesktopQueueEntry>("jobq:");
 }
 
-function isValidDesktopQueueUrl(url: string): boolean {
-  if (typeof url !== "string") return false;
-  const trimmed = url.trim();
-  if (trimmed.length === 0 || trimmed.length > 2048) return false;
-  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) return false;
-  const afterScheme = trimmed.split("://")[1] ?? "";
-  const authority = afterScheme.split("/")[0]?.split("?")[0] ?? "";
-  if (authority.includes("@")) return false;
-  try {
-    const u = new URL(trimmed);
-    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
-    if (u.username !== "" || u.password !== "") return false;
-  } catch {
-    return false;
-  }
-  return true;
-}
-
 /**
  * Enqueue one validated single-job request. Invalid input is rejected with
  * `job.invalid-input` and no state change. The first entry while idle becomes
@@ -52,7 +35,7 @@ export function enqueueDesktopQueue(
   inputUrl: string,
 ): { queue: DesktopQueue; entry: DesktopQueueEntry | null; code: QueueResultCode } {
   const trimmed = typeof inputUrl === "string" ? inputUrl.trim() : "";
-  if (!isValidDesktopQueueUrl(trimmed)) {
+  if (!isValidInputUrl(trimmed)) {
     return { queue, entry: null, code: "job.invalid-input" };
   }
   const result = enqueueSequential(queue, (id, status) => ({

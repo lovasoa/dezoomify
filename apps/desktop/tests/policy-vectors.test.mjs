@@ -16,8 +16,11 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { isRetryable } from "../../../packages/shared-ui/src/failure.ts";
-import { SIGNED_QUERY_KEYS } from "../../../packages/shared-ui/src/source-url.ts";
-import { DEEP_LINK_SECRET_QUERY_KEYS, validateDeepLinkPayload } from "../src/errorCopy.ts";
+import {
+  DEEP_LINK_SECRET_QUERY_KEYS,
+  SIGNED_QUERY_KEYS,
+  validateDeepLinkPayload,
+} from "../../../packages/shared-ui/src/source-url.ts";
 
 const deepLinkVectors = JSON.parse(
   readFileSync(
