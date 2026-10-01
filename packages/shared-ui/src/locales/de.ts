@@ -210,8 +210,6 @@ export const de = {
     "Dieses Bild ist zu groß für diesen Browser-Tab. Die Desktop-App kann es in voller Größe speichern.",
   "view.fail.canvasContext":
     "Dieser Browser-Tab konnte die Bildfläche in dieser Größe nicht erstellen. Die Desktop-App kann es in voller Größe speichern.",
-  "view.fail.encodeFail":
-    "Das Bild konnte nicht kodiert werden. Versuchen Sie ein anderes Ausgabeformat.",
   // Cancelled section.
   "view.cancel.title": "Speichern abgebrochen",
   "view.cancel.message": "Das Speichern des Bildes wurde gestoppt.",

@@ -164,7 +164,4 @@ test("canvas failure copy names the desktop app for every report", () => {
   for (const kind of ["plan-invalid", "output-unavailable"]) {
     assert.match(plainMessageFor({ kind }, "example.test"), /desktop app/i, kind);
   }
-  // `encode-failed` also covers native output encoding: its copy names the
-  // next action (a different output format) without naming a product.
-  assert.match(plainMessageFor({ kind: "encode-failed" }, "example.test"), /output format/i);
 });

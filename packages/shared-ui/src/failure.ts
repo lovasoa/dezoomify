@@ -61,7 +61,7 @@ const COPY = {
   "decode-failed": "desktop.tile.partialChoice",
   "processing-failed": "desktop.tile.partialChoice",
   "limit-exceeded": "desktop.output.canvasLimit",
-  "encode-failed": "view.fail.encodeFail",
+  "encode-failed": "desktop.output.writeFail",
   "write-failed": "desktop.output.writeFail",
   "output-exists": "desktop.output.exists",
   "destination-denied": "desktop.output.destDenied",

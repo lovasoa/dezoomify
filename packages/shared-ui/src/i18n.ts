@@ -287,13 +287,12 @@ const en = {
   "view.fail.techDetails": "Technical error details & bug report",
   "view.fail.reportBug": "Report a bug on GitHub",
   "view.fail.retry": "Try again",
-  // Browser canvas failure family (allocation, 2D context, PNG encoding):
+  // Browser canvas failure family (allocation, 2D context):
   // the desktop app is the recovery, so every message names it.
   "view.fail.canvasAllocation":
     "This picture is too large to assemble in this browser tab. The desktop app can save it at full size.",
   "view.fail.canvasContext":
     "This browser tab could not create the picture surface at this size. The desktop app can save it at full size.",
-  "view.fail.encodeFail": "The image could not be encoded. Try a different output format.",
   // Cancelled section.
   "view.cancel.title": "Save cancelled",
   "view.cancel.message": "The image save was stopped.",
