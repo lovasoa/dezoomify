@@ -128,7 +128,7 @@ fn run_edge_scenario(id: &str, origin: &str, mismatches: &mut Vec<String>) {
         // prose; pixel/EXIF fidelity lives in the native imaging tests).
         mismatches.extend(dezoomify_fixture_server::result_golden_mismatches(
             &entry,
-            support::golden_result(&outcome),
+            &support::golden_result(&outcome),
         ));
         return;
     }
