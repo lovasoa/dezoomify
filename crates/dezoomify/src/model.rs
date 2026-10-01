@@ -108,15 +108,11 @@ impl OutputFormat {
     }
 }
 
-/// How an acquired tile participates in probing and final output. The two
-/// facts are orthogonal and consumed independently: `probe` marks
-/// adaptive-probe acquisitions (fetched to observe dimensions, where a miss
-/// is an observation and never an output failure), `output` marks
-/// acquisitions whose success joins the final canvas. Every planned tile
-/// sets at least one flag and is built through one of the three named
-/// constructors; a wire value with both flags clear behaves as an
-/// acquisition that is fetched and discarded. `RequestPurpose` on a tile
-/// request is derived from `probe` and never disagrees with it.
+/// How an acquired tile participates in probing and final output. `probe`
+/// marks adaptive-probe acquisitions (a miss is an observation, never an
+/// output failure); `output` marks acquisitions joining the final canvas.
+/// Every planned tile sets at least one flag; `RequestPurpose` on a tile
+/// request derives from `probe` and never disagrees with it.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct TileRole {
@@ -151,13 +147,10 @@ impl TileRole {
     }
 }
 
-/// Host-neutral placement of one tile in the output image, projected from
-/// the core tile plan. `position` is the top-left output corner;
-/// `expected_size` is the planned extent when the plan declares it (absent
-/// when only decoding reveals the extent); `canvas` is the declared output
-/// size when the plan declares one; `processing` is the stable recipe id
-/// the host must apply to the acquired bytes before decoding. Native
-/// assembly and browser canvas hosts consume the same values.
+/// Host-neutral placement of one tile, projected from the core tile plan:
+/// `position` is the top-left output corner, `expected_size` the planned
+/// extent when declared, `canvas` the declared output size when declared,
+/// and `processing` the recipe id the host applies before decoding.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct TilePlacement {

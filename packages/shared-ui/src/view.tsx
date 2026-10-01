@@ -44,9 +44,7 @@ import { DiagnosticDetails } from "./diagnostic-details.tsx";
 import { t } from "./i18n.ts";
 import { UrlInput } from "./url-input.tsx";
 
-// ---------------------------------------------------------------------------
 // Pure helpers (host-neutral, no DOM).
-// ---------------------------------------------------------------------------
 
 function historyDimsLabel(entry: HistoryEntry): string {
   if (
@@ -70,9 +68,7 @@ function historyDateLabel(at: number): string {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Presentational atoms.
-// ---------------------------------------------------------------------------
 
 function Logo() {
   return (
@@ -263,9 +259,7 @@ function resolutionNoticeOf(
   );
 }
 
-// ---------------------------------------------------------------------------
 // Input / history.
-// ---------------------------------------------------------------------------
 
 function HistorySection({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: ViewContext }) {
   const entries = ctx?.history;
@@ -334,9 +328,7 @@ function IdleView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: ViewCont
   );
 }
 
-// ---------------------------------------------------------------------------
 // Live job.
-// ---------------------------------------------------------------------------
 
 interface JobDerived {
   paused: boolean;
@@ -562,9 +554,7 @@ function JobView({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Display-only, completed, failed, cancelled, generic.
-// ---------------------------------------------------------------------------
 
 function DisplayOnlyView({
   callbacks,
@@ -971,9 +961,7 @@ function CancelledView({ callbacks }: { callbacks: ViewCallbacks }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Root renderer.
-// ---------------------------------------------------------------------------
 
 function SharedView({
   presentation,
@@ -1075,9 +1063,7 @@ export function renderView(
   );
 }
 
-// ---------------------------------------------------------------------------
 // Overlays (guidance modal, choosers, consent).
-// ---------------------------------------------------------------------------
 
 function ModalCard({
   id,
@@ -1254,9 +1240,7 @@ function ConfirmDialog({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Guidance dialogs.
-// ---------------------------------------------------------------------------
 
 function detectPlatform(hints?: PlatformHints): { name: string; installer: string } {
   const ua = (hints?.userAgent ?? "").toLowerCase();
