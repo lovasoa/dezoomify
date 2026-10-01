@@ -1,78 +1,39 @@
 # Algorithm
 
-`dezoomify(inputs, options, host)` is the shared async function used by website,
-extension, desktop, and CLI. It awaits injected platform capabilities and returns
-`Result<Output, Error>`. It awaits `host.settle()` before returning.
+`dezoomify(inputs, options, host)` is the shared async function used by website, extension, desktop, and CLI. It awaits injected platform capabilities and returns `Result<Output, Error>`, after awaiting `host.settle()`.
 
 ## Discovery
 
-Discovery receives ordered source, observed-document, and observed-resource
-inputs. It preserves requested URLs, headers, redirected bases, and branch-local
-resource history. Shared resource reads deduplicate equivalent requests and
-apply byte, request, navigation, and traversal budgets across inputs.
+Discovery receives ordered source, observed-document, and observed-resource inputs. It preserves requested URLs, headers, redirected bases, and branch-local resource history. Shared resource reads deduplicate equivalent requests and apply byte, request, navigation, and traversal budgets across inputs.
 
-Source catalogs and format-specific references precede readable observed
-documents, recognized metadata/image addresses, viewer navigation, and opaque
-observations. Registry order breaks equal format matches. Within an evidence
-class, input and document order determine precedence. Failed parents do not
-prune child references. Navigation cycles are bounded.
+Source catalogs and format-specific references precede readable observed documents, recognized metadata/image addresses, viewer navigation, and opaque observations. Registry order breaks equal format matches; within an evidence class, input and document order determine precedence. Failed parents do not prune child references, and navigation cycles are bounded.
 
-Initial reads forbid interaction. A resource that needs access remains deferred
-while accessible alternatives run. When automatic work is exhausted, discovery
-awaits an interactive read of the same resource. Browser permission details stay
-inside the Host.
+Initial reads forbid interaction. A resource that needs access remains deferred while accessible alternatives run; when automatic work is exhausted, discovery awaits an interactive read of the same resource. Browser permission details stay inside the Host.
 
-Accepted catalogs send their format warnings to `host.warn`, once per distinct
-warning in that catalog. Hosts record these as bounded `discovery-warning`
-diagnostics; malformed sibling entries do not prevent using a valid image.
+Accepted catalogs send their format warnings to `host.warn`, once per distinct warning in that catalog. Hosts record these as bounded `discovery-warning` diagnostics; malformed sibling entries do not prevent using a valid image.
 
 ## Selection and planning
 
-Interactive choices are awaited Host calls carrying the actual catalog or image.
-Automatic selection follows the supplied rule. Native selection preserves exact
-zoom, largest, optional width/height caps, image-index clamping, and its fallback
-ordering. Browser selection chooses a ready image and a level fitting canvas
-limits; progress includes maximum and selected dimensions for the UI notice.
+Interactive choices are awaited Host calls carrying the actual catalog or image. Automatic selection follows the supplied rule. Native selection preserves exact zoom, largest, optional width/height caps, image-index clamping, and its fallback ordering. Browser selection chooses a ready image and level fitting canvas limits; progress includes maximum and selected dimensions for the UI notice.
 
-Deferred catalog entries resolve within the invocation with bounded follows and
-cycle detection against chosen source URLs and their redirect destinations. Observed
-resources remain eligible when selected later. Planning retains lazy tile
-generation, validated geometry, processing recipes, and adaptive probing.
-Reusable successful probes count toward the final image and retain their final
-tile order for output metadata selection.
+Deferred catalog entries resolve within the invocation with bounded follows and cycle detection against chosen source URLs and their redirect destinations. Observed resources remain eligible when selected later. Planning retains lazy tile generation, validated geometry, processing recipes, and adaptive probing. Reusable successful probes count toward the final image and retain their final tile order for output metadata selection.
 
 ## Retry and progress
 
-Acquisition bounds complete fetch/process/decode/place operations. A tile retains
-its identity across attempts. Concurrent successes settle before partial output
-is decided. A lazy plan does not allocate every tile URL in advance.
+Acquisition bounds complete fetch/process/decode/place operations. A tile retains its identity across attempts, concurrent successes settle before partial output is decided, and a lazy plan does not allocate every tile URL in advance.
 
-Transient failures retry within the configured budget. Default exponential
-backoff starts at 1 s and caps at 30 s; an observed Retry-After is honored up to
-300 s. Permanent failures, including HTTP 403, settle without retry. The shared
-algorithm asks the Host to sleep and owns retry classification.
+Transient failures retry within the configured budget. Default exponential backoff starts at 1 s and caps at 30 s; an observed Retry-After is honored up to 300 s. Permanent failures, including HTTP 403, settle without retry. The shared algorithm owns retry classification and asks the Host to sleep.
 
-Progress reports the active work and acquired/total counts. Host output failures
-remain output failures, not missing tiles.
+Progress reports the active work and acquired/total counts. Host output failures remain output failures, not missing tiles.
 
 ## Pause and cancellation
 
-Cancellation checkpoints apply to discovery and acquisition. Acquisition
-checkpoints also wait for resume. Pause prevents new tile acquisitions while
-in-flight work settles; discovery and probing remain available. Cancel wakes
-paused work and wins over further scheduling or publication.
+Cancellation checkpoints apply to discovery and acquisition; acquisition checkpoints also wait for resume. Pause prevents new tile acquisitions while in-flight work settles, while discovery and probing remain available. Cancel wakes paused work and wins over further scheduling or publication.
 
-Hosts abort actual operations and await owned decoding and output work during
-cleanup. Late browser completions cannot draw into a replacement image. Native
-cancellation cannot overwrite an existing output file.
+Hosts abort actual operations and await owned decoding and output work during cleanup. Late browser completions cannot draw into a replacement image, and native cancellation cannot overwrite an existing output file.
 
 ## Partial output and save
 
-After every tile settles, missing tiles retain structured failure details.
-Retry resets the budget for missing tiles only and keeps acquired tiles.
-Keep saves a partial result; discard fails with the stable partial-discarded code.
-A job with no usable tiles fails rather than presenting empty partial output.
+After every tile settles, missing tiles retain structured failure details. Retry resets the budget for missing tiles only and keeps acquired tiles. Keep saves a partial result; discard fails with the stable partial-discarded code. A job with no usable tiles fails rather than presenting empty partial output.
 
-The algorithm awaits `host.finish` and returns its actual output disposition:
-native publication, browser save initiated, browser save ready, or display only.
-Ordinary image display never claims readable pixels or a programmatic save.
+The algorithm awaits `host.finish` and returns its actual output disposition: native publication, browser save initiated, browser save ready, or display only. Ordinary image display never claims readable pixels or a programmatic save.

@@ -9,7 +9,6 @@ Source sites, metadata, tiles, handoff payloads, and output names are all untrus
 - The metadata proxy is a restricted fetcher for eligible public, non-credential metadata, never a credential endpoint or tile relay.
 - The extension background accepts requests only from its own authenticated contexts.
 - Native apps reach network and filesystem, so they validate typed input and require user-picked local destinations.
-- Parsers and geometry stay pure; the shared algorithm awaits only injected Host capabilities.
 
 Parsers and decoders cap input, dimensions, tile counts, allocation, recursion, and decompression. URLs normalize before policy checks. Redirects carrying credentials revalidate every hop.
 

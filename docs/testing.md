@@ -1,8 +1,6 @@
 # Testing
 
-Tests are deterministic unless the command says `live`. Shared scenarios in `testdata/scenarios` describe resources, inputs, expected output, and errors. Tests compare requests, choices, pixels, saves, resource limits, and cleanup. Live diagnostics never substitute.
-
-Deterministic suites use fixed fixture bytes, stable ordering, explicit seeds, controlled time, no public DNS or network. Platform-specific deterministic tests and manual release checks supplement that contract, never weaken it. Task grammar: [`crates/xtask/README.md`](../crates/xtask/README.md).
+Tests are deterministic unless the command says `live`. Shared scenarios in `testdata/scenarios` describe resources, inputs, expected output, and errors, and tests compare requests, choices, pixels, saves, resource limits, and cleanup; live diagnostics never substitute. Deterministic suites use fixed fixture bytes, stable ordering, explicit seeds, controlled time, no public DNS or network. Platform-specific deterministic tests and manual release checks supplement that contract, never weaken it. Task grammar: [`crates/xtask/README.md`](../crates/xtask/README.md).
 
 ## Main commands
 
@@ -18,12 +16,7 @@ cargo xtask test all
 
 Node 24.15.0 is the minimum supported Node version. Direct Cargo and pnpm commands are valid for debugging an individual component, but `cargo xtask` remains the unified front door and defines repository coverage.
 
-Bare `cargo xtask test` is the fast aggregate:
-
-1. One `cargo test --workspace` run, quiet Cargo output, terse libtest format.
-2. Help-page generation, then one Node dot-reporter process over website, browser runtime, desktop Node, and pure extension unit suites.
-
-It never runs `check`, generates bindings, builds WXT packages, or launches a browser.
+Bare `cargo xtask test` is the fast aggregate: one `cargo test --workspace` run (quiet Cargo, terse libtest format), then help-page generation and one Node dot-reporter process over website, browser runtime, desktop Node, and pure extension unit suites. It never runs `check`, generates bindings, builds WXT packages, or launches a browser.
 
 `cargo xtask test all` runs the fast aggregate once, then adds the fresh WASM Node harness, website Chromium Playwright E2E, and remaining extension tests needing generated WASM/WXT packages (Chromium plus Firefox headless E2E). It re-invokes no focused aliases, so it repeats neither the fast Rust nor the Node matrix. It excludes public-network tests and the desktop real-window test.
 
@@ -109,7 +102,7 @@ Live checks use no private credentials, bounded counts and rates, and reproducib
 cargo xtask test desktop --e2e-window
 ```
 
-This explicit lane builds current frontend, fixture server, and Tauri shell with its embedded W3C WebDriver server, then verifies real save, cancellation, confirmed handoff, and partial journeys. Excluded from bare `test`, `test all`, and `cargo xtask ci local`. Linux needs `xvfb-run -a`; macOS and Windows use GUI sessions. The path-gated desktop workflow runs it on all three OSes plus bundle smoke.
+This explicit lane builds current frontend, fixture server, and Tauri shell with its embedded W3C WebDriver server, then verifies real save, cancellation, confirmed handoff, and partial journeys. Excluded from bare `test`, `test all`, and `cargo xtask ci local`. Linux needs `xvfb-run -a`; macOS and Windows use GUI sessions. The path-gated desktop workflow runs it on all three OSes plus bundle smoke. Native mechanism: [Native apps](native-apps.md#real-window-e2e-hook).
 
 ## Cross-runtime guarantees
 

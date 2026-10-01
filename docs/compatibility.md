@@ -14,7 +14,7 @@ Deep-link input remains untrusted and needs validation and confirmation before s
 | Desktop app | Windows x86_64, Apple silicon macOS, and Linux x86_64 through the Tauri shell (WebView2 on Windows, WebKit on macOS, webkit2gtk on Linux) | Display-free `cargo xtask test desktop` plus explicit `test desktop --e2e-window`; each installer builds and launches on its matching host |
 | CLI | Native binary (Linux `cli-linux-x86_64` target; the same native runtime as the desktop app) | `cargo xtask test native` plus scenario parity |
 
-Desktop installers ship unsigned (no paid Apple or Azure signing): Linux x86_64, Windows x86_64, Apple silicon macOS (see [Releases](releases.md)). No in-app updates: no update host or key exists, so users check GitHub Releases by hand. User install note: [Desktop app guide](user/desktop-app.md#install).
+Desktop installers ship unsigned and no in-app updates exist (see [Releases](releases.md#desktop-updater)). User install note: [Desktop app guide](user/desktop-app.md#install).
 
 ## Canvas and save limits
 
@@ -28,10 +28,6 @@ This table is canonical; user pages state the user-facing facts and link back.
 
 Encoder side caps add to the memory check: JPEG 65535 px per side max, WebP 16383; larger canvases save as PNG, TIFF, ZIF, or `iiif-dir`. Encoder behavior: [Native apps](native-apps.md#output-naming-and-encoders).
 
-## Ordinary display without readable bytes
-
-Unprocessed ordinary tiles render through plain `<img>` and draw into a canvas even when tainted. The picture stays visible (browser right-click save where available), but the canvas is not origin-clean: no pixel reads, hashing, processing, `toBlob`, or `toDataURL`, and no promised programmatic save. The website says so before rendering and points at the extension or desktop app when the job needs processing or a clean save. Full behavior: [Browser runtime](browser-runtime.md#ordinary-image-display).
-
 ## Format support
 
 One shared domain crate (`crates/dezoomify`): every app recognizes the same formats in the same precedence order, automatically. Apps differ in reach (auth), saving (tainted display vs clean bytes), and bulk (below). Paste guide: [Supported formats](user/supported-formats.md); no matrix duplicated here.
@@ -44,7 +40,7 @@ One shared domain crate (`crates/dezoomify`): every app recognizes the same form
 
 ### Tainted canvas
 
-Browser apps show tainted tiles but save nothing clean from them (above). The extension assembles on an origin-clean canvas under its fetch grant, so its saves are clean. Native apps decode bytes directly; no taint exists.
+Browser apps show tainted tiles but save nothing clean from them ([Browser runtime](browser-runtime.md#ordinary-image-display)). The extension assembles on an origin-clean canvas under its fetch grant, so its saves are clean. Native apps decode bytes directly; no taint exists.
 
 ### Bulk
 
