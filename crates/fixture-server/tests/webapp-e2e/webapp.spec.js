@@ -4,70 +4,15 @@
 const { test, expect } = require("@playwright/test");
 const fs = require("node:fs");
 const path = require("node:path");
-const zlib = require("node:zlib");
 const assert = require("node:assert/strict");
+const {
+  assertSavedPyramid,
+  decodePngPixels,
+  decodePngSize,
+  pixelAt,
+} = require("../../../../test/support/png.mjs");
 
 const ADDR = process.env.DEZOOMIFY_E2E_ADDR;
-
-function decodePngSize(bytes) {
-  assert.equal(bytes.readUInt32BE(0), 0x89504e47 >>> 0, "PNG signature");
-  const width = bytes.readUInt32BE(16);
-  const height = bytes.readUInt32BE(20);
-  return { width, height };
-}
-
-// Inflates the concatenated IDAT stream of a small RGB PNG and returns rows.
-function decodePngPixels(bytes) {
-  const idat = [];
-  let offset = 8;
-  while (offset < bytes.length) {
-    const length = bytes.readUInt32BE(offset);
-    const type = bytes.toString("ascii", offset + 4, offset + 8);
-    if (type === "IDAT") {
-      idat.push(bytes.subarray(offset + 8, offset + 8 + length));
-    }
-    offset += 12 + length;
-  }
-  const raw = zlib.inflateSync(Buffer.concat(idat));
-  const width = bytes.readUInt32BE(16);
-  const height = bytes.readUInt32BE(20);
-  // Canvas PNGs are RGBA (color type 6); fixtures are RGB (type 2).
-  // One filter byte per row. Reverse every standard PNG row filter.
-  const colorType = bytes[25];
-  assert.ok(colorType === 2 || colorType === 6, `unsupported color type ${colorType}`);
-  const bpp = colorType === 6 ? 4 : 3;
-  const stride = width * bpp + 1;
-  const pixels = Buffer.alloc(width * height * bpp);
-  for (let y = 0; y < height; y += 1) {
-    const filter = raw[y * stride];
-    const row = raw.subarray(y * stride + 1, (y + 1) * stride);
-    const out = pixels.subarray(y * width * bpp, (y + 1) * width * bpp);
-    for (let x = 0; x < row.length; x += 1) {
-      const a = x >= bpp ? out[x - bpp] : 0;
-      const b = y > 0 ? pixels[(y - 1) * width * bpp + x] : 0;
-      const c = x >= bpp && y > 0 ? pixels[(y - 1) * width * bpp + x - bpp] : 0;
-      const v = row[x];
-      let value;
-      switch (filter) {
-        case 0: value = v; break;
-        case 1: value = v + a; break;
-        case 2: value = v + b; break;
-        case 3: value = v + Math.floor((a + b) / 2); break;
-        case 4: {
-          const p = a + b - c;
-          const pa = Math.abs(p - a);
-          const pb = Math.abs(p - b);
-          const pc = Math.abs(p - c);
-          value = v + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c);
-          break;
-        }
-        default: throw new Error(`unknown PNG row filter ${filter}`);
-      }
-      out[x] = value & 0xff;
-    }
-  }
-  return { pixels, width, height, bpp };
-}
 
 test("webapp discovers, downloads, assembles, and saves a real DZI pyramid", async ({ page }) => {
   // Hold tile responses long enough to observe the acquisition state. The
@@ -135,19 +80,7 @@ test("webapp discovers, downloads, assembles, and saves a real DZI pyramid", asy
   const target = path.join(tmp, `saved-${Date.now()}.png`);
   await download.saveAs(target);
   const bytes = fs.readFileSync(target);
-  const { width, height } = decodePngSize(bytes);
-  assert.equal(width, 512, "saved image width");
-  assert.equal(height, 512, "saved image height");
-
-  const { pixels, bpp } = decodePngPixels(bytes);
-  const at = (x, y) => {
-    const o = (y * width + x) * bpp;
-    return [pixels[o], pixels[o + 1], pixels[o + 2]];
-  };
-  assert.deepEqual(at(64, 64), [196, 48, 48], "top-left quadrant red");
-  assert.deepEqual(at(448, 64), [48, 168, 64], "top-right quadrant green");
-  assert.deepEqual(at(64, 448), [48, 72, 200], "bottom-left quadrant blue");
-  assert.deepEqual(at(448, 448), [232, 220, 96], "bottom-right quadrant yellow");
+  assertSavedPyramid(bytes);
 
   // website/direct-success: one direct metadata attempt, zero metadata
   // proxy requests, and an origin-clean save. (`tilePolicy` and `transport`
@@ -267,13 +200,9 @@ test("webapp downloads a Google Arts & Culture image through the metadata proxy"
   // tile into the planned extent would pull black padding into these sampled
   // output pixels. Two tiles also pin concurrent downloads plus serialized
   // worker-side decrypt processing.
-  const { pixels } = decodePngPixels(bytes);
-  const at = (x, y) => {
-    const o = (y * width + x) * 4;
-    return [pixels[o], pixels[o + 1], pixels[o + 2], pixels[o + 3]];
-  };
+  const decoded = decodePngPixels(bytes);
   for (const [x, y] of [[0, 0], [63, 0], [64, 32], [99, 49], [0, 49], [99, 0]]) {
-    assert.deepEqual(at(x, y), [200, 48, 48, 255], `solid tile color at ${x},${y}`);
+    assert.deepEqual(pixelAt(decoded, x, y), [200, 48, 48, 255], `solid tile color at ${x},${y}`);
   }
   assert.ok(
     proxyTargets.includes(ARTS_PAGE_URL),

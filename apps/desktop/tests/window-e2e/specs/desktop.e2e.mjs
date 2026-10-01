@@ -8,6 +8,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { after, afterEach, before, describe, it } from "node:test";
 import { Builder, By } from "selenium-webdriver";
+import { assertSavedPyramid } from "../../../../../test/support/png.mjs";
 import {
   closeFrontendServer,
   createRunDirs,
@@ -25,7 +26,6 @@ import {
   stopWindowApp,
   WEBDRIVER_URL,
 } from "../harness.mjs";
-import { assertSavedPyramid } from "../png-assert.mjs";
 
 const GATEWAY_DZI = "https://fixtures.test/cli/pyramid.dzi";
 // Two tiles answer 429 with Retry-After, so the job stays running through
