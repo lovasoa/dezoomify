@@ -44,12 +44,10 @@ fn handle_html(resource: DiscoveryResource<'_>) -> Result<ParsedResource, Discov
         return handle_viewer_js(resource);
     }
     let html = resource.text_lossy();
-    let xml_reference =
-        extract_xml_from_query(resource.final_uri()).or_else(|| extract_xml_from_embedpano(&html));
-    let xml_uri = xml_reference.map_or_else(
-        || sibling_uri(resource.final_uri(), "tour.xml"),
-        |reference| resolve_relative(resource.final_uri(), &reference),
-    );
+    let xml_uri = extract_xml_from_query(resource.final_uri())
+        .map(|reference| resolve_relative(resource.final_uri(), &reference))
+        .or_else(|| extract_xml_from_embedpano(&html, resource.final_uri()))
+        .unwrap_or_else(|| sibling_uri(resource.final_uri(), "tour.xml"));
     Ok(ParsedResource::Follow(Request::new(xml_uri)))
 }
 
@@ -220,14 +218,17 @@ fn looks_like_viewer_js(contents: &[u8]) -> bool {
 fn extract_js_candidates_from_html(html: &str, html_uri: &str) -> Vec<String> {
     let mut candidates = Vec::new();
     let mut seen = HashSet::new();
-    for (index, tag) in SCRIPT_TAG_RE.find_iter(html).enumerate() {
-        let Some(src) = extract_src_attr(tag.as_str()) else {
+    for (index, script) in crate::web_page::scripts(html, html_uri)
+        .into_iter()
+        .enumerate()
+    {
+        let Some(src) = script.source else {
             continue;
         };
         if !is_javascript_src(&src) {
             continue;
         }
-        let uri = resolve_relative(html_uri, &src);
+        let uri = resolve_relative(&script.fetch_base, &src);
         if seen.insert(uri.clone()) {
             candidates.push(ScriptCandidate {
                 uri,
@@ -248,16 +249,24 @@ fn extract_js_candidates_from_html(html: &str, html_uri: &str) -> Vec<String> {
         .collect()
 }
 
-fn extract_xml_from_embedpano(html: &str) -> Option<String> {
-    let start = html
-        .find("embedpano(")
-        .or_else(|| html.find("createPanoViewer("))?;
-    let body = &html[start..];
-    let end = EMBEDPANO_END_RE.find(body)?;
-    let params = &body[..end.end()];
-    EMBEDPANO_XML_RE
-        .captures(params)
-        .map(|captures| captures[1].to_owned())
+fn extract_xml_from_embedpano(html: &str, uri: &str) -> Option<String> {
+    crate::web_page::scripts(html, uri)
+        .into_iter()
+        .filter(|script| script.source.is_none())
+        .map(|script| (script.body.to_owned(), script.base))
+        .chain(
+            crate::web_page::load_handlers(html, uri)
+                .into_iter()
+                .map(|script| (script.body, script.base)),
+        )
+        .find_map(|(script, base)| {
+            let source = crate::javascript::mask(&script);
+            crate::javascript::captures(&EMBEDPANO_RE, &source).find_map(|call| {
+                let body = crate::javascript::body_at(&source, call.get(0)?.end())?;
+                crate::javascript::property(body, "xml")
+                    .map(|reference| resolve_relative(&base, &reference))
+            })
+        })
 }
 
 fn extract_xml_from_query(uri: &str) -> Option<String> {
@@ -265,15 +274,6 @@ fn extract_xml_from_query(uri: &str) -> Option<String> {
         .ok()?
         .query_pairs()
         .find_map(|(name, value)| (name == "xml" && !value.is_empty()).then(|| value.into_owned()))
-}
-
-fn extract_src_attr(tag: &str) -> Option<String> {
-    let captures = SCRIPT_SRC_RE.captures(tag)?;
-    captures
-        .get(1)
-        .or_else(|| captures.get(2))
-        .or_else(|| captures.get(3))
-        .map(|capture| capture.as_str().to_owned())
 }
 
 fn extract_viewer_js(contents: &[u8]) -> Option<Vec<u8>> {
@@ -327,16 +327,9 @@ struct ScriptCandidate {
     index: usize,
 }
 
-static SCRIPT_TAG_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<script\b[^>]*>").expect("constant script tag regex"));
-static SCRIPT_SRC_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?is)(?:^|[\s<])src\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+))"#)
-        .expect("constant script source regex")
-});
-static EMBEDPANO_END_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\}\s*\)").expect("constant embed closing regex"));
-static EMBEDPANO_XML_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"\bxml[\"']?\s*:\s*[\"']([^\"']+)[\"']"#).expect("constant embed XML regex")
+static EMBEDPANO_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(?:window\.)?(?:embedpano|createPanoViewer)\s*\(\s*\{")
+        .expect("constant embed pattern")
 });
 
 fn is_javascript_src(src: &str) -> bool {
@@ -839,21 +832,6 @@ mod tests {
     }
 
     #[test]
-    fn extract_xml_from_embedpano_tolerates_whitespace() {
-        for html in [
-            r#"<script>embedpano({ xml : "panos/tour.xml", target:"pano" });</script>"#,
-            r#"embedpano({ "xml": "panos/tour.xml" });"#,
-            r#"<script>createPanoViewer({ xml: "panos/tour.xml" });</script>"#,
-            "embedpano({\n xml: \"panos/tour.xml\"\n}\n);",
-        ] {
-            assert_eq!(
-                extract_xml_from_embedpano(html),
-                Some("panos/tour.xml".into())
-            );
-        }
-    }
-
-    #[test]
     fn query_xml_overrides_the_viewer_default() {
         assert_eq!(
             extract_xml_from_query(
@@ -872,7 +850,8 @@ mod tests {
         let cases: &[(&str, &[u8], &str)] = &[
             ("https://example.com/viewer/krpano.html?xml=examples/tour.xml", br#"<html><script src="krpano.js"></script><script>embedpano({xml:"krpano.xml", passQueryParameters:"xml"});</script></html>"#, "https://example.com/viewer/examples/tour.xml"),
             ("https://example.com/krpano.js", b"function embedpano(opts) { /* krpano viewer */ }", "https://example.com/tour.xml"),
-            ("https://example.com/pano/index.html", br#"<html><script>function embedpano(opts) { return opts; } embedpano({xml: "scenes/custom.xml", target: "pano"});</script></html>"#, "https://example.com/pano/scenes/custom.xml"),
+            ("https://example.com/pano/index.html", br#"<base href='../viewer/'><body onload="embedpano({xml:'scenes/custom.xml'})">"#, "https://example.com/viewer/scenes/custom.xml"),
+            ("https://example.com/pano/index.html", br#"<body onclick="embedpano({xml:'wrong.xml'})"><script>createPanoViewer({ xml : 'scenes/custom.xml' });</script>"#, "https://example.com/pano/scenes/custom.xml"),
             ("https://example.com/viewer.js", b"function createPanoViewer(opts) { return buildViewer(opts); }", "https://example.com/tour.xml"),
         ];
         for (input, page, next) in cases {

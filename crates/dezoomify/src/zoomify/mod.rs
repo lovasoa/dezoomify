@@ -92,11 +92,6 @@ where
 /// At most this many inline sources become catalog entries.
 const MAX_INLINE_SERVICES: usize = 8;
 
-static SCRIPT_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r"(?is)<script\b[^>]*>(?P<content>.*?)</script\s*>")
-        .expect("constant script block pattern")
-});
-
 static HTML_BASE_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(r#"(?is)<base\s+[^>]*\bhref\s*=\s*["'](?P<base>[^"']*)"#)
         .expect("constant HTML base pattern")
@@ -426,11 +421,11 @@ fn extract_image_path(html: &[u8]) -> Option<String> {
 /// Tile-service configurations are only meaningful inside script code;
 /// matching outside would pick up documentation snippets.
 fn script_blocks(html: &[u8]) -> Vec<(usize, &[u8])> {
-    SCRIPT_RE
-        .captures_iter(html)
-        .filter_map(|captures| {
-            let content = captures.name("content")?;
-            Some((content.start(), content.as_bytes()))
+    crate::web_page::script_bodies(html)
+        .into_iter()
+        .map(|body| {
+            let offset = body.as_ptr() as usize - html.as_ptr() as usize;
+            (offset, body)
         })
         .collect()
 }
@@ -771,7 +766,7 @@ mod tests {
     #[test]
     fn inline_service_accepts_string_dimensions_and_any_case() {
         let services: Vec<InlineService> = inline_tile_services(
-            br#"<script>var c = {type: 'ZoomifyTileService', width: "1024",
+            br#"Server warning <script type="application/json">{type: 'ZoomifyTileService', width: "1024",
                 height: '768', tilesUrl: "/z/", tileSize: "64",};</script>"#,
             "https://example.com/page",
             "",

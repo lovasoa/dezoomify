@@ -101,9 +101,9 @@ test("methods and content types", () => {
   assert.equal(validateUpstreamMethod("HEAD"), true);
   assert.equal(validateUpstreamMethod("POST"), false);
   assert.equal(validateUpstreamMethod("PUT"), false);
-  assert.equal(isAllowedMetadataContentType("application/json"), true);
-  assert.equal(isAllowedMetadataContentType("application/json; charset=utf-8"), true);
-  assert.equal(isAllowedMetadataContentType("text/xml"), true);
+  assert.equal(isAllowedMetadataContentType("application/x-javascript"), true);
+  assert.equal(isAllowedMetadataContentType("application/ecmascript; charset=utf-8"), true);
+  assert.equal(isAllowedMetadataContentType("TEXT/JAVASCRIPT; charset=UTF-8"), true);
   assert.equal(isAllowedMetadataContentType("image/png"), false);
   assert.equal(isAllowedMetadataContentType("image/jpeg"), false);
   assert.equal(isAllowedMetadataContentType(null), false);
@@ -136,7 +136,7 @@ test("relay: valid public metadata succeeds; tiles rejected by content-type", as
   const okDeps = {
     fetchUpstream: async () => ({
       status: 200,
-      headers: hdr({ "content-type": "application/json", "content-length": "10" }),
+      headers: hdr({ "content-type": "text/javascript", "content-length": "10" }),
       async arrayBuffer() {
         return new Uint8Array([1, 2]).buffer;
       },
@@ -144,7 +144,7 @@ test("relay: valid public metadata succeeds; tiles rejected by content-type", as
     websiteOrigin: "https://site.test",
   };
   const ok = await handleProxyRequest(
-    { method: "POST", targetUrl: "https://public.test/x.json", protocolVersion: 1 },
+    { method: "POST", targetUrl: "https://public.test/config.js", protocolVersion: 1 },
     okDeps,
   );
   assert.equal(ok.status, 200);

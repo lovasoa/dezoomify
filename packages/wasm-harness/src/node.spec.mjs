@@ -1,6 +1,7 @@
 // Executes the fresh wasm-bindgen module against injected asynchronous capabilities.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { test } from "node:test";
@@ -87,6 +88,53 @@ test("async Host reads binary metadata and saves the full selected image", async
   assert.equal(platform.observed.settled, 1);
   assert.ok(platform.observed.reads.every((request) => request.uri === url));
   assert.ok(platform.observed.progress.some((progress) => progress.completed === 4));
+});
+
+test("FreezoomPack WASM plans match the native/browser fixture golden", async () => {
+  const scenario = path.join(root, "testdata/scenarios/formats/fzp");
+  const expected = JSON.parse(readFileSync(path.join(scenario, "expected/result.json"), "utf8"));
+  for (const [profile, levels] of Object.entries(expected)) {
+    for (const [position, golden] of levels.entries()) {
+      const source = `https://fixtures.test/fzp/resources/${profile}/root.xml`;
+      const bytes = readFileSync(
+        path.join(scenario, `payloads/127.0.0.1/fzp/resources/${profile}/root.xml`),
+      );
+      const platform = host({
+        async fetch(request) {
+          platform.observed.reads.push(request);
+          assert.equal(request.uri, source);
+          assert.equal(request.purpose, "metadata");
+          return { kind: "response", response: { bytes, final_uri: source } };
+        },
+      });
+      const output = await wasm.dezoomify(
+        [{ url: source }],
+        {
+          ...options,
+          selection: {
+            kind: "automatic",
+            image_index: 0,
+            largest: false,
+            zoom_level: levels.length - 1 - position,
+          },
+        },
+        platform,
+      );
+      assert.deepEqual(output.canvas, { width: golden.width, height: golden.height });
+      assert.deepEqual(output.missing, []);
+      const tiles = platform.observed.tiles.sort((a, b) => a.index - b.index);
+      assert.deepEqual(
+        tiles.map((tile) => new URL(tile.request.uri).pathname),
+        golden.requests,
+      );
+      for (const tile of tiles) {
+        assert.equal(tile.request.purpose, "tile");
+        assert.equal(tile.placement.processing, "none");
+        assert.ok(tile.placement.expected_size.width > 0);
+        assert.ok(tile.placement.expected_size.height > 0);
+      }
+    }
+  }
 });
 
 test("structured Host rejection retains request facts", async () => {

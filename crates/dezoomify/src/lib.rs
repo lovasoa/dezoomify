@@ -17,6 +17,7 @@ pub mod core;
 pub mod custom_yaml;
 pub mod dzi;
 pub mod fsi;
+pub mod fzp;
 pub mod generic;
 pub mod google_arts_and_culture;
 pub mod hungaricana;
@@ -42,6 +43,7 @@ mod run;
 pub use host::Host;
 pub use run::dezoomify;
 
+mod javascript;
 mod json_utils;
 mod markup;
 mod template;

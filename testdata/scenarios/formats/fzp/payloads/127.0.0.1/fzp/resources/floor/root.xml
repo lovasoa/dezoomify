@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pal><self role="root" nest="floor" name="root"><title>Floor &amp; edges</title></self><content><image service="FZP" url="." src="floor" x="0" y="0" width="9" height="7" tilewidth="4" tileheight="4" min="0" max="1"/></content></pal>
