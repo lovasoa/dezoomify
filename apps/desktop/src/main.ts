@@ -174,7 +174,7 @@ function isTerminalNow(): boolean {
 
 function activity(): NonNullable<ViewContext["jobActivity"]> {
   if (!currentAttempt.viewCtx.jobActivity)
-    currentAttempt.viewCtx.jobActivity = { timeoutMs: REQUEST_TIMEOUT_MS };
+    currentAttempt.viewCtx.jobActivity = { now: Date.now(), timeoutMs: REQUEST_TIMEOUT_MS };
   return currentAttempt.viewCtx.jobActivity as NonNullable<ViewContext["jobActivity"]>;
 }
 

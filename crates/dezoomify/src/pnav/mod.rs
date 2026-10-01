@@ -151,7 +151,7 @@ impl PnavSource {
             destination: Vec2d::default(),
             expected_size: None,
             processing: crate::core::ProcessingRecipe::None,
-            role: TileRole::ProbeAndOutput,
+            role: TileRole::probe_and_output(),
         };
         let result = crate::run::probe(host, tile, &mut remaining_probes).await?;
         Ok(self.geometry(result)?)

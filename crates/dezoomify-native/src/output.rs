@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use dezoomify::model::{Error, ErrorPhase, LimitContext, LimitReason, OutputFormat, Size};
+use dezoomify::model::{Error, ErrorCode, ErrorPhase, LimitContext, OutputFormat};
 
 /// One rendered `iiif-dir` tile set: `(relative path, bytes)` pairs in
 /// sorted relative-path order.
@@ -185,10 +185,10 @@ pub fn write_iiif_dir(dir: &Path, info_json: &[u8], tiles: &IiifTiles) -> Result
     // directory path is replaced before the tile tree is written.
     if dir.is_file() {
         std::fs::remove_file(dir)
-            .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed("output write failed", &e))?;
     }
     std::fs::create_dir_all(dir)
-        .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+        .map_err(|e| crate::output::write_failed("output write failed", &e))?;
     for (relative, bytes) in tiles {
         if relative.contains("..") || relative.contains('\\') || Path::new(relative).is_absolute() {
             return Err(crate::output::destination_denied(
@@ -198,57 +198,60 @@ pub fn write_iiif_dir(dir: &Path, info_json: &[u8], tiles: &IiifTiles) -> Result
         let dest = dir.join(relative);
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+                .map_err(|e| crate::output::write_failed("output write failed", &e))?;
         }
         let tmp = dest.with_extension("tmp");
         std::fs::write(&tmp, bytes)
-            .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed("output write failed", &e))?;
         std::fs::rename(&tmp, &dest)
-            .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed("output write failed", &e))?;
     }
     let manifest = dir.join("info.json");
     let tmp = manifest.with_extension("tmp");
     std::fs::write(&tmp, info_json)
-        .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+        .map_err(|e| crate::output::write_failed("output write failed", &e))?;
     std::fs::rename(&tmp, &manifest)
-        .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+        .map_err(|e| crate::output::write_failed("output write failed", &e))?;
     Ok(())
 }
 
 /// A memory-budget refusal with structured facts for host copy; `message`
 /// prose is presentation only and never a data channel.
-pub(crate) fn memory_limit(
-    message: String,
-    dimensions: Option<Size>,
-    bytes_required: Option<u64>,
-    bytes_available: Option<u64>,
-) -> Error {
-    Error::new("output.canvas-limit", ErrorPhase::Output, message).with_limit(LimitContext {
-        reason: LimitReason::Memory,
-        dimensions,
-        bytes_required,
-        bytes_available,
-    })
+pub(crate) fn memory_limit(message: String, limit: LimitContext) -> Error {
+    Error::new(ErrorCode::OutputCanvasLimit, ErrorPhase::Output, message).with_limit(limit)
 }
 
 fn output_exists() -> Error {
     Error::new(
-        "output.exists",
+        ErrorCode::OutputExists,
         ErrorPhase::Output,
         "output exists (refusing overwrite); choose a different destination or confirm overwrite",
     )
 }
 
 fn destination_denied(detail: impl Into<String>) -> Error {
-    Error::new("output.destination-denied", ErrorPhase::Output, detail)
+    Error::new(
+        ErrorCode::OutputDestinationDenied,
+        ErrorPhase::Output,
+        detail,
+    )
 }
 
 fn unsupported_extension(detail: impl Into<String>) -> Error {
-    Error::new("output.unsupported-extension", ErrorPhase::Output, detail)
+    Error::new(
+        ErrorCode::OutputUnsupportedExtension,
+        ErrorPhase::Output,
+        detail,
+    )
 }
 
-pub(crate) fn write_failed(detail: impl Into<String>) -> Error {
-    Error::new("output.write-failed", ErrorPhase::Output, detail)
+/// Output write failure with the cause chain preserved in `detail`.
+pub(crate) fn write_failed(
+    message: impl Into<String>,
+    cause: &(dyn std::error::Error + 'static),
+) -> Error {
+    Error::new(ErrorCode::OutputWriteFailed, ErrorPhase::Output, message)
+        .with_detail(dezoomify::model::chain_text(cause))
 }
 
 #[cfg(test)]

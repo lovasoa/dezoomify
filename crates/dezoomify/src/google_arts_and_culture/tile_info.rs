@@ -35,25 +35,38 @@ pub struct PageInfo {
     path: String,
 }
 
-impl PageInfo {
-    /// Build a page record, rejecting base URLs without the path segment the
-    /// signing scheme requires (`ci/xxx` in `https://host/ci/xxx`). Parsing
-    /// once here keeps [`Self::path`] total on server-controlled URLs.
-    pub fn new(base_url: String, token: String, name: String) -> Result<Self, PageParseError> {
-        // The base url is something like "https://lh3.googleusercontent.com/ci/xxx",
-        // and we need to extract the "ci/xxx" part.
-        let path = base_url
+/// Parsed page identity, grouped so construction never mixes bare strings.
+/// [`PageInfo`] validates and derives the signing path from it.
+pub struct PageInfoParts {
+    pub base_url: String,
+    pub token: String,
+    pub name: String,
+}
+
+impl TryFrom<PageInfoParts> for PageInfo {
+    type Error = PageParseError;
+
+    fn try_from(parts: PageInfoParts) -> Result<Self, Self::Error> {
+        // The base url is something like
+        // "https://lh3.googleusercontent.com/ci/xxx", and we need to
+        // extract the "ci/xxx" part. Parsing once here keeps
+        // [`Self::path`] total on server-controlled URLs.
+        let path = parts
+            .base_url
             .splitn(4, '/')
             .nth(3)
             .ok_or(PageParseError::MalformedBase)?
             .to_string();
         Ok(Self {
-            base_url,
-            token,
-            name,
+            base_url: parts.base_url,
+            token: parts.token,
+            name: parts.name,
             path,
         })
     }
+}
+
+impl PageInfo {
     pub fn tile_info_url(&self) -> String {
         self.base_url.clone() + "=g"
     }
@@ -101,7 +114,11 @@ impl FromStr for PageInfo {
 
         let name = get_name_from_gap_html(s);
 
-        PageInfo::new(base_url, token, name)
+        PageInfo::try_from(PageInfoParts {
+            base_url,
+            token,
+            name,
+        })
     }
 }
 

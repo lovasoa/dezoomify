@@ -2,6 +2,7 @@
 //! stderr = human progress. Never mixed.
 
 use dezoomify::model::DiagnosticLevel;
+use dezoomify::model::ErrorCode;
 use dezoomify_native::diagnostics::Diagnostics;
 use std::collections::BTreeMap;
 
@@ -196,29 +197,30 @@ pub fn show_progress(level: &str) -> bool {
     log_level_rank(level) >= 2
 }
 
-/// Stable codes printed by the command-line interface.
-pub fn error_code(code: &str) -> &str {
+/// Stable codes printed by the command-line interface. The published
+/// strings are presentation labels mapped from the typed domain codes.
+#[must_use]
+pub fn error_code(code: ErrorCode) -> &'static str {
     match code {
-        "job.invalid-input"
-        | "job.discovery-failed"
-        | "job.catalog-invalid"
-        | "job.empty-resource" => "discovery.failed",
-        "job.no-images" => "discovery.no-image",
-        "job.unknown-format" => "discovery.unknown-format",
-        "job.resource-limit" => "tile.limit",
-        "job.deferred-limit" => "discovery.deferred",
-        "job.plan-invalid" => "discovery.tile-plan",
-        "job.plan-empty" => "discovery.no-level",
-        "job.partial-discarded" | "job.no-usable-tiles" => "tile.download-failed",
-        "TRANSPORT_TIMEOUT" => "transport.timeout",
-        "TRANSPORT_NETWORK_ERROR" => "transport.network-error",
-        "TRANSPORT_SIZE_LIMIT" => "transport.size-limit",
-        "TRANSPORT_BAD_URL" => "transport.bad-url",
-        "TRANSPORT_BAD_REDIRECT" => "transport.bad-redirect",
-        "TRANSPORT_REDIRECT_LIMIT" => "transport.redirect-limit",
-        "TRANSPORT_HTTP_ERROR" => "tile.http-error",
-        "TILE_DECODE_FAILED" => "tile.decode-failed",
-        code => code,
+        ErrorCode::JobInvalidInput
+        | ErrorCode::JobDiscoveryFailed
+        | ErrorCode::JobEmptyResource => "discovery.failed",
+        ErrorCode::JobNoImages => "discovery.no-image",
+        ErrorCode::JobUnknownFormat => "discovery.unknown-format",
+        ErrorCode::JobResourceLimit => "tile.limit",
+        ErrorCode::JobDeferredLimit => "discovery.deferred",
+        ErrorCode::JobPlanInvalid => "discovery.tile-plan",
+        ErrorCode::JobPlanEmpty => "discovery.no-level",
+        ErrorCode::JobPartialDiscarded | ErrorCode::JobNoUsableTiles => "tile.download-failed",
+        ErrorCode::TransportTimeout => "transport.timeout",
+        ErrorCode::TransportNetworkError => "transport.network-error",
+        ErrorCode::TransportSizeLimit => "transport.size-limit",
+        ErrorCode::TransportBadUrl => "transport.bad-url",
+        ErrorCode::TransportBadRedirect => "transport.bad-redirect",
+        ErrorCode::TransportRedirectLimit => "transport.redirect-limit",
+        ErrorCode::TransportHttpError => "tile.http-error",
+        ErrorCode::TileDecodeFailed => "tile.decode-failed",
+        code => code.as_str(),
     }
 }
 
@@ -229,11 +231,11 @@ mod tests {
     #[test]
     fn failure_codes_match_the_published_scenario_results() {
         for (scenario, code) in [
-            ("cli-corrupt-tile", "job.partial-discarded"),
-            ("cli-tile-failure", "job.partial-discarded"),
-            ("cli-deferred-limit", "job.deferred-limit"),
-            ("cli-destination-denied", "output.exists"),
-            ("cli-cancel", "job.cancelled"),
+            ("cli-corrupt-tile", ErrorCode::JobPartialDiscarded),
+            ("cli-tile-failure", ErrorCode::JobPartialDiscarded),
+            ("cli-deferred-limit", ErrorCode::JobDeferredLimit),
+            ("cli-destination-denied", ErrorCode::OutputExists),
+            ("cli-cancel", ErrorCode::JobCancelled),
         ] {
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../testdata/scenarios/native")

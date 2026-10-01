@@ -10,7 +10,7 @@ use regex::bytes::Regex as BytesRegex;
 use super::model::{CatalogPlan, DiscoveryCatalog, ImagePlan, Request};
 use super::tile_plan::TileSourceError;
 use super::uri::resolve_relative;
-use crate::model::{DiscoveryInputKind, Error};
+use crate::model::{DiscoveryInputKind, Error, ErrorCode};
 
 /// User source or host observation supplied to the shared discovery search.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -475,6 +475,10 @@ pub enum RejectionKind {
     /// The candidate recognized the resource but its metadata was invalid
     /// or unparseable.
     InvalidMetadata,
+    /// The candidate parsed the metadata successfully, but the document
+    /// declares no image (for example a zero-sized DZI). Distinct from
+    /// [`Self::InvalidMetadata`]: the document is readable, it is empty.
+    NoImage,
     /// A resource the candidate needed could not be fetched.
     FetchFailed,
     /// The candidate stopped for another reason (resource or traversal
@@ -588,7 +592,7 @@ pub fn diagnostic_bullets(diagnostics: &[CandidateDiagnostic]) -> Vec<String> {
 fn describe_fetch(error: &Error) -> String {
     let status = error
         .http
-        .map_or_else(|| error.code.clone(), |http| format!("HTTP {http}"));
+        .map_or_else(|| error.code.to_string(), |http| format!("HTTP {http}"));
     match error.blocked_reason {
         Some(reason) => format!("{status} fetching this address, reason={}", reason.as_str()),
         None => format!("{status} fetching this address"),
@@ -766,7 +770,7 @@ where
                             .filter(|total| *total <= limit)
                             .ok_or_else(|| {
                                 crate::model::Error::new(
-                                    "job.resource-limit",
+                                    ErrorCode::JobResourceLimit,
                                     crate::model::ErrorPhase::Discovery,
                                     "discovery metadata size limit exceeded",
                                 )
@@ -849,10 +853,8 @@ where
                     response: Some(response),
                 },
                 Err(DiscoveryError::Host(error))
-                    if error.code == "job.cancelled"
-                        || error.code == "TRANSPORT_CANCELLED"
-                        || error.code == "job.resource-limit"
-                        || error.code.starts_with("binding.") =>
+                    if crate::retry::is_terminal_failure(error.code)
+                        || error.code == ErrorCode::JobResourceLimit =>
                 {
                     return Err(DiscoveryError::Host(error));
                 }
@@ -1119,7 +1121,7 @@ mod tests {
     fn diagnostics_group_by_typed_cause_and_collapse_url_misses() {
         let http_cause = |status: u16| {
             let mut error = Error::new(
-                "TRANSPORT_HTTP_ERROR",
+                ErrorCode::TransportHttpError,
                 crate::model::ErrorPhase::Discovery,
                 "forbidden",
             )
@@ -1190,49 +1192,49 @@ mod tests {
         use crate::model::{BlockedReason, ErrorPhase, ErrorTransport};
         let causes = [
             (
-                "TRANSPORT_HTTP_ERROR",
+                ErrorCode::TransportHttpError,
                 Some(403),
                 ErrorTransport::Direct,
                 None,
             ),
             (
-                "TRANSPORT_HTTP_ERROR",
+                ErrorCode::TransportHttpError,
                 Some(404),
                 ErrorTransport::Direct,
                 None,
             ),
             (
-                "TRANSPORT_HTTP_ERROR",
+                ErrorCode::TransportHttpError,
                 Some(403),
                 ErrorTransport::MetadataProxy,
                 None,
             ),
             (
-                "TRANSPORT_HTTP_ERROR",
+                ErrorCode::TransportHttpError,
                 Some(403),
                 ErrorTransport::Native,
                 None,
             ),
             (
-                "TRANSPORT_HTTP_ERROR",
+                ErrorCode::TransportHttpError,
                 Some(403),
                 ErrorTransport::DisplayOnly,
                 None,
             ),
             (
-                "TRANSPORT_POLICY_DENIED",
+                ErrorCode::TransportPolicyDenied,
                 None,
                 ErrorTransport::MetadataProxy,
                 Some(BlockedReason::SignedQuery),
             ),
             (
-                "TRANSPORT_POLICY_DENIED",
+                ErrorCode::TransportPolicyDenied,
                 None,
                 ErrorTransport::MetadataProxy,
                 Some(BlockedReason::PrivateHost),
             ),
             (
-                "extension.network",
+                ErrorCode::TransportNetworkError,
                 None,
                 ErrorTransport::BrowserSession,
                 None,
@@ -1263,7 +1265,7 @@ mod tests {
         assert!(
             rendered
                 .iter()
-                .any(|line| line.contains("extension.network fetching this address"))
+                .any(|line| line.contains("TRANSPORT_NETWORK_ERROR fetching this address"))
         );
         let mut different_text = diagnostics[0].clone();
         different_text.cause.as_mut().unwrap().message = "another format's explanation".into();

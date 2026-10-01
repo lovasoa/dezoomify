@@ -170,7 +170,7 @@ y_template: y
         let first = &tiles[0];
         let last = &tiles[3];
         assert_eq!(first.ordinal, 0);
-        assert_eq!(first.role, TileRole::Output);
+        assert_eq!(first.role, TileRole::output());
         assert_eq!(first.request.uri, "https://example.test/0/0");
         assert_eq!(last.request.uri, "https://example.test/1/1");
         assert_eq!(first, &plan.tiles().next().unwrap().unwrap());

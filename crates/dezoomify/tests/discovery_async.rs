@@ -1,4 +1,5 @@
 use core::discovery::{DiscoveryInput, DiscoveryLimits, any, metadata, url_suffix, viewer};
+use dezoomify::model::ErrorCode;
 use dezoomify::{
     core::{
         self, DiscoveredEntry, DiscoveryCatalog, DiscoveryError, DiscoveryResource, FormatSpec,
@@ -167,7 +168,7 @@ fn deferred_access_runs_after_every_runnable_branch_and_reuses_its_resource() {
             async move {
                 if request.uri.ends_with("/b") {
                     return Err(Error::new(
-                        "DISCOVERY_FAILED",
+                        ErrorCode::DiscoveryFailed,
                         ErrorPhase::Discovery,
                         "unavailable",
                     ));
@@ -285,10 +286,10 @@ fn live_resource_concurrency_stays_within_the_declared_bound() {
 
 #[test]
 fn rejected_candidates_retain_native_and_unknown_host_failure_facts() {
-    use dezoomify::model::{BlockedReason, ErrorTransport, ResourceKind};
+    use dezoomify::model::{BlockedReason, ErrorCode, ErrorTransport, ResourceKind};
     for transport in [ErrorTransport::Native, ErrorTransport::DisplayOnly] {
         let mut failure = Error::new(
-            "host.new-policy",
+            ErrorCode::HostInternal,
             ErrorPhase::Discovery,
             "exact host message",
         )

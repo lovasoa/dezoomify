@@ -1,6 +1,6 @@
 //! Native input, transport, and output settings.
 use crate::output::validate_destination;
-use dezoomify::model::{Error, ErrorPhase, OutputFormat};
+use dezoomify::model::{Error, ErrorCode, ErrorPhase, OutputFormat};
 use std::{collections::BTreeMap, path::PathBuf, time::Duration};
 
 /// Where the finished output goes.
@@ -113,7 +113,7 @@ impl JobOptions {
     pub fn validate(&self) -> Result<(), Error> {
         if self.input_url.is_empty() || self.input_url.len() > 2048 {
             return Err(Error::new(
-                "job.invalid-input",
+                ErrorCode::JobInvalidInput,
                 ErrorPhase::Validation,
                 "input must be 1..2048 bytes",
             ));
@@ -133,7 +133,7 @@ impl JobOptions {
                 .unwrap_or("");
             if authority.contains('@') {
                 return Err(Error::new(
-                    "job.invalid-input",
+                    ErrorCode::JobInvalidInput,
                     ErrorPhase::Validation,
                     "input must not contain userinfo",
                 ));

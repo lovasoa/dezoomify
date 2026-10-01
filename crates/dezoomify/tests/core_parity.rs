@@ -5,7 +5,9 @@
 
 use dezoomify::Vec2d;
 use dezoomify::core::discovery::{DiscoveryError, DiscoveryInput, DiscoveryLimits};
-use dezoomify::model::{Error, ErrorPhase, ProbeOutcome, ResourceRead, ResourceResponse};
+use dezoomify::model::{
+    Error, ErrorCode, ErrorPhase, ProbeOutcome, ResourceRead, ResourceResponse,
+};
 mod support;
 use dezoomify::core::{
     DiscoveredEntry, DiscoveryCatalog, Grid, Registry, ResolvedLevel, TileSource, default_registry,
@@ -49,7 +51,7 @@ fn discover_with(
                     })
                     .ok_or_else(|| {
                         Error::new(
-                            "DISCOVERY_FAILED",
+                            ErrorCode::DiscoveryFailed,
                             ErrorPhase::Discovery,
                             format!("no fixture: {}", request.uri),
                         )
@@ -245,7 +247,7 @@ fn automatic_discovery_selects_every_ready_format() {
 
     let input = "https://artsandculture.google.com/asset/test";
     let catalog=futures::executor::block_on(default_registry().discover(vec![DiscoveryInput::new(input)],Default::default(),|request,_|async move {
-        let bytes=if request.uri==input {include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/google_arts_and_culture/page_source.html").as_slice()} else if request.uri.ends_with("=g") {include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/google_arts_and_culture/tile_info.xml").as_slice()} else {return Err(Error::new("DISCOVERY_FAILED",ErrorPhase::Discovery,"missing fixture"));};
+        let bytes=if request.uri==input {include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/google_arts_and_culture/page_source.html").as_slice()} else if request.uri.ends_with("=g") {include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/google_arts_and_culture/tile_info.xml").as_slice()} else {return Err(Error::new(ErrorCode::DiscoveryFailed,ErrorPhase::Discovery,"missing fixture"));};
         Ok(ResourceRead::Response {response:ResourceResponse {bytes:bytes.to_vec(),final_uri:None}})
     })).unwrap();
     assert_eq!(ready_image(catalog).format, "google_arts_and_culture");

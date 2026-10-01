@@ -1,5 +1,6 @@
 //! Native scenario tests: header scope, redirects, cache, limits.
 
+use dezoomify::model::ErrorCode;
 use dezoomify::model::OutputFormat;
 use dezoomify_native::cache;
 use dezoomify_native::client;
@@ -162,7 +163,7 @@ fn output_format_follows_the_destination_extension() {
     // mislabeled file. The error names every supported extension.
     let bmp = output::infer_from_path(Path::new("painting.bmp"));
     let error = bmp.expect_err("bmp stays unsupported");
-    assert_eq!(error.code, "output.unsupported-extension");
+    assert_eq!(error.code, ErrorCode::OutputUnsupportedExtension);
     assert_eq!(error.phase, dezoomify::model::ErrorPhase::Output);
     for supported in [".png", ".jpg", ".tif", ".zif", ".webp", ".iiif"] {
         assert!(
@@ -257,5 +258,5 @@ fn jpeg_rejects_canvases_beyond_its_side_limit() {
     // through the dimension check on a wide image instead.
     let wide = image::RgbaImage::new(65_536, 1);
     let error = encode_jpeg(&wide, 92, None).expect_err("jpeg side limit applies");
-    assert_eq!(error.code, "output.encode-failed");
+    assert_eq!(error.code, ErrorCode::OutputEncodeFailed);
 }

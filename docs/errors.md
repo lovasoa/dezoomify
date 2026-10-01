@@ -9,8 +9,13 @@ Each error includes:
 - a stable code such as `TRANSPORT_HTTP_ERROR` or `TILE_DECODE_FAILED`;
 - the job phase and affected resource or tile when safe;
 - the attempted and active transport when relevant and safe;
-- whether retry is valid;
+- the derived retry verdict (`retry::is_retryable(code, http)` decides, with
+  HTTP status taking precedence; the verdict is recomputed whenever the code
+  changes, and job-level aggregates derive it from their retained failure
+  set — it is never set independently);
 - a concise user message;
+- optional structured limit facts (limit reason, dimensions, required and
+  available bytes) for output-limit refusals;
 - optional request, transport, blocked-reason, resource-kind, HTTP status, bounded server signal, and diagnostic detail.
 
 Codes are stable API; messages improve freely. Diagnostic reports retain exact URLs, paths, and settings under the [diagnostic capture contract](security.md#credentials).
@@ -19,7 +24,7 @@ Hosts keep their own error chains internally; only the typed shape crosses the c
 
 Extension HTTP responses produce the generated `FetchFailure` at the fetch boundary. Source-script results carry that payload unchanged through validation and transport choice. BrowserHost rejects with the structured domain error. HTTP status and request context remain intact; only unclassified host exceptions require classification.
 
-`FetchFailure` describes observed browser fetch facts. The core's `retry::is_retryable` classifies the code and HTTP status for tile retries and metadata error presentation. HTTP status takes precedence over the transport code. `Error` retains retryability for presentation; missing tiles retain these errors for each failed attempt. Output failures do not inherit fetch retry policy.
+`FetchFailure` describes observed browser fetch facts. The core's `retry::is_retryable` classifies the code and HTTP status for tile retries and metadata error presentation. HTTP status takes precedence over the transport code. `Error` carries that derived verdict (every construction and code rewrite recomputes it; job-level aggregates derive it from their retained failure set, so any transient constituent keeps retry available), so presentation never sees a verdict that disagrees with its facts; missing tiles retain these errors for each failed attempt. Output failures do not inherit fetch retry policy.
 
 
 ## Recovery actions
@@ -47,7 +52,7 @@ The website transport transition is automatic for eligible metadata (no per-atte
 Messages follow the presentation rules in [Product](product.md#progressive-disclosure):
 
 - First: one specific plain sentence (what failed for this job, which step and resource, which route) plus the single best next action. No shared generic template across causes.
-- Jargon waits for expandable details and linked docs. Wording is driven by structured context (code, phase, transport, kind, blocked reason, source origin), so identical causes read identically everywhere.
+- Jargon waits for expandable details and linked docs. Wording is driven by structured context (code, phase, transport, kind, blocked reason, source origin, structured limit facts), so identical causes read identically everywhere.
 - A fetch failure is the job outcome: plain message plus stable code up front; discovery diagnostics (for discovery, the headline-free per-format bullets) only inside expandable details.
 - User and technical wording never mix. Fetch failures preserve code, HTTP status, transport, policy reason, and diagnostic detail in the generated domain types. Product wording uses a plain sentence derived from those facts. Discovery diagnostics group by code, HTTP status, transport, and policy reason, never by rendered text. A proxy denial retains the proxy code, HTTP status, and policy reason, so policy denials never read as upstream refusals and vice versa.
 - Details stay on the device in the diagnostic report: full request URL, observed HTTP status, bounded server signal, and discovery failure context. Format URL-shape misses (`DidNotMatchUrl`, nothing fetched) collapse to a count; fetch rejections group by their structured facts under format names; other rejections group by `(kind, detail)`.

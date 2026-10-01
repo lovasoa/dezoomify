@@ -317,7 +317,7 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
             }
             true
         }
-        Err(error) if error.code == "job.cancelled" => {
+        Err(error) if error.code == dezoomify::model::ErrorCode::JobCancelled => {
             eprintln!("error: job cancelled before completion (job.cancelled)");
             false
         }
@@ -325,7 +325,7 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
             eprintln!(
                 "error: {} ({})",
                 error.message,
-                report::error_code(&error.code)
+                report::error_code(error.code)
             );
             false
         }
@@ -484,7 +484,7 @@ fn run_one_bulk_image(
                 publication.path.to_string_lossy().into_owned(),
             )
         })
-        .map_err(|error| (report::error_code(&error.code).into(), error.message))
+        .map_err(|error| (report::error_code(error.code).into(), error.message))
 }
 
 #[allow(clippy::result_large_err)] // Preserve the shared error until CLI presentation.
@@ -494,7 +494,7 @@ fn run_native(
     output: &Path,
     individual: bool,
 ) -> Result<(dezoomify_native::Publication, u64), dezoomify::model::Error> {
-    use dezoomify::model::{Error, ErrorPhase};
+    use dezoomify::model::{Error, ErrorCode, ErrorPhase};
     let started = Instant::now();
     let mut progress_gate = report::ProgressGate::default();
     let sequence = std::cell::Cell::new(1u64);
@@ -536,7 +536,7 @@ fn run_native(
         ))
         .inspect_err(|error| {
             host.diagnostics.finish(
-                if error.code == "job.cancelled" {
+                if error.code == dezoomify::model::ErrorCode::JobCancelled {
                     "cancelled"
                 } else {
                     "failed"
@@ -546,7 +546,7 @@ fn run_native(
         })?;
     let publication = host.publication().ok_or_else(|| {
         Error::new(
-            "native.internal",
+            ErrorCode::HostInternal,
             ErrorPhase::Output,
             "output was not published",
         )

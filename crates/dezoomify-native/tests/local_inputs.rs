@@ -2,6 +2,7 @@
 //! flow through validation, filesystem fetch, and assembly with scoped
 //! credential scope and typed errors preserved.
 
+use dezoomify::model::ErrorCode;
 use std::path::PathBuf;
 
 mod support;
@@ -103,7 +104,7 @@ fn file_uri_with_remote_host_is_rejected_typed() {
     let output = work.join("out.png");
     let error = support::run_file("file://other.test/tile.png", &output, |_| {})
         .expect_err("remote file host must be rejected");
-    assert_eq!(error.code, "job.invalid-input");
+    assert_eq!(error.code, ErrorCode::JobInvalidInput);
     assert!(
         !error.message.contains("other.test"),
         "error must not leak the rejected host: {}",

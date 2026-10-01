@@ -1,4 +1,5 @@
 mod support;
+use dezoomify::model::ErrorCode;
 use dezoomify::{dezoomify, model::*};
 use futures::FutureExt;
 use std::num::NonZeroU64;
@@ -24,7 +25,7 @@ fn invoke(host: &MemoryHost, options: Options) -> Result<Output, Error> {
 }
 fn failure(status: u16) -> Error {
     let mut e = Error::new(
-        "TRANSPORT_HTTP_ERROR",
+        ErrorCode::TransportHttpError,
         ErrorPhase::Acquisition,
         "tile refused",
     );
@@ -223,7 +224,7 @@ fn discard_and_empty_output_never_publish() {
     fail(&host, 0, [failure(404)]);
     assert_eq!(
         invoke(&host, options()).unwrap_err().code,
-        "job.partial-discarded"
+        ErrorCode::JobPartialDiscarded
     );
     assert!(host.outputs.borrow().is_empty());
     assert_eq!(host.settled.get(), 1);
@@ -241,15 +242,15 @@ fn discard_and_empty_output_never_publish() {
         )
         .unwrap_err()
         .code,
-        "job.no-usable-tiles"
+        ErrorCode::JobNoUsableTiles
     );
     assert!(host.outputs.borrow().is_empty());
 }
 #[test]
 fn invalid_binding_and_output_allocation_failures_abort_immediately() {
     for (code, phase) in [
-        ("binding.invalid-value", ErrorPhase::Acquisition),
-        ("OUTPUT_ALLOCATION_FAILED", ErrorPhase::Output),
+        (ErrorCode::BindingInvalidValue, ErrorPhase::Acquisition),
+        (ErrorCode::CanvasAllocationFailed, ErrorPhase::Output),
     ] {
         let host = MemoryHost::default();
         fail(&host, 0, [Error::new(code, phase, "bad result")]);
@@ -274,16 +275,22 @@ fn invalid_binding_and_output_allocation_failures_abort_immediately() {
 fn cancellation_and_publication_failure_always_settle() {
     let host = MemoryHost::default();
     host.cancel_after.set(Some(1));
-    assert_eq!(invoke(&host, options()).unwrap_err().code, "job.cancelled");
+    assert_eq!(
+        invoke(&host, options()).unwrap_err().code,
+        ErrorCode::JobCancelled
+    );
     assert!(host.outputs.borrow().is_empty());
     assert_eq!(host.settled.get(), 1);
     let host = MemoryHost::default();
     *host.finish_error.borrow_mut() = Some(Error::new(
-        "output.denied",
+        ErrorCode::OutputDenied,
         ErrorPhase::Publication,
         "denied",
     ));
-    assert_eq!(invoke(&host, options()).unwrap_err().code, "output.denied");
+    assert_eq!(
+        invoke(&host, options()).unwrap_err().code,
+        ErrorCode::OutputDenied
+    );
     assert_eq!(host.settled.get(), 1);
 }
 #[test]
@@ -302,77 +309,77 @@ fn invalid_inputs_and_limits_are_rejected_before_host_reads() {
                 max_concurrent: 0,
                 ..options()
             },
-            "job.invalid-config",
+            ErrorCode::JobInvalidConfig,
         ),
         (
             Options {
                 max_tiles: 0,
                 ..options()
             },
-            "job.invalid-config",
+            ErrorCode::JobInvalidConfig,
         ),
         (
             Options {
                 max_bytes: 0,
                 ..options()
             },
-            "job.invalid-config",
+            ErrorCode::JobInvalidConfig,
         ),
         (
             Options {
                 max_concurrent: 65,
                 ..options()
             },
-            "job.resource-limit",
+            ErrorCode::JobResourceLimit,
         ),
         (
             Options {
                 max_tiles: 16_777_217,
                 ..options()
             },
-            "job.resource-limit",
+            ErrorCode::JobResourceLimit,
         ),
         (
             Options {
                 max_bytes: 1,
                 ..options()
             },
-            "job.resource-limit",
+            ErrorCode::JobResourceLimit,
         ),
         (
             Options {
                 max_bytes: 4_294_967_297,
                 ..options()
             },
-            "job.resource-limit",
+            ErrorCode::JobResourceLimit,
         ),
         (
             Options {
                 max_retries: 1025,
                 ..options()
             },
-            "job.resource-limit",
+            ErrorCode::JobResourceLimit,
         ),
         (
             Options {
                 max_deferred_follows: 65,
                 ..options()
             },
-            "job.resource-limit",
+            ErrorCode::JobResourceLimit,
         ),
         (
             Options {
                 retry_base_delay_ms: 300_001,
                 ..options()
             },
-            "job.resource-limit",
+            ErrorCode::JobResourceLimit,
         ),
         (
             Options {
                 max_tiles: 1,
                 ..options()
             },
-            "job.invalid-config",
+            ErrorCode::JobInvalidConfig,
         ),
     ] {
         let host = MemoryHost::default();
@@ -385,7 +392,7 @@ fn invalid_inputs_and_limits_are_rejected_before_host_reads() {
         futures::executor::block_on(dezoomify(Vec::new(), options(), &host))
             .unwrap_err()
             .code,
-        "job.invalid-input"
+        ErrorCode::JobInvalidInput
     );
     assert_eq!(host.settled.get(), 1);
 }
@@ -405,7 +412,7 @@ fn supplied_documents_obey_resource_limits_before_host_io() {
             &host,
         ))
         .unwrap_err();
-        assert_eq!(error.code, "job.resource-limit");
+        assert_eq!(error.code, ErrorCode::JobResourceLimit);
         assert!(host.fetched.borrow().is_empty());
         assert!(host.probes.borrow().is_empty());
         assert!(host.acquired.borrow().is_empty());
@@ -419,13 +426,13 @@ fn image_and_level_choices_are_checked() {
     host.image.set(20);
     assert_eq!(
         invoke(&host, options()).unwrap_err().code,
-        "job.invalid-selection"
+        ErrorCode::JobInvalidSelection
     );
     let host = MemoryHost::default();
     host.level.set(Some(20));
     assert_eq!(
         invoke(&host, options()).unwrap_err().code,
-        "job.invalid-selection"
+        ErrorCode::JobInvalidSelection
     );
     let host = MemoryHost::default();
     assert_eq!(
@@ -439,7 +446,7 @@ fn image_and_level_choices_are_checked() {
         )
         .unwrap_err()
         .code,
-        "job.resource-limit"
+        ErrorCode::JobResourceLimit
     );
     assert!(host.acquired.borrow().is_empty());
 }
@@ -537,7 +544,7 @@ fn generic_probes_reuse_placed_tiles_and_keep_boundaries() {
     assert_eq!(host.probes.borrow().len(), 4);
     assert_eq!(
         host.probes.borrow()[0].placement.role,
-        TileRole::ProbeAndOutput
+        TileRole::probe_and_output()
     );
 }
 
@@ -573,7 +580,7 @@ fn probe_budget_stops_generic_search_and_iiif_fallback_before_excess_io() {
             &host,
         ))
         .unwrap_err();
-        assert_eq!(error.code, "job.resource-limit");
+        assert_eq!(error.code, ErrorCode::JobResourceLimit);
         assert_eq!(host.probes.borrow().len(), 1);
         assert!(host.fetched.borrow().is_empty());
         assert!(host.acquired.borrow().is_empty());
@@ -677,7 +684,7 @@ fn automatic_selection_follows_catalog_entries_and_rejects_cycles() {
         &host,
     ))
     .unwrap_err();
-    assert_eq!(error.code, "job.deferred-limit");
+    assert_eq!(error.code, ErrorCode::JobDeferredLimit);
     assert_eq!(host.fetched.borrow().len(), 1);
     assert!(host.outputs.borrow().is_empty());
 }
@@ -712,7 +719,7 @@ fn deferred_cycles_do_not_reacquire_supplied_sources_or_their_redirected_address
             &host,
         ))
         .unwrap_err();
-        assert_eq!(error.code, "job.deferred-limit");
+        assert_eq!(error.code, ErrorCode::JobDeferredLimit);
         assert_eq!(error.phase, ErrorPhase::Discovery);
         assert_eq!(host.fetched.borrow().len(), usize::from(!supplied));
         assert!(host.outputs.borrow().is_empty());
@@ -732,7 +739,7 @@ fn unsupported_schemes_and_zero_canvas_limits_are_rejected() {
         let error =
             futures::executor::block_on(dezoomify(vec![JobInput::new(uri)], options(), &host))
                 .unwrap_err();
-        assert_eq!(error.code, "job.invalid-input");
+        assert_eq!(error.code, ErrorCode::JobInvalidInput);
         assert!(host.fetched.borrow().is_empty());
     }
     let host = MemoryHost::default();
@@ -748,14 +755,14 @@ fn unsupported_schemes_and_zero_canvas_limits_are_rejected() {
         },
     )
     .unwrap_err();
-    assert_eq!(error.code, "job.invalid-options");
+    assert_eq!(error.code, ErrorCode::JobInvalidOptions);
 }
 
 #[test]
 fn missing_tiles_preserve_the_complete_original_host_error() {
     let host = MemoryHost::default();
     let mut error = failure(403);
-    error = error.with_code("native.future-refusal");
+    error = error.with_code(ErrorCode::HostInternal);
     error.transport = Some(ErrorTransport::Native);
     error.request = Some("https://redirected.test/image?signature=precise".into());
     error.resource_kind = Some(ResourceKind::Tile);

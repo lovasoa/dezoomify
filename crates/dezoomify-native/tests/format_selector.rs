@@ -2,6 +2,7 @@
 //! `None`/`auto` auto-detects; a named format restricts discovery to that
 //! format; unknown names fail typed.
 
+use dezoomify::model::ErrorCode;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -108,7 +109,7 @@ fn named_mismatch_fails_instead_of_auto_detecting() {
     let output = out_dir.join("mismatch.png");
     let error = run_with_format(&input, &output, Some("iiif".to_string()))
         .expect_err("iiif-only registry cannot parse DZI");
-    assert_eq!(error.code, "job.discovery-failed");
+    assert_eq!(error.code, ErrorCode::JobDiscoveryFailed);
     assert!(!output.exists(), "failed jobs write no output");
 }
 
@@ -121,7 +122,7 @@ fn unknown_format_fails_typed_without_output() {
     let error = run_with_format(&input, &output, Some("nope".to_string()))
         .expect_err("unknown format must fail");
     // Stable code, never display-string matching.
-    assert_eq!(error.code, "job.unknown-format");
+    assert_eq!(error.code, ErrorCode::JobUnknownFormat);
     assert!(
         error.message.contains("nope"),
         "message names the bad format without credentials: {}",

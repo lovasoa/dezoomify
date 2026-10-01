@@ -1,3 +1,4 @@
+use dezoomify::model::ErrorCode;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -147,7 +148,7 @@ fn http_failures_retain_the_resource_and_discovery_phase() {
                     expected_size: None,
                     canvas: None,
                     processing: ProcessingRecipe::None,
-                    role: TileRole::Output,
+                    role: TileRole::output(),
                 },
             })
             .await
@@ -155,7 +156,7 @@ fn http_failures_retain_the_resource_and_discovery_phase() {
         assert_eq!(tile.phase, ErrorPhase::Acquisition);
         assert_eq!(tile.resource_kind, Some(ResourceKind::Tile));
         for error in [&metadata, &tile] {
-            assert_eq!(error.code, "TRANSPORT_HTTP_ERROR");
+            assert_eq!(error.code, ErrorCode::TransportHttpError);
             assert_eq!(error.request.as_deref(), Some(uri.as_str()));
             assert_eq!(error.transport, Some(ErrorTransport::Native));
             assert_eq!(error.http, Some(403));
@@ -207,13 +208,13 @@ fn malformed_encrypted_tile_retains_processing_failure_and_good_partial_pixels()
             }),
             canvas: Some(canvas.clone()),
             processing: ProcessingRecipe::GoogleArtsDecrypt,
-            role: TileRole::Output,
+            role: TileRole::output(),
         },
     };
     host.transport.block_on(async {
         host.acquire_tile(tile(0, "good.png")).await.unwrap();
         let error = host.acquire_tile(tile(1, "bad.bin")).await.unwrap_err();
-        assert_eq!(error.code, "tile.processing-failed");
+        assert_eq!(error.code, ErrorCode::TileProcessingFailed);
         assert_eq!(error.phase, ErrorPhase::Processing);
         assert_eq!(
             error.request,
@@ -226,7 +227,7 @@ fn malformed_encrypted_tile_retains_processing_failure_and_good_partial_pixels()
         let mut corrupt_image = tile(1, "bad.bin");
         corrupt_image.placement.processing = ProcessingRecipe::None;
         let decode_error = host.acquire_tile(corrupt_image).await.unwrap_err();
-        assert_eq!(decode_error.code, "TILE_DECODE_FAILED");
+        assert_eq!(decode_error.code, ErrorCode::TileDecodeFailed);
         assert_eq!(decode_error.phase, ErrorPhase::Decode);
         let decision = host
             .choose_partial(MissingTiles {
@@ -693,7 +694,7 @@ fn cancel_during_acquisition_quiesces_without_publication() {
         }
     });
     let error = support::run_host(&host).expect_err("cancel wins the race");
-    assert_eq!(error.code, "job.cancelled");
+    assert_eq!(error.code, ErrorCode::JobCancelled);
     assert!(
         start.elapsed() < Duration::from_secs(60),
         "cancel quiesces promptly, including decode tails"
@@ -757,7 +758,7 @@ fn cancel_publication_race_orders_commit_or_nothing() {
         Box::pin(async { Ok(dezoomify::model::RecoveryChoice::Keep) })
     });
     let error = support::run_host(&host).expect_err("cancel wins the race");
-    assert_eq!(error.code, "job.cancelled");
+    assert_eq!(error.code, ErrorCode::JobCancelled);
     // Cancellation is prompt (bounded gate wait, aborted fetches, joined
     // tasks) and publishes nothing.
     assert!(

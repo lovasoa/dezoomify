@@ -6,6 +6,7 @@
 
 import type { ErrorTransport, FetchFailure, ResourceRequest } from "@dezoomify/wasm-bindings";
 import type { DiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
+import { SIGNED_QUERY_KEYS } from "../../shared-ui/src/source-url.ts";
 import { blockedReason } from "./failure.ts";
 import { readErrorPreview, readResponseBytes, retryAfterMs } from "./response-body.ts";
 import {
@@ -16,18 +17,10 @@ import {
   sleep,
 } from "./tile-policy.ts";
 
-const SIGNED_QUERY_KEYS = new Set([
-  "token",
-  "signature",
-  "sig",
-  "auth",
-  "key",
-  "session",
-  "sid",
-  "ticket",
-  "secret",
-  "password",
-]);
+// Signed/credential query keys gate proxy fallback: URLs whose signature would
+// break, or that carry credentials, must never be proxied. The vocabulary is
+// defined once in `packages/shared-ui/src/source-url.ts` (`SIGNED_QUERY_KEYS`)
+// and shared with the metadata CORS proxy validator in `src/server/security.ts`.
 
 function hasSignedQuery(urlString: string): boolean {
   try {

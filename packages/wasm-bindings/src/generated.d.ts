@@ -80,6 +80,9 @@ export interface TilePlacement {
     expected_size: Size | undefined;
     canvas: Size | undefined;
     processing: ProcessingRecipe;
+    /**
+     * Probe/output participation; see [`TileRole`].
+     */
     role: TileRole;
 }
 
@@ -102,12 +105,20 @@ export interface FetchFailure {
 }
 
 /**
- * How an acquired tile participates in adaptive probing and final output.
- * This is the single role vocabulary shared by the core tile plan and the
- * portable wire contract; `RequestPurpose` on a tile request is derived
- * from it and never disagrees.
+ * How an acquired tile participates in probing and final output. The two
+ * facts are orthogonal and consumed independently: `probe` marks
+ * adaptive-probe acquisitions (fetched to observe dimensions, where a miss
+ * is an observation and never an output failure), `output` marks
+ * acquisitions whose success joins the final canvas. Every planned tile
+ * sets at least one flag and is built through one of the three named
+ * constructors; a wire value with both flags clear behaves as an
+ * acquisition that is fetched and discarded. `RequestPurpose` on a tile
+ * request is derived from `probe` and never disagrees with it.
  */
-export type TileRole = "output" | "probe" | "probe-and-output";
+export interface TileRole {
+    probe: boolean;
+    output: boolean;
+}
 
 /**
  * One discovery input. An omitted kind is a user-supplied source for
@@ -165,6 +176,14 @@ export type RequestPurpose = "metadata" | "tile" | "probe";
  * preserves stable error codes.
  */
 export type FetchFailureCode = "TRANSPORT_HTTP_ERROR" | "DISCOVERY_HTTP_ERROR" | "UPSTREAM_RATE_LIMITED" | "TRANSPORT_POLICY_DENIED" | "PROXY_BUDGET_EXCEEDED" | "PROXY_ERROR" | "PROXY_NETWORK_ERROR" | "PROXY_RATE_LIMITED" | "DISCOVERY_FAILED" | "TRANSPORT_TIMEOUT" | "TRANSPORT_NETWORK_ERROR" | "TRANSPORT_CANCELLED" | "TRANSPORT_BAD_URL" | "TRANSPORT_BAD_REDIRECT" | "TRANSPORT_REDIRECT_LIMIT" | "TRANSPORT_SIZE_LIMIT";
+
+/**
+ * Stable error code. Codes are a closed, type-checked API: each variant's
+ * serde rename is the exact wire value, so structured codes never live in
+ * free strings, every code is known to have user wording, and adding one
+ * is a deliberate contract change. Match on variants; never on text.
+ */
+export type ErrorCode = "TRANSPORT_HTTP_ERROR" | "DISCOVERY_HTTP_ERROR" | "UPSTREAM_RATE_LIMITED" | "TRANSPORT_POLICY_DENIED" | "PROXY_BUDGET_EXCEEDED" | "PROXY_ERROR" | "PROXY_NETWORK_ERROR" | "PROXY_RATE_LIMITED" | "PROXY_POLICY_DENIED" | "DISCOVERY_FAILED" | "TRANSPORT_TIMEOUT" | "TRANSPORT_NETWORK_ERROR" | "TRANSPORT_CANCELLED" | "TRANSPORT_BAD_URL" | "TRANSPORT_BAD_REDIRECT" | "TRANSPORT_REDIRECT_LIMIT" | "TRANSPORT_SIZE_LIMIT" | "job.cancelled" | "job.invalid-input" | "job.invalid-config" | "job.invalid-options" | "job.invalid-selection" | "job.invalid-state" | "job.duplicate" | "job.discovery-failed" | "job.empty-resource" | "job.deferred-limit" | "job.plan-empty" | "job.plan-invalid" | "job.no-images" | "job.no-usable-tiles" | "job.partial-discarded" | "job.resource-limit" | "job.unknown" | "job.stale" | "job.unknown-format" | "discovery.no-image" | "discovery.no-level" | "TILE_DECODE_FAILED" | "tile.processing-failed" | "output.canvas-limit" | "output.encode-failed" | "output.write-failed" | "output.exists" | "output.destination-denied" | "output.unsupported-extension" | "output.unavailable" | "output.no-parent" | "output.launch-failed" | "output.launch-task-failed" | "output.denied" | "output.not-found" | "output.invoke-failed" | "PLAN_INVALID" | "OUTPUT_ALLOCATION_FAILED" | "OUTPUT_SURFACE_UNAVAILABLE" | "OUTPUT_ENCODE_FAILED" | "OUTPUT_FAILED" | "OUTPUT_DENIED" | "START_FAILED" | "CHOICE_FAILED" | "INVALID_URL" | "INVALID_SETTINGS" | "NO_IMAGE_FOUND" | "handoff.rejected" | "desktop.invalid-settings" | "desktop.invalid-source" | "desktop.result-retired" | "desktop.registration-failed" | "native.internal" | "shell.lock" | "binding.invalid-value" | "interaction.expired" | "auth.forbidden-header";
 
 /**
  * Stable ordered catalog projection (never exposes private core enums).
@@ -249,12 +268,17 @@ export interface DiagnosticRecord {
 
 export interface Error {
     retry_after_ms?: number;
-    code: string;
+    /**
+     * Stable error code. Rewrite through [`Error::with_code`] so the
+     * derived `retryable` verdict never disagrees with it.
+     */
+    code: ErrorCode;
     phase: ErrorPhase;
     /**
-     * Derived from `code` and `http` by [`crate::retry::is_retryable`];
-     * every construction and rewrite recomputes it so the pair never
-     * disagrees.
+     * Derived from `code` and `http` by [`crate::retry::is_retryable`]
+     * (job-level aggregates derive it from their retained failure set via
+     * [`crate::retry::aggregate_retryable`]); every construction and
+     * rewrite recomputes it so it never contradicts its facts.
      */
     retryable?: boolean;
     message: string;
@@ -291,6 +315,7 @@ export interface Host {
     choosePartial(missing: MissingTiles,): Promise<RecoveryChoice>;
     checkpoint(gate: Gate,): Promise<void>;
     sleep(delay_ms: number,): Promise<void>;
+    transport(): Promise<ErrorTransport | null>;
     report(progress: Progress): void;
     warn(message: string): void;
     settle(): Promise<void>;

@@ -531,7 +531,7 @@ impl IiifProbe {
             let result = crate::run::probe(
                 host,
                 TileSpec {
-                    role: TileRole::ProbeAndOutput,
+                    role: TileRole::probe_and_output(),
                     ..tile
                 },
                 &mut remaining_probes,

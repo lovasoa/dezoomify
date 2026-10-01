@@ -7,7 +7,7 @@ use crate::commands;
 use crate::deep_link;
 use crate::jobs::JobTable;
 use crate::settings::parse_settings;
-use dezoomify::model::{Error, ErrorPhase, OutputFormat};
+use dezoomify::model::{Error, ErrorCode, ErrorPhase, OutputFormat};
 use dezoomify_native::{NativeHost, OutputTarget};
 
 #[cfg(all(test, target_os = "linux"))]
@@ -92,7 +92,7 @@ async fn open_saved_output(
         .and_then(|table| table.saved_output_for(&job))
         .ok_or_else(|| {
             Error::new(
-                "output.unavailable",
+                ErrorCode::OutputUnavailable,
                 ErrorPhase::Output,
                 "The saved image is unavailable.",
             )
@@ -105,7 +105,7 @@ async fn open_saved_output(
         .await
         .map_err(|_| {
             Error::new(
-                "output.launch-task-failed",
+                ErrorCode::OutputLaunchTaskFailed,
                 ErrorPhase::Output,
                 "The file-opening task could not finish.",
             )
@@ -117,7 +117,7 @@ fn launch_saved_output(path: std::path::PathBuf, reveal: bool) -> Result<(), Err
         path.parent()
             .ok_or_else(|| {
                 Error::new(
-                    "output.no-parent",
+                    ErrorCode::OutputNoParent,
                     ErrorPhase::Output,
                     "The saved image has no containing folder.",
                 )
@@ -150,7 +150,7 @@ fn launch_saved_output(path: std::path::PathBuf, reveal: bool) -> Result<(), Err
         }
     }
     Err(Error::new(
-        "output.launch-failed",
+        ErrorCode::OutputLaunchFailed,
         ErrorPhase::Output,
         "The system could not launch the default application.",
     ))
@@ -161,7 +161,7 @@ fn lock_table<'a>(
 ) -> Result<std::sync::MutexGuard<'a, JobTable>, Error> {
     state.lock().map_err(|_| {
         Error::new(
-            "shell.lock",
+            ErrorCode::ShellLock,
             ErrorPhase::Output,
             "native resources unavailable",
         )
@@ -177,7 +177,7 @@ async fn dezoomify(
     settings: Option<serde_json::Value>,
 ) -> Result<dezoomify::model::Output, dezoomify::model::Error> {
     let invalid =
-        |message: String| Error::new("job.invalid-input", ErrorPhase::Validation, message);
+        |message: String| Error::new(ErrorCode::JobInvalidInput, ErrorPhase::Validation, message);
     if !commands::is_valid_input_url(&input_url) {
         return Err(invalid(
             "input_url must be an http(s) URL up to 2048 bytes without userinfo".into(),
@@ -198,7 +198,7 @@ async fn dezoomify(
     ) {
         lock_table(&state)?.release_job(&job);
         return Err(Error::new(
-            "desktop.registration-failed",
+            ErrorCode::DesktopRegistrationFailed,
             ErrorPhase::Validation,
             format!("The native invocation could not be acknowledged: {error}"),
         ));
@@ -246,7 +246,7 @@ async fn dezoomify(
             Box::pin(async move {
                 answer.await.map_err(|_| {
                     Error::new(
-                        "interaction.expired",
+                        ErrorCode::InteractionExpired,
                         ErrorPhase::Acquisition,
                         "The question is no longer open.",
                     )
@@ -261,7 +261,7 @@ async fn dezoomify(
         registration.finish(host.publication().map(|output| output.path));
         if let Err(error) = &result {
             registration.diagnostics.finish(
-                if error.code == "job.cancelled" {
+                if error.code == dezoomify::model::ErrorCode::JobCancelled {
                     "cancelled"
                 } else {
                     "failed"
@@ -272,7 +272,13 @@ async fn dezoomify(
         result
     })
     .await
-    .map_err(|_| Error::new("native.internal", ErrorPhase::Cleanup, "native task failed"))?
+    .map_err(|_| {
+        Error::new(
+            ErrorCode::HostInternal,
+            ErrorPhase::Cleanup,
+            "native task failed",
+        )
+    })?
 }
 
 #[tauri::command]

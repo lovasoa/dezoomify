@@ -10,7 +10,7 @@ mod bindings {
 
     fn boundary_error(detail: impl std::fmt::Display) -> Error {
         Error::new(
-            "binding.invalid-value",
+            ErrorCode::BindingInvalidValue,
             ErrorPhase::Validation,
             detail.to_string(),
         )
@@ -48,6 +48,9 @@ mod bindings {
         };
         (String) => {
             "string"
+        };
+        (ActiveTransport) => {
+            "ErrorTransport | null"
         };
         ($name:ident) => {
             stringify!($name)
@@ -131,7 +134,7 @@ mod bindings {
             .apply(bytes.to_vec())
             .map_err(|error| {
                 js_error(Error::new(
-                    "tile.processing-failed",
+                    ErrorCode::TileProcessingFailed,
                     ErrorPhase::Processing,
                     error.to_string(),
                 ))

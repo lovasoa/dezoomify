@@ -1,3 +1,4 @@
+use dezoomify::model::ErrorCode;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -132,7 +133,7 @@ fn retries_zero_sends_no_second_request() {
         options.keep_partial = false;
     })
     .expect_err("missing tile fails");
-    assert_eq!(error.code, "job.partial-discarded");
+    assert_eq!(error.code, ErrorCode::JobPartialDiscarded);
     assert!(!output.exists());
     let counts = counts.lock().expect("lock");
     // The missing tile is never refetched with retries=0.

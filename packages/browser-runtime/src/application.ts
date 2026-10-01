@@ -117,6 +117,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       onUpdate: () => {
         if (current === attempt) update();
       },
+      nowFn: Date.now,
     });
     const attempt = {
       url,
@@ -310,7 +311,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         width: a.output.canvas?.width ?? 0,
         height: a.output.canvas?.height ?? 0,
         format: a.output.disposition === "display-only" ? "display" : "png",
-        at: Date.now(),
+        at: a.activity.state.now,
       });
       if (entry && options.history) {
         history = pushHistory(history, entry);

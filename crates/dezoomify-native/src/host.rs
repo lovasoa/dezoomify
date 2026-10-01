@@ -20,6 +20,7 @@ use crate::{
     sink::{Sink, SinkOptions},
     transport::NativeTransport,
 };
+use dezoomify::model::ErrorCode;
 use dezoomify::{host::Host, model::*, Vec2d};
 
 /// Shared cancellation and pause controls, independent of the calling executor.
@@ -327,7 +328,7 @@ impl<'a> NativeHost<'a> {
         self.instrumentation.borrow_mut().bytes_fetched += outcome.body.len() as u64;
         if !outcome.ok() {
             let mut error = Error::new(
-                "TRANSPORT_HTTP_ERROR",
+                ErrorCode::TransportHttpError,
                 ErrorPhase::Acquisition,
                 crate::imaging::describe_http_failure(&outcome),
             );
@@ -352,7 +353,7 @@ impl<'a> NativeHost<'a> {
                 let _permit = permit;
                 let bytes = processing.apply(bytes).map_err(|error| {
                     Error::new(
-                        "tile.processing-failed",
+                        ErrorCode::TileProcessingFailed,
                         ErrorPhase::Processing,
                         error.to_string(),
                     )
@@ -361,7 +362,11 @@ impl<'a> NativeHost<'a> {
                     let _ = crate::cache::store(&dir, &namespace, &uri, &bytes);
                 }
                 let image = load_image_with_metadata(&bytes).map_err(|error| {
-                    Error::new("TILE_DECODE_FAILED", ErrorPhase::Decode, error.to_string())
+                    Error::new(
+                        ErrorCode::TileDecodeFailed,
+                        ErrorPhase::Decode,
+                        error.to_string(),
+                    )
                 })?;
                 Ok::<_, Error>(DecodedTile {
                     image: image.image.to_rgba8(),
@@ -372,7 +377,7 @@ impl<'a> NativeHost<'a> {
             .await
             .map_err(|_| {
                 Error::new(
-                    "native.internal",
+                    ErrorCode::HostInternal,
                     ErrorPhase::Acquisition,
                     "tile decode task failed",
                 )
@@ -427,7 +432,7 @@ impl<'a> NativeHost<'a> {
     fn place(&self, tile: &Tile, decoded: DecodedTile) -> Result<(), Error> {
         // Separate resource slots prevent probe indices from colliding with
         // final plan indices. Finish supplies the plan order of reused probes.
-        let storage_index = if tile.placement.role == TileRole::ProbeAndOutput {
+        let storage_index = if tile.placement.role.probe {
             (self.options.max_tiles as u32).saturating_add(tile.index)
         } else {
             tile.index
@@ -446,13 +451,16 @@ impl<'a> NativeHost<'a> {
                 format!(
                     "decoded tiles beyond the retain cap ({retained} retained, {inflight} in flight)"
                 ),
-                None,
-                Some(
-                    retained
-                        .saturating_add(inflight)
-                        .saturating_add(crate::sink::tile_bytes(&decoded.image)),
-                ),
-                Some(sink.retain_cap_bytes()),
+                LimitContext {
+                    reason: LimitReason::Memory,
+                    dimensions: None,
+                    bytes_required: Some(
+                        retained
+                            .saturating_add(inflight)
+                            .saturating_add(crate::sink::tile_bytes(&decoded.image)),
+                    ),
+                    bytes_available: Some(sink.retain_cap_bytes()),
+                },
             ));
         }
         sink.place(
@@ -471,6 +479,10 @@ impl<'a> NativeHost<'a> {
 }
 
 impl Host for NativeHost<'_> {
+    async fn transport(&self) -> Result<ActiveTransport, Error> {
+        Ok(Some(ErrorTransport::Native))
+    }
+
     async fn fetch(
         &self,
         request: ResourceRequest,
@@ -490,7 +502,7 @@ impl Host for NativeHost<'_> {
             Ok(decoded) => {
                 let width = std::num::NonZeroU64::new(u64::from(decoded.image.width()));
                 let height = std::num::NonZeroU64::new(u64::from(decoded.image.height()));
-                if tile.placement.role == TileRole::ProbeAndOutput {
+                if tile.placement.role.output {
                     self.place(&tile, decoded)
                         .map_err(|error| resource_context(error, &tile.request))?;
                 }
@@ -499,7 +511,7 @@ impl Host for NativeHost<'_> {
                     _ => Ok(ProbeOutcome::Missing),
                 }
             }
-            Err(error) if error.code == "job.cancelled" => {
+            Err(error) if error.code == dezoomify::model::ErrorCode::JobCancelled => {
                 Err(resource_context(error, &tile.request))
             }
             Err(_) => Ok(ProbeOutcome::Missing),
@@ -521,7 +533,7 @@ impl Host for NativeHost<'_> {
             } else {
                 stats.failed_permanent += 1;
             }
-            if error.code != "job.cancelled" {
+            if error.code != dezoomify::model::ErrorCode::JobCancelled {
                 self.diagnostics
                     .record(DiagnosticLevel::Warn, "tile", serde_json::json!(error));
             }
@@ -585,7 +597,7 @@ impl Host for NativeHost<'_> {
 
     async fn choose_image(&self, _catalog: Catalog) -> Result<u32, Error> {
         Err(Error::new(
-            "discovery.no-image",
+            ErrorCode::DiscoveryNoImage,
             ErrorPhase::Discovery,
             "native image selection requires a configured policy",
         ))
@@ -593,7 +605,7 @@ impl Host for NativeHost<'_> {
 
     async fn choose_level(&self, _image: Image) -> Result<u32, Error> {
         Err(Error::new(
-            "discovery.no-level",
+            ErrorCode::DiscoveryNoLevel,
             ErrorPhase::Discovery,
             "native level selection requires a configured policy",
         ))
@@ -697,7 +709,7 @@ fn size(size: &Size) -> Vec2d {
 }
 fn cancelled() -> Error {
     Error::new(
-        "job.cancelled",
+        dezoomify::model::ErrorCode::JobCancelled,
         ErrorPhase::Cleanup,
         "job cancelled before completion",
     )
@@ -776,7 +788,7 @@ mod tests {
                 () = std::future::ready(()) => {}
             }
             controls.cancel();
-            assert_eq!(acquisition.await.unwrap_err().code, "job.cancelled");
+            assert_eq!(acquisition.await.unwrap_err().code, ErrorCode::JobCancelled);
         });
     }
 

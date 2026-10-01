@@ -31,17 +31,22 @@ invocations receive independent Host objects.
 
 Inputs preserve URLs, optional source contents, and evidence kind. Resource
 responses preserve bytes and redirected addresses. Tile values carry their
-index, exact request, placement, declared canvas, and processing recipe.
+index, exact request, placement (including the tile's probe and output
+participation), declared canvas, and processing recipe.
 The finish request identifies acquired probes by their final tile index and
 position. Missing tiles preserve the complete errors from their acquisition attempts.
 
-Errors carry stable codes, phases, retryability, user wording,
-and optional request, transport, HTTP status, and bounded server context.
-Progress reports work and geometry; Output reports completeness, missing tiles,
-canvas, format, and actual save disposition.
+Errors carry stable codes, phases, the derived retry verdict, user wording,
+optional structured limit facts (limit reason, dimensions, required and
+available bytes), and optional request, transport, HTTP status, and bounded
+server context.
+Progress reports work and geometry; Output reports missing tiles
+(completeness is derived from their absence), canvas, format, and actual
+save disposition.
 
 Browser products save PNG. Native output formats are defined in
-[Native apps](native-apps.md#output-naming-and-encoders).
+[Native apps](native-apps.md#output-naming-and-encoders). Native
+encoders `[png, jpeg, tiff, zif, webp]` match `generated/desktop-capabilities.json`.
 
 ## Handoff and diagnostics
 

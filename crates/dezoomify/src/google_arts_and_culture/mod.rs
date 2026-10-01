@@ -78,7 +78,14 @@ fn decode(page: &Arc<PageInfo>, bytes: &[u8]) -> Result<ImagePlan, DiscoveryErro
                 ProcessingRecipe::GoogleArtsDecrypt,
                 move |tile| {
                     let cell: Vec2d = tile.coord.into();
-                    Request::new(url::compute_url(&request_page, cell.x, cell.y, z))
+                    Request::new(url::compute_url(
+                        &request_page,
+                        url::TileCoord {
+                            x: cell.x,
+                            y: cell.y,
+                            z,
+                        },
+                    ))
                 },
             )
             .map_err(|error| {

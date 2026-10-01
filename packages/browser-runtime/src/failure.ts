@@ -84,6 +84,6 @@ export function blockedReason(value: unknown): BlockedReason | undefined {
 }
 
 /** Typed output failure with its diagnostic cause retained in the domain error. */
-export function outputError(code: string, message: string, detail?: string): JobError {
+export function outputError(code: ErrorCode, message: string, detail?: string): JobError {
   return { code, message, phase: "output", retryable: false, ...(detail ? { detail } : {}) };
 }

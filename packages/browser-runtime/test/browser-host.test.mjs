@@ -13,7 +13,7 @@ const tile = {
     processing: "none",
     canvas: { width: 256, height: 256 },
     expected_size: null,
-    role: "output",
+    role: { probe: false, output: true },
   },
 };
 function setup(overrides = {}) {
@@ -157,7 +157,10 @@ test("probe output is painted from its first fetch without reacquisition", async
     },
   });
   assert.deepEqual(
-    await h.host.probe({ ...tile, placement: { ...tile.placement, role: "probe-and-output" } }),
+    await h.host.probe({
+      ...tile,
+      placement: { ...tile.placement, role: { probe: true, output: true } },
+    }),
     { status: "available", width: 256, height: 256 },
   );
   assert.equal(reads, 1);
@@ -200,7 +203,10 @@ test("surface and output failures retain their typed code", async () => {
     retryable: false,
   });
   await assert.rejects(
-    h.host.probe({ ...tile, placement: { ...tile.placement, role: "probe-and-output" } }),
+    h.host.probe({
+      ...tile,
+      placement: { ...tile.placement, role: { probe: true, output: true } },
+    }),
     {
       code: "OUTPUT_SURFACE_UNAVAILABLE",
       phase: "output",

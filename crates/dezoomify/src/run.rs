@@ -2,7 +2,7 @@
 //! Shared discovery, selection, acquisition, and output policy.
 use crate::{
     Host, Vec2d,
-    core::{self, DiscoveredEntry, DiscoveryCatalog, TileRole, TileSource, TileSpec},
+    core::{self, DiscoveredEntry, DiscoveryCatalog, TileSource, TileSpec},
     model::*,
 };
 use core::discovery::{DiscoveryInput, DiscoveryLimits};
@@ -77,7 +77,7 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
     }
     if total > u64::from(options.max_tiles) {
         return Err(Error::new(
-            "job.resource-limit",
+            ErrorCode::JobResourceLimit,
             ErrorPhase::Acquisition,
             format!("tile plan exceeds max_tiles {}", options.max_tiles),
         ));
@@ -122,9 +122,16 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
             .and_then(|(_, failures)| failures.first())
             .cloned()
             .unwrap_or_else(empty_plan)
-            .with_code("job.no-usable-tiles");
+            .with_code(ErrorCode::JobNoUsableTiles);
         error.phase = ErrorPhase::Acquisition;
         error.message = "no usable tiles were acquired".into();
+        // The aggregate keeps the first failure's structured context but
+        // derives its retry verdict from the whole retained failure set.
+        error.retryable = crate::retry::aggregate_retryable(
+            missing
+                .iter()
+                .flat_map(|(_, failures)| failures.iter().cloned()),
+        );
         if let Some((tile, _)) = missing.first() {
             error
                 .request
@@ -154,11 +161,30 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
         match choice {
             RecoveryChoice::Keep => break,
             RecoveryChoice::Discard => {
-                return Err(Error::new(
-                    "job.partial-discarded",
-                    ErrorPhase::Acquisition,
-                    "partial output was discarded",
-                ));
+                // The aggregate keeps the first failure's structured context
+                // (transport, kind, request) and derives its retry verdict
+                // from the whole retained failure set, like the
+                // no-usable-tiles aggregate.
+                let mut error = missing
+                    .first()
+                    .and_then(|(_, failures)| failures.first())
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        Error::new(
+                            ErrorCode::JobPartialDiscarded,
+                            ErrorPhase::Acquisition,
+                            "partial output was discarded",
+                        )
+                    })
+                    .with_code(ErrorCode::JobPartialDiscarded);
+                error.phase = ErrorPhase::Acquisition;
+                error.message = "partial output was discarded".into();
+                error.retryable = crate::retry::aggregate_retryable(
+                    missing
+                        .iter()
+                        .flat_map(|(_, failures)| failures.iter().cloned()),
+                );
+                return Err(error);
             }
             RecoveryChoice::Retry => {
                 let retry = std::mem::take(&mut missing);
@@ -191,11 +217,12 @@ async fn discover(
     host: &impl Host,
     followed: &RefCell<HashSet<String>>,
 ) -> Result<DiscoveryCatalog, Error> {
+    let host_transport = host.transport().await.ok().flatten();
     let registry = match options.format.as_deref() {
         None | Some("auto") => core::default_registry(),
         Some(format) => core::registry_for(format).ok_or_else(|| {
             Error::new(
-                "job.unknown-format",
+                ErrorCode::JobUnknownFormat,
                 ErrorPhase::Validation,
                 format!("unknown format: {format}"),
             )
@@ -244,7 +271,7 @@ async fn discover(
                     }
                     if response.bytes.is_empty() {
                         let mut err = Error::new(
-                            "job.empty-resource",
+                            ErrorCode::JobEmptyResource,
                             ErrorPhase::Discovery,
                             "metadata resource is empty",
                         );
@@ -253,7 +280,7 @@ async fn discover(
                     }
                     if u64::try_from(response.bytes.len()).unwrap_or(u64::MAX) > options.max_bytes {
                         let mut err = Error::new(
-                            "job.resource-limit",
+                            ErrorCode::JobResourceLimit,
                             ErrorPhase::Discovery,
                             "metadata resource exceeds max_bytes",
                         );
@@ -286,8 +313,24 @@ async fn discover(
                     _ => None,
                 };
                 let mut failure = cause.unwrap_or_else(|| {
+                    // A document some format parsed as an empty image is
+                    // `job.no-images`; an unparseable or unrecognized
+                    // document is `job.discovery-failed`.
                     Error::new(
-                        "job.discovery-failed",
+                        match &error {
+                            core::DiscoveryError::Rejected {
+                                kind: core::RejectionKind::NoImage,
+                                ..
+                            } => ErrorCode::JobNoImages,
+                            core::DiscoveryError::NoCandidateAccepted { diagnostics }
+                                if diagnostics.iter().any(|diagnostic| {
+                                    diagnostic.kind == core::RejectionKind::NoImage
+                                }) =>
+                            {
+                                ErrorCode::JobNoImages
+                            }
+                            _ => ErrorCode::JobDiscoveryFailed,
+                        },
                         ErrorPhase::Discovery,
                         "No zoomable image was found",
                     )
@@ -295,6 +338,18 @@ async fn discover(
                 failure.detail.get_or_insert_with(|| error.detail());
                 failure
             }
+        })
+        .map_err(|mut failure| {
+            // Discovery failures describe metadata work: preserve the host's
+            // transport and the resource kind when the underlying failure
+            // did not already carry them.
+            if failure.transport.is_none() {
+                failure.transport = host_transport;
+            }
+            if failure.resource_kind.is_none() {
+                failure.resource_kind = Some(ResourceKind::Metadata);
+            }
+            failure
         })?;
     let mut seen = HashSet::new();
     for entry in catalog.entries() {
@@ -353,7 +408,7 @@ async fn select(
         };
         let Some(entry) = catalog.into_entries().into_iter().nth(index) else {
             return Err(Error::new(
-                "job.invalid-selection",
+                ErrorCode::JobInvalidSelection,
                 ErrorPhase::Validation,
                 "image selection is out of range",
             ));
@@ -362,7 +417,7 @@ async fn select(
             DiscoveredEntry::Deferred(resource) => {
                 if remaining_follows == 0 || !followed.borrow_mut().insert(resource.uri.clone()) {
                     return Err(Error::new(
-                        "job.deferred-limit",
+                        ErrorCode::JobDeferredLimit,
                         ErrorPhase::Discovery,
                         "deferred image follow limit or cycle",
                     ));
@@ -380,7 +435,7 @@ async fn select(
                 };
                 if level >= image.levels.len() {
                     return Err(Error::new(
-                        "job.invalid-selection",
+                        ErrorCode::JobInvalidSelection,
                         ErrorPhase::Validation,
                         "level selection is out of range",
                     ));
@@ -466,10 +521,10 @@ fn portable_tile(tile: TileSpec, canvas: Option<Size>) -> Tile {
         request: ResourceRequest {
             uri: tile.request.uri,
             headers: tile.request.headers,
-            purpose: if tile.role == TileRole::Output {
-                RequestPurpose::Tile
-            } else {
+            purpose: if tile.role.probe {
                 RequestPurpose::Probe
+            } else {
+                RequestPurpose::Tile
             },
         },
         placement: TilePlacement {
@@ -491,7 +546,7 @@ pub(crate) async fn probe(
 ) -> Result<core::ObservationResult, Error> {
     *remaining = remaining.checked_sub(1).ok_or_else(|| {
         Error::new(
-            "job.resource-limit",
+            ErrorCode::JobResourceLimit,
             ErrorPhase::Acquisition,
             "probe count exceeds max_tiles",
         )
@@ -546,9 +601,7 @@ async fn acquire(
         match host.acquire_tile(tile.clone()).await {
             Ok(()) => return Ok((tile, None)),
             Err(error)
-                if error.code == "job.cancelled"
-                    || error.code == "TRANSPORT_CANCELLED"
-                    || error.code.starts_with("binding.")
+                if crate::retry::is_terminal_failure(error.code)
                     || error.phase == ErrorPhase::Output =>
             {
                 return Err(error);
@@ -575,7 +628,7 @@ async fn acquire(
 
 fn empty_plan() -> Error {
     Error::new(
-        "job.plan-empty",
+        ErrorCode::JobPlanEmpty,
         ErrorPhase::Acquisition,
         "the selected level has no tiles",
     )
@@ -583,7 +636,7 @@ fn empty_plan() -> Error {
 impl From<core::TileSourceError> for Error {
     fn from(error: core::TileSourceError) -> Self {
         Self::new(
-            "job.plan-invalid",
+            ErrorCode::JobPlanInvalid,
             ErrorPhase::Acquisition,
             error.to_string(),
         )
@@ -622,14 +675,14 @@ fn validate(inputs: &[JobInput], options: &Options) -> Result<(), Error> {
         || inputs.iter().any(|i| !valid(&i.url))
     {
         return Err(Error::new(
-            "job.invalid-input",
+            ErrorCode::JobInvalidInput,
             ErrorPhase::Validation,
             "inputs require a user source and at most 256 valid URLs or local paths up to 2048 bytes",
         ));
     }
     if options.max_concurrent == 0 || options.max_tiles == 0 || options.max_bytes == 0 {
         return Err(Error::new(
-            "job.invalid-config",
+            ErrorCode::JobInvalidConfig,
             ErrorPhase::Validation,
             "concurrency, tile, and byte limits must be positive",
         ));
@@ -643,14 +696,14 @@ fn validate(inputs: &[JobInput], options: &Options) -> Result<(), Error> {
         || options.retry_base_delay_ms > 300_000
     {
         return Err(Error::new(
-            "job.resource-limit",
+            ErrorCode::JobResourceLimit,
             ErrorPhase::Validation,
             "resource limits are out of range",
         ));
     }
     if options.max_concurrent > options.max_tiles {
         return Err(Error::new(
-            "job.invalid-config",
+            ErrorCode::JobInvalidConfig,
             ErrorPhase::Validation,
             "max_concurrent cannot exceed max_tiles",
         ));
@@ -663,7 +716,7 @@ fn validate(inputs: &[JobInput], options: &Options) -> Result<(), Error> {
         && (max_width == 0 || max_height == 0 || max_area == 0)
     {
         return Err(Error::new(
-            "job.invalid-options",
+            ErrorCode::JobInvalidOptions,
             ErrorPhase::Validation,
             "canvas limits must be positive",
         ));
@@ -674,7 +727,7 @@ fn validate(inputs: &[JobInput], options: &Options) -> Result<(), Error> {
         })
     }) {
         return Err(Error::new(
-            "job.resource-limit",
+            ErrorCode::JobResourceLimit,
             ErrorPhase::Discovery,
             "supplied document exceeds resource limits",
         ));

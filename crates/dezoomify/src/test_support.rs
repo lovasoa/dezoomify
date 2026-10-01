@@ -1,7 +1,7 @@
 //! Deterministic resource acquisition for format tests.
 use crate::core::discovery::{DiscoveryInput, DiscoveryLimits};
 use crate::core::{DiscoveryCatalog, DiscoveryError, FormatSpec, Registry, Request};
-use crate::model::{Error, ErrorPhase, ResourceRead, ResourceResponse};
+use crate::model::{Error, ErrorCode, ErrorPhase, ResourceRead, ResourceResponse};
 use std::cell::RefCell;
 
 pub fn discover(
@@ -28,7 +28,11 @@ pub fn discover(
                 });
             async move {
                 response.ok_or_else(|| {
-                    Error::new("DISCOVERY_FAILED", ErrorPhase::Discovery, "missing fixture")
+                    Error::new(
+                        ErrorCode::DiscoveryFailed,
+                        ErrorPhase::Discovery,
+                        "missing fixture",
+                    )
                 })
             }
         },

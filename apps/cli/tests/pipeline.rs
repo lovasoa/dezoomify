@@ -1,7 +1,7 @@
 //! End-to-end CLI test: the real binary discovers, downloads, assembles, and
 //! writes a real output file over loopback sockets (fixture-server scenarios).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
@@ -41,6 +41,88 @@ fn temp_dir(name: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("temp dir");
     dir
+}
+
+/// Load a scenario's `expected/result.json` golden from the corpus.
+fn expected_result(scenario: &str) -> serde_json::Value {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../testdata/scenarios")
+        .join(scenario)
+        .join("expected/result.json");
+    serde_json::from_str(&std::fs::read_to_string(&path).expect("expected result"))
+        .expect("expected json")
+}
+
+/// Assert a `--json` run's completion event and the bytes it wrote against
+/// the scenario golden: reported image size and tile count, the produced
+/// file's actual pixel dimensions, its output format, and (when the golden
+/// pins one) the partial/`ok` disposition.
+fn assert_result_golden(scenario: &str, stdout: &str, output: &Path) {
+    let expected = expected_result(scenario);
+    let completed = stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .rfind(|event| {
+            matches!(
+                event["kind"].as_str(),
+                Some("completed") | Some("partial-completed")
+            )
+        })
+        .unwrap_or_else(|| panic!("{scenario}: completed event present in stdout: {stdout}"));
+    assert_eq!(
+        completed["width"].as_u64(),
+        expected["imageSize"]["x"].as_u64(),
+        "{scenario} reported width"
+    );
+    assert_eq!(
+        completed["height"].as_u64(),
+        expected["imageSize"]["y"].as_u64(),
+        "{scenario} reported height"
+    );
+    assert_eq!(
+        completed["tileCount"].as_u64(),
+        expected["tileCount"].as_u64(),
+        "{scenario} reported tile count"
+    );
+    // The produced file is really the golden format at the golden size.
+    assert_eq!(
+        expected["outputFormat"].as_str(),
+        Some("png"),
+        "{scenario}: golden pins a png output"
+    );
+    let bytes = std::fs::read(output).expect("output file written");
+    assert!(
+        bytes.starts_with(&[0x89, b'P', b'N', b'G']),
+        "{scenario} output is a PNG"
+    );
+    let pixels = |range: std::ops::Range<usize>| {
+        u32::from_be_bytes(bytes[range].try_into().expect("4 bytes")) as u64
+    };
+    assert_eq!(
+        pixels(16..20),
+        expected["imageSize"]["x"].as_u64().expect("golden width"),
+        "{scenario} PNG width"
+    );
+    assert_eq!(
+        pixels(20..24),
+        expected["imageSize"]["y"].as_u64().expect("golden height"),
+        "{scenario} PNG height"
+    );
+    if let Some(partial) = expected.get("partial") {
+        assert_eq!(&completed["partial"], partial, "{scenario} partial flag");
+        assert_eq!(
+            completed["kind"].as_str(),
+            Some("partial-completed"),
+            "{scenario} partial completion event"
+        );
+    }
+    if expected.get("code") == Some(&serde_json::json!("ok")) {
+        assert_eq!(
+            completed["kind"].as_str(),
+            Some("completed"),
+            "{scenario} complete completion event"
+        );
+    }
 }
 
 #[test]
@@ -92,13 +174,15 @@ fn cli_fails_honestly_on_missing_tiles() {
 
 #[test]
 fn cli_max_width_flag_caps_output() {
-    // `--max-width 300` on the 512px pyramid must download the largest
-    // fitting level (256px, 1 tile) and hash to the cli-max-width golden.
+    // `--max-width 300` on the 512px pyramid downloads the largest fitting
+    // level: the run reports (and the produced PNG carries) the 256x256
+    // one-tile geometry pinned by the `native/cli-max-width` golden.
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("e2e-max-width");
     let output = out_dir.join("narrow.png");
     let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--json")
         .arg("--max-width")
         .arg("300")
         .arg("--overwrite")
@@ -111,17 +195,24 @@ fn cli_max_width_flag_caps_output() {
         "cli --max-width should succeed: stderr={:?}",
         String::from_utf8_lossy(&run.stderr),
     );
+    assert_result_golden(
+        "native/cli-max-width",
+        &String::from_utf8_lossy(&run.stdout),
+        &output,
+    );
 }
 
 #[test]
 fn cli_forwards_user_headers() {
-    // `-H` headers must flow into the pipeline without breaking the fetch:
-    // the output still hashes to the cli-dzi golden.
+    // `-H` headers flow into the pipeline without breaking the fetch: the
+    // run's reported geometry and the produced PNG still match the
+    // `native/cli-dzi` golden.
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("e2e-headers");
     let output = out_dir.join("headers.png");
     let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--json")
         .arg("-H")
         .arg("Referer: https://fixtures.test/viewer")
         .arg("--overwrite")
@@ -133,6 +224,11 @@ fn cli_forwards_user_headers() {
         run.status.success(),
         "cli -H should succeed: stderr={:?}",
         String::from_utf8_lossy(&run.stderr),
+    );
+    assert_result_golden(
+        "native/cli-dzi",
+        &String::from_utf8_lossy(&run.stdout),
+        &output,
     );
 }
 
@@ -299,16 +395,18 @@ fn cli_bulk_json_emits_item_lines() {
 
 #[test]
 fn cli_full_flags_produce_golden_output() {
-    // Every wired flag must flow through without breaking the fetch: the
-    // output still hashes to the cli-dzi golden. Values are chosen to
-    // preserve the largest level (wide caps, out-of-range zoom-level falls
-    // back to last, explicit defaults for timing/pooling/compression).
+    // Every wired flag flows through without breaking the fetch: the run's
+    // reported geometry and the produced PNG still match the `native/cli-dzi`
+    // golden. Values are chosen to preserve the largest level (wide caps,
+    // out-of-range zoom-level falls back to last, explicit defaults for
+    // timing/pooling/compression).
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("e2e-full-flags");
     let output = out_dir.join("full.png");
     let cache = out_dir.join("tiles");
     let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--json")
         .arg("--header")
         .arg("Referer: https://fixtures.test/viewer")
         .arg("--retries")
@@ -374,19 +472,26 @@ fn cli_full_flags_produce_golden_output() {
     }
 
     assert!(cache.exists(), "tile cache folder created");
+    assert_result_golden(
+        "native/cli-dzi",
+        &String::from_utf8_lossy(&run.stdout),
+        &output,
+    );
 }
 
 #[test]
 fn cli_selection_gaps_are_real_no_warnings() {
     // `--format <named>`, `--logging <non-info>`, and `--retries 0` are
     // real: validated/passed through with zero warnings. The fetch still
-    // succeeds and hashes to the cli-dzi golden (`deepzoom` parses the
-    // pyramid DZI; `iiif` would fail typed).
+    // succeeds and the run's reported geometry and produced PNG match the
+    // `native/cli-dzi` golden (`deepzoom` parses the pyramid DZI; `iiif`
+    // would fail typed).
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("e2e-no-fallback-warnings");
     let output = out_dir.join("real.png");
     let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--json")
         .arg("--format")
         .arg("deepzoom")
         .arg("--logging")
@@ -419,6 +524,11 @@ fn cli_selection_gaps_are_real_no_warnings() {
     assert!(
         !stderr.contains("verbosity is fixed"),
         "logging no longer warns fixed verbosity: {stderr}"
+    );
+    assert_result_golden(
+        "native/cli-dzi",
+        &String::from_utf8_lossy(&run.stdout),
+        &output,
     );
 }
 
@@ -583,11 +693,13 @@ fn cli_unknown_format_fails_with_typed_error() {
 #[test]
 fn cli_auto_names_output_when_omitted() {
     // Single runs without an output auto-name to `dezoomify.png` in the
-    // working directory; the bytes still hash to the cli-dzi golden.
+    // working directory; that file's reported geometry and bytes match the
+    // `native/cli-dzi` golden.
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("e2e-auto-name");
     let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--json")
         .arg(&input)
         .current_dir(&out_dir)
         .output()
@@ -599,6 +711,11 @@ fn cli_auto_names_output_when_omitted() {
     );
     let output = out_dir.join("dezoomify.png");
     assert!(output.exists(), "auto-named output written");
+    assert_result_golden(
+        "native/cli-dzi",
+        &String::from_utf8_lossy(&run.stdout),
+        &output,
+    );
 }
 
 #[test]
@@ -717,4 +834,97 @@ fn cli_named_format_mismatch_fails_instead_of_detecting() {
         stderr.contains("discovery."),
         "typed discovery failure: {stderr}"
     );
+}
+
+/// The `native/edge-*` failure goldens pin the CLI's published display codes
+/// (`report::error_code`); the typed error fields behind the same goldens are
+/// asserted by `dezoomify-native`'s `edge_scenarios` test. This test drives
+/// each scenario through the real binary and checks the published code.
+#[test]
+fn edge_failures_publish_their_golden_codes() {
+    let origin = start_fixture_server();
+    for id in [
+        "edge-cache-304",
+        "edge-gzip-cache",
+        "edge-malformed-json",
+        "edge-malformed-xml",
+        "edge-range-truncate",
+        "edge-redirect-loop",
+        "edge-throttle-429",
+        "edge-zero-tile",
+    ] {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../testdata/scenarios/native")
+            .join(id);
+        let scenario: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join("scenario.json")).expect("scenario"),
+        )
+        .expect("scenario json");
+        let input = scenario["input"]["url"]
+            .as_str()
+            .expect("scenario input url")
+            .replace("http://{{origin}}", &origin);
+        let expected = expected_result(&format!("native/{id}"));
+        assert_eq!(
+            expected["outcome"].as_str(),
+            Some("failed"),
+            "{id} golden pins a failure"
+        );
+        let out_dir = temp_dir(id);
+        let output = out_dir.join("out.png");
+        // The `tile.download-failed` contract is the `Fail` partial policy.
+        let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+            .arg("--no-partial")
+            .arg(&input)
+            .arg(&output)
+            .output()
+            .expect("run cli");
+        assert!(!run.status.success(), "{id} must fail");
+        assert!(!output.exists(), "{id} writes no output on failure");
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        let code = expected["code"].as_str().expect("golden code");
+        assert!(stderr.contains(code), "{id} publishes {code:?}: {stderr}");
+    }
+}
+
+/// The `native/edge-*` success goldens pin the geometry and disposition the
+/// CLI reports (EXIF/redirect/cache prose in the goldens documents the edge
+/// behavior; native pixel fidelity lives in the imaging tests).
+#[test]
+fn edge_successes_match_their_result_goldens() {
+    let origin = start_fixture_server();
+    for id in ["edge-exif", "edge-redirect-chain", "edge-resume-offline"] {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../testdata/scenarios/native")
+            .join(id);
+        let scenario: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join("scenario.json")).expect("scenario"),
+        )
+        .expect("scenario json");
+        let input = scenario["input"]["url"]
+            .as_str()
+            .expect("scenario input url")
+            .replace("http://{{origin}}", &origin);
+        let out_dir = temp_dir(id);
+        let output = out_dir.join("out.png");
+        let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+            .arg("--json")
+            .arg("--tile-cache")
+            .arg(out_dir.join("cache"))
+            .arg("--overwrite")
+            .arg(&input)
+            .arg(&output)
+            .output()
+            .expect("run cli");
+        assert!(
+            run.status.success(),
+            "{id} must succeed: {:?}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+        assert_result_golden(
+            &format!("native/{id}"),
+            &String::from_utf8_lossy(&run.stdout),
+            &output,
+        );
+    }
 }

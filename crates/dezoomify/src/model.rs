@@ -108,23 +108,47 @@ impl OutputFormat {
     }
 }
 
-/// How an acquired tile participates in adaptive probing and final output.
-/// This is the single role vocabulary shared by the core tile plan and the
-/// portable wire contract; `RequestPurpose` on a tile request is derived
-/// from it and never disagrees.
-#[derive(
-    Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
-)]
-#[serde(rename_all = "kebab-case")]
+/// How an acquired tile participates in probing and final output. The two
+/// facts are orthogonal and consumed independently: `probe` marks
+/// adaptive-probe acquisitions (fetched to observe dimensions, where a miss
+/// is an observation and never an output failure), `output` marks
+/// acquisitions whose success joins the final canvas. Every planned tile
+/// sets at least one flag and is built through one of the three named
+/// constructors; a wire value with both flags clear behaves as an
+/// acquisition that is fetched and discarded. `RequestPurpose` on a tile
+/// request is derived from `probe` and never disagrees with it.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum TileRole {
-    /// Part of the final output plan only.
-    #[default]
-    Output,
+pub struct TileRole {
+    pub probe: bool,
+    pub output: bool,
+}
+
+impl TileRole {
+    /// Fetched for the final output plan only.
+    #[must_use]
+    pub const fn output() -> Self {
+        Self {
+            probe: false,
+            output: true,
+        }
+    }
     /// A probe which must not be added to the output canvas.
-    Probe,
+    #[must_use]
+    pub const fn probe() -> Self {
+        Self {
+            probe: true,
+            output: false,
+        }
+    }
     /// A successful probe is output; a missing probe is not an output failure.
-    ProbeAndOutput,
+    #[must_use]
+    pub const fn probe_and_output() -> Self {
+        Self {
+            probe: true,
+            output: true,
+        }
+    }
 }
 
 /// Host-neutral placement of one tile in the output image, projected from
@@ -141,6 +165,7 @@ pub struct TilePlacement {
     pub expected_size: Option<Size>,
     pub canvas: Option<Size>,
     pub processing: ProcessingRecipe,
+    /// Probe/output participation; see [`TileRole`].
     pub role: TileRole,
 }
 
@@ -298,6 +323,10 @@ impl ErrorTransport {
     }
 }
 
+/// The host's active transport when it knows one (absent when unknown).
+/// A named alias so the bindings' token-tree macros stay single-token.
+pub type ActiveTransport = Option<ErrorTransport>;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
@@ -328,6 +357,290 @@ pub enum BlockedReason {
     SourceDocumentLost,
     Throttled,
     Userinfo,
+}
+
+/// Stable error code. Codes are a closed, type-checked API: each variant's
+/// serde rename is the exact wire value, so structured codes never live in
+/// free strings, every code is known to have user wording, and adding one
+/// is a deliberate contract change. Match on variants; never on text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum ErrorCode {
+    // Fetch and transport observations (shared with [`FetchFailureCode`]).
+    #[serde(rename = "TRANSPORT_HTTP_ERROR")]
+    TransportHttpError,
+    #[serde(rename = "DISCOVERY_HTTP_ERROR")]
+    DiscoveryHttpError,
+    #[serde(rename = "UPSTREAM_RATE_LIMITED")]
+    UpstreamRateLimited,
+    #[serde(rename = "TRANSPORT_POLICY_DENIED")]
+    TransportPolicyDenied,
+    #[serde(rename = "PROXY_BUDGET_EXCEEDED")]
+    ProxyBudgetExceeded,
+    #[serde(rename = "PROXY_ERROR")]
+    ProxyError,
+    #[serde(rename = "PROXY_NETWORK_ERROR")]
+    ProxyNetworkError,
+    #[serde(rename = "PROXY_RATE_LIMITED")]
+    ProxyRateLimited,
+    #[serde(rename = "PROXY_POLICY_DENIED")]
+    ProxyPolicyDenied,
+    #[serde(rename = "DISCOVERY_FAILED")]
+    DiscoveryFailed,
+    #[serde(rename = "TRANSPORT_TIMEOUT")]
+    TransportTimeout,
+    #[serde(rename = "TRANSPORT_NETWORK_ERROR")]
+    TransportNetworkError,
+    #[serde(rename = "TRANSPORT_CANCELLED")]
+    TransportCancelled,
+    #[serde(rename = "TRANSPORT_BAD_URL")]
+    TransportBadUrl,
+    #[serde(rename = "TRANSPORT_BAD_REDIRECT")]
+    TransportBadRedirect,
+    #[serde(rename = "TRANSPORT_REDIRECT_LIMIT")]
+    TransportRedirectLimit,
+    #[serde(rename = "TRANSPORT_SIZE_LIMIT")]
+    TransportSizeLimit,
+
+    // Job lifecycle.
+    #[serde(rename = "job.cancelled")]
+    JobCancelled,
+    #[serde(rename = "job.invalid-input")]
+    JobInvalidInput,
+    #[serde(rename = "job.invalid-config")]
+    JobInvalidConfig,
+    #[serde(rename = "job.invalid-options")]
+    JobInvalidOptions,
+    #[serde(rename = "job.invalid-selection")]
+    JobInvalidSelection,
+    #[serde(rename = "job.invalid-state")]
+    JobInvalidState,
+    #[serde(rename = "job.duplicate")]
+    JobDuplicate,
+    #[serde(rename = "job.discovery-failed")]
+    JobDiscoveryFailed,
+    #[serde(rename = "job.empty-resource")]
+    JobEmptyResource,
+    #[serde(rename = "job.deferred-limit")]
+    JobDeferredLimit,
+    #[serde(rename = "job.plan-empty")]
+    JobPlanEmpty,
+    #[serde(rename = "job.plan-invalid")]
+    JobPlanInvalid,
+    #[serde(rename = "job.no-images")]
+    JobNoImages,
+    #[serde(rename = "job.no-usable-tiles")]
+    JobNoUsableTiles,
+    #[serde(rename = "job.partial-discarded")]
+    JobPartialDiscarded,
+    #[serde(rename = "job.resource-limit")]
+    JobResourceLimit,
+    #[serde(rename = "job.unknown")]
+    JobUnknown,
+    #[serde(rename = "job.stale")]
+    JobStale,
+    #[serde(rename = "job.unknown-format")]
+    JobUnknownFormat,
+
+    // Discovery and planning presentation codes.
+    #[serde(rename = "discovery.no-image")]
+    DiscoveryNoImage,
+    #[serde(rename = "discovery.no-level")]
+    DiscoveryNoLevel,
+
+    // Tiles and processing.
+    #[serde(rename = "TILE_DECODE_FAILED")]
+    TileDecodeFailed,
+    #[serde(rename = "tile.processing-failed")]
+    TileProcessingFailed,
+
+    // Native and desktop output.
+    #[serde(rename = "output.canvas-limit")]
+    OutputCanvasLimit,
+    #[serde(rename = "output.encode-failed")]
+    OutputEncodeFailed,
+    #[serde(rename = "output.write-failed")]
+    OutputWriteFailed,
+    #[serde(rename = "output.exists")]
+    OutputExists,
+    #[serde(rename = "output.destination-denied")]
+    OutputDestinationDenied,
+    #[serde(rename = "output.unsupported-extension")]
+    OutputUnsupportedExtension,
+    #[serde(rename = "output.unavailable")]
+    OutputUnavailable,
+    #[serde(rename = "output.no-parent")]
+    OutputNoParent,
+    #[serde(rename = "output.launch-failed")]
+    OutputLaunchFailed,
+    #[serde(rename = "output.launch-task-failed")]
+    OutputLaunchTaskFailed,
+    #[serde(rename = "output.denied")]
+    OutputDenied,
+    #[serde(rename = "output.not-found")]
+    OutputNotFound,
+    #[serde(rename = "output.invoke-failed")]
+    OutputInvokeFailed,
+
+    // Browser canvas and display-only output family.
+    #[serde(rename = "PLAN_INVALID")]
+    CanvasPlanInvalid,
+    #[serde(rename = "OUTPUT_ALLOCATION_FAILED")]
+    CanvasAllocationFailed,
+    #[serde(rename = "OUTPUT_SURFACE_UNAVAILABLE")]
+    CanvasSurfaceUnavailable,
+    #[serde(rename = "OUTPUT_ENCODE_FAILED")]
+    CanvasEncodeFailed,
+    #[serde(rename = "OUTPUT_FAILED")]
+    CanvasFailed,
+    #[serde(rename = "OUTPUT_DENIED")]
+    DesktopOutputDenied,
+
+    // Product control failures.
+    #[serde(rename = "START_FAILED")]
+    StartFailed,
+    #[serde(rename = "CHOICE_FAILED")]
+    ChoiceFailed,
+    #[serde(rename = "INVALID_URL")]
+    InvalidUrl,
+    #[serde(rename = "INVALID_SETTINGS")]
+    InvalidSettings,
+    #[serde(rename = "NO_IMAGE_FOUND")]
+    NoImageFound,
+    #[serde(rename = "handoff.rejected")]
+    HandoffRejected,
+    #[serde(rename = "desktop.invalid-settings")]
+    DesktopInvalidSettings,
+    #[serde(rename = "desktop.invalid-source")]
+    DesktopInvalidSource,
+    #[serde(rename = "desktop.result-retired")]
+    DesktopResultRetired,
+    #[serde(rename = "desktop.registration-failed")]
+    DesktopRegistrationFailed,
+
+    // Host and binding internals.
+    #[serde(rename = "native.internal")]
+    HostInternal,
+    #[serde(rename = "shell.lock")]
+    ShellLock,
+    #[serde(rename = "binding.invalid-value")]
+    BindingInvalidValue,
+    #[serde(rename = "interaction.expired")]
+    InteractionExpired,
+    #[serde(rename = "auth.forbidden-header")]
+    AuthForbiddenHeader,
+}
+
+impl ErrorCode {
+    /// The exact stable wire value of this code.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TransportHttpError => "TRANSPORT_HTTP_ERROR",
+            Self::DiscoveryHttpError => "DISCOVERY_HTTP_ERROR",
+            Self::UpstreamRateLimited => "UPSTREAM_RATE_LIMITED",
+            Self::TransportPolicyDenied => "TRANSPORT_POLICY_DENIED",
+            Self::ProxyBudgetExceeded => "PROXY_BUDGET_EXCEEDED",
+            Self::ProxyError => "PROXY_ERROR",
+            Self::ProxyNetworkError => "PROXY_NETWORK_ERROR",
+            Self::ProxyRateLimited => "PROXY_RATE_LIMITED",
+            Self::ProxyPolicyDenied => "PROXY_POLICY_DENIED",
+            Self::DiscoveryFailed => "DISCOVERY_FAILED",
+            Self::TransportTimeout => "TRANSPORT_TIMEOUT",
+            Self::TransportNetworkError => "TRANSPORT_NETWORK_ERROR",
+            Self::TransportCancelled => "TRANSPORT_CANCELLED",
+            Self::TransportBadUrl => "TRANSPORT_BAD_URL",
+            Self::TransportBadRedirect => "TRANSPORT_BAD_REDIRECT",
+            Self::TransportRedirectLimit => "TRANSPORT_REDIRECT_LIMIT",
+            Self::TransportSizeLimit => "TRANSPORT_SIZE_LIMIT",
+            Self::JobCancelled => "job.cancelled",
+            Self::JobInvalidInput => "job.invalid-input",
+            Self::JobInvalidConfig => "job.invalid-config",
+            Self::JobInvalidOptions => "job.invalid-options",
+            Self::JobInvalidSelection => "job.invalid-selection",
+            Self::JobInvalidState => "job.invalid-state",
+            Self::JobDuplicate => "job.duplicate",
+            Self::JobDiscoveryFailed => "job.discovery-failed",
+            Self::JobEmptyResource => "job.empty-resource",
+            Self::JobDeferredLimit => "job.deferred-limit",
+            Self::JobPlanEmpty => "job.plan-empty",
+            Self::JobPlanInvalid => "job.plan-invalid",
+            Self::JobNoImages => "job.no-images",
+            Self::JobNoUsableTiles => "job.no-usable-tiles",
+            Self::JobPartialDiscarded => "job.partial-discarded",
+            Self::JobResourceLimit => "job.resource-limit",
+            Self::JobUnknown => "job.unknown",
+            Self::JobStale => "job.stale",
+            Self::JobUnknownFormat => "job.unknown-format",
+            Self::DiscoveryNoImage => "discovery.no-image",
+            Self::DiscoveryNoLevel => "discovery.no-level",
+            Self::TileDecodeFailed => "TILE_DECODE_FAILED",
+            Self::TileProcessingFailed => "tile.processing-failed",
+            Self::OutputCanvasLimit => "output.canvas-limit",
+            Self::OutputEncodeFailed => "output.encode-failed",
+            Self::OutputWriteFailed => "output.write-failed",
+            Self::OutputExists => "output.exists",
+            Self::OutputDestinationDenied => "output.destination-denied",
+            Self::OutputUnsupportedExtension => "output.unsupported-extension",
+            Self::OutputUnavailable => "output.unavailable",
+            Self::OutputNoParent => "output.no-parent",
+            Self::OutputLaunchFailed => "output.launch-failed",
+            Self::OutputLaunchTaskFailed => "output.launch-task-failed",
+            Self::OutputDenied => "output.denied",
+            Self::OutputNotFound => "output.not-found",
+            Self::OutputInvokeFailed => "output.invoke-failed",
+            Self::CanvasPlanInvalid => "PLAN_INVALID",
+            Self::CanvasAllocationFailed => "OUTPUT_ALLOCATION_FAILED",
+            Self::CanvasSurfaceUnavailable => "OUTPUT_SURFACE_UNAVAILABLE",
+            Self::CanvasEncodeFailed => "OUTPUT_ENCODE_FAILED",
+            Self::CanvasFailed => "OUTPUT_FAILED",
+            Self::DesktopOutputDenied => "OUTPUT_DENIED",
+            Self::StartFailed => "START_FAILED",
+            Self::ChoiceFailed => "CHOICE_FAILED",
+            Self::InvalidUrl => "INVALID_URL",
+            Self::InvalidSettings => "INVALID_SETTINGS",
+            Self::NoImageFound => "NO_IMAGE_FOUND",
+            Self::HandoffRejected => "handoff.rejected",
+            Self::DesktopInvalidSettings => "desktop.invalid-settings",
+            Self::DesktopInvalidSource => "desktop.invalid-source",
+            Self::DesktopResultRetired => "desktop.result-retired",
+            Self::DesktopRegistrationFailed => "desktop.registration-failed",
+            Self::HostInternal => "native.internal",
+            Self::ShellLock => "shell.lock",
+            Self::BindingInvalidValue => "binding.invalid-value",
+            Self::InteractionExpired => "interaction.expired",
+            Self::AuthForbiddenHeader => "auth.forbidden-header",
+        }
+    }
+}
+
+impl std::fmt::Display for ErrorCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl From<FetchFailureCode> for ErrorCode {
+    fn from(code: FetchFailureCode) -> Self {
+        match code {
+            FetchFailureCode::TRANSPORT_HTTP_ERROR => Self::TransportHttpError,
+            FetchFailureCode::DISCOVERY_HTTP_ERROR => Self::DiscoveryHttpError,
+            FetchFailureCode::UPSTREAM_RATE_LIMITED => Self::UpstreamRateLimited,
+            FetchFailureCode::TRANSPORT_POLICY_DENIED => Self::TransportPolicyDenied,
+            FetchFailureCode::PROXY_BUDGET_EXCEEDED => Self::ProxyBudgetExceeded,
+            FetchFailureCode::PROXY_ERROR => Self::ProxyError,
+            FetchFailureCode::PROXY_NETWORK_ERROR => Self::ProxyNetworkError,
+            FetchFailureCode::PROXY_RATE_LIMITED => Self::ProxyRateLimited,
+            FetchFailureCode::DISCOVERY_FAILED => Self::DiscoveryFailed,
+            FetchFailureCode::TRANSPORT_TIMEOUT => Self::TransportTimeout,
+            FetchFailureCode::TRANSPORT_NETWORK_ERROR => Self::TransportNetworkError,
+            FetchFailureCode::TRANSPORT_CANCELLED => Self::TransportCancelled,
+            FetchFailureCode::TRANSPORT_BAD_URL => Self::TransportBadUrl,
+            FetchFailureCode::TRANSPORT_BAD_REDIRECT => Self::TransportBadRedirect,
+            FetchFailureCode::TRANSPORT_REDIRECT_LIMIT => Self::TransportRedirectLimit,
+            FetchFailureCode::TRANSPORT_SIZE_LIMIT => Self::TransportSizeLimit,
+        }
+    }
 }
 
 /// Stable code for a host-observed fetch failure.
@@ -459,11 +772,12 @@ pub struct Error {
     pub retry_after_ms: Option<u64>,
     /// Stable error code. Rewrite through [`Error::with_code`] so the
     /// derived `retryable` verdict never disagrees with it.
-    pub code: String,
+    pub code: ErrorCode,
     pub phase: ErrorPhase,
-    /// Derived from `code` and `http` by [`crate::retry::is_retryable`];
-    /// every construction and rewrite recomputes it so the pair never
-    /// disagrees.
+    /// Derived from `code` and `http` by [`crate::retry::is_retryable`]
+    /// (job-level aggregates derive it from their retained failure set via
+    /// [`crate::retry::aggregate_retryable`]); every construction and
+    /// rewrite recomputes it so it never contradicts its facts.
     #[serde(default)]
     pub retryable: bool,
     pub message: String,
@@ -487,9 +801,8 @@ pub struct Error {
 
 impl Error {
     #[must_use]
-    pub fn new(code: impl Into<String>, phase: ErrorPhase, message: impl Into<String>) -> Self {
-        let code = code.into();
-        let retryable = crate::retry::is_retryable(&code, None);
+    pub fn new(code: ErrorCode, phase: ErrorPhase, message: impl Into<String>) -> Self {
+        let retryable = crate::retry::is_retryable(code, None);
         Self {
             retry_after_ms: None,
             code,
@@ -510,9 +823,17 @@ impl Error {
     /// Rewrite the code (and therefore the retry verdict) while keeping the
     /// structured failure context.
     #[must_use]
-    pub fn with_code(mut self, code: impl Into<String>) -> Self {
-        self.code = code.into();
-        self.retryable = crate::retry::is_retryable(&self.code, self.http);
+    pub fn with_code(mut self, code: ErrorCode) -> Self {
+        self.code = code;
+        self.retryable = crate::retry::is_retryable(self.code, self.http);
+        self
+    }
+
+    /// Attach the bounded diagnostic detail (for example the preserved
+    /// error-chain text of the underlying cause).
+    #[must_use]
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
         self
     }
 
@@ -811,6 +1132,30 @@ impl std::fmt::Display for Error {
     }
 }
 impl std::error::Error for Error {}
+
+/// Bounded error-chain text for [`Error::detail`]: the cause chain is
+/// preserved as diagnostic detail instead of being pasted into `message`
+/// or thrown away. Truncated with an ellipsis marker past 512 bytes.
+#[must_use]
+pub fn chain_text(error: &(dyn std::error::Error + 'static)) -> String {
+    const LIMIT: usize = 512;
+    let mut text = error.to_string();
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        text.push_str(": ");
+        text.push_str(&cause.to_string());
+        source = std::error::Error::source(cause);
+    }
+    if text.len() > LIMIT {
+        let mut cut = LIMIT;
+        while cut > 0 && !text.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        text.truncate(cut);
+        text.push_str("...");
+    }
+    text
+}
 
 // ---------------------------------------------------------------------------
 // Credential vocabulary (cross-language constants)

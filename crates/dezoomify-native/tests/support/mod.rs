@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 #![allow(clippy::result_large_err)]
+use dezoomify::model::ErrorCode;
 use dezoomify::model::Progress;
 use dezoomify_native::{Controls, JobOptions, NativeHost, OutputTarget, Publication};
 use std::path::Path;
@@ -22,7 +23,7 @@ pub fn run_host(host: &NativeHost<'_>) -> Result<Publication, dezoomify::model::
     ));
     if let Err(error) = &result {
         host.diagnostics.finish(
-            if error.code == "job.cancelled" {
+            if error.code == ErrorCode::JobCancelled {
                 "cancelled"
             } else {
                 "failed"
@@ -33,7 +34,7 @@ pub fn run_host(host: &NativeHost<'_>) -> Result<Publication, dezoomify::model::
     result?;
     host.publication().ok_or_else(|| {
         dezoomify::model::Error::new(
-            "native.internal",
+            ErrorCode::HostInternal,
             dezoomify::model::ErrorPhase::Output,
             "output was not published",
         )

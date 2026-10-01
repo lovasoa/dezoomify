@@ -34,6 +34,7 @@ export interface BrowserHostDependencies {
   loadDisplayImage?(url: string, signal: AbortSignal): Promise<TileImageLike>;
   onProgress(progress: Progress): void;
   choosePartial(missing: MissingTiles, signal: AbortSignal): Promise<RecoveryChoice>;
+  transport?(): ErrorTransport | null;
 }
 
 /** Concrete browser capabilities for one cancellable invocation. */
@@ -147,7 +148,7 @@ export class BrowserHost implements Host {
           : {}),
       });
       const tile_probe = await probe(tile.request, this.signal);
-      if (tile_probe.status === "available" && tile.placement.role === "probe-and-output") {
+      if (tile_probe.status === "available" && tile.placement.role.output) {
         try {
           this.deps.assembly.prepare(tile.placement.canvas);
         } catch (error) {

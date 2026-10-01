@@ -11,7 +11,7 @@ use crate::core::discovery::{
 };
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
-    ParsedResource, Request, ResolvedLevel,
+    ParsedResource, RejectionKind, Request, ResolvedLevel,
 };
 use crate::json_utils::all_json;
 
@@ -229,9 +229,11 @@ fn catalog_from_dzi(
             ));
         }
         if image.get_size().x == 0 || image.get_size().y == 0 {
-            return Err(DiscoveryError::InvalidMetadata(
-                "invalid DZI zero image size".into(),
-            ));
+            return Err(DiscoveryError::Rejected {
+                kind: RejectionKind::NoImage,
+                cause: None,
+                detail: Some("the document declares an empty image".into()),
+            });
         }
         let base_url: Arc<str> = image.base_url(url).into();
         let image_size = image.get_size();

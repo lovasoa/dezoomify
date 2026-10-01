@@ -2,7 +2,9 @@ use dezoomify::core::discovery::{DiscoveryError, DiscoveryInput, DiscoveryLimits
 use dezoomify::core::{
     DiscoveredEntry, DiscoveryCatalog, Registry, default_registry, registry_for,
 };
-use dezoomify::model::{DiscoveryInputKind, Error, ErrorPhase, ResourceRead, ResourceResponse};
+use dezoomify::model::{
+    DiscoveryInputKind, Error, ErrorCode, ErrorPhase, ResourceRead, ResourceResponse,
+};
 use std::cell::RefCell;
 
 const PAGE: &str = "https://museum.test/viewer";
@@ -40,7 +42,7 @@ fn lookup(
         async move {
             found.ok_or_else(|| {
                 Error::new(
-                    "DISCOVERY_FAILED",
+                    ErrorCode::DiscoveryFailed,
                     ErrorPhase::Discovery,
                     format!("no fixture: {}", request.uri),
                 )
@@ -310,7 +312,9 @@ fn supplied_inputs_and_fetched_documents_share_limits() {
         None,
     )
     .unwrap_err();
-    assert!(matches!(error,DiscoveryError::Host(ref error) if error.code=="job.resource-limit"));
+    assert!(
+        matches!(error,DiscoveryError::Host(ref error) if error.code==ErrorCode::JobResourceLimit)
+    );
 }
 
 #[test]

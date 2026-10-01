@@ -1,5 +1,5 @@
 //! Native resources retained for a desktop invocation and its saved result.
-use dezoomify::model::{DiagnosticReport, RecoveryChoice};
+use dezoomify::model::{DiagnosticReport, ErrorCode, RecoveryChoice};
 use dezoomify::model::{Error, ErrorPhase};
 use dezoomify_native::{diagnostics::Diagnostics, Controls};
 use std::{
@@ -54,7 +54,7 @@ impl Registration {
             .unwrap_or_else(|error| error.into_inner());
         if !pending.as_ref().is_some_and(|(id, _)| *id == question) {
             return Err(Error::new(
-                "interaction.expired",
+                ErrorCode::InteractionExpired,
                 ErrorPhase::Validation,
                 "The question is no longer open.",
             ));
@@ -62,7 +62,7 @@ impl Registration {
         if let Some((_, send)) = pending.take() {
             send.send(answer).map_err(|_| {
                 Error::new(
-                    "interaction.expired",
+                    ErrorCode::InteractionExpired,
                     ErrorPhase::Validation,
                     "The question is no longer open.",
                 )
@@ -102,14 +102,14 @@ impl JobTable {
     pub fn insert(&mut self, id: &str) -> Result<Arc<Registration>, Error> {
         if !crate::commands::is_valid_job_id(id) {
             return Err(Error::new(
-                "job.invalid-input",
+                ErrorCode::JobInvalidInput,
                 ErrorPhase::Validation,
                 "job id must look like job:<suffix>",
             ));
         }
         if self.jobs.contains_key(id) {
             return Err(Error::new(
-                "job.duplicate",
+                ErrorCode::JobDuplicate,
                 ErrorPhase::Validation,
                 "An invocation with this identity already exists.",
             ));
@@ -125,7 +125,7 @@ impl JobTable {
         let entry = self.get(id)?;
         if entry.completed.load(Ordering::SeqCst) {
             return Err(Error::new(
-                "job.stale",
+                ErrorCode::JobStale,
                 ErrorPhase::Cleanup,
                 format!("the invocation {id} has finished"),
             ));
@@ -157,7 +157,7 @@ impl Drop for JobTable {
 
 pub fn unknown_job(id: &str) -> Error {
     Error::new(
-        "job.unknown",
+        ErrorCode::JobUnknown,
         ErrorPhase::Validation,
         format!("unknown job id {id}; the invocation never existed or belongs to a closed window"),
     )
@@ -216,7 +216,7 @@ mod tests {
                     &host,
                 ))
                 .unwrap_err();
-            assert_eq!(error.code, "job.cancelled");
+            assert_eq!(error.code, ErrorCode::JobCancelled);
             assert!(host.publication().is_none());
             assert!(!output.exists());
             drop(host);
