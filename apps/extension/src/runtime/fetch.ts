@@ -83,8 +83,7 @@ function checkedUrl(url: string): URL {
   } catch {
     throw transportError("bad-url", "invalid URL");
   }
-  if (!isPublicHttpUrl(parsed.href))
-    throw transportError("bad-url", "unsupported URL scheme");
+  if (!isPublicHttpUrl(parsed.href)) throw transportError("bad-url", "unsupported URL scheme");
   return parsed;
 }
 

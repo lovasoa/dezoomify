@@ -181,7 +181,7 @@ test("no proxy for http-error, ineligible targets, cancelled, tile", async () =>
     const fetcher = createWebFetcher(deps);
     await assert.rejects(
       fetcher.fetchResource(request("https://public.test/x"), attemptSignal),
-      (error) => error.code === "DISCOVERY_HTTP_ERROR",
+      (error) => error.kind === "http-error" && error.status === 404,
     );
     assert.equal(proxy.calls, 0);
   }
@@ -193,7 +193,7 @@ test("no proxy for http-error, ineligible targets, cancelled, tile", async () =>
     const fetcher = createWebFetcher(deps);
     await assert.rejects(
       fetcher.fetchResource(request("https://user:pw@public.test/x"), attemptSignal),
-      (error) => error.code === "DISCOVERY_FAILED",
+      (error) => error.kind === "network-failure",
     );
     assert.equal(proxy.calls, 0);
   }
@@ -207,7 +207,7 @@ test("no proxy for http-error, ineligible targets, cancelled, tile", async () =>
     ctrl.abort();
     await assert.rejects(
       fetcher.fetchResource(request("https://public.test/x"), ctrl.signal),
-      (error) => error.code === "TRANSPORT_CANCELLED",
+      (error) => error.kind === "cancelled",
     );
     assert.equal(proxy.calls, 0);
   }

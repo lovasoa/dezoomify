@@ -414,7 +414,7 @@ impl Sink {
                 .map_err(|e| crate::output::write_failed("spool read failed", &e))?;
             if bytes.len() < 24 {
                 return Err(Error::WriteFailed {
-                    detail: Some("spool entry truncated".into()),
+                    failure: "spool entry truncated".to_string().into(),
                 });
             }
             let w = u32::from_le_bytes(bytes[0..4].try_into().unwrap_or([0; 4]));
@@ -423,12 +423,12 @@ impl Sink {
             let expected = (w as usize).saturating_mul(h as usize).saturating_mul(4);
             if pixels.len() != expected || w == 0 || h == 0 {
                 return Err(Error::WriteFailed {
-                    detail: Some("spool entry corrupt".into()),
+                    failure: "spool entry corrupt".to_string().into(),
                 });
             }
             let image =
                 RgbaImage::from_raw(w, h, pixels.to_vec()).ok_or_else(|| Error::WriteFailed {
-                    detail: Some("spool entry corrupt".into()),
+                    failure: "spool entry corrupt".to_string().into(),
                 })?;
             self.paint(tile.ordinal, &image, tile.destination, tile.extent);
         }
@@ -512,7 +512,7 @@ impl Sink {
         };
         validate_destination(&dest, &format, overwrite)?;
         let canvas = self.canvas.clone().ok_or_else(|| Error::Internal {
-            detail: Some("commit without assembled canvas".into()),
+            failure: "commit without assembled canvas".to_string().into(),
         })?;
         let (icc, exif) = self.first_meta(reused_tiles);
         let encoded_len: u64;

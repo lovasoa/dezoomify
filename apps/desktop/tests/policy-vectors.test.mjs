@@ -5,7 +5,9 @@
 // (apps/desktop/src-tauri/src/deep_link.rs) and
 // `policy_vectors_match_the_shared_oracle`
 // (apps/desktop/src-tauri/src/settings.rs), so the TS and Rust validators can
-// never accept or reject different inputs unnoticed. Also pins the two
+// never accept or reject different inputs unnoticed. The settings cases in
+// testdata/policy-vectors.json are covered by the Rust validator alone (the
+// duplicated TS settings validator is gone). Also pins the two
 // credential query-key vocabularies that live in TypeScript against their
 // Rust contract mirror.
 
@@ -13,9 +15,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { isRetryable } from "../../../packages/shared-ui/src/failure.ts";
 import { SIGNED_QUERY_KEYS } from "../../../packages/shared-ui/src/source-url.ts";
-import { DEEP_LINK_SECRET_QUERY_KEYS } from "../src/errorCopy.ts";
-import { parseHeadersText, validateSettings } from "../src/settings.ts";
+import { DEEP_LINK_SECRET_QUERY_KEYS, validateDeepLinkPayload } from "../src/errorCopy.ts";
 
 const deepLinkVectors = JSON.parse(
   readFileSync(
@@ -30,36 +32,27 @@ const policyVectors = JSON.parse(
   ),
 );
 
-test("settings policy vectors: the TS validators match the shared oracle", () => {
-  for (const c of policyVectors.headerLines) {
-    const parsed = parseHeadersText(c.line);
-    if (c.reject !== undefined) {
-      assert.deepEqual(parsed.errors, [c.reject.ts], `${c.name} must reject`);
-    } else if (c.accept === null) {
-      assert.deepEqual(parsed, { headers: {}, errors: [] }, `${c.name} must be ignored`);
-    } else {
-      assert.deepEqual(parsed.errors, [], `${c.name} must accept`);
-      assert.deepEqual(
-        parsed.headers,
-        { [c.accept.name]: c.accept.value },
-        `${c.name} must accept`,
-      );
-    }
-  }
-  for (const c of policyVectors.settings) {
-    const validated = validateSettings(c.input);
-    if (c.reject !== undefined) {
-      assert.equal(validated.ok, false, `${c.name} must reject`);
-      assert.equal(validated.errors[0], c.reject.ts, `${c.name} rejection reason`);
-    } else {
-      assert.equal(validated.ok, true, `${c.name} must accept (${validated.errors})`);
-      assert.ok(validated.settings, `${c.name} produces settings`);
-      for (const [field, value] of Object.entries(c.accept)) {
-        assert.deepEqual(validated.settings[field], value, `${c.name}: ${field}`);
-      }
-    }
+test("deep-link vectors: the frontend refuses every raw link (the shell parser is the single validator)", () => {
+  assert.ok(deepLinkVectors.cases.length > 0);
+  for (const c of deepLinkVectors.cases) {
+    assert.equal(
+      validateDeepLinkPayload({ source_url: c.raw }),
+      null,
+      `${c.name}: raw dezoomify:// values never pass frontend validation`,
+    );
   }
 });
+
+test("retry policy vectors: the TS verdicts match the shared oracle", () => {
+  for (const vector of policyVectors.retryPolicy) {
+    assert.equal(isRetryable(vector.error), vector.retryable, vector.name);
+  }
+});
+
+// Settings policy vectors stay covered by the Rust single validator
+// (`policy_vectors_match_the_shared_oracle` in
+// apps/desktop/src-tauri/src/settings.rs); the TS mirror of that validator
+// is gone.
 
 // Deliberate cross-language membership lock: this exact list mirrors the
 // canonical Rust contract constant `dezoomify::model::SENSITIVE_QUERY_KEYS`

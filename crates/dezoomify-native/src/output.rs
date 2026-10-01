@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use dezoomify::model::{Error, LimitContext, OutputFormat};
+use dezoomify::model::{Error, Failure, LimitContext, OutputFormat};
 
 /// One rendered `iiif-dir` tile set: `(relative path, bytes)` pairs in
 /// sorted relative-path order.
@@ -227,28 +227,35 @@ fn output_exists() -> Error {
 
 fn destination_denied(detail: impl Into<String>) -> Error {
     Error::DestinationDenied {
-        detail: Some(detail.into()),
+        failure: Failure {
+            request: None,
+            detail: Some(detail.into()),
+        },
     }
 }
 
 fn unsupported_extension(detail: impl Into<String>) -> Error {
     Error::UnsupportedExtension {
-        detail: Some(detail.into()),
+        failure: Failure {
+            request: None,
+            detail: Some(detail.into()),
+        },
     }
 }
 
 /// Output write failure with the failing step and cause chain preserved in
-/// `detail`.
+/// the failure detail.
 pub(crate) fn write_failed(
     message: impl Into<String>,
     cause: &(dyn std::error::Error + 'static),
 ) -> Error {
     Error::WriteFailed {
-        detail: Some(format!(
+        failure: format!(
             "{}: {}",
             message.into(),
             dezoomify::model::chain_text(cause)
-        )),
+        )
+        .into(),
     }
 }
 

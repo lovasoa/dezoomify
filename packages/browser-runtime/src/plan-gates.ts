@@ -21,7 +21,10 @@ function canvasFailure(
   stage: string,
 ): JobError {
   const handoff = desktopHandoffLink(sourceUrl);
-  return outputError(kind, `canvas ${width}x${height} ${stage}; open in the desktop app: ${handoff}`);
+  return outputError(
+    kind,
+    `canvas ${width}x${height} ${stage}; open in the desktop app: ${handoff}`,
+  );
 }
 
 /** The plan's declared canvas exceeds the browser canvas limits. */

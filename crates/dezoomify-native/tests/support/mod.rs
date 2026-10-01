@@ -33,7 +33,7 @@ pub fn run_host(host: &NativeHost<'_>) -> Result<Publication, dezoomify::model::
     result?;
     host.publication()
         .ok_or_else(|| dezoomify::model::Error::Internal {
-            detail: Some("output was not published".into()),
+            failure: "output was not published".to_string().into(),
         })
 }
 

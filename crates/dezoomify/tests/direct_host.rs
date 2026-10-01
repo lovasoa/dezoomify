@@ -25,11 +25,10 @@ fn invoke(host: &MemoryHost, options: Options) -> Result<Output, Error> {
 fn failure(status: u16) -> Error {
     Error::HttpError {
         status,
-        request: None,
         retry_after_ms: None,
         preview: None,
         transport: ErrorTransport::DisplayOnly,
-        detail: None,
+        failure: Failure::default(),
     }
 }
 fn fail(host: &MemoryHost, index: u32, errors: impl IntoIterator<Item = Error>) {
@@ -83,11 +82,10 @@ fn discovery_preserves_the_rejected_lookup_cause_after_a_failed_alternative() {
         .insert("https://images.test/first.js".into(), earlier);
     let rejected = Error::HttpError {
         status: 429,
-        request: None,
         retry_after_ms: Some(7000),
         preview: Some("slow down".into()),
         transport: ErrorTransport::BrowserSession,
-        detail: Some("final lookup details".into()),
+        failure: "final lookup details".to_string().into(),
     };
     host.fetch_failures
         .insert("https://images.test/second.js".into(), rejected.clone());
@@ -112,7 +110,9 @@ fn discovery_preserves_the_rejected_lookup_cause_after_a_failed_alternative() {
     assert_eq!(
         error,
         Error::DiscoveryFailed {
-            detail: Some(" - krpano: HTTP 429 fetching this address".into()),
+            failure: " - krpano: HTTP 429 fetching this address"
+                .to_string()
+                .into(),
             cause: Some(Box::new(retained)),
         }
     );
@@ -179,11 +179,10 @@ fn transient_failures_honor_exact_budget_and_retry_after() {
     let host = MemoryHost::default();
     let throttled = Error::HttpError {
         status: 429,
-        request: None,
         retry_after_ms: Some(7000),
         preview: None,
         transport: ErrorTransport::DisplayOnly,
-        detail: None,
+        failure: Failure::default(),
     };
     fail(&host, 0, [throttled, failure(503)]);
     invoke(&host, options()).unwrap();
@@ -262,10 +261,10 @@ fn discard_and_empty_output_never_publish() {
 fn invalid_binding_and_output_failures_abort_immediately() {
     for error in [
         Error::BindingInvalidValue {
-            detail: Some("bad result".into()),
+            failure: "bad result".to_string().into(),
         },
         Error::OutputUnavailable {
-            detail: Some("canvas allocation failed".into()),
+            failure: "canvas allocation failed".to_string().into(),
         },
     ] {
         let host = MemoryHost::default();
@@ -774,11 +773,13 @@ fn missing_tiles_preserve_the_complete_original_host_error() {
     let host = MemoryHost::default();
     let error = Error::HttpError {
         status: 403,
-        request: Some("https://redirected.test/image?signature=precise".into()),
         retry_after_ms: Some(5000),
         preview: Some("denied body".into()),
         transport: ErrorTransport::Native,
-        detail: Some("original diagnostic context".into()),
+        failure: Failure {
+            request: Some("https://redirected.test/image?signature=precise".into()),
+            detail: Some("original diagnostic context".into()),
+        },
     };
     fail(&host, 0, [error.clone()]);
     host.choices.borrow_mut().push_back(RecoveryChoice::Keep);

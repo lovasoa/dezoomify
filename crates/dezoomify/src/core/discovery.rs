@@ -803,7 +803,9 @@ where
                             .checked_add(response.bytes.len())
                             .filter(|total| *total <= limit)
                             .ok_or_else(|| crate::model::Error::ResourceLimit {
-                                detail: Some("discovery metadata size limit exceeded".to_string()),
+                                failure: "discovery metadata size limit exceeded"
+                                    .to_string()
+                                    .into(),
                             })?;
                         retained.set(total);
                         let response = std::sync::Arc::new(response);
@@ -1147,16 +1149,18 @@ fn record_diagnostic(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{BlockedReason, ErrorTransport};
+    use crate::model::{BlockedReason, ErrorTransport, Failure};
 
     fn http_cause(status: u16, transport: ErrorTransport) -> Box<Error> {
         Box::new(Error::HttpError {
             status,
-            request: Some("https://example.test/metadata".into()),
             retry_after_ms: None,
             preview: None,
             transport,
-            detail: None,
+            failure: Failure {
+                request: Some("https://example.test/metadata".into()),
+                detail: None,
+            },
         })
     }
 
@@ -1231,16 +1235,16 @@ mod tests {
             Box::new(Error::PolicyDenied {
                 blocked_reason: BlockedReason::SignedQuery,
                 transport: ErrorTransport::MetadataProxy,
-                detail: None,
+                failure: Failure::default(),
             }),
             Box::new(Error::PolicyDenied {
                 blocked_reason: BlockedReason::PrivateHost,
                 transport: ErrorTransport::MetadataProxy,
-                detail: None,
+                failure: Failure::default(),
             }),
             Box::new(Error::NetworkFailure {
                 transport: ErrorTransport::BrowserSession,
-                detail: None,
+                failure: Failure::default(),
             }),
         ];
         let diagnostics: Vec<_> = causes
@@ -1267,9 +1271,9 @@ mod tests {
         // Bounded detail is a diagnostic, never a grouping fact.
         let mut different_text = diagnostics[0].clone();
         if let Some(cause) = &mut different_text.cause
-            && let Error::HttpError { detail, .. } = cause.as_mut()
+            && let Error::HttpError { failure, .. } = cause.as_mut()
         {
-            *detail = Some("another format's explanation".into());
+            failure.detail = Some("another format's explanation".into());
         }
         assert_eq!(
             diagnostic_bullets(&[diagnostics[0].clone(), different_text]).len(),

@@ -39,7 +39,7 @@ fn lookup(
             });
         async move {
             found.ok_or_else(|| Error::DiscoveryFailed {
-                detail: Some(format!("no fixture: {}", request.uri)),
+                failure: format!("no fixture: {}", request.uri).into(),
                 cause: None,
             })
         }

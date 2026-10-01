@@ -93,7 +93,7 @@ implementation. See [Browser runtime](browser-runtime.md) and [Security](securit
 - Shared UI imports domain declarations and local utilities, with no host globals.
 - Browser application modules may compose UI and Host; image and transport modules remain independent of UI.
 - Crossing values derive from Rust declarations. URLs, headers, errors, and geometry retain their exact meaning.
-- Errors carry stable codes and structured context; callers never branch on display text.
+- Errors are one typed enum: the `kind` tag names the failure and structured fields carry the facts; callers never branch on display text.
 
 Biome rejects product package and sibling-app imports. The architecture test in
 `test/architecture.test.mjs` checks the compiled import inventory of authored

@@ -223,7 +223,7 @@ fn discover_once(scenario: &str, input: &str) -> Result<DiscoveredEntry, String>
                         },
                     })
                     .ok_or_else(|| Error::DiscoveryFailed {
-                        detail: Some(format!("no mirrored payload: {}", request.uri)),
+                        failure: format!("no mirrored payload: {}", request.uri).into(),
                         cause: None,
                     })
             }

@@ -9,13 +9,13 @@ import type { ViewContext } from "@dezoomify/shared-ui";
 import {
   boundDiagnosticReport,
   cancelAllQueueEntries,
-  isJobError,
   cancelQueueEntry,
   clearHistory as clearHistoryStore,
   detailOf,
   finishActiveQueueEntry,
   HISTORY_KEY_DESKTOP,
   type HistoryEntry,
+  isJobError,
   loadHistory as loadHistoryStore,
   openConfirmModal,
   PartialDecisionActions,
@@ -63,19 +63,12 @@ import {
   retryDesktopEntry,
 } from "./queue.ts";
 import type { DesktopSettings } from "./settings.ts";
-import {
-  defaultOutputDirectory,
-  loadSettings,
-  resetSettings,
-  saveSettings,
-  validateSettings,
-} from "./settings.ts";
+import { defaultOutputDirectory, loadSettings, resetSettings, saveSettings } from "./settings.ts";
 import { DesktopSettingsView } from "./settingsView.tsx";
 
 const root = typeof document !== "undefined" ? document.getElementById("root") : null;
 
 const DESKTOP_DOCS_BASE = "https://dezoomify.ophir.dev";
-
 
 const REQUEST_TIMEOUT_MS = 30000;
 
@@ -353,25 +346,20 @@ function launchNativeJob(trimmed: string): void {
     input: trimmed,
     submitted: {
       ...desktopSettings,
+      // Raw header lines carry values, so they never enter diagnostics.
       headers: undefined,
-      header_names: Object.keys(desktopSettings.headers),
     },
   });
   resetActivity(trimmed);
 
-  const effective = validateSettings(desktopSettings);
-  if (!effective.ok || !effective.settings) {
-    const detail = effective.errors.join("; ") || "Invalid settings.";
-    settingsError = detail;
-    failLocally({ kind: "invalid-settings", detail });
-    return;
-  }
+  // Rust (`parse_settings`) is the single settings validator; its typed
+  // rejection below is authoritative. A rejected save shows its reason and
+  // persists nothing.
   settingsError = null;
-  desktopSettings = effective.settings;
   update();
   const request = {
     inputUrl: trimmed,
-    settings: { ...desktopSettings, headers: { ...desktopSettings.headers } },
+    settings: { ...desktopSettings, headers: [...desktopSettings.headers] },
   };
   void invokeNative(request, {
     progress(progress) {
@@ -429,6 +417,11 @@ function launchNativeJob(trimmed: string): void {
         settleActiveQueue("cancelled");
         update();
         return;
+      }
+      if (isJobError(error) && error.kind === "invalid-settings") {
+        // The Rust save command rejected the settings; surface its typed
+        // reason in the settings panel as well as the failure view.
+        settingsError = detailOf(error) ?? t("desktop.settings.invalidSubmit");
       }
       failLocally(
         isJobError(error)

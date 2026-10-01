@@ -34,7 +34,7 @@
     },
     {
       "entry": "jobq:1",
-      "errorCode": "job.partial-discarded",
+      "errorCode": "partial-discarded",
       "transition": "failed"
     },
     {

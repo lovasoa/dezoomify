@@ -328,11 +328,13 @@ impl<'a> NativeHost<'a> {
         if !outcome.ok() {
             let error = Error::HttpError {
                 status: outcome.status,
-                request: Some(dezoomify::model::bounded_uri(outcome.final_uri.clone())),
                 retry_after_ms: outcome.retry_after_ms,
                 preview: None,
                 transport: ErrorTransport::Native,
-                detail: None,
+                failure: Failure {
+                    request: Some(dezoomify::model::bounded_uri(outcome.final_uri.clone())),
+                    detail: None,
+                },
             };
             return Err(resource_context(error, request));
         }
@@ -352,14 +354,14 @@ impl<'a> NativeHost<'a> {
                 let bytes = processing
                     .apply(bytes)
                     .map_err(|error| Error::ProcessingFailed {
-                        detail: Some(error.to_string()),
+                        failure: error.to_string().into(),
                     })?;
                 if let Some((dir, namespace, uri)) = store {
                     let _ = crate::cache::store(&dir, &namespace, &uri, &bytes);
                 }
                 let image =
                     load_image_with_metadata(&bytes).map_err(|error| Error::DecodeFailed {
-                        detail: Some(error.to_string()),
+                        failure: error.to_string().into(),
                     })?;
                 Ok::<_, Error>(DecodedTile {
                     image: image.image.to_rgba8(),
@@ -369,7 +371,7 @@ impl<'a> NativeHost<'a> {
             })
             .await
             .map_err(|_| Error::Internal {
-                detail: Some("tile decode task failed".into()),
+                failure: "tile decode task failed".to_string().into(),
             })?
         })
         .await
@@ -577,13 +579,17 @@ impl Host for NativeHost<'_> {
 
     async fn choose_image(&self, _catalog: Catalog) -> Result<u32, Error> {
         Err(Error::ChoiceFailed {
-            detail: Some("native image selection requires a configured policy".into()),
+            failure: "native image selection requires a configured policy"
+                .to_string()
+                .into(),
         })
     }
 
     async fn choose_level(&self, _image: Image) -> Result<u32, Error> {
         Err(Error::ChoiceFailed {
-            detail: Some("native level selection requires a configured policy".into()),
+            failure: "native level selection requires a configured policy"
+                .to_string()
+                .into(),
         })
     }
 

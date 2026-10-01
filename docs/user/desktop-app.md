@@ -56,7 +56,7 @@ step. Settings and the queue do not appear on the finished image screen.
 If some parts could not be retrieved, the app labels the image as saved with
 gaps; the open actions use that partial file.
 If opening fails, each attempt shows its own error. **Technical details &
-logs → Copy diagnostics** includes the failed action and its error code.
+logs → Copy diagnostics** includes the failed action and its error kind.
 You can still open the containing folder if the image has been moved.
 
 ## Install

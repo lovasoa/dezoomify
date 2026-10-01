@@ -116,7 +116,7 @@ test("a replacement renders immediately and waits for prior resources before sta
       },
       "forbidden",
     ),
-    { code: "TRANSPORT_CANCELLED" },
+    { kind: "cancelled" },
   );
   act(() => {
     second = h.app.run("https://second.test/image");
@@ -148,14 +148,7 @@ test("the shared queue advances after failure and preserves successful history",
   });
   await tick();
   assert.equal(h.calls.length, 1);
-  act(() =>
-    h.calls[0].reject({
-      code: "job.discovery-failed",
-      phase: "discovery",
-      message: "No image",
-      retryable: false,
-    }),
-  );
+  act(() => h.calls[0].reject({ kind: "discovery-failed", detail: "no image" }));
   await tick();
   assert.equal(h.calls[1].inputs[0].url, "https://two.test/image");
   act(() => h.calls[1].resolve(output));
@@ -224,11 +217,10 @@ test("partial actions resolve the awaited choice and disappear before completed 
           tile: 2,
           failures: [
             {
-              retryable: false,
-              code: "TRANSPORT_HTTP_ERROR",
-              phase: "acquisition",
-              message: "The website refused this tile.",
-              http: 403,
+              kind: "http-error",
+              status: 403,
+              transport: "direct",
+              detail: "the website refused this tile",
             },
           ],
         },

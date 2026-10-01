@@ -62,8 +62,9 @@ compilation. Use `--profile dev-debug` only when a diagnosis needs symbols.
 - **Contracts:** cross-language types are defined once in `crates/dezoomify/src/model.rs`;
   `packages/wasm-bindings` is emitted by the real WASM build via
   `cargo xtask bindings generate` and never hand-edited. Browser boundary
-  modules import it and never redeclare Rust contract types. Errors carry stable codes and structured context;
-  never branch on display strings.
+  modules import it and never redeclare Rust contract types. Errors are one
+  typed enum whose serde `kind` tag is the only stable identifier and whose
+  structured fields carry the facts; never branch on display strings.
 - **Generated artifacts:** nothing generated for the website is committed
   (wasm glue, `help/`, `dist/`); the website-deploy workflow builds
   everything via `scripts/build-site.mjs` (legacy site at `/`, Vite+React app

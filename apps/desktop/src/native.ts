@@ -9,7 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { assertNoTileBytes } from "./events.ts";
-import { type DesktopSettings, validateSettings } from "./settings.ts";
+import type { DesktopSettings } from "./settings.ts";
 
 export interface DesktopIpc {
   invoke(command: string, args?: Record<string, unknown>): Promise<unknown>;
@@ -46,9 +46,6 @@ export async function invokeNative(
     request.inputUrl.length > 2048
   ) {
     throw { kind: "invalid-input", detail: "the image address is not usable" };
-  }
-  if (!validateSettings(request.settings).ok) {
-    throw { kind: "invalid-settings", detail: "the output settings are not valid" };
   }
   const id = `job:desktop-${Date.now()}-${++nextInvocation}`;
   let retired = false;
@@ -98,11 +95,13 @@ export async function invokeNative(
     if (retired) throw { kind: "stale" };
     await api.invoke(command, { job: id, ...args });
   };
+  // Settings cross IPC raw as typed; Rust's `parse_settings` is the single
+  // validator and its typed rejection reason is authoritative.
   const finished = api
     .invoke("dezoomify", {
       job: id,
       inputUrl: request.inputUrl,
-      settings: { ...request.settings, headers: { ...request.settings.headers } },
+      settings: { ...request.settings, headers: [...request.settings.headers] },
     })
     .then((output) => {
       assertNoTileBytes(output);

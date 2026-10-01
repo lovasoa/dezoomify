@@ -167,7 +167,7 @@ fn deferred_access_runs_after_every_runnable_branch_and_reuses_its_resource() {
             async move {
                 if request.uri.ends_with("/b") {
                     return Err(Error::DiscoveryFailed {
-                        detail: Some("unavailable".into()),
+                        failure: "unavailable".to_string().into(),
                         cause: None,
                     });
                 }
@@ -284,17 +284,19 @@ fn live_resource_concurrency_stays_within_the_declared_bound() {
 
 #[test]
 fn rejected_candidates_retain_host_failure_facts() {
-    use dezoomify::model::{ErrorTransport, ResourceKind};
+    use dezoomify::model::{ErrorTransport, Failure, ResourceKind};
     for transport in [ErrorTransport::Native, ErrorTransport::DisplayOnly] {
         // The exact structured facts a host observed survive the discovery
         // layer unchanged: no field is stripped or flattened away.
         let failure = Error::HttpError {
             status: 429,
-            request: Some("https://redirected.test/metadata?access=exact".into()),
             retry_after_ms: Some(9000),
             preview: Some("original response".into()),
             transport,
-            detail: Some("original explanation".into()),
+            failure: Failure {
+                request: Some("https://redirected.test/metadata?access=exact".into()),
+                detail: Some("original explanation".into()),
+            },
         }
         .resource("https://test/root", ResourceKind::Metadata);
         let registry = registry();

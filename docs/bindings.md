@@ -36,10 +36,21 @@ participation), declared canvas, and processing recipe.
 The finish request identifies acquired probes by their final tile index and
 position. Missing tiles preserve the complete errors from their acquisition attempts.
 
-Errors carry stable codes, phases, the derived retry verdict, user wording,
-optional structured limit facts (limit reason, dimensions, required and
-available bytes), and optional request, transport, HTTP status, and bounded
-server context.
+Errors are one closed enum with an internally tagged `kind` (the kebab-case
+variant name): the single stable identifier across the boundary. Variants
+carry structured facts (HTTP status, request address, retry hint, bounded
+server preview, policy reason, attempted transport, structured limit facts,
+and bounded diagnostic detail) plus the `resource` composition variant (exact
+URI and resource kind over a nested cause). Display messages render from
+those fields only and never cross as stored text; the derived retry verdict
+(`Error::retryable`) is a method, not a field. Both sides raise the same
+shapes: JavaScript hosts throw plain objects matching variant shapes and
+serde round-trips them through the tag. The WASM bindings are generated
+(`cargo xtask bindings generate`); never hand-edit them. Secret query-key
+vocabulary and the policies duplicated across the frontier are pinned by
+`testdata/policy-vectors.json`; deep-link parsing lives once in the native
+shell, pinned by `testdata/deep-link-vectors.json` (see
+[Security](security.md#credentials)).
 Progress reports work and geometry; Output reports missing tiles
 (completeness is derived from their absence), canvas, format, and actual
 save disposition.

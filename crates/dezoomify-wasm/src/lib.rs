@@ -10,7 +10,7 @@ mod bindings {
 
     fn boundary_error(detail: impl std::fmt::Display) -> Error {
         Error::BindingInvalidValue {
-            detail: Some(detail.to_string()),
+            failure: detail.to_string().into(),
         }
     }
 
@@ -129,7 +129,7 @@ mod bindings {
             .apply(bytes.to_vec())
             .map_err(|error| {
                 js_error(Error::ProcessingFailed {
-                    detail: Some(error.to_string()),
+                    failure: error.to_string().into(),
                 })
             })
     }

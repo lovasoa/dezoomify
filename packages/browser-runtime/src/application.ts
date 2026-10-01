@@ -24,8 +24,8 @@ import {
   type ViewContext,
 } from "@dezoomify/shared-ui";
 import type {
-  Error as JobError,
   ErrorTransport,
+  Error as JobError,
   JobInput,
   MissingTiles,
   Options,
@@ -34,10 +34,10 @@ import type {
   RecoveryChoice,
 } from "@dezoomify/wasm-bindings";
 import { createElement } from "react";
+import { isJobError } from "../../shared-ui/src/failure.ts";
 import type { BrowserSaveDisposition } from "./assembly.ts";
 import { createBrowserAssembly } from "./browser-assembly.ts";
 import { BrowserHost, type BrowserHostDependencies } from "./browser-host.ts";
-import { isJobError } from "../../shared-ui/src/failure.ts";
 import {
   copyDiagnosticText,
   createAttemptDiagnostics,

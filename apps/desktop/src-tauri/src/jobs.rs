@@ -91,7 +91,7 @@ impl JobTable {
     pub fn insert(&mut self, id: &str) -> Result<Arc<Registration>, Error> {
         if !crate::commands::is_valid_job_id(id) {
             return Err(Error::InvalidInput {
-                detail: Some("job id must look like job:<suffix>".into()),
+                failure: "job id must look like job:<suffix>".to_string().into(),
             });
         }
         if self.jobs.contains_key(id) {
@@ -136,9 +136,10 @@ impl Drop for JobTable {
 
 pub fn unknown_job(id: &str) -> Error {
     Error::InvalidState {
-        detail: Some(format!(
+        failure: format!(
             "unknown job id {id}; the invocation never existed or belongs to a closed window"
-        )),
+        )
+        .into(),
     }
 }
 

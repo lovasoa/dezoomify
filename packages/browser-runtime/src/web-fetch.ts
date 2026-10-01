@@ -4,7 +4,7 @@
 // credentials). The single-policy proxy transport instance is supplied by
 // the caller. Progress and diagnostics callbacks update the job view.
 
-import type { Error as JobError, ErrorTransport, ResourceRequest } from "@dezoomify/wasm-bindings";
+import type { ErrorTransport, Error as JobError, ResourceRequest } from "@dezoomify/wasm-bindings";
 import type { DiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
 import { SIGNED_QUERY_KEYS } from "../../shared-ui/src/source-url.ts";
 import { blockedReason, isJobError } from "./failure.ts";

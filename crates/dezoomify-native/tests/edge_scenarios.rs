@@ -2,7 +2,7 @@
 //! driven end-to-end over the fixture server and asserted against its
 //! `expected/result.json` contract (success geometry or typed failure
 //! context). The goldens' `code` field holds the typed error's stable
-//! `kind` — the same identifier the CLI human line prints and
+//! `kind`: the same identifier the CLI human line prints and
 //! `apps/cli/tests/pipeline.rs` publishes through the real binary.
 
 use std::path::PathBuf;

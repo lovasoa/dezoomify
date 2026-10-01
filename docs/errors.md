@@ -4,27 +4,55 @@ Every runtime reports failures the same way: a typed error naming what failed, n
 
 ## Error shape
 
-Each error includes:
+The error type is one closed enum declared once in
+[`model.rs`](../crates/dezoomify/src/model.rs) and projected to TypeScript.
+Its named-field variants are grouped by domain: transport and fetch,
+discovery, job and planning, tiles, output, control, internals, plus one
+composition variant.
 
-- a stable code such as `TRANSPORT_HTTP_ERROR` or `TILE_DECODE_FAILED`;
-- the job phase and affected resource or tile when safe;
-- the attempted and active transport when relevant and safe;
-- the derived retry verdict (`retry::is_retryable(code, http)` decides, with
-  HTTP status taking precedence; the verdict is recomputed whenever the code
-  changes, and job-level aggregates derive it from their retained failure
-  set — it is never set independently);
-- a concise user message;
-- optional structured limit facts (limit reason, dimensions, required and
-  available bytes) for output-limit refusals;
-- optional request, transport, blocked-reason, resource-kind, HTTP status, bounded server signal, and diagnostic detail.
+- `kind`, the kebab-case variant name (`http-error`, `no-image-found`,
+  `limit-exceeded`, ...), is the single stable machine identifier. It is
+  the serde tag, `Error::kind()` in Rust, `error.kind` in TypeScript. No
+  other error code exists anywhere in the contract.
+- Display messages are plain sentences rendered by `#[error(...)]` templates
+  from structured fields only. No message text is stored, so identical
+  causes read identically everywhere and prose can never be parsed.
+- Structured facts per failure: HTTP status, exact request address,
+  `retry-after` hint, bounded server preview, the policy reason for policy
+  denials, the attempted transport on fetch failures, structured limit facts
+  (limit reason, dimensions, required and available bytes) for output-limit
+  refusals, and bounded diagnostic detail including preserved cause chains.
+- `resource` composes request context (exact URI and resource kind) over any
+  underlying failure, which stays reachable through the error chain.
 
-Codes are stable API; messages improve freely. Diagnostic reports retain exact URLs, paths, and settings under the [diagnostic capture contract](security.md#credentials).
+The retry verdict is derived, never stored. `Error::retryable` and
+`Error::retry_after_ms` are pure functions of the variant and its facts:
+HTTP 408/425/429/5xx and transient transport/service failures retry,
+everything else fails closed so novel failures never burn the retry budget;
+aggregates (`no-usable-tiles`, `partial-discarded`) derive from their
+retained failure sets: any transient constituent keeps retry available;
+`resource` and the discovery aggregate delegate to their cause. The shared
+UI mirrors the verdict as `isRetryable`, and `testdata/policy-vectors.json`
+pins both implementations to one oracle. Missing tiles retain the complete
+errors from every failed attempt. Output failures do not inherit fetch retry
+policy.
 
-Hosts keep their own error chains internally; only the typed shape crosses the contract. Browser code classifies a fetch failure once into `FetchFailure` (host-observed facts only). Host operations attach the URI and kind from their `ResourceRequest`: metadata failures are `discovery`, and tile/probe fetch failures are `acquisition`. The algorithm preserves this context when reporting failed discovery and missing tiles. Output failures use phase `output`. Never branch on display strings.
+Hosts keep their own error chains internally; only the typed shape crosses
+the contract. Both sides raise the same shapes: browser hosts throw plain
+objects matching variant shapes and the boundary round-trips them through
+serde. Host operations attach the URI and kind from their `ResourceRequest`
+exactly once; the algorithm preserves this context when reporting failed
+discovery and missing tiles. Output failures are their own variants and
+never read as acquisition failures. Never branch on display strings.
 
-Extension HTTP responses produce the generated `FetchFailure` at the fetch boundary. Source-script results carry that payload unchanged through validation and transport choice. BrowserHost rejects with the structured domain error. HTTP status and request context remain intact; only unclassified host exceptions require classification.
-
-`FetchFailure` describes observed browser fetch facts. The core's `retry::is_retryable` classifies the code and HTTP status for tile retries and metadata error presentation. HTTP status takes precedence over the transport code. `Error` carries that derived verdict (every construction and code rewrite recomputes it; job-level aggregates derive it from their retained failure set, so any transient constituent keeps retry available), so presentation never sees a verdict that disagrees with its facts; missing tiles retain these errors for each failed attempt. Output failures do not inherit fetch retry policy.
+Extension HTTP responses are classified once at the fetch boundary into the
+same enum. Source-script results carry that payload unchanged through
+validation and transport choice. BrowserHost rejects with the structured
+domain error. HTTP status and request context remain intact; only
+unclassified host exceptions require classification. The metadata CORS
+proxy's relay protocol keeps its own response codes, mapped once in
+`classifyProxyFailure`; a proxy policy denial stays a `policy-denied` and
+never reads as an upstream refusal.
 
 
 ## Recovery actions
@@ -53,10 +81,10 @@ Messages follow the presentation rules in [Product](product.md#progressive-discl
 
 - First: one specific plain sentence (what failed for this job, which step and resource, which route) plus the single best next action. No shared generic template across causes.
 - Jargon waits for expandable details and linked docs. Wording is driven by structured context (code, phase, transport, kind, blocked reason, source origin, structured limit facts), so identical causes read identically everywhere.
-- A fetch failure is the job outcome: plain message plus stable code up front; discovery diagnostics (for discovery, the headline-free per-format bullets) only inside expandable details.
-- User and technical wording never mix. Fetch failures preserve code, HTTP status, transport, policy reason, and diagnostic detail in the generated domain types. Product wording uses a plain sentence derived from those facts. Discovery diagnostics group by code, HTTP status, transport, and policy reason, never by rendered text. A proxy denial retains the proxy code, HTTP status, and policy reason, so policy denials never read as upstream refusals and vice versa.
+- A fetch failure is the job outcome: plain message plus the stable `kind` up front; discovery diagnostics (for discovery, the headline-free per-format bullets) only inside expandable details.
+- User and technical wording never mix. Fetch failures preserve kind, HTTP status, transport, policy reason, and diagnostic detail in the generated domain types. Product wording is a plain sentence derived from those facts by the shared display dispatch (`plainMessageFor`), which is exhaustive over the union: a new variant must choose its wording before it compiles. Discovery diagnostics group by kind, HTTP status, transport, and policy reason, never by rendered text. A proxy denial retains its policy reason and transport, so policy denials never read as upstream refusals and vice versa.
 - Details stay on the device in the diagnostic report: full request URL, observed HTTP status, bounded server signal, and discovery failure context. Format URL-shape misses (`DidNotMatchUrl`, nothing fetched) collapse to a count; fetch rejections group by their structured facts under format names; other rejections group by `(kind, detail)`.
-- Every code has user wording; a code without wording is a release defect. Only transient failures invite retry; policy denials and upstream 4xx name the next app or address fix instead. Retry re-runs the same request, never a reset. Start over exists only where a new address is accepted (website, desktop); the extension job tab stays bound to the scanned page.
+- Every variant has user wording; a variant without wording cannot compile past the display dispatch. Only transient failures invite retry; policy denials and upstream 4xx name the next app or address fix instead. Retry re-runs the same request, never a reset. Start over exists only where a new address is accepted (website, desktop); the extension job tab stays bound to the scanned page.
 
 ## Failure policy
 

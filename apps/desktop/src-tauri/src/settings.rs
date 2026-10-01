@@ -208,7 +208,7 @@ fn parse_headers_value(value: &serde_json::Value) -> Result<BTreeMap<String, Str
             for (key, val) in map {
                 let name = key.trim().to_ascii_lowercase();
                 // Header values are strings (numbers stay fail-closed, matching
-                // the TS validator in `apps/desktop/src/settings.ts`).
+                // the single validator for this corpus).
                 let val_str = match val {
                     serde_json::Value::String(s) => s.clone(),
                     _ => {
@@ -480,7 +480,7 @@ mod tests {
     /// Shared cross-language oracle: every case in
     /// `testdata/policy-vectors.json` is asserted here and by
     /// `apps/desktop/tests/policy-vectors.test.mjs` against the TS validators
-    /// (`parseHeadersText`, `validateSettings`), so the Rust and TS settings
+    /// (the shell's `parse_settings`), so the Rust settings
     /// validation can never drift apart unnoticed. Rejection reason strings are
     /// pinned per side; where the sides differ in wording only, the vector
     /// carries both strings plus a comment.

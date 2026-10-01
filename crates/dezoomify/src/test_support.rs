@@ -28,7 +28,7 @@ pub fn discover(
                 });
             async move {
                 response.ok_or_else(|| Error::DiscoveryFailed {
-                    detail: Some("missing fixture".into()),
+                    failure: "missing fixture".to_string().into(),
                     cause: None,
                 })
             }

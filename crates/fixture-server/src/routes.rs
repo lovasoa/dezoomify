@@ -474,7 +474,7 @@ fn is_text(headers: &HeaderMap) -> bool {
 }
 
 /// Fixture-relative payload names only: traversal and absolute paths are
-/// refused. Every payload resolution goes through this family of helpers —
+/// refused. Every payload resolution goes through this family of helpers:
 /// one spelling of the guard, not one per call site.
 fn is_safe_payload_rel(name: &str) -> bool {
     !name.contains("..") && !name.starts_with('/')

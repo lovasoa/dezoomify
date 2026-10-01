@@ -54,5 +54,5 @@ Each fact lives once; every other page links to it:
 - One shared [UI](architecture.md#shared-ui-and-application) (React TSX) serves the website, desktop app, and extension.
 - Browser and native runtimes implement the same capabilities honestly; unsupported operations are reported before a job starts.
 - The extension never transfers browser cookies to another app. Desktop deep links are revalidated and confirmed before they start work.
-- Every user-visible failure has a stable error code and structured context for [recovery](errors.md#recovery-actions).
+- Every user-visible failure is one typed error whose `kind` names it and whose structured facts drive [recovery](errors.md#recovery-actions).
 - Contract pages use present tense as invariants and carry no staleness markers. Open work lives in [`plans/`](../plans/), including the [legacy retirement](../plans/legacy-retirement.md) day-of-switch plan.

@@ -113,7 +113,7 @@ impl JobOptions {
     pub fn validate(&self) -> Result<(), Error> {
         if self.input_url.is_empty() || self.input_url.len() > 2048 {
             return Err(Error::InvalidInput {
-                detail: Some("input must be 1..2048 bytes".into()),
+                failure: "input must be 1..2048 bytes".to_string().into(),
             });
         }
         if let Some(after_scheme) = self
@@ -131,7 +131,7 @@ impl JobOptions {
                 .unwrap_or("");
             if authority.contains('@') {
                 return Err(Error::InvalidInput {
-                    detail: Some("input must not contain userinfo".into()),
+                    failure: "input must not contain userinfo".to_string().into(),
                 });
             }
         }

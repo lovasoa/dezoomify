@@ -7,7 +7,7 @@ use crate::commands;
 use crate::deep_link;
 use crate::jobs::JobTable;
 use crate::settings::parse_settings;
-use dezoomify::model::{Error, OutputFormat};
+use dezoomify::model::{Error, Failure, OutputFormat};
 use dezoomify_native::{NativeHost, OutputTarget};
 
 #[cfg(all(test, target_os = "linux"))]
@@ -88,7 +88,9 @@ async fn open_saved_output(
         .lock()
         .ok()
         .and_then(|table| table.saved_output_for(&job))
-        .ok_or_else(|| Error::OutputUnavailable { detail: None })?;
+        .ok_or_else(|| Error::OutputUnavailable {
+            failure: Failure::default(),
+        })?;
     // Launch off the async executor and check the launcher's result. The
     // opener plugin's detached path reports success before the launcher exits;
     // its Linux reveal API also requires a FileManager1/portal D-Bus service.
@@ -96,7 +98,7 @@ async fn open_saved_output(
     tauri::async_runtime::spawn_blocking(move || launch_saved_output(path, reveal))
         .await
         .map_err(|_| Error::LaunchFailed {
-            detail: Some("the file-opening task could not finish".into()),
+            failure: "the file-opening task could not finish".to_string().into(),
         })?
 }
 
@@ -111,7 +113,7 @@ fn launch_saved_output(path: std::path::PathBuf, reveal: bool) -> Result<(), Err
             Error::OutputNotFound
         } else {
             Error::OutputUnavailable {
-                detail: Some(dezoomify::model::chain_text(&error)),
+                failure: dezoomify::model::chain_text(&error).into(),
             }
         }
     })?;
@@ -128,7 +130,9 @@ fn launch_saved_output(path: std::path::PathBuf, reveal: bool) -> Result<(), Err
         }
     }
     Err(Error::LaunchFailed {
-        detail: Some("the system could not launch the default application".into()),
+        failure: "the system could not launch the default application"
+            .to_string()
+            .into(),
     })
 }
 
@@ -148,9 +152,9 @@ async fn dezoomify(
 ) -> Result<dezoomify::model::Output, dezoomify::model::Error> {
     if !commands::is_valid_input_url(&input_url) {
         return Err(Error::InvalidInput {
-            detail: Some(
-                "input_url must be an http(s) URL up to 2048 bytes without userinfo".into(),
-            ),
+            failure: "input_url must be an http(s) URL up to 2048 bytes without userinfo"
+                .to_string()
+                .into(),
         });
     }
     let settings = settings
@@ -168,9 +172,7 @@ async fn dezoomify(
     ) {
         lock_table(&state)?.release_job(&job);
         return Err(Error::RegistrationFailed {
-            detail: Some(format!(
-                "the native invocation could not be acknowledged: {error}"
-            )),
+            failure: format!("the native invocation could not be acknowledged: {error}").into(),
         });
     }
     let mut options = crate::settings::job_options_for(&settings);
@@ -235,7 +237,7 @@ async fn dezoomify(
     })
     .await
     .map_err(|_| Error::Internal {
-        detail: Some("native task failed".into()),
+        failure: "native task failed".to_string().into(),
     })?
 }
 

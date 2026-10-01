@@ -42,11 +42,11 @@ test("cancelled encoding settles only after the native callback releases its pix
   assert.equal(settled, true);
 });
 
-test("canvasToPngBlob maps null and throws to OUTPUT_ENCODE_FAILED", async () => {
+test("canvasToPngBlob maps null and throws to encode-failed", async () => {
   await assert.rejects(
     () => canvasToPngBlob({ toBlob: (cb) => cb(null) }),
     (e) => {
-      assert.equal(e.code, "OUTPUT_ENCODE_FAILED");
+      assert.equal(e.kind, "encode-failed");
       return true;
     },
   );
@@ -58,7 +58,7 @@ test("canvasToPngBlob maps null and throws to OUTPUT_ENCODE_FAILED", async () =>
         },
       }),
     (e) => {
-      assert.equal(e.code, "OUTPUT_ENCODE_FAILED");
+      assert.equal(e.kind, "encode-failed");
       return true;
     },
   );

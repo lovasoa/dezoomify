@@ -45,9 +45,7 @@ export function canvasToPngBlob(canvas: CanvasLike, signal?: AbortSignal): Promi
       }
       if (blob) resolve(blob);
       else
-        reject(
-          outputError("encode-failed", "canvas.toBlob returned null while encoding the PNG"),
-        );
+        reject(outputError("encode-failed", "canvas.toBlob returned null while encoding the PNG"));
     };
     try {
       canvas.toBlob(finish, "image/png");

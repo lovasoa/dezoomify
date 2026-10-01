@@ -103,11 +103,8 @@ const viewCallbacks = {
 };
 
 const failedState = presentFailure({
-  code: "PLAN_INVALID",
-  phase: "output",
-  transport: "direct",
-  retryable: false,
-  message: "This picture is too large for a browser tab.",
+  kind: "plan-invalid",
+  detail: "canvas 40000x30000 exceeds the browser limit",
 });
 
 test("failed and display-only views offer the desktop deep link", () => {

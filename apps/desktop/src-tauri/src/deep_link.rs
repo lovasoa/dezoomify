@@ -162,17 +162,9 @@ fn validate_source(src: &str) -> Result<(), DeepLinkError> {
     }
     // Downstream scheme dispatch is case-sensitive; keep the accepted form
     // normalized so an uppercase scheme cannot be accepted and then refused.
-    let src_owned: String;
-    let src = if src.starts_with("http://") || src.starts_with("https://") {
-        src
-    } else {
-        src_owned = format!(
-            "{}{}",
-            &scheme_lower[..scheme_lower.find(':').unwrap_or(0) + 3],
-            &src[scheme_lower.find(':').unwrap_or(0) + 3..]
-        );
-        src_owned.as_str()
-    };
+    let (scheme, rest) = src.split_once("://").expect("scheme checked above");
+    let normalized = format!("{}://{}", scheme.to_ascii_lowercase(), rest);
+    let src = normalized.as_str();
     // userinfo credentials must never travel in a deep link.
     if has_userinfo(src) {
         return Err(DeepLinkError::UserinfoForbidden);

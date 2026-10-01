@@ -168,11 +168,13 @@ fn http_failures_retain_the_request_context_and_transport() {
                 **source,
                 Error::HttpError {
                     status: 403,
-                    request: Some(uri.clone()),
                     retry_after_ms: None,
                     preview: None,
                     transport: ErrorTransport::Native,
-                    detail: None,
+                    failure: Failure {
+                        request: Some(uri.clone()),
+                        detail: None,
+                    },
                 }
             );
             assert!(!error.retryable());
@@ -243,7 +245,7 @@ fn malformed_encrypted_tile_retains_processing_failure_and_good_partial_pixels()
         );
         assert_eq!(*resource_kind, ResourceKind::Tile);
         assert!(
-            matches!(&**source, Error::ProcessingFailed { detail: Some(detail) }
+            matches!(&**source, Error::ProcessingFailed { failure: Failure { detail: Some(detail), .. } }
                 if detail.contains("unencrypted header"))
         );
         assert!(!error.retryable());

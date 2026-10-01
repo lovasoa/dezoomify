@@ -99,17 +99,28 @@ export function isJobError(value: unknown): value is JobError {
   return typeof kind === "string" && Object.hasOwn(KINDS, kind) && boundedText(value, 0);
 }
 
-/** The underlying failure, seen through the composition wrappers. */
-export function causeOf(error: JobError): JobError {
+/** The underlying failure, seen through the composition wrappers (`resource`
+ * and `discovery-failed.cause`). */
+export type RootCause = Exclude<JobError, { kind: "resource" }>;
+
+export function causeOf(error: JobError): RootCause {
   if (error.kind === "resource") return causeOf(error.source);
   if (error.kind === "discovery-failed" && error.cause) return causeOf(error.cause);
   return error;
 }
 
-/** The observed HTTP status of a fetch failure, when there is one. */
+/** The observed HTTP status of a fetch failure, when there is one.
+ * Aggregates report the status of their first retained HTTP failure. */
 export function httpStatusOf(error: JobError): number | undefined {
   const cause = causeOf(error);
-  return cause.kind === "http-error" ? cause.status : undefined;
+  if (cause.kind === "http-error") return cause.status;
+  if (cause.kind === "no-usable-tiles" || cause.kind === "partial-discarded") {
+    for (const failure of cause.failures) {
+      const status = httpStatusOf(failure);
+      if (status !== undefined) return status;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -142,10 +153,20 @@ export function isRetryable(error: JobError): boolean {
   }
 }
 
-/** The bounded diagnostic text retained on the underlying failure. */
+/** The bounded diagnostic text retained along the composition chain. */
 export function detailOf(error: JobError): string | undefined {
-  const cause = causeOf(error);
-  return "detail" in cause ? cause.detail : undefined;
+  const parts: string[] = [];
+  let current: JobError | undefined = error;
+  for (let depth = 0; current && depth < 8; depth += 1) {
+    if ("detail" in current && typeof current.detail === "string") parts.push(current.detail);
+    current =
+      current.kind === "resource"
+        ? current.source
+        : current.kind === "discovery-failed"
+          ? current.cause
+          : undefined;
+  }
+  return parts.length > 0 ? [...new Set(parts)].join("\n") : undefined;
 }
 
 /**
@@ -265,7 +286,21 @@ export function plainMessageFor(error: JobError, host: string, source = ""): str
     case "binding-invalid-value":
     case "registration-failed":
       return t("desktop.internal.error", { host });
-    default:
+    case "policy-denied":
+      return t("desktop.save.generic", { host });
+    case "invalid-input":
+    case "invalid-options":
+    case "size-limit":
+    case "proxy-budget-exceeded":
+    case "duplicate":
       return t("desktop.save.fallback", { host });
+    default: {
+      // Exhaustiveness guard: a new Rust variant must choose its wording
+      // here before this compiles. Unrecognized payloads stay on the
+      // generic sentence at runtime.
+      const exhaustive: never = cause;
+      void exhaustive;
+      return t("desktop.save.fallback", { host });
+    }
   }
 }

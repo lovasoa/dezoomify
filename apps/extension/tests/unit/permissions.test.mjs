@@ -54,7 +54,7 @@ test("denial and unretained grants fail every waiter instead of reopening a prom
     const p = setup(),
       controller = new AbortController();
     const result = assert.rejects(p.ensure("https://a.example", controller.signal), {
-      code: "TRANSPORT_POLICY_DENIED",
+      kind: "policy-denied",
     });
     await tick();
     p.pending[0].request();

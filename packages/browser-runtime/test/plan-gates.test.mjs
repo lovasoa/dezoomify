@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { BROWSER_MAX_CANVAS_AREA, BROWSER_MAX_CANVAS_SIDE } from "../src/limits.ts";
 import {
-  CANVAS_TOO_LARGE_MESSAGE,
   canvasAllocationFailure,
   canvasSurfaceFailure,
   canvasTooLargeFailure,
@@ -24,22 +23,18 @@ test("browser canvas bound is 32768 px per side and 16384 squared of area", () =
 
 test("canvasTooLargeFailure retains canvas size and handoff details", () => {
   const failure = canvasTooLargeFailure(10, 20, "https://a.test/");
-  assert.equal(failure.code, "PLAN_INVALID");
-  assert.equal(failure.retryable, false);
+  assert.equal(failure.kind, "plan-invalid");
   assert.match(failure.detail ?? "", /dezoomify:\/\/open/);
   assert.match(failure.detail ?? "", /canvas 10x20/);
 });
 
 test("allocation and context failures share the large-canvas report family", () => {
   const allocation = canvasAllocationFailure(40000, 20000, "https://a.test/");
-  assert.equal(allocation.code, "OUTPUT_ALLOCATION_FAILED");
-  assert.equal(allocation.retryable, false);
-  assert.equal(allocation.message, CANVAS_TOO_LARGE_MESSAGE);
+  assert.equal(allocation.kind, "output-unavailable");
   assert.match(allocation.detail ?? "", /dezoomify:\/\/open/);
   assert.match(allocation.detail ?? "", /allocation failed/);
   const surface = canvasSurfaceFailure(40000, 20000, "https://a.test/");
-  assert.equal(surface.code, "OUTPUT_SURFACE_UNAVAILABLE");
-  assert.equal(surface.retryable, false);
+  assert.equal(surface.kind, "output-unavailable");
   assert.match(surface.detail ?? "", /dezoomify:\/\/open/);
   assert.match(surface.detail ?? "", /2D context/);
 });

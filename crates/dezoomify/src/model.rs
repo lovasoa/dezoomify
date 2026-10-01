@@ -425,6 +425,43 @@ pub struct LimitContext {
     pub bytes_available: Option<u64>,
 }
 
+/// The shared failure context, defined once instead of per variant:
+/// `request` preserves the exact URI when known and `detail` carries the
+/// bounded diagnostic text (usually the preserved cause chain).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct Failure {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+impl Failure {
+    /// Message suffix for `#[error]` templates: `": detail"` or empty.
+    #[must_use]
+    pub fn suffix(&self) -> String {
+        self.detail
+            .as_deref()
+            .map_or_else(String::new, |text| format!(": {text}"))
+    }
+}
+
+impl From<String> for Failure {
+    fn from(detail: String) -> Self {
+        Self {
+            request: None,
+            detail: Some(detail),
+        }
+    }
+}
+
+impl From<&str> for Failure {
+    fn from(detail: &str) -> Self {
+        Self::from(detail.to_string())
+    }
+}
+
 /// One typed failure. Grouped by domain: transport and fetch, discovery,
 /// job and planning, tiles, output, control, internals, and the composable
 /// [`Error::Resource`] context wrapper that preserves the exact URI and
@@ -436,66 +473,60 @@ pub enum Error {
     // ---- Transport and fetch ----
     #[error(
         "request to {} returned HTTP {status}",
-        request.as_deref().unwrap_or("<unknown address>")
+        .failure.request.as_deref().unwrap_or("<unknown address>")
     )]
     HttpError {
         status: u16,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        request: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         retry_after_ms: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         preview: Option<String>,
         transport: ErrorTransport,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
     #[error(
         "request to {} was rate limited",
-        request.as_deref().unwrap_or("<unknown address>")
+        .failure.request.as_deref().unwrap_or("<unknown address>")
     )]
     RateLimited {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        request: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         retry_after_ms: Option<u64>,
         transport: ErrorTransport,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
     #[error(
         "request to {} timed out",
-        request.as_deref().unwrap_or("<unknown address>")
+        .failure.request.as_deref().unwrap_or("<unknown address>")
     )]
     Timeout {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        request: Option<String>,
         transport: ErrorTransport,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
-    #[error("the request failed{}", detail_suffix(.detail))]
+    #[error("the request failed{}", .failure.suffix())]
     NetworkFailure {
         transport: ErrorTransport,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
-    #[error("the request was blocked by policy: {}{}", .blocked_reason.as_str(), detail_suffix(.detail))]
+    #[error("the request was blocked by policy: {}{}", .blocked_reason.as_str(), .failure.suffix())]
     PolicyDenied {
         blocked_reason: BlockedReason,
         transport: ErrorTransport,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
-    #[error("the request address is invalid{}", detail_suffix(.detail))]
+    #[error("the request address is invalid{}", .failure.suffix())]
     BadUrl {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
-    #[error("the redirect target is invalid{}", detail_suffix(.detail))]
+    #[error("the redirect target is invalid{}", .failure.suffix())]
     BadRedirect {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
     #[error("redirect limit of {max} exceeded")]
     RedirectLimit { max: u32 },
@@ -505,39 +536,39 @@ pub enum Error {
     Cancelled,
     #[error("the metadata proxy budget is exhausted")]
     ProxyBudgetExceeded,
-    #[error("the metadata proxy could not fetch the address{}", detail_suffix(.detail))]
+    #[error("the metadata proxy could not fetch the address{}", .failure.suffix())]
     ProxyError {
         transport: ErrorTransport,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
 
     // ---- Discovery ----
-    #[error("no zoomable image was found{}", detail_suffix(.detail))]
+    #[error("no zoomable image was found{}", .failure.suffix())]
     NoImageFound {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
-    #[error("the metadata could not be parsed{}", detail_suffix(.detail))]
+    #[error("the metadata could not be parsed{}", .failure.suffix())]
     MalformedMetadata {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
     #[error("unknown format: {format}")]
     UnknownFormat { format: String },
     #[error("the metadata resource is empty")]
     EmptyResource,
-    #[error("a resource limit was reached{}", detail_suffix(.detail))]
+    #[error("a resource limit was reached{}", .failure.suffix())]
     ResourceLimit {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
     #[error("the deferred image follow limit of {max} was reached (or a loop)")]
     DeferredLimit { max: u32 },
-    #[error("discovery failed{}", detail_suffix(.detail))]
+    #[error("discovery failed{}", .failure.suffix())]
     DiscoveryFailed {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
         /// The representative fetch failure when every candidate failed on
         /// observed facts: its context and retry verdict stay authoritative.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -546,20 +577,20 @@ pub enum Error {
     },
 
     // ---- Job and planning ----
-    #[error("the input is not usable{}", detail_suffix(.detail))]
+    #[error("the input is not usable{}", .failure.suffix())]
     InvalidInput {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
-    #[error("the options are not usable{}", detail_suffix(.detail))]
+    #[error("the options are not usable{}", .failure.suffix())]
     InvalidOptions {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
-    #[error("the request does not match the job state{}", detail_suffix(.detail))]
+    #[error("the request does not match the job state{}", .failure.suffix())]
     InvalidState {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
     #[error("a job with this identity is already running")]
     Duplicate,
@@ -567,10 +598,10 @@ pub enum Error {
     Stale,
     #[error("the selected level has no tiles")]
     PlanEmpty,
-    #[error("the tile plan is invalid{}", detail_suffix(.detail))]
+    #[error("the tile plan is invalid{}", .failure.suffix())]
     PlanInvalid {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
     #[error("no usable tiles were acquired")]
     NoUsableTiles { failures: Vec<Error> },
@@ -578,53 +609,53 @@ pub enum Error {
     PartialDiscarded { failures: Vec<Error> },
 
     // ---- Tiles ----
-    #[error("a tile could not be decoded{}", detail_suffix(.detail))]
+    #[error("a tile could not be decoded{}", .failure.suffix())]
     DecodeFailed {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
-    #[error("a tile could not be processed{}", detail_suffix(.detail))]
+    #[error("a tile could not be processed{}", .failure.suffix())]
     ProcessingFailed {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
 
     // ---- Output ----
     #[error("the output exceeds a supported limit{}", limit_facts(.limit))]
     LimitExceeded { limit: LimitContext },
-    #[error("the output could not be encoded{}", detail_suffix(.detail))]
+    #[error("the output could not be encoded{}", .failure.suffix())]
     EncodeFailed {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
-    #[error("the output could not be written{}", detail_suffix(.detail))]
+    #[error("the output could not be written{}", .failure.suffix())]
     WriteFailed {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
     #[error("the output file already exists (refusing overwrite)")]
     OutputExists,
-    #[error("the output destination is not writable{}", detail_suffix(.detail))]
+    #[error("the output destination is not writable{}", .failure.suffix())]
     DestinationDenied {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
-    #[error("the output file extension is not supported{}", detail_suffix(.detail))]
+    #[error("the output file extension is not supported{}", .failure.suffix())]
     UnsupportedExtension {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
-    #[error("the saved image is unavailable{}", detail_suffix(.detail))]
+    #[error("the saved image is unavailable{}", .failure.suffix())]
     OutputUnavailable {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
     #[error("the output path has no containing folder")]
     OutputNoParent,
-    #[error("the system could not open the output{}", detail_suffix(.detail))]
+    #[error("the system could not open the output{}", .failure.suffix())]
     LaunchFailed {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
     #[error("no output location was chosen")]
     OutputDenied,
@@ -634,46 +665,46 @@ pub enum Error {
     InvokeFailed,
 
     // ---- Control ----
-    #[error("the job could not be started{}", detail_suffix(.detail))]
+    #[error("the job could not be started{}", .failure.suffix())]
     StartFailed {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
-    #[error("the image or level choice failed{}", detail_suffix(.detail))]
+    #[error("the image or level choice failed{}", .failure.suffix())]
     ChoiceFailed {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
     #[error("the address is not a usable web address")]
     InvalidUrl,
-    #[error("the output settings are not usable{}", detail_suffix(.detail))]
+    #[error("the output settings are not usable{}", .failure.suffix())]
     InvalidSettings {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
-    #[error("the handoff was rejected{}", detail_suffix(.detail))]
+    #[error("the handoff was rejected{}", .failure.suffix())]
     HandoffRejected {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
-    #[error("the app could not register the request{}", detail_suffix(.detail))]
+    #[error("the app could not register the request{}", .failure.suffix())]
     RegistrationFailed {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
 
     // ---- Internal ----
-    #[error("internal error{}", detail_suffix(.detail))]
+    #[error("internal error{}", .failure.suffix())]
     Internal {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
     #[error("native resources are unavailable")]
     ShellLock,
-    #[error("the host sent an invalid value{}", detail_suffix(.detail))]
+    #[error("the host sent an invalid value{}", .failure.suffix())]
     BindingInvalidValue {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<String>,
+        #[serde(flatten)]
+        failure: Failure,
     },
     #[error("the question is no longer open")]
     InteractionExpired,
@@ -694,12 +725,6 @@ pub enum Error {
 }
 
 /// Bounded diagnostic suffix for plain message templates.
-fn detail_suffix(detail: &Option<String>) -> String {
-    detail
-        .as_deref()
-        .map_or_else(String::new, |text| format!(": {text}"))
-}
-
 /// Bounded request text for error fields: server-controlled addresses are
 /// capped at 2048 bytes with an ellipsis marker on a UTF-8 char boundary.
 #[must_use]
@@ -1253,3 +1278,117 @@ pub const SENSITIVE_QUERY_KEYS: &[&str] = &[
     "token",
     "x-api-key",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(serde::Deserialize)]
+    struct RetryVector {
+        name: String,
+        error: Error,
+        retryable: bool,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Vectors {
+        #[serde(rename = "retryPolicy")]
+        retry_policy: Vec<RetryVector>,
+    }
+
+    #[test]
+    fn retry_policy_vectors_match_the_shared_oracle() {
+        // `Error::retryable` here and `isRetryable` in
+        // `packages/shared-ui/src/failure.ts` read one oracle; the TS side is
+        // asserted by `apps/desktop/tests/policy-vectors.test.mjs`.
+        let vectors: Vectors =
+            serde_json::from_str(include_str!("../../../testdata/policy-vectors.json"))
+                .expect("policy vectors");
+        assert!(!vectors.retry_policy.is_empty());
+        for vector in &vectors.retry_policy {
+            assert_eq!(
+                vector.error.retryable(),
+                vector.retryable,
+                "{} disagrees with the shared oracle",
+                vector.name
+            );
+        }
+    }
+
+    #[test]
+    fn messages_render_from_structured_facts_only() {
+        let refused = Error::HttpError {
+            status: 403,
+            retry_after_ms: None,
+            preview: None,
+            transport: ErrorTransport::Native,
+            failure: Failure {
+                request: Some("https://example.test/tile".into()),
+                detail: None,
+            },
+        };
+        assert_eq!(
+            refused.to_string(),
+            "request to https://example.test/tile returned HTTP 403"
+        );
+        let unknown = Error::HttpError {
+            status: 503,
+            retry_after_ms: None,
+            preview: None,
+            transport: ErrorTransport::Direct,
+            failure: "connection reset".to_string().into(),
+        };
+        assert_eq!(
+            unknown.to_string(),
+            "request to <unknown address> returned HTTP 503"
+        );
+        // Bounded diagnostic detail rides along in the rendered sentence.
+        assert_eq!(
+            Error::MalformedMetadata {
+                failure: "expected value at line 1".to_string().into()
+            }
+            .to_string(),
+            "the metadata could not be parsed: expected value at line 1"
+        );
+    }
+
+    #[test]
+    fn verdicts_derive_from_the_variant_and_its_facts() {
+        assert!(Error::Cancelled.retry_after_ms().is_none());
+        assert!(!Error::Cancelled.retryable());
+        assert!(Error::Cancelled.is_terminal());
+        assert!(!Error::Cancelled.is_output());
+        assert!(
+            Error::WriteFailed {
+                failure: Failure::default()
+            }
+            .is_output()
+        );
+        assert!(
+            !Error::WriteFailed {
+                failure: Failure::default()
+            }
+            .is_terminal()
+        );
+        let throttled = Error::RateLimited {
+            retry_after_ms: Some(9_000),
+            transport: ErrorTransport::MetadataProxy,
+            failure: Failure::default(),
+        }
+        .resource("https://example.test/info.json", ResourceKind::Metadata);
+        assert!(throttled.retryable());
+        assert_eq!(throttled.retry_after_ms(), Some(9_000));
+        assert_eq!(throttled.cause().kind(), "rate-limited");
+        // Aggregates report the largest retained hint.
+        let aggregate = Error::NoUsableTiles {
+            failures: vec![
+                throttled.clone(),
+                Error::Timeout {
+                    transport: ErrorTransport::Native,
+                    failure: Failure::default(),
+                },
+            ],
+        };
+        assert_eq!(aggregate.retry_after_ms(), Some(9_000));
+    }
+}

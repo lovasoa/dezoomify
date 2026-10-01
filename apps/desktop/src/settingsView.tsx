@@ -3,12 +3,7 @@ import type { OutputFormat } from "@dezoomify/wasm-bindings";
 import type { ReactElement, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { DesktopSettings, NetworkProfile } from "./settings.ts";
-import {
-  headersToEditableText,
-  parseHeadersText,
-  pickDirectory,
-  validateSettings,
-} from "./settings.ts";
+import { headersToEditableText, pickDirectory } from "./settings.ts";
 
 interface Props {
   settings: DesktopSettings;
@@ -94,9 +89,10 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
     }
   }, [advancedOpen]);
 
+  // Raw values are submitted as typed; Rust validates on save and its typed
+  // rejection reason arrives through `error`.
   const commit = (patch: Partial<DesktopSettings>) => {
-    const candidate = validateSettings({ ...settings, ...patch });
-    if (candidate.settings) onChange(candidate.settings);
+    onChange({ ...settings, ...patch });
   };
 
   const chooseDirectory = async (key: "output_dir" | "cache_dir") => {
@@ -313,8 +309,7 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
               onChange={(event) => {
                 const draft = event.currentTarget.value;
                 setHeadersDraft(draft);
-                const parsed = parseHeadersText(draft);
-                if (parsed.errors.length === 0) commit({ headers: parsed.headers });
+                commit({ headers: draft.split("\n") });
               }}
             />
           </details>

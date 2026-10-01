@@ -173,7 +173,7 @@ test("webapp fails honestly on a page without a zoomable signal", async ({ page 
   await page.getByRole("button", { name: /find image/i }).click();
   const report = await page.locator("#dz-job-diagnostics").textContent();
   assert.match(report, /input: view-source:https:\/\/www.britishmuseum.org/);
-  assert.match(report, /code=INVALID_URL/);
+  assert.match(report, /kind=invalid-url/);
 });
 
 const FAILED_METADATA_URL = "https://fixtures.test/errors/info.json";
@@ -199,9 +199,9 @@ test("metadata proxy failure reaches the error UI with its complete typed contex
   const diagnostics = await page.locator("#dz-job-diagnostics").textContent();
   assert.ok(diagnostics);
   assert.match(diagnostics, /code=TRANSPORT_HTTP_ERROR\b/);
-  assert.match(diagnostics, /phase=discovery\b/);
+  assert.match(diagnostics, /kind=http-error\b/);
   assert.match(diagnostics, /transport=metadata-proxy\b/);
-  assert.match(diagnostics, /http=406\b/);
+  assert.match(diagnostics, /status=406\b/);
   assert.match(diagnostics, /proxy-example/);
   assert.match(diagnostics, /Cloudflare challenge/);
   assert.doesNotMatch(diagnostics, /binding\.invalid-value/);

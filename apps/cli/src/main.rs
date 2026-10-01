@@ -538,7 +538,7 @@ fn run_native(
             );
         })?;
     let publication = host.publication().ok_or_else(|| Error::Internal {
-        detail: Some("output was not published".into()),
+        failure: "output was not published".to_string().into(),
     })?;
     Ok((publication, sequence.get() + 1))
 }

@@ -127,16 +127,13 @@ export function createSourceAccess(
   function invalidate() {
     if (invalidated) return;
     invalidated = true;
-    lifetime.abort(
-      transportError("source-lost", "source document changed"),
-    );
+    lifetime.abort(transportError("source-lost", "source document changed"));
   }
   browserApi.tabs.onUpdated.addListener(onUpdated);
   browserApi.tabs.onRemoved.addListener(onRemoved);
 
   function assertLive() {
-    if (invalidated)
-      throw transportError("source-lost", "source document changed");
+    if (invalidated) throw transportError("source-lost", "source document changed");
   }
 
   async function injectUnchecked<Args extends unknown[], Result>(
@@ -275,8 +272,7 @@ export function createSourceAccess(
 
   async function fetch(request: Pick<ResourceRequest, "uri" | "headers">, signal: AbortSignal) {
     assertLive();
-    if (signal.aborted)
-      throw transportError("cancelled", "source fetch cancelled");
+    if (signal.aborted) throw transportError("cancelled", "source fetch cancelled");
     if (
       typeof request.uri !== "string" ||
       request.uri.length > MAX_URL_LENGTH ||
@@ -306,8 +302,7 @@ export function createSourceAccess(
         .then(() => undefined);
     };
     const result = await inject(fetchSource, [sourceRequest], signal, cancel, deadlineAt);
-    if (signal.aborted)
-      throw transportError("cancelled", "source fetch cancelled");
+    if (signal.aborted) throw transportError("cancelled", "source fetch cancelled");
     assertLive();
     if (!validFetchResult(result, documentUrl))
       throw transportError("bad-url", "invalid source fetch result");

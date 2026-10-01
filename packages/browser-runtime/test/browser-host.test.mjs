@@ -86,23 +86,35 @@ test("HTTP failures retain status, retry hints and preview without ordinary-imag
     const h = setup({
       fetchResource: async () => {
         reads++;
-        throw { code: "TRANSPORT_HTTP_ERROR", http, retry_after_ms: 3000, preview: "Challenge" };
+        throw {
+          kind: "http-error",
+          status: http,
+          transport: "direct",
+          retry_after_ms: 3000,
+          preview: "Challenge",
+        };
       },
       loadDisplayImage: async () => {
         displays++;
         return { naturalWidth: 256, naturalHeight: 256 };
       },
     });
-    await assert.rejects(h.host.acquireTile(tile), (error) => {
-      assert.equal(error.http, http);
-      assert.equal(error.retry_after_ms, 3000);
-      assert.equal(error.preview, "Challenge");
-      return true;
+    await assert.rejects(h.host.acquireTile(tile), {
+      kind: "resource",
+      request: tile.request.uri,
+      resource_kind: "tile",
+      source: {
+        kind: "http-error",
+        status: http,
+        transport: "direct",
+        retry_after_ms: 3000,
+        preview: "Challenge",
+      },
     });
     assert.equal(reads, 1);
     assert.equal(displays, 0);
     const failure = h.diagnostics.report().failures[0].first.fields;
-    assert.equal(failure.http, http);
+    assert.equal(failure["source.status"], http);
     assert.equal(failure.request, tile.request.uri);
   }
 });
@@ -113,7 +125,7 @@ test("an unreadable origin is classified once across concurrent ordinary tiles",
   const h = setup({
     fetchResource: async () => {
       reads++;
-      throw { code: "TRANSPORT_NETWORK_ERROR" };
+      throw { kind: "network-failure", transport: "direct" };
     },
     loadDisplayImage: async () => {
       displays++;
@@ -131,19 +143,25 @@ test("an unreadable origin is classified once across concurrent ordinary tiles",
 });
 
 test("processed tiles and permission denial never use ordinary images", async () => {
-  for (const [processing, code] of [
-    ["google-arts-decrypt", "TRANSPORT_NETWORK_ERROR"],
-    ["none", "TRANSPORT_POLICY_DENIED"],
+  const network = { kind: "network-failure", transport: "direct" };
+  const denied = {
+    kind: "policy-denied",
+    blocked_reason: "access-required",
+    transport: "browser-session",
+  };
+  for (const [processing, failure] of [
+    ["google-arts-decrypt", network],
+    ["none", denied],
   ]) {
     const h = setup({
       fetchResource: async () => {
-        throw { code };
+        throw failure;
       },
       loadDisplayImage: async () => assert.fail("pixels must be readable"),
     });
     await assert.rejects(
       h.host.acquireTile({ ...tile, placement: { ...tile.placement, processing } }),
-      { code },
+      { kind: "resource", request: tile.request.uri, resource_kind: "tile", source: failure },
     );
   }
 });
@@ -192,15 +210,16 @@ test("output waits for saving and preserves actual disposition and missing tiles
   });
 });
 
-test("surface and output failures retain their typed code", async () => {
+test("surface and output failures retain their typed kind", async () => {
   const h = setup();
   h.assembly.prepare = () => {
-    throw { code: "OUTPUT_SURFACE_UNAVAILABLE", message: "No canvas", retryable: false };
+    throw { kind: "output-unavailable", detail: "No canvas" };
   };
   await assert.rejects(h.host.acquireTile(tile), {
-    code: "OUTPUT_SURFACE_UNAVAILABLE",
-    phase: "output",
-    retryable: false,
+    kind: "resource",
+    request: tile.request.uri,
+    resource_kind: "tile",
+    source: { kind: "output-unavailable", detail: "No canvas" },
   });
   await assert.rejects(
     h.host.probe({
@@ -208,36 +227,29 @@ test("surface and output failures retain their typed code", async () => {
       placement: { ...tile.placement, role: { probe: true, output: true } },
     }),
     {
-      code: "OUTPUT_SURFACE_UNAVAILABLE",
-      phase: "output",
-      retryable: false,
+      kind: "resource",
+      request: tile.request.uri,
+      resource_kind: "tile",
+      source: { kind: "output-unavailable", detail: "No canvas" },
     },
   );
   h.assembly.finalizeOutput = async () => {
-    throw { code: "OUTPUT_ENCODE_FAILED", message: "No PNG", retryable: false };
+    throw { kind: "encode-failed", detail: "No PNG" };
   };
   await assert.rejects(h.host.finish({ missing: [], format: "png" }), {
-    code: "OUTPUT_ENCODE_FAILED",
-    phase: "output",
+    kind: "encode-failed",
+    detail: "No PNG",
   });
 });
 
 test("output errors retain the original diagnostic details", async () => {
   const h = setup();
   h.assembly.finalizeOutput = async () => {
-    throw {
-      code: "OUTPUT_FAILED",
-      message: "The browser could not save the image.",
-      detail: "FILE_NO_SPACE",
-      phase: "output",
-      retryable: false,
-    };
+    throw { kind: "write-failed", detail: "FILE_NO_SPACE" };
   };
   await assert.rejects(h.host.finish({ missing: [], format: "png" }), {
-    code: "OUTPUT_FAILED",
+    kind: "write-failed",
     detail: "FILE_NO_SPACE",
-    phase: "output",
-    retryable: false,
   });
 });
 
@@ -245,34 +257,34 @@ test("canonical failures retain their precise request and affected resource", as
   const h = setup({
     fetchResource: async () => {
       throw {
-        code: "TRANSPORT_HTTP_ERROR",
-        message: "The redirected file was refused.",
-        http: 403,
+        kind: "http-error",
+        status: 403,
         request: "https://redirect.test/actual.jpg",
-        resource_kind: "tile",
-        phase: "acquisition",
-        retryable: false,
+        transport: "browser-session",
+        detail: "the redirected file was refused",
       };
     },
   });
   await assert.rejects(h.host.acquireTile(tile), {
-    request: "https://redirect.test/actual.jpg",
+    kind: "resource",
+    request: tile.request.uri,
     resource_kind: "tile",
-    http: 403,
+    source: {
+      kind: "http-error",
+      status: 403,
+      request: "https://redirect.test/actual.jpg",
+      transport: "browser-session",
+      detail: "the redirected file was refused",
+    },
   });
   h.assembly.prepare = () => {
-    throw {
-      code: "OUTPUT_SURFACE_UNAVAILABLE",
-      message: "The output cannot be allocated.",
-      resource_kind: "output",
-      phase: "output",
-      retryable: false,
-    };
+    throw { kind: "output-unavailable", detail: "the output cannot be allocated" };
   };
   await assert.rejects(h.host.acquireTile(tile), {
-    code: "OUTPUT_SURFACE_UNAVAILABLE",
-    resource_kind: "output",
-    phase: "output",
+    kind: "resource",
+    request: tile.request.uri,
+    resource_kind: "tile",
+    source: { kind: "output-unavailable", detail: "the output cannot be allocated" },
   });
 });
 
@@ -291,9 +303,9 @@ test("pause gates acquisition, resume releases it, cancellation interrupts waits
   assert.equal(acquired, true);
   h.host.pause();
   const cancelled = assert.rejects(h.host.checkpoint("acquisition"), {
-    code: "TRANSPORT_CANCELLED",
+    kind: "cancelled",
   });
-  const sleep = assert.rejects(h.host.sleep(999999), { code: "TRANSPORT_CANCELLED" });
+  const sleep = assert.rejects(h.host.sleep(999999), { kind: "cancelled" });
   h.controller.abort();
   await Promise.all([cancelled, sleep]);
   h.host.report({ phase: "acquisition", completed: 2, total: 2 });
@@ -308,7 +320,7 @@ test("cancellation rejects late readable bytes before painting", async () => {
         complete = resolve;
       }),
   });
-  const rejected = assert.rejects(h.host.acquireTile(tile), { code: "TRANSPORT_CANCELLED" });
+  const rejected = assert.rejects(h.host.acquireTile(tile), { kind: "cancelled" });
   h.controller.abort();
   complete({ kind: "response", response: { bytes: new Uint8Array([1]), final_uri: null } });
   await rejected;
@@ -335,7 +347,7 @@ test("settlement aborts and joins a dropped sibling fetch before returning", asy
     },
   });
   const sibling = assert.rejects(h.host.fetch(tile.request, "forbidden"), {
-    code: "TRANSPORT_CANCELLED",
+    kind: "cancelled",
   });
   let settled = false;
   const cleanup = h.host.settle().then(() => {
@@ -364,7 +376,7 @@ test("settlement waits for native decoding after promptly rejecting the cancelle
       }),
   });
   const h = setup({ decoder });
-  const probe = assert.rejects(h.host.probe(tile), { code: "TRANSPORT_CANCELLED" });
+  const probe = assert.rejects(h.host.probe(tile), { kind: "cancelled" });
   await tick();
   let settled = false;
   const cleanup = h.host.settle().then(() => {
@@ -391,7 +403,7 @@ test("settlement cancels a permission interaction and suppresses a late image", 
   let image, signal;
   const h = setup({
     fetchResource: async () => {
-      throw { code: "TRANSPORT_NETWORK_ERROR" };
+      throw { kind: "network-failure", transport: "direct" };
     },
     loadDisplayImage: (_url, owned) => {
       signal = owned;
@@ -404,9 +416,9 @@ test("settlement cancels a permission interaction and suppresses a late image", 
         owned.addEventListener("abort", () => reject(owned.reason), { once: true }),
       ),
   });
-  const painting = assert.rejects(h.host.acquireTile(tile), { code: "TRANSPORT_CANCELLED" });
+  const painting = assert.rejects(h.host.acquireTile(tile), { kind: "cancelled" });
   const choosing = assert.rejects(h.host.choosePartial({ missing: [] }), {
-    code: "TRANSPORT_CANCELLED",
+    kind: "cancelled",
   });
   await tick();
   const cleanup = h.host.settle();
@@ -417,16 +429,22 @@ test("settlement cancels a permission interaction and suppresses a late image", 
 });
 
 test("permission failures retain their canonical facts", async () => {
+  const denied = {
+    kind: "policy-denied",
+    blocked_reason: "access-required",
+    transport: "browser-session",
+    detail: "Denied",
+  };
   const h = setup({
     fetchResource: async () => {
-      throw {
-        code: "TRANSPORT_POLICY_DENIED",
-        message: "Denied",
-        transport: "browser-session",
-        blocked_reason: "access-required",
-      };
+      throw denied;
     },
     loadDisplayImage: async () => assert.fail("denied permission is not display-only"),
   });
-  await assert.rejects(h.host.acquireTile(tile), { code: "TRANSPORT_POLICY_DENIED" });
+  await assert.rejects(h.host.acquireTile(tile), {
+    kind: "resource",
+    request: tile.request.uri,
+    resource_kind: "tile",
+    source: denied,
+  });
 });

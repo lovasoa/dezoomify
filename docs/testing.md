@@ -114,4 +114,4 @@ This explicit lane builds current frontend, fixture server, and Tauri shell with
 
 ## Cross-runtime guarantees
 
-Browser and native products call the same async algorithm. Fixtures verify output, attempts, cleanup, error codes, and recovery independently of platform APIs. Release candidates pass the matrix in [Releases](releases.md); security-sensitive scenarios follow [Security](security.md).
+Browser and native products call the same async algorithm. Fixtures verify output, attempts, cleanup, typed failures, and recovery independently of platform APIs. Release candidates pass the matrix in [Releases](releases.md); security-sensitive scenarios follow [Security](security.md).

@@ -133,7 +133,7 @@ Follow [Contributing a format](CONTRIBUTING-format.md). In short:
 
 - Domain decisions live in the shared Rust algorithm, never in UI or transport code.
 - Hosts implement capabilities; the shared algorithm owns selection and retries.
-- Runtime differences travel as capabilities and shared error codes.
+- Runtime differences travel as capabilities and the shared typed error enum.
 - Behavior exercised by more than one runtime gets a shared scenario.
 - Discovery, selection, retry, and partial-output policy live in shared Rust. The website supplies direct-first metadata proxy policy through its Host capabilities.
 - Preserve exact URLs, settings, and error causes in diagnostics so reports can reproduce failures. Keep capture bounded and use the extension-only sign-in note described in [Security](security.md#credentials).

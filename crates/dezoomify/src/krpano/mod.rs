@@ -998,13 +998,13 @@ mod tests {
     fn viewer_failures(
         http_failure: bool,
     ) -> (Result<DiscoveryCatalog, DiscoveryError>, Vec<Request>) {
-        use crate::model::{Error, ErrorTransport, ResourceRead, ResourceResponse};
+        use crate::model::{Error, ErrorTransport, Failure, ResourceRead, ResourceResponse};
         let requests = std::cell::RefCell::new(Vec::new());
         let registry = crate::core::registry_for("krpano").unwrap();
         let result=futures::executor::block_on(registry.discover(vec![crate::core::discovery::DiscoveryInput::new("https://example.com/pano/index.html")],Default::default(),|request,_| {
             let uri=request.uri.clone();requests.borrow_mut().push(request);
             async move {
-                let bytes:&[u8]=if uri.ends_with("index.html") {br#"<html><script src="first.js"></script><script src="second.js"></script><script>embedpano({xml:"tour.xml"});</script></html>"#.as_slice()} else if uri.ends_with("tour.xml") {b"<encrypted>not-valid-krpano-data</encrypted>"} else if !http_failure {b"invalid viewer JavaScript"} else {return Err(Error::HttpError {status:403,request:None,retry_after_ms:None,preview:None,transport:ErrorTransport::Direct,detail:None});};
+                let bytes:&[u8]=if uri.ends_with("index.html") {br#"<html><script src="first.js"></script><script src="second.js"></script><script>embedpano({xml:"tour.xml"});</script></html>"#.as_slice()} else if uri.ends_with("tour.xml") {b"<encrypted>not-valid-krpano-data</encrypted>"} else if !http_failure {b"invalid viewer JavaScript"} else {return Err(Error::HttpError {status:403,retry_after_ms:None,preview:None,transport:ErrorTransport::Direct,failure:Failure::default()});};
                 Ok(ResourceRead::Response {response:ResourceResponse {bytes:bytes.to_vec(),final_uri:None}})
             }
         }));
@@ -1025,11 +1025,10 @@ mod tests {
             **cause,
             crate::model::Error::HttpError {
                 status: 403,
-                request: None,
                 retry_after_ms: None,
                 preview: None,
                 transport: crate::model::ErrorTransport::Direct,
-                detail: None,
+                failure: crate::model::Failure::default(),
             }
         );
         assert!(

@@ -114,7 +114,7 @@ export function normalizeDeepLinkVersion(version: unknown): number | null {
 
 // Validate a `dezoomify://deep-link-pending` payload again in the frontend
 // before showing the confirm UI. Accepts exactly the validated
-// `{source_url, hint, version}` triple emitted by the Rust shell — raw
+// `{source_url, hint, version}` triple emitted by the Rust shell; raw
 // `dezoomify://` values are refused (the shell's parser is the single
 // validator, pinned by testdata/deep-link-vectors.json). Null means
 // reject (no-op).

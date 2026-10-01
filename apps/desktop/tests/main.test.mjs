@@ -4,6 +4,19 @@ import { registerHooks } from "node:module";
 import test from "node:test";
 import { act, click, makeContainer } from "../../../test/react-dom.mjs";
 
+// linkedom documents lack `oninput`, which keeps React's text-input change
+// detection disabled. Arm it before react-dom loads (through main.ts) so
+// edits fire onChange.
+document.oninput = null;
+
+/** Type into a controlled field the way the settings view tests do. */
+function typeInto(element, value) {
+  act(() => {
+    Object.defineProperty(element, "value", { configurable: true, writable: true, value });
+    element.dispatchEvent(new window.Event("change", { bubbles: true }));
+  });
+}
+
 const invocations = [];
 const output = {
   complete: true,
@@ -99,17 +112,17 @@ test("desktop failure preserves canonical refusal facts and diagnostic context",
   const invocation = await start();
   await act(async () =>
     invocation.reject({
-      code: "job.no-usable-tiles",
-      message: "No usable tiles were acquired.",
-      detail: "The source returned its signed-in challenge.",
-      phase: "acquisition",
-      transport: "native",
-      request: "https://tiles.test/redirected/0.jpg?token=exact",
-      resource_kind: "tile",
-      blocked_reason: "forbidden",
-      http: 403,
-      preview: "Sign in to see the collection",
-      retryable: false,
+      kind: "no-usable-tiles",
+      failures: [
+        {
+          kind: "http-error",
+          status: 403,
+          request: "https://tiles.test/redirected/0.jpg?token=exact",
+          transport: "native",
+          preview: "Sign in to see the collection",
+          detail: "the source returned its signed-in challenge",
+        },
+      ],
     }),
   );
   await tick();
@@ -125,7 +138,7 @@ test("desktop failure preserves canonical refusal facts and diagnostic context",
   assert.match(diagnostics, /https:\/\/tiles.test\/redirected\/0.jpg\?token=exact/);
   assert.match(diagnostics, /source returned its signed-in challenge/);
   assert.match(diagnostics, /Sign in to see the collection/);
-  assert.match(diagnostics, /retryable=false/);
+  assert.match(diagnostics, /kind=no-usable-tiles/);
   await reset();
 });
 
@@ -135,7 +148,7 @@ test("desktop partial actions honor retryability and retain a newer native quest
     missing: [
       {
         tile: 3,
-        failures: [{ code: "TRANSPORT_HTTP_ERROR", http: retryable ? 503 : 403, retryable }],
+        failures: [{ kind: "http-error", status: retryable ? 503 : 403, transport: "native" }],
       },
     ],
   });
@@ -162,19 +175,47 @@ test("desktop partial actions honor retryability and retain a newer native quest
 test("a late partial answer failure cannot replace the next invocation", async () => {
   const first = await start();
   act(() =>
-    first.callbacks.partial(1, { missing: [{ tile: 3, failures: [{ retryable: true }] }] }),
+    first.callbacks.partial(1, {
+      missing: [{ tile: 3, failures: [{ kind: "network-failure", transport: "native" }] }],
+    }),
   );
   click(root.querySelector("[data-dz-partial-choice=discard]"));
   await reset();
   const second = await start();
-  await act(async () =>
-    first.answers[0].reject({ code: "interaction.expired", message: "Expired" }),
-  );
+  await act(async () => first.answers[0].reject({ kind: "interaction-expired" }));
   assert.equal(root.querySelector(".dz-error-section"), null);
   assert.ok(root.querySelector(".dz-job-section"));
   act(() =>
-    second.callbacks.partial(2, { missing: [{ tile: 1, failures: [{ retryable: false }] }] }),
+    second.callbacks.partial(2, {
+      missing: [{ tile: 1, failures: [{ kind: "decode-failed" }] }],
+    }),
   );
   assert.ok(root.querySelector("[data-dz-partial-choice=keep]"));
   await reset();
+});
+
+test("raw header text is submitted as-is; nothing is pre-validated or blocked", async () => {
+  click(root.querySelector(".dz-settings-more"));
+  const textarea = root.querySelector(".dz-headers-disclosure textarea");
+  assert.ok(textarea, "request headers stay in advanced settings");
+  const text = "Referer: https://museum.test/viewer\nnot a header line";
+  typeInto(textarea, text);
+  const invocation = await start();
+  assert.deepEqual(invocation.request.settings.headers, text.split("\n"));
+  await reset();
+});
+
+test("a typed Rust save rejection shows its reason and persists nothing", async () => {
+  const invocation = await start();
+  await act(async () =>
+    invocation.reject({ kind: "invalid-settings", detail: "invalid header: bad name" }),
+  );
+  await tick();
+  const diagnostics = root.querySelector("#dz-job-diagnostics");
+  assert.match(diagnostics.textContent, /invalid header: bad name/);
+  await reset();
+  await tick();
+  const settingsError = root.querySelector("#dz-settings-error");
+  assert.ok(settingsError, "the settings panel surfaces the Rust rejection reason");
+  assert.match(settingsError.textContent, /invalid header: bad name/);
 });

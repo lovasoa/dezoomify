@@ -177,10 +177,7 @@ pub fn encode_png(
         image::ExtendedColorType::Rgba8,
     )
     .map_err(|e| Error::EncodeFailed {
-        detail: Some(format!(
-            "png encode failed: {}",
-            dezoomify::model::chain_text(&e)
-        )),
+        failure: format!("png encode failed: {}", dezoomify::model::chain_text(&e)).into(),
     })?;
     Ok(bytes)
 }
@@ -225,10 +222,7 @@ pub fn encode_jpeg(
         image::ExtendedColorType::Rgb8,
     )
     .map_err(|e| Error::EncodeFailed {
-        detail: Some(format!(
-            "jpeg encode failed: {}",
-            dezoomify::model::chain_text(&e)
-        )),
+        failure: format!("jpeg encode failed: {}", dezoomify::model::chain_text(&e)).into(),
     })?;
     Ok(bytes)
 }
@@ -310,7 +304,7 @@ pub fn encode_zif_pyramid(
 
 fn tiff_failed(error: tiff::TiffError) -> Error {
     Error::EncodeFailed {
-        detail: Some(format!("tiff encode failed: {error}")),
+        failure: format!("tiff encode failed: {error}").into(),
     }
 }
 
@@ -366,10 +360,7 @@ pub fn encode_webp(image: &image::RgbaImage, icc_profile: Option<&[u8]>) -> Resu
         image::ExtendedColorType::Rgba8,
     )
     .map_err(|e| Error::EncodeFailed {
-        detail: Some(format!(
-            "webp encode failed: {}",
-            dezoomify::model::chain_text(&e)
-        )),
+        failure: format!("webp encode failed: {}", dezoomify::model::chain_text(&e)).into(),
     })?;
     Ok(bytes)
 }

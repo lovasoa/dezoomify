@@ -360,7 +360,7 @@ export function createProxyTransport(
         ).buffer;
       } catch (error) {
         if (callOpts?.signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
-        if ((error as { code?: string })?.code === "TRANSPORT_SIZE_LIMIT")
+        if ((error as { kind?: string })?.kind === "size-limit")
           return { ok: false, status: response.status, code: "PROXY_BUDGET_EXCEEDED", requestId };
         return { ok: false, status: response.status, code: "TRANSPORT_NETWORK_ERROR", requestId };
       }

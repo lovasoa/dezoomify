@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use crate::client::{build_request, rebuild_for_redirect, EffectiveRequest};
 use crate::http::{FetchLimits, FetchOutcome, UserHeaders};
-use dezoomify::model::{bounded_uri, Error, ErrorTransport};
+use dezoomify::model::{bounded_uri, Error, ErrorTransport, Failure};
 
 /// Local carrier enabling `?`-chaining from platform error types into the
 /// pure domain [`Error`]: the orphan rule reserves those `From` conversions
@@ -14,19 +14,20 @@ pub struct TransportError(pub Error);
 
 impl From<reqwest::Error> for TransportError {
     fn from(error: reqwest::Error) -> Self {
-        let detail = Some(dezoomify::model::chain_text(&error));
+        let detail = dezoomify::model::chain_text(&error);
         let error = if error.is_timeout() {
             Error::Timeout {
-                request: None,
                 transport: ErrorTransport::Native,
-                detail,
+                failure: detail.into(),
             }
         } else if error.is_builder() {
-            Error::BadUrl { detail }
+            Error::BadUrl {
+                failure: detail.into(),
+            }
         } else {
             Error::NetworkFailure {
                 transport: ErrorTransport::Native,
-                detail,
+                failure: detail.into(),
             }
         };
         Self(error)
@@ -36,7 +37,7 @@ impl From<reqwest::Error> for TransportError {
 impl From<url::ParseError> for TransportError {
     fn from(error: url::ParseError) -> Self {
         Self(Error::BadUrl {
-            detail: Some(dezoomify::model::chain_text(&error)),
+            failure: dezoomify::model::chain_text(&error).into(),
         })
     }
 }
@@ -45,7 +46,7 @@ impl From<reqwest::header::InvalidHeaderName> for TransportError {
     fn from(error: reqwest::header::InvalidHeaderName) -> Self {
         Self(Error::NetworkFailure {
             transport: ErrorTransport::Native,
-            detail: Some(dezoomify::model::chain_text(&error)),
+            failure: dezoomify::model::chain_text(&error).into(),
         })
     }
 }
@@ -54,7 +55,7 @@ impl From<reqwest::header::InvalidHeaderValue> for TransportError {
     fn from(error: reqwest::header::InvalidHeaderValue) -> Self {
         Self(Error::NetworkFailure {
             transport: ErrorTransport::Native,
-            detail: Some(dezoomify::model::chain_text(&error)),
+            failure: dezoomify::model::chain_text(&error).into(),
         })
     }
 }
@@ -63,7 +64,7 @@ impl From<std::io::Error> for TransportError {
     fn from(error: std::io::Error) -> Self {
         Self(Error::NetworkFailure {
             transport: ErrorTransport::Native,
-            detail: Some(dezoomify::model::chain_text(&error)),
+            failure: dezoomify::model::chain_text(&error).into(),
         })
     }
 }
@@ -104,10 +105,11 @@ impl NativeTransport {
             .thread_name("dezoomify-transport")
             .build()
             .map_err(|e| Error::Internal {
-                detail: Some(format!(
+                failure: format!(
                     "transport runtime could not start: {}",
                     dezoomify::model::chain_text(&e)
-                )),
+                )
+                .into(),
             })?;
         let mut builder = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
@@ -121,10 +123,11 @@ impl NativeTransport {
             builder = builder.use_preconfigured_tls(tls_config());
         }
         let client = builder.build().map_err(|e| Error::Internal {
-            detail: Some(format!(
+            failure: format!(
                 "transport client could not be built: {}",
                 dezoomify::model::chain_text(&e)
-            )),
+            )
+            .into(),
         })?;
         Ok(Self {
             runtime,
@@ -256,7 +259,7 @@ fn reject_userinfo_uri(uri: &str) -> Result<(), Error> {
     let parsed = url::Url::parse(uri).map_err(TransportError::from)?;
     if !parsed.username().is_empty() {
         return Err(Error::BadUrl {
-            detail: Some("userinfo rejected".into()),
+            failure: "userinfo rejected".to_string().into(),
         });
     }
     Ok(())
@@ -274,9 +277,11 @@ async fn fetch_loop(
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             return Err(Error::Timeout {
-                request: Some(bounded_uri(request.uri.clone())),
                 transport: ErrorTransport::Native,
-                detail: Some("fetch deadline exceeded".into()),
+                failure: Failure {
+                    request: Some(bounded_uri(request.uri.clone())),
+                    detail: Some("fetch deadline exceeded".into()),
+                },
             });
         }
         let response = fetch_once(client, &request, remaining).await?;
@@ -386,7 +391,7 @@ async fn read_body_capped(
             Err(e) => {
                 return Err(Error::NetworkFailure {
                     transport: ErrorTransport::Native,
-                    detail: Some(dezoomify::model::chain_text(&e)),
+                    failure: dezoomify::model::chain_text(&e).into(),
                 });
             }
         }
@@ -402,26 +407,26 @@ fn parse_retry_after_ms(value: &str) -> Option<u64> {
 fn resolve_redirect(base: &str, location: &str) -> Result<String, Error> {
     if location.is_empty() {
         return Err(Error::BadRedirect {
-            detail: Some("empty location".into()),
+            failure: "empty location".to_string().into(),
         });
     }
     let base = url::Url::parse(base).map_err(|e| Error::BadUrl {
-        detail: Some(dezoomify::model::chain_text(&e)),
+        failure: dezoomify::model::chain_text(&e).into(),
     })?;
     let next = base.join(location).map_err(|e| Error::BadRedirect {
-        detail: Some(format!("bad location: {e}")),
+        failure: format!("bad location: {e}").into(),
     })?;
     if matches!(next.scheme(), "http" | "https") && !next.cannot_be_a_base() {
         if next.username().is_empty() {
             Ok(next.to_string())
         } else {
             Err(Error::BadRedirect {
-                detail: Some("userinfo rejected".into()),
+                failure: "userinfo rejected".to_string().into(),
             })
         }
     } else {
         Err(Error::BadRedirect {
-            detail: Some("unsupported redirect scheme".into()),
+            failure: "unsupported redirect scheme".to_string().into(),
         })
     }
 }
@@ -443,7 +448,9 @@ fn local_path_for_uri(uri: &str) -> Result<&str, Error> {
             return Ok(rest);
         }
         return Err(Error::BadUrl {
-            detail: Some("file uri must name a local absolute path".into()),
+            failure: "file uri must name a local absolute path"
+                .to_string()
+                .into(),
         });
     }
     Ok(uri)
@@ -457,7 +464,7 @@ fn fetch_local(uri: &str, limits: &FetchLimits) -> Result<FetchOutcome, Error> {
     let path = local_path_for_uri(uri)?;
     let body = std::fs::read(path).map_err(|e| Error::NetworkFailure {
         transport: ErrorTransport::Native,
-        detail: Some(format!("local file read failed: {e}")),
+        failure: format!("local file read failed: {e}").into(),
     })?;
     if body.len() as u64 > limits.max_bytes {
         return Err(Error::SizeLimit {
