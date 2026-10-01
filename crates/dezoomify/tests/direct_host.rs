@@ -236,7 +236,13 @@ fn discard_and_empty_output_never_publish() {
     let host = MemoryHost::default();
     fail(&host, 0, [failure(404)]);
     let error = invoke(&host, options()).unwrap_err();
-    assert!(matches!(&error, Error::PartialDiscarded { failures } if failures == &[failure(404)]));
+    assert!(matches!(
+        &error,
+        Error::PartialDiscarded {
+            transient: false,
+            ..
+        }
+    ));
     assert!(host.outputs.borrow().is_empty());
     assert_eq!(host.settled.get(), 1);
     let host = MemoryHost::default();
@@ -253,7 +259,13 @@ fn discard_and_empty_output_never_publish() {
     .unwrap_err();
     // The aggregate retains every settled failure and derives its verdict
     // from the whole set.
-    assert!(matches!(&error, Error::NoUsableTiles { failures } if failures.len() == 4));
+    assert!(matches!(
+        &error,
+        Error::NoUsableTiles {
+            transient: false,
+            ..
+        }
+    ));
     assert!(!error.retryable());
     assert!(host.outputs.borrow().is_empty());
 }

@@ -56,9 +56,7 @@ fn phase_of(error: &Error) -> &'static str {
             ..
         } => "acquisition",
         Error::Resource { source, .. } => phase_of(source),
-        Error::PartialDiscarded { failures } | Error::NoUsableTiles { failures } => {
-            failures.first().map_or("acquisition", phase_of)
-        }
+        Error::PartialDiscarded { .. } | Error::NoUsableTiles { .. } => "acquisition",
         Error::NoImageFound { .. }
         | Error::MalformedMetadata { .. }
         | Error::DiscoveryFailed { .. }

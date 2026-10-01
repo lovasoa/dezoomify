@@ -104,6 +104,15 @@ mod bindings {
     }
     dezoomify::host_members!(bind_host);
 
+    /// The retry policy of `Error::retryable()`, exposed at the boundary:
+    /// one policy in Rust, no mirror in TypeScript.
+    #[wasm_bindgen(js_name = isRetryable)]
+    pub fn is_retryable(error: JsValue) -> Result<bool, JsValue> {
+        let error: Error = decode(error)?;
+        Ok(error.retryable())
+    }
+
+
     #[wasm_bindgen(skip_typescript)]
     pub async fn dezoomify(
         inputs: JsValue,

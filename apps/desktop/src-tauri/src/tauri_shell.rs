@@ -78,6 +78,12 @@ mod output_tests {
 }
 
 /// Open only an output published by this app; callers never supply paths.
+/// The retry policy of `Error::retryable()`, exposed at the boundary.
+#[tauri::command]
+fn is_retryable(error: dezoomify::model::Error) -> bool {
+    error.retryable()
+}
+
 #[tauri::command]
 async fn open_saved_output(
     table: State<'_, Mutex<JobTable>>,

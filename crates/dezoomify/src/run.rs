@@ -115,11 +115,12 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
         });
     let mut missing = acquire_round(tiles, host, options, &mut progress).await?;
     if progress.completed == 0 {
-        // The aggregate retains a bounded failure sample whose derived
-        // facts (retry verdict, largest hint) stay exact over the complete
-        // set; the first failure keeps its exact request context.
+        // Derived facts over the complete settled set; the evidence stays
+        // in the missing-tile records and the diagnostics report.
+        let settled: Vec<&Error> = missing.iter().flat_map(|(_, f)| f.iter()).collect();
         return Err(Error::NoUsableTiles {
-            failures: retained_failures(missing.iter().map(|(_, failures)| failures)),
+            transient: settled.iter().any(|f| f.retryable()),
+            retry_after_ms: settled.iter().filter_map(|f| f.retry_after_ms()).max(),
         });
     }
     while !missing.is_empty() {
@@ -144,10 +145,11 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
         match choice {
             RecoveryChoice::Keep => break,
             RecoveryChoice::Discard => {
-                // Like the no-usable-tiles aggregate: a bounded sample with
-                // exact derived facts; `MissingTile` failures stay complete.
+                // Like the no-usable-tiles aggregate: derived facts only.
+                let settled: Vec<&Error> = missing.iter().flat_map(|(_, f)| f.iter()).collect();
                 return Err(Error::PartialDiscarded {
-                    failures: retained_failures(missing.iter().map(|(_, failures)| failures)),
+                    transient: settled.iter().any(|f| f.retryable()),
+                    retry_after_ms: settled.iter().filter_map(|f| f.retry_after_ms()).max(),
                 });
             }
             RecoveryChoice::Retry => {
@@ -601,31 +603,6 @@ fn empty_plan() -> Error {
 /// `retry-after` hint, plus a prefix sample whose first failure carries
 /// its exact request context.
 const MAX_AGGREGATE_FAILURES: usize = 8;
-
-fn retained_failures<'a>(failed: impl IntoIterator<Item = &'a Vec<Error>>) -> Vec<Error> {
-    let mut retained: Vec<Error> = Vec::new();
-    let mut transient: Option<&Error> = None;
-    let mut largest_hint: Option<&Error> = None;
-    for failures in failed {
-        for failure in failures {
-            if transient.is_none() && failure.retryable() {
-                transient = Some(failure);
-            }
-            if failure.retry_after_ms() > largest_hint.and_then(Error::retry_after_ms) {
-                largest_hint = Some(failure);
-            }
-            if retained.len() < MAX_AGGREGATE_FAILURES {
-                retained.push(failure.clone());
-            }
-        }
-    }
-    for extra in [transient, largest_hint].into_iter().flatten() {
-        if !retained.iter().any(|kept| kept == extra) {
-            retained.push(extra.clone());
-        }
-    }
-    retained
-}
 
 impl From<core::TileSourceError> for Error {
     fn from(error: core::TileSourceError) -> Self {
