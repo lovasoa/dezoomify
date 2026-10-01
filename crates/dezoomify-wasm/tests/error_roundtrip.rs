@@ -56,25 +56,20 @@ fn host_thrown_objects_deserialize_into_the_same_enum() {
                 .into(),
         }
     );
-    // Aggregates and nested composition deserialize the same way.
+    // Aggregates carry their derived verdict and largest hint; the settled
+    // evidence lives in the job's `missing[]` collection and the diagnostics
+    // report, never one nested error per failed attempt.
     let thrown = serde_json::json!({
         "kind": "no-usable-tiles",
-        "failures": [{
-            "kind": "resource",
-            "request": "https://example.test/tile",
-            "resource_kind": "tile",
-            "source": { "kind": "timeout", "transport": "native" },
-        }],
+        "transient": true,
+        "retry_after_ms": 3_000,
     });
     let error: Error = serde_json::from_value(thrown).expect("deserializes");
     assert!(
         error.retryable(),
-        "the retained transient constituent invites retry"
+        "a transient aggregate invites retry"
     );
-    assert!(matches!(
-        &error,
-        Error::NoUsableTiles { failures } if failures.len() == 1
-    ));
+    assert_eq!(error.retry_after_ms(), Some(3_000));
     // Round-trip: what one side raises, the other side reads unchanged.
     let round_tripped: Error =
         serde_json::from_value(serde_json::to_value(&error).expect("serializes"))

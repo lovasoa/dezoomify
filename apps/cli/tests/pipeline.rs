@@ -1,47 +1,10 @@
 //! End-to-end CLI test: the real binary discovers, downloads, assembles, and
 //! writes a real output file over loopback sockets (fixture-server scenarios).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
-use std::sync::{Arc, Mutex};
 
-use dezoomify_fixture_server::{router, scenarios_dir, AppState, RouteTable};
-
-fn start_fixture_server() -> String {
-    let scenarios_dir = scenarios_dir();
-    let routes = RouteTable::load(&scenarios_dir).expect("load routes");
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .expect("tokio runtime");
-    let _guard = rt.enter();
-    let listener = rt
-        .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
-        .expect("bind loopback");
-    let bound = listener.local_addr().expect("addr");
-    let state = AppState {
-        routes: Arc::new(routes),
-        scenarios_dir,
-        static_dir: None,
-        origin: format!("http://{bound}"),
-        log: Arc::new(Mutex::new(Vec::new())),
-        log_path: None,
-    };
-    tokio::spawn(async move {
-        axum::serve(listener, router(state))
-            .await
-            .expect("fixture server");
-    });
-    std::mem::forget(rt);
-    format!("http://{bound}")
-}
-
-fn temp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("dezoomify-cli-e2e-{}-{name}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    dir
-}
+use dezoomify_fixture_server::{scenario_input, start as start_fixture_server, temp_dir};
 
 /// Thin driver adapter over the shared corpus goldens: map the CLI's
 /// completion event and the bytes it wrote into the shared golden
@@ -835,11 +798,7 @@ fn edge_failures_publish_their_golden_codes() {
         "edge-throttle-429",
         "edge-zero-tile",
     ] {
-        let entry = dezoomify_fixture_server::scenario(&format!("native/{id}"));
-        let input = entry["input"]["url"]
-            .as_str()
-            .expect("scenario input url")
-            .replace("http://{{origin}}", &origin);
+        let (entry, input) = scenario_input(&format!("native/{id}"), &origin);
         let expected = &entry["expected"];
         assert_eq!(
             expected["outcome"].as_str(),
@@ -870,11 +829,7 @@ fn edge_failures_publish_their_golden_codes() {
 fn edge_successes_match_their_result_goldens() {
     let origin = start_fixture_server();
     for id in ["edge-exif", "edge-redirect-chain", "edge-resume-offline"] {
-        let entry = dezoomify_fixture_server::scenario(&format!("native/{id}"));
-        let input = entry["input"]["url"]
-            .as_str()
-            .expect("scenario input url")
-            .replace("http://{{origin}}", &origin);
+        let (entry, input) = scenario_input(&format!("native/{id}"), &origin);
         let out_dir = temp_dir(id);
         let output = out_dir.join("out.png");
         let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))

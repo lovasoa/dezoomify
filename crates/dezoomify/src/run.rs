@@ -595,15 +595,6 @@ fn empty_plan() -> Error {
     Error::PlanEmpty
 }
 
-/// Aggregate errors retain a bounded failure sample, never one entry per
-/// failed attempt: a large failed plan would otherwise serialize millions
-/// of nested errors next to the complete `MissingTile` collection. The
-/// derived facts stay exact over the complete set: retention keeps at
-/// least one transient constituent (any-transient retry) and the largest
-/// `retry-after` hint, plus a prefix sample whose first failure carries
-/// its exact request context.
-const MAX_AGGREGATE_FAILURES: usize = 8;
-
 impl From<core::TileSourceError> for Error {
     fn from(error: core::TileSourceError) -> Self {
         Self::PlanInvalid {

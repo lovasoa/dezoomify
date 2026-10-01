@@ -99,15 +99,7 @@ fn options_for_target(target: &Target<'_>, options: &JobOptions) -> JobOptions {
 // ── shared loopback and fixture harnesses ─────────────────────────
 // One copy for every integration test binary in this crate.
 
-pub fn temp_dir(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "dezoomify-native-tests-{}-{name}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    dir
-}
+pub use dezoomify_fixture_server::{start as start_fixture_server, temp_dir};
 
 pub fn http_response(status: &str, content_type: &str, body: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
@@ -204,35 +196,4 @@ pub fn serve_counted(
         }
     });
     format!("http://127.0.0.1:{port}")
-}
-
-/// The whole scenario corpus served on an allocated loopback port.
-pub fn start_fixture_server() -> String {
-    let scenarios_dir = dezoomify_fixture_server::scenarios_dir();
-    let routes = dezoomify_fixture_server::RouteTable::load(&scenarios_dir).expect("load routes");
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .expect("tokio runtime");
-    let _guard = rt.enter();
-    let listener = rt
-        .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
-        .expect("bind loopback");
-    let bound = listener.local_addr().expect("addr");
-    let state = dezoomify_fixture_server::AppState {
-        routes: std::sync::Arc::new(routes),
-        scenarios_dir,
-        static_dir: None,
-        origin: format!("http://{bound}"),
-        log: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-        log_path: None,
-    };
-    tokio::spawn(async move {
-        axum::serve(listener, dezoomify_fixture_server::router(state))
-            .await
-            .expect("fixture server");
-    });
-    // The runtime must outlive the server; leak it for the process lifetime.
-    std::mem::forget(rt);
-    format!("http://{bound}")
 }

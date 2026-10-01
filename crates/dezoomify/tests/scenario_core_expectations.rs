@@ -19,31 +19,27 @@ use support::grid;
 /// this origin before comparison.
 const ORIGIN: &str = "http://127.0.0.1";
 
-const CORE_GOLDENS: &[(&str, &str)] = &[
-    (
-        "web/core-discovery",
-        include_str!("../../../testdata/scenarios/web/core-discovery/expected/core.json"),
-    ),
-    (
-        "web/iiif-discovery",
-        include_str!("../../../testdata/scenarios/web/iiif-discovery/expected/core.json"),
-    ),
-    (
-        "web/seadragon-pages",
-        include_str!("../../../testdata/scenarios/web/seadragon-pages/expected/core.json"),
-    ),
-    (
-        "web/site-adapters",
-        include_str!("../../../testdata/scenarios/web/site-adapters/expected/core.json"),
-    ),
-    (
-        "web/topviewer",
-        include_str!("../../../testdata/scenarios/web/topviewer/expected/core.json"),
-    ),
-    (
-        "web/zoomify-pages",
-        include_str!("../../../testdata/scenarios/web/zoomify-pages/expected/core.json"),
-    ),
+/// Every `web/*/expected/core.json` golden, one line each.
+macro_rules! core_goldens {
+    ($($name:literal),* $(,)?) => {
+        &[$((
+            $name,
+            include_str!(concat!(
+                "../../../testdata/scenarios/",
+                $name,
+                "/expected/core.json"
+            )),
+        )),*]
+    };
+}
+
+const CORE_GOLDENS: &[(&str, &str)] = core_goldens![
+    "web/core-discovery",
+    "web/iiif-discovery",
+    "web/seadragon-pages",
+    "web/site-adapters",
+    "web/topviewer",
+    "web/zoomify-pages",
 ];
 
 /// Cases deliberately not asserted offline. Every skipped case keeps its

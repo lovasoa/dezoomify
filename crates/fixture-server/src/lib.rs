@@ -601,6 +601,62 @@ pub fn scenario(id: &str) -> serde_json::Value {
     entry
 }
 
+/// One scenario's corpus entry as [`scenario`] loads it, with its input URL
+/// handed back ready to run: the `http://{{origin}}` fixture placeholder is
+/// substituted with the live loopback origin. The one loader adapter for the
+/// native, edge, and CLI drivers.
+#[must_use]
+pub fn scenario_input(id: &str, origin: &str) -> (serde_json::Value, String) {
+    let entry = scenario(id);
+    let input = entry["input"]["url"]
+        .as_str()
+        .expect("scenario input url")
+        .replace("http://{{origin}}", origin);
+    (entry, input)
+}
+
+/// A fresh temp directory for one scenario run, cleared of leftovers.
+#[must_use]
+pub fn temp_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("dezoomify-tests-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    dir
+}
+
+/// The whole scenario corpus served on an allocated loopback port: the one
+/// loopback harness for every test binary that drives jobs end to end. The
+/// serving runtime is leaked for the process lifetime.
+#[must_use]
+pub fn start() -> String {
+    let scenarios_dir = scenarios_dir();
+    let routes = RouteTable::load(&scenarios_dir).expect("load routes");
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
+    let _guard = rt.enter();
+    let listener = rt
+        .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
+        .expect("bind loopback");
+    let bound = listener.local_addr().expect("addr");
+    let state = AppState {
+        routes: Arc::new(routes),
+        scenarios_dir,
+        static_dir: None,
+        origin: format!("http://{bound}"),
+        log: Arc::new(Mutex::new(Vec::new())),
+        log_path: None,
+    };
+    tokio::spawn(async move {
+        axum::serve(listener, router(state))
+            .await
+            .expect("fixture server");
+    });
+    std::mem::forget(rt);
+    format!("http://{bound}")
+}
+
 /// One completed job as its golden records it. Each driver adapts its own
 /// observation (native publication, CLI event JSON) into this shape once.
 #[derive(Clone, Debug)]
@@ -615,6 +671,18 @@ pub struct GoldenResult {
     pub partial: bool,
 }
 
+/// The one golden comparator: `(label, observed, golden)` triples, adapted
+/// once per driver, yield one readable mismatch line per divergence. Empty
+/// when every field matches.
+#[must_use]
+pub fn golden_mismatches(id: &str, fields: &[(&str, String, String)]) -> Vec<String> {
+    fields
+        .iter()
+        .filter(|(_, observed, golden)| observed != golden)
+        .map(|(name, observed, golden)| format!("{id} {name}: {observed} != golden {golden}"))
+        .collect()
+}
+
 /// Success-golden mismatches: image size, tile count, output format, and
 /// (when the golden pins one) the partial disposition and the `ok` code.
 /// Empty when the run matches its golden. `recovery` in success goldens
@@ -623,29 +691,33 @@ pub struct GoldenResult {
 pub fn result_golden_mismatches(entry: &serde_json::Value, result: &GoldenResult) -> Vec<String> {
     let id = entry["id"].as_str().unwrap_or("<scenario>");
     let golden = &entry["expected"];
-    let mut mismatches = Vec::new();
-    let width = golden["imageSize"]["x"].as_u64().expect("golden width");
-    let height = golden["imageSize"]["y"].as_u64().expect("golden height");
-    if result.image_size != (width, height) {
-        mismatches.push(format!(
-            "{id} image size: {:?} != golden ({width}, {height})",
-            result.image_size
-        ));
-    }
-    let tile_count = golden["tileCount"].as_u64().expect("golden tile count");
-    if result.tile_count != tile_count {
-        mismatches.push(format!(
-            "{id} tile count: {} != golden {tile_count}",
-            result.tile_count
-        ));
-    }
-    let format = golden["outputFormat"].as_str().expect("golden format");
-    if result.output_format != format {
-        mismatches.push(format!(
-            "{id} output format: {} != golden {format}",
-            result.output_format
-        ));
-    }
+    let (width, height) = result.image_size;
+    let mut mismatches = golden_mismatches(
+        id,
+        &[
+            (
+                "image size",
+                format!("{:?}", result.image_size),
+                format!("({width}, {height})"),
+            ),
+            (
+                "tile count",
+                result.tile_count.to_string(),
+                golden["tileCount"]
+                    .as_u64()
+                    .expect("golden tile count")
+                    .to_string(),
+            ),
+            (
+                "output format",
+                result.output_format.clone(),
+                golden["outputFormat"]
+                    .as_str()
+                    .expect("golden format")
+                    .to_string(),
+            ),
+        ],
+    );
     if let Some(partial) = golden.get("partial") {
         if partial.as_bool() != Some(result.partial) {
             mismatches.push(format!(
@@ -670,17 +742,21 @@ pub fn result_golden_mismatches(entry: &serde_json::Value, result: &GoldenResult
 pub fn failure_golden_mismatches(entry: &serde_json::Value, kind: &str) -> Vec<String> {
     let id = entry["id"].as_str().unwrap_or("<scenario>");
     let golden = &entry["expected"];
-    let mut mismatches = Vec::new();
-    if golden["outcome"].as_str() != Some("failed") {
-        mismatches.push(format!(
-            "{id} outcome: golden pins a failure, found {}",
-            golden["outcome"]
-        ));
-    }
-    if golden["code"].as_str().unwrap_or_default() != kind {
-        mismatches.push(format!("{id} code: {kind} != golden {}", golden["code"]));
-    }
-    mismatches
+    golden_mismatches(
+        id,
+        &[
+            (
+                "outcome",
+                "failed".to_string(),
+                golden["outcome"].as_str().unwrap_or_default().to_string(),
+            ),
+            (
+                "code",
+                kind.to_string(),
+                golden["code"].as_str().unwrap_or_default().to_string(),
+            ),
+        ],
+    )
 }
 
 /// Assert [`result_golden_mismatches`] is empty. Drivers that report a

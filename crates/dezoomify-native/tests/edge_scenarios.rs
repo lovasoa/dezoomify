@@ -13,33 +13,20 @@ use dezoomify_native::{JobOptions, NativeHost, OutputTarget};
 mod support;
 use support::{start_fixture_server, temp_dir};
 
-/// The loopback-side view of one corpus entry: the thin per-driver adapter
-/// over [`dezoomify_fixture_server::scenario`] (the shared corpus load)
-/// that substitutes the fixture origin into the input URL.
-struct Scenario {
-    entry: serde_json::Value,
-    input: String,
-}
-
-impl Scenario {
-    /// Load one `native/edge-*` corpus entry by its bare family name.
-    fn load(id: &str, origin: &str) -> Self {
-        let entry = dezoomify_fixture_server::scenario(&format!("native/{id}"));
-        let input = entry["input"]["url"]
-            .as_str()
-            .expect("scenario input url")
-            .replace("http://{{origin}}", origin);
-        Self { entry, input }
-    }
-
-    fn operation(&self) -> &str {
-        self.entry["operation"].as_str().expect("operation")
-    }
-
-    fn expected(&self) -> &serde_json::Value {
-        &self.entry["expected"]
-    }
-}
+/// Every `native/edge-*` corpus entry, one line each.
+const EDGE_SCENARIOS: &[&str] = &[
+    "edge-exif",
+    "edge-redirect-chain",
+    "edge-resume-offline",
+    "edge-cache-304",
+    "edge-gzip-cache",
+    "edge-malformed-json",
+    "edge-malformed-xml",
+    "edge-range-truncate",
+    "edge-redirect-loop",
+    "edge-throttle-429",
+    "edge-zero-tile",
+];
 
 /// The job step the golden records, derived from the typed failure:
 /// metadata work (including discovery aggregates) is discovery; tile work
@@ -67,60 +54,12 @@ fn phase_of(error: &Error) -> &'static str {
     }
 }
 
-const SUCCESS_SCENARIOS: &[&str] = &["edge-exif", "edge-redirect-chain", "edge-resume-offline"];
-
-const FAILURE_SCENARIOS: &[&str] = &[
-    "edge-cache-304",
-    "edge-gzip-cache",
-    "edge-malformed-json",
-    "edge-malformed-xml",
-    "edge-range-truncate",
-    "edge-redirect-loop",
-    "edge-throttle-429",
-    "edge-zero-tile",
-];
-
 #[test]
-fn edge_success_scenarios_match_their_result_goldens() {
-    let origin = start_fixture_server();
-    for id in SUCCESS_SCENARIOS {
-        let scenario = Scenario::load(id, &origin);
-        assert_eq!(scenario.operation(), "download", "{id}");
-        let out_dir = temp_dir(id);
-        let output = out_dir.join("out.png");
-        // Hermetic cache: the job never touches the user's default cache.
-        let options = JobOptions {
-            cache_dir: Some(out_dir.join("cache")),
-            ..Default::default()
-        };
-        let outcome = support::run_with_options(
-            &support::Target::new(
-                &scenario.input,
-                output.to_str().expect("utf8 output"),
-                false,
-            ),
-            &options,
-            &mut |_| {},
-        )
-        .unwrap_or_else(|error| panic!("{id} succeeds: {error} ({})", error.cause().kind()));
-        // `code: "ok"` pins success (the shared result comparison treats
-        // the code as optional), and the golden geometry matches the
-        // published output (the EXIF-preserving note in `edge-exif` is
-        // prose; pixel/EXIF fidelity lives in the native imaging tests).
-        assert_eq!(scenario.expected()["code"].as_str(), Some("ok"), "{id}");
-        dezoomify_fixture_server::assert_result_golden(
-            &scenario.entry,
-            support::golden_result(&outcome),
-        );
-    }
-}
-
-#[test]
-fn edge_failure_scenarios_match_their_result_goldens() {
+fn edge_scenarios_match_their_result_goldens() {
     let origin = start_fixture_server();
     let mut mismatches = Vec::new();
-    for id in FAILURE_SCENARIOS {
-        match_failure_scenario(id, &origin, &mut mismatches);
+    for id in EDGE_SCENARIOS {
+        run_edge_scenario(id, &origin, &mut mismatches);
     }
     assert!(
         mismatches.is_empty(),
@@ -129,23 +68,30 @@ fn edge_failure_scenarios_match_their_result_goldens() {
     );
 }
 
-fn match_failure_scenario(id: &str, origin: &str, mismatches: &mut Vec<String>) {
-    let scenario = Scenario::load(id, origin);
-    let mut fail = |field: &str, detail: String| {
-        mismatches.push(format!("{id} {field}: {detail}"));
+/// One scenario per call: run over the fixture server and compare the typed
+/// outcome with the golden's contract fields.
+fn run_edge_scenario(id: &str, origin: &str, mismatches: &mut Vec<String>) {
+    let (entry, input) = dezoomify_fixture_server::scenario_input(&format!("native/{id}"), origin);
+    let expected = &entry["expected"];
+    let failed = expected["outcome"].as_str() == Some("failed");
+    let wanted_operation = if failed {
+        "download-failure"
+    } else {
+        "download"
     };
-    if scenario.operation() != "download-failure" {
-        fail(
-            "operation",
-            format!("{} != download-failure", scenario.operation()),
-        );
+    if entry["operation"].as_str() != Some(wanted_operation) {
+        mismatches.push(format!(
+            "{id} operation: {} != {wanted_operation}",
+            entry["operation"]
+        ));
     }
     let out_dir = temp_dir(id);
     let output = out_dir.join("out.png");
-    // The published `tile.download-failed` contract is the `Fail`
-    // partial policy: the job discards the partial and fails honestly.
+    // Hermetic cache (never the user's default) and the `Fail` partial
+    // policy: the published `tile.download-failed` contract discards the
+    // partial and fails honestly.
     let options = JobOptions {
-        input_url: scenario.input.clone(),
+        input_url: input,
         output: OutputTarget::File(output.clone()),
         overwrite: false,
         cache_dir: Some(out_dir.join("cache")),
@@ -165,26 +111,72 @@ fn match_failure_scenario(id: &str, origin: &str, mismatches: &mut Vec<String>) 
             .push(serde_json::to_value(record).expect("record json"));
     });
     let host = NativeHost::with_diagnostics(options, diagnostics).expect("host options");
-    let error = match support::run_host(&host) {
+    let result = support::run_host(&host);
+    if !failed {
+        let outcome = match result {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                mismatches.push(format!(
+                    "{id} outcome: golden pins success but the run failed: {error}"
+                ));
+                return;
+            }
+        };
+        // `code: "ok"` pins success (the shared result comparison treats
+        // the code as optional), and the golden geometry matches the
+        // published output (the EXIF-preserving note in `edge-exif` is
+        // prose; pixel/EXIF fidelity lives in the native imaging tests).
+        mismatches.extend(dezoomify_fixture_server::result_golden_mismatches(
+            &entry,
+            support::golden_result(&outcome),
+        ));
+        return;
+    }
+    let error = match result {
         Err(error) => error,
         Ok(_) => {
-            fail(
-                "outcome",
-                "golden pins a failure but the run succeeded".to_string(),
-            );
+            mismatches.push(format!(
+                "{id} outcome: golden pins a failure but the run succeeded"
+            ));
             return;
         }
     };
-    let expected = scenario.expected();
     if output.exists() {
-        fail("outcome", "failed run wrote an output".into());
+        mismatches.push(format!("{id} outcome: failed run wrote an output"));
     }
-    if phase_of(&error) != expected["phase"].as_str().unwrap_or_default() {
-        fail(
-            "phase",
-            format!("{} != golden {}", phase_of(&error), expected["phase"]),
-        );
-    }
+    // `retryable` is the derived job-level verdict (any transient retained
+    // constituent keeps retry available, never a stored flag); recovery
+    // follows the documented action flow (docs/errors.md): an acquisition
+    // failure leaves the keep/discard/retry choice, while an input/address
+    // failure is edit-input.
+    mismatches.extend(dezoomify_fixture_server::golden_mismatches(
+        id,
+        &[
+            (
+                "phase",
+                phase_of(&error).to_string(),
+                expected["phase"].as_str().unwrap_or_default().to_string(),
+            ),
+            (
+                "retryable",
+                error.retryable().to_string(),
+                expected["retryable"].to_string(),
+            ),
+            (
+                "recovery",
+                if phase_of(&error) == "acquisition" {
+                    "retry"
+                } else {
+                    "edit-input"
+                }
+                .to_string(),
+                expected["recovery"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+            ),
+        ],
+    ));
     let requests: Vec<serde_json::Value> = records
         .lock()
         .expect("records")
@@ -196,43 +188,16 @@ fn match_failure_scenario(id: &str, origin: &str, mismatches: &mut Vec<String>) 
         record["purpose"].as_str() == expected["resourceKind"].as_str()
             && record["transport"].as_str() == expected["transport"].as_str()
     }) {
-        fail(
-            "transport/resourceKind",
-            format!(
-                "no request record for {} over {}; records: {requests:?}",
-                expected["resourceKind"], expected["transport"]
-            ),
-        );
-    }
-    // `retryable` is the derived job-level verdict: a pure function of the
-    // retained failure set (any transient constituent keeps retry
-    // available), never a stored flag.
-    let retryable = error.retryable();
-    if retryable != expected["retryable"].as_bool().unwrap_or_default() {
-        fail(
-            "retryable",
-            format!("{retryable} != golden {}", expected["retryable"]),
-        );
-    }
-    // Recovery follows the documented action flow (docs/errors.md): an
-    // acquisition failure leaves the keep/discard/retry choice, while an
-    // input/address failure is edit-input.
-    let recovery = if phase_of(&error) == "acquisition" {
-        "retry"
-    } else {
-        "edit-input"
-    };
-    if recovery != expected["recovery"].as_str().unwrap_or_default() {
-        fail(
-            "recovery",
-            format!("{recovery} != golden {}", expected["recovery"]),
-        );
+        mismatches.push(format!(
+            "{id} transport/resourceKind: no request record for {} over {}; records: {requests:?}",
+            expected["resourceKind"], expected["transport"]
+        ));
     }
     // `code` is the typed error's stable kind: the identifier the CLI human
     // line prints and `apps/cli/tests/pipeline.rs` publishes (also asserted
     // here directly). `underlying`/`note` are documentation prose.
     mismatches.extend(dezoomify_fixture_server::failure_golden_mismatches(
-        &scenario.entry,
+        &entry,
         error.cause().kind(),
     ));
 }
