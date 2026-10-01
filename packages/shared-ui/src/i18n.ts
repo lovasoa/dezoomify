@@ -293,8 +293,7 @@ const en = {
     "This picture is too large to assemble in this browser tab. The desktop app can save it at full size.",
   "view.fail.canvasContext":
     "This browser tab could not create the picture surface at this size. The desktop app can save it at full size.",
-  "view.fail.canvasEncode":
-    "This browser tab could not finish the full-size PNG picture. The desktop app can save it at full size.",
+  "view.fail.encodeFail": "The image could not be encoded. Try a different output format.",
   // Cancelled section.
   "view.cancel.title": "Save cancelled",
   "view.cancel.message": "The image save was stopped.",

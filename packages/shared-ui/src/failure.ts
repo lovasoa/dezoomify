@@ -280,7 +280,7 @@ export function plainMessageFor(error: JobError, host: string, source = ""): str
     case "output-unavailable":
       return t("view.fail.canvasContext");
     case "encode-failed":
-      return t("view.fail.canvasEncode");
+      return t("view.fail.encodeFail");
     // Structured limit facts come from `limit`; display prose is never parsed.
     case "limit-exceeded": {
       const need =

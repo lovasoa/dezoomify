@@ -209,8 +209,7 @@ export const fr = {
     "Cette image est trop grande pour être assemblée dans cet onglet. L application de bureau peut l enregistrer en taille réelle.",
   "view.fail.canvasContext":
     "Cet onglet n a pas pu créer la surface de l image à cette taille. L application de bureau peut l enregistrer en taille réelle.",
-  "view.fail.canvasEncode":
-    "Cet onglet n a pas pu terminer l image PNG en taille réelle. L application de bureau peut l enregistrer en taille réelle.",
+  "view.fail.encodeFail": "L'image n'a pas pu etre encodee. Essayez un autre format de sortie.",
   // Cancelled section.
   "view.cancel.title": "Enregistrement annule",
   "view.cancel.message": "L enregistrement de l image a ete interrompu.",

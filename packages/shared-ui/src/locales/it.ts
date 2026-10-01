@@ -205,8 +205,7 @@ export const it = {
     "Questa immagine è troppo grande per essere assemblata in questa scheda del browser. L applicazione desktop può salvarla a dimensione piena.",
   "view.fail.canvasContext":
     "Questa scheda del browser non ha potuto creare la superficie dell immagine a questa dimensione. L applicazione desktop può salvarla a dimensione piena.",
-  "view.fail.canvasEncode":
-    "Questa scheda del browser non ha potuto completare l immagine PNG a dimensione piena. L applicazione desktop può salvarla a dimensione piena.",
+  "view.fail.encodeFail": "L'immagine non ha potuto essere codificata. Prova un altro formato di output.",
   // Cancelled section.
   "view.cancel.title": "Salvataggio annullato",
   "view.cancel.message": "Il salvataggio dell immagine e stato interrotto.",
