@@ -36,7 +36,10 @@ The retry verdict is derived, never stored. `Error::retryable` and
 HTTP 408/425/429/5xx and transient transport/service failures retry,
 everything else fails closed so novel failures never burn the retry budget;
 aggregates (`no-usable-tiles`, `partial-discarded`) derive from their
-retained failure sets: any transient constituent keeps retry available;
+retained failure sets: any transient constituent keeps retry available,
+and retention is a bounded sample that keeps a transient constituent and
+the largest hint, so the derived verdicts stay exact over the complete
+set;
 `resource` and the discovery aggregate delegate to their cause. The shared
 UI mirrors the verdict as `isRetryable`, and `testdata/policy-vectors.json`
 pins both implementations to one oracle. Missing tiles retain the complete

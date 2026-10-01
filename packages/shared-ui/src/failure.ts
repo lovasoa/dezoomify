@@ -94,9 +94,73 @@ function boundedText(value: unknown, depth: number): boolean {
 
 /** Validate a typed error payload at untrusted boundaries, without rebuilding it. */
 export function isJobError(value: unknown): value is JobError {
-  if (!value || typeof value !== "object") return false;
-  const kind = (value as { kind?: unknown }).kind;
-  return typeof kind === "string" && Object.hasOwn(KINDS, kind) && boundedText(value, 0);
+  return isJobErrorAt(value, 0);
+}
+
+const TRANSPORTS = new Set([
+  "direct",
+  "metadata-proxy",
+  "browser-session",
+  "native",
+  "display-only",
+]);
+const RESOURCE_KINDS = new Set(["metadata", "tile", "probe", "output"]);
+
+/** Structural guard per variant: the required fields consumers read must
+ * exist with the right shape before the payload narrows to the generated
+ * union (wrappers recurse within the same depth bound). */
+function isJobErrorAt(value: unknown, depth: number): boolean {
+  if (!value || typeof value !== "object" || depth > 8) return false;
+  const record = value as Record<string, unknown>;
+  const kind = record.kind;
+  if (typeof kind !== "string" || !Object.hasOwn(KINDS, kind) || !boundedText(value, depth)) {
+    return false;
+  }
+  const num = (field: unknown) => typeof field === "number" && Number.isFinite(field);
+  const transport = (field: unknown) => typeof field === "string" && TRANSPORTS.has(field);
+  switch (kind) {
+    case "http-error":
+      return num(record.status) && transport(record.transport);
+    case "rate-limited":
+    case "timeout":
+    case "network-failure":
+    case "proxy-error":
+      return transport(record.transport);
+    case "policy-denied":
+      return (
+        transport(record.transport) &&
+        typeof record.blocked_reason === "string" &&
+        record.blocked_reason.length > 0
+      );
+    case "redirect-limit":
+    case "deferred-limit":
+      return num(record.max);
+    case "size-limit":
+      return num(record.max_bytes);
+    case "unknown-format":
+      return typeof record.format === "string" && record.format.length > 0;
+    case "limit-exceeded":
+      return !!record.limit && typeof record.limit === "object";
+    case "resource":
+      return (
+        typeof record.request === "string" &&
+        typeof record.resource_kind === "string" &&
+        RESOURCE_KINDS.has(record.resource_kind) &&
+        isJobErrorAt(record.source, depth + 1)
+      );
+    case "discovery-failed":
+      return record.cause === undefined || isJobErrorAt(record.cause, depth + 1);
+    case "no-usable-tiles":
+    case "partial-discarded":
+      return (
+        Array.isArray(record.failures) &&
+        record.failures.every((failure) => isJobErrorAt(failure, depth + 1))
+      );
+    default:
+      // Field-less variants (and `detail`-only variants) carry nothing
+      // beyond the bounded text already checked.
+      return true;
+  }
 }
 
 /** The underlying failure, seen through the composition wrappers (`resource`
