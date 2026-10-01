@@ -227,6 +227,7 @@ test("partial actions resolve the awaited choice and disappear before completed 
       ],
     });
   });
+  await tick();
   const keep = h.root.querySelector('[data-dz-partial-choice="keep"]');
   assert.ok(keep);
   assert.equal(h.root.querySelector('[role="progressbar"]'), null);
