@@ -4,7 +4,7 @@
 // message text is ever parsed. The Rust twin of `isRetryable` is
 // `Error::retryable`, pinned together by `testdata/policy-vectors.json`.
 import type { Error as JobError } from "@dezoomify/wasm-bindings";
-import { t } from "./i18n.ts";
+import { type I18nKey, t } from "./i18n.ts";
 
 // JPEG addresses at most 65535 px per side; WebP at most 16383 px
 // (copy interpolation only).
@@ -21,64 +21,71 @@ function formatBytes(bytes: number): string {
   return `${bytes} bytes`;
 }
 
-// Every variant of the generated union, pinned at compile time: adding a
-// Rust variant makes this record incomplete until it is listed here.
-const KINDS = {
-  "http-error": true,
-  "rate-limited": true,
-  timeout: true,
-  "network-failure": true,
-  "policy-denied": true,
-  "bad-url": true,
-  "bad-redirect": true,
-  "redirect-limit": true,
-  "size-limit": true,
-  cancelled: true,
-  "proxy-budget-exceeded": true,
-  "proxy-error": true,
-  "no-image-found": true,
-  "malformed-metadata": true,
-  "unknown-format": true,
-  "empty-resource": true,
-  "resource-limit": true,
-  "deferred-limit": true,
-  "discovery-failed": true,
-  "invalid-input": true,
-  "invalid-options": true,
-  "invalid-state": true,
-  duplicate: true,
-  stale: true,
-  "plan-empty": true,
-  "plan-invalid": true,
-  "no-usable-tiles": true,
-  "partial-discarded": true,
-  "decode-failed": true,
-  "processing-failed": true,
-  "limit-exceeded": true,
-  "encode-failed": true,
-  "write-failed": true,
-  "output-exists": true,
-  "destination-denied": true,
-  "unsupported-extension": true,
-  "output-unavailable": true,
-  "output-no-parent": true,
-  "launch-failed": true,
-  "output-denied": true,
-  "output-not-found": true,
-  "invoke-failed": true,
-  "start-failed": true,
-  "choice-failed": true,
-  "invalid-url": true,
-  "invalid-settings": true,
-  "handoff-rejected": true,
-  "registration-failed": true,
-  internal: true,
-  "shell-lock": true,
-  "binding-invalid-value": true,
-  "interaction-expired": true,
-  "auth-forbidden-header": true,
-  resource: true,
-} satisfies Record<JobError["kind"], true>;
+/**
+ * One headline key per error kind. Complete at compile time: adding a Rust
+ * variant makes this record incomplete until it is listed, and every value
+ * is checked against the i18n table. The lookup fills `{host}` for keys
+ * that use it. Kinds whose copy needs extra facts (`http-error` statuses,
+ * transport-branded rates, limit facts, policy hints, local sources) resolve
+ * in `plainMessageFor` first; their entry here is the plain fallback.
+ */
+const COPY = {
+  "http-error": "view.fail.httpNotOpened",
+  "rate-limited": "view.fail.rateDirect",
+  timeout: "desktop.transport.stalled",
+  "network-failure": "desktop.transport.stalled",
+  "policy-denied": "view.fail.policyBlocked",
+  "bad-url": "desktop.transport.stalled",
+  "bad-redirect": "desktop.transport.stalled",
+  "redirect-limit": "desktop.transport.stalled",
+  "size-limit": "desktop.save.fallback",
+  cancelled: "desktop.job.cancelledMsg",
+  "proxy-budget-exceeded": "view.fail.proxyBudget",
+  "proxy-error": "view.fail.proxyFetch",
+  "no-image-found": "view.discovery.none",
+  "malformed-metadata": "view.discovery.none",
+  "unknown-format": "view.discovery.none",
+  "empty-resource": "view.discovery.none",
+  "resource-limit": "desktop.plan.none",
+  "deferred-limit": "view.discovery.none",
+  "discovery-failed": "view.discovery.none",
+  "invalid-input": "desktop.save.fallback",
+  "invalid-options": "desktop.settings.unusable",
+  "invalid-state": "desktop.job.gone",
+  duplicate: "desktop.save.fallback",
+  stale: "desktop.job.gone",
+  "plan-empty": "desktop.plan.none",
+  "plan-invalid": "view.fail.canvasAllocation",
+  "no-usable-tiles": "desktop.tile.partialChoice",
+  "partial-discarded": "desktop.tile.partialDiscarded",
+  "decode-failed": "desktop.tile.partialChoice",
+  "processing-failed": "desktop.tile.partialChoice",
+  "limit-exceeded": "desktop.output.canvasLimit",
+  "encode-failed": "view.fail.encodeFail",
+  "write-failed": "desktop.output.writeFail",
+  "output-exists": "desktop.output.exists",
+  "destination-denied": "desktop.output.destDenied",
+  "unsupported-extension": "desktop.output.destDenied",
+  "output-unavailable": "view.fail.canvasContext",
+  "output-no-parent": "desktop.output.writeFail",
+  "launch-failed": "desktop.output.writeFail",
+  "output-denied": "desktop.output.deniedPick",
+  "output-not-found": "desktop.output.writeFail",
+  "invoke-failed": "desktop.output.writeFail",
+  "start-failed": "desktop.start.failed",
+  "choice-failed": "desktop.choice.failed",
+  "invalid-url": "desktop.url.invalid",
+  "invalid-settings": "desktop.settings.unusable",
+  "handoff-rejected": "desktop.handoff.rejected",
+  "registration-failed": "desktop.internal.error",
+  internal: "desktop.internal.error",
+  "shell-lock": "desktop.internal.error",
+  "binding-invalid-value": "desktop.internal.error",
+  "interaction-expired": "desktop.choice.failed",
+  "auth-forbidden-header": "desktop.settings.unusable",
+  // Unreachable through `plainMessageFor` (composition unwraps it first).
+  resource: "desktop.save.fallback",
+} satisfies Record<JobError["kind"], I18nKey>;
 
 // Bounded diagnostic text, matching the Rust side's bounds.
 const MAX_TEXT = 4096;
@@ -113,7 +120,7 @@ function isJobErrorAt(value: unknown, depth: number): boolean {
   if (!value || typeof value !== "object" || depth > 8) return false;
   const record = value as Record<string, unknown>;
   const kind = record.kind;
-  if (typeof kind !== "string" || !Object.hasOwn(KINDS, kind) || !boundedText(value, depth)) {
+  if (typeof kind !== "string" || !Object.hasOwn(COPY, kind) || !boundedText(value, depth)) {
     return false;
   }
   const num = (field: unknown) => typeof field === "number" && Number.isFinite(field);
@@ -265,24 +272,15 @@ function policyHintFor(
  */
 export function plainMessageFor(error: JobError, host: string, source = ""): string {
   const cause = causeOf(error);
-  const dims =
-    cause.kind === "limit-exceeded" && cause.limit.dimensions
-      ? t("desktop.msg.dimsPixels", {
-          a: String(cause.limit.dimensions.width),
-          b: String(cause.limit.dimensions.height),
-        })
-      : t("desktop.msg.thisPicture");
   switch (cause.kind) {
-    // Browser canvas failure family (plan shape, 2D context, PNG encoding):
-    // the plain sentence names the desktop app before any generic branch.
-    case "plan-invalid":
-      return t("view.fail.canvasAllocation");
-    case "output-unavailable":
-      return t("view.fail.canvasContext");
-    case "encode-failed":
-      return t("view.fail.encodeFail");
     // Structured limit facts come from `limit`; display prose is never parsed.
     case "limit-exceeded": {
+      const dims = cause.limit.dimensions
+        ? t("desktop.msg.dimsPixels", {
+            a: String(cause.limit.dimensions.width),
+            b: String(cause.limit.dimensions.height),
+          })
+        : t("desktop.msg.thisPicture");
       const need =
         cause.limit.bytes_required !== undefined
           ? t("desktop.msg.needAbout", { need: formatBytes(cause.limit.bytes_required) })
@@ -306,98 +304,30 @@ export function plainMessageFor(error: JobError, host: string, source = ""): str
       });
     }
     case "rate-limited":
-      return t(
-        cause.transport === "metadata-proxy" ? "view.fail.rateProxy" : "view.fail.rateDirect",
-      );
+      return t(rateKey(cause.transport));
     case "http-error": {
       const status = cause.status;
-      if (status === 429) {
-        return t(
-          cause.transport === "metadata-proxy" ? "view.fail.rateProxy" : "view.fail.rateDirect",
-        );
-      }
+      if (status === 429) return t(rateKey(cause.transport));
       if (status === 404) return t("view.fail.httpNotFound");
       if (status === 401 || status === 403 || status === 406) {
         return t("view.fail.httpRefused", { http: String(status) });
       }
       if (status >= 500) return t("view.fail.httpSiteProblem");
-      return t("view.fail.httpNotOpened");
+      break;
     }
-    case "invalid-url":
-      return source.startsWith("file:") ? t("view.handoff.localNote") : t("desktop.url.invalid");
-    case "invalid-settings":
-    case "auth-forbidden-header":
-      return t("desktop.settings.unusable");
-    case "output-denied":
-      return t("desktop.output.deniedPick");
-    case "handoff-rejected":
-      return t("desktop.handoff.rejected", { host });
-    case "output-exists":
-      return t("desktop.output.exists", { host });
-    case "destination-denied":
-    case "unsupported-extension":
-      return t("desktop.output.destDenied", { host });
-    case "stale":
-    case "invalid-state":
-      return t("desktop.job.gone", { host });
-    case "partial-discarded":
-      return t("desktop.tile.partialDiscarded", { host });
-    case "no-usable-tiles":
-    case "decode-failed":
-    case "processing-failed":
-      return t("desktop.tile.partialChoice", { host });
-    case "no-image-found":
-    case "empty-resource":
-    case "unknown-format":
-    case "malformed-metadata":
-    case "discovery-failed":
-    case "deferred-limit":
-      return t("view.discovery.none");
-    case "plan-empty":
-    case "resource-limit":
-      return t("desktop.plan.none", { host });
-    case "bad-url":
-    case "bad-redirect":
-    case "redirect-limit":
-    case "timeout":
-    case "network-failure":
-      return t("desktop.transport.stalled", { host });
-    case "write-failed":
-    case "output-not-found":
-    case "output-no-parent":
-    case "launch-failed":
-    case "invoke-failed":
-      return t("desktop.output.writeFail", { host });
-    case "cancelled":
-      return t("desktop.job.cancelledMsg");
-    case "start-failed":
-      return t("desktop.start.failed", { host });
-    case "choice-failed":
-    case "interaction-expired":
-      return t("desktop.choice.failed");
-    case "internal":
-    case "shell-lock":
-    case "binding-invalid-value":
-    case "registration-failed":
-      return t("desktop.internal.error", { host });
     case "policy-denied":
       return t("view.fail.policyBlocked", { hint: policyHintFor(cause.blocked_reason) });
-    case "proxy-error":
-      return t("view.fail.proxyFetch");
-    case "proxy-budget-exceeded":
-      return t("view.fail.proxyBudget");
-    case "invalid-input":
-    case "invalid-options":
-    case "size-limit":
-    case "duplicate":
-      return t("desktop.save.fallback", { host });
-    default: {
-      // Exhaustiveness guard: a new Rust variant must choose its wording
-      // here before this compiles. Unrecognized payloads stay on the
-      // generic sentence at runtime.
-      const exhaustive: never = cause;
-      void exhaustive;
-      return t("desktop.save.fallback", { host });
-    }
+    case "invalid-url":
+      if (source.startsWith("file:")) return t("view.handoff.localNote");
+      break;
   }
+  // Unrecognized payloads stay on the generic sentence at runtime; the
+  // compile-time exhaustiveness lives in `COPY`.
+  const key = Object.hasOwn(COPY, cause.kind) ? COPY[cause.kind] : undefined;
+  return t(key ?? "desktop.save.fallback", { host });
+}
+
+/** 429s read as rate limits, branded by the transport that saw them. */
+function rateKey(transport: string): I18nKey {
+  return transport === "metadata-proxy" ? "view.fail.rateProxy" : "view.fail.rateDirect";
 }
