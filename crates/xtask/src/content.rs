@@ -231,24 +231,9 @@ fn verdict(actual: u64, warn: u64, fail: u64) -> Verdict {
     }
 }
 
-/// One artifact's byte budget and its rebuild hint.
-#[derive(Clone, Copy)]
-struct Budget {
-    warn: u64,
-    fail: u64,
-    unit: &'static str,
-    hint: &'static str,
-}
-
-/// One gitignored build output against its budget. A missing file skips
-/// with the rebuild note; a present file warns or fails by the verdict.
-fn budget_file(r: &Path, rel: &str, budget: &Budget) -> Result<(), String> {
-    let Budget {
-        warn,
-        fail,
-        unit,
-        hint,
-    } = *budget;
+/// One gitignored build output against its byte budget. A missing file
+/// skips with the rebuild note; a present file warns or fails by verdict.
+fn budget_file(r: &Path, rel: &str, warn: u64, fail: u64, hint: &str) -> Result<(), String> {
     let path = r.join(rel);
     let Ok(meta) = std::fs::metadata(&path) else {
         println!("sizes: {rel} missing ({hint}); skipped");
@@ -257,15 +242,15 @@ fn budget_file(r: &Path, rel: &str, budget: &Budget) -> Result<(), String> {
     let actual = meta.len();
     match verdict(actual, warn, fail) {
         Verdict::Pass => {
-            println!("sizes: {rel} {actual} {unit} ok");
+            println!("sizes: {rel} {actual} bytes ok");
             Ok(())
         }
         Verdict::Warn => {
-            println!("sizes: WARNING {rel} {actual} {unit} exceeds warn {warn} (fail {fail})");
+            println!("sizes: WARNING {rel} {actual} bytes exceeds warn {warn} (fail {fail})");
             Ok(())
         }
         Verdict::Fail => Err(format!(
-            "sizes: {rel} {actual} {unit} exceeds fail budget {fail} (warn {warn})"
+            "sizes: {rel} {actual} bytes exceeds fail budget {fail} (warn {warn})"
         )),
     }
 }
@@ -305,23 +290,17 @@ fn verify_sizes(r: &Path) -> Result<(), String> {
     budget_file(
         r,
         "wasm/dezoomify-wasm_bg.wasm",
-        &Budget {
-            warn: WASM_WARN_BYTES,
-            fail: WASM_FAIL_BYTES,
-            unit: "bytes",
-            hint: "run `cargo xtask build web`",
-        },
+        WASM_WARN_BYTES,
+        WASM_FAIL_BYTES,
+        "run `cargo xtask build web`",
     )?;
     for name in ["dezoomify-chromium.zip", "dezoomify-firefox.zip"] {
         budget_file(
             r,
             &format!("target/extension/{name}"),
-            &Budget {
-                warn: EXT_ZIP_WARN_BYTES,
-                fail: EXT_ZIP_FAIL_BYTES,
-                unit: "bytes",
-                hint: "run `cargo xtask build extension`",
-            },
+            EXT_ZIP_WARN_BYTES,
+            EXT_ZIP_FAIL_BYTES,
+            "run `cargo xtask build extension`",
         )?;
     }
     match dist_js_bytes(r)? {

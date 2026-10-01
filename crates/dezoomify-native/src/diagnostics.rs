@@ -13,18 +13,18 @@ use std::time::Instant;
 
 pub const MAX_BYTES: usize = 1024 * 1024;
 static NEXT: AtomicU64 = AtomicU64::new(1);
-/// The bounded-retention state threaded through the recursive visit.
-struct Visit {
-    left: usize,
-    truncated: u32,
-    out: BTreeMap<String, DiagnosticValue>,
-}
-
 fn fields(value: Value, truncated: &mut u32) -> BTreeMap<String, DiagnosticValue> {
-    fn visit(key: String, value: Value, depth: usize, state: &mut Visit) {
+    fn visit(
+        key: String,
+        value: Value,
+        depth: usize,
+        left: &mut usize,
+        truncated: &mut u32,
+        out: &mut BTreeMap<String, DiagnosticValue>,
+    ) {
         let key: String = key.chars().take(256).collect();
-        if state.out.len() >= 48 || depth > 4 {
-            state.truncated += 1;
+        if out.len() >= 48 || depth > 4 {
+            *truncated += 1;
             return;
         }
         match value {
@@ -33,22 +33,22 @@ fn fields(value: Value, truncated: &mut u32) -> BTreeMap<String, DiagnosticValue
                     .chars()
                     .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
                     .collect();
-                let limit = state.left.min(4096);
+                let limit = (*left).min(4096);
                 let mut bounded: String = text.chars().take(limit).collect();
-                state.left = state.left.saturating_sub(bounded.chars().count());
+                *left = left.saturating_sub(bounded.chars().count());
                 if bounded.len() < text.len() {
                     bounded.push_str("…[truncated]");
-                    state.truncated += 1;
+                    *truncated += 1;
                 }
-                state.out.insert(key, DiagnosticValue::Text(bounded));
+                out.insert(key, DiagnosticValue::Text(bounded));
             }
             Value::Number(n) => {
                 if let Some(n) = n.as_f64() {
-                    state.out.insert(key, DiagnosticValue::Number(n));
+                    out.insert(key, DiagnosticValue::Number(n));
                 }
             }
             Value::Bool(b) => {
-                state.out.insert(key, DiagnosticValue::Bool(b));
+                out.insert(key, DiagnosticValue::Bool(b));
             }
             Value::Object(map) => {
                 for (name, value) in map {
@@ -62,25 +62,27 @@ fn fields(value: Value, truncated: &mut u32) -> BTreeMap<String, DiagnosticValue
                     } else {
                         format!("{key}.{name}")
                     };
-                    visit(next, value, depth + 1, state);
+                    visit(next, value, depth + 1, left, truncated, out);
                 }
             }
             Value::Array(items) => {
                 for (index, value) in items.into_iter().take(48).enumerate() {
-                    visit(format!("{key}.{index}"), value, depth + 1, state);
+                    visit(
+                        format!("{key}.{index}"),
+                        value,
+                        depth + 1,
+                        left,
+                        truncated,
+                        out,
+                    );
                 }
             }
             Value::Null => {}
         }
     }
-    let mut state = Visit {
-        left: 8192,
-        truncated: 0,
-        out: BTreeMap::new(),
-    };
-    visit(String::new(), value, 0, &mut state);
-    *truncated += state.truncated;
-    state.out
+    let mut result = BTreeMap::new();
+    visit(String::new(), value, 0, &mut 8192, truncated, &mut result);
+    result
 }
 
 #[derive(Clone)]

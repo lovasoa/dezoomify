@@ -14,39 +14,13 @@ const ZOOMIFY:&[u8]=br#"<IMAGE_PROPERTIES WIDTH="512" HEIGHT="512" NUMTILES="5" 
 fn observed(url: &str) -> DiscoveryInput {
     DiscoveryInput::new(url).with_kind(DiscoveryInputKind::ObservedResource)
 }
-/// One navigation stub: the corpus replies, the discovery limits, and the
-/// redirect the page answers with.
-#[derive(Clone, Copy)]
-struct Stub<'a> {
-    replies: &'a [(&'a str, &'a [u8])],
-    limits: DiscoveryLimits,
-    redirect: Option<&'a str>,
-}
-
-impl<'a> Stub<'a> {
-    fn new(
-        replies: &'a [(&'a str, &'a [u8])],
-        limits: DiscoveryLimits,
-        redirect: Option<&'a str>,
-    ) -> Self {
-        Self {
-            replies,
-            limits,
-            redirect,
-        }
-    }
-}
-
 fn lookup(
     registry: Registry,
     inputs: Vec<DiscoveryInput>,
-    stub: Stub<'_>,
+    replies: &[(&str, &[u8])],
+    limits: DiscoveryLimits,
+    redirect: Option<&str>,
 ) -> Result<DiscoveryCatalog, DiscoveryError> {
-    let Stub {
-        replies,
-        limits,
-        redirect,
-    } = stub;
     let requested = RefCell::new(Vec::new());
     let result = futures::executor::block_on(registry.discover(inputs, limits, |request, _| {
         requested.borrow_mut().push(request.uri.clone());
@@ -87,7 +61,9 @@ fn trace(inputs: Vec<DiscoveryInput>, replies: &[(&str, &[u8])]) -> DiscoveryCat
     lookup(
         default_registry(),
         inputs,
-        Stub::new(replies, Default::default(), None),
+        replies,
+        Default::default(),
+        None,
     )
     .unwrap()
 }
@@ -237,14 +213,12 @@ fn redirects_entities_and_explicit_format_apply_to_navigation() {
             DiscoveryInput::new(PAGE),
             observed("https://image.test/ImageProperties.xml"),
         ],
-        Stub::new(
-            &[
-                (PAGE, br#"<iframe src="art?x=1&amp;y=2"></iframe>"#),
-                ("https://viewer.test/final/art?x=1&y=2", DZI),
-            ],
-            Default::default(),
-            Some("https://viewer.test/final/page"),
-        ),
+        &[
+            (PAGE, br#"<iframe src="art?x=1&amp;y=2"></iframe>"#),
+            ("https://viewer.test/final/art?x=1&y=2", DZI),
+        ],
+        Default::default(),
+        Some("https://viewer.test/final/page"),
     )
     .unwrap();
     assert!(
@@ -274,14 +248,12 @@ fn navigation_cycles_and_resource_budgets_are_independent_of_parser_count() {
         let result = lookup(
             default_registry(),
             vec![DiscoveryInput::new(PAGE)],
-            Stub::new(
-                &[(PAGE, FRAME), ("https://museum.test/art", DZI)],
-                DiscoveryLimits {
-                    resources,
-                    ..Default::default()
-                },
-                None,
-            ),
+            &[(PAGE, FRAME), ("https://museum.test/art", DZI)],
+            DiscoveryLimits {
+                resources,
+                ..Default::default()
+            },
+            None,
         );
         assert_eq!(result.is_ok(), resources == 2);
     }
@@ -289,14 +261,12 @@ fn navigation_cycles_and_resource_budgets_are_independent_of_parser_count() {
         lookup(
             default_registry(),
             vec![DiscoveryInput::with_contents(PAGE, FRAME)],
-            Stub::new(
-                &[(
-                    "https://museum.test/art",
-                    br#"<iframe src="/viewer"></iframe><iframe src="/art"></iframe>"#
-                )],
-                Default::default(),
-                None
-            ),
+            &[(
+                "https://museum.test/art",
+                br#"<iframe src="/viewer"></iframe><iframe src="/art"></iframe>"#
+            )],
+            Default::default(),
+            None
         )
         .is_err()
     );
@@ -322,21 +292,19 @@ fn supplied_inputs_and_fetched_documents_share_limits() {
         ),
     ] {
         assert_eq!(
-            lookup(default_registry(), inputs, Stub::new(&[], limits, None)).unwrap_err(),
+            lookup(default_registry(), inputs, &[], limits, None).unwrap_err(),
             expected
         );
     }
     let error = lookup(
         default_registry(),
         vec![DiscoveryInput::with_contents(PAGE, FRAME)],
-        Stub::new(
-            &[("https://museum.test/art", DZI)],
-            DiscoveryLimits {
-                retained_bytes: DZI.len(),
-                ..Default::default()
-            },
-            None,
-        ),
+        &[("https://museum.test/art", DZI)],
+        DiscoveryLimits {
+            retained_bytes: DZI.len(),
+            ..Default::default()
+        },
+        None,
     )
     .unwrap_err();
     assert!(matches!(

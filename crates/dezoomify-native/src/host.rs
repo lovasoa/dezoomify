@@ -319,13 +319,7 @@ impl<'a> NativeHost<'a> {
         let outcome = self
             .controlled(async {
                 self.transport
-                    .fetch_resource(
-                        request,
-                        &crate::http::FetchPlan {
-                            user: Some(&self.user),
-                            limits: &self.fetch_limits,
-                        },
-                    )
+                    .fetch_resource(request, Some(&self.user), &self.fetch_limits)
                     .await
             })
             .await
@@ -439,7 +433,11 @@ impl<'a> NativeHost<'a> {
         let retained = sink.retained_bytes();
         let inflight = self.decode_tails.bytes.load(Ordering::SeqCst);
         if decode_budget_exceeded(
-            DecodeLoad::new(retained, inflight, crate::sink::tile_bytes(&decoded.image)),
+            DecodeLoad {
+                retained,
+                inflight,
+                tile: crate::sink::tile_bytes(&decoded.image),
+            },
             sink.retain_cap_bytes(),
         ) {
             return Err(crate::output::memory_limit(LimitContext {
@@ -454,14 +452,12 @@ impl<'a> NativeHost<'a> {
             }));
         }
         sink.place(
-            crate::sink::Placement {
-                ordinal: storage_index,
-                destination: Vec2d {
-                    x: tile.placement.position.x,
-                    y: tile.placement.position.y,
-                },
-                extent: tile.placement.expected_size.as_ref().map(size),
+            storage_index,
+            Vec2d {
+                x: tile.placement.position.x,
+                y: tile.placement.position.y,
             },
+            tile.placement.expected_size.as_ref().map(size),
             decoded,
         )?;
         self.acquired.borrow_mut().insert(storage_index);
@@ -748,21 +744,12 @@ impl Drop for Flight<'_, '_> {
 }
 
 /// The byte load one more decoded tile adds on top of the retained and
-/// in-flight bytes.
+/// in-flight bytes. The three same-typed counts stay named here so the
+/// budget call site never reads as four bare numbers.
 struct DecodeLoad {
     retained: u64,
     inflight: u64,
     tile: u64,
-}
-
-impl DecodeLoad {
-    fn new(retained: u64, inflight: u64, tile: u64) -> Self {
-        Self {
-            retained,
-            inflight,
-            tile,
-        }
-    }
 }
 
 fn decode_budget_exceeded(load: DecodeLoad, cap: u64) -> bool {
@@ -830,10 +817,28 @@ mod tests {
 
     #[test]
     fn decode_budget_counts_retained_pixels_and_unfinished_work() {
-        assert!(!decode_budget_exceeded(DecodeLoad::new(400, 100, 12), 512));
-        assert!(decode_budget_exceeded(DecodeLoad::new(400, 100, 13), 512));
+        assert!(!decode_budget_exceeded(
+            DecodeLoad {
+                retained: 400,
+                inflight: 100,
+                tile: 12
+            },
+            512
+        ));
         assert!(decode_budget_exceeded(
-            DecodeLoad::new(u64::MAX, u64::MAX, 1),
+            DecodeLoad {
+                retained: 400,
+                inflight: 100,
+                tile: 13
+            },
+            512
+        ));
+        assert!(decode_budget_exceeded(
+            DecodeLoad {
+                retained: u64::MAX,
+                inflight: u64::MAX,
+                tile: 1
+            },
             u64::MAX - 1
         ));
     }

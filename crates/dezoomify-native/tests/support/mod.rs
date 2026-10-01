@@ -52,48 +52,42 @@ pub fn run_file(
     run_options_observed(options, |_, _| {})
 }
 
-/// One run's target: the input URL, the output path, and overwrite mode.
-/// The parameter bundle shared by the run helpers below.
-#[derive(Clone, Copy)]
-pub struct Target<'a> {
-    pub input_url: &'a str,
-    pub output: &'a str,
-    pub overwrite: bool,
-}
-
-impl<'a> Target<'a> {
-    pub fn new(input_url: &'a str, output: &'a str, overwrite: bool) -> Self {
-        Self {
-            input_url,
-            output,
-            overwrite,
-        }
-    }
-}
-
 pub fn run_with_options(
-    target: &Target<'_>,
+    input_url: &str,
+    output: &str,
+    overwrite: bool,
     options: &JobOptions,
     on_progress: &mut dyn FnMut(&Progress),
 ) -> Result<Publication, dezoomify::model::Error> {
-    run_options_observed(options_for_target(target, options), |_, progress| {
-        on_progress(progress)
-    })
+    run_options_observed(
+        options_for_target(input_url, output, overwrite, options),
+        |_, progress| on_progress(progress),
+    )
 }
 
 pub fn run_with_options_observed(
-    target: &Target<'_>,
+    input_url: &str,
+    output: &str,
+    overwrite: bool,
     options: &JobOptions,
     observe: impl FnMut(&Controls, &Progress),
 ) -> Result<Publication, dezoomify::model::Error> {
-    run_options_observed(options_for_target(target, options), observe)
+    run_options_observed(
+        options_for_target(input_url, output, overwrite, options),
+        observe,
+    )
 }
 
-fn options_for_target(target: &Target<'_>, options: &JobOptions) -> JobOptions {
+fn options_for_target(
+    input_url: &str,
+    output: &str,
+    overwrite: bool,
+    options: &JobOptions,
+) -> JobOptions {
     let mut options = options.clone();
-    options.input_url = target.input_url.to_string();
-    options.output = OutputTarget::File(target.output.into());
-    options.overwrite = target.overwrite;
+    options.input_url = input_url.to_string();
+    options.output = OutputTarget::File(output.into());
+    options.overwrite = overwrite;
     options
 }
 

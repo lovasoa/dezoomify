@@ -421,11 +421,9 @@ fn bounded_concurrency_and_memory_accounting() {
         ..Default::default()
     };
     let outcome = support::run_with_options(
-        &support::Target::new(
-            &format!("{base}/pyr.dzi"),
-            output.to_str().expect("utf8"),
-            false,
-        ),
+        &format!("{base}/pyr.dzi"),
+        output.to_str().expect("utf8"),
+        false,
         &config,
         &mut |_| {},
     )
@@ -569,11 +567,9 @@ fn decode_inflight_bytes_are_bounded_and_accounted() {
         ..Default::default()
     };
     let outcome = support::run_with_options(
-        &support::Target::new(
-            &format!("{base}/pyr.dzi"),
-            output.to_str().expect("utf8"),
-            false,
-        ),
+        &format!("{base}/pyr.dzi"),
+        output.to_str().expect("utf8"),
+        false,
         &config,
         &mut |_| {},
     )

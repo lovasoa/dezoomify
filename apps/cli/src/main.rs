@@ -508,13 +508,11 @@ fn run_native(
     if visible {
         print_progress(
             parsed.json,
+            &job_id,
+            1,
+            "started",
+            &BTreeMap::new(),
             &parsed.logging,
-            report::Event {
-                job: &job_id,
-                seq: 1,
-                kind: "started",
-                detail: &BTreeMap::new(),
-            },
         );
     }
     host.on_progress(|progress| {
@@ -523,13 +521,11 @@ fn run_native(
             sequence.set(sequence.get() + 1);
             print_progress(
                 parsed.json,
+                &job_id,
+                sequence.get(),
+                kind,
+                &detail,
                 &parsed.logging,
-                report::Event {
-                    job: &job_id,
-                    seq: sequence.get(),
-                    kind,
-                    detail: &detail,
-                },
             );
         }
     });
@@ -555,24 +551,30 @@ fn run_native(
     Ok((publication, sequence.get() + 1))
 }
 
-fn print_progress(json: bool, logging: &str, event: report::Event<'_>) {
+fn print_progress(
+    json: bool,
+    job: &str,
+    seq: u64,
+    kind: &str,
+    detail: &BTreeMap<String, String>,
+    logging: &str,
+) {
     if json {
-        println!("{}", event.to_json());
+        println!("{}", report::machine_event_detail(job, seq, kind, detail));
         return;
     }
     if !report::show_progress(logging) {
         return;
     }
-    let flat = event
-        .detail
+    let flat = detail
         .iter()
         .map(|(key, value)| format!("{key}={value}"))
         .collect::<Vec<_>>()
         .join(" ");
     if flat.is_empty() {
-        eprintln!("{} {}", event.kind, event.job);
+        eprintln!("{kind} {job}");
     } else {
-        eprintln!("{} {} {flat}", event.kind, event.job);
+        eprintln!("{kind} {job} {flat}");
     }
 }
 
@@ -636,7 +638,7 @@ fn fetch_bulk_url(
     headers: &BTreeMap<String, String>,
     accept_invalid_certs: bool,
 ) -> Result<String, String> {
-    use dezoomify_native::http::{fetch, FetchLimits, FetchPlan, TlsPolicy, UserHeaders};
+    use dezoomify_native::http::{fetch, FetchLimits, TlsPolicy, UserHeaders};
     let origin_host = url::parse_host(url);
     let user = UserHeaders::new(headers.clone(), origin_host);
     let limits = FetchLimits {
@@ -645,15 +647,7 @@ fn fetch_bulk_url(
         },
         ..FetchLimits::default()
     };
-    let outcome = fetch(
-        url,
-        &BTreeMap::new(),
-        &FetchPlan {
-            user: Some(&user),
-            limits: &limits,
-        },
-    )
-    .map_err(|e| e.to_string())?;
+    let outcome = fetch(url, &BTreeMap::new(), Some(&user), &limits).map_err(|e| e.to_string())?;
     if !(200..300).contains(&outcome.status) {
         return Err(format!(
             "bulk fetch failed with http status {}",

@@ -260,12 +260,7 @@ fn parse_headers_value(value: &serde_json::Value) -> Result<BTreeMap<String, Str
     Ok(out)
 }
 
-fn parse_u8_field(
-    value: &serde_json::Value,
-    field: &str,
-    range: std::ops::RangeInclusive<u8>,
-) -> Result<u8, String> {
-    let (min, max) = (*range.start(), *range.end());
+fn parse_u8_field(value: &serde_json::Value, field: &str, min: u8, max: u8) -> Result<u8, String> {
     match value {
         serde_json::Value::Number(n) => {
             let Some(v) = n.as_u64() else {
@@ -327,7 +322,7 @@ pub fn parse_settings(value: &serde_json::Value) -> Result<DesktopSettings, Stri
         .ok_or_else(|| "settings must be a JSON object".to_string())?;
     let compression = match obj.get("compression") {
         None => DEFAULT_COMPRESSION,
-        Some(v) => parse_u8_field(v, "compression", 0..=100)?,
+        Some(v) => parse_u8_field(v, "compression", 0, 100)?,
     };
     let retries = match obj.get("retries") {
         None => DEFAULT_RETRIES,

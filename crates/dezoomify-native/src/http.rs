@@ -100,14 +100,6 @@ impl FetchOutcome {
     }
 }
 
-/// The fetch policy for one request family: optional user headers and the
-/// job's limits travel together through every fetch.
-#[derive(Clone, Copy)]
-pub struct FetchPlan<'a> {
-    pub user: Option<&'a UserHeaders>,
-    pub limits: &'a FetchLimits,
-}
-
 /// One-shot fetch for out-of-band reads. Builds an ephemeral transport per
 /// call, so hot paths must prefer a job-scoped [`crate::transport::NativeTransport`]
 /// to reuse connections. Behavior (redirects, scoping, limits, local reads)
@@ -115,7 +107,8 @@ pub struct FetchPlan<'a> {
 pub fn fetch(
     uri: &str,
     extra_headers: &BTreeMap<String, String>,
-    plan: &FetchPlan<'_>,
+    user: Option<&UserHeaders>,
+    limits: &FetchLimits,
 ) -> Result<FetchOutcome, Error> {
-    crate::transport::NativeTransport::new(plan.limits)?.fetch(uri, extra_headers, plan)
+    crate::transport::NativeTransport::new(limits)?.fetch(uri, extra_headers, user, limits)
 }

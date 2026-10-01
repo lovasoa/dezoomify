@@ -23,21 +23,14 @@ impl ProgressGate {
     }
 }
 
-/// One CLI machine event: the fields shared by every machine record.
-pub struct Event<'a> {
-    pub job: &'a str,
-    pub seq: u64,
-    pub kind: &'a str,
-    pub detail: &'a BTreeMap<String, String>,
-}
-
-impl Event<'_> {
-    /// The event as one line-delimited JSON record.
-    #[must_use]
-    pub fn to_json(&self) -> String {
-        serde_json::json!({"job": self.job, "seq": self.seq, "kind": self.kind, "detail": self.detail})
-            .to_string()
-    }
+#[must_use]
+pub fn machine_event_detail(
+    job: &str,
+    seq: u64,
+    kind: &str,
+    detail: &BTreeMap<String, String>,
+) -> String {
+    serde_json::json!({"job": job, "seq": seq, "kind": kind, "detail": detail}).to_string()
 }
 
 /// Fields for the terminal machine-readable completion record.

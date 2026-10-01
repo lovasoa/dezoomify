@@ -13,7 +13,7 @@ mod b64;
 mod routes;
 mod svg;
 
-pub use routes::{derive_route_id, Lookup, RouteTable, ScenarioRoute};
+pub use routes::{derive_route_id, RouteTable, ScenarioRoute};
 
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
@@ -79,32 +79,13 @@ fn record(state: &AppState, entry: serde_json::Value) {
     }
 }
 
-/// One gateway request's context: method, headers, original URL, and route
-/// flavor (`fetch` gateway or `proxy`).
-#[derive(Clone, Copy)]
-struct Call<'a> {
-    method: &'a Method,
-    headers: &'a HeaderMap,
-    original: &'a str,
-    via: &'a str,
-}
-
 async fn handle_fetch(
     State(state): State<AppState>,
     method: Method,
     headers: HeaderMap,
     Query(params): Query<FetchParams>,
 ) -> Response {
-    serve_original_url(
-        &state,
-        Call {
-            method: &method,
-            headers: &headers,
-            original: &params.url,
-            via: "fetch",
-        },
-    )
-    .await
+    serve_original_url(&state, &method, &headers, &params.url, "fetch").await
 }
 
 async fn handle_fetch_path(
@@ -117,16 +98,7 @@ async fn handle_fetch_path(
         .get("url")
         .map(String::as_str)
         .unwrap_or(path.as_str());
-    serve_original_url(
-        &state,
-        Call {
-            method: &method,
-            headers: &headers,
-            original,
-            via: "fetch",
-        },
-    )
-    .await
+    serve_original_url(&state, &method, &headers, original, "fetch").await
 }
 
 async fn handle_proxy(
@@ -138,25 +110,16 @@ async fn handle_proxy(
     let Some(target) = params.get("url") else {
         return text_response(StatusCode::BAD_REQUEST, "missing url", false);
     };
-    serve_original_url(
-        &state,
-        Call {
-            method: &method,
-            headers: &headers,
-            original: target,
-            via: "proxy",
-        },
-    )
-    .await
+    serve_original_url(&state, &method, &headers, target, "proxy").await
 }
 
-async fn serve_original_url(state: &AppState, call: Call<'_>) -> Response {
-    let Call {
-        method,
-        headers,
-        original,
-        via,
-    } = call;
+async fn serve_original_url(
+    state: &AppState,
+    method: &Method,
+    headers: &HeaderMap,
+    original: &str,
+    via: &str,
+) -> Response {
     if *method != Method::GET && *method != Method::HEAD {
         return text_response(StatusCode::METHOD_NOT_ALLOWED, "method not allowed", false);
     }
@@ -203,11 +166,10 @@ async fn serve_original_url(state: &AppState, call: Call<'_>) -> Response {
             return text_response(StatusCode::BAD_REQUEST, "bad url", head_only);
         }
     };
-    match state.routes.lookup(&Lookup {
-        host: &parsed.method_host(),
-        path: &parsed.path,
-        query: parsed.query.as_deref(),
-    }) {
+    match state
+        .routes
+        .lookup(&parsed.method_host(), &parsed.path, parsed.query.as_deref())
+    {
         Some(hit) => {
             if let Some(cookie) = hit.route.missing_required_cookie(headers) {
                 record(
@@ -359,31 +321,13 @@ fn text_response(status: StatusCode, text: &str, head_only: bool) -> Response {
     (status, headers, body).into_response()
 }
 
-/// One direct static request's context: method, path, headers, and raw
-/// query text.
-struct StaticRequest<'a> {
-    method: Method,
-    path: String,
-    headers: &'a HeaderMap,
-    query: axum::extract::RawQuery,
-}
-
 async fn handle_static_root(
     State(state): State<AppState>,
     method: Method,
     headers: HeaderMap,
     raw_query: axum::extract::RawQuery,
 ) -> Response {
-    serve_static(
-        &state,
-        StaticRequest {
-            method,
-            path: String::new(),
-            headers: &headers,
-            query: raw_query,
-        },
-    )
-    .await
+    serve_static(&state, method, String::new(), &headers, raw_query).await
 }
 
 async fn handle_static(
@@ -392,25 +336,16 @@ async fn handle_static(
     headers: HeaderMap,
     (axum::extract::Path(path), raw_query): (axum::extract::Path<String>, axum::extract::RawQuery),
 ) -> Response {
-    serve_static(
-        &state,
-        StaticRequest {
-            method,
-            path,
-            headers: &headers,
-            query: raw_query,
-        },
-    )
-    .await
+    serve_static(&state, method, path, &headers, raw_query).await
 }
 
-async fn serve_static(state: &AppState, request: StaticRequest<'_>) -> Response {
-    let StaticRequest {
-        method,
-        path,
-        headers,
-        query: raw_query,
-    } = request;
+async fn serve_static(
+    state: &AppState,
+    method: Method,
+    path: String,
+    headers: &HeaderMap,
+    raw_query: axum::extract::RawQuery,
+) -> Response {
     let head_only = method == Method::HEAD;
     if method != Method::GET && method != Method::HEAD {
         return text_response(
@@ -444,11 +379,7 @@ async fn serve_static(state: &AppState, request: StaticRequest<'_>) -> Response 
             format!("/{path}")
         };
         let query = raw_query.0.clone();
-        if let Some(hit) = state.routes.lookup(&Lookup {
-            host: &host,
-            path: &full_path,
-            query: query.as_deref(),
-        }) {
+        if let Some(hit) = state.routes.lookup(&host, &full_path, query.as_deref()) {
             let parts = UrlParts {
                 host: host.clone(),
                 port: None,
