@@ -42,6 +42,7 @@ const EXPECTED_COMMANDS = [
   "open_saved_output",
   "release_job",
   "validate_settings",
+  "is_retryable",
 ];
 const EXPECTED_CHANNELS = [
   "dezoomify://registered",

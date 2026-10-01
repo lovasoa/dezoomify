@@ -9,6 +9,7 @@
     "cancel_job",
     "dezoomify",
     "get_job_diagnostics",
+    "is_retryable",
     "open_saved_output",
     "pause_job",
     "release_job",
