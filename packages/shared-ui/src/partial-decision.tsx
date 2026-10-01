@@ -1,6 +1,6 @@
 import type { MissingTiles, RecoveryChoice } from "@dezoomify/wasm-bindings";
 import type { ReactElement } from "react";
-import { isRetryable } from "./failure.ts";
+import { canRetry } from "./failure.ts";
 import { t } from "./i18n.ts";
 
 export function PartialDecisionActions({
@@ -17,16 +17,16 @@ export function PartialDecisionActions({
     discard: t("view.partial.cancel"),
     retry: t("view.partial.retry"),
   };
-  const canRetry =
+  const retryable =
     decision.missing.length > 0 &&
     decision.missing.every(({ failures }) => {
       const failure = failures.at(-1);
-      return failure !== undefined && isRetryable(failure);
+      return failure !== undefined && canRetry(failure);
     });
   const answer = onAnswer;
   return (
     <div className="dz-actions-row" data-dz-partial-decision="true">
-      {canRetry ? (
+      {retryable ? (
         <button
           type="button"
           className="dz-btn-tactile"
@@ -38,7 +38,7 @@ export function PartialDecisionActions({
       ) : null}
       <button
         type="button"
-        className={canRetry ? "dz-btn-secondary" : "dz-btn-tactile"}
+        className={retryable ? "dz-btn-secondary" : "dz-btn-tactile"}
         data-dz-partial-choice="keep"
         onClick={() => answer("keep")}
       >

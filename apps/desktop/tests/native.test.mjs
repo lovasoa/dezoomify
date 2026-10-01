@@ -35,6 +35,8 @@ function platform({ deferRegistration = false } = {}) {
         if (!deferRegistration) this.register();
         return completion;
       }
+      // The retry verdict is a stateless shell query: no job, no registration.
+      if (command === "is_retryable") return false;
       assert.ok(registered, `${command} reached Rust before registration`);
     },
     emit(channel, payload) {
@@ -73,6 +75,8 @@ test("native invocation preserves settings, progress, completion, and result own
     question: 4,
     missing: { missing: [{ tile: 3, failures: [] }] },
   });
+  // Delivery waits for the shell's retry verdicts to be stamped on.
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(partial[0][0], 4);
   await handle.pause();
   await handle.resume();
@@ -164,7 +168,7 @@ test("failure before native registration rejects startup and removes all listene
   assert.equal(api.handlers.size, 0);
   assert.deepEqual(
     api.calls.map(({ command }) => command),
-    ["dezoomify"],
+    ["dezoomify", "is_retryable"],
   );
 });
 

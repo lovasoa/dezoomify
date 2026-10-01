@@ -113,6 +113,7 @@ test("desktop failure preserves canonical refusal facts and diagnostic context",
   await act(async () =>
     invocation.reject({
       kind: "no-usable-tiles",
+      transient: false,
       failures: [
         {
           kind: "http-error",
@@ -126,7 +127,7 @@ test("desktop failure preserves canonical refusal facts and diagnostic context",
     }),
   );
   await tick();
-  assert.match(root.textContent, /website refused access/);
+  assert.match(root.textContent, /could not be retrieved/);
   assert.equal(root.querySelector("#dz-btn-try-again"), null);
   assert.equal(
     [...root.querySelectorAll(".dz-error-section button")].some((button) =>
@@ -148,7 +149,9 @@ test("desktop partial actions honor retryability and retain a newer native quest
     missing: [
       {
         tile: 3,
-        failures: [{ kind: "http-error", status: retryable ? 503 : 403, transport: "native" }],
+        failures: [
+          { kind: "http-error", status: retryable ? 503 : 403, transport: "native", retryable },
+        ],
       },
     ],
   });

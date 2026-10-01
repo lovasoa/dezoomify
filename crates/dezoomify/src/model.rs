@@ -1300,38 +1300,6 @@ pub const SENSITIVE_QUERY_KEYS: &[&str] = &[
 mod tests {
     use super::*;
 
-    #[derive(serde::Deserialize)]
-    struct RetryVector {
-        name: String,
-        error: Error,
-        retryable: bool,
-    }
-
-    #[derive(serde::Deserialize)]
-    struct Vectors {
-        #[serde(rename = "retryPolicy")]
-        retry_policy: Vec<RetryVector>,
-    }
-
-    #[test]
-    fn retry_policy_vectors_match_the_shared_oracle() {
-        // `Error::retryable` here and `isRetryable` in
-        // `packages/shared-ui/src/failure.ts` read one oracle; the TS side is
-        // asserted by `apps/desktop/tests/policy-vectors.test.mjs`.
-        let vectors: Vectors =
-            serde_json::from_str(include_str!("../../../testdata/policy-vectors.json"))
-                .expect("policy vectors");
-        assert!(!vectors.retry_policy.is_empty());
-        for vector in &vectors.retry_policy {
-            assert_eq!(
-                vector.error.retryable(),
-                vector.retryable,
-                "{} disagrees with the shared oracle",
-                vector.name
-            );
-        }
-    }
-
     #[test]
     fn messages_render_from_structured_facts_only() {
         let refused = Error::HttpError {

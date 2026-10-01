@@ -108,10 +108,9 @@ mod bindings {
     /// one policy in Rust, no mirror in TypeScript.
     #[wasm_bindgen(js_name = isRetryable)]
     pub fn is_retryable(error: JsValue) -> Result<bool, JsValue> {
-        let error: Error = decode(error)?;
+        let error: Error = decode(error).map_err(js_error)?;
         Ok(error.retryable())
     }
-
 
     #[wasm_bindgen(skip_typescript)]
     pub async fn dezoomify(

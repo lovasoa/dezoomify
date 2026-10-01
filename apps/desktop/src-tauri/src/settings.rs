@@ -483,10 +483,9 @@ mod tests {
     }
 
     /// Shared cross-language oracle: every case in
-    /// `testdata/policy-vectors.json` is asserted here and by
-    /// `apps/desktop/tests/policy-vectors.test.mjs` against the TS validators
-    /// (the shell's `parse_settings`), so the Rust settings
-    /// validation can never drift apart unnoticed. Rejection reason strings are
+    /// `testdata/policy-vectors.json` is asserted here against the shell's
+    /// `parse_settings`/`parse_header_line`, so the Rust settings validation
+    /// can never drift apart unnoticed. Rejection reason strings are
     /// pinned per side; where the sides differ in wording only, the vector
     /// carries both strings plus a comment.
     #[test]

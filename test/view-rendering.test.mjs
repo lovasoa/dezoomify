@@ -185,7 +185,9 @@ test("partial controls return the selected choice", () => {
     renderView(el, presentIdle(), callbacks, undefined, {
       after: createElement(PartialDecisionActions, {
         decision: {
-          missing: [{ tile: 1, failures: [{ kind: "timeout", transport: "direct" }] }],
+          missing: [
+            { tile: 1, failures: [{ kind: "timeout", transport: "direct", retryable: true }] },
+          ],
         },
         onAnswer: (command) => answers.push(command),
       }),
@@ -200,7 +202,12 @@ test("partial refusal is a static decision with useful actions before diagnostic
   const el = container();
   const decision = {
     missing: [
-      { tile: 1, failures: [{ kind: "http-error", status: 403, transport: "browser-session" }] },
+      {
+        tile: 1,
+        failures: [
+          { kind: "http-error", status: 403, transport: "browser-session", retryable: false },
+        ],
+      },
     ],
   };
   const presentation = {
@@ -235,10 +242,7 @@ test("zero-tile refusal has no partial controls and opens the source", () => {
   let opened = false;
   render(
     el,
-    presentFailure({
-      kind: "no-usable-tiles",
-      failures: [{ kind: "http-error", status: 403, transport: "browser-session" }],
-    }),
+    presentFailure({ kind: "no-usable-tiles", transient: false }),
     {
       ...callbacks,
       onOpenSource() {
@@ -246,7 +250,7 @@ test("zero-tile refusal has no partial controls and opens the source", () => {
       },
     },
   );
-  assert.match(el.textContent, /website refused access/);
+  assert.ok(el.textContent.includes(t("view.partial.empty")));
   assert.match(el.textContent, /No file was saved/);
   assert.equal(el.querySelector("[role=progressbar]"), null);
   assert.equal(el.querySelector("[data-dz-partial-decision]"), null);
@@ -407,7 +411,11 @@ test("paused job activity freezes the displayed elapsed time", () => {
 
 test("failed view offers retry only for retryable errors and start over only when the host can reset", () => {
   const el = container();
-  const retryable = failurePresentation({ kind: "network-failure", transport: "direct" });
+  const retryable = failurePresentation({
+    kind: "network-failure",
+    transport: "direct",
+    retryable: true,
+  });
   let retried = 0;
   let resets = 0;
   const withBoth = {
@@ -431,7 +439,7 @@ test("failed view offers retry only for retryable errors and start over only whe
   assert.equal(retried, 1, "retry invokes onRetrySameUrl");
   assert.equal(resets, 0, "retry never falls through to reset");
 
-  const nonRetryable = failurePresentation({ kind: "decode-failed" });
+  const nonRetryable = failurePresentation({ kind: "decode-failed", retryable: false });
   render(el, nonRetryable, withBoth);
   assert.equal(card.querySelector("#dz-btn-try-again"), null, "no retry for a non-retryable error");
   assert.ok(card.querySelector("#dz-btn-start-over"), "start over stays available");

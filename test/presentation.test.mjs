@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { renderSaveGuidance } from "../packages/shared-ui/src/components.ts";
-import { detailOf, isRetryable, plainMessageFor } from "../packages/shared-ui/src/failure.ts";
+import { canRetry, detailOf, plainMessageFor } from "../packages/shared-ui/src/failure.ts";
 import {
   presentFailure,
   presentIdle,
@@ -129,20 +129,16 @@ test("rate-limit failures render the transport-specific explainer", () => {
   );
 });
 
-test("the retry verdict derives from the typed facts", () => {
-  assert.equal(isRetryable({ kind: "timeout", transport: "native" }), true);
-  assert.equal(isRetryable({ kind: "http-error", status: 503, transport: "native" }), true);
-  assert.equal(isRetryable({ kind: "http-error", status: 403, transport: "native" }), false);
-  assert.equal(isRetryable({ kind: "processing-failed" }), false);
+test("the retry verdict is read from the boundary's hint and never recomputed", () => {
+  assert.equal(canRetry({ kind: "timeout", transport: "native", retryable: true }), true);
   assert.equal(
-    isRetryable({
-      kind: "resource",
-      request: "https://example.test/tile",
-      resource_kind: "tile",
-      source: { kind: "network-failure", transport: "native" },
-    }),
-    true,
+    canRetry({ kind: "http-error", status: 503, transport: "native", retryable: false }),
+    false,
   );
+  // Without the hint (a boundary that could not classify the error), retry
+  // fails closed.
+  assert.equal(canRetry({ kind: "http-error", status: 503, transport: "native" }), false);
+  assert.equal(canRetry({ kind: "processing-failed" }), false);
 });
 
 test("resolution downgrade remains visible after completion", () => {

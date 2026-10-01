@@ -7,7 +7,7 @@ import { flushSync } from "react-dom";
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
 import type { JobActivity } from "./activity.ts";
-import { httpStatusOf, isRetryable, plainMessageFor } from "./failure.ts";
+import { canRetry, httpStatusOf, plainMessageFor } from "./failure.ts";
 import type { HistoryEntry } from "./history.ts";
 import type { Presentation, ResolutionChoice } from "./presentation.ts";
 import {
@@ -827,7 +827,7 @@ function FailedView({
               {t("view.partial.openSource")}
             </button>
           ) : null}
-          {isRetryable(error) && callbacks.onRetrySameUrl ? (
+          {canRetry(error) && callbacks.onRetrySameUrl ? (
             <button type="button" className="dz-btn-secondary" onClick={callbacks.onRetrySameUrl}>
               {t("view.fail.retry")}
             </button>
@@ -901,7 +901,7 @@ function FailedView({
         </div>
       </div>
       <div className="dz-actions-row">
-        {isRetryable(error) && callbacks.onRetrySameUrl ? (
+        {canRetry(error) && callbacks.onRetrySameUrl ? (
           <button
             type="button"
             className="dz-btn-tactile"

@@ -57,7 +57,10 @@ import { desktopHandoffLink } from "./plan-gates.ts";
 import { createTileDecoder } from "./tile-decode.ts";
 import { BROWSER_MAX_CONCURRENCY } from "./tile-policy.ts";
 
-type WasmModule = Pick<typeof import("@dezoomify/wasm-bindings"), "dezoomify" | "applyProcessing">;
+type WasmModule = Pick<
+  typeof import("@dezoomify/wasm-bindings"),
+  "dezoomify" | "applyProcessing" | "isRetryable"
+>;
 export interface BrowserApplicationContext {
   signal: AbortSignal;
   diagnostics: DiagnosticRecorder;
@@ -260,12 +263,15 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
           }
         },
         transport: () => capabilities.transport(),
-        choosePartial: (missing, signal) =>
-          new Promise((resolve, reject) => {
+        choosePartial: async (missing, signal) => {
+          signal.throwIfAborted();
+          const hinted = await withVerdictMissing(missing);
+          signal.throwIfAborted();
+          return new Promise((resolve, reject) => {
             const abort = () => reject(signal.reason);
             signal.addEventListener("abort", abort, { once: true });
             a.decision = {
-              missing,
+              missing: hinted,
               answer(choice) {
                 if (current !== a || signal.aborted) return;
                 signal.removeEventListener("abort", abort);
@@ -276,7 +282,8 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
               },
             };
             update();
-          }),
+          });
+        },
       });
       const limits = maximum
         ? MAXIMUM_SELECTION_LIMITS
@@ -325,9 +332,9 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       if (current !== a) return;
       outcome = a.controller.signal.aborted ? "cancelled" : "failed";
       if (outcome === "failed") {
-        a.failure = isJobError(error)
-          ? error
-          : { kind: "internal", detail: String(error).slice(0, 2048) };
+        a.failure = await withVerdict(
+          isJobError(error) ? error : { kind: "internal", detail: String(error).slice(0, 2048) },
+        );
         a.view.desktopHandoffUrl = desktopHandoffLink(url);
       }
       a.diagnostics.finish(outcome, error);
@@ -343,6 +350,26 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         if (next.next) void run(next.next.url);
       }
     }
+  }
+
+  /** Stamp the boundary's retry verdict (`isRetryable`, the one policy in
+   * Rust) onto an error as a plain `retryable` hint for the shared UI. An
+   * error that cannot reach the boundary keeps no hint and so fails closed. */
+  async function withVerdict(error: JobError): Promise<JobError> {
+    try {
+      (error as { retryable?: boolean }).retryable = (await options.wasm()).isRetryable(error);
+    } catch {
+      // No verdict: the hint stays absent and retry fails closed.
+    }
+    return error;
+  }
+
+  /** `withVerdict` across every retained failure of a partial decision. */
+  async function withVerdictMissing(missing: MissingTiles): Promise<MissingTiles> {
+    await Promise.all(
+      missing.missing.flatMap((tile) => tile.failures.map((failure) => withVerdict(failure))),
+    );
+    return missing;
   }
 
   function submit(url: string): void {

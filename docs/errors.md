@@ -40,11 +40,12 @@ retained failure sets: any transient constituent keeps retry available,
 and retention is a bounded sample that keeps a transient constituent and
 the largest hint, so the derived verdicts stay exact over the complete
 set;
-`resource` and the discovery aggregate delegate to their cause. The shared
-UI mirrors the verdict as `isRetryable`, and `testdata/policy-vectors.json`
-pins both implementations to one oracle. Missing tiles retain the complete
-errors from every failed attempt. Output failures do not inherit fetch retry
-policy.
+`resource` and the discovery aggregate delegate to their cause. The policy
+exists once in Rust and is exposed at each host boundary
+(`isRetryable`/`is_retryable`); the shared UI reads the boundary-stamped
+`retryable` hint as plain data and holds no mirror. Missing tiles retain the
+complete errors from every failed attempt. Output failures do not inherit
+fetch retry policy.
 
 Hosts keep their own error chains internally; only the typed shape crosses
 the contract. Both sides raise the same shapes: browser hosts throw plain

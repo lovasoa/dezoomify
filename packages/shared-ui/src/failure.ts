@@ -1,8 +1,9 @@
 // Localized error headlines and derived verdicts for the typed error
 // contract (`Error` in `@dezoomify/wasm-bindings`). Copy is chosen from the
 // discriminated union's structured facts (kind, status, limit facts); no
-// message text is ever parsed. The Rust twin of `isRetryable` is
-// `Error::retryable`, pinned together by `testdata/policy-vectors.json`.
+// message text is ever parsed. The retry verdict is not computed here: each
+// host boundary stamps it onto errors as a plain `retryable` hint from the
+// one policy in Rust (`Error::retryable`).
 import type { Error as JobError } from "@dezoomify/wasm-bindings";
 import { type I18nKey, t } from "./i18n.ts";
 
@@ -148,6 +149,9 @@ function isJobErrorAt(value: unknown, depth: number): boolean {
       return typeof record.format === "string" && record.format.length > 0;
     case "limit-exceeded":
       return !!record.limit && typeof record.limit === "object";
+    case "no-usable-tiles":
+    case "partial-discarded":
+      return typeof record.transient === "boolean";
     case "resource":
       return (
         typeof record.request === "string" &&
@@ -157,12 +161,6 @@ function isJobErrorAt(value: unknown, depth: number): boolean {
       );
     case "discovery-failed":
       return record.cause === undefined || isJobErrorAt(record.cause, depth + 1);
-    case "no-usable-tiles":
-    case "partial-discarded":
-      return (
-        Array.isArray(record.failures) &&
-        record.failures.every((failure) => isJobErrorAt(failure, depth + 1))
-      );
     default:
       // Field-less variants (and `detail`-only variants) carry nothing
       // beyond the bounded text already checked.
@@ -180,48 +178,18 @@ export function causeOf(error: JobError): RootCause {
   return error;
 }
 
-/** The observed HTTP status of a fetch failure, when there is one.
- * Aggregates report the status of their first retained HTTP failure. */
+/** The observed HTTP status of a fetch failure, when there is one. */
 export function httpStatusOf(error: JobError): number | undefined {
   const cause = causeOf(error);
   if (cause.kind === "http-error") return cause.status;
-  if (cause.kind === "no-usable-tiles" || cause.kind === "partial-discarded") {
-    for (const failure of cause.failures) {
-      const status = httpStatusOf(failure);
-      if (status !== undefined) return status;
-    }
-  }
   return undefined;
 }
 
-/**
- * Whether the same request may be retried: transient HTTP statuses
- * (408/425/429 and 5xx) and transient transport/service failures retry;
- * everything else fails closed. Aggregates retry when any retained
- * constituent is transient. Mirrors `Error::retryable` in `model.rs`; the
- * shared oracle `testdata/policy-vectors.json` pins both.
- */
-export function isRetryable(error: JobError): boolean {
-  const cause = causeOf(error);
-  switch (cause.kind) {
-    case "http-error":
-      return (
-        cause.status === 408 ||
-        cause.status === 425 ||
-        cause.status === 429 ||
-        (cause.status >= 500 && cause.status <= 599)
-      );
-    case "rate-limited":
-    case "timeout":
-    case "network-failure":
-    case "proxy-error":
-      return true;
-    case "no-usable-tiles":
-    case "partial-discarded":
-      return cause.failures.some(isRetryable);
-    default:
-      return false;
-  }
+/** Whether the same request may be retried, read from the `retryable` hint
+ * the host boundary stamped from Rust's `Error::retryable`. Pure data read:
+ * no policy lives here, and an error without the hint fails closed. */
+export function canRetry(error: JobError): boolean {
+  return (error as { retryable?: boolean }).retryable === true;
 }
 
 /** The bounded diagnostic text retained along the composition chain. */
