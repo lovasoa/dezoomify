@@ -48,7 +48,6 @@ fn rejects_unknown_tasks_targets_and_lanes() {
         &["ci", "bogus"],
         &["release", "bogus"],
         &["test", "bogus"],
-        &["test", "--live"],
         &["test", "live"],
         &["sources", "verify"],
         &["parity", "validate"],
@@ -62,6 +61,13 @@ fn rejects_unknown_tasks_targets_and_lanes() {
             "rejection for {args:?} carries no usage guidance: {detail}"
         );
     }
+    // The live filter rejects with its own explicit reason.
+    let out = xtask(&["test", "--live"]);
+    assert!(!out.status.success(), "accepted --live");
+    assert!(
+        stderr_text(&out).contains("not part of the deterministic suite"),
+        "live rejection names the deterministic suite"
+    );
 }
 
 #[test]
