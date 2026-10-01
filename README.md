@@ -1,55 +1,102 @@
 # Dezoomify
 
-High-resolution zoomable images (IIIF, Deep Zoom, Zoomify, krpano, and more).
+[Dezoomify](https://dezoomify.ophir.dev/beta/) finds the full image behind a
+zoomable viewer and assembles its tiles into a picture you can save. It works
+with image viewers used by museums, libraries, archives, and map collections.
 
-- Website (new product at `/beta`, legacy website at `/`): shared async Rust
-  discovery, direct-first transport with automatic eligible metadata
-  proxy fallback, canvas assembly, and real save (Chromium E2E covered).
-- Extension (`apps/extension/`): explicit-action scan with unit coverage;
-  available from the Chrome Web Store and Firefox Browser Add-ons.
-- Desktop (`apps/desktop/`): real Tauri window with native capabilities, native save dialog, and installer bundling
-  (unsigned Linux x86_64 `.deb`, Windows x86_64 `.msi`, and Apple silicon
-  macOS `.dmg`; automatic updates are disabled, check GitHub Releases manually).
-- CLI (`apps/cli/`): real save pipeline through the native runtime,
-  covering discovery, bounded tile acquisition, assembly, and output writing.
+## Runs in your browser and on your desktop
 
-## Quick start
+The same Dezoomify codebase runs on different platforms, with different
+capabilities.
+
+- **[Website](https://dezoomify.ophir.dev/beta/):** The easiest to run, but
+  least powerful. Nothing to install: paste the address of the image's page.
+  Some websites block it, and it cannot use your browser login. The browser
+  limits the maximum image size, so it may save a smaller resolution than
+  the source offers. Saves PNG files. [Guide](docs/user/website.md).
+- **Browser extension [for Chrome](https://chromewebstore.google.com/detail/dezoomify/iapjjopjejpelnfdonefbffahmcndfbm)
+  and [for Firefox](https://addons.mozilla.org/en-US/firefox/addon/dezoomify/):**
+  Works with websites where you are signed in and works around some
+  restrictions that prevent the website from saving images. It also finds
+  image addresses that are hidden behind the viewer: open the image's page
+  and click the Dezoomify button in your browser toolbar. Has the same final
+  image size limits as the website. [Guide](docs/user/browser-extension.md).
+- **[Desktop app](https://github.com/lovasoa/dezoomify/releases/latest):**
+  For Windows, macOS, and Linux. Saves larger images, opens local files, and
+  supports PNG, JPEG, TIFF, ZIF, WebP, and IIIF tile folders. Interrupted saves
+  can resume using cached tiles. Image size is limited by your available
+  memory. It can work with some sites that refuse the website's requests,
+  but cannot reuse your browser login; use the extension for signed-in pages.
+  [Guide](docs/user/desktop-app.md).
+- **[Command-line tool](docs/user/command-line.md):** The same saving
+  capabilities as the desktop app, for scripts. Choose a particular image or
+  zoom level, limit the resolution, or save a list of addresses with `--bulk`.
+  The [releases page](https://github.com/lovasoa/dezoomify/releases/latest)
+  provides a Linux x86_64 executable in the `dezoomify-cli` archive. To build
+  it from source, see below.
+
+Desktop installers are available as `.msi` for Windows x86_64, `.dmg` for
+Apple silicon Macs, and `.deb` for Linux x86_64. They are unsigned, so your
+operating system may ask you to confirm that you trust the installer. Updates
+are installed manually from the releases page; there is no automatic update.
+
+The [legacy website](https://dezoomify.ophir.dev/) remains available.
+
+## Save your first image
+
+1. Open the page that shows the zoomable image and copy its address.
+2. Paste it into the [Dezoomify website](https://dezoomify.ophir.dev/beta/)
+   and press **Dezoomify**.
+3. When the image is ready, press **Save** to keep the PNG file.
+
+Dezoomify supports IIIF, Deep Zoom, Zoomify, Google Arts & Culture, krpano,
+and [other image formats](docs/user/supported-formats.md). No app works with
+every website. If you already have the address of the image's description
+file, such as `info.json`, `ImageProperties.xml`, or a `.dzi` file, you can
+paste that directly instead of the viewer page.
+
+## If it doesn't work
+
+- **No image found:** Try the browser extension on the page showing the
+  image. If it still finds nothing, follow
+  [finding the image address](docs/user/finding-the-image-address.md) to
+  locate the description file yourself.
+- **Login required or access refused:** Use the extension while signed in.
+  If the site only serves images to its own viewer, the desktop app or CLI
+  can identify the viewing page in their requests; see
+  [forbidden or unauthorized errors](docs/user/troubleshooting.md#forbidden-or-unauthorized-errors).
+- **Image too large, blank, or impossible to save:** Use the desktop app.
+  Installing the extension does not remove the browser's size limits.
+- **Too many requests (429):** Wait a few minutes before trying again.
+
+See [troubleshooting](docs/user/troubleshooting.md) for interrupted saves
+and other problems. Search [existing issues](https://github.com/lovasoa/dezoomify/issues)
+for the site's name before
+[requesting support for a site](https://github.com/lovasoa/dezoomify/issues/new?template=0_new-site-support.md)
+or [reporting an app bug](https://github.com/lovasoa/dezoomify/issues/new?template=1_bug_report.md).
+Include the exact viewing page address, the address you gave Dezoomify,
+which app you used, and the error message or diagnostic report from
+**Technical details & logs**.
+
+## Build and contribute
+
+Install Rust and Node.js 24.15.0 or newer, then run these commands from the
+repository root:
 
 ```sh
-cargo xtask setup     # verify tools and install the pnpm workspace
-cargo xtask check     # formatting, lint, artifact validation
-cargo xtask test      # one Rust workspace run + one combined Node unit run
-cargo xtask test all  # add generated WASM and browser integration (no public network)
+cargo xtask setup
+cargo xtask check
+cargo xtask test
+cargo xtask dev web
 ```
 
-The fast test does not run `check`, generated WASM bindings, packaging, or
-browsers. Node 24.15.0 is the minimum supported Node version. `test all` adds the
-generated WASM Node harness, Chromium website E2E, and full Chromium/Firefox
-extension integration without rerunning the fast matrix; the desktop real
-window remains explicit.
+To build the command-line tool, run `cargo xtask build cli`. The executable
+is `target/debug/dezoomify-cli`:
 
-`cargo xtask test live --public` is the only command that contacts real
-websites (explicit opt-in). `cargo xtask --help` lists everything else,
-including `build`, `dev`, `ci`, `release`, `bindings`, and `fixtures`. See
-[Development](docs/development.md) and [Testing](docs/testing.md).
+```sh
+target/debug/dezoomify-cli "https://museum.example/collection/painting" painting.png
+```
 
-## Layout
-
-- Repository root: the website, where you paste a URL and save the image.
-- [`apps/`](apps/): the extension, desktop app, and CLI.
-- [`crates/`](crates/): one async Rust dezooming function, pure parsers and geometry,
-  the injected Host contract, native capabilities, generated WASM calls, and tests.
-- [`packages/`](packages/): TypeScript shared UI, browser runtime, and generated
-  WASM bindings.
-- [`testdata/scenarios`](testdata/scenarios): deterministic test fixtures.
-- [`docs/`](docs/): architecture, privacy, security, and release contracts.
-
-## How fetching works
-
-The website always tries a direct browser fetch first, with a short 1500 ms
-window. If the direct fetch does not complete in time, it automatically retries
-eligible public metadata (never image tiles) through a same-origin metadata
-proxy. This proxy is visible in the UI and never carries cookies or
-credentials. The extension instead uses your browser session under
-permissions you grant; it does not transfer browser credentials to the
-desktop app.
+See the [development guide](docs/development.md) for build and test commands,
+and [Contributing a format](docs/CONTRIBUTING-format.md) to add support for a
+site format.
