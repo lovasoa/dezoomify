@@ -271,7 +271,7 @@ impl RouteTable {
                     route.route_id = route.effective_id();
                 }
                 if let Some(payload) = &route.payload {
-                    if payload.contains("..") || payload.starts_with('/') {
+                    if !is_safe_payload_rel(payload) {
                         return Err(format!(
                             "unsafe payload path in {}: {payload}",
                             route.route_id
@@ -433,17 +433,6 @@ impl ScenarioRoute {
             );
         }
         let scenario_dir = state.scenarios_dir.join(scenario);
-        let join_under = |name: &str| -> Option<std::path::PathBuf> {
-            if name.contains("..") || name.starts_with('/') {
-                return None;
-            }
-            let full = scenario_dir.join(name);
-            if full.starts_with(&scenario_dir) {
-                Some(full)
-            } else {
-                None
-            }
-        };
         let bytes = if let Some(gen) = &self.generator {
             render_generator(
                 gen,
@@ -452,9 +441,7 @@ impl ScenarioRoute {
                 original.query.as_deref(),
             )?
         } else if let Some(payload) = &self.payload {
-            let full = join_under(payload).ok_or(axum::http::StatusCode::FORBIDDEN)?;
-            let mut bytes =
-                std::fs::read(&full).map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+            let mut bytes = read_payload(&scenario_dir, payload)?;
             if is_text(&headers) {
                 let text = String::from_utf8_lossy(&bytes).into_owned();
                 let localhost_origin = state.origin.replacen("127.0.0.1", "localhost", 1);
@@ -486,6 +473,29 @@ fn is_text(headers: &HeaderMap) -> bool {
         })
 }
 
+/// Fixture-relative payload names only: traversal and absolute paths are
+/// refused. Every payload resolution goes through this family of helpers —
+/// one spelling of the guard, not one per call site.
+fn is_safe_payload_rel(name: &str) -> bool {
+    !name.contains("..") && !name.starts_with('/')
+}
+
+fn safe_payload(scenario_dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    if !is_safe_payload_rel(name) {
+        return None;
+    }
+    let full = scenario_dir.join(name);
+    full.starts_with(scenario_dir).then_some(full)
+}
+
+fn read_payload(
+    scenario_dir: &std::path::Path,
+    name: &str,
+) -> Result<Vec<u8>, axum::http::StatusCode> {
+    let full = safe_payload(scenario_dir, name).ok_or(axum::http::StatusCode::FORBIDDEN)?;
+    std::fs::read(&full).map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)
+}
+
 fn render_generator(
     gen: &GeneratorSpec,
     scenario_dir: &Path,
@@ -494,29 +504,11 @@ fn render_generator(
 ) -> Result<Vec<u8>, axum::http::StatusCode> {
     match gen {
         GeneratorSpec::ArtsTile { image } => {
-            let full = if image.contains("..") || image.starts_with('/') {
-                return Err(axum::http::StatusCode::FORBIDDEN);
-            } else {
-                scenario_dir.join(image)
-            };
-            if !full.starts_with(scenario_dir) {
-                return Err(axum::http::StatusCode::FORBIDDEN);
-            }
-            let bytes =
-                std::fs::read(&full).map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+            let bytes = read_payload(scenario_dir, image)?;
             super::arts::verify_and_decrypt(path, &bytes).ok_or(axum::http::StatusCode::FORBIDDEN)
         }
         GeneratorSpec::ArtsSignedTile { image } => {
-            let full = if image.contains("..") || image.starts_with('/') {
-                return Err(axum::http::StatusCode::FORBIDDEN);
-            } else {
-                scenario_dir.join(image)
-            };
-            if !full.starts_with(scenario_dir) {
-                return Err(axum::http::StatusCode::FORBIDDEN);
-            }
-            let bytes =
-                std::fs::read(&full).map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+            let bytes = read_payload(scenario_dir, image)?;
             super::arts::verify_signature(path).ok_or(axum::http::StatusCode::FORBIDDEN)?;
             Ok(bytes)
         }
@@ -529,29 +521,11 @@ fn render_generator(
         GeneratorSpec::JpegStub { image } => {
             // Legacy serves the shared 256x256 fixture photo for stub tile
             // URLs; exact bytes matter (clients refine tile size from them).
-            let full = if image.contains("..") || image.starts_with('/') {
-                return Err(axum::http::StatusCode::FORBIDDEN);
-            } else {
-                scenario_dir.join(image)
-            };
-            if !full.starts_with(scenario_dir) {
-                return Err(axum::http::StatusCode::FORBIDDEN);
-            }
-            let bytes =
-                std::fs::read(&full).map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+            let bytes = read_payload(scenario_dir, image)?;
             Ok(bytes)
         }
         GeneratorSpec::GenericJpg { image } => {
-            let full = if image.contains("..") || image.starts_with('/') {
-                return Err(axum::http::StatusCode::FORBIDDEN);
-            } else {
-                scenario_dir.join(image)
-            };
-            if !full.starts_with(scenario_dir) {
-                return Err(axum::http::StatusCode::FORBIDDEN);
-            }
-            let bytes =
-                std::fs::read(&full).map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+            let bytes = read_payload(scenario_dir, image)?;
             super::svg::generic_jpg(&bytes, query).ok_or(axum::http::StatusCode::NOT_FOUND)
         }
     }
