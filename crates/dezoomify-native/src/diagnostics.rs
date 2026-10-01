@@ -170,14 +170,26 @@ impl Diagnostics {
             };
             let mut repeated = false;
             if matches!(level, DiagnosticLevel::Warn | DiagnosticLevel::Error) {
-                let key = format!(
-                    "{}|{:?}|{:?}|{:?}|{:?}",
-                    entry.event,
-                    entry.fields.get("code"),
-                    entry.fields.get("transport"),
-                    entry.fields.get("http"),
-                    entry.fields.get("purpose")
-                );
+                // Groups key on the typed error facts (kind/status/transport/
+                // purpose at any composition depth), so distinct causes never
+                // collapse into one group and hide intermediate evidence.
+                let mut key = entry.event.clone();
+                for (name, value) in &entry.fields {
+                    let leaf = name.rsplit('.').next().unwrap_or(name.as_str());
+                    if matches!(
+                        leaf,
+                        "kind" | "status" | "transport" | "resource_kind" | "purpose"
+                    ) {
+                        key.push('|');
+                        key.push_str(name);
+                        key.push('=');
+                        match value {
+                            DiagnosticValue::Text(text) => key.push_str(text),
+                            DiagnosticValue::Number(number) => key.push_str(&number.to_string()),
+                            DiagnosticValue::Bool(flag) => key.push_str(&flag.to_string()),
+                        }
+                    }
+                }
                 if let Some(group) = state.report.failures.iter_mut().find(|g| g.key == key) {
                     group.count = group.count.saturating_add(1);
                     group.last = entry.clone();

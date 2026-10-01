@@ -13,6 +13,8 @@ export const DIAGNOSTIC_MAX_RECORDS = 1000;
 const FIELD_LIMIT = 4096;
 const MAX_FIELDS = 48;
 const MAX_GROUPS = 16;
+// Typed error facts that distinguish failure groups; prose fields never do.
+const FACT_FIELD = /^(?:.*\.)?(?:kind|status|transport|resource_kind|purpose)$/;
 // JSON escaping and UTF-8 use at most six bytes per UTF-16 code unit.
 const size = (value: unknown) => JSON.stringify(value).length * 6;
 
@@ -172,8 +174,16 @@ export function createDiagnosticRecorder(options: {
       const entry = make(level, event, fields);
       let repeated = false;
       if (level === "warn" || level === "error") {
+        // Failure groups key on the typed error facts (kind/status/transport/
+        // purpose at any composition depth), so distinct causes never collapse
+        // into one group and hide intermediate evidence.
         const f = entry.fields;
-        const key = [entry.event, f.code, f.transport, f.http, f.purpose].join("|");
+        const key = [
+          entry.event,
+          ...Object.keys(f)
+            .filter((name) => FACT_FIELD.test(name))
+            .map((name) => `${name}=${String(f[name])}`),
+        ].join("|");
         const group = state.failures.find((candidate) => candidate.key === key);
         if (group) {
           group.count++;
