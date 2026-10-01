@@ -240,16 +240,12 @@ test("partial refusal is a static decision with useful actions before diagnostic
 test("zero-tile refusal has no partial controls and opens the source", () => {
   const el = container();
   let opened = false;
-  render(
-    el,
-    presentFailure({ kind: "no-usable-tiles", transient: false }),
-    {
-      ...callbacks,
-      onOpenSource() {
-        opened = true;
-      },
+  render(el, presentFailure({ kind: "no-usable-tiles", transient: false }), {
+    ...callbacks,
+    onOpenSource() {
+      opened = true;
     },
-  );
+  });
   assert.ok(el.textContent.includes(t("view.partial.empty")));
   assert.match(el.textContent, /No file was saved/);
   assert.equal(el.querySelector("[role=progressbar]"), null);

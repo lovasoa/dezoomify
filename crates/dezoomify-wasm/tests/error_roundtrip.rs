@@ -65,10 +65,7 @@ fn host_thrown_objects_deserialize_into_the_same_enum() {
         "retry_after_ms": 3_000,
     });
     let error: Error = serde_json::from_value(thrown).expect("deserializes");
-    assert!(
-        error.retryable(),
-        "a transient aggregate invites retry"
-    );
+    assert!(error.retryable(), "a transient aggregate invites retry");
     assert_eq!(error.retry_after_ms(), Some(3_000));
     // Round-trip: what one side raises, the other side reads unchanged.
     let round_tripped: Error =
