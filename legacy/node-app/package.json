@@ -4,8 +4,8 @@
   "description": "Download images in various zoomable image formats.",
   "main": "dezoomify-node.js",
   "dependencies": {
-    "@napi-rs/canvas": "^1.0.0",
-    "jsdom": "^29.1.1"
+    "@napi-rs/canvas": "^1.0.9",
+    "jsdom": "^30.1.1"
   },
   "devDependencies": {},
   "scripts": {
@@ -27,8 +27,5 @@
   "bugs": {
     "url": "https://github.com/lovasoa/dezoomify/issues"
   },
-  "homepage": "https://github.com/lovasoa/dezoomify",
-  "overrides": {
-    "undici": "7.29.0"
-  }
+  "homepage": "https://github.com/lovasoa/dezoomify"
 }

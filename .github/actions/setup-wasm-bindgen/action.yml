@@ -15,6 +15,6 @@ runs:
         test -n "$v" || { echo "wasm-bindgen version not found in Cargo.lock"; exit 1; }
         echo "version=$v" >> "$GITHUB_OUTPUT"
     - name: Install wasm-bindgen-cli
-      uses: taiki-e/install-action@7b8d4719ee4aaa279bdf55df38dacb9ebfe12a6c # v2.87.6
+      uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
       with:
         tool: wasm-bindgen-cli@${{ steps.resolve.outputs.version }}
