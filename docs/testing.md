@@ -47,7 +47,6 @@ Focused aliases remain available for iteration:
 | `desktop [--e2e-window]` | desktop Rust and Node suites; the option runs the explicit real-window gate instead |
 | `extension` | generated WASM/WXT, all extension units, and Chromium plus Firefox headless E2E |
 | `scenario` | CLI snapshots and native scenario/loopback integration tests |
-| `perf [--smoke]` | native pipeline performance smoke and tracked benches |
 | `live` | explicit, advisory public compatibility checks |
 | `all` | fast aggregate plus build-dependent WASM, website, and extension integration |
 
@@ -110,7 +109,7 @@ Live checks use no private credentials, bounded counts and rates, and reproducib
 cargo xtask test desktop --e2e-window
 ```
 
-This explicit lane builds current frontend, fixture server, and Tauri shell with its embedded W3C WebDriver server, then verifies real save, cancellation, confirmed handoff, and partial journeys. Excluded from bare `test`, `test all`, and `cargo xtask ci local`. Linux needs `xvfb-run -a`; macOS and Windows use GUI sessions. The path-gated desktop workflow runs it on all three OSes plus bundle smoke. Native mechanism: [Native apps](native-apps.md#real-window-e2e-hook).
+This explicit lane builds current frontend, fixture server, and Tauri shell with its embedded W3C WebDriver server, then verifies real save, cancellation, confirmed handoff, and partial journeys. Excluded from bare `test`, `test all`, and `cargo xtask ci local`. Linux needs `xvfb-run -a`; macOS and Windows use GUI sessions. The path-gated desktop workflow runs it on all three OSes plus bundle smoke.
 
 ## Cross-runtime guarantees
 

@@ -31,7 +31,7 @@ fn help_lists_the_stable_surface() {
     let help = stdout_text(&out);
     for token in [
         "setup", "check", "fixtures", "bindings", "build", "dev", "ci", "release", "test",
-        "digest", "perf",
+        "digest",
     ] {
         assert!(help.contains(token), "help lacks {token}");
     }
@@ -79,7 +79,6 @@ fn rejects_unknown_flags_without_running_suites() {
         &["fixtures", "verify", "--bogus"],
         &["fixtures", "serve", "--bogus"],
         &["test", "core", "--bogus"],
-        &["test", "perf", "--bogus"],
         &["test", "native", "--bogus"],
         &["ci", "digest", "--bogus"],
         &["ci", "digest", "--check"],

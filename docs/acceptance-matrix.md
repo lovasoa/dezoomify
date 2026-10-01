@@ -18,7 +18,7 @@ tests contact no public source websites.
 | Local history retention and canonical labels | `test/history.test.mjs`, `test/labels.test.mjs` | `test` |
 | Source-document identity, scan limits, permission user activation, authenticated fetch, redirects | Extension source tests and packaged Chromium/Firefox fixture journeys | `test extension` |
 | Native file/HTTP reads, cache, output formats, ICC/EXIF, overwrite policy, publication | Native I/O tests and actual CLI scenarios | `test native`, `test scenario` |
-| Bounded decode, memory/spool accounting, cancellation/publication ordering | Native pipeline, sink, and performance tests | `test native`, `test perf --smoke` |
+| Bounded decode, memory/spool accounting, cancellation/publication ordering | Native pipeline and sink tests | `test native` |
 | Desktop settings, save, cancel, queue, partial, open/reveal, confirmed handoff | Desktop tests and real-window fixture journeys | `test desktop`, `test desktop --e2e-window` |
 | Legacy `/` and new `/beta` routes, fresh WASM, packaged assets | Assembled-site build and website/extension E2E | `build web`, `test all` |
 
@@ -27,8 +27,8 @@ fixtures, content, and generated bindings. `cargo xtask test` runs fast Rust and
 Node tests once. `test all` adds built-WASM and packaged-browser journeys.
 `ci local` also validates portability and dependencies.
 
-The desktop real-window and native performance smoke gates run explicitly.
-Production builds cover web, CLI, extension, and desktop. Product observations
+The desktop real-window gate runs explicitly. Production builds cover web,
+CLI, extension, and desktop. Product observations
 compare selected dimensions, decoded pixels, required/forbidden requests,
 attempt counts, visible choices, actual saved output, and cleanup. Pure parser
 and platform tests remain focused where full product tests cannot economically
