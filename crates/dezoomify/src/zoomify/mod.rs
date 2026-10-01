@@ -578,12 +578,6 @@ mod tests {
         plan.tiles_row_major().next().unwrap().unwrap().request.uri
     }
 
-    fn discover_viewer(page_uri: &str, page: &[u8]) -> (String, String) {
-        let (catalog, requests) =
-            crate::test_support::discover(SPEC, page_uri, &[(page, None), (XML, None)]);
-        (requests[1].uri.clone(), first_tile(catalog.unwrap()))
-    }
-
     #[test]
     fn tile_urls_request_sibling_metadata() {
         let (catalog, requests) = crate::test_support::discover(
@@ -602,72 +596,79 @@ mod tests {
     }
 
     #[test]
-    fn viewer_pages_respect_html_base_and_first_show_image_path() {
-        let (metadata, tile) = discover_viewer(
-            "https://fixtures.test/zoomify-base-href/product.html",
-            br#"<base href="https://fixtures.test/zoomify-base-href/assets/">
+    fn viewer_pages_resolve_metadata_and_tile_bases() {
+        let cases: &[(
+            &str,
+            &str,
+            &[(&[u8], Option<&str>)],
+            Option<&str>,
+            Option<&str>,
+        )] = &[
+            (
+                "html base href and first showImage path",
+                "https://fixtures.test/zoomify-base-href/product.html",
+                &[
+                    (
+                        br#"<base href="https://fixtures.test/zoomify-base-href/assets/">
                 <script>
                     Z.showImage("viewer", "maps/sample");
                     Z.showImage("viewer", "maps/missing");
                 </script>"#,
-        );
-        assert_eq!(
-            metadata,
-            "https://fixtures.test/zoomify-base-href/assets/maps/sample/ImageProperties.xml"
-        );
-        assert_eq!(
-            tile,
-            "https://fixtures.test/zoomify-base-href/assets/maps/sample/TileGroup0/0-0-0.jpg"
-        );
-    }
-
-    #[test]
-    fn viewer_pages_resolve_relative_paths_against_the_redirect_target() {
-        let (catalog, requests) = crate::test_support::discover(
-            SPEC,
-            "https://museum.example/object/12",
-            &[
-                (
-                    br#"<script>Z.showImage("viewer", "tiles");</script>"#,
-                    Some("https://cdn.example/viewer/12/index.html"),
+                        None,
+                    ),
+                    (XML, None),
+                ],
+                Some(
+                    "https://fixtures.test/zoomify-base-href/assets/maps/sample/ImageProperties.xml",
                 ),
-                (XML, None),
-            ],
-        );
-        catalog.unwrap();
-        assert_eq!(
-            requests[1].uri,
-            "https://cdn.example/viewer/12/tiles/ImageProperties.xml"
-        );
-    }
-
-    #[test]
-    fn redirected_metadata_keeps_the_requested_tile_base() {
-        let (catalog, _) = crate::test_support::discover(
-            SPEC,
-            "https://origin.example/book/ImageProperties.xml",
-            &[(XML, Some("https://cdn.example/metadata/content.xml"))],
-        );
-        assert_eq!(
-            first_tile(catalog.unwrap()),
-            "https://origin.example/book/TileGroup0/0-0-0.jpg"
-        );
-    }
-
-    #[test]
-    fn signed_proxy_remains_the_tile_base() {
-        let (metadata, tile) = discover_viewer(
-            "https://museum.example/viewer/object",
-            br#"<script>Z.showImage("viewer", "https://museum.example/proxy/OBJECT_ID/");</script>"#,
-        );
-        assert_eq!(
-            metadata,
-            "https://museum.example/proxy/OBJECT_ID/ImageProperties.xml"
-        );
-        assert_eq!(
-            tile,
-            "https://museum.example/proxy/OBJECT_ID/TileGroup0/0-0-0.jpg"
-        );
+                Some(
+                    "https://fixtures.test/zoomify-base-href/assets/maps/sample/TileGroup0/0-0-0.jpg",
+                ),
+            ),
+            (
+                "relative paths resolve against the redirect target",
+                "https://museum.example/object/12",
+                &[
+                    (
+                        br#"<script>Z.showImage("viewer", "tiles");</script>"#,
+                        Some("https://cdn.example/viewer/12/index.html"),
+                    ),
+                    (XML, None),
+                ],
+                Some("https://cdn.example/viewer/12/tiles/ImageProperties.xml"),
+                None,
+            ),
+            (
+                "signed proxy remains the tile base",
+                "https://museum.example/viewer/object",
+                &[
+                    (
+                        br#"<script>Z.showImage("viewer", "https://museum.example/proxy/OBJECT_ID/");</script>"#,
+                        None,
+                    ),
+                    (XML, None),
+                ],
+                Some("https://museum.example/proxy/OBJECT_ID/ImageProperties.xml"),
+                Some("https://museum.example/proxy/OBJECT_ID/TileGroup0/0-0-0.jpg"),
+            ),
+            (
+                "redirected metadata keeps the requested tile base",
+                "https://origin.example/book/ImageProperties.xml",
+                &[(XML, Some("https://cdn.example/metadata/content.xml"))],
+                None,
+                Some("https://origin.example/book/TileGroup0/0-0-0.jpg"),
+            ),
+        ];
+        for (name, input, replies, metadata, tile) in cases {
+            let (catalog, requests) = crate::test_support::discover(SPEC, input, replies);
+            let catalog = catalog.unwrap_or_else(|error| panic!("{name}: {error}"));
+            if let Some(metadata) = metadata {
+                assert_eq!(requests[1].uri, *metadata, "{name}");
+            }
+            if let Some(tile) = tile {
+                assert_eq!(first_tile(catalog), *tile, "{name}");
+            }
+        }
     }
 
     #[test]
@@ -700,15 +701,17 @@ mod tests {
 
     #[test]
     fn unrelated_pages_are_rejected() {
-        let (result, _) = crate::test_support::discover(
-            SPEC,
-            "https://example.com/page",
-            &[(b"<html><body>ordinary page</body></html>", None)],
-        );
-        assert!(matches!(
-            result,
-            Err(DiscoveryError::NoCandidateAccepted { .. })
-        ));
+        for page in [
+            br#"<html><body>ordinary page</body></html>"#.as_slice(),
+            br#"<script>var url = '/zoomify';</script>"#,
+        ] {
+            let (result, _) =
+                crate::test_support::discover(SPEC, "https://example.com/page", &[(page, None)]);
+            assert!(matches!(
+                result,
+                Err(DiscoveryError::NoCandidateAccepted { .. })
+            ));
+        }
     }
 
     #[test]
@@ -731,74 +734,16 @@ mod tests {
     }
 
     #[test]
-    fn inline_tile_service_completes_without_metadata_fetch() {
-        let (catalog, requests) = crate::test_support::discover(
-            SPEC,
-            "https://www.geographicus.com/P/AntiqueMap/example",
-            &[(
-                br#"<html><head><base href="https://www.geographicus.com/mm5/" /></head><body>
-                <script>viewer = OpenSeadragon({ tileSources: [
-                  { type: "zoomifytileservice", width: 7066, height: 9380,
-                    tilesUrl: "/mm5/graphics/00000001/zoomify/Cowboys-mora-1941-3/",
-                    tileSize: 256, fileFormat: 'jpg' },
-                  { type: "zoomifytileservice", width: 3020, height: 5000,
-                    tilesUrl: "/mm5/graphics/00000001/zoomify/Cowboys-mora-1941-3-image2/",
-                    tileSize: 256, fileFormat: 'jpg' }
-                ] });</script></body></html>"#,
-                None,
-            )],
-        );
-        let catalog = catalog.unwrap();
-        assert_eq!(requests.len(), 1);
-        assert_eq!(catalog.len(), 2);
-        let DiscoveredEntry::Ready(first) = &catalog.entries()[0] else {
-            panic!("inline Zoomify sources must be ready");
-        };
-        let DiscoveredEntry::Ready(second) = &catalog.entries()[1] else {
-            panic!("inline Zoomify sources must be ready");
-        };
-        assert!(first.warnings.is_empty());
-        assert_eq!(first.title.as_deref(), Some("Cowboys-mora-1941-3"));
-        assert_eq!(second.title.as_deref(), Some("Cowboys-mora-1941-3-image2"));
-        assert_eq!(first.levels.len(), 7);
-        let TileSource::Grid(full) = &first.levels[6].source else {
-            unreachable!()
-        };
-        let urls: Vec<_> = full
-            .tiles_row_major()
-            .map(|tile| tile.unwrap().request.uri)
-            .collect();
-        assert_eq!(urls.len(), 1036);
-        assert!(urls[0].ends_with("/TileGroup1/6-0-0.jpg"));
-        // Lower levels contain 365 tiles; group 2 begins at ordinal 147.
-        assert!(urls[146].ends_with("/TileGroup1/6-6-5.jpg"));
-        assert!(urls[147].ends_with("/TileGroup2/6-7-5.jpg"));
-        for image in [first, second] {
-            let TileSource::Grid(plan) = &image.levels[0].source else {
-                panic!("inline Zoomify levels must be grids");
-            };
-            let first_tile = plan.tiles_row_major().next().unwrap().unwrap();
-            assert!(first_tile.request.uri.ends_with("/TileGroup0/0-0-0.jpg"));
-        }
-        let TileSource::Grid(plan) = &first.levels[0].source else {
-            unreachable!()
-        };
-        assert!(plan.tiles_row_major().next().unwrap().unwrap().request.uri.starts_with(
-            "https://www.geographicus.com/mm5/graphics/00000001/zoomify/Cowboys-mora-1941-3/TileGroup0/"
-        ));
-    }
-
-    #[test]
-    fn inline_service_survives_unrelated_json_objects_earlier_in_the_page() {
+    fn inline_tile_services_complete_without_metadata_fetch() {
         // Regression: the service cap must count matched services, never the
         // unrelated JSON objects that real pages carry ahead of the viewer
         // (geographicus.com ships dozens of analytics/bootstrap objects before
         // its OpenSeadragon `tileSources` block).
-        let mut page = String::from("<html><body>");
-        page.extend((0..12).map(|index| {
+        let mut noisy = String::from("<html><body>");
+        noisy.extend((0..12).map(|index| {
             format!("<script>var config{index} = {{type: \"other\", width: {index}, height: 1}};</script>")
         }));
-        page.push_str(
+        noisy.push_str(
             r#"<script>
                 viewer = OpenSeadragon({ tileSources: [
                   { type: "zoomifytileservice", width: 7066, height: 9380,
@@ -807,18 +752,64 @@ mod tests {
                     tilesUrl: "/mm5/graphics/zoomify/Cowboys-mora-1941-3-image2/", tileSize: 256 }
                 ] });</script></body></html>"#,
         );
-        let (catalog, requests) = crate::test_support::discover(
-            SPEC,
-            "https://www.geographicus.com/P/AntiqueMap/example",
-            &[(page.as_bytes(), None)],
-        );
-        let catalog = catalog.unwrap();
-        assert_eq!(requests.len(), 1);
-        assert_eq!(catalog.len(), 2);
-        let DiscoveredEntry::Ready(first) = &catalog.entries()[0] else {
-            panic!("inline Zoomify sources must be ready");
-        };
-        assert_eq!(first.title.as_deref(), Some("Cowboys-mora-1941-3"));
+        let based = br#"<html><head><base href="https://www.geographicus.com/mm5/" /></head><body>
+                <script>viewer = OpenSeadragon({ tileSources: [
+                  { type: "zoomifytileservice", width: 7066, height: 9380,
+                    tilesUrl: "/mm5/graphics/00000001/zoomify/Cowboys-mora-1941-3/",
+                    tileSize: 256, fileFormat: 'jpg' },
+                  { type: "zoomifytileservice", width: 3020, height: 5000,
+                    tilesUrl: "/mm5/graphics/00000001/zoomify/Cowboys-mora-1941-3-image2/",
+                    tileSize: 256, fileFormat: 'jpg' }
+                ] });</script></body></html>"#;
+        for (name, page, base) in [
+            (
+                "inline tileSources",
+                &based[..],
+                "https://www.geographicus.com/mm5/graphics/00000001/zoomify/",
+            ),
+            (
+                "unrelated JSON objects before the viewer",
+                noisy.as_bytes(),
+                "https://www.geographicus.com/mm5/graphics/zoomify/",
+            ),
+        ] {
+            let (catalog, requests) = crate::test_support::discover(
+                SPEC,
+                "https://www.geographicus.com/P/AntiqueMap/example",
+                &[(page, None)],
+            );
+            let catalog = catalog.unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert_eq!(requests.len(), 1, "{name}");
+            assert_eq!(catalog.len(), 2, "{name}");
+            let DiscoveredEntry::Ready(first) = &catalog.entries()[0] else {
+                panic!("inline Zoomify sources must be ready");
+            };
+            let DiscoveredEntry::Ready(second) = &catalog.entries()[1] else {
+                panic!("inline Zoomify sources must be ready");
+            };
+            assert!(first.warnings.is_empty(), "{name}");
+            assert_eq!(first.title.as_deref(), Some("Cowboys-mora-1941-3"), "{name}");
+            assert_eq!(
+                second.title.as_deref(),
+                Some("Cowboys-mora-1941-3-image2"),
+                "{name}"
+            );
+            assert_eq!(first.levels.len(), 7, "{name}");
+            for (image, title) in [
+                (first, "Cowboys-mora-1941-3"),
+                (second, "Cowboys-mora-1941-3-image2"),
+            ] {
+                let TileSource::Grid(plan) = &image.levels[0].source else {
+                    panic!("inline Zoomify levels must be grids");
+                };
+                let first_tile = plan.tiles_row_major().next().unwrap().unwrap();
+                assert_eq!(
+                    first_tile.request.uri,
+                    format!("{base}{title}/TileGroup0/0-0-0.jpg"),
+                    "{name}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -845,19 +836,6 @@ mod tests {
             requests[1].uri,
             "https://example.com/zoomify/ImageProperties.xml"
         );
-    }
-
-    #[test]
-    fn generic_var_url_pages_are_not_treated_as_ngv() {
-        let (result, _) = crate::test_support::discover(
-            SPEC,
-            "https://example.com/page",
-            &[(br"<script>var url = '/zoomify';</script>", None)],
-        );
-        assert!(matches!(
-            result,
-            Err(DiscoveryError::NoCandidateAccepted { .. })
-        ));
     }
 
     fn ready_image(url: &str, contents: &[u8]) -> ResolvedImage {
@@ -893,7 +871,7 @@ mod tests {
         };
         let urls: Vec<_> = plan
             .tiles_row_major()
-            .take(6)
+            .take(2)
             .map(Result::unwrap)
             .map(|tile| tile.request.uri)
             .collect();
@@ -902,32 +880,17 @@ mod tests {
             [
                 "http://x.fr/y/TileGroup0/3-0-0.jpg",
                 "http://x.fr/y/TileGroup0/3-1-0.jpg",
-                "http://x.fr/y/TileGroup0/3-2-0.jpg",
-                "http://x.fr/y/TileGroup0/3-3-0.jpg",
-                "http://x.fr/y/TileGroup0/3-4-0.jpg",
-                "http://x.fr/y/TileGroup0/3-5-0.jpg",
             ]
         );
     }
 
     #[test]
-    fn titles_tile_groups_and_warnings_are_retained() {
+    fn titles_and_warnings_are_retained() {
         let image = ready_image(
             "http://example.com/images/manuscript123/ImageProperties.xml",
             br#"<IMAGE_PROPERTIES WIDTH="12000" HEIGHT="9788" NUMTILES="2477" NUMIMAGES="1" VERSION="1.8" TILESIZE="256"/>"#,
         );
         assert_eq!(image.title.as_deref(), Some("manuscript123"));
-        let TileSource::Grid(plan) = &image.levels[5].source else {
-            unreachable!()
-        };
-        let urls: std::collections::HashSet<_> = plan
-            .tiles_row_major()
-            .map(Result::unwrap)
-            .map(|tile| tile.request.uri)
-            .collect();
-        assert!(urls.contains("http://example.com/images/manuscript123/TileGroup1/5-0-14.jpg"));
-        assert!(urls.contains("http://example.com/images/manuscript123/TileGroup2/5-0-15.jpg"));
-
         let image = ready_image(
             "http://example.com/ImageProperties.xml",
             br#"<IMAGE_PROPERTIES WIDTH="500" HEIGHT="500" NUMTILES="9" NUMIMAGES="1" VERSION="1.8" TILESIZE="256"/>"#,

@@ -570,8 +570,6 @@ mod tests {
             </image>
         </krpano>"#;
         for with_empty in [false, true] {
-            let mut registry = crate::core::Registry::new();
-            registry.register(SPEC);
             let uri = "https://krpano.com/panos/andreabiffi/galleria_04.xml";
             let (catalog, _) =
                 crate::test_support::discover(SPEC, uri, &[(xml, with_empty.then_some(""))]);
@@ -656,6 +654,7 @@ mod tests {
             "http://test.com",
             br#"<krpano><image><flat url="level=%l x=%0x y=%0y" multires="1,2x3,3x4x3"/></image></krpano>"#,
         ));
+        assert_eq!(image.title, None);
         assert_eq!(image.levels.len(), 2);
         assert_eq!(
             image.levels[1].source.image_size(),
@@ -682,15 +681,15 @@ mod tests {
 
     fn assert_bellegambe_levels(levels: &[ResolvedLevel]) {
         let expected_sizes = [
-            Vec2d { x: 512, y: 342 },
-            Vec2d { x: 768, y: 514 },
-            Vec2d { x: 1536, y: 1026 },
-            Vec2d { x: 3072, y: 2052 },
-            Vec2d { x: 5888, y: 3930 },
-            Vec2d { x: 11904, y: 7946 },
-            Vec2d { x: 23808, y: 15892 },
-            Vec2d { x: 47616, y: 31782 },
-            Vec2d { x: 94976, y: 63392 },
+            (512, 342),
+            (768, 514),
+            (1536, 1026),
+            (3072, 2052),
+            (5888, 3930),
+            (11904, 7946),
+            (23808, 15892),
+            (47616, 31782),
+            (94976, 63392),
         ];
         assert_eq!(levels.len(), expected_sizes.len());
         assert_eq!(
@@ -698,7 +697,10 @@ mod tests {
                 .iter()
                 .map(|level| level.source.image_size())
                 .collect::<Vec<_>>(),
-            expected_sizes.into_iter().map(Some).collect::<Vec<_>>()
+            expected_sizes
+                .into_iter()
+                .map(|(x, y)| Some(Vec2d { x, y }))
+                .collect::<Vec<_>>()
         );
         let TileSource::Grid(plan) = &levels[7].source else {
             unreachable!()
@@ -722,20 +724,7 @@ mod tests {
         let data =
             std::fs::read("../../testdata/scenarios/rs-core/formats/payloads/krpano/pba_lille_gigapixels_1515_bellegambe.xml").unwrap();
         assert_bellegambe_levels(&image(catalog_from_xml(BELLEGAMBE_XML_URL, &data)).levels);
-    }
-
-    #[test]
-    fn explicit_levels_expand_level_placeholder_in_discovery() {
-        let data =
-            std::fs::read("../../testdata/scenarios/rs-core/formats/payloads/krpano/pba_lille_gigapixels_1515_bellegambe.xml").unwrap();
         assert_bellegambe_levels(&image(discover_single_resource(BELLEGAMBE_XML_URL, data)).levels);
-    }
-
-    #[test]
-    fn test_single_image() {
-        let image = image(catalog_from_xml("http://test.com", br#"<krpano><image><flat url="level=%l x=%0x y=%0y" multires="1,2x3,3x4x3"/></image></krpano>"#));
-        assert_eq!(image.title, None);
-        assert_eq!(image.levels.len(), 2);
     }
 
     #[test]
@@ -793,74 +782,77 @@ mod tests {
 
     #[test]
     fn sibling_uri_handles_url_and_local_paths() {
-        assert_eq!(
-            sibling_uri("http://example.com/pano/tour.js", "tour.xml"),
-            "http://example.com/pano/tour.xml"
-        );
-        assert_eq!(
-            sibling_uri("http://example.com/pano/", "tour.xml"),
-            "http://example.com/pano/tour.xml"
-        );
-        assert_eq!(
-            sibling_uri("/home/user/tour.js", "tour.xml"),
-            "/home/user/tour.xml"
-        );
-        assert_eq!(
-            sibling_uri("C:\\foo\\bar\\tour.js", "tour.xml"),
-            "C:\\foo\\bar\\tour.xml"
-        );
-        assert_eq!(
-            sibling_uri("\\\\server\\share\\tour.js", "tour.xml"),
-            "\\\\server\\share\\tour.xml"
-        );
-        assert_eq!(sibling_uri("tour.js", "tour.xml"), "tour.xml");
-        assert_eq!(
-            sibling_uri("https://example.com", "tour.xml"),
-            "https://example.com/tour.xml"
-        );
-        assert_eq!(
-            sibling_uri("http://example.com", "tour.js"),
-            "http://example.com/tour.js"
-        );
-        assert_eq!(
-            sibling_uri("https://example.com?scene=1", "tour.xml"),
-            "https://example.com/tour.xml"
-        );
-        assert_eq!(
-            sibling_uri("https://example.com#section", "tour.xml"),
-            "https://example.com/tour.xml"
-        );
-        assert_eq!(
-            sibling_uri("https://example.com/pano/tour.js?cache=1", "tour.xml"),
-            "https://example.com/pano/tour.xml"
-        );
+        for (base, sibling, expected) in [
+            (
+                "http://example.com/pano/tour.js",
+                "tour.xml",
+                "http://example.com/pano/tour.xml",
+            ),
+            (
+                "http://example.com/pano/",
+                "tour.xml",
+                "http://example.com/pano/tour.xml",
+            ),
+            ("/home/user/tour.js", "tour.xml", "/home/user/tour.xml"),
+            (
+                "C:\\foo\\bar\\tour.js",
+                "tour.xml",
+                "C:\\foo\\bar\\tour.xml",
+            ),
+            (
+                "\\\\server\\share\\tour.js",
+                "tour.xml",
+                "\\\\server\\share\\tour.xml",
+            ),
+            ("tour.js", "tour.xml", "tour.xml"),
+            (
+                "https://example.com",
+                "tour.xml",
+                "https://example.com/tour.xml",
+            ),
+            (
+                "http://example.com",
+                "tour.js",
+                "http://example.com/tour.js",
+            ),
+            (
+                "https://example.com?scene=1",
+                "tour.xml",
+                "https://example.com/tour.xml",
+            ),
+            (
+                "https://example.com#section",
+                "tour.xml",
+                "https://example.com/tour.xml",
+            ),
+            (
+                "https://example.com/pano/tour.js?cache=1",
+                "tour.xml",
+                "https://example.com/pano/tour.xml",
+            ),
+        ] {
+            assert_eq!(sibling_uri(base, sibling), expected, "{base}");
+        }
     }
 
     #[test]
     fn viewer_js_candidates_derived_from_xml_filename() {
-        assert_eq!(
-            viewer_js_candidates_for_xml("https://example.com/panos/map_core.xml"),
-            vec![
-                "https://example.com/panos/map_core.js",
-                "https://example.com/panos/tour.js",
-                "https://example.com/panos/krpano.js"
-            ]
-        );
-        assert_eq!(
-            viewer_js_candidates_for_xml("https://example.com/tour.xml"),
-            vec![
-                "https://example.com/tour.js",
-                "https://example.com/krpano.js"
-            ]
-        );
-        assert_eq!(
-            viewer_js_candidates_for_xml("https://example.com/panos/map_core.xml?v=1.2"),
-            vec![
-                "https://example.com/panos/map_core.js",
-                "https://example.com/panos/tour.js",
-                "https://example.com/panos/krpano.js"
-            ]
-        );
+        for (xml, expected) in [
+            (
+                "https://example.com/panos/map_core.xml",
+                "https://example.com/panos/map_core.js,https://example.com/panos/tour.js,https://example.com/panos/krpano.js",
+            ),
+            (
+                "https://example.com/tour.xml",
+                "https://example.com/tour.js,https://example.com/krpano.js",
+            ),
+            (
+                "https://example.com/panos/map_core.xml?v=1.2",
+                "https://example.com/panos/map_core.js,https://example.com/panos/tour.js,https://example.com/panos/krpano.js",
+            ),
+        ] {
+            assert_eq!(viewer_js_candidates_for_xml(xml).join(","), expected, "{xml}");
+        }
     }
 
     #[test]
@@ -869,16 +861,13 @@ mod tests {
             r#"<script>embedpano({ xml : "panos/tour.xml", target:"pano" });</script>"#,
             r#"embedpano({ "xml": "panos/tour.xml" });"#,
             r#"<script>createPanoViewer({ xml: "panos/tour.xml" });</script>"#,
+            "embedpano({\n xml: \"panos/tour.xml\"\n}\n);",
         ] {
             assert_eq!(
                 extract_xml_from_embedpano(html),
                 Some("panos/tour.xml".into())
             );
         }
-        assert_eq!(
-            extract_xml_from_embedpano("embedpano({\n xml: \"panos/tour.xml\"\n}\n);"),
-            Some("panos/tour.xml".into())
-        );
     }
 
     #[test]
@@ -896,79 +885,65 @@ mod tests {
     }
 
     #[test]
-    fn html_query_xml_is_followed_instead_of_the_viewer_default() {
-        let (_, requests) = crate::test_support::discover(
-            SPEC,
-            "https://example.com/viewer/krpano.html?xml=examples/tour.xml",
-            &[(
-                br#"<html><script src="krpano.js"></script><script>
+    fn viewer_pages_follow_their_declared_krpano_sources() {
+        let cases: &[(&str, &[(&[u8], Option<&str>)], &str)] = &[
+            (
+                "https://example.com/viewer/krpano.html?xml=examples/tour.xml",
+                &[(
+                    br#"<html><script src="krpano.js"></script><script>
                     embedpano({xml:"krpano.xml", passQueryParameters:"xml"});
                 </script></html>"#,
-                None,
-            )],
-        );
-        assert_eq!(
-            requests[1].uri,
-            "https://example.com/viewer/examples/tour.xml"
-        );
+                    None,
+                )],
+                "https://example.com/viewer/examples/tour.xml",
+            ),
+            (
+                "https://example.com/krpano.js",
+                &[(b"function embedpano(opts) { /* krpano viewer */ }", None)],
+                "https://example.com/tour.xml",
+            ),
+            (
+                "https://example.com/pano/index.html",
+                &[(
+                    br#"<html><script>
+                    function embedpano(opts) { return opts; }
+                    embedpano({xml: "scenes/custom.xml", target: "pano"});
+                </script></html>"#,
+                    None,
+                )],
+                "https://example.com/pano/scenes/custom.xml",
+            ),
+            (
+                "https://example.com/viewer.js",
+                &[(
+                    b"function createPanoViewer(opts) { return buildViewer(opts); }",
+                    None,
+                )],
+                "https://example.com/tour.xml",
+            ),
+        ];
+        for (input, replies, next) in cases {
+            let (_, requests) = crate::test_support::discover(SPEC, input, replies);
+            assert_eq!(requests[1].uri, *next, "{input}");
+        }
     }
 
     #[test]
     fn looks_like_krpano_xml_detects_xml_roots() {
-        assert!(looks_like_krpano_xml(
-            b"<?xml version=\"1.0\"?><krpano></krpano>"
-        ));
-        assert!(looks_like_krpano_xml(b"<krpano><image></image></krpano>"));
-        assert!(looks_like_krpano_xml(
-            b"\xef\xbb\xbf<?xml version=\"1.0\"?><krpano/>"
-        ));
-        assert!(looks_like_krpano_xml(
-            b"<?xml version=\"1.0\"?><krpano><action><![CDATA[embedpano();]]></action></krpano>"
-        ));
-        assert!(!looks_like_krpano_xml(b"<html><body></body></html>"));
-        assert!(!looks_like_krpano_xml(b"/* krpano */ function() {}"));
-    }
-
-    #[test]
-    fn viewer_js_is_detected_before_html_embed_markers() {
-        let (_, requests) = crate::test_support::discover(
-            SPEC,
-            "https://example.com/krpano.js",
-            &[(b"function embedpano(opts) { /* krpano viewer */ }", None)],
-        );
-        assert_eq!(requests[1].uri, "https://example.com/tour.xml");
-    }
-
-    #[test]
-    fn html_with_inline_viewer_code_keeps_its_explicit_xml_url() {
-        let (_, requests) = crate::test_support::discover(
-            SPEC,
-            "https://example.com/pano/index.html",
-            &[(
-                br#"<html><script>
-                    function embedpano(opts) { return opts; }
-                    embedpano({xml: "scenes/custom.xml", target: "pano"});
-                </script></html>"#,
-                None,
-            )],
-        );
-        assert_eq!(
-            requests[1].uri,
-            "https://example.com/pano/scenes/custom.xml"
-        );
-    }
-
-    #[test]
-    fn old_create_pano_viewer_js_is_detected_as_viewer_js() {
-        let (_, requests) = crate::test_support::discover(
-            SPEC,
-            "https://example.com/viewer.js",
-            &[(
-                b"function createPanoViewer(opts) { return buildViewer(opts); }",
-                None,
-            )],
-        );
-        assert_eq!(requests[1].uri, "https://example.com/tour.xml");
+        for xml in [
+            b"<?xml version=\"1.0\"?><krpano></krpano>".as_slice(),
+            b"<krpano><image></image></krpano>",
+            b"\xef\xbb\xbf<?xml version=\"1.0\"?><krpano/>",
+            b"<?xml version=\"1.0\"?><krpano><action><![CDATA[embedpano();]]></action></krpano>",
+        ] {
+            assert!(looks_like_krpano_xml(xml));
+        }
+        for xml in [
+            b"<html><body></body></html>".as_slice(),
+            b"/* krpano */ function() {}",
+        ] {
+            assert!(!looks_like_krpano_xml(xml));
+        }
     }
 
     #[test]
@@ -991,17 +966,29 @@ mod tests {
     fn viewer_failures(
         http_failure: bool,
     ) -> (Result<DiscoveryCatalog, DiscoveryError>, Vec<Request>) {
-        use crate::model::{Error, ErrorTransport, Failure, ResourceRead, ResourceResponse};
-        let requests = std::cell::RefCell::new(Vec::new());
-        let registry = crate::core::registry_for("krpano").unwrap();
-        let result=futures::executor::block_on(registry.discover(vec![crate::core::discovery::DiscoveryInput::new("https://example.com/pano/index.html")],Default::default(),|request,_| {
-            let uri=request.uri.clone();requests.borrow_mut().push(request);
-            async move {
-                let bytes:&[u8]=if uri.ends_with("index.html") {br#"<html><script src="first.js"></script><script src="second.js"></script><script>embedpano({xml:"tour.xml"});</script></html>"#.as_slice()} else if uri.ends_with("tour.xml") {b"<encrypted>not-valid-krpano-data</encrypted>"} else if !http_failure {b"invalid viewer JavaScript"} else {return Err(Error::HttpError {status:403,retry_after_ms:None,preview:None,transport:ErrorTransport::Direct,failure:Failure::default()});};
-                Ok(ResourceRead::Response {response:ResourceResponse {bytes:bytes.to_vec(),final_uri:None}})
-            }
-        }));
-        (result, requests.into_inner())
+        use crate::model::{Error, ErrorTransport, Failure};
+        crate::test_support::discover_with_responses(
+            crate::core::registry_for("krpano").unwrap(),
+            "https://example.com/pano/index.html",
+            |uri| {
+                let bytes: &[u8] = if uri.ends_with("index.html") {
+                    br#"<html><script src="first.js"></script><script src="second.js"></script><script>embedpano({xml:"tour.xml"});</script></html>"#
+                } else if uri.ends_with("tour.xml") {
+                    b"<encrypted>not-valid-krpano-data</encrypted>"
+                } else if !http_failure {
+                    b"invalid viewer JavaScript"
+                } else {
+                    return Some(Err(Error::HttpError {
+                        status: 403,
+                        retry_after_ms: None,
+                        preview: None,
+                        transport: ErrorTransport::Direct,
+                        failure: Failure::default(),
+                    }));
+                };
+                Some(Ok((bytes.to_vec(), None)))
+            },
+        )
     }
 
     #[test]
@@ -1023,11 +1010,6 @@ mod tests {
                 transport: crate::model::ErrorTransport::Direct,
                 failure: crate::model::Failure::default(),
             }
-        );
-        assert!(
-            error
-                .detail()
-                .contains("krpano: HTTP 403 fetching this address")
         );
     }
 

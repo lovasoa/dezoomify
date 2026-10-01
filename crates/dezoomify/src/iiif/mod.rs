@@ -752,22 +752,7 @@ fn parse_unknown_manifest(
 
 #[test]
 fn test_tiles() {
-    let data = br#"{
-      "@context" : "http://iiif.io/api/image/2/context.json",
-      "@id" : "http://www.asmilano.it/fast/iipsrv.fcgi?IIIF=/opt/divenire/files/./tifs/05/36/536765.tif",
-      "protocol" : "http://iiif.io/api/image",
-      "width" : 15001,
-      "height" : 48002,
-      "tiles" : [
-         { "width" : 512, "height" : 512, "scaleFactors" : [ 1, 2, 4, 8, 16, 32, 64, 128 ] }
-      ],
-      "profile" : [
-         "http://iiif.io/api/image/2/level1.json",
-         { "formats" : [ "jpg" ],
-           "qualities" : [ "native","color","gray" ],
-           "supports" : ["regionByPct","sizeByForcedWh","sizeByWh","sizeAboveFull","rotationBy90s","mirroring","gray"] }
-      ]
-    }"#;
+    let data = br#"{"@context": "http://iiif.io/api/image/2/context.json", "@id": "http://www.asmilano.it/fast/iipsrv.fcgi?IIIF=/opt/divenire/files/./tifs/05/36/536765.tif", "protocol": "http://iiif.io/api/image", "width": 15001, "height": 48002, "tiles": [{ "width": 512, "height": 512, "scaleFactors": [1, 2, 4, 8, 16, 32, 64, 128] }], "profile": ["http://iiif.io/api/image/2/level1.json", { "formats": ["jpg"], "qualities": ["native", "color", "gray"], "supports": ["regionByPct", "sizeByForcedWh", "sizeByWh", "sizeAboveFull", "rotationBy90s", "mirroring", "gray"] }]}"#;
     let levels = levels("test.com", data).unwrap();
     let tiles = tile_urls(level_with_scale(&levels, 64));
     assert_eq!(
@@ -783,12 +768,8 @@ fn test_tiles() {
 fn test_tiles_max_area_filter() {
     // Predefined tile size (1024x1024) is over maxArea (262144 = 512x512).
     // See https://github.com/lovasoa/dezoomify-rs/issues/107#issuecomment-862225501
-    let data = br#"{
-      "width" : 1024,
-      "height" : 1024,
-      "tiles" : [{ "width" : 1024, "scaleFactors" : [ 1 ] }],
-      "profile" :  [ { "maxArea": 262144 } ]
-    }"#;
+    let data =
+        br#"{"width": 1024, "height": 1024, "tiles": [{ "width": 1024, "scaleFactors": [1] }], "profile": [{ "maxArea": 262144 }]}"#;
     let levels = levels("http://ophir.dev/info.json", data).unwrap();
     let tiles = tile_urls(level_with_scale(&levels, 1));
     assert_eq!(
@@ -803,74 +784,40 @@ fn test_tiles_max_area_filter() {
 }
 
 #[test]
-fn test_missing_id() {
-    let data = br#"{
-      "width" : 600,
-      "height" : 350
-    }"#;
-    let levels = levels("http://test.com/info.json", data).unwrap();
-    let tiles = tile_urls(level_with_scale(&levels, 1));
-    assert_eq!(
-        tiles,
-        vec![
-            "http://test.com/0,0,512,350/512,350/0/default.jpg",
-            "http://test.com/512,0,88,350/88,350/0/default.jpg"
-        ]
-    );
-}
-
-#[test]
-fn ordinary_query_parameters_follow_the_iiif_tile_path() {
-    let data = br#"{
-      "type": "ImageService3",
-      "width": 512,
-      "height": 512,
-      "tiles": [{ "width": 512, "scaleFactors": [1] }]
-    }"#;
-    let levels = levels("https://example.com/image/info.json?token=secret", data).unwrap();
-    assert_eq!(
-        tile_urls(level_with_scale(&levels, 1)),
-        vec!["https://example.com/image/0,0,512,512/512,512/0/default.jpg?token=secret"]
-    );
-}
-
-#[test]
-fn iiif_query_parameters_keep_the_image_path_inside_the_iiif_value() {
-    let data = br#"{
-      "type": "ImageService3",
-      "id": "https://images.example.test/iipsrv.fcgi?IIIF=/images/item.tif&download",
-      "width": 512,
-      "height": 512,
-      "tiles": [{ "width": 512, "scaleFactors": [1] }]
-    }"#;
-    let levels = levels("https://example.com/info.json", data).unwrap();
-    assert_eq!(
-        tile_urls(level_with_scale(&levels, 1)),
-        vec![
-            "https://images.example.test/iipsrv.fcgi?IIIF=/images/item.tif/0,0,512,512/512,512/0/default.jpg&download"
-        ]
-    );
-}
-
-#[test]
-fn nested_info_urls_do_not_repeat_info_json_in_tile_paths() {
-    let data = br#"{
-      "type": "ImageService3",
-      "width": 512,
-      "height": 512,
-      "tiles": [{ "width": 512, "scaleFactors": [1] }]
-    }"#;
-    let levels = levels(
-        "https://auchinleck.nls.uk/imageserver/iipsrv.fcgi?iiif=/auchinleck/105v.jp2/info.json",
-        data,
-    )
-    .unwrap();
-    assert_eq!(
-        tile_urls(level_with_scale(&levels, 1)),
-        vec![
-            "https://auchinleck.nls.uk/imageserver/iipsrv.fcgi?iiif=/auchinleck/105v.jp2/0,0,512,512/512,512/0/default.jpg"
-        ]
-    );
+fn tile_paths_follow_the_iiif_image_identifier() {
+    let plain =
+        br#"{"type": "ImageService3", "width": 512, "height": 512, "tiles": [{ "width": 512, "scaleFactors": [1] }]}"#;
+    let cases: &[(&str, &[u8], &str)] = &[
+        (
+            // A missing identifier falls back to the request URL.
+            "http://test.com/info.json",
+            br#"{"width": 600, "height": 350}"#,
+            "http://test.com/0,0,512,350/512,350/0/default.jpg,http://test.com/512,0,88,350/88,350/0/default.jpg",
+        ),
+        (
+            "https://example.com/image/info.json?token=secret",
+            plain,
+            "https://example.com/image/0,0,512,512/512,512/0/default.jpg?token=secret",
+        ),
+        (
+            "https://example.com/info.json",
+            br#"{"type": "ImageService3", "id": "https://images.example.test/iipsrv.fcgi?IIIF=/images/item.tif&download", "width": 512, "height": 512, "tiles": [{ "width": 512, "scaleFactors": [1] }]}"#,
+            "https://images.example.test/iipsrv.fcgi?IIIF=/images/item.tif/0,0,512,512/512,512/0/default.jpg&download",
+        ),
+        (
+            "https://auchinleck.nls.uk/imageserver/iipsrv.fcgi?iiif=/auchinleck/105v.jp2/info.json",
+            plain,
+            "https://auchinleck.nls.uk/imageserver/iipsrv.fcgi?iiif=/auchinleck/105v.jp2/0,0,512,512/512,512/0/default.jpg",
+        ),
+    ];
+    for (uri, data, expected) in cases {
+        let levels = levels(uri, data).unwrap();
+        assert_eq!(
+            tile_urls(level_with_scale(&levels, 1)).join(","),
+            *expected,
+            "{uri}"
+        );
+    }
 }
 
 #[test]
@@ -909,18 +856,7 @@ fn test_false_positive() {
 
 #[test]
 fn test_qualities() {
-    let data = br#"{
-        "@context": "http://library.stanford.edu/iiif/image-api/1.1/context.json",
-        "@id": "https://images.britishart.yale.edu/iiif/fd470c3e-ead0-4878-ac97-d63295753f82",
-        "tile_height": 1024,
-        "tile_width": 1024,
-        "width": 5156,
-        "height": 3816,
-        "profile": "http://library.stanford.edu/iiif/image-api/1.1/compliance.html#level0",
-        "qualities": [ "native", "color", "bitonal", "gray", "zorglub" ],
-        "formats" : [ "png", "zorglub" ],
-        "scale_factors": [ 10 ]
-    }"#;
+    let data = br#"{"@context": "http://library.stanford.edu/iiif/image-api/1.1/context.json", "@id": "https://images.britishart.yale.edu/iiif/fd470c3e-ead0-4878-ac97-d63295753f82", "tile_height": 1024, "tile_width": 1024, "width": 5156, "height": 3816, "profile": "http://library.stanford.edu/iiif/image-api/1.1/compliance.html#level0", "qualities": ["native", "color", "bitonal", "gray", "zorglub"], "formats": ["png", "zorglub"], "scale_factors": [10]}"#;
     let levels = levels("test.com", data).unwrap();
     let level = level_with_scale(&levels, 10);
     assert_eq!(level.source.image_size(), Some(Vec2d { x: 516, y: 382 })); // ceil(5156/10), ceil(3816/10)
@@ -952,11 +888,7 @@ fn discovery_requests_metadata_then_returns_normalized_replayable_levels() {
         SPEC,
         "https://example.com/image/info.json",
         &[(
-            br#"{
-          "type":"ImageService3", "id":"https://images.example/item",
-          "width":1000, "height":1500,
-          "tiles":[{"width":512,"height":512,"scaleFactors":[1,2,4]}]
-        }"#,
+            br#"{"type":"ImageService3", "id":"https://images.example/item", "width":1000, "height":1500, "tiles":[{"width":512,"height":512,"scaleFactors":[1,2,4]}]}"#,
             None,
         )],
     );
@@ -988,12 +920,20 @@ fn discovery_requests_metadata_then_returns_normalized_replayable_levels() {
 
 #[test]
 fn page_with_embedded_info_json_url_is_followed() {
-    let (result,requests)=crate::test_support::discover(SPEC,"https://viewer.example/lots/1/images/1",&[(br#"<div id="zoom-viewer"
-                 data-image-url="//img.viewer.example/iiif/Online/2510/br_item.tif/info.json"></div>"#,None),(br#"{
-          "type":"ImageService3", "id":"https://img.viewer.example/iiif/Online/2510/br_item.tif",
-          "width":1000, "height":1500,
-          "tiles":[{"width":256,"height":256,"scaleFactors":[1,2]}]
-        }"#,None)]);
+    let (result, requests) = crate::test_support::discover(
+        SPEC,
+        "https://viewer.example/lots/1/images/1",
+        &[
+            (
+                br#"<div id="zoom-viewer" data-image-url="//img.viewer.example/iiif/Online/2510/br_item.tif/info.json"></div>"#,
+                None,
+            ),
+            (
+                br#"{"type":"ImageService3", "id":"https://img.viewer.example/iiif/Online/2510/br_item.tif", "width":1000, "height":1500, "tiles":[{"width":256,"height":256,"scaleFactors":[1,2]}]}"#,
+                None,
+            ),
+        ],
+    );
     let catalog = result.unwrap();
     assert_eq!(requests.len(), 2);
     assert_eq!(
@@ -1034,11 +974,7 @@ fn direct_info_json_bodies_are_not_harvested() {
         SPEC,
         "https://images.example/item/info.json",
         &[(
-            br#"{
-          "type":"ImageService3", "id":"https://images.example/item/info.json",
-          "width":512, "height":512,
-          "tiles":[{"width":256,"scaleFactors":[1]}]
-        }"#,
+            br#"{"type":"ImageService3", "id":"https://images.example/item/info.json", "width":512, "height":512, "tiles":[{"width":256,"scaleFactors":[1]}]}"#,
             None,
         )],
     );
@@ -1054,57 +990,14 @@ mod manifest_parsing_tests {
     use crate::iiif::manifest_types::ExtractedImageInfo;
 
     fn legacy_manifest_data() -> &'static [u8] {
-        r#"{
-          "@context":"http://iiif.io/api/presentation/2/context.json","@type":"sc:Manifest",
-          "label":"Legacy Book","sequences":[{"canvases":[{"label":"Page 1","images":[{"resource":{
-            "@type":"dctypes:Image","@id":"https://example.com/iiif/page1/full/843,/0/default.jpg",
-            "service":{"@id":"https://example.com/iiif/page1"}
-          }}]}]}]
-        }"#
-        .as_bytes()
+        r#"{"@context":"http://iiif.io/api/presentation/2/context.json","@type":"sc:Manifest","label":"Legacy Book","sequences":[{"canvases":[{"label":"Page 1","images":[{"resource":{"@type":"dctypes:Image","@id":"https://example.com/iiif/page1/full/843,/0/default.jpg","service":{"@id":"https://example.com/iiif/page1"}}}]}]}]}"#
+            .as_bytes()
     }
 
     #[test]
     fn test_parse_simple_manifest_from_bytes() {
         let manifest_url = "https://example.com/manifest.json";
-        let json_data = r#"
-        {
-          "@context": "http://iiif.io/api/presentation/3/context.json",
-          "id": "https://example.org/iiif/book1/manifest",
-          "type": "Manifest",
-          "label": { "en": [ "Book Example" ] },
-          "items": [
-            {
-              "id": "canvas1",
-              "type": "Canvas",
-              "label": { "en": [ "Page 1" ] },
-              "items": [
-                {
-                  "id": "anno_page1",
-                  "type": "AnnotationPage",
-                  "items": [
-                    {
-                      "id": "anno1",
-                      "type": "Annotation",
-                      "motivation": "painting",
-                      "body": {
-                        "id": "http://example.images/page1_img_direct.jpg",
-                        "type": "Image",
-                        "service": [
-                          {
-                            "id": "svc/page1_svc",
-                            "type": "ImageService2"
-                          }
-                        ]
-                      }
-                    }
-                  ]
-                }
-              ]
-            }
-          ]
-        }
-        "#;
+        let json_data = r#"{"@context": "http://iiif.io/api/presentation/3/context.json", "id": "https://example.org/iiif/book1/manifest", "type": "Manifest", "label": {"en": ["Book Example"]}, "items": [{"id": "canvas1", "type": "Canvas", "label": {"en": ["Page 1"]}, "items": [{"id": "anno_page1", "type": "AnnotationPage", "items": [{"id": "anno1", "type": "Annotation", "motivation": "painting", "body": {"id": "http://example.images/page1_img_direct.jpg", "type": "Image", "service": [{"id": "svc/page1_svc", "type": "ImageService2"}]}}]}]}]}"#;
         let infos = parse_iiif_manifest_from_bytes(json_data.as_bytes(), manifest_url).unwrap();
         assert_eq!(infos.len(), 1);
         assert_eq!(
@@ -1122,33 +1015,11 @@ mod manifest_parsing_tests {
     #[test]
     fn test_parse_manifest_with_relative_paths_from_bytes() {
         let manifest_url = "https://library.example.edu/collection/item123/manifest.json";
-        let json_data = r#"
-        {
-          "id": "relative-manifest",
-          "type": "Manifest",
-          "label": { "en": ["RelPath Test"] },
-          "items": [
-            {
-              "id": "c1", "type": "Canvas", "label": {"en": ["C1 Rel Svc"]},
-              "items": [{"id": "ap1", "type": "AnnotationPage", "items": [{"id": "a1", "type": "Annotation", "motivation": "painting",
-                  "body": { "id": "../images/image1.jpg", "type": "Image", "service": [{"id": "../services/image1_svc", "type": "ImageService3"}]}
-              }]}]
-            },
-            {
-              "id": "c2", "type": "Canvas", "label": {"en": ["C2 Abs Path Svc"]},
-              "items": [{"id": "ap2", "type": "AnnotationPage", "items": [{"id": "a2", "type": "Annotation", "motivation": "painting",
-                  "body": { "id": "/img/abs_image2.png", "type": "Image", "service": [{"id": "/iiif-services/abs_image2_svc", "type": "ImageService2"}]}
-              }]}]
-            },
-            {
-              "id": "c3", "type": "Canvas", "label": {"en": ["C3 Direct Rel Img"]},
-              "items": [{"id": "ap3", "type": "AnnotationPage", "items": [{"id": "a3", "type": "Annotation", "motivation": "painting",
-                  "body": { "id": "images/cover_art.jpeg", "type": "Image" }
-              }]}]
-            }
-          ]
-        }
-        "#;
+        let json_data = r#"{"id": "relative-manifest", "type": "Manifest", "label": {"en": ["RelPath Test"]}, "items": [
+          {"id": "c1", "type": "Canvas", "label": {"en": ["C1 Rel Svc"]}, "items": [{"id": "ap1", "type": "AnnotationPage", "items": [{"id": "a1", "type": "Annotation", "motivation": "painting", "body": {"id": "../images/image1.jpg", "type": "Image", "service": [{"id": "../services/image1_svc", "type": "ImageService3"}]}}]}]},
+          {"id": "c2", "type": "Canvas", "label": {"en": ["C2 Abs Path Svc"]}, "items": [{"id": "ap2", "type": "AnnotationPage", "items": [{"id": "a2", "type": "Annotation", "motivation": "painting", "body": {"id": "/img/abs_image2.png", "type": "Image", "service": [{"id": "/iiif-services/abs_image2_svc", "type": "ImageService2"}]}}]}]},
+          {"id": "c3", "type": "Canvas", "label": {"en": ["C3 Direct Rel Img"]}, "items": [{"id": "ap3", "type": "AnnotationPage", "items": [{"id": "a3", "type": "Annotation", "motivation": "painting", "body": {"id": "images/cover_art.jpeg", "type": "Image"}}]}]}
+        ]}"#;
 
         let infos = parse_iiif_manifest_from_bytes(json_data.as_bytes(), manifest_url).unwrap();
         assert_eq!(infos.len(), 3);
@@ -1174,18 +1045,24 @@ mod manifest_parsing_tests {
     }
 
     #[test]
-    fn test_parse_legacy_manifest_from_bytes() {
+    fn legacy_manifests_parse_and_label_images() {
         let infos = parse_iiif_manifest_from_bytes(
             legacy_manifest_data(),
             "https://api.artic.edu/api/v1/artworks/103887/manifest.json",
         )
         .unwrap();
-
         assert_eq!(infos.len(), 1);
         assert_eq!(
             infos[0].image_uri,
             "https://example.com/iiif/page1/info.json"
         );
+
+        let catalog = catalog("https://example.com/manifest.json", legacy_manifest_data()).unwrap();
+        let [DiscoveredEntry::Deferred(image)] = catalog.entries() else {
+            panic!("manifest should produce one deferred image");
+        };
+        assert_eq!(image.uri, "https://example.com/iiif/page1/info.json");
+        assert_eq!(image.title.as_deref(), Some("Legacy Book - Page 1"));
     }
 
     #[test]
@@ -1201,13 +1078,7 @@ mod manifest_parsing_tests {
     #[test]
     fn test_parse_json_not_a_manifest_type() {
         let manifest_url = "https://example.com/not_a_manifest.json";
-        let json_data = r#"{
-          "id": "test", "type": "NotAManifest",
-          "items": [{"id":"canvas","type":"Canvas","items":[{"items":[{
-            "motivation":"painting","body":{"id":"image.jpg","type":"Image",
-            "service":[{"id":"https://example.com/iiif/page1","type":"ImageService3"}]}
-          }]}]}]
-        }"#;
+        let json_data = r#"{"id": "test", "type": "NotAManifest", "items": [{"id":"canvas","type":"Canvas","items":[{"items":[{"motivation":"painting","body":{"id":"image.jpg","type":"Image","service":[{"id":"https://example.com/iiif/page1","type":"ImageService3"}]}}]}]}]}"#;
         // The parser remains lenient, while the application-facing catalog carries the warning.
         // The function itself should succeed if the structure is parsable into Manifest.
         let infos = parse_iiif_manifest_from_bytes(json_data.as_bytes(), manifest_url).unwrap();
@@ -1225,45 +1096,8 @@ mod manifest_parsing_tests {
 
     #[test]
     fn test_images_with_manifest() {
-        let manifest_data = r#"
-        {
-          "@context": "http://iiif.io/api/presentation/3/context.json",
-          "id": "https://example.org/iiif/book1/manifest",
-          "type": "Manifest",
-          "label": { "en": [ "Test Book" ] },
-          "items": [
-            {
-              "id": "canvas1",
-              "type": "Canvas",
-              "label": { "en": [ "Page 1" ] },
-              "items": [
-                {
-                  "id": "anno_page1",
-                  "type": "AnnotationPage",
-                  "items": [
-                    {
-                      "id": "anno1",
-                      "type": "Annotation",
-                      "motivation": "painting",
-                      "body": {
-                        "id": "image.jpg",
-                        "type": "Image",
-                        "service": [
-                          {
-                            "id": "https://example.com/iiif/page1",
-                            "type": "ImageService3"
-                          }
-                        ]
-                      }
-                    }
-                  ]
-                }
-              ]
-            }
-          ]
-        }
-        "#
-        .as_bytes();
+        let manifest_data = r#"{"@context": "http://iiif.io/api/presentation/3/context.json", "id": "https://example.org/iiif/book1/manifest", "type": "Manifest", "label": {"en": ["Test Book"]}, "items": [{"id": "canvas1", "type": "Canvas", "label": {"en": ["Page 1"]}, "items": [{"id": "anno_page1", "type": "AnnotationPage", "items": [{"id": "anno1", "type": "Annotation", "motivation": "painting", "body": {"id": "image.jpg", "type": "Image", "service": [{"id": "https://example.com/iiif/page1", "type": "ImageService3"}]}}]}]}]}"#
+            .as_bytes();
 
         let catalog = catalog("https://example.com/manifest.json", manifest_data).unwrap();
         let [DiscoveredEntry::Deferred(image)] = catalog.entries() else {
@@ -1274,28 +1108,9 @@ mod manifest_parsing_tests {
     }
 
     #[test]
-    fn test_images_with_legacy_manifest() {
-        let catalog = catalog("https://example.com/manifest.json", legacy_manifest_data()).unwrap();
-        let [DiscoveredEntry::Deferred(image)] = catalog.entries() else {
-            panic!("manifest should produce one deferred image");
-        };
-        assert_eq!(image.uri, "https://example.com/iiif/page1/info.json");
-        assert_eq!(image.title.as_deref(), Some("Legacy Book - Page 1"));
-    }
-
-    #[test]
     fn test_images_with_info_json() {
-        let info_data = r#"{
-          "@context" : "http://iiif.io/api/image/2/context.json",
-          "@id" : "https://example.com/image",
-          "protocol" : "http://iiif.io/api/image",
-          "width" : 1000,
-          "height" : 1500,
-          "tiles" : [
-             { "width" : 512, "height" : 512, "scaleFactors" : [ 1, 2, 4 ] }
-          ]
-        }"#
-        .as_bytes();
+        let info_data = r#"{"@context": "http://iiif.io/api/image/2/context.json", "@id": "https://example.com/image", "protocol": "http://iiif.io/api/image", "width": 1000, "height": 1500, "tiles": [{"width": 512, "height": 512, "scaleFactors": [1, 2, 4]}]}"#
+            .as_bytes();
 
         let catalog = catalog("https://example.com/image/info.json", info_data).unwrap();
         let [DiscoveredEntry::Ready(image)] = catalog.entries() else {
@@ -1306,40 +1121,23 @@ mod manifest_parsing_tests {
     }
 
     #[test]
-    fn invalid_image_id_warning_is_attached_to_image() {
-        let info_data = br#"{
-          "@id": "https://www.example.org/image",
-          "width": 1000,
-          "height": 1500,
-          "tiles": [{"width": 512, "scaleFactors": [1]}]
-        }"#;
-        let catalog = catalog("https://example.com/image/info.json", info_data).unwrap();
-        let [DiscoveredEntry::Ready(image)] = catalog.entries() else {
-            panic!("info.json should produce one ready image");
-        };
-        assert_eq!(
-            image.warnings,
-            ["Removed probably invalid IIIF image identifier"]
-        );
-    }
-
-    #[test]
-    fn unknown_profile_warning_is_attached_to_image() {
-        let info_data = br#"{
-          "width": 1000,
-          "height": 1500,
-          "profile": ["https://example.com/unknown-profile"],
-          "tiles": [{"width": 512, "scaleFactors": [1]}]
-        }"#;
-        let catalog = catalog("https://example.com/image/info.json", info_data).unwrap();
-        let [DiscoveredEntry::Ready(image)] = catalog.entries() else {
-            panic!("info.json should produce one ready image");
-        };
-        assert_eq!(
-            image.warnings,
-            [
-                "Unknown IIIF profile reference 'https://example.com/unknown-profile'; using default capabilities"
-            ]
-        );
+    fn info_json_warnings_are_attached_to_the_image() {
+        let cases: &[(&[u8], &str)] = &[
+            (
+                br#"{"@id": "https://www.example.org/image", "width": 1000, "height": 1500, "tiles": [{"width": 512, "scaleFactors": [1]}]}"#,
+                "Removed probably invalid IIIF image identifier",
+            ),
+            (
+                br#"{"width": 1000, "height": 1500, "profile": ["https://example.com/unknown-profile"], "tiles": [{"width": 512, "scaleFactors": [1]}]}"#,
+                "Unknown IIIF profile reference 'https://example.com/unknown-profile'; using default capabilities",
+            ),
+        ];
+        for (info_data, warning) in cases {
+            let catalog = catalog("https://example.com/image/info.json", info_data).unwrap();
+            let [DiscoveredEntry::Ready(image)] = catalog.entries() else {
+                panic!("info.json should produce one ready image");
+            };
+            assert_eq!(image.warnings, [*warning]);
+        }
     }
 }
