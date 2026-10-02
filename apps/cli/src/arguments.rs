@@ -759,6 +759,18 @@ mod tests {
     }
 
     #[test]
+    fn freezoompack_format_selector_uses_the_shared_registry() {
+        let args = parse(&[
+            "--format".to_string(),
+            "FZP".to_string(),
+            "https://example.test/root.xml".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(args.format, "FZP");
+        assert!(known_formats().contains(&"fzp"));
+    }
+
+    #[test]
     fn short_aliases_match_long_flags() {
         let short = parse(&[
             "-w".to_string(),

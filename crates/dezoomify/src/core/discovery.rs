@@ -139,6 +139,11 @@ impl<'a> DiscoveryContext<'a> {
     pub fn resources(&self) -> impl DoubleEndedIterator<Item = DiscoveryResource<'a>> + '_ {
         self.history.iter().filter_map(ReadResource::resource)
     }
+    pub(crate) fn failures(&self) -> impl DoubleEndedIterator<Item = &Error> {
+        self.history
+            .iter()
+            .filter_map(|record| record.response.as_ref().err())
+    }
     pub fn has_visited(&self, uri: &str) -> bool {
         self.history.iter().any(|record| {
             record.request.uri == uri
@@ -691,11 +696,11 @@ impl std::error::Error for DiscoveryError {}
 #[derive(Clone, Debug)]
 struct ReadResource {
     request: Request,
-    response: Option<std::sync::Arc<crate::model::ResourceResponse>>,
+    response: Result<std::sync::Arc<crate::model::ResourceResponse>, Error>,
 }
 impl ReadResource {
     fn resource(&self) -> Option<DiscoveryResource<'_>> {
-        let response = self.response.as_ref()?;
+        let response = self.response.as_ref().ok()?;
         Some(DiscoveryResource {
             final_uri: response
                 .final_uri
@@ -752,7 +757,7 @@ where
             });
             self.responses.borrow_mut().push(ReadResource {
                 request: request.clone(),
-                response: Some(response.clone()),
+                response: Ok(response.clone()),
             });
             self.reads.borrow_mut().push((
                 request,
@@ -811,7 +816,7 @@ where
                         let response = std::sync::Arc::new(response);
                         responses.borrow_mut().push(ReadResource {
                             request: key,
-                            response: Some(response.clone()),
+                            response: Ok(response.clone()),
                         });
                         Ok(Read::Response(response))
                     }
@@ -882,7 +887,7 @@ where
                 Ok(Read::NeedsAccess) => return Ok(None),
                 Ok(Read::Response(response)) => ReadResource {
                     request: request.clone(),
-                    response: Some(response),
+                    response: Ok(response),
                 },
                 Err(DiscoveryError::Host(error))
                     if error.is_terminal()
@@ -897,7 +902,7 @@ where
                     };
                     history.push(ReadResource {
                         request,
-                        response: None,
+                        response: Err(*error),
                     });
                     continue;
                 }
@@ -1079,7 +1084,7 @@ where
             else {
                 continue;
             };
-            let Some(response) = &resource.response else {
+            let Ok(response) = &resource.response else {
                 continue;
             };
             let base = response

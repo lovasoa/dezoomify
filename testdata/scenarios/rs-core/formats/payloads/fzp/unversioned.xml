@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pal>
+   <self role="root" field="." nest="12562_001" name="root">四ッ谷見附橋（12562-001）</self>
+   <datetime>
+       <created>2011/01/08</created>
+   </datetime>
+   <author>
+       <group>null</group>
+       <name>HCL</name>
+       <idcode>00000HCL</idcode>
+   </author>
+   <limit />
+   <content>
+       <image url="." src="12562_001" hint="text/plain" service="FZP" x="0" y="0" width="12283" height="7854" tilewidth="512" tileheight="512" min="0" max="5" />
+       <rect x="0" y="0" width="12283" height="7854" />
+   </content>
+   <category></category>
+   <description></description>
+</pal>

@@ -104,6 +104,74 @@ test("webapp fails honestly on a page without a zoomable signal", async ({ page 
   assert.match(report, /kind=invalid-url/);
 });
 
+const fzpGolden = JSON.parse(fs.readFileSync(
+  path.resolve(__dirname, "../../../../testdata/scenarios/formats/fzp/expected/result.json"), "utf8",
+));
+test("FreezoomPack computed Lime paths discover an index and save browser pixels", async ({ page }) => {
+  await page.route("**/fzp/views/reported.html?*", (route) => route.fulfill({
+    contentType: "text/html",
+    body: `<script src="../limescripts/lime.js"></script><script>lime('reported','xml');</script>`,
+  }));
+  await page.route("**/fzp/limescripts/lime.js", (route) => route.fulfill({
+    contentType: "text/javascript",
+    body: `var lime_depth = limeGetScriptDepth();
+      jime_vars.ResourcePath = lime_depth['dir'] + "resources/";
+      jime_vars.IndexPath = lime_depth['dir'] + "xmls/";`,
+  }));
+  await page.route("**/fzp/xmls/reported.xml", (route) => route.fulfill({
+    contentType: "application/xml",
+    body: `<item title="Reported viewer"><item resource="floor" ext="fzp" label="1/1"/></item>`,
+  }));
+  await page.goto(`${ADDR}/beta/`, { waitUntil: "networkidle" });
+  await page.locator("#dz-url-input").fill(`${ADDR}/fzp/views/reported.html?l=1&amp;n=6`);
+  await page.getByRole("button", { name: /find image/i }).click();
+  await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 60000 });
+  const pending = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Save image" }).click();
+  const decoded = decodePngPixels(fs.readFileSync(await (await pending).path()));
+  const golden = fzpGolden.floor.find((level) => level.level === 0);
+  assert.equal(decoded.width, golden.width);
+  assert.equal(decoded.height, golden.height);
+  golden.gray_pixels.forEach((gray, index) => {
+    assert.deepEqual([...decoded.pixels.subarray(index * decoded.bpp, index * decoded.bpp + 3)], [gray, gray, gray]);
+  });
+});
+for (const [profile, levels] of Object.entries(fzpGolden)) {
+  for (const golden of levels) {
+    test(`FreezoomPack ${profile} level ${golden.level} saves pixels matching native output`, async ({ page }) => {
+      const requests = [];
+      page.on("request", (request) => {
+        const pathname = new URL(request.url()).pathname;
+        if (pathname.startsWith(`/fzp/resources/${profile}/`) && pathname.endsWith(".jpg")) {
+          requests.push(pathname);
+        }
+      });
+      if (golden.level === 1) {
+        // Expose just the stored reduced level to the product's automatic picker.
+        await page.route(`**/fzp/resources/${profile}/root.xml`, async (route) => {
+          const response = await route.fetch();
+          await route.fulfill({ response, body: (await response.text()).replace('min="0"', 'min="1"') });
+        });
+      }
+      await page.goto(`${ADDR}/beta/`, { waitUntil: "networkidle" });
+      await page.locator("#dz-url-input").fill(`${ADDR}/fzp/resources/${profile}/root.xml`);
+      await page.getByRole("button", { name: /find image/i }).click();
+      await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 60000 });
+      assert.deepEqual(requests.sort(), [...golden.requests].sort());
+      const pending = page.waitForEvent("download");
+      await page.getByRole("button", { name: "Save image" }).click();
+      const download = await pending;
+      const bytes = fs.readFileSync(await download.path());
+      const decoded = decodePngPixels(bytes);
+      assert.equal(decoded.width, golden.width);
+      assert.equal(decoded.height, golden.height);
+      golden.gray_pixels.forEach((gray, index) => {
+        assert.deepEqual([...decoded.pixels.subarray(index * decoded.bpp, index * decoded.bpp + 3)], [gray, gray, gray]);
+      });
+    });
+  }
+}
+
 const FAILED_METADATA_URL = "https://fixtures.test/errors/info.json";
 
 test("metadata proxy failure reaches the error UI with its complete typed context", async ({ page }) => {
