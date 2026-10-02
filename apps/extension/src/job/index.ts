@@ -213,7 +213,12 @@ api.runtime.onMessage.addListener((message: unknown) => {
   if (value.type === "dezoomify-test-source-access")
     return (async () => {
       const scan = await bound.scan();
-      const expected = value.scenario === "cookie-session" ? "/protected/artwork.dzi" : "/fetch/";
+      const expected =
+        value.scenario === "cookie-session"
+          ? "/protected/artwork.dzi"
+          : typeof value.scenario === "string" && value.scenario.startsWith("fixtures/")
+            ? `/${value.scenario}/`
+            : "/fetch/";
       const input = scan.inputs.find((candidate) => candidate.url.includes(expected));
       if (!input) throw new Error(`direct scan did not find ${expected}`);
       const url =
