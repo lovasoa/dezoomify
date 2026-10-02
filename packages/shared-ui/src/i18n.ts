@@ -201,16 +201,6 @@ const en = {
   "view.job.progressValue": "{done} done, {active} in progress, {remaining} remaining",
   // Display-only section.
   "view.display.title": "Showing preview – not saved yet",
-  // Desktop handoff uses the ordinary, user-confirmed dezoomify:// link.
-  "view.handoff.send": "Send to desktop app",
-  "view.handoff.sendOrigin": "Send to desktop app ({origin})",
-  "view.handoff.localNote":
-    "Local files stay on this computer. Open the desktop app and choose the file there; nothing is sent.",
-  // Desktop handoff uses the ordinary, user-confirmed dezoomify:// link.
-  "view.handoff.send": "Send to desktop app",
-  "view.handoff.sendOrigin": "Send to desktop app ({origin})",
-  "view.handoff.localNote":
-    "Local files stay on this computer. Open the desktop app and choose the file there; nothing is sent.",
   "view.display.waysTitle": "Ways to save this artwork",
   "view.display.extTitle": "Browser Extension Guide",
   "view.display.extDesc":

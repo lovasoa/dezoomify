@@ -134,16 +134,6 @@ export const de = {
   "view.job.progressValue": "{done} fertig, {active} in Arbeit, {remaining} verbleibend",
   // Display-only section.
   "view.display.title": "Vorschau wird gezeigt, noch nicht gespeichert",
-  // Desktop handoff uses the ordinary, user-confirmed dezoomify:// link.
-  "view.handoff.send": "An die Desktop-App senden",
-  "view.handoff.sendOrigin": "An die Desktop-App senden ({origin})",
-  "view.handoff.localNote":
-    "Lokale Dateien bleiben auf diesem Rechner. Offnen Sie die Desktop-App und wahlen Sie dort die Datei; nichts wird gesendet.",
-  // Desktop handoff uses the ordinary, user-confirmed dezoomify:// link.
-  "view.handoff.send": "An die Desktop-App senden",
-  "view.handoff.sendOrigin": "An die Desktop-App senden ({origin})",
-  "view.handoff.localNote":
-    "Lokale Dateien bleiben auf diesem Rechner. Offnen Sie die Desktop-App und wahlen Sie dort die Datei; nichts wird gesendet.",
   "view.display.waysTitle": "Wege, dieses Kunstwerk zu speichern",
   "view.display.extTitle": "Anleitung zur Browser-Erweiterung",
   "view.display.extDesc":
@@ -267,13 +257,6 @@ export const de = {
     "Dieses Bild von {host} konnte nicht gespeichert werden. Versuchen Sie es erneut.",
   "desktop.invoke.startFallback": "Der Auftrag konnte nicht gestartet werden.",
   "desktop.invoke.partial": "Die Teilbildwahl wurde abgelehnt.",
-  "desktop.link.title": "Eine andere App mochte ein Bild in Dezoomify offnen.",
-  "desktop.link.source": "Quelle: {url}",
-  "desktop.link.prov": "Herkunft: dezoomify://-Link (v{version})",
-  "desktop.link.provHint": "Herkunft: dezoomify://-Link (v{version}) · {hint}",
-  "desktop.link.note": "Nichts lauft, bis Sie bestatigen. Ablehnen bewirkt nichts.",
-  "desktop.link.dismiss": "Verwerfen",
-  "desktop.link.open": "Bild offnen",
   "desktop.rec.missing": "Fehlende Kacheln: {shown}{rest}.",
   "desktop.rec.more": " und {n} weitere",
   "desktop.rec.keep": "Teilbild behalten",

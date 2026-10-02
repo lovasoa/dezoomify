@@ -1,10 +1,8 @@
 use std::sync::Mutex;
 
-use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::commands;
-use crate::deep_link;
 use crate::jobs::JobTable;
 use crate::settings::parse_settings;
 use dezoomify::model::{Error, Failure, OutputFormat};
@@ -289,15 +287,7 @@ async fn get_job_diagnostics(
         .diagnostic_report(&job)
         .ok_or_else(|| crate::jobs::unknown_job(&job))
 }
-#[derive(Serialize, Clone)]
-struct DeepLinkPendingPayload {
-    source_url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    hint: Option<String>,
-    version: u32,
-}
-
-/// Bring the main window forward for a (second-instance) deep link.
+/// Bring the main window forward when a launch focuses this instance.
 fn focus_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
@@ -306,40 +296,12 @@ fn focus_main_window(app: &AppHandle) {
     }
 }
 
-fn handle_deep_link_url(app: &AppHandle, raw: &str) {
-    match deep_link::parse_deep_link(raw) {
-        Ok(link) => {
-            // Validated fields are non-secret by construction: the parser
-            // rejects userinfo and secret keys, enforces v1-2, the 2048-byte
-            // bound, and strict percent-decoding. Only this validated triple
-            // crosses the event boundary, never the raw link.
-            let payload = DeepLinkPendingPayload {
-                source_url: link.source_url.clone(),
-                hint: link.hint.clone(),
-                version: link.version,
-            };
-            let _ = app.emit("dezoomify://deep-link-pending", payload);
-        }
-        Err(err) => {
-            eprintln!("deep-link rejected: {err}");
-        }
-    }
-}
-
-fn handle_deep_link_argv(app: &AppHandle, argv: &[String]) {
-    if let Some(candidate) = deep_link::find_deep_link_in_argv(argv) {
-        handle_deep_link_url(app, &candidate);
-    }
-}
-
 /// Run the desktop shell. Exits the process on failure.
 pub fn run() {
     let builder = tauri::Builder::default()
-        // Single-instance first: second launches forward their argv
-        // (`dezoomify://open?v=..&src=..`) to this window instead of
-        // opening a second window.
-        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            handle_deep_link_argv(app, &argv);
+        // Single-instance: a second launch focuses the existing window
+        // instead of opening a second one.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             focus_main_window(app);
         }))
         .plugin(tauri_plugin_dialog::init())
@@ -357,13 +319,6 @@ pub fn run() {
     builder
         .manage(Mutex::new(JobTable::new()))
         .invoke_handler(desktop_commands!(command_handler))
-        .setup(|app| {
-            // Initial launch may itself carry a deep link
-            // (`dezoomify-desktop dezoomify://open?...`).
-            let argv: Vec<String> = std::env::args().collect();
-            handle_deep_link_argv(app.handle(), &argv);
-            Ok(())
-        })
         .build(tauri::generate_context!())
         .unwrap_or_else(|e| {
             // Startup-only: without a built shell there is no window to
@@ -372,17 +327,5 @@ pub fn run() {
             eprintln!("error: cannot start the Dezoomify desktop shell: {e}");
             std::process::exit(1);
         })
-        .run(|app_handle, event| {
-            // macOS open-url delivery: the OS hands `dezoomify://` URLs to
-            // the running instance instead of spawning a second one.
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
-            if let tauri::RunEvent::Opened { urls } = event {
-                for url in urls {
-                    handle_deep_link_url(app_handle, url.as_str());
-                }
-                focus_main_window(app_handle);
-            }
-            #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-            let _ = (app_handle, event);
-        });
+        .run(|_app_handle, _event| {});
 }

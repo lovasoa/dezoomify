@@ -23,7 +23,7 @@ Extension HTTP responses are classified once at the fetch boundary into the same
 Products choose recovery controls from the typed `kind`, the structured context, and available capabilities. They never parse user-facing text. The algorithm awaits the Host's keep, discard, or retry choice when tiles remain missing, and pending interactions belong to one invocation and close when it retires.
 
 - Transient transport failures retry the same request; address or input failures invite editing the input; output or destination failures invite choosing output.
-- Missing host grants lead to the grant action; no readable browser route leads to a transport change (handoff to extension or native).
+- Missing host grants lead to the grant action; no readable browser route leads to a transport change.
 - Tiles missing after retries enter the partial policy: keep the partial sibling, discard the partial, or a user keep/discard/retry choice.
 
 The website transport transition is automatic for eligible metadata (no per-attempt consent action); see [Browser runtime](browser-runtime.md#request-order).

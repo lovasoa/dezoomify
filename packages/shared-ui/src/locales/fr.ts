@@ -132,16 +132,6 @@ export const fr = {
   "view.job.progressValue": "{done} terminées, {active} en cours, {remaining} restantes",
   // Display-only section.
   "view.display.title": "Apercu affiche, non enregistre",
-  // Desktop handoff uses the ordinary, user-confirmed dezoomify:// link.
-  "view.handoff.send": "Envoyer vers l application de bureau",
-  "view.handoff.sendOrigin": "Envoyer vers l application de bureau ({origin})",
-  "view.handoff.localNote":
-    "Les fichiers locaux restent sur cet ordinateur. Ouvrez l application de bureau et choisissez-y le fichier ; rien n est envoye.",
-  // Desktop handoff uses the ordinary, user-confirmed dezoomify:// link.
-  "view.handoff.send": "Envoyer vers l application de bureau",
-  "view.handoff.sendOrigin": "Envoyer vers l application de bureau ({origin})",
-  "view.handoff.localNote":
-    "Les fichiers locaux restent sur cet ordinateur. Ouvrez l application de bureau et choisissez-y le fichier ; rien n est envoye.",
   "view.display.waysTitle": "Moyens d enregistrer cette oeuvre",
   "view.display.extTitle": "Guide de l extension de navigateur",
   "view.display.extDesc":

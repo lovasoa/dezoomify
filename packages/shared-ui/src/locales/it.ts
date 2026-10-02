@@ -133,11 +133,6 @@ export const it = {
   "view.job.progressValue": "{done} completati, {active} in corso, {remaining} rimanenti",
   // Display-only section.
   "view.display.title": "Anteprima mostrata, non ancora salvata",
-  // Desktop handoff uses the ordinary, user-confirmed dezoomify:// link.
-  "view.handoff.send": "Invia all applicazione desktop",
-  "view.handoff.sendOrigin": "Invia all applicazione desktop ({origin})",
-  "view.handoff.localNote":
-    "I file locali restano su questo computer. Apri l applicazione desktop e scegli li il file; nulla viene inviato.",
   "view.display.waysTitle": "Modi per salvare quest opera",
   "view.display.extTitle": "Guida all estensione del browser",
   "view.display.extDesc":
@@ -219,8 +214,6 @@ export const it = {
     "Queste impostazioni di scaricamento non sono valide. Regolale e riprova.",
   "desktop.output.deniedPick":
     "La destinazione di salvataggio non e stata accettata. Scegli un altro file per continuare.",
-  "desktop.handoff.rejected":
-    "Questo collegamento non si puo aprire da {host}. Prova un altro indirizzo senza dati di accesso.",
   "desktop.output.exists":
     "Esiste gia un file nella destinazione di salvataggio da {host}. Scegli un altro file o conferma la sovrascrittura per continuare.",
   "desktop.output.destDenied":
@@ -258,13 +251,6 @@ export const it = {
   "desktop.save.fallback": "Impossibile salvare questa immagine da {host}. Riprova.",
   "desktop.invoke.startFallback": "Impossibile avviare l attivita.",
   "desktop.invoke.partial": "La scelta di immagine parziale e stata rifiutata.",
-  "desktop.link.title": "Un altra applicazione vuole aprire un immagine in Dezoomify.",
-  "desktop.link.source": "Origine: {url}",
-  "desktop.link.prov": "Provenienza: collegamento dezoomify:// (v{version})",
-  "desktop.link.provHint": "Provenienza: collegamento dezoomify:// (v{version}) · {hint}",
-  "desktop.link.note": "Nulla avviene finche non confermi. Rifiutare non fa nulla.",
-  "desktop.link.dismiss": "Ignora",
-  "desktop.link.open": "Apri l immagine",
   "desktop.rec.missing": "Riquadri mancanti: {shown}{rest}.",
   "desktop.rec.more": " e altri {n}",
   "desktop.rec.keep": "Conserva l immagine parziale",
