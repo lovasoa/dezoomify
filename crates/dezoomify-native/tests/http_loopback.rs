@@ -1,7 +1,6 @@
+use dezoomify::model::Error;
+use dezoomify_fixture_server::NodeServer;
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
-use std::net::TcpListener;
-use std::thread;
 
 use dezoomify_native::http::{fetch, FetchLimits, UserHeaders};
 
@@ -29,23 +28,16 @@ fn response(status_line: &str, headers: &[(&str, &str)], body: &[u8]) -> Vec<u8>
     out
 }
 
-/// Serves one canned response per accepted connection on a fresh loopback
-/// port. Requests are drained before responding. Never re-binds.
-fn serve(responses: Vec<Vec<u8>>) -> (u16, thread::JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
-    let port = listener.local_addr().expect("addr").port();
-    let handle = thread::spawn(move || {
-        for response in responses {
-            let Ok((mut stream, _)) = listener.accept() else {
-                break;
-            };
-            let mut buffer = [0u8; 4096];
-            let _ = stream.read(&mut buffer);
-            let _ = stream.write_all(&response);
-            let _ = stream.flush();
-        }
+/// Node serves one canned response per request on a fresh loopback port.
+fn serve(responses: Vec<Vec<u8>>) -> (u16, NodeServer) {
+    let server = NodeServer::raw("127.0.0.1", move |request| {
+        responses
+            .get(request.id as usize - 1)
+            .expect("unexpected request")
+            .clone()
+            .into()
     });
-    (port, handle)
+    (server.port(), server)
 }
 
 #[test]
@@ -161,12 +153,9 @@ fn reset_connection_fails_after_a_single_attempt() {
 
 #[test]
 fn connection_refused_is_network_error() {
-    // Bind then immediately drop the listener to claim a definitively
-    // closed loopback port.
-    let port = {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-        listener.local_addr().expect("addr").port()
-    };
+    let server = NodeServer::raw("127.0.0.1", |_| Vec::new().into());
+    let port = server.port();
+    drop(server);
     let error = fetch(
         &format!("http://127.0.0.1:{port}/nothing"),
         &BTreeMap::new(),
@@ -182,22 +171,12 @@ fn credentials_never_leave_the_input_origin() {
     // One listener records the request heads it receives.
     let captured: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
         std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-    let port = listener.local_addr().expect("addr").port();
     let sink = std::sync::Arc::clone(&captured);
-    let server = thread::spawn(move || {
-        for _ in 0..2 {
-            let Ok((mut stream, _)) = listener.accept() else {
-                break;
-            };
-            let mut buffer = [0u8; 4096];
-            let n = stream.read(&mut buffer).unwrap_or(0);
-            let head = String::from_utf8_lossy(&buffer[..n]).to_string();
-            let response = response("HTTP/1.1 200 OK", &[("content-type", "text/plain")], b"ok");
-            let _ = stream.write_all(&response);
-            sink.lock().expect("lock").push(head);
-        }
+    let server = NodeServer::raw("127.0.0.1", move |request| {
+        sink.lock().expect("lock").push(request.head);
+        response("HTTP/1.1 200 OK", &[("content-type", "text/plain")], b"ok").into()
     });
+    let port = server.port();
     let mut headers = std::collections::BTreeMap::new();
     headers.insert("Cookie".to_string(), "js_enabled=2".to_string());
     headers.insert("Accept".to_string(), "text/html".to_string());

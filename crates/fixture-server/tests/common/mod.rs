@@ -1,15 +1,14 @@
-//! Shared test support: spawn the server in-process on an ephemeral loopback
-//! port. No sleep-based readiness: the bound address implies listen readiness.
+//! Shared support: Node owns the loopback server and signals readiness over stdio.
 
-use dezoomify_fixture_server::{AppState, RouteTable};
-use std::sync::{Arc, Mutex};
+use dezoomify_fixture_server::NodeServer;
 
 pub struct TestServer {
     pub base: String,
     // Only security tests read the log today; other harnesses share this
     // helper without log assertions.
     #[allow(dead_code)]
-    log: Arc<Mutex<Vec<serde_json::Value>>>,
+    log: std::path::PathBuf,
+    _server: NodeServer,
 }
 
 impl TestServer {
@@ -35,41 +34,25 @@ impl TestServer {
     }
 
     async fn start_inner(static_dir: Option<std::path::PathBuf>) -> Self {
-        let scenarios_dir = Self::scenarios_path("");
-        let routes = RouteTable::load(&scenarios_dir).expect("load routes");
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind");
-        let bound = listener.local_addr().expect("addr");
-        let log = Arc::new(Mutex::new(Vec::new()));
-        let state = AppState {
-            routes: Arc::new(routes),
-            scenarios_dir,
-            static_dir,
-            origin: format!("http://{bound}"),
-            log: Arc::clone(&log),
-            log_path: None,
-        };
-        tokio::spawn(async move {
-            axum::serve(listener, dezoomify_fixture_server::router(state))
-                .await
-                .expect("serve");
-        });
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let log =
+            std::env::temp_dir().join(format!("dz-requests-{}-{id}.jsonl", std::process::id()));
+        let mut args = vec!["--request-log".into(), log.to_string_lossy().into_owned()];
+        if let Some(dir) = static_dir {
+            args.extend(["--static-dir".into(), dir.to_string_lossy().into_owned()]);
+        }
+        let server = NodeServer::fixture(&args);
         TestServer {
-            base: format!("http://{bound}"),
+            base: server.origin.clone(),
             log,
+            _server: server,
         }
     }
 
     #[allow(dead_code)]
     pub fn log_text(&self) -> String {
-        self.log
-            .lock()
-            .expect("log lock")
-            .iter()
-            .map(|v| v.to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
+        std::fs::read_to_string(&self.log).expect("request log")
     }
 
     /// Sends one raw HTTP/1.1 GET over a socket and returns (status, body).
@@ -100,6 +83,7 @@ impl TestServer {
         (status, body)
     }
 
+    #[allow(dead_code)]
     pub fn scenarios_path(rel: &str) -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../testdata/scenarios")

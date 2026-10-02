@@ -62,7 +62,6 @@ sha2 = "0.11"
 sysinfo = "0.39"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net"] }
-axum = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-manual-roots", "json"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-test = "0.3"

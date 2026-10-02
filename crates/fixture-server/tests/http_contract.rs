@@ -1,8 +1,7 @@
 //! HTTP contract tests: exact method/status/headers/body, HEAD semantics,
-//! templating, generators, Arts signing, traversal rejection, and deterministic
-//! startup. Ephemeral loopback ports only; in-process servers need no
-//! readiness sleep (the bound address implies listening); the one spawned
-//! subprocess test polls its address file with a bounded budget.
+//! templating, custom handlers, Arts signing, traversal rejection, and deterministic
+//! startup. Node owns ephemeral loopback ports; its readiness notification
+//! and address file are emitted only after listening.
 
 mod common;
 
@@ -353,6 +352,21 @@ async fn proxy_branch_serves_fixtures() {
     let missing = format!("{}/proxy", srv.base);
     let res = reqwest::get(&missing).await.expect("get");
     assert_eq!(res.status(), 400);
+
+    for (target, status, body) in [
+        ("data:text/plain,plain", 200, "plain"),
+        ("data:text/plain;base64,cGxhaW4=", 200, "plain"),
+        ("data:text/plain;base64,!invalid!", 400, "bad data url"),
+    ] {
+        let res = reqwest::Client::new()
+            .get(format!("{}/proxy", srv.base))
+            .query(&[("url", target)])
+            .send()
+            .await
+            .expect("data request");
+        assert_eq!(res.status(), status);
+        assert_eq!(res.text().await.unwrap(), body);
+    }
 }
 
 #[tokio::test]
@@ -360,7 +374,8 @@ async fn startup_writes_address_after_listening() {
     let dir = std::env::temp_dir().join(format!("dz-addr-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("tmpdir");
     let addr_file = dir.join("server.addr");
-    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_dezoomify-fixture-server"))
+    let mut child = std::process::Command::new("node")
+        .arg(dezoomify_fixture_server::server_script())
         .args([
             "--port",
             "0",

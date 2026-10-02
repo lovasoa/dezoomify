@@ -1,9 +1,6 @@
 {
   "routes": [
     {
-      "generator": {
-        "type": "assembly-tile"
-      },
       "headers": {
         "Content-Type": "image/svg+xml"
       },

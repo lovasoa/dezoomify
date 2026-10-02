@@ -34,10 +34,6 @@
       "status": 200
     },
     {
-      "generator": {
-        "image": "payloads/127.0.0.1/fixtures/pnav/image.jpg",
-        "type": "generic-jpg"
-      },
       "headers": {
         "Content-Type": "image/jpeg"
       },
@@ -48,10 +44,6 @@
       "status": 200
     },
     {
-      "generator": {
-        "image": "payloads/127.0.0.1/stub.jpg",
-        "type": "jpeg-stub"
-      },
       "headers": {
         "Content-Type": "image/jpeg"
       },
@@ -59,13 +51,10 @@
       "method": "GET",
       "path_prefix": "/iiif/",
       "route_id": "127-0-0-1-iiif",
-      "status": 200
+      "status": 200,
+      "payload": "payloads/127.0.0.1/stub.jpg"
     },
     {
-      "generator": {
-        "image": "payloads/127.0.0.1/stub.jpg",
-        "type": "jpeg-stub"
-      },
       "headers": {
         "Content-Type": "image/jpeg"
       },
@@ -73,7 +62,8 @@
       "method": "GET",
       "path_prefix": "/KEimL/",
       "route_id": "iiif-micr-io-KEimL",
-      "status": 200
+      "status": 200,
+      "payload": "payloads/127.0.0.1/stub.jpg"
     }
   ]
 }

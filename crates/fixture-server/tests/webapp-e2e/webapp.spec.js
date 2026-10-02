@@ -8,6 +8,19 @@ const zlib = require("node:zlib");
 const assert = require("node:assert/strict");
 
 const ADDR = process.env.DEZOOMIFY_E2E_ADDR;
+const { formats } = require("../../../../test/support/formats.cjs");
+
+for (const fixture of formats) {
+  test(`website saves ${fixture.name} pixels`, async ({ page }) => {
+    await page.goto(`${ADDR}/beta/`);
+    await page.locator("#dz-url-input").fill(ADDR + fixture.input);
+    await page.getByRole("button", { name: /find image/i }).click();
+    await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 30000 });
+    const pending = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Save image" }).click();
+    assertSavedPyramid(fs.readFileSync(await (await pending).path()), 2);
+  });
+}
 
 function decodePngSize(bytes) {
   assert.equal(bytes.readUInt32BE(0), 0x89504e47 >>> 0, "PNG signature");

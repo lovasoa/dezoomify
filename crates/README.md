@@ -6,7 +6,7 @@ Shared algorithm, platform capabilities, and repository tooling:
   asynchronous dezooming through injected Host methods.
 - [`dezoomify-native/`](dezoomify-native/): native HTTP, cache, codecs.
 - [`dezoomify-wasm/`](dezoomify-wasm/): browser ABI and tile processing entrypoint.
-- [`fixture-server/`](fixture-server/): deterministic local test server.
+- [`fixture-server/`](fixture-server/): corpus readers and adapters for Node test servers.
 - [`xtask/`](xtask/): `cargo xtask`, the repo task runner.
 
 Contributing: dependencies inside `dezoomify` flow algorithm to formats to model;

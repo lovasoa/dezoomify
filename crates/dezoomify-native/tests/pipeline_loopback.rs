@@ -1,7 +1,4 @@
 use std::collections::HashMap;
-use std::io::{Read, Write};
-use std::net::TcpListener;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use dezoomify_fixture_server::{router, AppState, RouteTable};
@@ -830,45 +827,18 @@ fn http_response(status: &str, content_type: &str, body: &[u8]) -> Vec<u8> {
 /// is read per request, so callers bind first, learn the port, then publish
 /// port-dependent bodies (deferred lists need absolute runtime URLs).
 fn serve_shared_map(shared: Arc<Mutex<HashMap<String, Vec<u8>>>>) -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
-    let port = listener.local_addr().expect("addr").port();
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(mut stream) = stream else { break };
-            let shared = Arc::clone(&shared);
-            std::thread::spawn(move || {
-                let mut head = Vec::new();
-                let mut byte = [0u8; 1];
-                while head.len() < 8192 {
-                    let Ok(n) = stream.read(&mut byte) else {
-                        return;
-                    };
-                    if n == 0 {
-                        break;
-                    }
-                    head.extend_from_slice(&byte);
-                    if head.ends_with(b"\r\n\r\n") {
-                        break;
-                    }
-                }
-                let path = String::from_utf8_lossy(&head)
-                    .lines()
-                    .next()
-                    .and_then(|line| line.split_whitespace().nth(1))
-                    .unwrap_or("/")
-                    .to_string();
-                let body = shared
-                    .lock()
-                    .expect("lock")
-                    .get(&path)
-                    .cloned()
-                    .unwrap_or_else(|| http_response("404 Not Found", "text/plain", b"not found"));
-                let _ = stream.write_all(&body);
-                let _ = stream.flush();
-            });
-        }
+    let server = dezoomify_fixture_server::NodeServer::raw("127.0.0.1", move |request| {
+        shared
+            .lock()
+            .expect("lock")
+            .get(&request.path)
+            .cloned()
+            .unwrap_or_else(|| http_response("404 Not Found", "text/plain", b"not found"))
+            .into()
     });
-    format!("http://127.0.0.1:{port}")
+    let origin = server.origin.clone();
+    std::mem::forget(server);
+    origin
 }
 
 fn scenario_payload(name: &str) -> Vec<u8> {

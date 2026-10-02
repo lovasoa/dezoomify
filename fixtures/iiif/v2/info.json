@@ -1,0 +1,6 @@
+{
+  "@context": "http://iiif.io/api/image/2/context.json",
+  "@id": "{{origin}}/fixtures/iiif/v2",
+  "protocol": "http://iiif.io/api/image", "profile": ["http://iiif.io/api/image/2/level2.json"],
+  "width": 512, "height": 512, "tiles": [{"width": 256, "scaleFactors": [1]}]
+}

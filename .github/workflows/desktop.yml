@@ -8,6 +8,8 @@ on:
       - packages/browser-runtime/**
       - packages/wasm-bindings/**
       - testdata/**
+      - fixtures/**
+      - test/**
       - scripts/**
       - installer/**
       - generated/**
@@ -44,6 +46,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
+      - name: Enable fixture symlinks on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.symlinks true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-pnpm
         with:

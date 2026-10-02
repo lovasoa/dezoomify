@@ -85,6 +85,8 @@ development server translate HTTP requests into the same function. Eligibility,
 credential restrictions, redirect checks, limits, and CORS behavior have one
 implementation. See [Browser runtime](browser-runtime.md) and [Security](security.md).
 
+Generated help pages include a copy of the shared UI theme beside their HTML under `/beta/help/`, so their typography, navigation, surfaces, and automatic light and dark colors use the same CSS as the app without depending on repository source URLs.
+
 ## Boundaries
 
 - Products never import each other.
@@ -95,7 +97,4 @@ implementation. See [Browser runtime](browser-runtime.md) and [Security](securit
 - Crossing values derive from Rust declarations. URLs, headers, errors, and geometry retain their exact meaning.
 - Errors carry stable codes and structured context; callers never branch on display text.
 
-Biome rejects product package and sibling-app imports. The architecture test in
-`test/architecture.test.mjs` checks the compiled import inventory of authored
-product code, resolving relative paths at any directory depth. Shared packages
-and the website's deployed proxy entrypoints remain valid dependencies.
+Biome rejects product package and sibling-app imports. Shared packages and the website's deployed proxy entrypoints remain valid dependencies.

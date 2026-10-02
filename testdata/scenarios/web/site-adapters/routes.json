@@ -1,10 +1,6 @@
 {
   "routes": [
     {
-      "generator": {
-        "image": "payloads/fixtures.test/arts/encrypted-tile.b64",
-        "type": "arts-tile"
-      },
       "headers": {
         "Content-Type": "application/octet-stream"
       },

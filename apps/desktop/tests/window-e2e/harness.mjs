@@ -52,7 +52,7 @@ export const APP_BIN = withExe(
 );
 export const FRONTEND_DIST =
   process.env.DEZOOMIFY_WINDOW_E2E_DIST || path.join(REPO_ROOT, "apps/desktop/dist");
-const FIXTURE_SERVER_BIN = withExe(path.join(CARGO_TARGET_DIR, "debug/dezoomify-fixture-server"));
+const FIXTURE_SERVER_SCRIPT = path.join(REPO_ROOT, "test/fixture-server.mjs");
 
 // Fixed loopback port dictated by the embedded devUrl in `tauri.conf.json`.
 export const FRONTEND_PORT = 1420;
@@ -224,22 +224,14 @@ export async function stopWindowApp(app) {
   }
 }
 
-function buildBinary(bin, pkg) {
-  const build = spawnSync("cargo", ["build", "-p", pkg], { cwd: REPO_ROOT, encoding: "utf8" });
-  if (build.status !== 0) throw new Error(`cargo build -p ${pkg} failed:\n${build.stderr}`);
-  if (!existsSync(bin)) throw new Error(`binary missing after build: ${bin}`);
-}
-
-export function ensureFixtureServerBuilt() {
-  buildBinary(FIXTURE_SERVER_BIN, "dezoomify-fixture-server");
-}
-
-// Same binary and flags the `cargo xtask fixtures serve --port 0` path spawns:
+// Same Node server and flags the `cargo xtask fixtures serve --port 0` path spawns:
 // loopback only, kernel-allocated port, address readiness file.
 export async function startFixtureServer(workDir) {
   const addrFile = path.join(workDir, "server.addr");
   const requestLog = path.join(workDir, "requests.log");
-  const proc = spawn(FIXTURE_SERVER_BIN, [
+  const proc = spawn(process.execPath, [
+    FIXTURE_SERVER_SCRIPT,
+    "--parent-stdio",
     "--port",
     "0",
     "--write-address",

@@ -1,67 +1,21 @@
 # Contributing a format
 
-A new format ships five parts: pure core parser, `registry.rs` entry, shared scenario, passing `fixtures verify`, passing `test core --parity`. The pull request pastes the source URL plus capture output and expected output image.
+Implement a pure parser and tile plan in `crates/dezoomify`, then register its
+stable id in `core/registry.rs`. Parsing uses supplied bytes and injected Host
+capabilities, per [Architecture](architecture.md).
 
-## Checklist
+Add a folder under [`fixtures/<format>/<variant>/`](../fixtures/README.md):
+an `input.txt` containing its relative input URL, minimal metadata, and links
+to shared tile images. Static responses use ordinary files. Query protocols use
+a local `server.js` exporting `serve(Request): Response`. Adding the input
+automatically adds a saved-pixel check to each product's matrix.
 
-Complete when all hold in one pull request:
+Distill public metadata into the smallest reproduction that preserves the bug.
+Record the original URL, issue, and license in the fixture README. Retain copied
+copyright notices; real credentials and private URLs never belong in fixtures.
+There is no capture tool, hash registry, or generated expectation to maintain.
 
-- `crates/dezoomify` parses metadata and plans tiles from supplied bytes only (no network, filesystem, clock, or tasks), per [Architecture](architecture.md).
-- `crates/dezoomify/src/core/registry.rs` registers a stable id plus user-visible display name in precedence order.
-- `testdata/scenarios/<id>/` holds `routes.json`, payloads, `scenario.json`, per `testdata/scenarios/README.md`.
-- `cargo xtask fixtures verify` passes.
-- `cargo xtask test core --parity` passes.
-
-## Workflow
-
-### 1. Paste the URL
-
-Find a public viewer page or metadata file showing the format; paste the URL into the PR description. Public pages only: no credentials, signed URLs, or personal data. Public demo keys in fixture URLs are fine; private tokens never commit. See [Security](security.md).
-
-### 2. Capture fixtures
-
-Run the capture helper from the repository root:
-
-```sh
-cargo xtask fixtures capture --url <url> --out <scenario-id>
-```
-
-Pass `--also <url>` per extra metadata resource the parser needs (viewer page plus `info.json`, for example). The helper fetches with plain `curl` (credential-free, bounded redirects and time, per-payload size cap). It saves `routes.json` plus payloads under `testdata/scenarios/<scenario-id>/` and prints a manifest snippet plus next steps.
-
-Capture preserves the source URL and response payload. Routes keep the `Content-Type` response header. Colons in payload paths become `%3A` for Windows checkouts.
-
-After capture, review first:
-
-```sh
-git status --porcelain -- testdata/scenarios
-git diff -- testdata/scenarios/<scenario-id>
-```
-
-Confirm the capture uses public or synthetic inputs and matches the intended format. Insert the printed manifest entries (sorted) into `testdata/scenarios/manifest.json` with accurate `license_provenance`, then run `cargo xtask fixtures verify`. Verification rewrites nothing; fix fixtures until green. Provenance: [Licensing](licensing.md).
-
-### 3. Add the core parser and register it
-
-Implement the format beside neighboring format modules: recognize URL shape and metadata bytes, describe the catalog, plan the tile grid. Pure and deterministic: fixed parsing, no network, stable ordering. Register the stable id in precedence order in `crates/dezoomify/src/core/registry.rs`; cover with unit cases plus the parity suite.
-
-### 4. Save the expected output
-
-Run the native app against loopback fixtures and save the expected output for the PR:
-
-```sh
-cargo xtask fixtures serve --port 0
-dezoomify "<viewer-or-metadata-url>" expected.png
-```
-
-Attach `expected.png` so reviewers compare pixels, not promises. Name produced files with `output` / `save`, never `export` / `download`.
-
-### 5. Verify and open the pull request
-
-From the root:
-
-```sh
-cargo xtask fixtures verify
-cargo xtask test core --parity
-cargo xtask test scenario
-```
-
-The PR holds the pasted URL, capture output, expected image, and checklist. Reviewers check provenance, precedence, and parity before merge. Live checks (`cargo xtask test live --public`) stay advisory, never replacing scenario coverage, per [Testing](testing.md).
+Run `cargo xtask check`, the focused core tests, then `cargo xtask test all`.
+Desktop fixture changes also run the real-window matrix in CI. The PR includes
+the source URL and evidence of the produced pixels. Public live checks remain
+opt-in and advisory.

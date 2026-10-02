@@ -1,11 +1,13 @@
 # Acceptance matrix
 
 Behavior is checked through the shared Rust function, real platform operations,
-and product entry points. Fixture data lives under `testdata/scenarios`; required
+and product entry points. Shared product fixtures live under `fixtures/`; historical regressions under
+`testdata/scenarios`; required
 tests contact no public source websites.
 
 | Behavior | Executable evidence | Lane |
 |---|---|---|
+| Saved pixels for every registered format | Shared `fixtures/` loop in CLI, website, extension and desktop window tests | `test native`, `test web --e2e`, `test extension`, `test desktop --e2e-window` |
 | Format parsing, geometry, exact URLs, headers, processing | Rust format tests, `core_parity.rs`, `discovery_navigation.rs` | `test core` |
 | Image/level precedence, deferred resources, budgets | Direct async discovery and algorithm tests with injected capabilities | `test core` |
 | Bounded acquisition, retry, missing-only retry, cancellation | Direct Host tests and native loopback tests | `test core`, `test native` |
@@ -22,7 +24,7 @@ tests contact no public source websites.
 | Desktop settings, save, cancel, queue, partial, open/reveal, confirmed handoff | Desktop tests and real-window fixture journeys | `test desktop`, `test desktop --e2e-window` |
 | Legacy `/` and new `/beta` routes, fresh WASM, packaged assets | Assembled-site build and website/extension E2E | `build web`, `test all` |
 
-`cargo xtask check` validates formatting, Clippy, TypeScript, architecture,
+`cargo xtask check` validates formatting, Clippy, TypeScript,
 fixtures, content, and generated bindings. `cargo xtask test` runs fast Rust and
 Node tests once. `test all` adds built-WASM and packaged-browser journeys.
 `ci local` also validates portability and dependencies.

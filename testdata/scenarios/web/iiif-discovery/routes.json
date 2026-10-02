@@ -1,10 +1,6 @@
 {
   "routes": [
     {
-      "generator": {
-        "image": "payloads/127.0.0.1/stub.jpg",
-        "type": "jpeg-stub"
-      },
       "headers": {
         "Content-Type": "image/jpeg"
       },
@@ -12,7 +8,8 @@
       "method": "GET",
       "path_prefix": "/fixtures/iiif-private-id/",
       "route_id": "127-0-0-1-fixtures-iiif-private-id",
-      "status": 200
+      "status": 200,
+      "payload": "payloads/127.0.0.1/stub.jpg"
     },
     {
       "headers": {
@@ -26,10 +23,6 @@
       "status": 200
     },
     {
-      "generator": {
-        "image": "payloads/127.0.0.1/stub.jpg",
-        "type": "jpeg-stub"
-      },
       "headers": {
         "Content-Type": "image/jpeg"
       },
@@ -37,13 +30,10 @@
       "method": "GET",
       "path_prefix": "/iiif/",
       "route_id": "127-0-0-1-iiif",
-      "status": 200
+      "status": 200,
+      "payload": "payloads/127.0.0.1/stub.jpg"
     },
     {
-      "generator": {
-        "image": "payloads/127.0.0.1/stub.jpg",
-        "type": "jpeg-stub"
-      },
       "headers": {
         "Content-Type": "image/jpeg"
       },
@@ -51,13 +41,10 @@
       "method": "GET",
       "path_prefix": "/digital/iiif/",
       "route_id": "127-0-0-1-digital-iiif",
-      "status": 200
+      "status": 200,
+      "payload": "payloads/127.0.0.1/stub.jpg"
     },
     {
-      "generator": {
-        "image": "payloads/127.0.0.1/stub.jpg",
-        "type": "jpeg-stub"
-      },
       "headers": {
         "Content-Type": "image/jpeg"
       },
@@ -65,7 +52,8 @@
       "method": "GET",
       "path": "/server.iip",
       "route_id": "127-0-0-1-server-iip",
-      "status": 200
+      "status": 200,
+      "payload": "payloads/127.0.0.1/stub.jpg"
     }
   ]
 }

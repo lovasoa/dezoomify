@@ -1,0 +1,1 @@
+server?type=info&source=image

@@ -1,503 +1,59 @@
-//! Deterministic loopback fixture server.
-//!
-//! Loads every `testdata/scenarios/*/routes.json` plus referenced payloads and
-//! serves them by exact method/host/path match. The directory mirror is the
-//! default route table: a payload at `payloads/{host}{url-path}` serves at
-//! `{host}{url-path}` with a type inferred from its extension, so `routes.json`
-//! only spells out exceptions. No public network access is
-//! possible by construction: unknown resources get a stable fixture-missing
-//! response and there is no passthrough mode.
-
-mod arts;
-mod b64;
-mod routes;
-mod svg;
-
-pub use routes::{RouteTable, ScenarioRoute};
-
-use axum::body::Body;
-use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
-use axum::response::{IntoResponse, Response};
-use axum::routing::any;
-use serde::Deserialize;
-use std::collections::HashMap;
+//! Corpus readers and process adapters for Node test servers.
+mod node;
+pub use node::{server_script, NodeServer, RawRequest, RawResponse};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 
-#[derive(Clone)]
-pub struct AppState {
-    pub routes: Arc<RouteTable>,
-    pub scenarios_dir: PathBuf,
-    pub static_dir: Option<PathBuf>,
-    pub origin: String,
-    pub log: Arc<Mutex<Vec<serde_json::Value>>>,
-    pub log_path: Option<PathBuf>,
+// ---------------------------------------------------------------------------
+// Scenario corpus access: this test-tool crate owns testdata/scenarios.
+// ---------------------------------------------------------------------------
+
+/// The shared scenario corpus under `testdata/scenarios`.
+#[must_use]
+pub fn scenarios_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/scenarios")
 }
 
-#[derive(Debug, Deserialize)]
-struct FetchParams {
-    url: String,
-}
-
-pub fn router(state: AppState) -> axum::Router {
-    axum::Router::new()
-        .route("/fetch", any(handle_fetch))
-        // Test-only discovery path: the outer path can carry the original
-        // fixture URL, so URL-shape discovery sees its real suffix. A `url`
-        // query remains supported and takes precedence for existing tests.
-        .route("/fetch/{*path}", any(handle_fetch_path))
-        .route("/proxy", any(handle_proxy))
-        .route("/", any(handle_static_root))
-        .route("/{*path}", any(handle_static))
-        .with_state(state)
-}
-
-fn cors_headers(map: &mut HeaderMap) {
-    // Test-only deterministic origin emulator on loopback: permissive CORS
-    // is intentional so same-server fixtures can exercise both readable
-    // (`cors-readable`) and denied (`cors-denied-*`) paths per-route.
-    // This is NOT the website metadata CORS proxy (phase 09 owns its
-    // restrictive CORS, SSRF, and credential policy).
-    map.insert("access-control-allow-origin", HeaderValue::from_static("*"));
-    map.insert(
-        "access-control-expose-headers",
-        HeaderValue::from_static("X-Set-Cookie"),
-    );
-}
-
-fn record(state: &AppState, entry: serde_json::Value) {
-    let mut log = state.log.lock().expect("request log lock");
-    log.push(entry);
-    if let Some(path) = &state.log_path {
-        let mut text = String::new();
-        for e in log.iter() {
-            text.push_str(&serde_json::to_string(e).expect("log serialize"));
-            text.push('\n');
+/// Product inputs discovered from ordinary fixture folders, without registration.
+pub fn format_inputs() -> Vec<String> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures");
+    let mut inputs = Vec::new();
+    for format in std::fs::read_dir(root).expect("fixtures").flatten() {
+        if !format.path().is_dir() {
+            continue;
         }
-        let _ = std::fs::write(path, text);
-    }
-}
-
-async fn handle_fetch(
-    State(state): State<AppState>,
-    method: Method,
-    headers: HeaderMap,
-    Query(params): Query<FetchParams>,
-) -> Response {
-    serve_original_url(&state, &method, &headers, &params.url, "fetch").await
-}
-
-async fn handle_fetch_path(
-    State(state): State<AppState>,
-    method: Method,
-    headers: HeaderMap,
-    Path(path): Path<String>,
-    Query(params): Query<HashMap<String, String>>,
-) -> Response {
-    let original = params
-        .get("url")
-        .map(String::as_str)
-        .unwrap_or(path.as_str());
-    serve_original_url(&state, &method, &headers, original, "fetch").await
-}
-
-async fn handle_proxy(
-    State(state): State<AppState>,
-    method: Method,
-    headers: HeaderMap,
-    Query(params): Query<HashMap<String, String>>,
-) -> Response {
-    let Some(target) = params.get("url") else {
-        return text_response(StatusCode::BAD_REQUEST, "missing url", false);
-    };
-    serve_original_url(&state, &method, &headers, target, "proxy").await
-}
-
-async fn serve_original_url(
-    state: &AppState,
-    method: &Method,
-    headers: &HeaderMap,
-    original: &str,
-    via: &str,
-) -> Response {
-    if *method != Method::GET && *method != Method::HEAD {
-        return text_response(StatusCode::METHOD_NOT_ALLOWED, "method not allowed", false);
-    }
-    let head_only = *method == Method::HEAD;
-    if let Some(data) = original.strip_prefix("data:") {
-        // Legacy-compatible data: targets (used by proxy contract checks).
-        let (meta, payload) = data.split_once(',').unwrap_or(("", data));
-        let (mime, is_b64) = match meta.split_once(';') {
-            Some((m, _)) => (if m.is_empty() { "text/plain" } else { m }, true),
-            None => (if meta.is_empty() { "text/plain" } else { meta }, false),
-        };
-        let bytes = if is_b64 {
-            match b64::decode(payload) {
-                Some(b) => b,
-                None => {
-                    record(
-                        state,
-                        serde_json::json!({"via": via, "url": original, "status": 400, "route": "data"}),
-                    );
-                    return text_response(StatusCode::BAD_REQUEST, "bad data url", head_only);
-                }
+        for variant in std::fs::read_dir(format.path())
+            .expect("variants")
+            .flatten()
+        {
+            if let Ok(input) = std::fs::read_to_string(variant.path().join("input.txt")) {
+                inputs.push(format!(
+                    "/fixtures/{}/{}/{}",
+                    format.file_name().to_string_lossy(),
+                    variant.file_name().to_string_lossy(),
+                    input.trim()
+                ));
             }
-        } else {
-            payload.as_bytes().to_vec()
-        };
-        record(
-            state,
-            serde_json::json!({"via": via, "url": original, "status": 200, "route": "data"}),
-        );
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "content-type",
-            HeaderValue::from_str(mime).unwrap_or(HeaderValue::from_static("text/plain")),
-        );
-        return bytes_response(200, headers, bytes, head_only);
-    }
-    let parsed = match url_parts(original) {
-        Some(p) => p,
-        None => {
-            record(
-                state,
-                serde_json::json!({"via": via, "url": original, "status": 400, "route": null}),
-            );
-            return text_response(StatusCode::BAD_REQUEST, "bad url", head_only);
-        }
-    };
-    match state
-        .routes
-        .lookup(&parsed.method_host(), &parsed.path, parsed.query.as_deref())
-    {
-        Some(hit) => {
-            if let Some(cookie) = hit.route.missing_required_cookie(headers) {
-                record(
-                    state,
-                    serde_json::json!({
-                        "via": via,
-                        "url": original,
-                        "status": 403,
-                        "route": hit.route.route_id,
-                        "scenario": hit.scenario,
-                        "auth": "missing-required-cookie",
-                        "cookie_name": cookie,
-                    }),
-                );
-                return text_response(
-                    StatusCode::FORBIDDEN,
-                    &format!("fixture auth required: missing cookie {cookie}"),
-                    head_only,
-                );
-            }
-            if let Some(header) = hit.route.missing_required_header(headers, &state.origin) {
-                record(
-                    state,
-                    serde_json::json!({"via": via, "url": original, "status": 403, "route": hit.route.route_id, "missing_header": header}),
-                );
-                return text_response(
-                    StatusCode::FORBIDDEN,
-                    &format!("fixture requires header {header}"),
-                    head_only,
-                );
-            }
-            let body = match hit.route.render(state, hit.scenario, &parsed) {
-                Ok(b) => b,
-                Err(status) => {
-                    record(
-                        state,
-                        serde_json::json!({"via": via, "url": original, "status": status.as_u16(), "route": hit.route.route_id, "scenario": hit.scenario}),
-                    );
-                    return text_response(status, "fixture error", head_only);
-                }
-            };
-            record(
-                state,
-                serde_json::json!({"via": via, "url": original, "status": hit.route.status, "route": hit.route.route_id, "scenario": hit.scenario}),
-            );
-            bytes_response(hit.route.status, body.headers, body.bytes, head_only)
-        }
-        None => {
-            record(
-                state,
-                serde_json::json!({"via": via, "url": original, "status": 404, "route": null}),
-            );
-            let mut map = HeaderMap::new();
-            cors_headers(&mut map);
-            map.insert("content-type", HeaderValue::from_static("application/json"));
-            let body = serde_json::json!({"error": "fixture-missing", "url": original}).to_string();
-            bytes_response(404, map, body.into_bytes(), head_only)
         }
     }
+    inputs.sort();
+    inputs
 }
 
-pub struct UrlParts {
-    host: String,
-    // 6.1: `port` is parsed and retained so gateway URLs keep an
-    // explicit non-default port through redirects; no route reads it
-    // yet, which is why the field (not the parsing) is exempt.
-    #[allow(dead_code)]
-    port: Option<u16>,
-    path: String,
-    query: Option<String>,
+/// A fresh temp directory for one scenario run, cleared of leftovers.
+#[must_use]
+pub fn temp_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("dezoomify-tests-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    dir
 }
 
-impl UrlParts {
-    fn method_host(&self) -> String {
-        self.host.clone()
-    }
-}
-
-fn url_parts(original: &str) -> Option<UrlParts> {
-    let rest = original
-        .strip_prefix("http://")
-        .or_else(|| original.strip_prefix("https://"))?;
-    let (authority, path_query) = match rest.find('/') {
-        Some(i) => (&rest[..i], &rest[i..]),
-        None => (rest, "/"),
-    };
-    if authority.is_empty() || authority.contains(' ') || authority.contains('@') {
-        return None;
-    }
-    // Match routes on hostname only: ephemeral test ports must not affect
-    // fixture identity (mirrors legacy hostname-based lookup).
-    let (host, port) = match authority.rsplit_once(':') {
-        Some((h, p)) if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) => {
-            (h.to_lowercase(), p.parse::<u16>().ok())
-        }
-        _ => (authority.to_lowercase(), None),
-    };
-    if host.is_empty() {
-        return None;
-    }
-    let (path, query) = match path_query.find('?') {
-        Some(i) => (
-            path_query[..i].to_string(),
-            Some(path_query[i + 1..].to_string()),
-        ),
-        None => (path_query.to_string(), None),
-    };
-    if path.contains("..") {
-        return None;
-    }
-    Some(UrlParts {
-        host,
-        port,
-        path,
-        query,
-    })
-}
-
-pub struct Rendered {
-    pub headers: HeaderMap,
-    pub bytes: Vec<u8>,
-}
-
-fn bytes_response(
-    status: u16,
-    mut headers: HeaderMap,
-    bytes: Vec<u8>,
-    head_only: bool,
-) -> Response {
-    cors_headers(&mut headers);
-    let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-    let body = if head_only {
-        Body::empty()
-    } else {
-        Body::from(bytes)
-    };
-    (status, headers, body).into_response()
-}
-
-fn text_response(status: StatusCode, text: &str, head_only: bool) -> Response {
-    let mut headers = HeaderMap::new();
-    cors_headers(&mut headers);
-    headers.insert("content-type", HeaderValue::from_static("text/plain"));
-    let body = if head_only {
-        Body::empty()
-    } else {
-        Body::from(text.to_string())
-    };
-    (status, headers, body).into_response()
-}
-
-async fn handle_static_root(
-    State(state): State<AppState>,
-    method: Method,
-    headers: HeaderMap,
-    raw_query: axum::extract::RawQuery,
-) -> Response {
-    serve_static(&state, method, String::new(), &headers, raw_query).await
-}
-
-async fn handle_static(
-    State(state): State<AppState>,
-    method: Method,
-    axum::extract::Path(path): axum::extract::Path<String>,
-    headers: HeaderMap,
-    raw_query: axum::extract::RawQuery,
-) -> Response {
-    serve_static(&state, method, path, &headers, raw_query).await
-}
-
-async fn serve_static(
-    state: &AppState,
-    method: Method,
-    path: String,
-    headers: &HeaderMap,
-    raw_query: axum::extract::RawQuery,
-) -> Response {
-    let head_only = method == Method::HEAD;
-    if method != Method::GET && method != Method::HEAD {
-        return text_response(
-            StatusCode::METHOD_NOT_ALLOWED,
-            "method not allowed",
-            head_only,
-        );
-    }
-    // Direct deterministic route serving (loopback only): scenario routes
-    // with host `127.0.0.1` are servable without the `/fetch?url=` gateway,
-    // so URL-shape discovery gates see the true path (`/zoomify/...`,
-    // `/xl/*.imgi`, `/arcgis/MapServer`, ...) and tile URLs derived as
-    // direct `{{origin}}/...` stay fetchable. Host matching ignores the
-    // ephemeral port, mirroring the gateway path. Routes win over static
-    // files (no `dist/` path collides with scenario tile paths); unknown
-    // direct paths fall through to the static handler below, preserving
-    // the stable `not found` contract.
-    {
-        let host = headers
-            .get("host")
-            .and_then(|v| v.to_str().ok())
-            .map(|authority| match authority.rsplit_once(':') {
-                Some((h, p)) if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) => h,
-                _ => authority,
-            })
-            .unwrap_or("127.0.0.1")
-            .to_lowercase();
-        let full_path = if path.is_empty() {
-            "/".to_string()
-        } else {
-            format!("/{path}")
-        };
-        let query = raw_query.0.clone();
-        if let Some(hit) = state.routes.lookup(&host, &full_path, query.as_deref()) {
-            let parts = UrlParts {
-                host: host.clone(),
-                port: None,
-                path: full_path.clone(),
-                query: query.clone(),
-            };
-            if let Some(cookie) = hit.route.missing_required_cookie(headers) {
-                record(
-                    state,
-                    serde_json::json!({
-                        "via": "direct",
-                        "host": host,
-                        "path": full_path,
-                        "query": query,
-                        "status": 403,
-                        "route": hit.route.route_id,
-                        "scenario": hit.scenario,
-                        "auth": "missing-required-cookie",
-                        "cookie_name": cookie,
-                    }),
-                );
-                return text_response(
-                    StatusCode::FORBIDDEN,
-                    &format!("fixture auth required: missing cookie {cookie}"),
-                    head_only,
-                );
-            }
-            if let Some(header) = hit.route.missing_required_header(headers, &state.origin) {
-                record(
-                    state,
-                    serde_json::json!({"via": "direct", "path": full_path, "status": 403, "route": hit.route.route_id, "missing_header": header}),
-                );
-                return text_response(
-                    StatusCode::FORBIDDEN,
-                    &format!("fixture requires header {header}"),
-                    head_only,
-                );
-            }
-            let body = match hit.route.render(state, hit.scenario, &parts) {
-                Ok(b) => b,
-                Err(status) => {
-                    record(
-                        state,
-                        serde_json::json!({"via": "direct", "host": host, "path": full_path, "status": status.as_u16(), "route": hit.route.route_id, "scenario": hit.scenario}),
-                    );
-                    return text_response(status, "fixture error", head_only);
-                }
-            };
-            record(
-                state,
-                serde_json::json!({"via": "direct", "host": host, "path": full_path, "query": query, "status": hit.route.status, "route": hit.route.route_id, "scenario": hit.scenario}),
-            );
-            return bytes_response(hit.route.status, body.headers, body.bytes, head_only);
-        }
-        // Log direct misses like gateway misses so hermetic E2E failures
-        // name the unserved tile URL (the static fallback below still
-        // returns the stable `not found` contract).
-        record(
-            state,
-            serde_json::json!({"via": "direct", "host": host, "path": full_path, "query": query, "status": 404, "route": null}),
-        );
-    }
-    let Some(dir) = &state.static_dir else {
-        return text_response(StatusCode::NOT_FOUND, "not found", head_only);
-    };
-    let rel = if path.is_empty() {
-        "index.html".to_string()
-    } else {
-        path
-    };
-    if rel.contains("..") {
-        return text_response(StatusCode::FORBIDDEN, "forbidden", head_only);
-    }
-    let full = dir.join(&rel);
-    // Canonical-prefix traversal guard (symlink-aware): the joined path must
-    // remain under the canonical static dir.
-    let canonical_dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
-    let canonical_full = full.canonicalize().unwrap_or_else(|_| full.clone());
-    // For not-yet-existing paths canonicalize fails; fall back to lexical
-    // check plus prefix comparison on the joined path.
-    if canonical_full != full && !canonical_full.starts_with(&canonical_dir)
-        || !full.starts_with(dir)
-    {
-        return text_response(StatusCode::FORBIDDEN, "forbidden", head_only);
-    }
-    let full = if full.is_dir() {
-        full.join("index.html")
-    } else {
-        full
-    };
-    match std::fs::read(&full) {
-        Ok(bytes) => {
-            let mut headers = HeaderMap::new();
-            let ctype = content_type(full.extension().and_then(|e| e.to_str()).unwrap_or(""));
-            headers.insert("content-type", HeaderValue::from_str(ctype).expect("ctype"));
-            bytes_response(200, headers, bytes, head_only)
-        }
-        Err(_) => text_response(StatusCode::NOT_FOUND, "not found", head_only),
-    }
-}
-
-fn content_type(ext: &str) -> &'static str {
-    match ext {
-        "html" => "text/html",
-        "js" => "application/javascript",
-        "css" => "text/css",
-        "json" => "application/json",
-        "xml" | "dzi" => "text/xml",
-        "txt" => "text/plain",
-        "svg" => "image/svg+xml",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "wasm" => "application/wasm",
-        "mjs" => "application/javascript",
-        "ico" => "image/x-icon",
-        "yaml" | "yml" => "application/yaml",
-        _ => "application/octet-stream",
-    }
+/// One Node-owned fixture server per Rust test process.
+#[must_use]
+pub fn start() -> String {
+    static SERVER: std::sync::OnceLock<NodeServer> = std::sync::OnceLock::new();
+    SERVER
+        .get_or_init(|| NodeServer::fixture(&[]))
+        .origin
+        .clone()
 }

@@ -4,7 +4,9 @@
 globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
   const api = globalThis.browser ?? globalThis.chrome;
   const origin = globalThis.__DEZOOMIFY_TEST_ORIGIN__;
-  const scenario = globalThis.__DEZOOMIFY_TEST_SCENARIO__;
+  const scenario =
+    new URLSearchParams(location.search).get("scenario") ?? globalThis.__DEZOOMIFY_TEST_SCENARIO__;
+  if (scenario === "idle") return;
   const restartBackground = globalThis.__DEZOOMIFY_TEST_RESTART_BACKGROUND__ === true;
   if (!api?.tabs?.create || typeof origin !== "string" || typeof scenario !== "string") {
     throw new Error("extension E2E driver is not configured");
@@ -17,8 +19,9 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
     if (message?.type === "dezoomify-test-job-complete") signalCompleted();
   });
 
-  const targetUrl =
-    scenario === "observed-zoomify"
+  const targetUrl = scenario.startsWith("fixtures/")
+    ? `${origin}/${scenario}/viewer.html`
+    : scenario === "observed-zoomify"
       ? `${origin}/observed-zoomify/viewer.html`
       : scenario === ""
         ? `${origin}/target.html`

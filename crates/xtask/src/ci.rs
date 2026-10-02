@@ -69,7 +69,7 @@ pub fn test_live(args: &[String]) -> Result<(), String> {
 ///
 /// `cargo xtask ci digest` prints the sha256 over the exact files the
 /// release plan and verification read (Rust lockfile, release inventory,
-/// generated capabilities, fixture manifest), each framed by its relative
+/// generated capabilities), each framed by its relative
 /// path so renames change the digest. CI and `release` do not consume it:
 /// the release workflow gates on a successful CI run for the exact source
 /// sha instead (`.github/workflows/release.yml`), which already pins these
@@ -81,7 +81,6 @@ const DIGEST_FILES: &[&str] = &[
     "release/targets.toml",
     "generated/release-capabilities.json",
     "generated/desktop-capabilities.json",
-    "testdata/scenarios/manifest.json",
 ];
 
 pub fn digest(args: &[String]) -> Result<(), String> {

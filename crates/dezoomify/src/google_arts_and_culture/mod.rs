@@ -25,12 +25,21 @@ fn is_google_arts_url(uri: &str) -> bool {
 }
 
 fn parse_page(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+    Ok(ParsedResource::Follow(Request::new(
+        page_info(resource)?.tile_info_url(),
+    )))
+}
+
+fn page_info(resource: DiscoveryResource<'_>) -> Result<PageInfo, DiscoveryError> {
     let source = std::str::from_utf8(resource.bytes())
         .map_err(|error| DiscoveryError::InvalidMetadata(error.to_string()))?;
-    let page = source
+    let mut page = source
         .parse::<PageInfo>()
         .map_err(|error| DiscoveryError::InvalidMetadata(error.to_string()))?;
-    Ok(ParsedResource::Follow(Request::new(page.tile_info_url())))
+    // The viewer supplies a protocol-relative URL; resolve its scheme from
+    // the actual page rather than forcing HTTPS on HTTP image servers.
+    page.base_url = crate::core::resolve_relative(resource.final_uri(), &page.base_url[6..]);
+    Ok(page)
 }
 
 fn parse_tile_information(
@@ -39,9 +48,7 @@ fn parse_tile_information(
     let page = resource
         .context()
         .resources()
-        .map(DiscoveryResource::bytes)
-        .filter_map(|bytes| std::str::from_utf8(bytes).ok())
-        .find_map(|source| source.parse::<PageInfo>().ok())
+        .find_map(|resource| page_info(resource).ok())
         .map(Arc::new)
         .ok_or_else(|| {
             DiscoveryError::InvalidMetadata("Google Arts page metadata is missing".into())

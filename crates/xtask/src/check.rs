@@ -36,7 +36,6 @@ pub fn run(args: &[String]) -> Result<(), String> {
     ])?;
     run_biome()?;
     run_typecheck()?;
-    super::fixtures::verify(&[])?;
     super::style::verify(&[])?;
     super::content::verify(&[])?;
     let status = std::process::Command::new("node")

@@ -24,8 +24,7 @@
    "host": "fixtures.test",
    "path_regex": "^/arts/gap/path=x1-y0-z0-t[^/]+$",
    "status": 200,
-   "headers": {"Content-Type": "application/octet-stream"},
-   "generator": {"type": "arts-signed-tile", "image": "payloads/fixtures.test/arts/padded-edge-tile.bin"}
+   "headers": {"Content-Type": "application/octet-stream"}
   },
   {
    "route_id": "fixtures-test-arts-gap-signed-tile",
@@ -33,8 +32,7 @@
    "host": "fixtures.test",
    "path_regex": "^/arts/gap/path=x[0-9]+-y[0-9]+-z[0-9]+-t[^/]+$",
    "status": 200,
-   "headers": {"Content-Type": "application/octet-stream"},
-   "generator": {"type": "arts-signed-tile", "image": "payloads/fixtures.test/arts/encrypted-tile.bin"}
+   "headers": {"Content-Type": "application/octet-stream"}
   }
  ]
 }

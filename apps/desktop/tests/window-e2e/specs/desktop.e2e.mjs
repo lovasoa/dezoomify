@@ -8,12 +8,13 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { after, afterEach, before, describe, it } from "node:test";
 import { Builder, By } from "selenium-webdriver";
+import { formats } from "../../../../../test/support/formats.cjs";
+import { assertSavedPyramid } from "../../../../../test/support/png.mjs";
 import {
   closeFrontendServer,
   createRunDirs,
   deepLinkArgv,
   deliverDeepLink,
-  ensureFixtureServerBuilt,
   gatewayInput,
   laneAppEnv,
   outputFiles,
@@ -25,7 +26,6 @@ import {
   stopWindowApp,
   WEBDRIVER_URL,
 } from "../harness.mjs";
-import { assertSavedPyramid } from "../png-assert.mjs";
 
 const GATEWAY_DZI = "https://fixtures.test/cli/pyramid.dzi";
 // Two tiles answer 429 with Retry-After, so the job stays running through
@@ -186,7 +186,6 @@ describe("Dezoomify desktop window", () => {
       process.env.DEZOOMIFY_WINDOW_E2E_OUTPUT = runDirs.output;
       // The deep-link forwarder inherits the isolated profile too.
       Object.assign(process.env, laneAppEnv(runDirs.home));
-      ensureFixtureServerBuilt();
       fixture = await startFixtureServer(runDirs.root);
       process.env.DEZOOMIFY_WINDOW_E2E_BASE = fixture.base;
       // The debug shell loads its embedded devUrl, so the frontend server must
@@ -240,6 +239,26 @@ describe("Dezoomify desktop window", () => {
     assert.ok(!outputs[0].includes(".partial."), "a complete save is not a partial sibling");
     assertSavedPyramid(readFileSync(outputs[0]));
   });
+
+  for (const fixtureInput of formats) {
+    it(`saves ${fixtureInput.name} pixels`, async () => {
+      clearOutput();
+      await submitUrl(driver, fixture.base + fixtureInput.input);
+      await waitFor(
+        driver,
+        async () => {
+          const state = await snapshot(driver);
+          if (state.error) throw new Error(errorDetail(state));
+          return state.completed;
+        },
+        60000,
+        fixtureInput.name,
+      );
+      const outputs = outputFiles(runOutputDir());
+      assert.equal(outputs.length, 1);
+      assertSavedPyramid(readFileSync(outputs[0]), 2);
+    });
+  }
 
   it("cancelling a job leaves no output", async () => {
     clearOutput();

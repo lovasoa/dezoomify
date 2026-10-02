@@ -12,7 +12,7 @@ graphical apps; `packages/browser-runtime` integrates it with the browser.
 Run from the repository root:
 
 ```sh
-cargo xtask check          # fmt + clippy + Biome + fixture/binding artifact validation
+cargo xtask check          # fmt + clippy + Biome + binding artifact validation
 cargo xtask test           # one Rust workspace run + one combined Node unit run
 cargo xtask test <target>  # core|bindings|wasm|browser|ui|web|native|desktop|extension|scenario|all
 cargo xtask build <target> # wasm|web|cli|desktop|extension
@@ -26,7 +26,12 @@ compilation. Use `--profile dev-debug` only when a diagnosis needs symbols.
 
 - `cargo xtask test live --public` is the only command that contacts real
   websites; it is opt-in and advisory.
-- Node 24 is the minimum supported Node version.
+- Node 24.15.0 is the minimum supported Node version.
+- Node is the only runtime for repository-authored HTTP servers, including
+  development, fixtures, and transport tests. Rust tests launch Node; they never
+  bind HTTP listeners. The third-party desktop WebDriver remains supported.
+- The fixture server is format-agnostic. Dynamic fixture behavior lives beside
+  the fixture in `server.js`, exporting `serve(Request): Response`.
 - Iterate with `check` plus bare `test`, run the narrowest focused lane after
   each change, and finish with `test all` plus `cargo xtask ci local`.
 - Full grammar: `cargo xtask --help`, [`docs/development.md`](docs/development.md),
@@ -57,8 +62,7 @@ compilation. Use `--profile dev-debug` only when a diagnosis needs symbols.
   only injected Host capabilities. Platform I/O, clocks, codecs, and task ownership
   belong to Hosts. Products never import each other. Shared UI never touches host
   globals. Browser application modules compose UI and Host; transport/image modules
-  receive callbacks. Biome enforces scoped import rules; add architecture tests for
-  mechanically enforceable boundaries.
+  receive callbacks. Biome and Clippy enforce scoped import and Host capability rules.
 - **Contracts:** cross-language types are defined once in `crates/dezoomify/src/model.rs`;
   `packages/wasm-bindings` is emitted by the real WASM build via
   `cargo xtask bindings generate` and never hand-edited. Browser boundary

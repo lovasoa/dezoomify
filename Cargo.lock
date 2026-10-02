@@ -1086,10 +1086,10 @@ dependencies = [
 name = "dezoomify-cli"
 version = "0.0.0"
 dependencies = [
- "axum",
  "dezoomify",
  "dezoomify-fixture-server",
  "dezoomify-native",
+ "image",
  "serde_json",
  "tokio",
 ]
@@ -1116,12 +1116,8 @@ dependencies = [
 name = "dezoomify-fixture-server"
 version = "0.1.0"
 dependencies = [
- "aes",
- "axum",
  "base64 0.23.1",
- "cbc",
  "hmac",
- "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -1133,7 +1129,6 @@ dependencies = [
 name = "dezoomify-native"
 version = "1.0.0"
 dependencies = [
- "axum",
  "criterion",
  "dezoomify",
  "dezoomify-fixture-server",

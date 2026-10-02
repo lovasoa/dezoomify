@@ -17,36 +17,16 @@ if (site.status !== 0) {
   throw new Error("failed to build the site (scripts/build-site.mjs)");
 }
 
-const targetDir = JSON.parse(
-  spawnSync("cargo", ["metadata", "--format-version", "1", "--no-deps"], {
-    cwd: root,
-    encoding: "utf8",
-  }).stdout,
-).target_directory;
-const bin = path.join(
-  targetDir,
-  "debug",
-  `dezoomify-fixture-server${process.platform === "win32" ? ".exe" : ""}`,
-);
-// Always enter through Cargo so changed sources or dependencies rebuild.
-const serverBuild = spawnSync("cargo", ["build", "-p", "dezoomify-fixture-server"], {
-  cwd: root,
-  encoding: "utf8",
-});
-if (serverBuild.status !== 0) {
-  process.stderr.write(serverBuild.stdout ?? "");
-  process.stderr.write(serverBuild.stderr ?? "");
-  throw new Error("failed to build fixture server");
-}
-
 const child = spawn(
-  bin,
+  process.execPath,
   [
+    path.join(root, "test/fixture-server.mjs"),
+    "--parent-stdio",
     "--port", "0",
     "--scenarios-dir", path.join(root, "testdata", "scenarios"),
     "--static-dir", path.join(root, "dist"),
   ],
-  { stdio: ["ignore", "inherit", "pipe"] },
+  { stdio: ["pipe", "inherit", "pipe"] },
 );
 
 let shuttingDown = false;

@@ -1,0 +1,16 @@
+<Capabilities xmlns="http://www.opengis.net/wmts/1.0" xmlns:ows="http://www.opengis.net/ows/1.1">
+  <Contents>
+    <Layer>
+      <ows:Identifier>image</ows:Identifier>
+      <ows:BoundingBox crs="urn:ogc:def:crs:EPSG::3857"><ows:LowerCorner>0 1</ows:LowerCorner><ows:UpperCorner>511 512</ows:UpperCorner></ows:BoundingBox>
+      <Style isDefault="true"><ows:Identifier>default</ows:Identifier></Style>
+      <ResourceURL format="image/jpeg" resourceType="tile" template="{{origin}}/fixtures/wmts/basic/tiles/{TileCol}-{TileRow}.jpg" />
+    </Layer>
+    <TileMatrixSet>
+      <ows:Identifier>EPSG3857</ows:Identifier><ows:SupportedCRS>urn:ogc:def:crs:EPSG::3857</ows:SupportedCRS>
+      <TileMatrix><ows:Identifier>0</ows:Identifier><ScaleDenominator>3571.4285714285716</ScaleDenominator><TopLeftCorner>0 512</TopLeftCorner>
+        <TileWidth>256</TileWidth><TileHeight>256</TileHeight><MatrixWidth>2</MatrixWidth><MatrixHeight>2</MatrixHeight>
+      </TileMatrix>
+    </TileMatrixSet>
+  </Contents>
+</Capabilities>
