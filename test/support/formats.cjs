@@ -3,6 +3,7 @@ const path = require("node:path");
 
 const root = path.resolve(__dirname, "../..");
 const formats = globSync("fixtures/*/*/input.txt", { cwd: root })
+  .map((file) => file.split(path.sep).join("/"))
   .sort()
   .map((file) => ({
     name: file.slice(9, -10),

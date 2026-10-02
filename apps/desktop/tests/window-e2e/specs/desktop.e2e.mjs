@@ -236,12 +236,13 @@ describe("Dezoomify desktop window", () => {
         driver,
         async () => {
           const state = await snapshot(driver);
-          if (state.error) throw new Error(errorDetail(state));
-          return state.completed;
+          return state.completed || state.error;
         },
         60000,
         fixtureInput.name,
       );
+      const terminal = await snapshot(driver);
+      assert.equal(terminal.error, false, errorDetail(terminal));
       const outputs = outputFiles(runOutputDir());
       assert.equal(outputs.length, 1);
       assertSavedPyramid(readFileSync(outputs[0]), 2);
