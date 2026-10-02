@@ -625,8 +625,6 @@ pub enum Error {
     InvalidUrl,
     #[error("the output settings are not usable{}", .0.suffix())]
     InvalidSettings(Failure),
-    #[error("the handoff was rejected{}", .0.suffix())]
-    HandoffRejected(Failure),
     #[error("the app could not register the request{}", .0.suffix())]
     RegistrationFailed(Failure),
 
@@ -772,7 +770,6 @@ impl Error {
             Self::ChoiceFailed { .. } => "choice-failed",
             Self::InvalidUrl => "invalid-url",
             Self::InvalidSettings { .. } => "invalid-settings",
-            Self::HandoffRejected { .. } => "handoff-rejected",
             Self::RegistrationFailed { .. } => "registration-failed",
             Self::Internal { .. } => "internal",
             Self::ShellLock => "shell-lock",

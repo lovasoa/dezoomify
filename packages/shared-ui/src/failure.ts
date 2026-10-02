@@ -72,7 +72,6 @@ const COPY = {
   "choice-failed": "desktop.choice.failed",
   "invalid-url": "desktop.url.invalid",
   "invalid-settings": "desktop.settings.unusable",
-  "handoff-rejected": "desktop.internal.error",
   "registration-failed": "desktop.internal.error",
   internal: "desktop.internal.error",
   "shell-lock": "desktop.internal.error",
