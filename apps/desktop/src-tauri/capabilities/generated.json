@@ -54,7 +54,6 @@
       "iiif-dir"
     ],
     "eventChannels": [
-      "dezoomify://deep-link-pending",
       "dezoomify://partial",
       "dezoomify://progress",
       "dezoomify://registered"
@@ -65,12 +64,6 @@
       "enabled": false,
       "httpsOnly": true,
       "requiresUserConfirm": true
-    },
-    "deepLink": {
-      "name": "dezoomify",
-      "schemes": [
-        "dezoomify"
-      ]
     }
   }
 }

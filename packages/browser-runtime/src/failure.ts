@@ -1,44 +1,11 @@
 // Structured failures shared by browser operations. Hosts throw plain
 // objects matching the generated `Error` shapes: serde round-trips them
-// across the Rust/TypeScript boundary unchanged.
-import type { BlockedReason, Error as JobError } from "@dezoomify/wasm-bindings";
-import { isJobError } from "../../shared-ui/src/failure.ts";
+// across the Rust/TypeScript boundary unchanged. The closed-enum vocabulary
+// lives beside its validation in the shared UI's failure module.
+import type { Error as JobError } from "@dezoomify/wasm-bindings";
+import { blockedReason, isJobError } from "../../shared-ui/src/failure.ts";
 
-export { isJobError };
-
-export function blockedReason(value: unknown): BlockedReason | undefined {
-  switch (value) {
-    case "access-required":
-    case "blocked-ipv4":
-    case "blocked-ipv6":
-    case "cancelled":
-    case "content-type":
-    case "dns-rebinding":
-    case "dns-rebinding-v6":
-    case "forbidden":
-    case "invalid-url":
-    case "limit-exceeded":
-    case "loopback-host":
-    case "malformed":
-    case "malformed-body":
-    case "method":
-    case "network":
-    case "non-standard-port":
-    case "origin":
-    case "private-host":
-    case "protocol-version":
-    case "redirect-limit":
-    case "redirect-target":
-    case "scheme":
-    case "signed-query":
-    case "source-document-lost":
-    case "throttled":
-    case "userinfo":
-      return value;
-    default:
-      return undefined;
-  }
-}
+export { blockedReason, isJobError };
 
 /** Typed tile failure with its diagnostic cause retained in `detail`.
  * Already-typed causes pass through unchanged; decoding and processing

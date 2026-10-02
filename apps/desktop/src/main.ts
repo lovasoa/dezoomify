@@ -20,7 +20,6 @@ import {
   isJobError,
   isValidInputUrl,
   loadHistory as loadHistoryStore,
-  openConfirmModal,
   PartialDecisionActions,
   type Presentation,
   presentFailure,
@@ -36,8 +35,6 @@ import {
   t,
   toHistoryEntry,
   trimTechnical,
-  type ValidatedDeepLink,
-  validateDeepLinkPayload,
 } from "@dezoomify/shared-ui";
 import type {
   Error as JobError,
@@ -49,7 +46,6 @@ import type {
 import { createElement } from "react";
 import {
   invokeNative,
-  listenDeepLinks,
   type NativeInvocation,
   openExternalLink,
   readNativeDiagnostics,
@@ -71,11 +67,6 @@ const root = typeof document !== "undefined" ? document.getElementById("root") :
 const DESKTOP_DOCS_BASE = "https://dezoomify.ophir.dev";
 
 const REQUEST_TIMEOUT_MS = 30000;
-
-void listenDeepLinks((payload) => {
-  const validated = validateDeepLinkPayload(payload);
-  if (validated) showDeepLinkConfirm(validated);
-}).catch(() => {});
 
 function newAttempt() {
   return {
@@ -716,25 +707,6 @@ function handleOpenExternalLink(url: string): void {
   );
 }
 
-function showDeepLinkConfirm(info: ValidatedDeepLink): void {
-  if (typeof document === "undefined") return;
-  void openConfirmModal(document, {
-    id: "dz-deep-link-confirm",
-    title: t("desktop.link.title"),
-    subtitle: t("desktop.link.source", { url: info.sourceUrl }),
-    bodyLines: [
-      info.hint
-        ? t("desktop.link.provHint", { version: info.version, hint: info.hint })
-        : t("desktop.link.prov", { version: info.version }),
-      t("desktop.link.note"),
-    ],
-    confirmLabel: t("desktop.link.open"),
-    declineLabel: t("desktop.link.dismiss"),
-  }).then((confirmed) => {
-    if (confirmed) handleSubmitUrl(info.sourceUrl);
-  });
-}
-
 function initInitialUrl(): void {
   const prefilled = readInitialUrl(globalThis.location);
   if (prefilled) currentAttempt.viewCtx.initialUrl = prefilled;
@@ -1009,4 +981,4 @@ function getCurrentJobId(): string | null {
   return currentAttempt.activeHandle?.id ?? null;
 }
 
-export { getCurrentJobId, showDeepLinkConfirm, update, validateDeepLinkPayload };
+export { getCurrentJobId, update };

@@ -17,12 +17,13 @@ import {
   suggestedNameFor,
 } from "@dezoomify/shared-ui";
 import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.ts";
-import { createProxyTransport, PROXY_METADATA_MAX_BYTES } from "./proxyTransport.ts";
+import { createProxyTransport } from "./proxyTransport.ts";
+import { PROXY_MAX_BYTES } from "./server/security.ts";
 
 const preview = createPreviewControls();
 const proxyTransport = createProxyTransport(fetch, {
   protocolVersion: 1,
-  maxBytes: PROXY_METADATA_MAX_BYTES,
+  maxBytes: PROXY_MAX_BYTES,
 });
 const memory = new Map<string, string>();
 const historyStore = {

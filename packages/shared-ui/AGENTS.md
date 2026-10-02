@@ -38,7 +38,7 @@ Retain Dezoomify's authentic parchment aesthetic, wide proportions, and distinct
    - Progress displays a smooth track and tabular counts.
 
 8. **Languages (English, French, German, Italian):**
-   - User copy renders through `t(key, vars)` against `src/i18n.ts`; English is the canonical table and `src/locales/fr.ts`, `de.ts`, `it.ts` mirror it key for key with identical `{placeholders}`. Missing keys fall back to English per key, never to `undefined`.
+   - User copy renders through `t(key, vars)` against `src/i18n.ts`; English is the canonical table and `src/locales/fr.ts`, `de.ts`, `it.ts` cover it key for key with identical `{placeholders}`. Missing keys fall back to English per key, never to `undefined`.
    - The audience includes multilingual art historians and archivists: translate buttons, messages, and guidance, but keep brand and product names (`Dezoomify`, `Chrome Web Store`, `GitHub Releases`), format names (`PNG`), codes, URLs, and diagnostics literal. Interpolation is `{name}` substitution only, with no plural rules and no markup.
    - Hosts pick the locale with `setLocale()` (explicit picker choice) or `pickLocale()` (`Accept-Language` header or `navigator.languages`); unknown tags fail closed to English. A new locale adds a sibling table under `src/locales/` plus a `SUPPORTED_LOCALES` entry, never a second lookup path.
-   - Hosts bundle the shared UI directly (Vite for the website and desktop, WXT for the extension); there are no hand-maintained `.js` mirrors or `vendor/` copies. `test/ui-i18n.test.mjs` fails on missing keys, placeholder drift, or replica tables.
+   - Hosts bundle the shared UI directly (Vite for the website and desktop, WXT for the extension); there are no hand-maintained `.js` copies or `vendor/` trees. `test/ui-i18n.test.mjs` fails on missing keys, placeholder drift, or duplicated tables.

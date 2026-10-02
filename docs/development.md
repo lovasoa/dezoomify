@@ -60,7 +60,7 @@ The TypeScript/TSX sources (`src/*.ts` plus imported shared-UI and browser-runti
 | `desktop` | real Tauri dev app; fails closed naming missing webview packages |
 | `extension` | store-shaped production build in Playwright Chromium with a throwaway profile; rerun after changes |
 
-Both serve the assembled `dist/` tree through `scripts/dev-server.mjs` (loopback static server plus the same `POST`/`OPTIONS /api/proxy` relay Cloudflare runs; relay core lives once in `src/server/proxy.ts`). `dev web` mirrors the deployed site; `dev ui` opens the beta surface. Nothing extra installs; `cargo xtask dev web` alone gives a working app.
+Both serve the assembled `dist/` tree through `scripts/dev-server.mjs` (loopback static server plus the same `POST`/`OPTIONS /api/proxy` relay Cloudflare runs; relay core lives once in `src/server/proxy.ts`). `dev web` serves the same assembled `dist/` tree the deployed site serves; `dev ui` opens the beta surface. Nothing extra installs; `cargo xtask dev web` alone gives a working app.
 
 `dev desktop` starts the Vite server on `http://localhost:1420/`, waits for it, then launches the Tauri shell. The server is non-interactive; its whole process tree stops with the shell, including second launches forwarded to a running app.
 

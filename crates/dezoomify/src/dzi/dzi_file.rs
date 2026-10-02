@@ -57,7 +57,7 @@ impl DziFile {
 fn implicit_base_url(resource_url: &str) -> String {
     if let Ok(mut url) = Url::parse(resource_url) {
         // National Library of Australia serves extensionless DZI metadata
-        // with `?tile=` query tiles, mirroring the deployed web client.
+        // with `?tile=` query tiles, matching the deployed web client.
         if url
             .host_str()
             .is_some_and(|host| host.contains("nla.gov.au"))

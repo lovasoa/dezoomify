@@ -112,11 +112,11 @@ pub fn derive_route_id(host: &str, target: &str) -> String {
     id.chars().take(100).collect()
 }
 
-/// Directory-mirror convention: any payload laid out as
+/// Payload layout convention: any payload laid out as
 /// `{scenario}/payloads/{host}/{url-path}` is served at `{host}{url-path}`
 /// unless an explicit route already claims it. A fixture that follows the
 /// layout needs no `routes.json` entry at all.
-fn mirror_routes(
+fn layout_routes(
     scenarios_dir: &Path,
     claimed: &HashSet<(String, String)>,
     served: &HashSet<(String, String, String)>,
@@ -125,7 +125,7 @@ fn mirror_routes(
     collect_payloads(scenarios_dir, scenarios_dir, &mut payloads)?;
     payloads.sort();
     let mut routes = Vec::new();
-    let mut mirrored: HashSet<(String, String)> = HashSet::new();
+    let mut laid_out: HashSet<(String, String)> = HashSet::new();
     for (scenario, payload) in payloads {
         if claimed.contains(&(scenario.clone(), payload.clone())) {
             continue;
@@ -141,7 +141,7 @@ fn mirror_routes(
         }
         let url_path = format!("/{tail}");
         if served.contains(&(host.to_string(), url_path.clone(), "GET".to_string()))
-            || !mirrored.insert((host.to_string(), url_path.clone()))
+            || !laid_out.insert((host.to_string(), url_path.clone()))
         {
             continue;
         }
@@ -153,7 +153,7 @@ fn mirror_routes(
         routes.push((
             scenario,
             ScenarioRoute {
-                route_id: format!("mirror-{host}-{tail}"),
+                route_id: format!("layout-{host}-{tail}"),
                 method: "GET".to_string(),
                 host: Some(host.to_string()),
                 path: Some(url_path),
@@ -249,8 +249,8 @@ impl RouteTable {
         }
         dirs.sort();
         let mut entries = Vec::new();
-        // Explicit routes win over the directory-mirror convention, so track
-        // which payloads and served URLs they claim before mirroring.
+        // Explicit routes win over the payload layout convention, so track
+        // which payloads and served URLs they claim before deriving routes.
         let mut claimed: HashSet<(String, String)> = HashSet::new();
         let mut served: HashSet<(String, String, String)> = HashSet::new();
         for (id, dir) in &dirs {
@@ -297,7 +297,7 @@ impl RouteTable {
                 entries.push((id.clone(), route, compiled));
             }
         }
-        entries.extend(mirror_routes(scenarios_dir, &claimed, &served)?);
+        entries.extend(layout_routes(scenarios_dir, &claimed, &served)?);
         Ok(RouteTable { entries })
     }
 
@@ -321,7 +321,7 @@ impl RouteTable {
 
     fn lookup_exact(&self, host: &str, path: &str, query: Option<&str>) -> Option<RouteHit<'_>> {
         // Exact path matches beat prefix/regex wildcards, regardless of load
-        // order: directory-mirror routes are appended last, and a concrete
+        // order: layout-derived routes are appended last, and a concrete
         // payload must not be shadowed by an earlier wildcard fallback.
         self.match_entries(host, path, query, true)
             .or_else(|| self.match_entries(host, path, query, false))

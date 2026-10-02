@@ -1,7 +1,7 @@
 //! Deterministic loopback fixture server.
 //!
 //! Loads every `testdata/scenarios/*/routes.json` plus referenced payloads and
-//! serves them by exact method/host/path match. The directory mirror is the
+//! serves them by exact method/host/path match. The payload layout is the
 //! default route table: a payload at `payloads/{host}{url-path}` serves at
 //! `{host}{url-path}` with a type inferred from its extension, so `routes.json`
 //! only spells out exceptions. No public network access is
@@ -260,7 +260,7 @@ fn url_parts(original: &str) -> Option<UrlParts> {
         return None;
     }
     // Match routes on hostname only: ephemeral test ports must not affect
-    // fixture identity (mirrors legacy hostname-based lookup).
+    // fixture identity (matching the legacy hostname-based lookup).
     let (host, port) = match authority.rsplit_once(':') {
         Some((h, p)) if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) => {
             (h.to_lowercase(), p.parse::<u16>().ok())
@@ -359,7 +359,7 @@ async fn serve_static(
     // so URL-shape discovery gates see the true path (`/zoomify/...`,
     // `/xl/*.imgi`, `/arcgis/MapServer`, ...) and tile URLs derived as
     // direct `{{origin}}/...` stay fetchable. Host matching ignores the
-    // ephemeral port, mirroring the gateway path. Routes win over static
+    // ephemeral port, as the gateway path does. Routes win over static
     // files (no `dist/` path collides with scenario tile paths); unknown
     // direct paths fall through to the static handler below, preserving
     // the stable `not found` contract.
@@ -482,8 +482,8 @@ async fn serve_static(
 }
 
 /// Content type inferred from the final path segment's extension. The single
-/// mapping for static files, mirrored payload routes, and the xtask fixture
-/// tooling (capture), so none of them can drift from the others.
+/// mapping for static files, layout-derived payload routes, and the xtask
+/// fixture tooling (capture), so none of them can drift from the others.
 /// `.xml`/`.dzi` are `application/xml`, the convention documented in
 /// `testdata/scenarios/README.md`.
 pub fn content_type(path: &str) -> &'static str {

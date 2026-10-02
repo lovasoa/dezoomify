@@ -1,13 +1,12 @@
 // Browser-side proxy client: POST same-origin /api/proxy, credentials omit.
 //
-// The response-size cap mirrors the server limit (`PROXY_MAX_BYTES` in
-// `src/server/security.ts`): the server stays authoritative, this browser-side
-// guard only fails closed early instead of buffering an over-budget body.
+// The response-size budget is owned by the relay limit (`PROXY_MAX_BYTES` in
+// `src/server/security.ts`): the server stays authoritative; a browser-side
+// guard here would only fail closed early instead of buffering an
+// over-budget body.
 
 import type { ResourceRequest } from "@dezoomify/wasm-bindings";
 import { readResponseBytes, retryAfterMs } from "../packages/browser-runtime/src/response-body.ts";
-
-export const PROXY_METADATA_MAX_BYTES = 2 * 1024 * 1024;
 
 export const PROXY_UPSTREAM_URL_HEADER = "x-proxy-upstream-url";
 

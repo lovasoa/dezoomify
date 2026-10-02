@@ -77,7 +77,7 @@ There are no separate native or scenario CI lanes: the Rust workspace lane alrea
 
 ## Fixture harness
 
-`crates/fixture-server` serves the scenario corpus on allocated loopback ports. A payload at `payloads/{host}{url-path}` maps to `{host}{url-path}`, content type inferred from extension. `routes.json` records only exceptions: non-`200` statuses, extra headers, redirects, query/wildcard matches, generators, non-mirrored payload names.
+`crates/fixture-server` serves the scenario corpus on allocated loopback ports. A payload at `payloads/{host}{url-path}` maps to `{host}{url-path}`, content type inferred from extension. `routes.json` records only exceptions: non-`200` statuses, extra headers, redirects, query/wildcard matches, generators, payloads whose stored name does not follow the layout.
 
 ```sh
 cargo xtask fixtures verify

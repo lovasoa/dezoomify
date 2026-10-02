@@ -112,9 +112,9 @@ impl JobOptions {
     /// races between start and publication.
     pub fn validate(&self) -> Result<(), Error> {
         if self.input_url.is_empty() || self.input_url.len() > 2048 {
-            return Err(Error::InvalidInput {
-                failure: "input must be 1..2048 bytes".to_string().into(),
-            });
+            return Err(Error::InvalidInput(
+                "input must be 1..2048 bytes".to_string().into(),
+            ));
         }
         if let Some(after_scheme) = self
             .input_url
@@ -130,9 +130,9 @@ impl JobOptions {
                 .next()
                 .unwrap_or("");
             if authority.contains('@') {
-                return Err(Error::InvalidInput {
-                    failure: "input must not contain userinfo".to_string().into(),
-                });
+                return Err(Error::InvalidInput(
+                    "input must not contain userinfo".to_string().into(),
+                ));
             }
         }
         match &self.output {

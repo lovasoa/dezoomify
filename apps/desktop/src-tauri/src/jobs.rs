@@ -13,7 +13,6 @@ use std::{
 pub const CHANNEL_REGISTERED: &str = "dezoomify://registered";
 pub const CHANNEL_PROGRESS: &str = "dezoomify://progress";
 pub const CHANNEL_PARTIAL: &str = "dezoomify://partial";
-pub const CHANNEL_DEEP_LINK: &str = "dezoomify://deep-link-pending";
 
 pub struct Registration {
     pub controls: Controls,
@@ -90,9 +89,9 @@ impl JobTable {
     }
     pub fn insert(&mut self, id: &str) -> Result<Arc<Registration>, Error> {
         if !crate::commands::is_valid_job_id(id) {
-            return Err(Error::InvalidInput {
-                failure: "job id must look like job:<suffix>".to_string().into(),
-            });
+            return Err(Error::InvalidInput(
+                "job id must look like job:<suffix>".to_string().into(),
+            ));
         }
         if self.jobs.contains_key(id) {
             return Err(Error::Duplicate);
@@ -135,12 +134,10 @@ impl Drop for JobTable {
 }
 
 pub fn unknown_job(id: &str) -> Error {
-    Error::InvalidState {
-        failure: format!(
-            "unknown job id {id}; the invocation never existed or belongs to a closed window"
-        )
-        .into(),
-    }
+    Error::InvalidState(
+        format!("unknown job id {id}; the invocation never existed or belongs to a closed window")
+            .into(),
+    )
 }
 
 #[cfg(test)]

@@ -54,37 +54,3 @@ export function jobPageTitle(url?: string): string {
   if (!url || host === "" || host === "the server") return DEFAULT_PAGE_TITLE;
   return `${DEFAULT_PAGE_TITLE} ${host}`;
 }
-
-export function handoffOriginFor(handoffUrl?: string, sourceUrl?: string): string {
-  const candidates = [sourceUrl];
-  try {
-    const src = handoffUrl
-      ?.split("?")[1]
-      ?.split("#")[0]
-      ?.split("&")
-      .find((part) => part.startsWith("src="));
-    if (src) candidates.push(decodeURIComponent(src.slice(4).replace(/\+/g, " ")));
-  } catch {
-    /* malformed handoff links have no origin summary */
-  }
-  for (const candidate of candidates) {
-    try {
-      if (!candidate) continue;
-      if (candidate.trim().toLowerCase().startsWith("file:")) return "";
-      const url = new URL(candidate.trim());
-      if (url.protocol === "http:" || url.protocol === "https:")
-        return `${url.protocol}//${url.host}/`;
-    } catch {
-      /* try the next candidate */
-    }
-  }
-  return "";
-}
-
-export function isFileHandoffSource(sourceUrl?: string): boolean {
-  try {
-    return new URL(String(sourceUrl ?? "").trim()).protocol === "file:";
-  } catch {
-    return false;
-  }
-}

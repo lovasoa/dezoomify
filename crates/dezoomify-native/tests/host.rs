@@ -245,7 +245,7 @@ fn malformed_encrypted_tile_retains_processing_failure_and_good_partial_pixels()
         );
         assert_eq!(*resource_kind, ResourceKind::Tile);
         assert!(
-            matches!(&**source, Error::ProcessingFailed { failure: Failure { detail: Some(detail), .. } }
+            matches!(&**source, Error::ProcessingFailed(Failure { detail: Some(detail), .. })
                 if detail.contains("unencrypted header"))
         );
         assert!(!error.retryable());
@@ -253,7 +253,7 @@ fn malformed_encrypted_tile_retains_processing_failure_and_good_partial_pixels()
         corrupt_image.placement.processing = ProcessingRecipe::None;
         let decode_error = host.acquire_tile(corrupt_image).await.unwrap_err();
         assert!(
-            matches!(decode_error.cause(), Error::DecodeFailed { .. }),
+            matches!(decode_error.cause(), Error::DecodeFailed(_)),
             "decode failure: {decode_error}"
         );
         let decision = host

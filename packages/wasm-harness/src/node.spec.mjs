@@ -239,7 +239,7 @@ test("malformed tile processing remains a permanent missing tile eligible for pa
     async choosePartial({ missing }) {
       assert.equal(missing.length, 1);
       assert.equal(missing[0].tile, 1);
-      // Permanence is derived from the kind; pinned by policy-vectors.json.
+      // Permanence is derived from the kind.
       assert.equal(missing[0].failures[0].kind, "processing-failed");
       return "keep";
     },

@@ -511,16 +511,10 @@ pub enum Error {
         #[serde(flatten)]
         failure: Failure,
     },
-    #[error("the request address is invalid{}", .failure.suffix())]
-    BadUrl {
-        #[serde(flatten)]
-        failure: Failure,
-    },
-    #[error("the redirect target is invalid{}", .failure.suffix())]
-    BadRedirect {
-        #[serde(flatten)]
-        failure: Failure,
-    },
+    #[error("the request address is invalid{}", .0.suffix())]
+    BadUrl(Failure),
+    #[error("the redirect target is invalid{}", .0.suffix())]
+    BadRedirect(Failure),
     #[error("redirect limit of {max} exceeded")]
     RedirectLimit { max: u32 },
     #[error("the response exceeds the {max_bytes}-byte limit")]
@@ -537,25 +531,16 @@ pub enum Error {
     },
 
     // ---- Discovery ----
-    #[error("no zoomable image was found{}", .failure.suffix())]
-    NoImageFound {
-        #[serde(flatten)]
-        failure: Failure,
-    },
-    #[error("the metadata could not be parsed{}", .failure.suffix())]
-    MalformedMetadata {
-        #[serde(flatten)]
-        failure: Failure,
-    },
+    #[error("no zoomable image was found{}", .0.suffix())]
+    NoImageFound(Failure),
+    #[error("the metadata could not be parsed{}", .0.suffix())]
+    MalformedMetadata(Failure),
     #[error("unknown format: {format}")]
     UnknownFormat { format: String },
     #[error("the metadata resource is empty")]
     EmptyResource,
-    #[error("a resource limit was reached{}", .failure.suffix())]
-    ResourceLimit {
-        #[serde(flatten)]
-        failure: Failure,
-    },
+    #[error("a resource limit was reached{}", .0.suffix())]
+    ResourceLimit(Failure),
     #[error("the deferred image follow limit of {max} was reached (or a loop)")]
     DeferredLimit { max: u32 },
     #[error("discovery failed{}", .failure.suffix())]
@@ -570,32 +555,20 @@ pub enum Error {
     },
 
     // ---- Job and planning ----
-    #[error("the input is not usable{}", .failure.suffix())]
-    InvalidInput {
-        #[serde(flatten)]
-        failure: Failure,
-    },
-    #[error("the options are not usable{}", .failure.suffix())]
-    InvalidOptions {
-        #[serde(flatten)]
-        failure: Failure,
-    },
-    #[error("the request does not match the job state{}", .failure.suffix())]
-    InvalidState {
-        #[serde(flatten)]
-        failure: Failure,
-    },
+    #[error("the input is not usable{}", .0.suffix())]
+    InvalidInput(Failure),
+    #[error("the options are not usable{}", .0.suffix())]
+    InvalidOptions(Failure),
+    #[error("the request does not match the job state{}", .0.suffix())]
+    InvalidState(Failure),
     #[error("a job with this identity is already running")]
     Duplicate,
     #[error("the job result has been retired")]
     Stale,
     #[error("the selected level has no tiles")]
     PlanEmpty,
-    #[error("the tile plan is invalid{}", .failure.suffix())]
-    PlanInvalid {
-        #[serde(flatten)]
-        failure: Failure,
-    },
+    #[error("the tile plan is invalid{}", .0.suffix())]
+    PlanInvalid(Failure),
     /// The derived verdict and largest hint of the settled failure set;
     /// the evidence itself lives in `missing[]` and the diagnostics report.
     #[error("no usable tiles were acquired")]
@@ -612,54 +585,30 @@ pub enum Error {
     },
 
     // ---- Tiles ----
-    #[error("a tile could not be decoded{}", .failure.suffix())]
-    DecodeFailed {
-        #[serde(flatten)]
-        failure: Failure,
-    },
-    #[error("a tile could not be processed{}", .failure.suffix())]
-    ProcessingFailed {
-        #[serde(flatten)]
-        failure: Failure,
-    },
+    #[error("a tile could not be decoded{}", .0.suffix())]
+    DecodeFailed(Failure),
+    #[error("a tile could not be processed{}", .0.suffix())]
+    ProcessingFailed(Failure),
 
     // ---- Output ----
     #[error("the output exceeds a supported limit{}", limit_facts(.limit))]
     LimitExceeded { limit: LimitContext },
-    #[error("the output could not be encoded{}", .failure.suffix())]
-    EncodeFailed {
-        #[serde(flatten)]
-        failure: Failure,
-    },
-    #[error("the output could not be written{}", .failure.suffix())]
-    WriteFailed {
-        #[serde(flatten)]
-        failure: Failure,
-    },
+    #[error("the output could not be encoded{}", .0.suffix())]
+    EncodeFailed(Failure),
+    #[error("the output could not be written{}", .0.suffix())]
+    WriteFailed(Failure),
     #[error("the output file already exists (refusing overwrite)")]
     OutputExists,
-    #[error("the output destination is not writable{}", .failure.suffix())]
-    DestinationDenied {
-        #[serde(flatten)]
-        failure: Failure,
-    },
-    #[error("the output file extension is not supported{}", .failure.suffix())]
-    UnsupportedExtension {
-        #[serde(flatten)]
-        failure: Failure,
-    },
-    #[error("the saved image is unavailable{}", .failure.suffix())]
-    OutputUnavailable {
-        #[serde(flatten)]
-        failure: Failure,
-    },
+    #[error("the output destination is not writable{}", .0.suffix())]
+    DestinationDenied(Failure),
+    #[error("the output file extension is not supported{}", .0.suffix())]
+    UnsupportedExtension(Failure),
+    #[error("the saved image is unavailable{}", .0.suffix())]
+    OutputUnavailable(Failure),
     #[error("the output path has no containing folder")]
     OutputNoParent,
-    #[error("the system could not open the output{}", .failure.suffix())]
-    LaunchFailed {
-        #[serde(flatten)]
-        failure: Failure,
-    },
+    #[error("the system could not open the output{}", .0.suffix())]
+    LaunchFailed(Failure),
     #[error("no output location was chosen")]
     OutputDenied,
     #[error("the output file is missing")]
@@ -668,47 +617,26 @@ pub enum Error {
     InvokeFailed,
 
     // ---- Control ----
-    #[error("the job could not be started{}", .failure.suffix())]
-    StartFailed {
-        #[serde(flatten)]
-        failure: Failure,
-    },
-    #[error("the image or level choice failed{}", .failure.suffix())]
-    ChoiceFailed {
-        #[serde(flatten)]
-        failure: Failure,
-    },
+    #[error("the job could not be started{}", .0.suffix())]
+    StartFailed(Failure),
+    #[error("the image or level choice failed{}", .0.suffix())]
+    ChoiceFailed(Failure),
     #[error("the address is not a usable web address")]
     InvalidUrl,
-    #[error("the output settings are not usable{}", .failure.suffix())]
-    InvalidSettings {
-        #[serde(flatten)]
-        failure: Failure,
-    },
-    #[error("the handoff was rejected{}", .failure.suffix())]
-    HandoffRejected {
-        #[serde(flatten)]
-        failure: Failure,
-    },
-    #[error("the app could not register the request{}", .failure.suffix())]
-    RegistrationFailed {
-        #[serde(flatten)]
-        failure: Failure,
-    },
+    #[error("the output settings are not usable{}", .0.suffix())]
+    InvalidSettings(Failure),
+    #[error("the handoff was rejected{}", .0.suffix())]
+    HandoffRejected(Failure),
+    #[error("the app could not register the request{}", .0.suffix())]
+    RegistrationFailed(Failure),
 
     // ---- Internal ----
-    #[error("internal error{}", .failure.suffix())]
-    Internal {
-        #[serde(flatten)]
-        failure: Failure,
-    },
+    #[error("internal error{}", .0.suffix())]
+    Internal(Failure),
     #[error("native resources are unavailable")]
     ShellLock,
-    #[error("the host sent an invalid value{}", .failure.suffix())]
-    BindingInvalidValue {
-        #[serde(flatten)]
-        failure: Failure,
-    },
+    #[error("the host sent an invalid value{}", .0.suffix())]
+    BindingInvalidValue(Failure),
     #[error("the question is no longer open")]
     InteractionExpired,
     #[error("cookie or authorization headers are forbidden in public requests")]
@@ -1241,23 +1169,23 @@ pub fn chain_text(error: &(dyn std::error::Error + 'static)) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Credential vocabulary (cross-language constants)
+// Credential vocabulary
 // ---------------------------------------------------------------------------
 
-/// Canonical secret/credential query-key vocabulary. These keys must never
-/// travel in a handoff deep link (they are rejected before use) and never
-/// enter diagnostics. Matching is case-insensitive exact, never substring, so
-/// `/cookie-recipe/` stays valid while `?token=secret` is rejected. Sorted and
-/// unique.
+/// Canonical secret/credential query-key vocabulary, the single owner of the
+/// policy. These keys must never travel in a source URL (they are rejected
+/// before use) and never enter diagnostics. Matching is case-insensitive
+/// exact, never substring, so `/cookie-recipe/` stays valid while
+/// `?token=secret` is rejected. Sorted and unique. Membership is deliberately
+/// unpinned: adding or removing a key is a reviewed policy edit.
 ///
-/// This constant is the single source of truth on the Rust side. The
-/// TypeScript mirror is `DEEP_LINK_SECRET_QUERY_KEYS` in
-/// [`packages/shared-ui/src/source-url.ts`](../../../../packages/shared-ui/src/source-url.ts);
-/// the shared rejection behavior is pinned on both sides by
-/// `testdata/deep-link-vectors.json` (membership itself is deliberately
-/// unpinned: adding or removing a key is a reviewed policy edit).
-/// The deliberately narrower metadata-proxy policy is `SIGNED_QUERY_KEYS` in
-/// the same TypeScript module (a strict subset of this vocabulary).
+/// The wasm boundary exposes the policy as `isSecretKey`/`hasSecretParams`;
+/// TypeScript callers with a runtime ask there. The one TypeScript list in
+/// [`packages/shared-ui/src/source-url.ts`](../../../../packages/shared-ui/src/source-url.ts)
+/// is the wire-format counterpart of `isSecretKey`, kept only for pure
+/// callers that load no runtime. The deliberately narrower metadata-proxy
+/// policy is `SIGNED_QUERY_KEYS` in that module (a strict subset of this
+/// vocabulary).
 pub const SENSITIVE_QUERY_KEYS: &[&str] = &[
     "access-token",
     "access_token",
@@ -1288,6 +1216,43 @@ pub const SENSITIVE_QUERY_KEYS: &[&str] = &[
     "token",
     "x-api-key",
 ];
+
+/// Case-insensitive exact membership in [`SENSITIVE_QUERY_KEYS`].
+pub fn is_secret_key(key: &str) -> bool {
+    SENSITIVE_QUERY_KEYS.contains(&key.to_ascii_lowercase().as_str())
+}
+
+/// Whether a URL carries a secret-bearing query or fragment key. A pair's key
+/// is the text before its first `=`, so bare keys (`?token`) and
+/// percent-encoded spellings are caught like `?token=secret`. Unparseable
+/// URLs count as secret-bearing.
+pub fn has_secret_params(url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return true;
+    };
+    if parsed.query_pairs().any(|(key, _)| is_secret_key(&key)) {
+        return true;
+    }
+    let Some(fragment) = parsed.fragment() else {
+        return false;
+    };
+    fragment.split('&').any(|pair| {
+        if pair.is_empty() {
+            return false;
+        }
+        let raw_key = pair.split_once('=').map_or(pair, |(key, _)| key);
+        let raw_key = raw_key.trim_start_matches(['?', '#']);
+        if raw_key.is_empty() {
+            return false;
+        }
+        if is_secret_key(raw_key) {
+            return true;
+        }
+        url::form_urlencoded::parse(pair.as_bytes())
+            .next()
+            .is_some_and(|(key, _)| is_secret_key(&key))
+    })
+}
 
 #[cfg(test)]
 mod tests {
@@ -1322,10 +1287,7 @@ mod tests {
         );
         // Bounded diagnostic detail rides along in the rendered sentence.
         assert_eq!(
-            Error::MalformedMetadata {
-                failure: "expected value at line 1".to_string().into()
-            }
-            .to_string(),
+            Error::MalformedMetadata("expected value at line 1".to_string().into()).to_string(),
             "the metadata could not be parsed: expected value at line 1"
         );
     }
@@ -1336,26 +1298,11 @@ mod tests {
         assert!(!Error::Cancelled.retryable());
         assert!(Error::Cancelled.is_terminal());
         assert!(!Error::Cancelled.is_output());
-        assert!(
-            Error::WriteFailed {
-                failure: Failure::default()
-            }
-            .is_output()
-        );
-        assert!(
-            !Error::WriteFailed {
-                failure: Failure::default()
-            }
-            .is_terminal()
-        );
+        assert!(Error::WriteFailed(Failure::default()).is_output());
+        assert!(!Error::WriteFailed(Failure::default()).is_terminal());
         // The browser's canvas refusal settles the job typed at once; it is
         // never one tile's failure.
-        assert!(
-            Error::PlanInvalid {
-                failure: Failure::default()
-            }
-            .is_output()
-        );
+        assert!(Error::PlanInvalid(Failure::default()).is_output());
         let throttled = Error::RateLimited {
             retry_after_ms: Some(9_000),
             transport: ErrorTransport::MetadataProxy,

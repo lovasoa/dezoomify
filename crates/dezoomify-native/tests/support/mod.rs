@@ -32,10 +32,9 @@ pub fn run_host(host: &NativeHost<'_>) -> Result<Publication, dezoomify::model::
         );
     }
     result?;
-    host.publication()
-        .ok_or_else(|| dezoomify::model::Error::Internal {
-            failure: "output was not published".to_string().into(),
-        })
+    host.publication().ok_or_else(|| {
+        dezoomify::model::Error::Internal("output was not published".to_string().into())
+    })
 }
 
 pub fn run_file(

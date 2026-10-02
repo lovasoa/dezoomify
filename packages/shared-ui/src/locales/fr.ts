@@ -1,6 +1,6 @@
 // French message dictionary for the shared UI.
 //
-// Mirrors `../i18n.ts` key for key: every English key has exactly one French
+// Translation of `../i18n.ts`, key for key: every English key has exactly one French
 // entry with identical `{placeholders}`. Missing keys fall back to English at
 // lookup time, so this table must never drop a key when English grows.
 // Brand and product names ("Dezoomify", "Chrome Web Store", "GitHub Releases",
@@ -137,6 +137,11 @@ export const fr = {
   "view.handoff.sendOrigin": "Envoyer vers l application de bureau ({origin})",
   "view.handoff.localNote":
     "Les fichiers locaux restent sur cet ordinateur. Ouvrez l application de bureau et choisissez-y le fichier ; rien n est envoye.",
+  // Desktop handoff uses the ordinary, user-confirmed dezoomify:// link.
+  "view.handoff.send": "Envoyer vers l application de bureau",
+  "view.handoff.sendOrigin": "Envoyer vers l application de bureau ({origin})",
+  "view.handoff.localNote":
+    "Les fichiers locaux restent sur cet ordinateur. Ouvrez l application de bureau et choisissez-y le fichier ; rien n est envoye.",
   "view.display.waysTitle": "Moyens d enregistrer cette oeuvre",
   "view.display.extTitle": "Guide de l extension de navigateur",
   "view.display.extDesc":
@@ -221,8 +226,6 @@ export const fr = {
     "Ces parametres de telechargement sont invalides. Ajustez-les et reessayez.",
   "desktop.output.deniedPick":
     "La destination d enregistrement n a pas ete acceptee. Choisissez un autre fichier pour continuer.",
-  "desktop.handoff.rejected":
-    "Ce lien ne peut pas etre ouvert depuis {host}. Essayez une autre adresse sans donnees de connexion.",
   "desktop.output.exists":
     "Un fichier existe deja a la destination d enregistrement depuis {host}. Choisissez un autre fichier ou confirmez l ecrasement pour continuer.",
   "desktop.output.destDenied":
@@ -260,13 +263,6 @@ export const fr = {
   "desktop.save.fallback": "Impossible d enregistrer cette image depuis {host}. Reessayez.",
   "desktop.invoke.startFallback": "Impossible de demarrer la tache.",
   "desktop.invoke.partial": "Le choix d image partielle a ete refuse.",
-  "desktop.link.title": "Une autre application veut ouvrir une image dans Dezoomify.",
-  "desktop.link.source": "Source : {url}",
-  "desktop.link.prov": "Provenance : lien dezoomify:// (v{version})",
-  "desktop.link.provHint": "Provenance : lien dezoomify:// (v{version}) · {hint}",
-  "desktop.link.note": "Rien ne s execute avant votre confirmation. Refuser ne fait rien.",
-  "desktop.link.dismiss": "Ignorer",
-  "desktop.link.open": "Ouvrir l image",
   "desktop.rec.missing": "Tuiles manquantes : {shown}{rest}.",
   "desktop.rec.more": " et {n} de plus",
   "desktop.rec.keep": "Conserver l image partielle",

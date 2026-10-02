@@ -246,9 +246,6 @@ test("static accessibility contract: completed and display-only views keep every
       canvas: { width: 100, height: 80 },
     }),
     callbacks,
-    {
-      desktopHandoffUrl: "dezoomify://open?v=2&src=https%3A%2F%2Fx",
-    },
   );
   assert.equal(preview.querySelector("#dz-btn-save"), null);
   assertButtonsNamed(preview.querySelector(".dz-card"), "display-only");

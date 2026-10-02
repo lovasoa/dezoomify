@@ -1,14 +1,14 @@
 // Pure proxy security helpers (no server framework) so node:test can import them.
 
-import { SIGNED_QUERY_KEYS } from "../../packages/shared-ui/src/source-url.ts";
+import { hasSignedQuery } from "../../packages/shared-ui/src/source-url.ts";
 
 export const PROXY_MAX_REDIRECTS = 5;
 export const PROXY_MAX_BYTES = 2 * 1024 * 1024;
 
 // Signed/credential query keys deny proxying: URLs whose signature would
-// break, or that carry credentials, must never be proxied. The vocabulary is
-// defined once in `packages/shared-ui/src/source-url.ts` (`SIGNED_QUERY_KEYS`)
-// and shared with the browser's proxy-fallback gate in
+// break, or that carry credentials, must never be proxied. The policy lives
+// once in `packages/shared-ui/src/source-url.ts` (`hasSignedQuery`) and is
+// shared with the browser's proxy-fallback gate in
 // `packages/browser-runtime/src/web-fetch.ts`.
 
 const HOP_BY_HOP = new Set([
@@ -212,13 +212,6 @@ export function isBlockedIPv6(host: string): boolean {
   return false;
 }
 
-export function hasSensitiveQuery(url: URL): boolean {
-  for (const k of url.searchParams.keys()) {
-    if (SIGNED_QUERY_KEYS.has(k.toLowerCase())) return true;
-  }
-  return false;
-}
-
 export function validateUpstreamMethod(method: string): boolean {
   const m = method.toUpperCase();
   return m === "GET" || m === "HEAD";
@@ -326,7 +319,7 @@ export function validateProxyTarget(
   if (u.username !== "" || u.password !== "") {
     return { ok: false, code: "PROXY_POLICY_DENIED", reason: "userinfo" };
   }
-  if (hasSensitiveQuery(u)) {
+  if (hasSignedQuery(u)) {
     return { ok: false, code: "PROXY_POLICY_DENIED", reason: "signed-query" };
   }
   // Standard ports only unless explicitly allowlisted (not allowlisted here).

@@ -802,10 +802,10 @@ where
                             .get()
                             .checked_add(response.bytes.len())
                             .filter(|total| *total <= limit)
-                            .ok_or_else(|| crate::model::Error::ResourceLimit {
-                                failure: "discovery metadata size limit exceeded"
-                                    .to_string()
-                                    .into(),
+                            .ok_or_else(|| {
+                                crate::model::Error::ResourceLimit(
+                                    "discovery metadata size limit exceeded".to_string().into(),
+                                )
                             })?;
                         retained.set(total);
                         let response = std::sync::Arc::new(response);

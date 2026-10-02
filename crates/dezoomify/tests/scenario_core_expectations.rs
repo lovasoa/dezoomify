@@ -46,40 +46,40 @@ const SKIPPED: &[(&str, &str, &str)] = &[
     (
         "web/core-discovery",
         "https://fixtures.test/mirador?manifest=https://fixtures.test/iiif-presentation/manifest.json",
-        "no payload mirrors the /mirador viewer page",
+        "no payload serves the /mirador viewer page",
     ),
     (
         "web/core-discovery",
         "https://fixtures.test/uv/#?manifest=https%3A%2F%2Ffixtures.test%2Fiiif-presentation%2Fmanifest.json",
-        "no payload mirrors the /uv viewer page",
+        "no payload serves the /uv viewer page",
     ),
     // The tile-info payload is stored under i.micr.io while the page and the
-    // plan use iiif.micr.io: the corpus has no mirrored bytes for the fetch.
+    // plan use iiif.micr.io: the corpus stores no bytes for the fetch.
     (
         "web/core-discovery",
         "https://fixtures.test/micrio-custom-element",
-        "payloads/i.micr.io/KEimL/info.json does not mirror the iiif.micr.io fetch",
+        "payloads/i.micr.io/KEimL/info.json does not answer the iiif.micr.io fetch",
     ),
-    // External viewer pages with no mirrored payload for the input URL.
+    // External viewer pages with no stored payload for the input URL.
     (
         "web/iiif-discovery",
         "https://viewer.onb.ac.at/10048A37/",
-        "no payload mirrors the viewer.onb.ac.at page (only api.onb.ac.at metadata)",
+        "no payload serves the viewer.onb.ac.at page (only api.onb.ac.at metadata)",
     ),
     (
         "web/seadragon-pages",
         "https://www.bl.uk/manuscripts/Viewer.aspx?ref=burney_ms_276_f031ar",
-        "no payload mirrors the Viewer.aspx page (only the Proxy.ashx metadata)",
+        "no payload serves the Viewer.aspx page (only the Proxy.ashx metadata)",
     ),
     (
         "web/seadragon-pages",
         "https://polona.pl/item/9388882/0/",
-        "no payload mirrors the polona.pl viewer page (only the resources JSON)",
+        "no payload serves the polona.pl viewer page (only the resources JSON)",
     ),
     (
         "web/seadragon-pages",
         "https://nla.gov.au/nla.obj-152642460/view",
-        "no payload mirrors the /view page (only the /dzi metadata)",
+        "no payload serves the /view page (only the /dzi metadata)",
     ),
     // The pnav payloads (page w=1000&h=1000, image.json 512x512) cannot
     // reproduce the pinned probe plan (w=2000&h=2000&cw=512&ch=512), and
@@ -90,22 +90,22 @@ const SKIPPED: &[(&str, &str, &str)] = &[
         "pnav probe plan cannot be reproduced from the stored payloads",
     ),
     // The viewer page pins a TopViewer JSON under images.memorix.nl/demo/...
-    // with no mirrored payload (the corpus stores a different memorix JSON).
+    // with no stored payload (the corpus stores a different memorix JSON).
     (
         "web/core-discovery",
         "https://fixtures.test/topviewer/page?FIF=not-iip",
-        "the page's memorix JSON has no mirrored payload",
+        "the page's memorix JSON is not stored",
     ),
-    // External TopViewer viewer pages with no mirrored payloads.
+    // External TopViewer viewer pages with no stored payloads.
     (
         "web/topviewer",
         "https://www.beeldbankgroningen.nl/beelden/detail/53479cae-899f-0ac1-8913-40276a93a4f7/media/1c7914ee-3f37-0d37-3218-48eba1c3a97f?mode=detail&view=horizontal&rows=1&page=4&fq%5B%5D=search_s_download:%22Nee%22&sort=random%7B1785398988616%7D%20asc",
-        "no payload mirrors the beeldbankgroningen viewer page",
+        "no payload serves the beeldbankgroningen viewer page",
     ),
     (
         "web/topviewer",
         "https://historischarchief.midden-groningen.nl/collectie/beelden/beelden-view/?mode=gallery&view=horizontal&sort=random%7B1785398881908%7D%20asc",
-        "no payload mirrors the historischarchief viewer page",
+        "no payload serves the historischarchief viewer page",
     ),
 ];
 
@@ -141,10 +141,10 @@ fn payloads_dir(scenario: &str) -> PathBuf {
         .join("payloads")
 }
 
-/// Directory-mirror lookup (`payloads/{host}{url-path}`, query ignored),
+/// Payload layout lookup (`payloads/{host}{url-path}`, query ignored),
 /// with the corpus's suffix (`MapServer.json`) and index (`.../index.html`)
 /// spellings resolved as documented fallbacks.
-fn mirrored_payload(payloads: &Path, uri: &str) -> Option<Vec<u8>> {
+fn laid_out_payload(payloads: &Path, uri: &str) -> Option<Vec<u8>> {
     let url = url::Url::parse(uri).ok()?;
     let host = url.host_str()?;
     let path = url.path().trim_start_matches('/');
@@ -186,7 +186,7 @@ fn substitute(bytes: Vec<u8>, host: &str) -> Vec<u8> {
 fn discover(scenario: &str, input: &str) -> Result<ResolvedImage, String> {
     // Deferred catalog entries name their real target (e.g. an IIIF
     // Presentation manifest naming an image service): follow with a fresh
-    // bounded discovery, mirroring the pipeline's deferred resolution.
+    // bounded discovery, matching the pipeline's deferred resolution.
     let mut current = input.to_string();
     for _ in 0..3 {
         match discover_once(scenario, &current)? {
@@ -200,7 +200,7 @@ fn discover(scenario: &str, input: &str) -> Result<ResolvedImage, String> {
 fn discover_once(scenario: &str, input: &str) -> Result<DiscoveredEntry, String> {
     let payloads = payloads_dir(scenario);
     support::discover_with(default_registry(), input, |uri| {
-        mirrored_payload(&payloads, uri)
+        laid_out_payload(&payloads, uri)
     })
     .map_err(|error| format!("discovery failed: {error:?}"))?
     .into_entries()

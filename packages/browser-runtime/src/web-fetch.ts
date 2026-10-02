@@ -6,7 +6,7 @@
 
 import type { ErrorTransport, Error as JobError, ResourceRequest } from "@dezoomify/wasm-bindings";
 import type { DiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
-import { SIGNED_QUERY_KEYS } from "../../shared-ui/src/source-url.ts";
+import { hasSignedQuery } from "../../shared-ui/src/source-url.ts";
 import { blockedReason, isJobError } from "./failure.ts";
 import { readErrorPreview, readResponseBytes, retryAfterMs } from "./response-body.ts";
 import {
@@ -18,21 +18,9 @@ import {
 } from "./tile-policy.ts";
 
 // Signed/credential query keys gate proxy fallback: URLs whose signature would
-// break, or that carry credentials, must never be proxied. The vocabulary is
-// defined once in `packages/shared-ui/src/source-url.ts` (`SIGNED_QUERY_KEYS`)
-// and shared with the metadata CORS proxy validator in `src/server/security.ts`.
-
-function hasSignedQuery(urlString: string): boolean {
-  try {
-    const u = new URL(urlString);
-    for (const k of u.searchParams.keys()) {
-      if (SIGNED_QUERY_KEYS.has(k.toLowerCase())) return true;
-    }
-    return false;
-  } catch {
-    return true;
-  }
-}
+// break, or that carry credentials, must never be proxied. The policy lives
+// once in `packages/shared-ui/src/source-url.ts` (`hasSignedQuery`) and is
+// shared with the metadata CORS proxy validator in `src/server/security.ts`.
 
 function hasCredentialHeader(headers: ResourceRequest["headers"]): boolean {
   if (!headers) return false;

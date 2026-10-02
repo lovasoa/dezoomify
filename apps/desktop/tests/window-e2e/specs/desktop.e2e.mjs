@@ -12,8 +12,6 @@ import { assertSavedPyramid } from "../../../../../test/support/png.mjs";
 import {
   closeFrontendServer,
   createRunDirs,
-  deepLinkArgv,
-  deliverDeepLink,
   ensureFixtureServerBuilt,
   gatewayInput,
   laneAppEnv,
@@ -52,7 +50,6 @@ async function snapshot(driver) {
       error: !!q(".dz-error-section"),
       errorText: text("#dz-error-message"),
       errorDiagnostics: text("#dz-error-diagnostics"),
-      deepLink: !!q("#dz-deep-link-confirm"),
       partialNote: text(".dz-partial-note"),
     };
   });
@@ -184,7 +181,6 @@ describe("Dezoomify desktop window", () => {
       process.env.DEZOOMIFY_WINDOW_E2E_ROOT = runDirs.root;
       process.env.DEZOOMIFY_WINDOW_E2E_HOME = runDirs.home;
       process.env.DEZOOMIFY_WINDOW_E2E_OUTPUT = runDirs.output;
-      // The deep-link forwarder inherits the isolated profile too.
       Object.assign(process.env, laneAppEnv(runDirs.home));
       ensureFixtureServerBuilt();
       fixture = await startFixtureServer(runDirs.root);
@@ -252,63 +248,12 @@ describe("Dezoomify desktop window", () => {
       driver,
       async () => {
         const state = await snapshot(driver);
-        return !state.job && !state.completed && !state.error && !state.deepLink;
+        return !state.job && !state.completed && !state.error;
       },
       60000,
       "cancelled view",
     );
     assert.equal(outputFiles(runOutputDir()).length, 0, "cancelled jobs publish no output");
-  });
-
-  it("a confirmed deep link saves the expected PNG", async () => {
-    clearOutput();
-    await deliverDeepLink({
-      env: process.env,
-      link: deepLinkArgv(gatewayInput(GATEWAY_DZI)),
-    });
-    await waitFor(
-      driver,
-      async () => (await snapshot(driver)).deepLink,
-      60000,
-      "deep-link confirmation",
-    );
-
-    const pending = await snapshot(driver);
-    assert.equal(pending.job, false, "the link does not start before confirmation");
-    assert.equal(
-      outputFiles(runOutputDir()).length,
-      0,
-      "the link does not save before confirmation",
-    );
-
-    const confirmed = await driver.executeScript(() => {
-      const button = Array.from(document.querySelectorAll("#dz-deep-link-confirm button")).find(
-        (candidate) => candidate.textContent.includes("Open image"),
-      );
-      if (!button) return false;
-      button.click();
-      return true;
-    });
-    assert.equal(confirmed, true, "the confirmation dialog offers Open image");
-
-    await waitFor(
-      driver,
-      async () => {
-        const state = await snapshot(driver);
-        return state.completed || state.error;
-      },
-      180000,
-      "deep-link save terminal",
-    );
-    const terminal = await snapshot(driver);
-    assert.equal(
-      terminal.error,
-      false,
-      `the confirmed deep link completes: ${errorDetail(terminal)}`,
-    );
-    const outputs = outputFiles(runOutputDir());
-    assert.equal(outputs.length, 1, "the deep link writes exactly one PNG");
-    assertSavedPyramid(readFileSync(outputs[0]));
   });
 
   it("keeps a partial download as a .partial sibling", async () => {

@@ -35,7 +35,8 @@ pub(crate) struct Capabilities {
     pub(crate) capabilities: Vec<String>,
 }
 
-/// Release targets mirror the host bundlers in `release/targets.toml`.
+/// Release targets and their host bundlers are declared in
+/// `release/targets.toml`.
 /// Every declared target is mandatory; a missing recipe, host, tool, or
 /// artifact fails the release rather than narrowing its inventory.
 pub(crate) fn load_targets() -> Result<Targets, String> {

@@ -24,10 +24,8 @@ fn rust_errors_serialize_to_the_tagged_wire_shape() {
     assert_eq!(value["transport"], "metadata-proxy");
     // Absent optional facts are omitted, never nulled.
     assert!(value.get("detail").is_some());
-    let wrapped = Error::NoImageFound {
-        failure: Failure::default(),
-    }
-    .resource("https://example.test/viewer", ResourceKind::Metadata);
+    let wrapped = Error::NoImageFound(Failure::default())
+        .resource("https://example.test/viewer", ResourceKind::Metadata);
     let value = serde_json::to_value(&wrapped).expect("serializes");
     assert_eq!(value["kind"], "resource");
     assert_eq!(value["request"], "https://example.test/viewer");
@@ -95,9 +93,7 @@ fn the_kind_tag_is_the_single_stable_identifier() {
             Error::Resource {
                 request: "https://example.test".into(),
                 resource_kind: ResourceKind::Tile,
-                source: Box::new(Error::DecodeFailed {
-                    failure: "broken".to_string().into(),
-                }),
+                source: Box::new(Error::DecodeFailed("broken".to_string().into())),
             },
             "resource",
         ),

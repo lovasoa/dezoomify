@@ -38,7 +38,7 @@ test("i18n: English table is namespaced and well-formed", () => {
   }
 });
 
-test("i18n: fr/de/it mirror the English key set with identical placeholders", () => {
+test("i18n: fr/de/it cover the English key set with identical placeholders", () => {
   assert.equal(DEFAULT_LOCALE, "en");
   assert.deepEqual([...SUPPORTED_LOCALES], ["en", "fr", "de", "it"]);
   const enKeys = Object.keys(EN);

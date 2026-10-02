@@ -151,10 +151,11 @@ pub fn verify(args: &[String]) -> Result<(), String> {
             }
         }
     }
-    // Directory-mirror convention: a payload laid out as
+    // Payload layout convention: a payload laid out as
     // `{scenario}/payloads/{host}/{url-path}` serves at `{host}{url-path}`
-    // unless an explicit route claims it. Fold mirrors into `served` so the
-    // incompatible-duplicate check covers the whole served surface.
+    // unless an explicit route claims it. Fold layout-derived routes into
+    // `served` so the incompatible-duplicate check covers the whole served
+    // surface.
     for entry in &manifest.scenarios {
         let Some((scenario, rest)) = entry.path.split_once("/payloads/") else {
             continue;

@@ -1,8 +1,5 @@
-// Shared validation for ordinary user input and deep-link source URLs.
-// Deep links carry only a source address; credentials, local paths, and
-// secret-bearing query or fragment keys are rejected before use. The Rust
-// shell (`apps/desktop/src-tauri/src/deep_link.rs` and `commands.rs`) is the
-// authoritative validator; this module is the one TypeScript mirror.
+// Shared validation for ordinary user input URLs. Credentials and
+// secret-bearing query or fragment keys are rejected before use.
 
 export function isValidInputUrl(url: string): boolean {
   if (typeof url !== "string") return false;
@@ -14,7 +11,7 @@ export function isValidInputUrl(url: string): boolean {
     if (parsed.username !== "" || parsed.password !== "") return false;
     // userinfo credentials must never enter: any authority containing `@`
     // is rejected (`URL.username` alone misses empty userinfo such as
-    // `https://@example.com`), mirroring the Rust `has_userinfo` check.
+    // `https://@example.com`).
     const afterScheme = trimmed.split("://")[1] ?? "";
     const authority = afterScheme.split(/[/?#]/)[0] ?? "";
     return !authority.includes("@");
@@ -24,12 +21,14 @@ export function isValidInputUrl(url: string): boolean {
 }
 
 /**
- * Secret/credential query keys that never travel in a handoff deep link or
- * enter diagnostics (case-insensitive exact match). Mirrors the canonical
- * Rust `dezoomify::model::SENSITIVE_QUERY_KEYS`; rejection is pinned by
- * `testdata/deep-link-vectors.json` on both sides.
+ * Secret/credential query keys that never travel in a source URL or enter
+ * diagnostics (case-insensitive exact match). This is the wire-format
+ * counterpart of the wasm boundary's `isSecretKey` callable; Rust
+ * `dezoomify::model::SENSITIVE_QUERY_KEYS` owns the policy. It is spelled out
+ * here only for pure callers that load no runtime (the desktop webview's
+ * payload validation); callers with a runtime ask the boundary instead.
  */
-export const DEEP_LINK_SECRET_QUERY_KEYS = new Set([
+export const SENSITIVE_QUERY_KEYS = new Set([
   "access-token",
   "access_token",
   "api-key",
@@ -62,10 +61,10 @@ export const DEEP_LINK_SECRET_QUERY_KEYS = new Set([
 
 /**
  * Signed/credential query keys rejected from metadata CORS proxy admission
- * (a strict subset of `DEEP_LINK_SECRET_QUERY_KEYS`: OAuth handoff params
- * such as `code`/`state` are not signed-fetch credentials). Consumed by
+ * (a strict subset of `SENSITIVE_QUERY_KEYS`: OAuth exchange params such as
+ * `code`/`state` are not signed-fetch credentials). Consumed by
  * `web-fetch.ts` (proxy-fallback gate) and `src/server/security.ts`
- * (metadata proxy validator); locked by `apps/desktop/tests/policy-vectors.test.mjs`.
+ * (metadata proxy validator).
  */
 export const SIGNED_QUERY_KEYS = new Set([
   "access_token",
@@ -85,10 +84,11 @@ export const SIGNED_QUERY_KEYS = new Set([
 const SECRET_FRAGMENT_KEY_RE = /^[?#]+/;
 
 /**
- * Secret-bearing query or fragment keys in a source URL. Regions mirror the
- * Rust `smuggled_secret_key` (`deep_link.rs`); a pair's key is the text before
- * its first `=`, so bare keys (`?token`) and percent-encoded spellings are
- * caught like `?token=secret`. Unparseable URLs count as secret-bearing.
+ * Secret-bearing query or fragment keys in a source URL, the pure
+ * counterpart of the boundary's `hasSecretParams` callable: a pair's key is
+ * the text before its first `=`, so bare keys (`?token`) and percent-encoded
+ * spellings are caught like `?token=secret`. Unparseable URLs count as
+ * secret-bearing.
  */
 export function hasSecretQueryParams(urlString: string): boolean {
   let parsed: URL;
@@ -98,7 +98,7 @@ export function hasSecretQueryParams(urlString: string): boolean {
     return true;
   }
   for (const key of parsed.searchParams.keys()) {
-    if (DEEP_LINK_SECRET_QUERY_KEYS.has(key.toLowerCase())) return true;
+    if (SENSITIVE_QUERY_KEYS.has(key.toLowerCase())) return true;
   }
   if (parsed.hash) {
     for (const pair of parsed.hash.slice(1).split("&")) {
@@ -106,30 +106,45 @@ export function hasSecretQueryParams(urlString: string): boolean {
       const eq = pair.indexOf("=");
       const rawKey = (eq < 0 ? pair : pair.slice(0, eq)).replace(SECRET_FRAGMENT_KEY_RE, "");
       if (rawKey.length === 0) continue;
-      if (DEEP_LINK_SECRET_QUERY_KEYS.has(rawKey.toLowerCase())) return true;
+      if (SENSITIVE_QUERY_KEYS.has(rawKey.toLowerCase())) return true;
       let decodedKey: string;
       try {
         decodedKey = decodeURIComponent(rawKey.replace(/\+/g, " "));
       } catch {
         continue;
       }
-      if (DEEP_LINK_SECRET_QUERY_KEYS.has(decodedKey.toLowerCase())) return true;
+      if (SENSITIVE_QUERY_KEYS.has(decodedKey.toLowerCase())) return true;
     }
   }
   return false;
 }
 
-export function isValidDeepLinkSource(source: unknown): source is string {
-  if (typeof source !== "string") return false;
-  const trimmed = source.trim();
-  if (!isValidInputUrl(trimmed) || hasSecretQueryParams(trimmed)) return false;
-  const lower = trimmed.toLowerCase();
-  return !["file://", "/etc/", "c:\\"].some((needle) => lower.includes(needle));
+/**
+ * Signed/credential query keys gate proxy admission: URLs whose signature
+ * would break, or that carry credentials, must never be proxied. Unparseable
+ * URLs count as signed (fail closed).
+ */
+export function hasSignedQuery(url: string | URL): boolean {
+  let parsed: URL;
+  try {
+    parsed = typeof url === "string" ? new URL(url) : url;
+  } catch {
+    return true;
+  }
+  for (const k of parsed.searchParams.keys()) {
+    if (SIGNED_QUERY_KEYS.has(k.toLowerCase())) return true;
+  }
+  return false;
 }
 
 // Idle prefill: read an initial URL from the launch location without ever
 // treating it as a started job (`?url=`/`?src=`, `#url=`, or bare hash).
-// Invalid or secret-bearing candidates return null.
+// Invalid or secret-bearing candidates return null: the vocabulary check is
+// the pure, no-runtime path of the boundary's `hasSecretParams` callable.
+function isPrefillable(candidate: string): boolean {
+  return isValidInputUrl(candidate) && !hasSecretQueryParams(candidate);
+}
+
 export function readInitialUrl(loc?: { search?: string; hash?: string }): string | null {
   try {
     if (!loc) return null;
@@ -138,7 +153,7 @@ export function readInitialUrl(loc?: { search?: string; hash?: string }): string
       const params = new URLSearchParams(search);
       for (const key of ["url", "src", "input_url", "inputUrl"]) {
         const v = params.get(key);
-        if (v && isValidInputUrl(v.trim())) return v.trim();
+        if (v && isPrefillable(v.trim())) return v.trim();
       }
     }
     const hash = typeof loc.hash === "string" ? loc.hash : "";
@@ -147,18 +162,18 @@ export function readInitialUrl(loc?: { search?: string; hash?: string }): string
       if (body.startsWith("?")) {
         const params = new URLSearchParams(body.slice(1));
         const v = params.get("url") ?? params.get("src");
-        if (v && isValidInputUrl(v.trim())) return v.trim();
+        if (v && isPrefillable(v.trim())) return v.trim();
       } else if (body.startsWith("url=")) {
         try {
           const v = decodeURIComponent(body.slice(4).replace(/\+/g, " "));
-          if (isValidInputUrl(v.trim())) return v.trim();
+          if (isPrefillable(v.trim())) return v.trim();
         } catch {
           return null;
         }
       } else if (body.length > 0 && body.length <= 2048) {
         try {
           const v = decodeURIComponent(body.replace(/\+/g, " "));
-          if (isValidInputUrl(v.trim())) return v.trim();
+          if (isPrefillable(v.trim())) return v.trim();
         } catch {
           return null;
         }
@@ -168,53 +183,4 @@ export function readInitialUrl(loc?: { search?: string; hash?: string }): string
     return null;
   }
   return null;
-}
-
-export interface ValidatedDeepLink {
-  sourceUrl: string;
-  hint: string | null;
-  version: number;
-}
-
-const utf8Encoder = new TextEncoder();
-
-// UTF-8 byte length, matching the Rust shell's byte bounds.
-function utf8Length(text: string): number {
-  return utf8Encoder.encode(text).length;
-}
-
-export function normalizeDeepLinkHint(hint: unknown): string | null | undefined {
-  if (hint === undefined || hint === null) return null;
-  if (typeof hint !== "string") return undefined;
-  if (hint.includes("\0")) return undefined;
-  if (hint.length === 0) return null;
-  // Byte bound matches the Rust shell (`deep_link.rs`: "hint beyond 256 bytes").
-  if (utf8Length(hint) > 256) return undefined;
-  return hint;
-}
-
-export function normalizeDeepLinkVersion(version: unknown): number | null {
-  if (typeof version === "number" && Number.isInteger(version)) {
-    return version === 1 || version === 2 ? version : null;
-  }
-  if (typeof version === "string" && (version === "1" || version === "2")) {
-    return Number(version);
-  }
-  return null;
-}
-
-// Validate a `dezoomify://deep-link-pending` payload again in the frontend
-// before showing the confirm UI: exactly the `{source_url, hint, version}`
-// triple the Rust shell emits (its parser is the single validator, pinned by
-// testdata/deep-link-vectors.json). Null means reject (no-op).
-export function validateDeepLinkPayload(
-  payload: Record<string, unknown>,
-): ValidatedDeepLink | null {
-  const sourceUrl = payload.source_url;
-  const version = normalizeDeepLinkVersion(payload.version);
-  if (version === null) return null;
-  if (!isValidDeepLinkSource(sourceUrl)) return null;
-  const hint = normalizeDeepLinkHint(payload.hint ?? null);
-  if (hint === undefined) return null;
-  return { sourceUrl: (sourceUrl as string).trim(), hint, version };
 }

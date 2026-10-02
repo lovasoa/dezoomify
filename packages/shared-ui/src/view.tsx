@@ -10,12 +10,7 @@ import type { JobActivity } from "./activity.ts";
 import { canRetry, httpStatusOf, plainMessageFor } from "./failure.ts";
 import type { HistoryEntry } from "./history.ts";
 import type { Presentation, ResolutionChoice } from "./presentation.ts";
-import {
-  displaySourceUrl,
-  handoffOriginFor,
-  hostFromUrl,
-  isFileHandoffSource,
-} from "./view-helpers.ts";
+import { displaySourceUrl, hostFromUrl } from "./view-helpers.ts";
 import type {
   ConfirmModalArgs,
   PlatformHints,
@@ -24,12 +19,7 @@ import type {
   ViewRenderOptions,
 } from "./view-types.ts";
 
-export {
-  DEFAULT_PAGE_TITLE,
-  handoffOriginFor,
-  isFileHandoffSource,
-  jobPageTitle,
-} from "./view-helpers.ts";
+export { DEFAULT_PAGE_TITLE, jobPageTitle } from "./view-helpers.ts";
 export type {
   ConfirmModalArgs,
   PlatformHints,
@@ -566,13 +556,6 @@ function DisplayOnlyView({
   hostDocument: Document;
 }) {
   const guidance = renderSaveGuidance(false);
-  const handoffUrl = typeof ctx?.desktopHandoffUrl === "string" ? ctx.desktopHandoffUrl : "";
-  const handoffSource = typeof ctx?.sourceUrl === "string" ? ctx.sourceUrl : "";
-  const handoffOrigin = handoffOriginFor(handoffUrl, handoffSource);
-  const handoffLabel =
-    handoffOrigin !== ""
-      ? t("view.handoff.sendOrigin", { origin: handoffOrigin })
-      : t("view.handoff.send");
   return (
     <div className="dz-view-body dz-notice-section dz-fade-in">
       <div className="dz-notice-header">
@@ -613,22 +596,6 @@ function DisplayOnlyView({
           >
             {t("view.display.startOver")}
           </button>
-        ) : null}
-        {handoffUrl !== "" ? (
-          <a
-            className="dz-btn-secondary"
-            id="dz-btn-desktop-handoff"
-            href={handoffUrl}
-            onClick={() => {
-              try {
-                callbacks.onOpenExternalLink?.(handoffUrl);
-              } catch {
-                // Handoff navigation must never break display.
-              }
-            }}
-          >
-            {handoffLabel}
-          </a>
         ) : null}
       </div>
     </div>
@@ -793,16 +760,12 @@ function FailedView({
   hostDocument: Document;
 }) {
   const error: JobError = presentation.error ?? { kind: "internal" };
-  const handoffUrl = typeof ctx?.desktopHandoffUrl === "string" ? ctx.desktopHandoffUrl : "";
   const source =
     typeof ctx?.sourceUrl === "string"
       ? ctx.sourceUrl
       : typeof ctx?.jobActivity?.url === "string"
         ? ctx.jobActivity.url
         : "";
-  const isFile = isFileHandoffSource(source);
-  const origin = isFile ? "" : handoffOriginFor(handoffUrl, source);
-  const label = origin !== "" ? t("view.handoff.sendOrigin", { origin }) : t("view.handoff.send");
   if (error.kind === "no-usable-tiles") {
     const status = httpStatusOf(error);
     const refused = status === 401 || status === 403;
@@ -851,7 +814,7 @@ function FailedView({
         <div>
           <h2 className="dz-error-title">{t("view.fail.title")}</h2>
           <p className="dz-error-message" id="dz-error-message">
-            {plainMessageFor(error, hostFromUrl(source), source)}
+            {plainMessageFor(error, hostFromUrl(source))}
           </p>
         </div>
       </div>
@@ -912,28 +875,7 @@ function FailedView({
             {t("view.display.startOver")}
           </button>
         ) : null}
-        {handoffUrl !== "" && !isFile ? (
-          <a
-            className="dz-btn-secondary"
-            id="dz-btn-desktop-handoff"
-            href={handoffUrl}
-            onClick={() => {
-              try {
-                callbacks.onOpenExternalLink?.(handoffUrl);
-              } catch {
-                // Handoff navigation must never break the error view.
-              }
-            }}
-          >
-            {label}
-          </a>
-        ) : null}
       </div>
-      {isFile ? (
-        <p className="dz-notice-message" id="dz-handoff-local">
-          {t("view.handoff.localNote")}
-        </p>
-      ) : null}
     </div>
   );
 }

@@ -2,7 +2,7 @@
 // `@dezoomify/wasm-bindings`): copy comes from structured facts only; no
 // message text is parsed. The retry verdict is stamped by host boundaries
 // from the one policy in Rust (`Error::retryable`).
-import type { Error as JobError } from "@dezoomify/wasm-bindings";
+import type { BlockedReason, Error as JobError } from "@dezoomify/wasm-bindings";
 import { type I18nKey, t } from "./i18n.ts";
 
 // JPEG addresses at most 65535 px per side; WebP at most 16383 px
@@ -72,7 +72,7 @@ const COPY = {
   "choice-failed": "desktop.choice.failed",
   "invalid-url": "desktop.url.invalid",
   "invalid-settings": "desktop.settings.unusable",
-  "handoff-rejected": "desktop.handoff.rejected",
+  "handoff-rejected": "desktop.internal.error",
   "registration-failed": "desktop.internal.error",
   internal: "desktop.internal.error",
   "shell-lock": "desktop.internal.error",
@@ -108,8 +108,10 @@ const TRANSPORTS = new Set([
   "display-only",
 ]);
 const RESOURCE_KINDS = new Set(["metadata", "tile", "probe", "output"]);
-// Closed enums mirrored from the generated contract (`BlockedReason`,
-// `LimitReason`): an unknown member is a binding error waiting to happen.
+// Closed enums of the generated contract's wire values (`BlockedReason`,
+// `LimitReason`); the generated package declares types only, so this runtime
+// list is their wire spelling. An unknown member is a binding error waiting
+// to happen.
 const BLOCKED_REASONS = new Set([
   "access-required",
   "blocked-ipv4",
@@ -139,6 +141,14 @@ const BLOCKED_REASONS = new Set([
   "userinfo",
 ]);
 const LIMIT_REASONS = new Set(["memory", "jpeg-side", "webp-side"]);
+
+/** Narrow a wire value to the generated `BlockedReason` union; an unknown
+ * member is simply absent. */
+export function blockedReason(value: unknown): BlockedReason | undefined {
+  return typeof value === "string" && BLOCKED_REASONS.has(value)
+    ? (value as BlockedReason)
+    : undefined;
+}
 
 /** Structural guard per variant: required fields must exist with the right
  * shape before the payload narrows to the generated union (wrappers recurse
@@ -170,11 +180,7 @@ function isJobErrorAt(value: unknown, depth: number): boolean {
     case "proxy-error":
       return transport(record.transport);
     case "policy-denied":
-      return (
-        transport(record.transport) &&
-        typeof record.blocked_reason === "string" &&
-        BLOCKED_REASONS.has(record.blocked_reason)
-      );
+      return transport(record.transport) && blockedReason(record.blocked_reason) !== undefined;
     case "redirect-limit":
     case "deferred-limit":
       return num(record.max);
@@ -283,7 +289,7 @@ function policyHintFor(
  * names, statuses, raw failure chains) stays out of this sentence; it
  * belongs in the collapsible detail built beside it.
  */
-export function plainMessageFor(error: JobError, host: string, source = ""): string {
+export function plainMessageFor(error: JobError, host: string): string {
   const cause = causeOf(error);
   switch (cause.kind) {
     // Structured limit facts come from `limit`; display prose is never parsed.
@@ -330,9 +336,6 @@ export function plainMessageFor(error: JobError, host: string, source = ""): str
     }
     case "policy-denied":
       return t("view.fail.policyBlocked", { hint: policyHintFor(cause.blocked_reason) });
-    case "invalid-url":
-      if (source.startsWith("file:")) return t("view.handoff.localNote");
-      break;
   }
   // Unrecognized payloads stay on the generic sentence at runtime; the
   // compile-time exhaustiveness lives in `COPY`.

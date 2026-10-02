@@ -1,6 +1,6 @@
 // Shared-UI message dictionary (English plus French, German, Italian).
 //
-// English (`en`) is the canonical source: every other locale mirrors it key
+// English (`en`) is the canonical source: every other locale covers it key
 // for key with identical `{placeholders}`, and lookups fall back to English
 // per key. Rules for user copy: `packages/shared-ui/AGENTS.md`.
 //
@@ -206,6 +206,11 @@ const en = {
   "view.handoff.sendOrigin": "Send to desktop app ({origin})",
   "view.handoff.localNote":
     "Local files stay on this computer. Open the desktop app and choose the file there; nothing is sent.",
+  // Desktop handoff uses the ordinary, user-confirmed dezoomify:// link.
+  "view.handoff.send": "Send to desktop app",
+  "view.handoff.sendOrigin": "Send to desktop app ({origin})",
+  "view.handoff.localNote":
+    "Local files stay on this computer. Open the desktop app and choose the file there; nothing is sent.",
   "view.display.waysTitle": "Ways to save this artwork",
   "view.display.extTitle": "Browser Extension Guide",
   "view.display.extDesc":
@@ -295,8 +300,6 @@ const en = {
     "These download settings are invalid. Adjust them and try again.",
   "desktop.output.deniedPick":
     "The save destination was not accepted. Choose a different file to continue.",
-  "desktop.handoff.rejected":
-    "This link cannot be opened from {host}. Try a different address without sign-in details.",
   "desktop.output.exists":
     "A file already exists at the save destination from {host}. Choose a different file or confirm overwriting to continue.",
   "desktop.output.destDenied":
@@ -331,13 +334,6 @@ const en = {
   "desktop.save.fallback": "Could not save this picture from {host}. Try again.",
   "desktop.invoke.startFallback": "Could not start the job.",
   "desktop.invoke.partial": "The partial-image choice was rejected.",
-  "desktop.link.title": "Another app wants to open an image in Dezoomify.",
-  "desktop.link.source": "Source: {url}",
-  "desktop.link.prov": "Provenance: dezoomify:// link (v{version})",
-  "desktop.link.provHint": "Provenance: dezoomify:// link (v{version}) · {hint}",
-  "desktop.link.note": "Nothing runs until you confirm. Declining does nothing.",
-  "desktop.link.dismiss": "Dismiss",
-  "desktop.link.open": "Open image",
   "desktop.rec.missing": "Missing tiles: {shown}{rest}.",
   "desktop.rec.more": " and {n} more",
   "desktop.rec.keep": "Keep partial image",

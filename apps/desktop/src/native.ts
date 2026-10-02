@@ -177,14 +177,6 @@ export async function validateSettings(
   });
 }
 
-export async function listenDeepLinks(
-  callback: (payload: Record<string, unknown>) => void,
-): Promise<void> {
-  await ipc.listen("dezoomify://deep-link-pending", ({ payload }) => {
-    if (payload && typeof payload === "object") callback(payload as Record<string, unknown>);
-  });
-}
-
 /** Open explicitly requested HTTPS links outside the app window. */
 export async function openExternalLink(url: string): Promise<void> {
   const address = new URL(url);

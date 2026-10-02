@@ -1,6 +1,6 @@
 // Italian message dictionary for the shared UI.
 //
-// Mirrors `../i18n.ts` key for key: every English key has exactly one Italian
+// Translation of `../i18n.ts`, key for key: every English key has exactly one Italian
 // entry with identical `{placeholders}`. Missing keys fall back to English at
 // lookup time, so this table must never drop a key when English grows.
 // Brand and product names ("Dezoomify", "Chrome Web Store", "GitHub Releases",

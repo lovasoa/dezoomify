@@ -353,16 +353,12 @@ impl<'a> NativeHost<'a> {
                 let _permit = permit;
                 let bytes = processing
                     .apply(bytes)
-                    .map_err(|error| Error::ProcessingFailed {
-                        failure: error.to_string().into(),
-                    })?;
+                    .map_err(|error| Error::ProcessingFailed(error.to_string().into()))?;
                 if let Some((dir, namespace, uri)) = store {
                     let _ = crate::cache::store(&dir, &namespace, &uri, &bytes);
                 }
-                let image =
-                    load_image_with_metadata(&bytes).map_err(|error| Error::DecodeFailed {
-                        failure: error.to_string().into(),
-                    })?;
+                let image = load_image_with_metadata(&bytes)
+                    .map_err(|error| Error::DecodeFailed(error.to_string().into()))?;
                 Ok::<_, Error>(DecodedTile {
                     image: image.image.to_rgba8(),
                     icc_profile: image.icc_profile,
@@ -370,9 +366,7 @@ impl<'a> NativeHost<'a> {
                 })
             })
             .await
-            .map_err(|_| Error::Internal {
-                failure: "tile decode task failed".to_string().into(),
-            })?
+            .map_err(|_| Error::Internal("tile decode task failed".to_string().into()))?
         })
         .await
     }
@@ -580,19 +574,19 @@ impl Host for NativeHost<'_> {
     }
 
     async fn choose_image(&self, _catalog: Catalog) -> Result<u32, Error> {
-        Err(Error::ChoiceFailed {
-            failure: "native image selection requires a configured policy"
+        Err(Error::ChoiceFailed(
+            "native image selection requires a configured policy"
                 .to_string()
                 .into(),
-        })
+        ))
     }
 
     async fn choose_level(&self, _image: Image) -> Result<u32, Error> {
-        Err(Error::ChoiceFailed {
-            failure: "native level selection requires a configured policy"
+        Err(Error::ChoiceFailed(
+            "native level selection requires a configured policy"
                 .to_string()
                 .into(),
-        })
+        ))
     }
 
     async fn choose_partial(&self, missing: MissingTiles) -> Result<RecoveryChoice, Error> {

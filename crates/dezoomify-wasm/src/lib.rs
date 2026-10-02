@@ -9,9 +9,7 @@ mod bindings {
     use wasm_bindgen::prelude::*;
 
     fn boundary_error(detail: impl std::fmt::Display) -> Error {
-        Error::BindingInvalidValue {
-            failure: detail.to_string().into(),
-        }
+        Error::BindingInvalidValue(detail.to_string().into())
     }
 
     fn encode(value: &impl Serialize) -> Result<JsValue, Error> {
@@ -105,11 +103,26 @@ mod bindings {
     dezoomify::host_members!(bind_host);
 
     /// The retry policy of `Error::retryable()`, exposed at the boundary:
-    /// one policy in Rust, no mirror in TypeScript.
+    /// one policy in Rust; the shared UI reads the boundary-stamped
+    /// `retryable` hint as plain data.
     #[wasm_bindgen(js_name = isRetryable)]
     pub fn is_retryable(error: JsValue) -> Result<bool, JsValue> {
         let error: Error = decode(error).map_err(js_error)?;
         Ok(error.retryable())
+    }
+
+    /// The secret/credential query-key policy of `SENSITIVE_QUERY_KEYS`,
+    /// exposed at the boundary: one vocabulary in Rust. The TypeScript list
+    /// exists only for pure callers that load no runtime.
+    #[wasm_bindgen(js_name = isSecretKey)]
+    pub fn is_secret_key(key: &str) -> bool {
+        dezoomify::model::is_secret_key(key)
+    }
+
+    /// Whether a source URL carries secret-bearing query or fragment keys.
+    #[wasm_bindgen(js_name = hasSecretParams)]
+    pub fn has_secret_params(url: &str) -> bool {
+        dezoomify::model::has_secret_params(url)
     }
 
     #[wasm_bindgen(skip_typescript)]
@@ -135,11 +148,7 @@ mod bindings {
         decode::<ProcessingRecipe>(recipe)
             .map_err(js_error)?
             .apply(bytes.to_vec())
-            .map_err(|error| {
-                js_error(Error::ProcessingFailed {
-                    failure: error.to_string().into(),
-                })
-            })
+            .map_err(|error| js_error(Error::ProcessingFailed(error.to_string().into())))
     }
 
     #[wasm_bindgen(typescript_custom_section)]

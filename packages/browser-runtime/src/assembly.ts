@@ -41,7 +41,7 @@ export interface CanvasAssemblyDeps<C extends AssemblyCanvas = AssemblyCanvas> {
     height: number,
     signal: AbortSignal,
   ): BrowserSaveDisposition | Promise<BrowserSaveDisposition>;
-  /** Job source URL, used for the desktop handoff link in limit failures. */
+  /** Job source URL, named in limit-failure diagnostics. */
   sourceUrl?: string;
   /** Limits override for tests; defaults to the browser canvas limits. */
   limits?: BrowserLimits;

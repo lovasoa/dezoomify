@@ -86,14 +86,12 @@ fn is_retryable(error: dezoomify::model::Error) -> bool {
 
 /// Validate raw settings without starting a job: `parse_settings` is the
 /// single validator, so the webview persists an edit only after the shell
-/// accepts it and never mirrors its rules.
+/// accepts it and holds none of its rules.
 #[tauri::command]
 fn validate_settings(settings: serde_json::Value) -> Result<(), Error> {
     parse_settings(&settings)
         .map(|_| ())
-        .map_err(|message| Error::InvalidSettings {
-            failure: message.into(),
-        })
+        .map_err(|message| Error::InvalidSettings(message.into()))
 }
 
 #[tauri::command]
@@ -106,17 +104,15 @@ async fn open_saved_output(
         .lock()
         .ok()
         .and_then(|table| table.saved_output_for(&job))
-        .ok_or_else(|| Error::OutputUnavailable {
-            failure: Failure::default(),
-        })?;
+        .ok_or_else(|| Error::OutputUnavailable(Failure::default()))?;
     // Launch off the async executor and check the launcher's result. The
     // opener plugin's detached path reports success before the launcher exits;
     // its Linux reveal API also requires a FileManager1/portal D-Bus service.
     // Opening the parent uses the user's default folder handler instead.
     tauri::async_runtime::spawn_blocking(move || launch_saved_output(path, reveal))
         .await
-        .map_err(|_| Error::LaunchFailed {
-            failure: "the file-opening task could not finish".to_string().into(),
+        .map_err(|_| {
+            Error::LaunchFailed("the file-opening task could not finish".to_string().into())
         })?
 }
 
@@ -130,9 +126,7 @@ fn launch_saved_output(path: std::path::PathBuf, reveal: bool) -> Result<(), Err
         if error.kind() == std::io::ErrorKind::NotFound {
             Error::OutputNotFound
         } else {
-            Error::OutputUnavailable {
-                failure: dezoomify::model::chain_text(&error).into(),
-            }
+            Error::OutputUnavailable(dezoomify::model::chain_text(&error).into())
         }
     })?;
     // `open::that` stops after an installed launcher exits unsuccessfully.
@@ -147,11 +141,11 @@ fn launch_saved_output(path: std::path::PathBuf, reveal: bool) -> Result<(), Err
             return Ok(());
         }
     }
-    Err(Error::LaunchFailed {
-        failure: "the system could not launch the default application"
+    Err(Error::LaunchFailed(
+        "the system could not launch the default application"
             .to_string()
             .into(),
-    })
+    ))
 }
 
 fn lock_table<'a>(
@@ -170,18 +164,16 @@ async fn dezoomify(
     settings: Option<serde_json::Value>,
 ) -> Result<dezoomify::model::Output, dezoomify::model::Error> {
     if !commands::is_valid_input_url(&input_url) {
-        return Err(Error::InvalidInput {
-            failure: "input_url must be an http(s) URL up to 2048 bytes without userinfo"
+        return Err(Error::InvalidInput(
+            "input_url must be an http(s) URL up to 2048 bytes without userinfo"
                 .to_string()
                 .into(),
-        });
+        ));
     }
     let settings = settings
         .map(|value| parse_settings(&value))
         .transpose()
-        .map_err(|message| Error::InvalidSettings {
-            failure: message.into(),
-        })?
+        .map_err(|message| Error::InvalidSettings(message.into()))?
         .unwrap_or_else(crate::settings::DesktopSettings::with_defaults);
     let registration = lock_table(&state)?.insert(&job)?;
     if let Err(error) = app.emit(
@@ -189,9 +181,9 @@ async fn dezoomify(
         serde_json::json!({"job": job}),
     ) {
         lock_table(&state)?.release_job(&job);
-        return Err(Error::RegistrationFailed {
-            failure: format!("the native invocation could not be acknowledged: {error}").into(),
-        });
+        return Err(Error::RegistrationFailed(
+            format!("the native invocation could not be acknowledged: {error}").into(),
+        ));
     }
     let mut options = crate::settings::job_options_for(&settings);
     options.input_url = input_url;
@@ -253,9 +245,7 @@ async fn dezoomify(
         result
     })
     .await
-    .map_err(|_| Error::Internal {
-        failure: "native task failed".to_string().into(),
-    })?
+    .map_err(|_| Error::Internal("native task failed".to_string().into()))?
 }
 
 #[tauri::command]

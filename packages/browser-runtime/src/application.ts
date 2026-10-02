@@ -53,7 +53,6 @@ import {
   selectionLimitsFor,
 } from "./limits.ts";
 import type { PermissionWait } from "./permissions.ts";
-import { desktopHandoffLink } from "./plan-gates.ts";
 import { createTileDecoder } from "./tile-decode.ts";
 import { BROWSER_MAX_CONCURRENCY } from "./tile-policy.ts";
 
@@ -243,7 +242,6 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
           capabilities.save(blob, width, height, signal, a.progress?.title ?? undefined),
         onDisplayOnly: () => {
           if (current === a) {
-            a.view.desktopHandoffUrl = desktopHandoffLink(url);
             update();
           }
         },
@@ -335,7 +333,6 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         a.failure = await withVerdict(
           isJobError(error) ? error : { kind: "internal", detail: String(error).slice(0, 2048) },
         );
-        a.view.desktopHandoffUrl = desktopHandoffLink(url);
       }
       a.diagnostics.finish(outcome, error);
     } finally {

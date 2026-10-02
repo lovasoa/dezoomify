@@ -272,12 +272,8 @@ fn discard_and_empty_output_never_publish() {
 #[test]
 fn invalid_binding_and_output_failures_abort_immediately() {
     for error in [
-        Error::BindingInvalidValue {
-            failure: "bad result".to_string().into(),
-        },
-        Error::OutputUnavailable {
-            failure: "canvas allocation failed".to_string().into(),
-        },
+        Error::BindingInvalidValue("bad result".to_string().into()),
+        Error::OutputUnavailable("canvas allocation failed".to_string().into()),
     ] {
         let host = MemoryHost::default();
         let expected = error.clone();

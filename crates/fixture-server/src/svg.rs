@@ -1,4 +1,4 @@
-//! Deterministic tile-image generators mirroring legacy fixture behavior.
+//! Deterministic tile-image generators matching legacy fixture behavior.
 //!
 //! Pixel semantics (not byte identity) match the legacy server: solid-color
 //! SVGs with exact dimensions and availability shapes; decoded pixels are what

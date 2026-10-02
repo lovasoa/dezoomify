@@ -290,9 +290,9 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
     match result {
         Ok((summary, terminal_seq)) => {
             let Some(size) = summary.output.canvas.as_ref() else {
-                return fail(&dezoomify::model::Error::Internal {
-                    failure: "saved output has no dimensions".to_string().into(),
-                });
+                return fail(&dezoomify::model::Error::Internal(
+                    "saved output has no dimensions".to_string().into(),
+                ));
             };
             if json {
                 println!(
@@ -545,9 +545,9 @@ fn run_native(
                 serde_json::json!({ "error": error }),
             );
         })?;
-    let publication = host.publication().ok_or_else(|| Error::Internal {
-        failure: "output was not published".to_string().into(),
-    })?;
+    let publication = host
+        .publication()
+        .ok_or_else(|| Error::Internal("output was not published".to_string().into()))?;
     Ok((publication, sequence.get() + 1))
 }
 

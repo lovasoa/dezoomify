@@ -76,9 +76,9 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
         return Err(empty_plan());
     }
     if total > u64::from(options.max_tiles) {
-        return Err(Error::ResourceLimit {
-            failure: format!("tile plan exceeds max_tiles {}", options.max_tiles).into(),
-        });
+        return Err(Error::ResourceLimit(
+            format!("tile plan exceeds max_tiles {}", options.max_tiles).into(),
+        ));
     }
     let canvas = source.image_size().map(size);
     let tiles: Box<dyn Iterator<Item = Result<TileSpec, core::TileSourceError>>> = match source {
@@ -239,13 +239,10 @@ async fn discover(
                         return Err(Error::EmptyResource.resource(read, ResourceKind::Metadata));
                     }
                     if u64::try_from(response.bytes.len()).unwrap_or(u64::MAX) > options.max_bytes {
-                        return Err(Error::ResourceLimit {
-                            failure: format!(
-                                "metadata resource exceeds max_bytes {}",
-                                options.max_bytes
-                            )
-                            .into(),
-                        }
+                        return Err(Error::ResourceLimit(
+                            format!("metadata resource exceeds max_bytes {}", options.max_bytes)
+                                .into(),
+                        )
                         .resource(read, ResourceKind::Metadata));
                     }
                 }
@@ -304,24 +301,20 @@ async fn discover(
                 match &error {
                     core::DiscoveryError::ParseLimitExceeded
                     | core::DiscoveryError::ResourceLimitExceeded
-                    | core::DiscoveryError::MetadataSizeLimitExceeded => Error::ResourceLimit {
-                        failure: Failure {
+                    | core::DiscoveryError::MetadataSizeLimitExceeded => {
+                        Error::ResourceLimit(Failure {
                             request: None,
                             detail,
-                        },
-                    },
-                    _ if empty_image => Error::NoImageFound {
-                        failure: Failure {
-                            request: None,
-                            detail,
-                        },
-                    },
-                    _ if cause.is_none() && malformed => Error::MalformedMetadata {
-                        failure: Failure {
-                            request: None,
-                            detail,
-                        },
-                    },
+                        })
+                    }
+                    _ if empty_image => Error::NoImageFound(Failure {
+                        request: None,
+                        detail,
+                    }),
+                    _ if cause.is_none() && malformed => Error::MalformedMetadata(Failure {
+                        request: None,
+                        detail,
+                    }),
                     _ => Error::DiscoveryFailed {
                         failure: Failure {
                             request: None,
@@ -388,9 +381,9 @@ async fn select(
                 .map_or(0, |(index, _)| index),
         };
         let Some(entry) = catalog.into_entries().into_iter().nth(index) else {
-            return Err(Error::InvalidState {
-                failure: "image selection is out of range".to_string().into(),
-            });
+            return Err(Error::InvalidState(
+                "image selection is out of range".to_string().into(),
+            ));
         };
         match entry {
             DiscoveredEntry::Deferred(resource) => {
@@ -411,9 +404,9 @@ async fn select(
                     policy => select_level(&image, policy).ok_or_else(empty_plan)?,
                 };
                 if level >= image.levels.len() {
-                    return Err(Error::InvalidState {
-                        failure: "level selection is out of range".to_string().into(),
-                    });
+                    return Err(Error::InvalidState(
+                        "level selection is out of range".to_string().into(),
+                    ));
                 }
                 return Ok((image, level));
             }
@@ -521,9 +514,7 @@ pub(crate) async fn probe(
 ) -> Result<core::ObservationResult, Error> {
     *remaining = remaining
         .checked_sub(1)
-        .ok_or_else(|| Error::ResourceLimit {
-            failure: "probe count exceeds max_tiles".to_string().into(),
-        })?;
+        .ok_or_else(|| Error::ResourceLimit("probe count exceeds max_tiles".to_string().into()))?;
     host.checkpoint(Gate::Cancellation).await?;
     match host.probe(portable_tile(tile, None)).await? {
         ProbeOutcome::Missing => Ok(core::ObservationResult::Missing),
@@ -597,9 +588,7 @@ fn empty_plan() -> Error {
 
 impl From<core::TileSourceError> for Error {
     fn from(error: core::TileSourceError) -> Self {
-        Self::PlanInvalid {
-            failure: error.to_string().into(),
-        }
+        Self::PlanInvalid(error.to_string().into())
     }
 }
 fn validate(inputs: &[JobInput], options: &Options) -> Result<(), Error> {
@@ -634,18 +623,16 @@ fn validate(inputs: &[JobInput], options: &Options) -> Result<(), Error> {
             .any(|i| i.kind.unwrap_or_default() == DiscoveryInputKind::Source)
         || inputs.iter().any(|i| !valid(&i.url))
     {
-        return Err(Error::InvalidInput {
-            failure: "inputs require a user source and at most 256 valid URLs or local paths up to 2048 bytes"
+        return Err(Error::InvalidInput("inputs require a user source and at most 256 valid URLs or local paths up to 2048 bytes"
                 .to_string()
-                .into(),
-        });
+                .into()));
     }
     if options.max_concurrent == 0 || options.max_tiles == 0 || options.max_bytes == 0 {
-        return Err(Error::InvalidOptions {
-            failure: "concurrency, tile, and byte limits must be positive"
+        return Err(Error::InvalidOptions(
+            "concurrency, tile, and byte limits must be positive"
                 .to_string()
                 .into(),
-        });
+        ));
     }
     if options.max_concurrent > 64
         || options.max_tiles > 16_777_216
@@ -655,14 +642,14 @@ fn validate(inputs: &[JobInput], options: &Options) -> Result<(), Error> {
         || options.max_deferred_follows > 64
         || options.retry_base_delay_ms > 300_000
     {
-        return Err(Error::ResourceLimit {
-            failure: "resource limits are out of range".to_string().into(),
-        });
+        return Err(Error::ResourceLimit(
+            "resource limits are out of range".to_string().into(),
+        ));
     }
     if options.max_concurrent > options.max_tiles {
-        return Err(Error::InvalidOptions {
-            failure: "max_concurrent cannot exceed max_tiles".to_string().into(),
-        });
+        return Err(Error::InvalidOptions(
+            "max_concurrent cannot exceed max_tiles".to_string().into(),
+        ));
     }
     if let SelectionPolicy::Fitting {
         max_width,
@@ -671,20 +658,20 @@ fn validate(inputs: &[JobInput], options: &Options) -> Result<(), Error> {
     } = options.selection
         && (max_width == 0 || max_height == 0 || max_area == 0)
     {
-        return Err(Error::InvalidOptions {
-            failure: "canvas limits must be positive".to_string().into(),
-        });
+        return Err(Error::InvalidOptions(
+            "canvas limits must be positive".to_string().into(),
+        ));
     }
     if inputs.iter().any(|input| {
         input.contents.as_ref().is_some_and(|contents| {
             contents.is_empty() || contents.len() as u64 > options.max_bytes
         })
     }) {
-        return Err(Error::ResourceLimit {
-            failure: "supplied document exceeds resource limits"
+        return Err(Error::ResourceLimit(
+            "supplied document exceeds resource limits"
                 .to_string()
                 .into(),
-        });
+        ));
     }
     Ok(())
 }

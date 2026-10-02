@@ -323,7 +323,6 @@ test("resolution notice during fetching offers Try maximum and reports the large
   await page.locator("#dz-btn-try-maximum").click();
   await expect(page.locator(".dz-error-section")).toBeVisible({ timeout: 30000 });
   await expect(page.locator("#dz-error-message")).toContainText(/too large/i);
-  await expect(page.locator("#dz-btn-desktop-handoff")).toBeVisible();
 });
 
 // website/proxy-fallback flow contract: a non-readable metadata URL takes

@@ -1,6 +1,6 @@
 // German message dictionary for the shared UI.
 //
-// Mirrors `../i18n.ts` key for key: every English key has exactly one German
+// Translation of `../i18n.ts`, key for key: every English key has exactly one German
 // entry with identical `{placeholders}`. Missing keys fall back to English at
 // lookup time, so this table must never drop a key when English grows.
 // Brand and product names ("Dezoomify", "Chrome Web Store", "GitHub Releases",
@@ -139,6 +139,11 @@ export const de = {
   "view.handoff.sendOrigin": "An die Desktop-App senden ({origin})",
   "view.handoff.localNote":
     "Lokale Dateien bleiben auf diesem Rechner. Offnen Sie die Desktop-App und wahlen Sie dort die Datei; nichts wird gesendet.",
+  // Desktop handoff uses the ordinary, user-confirmed dezoomify:// link.
+  "view.handoff.send": "An die Desktop-App senden",
+  "view.handoff.sendOrigin": "An die Desktop-App senden ({origin})",
+  "view.handoff.localNote":
+    "Lokale Dateien bleiben auf diesem Rechner. Offnen Sie die Desktop-App und wahlen Sie dort die Datei; nichts wird gesendet.",
   "view.display.waysTitle": "Wege, dieses Kunstwerk zu speichern",
   "view.display.extTitle": "Anleitung zur Browser-Erweiterung",
   "view.display.extDesc":
@@ -224,8 +229,6 @@ export const de = {
     "Diese Download-Einstellungen sind ungueltig. Passen Sie sie an und versuchen Sie es erneut.",
   "desktop.output.deniedPick":
     "Das Speicherziel wurde nicht angenommen. Wahlen Sie eine andere Datei, um fortzufahren.",
-  "desktop.handoff.rejected":
-    "Dieser Link kann von {host} aus nicht geoffnet werden. Versuchen Sie eine andere Adresse ohne Anmeldedaten.",
   "desktop.output.exists":
     "Am Speicherziel von {host} existiert bereits eine Datei. Wahlen Sie eine andere Datei oder bestatigen Sie das Ueberschreiben, um fortzufahren.",
   "desktop.output.destDenied":

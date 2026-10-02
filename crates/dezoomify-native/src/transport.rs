@@ -33,7 +33,7 @@ impl From<reqwest::Error> for TransportError {
                         failure,
                     }
                 } else if error.is_builder() {
-                    Error::BadUrl { failure }
+                    Error::BadUrl(failure)
                 } else {
                     Error::NetworkFailure {
                         transport: ErrorTransport::Native,
@@ -48,7 +48,7 @@ impl From<reqwest::Error> for TransportError {
 
 impl From<url::ParseError> for TransportError {
     fn from(error: url::ParseError) -> Self {
-        caused(|failure| Error::BadUrl { failure }, &error)
+        caused(Error::BadUrl, &error)
     }
 }
 
@@ -123,12 +123,14 @@ impl NativeTransport {
             .worker_threads(RUNTIME_WORKERS)
             .thread_name("dezoomify-transport")
             .build()
-            .map_err(|e| Error::Internal {
-                failure: format!(
-                    "transport runtime could not start: {}",
-                    dezoomify::model::chain_text(&e)
+            .map_err(|e| {
+                Error::Internal(
+                    format!(
+                        "transport runtime could not start: {}",
+                        dezoomify::model::chain_text(&e)
+                    )
+                    .into(),
                 )
-                .into(),
             })?;
         let mut builder = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
@@ -141,12 +143,14 @@ impl NativeTransport {
         } else {
             builder = builder.use_preconfigured_tls(tls_config());
         }
-        let client = builder.build().map_err(|e| Error::Internal {
-            failure: format!(
-                "transport client could not be built: {}",
-                dezoomify::model::chain_text(&e)
+        let client = builder.build().map_err(|e| {
+            Error::Internal(
+                format!(
+                    "transport client could not be built: {}",
+                    dezoomify::model::chain_text(&e)
+                )
+                .into(),
             )
-            .into(),
         })?;
         Ok(Self {
             runtime,
@@ -272,14 +276,12 @@ fn is_http_uri(uri: &str) -> bool {
     uri.starts_with("http://") || uri.starts_with("https://")
 }
 
-/// Reject credential-bearing userinfo in the request URI itself, mirroring
+/// Reject credential-bearing userinfo in the request URI itself, matching
 /// the redirect-target rule.
 fn reject_userinfo_uri(uri: &str) -> Result<(), Error> {
     let parsed = url::Url::parse(uri).map_err(TransportError::from)?;
     if !parsed.username().is_empty() {
-        return Err(Error::BadUrl {
-            failure: "userinfo rejected".to_string().into(),
-        });
+        return Err(Error::BadUrl("userinfo rejected".to_string().into()));
     }
     Ok(())
 }
@@ -425,28 +427,23 @@ fn parse_retry_after_ms(value: &str) -> Option<u64> {
 
 fn resolve_redirect(base: &str, location: &str) -> Result<String, Error> {
     if location.is_empty() {
-        return Err(Error::BadRedirect {
-            failure: "empty location".to_string().into(),
-        });
+        return Err(Error::BadRedirect("empty location".to_string().into()));
     }
-    let base = url::Url::parse(base).map_err(|e| Error::BadUrl {
-        failure: dezoomify::model::chain_text(&e).into(),
-    })?;
-    let next = base.join(location).map_err(|e| Error::BadRedirect {
-        failure: format!("bad location: {e}").into(),
-    })?;
+    let base = url::Url::parse(base)
+        .map_err(|e| Error::BadUrl(dezoomify::model::chain_text(&e).into()))?;
+    let next = base
+        .join(location)
+        .map_err(|e| Error::BadRedirect(format!("bad location: {e}").into()))?;
     if matches!(next.scheme(), "http" | "https") && !next.cannot_be_a_base() {
         if next.username().is_empty() {
             Ok(next.to_string())
         } else {
-            Err(Error::BadRedirect {
-                failure: "userinfo rejected".to_string().into(),
-            })
+            Err(Error::BadRedirect("userinfo rejected".to_string().into()))
         }
     } else {
-        Err(Error::BadRedirect {
-            failure: "unsupported redirect scheme".to_string().into(),
-        })
+        Err(Error::BadRedirect(
+            "unsupported redirect scheme".to_string().into(),
+        ))
     }
 }
 
@@ -466,11 +463,11 @@ fn local_path_for_uri(uri: &str) -> Result<&str, Error> {
         } else if rest.starts_with('/') {
             return Ok(rest);
         }
-        return Err(Error::BadUrl {
-            failure: "file uri must name a local absolute path"
+        return Err(Error::BadUrl(
+            "file uri must name a local absolute path"
                 .to_string()
                 .into(),
-        });
+        ));
     }
     Ok(uri)
 }

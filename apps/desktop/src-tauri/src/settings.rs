@@ -207,8 +207,7 @@ fn parse_headers_value(value: &serde_json::Value) -> Result<BTreeMap<String, Str
         serde_json::Value::Object(map) => {
             for (key, val) in map {
                 let name = key.trim().to_ascii_lowercase();
-                // Header values are strings (numbers stay fail-closed, matching
-                // the single validator for this corpus).
+                // Header values are strings; JSON numbers fail closed.
                 let val_str = match val {
                     serde_json::Value::String(s) => s.clone(),
                     _ => {
@@ -380,6 +379,8 @@ mod tests {
     #[test]
     fn defaults_match_cli() {
         let settings = parse_settings(&serde_json::Value::Null).unwrap();
+        assert_eq!(settings, DesktopSettings::with_defaults());
+        assert_eq!(parse_settings(&json!({})).unwrap(), settings);
         assert_eq!(settings.output_format, "png");
         assert_eq!(settings.compression, 5);
         assert_eq!(settings.retries, 3);
@@ -419,6 +420,12 @@ mod tests {
     fn retries_zero_allowed_and_bounded() {
         assert_eq!(parse_settings(&json!({"retries": 0})).unwrap().retries, 0);
         assert_eq!(parse_settings(&json!({"retries": 3})).unwrap().retries, 3);
+        assert_eq!(
+            parse_settings(&json!({"retries": MAX_RETRIES}))
+                .unwrap()
+                .retries,
+            MAX_RETRIES
+        );
         assert!(parse_settings(&json!({"retries": -1})).is_err());
         assert!(parse_settings(&json!({"retries": 101})).is_err());
         assert!(parse_settings(&json!({"retries": "x"})).is_err());
@@ -462,6 +469,29 @@ mod tests {
         );
         assert!(parse_settings(&json!({"headers": {"bad name": "v"}})).is_err());
         assert!(parse_settings(&json!({"headers": ["no-colon"]})).is_err());
+        assert!(parse_settings(&json!({"headers": {"x-note": 1}})).is_err());
+    }
+
+    #[test]
+    fn header_lines_validate_shape() {
+        assert_eq!(
+            parse_header_line("  Cookie :  secret=1  ").unwrap(),
+            Some(("cookie".to_string(), "secret=1".to_string()))
+        );
+        assert_eq!(
+            parse_header_line("Referer: https://example.com/a:b").unwrap(),
+            Some(("referer".to_string(), "https://example.com/a:b".to_string()))
+        );
+        assert_eq!(parse_header_line("   ").unwrap(), None);
+        assert_eq!(
+            parse_header_line("X-Note:").unwrap(),
+            Some(("x-note".to_string(), String::new()))
+        );
+        assert!(parse_header_line("no colon here").is_err());
+        assert!(parse_header_line("bad name: v").is_err());
+        assert!(parse_header_line(": v").is_err());
+        assert!(parse_header_line("X: a\rb").is_err());
+        assert!(parse_header_line("X: a\u{0}b").is_err());
     }
 
     #[test]
@@ -475,60 +505,5 @@ mod tests {
             .unwrap()
             .cache_dir
             .is_none());
-    }
-
-    /// Shared cross-language oracle: every case in
-    /// `testdata/policy-vectors.json` is asserted here against the shell's
-    /// `parse_settings`/`parse_header_line`, so the Rust settings validation
-    /// can never drift apart unnoticed. Rejection reason strings are
-    /// pinned per side; where the sides differ in wording only, the vector
-    /// carries both strings plus a comment.
-    #[test]
-    fn policy_vectors_match_the_shared_oracle() {
-        let header_lines = crate::test_vectors::cases("policy-vectors.json", "headerLines");
-        assert!(
-            (15..=25).contains(&header_lines.len()),
-            "the header-line list stays bounded ({} cases)",
-            header_lines.len()
-        );
-        for case in header_lines {
-            let name = case["name"].as_str().expect("case name");
-            let line = case["line"].as_str().expect("case line");
-            let result = parse_header_line(line);
-            crate::test_vectors::assert_case(&case, result, |accept, entry| {
-                if accept.is_null() {
-                    assert_eq!(entry, None, "{name} blank line is ignored");
-                } else {
-                    let entry = entry.expect("entry");
-                    assert_eq!(entry.0, accept["name"].as_str().expect("name"), "{name}");
-                    assert_eq!(entry.1, accept["value"].as_str().expect("value"), "{name}");
-                }
-            });
-        }
-        let settings_cases = crate::test_vectors::cases("policy-vectors.json", "settings");
-        assert!(
-            (5..=25).contains(&settings_cases.len()),
-            "the settings list stays bounded ({} cases)",
-            settings_cases.len()
-        );
-        for case in settings_cases {
-            let name = case["name"].as_str().expect("case name");
-            let result = parse_settings(&case["input"]);
-            crate::test_vectors::assert_case(&case, result, |accept, parsed| {
-                if let Some(retries) = accept["retries"].as_u64() {
-                    assert_eq!(u64::from(parsed.retries), retries, "{name}: retries");
-                }
-                if let Some(headers) = accept["headers"].as_object() {
-                    assert_eq!(parsed.headers.len(), headers.len(), "{name}: headers");
-                    for (key, value) in headers {
-                        assert_eq!(
-                            parsed.headers.get(key).map(String::as_str),
-                            value.as_str(),
-                            "{name}: header {key}"
-                        );
-                    }
-                }
-            });
-        }
     }
 }

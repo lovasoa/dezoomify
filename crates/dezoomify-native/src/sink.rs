@@ -413,23 +413,19 @@ impl Sink {
             let bytes = std::fs::read(&path)
                 .map_err(|e| crate::output::write_failed("spool read failed", &e))?;
             if bytes.len() < 24 {
-                return Err(Error::WriteFailed {
-                    failure: "spool entry truncated".to_string().into(),
-                });
+                return Err(Error::WriteFailed(
+                    "spool entry truncated".to_string().into(),
+                ));
             }
             let w = u32::from_le_bytes(bytes[0..4].try_into().unwrap_or([0; 4]));
             let h = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
             let pixels = &bytes[24..];
             let expected = (w as usize).saturating_mul(h as usize).saturating_mul(4);
             if pixels.len() != expected || w == 0 || h == 0 {
-                return Err(Error::WriteFailed {
-                    failure: "spool entry corrupt".to_string().into(),
-                });
+                return Err(Error::WriteFailed("spool entry corrupt".to_string().into()));
             }
-            let image =
-                RgbaImage::from_raw(w, h, pixels.to_vec()).ok_or_else(|| Error::WriteFailed {
-                    failure: "spool entry corrupt".to_string().into(),
-                })?;
+            let image = RgbaImage::from_raw(w, h, pixels.to_vec())
+                .ok_or_else(|| Error::WriteFailed("spool entry corrupt".to_string().into()))?;
             self.paint(tile.ordinal, tile.destination, tile.extent, &image);
         }
         self.remove_spool_dir();
@@ -511,9 +507,10 @@ impl Sink {
             dest_path.to_path_buf()
         };
         validate_destination(&dest, &format, overwrite)?;
-        let canvas = self.canvas.clone().ok_or_else(|| Error::Internal {
-            failure: "commit without assembled canvas".to_string().into(),
-        })?;
+        let canvas = self
+            .canvas
+            .clone()
+            .ok_or_else(|| Error::Internal("commit without assembled canvas".to_string().into()))?;
         let (icc, exif) = self.first_meta(reused_tiles);
         let encoded_len: u64;
         match format {

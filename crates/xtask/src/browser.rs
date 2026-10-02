@@ -194,7 +194,7 @@ fn dir_size(dir: &std::path::Path) -> Result<u64, String> {
 }
 
 /// Build the entire website via `scripts/build-site.mjs`: browser JS
-/// mirrors, help pages, wasm glue, and the deployable `dist/` tree. The
+/// assets, help pages, wasm glue, and the deployable `dist/` tree. The
 /// same script runs in the website-deploy GitHub Actions workflow, so
 /// local builds and deployments cannot diverge.
 fn build_site(no_wasm: bool) -> Result<(), String> {
@@ -304,10 +304,10 @@ fn dist_fresh() -> bool {
     true
 }
 
-/// Shared-UI and website development: build the full site (mirrors, wasm
-/// glue, dist tree) and serve it on loopback through the Node dev server
-/// (static files plus the same /api/proxy relay as production), exactly as
-/// deployed.
+/// Shared-UI and website development: build the full site (browser JS
+/// assets, wasm glue, dist tree) and serve it on loopback through the Node
+/// dev server (static files plus the same /api/proxy relay as production),
+/// exactly as deployed.
 fn dev_web(args: &[String]) -> Result<(), String> {
     let no_wasm = parse_dev_site_args("dev web", args)?;
     if dist_fresh() {

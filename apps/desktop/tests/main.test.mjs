@@ -69,7 +69,6 @@ registerHooks({
         shortCircuit: true,
         source: `
           export const invokeNative = (...args) => globalThis.desktopTestNative.invokeNative(...args);
-          export const listenDeepLinks = async () => {};
           export const openExternalLink = async () => {};
           export const readNativeDiagnostics = async () => { throw new Error("No native report"); };
           export const validateSettings = async (settings) => { await globalThis.desktopTestNative.validateSettings?.(settings); };

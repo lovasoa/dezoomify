@@ -59,7 +59,7 @@ impl MetadataEntry {
 
 // Default implementation to handle missing labels gracefully via #[serde(default)]
 
-// 6.1: field names mirror the IIIF Presentation 3 wire vocabulary
+// 6.1: field names follow the IIIF Presentation 3 wire vocabulary
 // (`id`/`type`/`label`/`items`); renaming them would break serde
 // mapping, so the shared-prefix lint stays allowed here.
 #[allow(clippy::struct_field_names)]
@@ -82,7 +82,7 @@ pub struct Manifest {
     // pub thumbnail: Option<Vec<Thumbnail>>,
 }
 
-// 6.1: field names mirror the IIIF Presentation 3 wire vocabulary
+// 6.1: field names follow the IIIF Presentation 3 wire vocabulary
 // (`id`/`type`/`label`/`items`); renaming them would break serde
 // mapping, so the shared-prefix lint stays allowed here.
 #[allow(clippy::struct_field_names)]
@@ -100,7 +100,7 @@ pub struct Canvas {
     pub height: Option<u32>,
 }
 
-// 6.1: field names mirror the IIIF Presentation 3 wire vocabulary
+// 6.1: field names follow the IIIF Presentation 3 wire vocabulary
 // (`id`/`type`/`label`/`items`); renaming them would break serde
 // mapping, so the shared-prefix lint stays allowed here.
 #[allow(clippy::struct_field_names)]
@@ -114,7 +114,7 @@ pub struct AnnotationPage {
     pub items: Vec<Annotation>,
 }
 
-// 6.1: field names mirror the IIIF Presentation 3 wire vocabulary
+// 6.1: field names follow the IIIF Presentation 3 wire vocabulary
 // (`id`/`type`/`label`/`items`); renaming them would break serde
 // mapping, so the shared-prefix lint stays allowed here.
 #[allow(clippy::struct_field_names)]
