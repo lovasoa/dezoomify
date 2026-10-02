@@ -7,12 +7,7 @@
  * page that invoked it.
  */
 
-import type {
-  DiscoveryInputKind,
-  FetchFailure,
-  FetchFailureCode,
-  JobInput,
-} from "@dezoomify/wasm-bindings";
+import type { DiscoveryInputKind, Error as JobError, JobInput } from "@dezoomify/wasm-bindings";
 
 type SourceRequest = {
   url: string;
@@ -118,7 +113,7 @@ export function collectCandidates(): {
  * transport. Cookies/session credentials are never part of this result.
  */
 export async function fetchSource(request: SourceRequest): Promise<
-  | { ok: false; error: FetchFailure; documentUrl: string }
+  | { ok: false; error: JobError; documentUrl: string }
   | {
       ok: true;
       status: number;
@@ -139,26 +134,21 @@ export async function fetchSource(request: SourceRequest): Promise<
     controllers = new Map();
     world.__dezoomifySourceFetches = controllers;
   }
-  const fail = (code: FetchFailureCode, message: string, http?: number) => ({
-    ok: false as const,
-    error: {
-      code,
-      message,
-      transport: "browser-session",
-      ...(http === undefined ? {} : { http }),
-      ...(http === 401 || http === 403 ? { blocked_reason: "forbidden" as const } : {}),
-    } satisfies FetchFailure,
-    documentUrl,
-  });
+  const fail = (error: JobError) => ({ ok: false as const, error, documentUrl });
 
   const headers: Record<string, string> = {};
   for (const header of request.headers) headers[header.name] = header.value;
 
   const deadlineAt = request.deadlineAt ?? Date.now() + (request.timeoutMs ?? 30_000);
-  if (Date.now() >= deadlineAt) return fail("TRANSPORT_TIMEOUT", "The source request timed out.");
+  if (Date.now() >= deadlineAt)
+    return fail({
+      kind: "timeout",
+      transport: "browser-session",
+      detail: "the source request timed out",
+    });
   if (request.operationId && controllers.get(request.operationId) === null) {
     controllers.delete(request.operationId);
-    return fail("TRANSPORT_CANCELLED", "The source fetch was cancelled.");
+    return fail({ kind: "cancelled" });
   }
   const controller = new AbortController();
   let finish = () => {};
@@ -181,13 +171,18 @@ export async function fetchSource(request: SourceRequest): Promise<
       signal: controller?.signal,
     });
     if (!response || typeof response.status !== "number")
-      return fail("TRANSPORT_NETWORK_ERROR", "The source returned an invalid response.");
+      return fail({
+        kind: "network-failure",
+        transport: "browser-session",
+        detail: "the source returned an invalid response",
+      });
     if (!response.ok) {
-      const result = fail(
-        "TRANSPORT_HTTP_ERROR",
-        "The website refused this file.",
-        response.status,
-      );
+      const result = fail({
+        kind: "http-error",
+        status: response.status,
+        request: request.url,
+        transport: "browser-session",
+      });
       const raw = response.headers?.get?.("retry-after");
       if (raw) {
         const seconds = Number(raw);
@@ -236,14 +231,14 @@ export async function fetchSource(request: SourceRequest): Promise<
         try {
           controller?.abort?.();
         } catch {}
-        throw Object.assign(new Error("source response exceeds limit"), { code: "too-large" });
+        throw { kind: "size-limit", max_bytes: MAX_SOURCE_FETCH_BYTES };
       }
       parts.push(value);
     };
 
     const declared = Number(response.headers?.get?.("content-length"));
     if (Number.isSafeInteger(declared) && declared > MAX_SOURCE_FETCH_BYTES)
-      return fail("TRANSPORT_SIZE_LIMIT", "The source response exceeds the byte limit.");
+      return fail({ kind: "size-limit", max_bytes: MAX_SOURCE_FETCH_BYTES });
     const reader = response.body?.getReader?.();
     if (reader) {
       for (;;) {
@@ -270,18 +265,23 @@ export async function fetchSource(request: SourceRequest): Promise<
       documentUrl,
     };
   } catch (error) {
-    const caught = error as { code?: unknown; name?: unknown };
+    const caught = error as { kind?: unknown; name?: unknown };
     if (timedOut) {
-      return fail("TRANSPORT_TIMEOUT", "The source request timed out.");
+      return fail({
+        kind: "timeout",
+        transport: "browser-session",
+        detail: "the source request timed out",
+      });
     }
-    if (caught?.code === "too-large")
-      return fail("TRANSPORT_SIZE_LIMIT", "The source response exceeds the byte limit.");
+    if (caught?.kind === "size-limit")
+      return fail({ kind: "size-limit", max_bytes: MAX_SOURCE_FETCH_BYTES });
     return caught?.name === "AbortError"
-      ? fail("TRANSPORT_CANCELLED", "The source fetch was cancelled.")
-      : fail(
-          "TRANSPORT_NETWORK_ERROR",
-          error instanceof Error ? error.message.slice(0, 4096) : "The source fetch failed.",
-        );
+      ? fail({ kind: "cancelled" })
+      : fail({
+          kind: "network-failure",
+          transport: "browser-session",
+          detail: error instanceof Error ? error.message.slice(0, 4096) : "the source fetch failed",
+        });
   } finally {
     controller.abort();
     clearTimeout(timer);

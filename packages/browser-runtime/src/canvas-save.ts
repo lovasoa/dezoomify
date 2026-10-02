@@ -45,13 +45,7 @@ export function canvasToPngBlob(canvas: CanvasLike, signal?: AbortSignal): Promi
       }
       if (blob) resolve(blob);
       else
-        reject(
-          outputError(
-            "OUTPUT_ENCODE_FAILED",
-            "The final picture could not be created from the saved pieces.",
-            "canvas.toBlob returned null while encoding the PNG",
-          ),
-        );
+        reject(outputError("encode-failed", "canvas.toBlob returned null while encoding the PNG"));
     };
     try {
       canvas.toBlob(finish, "image/png");
@@ -62,8 +56,7 @@ export function canvasToPngBlob(canvas: CanvasLike, signal?: AbortSignal): Promi
       }
       reject(
         outputError(
-          "OUTPUT_ENCODE_FAILED",
-          "The final picture could not be created from the saved pieces.",
+          "encode-failed",
           `canvas.toBlob threw while encoding the PNG: ${e instanceof Error ? e.message : String(e)}`,
         ),
       );

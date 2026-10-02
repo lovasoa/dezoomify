@@ -1,6 +1,6 @@
 // Italian message dictionary for the shared UI.
 //
-// Mirrors `../i18n.ts` key for key: every English key has exactly one Italian
+// Translation of `../i18n.ts`, key for key: every English key has exactly one Italian
 // entry with identical `{placeholders}`. Missing keys fall back to English at
 // lookup time, so this table must never drop a key when English grows.
 // Brand and product names ("Dezoomify", "Chrome Web Store", "GitHub Releases",
@@ -27,7 +27,6 @@ export const it = {
   "desktop.done.folderError":
     "Impossibile aprire la cartella. Verifica che sia installato un gestore di file.",
   "desktop.done.missingError": "L’immagine o la cartella non esiste più.",
-  "view.partial.extensionKeep": "Conserva l’immagine parziale",
   "view.partial.title": "L’immagine è incompleta",
   "view.partial.summary": "Sono stati recuperati {done} riquadri su {total}.",
   "view.partial.gaps":
@@ -44,8 +43,6 @@ export const it = {
   "view.partial.checkSource":
     "Apri la pagina di origine e verifica che il suo visualizzatore funzioni.",
   "view.partial.openSource": "Apri pagina di origine",
-  "view.partial.extensionDiscard": "Scarta l’immagine parziale",
-  "view.partial.extensionRetry": "Riprova i riquadri mancanti",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Capito",
   "view.modal.closeDialog": "Chiudi la finestra",
@@ -56,6 +53,13 @@ export const it = {
     "Applicazione nativa ad alte prestazioni per opere museali gigapixel e scansioni locali",
   "view.desktop.installer": "L’{installer} non firmato per {platform} è disponibile su",
   "view.desktop.releasesLink": "GitHub Releases",
+  "view.desktop.releasesNote":
+    "Nessun aggiornamento automatico; controlla GitHub Releases manualmente.",
+  "view.desktop.installerMsi": "installer .msi",
+  "view.desktop.installerDmg": "installer .dmg Apple silicon",
+  "view.desktop.installerDeb": "installer .deb",
+  "view.desktop.installerGeneric": "installer",
+  "view.desktop.platformGeneric": "la vostra piattaforma",
   "view.desktop.whyTitle": "Perche usare l applicazione desktop?",
   "view.desktop.why1Title": "Gestisce opere molto grandi:",
   "view.desktop.why1Body":
@@ -100,24 +104,14 @@ export const it = {
     "Vai alla pagina del museo o della biblioteca che mostra la tua opera, accedendo se serve.",
   "view.ext.step3":
     "Fai clic sull icona Dezoomify nella barra del browser per rilevare ed estrarre in automatico l immagine a piena risoluzione!",
+  // Access request (browser-session file access), shared access-request.tsx.
+  "view.access.title": "Consenti l’accesso per continuare",
+  "view.access.usesOrigin": "Questa immagine usa file di {origin}.",
+  "view.access.needAccess":
+    "Dezoomify ha bisogno di accesso per leggere quei file e comporre la tua immagine in questo browser.",
+  "view.access.requesting": "Richiesta di accesso in corso…",
+  "view.access.allow": "Consenti l’accesso e continua",
   // Idle input section.
-  "view.idle.intro": "permette di salvare",
-  "view.idle.zoomable": "immagini zoomabili",
-  "view.idle.zoomableTitle": "Immagini grandi in cui si puo navigare dentro una pagina web.",
-  "view.idle.enterThe": "Inserisci l",
-  "view.idle.urlAbbr": "URL",
-  "view.idle.urlTitle": "Uniform Resource Locator, l indirizzo di una pagina web",
-  "view.idle.body":
-    "di una tale immagine nel campo qui sotto. L immagine sara salvata alla massima risoluzione. Potrai poi fare clic destro sull immagine e scegliere «Salva con nome» per conservarla come PNG sul tuo computer. Se non funziona, leggi la nostra",
-  "view.idle.troubleLink": "guida alla risoluzione dei problemi",
-  "view.idle.moreInfo": "Per maggiori informazioni, leggi la nostra",
-  "view.idle.projectLink": "pagina del progetto",
-  "view.idle.license1": "Questo script e pubblicato sotto",
-  "view.idle.gplLink": "GPL",
-  "view.idle.sourceLink": "Vedi il codice sorgente",
-  "view.idle.termsLink": "Decliniamo ogni responsabilita per un uso illegale di questo software",
-  "view.idle.urlPlaceholder": "URL della pagina con la tua immagine",
-  "view.idle.urlAria": "URL della pagina con la tua immagine zoomabile",
   "view.idle.clearTitle": "Cancella il testo",
   "view.idle.submit": "Dezoomify !",
   // Job step labels.
@@ -125,32 +119,20 @@ export const it = {
   "view.step.preflighting": "Controllo delle dimensioni…",
   "view.step.downloading": "Salvataggio dei riquadri…",
   "view.step.saving": "Composizione dell immagine finale…",
-  "view.step.working": "Elaborazione…",
   "view.step.contactingDetail": "Contatto dell'host dell'immagine…",
-  "view.step.encodingDetail": "Codifica nell'app.",
-  "view.step.cleanupDetail": "Pulizia dei file non finiti…",
   // Live job section.
-  "view.job.workingOn": "Elaborazione di",
-  "view.job.cancel": "Annulla",
-  "view.job.change": "Cambia",
   "view.job.techDetails": "Dettagli tecnici e registri",
-  "view.job.oneImage": "1 immagine",
   "view.job.manyImages": "{count} immagini",
-  "view.job.autoChoiceFull":
-    "{noun} trovata, salvo la piu grande possibile ({width}×{height}, {tiles} riquadri).",
-  "view.job.autoChoiceDims": "{noun} trovata, salvo la piu grande possibile ({width}×{height}).",
-  "view.job.autoChoiceTiles": "{noun} trovata, salvo la piu grande possibile ({tiles} riquadri).",
-  "view.job.autoChoiceBare": "{noun} trovata, salvo la piu grande possibile.",
-  "view.job.stalled":
-    "Ancora al lavoro, {host} tarda a rispondere. Puoi attendere, oppure annullare e riprovare piu tardi.",
+  "view.job.paused": "In pausa",
+  "view.job.retryingTiles": "Nuovo tentativo sui riquadri ({count})…",
+  "view.job.waiting": "In attesa di {host}…",
+  "view.job.sourceLabel": "Sorgente",
+  "view.job.pause": "Pausa",
+  "view.job.resume": "Riprendi",
+  "view.job.stopReturn": "Ferma e torna all’inizio",
+  "view.job.progressValue": "{done} completati, {active} in corso, {remaining} rimanenti",
   // Display-only section.
   "view.display.title": "Anteprima mostrata, non ancora salvata",
-  "view.display.openDesktop": "Apri nell applicazione desktop",
-  // Desktop handoff uses the ordinary, user-confirmed dezoomify:// link.
-  "view.handoff.send": "Invia all applicazione desktop",
-  "view.handoff.sendOrigin": "Invia all applicazione desktop ({origin})",
-  "view.handoff.localNote":
-    "I file locali restano su questo computer. Apri l applicazione desktop e scegli li il file; nulla viene inviato.",
   "view.display.waysTitle": "Modi per salvare quest opera",
   "view.display.extTitle": "Guida all estensione del browser",
   "view.display.extDesc":
@@ -171,40 +153,28 @@ export const it = {
   "view.done.saveNow": "Salva ora l immagine",
   "view.done.another": "Dezoomifica un altra immagine",
   // Failure section.
-  "view.fail.fallback":
-    "Dezoomify non ha potuto trovare o salvare l immagine zoomabile a questo indirizzo.",
   "view.fail.title": "Impossibile dezoomificare l immagine",
   "view.fail.deskDescLimits":
     "Per immagini oltre i limiti di memoria del browser, in base alla memoria disponibile. Elaborate in nativo sul tuo computer.",
   "view.fail.helpTitle": "Aiuto ed estrazione dell indirizzo",
   "view.fail.helpDesc":
     "Come trovare l indirizzo dell immagine nei siti di musei e archivi, e cosa provare quando non si trova nulla.",
-  "view.fail.techDetails": "Dettagli tecnici dell errore e segnalazione",
   "view.fail.reportBug": "Segnala un problema su GitHub",
   "view.fail.retry": "Riprova",
   "view.fail.canvasAllocation":
     "Questa immagine è troppo grande per essere assemblata in questa scheda del browser. L applicazione desktop può salvarla a dimensione piena.",
   "view.fail.canvasContext":
     "Questa scheda del browser non ha potuto creare la superficie dell immagine a questa dimensione. L applicazione desktop può salvarla a dimensione piena.",
-  "view.fail.canvasEncode":
-    "Questa scheda del browser non ha potuto completare l immagine PNG a dimensione piena. L applicazione desktop può salvarla a dimensione piena.",
   // Cancelled section.
   "view.cancel.title": "Salvataggio annullato",
   "view.cancel.message": "Il salvataggio dell immagine e stato interrotto.",
-  // Generic fallback for unknown phases (debug surface; status codes stay raw).
-  "view.generic.status": "Stato:",
-  "view.generic.reset": "Reimposta",
   // Job section and share chrome.
-  "view.job.shareTitle": "Copia l indirizzo della pagina per questa attivita, non il file immagine",
-  "view.job.shareLink": "Copia il collegamento a questa attivita",
   "view.job.countsFull": "{current} riquadri su {total}",
-  "view.job.countsElapsed": "{current} riquadri su {total} · {elapsed} trascorsi",
-  "view.job.elapsedOnly": "{elapsed} trascorsi",
+  "view.job.countsActive": "{current} riquadri su {total} · {active} in corso",
   // Recent-jobs history (todo 5.2): local-only ledger.
   "view.history.title": "Immagini recenti",
   "view.history.empty": "Ancora nessuna immagine recente. Le immagini salvate appaiono qui.",
   "view.history.localOnly": "Conservate solo su questo dispositivo.",
-  "view.history.open": "Riapri",
   "view.history.clear": "Cancella la cronologia",
   "view.history.dims": "{w} per {h} pixel",
   "view.input.description":
@@ -212,30 +182,38 @@ export const it = {
   "view.input.placeholder": "Incolla l indirizzo di un visualizzatore o manifesto",
   "view.input.aria": "Indirizzo della pagina con l immagine ingrandibile",
   "view.input.start": "Trova immagine",
-  // Failure "What happened" explainer.
-  "view.fail.whatHappened": "Cosa e successo",
+  // Rate-limit explainers (see failure.ts plainMessageFor).
   "view.fail.rateProxy":
     "Il sito che ospita questa immagine limita quante pagine il nostro server puo chiedergli, e quel limite e stato appena raggiunto, quindi la pagina non si e potuta aprire. L estensione del browser e l applicazione desktop scaricano dalla tua connessione invece che dal nostro server, quindi non sono toccate da questo limite.",
   "view.fail.rateDirect":
     "Il sito che ospita questa immagine sta ricevendo troppe richieste dalla tua connessione in questo momento. Attendere qualche minuto di solito risolve, e l estensione o l applicazione desktop vedranno lo stesso segnale occupato fino ad allora.",
+  // Fetch-failure family (see failure.ts plainMessageFor).
+  "view.fail.httpNotFound": "Questa pagina non e stata trovata. Controlla l indirizzo e riprova.",
+  "view.fail.httpRefused":
+    "Il sito ha rifiutato di condividere questo file (HTTP {http}). Potrebbe bloccare i server condivisi; l estensione del browser o l app desktop potrebbero comunque funzionare.",
+  "view.fail.httpSiteProblem":
+    "Il sito ha avuto un problema nell aprire questa pagina. Riprova a breve.",
+  "view.fail.httpNotOpened": "Questa pagina non e stata aperta. Controlla l indirizzo e riprova.",
+  "view.fail.policyBlocked":
+    "Questo indirizzo non puo essere aperto tramite il sito. {hint} L estensione del browser o l app desktop potrebbero comunque funzionare.",
+  "view.fail.hintAddress": "Controlla l indirizzo e riprova.",
+  "view.fail.hintPrivate": "Il sito non puo aprire indirizzi privati o locali.",
+  "view.fail.hintContentType":
+    "Il sito ha risposto con un tipo di file che il sito non controlla qui.",
+  "view.fail.hintRedirect": "Il sito ha reindirizzato in un modo che il sito non puo seguire.",
+  "view.fail.proxyBudget":
+    "Questa pagina e troppo grande da controllare qui. Prova l app desktop per le immagini molto grandi.",
+  "view.fail.proxyFetch":
+    "Il proxy dei metadati non ha potuto recuperare questo indirizzo. Riprova a breve.",
   // Desktop app user copy (apps/desktop/src/main.tsx). Logs and technical
   // diagnostics stay literal English and never use these keys.
   "desktop.url.invalid": "Inserisci un indirizzo web valido che inizi con http:// o https://",
-  "desktop.url.notWebPage":
-    "Questo indirizzo non sembra una pagina web. Inserisci un indirizzo che inizi con http:// o https://.",
   "desktop.settings.unusable":
     "Queste impostazioni di scaricamento non si possono usare. Regola le impostazioni evidenziate e riprova.",
   "desktop.settings.invalidSubmit":
     "Queste impostazioni di scaricamento non sono valide. Regolale e riprova.",
   "desktop.output.deniedPick":
     "La destinazione di salvataggio non e stata accettata. Scegli un altro file per continuare.",
-  "desktop.output.deniedFallback": "La destinazione di salvataggio e stata rifiutata.",
-  "desktop.handoff.rejected":
-    "Questo collegamento non si puo aprire da {host}. Prova un altro indirizzo senza dati di accesso.",
-  "desktop.handoff.acceptedDetail":
-    "Questa immagine si puo passare a un altra applicazione. Sei gia nell applicazione nativa, quindi puoi continuare qui.",
-  "desktop.handoff.rejectedDetail":
-    "Questa immagine non si puo passare a un altra applicazione. Continua qui o prova un altra immagine.",
   "desktop.output.exists":
     "Esiste gia un file nella destinazione di salvataggio da {host}. Scegli un altro file o conferma la sovrascrittura per continuare.",
   "desktop.output.destDenied":
@@ -249,12 +227,12 @@ export const it = {
     "Questa immagine e troppo grande per essere composta su questo computer ({dims},{need} a 4 byte per pixel, limite {limit}). Salva una versione piu piccola con Larghezza max (CLI: --max-width). Nota: il JPEG accetta al piu {jpegMax} pixel per lato; usa il PNG per immagini piu grandi. Da {host}.",
   "desktop.output.jpegLimit":
     "Questa immagine ({dims}) e troppo grande per il JPEG, che accetta al piu {jpegMax} pixel per lato. Salvala invece come PNG. Da {host}.",
+  "desktop.output.webpLimit":
+    "Questa immagine ({dims}) e troppo grande per il WebP, che accetta al piu {webpMax} pixel per lato. Salvala invece come PNG. Da {host}.",
   "desktop.tile.partialDiscarded":
     "L immagine parziale e stata scartata, nessun file conservato. Riprova da {host} con una connessione stabile.",
   "desktop.tile.partialChoice":
     "Alcune parti di questa immagine da {host} non si sono potute salvare. Riprova le parti mancanti, oppure conserva l immagine parziale con aree vuote.",
-  "desktop.discovery.none":
-    "Nessuna immagine zoomabile trovata a questo indirizzo da {host}. Prova un altra pagina o controlla l indirizzo.",
   "view.discovery.none":
     "Nessuna immagine zoomabile trovata a questo indirizzo. Prova una pagina con un visualizzatore o l estensione del browser.",
   "desktop.plan.none":
@@ -268,57 +246,16 @@ export const it = {
   "desktop.start.failed":
     "Impossibile avviare il salvataggio di questa immagine da {host}. Riprova.",
   "desktop.choice.failed": "Questa scelta non e stata accettata. Riprova.",
-  "desktop.save.generic":
-    "Impossibile salvare questa immagine da {host}. Riprova con un altro indirizzo.",
   "desktop.internal.error":
     "Un problema imprevisto ha interrotto questo salvataggio da {host}. Riprova e copia la diagnostica se ricapita.",
   "desktop.save.fallback": "Impossibile salvare questa immagine da {host}. Riprova.",
-  "desktop.job.failedFallback": "L attivita non e riuscita.",
   "desktop.invoke.startFallback": "Impossibile avviare l attivita.",
   "desktop.invoke.partial": "La scelta di immagine parziale e stata rifiutata.",
-  "desktop.invoke.destination": "Impossibile richiedere la destinazione di salvataggio.",
-  "desktop.invoke.cancel": "Impossibile annullare l attivita.",
-  "desktop.step.chooseWhere": "Scegli dove salvare…",
-  "desktop.step.chooseWhereDetail":
-    "La destinazione di salvataggio richiede attenzione prima di continuare.",
-  "desktop.step.pickOutput": "Scegli il file di uscita per continuare.",
-  "desktop.step.partialTitle": "Alcuni riquadri non si sono potuti salvare…",
-  "desktop.step.partialDetail": "Scegli se conservare l immagine parziale, scartarla o riprovare.",
-  "desktop.step.displayPreview": "Solo anteprima…",
-  "desktop.step.displayDetail": "Questa immagine si puo solo vedere qui.",
-  "desktop.step.cleanupDetail": "Pulizia… rimozione del file incompleto…",
-  "desktop.step.cleaningShort": "Pulizia…",
-  "desktop.step.encodingNative": "Codifica nell applicazione nativa",
-  "desktop.step.encodingPartial": "Codifica dell immagine parziale nell applicazione nativa",
-  "desktop.step.discardingPartial": "Scarto dell immagine parziale",
-  "desktop.step.retrying": "Nuovo tentativo",
-  "desktop.step.appAutoDetail":
-    "L applicazione salva da sola la prima immagine; nessun selettore offerto.",
-  "desktop.step.foundFits": "{noun} trovata, salvo la piu grande possibile…",
-  "desktop.step.tilesAtFull": "{current} riquadri su {total} a piena risoluzione",
-  "desktop.step.savedDims": "{width} per {height} pixel salvati",
-  "desktop.step.partialDims": "Immagine parziale {width} per {height} pixel; {summary}",
-  "desktop.step.partialSaved": "Immagine parziale salvata; {summary}",
-  "desktop.step.savedWord": "Salvata",
-  "desktop.step.contacting": "Contatto {host}…",
-  "desktop.link.title": "Un altra applicazione vuole aprire un immagine in Dezoomify.",
-  "desktop.link.source": "Origine: {url}",
-  "desktop.link.prov": "Provenienza: collegamento dezoomify:// (v{version})",
-  "desktop.link.provHint": "Provenienza: collegamento dezoomify:// (v{version}) · {hint}",
-  "desktop.link.note": "Nulla avviene finche non confermi. Rifiutare non fa nulla.",
-  "desktop.link.dismiss": "Ignora",
-  "desktop.link.open": "Apri l immagine",
   "desktop.rec.missing": "Riquadri mancanti: {shown}{rest}.",
   "desktop.rec.more": " e altri {n}",
-  "desktop.rec.destTitle": "La destinazione di salvataggio richiede attenzione",
-  "desktop.rec.destDesc":
-    "La destinazione di salvataggio non e stata accettata. Scegli un file di uscita, riprova oppure usa un altra applicazione.",
   "desktop.rec.keep": "Conserva l immagine parziale",
   "desktop.rec.discard": "Scarta la parziale",
   "desktop.rec.retryTiles": "Riprova i riquadri mancanti",
-  "desktop.rec.chooseOutput": "Scegli l uscita…",
-  "desktop.rec.tryAgain": "Riprova",
-  "desktop.rec.useOther": "Usa un altra applicazione",
   "desktop.rec.missingSome": "Alcuni riquadri non si sono potuti salvare.",
   "desktop.rec.missingCount": "{count} riquadro{plural} non si sono potuti salvare.",
   "desktop.rec.missingList": "{n} riquadro{plural} mancante(i): {shown}{rest}.",
@@ -342,36 +279,7 @@ export const it = {
   "desktop.queue.retry": "Riprova",
   "desktop.queue.summary": "{succeeded} fatte, {failed} non riuscite, {total} totali",
   "desktop.queue.progress": "{current} riquadri su {total}",
-  "desktop.queue.unknownOrigin": "il server",
-  "desktop.panel.outputFormat": "Formato di uscita",
   "desktop.panel.jobActions": "Azioni dell attivita desktop",
-  "desktop.help.title": "Aiuto e informazioni",
-  "desktop.help.help": "Aiuto",
-  "desktop.help.desktopGuide": "Guida desktop",
-  "desktop.help.troubleshooting": "Risoluzione dei problemi",
-  "desktop.help.faq": "FAQ",
-  "desktop.help.privacy": "Privacy",
-  "desktop.help.terms": "Termini",
-  "desktop.help.donate": "Dona",
-  "desktop.settings.title": "Personalizza",
-  "desktop.settings.desc":
-    "Impostazioni minime di scaricamento. Salvate su questo dispositivo e usate per la prossima attivita. Le intestazioni vanno solo all origine dell immagine.",
-  "desktop.settings.fileGroup": "File",
-  "desktop.settings.imageGroup": "Immagine",
-  "desktop.settings.networkGroup": "Rete e ripristino",
-  "desktop.settings.outputDir": "Cartella di uscita (facoltativa)",
-  "desktop.settings.compression": "Compressione 0-100 (predefinita 5)",
-  "desktop.settings.maxWidth": "Larghezza max in px (facoltativa)",
-  "desktop.settings.maxHeight": "Altezza max in px (facoltativa)",
-  "desktop.settings.retries": "Tentativi 0-100 (predefiniti 3, 0 = nessuno)",
-  "desktop.settings.cacheDir": "Cartella di cache (facoltativa, ripresa)",
-  "desktop.settings.emptyLargest": "vuoto = la piu grande",
-  "desktop.settings.browse": "Sfoglia…",
-  "desktop.settings.browseOutput": "Scegli la cartella di uscita",
-  "desktop.settings.browseCache": "Scegli la cartella di cache",
-  "desktop.settings.headersAdv": "Avanzate: intestazioni di richiesta (fidate)",
-  "desktop.settings.headersLabel":
-    "Intestazioni di richiesta, una per riga come Nome: valore (facoltative, fidate)",
   "desktop.settings.reset": "Reimposta le impostazioni",
   "desktop.quick.folder": "Cartella",
   "desktop.quick.askEachTime": "Chiedi ogni volta",
@@ -413,17 +321,4 @@ export const it = {
   // shape; log and diagnostics lines stay literal English and never use these
   // keys. `test/ui-i18n.test.mjs` fails when the page renders a key outside
   // this table.
-  "page.step.scanning": "Scansione della pagina…",
-  "page.step.finding": "Ricerca dell immagine zoomabile ({done}/{total})…",
-  "page.step.choosing": "Scelta della risoluzione piu alta…",
-  "page.step.saving": "Salvataggio dei riquadri…",
-  "page.step.assembling": "Composizione dell immagine finale…",
-  "page.step.done": "Fatta",
-  "page.step.cancelled": "Annullata",
-  "page.step.cancelling": "Annullamento…",
-  "page.step.displaying": "Mostro l immagine…",
-  "page.tabs.scan": "Scansiona {label}",
-  "page.tabs.hint":
-    "Apri una pagina con un immagine zoomabile, poi fai clic sul pulsante Dezoomify per scansionare quella scheda.",
-  "page.ui.techDetails": "Dettagli tecnici e registri",
 } as const;

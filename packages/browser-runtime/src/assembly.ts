@@ -1,6 +1,6 @@
 // Canvas decoding, painting, and PNG output for browser capabilities.
 import type { OutputDisposition, TilePlacement } from "@dezoomify/wasm-bindings";
-import { outputError } from "./failure.ts";
+import { outputError, tileError } from "./failure.ts";
 import { BROWSER_LIMITS, type BrowserLimits, probeLimits } from "./limits.ts";
 import { canvasTooLargeFailure } from "./plan-gates.ts";
 import type { TileBitmap } from "./tile-decode.ts";
@@ -41,7 +41,7 @@ export interface CanvasAssemblyDeps<C extends AssemblyCanvas = AssemblyCanvas> {
     height: number,
     signal: AbortSignal,
   ): BrowserSaveDisposition | Promise<BrowserSaveDisposition>;
-  /** Job source URL, used for the desktop handoff link in limit failures. */
+  /** Job source URL, named in limit-failure diagnostics. */
   sourceUrl?: string;
   /** Limits override for tests; defaults to the browser canvas limits. */
   limits?: BrowserLimits;
@@ -124,8 +124,7 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
     if (!declared || canvas) return;
     if (!(declared.width > 0 && declared.height > 0)) {
       throw outputError(
-        "PLAN_INVALID",
-        "The image size could not be determined.",
+        "plan-invalid",
         `declared an empty canvas ${declared.width}x${declared.height}`,
       );
     }
@@ -140,10 +139,24 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
   ): Promise<void> {
     signal.throwIfAborted();
     placements.set(tile, placement);
-    const input =
-      placement.processing === "none" ? bytes : deps.processTile(placement.processing, bytes);
+    // Processing and decoding failures are typed at their source so they
+    // classify as tile failures instead of the retryable fetch fallback.
+    let input: ArrayBuffer;
+    try {
+      input =
+        placement.processing === "none" ? bytes : deps.processTile(placement.processing, bytes);
+    } catch (error) {
+      signal.throwIfAborted();
+      throw tileError("processing-failed", error);
+    }
     signal.throwIfAborted();
-    const bitmap = await deps.decode(input);
+    let bitmap: TileBitmap;
+    try {
+      bitmap = await deps.decode(input);
+    } catch (error) {
+      signal.throwIfAborted();
+      throw tileError("decode-failed", error);
+    }
     const mismatch =
       placement.expected_size &&
       (placement.expected_size.width !== bitmap.width ||
@@ -255,19 +268,14 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
   ): Promise<BrowserOutputDisposition> {
     signal.throwIfAborted();
     if (finalized) {
-      throw outputError(
-        "OUTPUT_STATE",
-        "The output surface is already open.",
-        "output was finalized twice",
-      );
+      throw outputError("internal", "output was finalized twice");
     }
     let surface = canvas;
     if (!surface) {
       const size = outputSize(declared);
       if (!(size.width > 0 && size.height > 0)) {
         throw outputError(
-          "PLAN_INVALID",
-          "The image size could not be determined.",
+          "plan-invalid",
           `output had an empty canvas ${size.width}x${size.height}`,
         );
       }

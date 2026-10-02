@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement } from "react";
 import { createDiagnosticRecorder } from "../packages/shared-ui/src/diagnostics.ts";
+import { setLocale, t } from "../packages/shared-ui/src/i18n.ts";
 import { PartialDecisionActions } from "../packages/shared-ui/src/partial-decision.tsx";
 import {
   presentFailure,
@@ -70,7 +71,8 @@ test("renderView mounts card and updates job section in place without DOM destru
   const ctx = {
     jobActivity: {
       url: "https://museum.example.org/artwork/1",
-      startedAt: Date.now() - 3000,
+      startedAt: 0,
+      now: 3_000,
     },
   };
 
@@ -108,7 +110,7 @@ test("renderView mounts card and updates job section in place without DOM destru
   // The step line renders the presentation headline, never host copy.
   assert.equal(stepTextEl.textContent, "Saving image tiles…");
   const countsEl = card.querySelector("#dz-job-counts");
-  assert.equal(countsEl.textContent, "15 done / 60");
+  assert.equal(countsEl.textContent, "15 of 60 tiles");
   const barEl = card.querySelector("#dz-job-bar");
   assert.equal(barEl.style.width, "25%");
 
@@ -171,7 +173,7 @@ test("output actions belong to their completed result", async () => {
   assert.equal(el.querySelector("#dz-btn-open").disabled, true);
 
   render(el, done, { ...callbacks, onOpenOutput: async () => {} }, { outputKey: "new" });
-  await act(async () => old.reject({ code: "output.not-found" }));
+  await act(async () => old.reject({ kind: "output-not-found" }));
   assert.equal(el.querySelector("#dz-open-error"), null);
   assert.equal(el.querySelector("#dz-btn-open").disabled, false);
 });
@@ -183,7 +185,9 @@ test("partial controls return the selected choice", () => {
     renderView(el, presentIdle(), callbacks, undefined, {
       after: createElement(PartialDecisionActions, {
         decision: {
-          missing: [{ tile: 1, failures: [{ retryable: true, code: "TRANSPORT_TIMEOUT" }] }],
+          missing: [
+            { tile: 1, failures: [{ kind: "timeout", transport: "direct", retryable: true }] },
+          ],
         },
         onAnswer: (command) => answers.push(command),
       }),
@@ -198,7 +202,12 @@ test("partial refusal is a static decision with useful actions before diagnostic
   const el = container();
   const decision = {
     missing: [
-      { tile: 1, failures: [{ code: "TRANSPORT_HTTP_ERROR", retryable: false, http: 403 }] },
+      {
+        tile: 1,
+        failures: [
+          { kind: "http-error", status: 403, transport: "browser-session", retryable: false },
+        ],
+      },
     ],
   };
   const presentation = {
@@ -231,24 +240,13 @@ test("partial refusal is a static decision with useful actions before diagnostic
 test("zero-tile refusal has no partial controls and opens the source", () => {
   const el = container();
   let opened = false;
-  render(
-    el,
-    presentFailure({
-      code: "job.no-usable-tiles",
-      phase: "acquisition",
-      transport: "browser-session",
-      message: "None retrieved",
-      http: 403,
-      retryable: false,
-    }),
-    {
-      ...callbacks,
-      onOpenSource() {
-        opened = true;
-      },
+  render(el, presentFailure({ kind: "no-usable-tiles", transient: false }), {
+    ...callbacks,
+    onOpenSource() {
+      opened = true;
     },
-  );
-  assert.match(el.textContent, /website refused access/);
+  });
+  assert.ok(el.textContent.includes(t("view.partial.empty")));
   assert.match(el.textContent, /No file was saved/);
   assert.equal(el.querySelector("[role=progressbar]"), null);
   assert.equal(el.querySelector("[data-dz-partial-decision]"), null);
@@ -260,7 +258,7 @@ test("zero-tile refusal has no partial controls and opens the source", () => {
 
 test("slow discovery replaces the phase with one waiting status", () => {
   const el = container();
-  const now = Date.now();
+  const now = 20_000;
   const ctx = {
     jobActivity: {
       url: "https://artsandculture.google.com/project/1",
@@ -277,35 +275,48 @@ test("slow discovery replaces the phase with one waiting status", () => {
   assert.doesNotMatch(step.textContent, /museum/i);
 });
 
+test("rate-limit failures render the localized explainer from the typed facts at display time", () => {
+  const el = container();
+  const proxy = failurePresentation({
+    kind: "rate-limited",
+    transport: "metadata-proxy",
+  });
+  render(el, proxy, callbacks);
+  assert.equal(el.querySelector("#dz-error-message").textContent, t("view.fail.rateProxy"));
+  const direct = failurePresentation({
+    kind: "rate-limited",
+    transport: "direct",
+  });
+  render(el, direct, callbacks);
+  assert.equal(el.querySelector("#dz-error-message").textContent, t("view.fail.rateDirect"));
+  try {
+    assert.equal(setLocale("fr"), true);
+    render(el, proxy, callbacks);
+    assert.equal(
+      el.querySelector("#dz-error-message").textContent,
+      t("view.fail.rateProxy", undefined, "fr"),
+    );
+  } finally {
+    setLocale("en");
+  }
+});
+
 test("failed state updates error details in place without destroying error container", () => {
   const el = container();
-  const errPresentation1 = failurePresentation({
-    code: "NO_IMAGE_FOUND",
-    phase: "discovery",
-    retryable: false,
-    message: "No zoomable image could be found.",
-  });
+  const errPresentation1 = failurePresentation({ kind: "no-image-found" });
   render(el, errPresentation1, callbacks);
   const card = el.querySelector(".dz-card");
   assert.equal(card.dataset.viewPhase, "failed");
   const errSec = card.querySelector(".dz-error-section");
   assert.ok(errSec, "error section mounted");
-  assert.equal(
-    card.querySelector("#dz-error-message").textContent,
-    "No zoomable image could be found.",
-  );
+  assert.equal(card.querySelector("#dz-error-message").textContent, t("view.discovery.none"));
 
-  const errPresentation2 = failurePresentation({
-    code: "NO_IMAGE_FOUND",
-    phase: "discovery",
-    retryable: false,
-    message: "Network timeout contacting server.",
-  });
+  const errPresentation2 = failurePresentation({ kind: "timeout", transport: "native" });
   render(el, errPresentation2, callbacks);
   assert.equal(card.querySelector(".dz-error-section"), errSec, "error section node preserved");
   assert.equal(
     card.querySelector("#dz-error-message").textContent,
-    "Network timeout contacting server.",
+    t("desktop.transport.stalled", { host: "the server" }),
   );
 });
 
@@ -315,16 +326,13 @@ test("error layering: plain message prominent, parser diagnostics only in techni
     " - zoomify, iiif, krpano: HTTP 429 fetching this address\n" +
     " - 2 other format(s) did not match this page address";
   const presentation = failurePresentation({
-    code: "UPSTREAM_RATE_LIMITED",
-    retryable: true,
-    message:
-      "The website hosting this image limits how many pages our server may request from it, and that limit was just reached, so the page could not be opened.",
-    detail: details,
-    transport: "metadata-proxy",
-    phase: "discovery",
+    kind: "http-error",
+    status: 429,
     request: "https://example.test/viewer/tour.xml?sig=abc&lang=fr",
-    http: 429,
+    transport: "metadata-proxy",
+    retry_after_ms: 7000,
     preview: "Too many requests",
+    detail: details,
   });
   render(el, presentation, callbacks);
   const card = el.querySelector(".dz-card");
@@ -332,21 +340,15 @@ test("error layering: plain message prominent, parser diagnostics only in techni
   assert.ok(!prominent.includes("zoomify"), "parser details must not be prominent");
   assert.ok(!prominent.includes("429"), "status must not be prominent");
   const diagnostics = card.querySelector("#dz-job-diagnostics").textContent;
-  assert.match(diagnostics, /http=429/);
+  assert.match(diagnostics, /status=429/);
   assert.match(diagnostics, /Too many requests/);
   assert.match(diagnostics, /sig=abc&lang=fr/);
   assert.ok(diagnostics.includes(details));
   // A fresh failure without url/http/detail renders only the trailing line.
-  const fresh = failurePresentation({
-    code: "NO_IMAGE_FOUND",
-    retryable: false,
-    message: "No zoomable image could be found.",
-    transport: "direct-browser",
-    phase: "discovery",
-  });
+  const fresh = failurePresentation({ kind: "no-image-found" });
   render(el, fresh, callbacks);
   const diag2 = card.querySelector("#dz-job-diagnostics").textContent;
-  assert.match(diag2, /code=NO_IMAGE_FOUND/);
+  assert.match(diag2, /kind=no-image-found/);
   assert.ok(!diag2.includes("example.test"), "stale detail must be replaced");
 });
 
@@ -381,16 +383,7 @@ test("job rail keeps integrated stop and diagnostics-copy controls, and header v
   const copyBtn = card.querySelector("#dz-btn-copy-diagnostics");
   assert.ok(copyBtn, "technical details include a diagnostics copy control");
 
-  render(
-    el,
-    failurePresentation({
-      code: "FAILED",
-      phase: "acquisition",
-      retryable: true,
-      message: "Error",
-    }),
-    callbacks,
-  );
+  render(el, failurePresentation({ kind: "internal" }), callbacks);
   assert.equal(header.style.display, "none", "header hidden in failed phase");
 
   render(el, presentIdle(), callbacks);
@@ -415,10 +408,9 @@ test("paused job activity freezes the displayed elapsed time", () => {
 test("failed view offers retry only for retryable errors and start over only when the host can reset", () => {
   const el = container();
   const retryable = failurePresentation({
-    code: "TRANSPORT_NETWORK_ERROR",
-    phase: "acquisition",
+    kind: "network-failure",
+    transport: "direct",
     retryable: true,
-    message: "The network failed.",
   });
   let retried = 0;
   let resets = 0;
@@ -443,12 +435,7 @@ test("failed view offers retry only for retryable errors and start over only whe
   assert.equal(retried, 1, "retry invokes onRetrySameUrl");
   assert.equal(resets, 0, "retry never falls through to reset");
 
-  const nonRetryable = failurePresentation({
-    code: "TRANSPORT_NETWORK_ERROR",
-    phase: "acquisition",
-    retryable: false,
-    message: "The network failed.",
-  });
+  const nonRetryable = failurePresentation({ kind: "decode-failed", retryable: false });
   render(el, nonRetryable, withBoth);
   assert.equal(card.querySelector("#dz-btn-try-again"), null, "no retry for a non-retryable error");
   assert.ok(card.querySelector("#dz-btn-start-over"), "start over stays available");

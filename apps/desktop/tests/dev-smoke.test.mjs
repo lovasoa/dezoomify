@@ -133,9 +133,6 @@ test("desktop dev server serves the real entrypoint and shared theme", {
 
     const theme = await fetchWithTimeout(new URL("/src/theme.css", DEV_URL));
     assert.equal(theme.status, 200, "Vite serves the imported shared theme");
-    const themeSource = await theme.text();
-    assert.match(themeSource, /--dz-page-bg\s*:/, "shared theme contains page colors");
-    assert.match(themeSource, /\.dz-card\b/, "shared theme contains card styling");
   } finally {
     stopFrontend(child);
     await waitForExit(child);

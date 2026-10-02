@@ -1,4 +1,4 @@
-// Minimal desktop settings: validated bounds, local persistence, CLI parity.
+// Minimal desktop settings: raw values, local persistence, CLI parity.
 //
 // Fields:
 // - output dir (native dir picker; text input plus Browse button)
@@ -7,12 +7,15 @@
 // - max-width / max-height caps, optional positive ints
 // - retries, default 3 (0 allowed = no retries), bounded 0-100
 // - cache-dir, optional resume cache (tile bodies only, never headers)
-// - user headers (-H, trusted, origin-scoped)
+// - user headers (-H, trusted, origin-scoped) as raw `Name: value` lines
 //
-// Persistence is the webview local file (localStorage key
-// `dezoomify.desktop.settings.v1`), validated on load with fail-closed to
-// defaults. No Tauri store plugin is required. Header values never enter
-// logs, diagnostics, or cache keys.
+// Rust is the single validator
+// (`apps/desktop/src-tauri/src/settings.rs::parse_settings`): raw values
+// cross IPC unchanged and typed rejection reasons flow back on save. This
+// module keeps the types, shape normalization on load, and the webview
+// local file (localStorage key `dezoomify.desktop.settings.v1`) with
+// fail-closed to defaults. No Tauri store plugin is required. Header
+// values never enter logs, diagnostics, or cache keys.
 //
 // Keep erasable syntax only so node type-stripping can read this file. No
 // imports from apps/web, apps/extension, or browser-runtime. No fetch/XHR.
@@ -30,7 +33,7 @@ export interface DesktopSettings {
   readonly retries: number;
   readonly network_profile: NetworkProfile;
   readonly cache_dir: string | null;
-  readonly headers: Readonly<Record<string, string>>;
+  readonly headers: ReadonlyArray<string>;
 }
 
 export const SETTINGS_STORAGE_KEY = "dezoomify.desktop.settings.v1" as const;
@@ -52,10 +55,7 @@ export const NETWORK_PROFILES: ReadonlyArray<NetworkProfile> = [
   "gentle",
 ] as const;
 export const DEFAULT_NETWORK_PROFILE: NetworkProfile = "maximum";
-export const MAX_RETRIES = 100 as const;
-export const MAX_DIMENSION = 1000000 as const;
 export const MAX_PATH_LEN = 4096 as const;
-export const MAX_HEADERS = 32 as const;
 
 export function defaultSettings(): DesktopSettings {
   return {
@@ -67,7 +67,7 @@ export function defaultSettings(): DesktopSettings {
     retries: DEFAULT_RETRIES,
     network_profile: DEFAULT_NETWORK_PROFILE,
     cache_dir: null,
-    headers: {},
+    headers: [],
   };
 }
 
@@ -85,278 +85,9 @@ export async function defaultOutputDirectory(): Promise<string | null> {
   }
 }
 
-const HEADER_NAME_RE = /^[a-z0-9!#$%&'*+\-.^_`|~]+$/;
-
-function isValidHeaderName(name: string): boolean {
-  if (name.length === 0 || name.length > 128) return false;
-  return HEADER_NAME_RE.test(name);
-}
-
-export interface HeadersParse {
-  readonly headers: Record<string, string>;
-  readonly errors: Array<string>;
-}
-
-// Parse `-H "Name: value"` lines (one per line, blank lines ignored, last
-// wins). Errors fail closed with a message; valid entries are still
-// returned so the UI can show both.
-export function parseHeadersText(text: string): HeadersParse {
-  const headers: Record<string, string> = {};
-  const errors: Array<string> = [];
-  const lines = text.split(/\r?\n/);
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? "";
-    if (line.trim() === "") continue;
-    const colon = line.indexOf(":");
-    if (colon < 0) {
-      errors.push(`headers line ${i + 1}: expected "Name: value"`);
-      continue;
-    }
-    const name = line.slice(0, colon).trim().toLowerCase();
-    const value = line.slice(colon + 1).trim();
-    if (!isValidHeaderName(name)) {
-      errors.push(`headers line ${i + 1}: bad header name`);
-      continue;
-    }
-    if (value.length > 4096) {
-      errors.push(`headers line ${i + 1}: value too long`);
-      continue;
-    }
-    if (value.includes("\r") || value.includes("\n") || value.includes("\0")) {
-      errors.push(`headers line ${i + 1}: value must not contain CR/LF/NUL`);
-      continue;
-    }
-    headers[name] = value;
-    if (Object.keys(headers).length > MAX_HEADERS) {
-      errors.push(`too many headers (max ${MAX_HEADERS})`);
-      break;
-    }
-  }
-  return { headers, errors };
-}
-
-export function headersToEditableText(headers: Readonly<Record<string, string>>): string {
-  return Object.entries(headers)
-    .map(([name, value]) => `${name}: ${value}`)
-    .join("\n");
-}
-
-export interface SettingsValidation {
-  readonly ok: boolean;
-  readonly settings: DesktopSettings | null;
-  readonly errors: Array<string>;
-}
-
-function parseOptionalDir(
-  raw: unknown,
-  field: string,
-  errors: Array<string>,
-): string | null | undefined {
-  if (raw === undefined || raw === null) return null;
-  if (typeof raw !== "string") {
-    errors.push(`${field} must be a string path`);
-    return undefined;
-  }
-  const trimmed = raw.trim();
-  if (trimmed === "") return null;
-  if (trimmed.length > MAX_PATH_LEN) {
-    errors.push(`${field} too long (max ${MAX_PATH_LEN} bytes)`);
-    return undefined;
-  }
-  if (trimmed.includes("\0")) {
-    errors.push(`${field} must not contain NUL`);
-    return undefined;
-  }
-  return trimmed;
-}
-
-function parseOptionalDimension(
-  raw: unknown,
-  field: string,
-  errors: Array<string>,
-): number | null | undefined {
-  if (raw === undefined || raw === null) return null;
-  if (typeof raw === "number") {
-    if (!Number.isInteger(raw) || raw <= 0 || raw > MAX_DIMENSION) {
-      errors.push(`${field} must be 1..=${MAX_DIMENSION}`);
-      return undefined;
-    }
-    return raw;
-  }
-  if (typeof raw === "string") {
-    const trimmed = raw.trim();
-    if (trimmed === "") return null;
-    const n = Number(trimmed);
-    if (!Number.isInteger(n) || n <= 0 || n > MAX_DIMENSION) {
-      errors.push(`${field} must be 1..=${MAX_DIMENSION}`);
-      return undefined;
-    }
-    return n;
-  }
-  errors.push(`${field} must be a positive integer`);
-  return undefined;
-}
-
-function parseOutputFormat(raw: unknown, errors: Array<string>): OutputFormat | undefined {
-  if (raw === undefined || raw === null) return DEFAULT_OUTPUT_FORMAT;
-  if (typeof raw === "string") {
-    const lower = raw.trim().toLowerCase();
-    if ((OUTPUT_FORMATS as ReadonlyArray<string>).includes(lower)) {
-      return lower as OutputFormat;
-    }
-  }
-  errors.push("output format must be one of png, jpeg, tiff, zif, webp, iiif-dir");
-  return undefined;
-}
-
-function parseCompression(raw: unknown, errors: Array<string>): number | undefined {
-  if (raw === undefined) return DEFAULT_COMPRESSION;
-  let n: number | null = null;
-  if (typeof raw === "number") n = raw;
-  else if (typeof raw === "string" && raw.trim() !== "") n = Number(raw.trim());
-  else {
-    errors.push("compression must be 0..=100");
-    return undefined;
-  }
-  if (n === null || !Number.isInteger(n) || n < 0 || n > 100) {
-    errors.push("compression must be 0..=100");
-    return undefined;
-  }
-  return n;
-}
-
-function parseRetries(raw: unknown, errors: Array<string>): number | undefined {
-  if (raw === undefined) return DEFAULT_RETRIES;
-  let n: number | null = null;
-  if (typeof raw === "number") n = raw;
-  else if (typeof raw === "string" && raw.trim() !== "") n = Number(raw.trim());
-  else {
-    errors.push(`retries must be 0..=${MAX_RETRIES}`);
-    return undefined;
-  }
-  if (n === null || !Number.isInteger(n) || n < 0 || n > MAX_RETRIES) {
-    errors.push(`retries must be 0..=${MAX_RETRIES}`);
-    return undefined;
-  }
-  return n;
-}
-
-function parseNetworkProfile(raw: unknown, errors: Array<string>): NetworkProfile | undefined {
-  if (raw === undefined || raw === null) return DEFAULT_NETWORK_PROFILE;
-  if (typeof raw === "string" && (NETWORK_PROFILES as ReadonlyArray<string>).includes(raw)) {
-    return raw as NetworkProfile;
-  }
-  errors.push("network profile must be maximum, balanced, or gentle");
-  return undefined;
-}
-
-function parseHeadersValue(
-  raw: unknown,
-  errors: Array<string>,
-): Record<string, string> | undefined {
-  if (raw === undefined || raw === null) return {};
-  if (typeof raw === "string") {
-    const parsed = parseHeadersText(raw);
-    for (const e of parsed.errors) errors.push(e);
-    if (parsed.errors.length > 0) return undefined;
-    return parsed.headers;
-  }
-  if (Array.isArray(raw)) {
-    const parsed = parseHeadersText(raw.filter((v) => typeof v === "string").join("\n"));
-    if (raw.some((v) => typeof v !== "string")) {
-      errors.push("headers must be Name: value lines");
-      return undefined;
-    }
-    for (const e of parsed.errors) errors.push(e);
-    if (parsed.errors.length > 0) return undefined;
-    return parsed.headers;
-  }
-  if (typeof raw === "object") {
-    const out: Record<string, string> = {};
-    for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
-      const name = key.trim().toLowerCase();
-      if (!isValidHeaderName(name)) {
-        errors.push("invalid header: bad name");
-        return undefined;
-      }
-      if (typeof val !== "string") {
-        errors.push("invalid header: value must be a string");
-        return undefined;
-      }
-      const value = val.trim();
-      if (
-        value.length > 4096 ||
-        value.includes("\r") ||
-        value.includes("\n") ||
-        value.includes("\0")
-      ) {
-        errors.push("invalid header: bad value");
-        return undefined;
-      }
-      out[name] = value;
-      if (Object.keys(out).length > MAX_HEADERS) {
-        errors.push(`too many headers (max ${MAX_HEADERS})`);
-        return undefined;
-      }
-    }
-    return out;
-  }
-  errors.push("headers must be an object or Name: value lines");
-  return undefined;
-}
-
-// Validate a raw settings object, failing closed on any invalid field.
-// Unknown fields are ignored. Null/empty-string dir and dimension fields
-// mean unset.
-export function validateSettings(raw: unknown): SettingsValidation {
-  const errors: Array<string> = [];
-  if (raw === null || raw === undefined) {
-    return { ok: true, settings: defaultSettings(), errors: [] };
-  }
-  if (typeof raw !== "object" || Array.isArray(raw)) {
-    return { ok: false, settings: null, errors: ["settings must be an object"] };
-  }
-  const obj = raw as Record<string, unknown>;
-  const output_format = parseOutputFormat(obj.output_format, errors);
-  const compression = parseCompression(obj.compression, errors);
-  const retries = parseRetries(obj.retries, errors);
-  const network_profile = parseNetworkProfile(obj.network_profile, errors);
-  const max_width = parseOptionalDimension(obj.max_width, "max-width", errors);
-  const max_height = parseOptionalDimension(obj.max_height, "max-height", errors);
-  const output_dir = parseOptionalDir(obj.output_dir, "output dir", errors);
-  const cache_dir = parseOptionalDir(obj.cache_dir, "cache dir", errors);
-  const headers = parseHeadersValue(obj.headers, errors);
-  if (
-    output_format === undefined ||
-    compression === undefined ||
-    retries === undefined ||
-    network_profile === undefined ||
-    max_width === undefined ||
-    max_height === undefined ||
-    output_dir === undefined ||
-    cache_dir === undefined ||
-    headers === undefined
-  ) {
-    return { ok: false, settings: null, errors };
-  }
-  if (errors.length > 0) {
-    return { ok: false, settings: null, errors };
-  }
-  return {
-    ok: true,
-    settings: {
-      output_dir,
-      output_format,
-      compression,
-      max_width,
-      max_height,
-      retries,
-      network_profile,
-      cache_dir,
-      headers,
-    },
-    errors: [],
-  };
+/** Stored header lines as editable text (one raw `Name: value` per line). */
+export function headersToEditableText(headers: ReadonlyArray<string>): string {
+  return headers.join("\n");
 }
 
 interface MemoryStore {
@@ -394,38 +125,63 @@ function writeStoredText(text: string): void {
   memoryFallback[SETTINGS_STORAGE_KEY] = text;
 }
 
-// Load persisted settings, validated with fail-closed to defaults on any
-// invalid or unreadable payload.
+// Shape normalization only: unknown or mistyped fields fall back to
+// defaults. Legacy payloads stored headers as name/value pairs or raw
+// text; raw lines keep their bytes as typed. Bounds and header syntax are
+// validated by Rust on use.
+function normalizeHeaderLines(raw: unknown): ReadonlyArray<string> {
+  if (Array.isArray(raw)) return raw.filter((item): item is string => typeof item === "string");
+  if (typeof raw === "string") return raw.split("\n");
+  if (raw !== null && typeof raw === "object") {
+    return Object.entries(raw as Record<string, unknown>)
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+      .map(([name, value]) => `${name}: ${value}`);
+  }
+  return [];
+}
+
+function normalizeSettings(raw: unknown): DesktopSettings {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return defaultSettings();
+  const obj = raw as Record<string, unknown>;
+  const defaults = defaultSettings();
+  return {
+    output_dir: typeof obj.output_dir === "string" && obj.output_dir !== "" ? obj.output_dir : null,
+    output_format: (OUTPUT_FORMATS as ReadonlyArray<string>).includes(obj.output_format as string)
+      ? (obj.output_format as OutputFormat)
+      : defaults.output_format,
+    compression: typeof obj.compression === "number" ? obj.compression : defaults.compression,
+    max_width: typeof obj.max_width === "number" ? obj.max_width : null,
+    max_height: typeof obj.max_height === "number" ? obj.max_height : null,
+    retries: typeof obj.retries === "number" ? obj.retries : defaults.retries,
+    network_profile: (NETWORK_PROFILES as ReadonlyArray<string>).includes(
+      obj.network_profile as string,
+    )
+      ? (obj.network_profile as NetworkProfile)
+      : defaults.network_profile,
+    cache_dir: typeof obj.cache_dir === "string" && obj.cache_dir !== "" ? obj.cache_dir : null,
+    headers: normalizeHeaderLines(obj.headers),
+  };
+}
+
+// Load persisted settings, fail-closed to defaults on any unreadable
+// payload. Shapes are normalized here; Rust revalidates on use.
 export function loadSettings(): DesktopSettings {
   const raw = readStoredText();
   if (!raw) return defaultSettings();
   try {
-    const parsed: unknown = JSON.parse(raw);
-    const validated = validateSettings(parsed);
-    if (validated.ok && validated.settings) return validated.settings;
-    return defaultSettings();
+    return normalizeSettings(JSON.parse(raw));
   } catch {
     return defaultSettings();
   }
 }
 
-// Persist validated settings only. Returns validation errors without
-// persisting when invalid (fail closed, keeps the last good payload).
+// Persist the raw settings as typed. Rust is the single validator and its
+// typed rejection reason is surfaced by the caller; a rejected save shows
+// its reason and persists nothing (fail closed, keeps the last good
+// payload).
 export function saveSettings(settings: DesktopSettings): Array<string> {
-  const validated = validateSettings({
-    output_dir: settings.output_dir,
-    output_format: settings.output_format,
-    compression: settings.compression,
-    max_width: settings.max_width,
-    max_height: settings.max_height,
-    retries: settings.retries,
-    network_profile: settings.network_profile,
-    cache_dir: settings.cache_dir,
-    headers: { ...settings.headers },
-  });
-  if (!validated.ok || !validated.settings) return validated.errors;
   try {
-    writeStoredText(JSON.stringify(validated.settings));
+    writeStoredText(JSON.stringify(settings));
   } catch {
     return ["could not persist settings"];
   }

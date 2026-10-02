@@ -3,11 +3,17 @@
 use std::path::Path;
 use std::process::Command;
 
-const BANNED_DEPS: &[&str] = &[
-    "reqwest", "tokio", "web-sys", "js-sys", "image", "png", "clap",
-];
+/// Banned anywhere in the normal dependency tree (dev/build edges stay
+/// excluded): platform I/O and runtimes, web platform APIs, image codecs,
+/// and application frameworks. The whole tree is checked, not just direct
+/// dependencies, so a transitive banned dependency cannot pass silently.
+/// `js-sys` is deliberately absent: `wasm-bindgen-futures` and
+/// `serde-wasm-bindgen` require it transitively as the JS value/future
+/// conversion substrate these bindings exist to use, and it exposes no I/O.
+const BANNED_DEPS: &[&str] = &["reqwest", "tokio", "web-sys", "image", "png", "clap"];
+
 #[test]
-fn direct_dependencies_only_convert_values_and_futures() {
+fn normal_dependency_tree_only_converts_values_and_futures() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
     let output = Command::new(env!("CARGO"))
         .args([
@@ -16,8 +22,6 @@ fn direct_dependencies_only_convert_values_and_futures() {
             manifest.to_str().unwrap(),
             "--edges",
             "normal",
-            "--depth",
-            "1",
             "--prefix",
             "none",
         ])

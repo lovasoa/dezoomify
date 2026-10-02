@@ -5,6 +5,17 @@
 
 export type QueueStatus = "queued" | "active" | "done" | "failed" | "cancelled";
 
+/** Queue mutation outcomes: `ok`, or the named refusal. `job.invalid-input`
+ * refuses enqueue validation and `job.duplicate` refuses an entry whose
+ * identity is already running. One vocabulary for every queue mutation. */
+export type QueueResultCode =
+  | "ok"
+  | "job.unknown"
+  | "job.stale"
+  | "job.invalid-state"
+  | "job.invalid-input"
+  | "job.duplicate";
+
 export interface QueueEntry {
   readonly id: string;
   readonly status: QueueStatus;
@@ -66,10 +77,6 @@ export function activeQueueEntry<E extends QueueEntry>(queue: SequentialQueue<E>
   return queue.entries.find((entry) => entry.id === queue.activeId) ?? null;
 }
 
-export function pendingQueueEntries<E extends QueueEntry>(queue: SequentialQueue<E>): E[] {
-  return queue.entries.filter((entry) => entry.status === "queued");
-}
-
 export function finishActiveQueueEntry<E extends QueueEntry>(
   queue: SequentialQueue<E>,
   outcome: "done" | "failed" | "cancelled",
@@ -88,7 +95,7 @@ export function finishActiveQueueEntry<E extends QueueEntry>(
 export function cancelQueueEntry<E extends QueueEntry>(
   queue: SequentialQueue<E>,
   id: string,
-): { queue: SequentialQueue<E>; next: E | null; code: string } {
+): { queue: SequentialQueue<E>; next: E | null; code: QueueResultCode } {
   const found = queue.entries.find((entry) => entry.id === id);
   if (!found) return { queue, next: null, code: "job.unknown" };
   if (found.status === "done" || found.status === "failed" || found.status === "cancelled") {
@@ -114,7 +121,7 @@ export function retryQueueEntry<E extends QueueEntry>(
   queue: SequentialQueue<E>,
   id: string,
   makeEntry: (id: string, previous: E, status: QueueStatus) => E,
-): { queue: SequentialQueue<E>; entry: E | null; code: string } {
+): { queue: SequentialQueue<E>; entry: E | null; code: QueueResultCode } {
   const found = queue.entries.find((entry) => entry.id === id);
   if (!found) return { queue, entry: null, code: "job.unknown" };
   if (found.status !== "failed" && found.status !== "cancelled") {
@@ -147,12 +154,4 @@ export function summarizeQueue<E extends QueueEntry>(queue: SequentialQueue<E>):
     else pending += 1;
   }
   return { total: queue.entries.length, succeeded, failed, cancelled, pending };
-}
-
-export function humanQueueSummary(summary: {
-  succeeded: number;
-  failed: number;
-  total: number;
-}): string {
-  return `bulk: ${summary.succeeded} succeeded, ${summary.failed} failed, ${summary.total} total`;
 }

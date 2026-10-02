@@ -406,28 +406,10 @@ fn take_value(
         .ok_or_else(|| format!("missing value for {flag}"))
 }
 
+/// Built-in format names (single source: the core registry).
 #[must_use]
-pub fn known_formats() -> &'static [&'static str] {
-    &[
-        "custom",
-        "google_arts_and_culture",
-        "zoomify",
-        "iiif",
-        "deepzoom",
-        "generic",
-        "krpano",
-        "iipimage",
-        "xlimage",
-        "topviewer",
-        "fsi",
-        "lizardtech",
-        "vls",
-        "hungaricana",
-        "wmts",
-        "arcgis",
-        "pnav",
-        "bulk_text",
-    ]
+pub fn known_formats() -> Vec<&'static str> {
+    dezoomify::core::builtin_names().collect()
 }
 
 /// Validate a `--format` value: `auto` or a known format (case-insensitive,
@@ -774,6 +756,18 @@ mod tests {
         ])
         .expect("known names validate case-insensitively");
         assert_eq!(ok.format, "IIIF");
+    }
+
+    #[test]
+    fn freezoompack_format_selector_uses_the_shared_registry() {
+        let args = parse(&[
+            "--format".to_string(),
+            "FZP".to_string(),
+            "https://example.test/root.xml".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(args.format, "FZP");
+        assert!(known_formats().contains(&"fzp"));
     }
 
     #[test]

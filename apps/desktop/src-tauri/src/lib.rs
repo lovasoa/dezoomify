@@ -15,8 +15,6 @@ pub const APP_VERSION: &str = match option_env!("DEZOOMIFY_VERSION") {
 };
 
 pub mod commands;
-pub mod deep_link;
-pub mod install_integration;
 pub mod jobs;
 pub mod settings;
 

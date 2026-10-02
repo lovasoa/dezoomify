@@ -4,7 +4,7 @@ use dezoomify::{
         self, DiscoveredEntry, DiscoveryCatalog, DiscoveryError, DiscoveryResource, FormatSpec,
         ParsedResource, Request, ResolvedImage,
     },
-    model::{Error, ErrorPhase, Interaction, ResourceRead, ResourceResponse},
+    model::{Error, Interaction, ResourceRead, ResourceResponse},
 };
 use futures::FutureExt;
 use std::{
@@ -166,11 +166,10 @@ fn deferred_access_runs_after_every_runnable_branch_and_reuses_its_resource() {
             calls.borrow_mut().push((request.uri.clone(), interaction));
             async move {
                 if request.uri.ends_with("/b") {
-                    return Err(Error::new(
-                        "DISCOVERY_FAILED",
-                        ErrorPhase::Discovery,
-                        "unavailable",
-                    ));
+                    return Err(Error::DiscoveryFailed {
+                        failure: "unavailable".to_string().into(),
+                        cause: None,
+                    });
                 }
                 Ok(if interaction == Interaction::Forbidden {
                     ResourceRead::NeedsAccess {
@@ -284,23 +283,22 @@ fn live_resource_concurrency_stays_within_the_declared_bound() {
 }
 
 #[test]
-fn rejected_candidates_retain_native_and_unknown_host_failure_facts() {
-    use dezoomify::model::{BlockedReason, ErrorTransport, ResourceKind};
+fn rejected_candidates_retain_host_failure_facts() {
+    use dezoomify::model::{ErrorTransport, Failure, ResourceKind};
     for transport in [ErrorTransport::Native, ErrorTransport::DisplayOnly] {
-        let mut failure = Error::new(
-            "host.new-policy",
-            ErrorPhase::Discovery,
-            "exact host message",
-        )
-        .with_transport(transport)
-        .with_resource(ResourceKind::Metadata)
-        .with_retryable(true);
-        failure.http = Some(429);
-        failure.request = Some("https://redirected.test/metadata?access=exact".into());
-        failure.blocked_reason = Some(BlockedReason::Throttled);
-        failure.retry_after_ms = Some(9000);
-        failure.preview = Some("original response".into());
-        failure.detail = Some("original explanation".into());
+        // The exact structured facts a host observed survive the discovery
+        // layer unchanged: no field is stripped or flattened away.
+        let failure = Error::HttpError {
+            status: 429,
+            retry_after_ms: Some(9000),
+            preview: Some("original response".into()),
+            transport,
+            failure: Failure {
+                request: Some("https://redirected.test/metadata?access=exact".into()),
+                detail: Some("original explanation".into()),
+            },
+        }
+        .resource("https://test/root", ResourceKind::Metadata);
         let registry = registry();
         let error = futures::executor::block_on(registry.discover(
             vec![DiscoveryInput::new("https://test/root")],

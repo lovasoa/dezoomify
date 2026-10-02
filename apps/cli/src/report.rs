@@ -61,14 +61,30 @@ pub fn machine_completed(summary: &CompletedOutput<'_>) -> String {
     .to_string()
 }
 
-/// One bulk entry outcome for summaries: `ok`, or `failed` with a stable error code.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// The terminal machine-readable failure record for a single job: `failed`,
+/// or `cancelled`, carrying the serialized typed error (its `kind` names the
+/// failure).
+#[must_use]
+pub fn machine_failed(job: &str, error: &dezoomify::model::Error) -> String {
+    use dezoomify::model::Error;
+    serde_json::json!({
+        "job": job,
+        "kind": if matches!(error.cause(), Error::Cancelled) { "cancelled" } else { "failed" },
+        "error": serde_json::to_value(error).unwrap_or(serde_json::Value::Null),
+    })
+    .to_string()
+}
+
+/// One bulk entry outcome for summaries: `ok`, or `failed` carrying the
+/// serialized typed error (its `kind` names the failure).
+#[derive(Clone, Debug)]
 pub struct BulkItem {
     pub index: usize,
     pub url: String,
     pub output: String,
     pub status: String,
     pub detail: String,
+    pub error: Option<serde_json::Value>,
 }
 
 impl BulkItem {
@@ -80,17 +96,19 @@ impl BulkItem {
             output: output.to_string(),
             status: "ok".to_string(),
             detail: String::new(),
+            error: None,
         }
     }
 
     #[must_use]
-    pub fn failed(index: usize, url: &str, output: &str, code: &str, message: &str) -> Self {
+    pub fn failed(index: usize, url: &str, output: &str, error: &dezoomify::model::Error) -> Self {
         Self {
             index,
             url: url.to_string(),
             output: output.to_string(),
             status: "failed".to_string(),
-            detail: format!("{code}: {message}"),
+            detail: format!("{}: {}", error.cause().kind(), error),
+            error: Some(serde_json::to_value(error).unwrap_or(serde_json::Value::Null)),
         }
     }
 }
@@ -113,15 +131,18 @@ pub fn machine_bulk_summary(total: usize, succeeded: usize, failed: usize) -> St
 
 #[must_use]
 pub fn machine_bulk_item(item: &BulkItem) -> String {
-    serde_json::json!({
+    let mut event = serde_json::json!({
         "kind": "bulk-item",
         "index": item.index,
         "url": item.url,
         "output": item.output,
         "status": item.status,
         "detail": item.detail,
-    })
-    .to_string()
+    });
+    if let Some(error) = &item.error {
+        event["error"] = error.clone();
+    }
+    event.to_string()
 }
 
 /// Log verbosity rank for `--logging`: error=0, warn=1, info=2, debug=3,
@@ -196,58 +217,9 @@ pub fn show_progress(level: &str) -> bool {
     log_level_rank(level) >= 2
 }
 
-/// Stable codes printed by the command-line interface.
-pub fn error_code(code: &str) -> &str {
-    match code {
-        "job.invalid-input"
-        | "job.discovery-failed"
-        | "job.catalog-invalid"
-        | "job.empty-resource" => "discovery.failed",
-        "job.no-images" => "discovery.no-image",
-        "job.unknown-format" => "discovery.unknown-format",
-        "job.resource-limit" => "tile.limit",
-        "job.deferred-limit" => "discovery.deferred",
-        "job.plan-invalid" => "discovery.tile-plan",
-        "job.plan-empty" => "discovery.no-level",
-        "job.partial-discarded" | "job.no-usable-tiles" => "tile.download-failed",
-        "TRANSPORT_TIMEOUT" => "transport.timeout",
-        "TRANSPORT_NETWORK_ERROR" => "transport.network-error",
-        "TRANSPORT_SIZE_LIMIT" => "transport.size-limit",
-        "TRANSPORT_BAD_URL" => "transport.bad-url",
-        "TRANSPORT_BAD_REDIRECT" => "transport.bad-redirect",
-        "TRANSPORT_REDIRECT_LIMIT" => "transport.redirect-limit",
-        "TRANSPORT_HTTP_ERROR" => "tile.http-error",
-        "TILE_DECODE_FAILED" => "tile.decode-failed",
-        code => code,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn failure_codes_match_the_published_scenario_results() {
-        for (scenario, code) in [
-            ("cli-corrupt-tile", "job.partial-discarded"),
-            ("cli-tile-failure", "job.partial-discarded"),
-            ("cli-deferred-limit", "job.deferred-limit"),
-            ("cli-destination-denied", "output.exists"),
-            ("cli-cancel", "job.cancelled"),
-        ] {
-            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../testdata/scenarios/native")
-                .join(scenario)
-                .join("expected/result.json");
-            let expected: serde_json::Value =
-                serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
-            assert_eq!(
-                error_code(code),
-                expected["code"].as_str().unwrap(),
-                "{scenario}"
-            );
-        }
-    }
 
     #[test]
     fn log_levels_gate_human_output() {
@@ -265,6 +237,24 @@ mod tests {
         assert!(!show_progress("warn"));
         assert!(show_progress("info"));
         assert!(show_progress("debug"));
+    }
+
+    #[test]
+    fn terminal_failure_record_carries_the_typed_error() {
+        use dezoomify::model::Error;
+        let failed: serde_json::Value = serde_json::from_str(&machine_failed(
+            "job:cli-1",
+            &Error::SizeLimit { max_bytes: 8 },
+        ))
+        .expect("json");
+        assert_eq!(failed["job"], "job:cli-1");
+        assert_eq!(failed["kind"], "failed");
+        assert_eq!(failed["error"]["kind"], "size-limit");
+        assert_eq!(failed["error"]["max_bytes"], 8);
+        let cancelled: serde_json::Value =
+            serde_json::from_str(&machine_failed("job:cli-1", &Error::Cancelled)).expect("json");
+        assert_eq!(cancelled["kind"], "cancelled");
+        assert_eq!(cancelled["error"]["kind"], "cancelled");
     }
 
     #[test]

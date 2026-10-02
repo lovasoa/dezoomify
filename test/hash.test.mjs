@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatElapsed, formatRemaining } from "../packages/shared-ui/src/components.ts";
+import { formatElapsed } from "../packages/shared-ui/src/components.ts";
 import { buildHash, looksLikeUsableUrl, parseHash } from "../src/hash.ts";
 
 test("legacy hash round-trips raw URLs", () => {
@@ -37,10 +37,4 @@ test("elapsed formatting stays quiet for fast requests", () => {
   assert.equal(formatElapsed(3000), "3 s");
   assert.equal(formatElapsed(65000), "1 min 5 s");
   assert.equal(formatElapsed(120000), "2 min");
-});
-
-test("remaining formatting counts down the 30 s timeout", () => {
-  assert.equal(formatRemaining(0, 30000), "30 s left");
-  assert.equal(formatRemaining(29500, 30000), "1 s left");
-  assert.equal(formatRemaining(30000, 30000), "0 s left");
 });

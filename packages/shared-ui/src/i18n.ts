@@ -1,33 +1,13 @@
 // Shared-UI message dictionary (English plus French, German, Italian).
 //
-// User-facing copy renders through `t(key, vars)` against one table per
-// locale. English (`en`) is the canonical source: every other locale mirrors
-// it key for key with identical `{placeholders}`. Lookups fall back to
-// English per key, so a missing translation never renders `undefined`.
-// There is deliberately one lookup path only: a new locale adds a sibling
-// table under `locales/` plus a `SUPPORTED_LOCALES` entry, never a second
-// dictionary shape.
+// English (`en`) is the canonical source: every other locale covers it key
+// for key with identical `{placeholders}`, and lookups fall back to English
+// per key. Rules for user copy: `packages/shared-ui/AGENTS.md`.
 //
-// Locale selection: hosts call `setLocale()` with an explicit picker choice,
-// or `pickLocale()` with an `Accept-Language` header value or a
-// `navigator.languages` list. Unknown tags fail closed to English.
-// The website documents the picker in `docs/user/website.md`; help bodies
-// stay English and regenerate via `scripts/build-help.mjs`.
-//
-// Rules (see `packages/shared-ui/AGENTS.md`):
-// - User copy goes through `t()`; stable codes, diagnostics, technical logs,
-//   URLs, transport codes, and protocol strings stay literal English.
-// - Brand and product names ("Dezoomify", "Chrome Web Store", "GitHub
-//   Releases", format names such as "PNG") stay literal in code; translators
-//   never rewrite them.
-// - Interpolation is `{name}` substitution only (no plural rules, no
-//   markup). Callers escape with `escapeHtml` when composing `innerHTML`.
-// - Hosts bundle the shared UI directly; there is no `.js` codegen mirror.
-//   `test/ui-i18n.test.mjs` fails when a renderer uses a key outside this
-//   table, when a locale drops a key, or when placeholders diverge per locale.
-//
-// This module is erasable-syntax-only TypeScript (type aliases, plain
-// functions) so node can type-strip it directly in tests.
+// Locale selection: hosts call `setLocale()` (explicit picker choice) or
+// `pickLocale()` (`Accept-Language` / `navigator.languages`); unknown tags
+// fail closed to English. This module is erasable-syntax-only TypeScript so
+// node can type-strip it directly in tests.
 
 import { de } from "./locales/de.ts";
 import { fr } from "./locales/fr.ts";
@@ -143,6 +123,12 @@ const en = {
     "High-performance native application for gigapixel museum artworks and local scans",
   "view.desktop.installer": "The unsigned {installer} for {platform} is on",
   "view.desktop.releasesLink": "GitHub Releases",
+  "view.desktop.releasesNote": "No auto-update; check GitHub Releases manually.",
+  "view.desktop.installerMsi": ".msi installer",
+  "view.desktop.installerDmg": "Apple silicon .dmg",
+  "view.desktop.installerDeb": ".deb installer",
+  "view.desktop.installerGeneric": "installer",
+  "view.desktop.platformGeneric": "your platform",
   "view.desktop.whyTitle": "Why use the Desktop App?",
   "view.desktop.why1Title": "Handles Larger Artworks:",
   "view.desktop.why1Body":
@@ -186,24 +172,14 @@ const en = {
     "Navigate to the museum or library page displaying your artwork, logging in if needed.",
   "view.ext.step3":
     "Click the Dezoomify icon in your browser toolbar to automatically detect and extract the full-resolution image!",
+  // Access request (browser-session file access), shared access-request.tsx.
+  "view.access.title": "Allow access to continue",
+  "view.access.usesOrigin": "This image uses files from {origin}.",
+  "view.access.needAccess":
+    "Dezoomify needs access to read those files and assemble your image in this browser.",
+  "view.access.requesting": "Requesting access…",
+  "view.access.allow": "Allow access and continue",
   // Idle input section.
-  "view.idle.intro": "allows you to save",
-  "view.idle.zoomable": "zoomable images",
-  "view.idle.zoomableTitle": "Large images in which you can navigate inside a webpage.",
-  "view.idle.enterThe": "Enter the",
-  "view.idle.urlAbbr": "URL",
-  "view.idle.urlTitle": "Uniform Resource Locator, the address of a webpage",
-  "view.idle.body":
-    'of such an image in the text field below. The image will be saved at maximal resolution. You can then right-click on the image, and choose "Save As" in order to save it as a PNG file on your computer. If it doesn\'t work, read our',
-  "view.idle.troubleLink": "troubleshooting guide",
-  "view.idle.moreInfo": "If you want more information, read our",
-  "view.idle.projectLink": "project page",
-  "view.idle.license1": "This script is released under the",
-  "view.idle.gplLink": "GPL",
-  "view.idle.sourceLink": "See the source code",
-  "view.idle.termsLink": "We decline any responsibility for an illegal use of this software",
-  "view.idle.urlPlaceholder": "URL of the webpage containing your image",
-  "view.idle.urlAria": "URL of the webpage containing your zoomable image",
   "view.idle.clearTitle": "Clear input",
   "view.idle.submit": "Dezoomify !",
   // Job step labels.
@@ -211,32 +187,20 @@ const en = {
   "view.step.preflighting": "Checking the image size…",
   "view.step.downloading": "Saving image tiles…",
   "view.step.saving": "Assembling the final picture…",
-  "view.step.working": "Working…",
   "view.step.contactingDetail": "Contacting the image host…",
-  "view.step.encodingDetail": "Encoding in the app.",
-  "view.step.cleanupDetail": "Cleaning up unfinished files…",
   // Live job section.
-  "view.job.workingOn": "Working on",
-  "view.job.cancel": "Cancel",
-  "view.job.change": "Change",
   "view.job.techDetails": "Technical details & logs",
-  "view.job.oneImage": "1 image",
   "view.job.manyImages": "{count} images",
-  "view.job.autoChoiceFull":
-    "Found {noun}, saving largest that fits ({width}×{height}, {tiles} tiles).",
-  "view.job.autoChoiceDims": "Found {noun}, saving largest that fits ({width}×{height}).",
-  "view.job.autoChoiceTiles": "Found {noun}, saving largest that fits ({tiles} tiles).",
-  "view.job.autoChoiceBare": "Found {noun}, saving largest that fits.",
-  "view.job.stalled":
-    "Still working, {host} is slow to answer. You can wait, or cancel and try again later.",
+  "view.job.paused": "Paused",
+  "view.job.retryingTiles": "Retrying tiles ({count})…",
+  "view.job.waiting": "Waiting for {host}…",
+  "view.job.sourceLabel": "Source",
+  "view.job.pause": "Pause",
+  "view.job.resume": "Resume",
+  "view.job.stopReturn": "Stop and return to start",
+  "view.job.progressValue": "{done} done, {active} in progress, {remaining} remaining",
   // Display-only section.
   "view.display.title": "Showing preview – not saved yet",
-  "view.display.openDesktop": "Open in desktop app",
-  // Desktop handoff uses the ordinary, user-confirmed dezoomify:// link.
-  "view.handoff.send": "Send to desktop app",
-  "view.handoff.sendOrigin": "Send to desktop app ({origin})",
-  "view.handoff.localNote":
-    "Local files stay on this computer. Open the desktop app and choose the file there; nothing is sent.",
   "view.display.waysTitle": "Ways to save this artwork",
   "view.display.extTitle": "Browser Extension Guide",
   "view.display.extDesc":
@@ -259,41 +223,30 @@ const en = {
   "view.done.saveNow": "Save image now",
   "view.done.another": "Dezoomify another image",
   // Failure section.
-  "view.fail.fallback": "Dezoomify could not find or save the zoomable image at this address.",
   "view.fail.title": "Could not dezoomify image",
   "view.fail.deskDescLimits":
     "For images that exceed browser memory limits, subject to available memory. Processes natively on your computer.",
   "view.fail.helpTitle": "Help & URL Extraction",
   "view.fail.helpDesc":
     "How to find the image address on museum & archive sites, and what to try when nothing is found.",
-  "view.fail.techDetails": "Technical error details & bug report",
   "view.fail.reportBug": "Report a bug on GitHub",
   "view.fail.retry": "Try again",
-  // Browser canvas failure family (allocation, 2D context, PNG encoding):
+  // Browser canvas failure family (allocation, 2D context):
   // the desktop app is the recovery, so every message names it.
   "view.fail.canvasAllocation":
     "This picture is too large to assemble in this browser tab. The desktop app can save it at full size.",
   "view.fail.canvasContext":
     "This browser tab could not create the picture surface at this size. The desktop app can save it at full size.",
-  "view.fail.canvasEncode":
-    "This browser tab could not finish the full-size PNG picture. The desktop app can save it at full size.",
   // Cancelled section.
   "view.cancel.title": "Save cancelled",
   "view.cancel.message": "The image save was stopped.",
-  // Generic fallback for unknown phases (debug surface; status codes stay raw).
-  "view.generic.status": "Status:",
-  "view.generic.reset": "Reset",
   // Job section and share chrome.
-  "view.job.shareTitle": "Copies the page address for this job, not the image file itself",
-  "view.job.shareLink": "Copy link to this job",
   "view.job.countsFull": "{current} of {total} tiles",
-  "view.job.countsElapsed": "{current} of {total} tiles · {elapsed} elapsed",
-  "view.job.elapsedOnly": "{elapsed} elapsed",
+  "view.job.countsActive": "{current} of {total} tiles · {active} in progress",
   // Recent-jobs history (todo 5.2): local-only ledger.
   "view.history.title": "Recent pictures",
   "view.history.empty": "No recent pictures yet. Saved pictures appear here.",
   "view.history.localOnly": "Kept only on this device.",
-  "view.history.open": "Open again",
   "view.history.clear": "Clear history",
   "view.history.dims": "{w} by {h} pixels",
   "view.input.description":
@@ -301,30 +254,42 @@ const en = {
   "view.input.placeholder": "Paste an image viewer or manifest URL",
   "view.input.aria": "Address of the webpage containing your zoomable image",
   "view.input.start": "Find image",
-  // Failure "What happened" explainer.
-  "view.fail.whatHappened": "What happened",
+  // Rate-limit explainers, rendered from the typed `rate-limited` failure at
+  // display time (see `plainMessageFor` in failure.ts): an upstream 429
+  // through the metadata proxy means OUR server was throttled; a direct 429
+  // means the user's own connection was throttled. The two cases name
+  // different fixes.
   "view.fail.rateProxy":
     "The website hosting this image limits how many pages our server may request from it, and that limit was just reached, so the page could not be opened. The browser extension and the desktop app download from your own internet connection instead of our server, so they are not affected by this limit.",
   "view.fail.rateDirect":
     "The website hosting this image is receiving too many requests from your own connection right now. Waiting a few minutes usually clears it, and the browser extension or desktop app will see the same busy signal until it does.",
+  // Fetch-failure family, rendered from the typed facts at display time
+  // (see `plainMessageFor` in failure.ts): every observed cause names its
+  // own next fix, so identical causes read identically everywhere.
+  "view.fail.httpNotFound": "This page could not be found. Check the address and try again.",
+  "view.fail.httpRefused":
+    "The site refused to share this file (HTTP {http}). It may block shared servers; the browser extension or the desktop app may still work.",
+  "view.fail.httpSiteProblem": "The site had a problem opening this page. Try again shortly.",
+  "view.fail.httpNotOpened": "This page could not be opened. Check the address and try again.",
+  "view.fail.policyBlocked":
+    "This address cannot be opened through the website. {hint} The browser extension or the desktop app may still work.",
+  "view.fail.hintAddress": "Check the address and try again.",
+  "view.fail.hintPrivate": "The website cannot open private or local addresses.",
+  "view.fail.hintContentType":
+    "The site answered with a file type the website does not check here.",
+  "view.fail.hintRedirect": "The site redirected in a way the website cannot follow.",
+  "view.fail.proxyBudget":
+    "This page is too large to check here. Try the desktop app for very large images.",
+  "view.fail.proxyFetch": "The metadata proxy could not fetch this address. Try again shortly.",
   // Desktop app user copy (apps/desktop/src/main.tsx). Logs and technical
   // diagnostics stay literal English and never use these keys.
   "desktop.url.invalid": "Please enter a valid web address starting with http:// or https://",
-  "desktop.url.notWebPage":
-    "That address does not look like a web page address. Enter an address starting with http:// or https://.",
   "desktop.settings.unusable":
     "These download settings cannot be used. Adjust the highlighted settings and try again.",
   "desktop.settings.invalidSubmit":
     "These download settings are invalid. Adjust them and try again.",
   "desktop.output.deniedPick":
     "The save destination was not accepted. Choose a different file to continue.",
-  "desktop.output.deniedFallback": "The save destination was denied.",
-  "desktop.handoff.rejected":
-    "This link cannot be opened from {host}. Try a different address without sign-in details.",
-  "desktop.handoff.acceptedDetail":
-    "This picture can be handed to another app. You are already in the native app, so you can continue here.",
-  "desktop.handoff.rejectedDetail":
-    "This picture cannot be handed to another app. Continue here or try a different picture.",
   "desktop.output.exists":
     "A file already exists at the save destination from {host}. Choose a different file or confirm overwriting to continue.",
   "desktop.output.destDenied":
@@ -337,12 +302,12 @@ const en = {
     "This picture is too large to assemble on this computer ({dims},{need} at 4 bytes per pixel, limit {limit}). Save a smaller version with Max width (CLI: --max-width). Note: JPEG saves at most {jpegMax} pixels per side; keep PNG for larger pictures. From {host}.",
   "desktop.output.jpegLimit":
     "This picture ({dims}) is too large for JPEG, which allows at most {jpegMax} pixels per side. Save it as PNG instead. From {host}.",
+  "desktop.output.webpLimit":
+    "This picture ({dims}) is too large for WebP, which allows at most {webpMax} pixels per side. Save it as PNG instead. From {host}.",
   "desktop.tile.partialDiscarded":
     "The partial picture was discarded so no file was kept. Try again from {host} with a steady connection.",
   "desktop.tile.partialChoice":
     "Some pieces of this picture from {host} could not be saved. Retry the failed pieces, or keep the partial picture with blank areas.",
-  "desktop.discovery.none":
-    "Could not find a zoomable image at this address from {host}. Try a different page or check the address.",
   "view.discovery.none":
     "No zoomable image was found at this address. Try a page that contains a zoom viewer, or try the browser extension.",
   "desktop.plan.none":
@@ -354,55 +319,16 @@ const en = {
   "desktop.job.cancelledMsg": "The image save was stopped. Any unfinished file was removed.",
   "desktop.start.failed": "Could not start saving this picture from {host}. Try again.",
   "desktop.choice.failed": "That choice was not accepted. Try again.",
-  "desktop.save.generic":
-    "Could not save this picture from {host}. Try again with a different address.",
   "desktop.internal.error":
     "Something unexpected stopped this save from {host}. Try again, and copy diagnostics if it keeps happening.",
   "desktop.save.fallback": "Could not save this picture from {host}. Try again.",
-  "desktop.job.failedFallback": "The job failed.",
   "desktop.invoke.startFallback": "Could not start the job.",
   "desktop.invoke.partial": "The partial-image choice was rejected.",
-  "desktop.invoke.destination": "Could not request the save destination.",
-  "desktop.invoke.cancel": "Could not cancel the job.",
-  "desktop.step.chooseWhere": "Choose where to save…",
-  "desktop.step.chooseWhereDetail":
-    "The save destination needs attention before the job can continue.",
-  "desktop.step.pickOutput": "Pick the output file to continue.",
-  "desktop.step.partialTitle": "Some tiles could not be saved…",
-  "desktop.step.partialDetail": "Choose whether to keep the partial image, discard it, or retry.",
-  "desktop.step.displayPreview": "Display-only preview…",
-  "desktop.step.displayDetail": "This picture can only be viewed here.",
-  "desktop.step.cleanupDetail": "Cleaning up… removing unfinished file…",
-  "desktop.step.cleaningShort": "Cleaning up…",
-  "desktop.step.encodingNative": "Encoding in the native app",
-  "desktop.step.encodingPartial": "Encoding partial image in the native app",
-  "desktop.step.discardingPartial": "Discarding partial image",
-  "desktop.step.retrying": "Retrying",
-  "desktop.step.appAutoDetail":
-    "The app saves the first image automatically; no picker is offered.",
-  "desktop.step.foundFits": "Found {noun}, saving largest that fits…",
-  "desktop.step.tilesAtFull": "{current} of {total} tiles at full resolution",
-  "desktop.step.savedDims": "Saved {width} by {height} pixels",
-  "desktop.step.partialDims": "Partial image {width} by {height} pixels; {summary}",
-  "desktop.step.partialSaved": "Partial image saved; {summary}",
-  "desktop.step.savedWord": "Saved",
-  "desktop.step.contacting": "Contacting {host}…",
-  "desktop.link.title": "Another app wants to open an image in Dezoomify.",
-  "desktop.link.source": "Source: {url}",
-  "desktop.link.prov": "Provenance: dezoomify:// link (v{version})",
-  "desktop.link.provHint": "Provenance: dezoomify:// link (v{version}) · {hint}",
-  "desktop.link.note": "Nothing runs until you confirm. Declining does nothing.",
-  "desktop.link.dismiss": "Dismiss",
-  "desktop.link.open": "Open image",
   "desktop.rec.missing": "Missing tiles: {shown}{rest}.",
   "desktop.rec.more": " and {n} more",
-  "desktop.rec.destTitle": "Save destination needs attention",
-  "desktop.rec.destDesc":
-    "The save destination was not accepted. Choose an output file, try again, or use another app.",
   "desktop.rec.keep": "Keep partial image",
   "desktop.rec.discard": "Discard partial",
   "desktop.rec.retryTiles": "Retry failed tiles",
-  "view.partial.extensionKeep": "Keep the partial image",
   "view.partial.title": "The image is incomplete",
   "view.partial.summary": "{done} of {total} tiles were retrieved.",
   "view.partial.gaps": "The saved image will have gaps. No file has been saved yet.",
@@ -416,11 +342,6 @@ const en = {
   "view.partial.noneSaved": "None of the image could be retrieved. No file was saved.",
   "view.partial.checkSource": "Open the source page and check that its image viewer works.",
   "view.partial.openSource": "Open source page",
-  "view.partial.extensionDiscard": "Discard the partial image",
-  "view.partial.extensionRetry": "Retry the missing tiles",
-  "desktop.rec.chooseOutput": "Choose output…",
-  "desktop.rec.tryAgain": "Try again",
-  "desktop.rec.useOther": "Use another app",
   "desktop.rec.missingSome": "Some tiles could not be saved.",
   "desktop.rec.missingCount": "{count} tile{plural} could not be saved.",
   "desktop.rec.missingList": "{n} tile{plural} missing: {shown}{rest}.",
@@ -444,36 +365,7 @@ const en = {
   "desktop.queue.retry": "Retry",
   "desktop.queue.summary": "{succeeded} done, {failed} failed, {total} total",
   "desktop.queue.progress": "{current} of {total} tiles",
-  "desktop.queue.unknownOrigin": "the server",
-  "desktop.panel.outputFormat": "Output format",
   "desktop.panel.jobActions": "Desktop job actions",
-  "desktop.help.title": "Help and about",
-  "desktop.help.help": "Help",
-  "desktop.help.desktopGuide": "Desktop guide",
-  "desktop.help.troubleshooting": "Troubleshooting",
-  "desktop.help.faq": "FAQ",
-  "desktop.help.privacy": "Privacy",
-  "desktop.help.terms": "Terms",
-  "desktop.help.donate": "Donate",
-  "desktop.settings.title": "Customize",
-  "desktop.settings.desc":
-    "Minimal download settings. Saved on this device and used for the next job. Headers are sent to the image origin only.",
-  "desktop.settings.fileGroup": "File",
-  "desktop.settings.imageGroup": "Image",
-  "desktop.settings.networkGroup": "Network and recovery",
-  "desktop.settings.outputDir": "Output directory (optional)",
-  "desktop.settings.compression": "Compression 0-100 (default 5)",
-  "desktop.settings.maxWidth": "Max width px (optional)",
-  "desktop.settings.maxHeight": "Max height px (optional)",
-  "desktop.settings.retries": "Retries 0-100 (default 3, 0 = none)",
-  "desktop.settings.cacheDir": "Cache directory (optional resume cache)",
-  "desktop.settings.emptyLargest": "empty = largest",
-  "desktop.settings.browse": "Browse…",
-  "desktop.settings.browseOutput": "Browse for output directory",
-  "desktop.settings.browseCache": "Browse for cache directory",
-  "desktop.settings.headersAdv": "Advanced: request headers (trusted)",
-  "desktop.settings.headersLabel":
-    "Request headers, one per line as Name: value (optional, trusted)",
   "desktop.settings.reset": "Reset settings",
   "desktop.quick.folder": "Folder",
   "desktop.quick.askEachTime": "Ask each time",
@@ -514,19 +406,6 @@ const en = {
   // shape; log and diagnostics lines stay literal English and never use these
   // keys. `test/ui-i18n.test.mjs` fails when the page renders a key outside
   // this table.
-  "page.step.scanning": "Scanning page…",
-  "page.step.finding": "Finding the zoomable image ({done}/{total})…",
-  "page.step.choosing": "Choosing the highest resolution…",
-  "page.step.saving": "Saving image tiles…",
-  "page.step.assembling": "Assembling the final picture…",
-  "page.step.done": "Done",
-  "page.step.cancelled": "Cancelled",
-  "page.step.cancelling": "Cancelling…",
-  "page.step.displaying": "Displaying the image…",
-  "page.tabs.scan": "Scan {label}",
-  "page.tabs.hint":
-    "Open a page with a zoomable image, then click the Dezoomify toolbar button to scan that tab.",
-  "page.ui.techDetails": "Technical details & logs",
 } as const;
 
 export type I18nKey = keyof typeof en;

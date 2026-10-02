@@ -1,5 +1,5 @@
 import type { Error as JobError, MissingTiles, Output, Progress } from "@dezoomify/wasm-bindings";
-import { type I18nKey, t } from "./i18n.ts";
+import type { I18nKey } from "./i18n.ts";
 
 export interface ResolutionChoice {
   selected: { width: number; height: number };
@@ -54,15 +54,7 @@ export function presentStatus(
     ...(status === "discovering" ? { detailKey: "view.step.contactingDetail" as const } : {}),
     progress: null,
     paused: false,
-    error:
-      status === "failed"
-        ? (opts?.error ?? {
-            code: "UNKNOWN",
-            phase: "output",
-            retryable: true,
-            message: t("view.fail.fallback"),
-          })
-        : undefined,
+    error: status === "failed" ? (opts?.error ?? { kind: "internal" }) : undefined,
   };
 }
 

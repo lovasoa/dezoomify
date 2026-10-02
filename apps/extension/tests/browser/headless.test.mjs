@@ -19,7 +19,6 @@ import path from "node:path";
 import test, { after, before } from "node:test";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { PNG } from "pngjs";
 import webdriver from "selenium-webdriver";
 import firefox from "selenium-webdriver/firefox.js";
 import { formats } from "../../../../test/support/formats.cjs";
@@ -136,28 +135,25 @@ async function startFixtureServer(workDir) {
 }
 
 function assertPng(bytes) {
-  const output = PNG.sync.read(bytes);
-  assert.deepEqual([output.width, output.height], [512, 512], "saved image dimensions");
-  for (const [name, x, y] of [
-    ["tile-0_0.png", 128, 128],
-    ["tile-1_0.png", 384, 128],
-    ["tile-0_1.png", 128, 384],
-    ["tile-1_1.png", 384, 384],
-  ]) {
-    const tile = PNG.sync.read(readFileSync(path.join(TILE_DIR, name)));
-    const expected = [
-      ...tile.data.subarray((128 * tile.width + 128) * 4, (128 * tile.width + 128) * 4 + 4),
-    ];
-    const actual = [
-      ...output.data.subarray((y * output.width + x) * 4, (y * output.width + x) * 4 + 4),
-    ];
-    assert.deepEqual(actual, expected, `${name} center pixel`);
+  const decoded = decodePngPixels(bytes);
+  assert.deepEqual(
+    [decoded.width, decoded.height],
+    [EXPECTED_WIDTH, EXPECTED_HEIGHT],
+    "saved image dimensions",
+  );
+  for (const { tile, center } of QUADRANTS) {
+    // Each tile file is sampled at its own center; the saved output at the
+    // tile's placement center.
+    const tilePixels = decodePngPixels(readFileSync(path.join(TILE_DIR, tile)));
+    const expected = pixelAt(tilePixels, tilePixels.width >> 1, tilePixels.height >> 1);
+    const actual = pixelAt(decoded, ...center);
+    assert.deepEqual(actual, expected, `${tile} center pixel`);
   }
 }
 
 function assertPngShape(bytes) {
-  const output = PNG.sync.read(bytes);
-  assert.deepEqual([output.width, output.height], [512, 512], "saved image dimensions");
+  const { width, height } = decodePngSize(bytes);
+  assert.deepEqual([width, height], [EXPECTED_WIDTH, EXPECTED_HEIGHT], "saved image dimensions");
 }
 
 async function readCompletedPng(outputDir, deadline) {
@@ -172,7 +168,7 @@ async function readCompletedPng(outputDir, deadline) {
         // Firefox creates the destination before the download stream has
         // finished. Decode the bytes before returning so the E2E observes a
         // completed save, not merely a visible pathname.
-        PNG.sync.read(bytes);
+        decodePngPixels(bytes);
         return bytes;
       } catch (error) {
         lastError = String(error?.message ?? error);

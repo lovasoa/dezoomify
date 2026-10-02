@@ -111,12 +111,10 @@ mod tests {
 
     #[test]
     fn viewer_path_normalization_is_case_insensitive() {
-        assert_eq!(
-            normalize_url("https://example.test/ThumbView/12")
-                .unwrap()
-                .uri,
-            "https://example.test/zoom/12"
-        );
+        let uri = normalize_url("https://example.test/ThumbView/12")
+            .unwrap()
+            .uri;
+        assert_eq!(uri, "https://example.test/zoom/12");
     }
 
     #[test]

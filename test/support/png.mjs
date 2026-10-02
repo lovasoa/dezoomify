@@ -8,14 +8,40 @@ import zlib from "node:zlib";
 
 export const EXPECTED_WIDTH = 512;
 export const EXPECTED_HEIGHT = 512;
-export const EXPECTED_TILES = 4;
 
-// Top-left red, top-right green, bottom-left blue, bottom-right yellow.
+// The fixed pyramid fixture: four solid quadrants (top-left red, top-right
+// green, bottom-left blue, bottom-right yellow). `at` probes the quadrant in
+// the assembled output; `tile`/`center` name the owning fixture tile and its
+// center pixel for saves checked against the tile bytes themselves.
 export const QUADRANTS = [
-  { at: [64, 64], rgb: [196, 48, 48] },
-  { at: [448, 64], rgb: [48, 168, 64] },
-  { at: [64, 448], rgb: [48, 72, 200] },
-  { at: [448, 448], rgb: [232, 220, 96] },
+  {
+    label: "top-left quadrant red",
+    tile: "tile-0_0.png",
+    at: [64, 64],
+    center: [128, 128],
+    rgb: [196, 48, 48],
+  },
+  {
+    label: "top-right quadrant green",
+    tile: "tile-1_0.png",
+    at: [448, 64],
+    center: [384, 128],
+    rgb: [48, 168, 64],
+  },
+  {
+    label: "bottom-left quadrant blue",
+    tile: "tile-0_1.png",
+    at: [64, 448],
+    center: [128, 384],
+    rgb: [48, 72, 200],
+  },
+  {
+    label: "bottom-right quadrant yellow",
+    tile: "tile-1_1.png",
+    at: [448, 448],
+    center: [384, 384],
+    rgb: [232, 220, 96],
+  },
 ];
 
 export function decodePngSize(bytes) {
@@ -23,6 +49,8 @@ export function decodePngSize(bytes) {
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
 }
 
+// Inflates the concatenated IDAT stream of a small RGB(A) PNG and reverses
+// every standard PNG row filter.
 export function decodePngPixels(bytes) {
   const idat = [];
   let offset = 8;
@@ -34,6 +62,7 @@ export function decodePngPixels(bytes) {
   }
   const raw = zlib.inflateSync(Buffer.concat(idat));
   const { width, height } = decodePngSize(bytes);
+  // Canvas PNGs are RGBA (color type 6); fixtures are RGB (type 2).
   const colorType = bytes[25];
   assert.ok(colorType === 2 || colorType === 6, `unsupported color type ${colorType}`);
   const bpp = colorType === 6 ? 4 : 3;
@@ -47,31 +76,31 @@ export function decodePngPixels(bytes) {
       const a = x >= bpp ? out[x - bpp] : 0;
       const b = y > 0 ? pixels[(y - 1) * width * bpp + x] : 0;
       const c = x >= bpp && y > 0 ? pixels[(y - 1) * width * bpp + x - bpp] : 0;
-      let v = row[x];
+      let value = row[x];
       switch (filter) {
         case 0:
           break;
         case 1:
-          v += a;
+          value += a;
           break;
         case 2:
-          v += b;
+          value += b;
           break;
         case 3:
-          v += (a + b) >> 1;
+          value += (a + b) >> 1;
           break;
         case 4: {
           const p = a + b - c;
-          const pa = Math.abs(p - a),
-            pb = Math.abs(p - b),
-            pc = Math.abs(p - c);
-          v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+          const pa = Math.abs(p - a);
+          const pb = Math.abs(p - b);
+          const pc = Math.abs(p - c);
+          value += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
           break;
         }
         default:
           assert.fail(`unknown PNG row filter ${filter}`);
       }
-      out[x] = v & 0xff;
+      out[x] = value & 0xff;
     }
   }
   return { pixels, bpp, width, height };

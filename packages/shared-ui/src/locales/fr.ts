@@ -1,6 +1,6 @@
 // French message dictionary for the shared UI.
 //
-// Mirrors `../i18n.ts` key for key: every English key has exactly one French
+// Translation of `../i18n.ts`, key for key: every English key has exactly one French
 // entry with identical `{placeholders}`. Missing keys fall back to English at
 // lookup time, so this table must never drop a key when English grows.
 // Brand and product names ("Dezoomify", "Chrome Web Store", "GitHub Releases",
@@ -27,7 +27,6 @@ export const fr = {
   "desktop.done.folderError":
     "Impossible d’ouvrir le dossier. Vérifiez qu’un gestionnaire de fichiers est installé.",
   "desktop.done.missingError": "L’image ou le dossier n’existe plus.",
-  "view.partial.extensionKeep": "Conserver l’image partielle",
   "view.partial.title": "L’image est incomplète",
   "view.partial.summary": "{done} tuiles sur {total} ont été récupérées.",
   "view.partial.gaps":
@@ -43,8 +42,6 @@ export const fr = {
     "Aucune partie de l’image n’a pu être récupérée. Aucun fichier n’a été enregistré.",
   "view.partial.checkSource": "Ouvrez la page source et vérifiez que sa visionneuse fonctionne.",
   "view.partial.openSource": "Ouvrir la page source",
-  "view.partial.extensionDiscard": "Supprimer l’image partielle",
-  "view.partial.extensionRetry": "Réessayer les tuiles manquantes",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Compris",
   "view.modal.closeDialog": "Fermer la boite de dialogue",
@@ -55,6 +52,13 @@ export const fr = {
     "Application native haute performance pour les oeuvres museales gigapixels et les numerisations locales",
   "view.desktop.installer": "L’{installer} non signé pour {platform} est disponible sur",
   "view.desktop.releasesLink": "GitHub Releases",
+  "view.desktop.releasesNote":
+    "Pas de mise à jour automatique ; consultez GitHub Releases manuellement.",
+  "view.desktop.installerMsi": "installeur .msi",
+  "view.desktop.installerDmg": "installeur .dmg Apple silicon",
+  "view.desktop.installerDeb": "installeur .deb",
+  "view.desktop.installerGeneric": "installeur",
+  "view.desktop.platformGeneric": "votre plateforme",
   "view.desktop.whyTitle": "Pourquoi utiliser l application de bureau ?",
   "view.desktop.why1Title": "Prend en charge les oeuvres tres grandes :",
   "view.desktop.why1Body":
@@ -99,26 +103,14 @@ export const fr = {
     "Rendez-vous sur la page du musee ou de la bibliotheque qui montre votre oeuvre, en vous connectant si besoin.",
   "view.ext.step3":
     "Cliquez sur l icone Dezoomify dans la barre d outils de votre navigateur pour detecter et extraire automatiquement l image en pleine resolution !",
+  // Access request (browser-session file access), shared access-request.tsx.
+  "view.access.title": "Autoriser l’accès pour continuer",
+  "view.access.usesOrigin": "Cette image utilise des fichiers de {origin}.",
+  "view.access.needAccess":
+    "Dezoomify a besoin d’accès pour lire ces fichiers et assembler votre image dans ce navigateur.",
+  "view.access.requesting": "Demande d’accès en cours…",
+  "view.access.allow": "Autoriser l’accès et continuer",
   // Idle input section.
-  "view.idle.intro": "permet d enregistrer",
-  "view.idle.zoomable": "des images zoomables",
-  "view.idle.zoomableTitle":
-    "De grandes images dans lesquelles on peut naviguer a l interieur d une page web.",
-  "view.idle.enterThe": "Saisissez l",
-  "view.idle.urlAbbr": "URL",
-  "view.idle.urlTitle": "Uniform Resource Locator, l adresse d une page web",
-  "view.idle.body":
-    "d une telle image dans le champ ci-dessous. L image sera enregistree a la resolution maximale. Vous pourrez ensuite faire un clic droit sur l image et choisir « Enregistrer sous » pour la conserver en PNG sur votre ordinateur. En cas d echec, lisez notre",
-  "view.idle.troubleLink": "guide de depannage",
-  "view.idle.moreInfo": "Pour en savoir plus, lisez notre",
-  "view.idle.projectLink": "page du projet",
-  "view.idle.license1": "Ce script est publie sous",
-  "view.idle.gplLink": "GPL",
-  "view.idle.sourceLink": "Voir le code source",
-  "view.idle.termsLink":
-    "Nous declinons toute responsabilite en cas d usage illegal de ce logiciel",
-  "view.idle.urlPlaceholder": "URL de la page contenant votre image",
-  "view.idle.urlAria": "URL de la page contenant votre image zoomable",
   "view.idle.clearTitle": "Effacer la saisie",
   "view.idle.submit": "Dezoomify !",
   // Job step labels.
@@ -126,34 +118,20 @@ export const fr = {
   "view.step.preflighting": "Verification de la taille de l image…",
   "view.step.downloading": "Enregistrement des tuiles…",
   "view.step.saving": "Assemblage de l image finale…",
-  "view.step.working": "En cours…",
   "view.step.contactingDetail": "Contact de l'hote de l'image…",
-  "view.step.encodingDetail": "Encodage dans l'application.",
-  "view.step.cleanupDetail": "Nettoyage des fichiers inacheves…",
   // Live job section.
-  "view.job.workingOn": "En cours sur",
-  "view.job.cancel": "Annuler",
-  "view.job.change": "Modifier",
   "view.job.techDetails": "Details techniques et journaux",
-  "view.job.oneImage": "1 image",
   "view.job.manyImages": "{count} images",
-  "view.job.autoChoiceFull":
-    "{noun} trouvee, enregistrement de la plus grande possible ({width}×{height}, {tiles} tuiles).",
-  "view.job.autoChoiceDims":
-    "{noun} trouvee, enregistrement de la plus grande possible ({width}×{height}).",
-  "view.job.autoChoiceTiles":
-    "{noun} trouvee, enregistrement de la plus grande possible ({tiles} tuiles).",
-  "view.job.autoChoiceBare": "{noun} trouvee, enregistrement de la plus grande possible.",
-  "view.job.stalled":
-    "Toujours en cours, {host} tarde a repondre. Vous pouvez attendre, ou annuler et reessayer plus tard.",
+  "view.job.paused": "En pause",
+  "view.job.retryingTiles": "Nouvelle tentative sur les tuiles ({count})…",
+  "view.job.waiting": "En attente de {host}…",
+  "view.job.sourceLabel": "Source",
+  "view.job.pause": "Pause",
+  "view.job.resume": "Reprendre",
+  "view.job.stopReturn": "Arrêter et revenir au début",
+  "view.job.progressValue": "{done} terminées, {active} en cours, {remaining} restantes",
   // Display-only section.
   "view.display.title": "Apercu affiche, non enregistre",
-  "view.display.openDesktop": "Ouvrir dans l application de bureau",
-  // Desktop handoff uses the ordinary, user-confirmed dezoomify:// link.
-  "view.handoff.send": "Envoyer vers l application de bureau",
-  "view.handoff.sendOrigin": "Envoyer vers l application de bureau ({origin})",
-  "view.handoff.localNote":
-    "Les fichiers locaux restent sur cet ordinateur. Ouvrez l application de bureau et choisissez-y le fichier ; rien n est envoye.",
   "view.display.waysTitle": "Moyens d enregistrer cette oeuvre",
   "view.display.extTitle": "Guide de l extension de navigateur",
   "view.display.extDesc":
@@ -175,42 +153,29 @@ export const fr = {
   "view.done.saveNow": "Enregistrer l image maintenant",
   "view.done.another": "Dezoomifier une autre image",
   // Failure section.
-  "view.fail.fallback":
-    "Dezoomify n a pas pu trouver ni enregistrer l image zoomable a cette adresse.",
   "view.fail.title": "Impossible de dezoomifier l image",
   "view.fail.deskDescLimits":
     "Pour les images qui depassent les limites memoire du navigateur, dans la limite de canevas de 8 Gio (avec la memoire libre correspondante). Traitees en natif sur votre ordinateur.",
   "view.fail.helpTitle": "Aide et extraction d URL",
   "view.fail.helpDesc":
     "Comment trouver l adresse de l image sur les sites de musees et d archives, et quoi essayer quand rien n est trouve.",
-  "view.fail.techDetails": "Details techniques de l erreur et rapport de bogue",
   "view.fail.reportBug": "Signaler un bogue sur GitHub",
   "view.fail.retry": "Reessayer",
   "view.fail.canvasAllocation":
     "Cette image est trop grande pour être assemblée dans cet onglet. L application de bureau peut l enregistrer en taille réelle.",
   "view.fail.canvasContext":
     "Cet onglet n a pas pu créer la surface de l image à cette taille. L application de bureau peut l enregistrer en taille réelle.",
-  "view.fail.canvasEncode":
-    "Cet onglet n a pas pu terminer l image PNG en taille réelle. L application de bureau peut l enregistrer en taille réelle.",
   // Cancelled section.
   "view.cancel.title": "Enregistrement annule",
   "view.cancel.message": "L enregistrement de l image a ete interrompu.",
-  // Generic fallback for unknown phases (debug surface; status codes stay raw).
-  "view.generic.status": "Etat :",
-  "view.generic.reset": "Reinitialiser",
   // Job section and share chrome.
-  "view.job.shareTitle":
-    "Copie l adresse de la page pour cette tache, pas le fichier image lui-meme",
-  "view.job.shareLink": "Copier le lien vers cette tache",
   "view.job.countsFull": "{current} tuiles sur {total}",
-  "view.job.countsElapsed": "{current} tuiles sur {total} · {elapsed} ecoulees",
-  "view.job.elapsedOnly": "{elapsed} ecoulees",
+  "view.job.countsActive": "{current} tuiles sur {total} · {active} en cours",
   // Recent-jobs history (todo 5.2): local-only ledger.
   "view.history.title": "Images recentes",
   "view.history.empty":
     "Aucune image recente pour le moment. Les images enregistrees apparaissent ici.",
   "view.history.localOnly": "Conserve uniquement sur cet appareil.",
-  "view.history.open": "Rouvrir",
   "view.history.clear": "Effacer l historique",
   "view.history.dims": "{w} par {h} pixels",
   "view.input.description":
@@ -218,31 +183,39 @@ export const fr = {
   "view.input.placeholder": "Collez l adresse d une visionneuse ou d un manifeste",
   "view.input.aria": "Adresse de la page contenant votre image zoomable",
   "view.input.start": "Trouver l image",
-  // Failure "What happened" explainer.
-  "view.fail.whatHappened": "Ce qui s est passe",
+  // Rate-limit explainers (see failure.ts plainMessageFor).
   "view.fail.rateProxy":
     "Le site qui heberge cette image limite le nombre de pages que notre serveur peut lui demander, et cette limite vient d etre atteinte, donc la page n a pas pu etre ouverte. L extension de navigateur et l application de bureau telechargent depuis votre propre connexion au lieu de notre serveur, elles ne sont donc pas concernees par cette limite.",
   "view.fail.rateDirect":
     "Le site qui heberge cette image recoit actuellement trop de demandes depuis votre propre connexion. Attendre quelques minutes suffit generalement, et l extension de navigateur ou l application de bureau verront le meme signal d encombrement jusque-la.",
+  // Fetch-failure family (see failure.ts plainMessageFor).
+  "view.fail.httpNotFound": "Cette page est introuvable. Verifiez l adresse et reessayez.",
+  "view.fail.httpRefused":
+    "Le site a refuse de partager ce fichier (HTTP {http}). Il bloque peut-etre les serveurs partages ; l extension de navigateur ou l application de bureau peuvent peut-etre encore fonctionner.",
+  "view.fail.httpSiteProblem":
+    "Le site a rencontre un probleme pour ouvrir cette page. Reessayez bientot.",
+  "view.fail.httpNotOpened": "Cette page n a pas pu etre ouverte. Verifiez l adresse et reessayez.",
+  "view.fail.policyBlocked":
+    "Cette adresse ne peut pas etre ouverte via le site. {hint} L extension de navigateur ou l application de bureau peuvent peut-etre encore fonctionner.",
+  "view.fail.hintAddress": "Verifiez l adresse et reessayez.",
+  "view.fail.hintPrivate": "Le site ne peut pas ouvrir les adresses privees ou locales.",
+  "view.fail.hintContentType":
+    "Le site a repondu avec un type de fichier que le site ne verifie pas ici.",
+  "view.fail.hintRedirect": "Le site a redirige d une maniere que le site ne peut pas suivre.",
+  "view.fail.proxyBudget":
+    "Cette page est trop volumineuse a verifier ici. Essayez l application de bureau pour les tres grandes images.",
+  "view.fail.proxyFetch":
+    "Le proxy de metadonnees n a pas pu recuperer cette adresse. Reessayez bientot.",
   // Desktop app user copy (apps/desktop/src/main.tsx). Logs and technical
   // diagnostics stay literal English and never use these keys.
   "desktop.url.invalid":
     "Veuillez saisir une adresse web valide commencant par http:// ou https://",
-  "desktop.url.notWebPage":
-    "Cette adresse ne ressemble pas a une adresse de page web. Saisissez une adresse commencant par http:// ou https://.",
   "desktop.settings.unusable":
     "Ces parametres de telechargement ne peuvent pas etre utilises. Ajustez les parametres surlignes et reessayez.",
   "desktop.settings.invalidSubmit":
     "Ces parametres de telechargement sont invalides. Ajustez-les et reessayez.",
   "desktop.output.deniedPick":
     "La destination d enregistrement n a pas ete acceptee. Choisissez un autre fichier pour continuer.",
-  "desktop.output.deniedFallback": "La destination d enregistrement a ete refusee.",
-  "desktop.handoff.rejected":
-    "Ce lien ne peut pas etre ouvert depuis {host}. Essayez une autre adresse sans donnees de connexion.",
-  "desktop.handoff.acceptedDetail":
-    "Cette image peut etre confiee a une autre application. Vous etes deja dans l application native, vous pouvez donc continuer ici.",
-  "desktop.handoff.rejectedDetail":
-    "Cette image ne peut pas etre confiee a une autre application. Continuez ici ou essayez une autre image.",
   "desktop.output.exists":
     "Un fichier existe deja a la destination d enregistrement depuis {host}. Choisissez un autre fichier ou confirmez l ecrasement pour continuer.",
   "desktop.output.destDenied":
@@ -256,12 +229,12 @@ export const fr = {
     "Cette image est trop grande pour etre assemblee sur cet ordinateur ({dims},{need} a 4 octets par pixel, limite {limit}). Enregistrez une version plus petite avec Largeur max (CLI : --max-width). Note : le JPEG accepte au plus {jpegMax} pixels par cote ; gardez le PNG pour les images plus grandes. Depuis {host}.",
   "desktop.output.jpegLimit":
     "Cette image ({dims}) est trop grande pour le JPEG, qui accepte au plus {jpegMax} pixels par cote. Enregistrez-la en PNG a la place. Depuis {host}.",
+  "desktop.output.webpLimit":
+    "Cette image ({dims}) est trop grande pour le WebP, qui accepte au plus {webpMax} pixels par cote. Enregistrez-la en PNG a la place. Depuis {host}.",
   "desktop.tile.partialDiscarded":
     "L image partielle a ete abandonnee, aucun fichier n a ete conserve. Reessayez depuis {host} avec une connexion stable.",
   "desktop.tile.partialChoice":
     "Certaines parties de cette image depuis {host} n ont pas pu etre enregistrees. Reessayez les parties manquees, ou conservez l image partielle avec des zones vides.",
-  "desktop.discovery.none":
-    "Aucune image zoomable trouvee a cette adresse depuis {host}. Essayez une autre page ou verifiez l adresse.",
   "view.discovery.none":
     "Aucune image zoomable trouvee a cette adresse. Essayez une page avec un visualiseur, ou essayez l extension.",
   "desktop.plan.none":
@@ -275,58 +248,16 @@ export const fr = {
   "desktop.start.failed":
     "Impossible de demarrer l enregistrement de cette image depuis {host}. Reessayez.",
   "desktop.choice.failed": "Ce choix n a pas ete accepte. Reessayez.",
-  "desktop.save.generic":
-    "Impossible d enregistrer cette image depuis {host}. Reessayez avec une autre adresse.",
   "desktop.internal.error":
     "Un probleme inattendu a interrompu cet enregistrement depuis {host}. Reessayez, et copiez les diagnostics si cela se reproduit.",
   "desktop.save.fallback": "Impossible d enregistrer cette image depuis {host}. Reessayez.",
-  "desktop.job.failedFallback": "La tache a echoue.",
   "desktop.invoke.startFallback": "Impossible de demarrer la tache.",
   "desktop.invoke.partial": "Le choix d image partielle a ete refuse.",
-  "desktop.invoke.destination": "Impossible de demander la destination d enregistrement.",
-  "desktop.invoke.cancel": "Impossible d annuler la tache.",
-  "desktop.step.chooseWhere": "Choisissez ou enregistrer…",
-  "desktop.step.chooseWhereDetail":
-    "La destination d enregistrement demande votre attention avant de continuer.",
-  "desktop.step.pickOutput": "Choisissez le fichier de sortie pour continuer.",
-  "desktop.step.partialTitle": "Certaines tuiles n ont pas pu etre enregistrees…",
-  "desktop.step.partialDetail":
-    "Choisissez de conserver l image partielle, de l abandonner ou de reessayer.",
-  "desktop.step.displayPreview": "Apercu seul…",
-  "desktop.step.displayDetail": "Cette image peut seulement etre vue ici.",
-  "desktop.step.cleanupDetail": "Nettoyage… suppression du fichier inacheve…",
-  "desktop.step.cleaningShort": "Nettoyage…",
-  "desktop.step.encodingNative": "Encodage dans l application native",
-  "desktop.step.encodingPartial": "Encodage de l image partielle dans l application native",
-  "desktop.step.discardingPartial": "Abandon de l image partielle",
-  "desktop.step.retrying": "Nouvel essai",
-  "desktop.step.appAutoDetail":
-    "L application enregistre automatiquement la premiere image ; aucun selecteur n est propose.",
-  "desktop.step.foundFits": "{noun} trouvee, enregistrement de la plus grande possible…",
-  "desktop.step.tilesAtFull": "{current} tuiles sur {total} en pleine resolution",
-  "desktop.step.savedDims": "{width} par {height} pixels enregistres",
-  "desktop.step.partialDims": "Image partielle {width} par {height} pixels ; {summary}",
-  "desktop.step.partialSaved": "Image partielle enregistree ; {summary}",
-  "desktop.step.savedWord": "Enregistre",
-  "desktop.step.contacting": "Contact avec {host}…",
-  "desktop.link.title": "Une autre application veut ouvrir une image dans Dezoomify.",
-  "desktop.link.source": "Source : {url}",
-  "desktop.link.prov": "Provenance : lien dezoomify:// (v{version})",
-  "desktop.link.provHint": "Provenance : lien dezoomify:// (v{version}) · {hint}",
-  "desktop.link.note": "Rien ne s execute avant votre confirmation. Refuser ne fait rien.",
-  "desktop.link.dismiss": "Ignorer",
-  "desktop.link.open": "Ouvrir l image",
   "desktop.rec.missing": "Tuiles manquantes : {shown}{rest}.",
   "desktop.rec.more": " et {n} de plus",
-  "desktop.rec.destTitle": "La destination d enregistrement demande votre attention",
-  "desktop.rec.destDesc":
-    "La destination d enregistrement n a pas ete acceptee. Choisissez un fichier de sortie, reessayez ou utilisez une autre application.",
   "desktop.rec.keep": "Conserver l image partielle",
   "desktop.rec.discard": "Abandonner la partie",
   "desktop.rec.retryTiles": "Reessayer les tuiles manquees",
-  "desktop.rec.chooseOutput": "Choisir la sortie…",
-  "desktop.rec.tryAgain": "Reessayer",
-  "desktop.rec.useOther": "Utiliser une autre application",
   "desktop.rec.missingSome": "Certaines tuiles n ont pas pu etre enregistrees.",
   "desktop.rec.missingCount": "{count} tuile{plural} n ont pas pu etre enregistrees.",
   "desktop.rec.missingList": "{n} tuile{plural} manquante(s) : {shown}{rest}.",
@@ -351,36 +282,7 @@ export const fr = {
   "desktop.queue.retry": "Reessayer",
   "desktop.queue.summary": "{succeeded} terminees, {failed} echouees, {total} au total",
   "desktop.queue.progress": "{current} tuiles sur {total}",
-  "desktop.queue.unknownOrigin": "le serveur",
-  "desktop.panel.outputFormat": "Format de sortie",
   "desktop.panel.jobActions": "Actions de la tache de bureau",
-  "desktop.help.title": "Aide et a propos",
-  "desktop.help.help": "Aide",
-  "desktop.help.desktopGuide": "Guide du bureau",
-  "desktop.help.troubleshooting": "Depannage",
-  "desktop.help.faq": "FAQ",
-  "desktop.help.privacy": "Confidentialite",
-  "desktop.help.terms": "Conditions",
-  "desktop.help.donate": "Faire un don",
-  "desktop.settings.title": "Personnaliser",
-  "desktop.settings.desc":
-    "Parametres de telechargement minimaux. Enregistres sur cet appareil et utilises pour la prochaine tache. Les entetes sont envoyes uniquement a l origine de l image.",
-  "desktop.settings.fileGroup": "Fichier",
-  "desktop.settings.imageGroup": "Image",
-  "desktop.settings.networkGroup": "Reseau et reprise",
-  "desktop.settings.outputDir": "Dossier de sortie (facultatif)",
-  "desktop.settings.compression": "Compression 0-100 (defaut 5)",
-  "desktop.settings.maxWidth": "Largeur max en px (facultatif)",
-  "desktop.settings.maxHeight": "Hauteur max en px (facultatif)",
-  "desktop.settings.retries": "Essais 0-100 (defaut 3, 0 = aucun)",
-  "desktop.settings.cacheDir": "Dossier de cache (facultatif, reprise)",
-  "desktop.settings.emptyLargest": "vide = la plus grande",
-  "desktop.settings.browse": "Parcourir…",
-  "desktop.settings.browseOutput": "Choisir le dossier de sortie",
-  "desktop.settings.browseCache": "Choisir le dossier de cache",
-  "desktop.settings.headersAdv": "Avance : entetes de requete (de confiance)",
-  "desktop.settings.headersLabel":
-    "Entetes de requete, un par ligne sous la forme Nom : valeur (facultatif, de confiance)",
   "desktop.settings.reset": "Reinitialiser les parametres",
   "desktop.quick.folder": "Dossier",
   "desktop.quick.askEachTime": "Demander a chaque fois",
@@ -423,17 +325,4 @@ export const fr = {
   // shape; log and diagnostics lines stay literal English and never use these
   // keys. `test/ui-i18n.test.mjs` fails when the page renders a key outside
   // this table.
-  "page.step.scanning": "Analyse de la page…",
-  "page.step.finding": "Recherche de l image zoomable ({done}/{total})…",
-  "page.step.choosing": "Choix de la plus haute resolution…",
-  "page.step.saving": "Enregistrement des tuiles…",
-  "page.step.assembling": "Assemblage de l image finale…",
-  "page.step.done": "Termine",
-  "page.step.cancelled": "Annule",
-  "page.step.cancelling": "Annulation…",
-  "page.step.displaying": "Affichage de l image…",
-  "page.tabs.scan": "Analyser {label}",
-  "page.tabs.hint":
-    "Ouvrez une page avec une image zoomable, puis cliquez sur le bouton Dezoomify de la barre d outils pour analyser cet onglet.",
-  "page.ui.techDetails": "Details techniques et journaux",
 } as const;

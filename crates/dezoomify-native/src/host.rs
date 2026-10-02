@@ -326,15 +326,16 @@ impl<'a> NativeHost<'a> {
             .map_err(|error| resource_context(error, request))?;
         self.instrumentation.borrow_mut().bytes_fetched += outcome.body.len() as u64;
         if !outcome.ok() {
-            let mut error = Error::new(
-                "TRANSPORT_HTTP_ERROR",
-                ErrorPhase::Acquisition,
-                crate::imaging::describe_http_failure(&outcome),
-            );
-            error.http = Some(outcome.status);
-            error.request = Some(outcome.final_uri);
-            error.retry_after_ms = outcome.retry_after_ms;
-            error.retryable = dezoomify::retry::is_retryable(&error.code, error.http);
+            let error = Error::HttpError {
+                status: outcome.status,
+                retry_after_ms: outcome.retry_after_ms,
+                preview: None,
+                transport: ErrorTransport::Native,
+                failure: Failure {
+                    request: Some(dezoomify::model::bounded_uri(outcome.final_uri.clone())),
+                    detail: None,
+                },
+            };
             return Err(resource_context(error, request));
         }
         Ok(outcome)
@@ -350,19 +351,14 @@ impl<'a> NativeHost<'a> {
         self.controlled(async {
             tokio::task::spawn_blocking(move || {
                 let _permit = permit;
-                let bytes = processing.apply(bytes).map_err(|error| {
-                    Error::new(
-                        "tile.processing-failed",
-                        ErrorPhase::Processing,
-                        error.to_string(),
-                    )
-                })?;
+                let bytes = processing
+                    .apply(bytes)
+                    .map_err(|error| Error::ProcessingFailed(error.to_string().into()))?;
                 if let Some((dir, namespace, uri)) = store {
                     let _ = crate::cache::store(&dir, &namespace, &uri, &bytes);
                 }
-                let image = load_image_with_metadata(&bytes).map_err(|error| {
-                    Error::new("TILE_DECODE_FAILED", ErrorPhase::Decode, error.to_string())
-                })?;
+                let image = load_image_with_metadata(&bytes)
+                    .map_err(|error| Error::DecodeFailed(error.to_string().into()))?;
                 Ok::<_, Error>(DecodedTile {
                     image: image.image.to_rgba8(),
                     icc_profile: image.icc_profile,
@@ -370,13 +366,7 @@ impl<'a> NativeHost<'a> {
                 })
             })
             .await
-            .map_err(|_| {
-                Error::new(
-                    "native.internal",
-                    ErrorPhase::Acquisition,
-                    "tile decode task failed",
-                )
-            })?
+            .map_err(|_| Error::Internal("tile decode task failed".to_string().into()))?
         })
         .await
     }
@@ -427,7 +417,7 @@ impl<'a> NativeHost<'a> {
     fn place(&self, tile: &Tile, decoded: DecodedTile) -> Result<(), Error> {
         // Separate resource slots prevent probe indices from colliding with
         // final plan indices. Finish supplies the plan order of reused probes.
-        let storage_index = if tile.placement.probe_output {
+        let storage_index = if tile.placement.role.probe {
             (self.options.max_tiles as u32).saturating_add(tile.index)
         } else {
             tile.index
@@ -437,19 +427,23 @@ impl<'a> NativeHost<'a> {
         let retained = sink.retained_bytes();
         let inflight = self.decode_tails.bytes.load(Ordering::SeqCst);
         if decode_budget_exceeded(
-            retained,
-            inflight,
-            crate::sink::tile_bytes(&decoded.image),
+            DecodeLoad {
+                retained,
+                inflight,
+                tile: crate::sink::tile_bytes(&decoded.image),
+            },
             sink.retain_cap_bytes(),
         ) {
-            return Err(crate::output::canvas_memory_unavailable(
-                1,
-                1,
-                &format!(
-                    "decoded tiles beyond the retain cap ({retained} retained, {inflight} in flight)"
+            return Err(crate::output::memory_limit(LimitContext {
+                reason: LimitReason::Memory,
+                dimensions: None,
+                bytes_required: Some(
+                    retained
+                        .saturating_add(inflight)
+                        .saturating_add(crate::sink::tile_bytes(&decoded.image)),
                 ),
-                "the configured output retention",
-            ));
+                bytes_available: Some(sink.retain_cap_bytes()),
+            }));
         }
         sink.place(
             storage_index,
@@ -486,7 +480,7 @@ impl Host for NativeHost<'_> {
             Ok(decoded) => {
                 let width = std::num::NonZeroU64::new(u64::from(decoded.image.width()));
                 let height = std::num::NonZeroU64::new(u64::from(decoded.image.height()));
-                if tile.placement.probe_output {
+                if tile.placement.role.output {
                     self.place(&tile, decoded)
                         .map_err(|error| resource_context(error, &tile.request))?;
                 }
@@ -495,7 +489,7 @@ impl Host for NativeHost<'_> {
                     _ => Ok(ProbeOutcome::Missing),
                 }
             }
-            Err(error) if error.code == "job.cancelled" => {
+            Err(error) if matches!(error.cause(), Error::Cancelled) => {
                 Err(resource_context(error, &tile.request))
             }
             Err(_) => Ok(ProbeOutcome::Missing),
@@ -512,12 +506,12 @@ impl Host for NativeHost<'_> {
         .map_err(|error| resource_context(error, &tile.request))
         .inspect_err(|error| {
             let mut stats = self.instrumentation.borrow_mut();
-            if error.retryable {
+            if error.retryable() {
                 stats.failed_transient += 1;
             } else {
                 stats.failed_permanent += 1;
             }
-            if error.code != "job.cancelled" {
+            if !matches!(error.cause(), Error::Cancelled) {
                 self.diagnostics
                     .record(DiagnosticLevel::Warn, "tile", serde_json::json!(error));
             }
@@ -564,7 +558,6 @@ impl Host for NativeHost<'_> {
                 height: image_size.y,
             }),
             format: request.format,
-            complete: !partial,
             missing: request.missing,
             disposition: OutputDisposition::NativePublication,
         };
@@ -581,18 +574,18 @@ impl Host for NativeHost<'_> {
     }
 
     async fn choose_image(&self, _catalog: Catalog) -> Result<u32, Error> {
-        Err(Error::new(
-            "discovery.no-image",
-            ErrorPhase::Discovery,
-            "native image selection requires a configured policy",
+        Err(Error::ChoiceFailed(
+            "native image selection requires a configured policy"
+                .to_string()
+                .into(),
         ))
     }
 
     async fn choose_level(&self, _image: Image) -> Result<u32, Error> {
-        Err(Error::new(
-            "discovery.no-level",
-            ErrorPhase::Discovery,
-            "native level selection requires a configured policy",
+        Err(Error::ChoiceFailed(
+            "native level selection requires a configured policy"
+                .to_string()
+                .into(),
         ))
     }
 
@@ -669,21 +662,19 @@ impl Host for NativeHost<'_> {
     }
 }
 
-fn resource_context(mut error: Error, request: &ResourceRequest) -> Error {
-    let kind = match request.purpose {
-        RequestPurpose::Metadata => {
-            if error.phase == ErrorPhase::Acquisition {
-                error.phase = ErrorPhase::Discovery;
-            }
-            ResourceKind::Metadata
+fn resource_context(error: Error, request: &ResourceRequest) -> Error {
+    match error {
+        // Host operations wrap their failures once: never stack contexts.
+        Error::Resource { .. } => error,
+        error => {
+            let kind = match request.purpose {
+                RequestPurpose::Metadata => ResourceKind::Metadata,
+                RequestPurpose::Tile => ResourceKind::Tile,
+                RequestPurpose::Probe => ResourceKind::Probe,
+            };
+            error.resource(request.uri.clone(), kind)
         }
-        RequestPurpose::Tile => ResourceKind::Tile,
-        RequestPurpose::Probe => ResourceKind::Probe,
-    };
-    error.request.get_or_insert_with(|| request.uri.clone());
-    error.resource_kind.get_or_insert(kind);
-    error.transport.get_or_insert(ErrorTransport::Native);
-    error
+    }
 }
 
 fn size(size: &Size) -> Vec2d {
@@ -693,11 +684,7 @@ fn size(size: &Size) -> Vec2d {
     }
 }
 fn cancelled() -> Error {
-    Error::new(
-        "job.cancelled",
-        ErrorPhase::Cleanup,
-        "job cancelled before completion",
-    )
+    Error::Cancelled
 }
 
 #[derive(Default)]
@@ -750,8 +737,20 @@ impl Drop for Flight<'_, '_> {
     }
 }
 
-fn decode_budget_exceeded(retained: u64, inflight: u64, tile: u64, cap: u64) -> bool {
-    retained.saturating_add(inflight).saturating_add(tile) > cap
+/// The byte load one more decoded tile adds on top of the retained and
+/// in-flight bytes. The three same-typed counts stay named here so the
+/// budget call site never reads as four bare numbers.
+struct DecodeLoad {
+    retained: u64,
+    inflight: u64,
+    tile: u64,
+}
+
+fn decode_budget_exceeded(load: DecodeLoad, cap: u64) -> bool {
+    load.retained
+        .saturating_add(load.inflight)
+        .saturating_add(load.tile)
+        > cap
 }
 
 #[cfg(test)]
@@ -773,7 +772,7 @@ mod tests {
                 () = std::future::ready(()) => {}
             }
             controls.cancel();
-            assert_eq!(acquisition.await.unwrap_err().code, "job.cancelled");
+            assert_eq!(acquisition.await.unwrap_err(), Error::Cancelled);
         });
     }
 
@@ -812,8 +811,29 @@ mod tests {
 
     #[test]
     fn decode_budget_counts_retained_pixels_and_unfinished_work() {
-        assert!(!decode_budget_exceeded(400, 100, 12, 512));
-        assert!(decode_budget_exceeded(400, 100, 13, 512));
-        assert!(decode_budget_exceeded(u64::MAX, u64::MAX, 1, u64::MAX - 1));
+        assert!(!decode_budget_exceeded(
+            DecodeLoad {
+                retained: 400,
+                inflight: 100,
+                tile: 12
+            },
+            512
+        ));
+        assert!(decode_budget_exceeded(
+            DecodeLoad {
+                retained: 400,
+                inflight: 100,
+                tile: 13
+            },
+            512
+        ));
+        assert!(decode_budget_exceeded(
+            DecodeLoad {
+                retained: u64::MAX,
+                inflight: u64::MAX,
+                tile: 1
+            },
+            u64::MAX - 1
+        ));
     }
 }

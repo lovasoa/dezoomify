@@ -10,13 +10,16 @@ import {
   boundDiagnosticReport,
   cancelAllQueueEntries,
   cancelQueueEntry,
+  causeOf,
   clearHistory as clearHistoryStore,
-  describeFailure,
+  detailOf,
   finishActiveQueueEntry,
+  formatMissingSummary,
   HISTORY_KEY_DESKTOP,
   type HistoryEntry,
+  isJobError,
+  isValidInputUrl,
   loadHistory as loadHistoryStore,
-  openConfirmModal,
   PartialDecisionActions,
   type Presentation,
   presentFailure,
@@ -25,11 +28,13 @@ import {
   presentProgress,
   presentStatus,
   pushHistory,
+  readInitialUrl,
   renderView,
   saveHistory as saveHistoryStore,
   summarizeQueue,
   t,
   toHistoryEntry,
+  trimTechnical,
 } from "@dezoomify/shared-ui";
 import type {
   Error as JobError,
@@ -39,21 +44,12 @@ import type {
   RecoveryChoice,
 } from "@dezoomify/wasm-bindings";
 import { createElement } from "react";
-import type { ValidatedDeepLink } from "./errorCopy.ts";
-import {
-  formatMissingSummary,
-  hostOf,
-  isValidInputUrl,
-  readInitialUrl,
-  trimTechnical,
-  validateDeepLinkPayload,
-} from "./errorCopy.ts";
 import {
   invokeNative,
-  listenDeepLinks,
   type NativeInvocation,
   openExternalLink,
   readNativeDiagnostics,
+  validateSettings,
 } from "./native.ts";
 import type { DesktopQueue } from "./queue.ts";
 import {
@@ -63,27 +59,14 @@ import {
   retryDesktopEntry,
 } from "./queue.ts";
 import type { DesktopSettings } from "./settings.ts";
-import {
-  defaultOutputDirectory,
-  loadSettings,
-  resetSettings,
-  saveSettings,
-  validateSettings,
-} from "./settings.ts";
+import { defaultOutputDirectory, loadSettings, resetSettings, saveSettings } from "./settings.ts";
 import { DesktopSettingsView } from "./settingsView.tsx";
 
 const root = typeof document !== "undefined" ? document.getElementById("root") : null;
 
 const DESKTOP_DOCS_BASE = "https://dezoomify.ophir.dev";
 
-const NATIVE_TRANSPORT = "native";
-
 const REQUEST_TIMEOUT_MS = 30000;
-
-void listenDeepLinks((payload) => {
-  const validated = validateDeepLinkPayload(payload);
-  if (validated) showDeepLinkConfirm(validated);
-}).catch(() => {});
 
 function newAttempt() {
   return {
@@ -174,7 +157,7 @@ function isTerminalNow(): boolean {
 
 function activity(): NonNullable<ViewContext["jobActivity"]> {
   if (!currentAttempt.viewCtx.jobActivity)
-    currentAttempt.viewCtx.jobActivity = { timeoutMs: REQUEST_TIMEOUT_MS };
+    currentAttempt.viewCtx.jobActivity = { now: Date.now(), timeoutMs: REQUEST_TIMEOUT_MS };
   return currentAttempt.viewCtx.jobActivity as NonNullable<ViewContext["jobActivity"]>;
 }
 
@@ -231,55 +214,49 @@ function touchProgress(): void {
   a.lastProgressAt = now;
 }
 
-function failLocally(
-  code: string,
-  message: string,
-  opts?: Partial<JobError> & { settle?: boolean },
-): void {
-  const sourceUrl = currentAttempt.lastInputUrl || activity().url || "";
-  const { settle, ...facts } = opts ?? {};
-  currentAttempt.localFailure = describeFailure(
-    {
-      ...facts,
-      code,
-      message,
-      detail: [message, opts?.detail === message ? undefined : opts?.detail]
-        .filter((part): part is string => Boolean(part))
-        .map((part) => trimTechnical(part))
-        .join("\n\n"),
-      transport: opts?.transport ?? NATIVE_TRANSPORT,
-      phase:
-        opts?.phase ??
-        (currentAttempt.progress?.phase === "planning"
-          ? "validation"
-          : currentAttempt.progress?.phase) ??
-        "validation",
-      request: opts?.request ?? (sourceUrl || undefined),
-    },
-    hostOf(sourceUrl),
-  );
-  currentAttempt.diagnostics.finish("failed", { code, message, ...opts });
+function failLocally(error: JobError, opts?: { detail?: string; settle?: boolean }): void {
+  const { settle, detail } = opts ?? {};
+  const base = detailOf(error);
+  const parts = [base, detail && detail !== base ? detail : undefined]
+    .filter((part): part is string => Boolean(part))
+    .map((part) => trimTechnical(part));
+  currentAttempt.localFailure = {
+    ...error,
+    ...(parts.length > 0 ? { detail: parts.join("\n\n") } : {}),
+  };
+  currentAttempt.diagnostics.finish("failed", { error: currentAttempt.localFailure });
   stopHeartbeat();
-  if (settle !== false) settleActiveQueue("failed", { errorCode: code });
+  if (settle !== false) settleActiveQueue("failed", { errorCode: error.kind });
   update();
 }
 
-function invokeErrorMessage(error: unknown, fallback: string): string {
+function invokeDetail(error: unknown, fallback: string): string {
   return error instanceof Error
     ? error.message
     : typeof error === "string"
       ? error
-      : error &&
-          typeof error === "object" &&
-          "message" in error &&
-          typeof error.message === "string"
-        ? error.message
+      : error && typeof error === "object" && "detail" in error && typeof error.detail === "string"
+        ? error.detail
         : fallback;
 }
 
-function runPersistSettingsFromPanel(): void {
-  const errors = saveSettings(desktopSettings);
-  settingsError = errors.length ? errors.join("; ") : null;
+// Rust (`parse_settings`) is the single validator: an edit is validated
+// before it is persisted, a refused edit persists nothing (fail closed,
+// keeps the last good payload), and its typed reason is shown until the
+// next accepted change.
+async function runPersistSettingsFromPanel(): Promise<void> {
+  const candidate = desktopSettings;
+  try {
+    await validateSettings(candidate);
+    if (desktopSettings !== candidate) return;
+    const errors = saveSettings(candidate);
+    settingsError = errors.length ? errors.join("; ") : null;
+  } catch (error) {
+    if (desktopSettings !== candidate) return;
+    settingsError = isJobError(error)
+      ? (detailOf(error) ?? t("desktop.settings.invalidSubmit"))
+      : invokeDetail(error, t("desktop.settings.invalidSubmit"));
+  }
   update();
 }
 
@@ -322,14 +299,14 @@ function clearJobViewState(): void {
 function handleSubmitUrl(url: string): void {
   const trimmed = typeof url === "string" ? url.trim() : "";
   if (!isValidInputUrl(trimmed)) {
-    failLocally("INVALID_URL", t("desktop.url.invalid"), { settle: false });
+    failLocally({ kind: "invalid-url" }, { settle: false });
     return;
   }
   if (!isTerminalNow()) {
     const res = enqueueDesktopQueue(desktopQueue, trimmed);
     desktopQueue = res.queue;
     if (res.code !== "ok" || !res.entry) {
-      failLocally("INVALID_URL", t("desktop.url.invalid"), { settle: false });
+      failLocally({ kind: "invalid-url" }, { settle: false });
       return;
     }
     if (res.entry.status === "queued") {
@@ -374,25 +351,20 @@ function launchNativeJob(trimmed: string): void {
     input: trimmed,
     submitted: {
       ...desktopSettings,
+      // Raw header lines carry values, so they never enter diagnostics.
       headers: undefined,
-      header_names: Object.keys(desktopSettings.headers),
     },
   });
   resetActivity(trimmed);
 
-  const effective = validateSettings(desktopSettings);
-  if (!effective.ok || !effective.settings) {
-    const detail = effective.errors.join("; ") || "Invalid settings.";
-    settingsError = detail;
-    failLocally("INVALID_SETTINGS", t("desktop.settings.invalidSubmit"), { detail });
-    return;
-  }
+  // Rust (`parse_settings`) is the single settings validator; its typed
+  // rejection below is authoritative. A rejected save shows its reason and
+  // persists nothing.
   settingsError = null;
-  desktopSettings = effective.settings;
   update();
   const request = {
     inputUrl: trimmed,
-    settings: { ...desktopSettings, headers: { ...desktopSettings.headers } },
+    settings: { ...desktopSettings, headers: [...desktopSettings.headers] },
   };
   void invokeNative(request, {
     progress(progress) {
@@ -445,20 +417,24 @@ function launchNativeJob(trimmed: string): void {
       if (!owns(attempt)) return;
       attempt.settled = true;
       attempt.partial = null;
-      const code =
-        error && typeof error === "object" && "code" in error && typeof error.code === "string"
-          ? error.code
-          : "START_FAILED";
-      if (code === "job.cancelled") {
+      if (isJobError(error) && causeOf(error).kind === "cancelled") {
         stopHeartbeat();
         settleActiveQueue("cancelled");
         update();
         return;
       }
+      if (isJobError(error) && error.kind === "invalid-settings") {
+        // The Rust save command rejected the settings; surface its typed
+        // reason in the settings panel as well as the failure view.
+        settingsError = detailOf(error) ?? t("desktop.settings.invalidSubmit");
+      }
       failLocally(
-        code,
-        invokeErrorMessage(error, t("desktop.invoke.startFallback")),
-        error && typeof error === "object" ? (error as Partial<JobError>) : undefined,
+        isJobError(error)
+          ? error
+          : {
+              kind: "start-failed",
+              detail: invokeDetail(error, t("desktop.invoke.startFallback")),
+            },
       );
     });
 }
@@ -640,8 +616,9 @@ function handlePause(): void {
     },
     (error: unknown) => {
       if (!owns(attempt)) return;
-      failLocally("PAUSE_FAILED", invokeErrorMessage(error, "The pause request was rejected."), {
-        retryable: true,
+      failLocally({
+        kind: "choice-failed",
+        detail: invokeDetail(error, "the pause request was rejected"),
       });
     },
   );
@@ -661,8 +638,9 @@ function handleResume(): void {
     },
     (error: unknown) => {
       if (!owns(attempt)) return;
-      failLocally("RESUME_FAILED", invokeErrorMessage(error, "The resume request was rejected."), {
-        retryable: true,
+      failLocally({
+        kind: "choice-failed",
+        detail: invokeDetail(error, "the resume request was rejected"),
       });
     },
   );
@@ -676,12 +654,10 @@ async function handleOpenOutput(attempt: DesktopAttempt, reveal: boolean): Promi
     await handle.openOutput(reveal);
   } catch (error) {
     if (!owns(attempt) || handle !== attempt.activeHandle) return;
-    const rawCode = error && typeof error === "object" && "code" in error ? error.code : null;
-    const code =
-      typeof rawCode === "string" && /^output\.[a-z-]+$/.test(rawCode)
-        ? rawCode
-        : "output.invoke-failed";
-    const failure = { action: reveal ? "folder" : "open", code };
+    const failure = {
+      action: reveal ? "folder" : "open",
+      kind: isJobError(error) ? error.kind : "invoke-failed",
+    };
     attempt.diagnostics.context({ output_action_error: failure });
     attempt.diagnostics.record("error", "output-action-failed", failure);
     throw error;
@@ -704,8 +680,9 @@ function answerPartial(
     },
     (error: unknown) => {
       if (!owns(attempt) || attempt.partial !== partial) return;
-      failLocally("CHOICE_FAILED", invokeErrorMessage(error, t("desktop.invoke.partial")), {
-        retryable: true,
+      failLocally({
+        kind: "choice-failed",
+        detail: invokeDetail(error, t("desktop.invoke.partial")),
       });
     },
   );
@@ -717,7 +694,7 @@ function handleReset(): void {
   desktopQueue = createDesktopQueue();
   currentAttempt.activeQueueId = null;
 
-  const prefilled = readInitialUrl();
+  const prefilled = readInitialUrl(globalThis.location);
   if (prefilled) currentAttempt.viewCtx.initialUrl = prefilled;
   else currentAttempt.viewCtx.initialUrl = undefined;
   update();
@@ -730,33 +707,14 @@ function handleOpenExternalLink(url: string): void {
   );
 }
 
-function showDeepLinkConfirm(info: ValidatedDeepLink): void {
-  if (typeof document === "undefined") return;
-  void openConfirmModal(document, {
-    id: "dz-deep-link-confirm",
-    title: t("desktop.link.title"),
-    subtitle: t("desktop.link.source", { url: info.sourceUrl }),
-    bodyLines: [
-      info.hint
-        ? t("desktop.link.provHint", { version: info.version, hint: info.hint })
-        : t("desktop.link.prov", { version: info.version }),
-      t("desktop.link.note"),
-    ],
-    confirmLabel: t("desktop.link.open"),
-    declineLabel: t("desktop.link.dismiss"),
-  }).then((confirmed) => {
-    if (confirmed) handleSubmitUrl(info.sourceUrl);
-  });
-}
-
 function initInitialUrl(): void {
-  const prefilled = readInitialUrl();
+  const prefilled = readInitialUrl(globalThis.location);
   if (prefilled) currentAttempt.viewCtx.initialUrl = prefilled;
 }
 
 function syncInitialUrlFromLocation(): void {
   if (currentAttempt.progress !== null || currentAttempt.localFailure !== null) return;
-  const prefilled = readInitialUrl();
+  const prefilled = readInitialUrl(globalThis.location);
   const current = currentAttempt.viewCtx.initialUrl;
   if (prefilled && prefilled !== current) {
     currentAttempt.viewCtx.initialUrl = prefilled;
@@ -773,7 +731,9 @@ function ensureDesktopAuxPanel(): void {
   const doc = root.ownerDocument;
   doc.getElementById("dz-desktop-aux")?.remove();
   const showPartialDone =
-    presentation.phase === "completed" && presentation.output?.complete === false;
+    presentation.phase === "completed" &&
+    presentation.output !== undefined &&
+    presentation.output.missing.length > 0;
   const showCancelledNote = presentation.phase === "cancelled";
   const showQueue = presentation.phase !== "completed" && desktopQueue.entries.length > 1;
   if (!showPartialDone && !showCancelledNote && !showQueue) return;
@@ -980,7 +940,7 @@ function update() {
               error: settingsError,
               onChange: (settings: DesktopSettings) => {
                 desktopSettings = settings;
-                runPersistSettingsFromPanel();
+                void runPersistSettingsFromPanel();
               },
               onReset: runResetDesktopSettings,
             }),
@@ -1021,4 +981,4 @@ function getCurrentJobId(): string | null {
   return currentAttempt.activeHandle?.id ?? null;
 }
 
-export { getCurrentJobId, showDeepLinkConfirm, update, validateDeepLinkPayload };
+export { getCurrentJobId, update };

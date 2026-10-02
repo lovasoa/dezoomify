@@ -41,7 +41,7 @@ ignores caps).
 | Pick a level by index | `--zoom-level 0` (0 is smallest; too large uses last; wins over largest and caps) |
 | Pick a specific image when several are found | `--image-index 2` (0-based; too large uses last) |
 | Keep a partial image when some tiles fail | `--keep-partial` (default; missing regions stay blank, saved to a `.partial` sibling: `out.png` becomes `out.partial.png`) |
-| Discard partial output on tile failure | `--no-partial` (fails with `tile.download-failed` and no output) |
+| Discard partial output on tile failure | `--no-partial` (fails with `partial-discarded` and no output) |
 | Retry more often on an unreliable server | `-r, --retries 5` (default 3; 0 means no retries) |
 | Wait before retrying | `--retry-delay 2s` (base wait, doubling per attempt to 30 s max, `Retry-After` honored) |
 | Tune output compression | `--compression 5` (JPEG quality `100 - compression`, default 95; PNG fast/balanced/best tiers) |
@@ -54,9 +54,11 @@ ignores caps).
 | Keep saved pieces to resume later | `-c, --tile-cache my-folder` |
 | Turn off address checking for odd servers | `--accept-invalid-certs` (careful: this disables protection against impostor servers) |
 | Overwrite an existing file | `--overwrite` |
-| Print machine-readable records | `--json` |
+| Print machine-readable records | `--json` (failure events carry the full typed error; its `kind` names the failure) |
 
 Run `dezoomify --help` (`-?` is an alias) for the full list. `-V` shows the version.
+
+A failure prints one plain sentence followed by its stable `kind` on stderr (`error: <sentence> (<kind>)`), for example `error: partial output was discarded (partial-discarded)`. The sentence is rendered from the typed failure facts; the `kind` is the identifier to quote in bug reports.
 
 ## Saving many images
 
@@ -87,7 +89,7 @@ first image). Between images `--min-interval` paces the queue.
 ## Limits
 
 The command-line tool holds the image in memory subject to the memory currently available to the process, as does the [desktop app](./desktop-app.md).
-A larger save stops with a typed `output.canvas-limit` error before anything is written; save a smaller level with `--max-width`.
+A larger save stops with a typed `limit-exceeded` error before anything is written; save a smaller level with `--max-width`.
 See [very large pictures](./troubleshooting.md#the-image-appears-blank-or-the-browser-slows-to-a-halt) when a browser tab cannot hold the image.
 
 ## Next steps

@@ -236,9 +236,9 @@ impl GenericSearch {
             expected_size: None,
             processing: super::model::ProcessingRecipe::None,
             role: if point == Vec2d::default() || self.tile_size.is_some() {
-                TileRole::ProbeAndOutput
+                TileRole::probe_and_output()
             } else {
-                TileRole::Probe
+                TileRole::probe()
             },
         })
     }

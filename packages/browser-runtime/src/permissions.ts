@@ -45,11 +45,10 @@ export function createAttemptPermissions(
                   accepted
                     ? undefined
                     : {
-                        code: "TRANSPORT_POLICY_DENIED",
+                        kind: "policy-denied",
                         blocked_reason: "access-required",
                         transport: "browser-session",
-                        message: `Access to ${origin} was denied`,
-                        retryable: false,
+                        detail: `access to ${origin} was denied`,
                       },
                 ),
               settle,

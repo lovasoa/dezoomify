@@ -1,9 +1,9 @@
 {
   "outcome": "failed",
-  "code": "tile.download-failed",
+  "code": "partial-discarded",
   "recovery": "retry",
   "phase": "acquisition",
-  "retryable": true,
+  "retryable": false,
   "transport": "native",
   "resourceKind": "tile"
 }

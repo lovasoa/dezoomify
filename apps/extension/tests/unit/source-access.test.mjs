@@ -108,7 +108,7 @@ test("source scan rejects a malformed boundary result", async () => {
     inputs: [{ url: "javascript:alert(1)" }],
   }));
   const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
-  await assert.rejects(source.scan(), { code: "TRANSPORT_BAD_URL" });
+  await assert.rejects(source.scan(), { kind: "bad-url" });
   source.dispose();
 });
 
@@ -121,11 +121,11 @@ test("navigation invalidates access and discards an in-flight scan result", asyn
   fake.listeners.updated[0](9, { status: "loading", url: SOURCE_URL });
   finish(snapshot());
   await assert.rejects(pending, {
-    code: "DISCOVERY_FAILED",
+    kind: "policy-denied",
     blocked_reason: "source-document-lost",
   });
   await assert.rejects(source.scan(), {
-    code: "DISCOVERY_FAILED",
+    kind: "policy-denied",
     blocked_reason: "source-document-lost",
   });
   source.dispose();
@@ -137,7 +137,7 @@ test("source scan rejects unknown observation kinds", async () => {
     inputs: [{ url: SOURCE_URL, kind: "trusted-image" }],
   }));
   const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
-  await assert.rejects(source.scan(), { code: "TRANSPORT_BAD_URL" });
+  await assert.rejects(source.scan(), { kind: "bad-url" });
   source.dispose();
 });
 
@@ -145,10 +145,10 @@ test("source fetch treats HTTP refusals as definitive and leaves fallback decisi
   const fake = fakeBrowser(async () => ({
     ok: false,
     error: {
-      code: "TRANSPORT_HTTP_ERROR",
-      http: 403,
-      message: "Refused",
+      kind: "http-error",
+      status: 403,
       transport: "browser-session",
+      detail: "Refused",
     },
     documentUrl: SOURCE_URL,
   }));
@@ -158,7 +158,7 @@ test("source fetch treats HTTP refusals as definitive and leaves fallback decisi
       { uri: "https://gallery.example/private.xml", headers: [] },
       new AbortController().signal,
     ),
-    { code: "TRANSPORT_HTTP_ERROR", http: 403 },
+    { kind: "http-error", status: 403 },
   );
   source.dispose();
 });
@@ -168,7 +168,7 @@ test("source access refuses a tab whose URL no longer matches its bound document
   fake.setUrl("https://gallery.example/other-page");
   const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
   await assert.rejects(source.scan(), {
-    code: "DISCOVERY_FAILED",
+    kind: "policy-denied",
     blocked_reason: "source-document-lost",
   });
   assert.equal(fake.calls.length, 0);
@@ -181,17 +181,15 @@ test("source injection errors retain the browser's cause", async () => {
     throw cause;
   });
   const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
-  await assert.rejects(source.scan(), { code: "TRANSPORT_NETWORK_ERROR", detail: cause.message });
+  await assert.rejects(source.scan(), { kind: "network-failure", detail: cause.message });
   source.dispose();
 });
 
 test("generated failure facts survive source validation unchanged", async () => {
   const error = {
-    code: "TRANSPORT_HTTP_ERROR",
-    http: 429,
-    message: "Busy",
+    kind: "http-error",
+    status: 429,
     transport: "browser-session",
-    blocked_reason: "throttled",
     retry_after_ms: 3000,
     preview: "Try later",
     detail: "original diagnostic",
@@ -226,7 +224,7 @@ test("a lost browser reply is bounded and returns a typed timeout", async (t) =>
     { uri: "https://gallery.example/tile.jpg", headers: [] },
     new AbortController().signal,
   );
-  const checked = assert.rejects(pending, { code: "TRANSPORT_TIMEOUT" });
+  const checked = assert.rejects(pending, { kind: "timeout" });
   await new Promise((resolve) => setImmediate(resolve));
   t.mock.timers.tick(30);
   await checked;
@@ -247,7 +245,7 @@ test("source cancellation waits for acknowledgement that the page fetch has stop
   const checked = assert
     .rejects(
       source.fetch({ uri: "https://gallery.example/tile.jpg", headers: [] }, controller.signal),
-      { code: "TRANSPORT_CANCELLED" },
+      { kind: "cancelled" },
     )
     .then(() => {
       settled = true;
@@ -277,7 +275,7 @@ test("a rejected cancellation injection still waits for the original source oper
   const checked = assert
     .rejects(
       source.fetch({ uri: "https://gallery.example/tile.jpg", headers: [] }, controller.signal),
-      { code: "TRANSPORT_CANCELLED" },
+      { kind: "cancelled" },
     )
     .then(() => {
       settled = true;
@@ -302,7 +300,7 @@ test("cancellation before source injection creates no page work or cancellation 
   const controller = new AbortController();
   const checked = assert.rejects(
     source.fetch({ uri: "https://gallery.example/tile.jpg", headers: [] }, controller.signal),
-    { code: "TRANSPORT_CANCELLED" },
+    { kind: "cancelled" },
   );
   controller.abort();
   await checked;
@@ -327,7 +325,7 @@ test("cancellation and disposal remain bounded when source and cancellation repl
       controller.signal,
     );
     const checked = assert.rejects(pending, {
-      code: action === "cancel" ? "TRANSPORT_CANCELLED" : "DISCOVERY_FAILED",
+      kind: action === "cancel" ? "cancelled" : "policy-denied",
     });
     await new Promise((resolve) => setImmediate(resolve));
     if (action === "cancel") controller.abort();

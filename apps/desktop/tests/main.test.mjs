@@ -3,6 +3,20 @@ import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import test from "node:test";
 import { act, click, makeContainer } from "../../../test/react-dom.mjs";
+import { loadSettings } from "../src/settings.ts";
+
+// linkedom documents lack `oninput`, which keeps React's text-input change
+// detection disabled. Arm it before react-dom loads (through main.ts) so
+// edits fire onChange.
+document.oninput = null;
+
+/** Type into a controlled field the way the settings view tests do. */
+function typeInto(element, value) {
+  act(() => {
+    Object.defineProperty(element, "value", { configurable: true, writable: true, value });
+    element.dispatchEvent(new window.Event("change", { bubbles: true }));
+  });
+}
 
 const invocations = [];
 const output = {
@@ -55,9 +69,9 @@ registerHooks({
         shortCircuit: true,
         source: `
           export const invokeNative = (...args) => globalThis.desktopTestNative.invokeNative(...args);
-          export const listenDeepLinks = async () => {};
           export const openExternalLink = async () => {};
           export const readNativeDiagnostics = async () => { throw new Error("No native report"); };
+          export const validateSettings = async (settings) => { await globalThis.desktopTestNative.validateSettings?.(settings); };
         `,
       };
     return nextLoad(url, context);
@@ -99,21 +113,22 @@ test("desktop failure preserves canonical refusal facts and diagnostic context",
   const invocation = await start();
   await act(async () =>
     invocation.reject({
-      code: "job.no-usable-tiles",
-      message: "No usable tiles were acquired.",
-      detail: "The source returned its signed-in challenge.",
-      phase: "acquisition",
-      transport: "native",
-      request: "https://tiles.test/redirected/0.jpg?token=exact",
-      resource_kind: "tile",
-      blocked_reason: "forbidden",
-      http: 403,
-      preview: "Sign in to see the collection",
-      retryable: false,
+      kind: "no-usable-tiles",
+      transient: false,
+      failures: [
+        {
+          kind: "http-error",
+          status: 403,
+          request: "https://tiles.test/redirected/0.jpg?token=exact",
+          transport: "native",
+          preview: "Sign in to see the collection",
+          detail: "the source returned its signed-in challenge",
+        },
+      ],
     }),
   );
   await tick();
-  assert.match(root.textContent, /website refused access/);
+  assert.match(root.textContent, /could not be retrieved/);
   assert.equal(root.querySelector("#dz-btn-try-again"), null);
   assert.equal(
     [...root.querySelectorAll(".dz-error-section button")].some((button) =>
@@ -125,7 +140,7 @@ test("desktop failure preserves canonical refusal facts and diagnostic context",
   assert.match(diagnostics, /https:\/\/tiles.test\/redirected\/0.jpg\?token=exact/);
   assert.match(diagnostics, /source returned its signed-in challenge/);
   assert.match(diagnostics, /Sign in to see the collection/);
-  assert.match(diagnostics, /retryable=false/);
+  assert.match(diagnostics, /kind=no-usable-tiles/);
   await reset();
 });
 
@@ -135,7 +150,9 @@ test("desktop partial actions honor retryability and retain a newer native quest
     missing: [
       {
         tile: 3,
-        failures: [{ code: "TRANSPORT_HTTP_ERROR", http: retryable ? 503 : 403, retryable }],
+        failures: [
+          { kind: "http-error", status: retryable ? 503 : 403, transport: "native", retryable },
+        ],
       },
     ],
   });
@@ -162,19 +179,64 @@ test("desktop partial actions honor retryability and retain a newer native quest
 test("a late partial answer failure cannot replace the next invocation", async () => {
   const first = await start();
   act(() =>
-    first.callbacks.partial(1, { missing: [{ tile: 3, failures: [{ retryable: true }] }] }),
+    first.callbacks.partial(1, {
+      missing: [{ tile: 3, failures: [{ kind: "network-failure", transport: "native" }] }],
+    }),
   );
   click(root.querySelector("[data-dz-partial-choice=discard]"));
   await reset();
   const second = await start();
-  await act(async () =>
-    first.answers[0].reject({ code: "interaction.expired", message: "Expired" }),
-  );
+  await act(async () => first.answers[0].reject({ kind: "interaction-expired" }));
   assert.equal(root.querySelector(".dz-error-section"), null);
   assert.ok(root.querySelector(".dz-job-section"));
   act(() =>
-    second.callbacks.partial(2, { missing: [{ tile: 1, failures: [{ retryable: false }] }] }),
+    second.callbacks.partial(2, {
+      missing: [{ tile: 1, failures: [{ kind: "decode-failed" }] }],
+    }),
   );
   assert.ok(root.querySelector("[data-dz-partial-choice=keep]"));
   await reset();
+});
+
+test("raw header text is submitted as-is; nothing is pre-validated or blocked", async () => {
+  click(root.querySelector(".dz-settings-more"));
+  const textarea = root.querySelector(".dz-headers-disclosure textarea");
+  assert.ok(textarea, "request headers stay in advanced settings");
+  const text = "Referer: https://museum.test/viewer\nnot a header line";
+  typeInto(textarea, text);
+  const invocation = await start();
+  assert.deepEqual(invocation.request.settings.headers, text.split("\n"));
+  await reset();
+});
+
+test("a typed Rust save rejection shows its reason and persists nothing", async () => {
+  const invocation = await start();
+  await act(async () =>
+    invocation.reject({ kind: "invalid-settings", detail: "invalid header: bad name" }),
+  );
+  await tick();
+  const diagnostics = root.querySelector("#dz-job-diagnostics");
+  assert.match(diagnostics.textContent, /invalid header: bad name/);
+  await reset();
+  await tick();
+  const settingsError = root.querySelector("#dz-settings-error");
+  assert.ok(settingsError, "the settings panel surfaces the Rust rejection reason");
+  assert.match(settingsError.textContent, /invalid header: bad name/);
+});
+
+test("a refused settings edit shows the shell reason and persists nothing", async () => {
+  const retries = root.querySelector('input[aria-label="Retries"]');
+  assert.ok(retries, "retries stay in the settings panel");
+  globalThis.desktopTestNative.validateSettings = async (settings) => {
+    if (settings.retries > 100) throw { kind: "invalid-settings", detail: "invalid retries: 101" };
+  };
+  typeInto(retries, 5);
+  await tick();
+  assert.equal(loadSettings().retries, 5, "an accepted edit is persisted");
+  typeInto(retries, 101);
+  await tick();
+  const settingsError = root.querySelector("#dz-settings-error");
+  assert.match(settingsError.textContent, /invalid retries: 101/);
+  assert.equal(loadSettings().retries, 5, "the refused edit persists nothing");
+  delete globalThis.desktopTestNative.validateSettings;
 });

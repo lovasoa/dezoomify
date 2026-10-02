@@ -158,12 +158,3 @@ export function combineTimeout(
   }
   return { signal: ctrl.signal, cleanup, timedOut: () => timedOut };
 }
-
-/** Hostname of a job's website, for plain-language progress messages. */
-export function hostOf(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return "the server";
-  }
-}

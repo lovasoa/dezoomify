@@ -13,7 +13,9 @@ macro_rules! desktop_commands {
             answer_partial,
             open_saved_output,
             release_job,
-            get_job_diagnostics
+            get_job_diagnostics,
+            validate_settings,
+            is_retryable
         )
     };
 }

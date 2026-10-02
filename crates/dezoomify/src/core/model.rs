@@ -44,17 +44,7 @@ impl Request {
     }
 }
 
-pub use crate::model::ProcessingRecipe;
-
-/// How an acquired tile participates in adaptive probing and final output.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum TileRole {
-    Output,
-    /// A probe which must not be added to the output canvas.
-    Probe,
-    /// A successful probe is output; a missing probe is not an output failure.
-    ProbeAndOutput,
-}
+pub use crate::model::{ProcessingRecipe, TileRole};
 
 /// A logical tile.
 #[derive(Clone, Debug, Eq, PartialEq)]

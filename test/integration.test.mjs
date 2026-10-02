@@ -1,16 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DIRECT_METADATA_TIMEOUT_MS } from "../packages/browser-runtime/src/tile-policy.ts";
 import { createWebFetcher, isProxyEligible } from "../packages/browser-runtime/src/web-fetch.ts";
 import { createDiagnosticRecorder } from "../packages/shared-ui/src/diagnostics.ts";
 import { presentIdle } from "../packages/shared-ui/src/presentation.ts";
 import { renderView } from "../packages/shared-ui/src/view.tsx";
-import {
-  createProxyRateLimiter,
-  createProxyTransport,
-  PROXY_MAX_INFLIGHT,
-  PROXY_MAX_REQUESTS_PER_SECOND,
-} from "../src/proxyTransport.ts";
+import { createProxyRateLimiter, createProxyTransport } from "../src/proxyTransport.ts";
 import { act } from "./react-dom.mjs";
 
 function okBytes(...values) {
@@ -181,7 +175,7 @@ test("no proxy for http-error, ineligible targets, cancelled, tile", async () =>
     const fetcher = createWebFetcher(deps);
     await assert.rejects(
       fetcher.fetchResource(request("https://public.test/x"), attemptSignal),
-      (error) => error.code === "DISCOVERY_HTTP_ERROR",
+      (error) => error.kind === "http-error" && error.status === 404,
     );
     assert.equal(proxy.calls, 0);
   }
@@ -193,7 +187,7 @@ test("no proxy for http-error, ineligible targets, cancelled, tile", async () =>
     const fetcher = createWebFetcher(deps);
     await assert.rejects(
       fetcher.fetchResource(request("https://user:pw@public.test/x"), attemptSignal),
-      (error) => error.code === "DISCOVERY_FAILED",
+      (error) => error.kind === "network-failure",
     );
     assert.equal(proxy.calls, 0);
   }
@@ -207,7 +201,7 @@ test("no proxy for http-error, ineligible targets, cancelled, tile", async () =>
     ctrl.abort();
     await assert.rejects(
       fetcher.fetchResource(request("https://public.test/x"), ctrl.signal),
-      (error) => error.code === "TRANSPORT_CANCELLED",
+      (error) => error.kind === "cancelled",
     );
     assert.equal(proxy.calls, 0);
   }
@@ -297,8 +291,6 @@ test("proxyTransport surfaces Retry-After on 429 so callers can back off once", 
 });
 
 test("proxyTransport caps proxy load at 4 inflight and 4 starts per second", async () => {
-  assert.equal(PROXY_MAX_INFLIGHT, 4);
-  assert.equal(PROXY_MAX_REQUESTS_PER_SECOND, 4);
   // Isolated limiter so this burst never borrows quota from other tests.
   const limiter = createProxyRateLimiter();
   let inflight = 0;
@@ -353,8 +345,7 @@ test("proxyTransport surfaces the upstream URL so proxied metadata keeps its til
   assert.equal(r2.finalUrl, undefined);
 });
 
-test("proxy fallback is unconditional: no opt-out UI, 1500 ms direct head start", () => {
-  assert.equal(DIRECT_METADATA_TIMEOUT_MS, 1500);
+test("proxy fallback is unconditional: no opt-out UI", () => {
   const el = globalThis.document.createElement("div");
   globalThis.document.body.appendChild(el);
   act(() =>

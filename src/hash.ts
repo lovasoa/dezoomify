@@ -35,11 +35,6 @@ export function buildHash(url: string): string {
   return `#${String(url ?? "").trim()}`;
 }
 
-export function readLocationHash(loc?: { hash?: string }): string | null {
-  if (!loc || typeof loc.hash !== "string") return null;
-  return parseHash(loc.hash);
-}
-
 export function looksLikeUsableUrl(value: string | null | undefined): boolean {
   if (!value) return false;
   try {

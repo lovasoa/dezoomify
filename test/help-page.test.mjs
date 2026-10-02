@@ -17,8 +17,13 @@ const PAGES = readdirSync(srcDir)
 test("every generated page exists with chrome, topics, and no legacy doc links", () => {
   for (const stem of PAGES) {
     const html = readFileSync(path.join(helpDir, `${stem}.html`), "utf8");
-    assert.ok(html.includes('class="dz-nav"'), `${stem}.html has site chrome`);
-    assert.ok(html.includes('class="dz-help-topics"'), `${stem}.html lists topics`);
+    // Structure checks use tag names and links only: renaming CSS classes
+    // or other implementation details must not break them.
+    assert.ok(html.includes("<header"), `${stem}.html has site chrome`);
+    assert.ok(html.includes("<nav"), `${stem}.html has site navigation`);
+    for (const topic of PAGES) {
+      assert.ok(html.includes(`href="${topic}.html"`), `${stem}.html lists the ${topic} topic`);
+    }
     const h1s = [...html.matchAll(/<h1 id="[^"]*">/g)].length;
     assert.equal(h1s, 1, `${stem}.html has exactly one h1 (marker line dropped)`);
     for (const legacy of [
@@ -69,13 +74,6 @@ function exists(p) {
   }
 }
 
-test("docs/user pages carry their stem marker", () => {
-  for (const stem of PAGES) {
-    const md = readFileSync(path.join(srcDir, `${stem}.md`), "utf8");
-    assert.match(md, new RegExp(`^# ${stem}\\n`), `${stem}.md starts with its marker line`);
-  }
-});
-
 test("app pages link the in-app docs instead of legacy doc sites", () => {
   for (const page of ["index.html", "privacy.html", "terms.html"]) {
     const html = readFileSync(path.join(webDir, page), "utf8");
@@ -94,11 +92,8 @@ test("failure guidance links the in-app image-address guide", () => {
     renderView(
       el,
       presentFailure({
-        code: "job.discovery-failed",
-        phase: "discovery",
-        transport: "direct",
-        retryable: false,
-        message: "No zoomable image could be found.",
+        kind: "discovery-failed",
+        detail: "no zoomable image could be found",
       }),
       { onSubmitUrl: () => {}, onCancel: () => {}, onReset: () => {}, onSave: () => {} },
     ),

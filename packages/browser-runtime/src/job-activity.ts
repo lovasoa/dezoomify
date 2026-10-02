@@ -40,7 +40,7 @@ export function createJobActivity(hooks: ActivityHooks): JobActivityTracker {
   const clearEvery =
     hooks.clearIntervalFn ?? ((t: unknown) => clearTimeout(t as ReturnType<typeof setInterval>));
 
-  const state: JobActivity = {};
+  const state: JobActivity = { now: now() };
   let requestSeq = 0;
   const pendingStarts = new Map<number, number>();
   let completedRequests = 0;

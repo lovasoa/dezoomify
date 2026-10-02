@@ -10,7 +10,7 @@ processes, temporary profiles, servers, and integration registrations.
 ```text
 cargo xtask setup
 cargo xtask check
-cargo xtask test [core|bindings|wasm|browser|ui|web|native|scenario|desktop|extension|perf|live|all] [options]
+cargo xtask test [core|bindings|wasm|browser|ui|web|native|scenario|desktop|extension|live|all] [options]
 cargo xtask build <wasm|web|cli|desktop|extension> [options]
 cargo xtask dev <ui|web|desktop|extension> [options]
 cargo xtask ci <check|rust|wasm|browser|web|desktop|extension|bindings|security|local|digest> [--check <hex>]
@@ -33,7 +33,7 @@ Chromium/Firefox headless E2E. The desktop real-window test stays explicit and
 outside `all`. `test live` is the only target allowed to contact public source
 sites and is never part of `all`, required CI, or release gates.
 
-Node 24 is the minimum supported Node version. Direct Cargo and pnpm commands
+Node 24.15.0 is the minimum supported Node version. Direct Cargo and pnpm commands
 are valid for focused debugging, but xtask remains the unified front door.
 
 `check`, all maintenance `check`/`verify` commands, and generated binding checks
@@ -67,7 +67,7 @@ the built binary; unit tests in `src/main.rs` pin the dispatcher.
 
 ## Package managers
 
-The Node 24 pnpm workspace (`packageManager` in the root `package.json`,
+The Node 24.15.0 pnpm workspace (`packageManager` in the root `package.json`,
 `pnpm-workspace.yaml`) owns every active JavaScript package, including the
 webapp, extension, and desktop E2E harnesses. The root `pnpm-lock.yaml` is the
 only active JavaScript lockfile. Playwright browser binaries remain separate

@@ -1,6 +1,6 @@
 # Security
 
-Source sites, metadata, tiles, handoff payloads, and output names are all untrusted input. Each runtime takes only the access its active user-started job needs.
+Source sites, metadata, tiles, and output names are all untrusted input. Each runtime takes only the access its active user-started job needs.
 
 ## Trust boundaries
 
@@ -9,15 +9,16 @@ Source sites, metadata, tiles, handoff payloads, and output names are all untrus
 - The metadata proxy is a restricted fetcher for eligible public, non-credential metadata, never a credential endpoint or tile relay.
 - The extension background accepts requests only from its own authenticated contexts.
 - Native apps reach network and filesystem, so they validate typed input and require user-picked local destinations.
-- Parsers and geometry stay pure; the shared algorithm awaits only injected Host capabilities.
 
 Parsers and decoders cap input, dimensions, tile counts, allocation, recursion, and decompression. URLs normalize before policy checks. Redirects carrying credentials revalidate every hop.
 
 ## Credentials
 
-Auth headers, cookies, signed URLs, and tokens appear in no analytics, user-visible cache keys, or ordinary handoffs. Diagnostic capture preserves supplied URLs, query parameters, paths, and settings as supplied. Capture sites record header names, never authorization-header or cookie values. Reports contain no image bytes or full response bodies; HTTP failures may retain a bounded server signal. Reports stay local until the user copies, saves, or opens a prefilled issue draft. The extension's technical-details panel shows a conditional sign-in warning before its sharing controls; it does not infer authentication from cookies. User guidance: [extension data use](user/browser-extension.md#what-the-extension-does-with-your-data).
+Auth headers, cookies, signed URLs, and tokens appear in no analytics or user-visible cache keys. Diagnostic capture preserves supplied URLs, query parameters, paths, and settings as supplied. Capture sites record header names, never authorization-header or cookie values. Reports contain no image bytes or full response bodies; HTTP failures may retain a bounded server signal. Reports stay local until the user copies, saves, or opens a prefilled issue draft. The extension's technical-details panel shows a conditional sign-in warning before its sharing controls; it does not infer authentication from cookies. User guidance: [extension data use](user/browser-extension.md#what-the-extension-does-with-your-data).
 
 Website direct and proxy requests omit cookies and `Authorization`. The proxy also forwards no caller credentials upstream and never fetches credential-bearing resources. Signed or token-bearing URLs are proxy-ineligible. The extension fetches in the tab origin with the page's session and from the extension origin credential-free, only for origins under active host permissions. It does not send browser cookies or other credentials to another product.
+
+The secret/credential query-key vocabulary lives once in Rust (`SENSITIVE_QUERY_KEYS` in [`model.rs`](../crates/dezoomify/src/model.rs)) and crosses the boundary only as the `isSecretKey`/`hasSecretParams` callables; TypeScript callers with a runtime ask the boundary. The one TypeScript list (`SENSITIVE_QUERY_KEYS` in [`source-url.ts`](../packages/shared-ui/src/source-url.ts)) is the wire-format counterpart of `isSecretKey`, kept only for pure callers that load no runtime. The deliberately narrower signed-params policy (`SIGNED_QUERY_KEYS`) governs metadata-proxy eligibility and is applied through one `hasSignedQuery` check by both `web-fetch.ts` and `src/server/security.ts`. Desktop settings and trusted-header validation live once in the native shell (`parse_settings`/`parse_header_line`) with direct unit tests; the frontend shape-normalizes only and trusts the shell's typed rejection. The retry policy exists once in Rust (`Error::retryable`) and is exposed at each host boundary (`isRetryable`/`is_retryable`); TypeScript holds no copy.
 
 ## Proxy controls
 

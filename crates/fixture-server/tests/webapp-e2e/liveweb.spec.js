@@ -114,8 +114,8 @@ for (const [id, url] of TARGETS) {
     // Live metadata proxy relay: the loopback harness serves no /api/proxy
     // route, so stub the production relay shape at the page layer. The POST
     // targetUrl is relayed to the real upstream with a GET and the upstream
-    // response is passed through with x-proxy-upstream-url set, mirroring
-    // src/server/proxy.ts so tile-base propagation is exercised live.
+    // response is passed through with x-proxy-upstream-url set, as
+    // src/server/proxy.ts does, so tile-base propagation is exercised live.
     // Missing or invalid targets get an honest 4xx and upstream errors pass
     // through; the stub never throws.
     await page.route("**/api/proxy", async (route) => {

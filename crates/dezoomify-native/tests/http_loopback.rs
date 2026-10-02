@@ -85,7 +85,7 @@ fn rejects_redirect_beyond_limit() {
         &tight,
     )
     .expect_err("redirect limit");
-    assert_eq!(error.code, "TRANSPORT_REDIRECT_LIMIT");
+    assert!(matches!(error, Error::RedirectLimit { .. }));
     server.join().expect("server");
 }
 
@@ -133,7 +133,7 @@ fn rejects_redirect_when_limit_is_exceeded_by_one() {
         &tight,
     )
     .expect_err("limit+1 redirects must fail");
-    assert_eq!(error.code, "TRANSPORT_REDIRECT_LIMIT");
+    assert!(matches!(error, Error::RedirectLimit { .. }));
     server.join().expect("server");
 }
 
@@ -147,7 +147,7 @@ fn reset_connection_fails_after_a_single_attempt() {
         &limits(),
     )
     .expect_err("reset connection fails");
-    assert_eq!(error.code, "TRANSPORT_NETWORK_ERROR");
+    assert!(matches!(error, Error::NetworkFailure { .. }));
     server.join().expect("server");
 }
 
@@ -163,7 +163,7 @@ fn connection_refused_is_network_error() {
         &limits(),
     )
     .expect_err("connection refused");
-    assert_eq!(error.code, "TRANSPORT_NETWORK_ERROR");
+    assert!(matches!(error, Error::NetworkFailure { .. }));
 }
 
 #[test]
@@ -276,7 +276,7 @@ fn reads_file_uris_as_local_paths() {
         &limits(),
     )
     .expect_err("remote file host rejected");
-    assert_eq!(error.code, "TRANSPORT_BAD_URL");
+    assert!(matches!(error, Error::BadUrl { .. }));
     // Missing local files fail honestly without a path leak.
     let missing = dir.join("absent.png");
     let error = fetch(
@@ -286,6 +286,6 @@ fn reads_file_uris_as_local_paths() {
         &limits(),
     )
     .expect_err("missing file fails");
-    assert_eq!(error.code, "TRANSPORT_NETWORK_ERROR");
+    assert!(matches!(error, Error::NetworkFailure { .. }));
     let _ = std::fs::remove_dir_all(&dir);
 }

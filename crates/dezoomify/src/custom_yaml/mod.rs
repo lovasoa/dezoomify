@@ -108,19 +108,14 @@ mod tests {
     use super::*;
     use crate::core::{DiscoveredEntry, TileRole, TileSource};
 
+    const BUNDLED: &[u8] =
+        include_bytes!("../../../../testdata/scenarios/rs-core/formats/payloads/tiles.yaml");
+
     #[test]
     fn parses_bundled_example_headers() {
-        let yaml_path = format!(
-            "{}/../../testdata/scenarios/rs-core/formats/payloads/tiles.yaml",
-            env!("CARGO_MANIFEST_DIR")
-        );
-        let yaml: CustomYamlTiles =
-            serde_yaml::from_reader(std::fs::File::open(yaml_path).unwrap()).unwrap();
+        let yaml: CustomYamlTiles = serde_yaml::from_slice(BUNDLED).unwrap();
         assert!(yaml.headers.contains_key("Referer"));
-        let catalog = catalog_from_yaml(include_bytes!(
-            "../../../../testdata/scenarios/rs-core/formats/payloads/tiles.yaml"
-        ))
-        .unwrap();
+        let catalog = catalog_from_yaml(BUNDLED).unwrap();
         let DiscoveredEntry::Ready(image) = &catalog.entries()[0] else {
             panic!("custom YAML is immediately ready")
         };
@@ -141,6 +136,13 @@ mod tests {
         assert!(!is_tiles_yaml("https://example.test/tiles.yml"));
     }
 
+    fn positioned_source(catalog: &crate::core::DiscoveryCatalog) -> &TileSource {
+        let DiscoveredEntry::Ready(image) = &catalog.entries()[0] else {
+            panic!("custom YAML is immediately ready")
+        };
+        &image.levels[0].source
+    }
+
     #[test]
     fn template_plan_is_replayable_without_collecting_tiles() {
         let catalog = catalog_from_yaml(
@@ -158,11 +160,7 @@ y_template: y
 "#,
         )
         .unwrap();
-        let image = match &catalog.entries()[0] {
-            DiscoveredEntry::Ready(image) => image,
-            DiscoveredEntry::Deferred(_) => panic!("custom YAML is immediately ready"),
-        };
-        let TileSource::Positioned(plan) = &image.levels[0].source else {
+        let TileSource::Positioned(plan) = positioned_source(&catalog) else {
             panic!("custom YAML is positioned");
         };
         assert_eq!(plan.count(), 4);
@@ -170,7 +168,7 @@ y_template: y
         let first = &tiles[0];
         let last = &tiles[3];
         assert_eq!(first.ordinal, 0);
-        assert_eq!(first.role, TileRole::Output);
+        assert_eq!(first.role, TileRole::output());
         assert_eq!(first.request.uri, "https://example.test/0/0");
         assert_eq!(last.request.uri, "https://example.test/1/1");
         assert_eq!(first, &plan.tiles().next().unwrap().unwrap());
@@ -192,11 +190,7 @@ y_template: y
 "#,
         )
         .unwrap();
-        let image = match &catalog.entries()[0] {
-            DiscoveredEntry::Ready(image) => image,
-            DiscoveredEntry::Deferred(_) => panic!("custom YAML is immediately ready"),
-        };
-        let TileSource::Positioned(plan) = &image.levels[0].source else {
+        let TileSource::Positioned(plan) = positioned_source(&catalog) else {
             panic!("custom YAML is positioned");
         };
         let error = plan.tiles().next().unwrap().unwrap_err().to_string();

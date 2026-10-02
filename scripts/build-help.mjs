@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // Generates the website help section under help/ from docs/user/*.md.
 // docs/user is the single source of truth: never hand-edit help/; run
-// `node scripts/build-help.mjs` after editing any page (the freshness test
-// in test/help-page.test.mjs fails on drift).
+// `node scripts/build-help.mjs` after editing any page.
 // Deterministic: same inputs produce byte-identical output.
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";

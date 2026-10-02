@@ -81,16 +81,16 @@ test("source injection failure tries extension once and preserves the original c
 test("definitive HTTP refusals do not retry and grouped diagnostics stay bounded", async () => {
   const h = setup({
     sourceFailure: {
-      code: "TRANSPORT_HTTP_ERROR",
-      http: 403,
+      kind: "http-error",
+      status: 403,
       transport: "browser-session",
-      message: "Refused",
+      detail: "Refused",
     },
   });
   for (let index = 0; index < 1036; index++)
     await assert.rejects(
       h.fetch({ ...request, uri: `https://source.test/${index}.jpg` }, signal, "allowed"),
-      { http: 403 },
+      { kind: "http-error", status: 403 },
     );
   assert.ok(h.calls.every(([route]) => route === "source"));
   const report = h.diagnostics.report();
@@ -105,11 +105,11 @@ test("definitive HTTP refusals do not retry and grouped diagnostics stay bounded
 test("a source deadline does not start an unbounded second route", async () => {
   const h = setup({
     sourceFailure: {
-      code: "TRANSPORT_TIMEOUT",
+      kind: "timeout",
       transport: "browser-session",
-      message: "Timed out",
+      detail: "timed out",
     },
   });
-  await assert.rejects(h.fetch(request, signal, "allowed"), { code: "TRANSPORT_TIMEOUT" });
+  await assert.rejects(h.fetch(request, signal, "allowed"), { kind: "timeout" });
   assert.equal(h.calls.length, 1);
 });

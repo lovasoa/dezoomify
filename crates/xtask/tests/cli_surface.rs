@@ -30,8 +30,7 @@ fn help_lists_the_stable_surface() {
     assert!(out.status.success(), "help failed: {}", stderr_text(&out));
     let help = stdout_text(&out);
     for token in [
-        "setup", "check", "fixtures", "bindings", "build", "dev", "ci", "release", "test",
-        "digest", "perf",
+        "setup", "check", "fixtures", "bindings", "build", "dev", "ci", "release", "test", "digest",
     ] {
         assert!(help.contains(token), "help lacks {token}");
     }
@@ -49,6 +48,8 @@ fn rejects_unknown_tasks_targets_and_lanes() {
         &["release", "bogus"],
         &["test", "bogus"],
         &["test", "live"],
+        &["sources", "verify"],
+        &["parity", "validate"],
     ];
     for args in cases {
         let out = xtask(args);
@@ -59,6 +60,13 @@ fn rejects_unknown_tasks_targets_and_lanes() {
             "rejection for {args:?} carries no usage guidance: {detail}"
         );
     }
+    // The live filter rejects with its own explicit reason.
+    let out = xtask(&["test", "--live"]);
+    assert!(!out.status.success(), "accepted --live");
+    assert!(
+        stderr_text(&out).contains("not part of the deterministic suite"),
+        "live rejection names the deterministic suite"
+    );
 }
 
 #[test]
@@ -70,7 +78,6 @@ fn rejects_unknown_flags_without_running_suites() {
         &["fixtures", "capture"],
         &["fixtures", "serve", "--bogus"],
         &["test", "core", "--bogus"],
-        &["test", "perf", "--bogus"],
         &["test", "native", "--bogus"],
         &["ci", "digest", "--bogus"],
         &["ci", "digest", "--check"],

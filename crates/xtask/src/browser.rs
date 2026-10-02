@@ -9,7 +9,6 @@ use std::process::Command;
 pub fn test_browser(args: &[String]) -> Result<(), String> {
     let mut build_only = false;
     let mut browser: Option<String> = None;
-    let mut scenario: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -17,10 +16,6 @@ pub fn test_browser(args: &[String]) -> Result<(), String> {
             "--browser" => {
                 i += 1;
                 browser = Some(args.get(i).ok_or("missing --browser <name>")?.clone());
-            }
-            "--scenario" => {
-                i += 1;
-                scenario = Some(args.get(i).ok_or("missing --scenario <id>")?.clone());
             }
             other => return Err(format!("unknown test browser arg '{other}'")),
         }
@@ -33,29 +28,6 @@ pub fn test_browser(args: &[String]) -> Result<(), String> {
                 "browser '{name}' unavailable (only chromium engine coverage; firefox/webkit deferred)"
             ));
         }
-    }
-    if let Some(id) = scenario {
-        // Scenario focus: the scenario must exist with a parsed expected
-        // result; the deterministic unit matrix then runs as usual.
-        let candidates = [
-            format!("testdata/scenarios/website/{id}/expected/result.json"),
-            format!("testdata/scenarios/browser-runtime/{id}/expected/result.json"),
-        ];
-        let mut ok = false;
-        for rel in &candidates {
-            if let Ok(text) = std::fs::read_to_string(super::repo_root().join(rel)) {
-                let _: serde_json::Value =
-                    serde_json::from_str(&text).map_err(|e| format!("bad scenario {id}: {e}"))?;
-                ok = true;
-            }
-        }
-        if !ok {
-            return Err(format!("unknown scenario '{id}'"));
-        }
-        // Scenario focus: website and browser-runtime scenarios are
-        // expectation contracts without executable inputs; their described
-        // flows run end-to-end in the real Chromium E2E below (explicit via
-        // --browser, or in test web).
     }
     if build_only {
         return build_only_check();
@@ -222,7 +194,7 @@ fn dir_size(dir: &std::path::Path) -> Result<u64, String> {
 }
 
 /// Build the entire website via `scripts/build-site.mjs`: browser JS
-/// mirrors, help pages, wasm glue, and the deployable `dist/` tree. The
+/// assets, help pages, wasm glue, and the deployable `dist/` tree. The
 /// same script runs in the website-deploy GitHub Actions workflow, so
 /// local builds and deployments cannot diverge.
 fn build_site(no_wasm: bool) -> Result<(), String> {
@@ -332,10 +304,10 @@ fn dist_fresh() -> bool {
     true
 }
 
-/// Shared-UI and website development: build the full site (mirrors, wasm
-/// glue, dist tree) and serve it on loopback through the Node dev server
-/// (static files plus the same /api/proxy relay as production), exactly as
-/// deployed.
+/// Shared-UI and website development: build the full site (browser JS
+/// assets, wasm glue, dist tree) and serve it on loopback through the Node
+/// dev server (static files plus the same /api/proxy relay as production),
+/// exactly as deployed.
 fn dev_web(args: &[String]) -> Result<(), String> {
     let no_wasm = parse_dev_site_args("dev web", args)?;
     if dist_fresh() {

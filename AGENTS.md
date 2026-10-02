@@ -1,123 +1,51 @@
-# AGENTS.md
+Dezoomify downloads tiled zoomable images. The website, extension,
+desktop app, and CLI share one Rust algorithm that takes a `Host` argument to interact with its environment.
+ 
+## Where to look
 
-Dezoomify downloads high-resolution zoomable images (IIIF, Deep Zoom,
-Zoomify, krpano, ...) from museum and library websites. Four apps share one
-Rust core: the website (repository root), the browser extension
-(`apps/extension/`), the desktop app (`apps/desktop/`), and the CLI
-(`apps/cli/`). `packages/shared-ui` is the host-neutral UI embedded by the
-graphical apps; `packages/browser-runtime` integrates it with the browser.
+- `crates/dezoomify/`: shared algorithm, format parsers, geometry, and domain types.
+  Start with [Architecture](docs/architecture.md) and [Algorithm](docs/algorithm.md).
+- `crates/dezoomify-native/` and `crates/dezoomify-wasm/`: native Host and WASM bridge.
+- `src/`, `legacy/`, and `apps/{extension,desktop,cli}/`: product integration.
+  See [Browser runtime](docs/browser-runtime.md), [Extension](docs/extension.md),
+  and [Native apps](docs/native-apps.md).
+- `packages/shared-ui/`: host-neutral UI; follow its [AGENTS.md](packages/shared-ui/AGENTS.md).
+  `packages/browser-runtime/` composes browser UI and Host capabilities.
+  [Application](docs/application.md) defines invocation, queue, and history ownership.
+- [Docs index](docs/README.md): detailed contracts.
+  [User docs](docs/user/README.md): source of all user-facing documentation.
+- `testdata/scenarios/`: deterministic fixtures, goldens, and transcripts.
+  See [Testing](docs/testing.md) and [Acceptance matrix](docs/acceptance-matrix.md).
+- `crates/xtask/`: development and release tooling.
+  See [Development](docs/development.md) and [Command reference](crates/xtask/README.md).
 
-## Commands
+## Invariants
 
-Run from the repository root:
+- Keep parsers and geometry pure. The shared algorithm calls only injected
+  Host capabilities; Hosts own I/O, clocks, codecs, resources, and task ownership.
+  Products never import each other. Shared UI never accesses host globals;
+  browser transport and image modules receive callbacks rather than importing UI.
+- Define cross-language types once in `crates/dezoomify/src/model.rs`.
+  Import generated bindings; never redeclare or hand-edit them. Regenerate with
+  `cargo xtask bindings generate`; see [Bindings](docs/bindings.md).
+  Branch on error `kind` and structured fields, never display strings.
+- Try credential-free direct browser fetch first; the website's metadata CORS
+  proxy is an automatic fallback for eligible public metadata. Extension
+  browser-session fetch requires granted permissions; scans require explicit
+  user action. Declare only permissions shipped code uses.
+  Follow [Security](docs/security.md).
+- Do not commit generated website output. Only `packages/wasm-bindings` and
+  `generated/*.json` are tracked generated trees. `scripts/build-site.mjs`
+  builds the deployed website (legacy at `/`, new app at `/beta`).
+- Use Node for repository-authored HTTP servers, including fixtures; Rust tests
+  launch Node rather than bind listeners. Live website tests are opt-in.
+- Read files before editing, use `apply_patch`, and preserve unrelated work.
+  Update affected contracts alongside code; link to user docs instead of copying
+  them. Preserve exact URLs, settings, and error causes in bounded diagnostics.
 
-```sh
-cargo xtask check          # fmt + clippy + Biome + binding artifact validation
-cargo xtask test           # one Rust workspace run + one combined Node unit run
-cargo xtask test <target>  # core|bindings|wasm|browser|ui|web|native|desktop|extension|scenario|all
-cargo xtask build <target> # wasm|web|cli|desktop|extension
-cargo xtask dev <target>   # ui|web|desktop|extension
-cargo xtask release version|plan|build|sign|verify|publish
-                           # release orchestration (sign/publish need keys)
-```
+## Validation
 
-Routine development builds omit debug symbols but retain incremental
-compilation. Use `--profile dev-debug` only when a diagnosis needs symbols.
-
-- `cargo xtask test live --public` is the only command that contacts real
-  websites; it is opt-in and advisory.
-- Node 24.15.0 is the minimum supported Node version.
-- Node is the only runtime for repository-authored HTTP servers, including
-  development, fixtures, and transport tests. Rust tests launch Node; they never
-  bind HTTP listeners. The third-party desktop WebDriver remains supported.
-- The fixture server is format-agnostic. Dynamic fixture behavior lives beside
-  the fixture in `server.js`, exporting `serve(Request): Response`.
-- Iterate with `check` plus bare `test`, run the narrowest focused lane after
-  each change, and finish with `test all` plus `cargo xtask ci local`.
-- Full grammar: `cargo xtask --help`, [`docs/development.md`](docs/development.md),
-  [`crates/xtask/README.md`](crates/xtask/README.md).
-
-## Read before you touch
-
-| Area | Contract |
-|---|---|
-| Architecture, crate boundaries, data flow | [`docs/architecture.md`](docs/architecture.md) |
-| Application (invocations, queue, history) | [`docs/application.md`](docs/application.md) |
-| Acceptance matrix (behavior → corpus → lane) | [`docs/acceptance-matrix.md`](docs/acceptance-matrix.md) |
-| Algorithm (discovery, retries, cancellation) | [`docs/algorithm.md`](docs/algorithm.md) |
-| Browser runtime, transports, tainted canvas | [`docs/browser-runtime.md`](docs/browser-runtime.md) |
-| Extension behavior, packaging, source binding | [`docs/extension.md`](docs/extension.md) |
-| CLI and desktop app | [`docs/native-apps.md`](docs/native-apps.md) |
-| Generated Host bindings and handoff | [`docs/bindings.md`](docs/bindings.md) |
-| Errors and typed recovery | [`docs/errors.md`](docs/errors.md) |
-| Security and credential rules | [`docs/security.md`](docs/security.md) |
-| Testing policy and fixtures | [`docs/testing.md`](docs/testing.md) |
-| UI visual language | [`packages/shared-ui/AGENTS.md`](packages/shared-ui/AGENTS.md) |
-| User-facing documentation | [`docs/user/README.md`](docs/user/README.md) |
-| Releases, operations, rollback, incidents | [`docs/releases.md`](docs/releases.md), [`docs/operations.md`](docs/operations.md) |
-
-## Hard rules
-
-- **Boundaries:** parsers and geometry are pure; the shared async algorithm calls
-  only injected Host capabilities. Platform I/O, clocks, codecs, and task ownership
-  belong to Hosts. Products never import each other. Shared UI never touches host
-  globals. Browser application modules compose UI and Host; transport/image modules
-  receive callbacks. Biome and Clippy enforce scoped import and Host capability rules.
-- **Contracts:** cross-language types are defined once in `crates/dezoomify/src/model.rs`;
-  `packages/wasm-bindings` is emitted by the real WASM build via
-  `cargo xtask bindings generate` and never hand-edited. Browser boundary
-  modules import it and never redeclare Rust contract types. Errors carry stable codes and structured context;
-  never branch on display strings.
-- **Generated artifacts:** nothing generated for the website is committed
-  (wasm glue, `help/`, `dist/`); the website-deploy workflow builds
-  everything via `scripts/build-site.mjs` (legacy site at `/`, Vite+React app
-  at `/beta`) and never serves repository files. `packages/wasm-bindings`
-  and `generated/*.json` are the only tracked generated trees.
-- **Website fetching:** direct browser fetch first; the metadata CORS proxy
-  is an automatic fallback for eligible public metadata.
-  The extension uses browser-session fetch under granted
-  host permissions, and only explicit-action scans.
-- **Extension permissions:** declare only permissions the shipped code actively uses;
-  the Chrome Web Store rejects unused permissions.
-- **Edits:** use `apply_patch` for manual edits; make the smallest complete
-  change; read the current file first and never revert unrelated or
-  concurrent work.
-- **Diagnostics:** preserve exact URLs, settings, and error causes for reproduction.
-  Keep reports bounded; use the extension-only sign-in note from
-  [the data-use guidance](docs/user/browser-extension.md#what-the-extension-does-with-your-data).
-- **Docs:** contracts in `docs/` are written in present tense as invariants
-  and updated in the same change that changes them. `docs/user/` is the only
-  source of user-facing text; link to it, never duplicate it.
-
-## Vocabulary
-
-Use these terms consistently in docs, code, and user-facing copy.
-
-| Term | Meaning |
-|---|---|
-| product | The website, extension, desktop app, or CLI. Not "surface" or "client". |
-| shared UI | The host-neutral UI (`packages/shared-ui`). |
-| runtime | Platform operations inside an app (browser or native). Internal term. |
-| Host | Injected platform capabilities called by the shared Rust algorithm. |
-| shared UI integration | An app's typed UI callbacks and capabilities. |
-| direct browser fetch | The website's credential-free readable fetch, always tried first. |
-| metadata CORS proxy | The website's metadata-only proxy ("Metadata proxy"). |
-| browser-session fetch | The extension's session fetch. Never "privileged fetch". |
-| ordinary image display | Tiles as plain `<img>` elements; visible, no byte access. |
-| readable bytes | Response bytes JavaScript can read. |
-| handoff | Moving a job to another app; the `dezoomify://` deep link is the mechanism. Never "escalation". |
-| output / save | The produced files and the user action that writes them. Never "export"/"download". |
-| job | One end-to-end user request, owned by one invocation. |
-| discovery / scan | Core image/level finding; the extension's one-shot tab observation. |
-| format | A site-format implementation. Never "dezoomer". |
-| scenario / fixture / golden / transcript | Deterministic test units under `testdata/scenarios`. Never "case". |
-
-## Git
-
-- `master` is the main branch and holds both the legacy site (`legacy/`) and the new apps.
-
-## Keeping this file current
-
-When commands, boundaries, vocabulary, or reference docs change, update this
-AGENTS.md file in the same change. This file contains rules and links only, never
-status narration, which belongs in the root `README.md`.
+Run from the repository root: `cargo xtask check` and `cargo xtask test`,
+using `cargo xtask test <target>` for focused iteration. Finish code changes
+with `cargo xtask test all` and `cargo xtask ci local`.
+Use `cargo xtask --help` for the full command grammar.

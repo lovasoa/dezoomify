@@ -78,6 +78,8 @@
               "options": {
                 "deniedGlobals": {
                   "window": "The shared UI is host-neutral; inject browser capabilities through its integration.",
+                  "document": "The shared UI is host-neutral; use the host-injected Document, never the global one.",
+                  "globalThis": "The shared UI is host-neutral; host globals only reach it through injected capabilities.",
                   "fetch": "The shared UI is host-neutral; inject fetching through its integration.",
                   "chrome": "The shared UI must not depend on extension globals.",
                   "tauri": "The shared UI must not depend on desktop globals."

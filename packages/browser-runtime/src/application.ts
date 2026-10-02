@@ -3,7 +3,6 @@ import {
   clearHistory,
   createSequentialQueue,
   type DiagnosticRecorder,
-  describeFailure,
   enqueueSequential,
   finishActiveQueueEntry,
   type HistoryEntry,
@@ -25,6 +24,7 @@ import {
   type ViewContext,
 } from "@dezoomify/shared-ui";
 import type {
+  ErrorTransport,
   Error as JobError,
   JobInput,
   MissingTiles,
@@ -34,6 +34,7 @@ import type {
   RecoveryChoice,
 } from "@dezoomify/wasm-bindings";
 import { createElement } from "react";
+import { isJobError } from "../../shared-ui/src/failure.ts";
 import type { BrowserSaveDisposition } from "./assembly.ts";
 import { createBrowserAssembly } from "./browser-assembly.ts";
 import { BrowserHost, type BrowserHostDependencies } from "./browser-host.ts";
@@ -52,11 +53,13 @@ import {
   selectionLimitsFor,
 } from "./limits.ts";
 import type { PermissionWait } from "./permissions.ts";
-import { desktopHandoffLink, isLocalFileUrl } from "./plan-gates.ts";
 import { createTileDecoder } from "./tile-decode.ts";
 import { BROWSER_MAX_CONCURRENCY } from "./tile-policy.ts";
 
-type WasmModule = Pick<typeof import("@dezoomify/wasm-bindings"), "dezoomify" | "applyProcessing">;
+type WasmModule = Pick<
+  typeof import("@dezoomify/wasm-bindings"),
+  "dezoomify" | "applyProcessing" | "isRetryable"
+>;
 export interface BrowserApplicationContext {
   signal: AbortSignal;
   diagnostics: DiagnosticRecorder;
@@ -77,7 +80,7 @@ export interface BrowserCapabilities
     signal: AbortSignal,
     title?: string,
   ): Promise<BrowserSaveDisposition> | BrowserSaveDisposition;
-  transport(): JobError["transport"] | null;
+  transport(): ErrorTransport | null;
   saveOutput?(): void;
   openOutput?(): Promise<void>;
   revealOutput?(): Promise<void>;
@@ -117,6 +120,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       onUpdate: () => {
         if (current === attempt) update();
       },
+      nowFn: Date.now,
     });
     const attempt = {
       url,
@@ -127,7 +131,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       capabilities: undefined as BrowserCapabilities | undefined,
       progress: undefined as Progress | undefined,
       output: undefined as Output | undefined,
-      failure: undefined as ReturnType<typeof describeFailure> | undefined,
+      failure: undefined as JobError | undefined,
       decision: undefined as
         | { missing: MissingTiles; answer(choice: RecoveryChoice): void }
         | undefined,
@@ -238,7 +242,6 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
           capabilities.save(blob, width, height, signal, a.progress?.title ?? undefined),
         onDisplayOnly: () => {
           if (current === a) {
-            a.view.desktopHandoffUrl = desktopHandoffLink(url);
             update();
           }
         },
@@ -257,12 +260,16 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
             a.activity.scheduleUpdate();
           }
         },
-        choosePartial: (missing, signal) =>
-          new Promise((resolve, reject) => {
+        transport: () => capabilities.transport(),
+        choosePartial: async (missing, signal) => {
+          signal.throwIfAborted();
+          const hinted = await withVerdictMissing(missing);
+          signal.throwIfAborted();
+          return new Promise((resolve, reject) => {
             const abort = () => reject(signal.reason);
             signal.addEventListener("abort", abort, { once: true });
             a.decision = {
-              missing,
+              missing: hinted,
               answer(choice) {
                 if (current !== a || signal.aborted) return;
                 signal.removeEventListener("abort", abort);
@@ -273,7 +280,8 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
               },
             };
             update();
-          }),
+          });
+        },
       });
       const limits = maximum
         ? MAXIMUM_SELECTION_LIMITS
@@ -302,12 +310,15 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       a.controller.signal.throwIfAborted();
       if (current !== a) return;
       a.output = output;
-      a.diagnostics.finish(a.output.complete ? "completed" : "partial-completed", a.output);
+      a.diagnostics.finish(
+        a.output.missing.length === 0 ? "completed" : "partial-completed",
+        a.output,
+      );
       const entry = toHistoryEntry(url, {
         width: a.output.canvas?.width ?? 0,
         height: a.output.canvas?.height ?? 0,
         format: a.output.disposition === "display-only" ? "display" : "png",
-        at: Date.now(),
+        at: a.activity.state.now,
       });
       if (entry && options.history) {
         history = pushHistory(history, entry);
@@ -319,27 +330,9 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       if (current !== a) return;
       outcome = a.controller.signal.aborted ? "cancelled" : "failed";
       if (outcome === "failed") {
-        const failure = error && typeof error === "object" ? (error as Partial<JobError>) : {};
-        a.failure = describeFailure(
-          {
-            ...failure,
-            code: failure?.code ?? "OUTPUT_FAILED",
-            message: failure?.message ?? String(error),
-            phase:
-              failure?.phase ??
-              (a.progress?.phase === "planning" ? "validation" : a.progress?.phase) ??
-              "discovery",
-            transport: failure?.transport ?? a.capabilities?.transport() ?? undefined,
-          },
-          (() => {
-            try {
-              return new URL(url).host;
-            } catch {
-              return "";
-            }
-          })(),
+        a.failure = await withVerdict(
+          isJobError(error) ? error : { kind: "internal", detail: String(error).slice(0, 2048) },
         );
-        a.view.desktopHandoffUrl = desktopHandoffLink(url);
       }
       a.diagnostics.finish(outcome, error);
     } finally {
@@ -356,18 +349,31 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
     }
   }
 
+  /** Stamp the boundary's retry verdict (`isRetryable`, the one policy in
+   * Rust) onto an error as a plain `retryable` hint for the shared UI. An
+   * error that cannot reach the boundary keeps no hint and so fails closed. */
+  async function withVerdict(error: JobError): Promise<JobError> {
+    try {
+      (error as { retryable?: boolean }).retryable = (await options.wasm()).isRetryable(error);
+    } catch {
+      // No verdict: the hint stays absent and retry fails closed.
+    }
+    return error;
+  }
+
+  /** `withVerdict` across every retained failure of a partial decision. */
+  async function withVerdictMissing(missing: MissingTiles): Promise<MissingTiles> {
+    await Promise.all(
+      missing.missing.flatMap((tile) => tile.failures.map((failure) => withVerdict(failure))),
+    );
+    return missing;
+  }
+
   function submit(url: string): void {
     url = url.trim();
     if (!isValidInputUrl(url)) {
       initialUrl = url;
-      const error: JobError = {
-        code: "INVALID_URL",
-        phase: "validation",
-        retryable: false,
-        message: isLocalFileUrl(url)
-          ? "Local files cannot be opened on this website. Use the desktop app for files on your computer."
-          : "Please enter a valid web address starting with http:// or https://",
-      };
+      const error: JobError = { kind: "invalid-url" };
       idle = presentFailure(error);
       if (!current || current.done) {
         retire();
@@ -392,7 +398,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       shown = presentation();
     a?.diagnostics.context({
       presented_phase: shown.phase,
-      presented_error: shown.error?.code ?? "",
+      presented_error: shown.error?.kind ?? "",
     });
     const report = a?.diagnostics.report();
     if (a)

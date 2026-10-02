@@ -1,6 +1,6 @@
 # Development
 
-One monorepo: Rust crates, generated WASM bindings, shared UI, hosts, extension packaging, and release tooling change together. Run tasks from the root through `cargo xtask`; direct Cargo/pnpm commands serve component debugging only. Node 24 minimum.
+One monorepo: Rust crates, generated WASM bindings, shared UI, hosts, extension packaging, and release tooling change together. Run tasks from the root through `cargo xtask`; direct Cargo/pnpm commands serve component debugging only. Node 24.15.0 minimum.
 
 ## Working areas
 
@@ -30,7 +30,7 @@ cargo xtask dev web
 
 `setup` checks Rust, Node, WASM, and wasm-bindgen tools, bootstraps pinned pnpm when needed, installs frozen workspace dependencies, and reports browser status. It installs no browser binaries or Rust toolchains. `check` runs format, lint, type checking, boundaries, generated-file checks, and manifest validation without rewriting sources.
 
-Bare `test` is the fast aggregate (one Rust workspace run plus one combined Node unit run; no `check`, no generated bindings, no WXT output, no browsers). `test all` adds the generated WASM Node harness, website Chromium E2E, and build-dependent Chromium/Firefox extension integration. The desktop real-window test stays explicit, outside `all`. Only `test live` touches public sites.
+Bare `test` is the fast aggregate and `test all` adds build-dependent WASM, website, and extension integration; the desktop real-window test stays explicit and only `test live` touches public sites. Coverage details: [Testing](testing.md).
 
 `setup` also installs the versioned hooks: pre-commit checks Rust formatting; pre-push runs `cargo xtask ci check`, printing its log only on failure.
 
@@ -44,16 +44,7 @@ Bare `test` is the fast aggregate (one Rust workspace run plus one combined Node
 | `web` | full site via `scripts/build-site.mjs`: WASM function plus browser glue under `wasm/`, Vite bundle, help pages, deployable `dist/` tree (needs `wasm-bindgen-cli` matching `Cargo.lock`) |
 | `cli` | real `dezoomify-cli` binary under `target/debug/` |
 | `desktop` | lean shell always compiles; Tauri window shell (feature `tauri`) compiles with platform webview packages present; with bundler prerequisites and without `--unsigned-test`, a real bundle for the matching host (Linux `deb`, Windows `msi`/`nsis`, macOS `dmg`; see [Native apps](native-apps.md#desktop-bundles)) |
-| `extension` | store-shaped Chromium and Firefox ZIPs under `target/extension/`, packed by the store-submission script |
-
-Examples:
-
-```sh
-cargo xtask build desktop --unsigned-test
-cargo xtask build extension
-cargo xtask build cli
-```
-
+| `extension` | store-shaped Chromium and Firefox ZIPs under `target/extension/` |
 The browser-runtime build is `cargo xtask test browser --build-only`. Shared UI artifacts come from `build web`, `build desktop`, `build extension`; no `build browser`, `build ui`, `build native`, or `build all` aliases exist.
 
 The TypeScript/TSX sources (`src/*.ts` plus imported shared-UI and browser-runtime sources) are the single source of truth: type-checked, unit-tested, bundled by Vite (`base: "/beta/"`). Wasm glue (`wasm/`), Vite output (`dist/`), and help pages (`help/`) are generated, never committed: `website-deploy` builds them on every `master` push (see [Operations](operations.md#website-deployment-contract)); `cargo xtask build web` builds them locally.
@@ -69,7 +60,7 @@ The TypeScript/TSX sources (`src/*.ts` plus imported shared-UI and browser-runti
 | `desktop` | real Tauri dev app; fails closed naming missing webview packages |
 | `extension` | store-shaped production build in Playwright Chromium with a throwaway profile; rerun after changes |
 
-Both serve the assembled `dist/` tree through `scripts/dev-server.mjs` (loopback static server plus the same `POST`/`OPTIONS /api/proxy` relay Cloudflare runs; relay core lives once in `src/server/proxy.ts`). `dev web` mirrors the deployed site; `dev ui` opens the beta surface. Nothing extra installs; `cargo xtask dev web` alone gives a working app.
+Both serve the assembled `dist/` tree through `scripts/dev-server.mjs` (loopback static server plus the same `POST`/`OPTIONS /api/proxy` relay Cloudflare runs; relay core lives once in `src/server/proxy.ts`). `dev web` serves the same assembled `dist/` tree the deployed site serves; `dev ui` opens the beta surface. Nothing extra installs; `cargo xtask dev web` alone gives a working app.
 
 `dev desktop` starts the Vite server on `http://localhost:1420/`, waits for it, then launches the Tauri shell. The server is non-interactive; its whole process tree stops with the shell, including second launches forwarded to a running app.
 
@@ -130,9 +121,4 @@ Follow [Contributing a format](CONTRIBUTING-format.md). In short:
 
 ## Change rules
 
-- Domain decisions live in the shared Rust algorithm, never in UI or transport code.
-- Hosts implement capabilities; the shared algorithm owns selection and retries.
-- Runtime differences travel as capabilities and shared error codes.
-- Behavior exercised by more than one runtime gets a shared scenario.
-- Discovery, selection, retry, and partial-output policy live in shared Rust. The website supplies direct-first metadata proxy policy through its Host capabilities.
-- Preserve exact URLs, settings, and error causes in diagnostics so reports can reproduce failures. Keep capture bounded and use the extension-only sign-in note described in [Security](security.md#credentials).
+Domain decisions, selection, retries, and partial-output policy live in shared Rust; hosts implement capabilities, runtime differences travel as typed capabilities and errors, and behavior exercised by more than one runtime gets a shared scenario. Diagnostics and copy rules: root `AGENTS.md` hard rules and [Security](security.md#credentials).

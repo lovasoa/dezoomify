@@ -39,9 +39,7 @@ One Cloudflare Pages project (the original `dezoomify`) builds from GitHub Actio
 
 ## Update and installer truth
 
-- No auto-update endpoint exists: `release/config.toml` sets `[updater] enabled = false` with empty endpoints, `tauri.conf.json` ships empty updater endpoints, and the desktop capability sets `updater.enabled: false` with an empty allowlist.
-- Download published artifacts from the corresponding GitHub Release.
-- Linux x86_64, Windows x86_64, and Apple silicon macOS installers ship in every release.
+No auto-update endpoint exists; updater state: [Releases](releases.md#desktop-updater). Users download published artifacts from the corresponding GitHub Release, and Linux x86_64, Windows x86_64, and Apple silicon macOS installers ship in every release.
 
 ## Service levels
 

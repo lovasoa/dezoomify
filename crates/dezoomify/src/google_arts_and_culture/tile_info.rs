@@ -38,13 +38,15 @@ impl PageInfo {
     pub fn tile_info_url(&self) -> String {
         self.base_url.clone() + "=g"
     }
-    pub fn path(&self) -> &str {
-        // The base url is something like "https://lh3.googleusercontent.com/ci/xxx",
-        // and we need to extract the "ci/xxx" part.
+
+    /// The signing path: the `ci/xxx` part of a base url like
+    /// `https://lh3.googleusercontent.com/ci/xxx`. Fallible because the
+    /// base url is server-controlled text.
+    pub fn path(&self) -> Result<&str, PageParseError> {
         self.base_url
             .splitn(4, '/')
             .nth(3)
-            .expect("Google Arts base_url is malformed")
+            .ok_or(PageParseError::MalformedBase)
     }
 }
 
@@ -99,6 +101,8 @@ impl FromStr for PageInfo {
 pub enum PageParseError {
     #[error("Unable to find the token in the page")]
     NoToken,
+    #[error("The Google Arts base URL has no path component")]
+    MalformedBase,
 }
 
 #[cfg(test)]

@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![allow(unused_imports)]
 #![allow(clippy::result_large_err)]
 use dezoomify::model::Progress;
 use dezoomify_native::{Controls, JobOptions, NativeHost, OutputTarget, Publication};
@@ -22,21 +23,17 @@ pub fn run_host(host: &NativeHost<'_>) -> Result<Publication, dezoomify::model::
     ));
     if let Err(error) = &result {
         host.diagnostics.finish(
-            if error.code == "job.cancelled" {
+            if matches!(error.cause(), dezoomify::model::Error::Cancelled) {
                 "cancelled"
             } else {
                 "failed"
             },
-            serde_json::json!({"code": error.code, "message": error.message}),
+            serde_json::json!({ "error": error }),
         );
     }
     result?;
     host.publication().ok_or_else(|| {
-        dezoomify::model::Error::new(
-            "native.internal",
-            dezoomify::model::ErrorPhase::Output,
-            "output was not published",
-        )
+        dezoomify::model::Error::Internal("output was not published".to_string().into())
     })
 }
 
@@ -98,6 +95,17 @@ fn options_for_target(
 
 pub use dezoomify_fixture_server::{start as start_fixture_server, temp_dir};
 
+/// Map a publication to the historical scenario's expected result.
+pub fn golden_result(outcome: &Publication) -> dezoomify_fixture_server::GoldenResult {
+    let canvas = outcome.output.canvas.as_ref().expect("published canvas");
+    dezoomify_fixture_server::GoldenResult {
+        image_size: (canvas.width as u64, canvas.height as u64),
+        tile_count: outcome.tile_count as u64,
+        output_format: outcome.output.format.as_str().to_string(),
+        partial: !outcome.output.is_complete(),
+    }
+}
+
 pub fn http_response(status: &str, content_type: &str, body: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(format!("HTTP/1.1 {status}\r\n").as_bytes());
@@ -116,7 +124,6 @@ pub fn scenario_payload(name: &str) -> Vec<u8> {
     )
     .unwrap_or_else(|e| panic!("read payload {name}: {e}"))
 }
-
 
 pub const DZI_512: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <Image TileSize="256" Format="png" Overlap="0" xmlns="http://schemas.microsoft.com/deepzoom/2008">

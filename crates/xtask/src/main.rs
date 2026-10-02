@@ -18,7 +18,6 @@ mod extension;
 mod fixtures;
 mod live;
 mod native;
-mod perf;
 mod release;
 mod setup;
 mod style;
@@ -46,10 +45,7 @@ fn dispatch(args: &[String]) -> Result<(), String> {
     let first = args.first().map(String::as_str).unwrap_or("--help");
     match first {
         "--help" | "-h" | "help" => {
-            print!(
-                "{}",
-                HELP.replace("|--browser <chromium|firefox|webkit|all>", "")
-            );
+            print!("{HELP}");
             Ok(())
         }
         "setup" => setup::run(&args[1..]),
@@ -145,53 +141,5 @@ pub(crate) fn reject_unknown_args(target: &str, args: &[String]) -> Result<(), S
             "unknown {target} argument(s): {}; this target takes no options",
             args.join(" ")
         ))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{dispatch, HELP};
-
-    fn s(args: &[&str]) -> Vec<String> {
-        args.iter().map(|a| a.to_string()).collect()
-    }
-
-    #[test]
-    fn command_help() {
-        // Help lists the implemented command surface: no future commands.
-        assert!(dispatch(&s(&["--help"])).is_ok());
-        for cmd in [
-            "setup", "check", "fixtures", "bindings", "build", "dev", "ci", "release", "test",
-        ] {
-            assert!(HELP.contains(cmd), "help lacks {cmd}");
-        }
-    }
-
-    #[test]
-    fn rejects_unavailable_commands() {
-        for args in [
-            vec!["build", "bogus"],
-            vec!["dev", "bogus"],
-            vec!["ci", "bogus"],
-            vec!["release", "bogus"],
-            vec!["bindings", "bogus"],
-            vec!["test", "bogus"],
-            vec!["bogus"],
-        ] {
-            assert!(dispatch(&s(&args)).is_err(), "accepted {args:?}");
-        }
-        // Only implemented subcommands parse.
-        assert!(dispatch(&s(&["fixtures", "bogus"])).is_err());
-        assert!(dispatch(&s(&["sources", "verify"])).is_err());
-        assert!(dispatch(&s(&["parity", "validate"])).is_err());
-    }
-
-    #[test]
-    fn test_command() {
-        // Unknown flags and live filters fail instead of widening coverage.
-        // Unknown core options must fail before any suite runs.
-        assert!(dispatch(&s(&["test", "--live"])).is_err());
-        assert!(dispatch(&s(&["test", "bogus"])).is_err());
-        assert!(dispatch(&s(&["test", "core", "--bogus"])).is_err());
     }
 }

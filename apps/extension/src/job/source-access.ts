@@ -1,12 +1,12 @@
 import {
   decodeBase64Payload,
-  isFetchFailure,
+  isJobError,
   isPublicHttpUrl,
   originOfUrl,
   SOURCE_FETCH_BYTE_LIMIT,
   validateRequestHeaders,
 } from "@dezoomify/browser-runtime";
-import type { FetchFailure, ResourceRequest } from "@dezoomify/wasm-bindings";
+import type { Error as JobError, ResourceRequest } from "@dezoomify/wasm-bindings";
 import type { WxtBrowser } from "wxt/browser";
 import { transportError } from "../runtime/fetch.ts";
 import { cancelSourceFetch, collectCandidates, fetchSource } from "./source-operations.ts";
@@ -72,7 +72,7 @@ function validSnapshot(value: unknown, expectedUrl: string): value is CandidateS
 function validFetchResult(value: unknown, expectedUrl: string): value is FetchResult {
   if (!isRecord(value) || typeof value.documentUrl !== "string") return false;
   if (!sameDocumentUrl(value.documentUrl, expectedUrl)) return false;
-  if (value.ok === false) return isFetchFailure(value.error);
+  if (value.ok === false) return isJobError(value.error);
   return (
     value.ok === true &&
     (value.contentType === undefined ||
@@ -104,9 +104,9 @@ export function createSourceAccess(
   options: { timeoutMs?: number } = {},
 ) {
   if (!Number.isSafeInteger(reference.tabId) || reference.tabId < 0)
-    throw transportError("TRANSPORT_BAD_URL", "invalid source tab id");
+    throw transportError("bad-url", "invalid source tab id");
   if (!isPublicHttpUrl(reference.documentUrl) || reference.documentUrl.length > MAX_URL_LENGTH)
-    throw transportError("TRANSPORT_BAD_URL", "invalid source document URL");
+    throw transportError("bad-url", "invalid source document URL");
 
   const { tabId, documentUrl } = reference;
   const timeoutMs = options.timeoutMs ?? 30_000;
@@ -127,16 +127,13 @@ export function createSourceAccess(
   function invalidate() {
     if (invalidated) return;
     invalidated = true;
-    lifetime.abort(
-      transportError("DISCOVERY_FAILED", "source document changed", "source-document-lost"),
-    );
+    lifetime.abort(transportError("source-lost", "source document changed"));
   }
   browserApi.tabs.onUpdated.addListener(onUpdated);
   browserApi.tabs.onRemoved.addListener(onRemoved);
 
   function assertLive() {
-    if (invalidated)
-      throw transportError("DISCOVERY_FAILED", "source document changed", "source-document-lost");
+    if (invalidated) throw transportError("source-lost", "source document changed");
   }
 
   async function injectUnchecked<Args extends unknown[], Result>(
@@ -151,11 +148,11 @@ export function createSourceAccess(
     signal.throwIfAborted();
     if (!tab) {
       invalidate();
-      throw transportError("DISCOVERY_FAILED", "source tab is unavailable", "source-document-lost");
+      throw transportError("source-lost", "source tab is unavailable");
     }
     if (!tab.url || !sameDocumentUrl(tab.url, documentUrl)) {
       invalidate();
-      throw transportError("DISCOVERY_FAILED", "source document changed", "source-document-lost");
+      throw transportError("source-lost", "source document changed");
     }
     assertLive();
     onLaunch?.();
@@ -168,18 +165,18 @@ export function createSourceAccess(
       .catch((cause: unknown) => {
         assertLive();
         throw {
-          ...transportError("TRANSPORT_NETWORK_ERROR", "source operation could not run", "network"),
+          ...transportError("network-failure", "source operation could not run"),
           detail: cause instanceof Error ? cause.message : String(cause),
         };
       });
     signal.throwIfAborted();
     assertLive();
     if (!Array.isArray(results) || results.length !== 1 || results[0]?.frameId !== 0)
-      throw transportError("TRANSPORT_BAD_URL", "source operation returned an invalid result");
+      throw transportError("bad-url", "source operation returned an invalid result");
     const tabAfter = await browserApi.tabs.get(tabId).catch(() => null);
     if (!tabAfter?.url || !sameDocumentUrl(tabAfter.url, documentUrl)) {
       invalidate();
-      throw transportError("DISCOVERY_FAILED", "source document changed", "source-document-lost");
+      throw transportError("source-lost", "source document changed");
     }
     assertLive();
     const result = results[0].result;
@@ -187,11 +184,7 @@ export function createSourceAccess(
       isRecord(result) && typeof result.documentUrl === "string" ? result.documentUrl : null;
     if (!resultDocumentUrl || !sameDocumentUrl(resultDocumentUrl, documentUrl)) {
       invalidate();
-      throw transportError(
-        "DISCOVERY_FAILED",
-        "source result belongs to another document",
-        "source-document-lost",
-      );
+      throw transportError("source-lost", "source result belongs to another document");
     }
     return result as Awaited<Result>;
   }
@@ -206,10 +199,10 @@ export function createSourceAccess(
   ): Promise<Awaited<Result>> {
     assertLive();
     const deadline = new AbortController();
-    const timeout: FetchFailure = {
-      code: "TRANSPORT_TIMEOUT",
-      message: "The source operation timed out.",
+    const timeout: JobError = {
+      kind: "timeout",
       transport: "browser-session",
+      detail: "the source operation timed out",
     };
     let reachDeadline = () => {};
     const deadlineReached = new Promise<void>((resolve) => {
@@ -235,7 +228,7 @@ export function createSourceAccess(
     let operationDone = Promise.resolve();
     const abort = () => {
       const reason = signal?.aborted
-        ? transportError("TRANSPORT_CANCELLED", "source fetch cancelled", "cancelled")
+        ? transportError("cancelled", "source fetch cancelled")
         : combined.reason;
       if (onAbort && launched) {
         const cleanup = Promise.resolve()
@@ -272,23 +265,22 @@ export function createSourceAccess(
   async function scan(signal?: AbortSignal): Promise<CandidateSnapshot> {
     const snapshot = await inject(collectCandidates, [], signal);
     if (!validSnapshot(snapshot, documentUrl))
-      throw transportError("TRANSPORT_BAD_URL", "invalid source scan result");
+      throw transportError("bad-url", "invalid source scan result");
     assertLive();
     return snapshot;
   }
 
   async function fetch(request: Pick<ResourceRequest, "uri" | "headers">, signal: AbortSignal) {
     assertLive();
-    if (signal.aborted)
-      throw transportError("TRANSPORT_CANCELLED", "source fetch cancelled", "cancelled");
+    if (signal.aborted) throw transportError("cancelled", "source fetch cancelled");
     if (
       typeof request.uri !== "string" ||
       request.uri.length > MAX_URL_LENGTH ||
       !isPublicHttpUrl(request.uri)
     )
-      throw transportError("TRANSPORT_BAD_URL", "invalid source request URL");
+      throw transportError("bad-url", "invalid source request URL");
     const headers = validateRequestHeaders(request.headers ?? []);
-    if (!headers) throw transportError("TRANSPORT_BAD_URL", "invalid source request headers");
+    if (!headers) throw transportError("bad-url", "invalid source request headers");
 
     const operationId = crypto.randomUUID();
     const deadlineAt = Date.now() + timeoutMs;
@@ -310,15 +302,14 @@ export function createSourceAccess(
         .then(() => undefined);
     };
     const result = await inject(fetchSource, [sourceRequest], signal, cancel, deadlineAt);
-    if (signal.aborted)
-      throw transportError("TRANSPORT_CANCELLED", "source fetch cancelled", "cancelled");
+    if (signal.aborted) throw transportError("cancelled", "source fetch cancelled");
     assertLive();
     if (!validFetchResult(result, documentUrl))
-      throw transportError("TRANSPORT_BAD_URL", "invalid source fetch result");
+      throw transportError("bad-url", "invalid source fetch result");
     if (result.ok === false) throw result.error;
     const bytes = decodeBase64Payload(result.data, SOURCE_FETCH_BYTE_LIMIT);
     if (!bytes || bytes.byteLength !== result.bytes)
-      throw transportError("TRANSPORT_BAD_URL", "invalid source payload");
+      throw transportError("bad-url", "invalid source payload");
     return { bytes, finalUri: result.url, http: result.status, contentType: result.contentType };
   }
 

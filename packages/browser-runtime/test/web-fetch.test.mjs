@@ -2,12 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { classifyProxyFailure, createWebFetcher } from "../src/web-fetch.ts";
 
-const messages = {
-  rateLimitedBySite: "RATE_LIMITED",
-  siteBusy: "SITE_BUSY",
-  discoveryFailed: (via) => `DISCOVERY_FAILED_VIA_${via}`,
-};
-
 function request(uri, purpose = "metadata", headers = []) {
   return { uri, purpose, headers };
 }
@@ -27,7 +21,6 @@ function makeFetcher(fetchImpl, extra = {}) {
       onRequestEnd: (_id, ok) => events.push(ok ? "ok" : "failed"),
       onUpdate: () => {},
     },
-    messages,
     ...extra,
   });
   return { fetcher, events };
@@ -68,7 +61,8 @@ test("direct metadata never proxies an upstream refusal and bounds its preview",
     },
   );
   await assert.rejects(fetcher.fetchResource(request("https://a.test/x"), signal), (error) => {
-    assert.equal(error.code, "DISCOVERY_HTTP_ERROR");
+    assert.equal(error.kind, "http-error");
+    assert.equal(error.status, 403);
     assert.match(error.preview, /Forbidden x/);
     assert.ok(error.preview.length <= 300);
     return true;
@@ -105,8 +99,8 @@ test("a stalled error preview preserves the HTTP refusal without proxy fallback"
   await new Promise((resolve) => setImmediate(resolve));
   deadline.abort(new DOMException("Timed out", "TimeoutError"));
   await assert.rejects(pending, (error) => {
-    assert.equal(error.code, "DISCOVERY_HTTP_ERROR");
-    assert.equal(error.http, 403);
+    assert.equal(error.kind, "http-error");
+    assert.equal(error.status, 403);
     return true;
   });
   assert.equal(proxyCalls, 0);
@@ -136,7 +130,7 @@ test("a proxy deadline reports a network failure rather than job cancellation", 
   await new Promise((resolve) => setImmediate(resolve));
   deadline.abort(new DOMException("Timed out", "TimeoutError"));
   await assert.rejects(pending, (error) => {
-    assert.equal(error.code, "PROXY_ERROR");
+    assert.equal(error.kind, "proxy-error");
     assert.equal(error.transport, "metadata-proxy");
     return true;
   });
@@ -213,7 +207,7 @@ test("oversized direct streams stop before buffering the full response", async (
   });
   const { fetcher } = makeFetcher(async () => new Response(stream));
   await assert.rejects(fetcher.fetchResource(request("https://a.test/large"), signal), {
-    code: "TRANSPORT_SIZE_LIMIT",
+    kind: "size-limit",
   });
   assert.equal(cancelled, true);
 });
@@ -227,16 +221,22 @@ test("an aborted metadata request makes no proxy request", async () => {
     throw new Error("unexpected fetch");
   });
   await assert.rejects(fetcher.fetchResource(request("https://a.test/x"), controller.signal), {
-    code: "TRANSPORT_CANCELLED",
+    kind: "cancelled",
   });
   assert.equal(called, false);
 });
 
 test("proxy policy denials stay distinct from upstream refusals", () => {
-  const policy = classifyProxyFailure({ status: 403, code: "PROXY_POLICY_DENIED" });
+  const policy = classifyProxyFailure({
+    status: 403,
+    code: "PROXY_POLICY_DENIED",
+    reason: "signed-query",
+  });
   const upstream = classifyProxyFailure({ status: 403, code: "TRANSPORT_HTTP_ERROR" });
-  assert.equal(policy.code, "TRANSPORT_POLICY_DENIED");
-  assert.equal(upstream.code, "TRANSPORT_HTTP_ERROR");
-  assert.equal(policy.http, 403);
-  assert.equal(upstream.http, 403);
+  assert.equal(policy.kind, "policy-denied");
+  assert.equal(policy.blocked_reason, "signed-query");
+  assert.equal(policy.transport, "metadata-proxy");
+  assert.equal(upstream.kind, "http-error");
+  assert.equal(upstream.status, 403);
+  assert.equal(upstream.transport, "metadata-proxy");
 });

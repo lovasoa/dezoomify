@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use dezoomify::model::{Error, ErrorPhase, OutputFormat};
+use dezoomify::model::{Error, Failure, LimitContext, OutputFormat};
 
 /// One rendered `iiif-dir` tile set: `(relative path, bytes)` pairs in
 /// sorted relative-path order.
@@ -185,10 +185,10 @@ pub fn write_iiif_dir(dir: &Path, info_json: &[u8], tiles: &IiifTiles) -> Result
     // directory path is replaced before the tile tree is written.
     if dir.is_file() {
         std::fs::remove_file(dir)
-            .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed("output write failed", &e))?;
     }
     std::fs::create_dir_all(dir)
-        .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+        .map_err(|e| crate::output::write_failed("output write failed", &e))?;
     for (relative, bytes) in tiles {
         if relative.contains("..") || relative.contains('\\') || Path::new(relative).is_absolute() {
             return Err(crate::output::destination_denied(
@@ -198,50 +198,61 @@ pub fn write_iiif_dir(dir: &Path, info_json: &[u8], tiles: &IiifTiles) -> Result
         let dest = dir.join(relative);
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+                .map_err(|e| crate::output::write_failed("output write failed", &e))?;
         }
         let tmp = dest.with_extension("tmp");
         std::fs::write(&tmp, bytes)
-            .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed("output write failed", &e))?;
         std::fs::rename(&tmp, &dest)
-            .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed("output write failed", &e))?;
     }
     let manifest = dir.join("info.json");
     let tmp = manifest.with_extension("tmp");
     std::fs::write(&tmp, info_json)
-        .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+        .map_err(|e| crate::output::write_failed("output write failed", &e))?;
     std::fs::rename(&tmp, &manifest)
-        .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+        .map_err(|e| crate::output::write_failed("output write failed", &e))?;
     Ok(())
 }
 
-pub(crate) fn canvas_memory_unavailable(
-    width: u32,
-    height: u32,
-    required: &str,
-    available: &str,
-) -> Error {
-    Error::new("output.canvas-limit", ErrorPhase::Output, format!("composed image {width}x{height} needs {required} of canvas memory, but only {available} is currently available; save a smaller level with --max-width"))
+/// A memory- or format-budget refusal with structured facts for host copy;
+/// display prose is presentation only and never a data channel.
+pub(crate) fn memory_limit(limit: LimitContext) -> Error {
+    Error::LimitExceeded { limit }
 }
 
 fn output_exists() -> Error {
-    Error::new(
-        "output.exists",
-        ErrorPhase::Output,
-        "output exists (refusing overwrite); choose a different destination or confirm overwrite",
-    )
+    Error::OutputExists
 }
 
 fn destination_denied(detail: impl Into<String>) -> Error {
-    Error::new("output.destination-denied", ErrorPhase::Output, detail)
+    Error::DestinationDenied(Failure {
+        request: None,
+        detail: Some(detail.into()),
+    })
 }
 
 fn unsupported_extension(detail: impl Into<String>) -> Error {
-    Error::new("output.unsupported-extension", ErrorPhase::Output, detail)
+    Error::UnsupportedExtension(Failure {
+        request: None,
+        detail: Some(detail.into()),
+    })
 }
 
-pub(crate) fn write_failed(detail: impl Into<String>) -> Error {
-    Error::new("output.write-failed", ErrorPhase::Output, detail)
+/// Output write failure with the failing step and cause chain preserved in
+/// the failure detail.
+pub(crate) fn write_failed(
+    message: impl Into<String>,
+    cause: &(dyn std::error::Error + 'static),
+) -> Error {
+    Error::WriteFailed(
+        format!(
+            "{}: {}",
+            message.into(),
+            dezoomify::model::chain_text(cause)
+        )
+        .into(),
+    )
 }
 
 #[cfg(test)]

@@ -39,7 +39,7 @@ const artifacts = {
   "apps/desktop/src-tauri/capabilities/generated.json": capabilities,
   "generated/desktop-capabilities.json": {
     app: "desktop",
-    bundle: { identifier: config.identifier, protocolScheme: "dezoomify" },
+    bundle: { identifier: config.identifier },
     ...metadata,
     generator: "scripts/generate-desktop-capabilities.mjs",
   },

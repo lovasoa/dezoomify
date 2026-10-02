@@ -10,10 +10,12 @@
     "dezoomify:allow-cancel-job",
     "dezoomify:allow-dezoomify",
     "dezoomify:allow-get-job-diagnostics",
+    "dezoomify:allow-is-retryable",
     "dezoomify:allow-open-saved-output",
     "dezoomify:allow-pause-job",
     "dezoomify:allow-release-job",
-    "dezoomify:allow-resume-job"
+    "dezoomify:allow-resume-job",
+    "dezoomify:allow-validate-settings"
   ],
   "windows": [
     "main"
@@ -24,10 +26,12 @@
       "cancel_job",
       "dezoomify",
       "get_job_diagnostics",
+      "is_retryable",
       "open_saved_output",
       "pause_job",
       "release_job",
-      "resume_job"
+      "resume_job",
+      "validate_settings"
     ],
     "decoders": [
       "png",
@@ -50,7 +54,6 @@
       "iiif-dir"
     ],
     "eventChannels": [
-      "dezoomify://deep-link-pending",
       "dezoomify://partial",
       "dezoomify://progress",
       "dezoomify://registered"
@@ -61,12 +64,6 @@
       "enabled": false,
       "httpsOnly": true,
       "requiresUserConfirm": true
-    },
-    "deepLink": {
-      "name": "dezoomify",
-      "schemes": [
-        "dezoomify"
-      ]
     }
   }
 }

@@ -30,12 +30,11 @@ pub fn run(args: &[String]) -> Result<(), String> {
             Some("scenario") => return super::native::test_scenario(&args[1..]),
             Some("desktop") => return super::desktop::test_desktop(&args[1..]),
             Some("extension") => return super::extension::test_extension(&args[1..]),
-            Some("perf") => return super::perf::run(&args[1..]),
             Some("all") => return super::ci::test_all(),
             _ => {}
         }
         return Err(format!(
-            "unknown test arguments (targets: core, bindings, wasm, browser, ui, web, native, scenario, desktop, extension, perf, all, live): {}",
+            "unknown test arguments (targets: core, bindings, wasm, browser, ui, web, native, scenario, desktop, extension, all, live): {}",
             args.join(" ")
         ));
     }
@@ -48,8 +47,8 @@ fn cargo_test() -> Result<(), String> {
     super::command::cargo_test(&["--workspace"])
 }
 
-/// `test ui`: host-neutral presentation, rendering, a11y, i18n, history,
-/// and handoff copy. No network or browsers.
+/// `test ui`: host-neutral presentation, rendering, a11y, i18n, and
+/// history. No network or browsers.
 pub(crate) fn test_ui(args: &[String]) -> Result<(), String> {
     if !args.is_empty() {
         return Err(format!(
@@ -64,7 +63,6 @@ pub(crate) fn test_ui(args: &[String]) -> Result<(), String> {
             "test/ui-a11y.test.mjs",
             "test/ui-i18n.test.mjs",
             "test/history.test.mjs",
-            "test/handoff.test.mjs",
             "test/hash.test.mjs",
         ],
         true,

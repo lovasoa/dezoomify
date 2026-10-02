@@ -36,15 +36,14 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use dezoomify::Vec2d;
-use image::RgbaImage;
-
 use crate::imaging::{
     blit_onto, encode_jpeg, encode_png, encode_tiff, encode_webp, encode_zif_pyramid,
     render_iiif_dir, DecodedTile,
 };
 use crate::output::{partial_path_for, validate_destination, write_iiif_dir};
-use dezoomify::model::{Error, ErrorPhase, OutputFormat, ReusedTile};
+use dezoomify::model::{Error, LimitContext, LimitReason, OutputFormat, ReusedTile, Size};
+use dezoomify::Vec2d;
+use image::RgbaImage;
 
 /// Encoder and buffering settings owned by the output sink.
 #[derive(Clone, Debug)]
@@ -201,20 +200,20 @@ impl Sink {
             .checked_mul(u64::from(height))
             .and_then(|pixels| pixels.checked_mul(4));
         let Some(bytes) = required else {
-            return Err(crate::output::canvas_memory_unavailable(
-                width,
-                height,
-                "over 16 EiB",
-                &describe_bytes(available),
-            ));
+            return Err(crate::output::memory_limit(LimitContext {
+                reason: LimitReason::Memory,
+                dimensions: Some(Size { width, height }),
+                bytes_required: None,
+                bytes_available: Some(available),
+            }));
         };
         if crate::imaging::exceeds_available_memory(bytes, available) {
-            return Err(crate::output::canvas_memory_unavailable(
-                width,
-                height,
-                &describe_bytes(bytes),
-                &describe_bytes(available),
-            ));
+            return Err(crate::output::memory_limit(LimitContext {
+                reason: LimitReason::Memory,
+                dimensions: Some(Size { width, height }),
+                bytes_required: Some(bytes),
+                bytes_available: Some(available),
+            }));
         }
         self.stats.canvas_bytes = bytes;
         self.width = width;
@@ -265,15 +264,15 @@ impl Sink {
         if overlaps {
             let bytes = tile_bytes(&tile.image);
             if self.retained_bytes.saturating_add(bytes) > self.retain_cap_bytes {
-                return Err(crate::output::canvas_memory_unavailable(
-                    self.width,
-                    self.height,
-                    &format!(
-                        "overlapping-tile retention beyond {}",
-                        describe_bytes(self.retain_cap_bytes)
-                    ),
-                    &describe_bytes(crate::imaging::available_memory_bytes()),
-                ));
+                return Err(crate::output::memory_limit(LimitContext {
+                    reason: LimitReason::Memory,
+                    dimensions: Some(Size {
+                        width: self.width,
+                        height: self.height,
+                    }),
+                    bytes_required: Some(self.retained_bytes.saturating_add(bytes)),
+                    bytes_available: Some(self.retain_cap_bytes),
+                }));
             }
             self.retained_bytes += bytes;
             self.pending.insert(ordinal, tile);
@@ -281,16 +280,16 @@ impl Sink {
                 self.stats.peak_retained_bytes.max(self.retained_bytes);
             return Ok(());
         }
-        self.paint(ordinal, &tile.image, destination, extent);
+        self.paint(ordinal, destination, extent, &tile.image);
         Ok(())
     }
 
     fn paint(
         &mut self,
         ordinal: u32,
-        image: &RgbaImage,
         destination: Vec2d,
         extent: Option<Vec2d>,
+        image: &RgbaImage,
     ) {
         if let Some(target) = self.canvas.as_mut() {
             blit_onto(target, destination, extent, image);
@@ -312,7 +311,7 @@ impl Sink {
             unique_suffix()
         ));
         std::fs::create_dir_all(&dir)
-            .map_err(|e| crate::output::write_failed(format!("spool dir failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed("spool dir failed", &e))?;
         self.spool_dir = Some(dir.clone());
         Ok(dir)
     }
@@ -329,12 +328,12 @@ impl Sink {
     ) -> Result<(), Error> {
         let bytes = tile_bytes(&tile.image);
         if self.spool_bytes.saturating_add(bytes) > self.spool_cap_bytes {
-            return Err(crate::output::canvas_memory_unavailable(
-                1,
-                1,
-                &format!("tile spool beyond {}", describe_bytes(self.spool_cap_bytes)),
-                &describe_bytes(crate::imaging::available_memory_bytes()),
-            ));
+            return Err(crate::output::memory_limit(LimitContext {
+                reason: LimitReason::Memory,
+                dimensions: None,
+                bytes_required: Some(self.spool_bytes.saturating_add(bytes)),
+                bytes_available: Some(self.spool_cap_bytes),
+            }));
         }
         let dir = self.spool_dir()?;
         let path = dir.join(format!("tile-{ordinal}.raw"));
@@ -352,14 +351,14 @@ impl Sink {
             header.extend_from_slice(&v.to_le_bytes());
         }
         let mut file = std::fs::File::create(&tmp)
-            .map_err(|e| crate::output::write_failed(format!("spool write failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed("spool write failed", &e))?;
         use std::io::Write as _;
         file.write_all(&header)
             .and_then(|()| file.write_all(tile.image.as_raw()))
-            .map_err(|e| crate::output::write_failed(format!("spool write failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed("spool write failed", &e))?;
         drop(file);
         std::fs::rename(&tmp, &path)
-            .map_err(|e| crate::output::write_failed(format!("spool write failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed("spool write failed", &e))?;
         self.spool_bytes += bytes;
         self.stats.peak_spool_bytes = self.stats.peak_spool_bytes.max(self.spool_bytes);
         self.spooled.push(SpooledTile {
@@ -412,20 +411,22 @@ impl Sink {
                 .map(|dir| dir.join(format!("tile-{}.raw", tile.ordinal)))
                 .unwrap_or_default();
             let bytes = std::fs::read(&path)
-                .map_err(|e| crate::output::write_failed(format!("spool read failed: {e}")))?;
+                .map_err(|e| crate::output::write_failed("spool read failed", &e))?;
             if bytes.len() < 24 {
-                return Err(crate::output::write_failed("spool entry truncated"));
+                return Err(Error::WriteFailed(
+                    "spool entry truncated".to_string().into(),
+                ));
             }
             let w = u32::from_le_bytes(bytes[0..4].try_into().unwrap_or([0; 4]));
             let h = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
             let pixels = &bytes[24..];
             let expected = (w as usize).saturating_mul(h as usize).saturating_mul(4);
             if pixels.len() != expected || w == 0 || h == 0 {
-                return Err(crate::output::write_failed("spool entry corrupt"));
+                return Err(Error::WriteFailed("spool entry corrupt".to_string().into()));
             }
             let image = RgbaImage::from_raw(w, h, pixels.to_vec())
-                .ok_or_else(|| crate::output::write_failed("spool entry corrupt"))?;
-            self.paint(tile.ordinal, &image, tile.destination, tile.extent);
+                .ok_or_else(|| Error::WriteFailed("spool entry corrupt".to_string().into()))?;
+            self.paint(tile.ordinal, tile.destination, tile.extent, &image);
         }
         self.remove_spool_dir();
         // Paint retained overlapping tiles in plan order for deterministic pixels.
@@ -438,7 +439,7 @@ impl Sink {
                 let (destination, extent) = geom
                     .map(|r| (Vec2d { x: r.x, y: r.y }, Some(Vec2d { x: r.w, y: r.h })))
                     .unwrap_or((Vec2d::default(), None));
-                self.paint(ordinal, &tile.image, destination, extent);
+                self.paint(ordinal, destination, extent, &tile.image);
             }
         }
         Ok(Vec2d {
@@ -494,11 +495,7 @@ impl Sink {
             reused_tiles,
         } = params;
         if cancelled.load(Ordering::SeqCst) {
-            return Err(Error::new(
-                "job.cancelled",
-                ErrorPhase::Cleanup,
-                "job cancelled before completion",
-            ));
+            return Err(Error::Cancelled);
         }
         // Kept partials publish to the `.partial` sibling so a partial file
         // never masquerades as a complete save. Fail-closed on collision.
@@ -510,13 +507,10 @@ impl Sink {
             dest_path.to_path_buf()
         };
         validate_destination(&dest, &format, overwrite)?;
-        let canvas = self.canvas.clone().ok_or_else(|| {
-            Error::new(
-                "native.internal",
-                ErrorPhase::Acquisition,
-                "commit without assembled canvas",
-            )
-        })?;
+        let canvas = self
+            .canvas
+            .clone()
+            .ok_or_else(|| Error::Internal("commit without assembled canvas".to_string().into()))?;
         let (icc, exif) = self.first_meta(reused_tiles);
         let encoded_len: u64;
         match format {
@@ -606,23 +600,23 @@ fn commit_bytes(dest: &Path, bytes: &[u8]) -> Result<(), Error> {
     if let Some(parent) = dest.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+                .map_err(|e| crate::output::write_failed("output write failed", &e))?;
         }
     }
     let tmp = temp_sibling(dest);
     {
         use std::io::Write as _;
         let mut file = std::fs::File::create(&tmp)
-            .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed("output write failed", &e))?;
         for chunk in bytes.chunks(64 << 10) {
             file.write_all(chunk)
-                .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+                .map_err(|e| crate::output::write_failed("output write failed", &e))?;
         }
         file.sync_all()
-            .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed("output write failed", &e))?;
     }
     std::fs::rename(&tmp, dest)
-        .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+        .map_err(|e| crate::output::write_failed("output write failed", &e))?;
     Ok(())
 }
 
@@ -638,10 +632,10 @@ fn commit_iiif_dir(
     write_iiif_dir(&staging, info_json, tiles)?;
     if dest.is_file() {
         std::fs::remove_file(dest)
-            .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+            .map_err(|e| crate::output::write_failed("output write failed", &e))?;
     }
     std::fs::rename(&staging, dest)
-        .map_err(|e| crate::output::write_failed(format!("output write failed: {e}")))?;
+        .map_err(|e| crate::output::write_failed("output write failed", &e))?;
     Ok(())
 }
 
@@ -674,21 +668,6 @@ pub(crate) fn tile_bytes(image: &RgbaImage) -> u64 {
     u64::from(image.width())
         .saturating_mul(u64::from(image.height()))
         .saturating_mul(4)
-}
-
-/// Human-readable byte counts for limit errors (exact bytes plus a
-/// GiB/MiB approximation).
-fn describe_bytes(bytes: u64) -> String {
-    const GIB: f64 = (1u64 << 30) as f64;
-    const MIB: f64 = (1u64 << 20) as f64;
-    let approx = bytes as f64;
-    if approx >= GIB {
-        format!("{:.1} GiB ({bytes} bytes)", approx / GIB)
-    } else if approx >= MIB {
-        format!("{:.1} MiB ({bytes} bytes)", approx / MIB)
-    } else {
-        format!("{bytes} bytes")
-    }
 }
 
 #[cfg(test)]

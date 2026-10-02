@@ -71,7 +71,7 @@ test("an interrupted save rejects with the browser's diagnostic", async () => {
   await new Promise((resolve) => setImmediate(resolve));
   api.emit({ id: 7, state: { current: "interrupted" }, error: { current: "FILE_NO_SPACE" } });
   await assert.rejects(saved, (error) => {
-    assert.equal(error.code, "OUTPUT_FAILED");
+    assert.equal(error.kind, "write-failed");
     assert.match(error.detail, /FILE_NO_SPACE/);
     return true;
   });
@@ -94,7 +94,7 @@ test("failed status lookup cancels the unfinished save before releasing its Blob
     "image.png",
     new AbortController().signal,
   );
-  const rejected = assert.rejects(saved, { code: "OUTPUT_FAILED" });
+  const rejected = assert.rejects(saved, { kind: "write-failed" });
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(api.cancelled, [7]);
   assert.equal(revoke.mock.callCount(), 0);

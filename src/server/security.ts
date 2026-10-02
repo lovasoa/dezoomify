@@ -1,22 +1,15 @@
 // Pure proxy security helpers (no server framework) so node:test can import them.
 
+import { hasSignedQuery } from "../../packages/shared-ui/src/source-url.ts";
+
 export const PROXY_MAX_REDIRECTS = 5;
 export const PROXY_MAX_BYTES = 2 * 1024 * 1024;
 
-const SENSITIVE_QUERY_KEYS = new Set([
-  "token",
-  "signature",
-  "sig",
-  "auth",
-  "key",
-  "session",
-  "sid",
-  "ticket",
-  "secret",
-  "password",
-  "credential",
-  "access_token",
-]);
+// Signed/credential query keys deny proxying: URLs whose signature would
+// break, or that carry credentials, must never be proxied. The policy lives
+// once in `packages/shared-ui/src/source-url.ts` (`hasSignedQuery`) and is
+// shared with the browser's proxy-fallback gate in
+// `packages/browser-runtime/src/web-fetch.ts`.
 
 const HOP_BY_HOP = new Set([
   "connection",
@@ -42,15 +35,8 @@ const STRIPPED_INBOUND = new Set([
 // JSON-LD IIIF manifests, viewer JS, vendor metadata) and viewer HTML pages
 // (a Google Arts & Culture asset page, a krpano embed, an OpenSeadragon
 // page). Tiles stay excluded by their own image/* content type.
-const ALLOWED_METADATA_TYPES = [
-  "application/json",
-  "application/ld+json",
-  "application/javascript",
-  "application/xml",
-  "text/xml",
-  "text/plain",
-  "text/html",
-];
+const METADATA_TYPE =
+  /^(?:application\/(?:ld\+)?json|(?:application|text)\/(?:xml|(?:x-)?(?:java|ecma)script)|text\/(?:plain|html|jscript|livescript|javascript1\.[0-5]))$/;
 
 // The client headers the relay forwards upstream. Everything else the
 // client sends (cookies, authorization, referer, origin, hop-by-hop) is
@@ -219,26 +205,14 @@ export function isBlockedIPv6(host: string): boolean {
   return false;
 }
 
-export function hasSensitiveQuery(url: URL): boolean {
-  for (const k of url.searchParams.keys()) {
-    if (SENSITIVE_QUERY_KEYS.has(k.toLowerCase())) return true;
-  }
-  return false;
-}
-
 export function validateUpstreamMethod(method: string): boolean {
   const m = method.toUpperCase();
   return m === "GET" || m === "HEAD";
 }
 
 export function isAllowedMetadataContentType(contentType: string | null | undefined): boolean {
-  if (!contentType) return false;
-  const base = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
-  if (base.startsWith("image/")) return false;
-  // Vendor metadata (e.g. IIIF-related application/vnd.* payloads) is text-ish
-  // metadata, never tiles (tiles stay excluded via the image/* deny above).
-  if (base.startsWith("application/vnd.")) return true;
-  return (ALLOWED_METADATA_TYPES as string[]).includes(base);
+  const base = contentType?.split(";")[0]?.trim().toLowerCase() ?? "";
+  return base.startsWith("application/vnd.") || METADATA_TYPE.test(base);
 }
 
 export function stripUpstreamHeaders(headers: Record<string, string>): Record<string, string> {
@@ -333,7 +307,7 @@ export function validateProxyTarget(
   if (u.username !== "" || u.password !== "") {
     return { ok: false, code: "PROXY_POLICY_DENIED", reason: "userinfo" };
   }
-  if (hasSensitiveQuery(u)) {
+  if (hasSignedQuery(u)) {
     return { ok: false, code: "PROXY_POLICY_DENIED", reason: "signed-query" };
   }
   // Standard ports only unless explicitly allowlisted (not allowlisted here).

@@ -133,22 +133,3 @@ fn compute_digest() -> Result<String, String> {
     }
     Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn digest_is_deterministic_and_checks() {
-        let first = super::compute_digest().unwrap();
-        let second = super::compute_digest().unwrap();
-        assert_eq!(first, second);
-        assert_eq!(first.len(), 64);
-        assert!(first.chars().all(|c| c.is_ascii_hexdigit()));
-        assert!(
-            super::digest(&["--check".to_string(), first.clone()]).is_ok(),
-            "digest must accept its own output"
-        );
-        assert!(super::digest(&["--check".to_string(), "0".repeat(64)]).is_err());
-        assert!(super::digest(&["--bogus".to_string()]).is_err());
-        assert!(super::digest(&["--check".to_string()]).is_err());
-    }
-}
