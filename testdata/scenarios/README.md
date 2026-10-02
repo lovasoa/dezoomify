@@ -10,7 +10,7 @@
 - **Interfaces and tests:** Each scenario records purpose, provenance, routes,
   expected request order/headers, readable-fetch or ordinary image display,
   expected `originClean` transitions, outputs/errors, and license. Include
-  bounded extension scan/direct-fetch and validated handoff cases. Run fixture
+  bounded extension scan/direct-fetch cases. Run fixture
   verification plus native and browser tests where applicable.
 - **Sources:** Distill each scenario from the behavior of the real site it
   represents; preserve behavior, not any particular directory layout.

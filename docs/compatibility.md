@@ -1,9 +1,5 @@
 # Compatibility
 
-## Installed extension and desktop versions
-
-Deep-link input remains untrusted and needs validation and confirmation before starting a job. The desktop app accepts handoff envelope versions 1 and 2; the browser products produce version 2.
-
 ## Browsers and operating systems
 
 | App | Supported platform | Verified by |

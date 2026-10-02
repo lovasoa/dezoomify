@@ -6,7 +6,7 @@
 // ephemeral loopback fixture server, a loopback static server for the built
 // frontend (the debug window shell loads its embedded devUrl
 // `http://localhost:1420`), an isolated per-run profile, WebDriver port
-// allocation, app launch/readiness/teardown, deep-link delivery, and output
+// allocation, app launch/readiness/teardown, and output
 // helpers. Inputs are fixed, there is no public network, and reports carry
 // origins, hashes, and stable codes only.
 import { spawn, spawnSync } from "node:child_process";

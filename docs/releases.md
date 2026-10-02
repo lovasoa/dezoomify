@@ -8,8 +8,6 @@ One version names a tested source revision across all apps. `cargo xtask release
 
 ## Compatibility
 
-Deep-link input carries its app version; receivers reject unsupported or expired data before confirmation or starting a job. Handoff input is bounded and contains no browser credentials.
-
 ### Compatibility break
 
 Native Messaging support and the `dezoomify-native-host` third-party entry point
@@ -30,7 +28,6 @@ A release candidate passes:
 - Rust-source-to-TypeScript binding generation checks and clean-tree checks;
 - shared scenarios on native, WASM, shared UI, extension, Tauri, and CLI targets;
 - supported browser and operating-system smoke tests;
-- deep-link version rejection, validation, confirmation, and handoff fixtures;
 - encoder output and large-image boundary tests;
 - website direct-first request-order and classified automatic proxy-fallback tests;
 - proxy public-resource eligibility, credential omission, redirect, and active-transport display audits;

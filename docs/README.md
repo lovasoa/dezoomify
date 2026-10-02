@@ -11,7 +11,7 @@ dezoomify discovers zoomable images, lets a user choose an image and level, down
 - [Browser runtime](browser-runtime.md): browser fetching, processing, and saving.
 - [Extension](extension.md): page discovery and browser-session fetching, including the source-binding and job-tab contract appendix.
 - [Native apps](native-apps.md): CLI and Tauri desktop capabilities.
-- [Bindings](bindings.md): generated Host calls, domain values, and handoff.
+- [Bindings](bindings.md): generated Host calls and domain values.
 - [Errors](errors.md): typed failures and recovery actions.
 - [Testing](testing.md): shared scenarios and runtime-specific coverage.
 - [Security](security.md): trust boundaries, credentials, and proxy controls.
@@ -27,7 +27,7 @@ dezoomify discovers zoomable images, lets a user choose an image and level, down
 - **host**: injected platform capabilities (browser tab, desktop shell, CLI process).
 - **runtime**: platform operations inside an app (browser or native code doing fetch, decode, save).
 - **transport**: how bytes reach the app (direct fetch, proxy, browser session).
-- **handoff**: moving a job to the desktop app through a `dezoomify://` link.
+
 - **scenario**: a deterministic test unit under `testdata/scenarios`.
 
 The full vocabulary rules live in the root `AGENTS.md`.

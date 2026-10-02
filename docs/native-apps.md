@@ -67,7 +67,7 @@ Per-OS install smoke runs in the desktop CI `bundle-smoke` matrix (see [Testing]
 
 ### Real-window E2E hook
 
-`cargo xtask test desktop --e2e-window` (display required; headless Linux uses Xvfb) builds fixtures, frontend, and the shell with the test-only `testing-webdriver` feature, then drives the real window over its embedded W3C WebDriver server (`tauri-plugin-wdio-webdriver`, no IPC commands, no capability entry). `specs/desktop.e2e.mjs` covers auto submit-to-save, cancellation, confirmed deep-link save, and kept partials as `.partial` siblings. No external driver needed; same lane on Linux, macOS, Windows. Output directory is a fail-closed temp dir set through the settings panel. Harness: `apps/desktop/tests/window-e2e/`.
+`cargo xtask test desktop --e2e-window` (display required; headless Linux uses Xvfb) builds fixtures, frontend, and the shell with the test-only `testing-webdriver` feature, then drives the real window over its embedded W3C WebDriver server (`tauri-plugin-wdio-webdriver`, no IPC commands, no capability entry). `specs/desktop.e2e.mjs` covers auto submit-to-save, cancellation, and kept partials as `.partial` siblings. No external driver needed; same lane on Linux, macOS, Windows. Output directory is a fail-closed temp dir set through the settings panel. Harness: `apps/desktop/tests/window-e2e/`.
 
 ## CLI
 

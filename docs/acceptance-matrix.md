@@ -19,7 +19,7 @@ tests contact no public source websites.
 | Source-document identity, scan limits, permission user activation, authenticated fetch, redirects | Extension source tests and packaged Chromium/Firefox fixture journeys | `test extension` |
 | Native file/HTTP reads, cache, output formats, ICC/EXIF, overwrite policy, publication | Native I/O tests and actual CLI scenarios | `test native`, `test scenario` |
 | Bounded decode, memory/spool accounting, cancellation/publication ordering | Native pipeline and sink tests | `test native` |
-| Desktop settings, save, cancel, queue, partial, open/reveal, confirmed handoff | Desktop tests and real-window fixture journeys | `test desktop`, `test desktop --e2e-window` |
+| Desktop settings, save, cancel, queue, partial, open/reveal | Desktop tests and real-window fixture journeys | `test desktop`, `test desktop --e2e-window` |
 | Legacy `/` and new `/beta` routes, fresh WASM, packaged assets | Assembled-site build and website/extension E2E | `build web`, `test all` |
 
 `cargo xtask check` validates formatting, Clippy, TypeScript, architecture,
