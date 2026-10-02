@@ -215,6 +215,15 @@ export async function startFixtureServer({
           const type = contentType(target);
           if (bytes.includes(Buffer.from("{{origin}}")))
             bytes = Buffer.from(bytes.toString().replaceAll("{{origin}}", origin));
+          if (bytes.includes(Buffer.from("{{input}}")))
+            bytes = Buffer.from(
+              bytes
+                .toString()
+                .replaceAll(
+                  "{{input}}",
+                  fs.readFileSync(path.join(path.dirname(target), "input.txt"), "utf8").trim(),
+                ),
+            );
           return send(200, bytes, { "content-type": type });
         } catch {
           if (await custom()) return;

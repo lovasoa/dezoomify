@@ -68,9 +68,9 @@ function stagePackage(
   { grantHostPermissions = true, sourceHostOnly = false, scenario, restartBackground = false } = {},
 ) {
   const zip = path.join(dir, `dezoomify-${browser}.zip`);
-  // All format inputs use one package per browser; the test driver receives
-  // the selected fixture through its ordinary page URL.
-  if (scenario?.startsWith("fixtures/")) scenario = "idle";
+  // Chromium shares one package and selects the fixture through the driver URL.
+  // Firefox requires its driver to open the configured URL from inside the package.
+  if (browser === "chromium" && scenario?.startsWith("fixtures/")) scenario = "idle";
   const key = JSON.stringify([
     browser,
     origin,
@@ -419,10 +419,6 @@ async function runFirefoxJob(base, work, runOptions = {}) {
         await driver.switchTo().window(handle);
         const url = await driver.getCurrentUrl();
         if (!url.includes("/test/driver.html")) continue;
-        if (runOptions.scenario?.startsWith("fixtures/") && !url.includes("?scenario=")) {
-          await driver.get(`${url}?scenario=${encodeURIComponent(runOptions.scenario)}`);
-          return false;
-        }
         const body = await driver.findElement(webdriver.By.css("body"));
         const state = await body.getDomAttribute("data-driver");
         if (state === "failed") throw new Error(await body.getText());

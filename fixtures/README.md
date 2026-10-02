@@ -6,7 +6,8 @@ Every basic fixture produces the same 512×512 image from four shared 256×256 J
 Tests check the saved pixels, not JSON transcripts or implementation call sequences.
 
 Static resources are ordinary files and relative symlinks. `viewer.html` loads the
-input so the extension observes it as a real viewer request. `server.js` exports
+input so the extension observes it as a real viewer request. The server substitutes
+`{{input}}` with the adjacent `input.txt` URL in the viewer template. `server.js` exports
 `serve(Request): Response` only where a protocol needs query-based tile requests.
 Handlers share the ordinary `tiles/server.js` helper; the HTTP server knows no formats.
 
