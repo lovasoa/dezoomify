@@ -2,7 +2,7 @@
 //! Shared discovery, selection, acquisition, and output policy.
 use crate::{
     Host, Vec2d,
-    core::{self, DiscoveredEntry, DiscoveryCatalog, TileRole, TileSource, TileSpec},
+    core::{self, DiscoveredEntry, DiscoveryCatalog, TileSource, TileSpec},
     model::*,
 };
 use core::discovery::{DiscoveryInput, DiscoveryLimits};
@@ -68,24 +68,23 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
                 .ok_or_else(empty_plan)?;
             (TileSource::Grid(resolved.grid), resolved.previously_output)
         }
-        source => (source.clone(), Vec::new()),
+        TileSource::Grid(grid) => (TileSource::Grid(grid.clone()), Vec::new()),
+        TileSource::Positioned(source) => (TileSource::Positioned(source.clone()), Vec::new()),
     };
     let total = source.count().ok_or_else(empty_plan)?;
     if total == 0 {
         return Err(empty_plan());
     }
     if total > u64::from(options.max_tiles) {
-        return Err(Error::new(
-            "job.resource-limit",
-            ErrorPhase::Acquisition,
-            format!("tile plan exceeds max_tiles {}", options.max_tiles),
+        return Err(Error::ResourceLimit(
+            format!("tile plan exceeds max_tiles {}", options.max_tiles).into(),
         ));
     }
     let canvas = source.image_size().map(size);
     let tiles: Box<dyn Iterator<Item = Result<TileSpec, core::TileSourceError>>> = match source {
         TileSource::Grid(grid) => Box::new(grid.tiles_row_major()),
         TileSource::Positioned(source) => Box::new(source.tiles()),
-        _ => unreachable!("geometry is resolved"),
+        TileSource::Adaptive(_) | TileSource::Generic(_) => unreachable!("geometry is resolved"),
     };
     progress.phase = ProgressPhase::Acquisition;
     progress.selected = canvas.clone();
@@ -116,20 +115,13 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
         });
     let mut missing = acquire_round(tiles, host, options, &mut progress).await?;
     if progress.completed == 0 {
-        let mut error = missing
-            .first()
-            .and_then(|(_, failures)| failures.first())
-            .cloned()
-            .unwrap_or_else(empty_plan);
-        error.code = "job.no-usable-tiles".into();
-        error.phase = ErrorPhase::Acquisition;
-        error.message = "no usable tiles were acquired".into();
-        if let Some((tile, _)) = missing.first() {
-            error
-                .request
-                .get_or_insert_with(|| tile.request.uri.clone());
-        }
-        return Err(error);
+        // Derived facts over the complete settled set; the evidence stays
+        // in the missing-tile records and the diagnostics report.
+        let settled: Vec<&Error> = missing.iter().flat_map(|(_, f)| f.iter()).collect();
+        return Err(Error::NoUsableTiles {
+            transient: settled.iter().any(|f| f.retryable()),
+            retry_after_ms: settled.iter().filter_map(|f| f.retry_after_ms()).max(),
+        });
     }
     while !missing.is_empty() {
         missing.sort_by_key(|(tile, _)| tile.index);
@@ -153,11 +145,12 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
         match choice {
             RecoveryChoice::Keep => break,
             RecoveryChoice::Discard => {
-                return Err(Error::new(
-                    "job.partial-discarded",
-                    ErrorPhase::Acquisition,
-                    "partial output was discarded",
-                ));
+                // Like the no-usable-tiles aggregate: derived facts only.
+                let settled: Vec<&Error> = missing.iter().flat_map(|(_, f)| f.iter()).collect();
+                return Err(Error::PartialDiscarded {
+                    transient: settled.iter().any(|f| f.retryable()),
+                    retry_after_ms: settled.iter().filter_map(|f| f.retry_after_ms()).max(),
+                });
             }
             RecoveryChoice::Retry => {
                 let retry = std::mem::take(&mut missing);
@@ -192,12 +185,8 @@ async fn discover(
 ) -> Result<DiscoveryCatalog, Error> {
     let registry = match options.format.as_deref() {
         None | Some("auto") => core::default_registry(),
-        Some(format) => core::registry_for(format).ok_or_else(|| {
-            Error::new(
-                "job.unknown-format",
-                ErrorPhase::Validation,
-                format!("unknown format: {format}"),
-            )
+        Some(format) => core::registry_for(format).ok_or_else(|| Error::UnknownFormat {
+            format: format.to_string(),
         })?,
     };
     let catalog = registry
@@ -227,10 +216,9 @@ async fn discover(
                         interaction,
                     )
                     .await
-                    .map_err(|error| {
-                        let mut error = crate::retry::classify(error);
-                        error.request.get_or_insert_with(|| uri.clone());
-                        error
+                    .map_err(|error| match error {
+                        Error::Resource { .. } => error,
+                        other => other.resource(uri.clone(), ResourceKind::Metadata),
                     })?;
                 if let ResourceRead::Response { response } = &result {
                     if let Some(final_uri) =
@@ -241,23 +229,21 @@ async fn discover(
                             followed.insert(final_uri.clone());
                         }
                     }
+                    let read = response
+                        .final_uri
+                        .as_deref()
+                        .filter(|uri| !uri.is_empty())
+                        .unwrap_or(&uri)
+                        .to_string();
                     if response.bytes.is_empty() {
-                        let mut err = Error::new(
-                            "job.empty-resource",
-                            ErrorPhase::Discovery,
-                            "metadata resource is empty",
-                        );
-                        err.request = response.final_uri.clone();
-                        return Err(err);
+                        return Err(Error::EmptyResource.resource(read, ResourceKind::Metadata));
                     }
                     if u64::try_from(response.bytes.len()).unwrap_or(u64::MAX) > options.max_bytes {
-                        let mut err = Error::new(
-                            "job.resource-limit",
-                            ErrorPhase::Discovery,
-                            "metadata resource exceeds max_bytes",
-                        );
-                        err.request = response.final_uri.clone();
-                        return Err(err);
+                        return Err(Error::ResourceLimit(
+                            format!("metadata resource exceeds max_bytes {}", options.max_bytes)
+                                .into(),
+                        )
+                        .resource(read, ResourceKind::Metadata));
                     }
                 }
                 Ok(result)
@@ -267,6 +253,12 @@ async fn discover(
         .map_err(|error| match error {
             core::DiscoveryError::Host(error) => *error,
             error => {
+                // A document some format parsed as an empty image is
+                // `no-image-found`; an unparseable or unrecognized document
+                // is `malformed-metadata`/`discovery-failed`. When every
+                // candidate failed on observed fetch facts, the first typed
+                // cause stays attached: its context and retry verdict are
+                // the authoritative ones.
                 let cause = match &error {
                     core::DiscoveryError::NoCandidateAccepted { diagnostics }
                         if diagnostics.iter().all(|diagnostic| {
@@ -279,20 +271,58 @@ async fn discover(
                     {
                         diagnostics
                             .iter()
-                            .find_map(|diagnostic| diagnostic.cause.as_deref())
-                            .cloned()
+                            .find_map(|diagnostic| diagnostic.cause.clone())
                     }
                     _ => None,
                 };
-                let mut failure = cause.unwrap_or_else(|| {
-                    Error::new(
-                        "job.discovery-failed",
-                        ErrorPhase::Discovery,
-                        "No zoomable image was found",
-                    )
-                });
-                failure.detail.get_or_insert_with(|| error.detail());
-                failure
+                let detail = Some(error.detail());
+                let empty_image = matches!(
+                    &error,
+                    core::DiscoveryError::Rejected {
+                        kind: core::RejectionKind::NoImage,
+                        ..
+                    }
+                ) || matches!(&error, core::DiscoveryError::NoCandidateAccepted { diagnostics }
+                if diagnostics.iter().any(|diagnostic| {
+                    diagnostic.kind == core::RejectionKind::NoImage
+                }));
+                let malformed = matches!(
+                    &error,
+                    core::DiscoveryError::InvalidMetadata(_)
+                        | core::DiscoveryError::Rejected {
+                            kind: core::RejectionKind::InvalidMetadata,
+                            ..
+                        }
+                ) || matches!(&error, core::DiscoveryError::NoCandidateAccepted { diagnostics }
+                if !diagnostics.is_empty()
+                    && diagnostics.iter().any(|diagnostic| {
+                        diagnostic.kind == core::RejectionKind::InvalidMetadata
+                    }));
+                match &error {
+                    core::DiscoveryError::ParseLimitExceeded
+                    | core::DiscoveryError::ResourceLimitExceeded
+                    | core::DiscoveryError::MetadataSizeLimitExceeded => {
+                        Error::ResourceLimit(Failure {
+                            request: None,
+                            detail,
+                        })
+                    }
+                    _ if empty_image => Error::NoImageFound(Failure {
+                        request: None,
+                        detail,
+                    }),
+                    _ if cause.is_none() && malformed => Error::MalformedMetadata(Failure {
+                        request: None,
+                        detail,
+                    }),
+                    _ => Error::DiscoveryFailed {
+                        failure: Failure {
+                            request: None,
+                            detail,
+                        },
+                        cause,
+                    },
+                }
             }
         })?;
     let mut seen = HashSet::new();
@@ -351,20 +381,16 @@ async fn select(
                 .map_or(0, |(index, _)| index),
         };
         let Some(entry) = catalog.into_entries().into_iter().nth(index) else {
-            return Err(Error::new(
-                "job.invalid-selection",
-                ErrorPhase::Validation,
-                "image selection is out of range",
+            return Err(Error::InvalidState(
+                "image selection is out of range".to_string().into(),
             ));
         };
         match entry {
             DiscoveredEntry::Deferred(resource) => {
                 if remaining_follows == 0 || !followed.borrow_mut().insert(resource.uri.clone()) {
-                    return Err(Error::new(
-                        "job.deferred-limit",
-                        ErrorPhase::Discovery,
-                        "deferred image follow limit or cycle",
-                    ));
+                    return Err(Error::DeferredLimit {
+                        max: options.max_deferred_follows,
+                    });
                 }
                 remaining_follows -= 1;
                 catalog =
@@ -378,10 +404,8 @@ async fn select(
                     policy => select_level(&image, policy).ok_or_else(empty_plan)?,
                 };
                 if level >= image.levels.len() {
-                    return Err(Error::new(
-                        "job.invalid-selection",
-                        ErrorPhase::Validation,
-                        "level selection is out of range",
+                    return Err(Error::InvalidState(
+                        "level selection is out of range".to_string().into(),
                     ));
                 }
                 return Ok((image, level));
@@ -465,10 +489,10 @@ fn portable_tile(tile: TileSpec, canvas: Option<Size>) -> Tile {
         request: ResourceRequest {
             uri: tile.request.uri,
             headers: tile.request.headers,
-            purpose: if tile.role == TileRole::Output {
-                RequestPurpose::Tile
-            } else {
+            purpose: if tile.role.probe {
                 RequestPurpose::Probe
+            } else {
+                RequestPurpose::Tile
             },
         },
         placement: TilePlacement {
@@ -479,7 +503,7 @@ fn portable_tile(tile: TileSpec, canvas: Option<Size>) -> Tile {
             expected_size: tile.expected_size.map(size),
             canvas,
             processing: tile.processing,
-            probe_output: tile.role == TileRole::ProbeAndOutput,
+            role: tile.role,
         },
     }
 }
@@ -488,19 +512,11 @@ pub(crate) async fn probe(
     tile: TileSpec,
     remaining: &mut u32,
 ) -> Result<core::ObservationResult, Error> {
-    *remaining = remaining.checked_sub(1).ok_or_else(|| {
-        Error::new(
-            "job.resource-limit",
-            ErrorPhase::Acquisition,
-            "probe count exceeds max_tiles",
-        )
-    })?;
+    *remaining = remaining
+        .checked_sub(1)
+        .ok_or_else(|| Error::ResourceLimit("probe count exceeds max_tiles".to_string().into()))?;
     host.checkpoint(Gate::Cancellation).await?;
-    match host
-        .probe(portable_tile(tile, None))
-        .await
-        .map_err(crate::retry::classify)?
-    {
+    match host.probe(portable_tile(tile, None)).await? {
         ProbeOutcome::Missing => Ok(core::ObservationResult::Missing),
         ProbeOutcome::Available { width, height } => Ok(core::ObservationResult::Available {
             size: Vec2d {
@@ -544,20 +560,14 @@ async fn acquire(
         host.checkpoint(Gate::Acquisition).await?;
         match host.acquire_tile(tile.clone()).await {
             Ok(()) => return Ok((tile, None)),
-            Err(error)
-                if error.code == "job.cancelled"
-                    || error.code == "TRANSPORT_CANCELLED"
-                    || error.code.starts_with("binding.")
-                    || error.phase == ErrorPhase::Output =>
-            {
+            Err(error) if error.is_terminal() || error.is_output() => {
                 return Err(error);
             }
             Err(error) => {
-                let error = crate::retry::classify(error);
-                let retry = error.retryable && attempt < options.max_retries;
+                let retry = error.retryable() && attempt < options.max_retries;
                 let delay = crate::retry::retry_delay_ms(
                     attempt + 1,
-                    error.retry_after_ms,
+                    error.retry_after_ms(),
                     options.retry_base_delay_ms,
                 );
                 failures.push(error);
@@ -573,19 +583,12 @@ async fn acquire(
 }
 
 fn empty_plan() -> Error {
-    Error::new(
-        "job.plan-empty",
-        ErrorPhase::Acquisition,
-        "the selected level has no tiles",
-    )
+    Error::PlanEmpty
 }
+
 impl From<core::TileSourceError> for Error {
     fn from(error: core::TileSourceError) -> Self {
-        Self::new(
-            "job.plan-invalid",
-            ErrorPhase::Acquisition,
-            error.to_string(),
-        )
+        Self::PlanInvalid(error.to_string().into())
     }
 }
 fn validate(inputs: &[JobInput], options: &Options) -> Result<(), Error> {
@@ -620,17 +623,15 @@ fn validate(inputs: &[JobInput], options: &Options) -> Result<(), Error> {
             .any(|i| i.kind.unwrap_or_default() == DiscoveryInputKind::Source)
         || inputs.iter().any(|i| !valid(&i.url))
     {
-        return Err(Error::new(
-            "job.invalid-input",
-            ErrorPhase::Validation,
-            "inputs require a user source and at most 256 valid URLs or local paths up to 2048 bytes",
-        ));
+        return Err(Error::InvalidInput("inputs require a user source and at most 256 valid URLs or local paths up to 2048 bytes"
+                .to_string()
+                .into()));
     }
     if options.max_concurrent == 0 || options.max_tiles == 0 || options.max_bytes == 0 {
-        return Err(Error::new(
-            "job.invalid-config",
-            ErrorPhase::Validation,
-            "concurrency, tile, and byte limits must be positive",
+        return Err(Error::InvalidOptions(
+            "concurrency, tile, and byte limits must be positive"
+                .to_string()
+                .into(),
         ));
     }
     if options.max_concurrent > 64
@@ -641,17 +642,13 @@ fn validate(inputs: &[JobInput], options: &Options) -> Result<(), Error> {
         || options.max_deferred_follows > 64
         || options.retry_base_delay_ms > 300_000
     {
-        return Err(Error::new(
-            "job.resource-limit",
-            ErrorPhase::Validation,
-            "resource limits are out of range",
+        return Err(Error::ResourceLimit(
+            "resource limits are out of range".to_string().into(),
         ));
     }
     if options.max_concurrent > options.max_tiles {
-        return Err(Error::new(
-            "job.invalid-config",
-            ErrorPhase::Validation,
-            "max_concurrent cannot exceed max_tiles",
+        return Err(Error::InvalidOptions(
+            "max_concurrent cannot exceed max_tiles".to_string().into(),
         ));
     }
     if let SelectionPolicy::Fitting {
@@ -661,10 +658,8 @@ fn validate(inputs: &[JobInput], options: &Options) -> Result<(), Error> {
     } = options.selection
         && (max_width == 0 || max_height == 0 || max_area == 0)
     {
-        return Err(Error::new(
-            "job.invalid-options",
-            ErrorPhase::Validation,
-            "canvas limits must be positive",
+        return Err(Error::InvalidOptions(
+            "canvas limits must be positive".to_string().into(),
         ));
     }
     if inputs.iter().any(|input| {
@@ -672,10 +667,10 @@ fn validate(inputs: &[JobInput], options: &Options) -> Result<(), Error> {
             contents.is_empty() || contents.len() as u64 > options.max_bytes
         })
     }) {
-        return Err(Error::new(
-            "job.resource-limit",
-            ErrorPhase::Discovery,
-            "supplied document exceeds resource limits",
+        return Err(Error::ResourceLimit(
+            "supplied document exceeds resource limits"
+                .to_string()
+                .into(),
         ));
     }
     Ok(())

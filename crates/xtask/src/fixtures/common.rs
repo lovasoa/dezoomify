@@ -4,8 +4,11 @@
 //! `capture` from their stage modules; this module holds what they share:
 //! the manifest/routes documents, traversal checks, directory
 //! collection, and hex encoding. Verification and capture stay read-only
-//! except for their declared outputs (see each stage module).
+//! except for their declared outputs (see each stage module). The route
+//! schema is the fixture server's `ScenarioRoute` (and its `derive_route_id`
+//! / `content_type` helpers), imported so tooling and server cannot drift.
 
+use dezoomify_fixture_server::ScenarioRoute;
 use serde::Deserialize;
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -30,58 +33,7 @@ pub(crate) struct ManifestEntry {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct RoutesFile {
-    pub(crate) routes: Vec<Route>,
-}
-
-fn default_method() -> String {
-    "GET".to_string()
-}
-
-fn default_status() -> u16 {
-    200
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct Route {
-    #[serde(default)]
-    pub(crate) route_id: String,
-    #[serde(default = "default_method")]
-    pub(crate) method: String,
-    #[allow(dead_code)]
-    pub(crate) host: Option<String>,
-    pub(crate) path: Option<String>,
-    pub(crate) path_prefix: Option<String>,
-    #[allow(dead_code)]
-    pub(crate) path_regex: Option<String>,
-    #[allow(dead_code)]
-    pub(crate) query: Option<String>,
-    #[serde(default = "default_status")]
-    pub(crate) status: u16,
-    #[allow(dead_code)]
-    pub(crate) headers: Option<std::collections::HashMap<String, String>>,
-    #[allow(dead_code)]
-    #[serde(default)]
-    pub(crate) required_cookies: std::collections::HashMap<String, String>,
-    pub(crate) payload: Option<String>,
-    pub(crate) generator: Option<serde_json::Value>,
-}
-
-impl Route {
-    /// A stable id for a route that omitted `route_id`; mirrors the server's
-    /// derivation so duplicate detection stays meaningful.
-    pub(crate) fn effective_id(&self) -> String {
-        if !self.route_id.is_empty() {
-            return self.route_id.clone();
-        }
-        let host = self.host.as_deref().unwrap_or("any");
-        let target = self
-            .path
-            .as_deref()
-            .or(self.path_prefix.as_deref())
-            .or(self.path_regex.as_deref())
-            .unwrap_or("route");
-        format!("{host}-{target}")
-    }
+    pub(crate) routes: Vec<ScenarioRoute>,
 }
 
 pub(crate) fn load_manifest(dir: &Path) -> Result<Manifest, String> {

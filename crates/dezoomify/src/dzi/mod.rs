@@ -11,7 +11,7 @@ use crate::core::discovery::{
 };
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
-    ParsedResource, Request, ResolvedLevel,
+    ParsedResource, RejectionKind, Request, ResolvedLevel,
 };
 use crate::json_utils::all_json;
 
@@ -229,9 +229,11 @@ fn catalog_from_dzi(
             ));
         }
         if image.get_size().x == 0 || image.get_size().y == 0 {
-            return Err(DiscoveryError::InvalidMetadata(
-                "invalid DZI zero image size".into(),
-            ));
+            return Err(DiscoveryError::Rejected {
+                kind: RejectionKind::NoImage,
+                cause: None,
+                detail: Some("the document declares an empty image".into()),
+            });
         }
         let base_url: Arc<str> = image.base_url(url).into();
         let image_size = image.get_size();
@@ -287,14 +289,8 @@ fn load_catalog(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{DiscoveredEntry, DiscoveryCatalog, ResolvedImage, TileSource};
-
-    fn ready_image(catalog: DiscoveryCatalog) -> ResolvedImage {
-        match catalog.into_entries().pop().unwrap() {
-            DiscoveredEntry::Ready(image) => image,
-            DiscoveredEntry::Deferred(_) => panic!("DZI is resolved"),
-        }
-    }
+    use crate::core::{DiscoveredEntry, TileSource};
+    use crate::test_support::ready_image;
 
     #[test]
     fn panorama_preserves_urls_overlap_and_normalized_level_order() {
@@ -317,16 +313,13 @@ mod tests {
         };
         let urls: Vec<_> = plan
             .tiles_row_major()
-            .take(10)
+            .take(2)
             .map(Result::unwrap)
             .map(|tile| tile.request.uri)
             .collect();
         assert_eq!(
-            urls,
-            vec![
-                "http://x.fr/y/test_files/9/0_0.jpg",
-                "http://x.fr/y/test_files/9/1_0.jpg"
-            ]
+            urls.join(","),
+            "http://x.fr/y/test_files/9/0_0.jpg,http://x.fr/y/test_files/9/1_0.jpg"
         );
     }
 

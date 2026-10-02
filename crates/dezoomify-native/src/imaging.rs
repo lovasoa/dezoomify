@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use dezoomify::Vec2d;
 
-use dezoomify::model::{Error, ErrorPhase};
+use dezoomify::model::{Error, LimitContext, LimitReason, Size};
 
 /// Default JPEG quality for `.jpg` output and `iiif-dir` tiles: `100`
 /// minus the default compression 5.
@@ -123,16 +123,6 @@ pub(crate) fn load_image_with_metadata(
     })
 }
 
-/// Provide actionable HTTP diagnostics for host logs.
-pub(crate) fn describe_http_failure(outcome: &crate::http::FetchOutcome) -> String {
-    let mut requested = outcome.final_uri.clone();
-    if requested.len() > 2_048 {
-        requested.truncate(2_048);
-        requested.push_str("...");
-    }
-    format!("request to {requested} returned HTTP {}", outcome.status)
-}
-
 pub(crate) fn blit_onto(
     target: &mut image::RgbaImage,
     destination: Vec2d,
@@ -187,10 +177,8 @@ pub fn encode_png(
         image::ExtendedColorType::Rgba8,
     )
     .map_err(|e| {
-        Error::new(
-            "output.encode-failed",
-            ErrorPhase::Output,
-            format!("png encode failed: {e}"),
+        Error::EncodeFailed(
+            format!("png encode failed: {}", dezoomify::model::chain_text(&e)).into(),
         )
     })?;
     Ok(bytes)
@@ -207,13 +195,17 @@ pub fn encode_jpeg(
     icc_profile: Option<&[u8]>,
 ) -> Result<Vec<u8>, Error> {
     if image.width() > JPEG_MAX_SIDE || image.height() > JPEG_MAX_SIDE {
-        return Err(Error::new("output.encode-failed", ErrorPhase::Output,
-            format!(
-                "jpeg output {}x{} exceeds the 65535px per-side jpeg limit; save as png, tiff, or iiif-dir",
-                image.width(),
-                image.height()
-            ),
-        ));
+        return Err(Error::LimitExceeded {
+            limit: LimitContext {
+                reason: LimitReason::JpegSide,
+                dimensions: Some(Size {
+                    width: image.width(),
+                    height: image.height(),
+                }),
+                bytes_required: None,
+                bytes_available: None,
+            },
+        });
     }
     let mut bytes = Vec::new();
     let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, quality);
@@ -232,10 +224,8 @@ pub fn encode_jpeg(
         image::ExtendedColorType::Rgb8,
     )
     .map_err(|e| {
-        Error::new(
-            "output.encode-failed",
-            ErrorPhase::Output,
-            format!("jpeg encode failed: {e}"),
+        Error::EncodeFailed(
+            format!("jpeg encode failed: {}", dezoomify::model::chain_text(&e)).into(),
         )
     })?;
     Ok(bytes)
@@ -317,11 +307,7 @@ pub fn encode_zif_pyramid(
 }
 
 fn tiff_failed(error: tiff::TiffError) -> Error {
-    Error::new(
-        "output.encode-failed",
-        ErrorPhase::Output,
-        format!("tiff encode failed: {error}"),
-    )
+    Error::EncodeFailed(format!("tiff encode failed: {error}").into())
 }
 
 /// Write one RGBA image as a single directory of an open TIFF encoder,
@@ -351,13 +337,17 @@ fn write_tiff_directory<W: std::io::Write + std::io::Seek>(
 /// embedded when present.
 pub fn encode_webp(image: &image::RgbaImage, icc_profile: Option<&[u8]>) -> Result<Vec<u8>, Error> {
     if image.width() > WEBP_MAX_SIDE || image.height() > WEBP_MAX_SIDE {
-        return Err(Error::new("output.encode-failed", ErrorPhase::Output,
-            format!(
-                "webp output {}x{} exceeds the 16383px per-side webp limit; save as png, tiff, zif, or iiif-dir",
-                image.width(),
-                image.height()
-            ),
-        ));
+        return Err(Error::LimitExceeded {
+            limit: LimitContext {
+                reason: LimitReason::WebpSide,
+                dimensions: Some(Size {
+                    width: image.width(),
+                    height: image.height(),
+                }),
+                bytes_required: None,
+                bytes_available: None,
+            },
+        });
     }
     let mut bytes = Vec::new();
     let mut encoder = image::codecs::webp::WebPEncoder::new_lossless(&mut bytes);
@@ -372,10 +362,8 @@ pub fn encode_webp(image: &image::RgbaImage, icc_profile: Option<&[u8]>) -> Resu
         image::ExtendedColorType::Rgba8,
     )
     .map_err(|e| {
-        Error::new(
-            "output.encode-failed",
-            ErrorPhase::Output,
-            format!("webp encode failed: {e}"),
+        Error::EncodeFailed(
+            format!("webp encode failed: {}", dezoomify::model::chain_text(&e)).into(),
         )
     })?;
     Ok(bytes)
@@ -638,7 +626,20 @@ mod tests {
     fn webp_rejects_canvases_beyond_its_side_limit() {
         let wide = image::RgbaImage::new(WEBP_MAX_SIDE + 1, 1);
         let error = encode_webp(&wide, None).expect_err("webp side limit applies");
-        assert_eq!(error.code, "output.encode-failed");
+        assert_eq!(
+            error,
+            Error::LimitExceeded {
+                limit: LimitContext {
+                    reason: LimitReason::WebpSide,
+                    dimensions: Some(Size {
+                        width: WEBP_MAX_SIDE + 1,
+                        height: 1,
+                    }),
+                    bytes_required: None,
+                    bytes_available: None,
+                }
+            }
+        );
     }
 
     #[test]

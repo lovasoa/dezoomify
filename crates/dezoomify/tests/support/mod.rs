@@ -6,6 +6,15 @@ use std::{
     task::Poll,
 };
 
+// ── shared discovery stubs ────────────────────────────────────────
+// The single fetch stub and plan helpers live in `src/test_support.rs`
+// (shared with in-crate format tests); this module adds the Host stub.
+pub use dezoomify::{core, model};
+#[path = "../../src/test_support.rs"]
+mod stub;
+#[allow(unused_imports)]
+pub use stub::*;
+
 #[derive(Default)]
 pub struct MemoryHost {
     pub resources: HashMap<String, ResourceResponse>,
@@ -52,7 +61,10 @@ impl Host for MemoryHost {
         }
         result
             .map(|response| ResourceRead::Response { response })
-            .ok_or_else(|| Error::new("DISCOVERY_FAILED", ErrorPhase::Discovery, "missing fixture"))
+            .ok_or_else(|| Error::DiscoveryFailed {
+                failure: "missing fixture".to_string().into(),
+                cause: None,
+            })
     }
     async fn probe(&self, tile: Tile) -> Result<ProbeOutcome, Error> {
         self.probes.borrow_mut().push(tile);
@@ -112,7 +124,6 @@ impl Host for MemoryHost {
         let output = Output {
             canvas: request.canvas.clone(),
             format: request.format,
-            complete: request.missing.is_empty(),
             missing: request.missing.clone(),
             disposition: if self.display_only.get() {
                 OutputDisposition::DisplayOnly
@@ -139,11 +150,7 @@ impl Host for MemoryHost {
     }
     async fn checkpoint(&self, gate: Gate) -> Result<(), Error> {
         if self.cancelled.get() {
-            Err(Error::new(
-                "job.cancelled",
-                ErrorPhase::Acquisition,
-                "cancelled",
-            ))
+            Err(Error::Cancelled)
         } else if gate == Gate::Acquisition && self.paused.get() {
             let resume = self.resume.borrow_mut().take();
             resume

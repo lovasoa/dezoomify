@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use dezoomify::model::{Error, ErrorPhase};
+use dezoomify::model::Error;
 
 #[derive(Clone, Debug)]
 pub struct EffectiveRequest {
@@ -17,11 +17,7 @@ pub fn build_request(
 ) -> Result<EffectiveRequest, Error> {
     for key in extra.keys() {
         if key.eq_ignore_ascii_case("cookie") || key.eq_ignore_ascii_case("authorization") {
-            return Err(Error::new(
-                "auth.forbidden-header",
-                ErrorPhase::Validation,
-                "cookie/authorization forbidden in public headers",
-            ));
+            return Err(Error::AuthForbiddenHeader);
         }
     }
     let mut headers = BTreeMap::new();

@@ -2,23 +2,11 @@
 
 One version covers core libraries, generated bindings, website, extension, CLI, and desktop artifacts.
 
-```mermaid
-flowchart TD
-    CI[master CI green] --> PLAN[release plan<br/>frozen contract]
-    PLAN --> BUILD[release build<br/>one target per matching host]
-    BUILD --> VERIFY[release verify<br/>names against plan]
-    VERIFY --> PUBLISH[release publish<br/>GitHub Release assets]
-    PUBLISH --> STORES[parallel store submission<br/>exact ZIPs, no rebuild]
-    STORES --> AVAIL[store review external<br/>availability follows approval]
-```
-
 ## Versioning
 
 One version names a tested source revision across all apps. `cargo xtask release version` derives it from Git: `vX.Y.Z` is `X.Y.Z`; each following first-parent commit bumps `Z`. Manifests author no versions; builds receive the derived value as `DEZOOMIFY_VERSION`. WASM bindings ship with their browser product from the same revision and version nothing on their own.
 
 ## Compatibility
-
-Deep-link input carries its app version; receivers reject unsupported or expired data before confirmation or starting a job. Handoff input is bounded and contains no browser credentials.
 
 ### Compatibility break
 
@@ -40,7 +28,6 @@ A release candidate passes:
 - Rust-source-to-TypeScript binding generation checks and clean-tree checks;
 - shared scenarios on native, WASM, shared UI, extension, Tauri, and CLI targets;
 - supported browser and operating-system smoke tests;
-- deep-link version rejection, validation, confirmation, and handoff fixtures;
 - encoder output and large-image boundary tests;
 - website direct-first request-order and classified automatic proxy-fallback tests;
 - proxy public-resource eligibility, credential omission, redirect, and active-transport display audits;
@@ -56,8 +43,6 @@ GitHub Releases holds provenance and the exact store-submitted artifacts. Instal
 
 ## Desktop updater
 
-Automatic in-app updates are disabled: no update host is deployed and no updater key exists. Users install the [latest release](https://github.com/lovasoa/dezoomify/releases/latest) manually. The shipped desktop capability sets `updater.enabled: false` with an empty allowlist, `tauri.conf.json` ships empty endpoints, `release/config.toml` sets `[updater] enabled = false` with empty endpoints and no key file, and empty `UPDATER_PUBKEY` keeps the plugin failing closed.
-
-`apps/desktop/src-tauri/src/updater.rs` keeps a tested `validate_candidate` describing the policy a future self-hosted updater enforces (strict ed25519 over `dezoomify-updater-v1`, HTTPS allowlist, 7-day stale bound, +300 s future skew, anti-rollback, explicit user confirmation, never auto-stage); production `validate_update` rejects everything with `updater.disabled` and the installed app keeps working. The capability grants only `updater:allow-check`, so download and install stay denied. Activation needs an undone key ceremony: a real pubkey replacing empty `UPDATER_PUBKEY` (also registering the plugin via the `tauri_shell.rs` gate), deployed endpoints, `enabled = true`. Until then no host or key is invented and every candidate fails closed.
+Automatic in-app updates are disabled: no update host is deployed and no updater key exists, and every candidate fails closed. Users install the [latest release](https://github.com/lovasoa/dezoomify/releases/latest) manually. The shipped desktop capability sets `updater.enabled: false` with an empty allowlist, `tauri.conf.json` ships empty endpoints, `release/config.toml` sets `[updater] enabled = false` with empty endpoints and no key file, and empty `UPDATER_PUBKEY` keeps the plugin failing closed. Activation needs an undone key ceremony: a real pubkey, deployed endpoints, `enabled = true`.
 
 See [Testing](testing.md) for test structure and [Security](security.md) for trust requirements.

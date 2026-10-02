@@ -20,17 +20,9 @@ Users pick an app under time pressure and without background knowledge. Every ap
 - The comparison describes each product's implemented capabilities and limits. An app offers only actions its Host supports.
 - The same guidance appears in docs and in every app; wording adapts to context, substance never changes.
 
-This page speaks to implementers; user copy derived from it keeps the plain-language rules above.
-
 ## Progressive disclosure
 
 Users get the minimum first:
-
-```mermaid
-flowchart TD
-    F[First message:<br/>one specific plain sentence<br/>+ single best next action] --> W[What happened:<br/>expandable plain-language cause<br/>+ honest alternatives, no jargon]
-    W --> T[Technical detail:<br/>copyable diagnostics + linked docs<br/>for users choosing to look]
-```
 
 1. **First message:** one specific plain sentence (what happened in this job) plus the single best next action.
 2. **"What happened":** expandable plain-language cause plus honest alternatives, still no jargon.
@@ -50,6 +42,6 @@ Discovery, selection, acquisition, processing, and saving stay distinct, keeping
 
 ## App boundaries
 
-Browsers save PNG for jobs fitting browser memory and save limits; budgets: [Compatibility](compatibility.md#canvas-and-save-limits). Native apps support large images and local input, with [six output formats](native-apps.md#output-naming-and-encoders). Queues belong to the application: website submitted addresses wait their turn, desktop shows per-job progress with cancel one/all and retry failed. CLI `--bulk` runs one bounded invocation per entry with per-entry results and totals. Credentials: [Security](security.md).
+Browsers save PNG for jobs fitting browser memory and save limits; budgets: [Compatibility](compatibility.md#canvas-and-save-limits). Native apps support large images and local input, with [six output formats](native-apps.md#output-naming-and-encoders): native encoders `[png, jpeg, tiff, zif, webp]` plus `iiif-dir` output. Queues belong to the application: website submitted addresses wait their turn, desktop shows per-job progress with cancel one/all and retry failed. CLI `--bulk` runs one bounded invocation per entry with per-entry results and totals. Credentials: [Security](security.md).
 
 dezoomify bypasses no authentication or access controls. Users are responsible for permission to retrieve and reproduce source material.

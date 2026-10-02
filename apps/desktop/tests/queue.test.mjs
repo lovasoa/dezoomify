@@ -8,8 +8,6 @@ import {
   cancelAllQueueEntries as cancelAllDesktop,
   cancelQueueEntry as cancelDesktopEntry,
   finishActiveQueueEntry as finishActiveDesktopEntry,
-  humanQueueSummary as humanDesktopQueueSummary,
-  pendingQueueEntries as pendingDesktopEntries,
   summarizeQueue as summarizeDesktopQueue,
 } from "@dezoomify/shared-ui";
 import {
@@ -26,6 +24,8 @@ function readJson(rel) {
   return JSON.parse(fs.readFileSync(path.join(SCENARIOS, rel), "utf8"));
 }
 
+const queuedEntries = (q) => q.entries.filter((e) => e.status === "queued");
+
 test("enqueue validates and runs one active job at a time", () => {
   let q = createDesktopQueue();
   const first = enqueueDesktopQueue(q, "https://example.com/a");
@@ -37,7 +37,7 @@ test("enqueue validates and runs one active job at a time", () => {
   assert.equal(second.entry.status, "queued");
   assert.equal(activeDesktopEntry(q).inputUrl, "https://example.com/a");
   assert.deepEqual(
-    pendingDesktopEntries(q).map((e) => e.inputUrl),
+    queuedEntries(q).map((e) => e.inputUrl),
     ["https://example.com/b"],
   );
   for (const bad of [
@@ -81,7 +81,6 @@ test("failed entry does not stop the rest and totals reflect all entries", () =>
   assert.equal(q.activeId, null);
   const summary = summarizeDesktopQueue(q);
   assert.deepEqual(summary, { total: 3, succeeded: 2, failed: 1, cancelled: 0, pending: 0 });
-  assert.equal(humanDesktopQueueSummary(summary), "bulk: 2 succeeded, 1 failed, 3 total");
 });
 
 test("cancel one and cancel all stop issuing new work", () => {
@@ -89,7 +88,7 @@ test("cancel one and cancel all stop issuing new work", () => {
   q = enqueueDesktopQueue(q, "https://example.com/a").queue;
   q = enqueueDesktopQueue(q, "https://example.com/b").queue;
   const active = activeDesktopEntry(q).id;
-  const waiting = pendingDesktopEntries(q)[0].id;
+  const waiting = queuedEntries(q)[0].id;
   let res = cancelDesktopEntry(q, waiting);
   assert.equal(res.code, "ok");
   q = res.queue;
@@ -191,7 +190,6 @@ for (const id of ["queue-basic", "queue-retry"]) {
     assert.deepEqual(outcomes, doc.golden.outcomes, "per-entry outcomes");
     const summary = summarizeDesktopQueue(q);
     assert.deepEqual(summary, doc.golden.summary, "totals");
-    assert.equal(humanDesktopQueueSummary(summary), doc.golden.human, "human totals line");
     if (doc.golden.retriedIdDiffers) {
       const failedId = byIndex[1];
       const retried = q.entries.find((e) => e.status === "done" && e.id !== byIndex[0]);

@@ -1,8 +1,6 @@
 # Testing
 
-Tests are deterministic unless the command says `live`. Shared scenarios in `testdata/scenarios` describe resources, inputs, expected output, and errors. Tests compare requests, choices, pixels, saves, resource limits, and cleanup. Live diagnostics never substitute.
-
-Deterministic suites use fixed fixture bytes, stable ordering, explicit seeds, controlled time, no public DNS or network. Platform-specific deterministic tests and manual release checks supplement that contract, never weaken it. Task grammar: [`crates/xtask/README.md`](../crates/xtask/README.md).
+Tests are deterministic unless the command says `live`. Shared scenarios in `testdata/scenarios` describe resources, inputs, expected output, and errors, and tests compare requests, choices, pixels, saves, resource limits, and cleanup; live diagnostics never substitute. Deterministic suites use fixed fixture bytes, stable ordering, explicit seeds, controlled time, no public DNS or network. Platform-specific deterministic tests and manual release checks supplement that contract, never weaken it. Task grammar: [`crates/xtask/README.md`](../crates/xtask/README.md).
 
 ## Main commands
 
@@ -18,12 +16,7 @@ cargo xtask test all
 
 Node 24.15.0 is the minimum supported Node version. Direct Cargo and pnpm commands are valid for debugging an individual component, but `cargo xtask` remains the unified front door and defines repository coverage.
 
-Bare `cargo xtask test` is the fast aggregate:
-
-1. One `cargo test --workspace` run, quiet Cargo output, terse libtest format.
-2. Help-page generation, then one Node dot-reporter process over website, browser runtime, desktop Node, and pure extension unit suites.
-
-It never runs `check`, generates bindings, builds WXT packages, or launches a browser.
+Bare `cargo xtask test` is the fast aggregate: one `cargo test --workspace` run (quiet Cargo, terse libtest format), then help-page generation and one Node dot-reporter process over website, browser runtime, desktop Node, and pure extension unit suites. It never runs `check`, generates bindings, builds WXT packages, or launches a browser.
 
 `cargo xtask test all` runs the fast aggregate once, then adds the fresh WASM Node harness, website Chromium Playwright E2E, and remaining extension tests needing generated WASM/WXT packages (Chromium plus Firefox headless E2E). It re-invokes no focused aliases, so it repeats neither the fast Rust nor the Node matrix. It excludes public-network tests and the desktop real-window test.
 
@@ -40,14 +33,13 @@ Focused aliases remain available for iteration:
 | `core [--purity\|--parity]` | core crate, with optional purity or format-parity focus |
 | `bindings` | generated-artifact comparison, Rust and TypeScript contracts, and WASM portability |
 | `wasm [--browser chromium]` | WASM Host ABI and generated Node harness; optional Chromium website E2E |
-| `browser [--build-only\|--browser chromium\|--scenario <id>]` | browser-runtime Node contracts; a browser selection adds website Chromium E2E |
+| `browser [--build-only\|--browser chromium]` | browser-runtime Node contracts; a browser selection adds website Chromium E2E |
 | `ui` | shared-UI presentation and product-agnostic view contract |
 | `web [--e2e]` | website Node suite; `--e2e` adds Chromium Playwright |
 | `native` | native runtime and CLI Rust suites |
 | `desktop [--e2e-window]` | desktop Rust and Node suites; the option runs the explicit real-window gate instead |
 | `extension` | generated WASM/WXT, all extension units, and Chromium plus Firefox headless E2E |
 | `scenario` | CLI snapshots and native scenario/loopback integration tests |
-| `perf [--smoke]` | native pipeline performance smoke and tracked benches |
 | `live` | explicit, advisory public compatibility checks |
 | `all` | fast aggregate plus build-dependent WASM, website, and extension integration |
 
@@ -85,7 +77,7 @@ There are no separate native or scenario CI lanes: the Rust workspace lane alrea
 
 ## Fixture harness
 
-`crates/fixture-server` serves the scenario corpus on allocated loopback ports. A payload at `payloads/{host}{url-path}` maps to `{host}{url-path}`, content type inferred from extension. `routes.json` records only exceptions: non-`200` statuses, extra headers, redirects, query/wildcard matches, generators, non-mirrored payload names.
+`crates/fixture-server` serves the scenario corpus on allocated loopback ports. A payload at `payloads/{host}{url-path}` maps to `{host}{url-path}`, content type inferred from extension. `routes.json` records only exceptions: non-`200` statuses, extra headers, redirects, query/wildcard matches, generators, payloads whose stored name does not follow the layout.
 
 ```sh
 cargo xtask fixtures verify
@@ -110,8 +102,8 @@ Live checks use no private credentials, bounded counts and rates, and reproducib
 cargo xtask test desktop --e2e-window
 ```
 
-This explicit lane builds current frontend, fixture server, and Tauri shell with its embedded W3C WebDriver server, then verifies real save, cancellation, confirmed handoff, and partial journeys. Excluded from bare `test`, `test all`, and `cargo xtask ci local`. Linux needs `xvfb-run -a`; macOS and Windows use GUI sessions. The path-gated desktop workflow runs it on all three OSes plus bundle smoke. Native mechanism: [Native apps](native-apps.md#real-window-e2e-hook).
+This explicit lane builds current frontend, fixture server, and Tauri shell with its embedded W3C WebDriver server, then verifies real save, cancellation, and partial journeys. Excluded from bare `test`, `test all`, and `cargo xtask ci local`. Linux needs `xvfb-run -a`; macOS and Windows use GUI sessions. The path-gated desktop workflow runs it on all three OSes plus bundle smoke. Native mechanism: [Native apps](native-apps.md#real-window-e2e-hook).
 
 ## Cross-runtime guarantees
 
-Browser and native products call the same async algorithm. Fixtures verify output, attempts, cleanup, error codes, and recovery independently of platform APIs. Release candidates pass the matrix in [Releases](releases.md); security-sensitive scenarios follow [Security](security.md).
+Browser and native products call the same async algorithm. Fixtures verify output, attempts, cleanup, typed failures, and recovery independently of platform APIs. Release candidates pass the matrix in [Releases](releases.md); security-sensitive scenarios follow [Security](security.md).

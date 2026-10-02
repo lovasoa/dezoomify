@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { renderSaveGuidance } from "../packages/shared-ui/src/components.ts";
-import { describeFailure, plainMessageFor } from "../packages/shared-ui/src/failure.ts";
+import { canRetry, detailOf, plainMessageFor } from "../packages/shared-ui/src/failure.ts";
 import {
   presentFailure,
   presentIdle,
@@ -14,7 +14,6 @@ const progress = (extra = {}) => ({ phase: "acquisition", completed: 2, total: 4
 const output = (extra = {}) => ({
   canvas: { width: 512, height: 512 },
   format: "png",
-  complete: true,
   missing: [],
   disposition: "browser-save-ready",
   ...extra,
@@ -57,7 +56,6 @@ test("ordinary image display keeps progress during work and presents its final p
 
 test("results without progress retain partial output and exact missing tile identities", () => {
   const result = output({
-    complete: false,
     missing: [10, 11, 12],
     disposition: "native-publication",
   });
@@ -69,14 +67,10 @@ test("results without progress retain partial output and exact missing tile iden
 
 test("failed presentation retains the canonical failure", () => {
   const error = {
-    code: "TRANSPORT_HTTP_ERROR",
-    phase: "acquisition",
-    message: "Three tiles failed.",
-    retryable: false,
-    transport: "native",
+    kind: "http-error",
+    status: 403,
     request: "https://example.test/tile?signature=exact",
-    resource_kind: "tile",
-    http: 403,
+    transport: "native",
   };
   const failed = presentFailure(error);
   assert.equal(failed.phase, "failed");
@@ -91,51 +85,60 @@ test("save guidance explains saving and browser color limitations", () => {
   assert.ok(renderSaveGuidance(true).includes("Colors may shift"));
 });
 
-test("failure wording keeps canonical diagnostic facts out of the headline", () => {
+test("failure wording keeps diagnostic facts out of the headline", () => {
   const facts = {
-    code: "job.discovery-failed",
-    phase: "discovery",
-    message: "candidate formats rejected the metadata",
+    kind: "discovery-failed",
     detail: " - iiif: Invalid IIIF info.json file\n - zoomify: HTTP 404 fetching this address",
-    retryable: false,
-    transport: "browser-session",
-    request: "https://example.test/info.json?signed=exact",
-    resource_kind: "metadata",
-    blocked_reason: "forbidden",
-    http: 403,
-    retry_after_ms: 7000,
-    preview: "server refusal",
+    cause: {
+      kind: "http-error",
+      status: 403,
+      request: "https://example.test/info.json?signed=exact",
+      transport: "browser-session",
+      retry_after_ms: 7000,
+      preview: "server refusal",
+      detail: "the site refused this file",
+    },
   };
-  const error = describeFailure(facts, "example.test");
-  assert.ok(error.message.includes("No zoomable image"));
-  assert.ok(!error.message.includes("iiif"));
-  assert.deepEqual({ ...error, message: facts.message }, facts);
+  // The typed cause drives the wording; the per-format evidence stays in
+  // the collapsible detail and never enters the headline.
+  assert.match(plainMessageFor(facts, "example.test"), /refused to share this file \(HTTP 403\)/i);
+  assert.ok(!plainMessageFor(facts, "example.test").includes("iiif"));
+  assert.match(
+    plainMessageFor({ kind: "discovery-failed", detail: facts.detail }, "example.test"),
+    /No zoomable image/,
+  );
+  assert.match(detailOf(facts), /iiif/);
+  assert.match(detailOf(facts), /the site refused this file/);
+  // The typed facts survive unchanged: no message is stored or parsed.
+  assert.deepEqual(facts.cause.status, 403);
+  assert.deepEqual(facts.cause.retry_after_ms, 7000);
 });
 
-test("metadata proxy guidance retains its precise upstream explanation", () => {
-  const facts = {
-    code: "TRANSPORT_HTTP_ERROR",
-    phase: "discovery",
-    transport: "metadata-proxy",
-    message:
-      "The site refused to share this file (HTTP 403). It may block shared servers; the browser extension or the desktop app may still work.",
-    retryable: false,
-    http: 403,
-  };
-  assert.deepEqual(describeFailure(facts), { ...facts, detail: facts.message });
+test("rate-limit failures render the transport-specific explainer", () => {
+  assert.match(
+    plainMessageFor({ kind: "rate-limited", transport: "metadata-proxy" }, "example.test"),
+    /our server/i,
+  );
+  assert.match(
+    plainMessageFor({ kind: "rate-limited", transport: "direct" }, "example.test"),
+    /your own connection/i,
+  );
+  assert.match(
+    plainMessageFor({ kind: "http-error", status: 429, transport: "direct" }, "example.test"),
+    /your own connection/i,
+  );
 });
 
-test("localizing an error preserves its phase and retryability", () => {
-  const facts = {
-    code: "tile.processing-failed",
-    phase: "processing",
-    message: "The encrypted tile has an invalid signature.",
-    retryable: false,
-  };
-  const localized = describeFailure(facts, "example.test");
-  assert.equal(localized.phase, "processing");
-  assert.equal(localized.retryable, false);
-  assert.equal(localized.detail, facts.message);
+test("the retry verdict is read from the boundary's hint and never recomputed", () => {
+  assert.equal(canRetry({ kind: "timeout", transport: "native", retryable: true }), true);
+  assert.equal(
+    canRetry({ kind: "http-error", status: 503, transport: "native", retryable: false }),
+    false,
+  );
+  // Without the hint (a boundary that could not classify the error), retry
+  // fails closed.
+  assert.equal(canRetry({ kind: "http-error", status: 503, transport: "native" }), false);
+  assert.equal(canRetry({ kind: "processing-failed" }), false);
 });
 
 test("resolution downgrade remains visible after completion", () => {
@@ -154,12 +157,7 @@ test("resolution downgrade remains visible after completion", () => {
 });
 
 test("canvas failure copy names the desktop app for every report", () => {
-  for (const code of [
-    "PLAN_INVALID",
-    "OUTPUT_ALLOCATION_FAILED",
-    "OUTPUT_SURFACE_UNAVAILABLE",
-    "OUTPUT_ENCODE_FAILED",
-  ]) {
-    assert.match(plainMessageFor(code, "", "example.test"), /desktop app/i, code);
+  for (const kind of ["plan-invalid", "output-unavailable"]) {
+    assert.match(plainMessageFor({ kind }, "example.test"), /desktop app/i, kind);
   }
 });

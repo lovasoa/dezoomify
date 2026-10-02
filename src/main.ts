@@ -16,14 +16,14 @@ import {
   showExtensionGuidance,
   suggestedNameFor,
 } from "@dezoomify/shared-ui";
-import { RATE_LIMITED_BY_SITE_MESSAGE, SITE_BUSY_MESSAGE } from "./discovery.ts";
 import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.ts";
-import { createProxyTransport, PROXY_METADATA_MAX_BYTES } from "./proxyTransport.ts";
+import { createProxyTransport } from "./proxyTransport.ts";
+import { PROXY_MAX_BYTES } from "./server/security.ts";
 
 const preview = createPreviewControls();
 const proxyTransport = createProxyTransport(fetch, {
   protocolVersion: 1,
-  maxBytes: PROXY_METADATA_MAX_BYTES,
+  maxBytes: PROXY_MAX_BYTES,
 });
 const memory = new Map<string, string>();
 const historyStore = {
@@ -87,11 +87,6 @@ const app = root
           proxyTransport,
           isProxyEligible,
           hooks,
-          messages: {
-            rateLimitedBySite: RATE_LIMITED_BY_SITE_MESSAGE,
-            siteBusy: SITE_BUSY_MESSAGE,
-            discoveryFailed: () => "No zoomable image was found at this address.",
-          },
           throttle: (url) => throttle.throttle(url),
         });
         let blobUrl: string | undefined;

@@ -1,6 +1,6 @@
 {
   "outcome": "failed",
-  "code": "discovery.failed",
+  "code": "malformed-metadata",
   "recovery": "edit-input",
   "phase": "discovery",
   "retryable": false,

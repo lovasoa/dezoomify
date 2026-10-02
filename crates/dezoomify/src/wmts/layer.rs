@@ -189,11 +189,13 @@ pub(crate) fn build_levels(context: &WmtsContext) -> Result<Vec<ResolvedLevel>, 
                 move |tile| {
                     render_template(
                         &template,
-                        &matrix_set,
-                        &matrix_identifier,
-                        &style,
-                        min_column + tile.coord.column,
-                        min_row + tile.coord.row,
+                        &TileRef {
+                            matrix_set: &matrix_set,
+                            matrix: &matrix_identifier,
+                            style: &style,
+                            column: min_column + tile.coord.column,
+                            row: min_row + tile.coord.row,
+                        },
                     )
                 },
             )?;
@@ -285,14 +287,24 @@ fn is_template_placeholder(value: &str) -> bool {
         .any(|known| value.eq_ignore_ascii_case(known))
 }
 
-fn render_template(
-    template: &str,
-    matrix_set: &str,
-    matrix: &str,
-    style: &str,
+/// One WMTS tile's addressing placeholders.
+#[derive(Clone, Copy)]
+struct TileRef<'a> {
+    matrix_set: &'a str,
+    matrix: &'a str,
+    style: &'a str,
     column: u32,
     row: u32,
-) -> Request {
+}
+
+fn render_template(template: &str, at: &TileRef<'_>) -> Request {
+    let TileRef {
+        matrix_set,
+        matrix,
+        style,
+        column,
+        row,
+    } = *at;
     let mut uri = String::with_capacity(template.len() + 32);
     let mut remaining = template;
     while let Some(start) = remaining.find('{') {

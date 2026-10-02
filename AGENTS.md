@@ -43,7 +43,7 @@ compilation. Use `--profile dev-debug` only when a diagnosis needs symbols.
 | Browser runtime, transports, tainted canvas | [`docs/browser-runtime.md`](docs/browser-runtime.md) |
 | Extension behavior, packaging, source binding | [`docs/extension.md`](docs/extension.md) |
 | CLI and desktop app | [`docs/native-apps.md`](docs/native-apps.md) |
-| Generated Host bindings and handoff | [`docs/bindings.md`](docs/bindings.md) |
+| Generated Host bindings | [`docs/bindings.md`](docs/bindings.md) |
 | Errors and typed recovery | [`docs/errors.md`](docs/errors.md) |
 | Security and credential rules | [`docs/security.md`](docs/security.md) |
 | Testing policy and fixtures | [`docs/testing.md`](docs/testing.md) |
@@ -62,8 +62,9 @@ compilation. Use `--profile dev-debug` only when a diagnosis needs symbols.
 - **Contracts:** cross-language types are defined once in `crates/dezoomify/src/model.rs`;
   `packages/wasm-bindings` is emitted by the real WASM build via
   `cargo xtask bindings generate` and never hand-edited. Browser boundary
-  modules import it and never redeclare Rust contract types. Errors carry stable codes and structured context;
-  never branch on display strings.
+  modules import it and never redeclare Rust contract types. Errors are one
+  typed enum whose serde `kind` tag is the only stable identifier and whose
+  structured fields carry the facts; never branch on display strings.
 - **Generated artifacts:** nothing generated for the website is committed
   (wasm glue, `help/`, `dist/`); the website-deploy workflow builds
   everything via `scripts/build-site.mjs` (legacy site at `/`, Vite+React app
@@ -101,7 +102,6 @@ Use these terms consistently in docs, code, and user-facing copy.
 | browser-session fetch | The extension's session fetch. Never "privileged fetch". |
 | ordinary image display | Tiles as plain `<img>` elements; visible, no byte access. |
 | readable bytes | Response bytes JavaScript can read. |
-| handoff | Moving a job to another app; the `dezoomify://` deep link is the mechanism. Never "escalation". |
 | output / save | The produced files and the user action that writes them. Never "export"/"download". |
 | job | One end-to-end user request, owned by one invocation. |
 | discovery / scan | Core image/level finding; the extension's one-shot tab observation. |

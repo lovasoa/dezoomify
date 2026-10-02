@@ -98,8 +98,8 @@ pub fn test_desktop(args: &[String]) -> Result<(), String> {
             args.join(" ")
         ));
     }
-    // Lean shell unit tests: handoff execution, registration, deep links,
-    // commands, updater (workspace member, always builds offline).
+    // Lean shell unit tests: job execution, registration, commands, updater
+    // (workspace member, always builds offline).
     super::command::cargo_test(&["-p", DESKTOP_PKG])?;
     run_node(&["apps/desktop/tests/*.test.mjs"])?;
     Ok(())
@@ -917,7 +917,7 @@ fn bundle() -> Result<(), String> {
 
 fn run_node(args: &[&str]) -> Result<(), String> {
     // Lean desktop suites normally finish in seconds. Preserve headroom for
-    // cold Cargo work in the deep-link test, while failing a leaked Node or
+    // cold Cargo work, while failing a leaked Node or
     // Vite descendant with the owning spec named instead of letting CI hang.
     let label = args.join(" ");
     // React `.tsx` sources import directly under the test hook.

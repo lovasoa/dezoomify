@@ -93,7 +93,7 @@ impl ImageInfo {
             .unwrap_or_else(|| "default".into())
     }
 
-    /// Best tile format, mirroring the deployed web behavior: prefer `png`
+    /// Best tile format, matching the deployed web behavior: prefer `png`
     /// when the metadata declares it, else the first declared format, else
     /// `jpg`. Profile-advertised formats are not consulted.
     #[must_use]

@@ -9,7 +9,6 @@
   "devDependencies": {
     "geckodriver": "^7.0.0",
     "playwright": "1.63.0",
-    "pngjs": "^7.0.0",
     "selenium-webdriver": "^4.50.0"
   },
   "license": "GPL-3.0-or-later"

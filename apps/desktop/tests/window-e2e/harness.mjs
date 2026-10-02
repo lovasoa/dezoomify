@@ -6,7 +6,7 @@
 // ephemeral loopback fixture server, a loopback static server for the built
 // frontend (the debug window shell loads its embedded devUrl
 // `http://localhost:1420`), an isolated per-run profile, WebDriver port
-// allocation, app launch/readiness/teardown, deep-link delivery, and output
+// allocation, app launch/readiness/teardown, and output
 // helpers. Inputs are fixed, there is no public network, and reports carry
 // origins, hashes, and stable codes only.
 import { spawn, spawnSync } from "node:child_process";
@@ -446,31 +446,12 @@ export function gatewayInput(innerUrl) {
   return `${fixtureBase()}/fetch?url=${innerUrl}`;
 }
 
-export function deepLinkArgv(input) {
-  return `dezoomify://open?v=2&src=${encodeURIComponent(input)}`;
-}
-
 // Automatic desktop saves derive their filename from the fixture catalog title,
 // so the resulting file is located by extension in the empty per-run directory.
 export function outputFiles(outputDir, extension = ".png") {
   return readdirSync(outputDir, { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(extension))
     .map((entry) => path.join(outputDir, entry.name));
-}
-
-// Delivers a deep link the way the OS does: a second app process with the link
-// argv forwards it to the running window through the single-instance channel
-// and exits. The link performs no I/O until the frontend confirm gate
-// accepts it. Times out fail-closed when the forwarder lingers.
-export async function deliverDeepLink({ env, link }) {
-  const child = spawn(APP_BIN, [link], { env, stdio: "ignore" });
-  const done = new Promise((resolve) => child.once("exit", resolve));
-  const timeout = new Promise((resolve) => setTimeout(() => resolve("timeout"), 30000));
-  const result = await Promise.race([done, timeout]);
-  if (result === "timeout") {
-    child.kill();
-    throw new Error("window E2E: deep-link forwarder did not exit in time");
-  }
 }
 
 export { FIXTURE_SERVER_BIN };

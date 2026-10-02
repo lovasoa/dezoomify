@@ -77,8 +77,8 @@ test("static accessibility contract: live job region announces progress with a l
   render(el, progressPresentation(3, 12), callbacks, {
     jobActivity: {
       url: "https://museum.example.org/x",
-      startedAt: Date.now() - 3000,
-      now: Date.now(),
+      startedAt: 0,
+      now: 3_000,
     },
   });
   const card = el.querySelector(".dz-card");
@@ -246,9 +246,6 @@ test("static accessibility contract: completed and display-only views keep every
       canvas: { width: 100, height: 80 },
     }),
     callbacks,
-    {
-      desktopHandoffUrl: "dezoomify://open?v=2&src=https%3A%2F%2Fx",
-    },
   );
   assert.equal(preview.querySelector("#dz-btn-save"), null);
   assertButtonsNamed(preview.querySelector(".dz-card"), "display-only");

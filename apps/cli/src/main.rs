@@ -276,12 +276,23 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
     let level = parsed.logging.as_str();
     let json = parsed.json;
     let job_id = format!("job:cli-{}", std::process::id());
+    // Every single-job failure ends the `--json` stream with one terminal
+    // record carrying the typed error, so machine consumers never see an
+    // unterminated event stream.
+    let fail = |error: &dezoomify::model::Error| {
+        if json {
+            println!("{}", report::machine_failed(&job_id, error));
+        }
+        eprintln!("error: {error} ({})", error.cause().kind());
+        false
+    };
     let result = run_native(parsed, input, output, true);
     match result {
         Ok((summary, terminal_seq)) => {
             let Some(size) = summary.output.canvas.as_ref() else {
-                eprintln!("error: saved output has no dimensions (native.internal)");
-                return false;
+                return fail(&dezoomify::model::Error::Internal(
+                    "saved output has no dimensions".to_string().into(),
+                ));
             };
             if json {
                 println!(
@@ -293,11 +304,11 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
                         width: size.width,
                         height: size.height,
                         tile_count: summary.tile_count,
-                        partial: !summary.output.complete,
+                        partial: !summary.output.is_complete(),
                     })
                 );
             } else if report::show_success(level) {
-                if !summary.output.complete {
+                if !summary.output.is_complete() {
                     eprintln!(
                         "kept partial {} ({} tiles, {}x{}) (missing tiles left blank)",
                         summary.path.display(),
@@ -317,18 +328,7 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
             }
             true
         }
-        Err(error) if error.code == "job.cancelled" => {
-            eprintln!("error: job cancelled before completion (job.cancelled)");
-            false
-        }
-        Err(error) => {
-            eprintln!(
-                "error: {} ({})",
-                error.message,
-                report::error_code(&error.code)
-            );
-            false
-        }
+        Err(error) => fail(&error),
     }
 }
 
@@ -386,12 +386,15 @@ fn run_bulk(parsed: Args) {
                 }
                 items.push(item);
             }
-            Err((code, message)) => {
-                let item = report::BulkItem::failed(index, url, &output_str, &code, &message);
+            Err(error) => {
+                let item = report::BulkItem::failed(index, url, &output_str, &error);
                 if parsed.json {
                     println!("{}", report::machine_bulk_item(&item));
                 } else {
-                    eprintln!("failed {url} -> {output_str}: {code}: {message}");
+                    eprintln!(
+                        "failed {url} -> {output_str}: {error} ({})",
+                        error.cause().kind()
+                    );
                 }
                 items.push(item);
             }
@@ -476,15 +479,13 @@ fn run_one_bulk_image(
     parsed: &Args,
     url: &str,
     output: &str,
-) -> Result<(usize, String), (String, String)> {
-    run_native(parsed, url, Path::new(output), false)
-        .map(|(publication, _)| {
-            (
-                publication.tile_count,
-                publication.path.to_string_lossy().into_owned(),
-            )
-        })
-        .map_err(|error| (report::error_code(&error.code).into(), error.message))
+) -> Result<(usize, String), dezoomify::model::Error> {
+    run_native(parsed, url, Path::new(output), false).map(|(publication, _)| {
+        (
+            publication.tile_count,
+            publication.path.to_string_lossy().into_owned(),
+        )
+    })
 }
 
 #[allow(clippy::result_large_err)] // Preserve the shared error until CLI presentation.
@@ -494,7 +495,7 @@ fn run_native(
     output: &Path,
     individual: bool,
 ) -> Result<(dezoomify_native::Publication, u64), dezoomify::model::Error> {
-    use dezoomify::model::{Error, ErrorPhase};
+    use dezoomify::model::Error;
     let started = Instant::now();
     let mut progress_gate = report::ProgressGate::default();
     let sequence = std::cell::Cell::new(1u64);
@@ -536,21 +537,17 @@ fn run_native(
         ))
         .inspect_err(|error| {
             host.diagnostics.finish(
-                if error.code == "job.cancelled" {
+                if matches!(error.cause(), Error::Cancelled) {
                     "cancelled"
                 } else {
                     "failed"
                 },
-                serde_json::json!({"code": error.code, "message": error.message}),
+                serde_json::json!({ "error": error }),
             );
         })?;
-    let publication = host.publication().ok_or_else(|| {
-        Error::new(
-            "native.internal",
-            ErrorPhase::Output,
-            "output was not published",
-        )
-    })?;
+    let publication = host
+        .publication()
+        .ok_or_else(|| Error::Internal("output was not published".to_string().into()))?;
     Ok((publication, sequence.get() + 1))
 }
 
@@ -650,8 +647,7 @@ fn fetch_bulk_url(
         },
         ..FetchLimits::default()
     };
-    let outcome =
-        fetch(url, &BTreeMap::new(), Some(&user), &limits).map_err(|e| e.message.clone())?;
+    let outcome = fetch(url, &BTreeMap::new(), Some(&user), &limits).map_err(|e| e.to_string())?;
     if !(200..300).contains(&outcome.status) {
         return Err(format!(
             "bulk fetch failed with http status {}",

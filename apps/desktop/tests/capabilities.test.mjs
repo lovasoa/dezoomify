@@ -41,13 +41,10 @@ const EXPECTED_COMMANDS = [
   "resume_job",
   "open_saved_output",
   "release_job",
+  "validate_settings",
+  "is_retryable",
 ];
-const EXPECTED_CHANNELS = [
-  "dezoomify://registered",
-  "dezoomify://progress",
-  "dezoomify://partial",
-  "dezoomify://deep-link-pending",
-];
+const EXPECTED_CHANNELS = ["dezoomify://registered", "dezoomify://progress", "dezoomify://partial"];
 const EXPECTED_ENCODERS = ["png", "jpeg", "tiff", "zif", "webp"];
 
 const DESKTOP_META = readJson("../src-tauri/dezoomify.json");
@@ -83,9 +80,8 @@ test("generated files list exact commands and channels", () => {
 test("encoders and updater stay consistent", () => {
   const tauriConf = readJson("../src-tauri/tauri.conf.json");
   const desktopCap = readJson("../../../generated/desktop-capabilities.json");
-  // The bundle identifier and deep-link scheme live in the tauri config.
+  // The bundle identifier lives in the tauri config.
   assert.equal(tauriConf.identifier, "dev.ophir.dezoomify");
-  assert.deepEqual(DESKTOP_META.deepLink.schemes, ["dezoomify"]);
   for (const doc of [DESKTOP_META, desktopCap]) {
     const x = xdezoomify(doc);
     assert.deepEqual(sorted(x.encoders), sorted(EXPECTED_ENCODERS));

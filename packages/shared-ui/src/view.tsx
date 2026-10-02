@@ -6,14 +6,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
+import type { JobActivity } from "./activity.ts";
+import { canRetry, httpStatusOf, plainMessageFor } from "./failure.ts";
 import type { HistoryEntry } from "./history.ts";
 import type { Presentation, ResolutionChoice } from "./presentation.ts";
-import {
-  displaySourceUrl,
-  handoffOriginFor,
-  hostFromUrl,
-  isFileHandoffSource,
-} from "./view-helpers.ts";
+import { displaySourceUrl, hostFromUrl } from "./view-helpers.ts";
 import type {
   ConfirmModalArgs,
   PlatformHints,
@@ -22,12 +19,7 @@ import type {
   ViewRenderOptions,
 } from "./view-types.ts";
 
-export {
-  DEFAULT_PAGE_TITLE,
-  handoffOriginFor,
-  isFileHandoffSource,
-  jobPageTitle,
-} from "./view-helpers.ts";
+export { DEFAULT_PAGE_TITLE, jobPageTitle } from "./view-helpers.ts";
 export type {
   ConfirmModalArgs,
   PlatformHints,
@@ -42,9 +34,7 @@ import { DiagnosticDetails } from "./diagnostic-details.tsx";
 import { t } from "./i18n.ts";
 import { UrlInput } from "./url-input.tsx";
 
-// ---------------------------------------------------------------------------
 // Pure helpers (host-neutral, no DOM).
-// ---------------------------------------------------------------------------
 
 function historyDimsLabel(entry: HistoryEntry): string {
   if (
@@ -68,9 +58,7 @@ function historyDateLabel(at: number): string {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Presentational atoms.
-// ---------------------------------------------------------------------------
 
 function Logo() {
   return (
@@ -157,12 +145,13 @@ function ResolutionNotice({
   choice,
   callbacks,
   running,
+  hostDocument,
 }: {
   choice: ResolutionChoice;
   callbacks: ViewCallbacks;
   running: boolean;
+  hostDocument: Document;
 }) {
-  const hostDoc = globalThis.document;
   const dims = (size: { width: number; height: number }) => `${size.width}×${size.height}`;
   return (
     <div className="dz-resolution-notice" id="dz-resolution-notice">
@@ -196,7 +185,7 @@ function ResolutionNotice({
           type="button"
           className="dz-resolution-download"
           id="dz-btn-download-desktop"
-          onClick={() => showDesktopAppGuidance(hostDoc)}
+          onClick={() => showDesktopAppGuidance(hostDocument)}
         >
           <svg
             width="18"
@@ -246,15 +235,21 @@ function resolutionNoticeOf(
   presentation: Presentation,
   callbacks: ViewCallbacks,
   running: boolean,
+  hostDocument: Document,
 ): ReactElement | null {
   const choice = callbacks.onTryMaximum ? presentation.resolution : undefined;
   if (!choice) return null;
-  return <ResolutionNotice choice={choice} callbacks={callbacks} running={running} />;
+  return (
+    <ResolutionNotice
+      choice={choice}
+      callbacks={callbacks}
+      running={running}
+      hostDocument={hostDocument}
+    />
+  );
 }
 
-// ---------------------------------------------------------------------------
 // Input / history.
-// ---------------------------------------------------------------------------
 
 function HistorySection({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: ViewContext }) {
   const entries = ctx?.history;
@@ -323,9 +318,7 @@ function IdleView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: ViewCont
   );
 }
 
-// ---------------------------------------------------------------------------
 // Live job.
-// ---------------------------------------------------------------------------
 
 interface JobDerived {
   paused: boolean;
@@ -343,7 +336,9 @@ interface JobDerived {
 }
 
 function deriveJob(presentation: Presentation, ctx?: ViewContext): JobDerived {
-  const activity = ctx?.jobActivity ?? {};
+  // Clock readings are host-injected through `jobActivity.now`; the view never
+  // reads a global clock. Hosts without job timing get the zero epoch.
+  const activity: JobActivity = ctx?.jobActivity ?? { now: 0 };
   const current = presentation.progress?.current ?? 0;
   const total = presentation.progress?.total ?? 0;
   const determinate = total > 0;
@@ -354,7 +349,7 @@ function deriveJob(presentation: Presentation, ctx?: ViewContext): JobDerived {
   const activePct = determinate ? (active / total) * 100 : 0;
   const retrying = Math.max(0, Math.min(ctx?.currentProgress?.retrying ?? 0, active));
   const paused = presentation.paused || activity.paused === true;
-  const now = activity.now ?? Date.now();
+  const now = activity.now;
   const startedAt = activity.startedAt ?? now;
   const timerNow = activity.pausedAt ?? now;
   const elapsedMs = Math.max(0, timerNow - startedAt - (activity.pausedDurationMs ?? 0));
@@ -366,11 +361,11 @@ function deriveJob(presentation: Presentation, ctx?: ViewContext): JobDerived {
     ? t(presentation.detailKey, presentation.detailVars)
     : undefined;
   const step = paused
-    ? "Paused"
+    ? t("view.job.paused")
     : retrying > 0
-      ? `Retrying ${retrying} tile${retrying === 1 ? "" : "s"}…`
+      ? t("view.job.retryingTiles", { count: retrying })
       : showStalled
-        ? `Waiting for ${hostFromUrl(activity.url)}…`
+        ? t("view.job.waiting", { host: hostFromUrl(activity.url) })
         : t(presentation.headlineKey, presentation.headlineVars);
   const sourceUrl = activity.url ? displaySourceUrl(activity.url) : "";
   const estimatedTotalMs =
@@ -382,7 +377,9 @@ function deriveJob(presentation: Presentation, ctx?: ViewContext): JobDerived {
     ? `${elapsed}${typeof estimatedTotalMs === "number" && estimatedTotalMs > elapsedMs ? ` / ~${formatElapsed(estimatedTotalMs)}` : ""}`
     : "";
   const countsText = determinate
-    ? `${current} done${active > 0 ? ` + ${active} in progress` : ""} / ${total}`
+    ? active > 0
+      ? t("view.job.countsActive", { current, total, active })
+      : t("view.job.countsFull", { current, total })
     : "";
   return {
     paused,
@@ -404,10 +401,12 @@ function JobView({
   presentation,
   callbacks,
   ctx,
+  hostDocument,
 }: {
   presentation: Presentation;
   callbacks: ViewCallbacks;
   ctx?: ViewContext;
+  hostDocument: Document;
 }) {
   const d = deriveJob(presentation, ctx);
   if (presentation.decision) {
@@ -416,7 +415,8 @@ function JobView({
       missing.length > 0 &&
       missing.every(({ failures }) => {
         const failure = failures.at(-1);
-        return failure?.http === 401 || failure?.http === 403;
+        const status = failure ? httpStatusOf(failure) : undefined;
+        return status === 401 || status === 403;
       });
     return (
       <section className="dz-view-body dz-partial-section" aria-labelledby="dz-partial-title">
@@ -440,7 +440,7 @@ function JobView({
         style={{ display: d.sourceUrl ? "" : "none" }}
         title={d.sourceUrl}
       >
-        <span className="dz-job-source-label">Source</span>
+        <span className="dz-job-source-label">{t("view.job.sourceLabel")}</span>
         <span className="dz-source-url" id="dz-job-source-url">
           {d.sourceUrl}
         </span>
@@ -471,8 +471,8 @@ function JobView({
             className="dz-progress-control"
             id="dz-btn-pause"
             style={{ display: showPause ? "" : "none" }}
-            aria-label="Pause"
-            title="Pause"
+            aria-label={t("view.job.pause")}
+            title={t("view.job.pause")}
             onClick={() => callbacks.onPause?.()}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -485,8 +485,8 @@ function JobView({
             className="dz-progress-control"
             id="dz-btn-resume"
             style={{ display: showResume ? "" : "none" }}
-            aria-label="Resume"
-            title="Resume"
+            aria-label={t("view.job.resume")}
+            title={t("view.job.resume")}
             onClick={() => callbacks.onResume?.()}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -497,8 +497,8 @@ function JobView({
             type="button"
             className="dz-progress-control dz-stop-control"
             id="dz-btn-cancel"
-            aria-label="Stop and return to start"
-            title="Stop and return to start"
+            aria-label={t("view.job.stopReturn")}
+            title={t("view.job.stopReturn")}
             onClick={() => callbacks.onCancel()}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -516,7 +516,11 @@ function JobView({
           aria-label={d.step}
           aria-valuetext={
             d.determinate
-              ? `${d.current} done, ${d.active} in progress, ${Math.max(0, d.total - d.current - d.active)} remaining`
+              ? t("view.job.progressValue", {
+                  done: d.current,
+                  active: d.active,
+                  remaining: Math.max(0, d.total - d.current - d.active),
+                })
               : d.step
           }
         >
@@ -535,25 +539,23 @@ function JobView({
           />
         </div>
       </div>
-      {resolutionNoticeOf(presentation, callbacks, true)}
+      {resolutionNoticeOf(presentation, callbacks, true, hostDocument)}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
 // Display-only, completed, failed, cancelled, generic.
-// ---------------------------------------------------------------------------
 
-function DisplayOnlyView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: ViewContext }) {
+function DisplayOnlyView({
+  callbacks,
+  ctx,
+  hostDocument,
+}: {
+  callbacks: ViewCallbacks;
+  ctx?: ViewContext;
+  hostDocument: Document;
+}) {
   const guidance = renderSaveGuidance(false);
-  const handoffUrl = typeof ctx?.desktopHandoffUrl === "string" ? ctx.desktopHandoffUrl : "";
-  const handoffSource = typeof ctx?.sourceUrl === "string" ? ctx.sourceUrl : "";
-  const handoffOrigin = handoffOriginFor(handoffUrl, handoffSource);
-  const handoffLabel =
-    handoffOrigin !== ""
-      ? t("view.handoff.sendOrigin", { origin: handoffOrigin })
-      : t("view.handoff.send");
-  const hostDoc = globalThis.document;
   return (
     <div className="dz-view-body dz-notice-section dz-fade-in">
       <div className="dz-notice-header">
@@ -577,9 +579,9 @@ function DisplayOnlyView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: V
       <div className="dz-guidance-section">
         <h3 className="dz-guidance-title">{t("view.display.waysTitle")}</h3>
         <div className="dz-guidance-grid">
-          <ExtensionGuideButton onOpen={() => showExtensionGuidance(hostDoc)} />
+          <ExtensionGuideButton onOpen={() => showExtensionGuidance(hostDocument)} />
           <DesktopGuideButton
-            onOpen={() => showDesktopAppGuidance(hostDoc)}
+            onOpen={() => showDesktopAppGuidance(hostDocument)}
             description={t("view.display.deskDescClean")}
           />
         </div>
@@ -595,22 +597,6 @@ function DisplayOnlyView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: V
             {t("view.display.startOver")}
           </button>
         ) : null}
-        {handoffUrl !== "" ? (
-          <a
-            className="dz-btn-secondary"
-            id="dz-btn-desktop-handoff"
-            href={handoffUrl}
-            onClick={() => {
-              try {
-                callbacks.onOpenExternalLink?.(handoffUrl);
-              } catch {
-                // Handoff navigation must never break display.
-              }
-            }}
-          >
-            {handoffLabel}
-          </a>
-        ) : null}
       </div>
     </div>
   );
@@ -619,14 +605,16 @@ function DisplayOnlyView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: V
 function CompletedView({
   presentation,
   callbacks,
+  hostDocument,
 }: {
   presentation: Presentation;
   callbacks: ViewCallbacks;
+  hostDocument: Document;
 }) {
   const [outputAction, setOutputAction] = useState<"open" | "folder" | null>(null);
   const [outputError, setOutputError] = useState<{
     action: "open" | "folder";
-    code: string;
+    kind: string;
   } | null>(null);
   async function runOutputAction(action: "open" | "folder", callback?: () => Promise<void>) {
     if (!callback || outputAction) return;
@@ -635,12 +623,11 @@ function CompletedView({
     try {
       await callback();
     } catch (error) {
-      const rawCode = error && typeof error === "object" && "code" in error ? error.code : null;
-      const code =
-        typeof rawCode === "string" && /^output\.[a-z-]+$/.test(rawCode)
-          ? rawCode
-          : "output.invoke-failed";
-      setOutputError({ action, code });
+      const kind =
+        error && typeof error === "object" && "kind" in error && typeof error.kind === "string"
+          ? error.kind
+          : "invoke-failed";
+      setOutputError({ action, kind });
     } finally {
       setOutputAction(null);
     }
@@ -651,7 +638,7 @@ function CompletedView({
     output?.disposition === "native-publication" ||
     output?.disposition === "browser-save-initiated";
   const title = saved
-    ? t(output.complete ? "desktop.done.title" : "desktop.done.partial")
+    ? t(output.missing.length === 0 ? "desktop.done.title" : "desktop.done.partial")
     : t("view.done.readyTitle");
   const summary = saved
     ? canvas
@@ -684,7 +671,7 @@ function CompletedView({
         </div>
       </div>
       <p className="dz-completed-guidance">{guidance}</p>
-      {resolutionNoticeOf(presentation, callbacks, false)}
+      {resolutionNoticeOf(presentation, callbacks, false, hostDocument)}
       <div className="dz-actions-row">
         {callbacks.onOpenOutput ? (
           <button
@@ -748,13 +735,13 @@ function CompletedView({
       {outputError ? (
         <p id="dz-open-error" role="alert">
           {t(
-            outputError.code === "output.not-found"
+            outputError.kind === "output-not-found"
               ? "desktop.done.missingError"
               : outputError.action === "folder"
                 ? "desktop.done.folderError"
                 : "desktop.done.openError",
           )}{" "}
-          ({outputError.code})
+          ({outputError.kind})
         </p>
       ) : null}
     </div>
@@ -765,30 +752,23 @@ function FailedView({
   presentation,
   callbacks,
   ctx,
+  hostDocument,
 }: {
   presentation: Presentation;
   callbacks: ViewCallbacks;
   ctx?: ViewContext;
+  hostDocument: Document;
 }) {
-  const error: JobError = presentation.error ?? {
-    code: "UNKNOWN",
-    phase: "output",
-    retryable: true,
-    message: t("view.fail.fallback"),
-  };
-  const handoffUrl = typeof ctx?.desktopHandoffUrl === "string" ? ctx.desktopHandoffUrl : "";
+  const error: JobError = presentation.error ?? { kind: "internal" };
   const source =
     typeof ctx?.sourceUrl === "string"
       ? ctx.sourceUrl
       : typeof ctx?.jobActivity?.url === "string"
         ? ctx.jobActivity.url
         : "";
-  const isFile = isFileHandoffSource(source);
-  const origin = isFile ? "" : handoffOriginFor(handoffUrl, source);
-  const label = origin !== "" ? t("view.handoff.sendOrigin", { origin }) : t("view.handoff.send");
-  const hostDoc = globalThis.document;
-  if (error.code === "job.no-usable-tiles") {
-    const refused = error.http === 401 || error.http === 403;
+  if (error.kind === "no-usable-tiles") {
+    const status = httpStatusOf(error);
+    const refused = status === 401 || status === 403;
     return (
       <section className="dz-view-body dz-error-section">
         <h2>{t(refused ? "view.partial.accessDenied" : "view.partial.empty")}</h2>
@@ -800,7 +780,7 @@ function FailedView({
               {t("view.partial.openSource")}
             </button>
           ) : null}
-          {error.retryable && callbacks.onRetrySameUrl ? (
+          {canRetry(error) && callbacks.onRetrySameUrl ? (
             <button type="button" className="dz-btn-secondary" onClick={callbacks.onRetrySameUrl}>
               {t("view.fail.retry")}
             </button>
@@ -834,16 +814,16 @@ function FailedView({
         <div>
           <h2 className="dz-error-title">{t("view.fail.title")}</h2>
           <p className="dz-error-message" id="dz-error-message">
-            {error.message}
+            {plainMessageFor(error, hostFromUrl(source))}
           </p>
         </div>
       </div>
       <div className="dz-guidance-section">
         <h3 className="dz-guidance-title">{t("view.display.waysTitle")}</h3>
         <div className="dz-guidance-grid">
-          <ExtensionGuideButton onOpen={() => showExtensionGuidance(hostDoc)} />
+          <ExtensionGuideButton onOpen={() => showExtensionGuidance(hostDocument)} />
           <DesktopGuideButton
-            onOpen={() => showDesktopAppGuidance(hostDoc)}
+            onOpen={() => showDesktopAppGuidance(hostDocument)}
             description={t("view.fail.deskDescLimits")}
           />
           <a
@@ -874,7 +854,7 @@ function FailedView({
         </div>
       </div>
       <div className="dz-actions-row">
-        {error.retryable && callbacks.onRetrySameUrl ? (
+        {canRetry(error) && callbacks.onRetrySameUrl ? (
           <button
             type="button"
             className="dz-btn-tactile"
@@ -895,28 +875,7 @@ function FailedView({
             {t("view.display.startOver")}
           </button>
         ) : null}
-        {handoffUrl !== "" && !isFile ? (
-          <a
-            className="dz-btn-secondary"
-            id="dz-btn-desktop-handoff"
-            href={handoffUrl}
-            onClick={() => {
-              try {
-                callbacks.onOpenExternalLink?.(handoffUrl);
-              } catch {
-                // Handoff navigation must never break the error view.
-              }
-            }}
-          >
-            {label}
-          </a>
-        ) : null}
       </div>
-      {isFile ? (
-        <p className="dz-notice-message" id="dz-handoff-local">
-          {t("view.handoff.localNote")}
-        </p>
-      ) : null}
     </div>
   );
 }
@@ -944,20 +903,20 @@ function CancelledView({ callbacks }: { callbacks: ViewCallbacks }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Root renderer.
-// ---------------------------------------------------------------------------
 
 function SharedView({
   presentation,
   callbacks,
   ctx,
   options,
+  hostDocument,
 }: {
   presentation: Presentation;
   callbacks: ViewCallbacks;
   ctx?: ViewContext;
   options?: ViewRenderOptions;
+  hostDocument: Document;
 }) {
   const phase = presentation.phase;
   const diagnostics = ctx?.diagnosticReport ? (
@@ -983,14 +942,31 @@ function SharedView({
       {phase === "idle" ? options?.idleBeforeHistory : null}
       {phase === "idle" ? <HistorySection callbacks={callbacks} ctx={ctx} /> : null}
       {phase === "job" ? (
-        <JobView presentation={presentation} callbacks={callbacks} ctx={ctx} />
+        <JobView
+          presentation={presentation}
+          callbacks={callbacks}
+          ctx={ctx}
+          hostDocument={hostDocument}
+        />
       ) : null}
-      {phase === "display-only" ? <DisplayOnlyView callbacks={callbacks} ctx={ctx} /> : null}
+      {phase === "display-only" ? (
+        <DisplayOnlyView callbacks={callbacks} ctx={ctx} hostDocument={hostDocument} />
+      ) : null}
       {phase === "completed" ? (
-        <CompletedView key={ctx?.outputKey} presentation={presentation} callbacks={callbacks} />
+        <CompletedView
+          key={ctx?.outputKey}
+          presentation={presentation}
+          callbacks={callbacks}
+          hostDocument={hostDocument}
+        />
       ) : null}
       {phase === "failed" ? (
-        <FailedView presentation={presentation} callbacks={callbacks} ctx={ctx} />
+        <FailedView
+          presentation={presentation}
+          callbacks={callbacks}
+          ctx={ctx}
+          hostDocument={hostDocument}
+        />
       ) : null}
       {phase === "cancelled" ? <CancelledView callbacks={callbacks} /> : null}
       {options?.after}
@@ -1019,13 +995,17 @@ export function renderView(
 ): void {
   renderInto(
     container,
-    <SharedView presentation={presentation} callbacks={callbacks} ctx={ctx} options={options} />,
+    <SharedView
+      presentation={presentation}
+      callbacks={callbacks}
+      ctx={ctx}
+      options={options}
+      hostDocument={container.ownerDocument}
+    />,
   );
 }
 
-// ---------------------------------------------------------------------------
 // Overlays (guidance modal, choosers, consent).
-// ---------------------------------------------------------------------------
 
 function ModalCard({
   id,
@@ -1033,6 +1013,7 @@ function ModalCard({
   subtitle,
   body,
   actions,
+  hostDocument,
   showClose = true,
   onClose,
 }: {
@@ -1041,6 +1022,7 @@ function ModalCard({
   subtitle?: string;
   body: ReactNode;
   actions?: ReactNode;
+  hostDocument: Document;
   showClose?: boolean;
   onClose(): void;
 }) {
@@ -1048,9 +1030,9 @@ function ModalCard({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    hostDocument.addEventListener("keydown", onKey);
+    return () => hostDocument.removeEventListener("keydown", onKey);
+  }, [hostDocument, onClose]);
   return (
     <div
       id={id}
@@ -1119,6 +1101,7 @@ export function openModal(
     <ModalCard
       title={title}
       subtitle={subtitle}
+      hostDocument={hostDocument}
       onClose={close}
       body={<div>{content}</div>}
       actions={
@@ -1143,7 +1126,7 @@ export function openModal(
 export function openConfirmModal(hostDocument: Document, args: ConfirmModalArgs): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     mountOverlay(hostDocument, (close) => (
-      <ConfirmDialog args={args} close={close} resolve={resolve} />
+      <ConfirmDialog args={args} close={close} resolve={resolve} hostDocument={hostDocument} />
     ));
   });
 }
@@ -1152,10 +1135,12 @@ function ConfirmDialog({
   args,
   close,
   resolve,
+  hostDocument,
 }: {
   args: ConfirmModalArgs;
   close(): void;
   resolve(value: boolean): void;
+  hostDocument: Document;
 }) {
   const declineRef = useRef<HTMLButtonElement>(null);
   useLayoutEffect(() => {
@@ -1170,6 +1155,7 @@ function ConfirmDialog({
       id={args.id}
       title={args.title}
       subtitle={args.subtitle}
+      hostDocument={hostDocument}
       showClose={false}
       onClose={() => decide(false)}
       body={args.bodyLines.map((line) => <p key={line}>{line}</p>)}
@@ -1196,20 +1182,21 @@ function ConfirmDialog({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Guidance dialogs.
-// ---------------------------------------------------------------------------
 
 function detectPlatform(hints?: PlatformHints): { name: string; installer: string } {
   const ua = (hints?.userAgent ?? "").toLowerCase();
   const platform = (hints?.platform ?? "").toLowerCase();
   if (ua.includes("win") || platform.includes("win"))
-    return { name: "Windows", installer: ".msi installer" };
+    return { name: "Windows", installer: t("view.desktop.installerMsi") };
   if (ua.includes("mac") || platform.includes("mac"))
-    return { name: "macOS", installer: "Apple silicon .dmg" };
+    return { name: "macOS", installer: t("view.desktop.installerDmg") };
   if (ua.includes("linux") || platform.includes("linux"))
-    return { name: "Linux", installer: ".deb installer" };
-  return { name: "your platform", installer: "installer" };
+    return { name: "Linux", installer: t("view.desktop.installerDeb") };
+  return {
+    name: t("view.desktop.platformGeneric"),
+    installer: t("view.desktop.installerGeneric"),
+  };
 }
 
 const RELEASES_URL = "https://github.com/lovasoa/dezoomify/releases/latest";
@@ -1218,13 +1205,13 @@ export function showDesktopAppGuidance(hostDocument: Document, hints?: PlatformH
   const p = detectPlatform(hints);
   const releases = (
     <a href={RELEASES_URL} target="_blank" rel="noopener">
-      GitHub Releases
+      {t("view.desktop.releasesLink")}
     </a>
   );
   const downloadNote = (
     <>
-      {t("view.desktop.installer", { platform: p.name, installer: p.installer })} {releases}. No
-      auto-update; check Releases manually.
+      {t("view.desktop.installer", { platform: p.name, installer: p.installer })} {releases}.{" "}
+      {t("view.desktop.releasesNote")}
     </>
   );
   const stepOne = t("view.desktop.step1", { platform: p.name, installer: p.installer });
@@ -1232,6 +1219,7 @@ export function showDesktopAppGuidance(hostDocument: Document, hints?: PlatformH
     <ModalCard
       title={t("view.desktop.title")}
       subtitle={t("view.desktop.subtitle")}
+      hostDocument={hostDocument}
       onClose={close}
       body={
         <>
@@ -1313,6 +1301,7 @@ export function showExtensionGuidance(hostDocument: Document): void {
     <ModalCard
       title={t("view.ext.title")}
       subtitle={t("view.ext.subtitle")}
+      hostDocument={hostDocument}
       onClose={close}
       body={
         <>

@@ -207,9 +207,9 @@ fn parse_headers_value(value: &serde_json::Value) -> Result<BTreeMap<String, Str
         serde_json::Value::Object(map) => {
             for (key, val) in map {
                 let name = key.trim().to_ascii_lowercase();
+                // Header values are strings; JSON numbers fail closed.
                 let val_str = match val {
                     serde_json::Value::String(s) => s.clone(),
-                    serde_json::Value::Number(n) => n.to_string(),
                     _ => {
                         return Err("invalid header: value must be a string".to_string());
                     }
@@ -379,6 +379,8 @@ mod tests {
     #[test]
     fn defaults_match_cli() {
         let settings = parse_settings(&serde_json::Value::Null).unwrap();
+        assert_eq!(settings, DesktopSettings::with_defaults());
+        assert_eq!(parse_settings(&json!({})).unwrap(), settings);
         assert_eq!(settings.output_format, "png");
         assert_eq!(settings.compression, 5);
         assert_eq!(settings.retries, 3);
@@ -418,6 +420,12 @@ mod tests {
     fn retries_zero_allowed_and_bounded() {
         assert_eq!(parse_settings(&json!({"retries": 0})).unwrap().retries, 0);
         assert_eq!(parse_settings(&json!({"retries": 3})).unwrap().retries, 3);
+        assert_eq!(
+            parse_settings(&json!({"retries": MAX_RETRIES}))
+                .unwrap()
+                .retries,
+            MAX_RETRIES
+        );
         assert!(parse_settings(&json!({"retries": -1})).is_err());
         assert!(parse_settings(&json!({"retries": 101})).is_err());
         assert!(parse_settings(&json!({"retries": "x"})).is_err());
@@ -461,6 +469,29 @@ mod tests {
         );
         assert!(parse_settings(&json!({"headers": {"bad name": "v"}})).is_err());
         assert!(parse_settings(&json!({"headers": ["no-colon"]})).is_err());
+        assert!(parse_settings(&json!({"headers": {"x-note": 1}})).is_err());
+    }
+
+    #[test]
+    fn header_lines_validate_shape() {
+        assert_eq!(
+            parse_header_line("  Cookie :  secret=1  ").unwrap(),
+            Some(("cookie".to_string(), "secret=1".to_string()))
+        );
+        assert_eq!(
+            parse_header_line("Referer: https://example.com/a:b").unwrap(),
+            Some(("referer".to_string(), "https://example.com/a:b".to_string()))
+        );
+        assert_eq!(parse_header_line("   ").unwrap(), None);
+        assert_eq!(
+            parse_header_line("X-Note:").unwrap(),
+            Some(("x-note".to_string(), String::new()))
+        );
+        assert!(parse_header_line("no colon here").is_err());
+        assert!(parse_header_line("bad name: v").is_err());
+        assert!(parse_header_line(": v").is_err());
+        assert!(parse_header_line("X: a\rb").is_err());
+        assert!(parse_header_line("X: a\u{0}b").is_err());
     }
 
     #[test]

@@ -1,18 +1,19 @@
 {
   "app": "desktop",
   "bundle": {
-    "identifier": "dev.ophir.dezoomify",
-    "protocolScheme": "dezoomify"
+    "identifier": "dev.ophir.dezoomify"
   },
   "commands": [
     "answer_partial",
     "cancel_job",
     "dezoomify",
     "get_job_diagnostics",
+    "is_retryable",
     "open_saved_output",
     "pause_job",
     "release_job",
-    "resume_job"
+    "resume_job",
+    "validate_settings"
   ],
   "decoders": [
     "png",
@@ -35,7 +36,6 @@
     "iiif-dir"
   ],
   "eventChannels": [
-    "dezoomify://deep-link-pending",
     "dezoomify://partial",
     "dezoomify://progress",
     "dezoomify://registered"
@@ -46,12 +46,6 @@
     "enabled": false,
     "httpsOnly": true,
     "requiresUserConfirm": true
-  },
-  "deepLink": {
-    "name": "dezoomify",
-    "schemes": [
-      "dezoomify"
-    ]
   },
   "generator": "scripts/generate-desktop-capabilities.mjs"
 }

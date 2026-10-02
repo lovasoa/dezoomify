@@ -67,13 +67,10 @@ export interface ReusedTile {
 export type OutputDisposition = "native-publication" | "browser-save-initiated" | "browser-save-ready" | "display-only";
 
 /**
- * Host-neutral placement of one tile in the output image, projected from
- * the core tile plan. `position` is the top-left output corner;
- * `expected_size` is the planned extent when the plan declares it (absent
- * when only decoding reveals the extent); `canvas` is the declared output
- * size when the plan declares one; `processing` is the stable recipe id
- * the host must apply to the acquired bytes before decoding. Native
- * assembly and browser canvas hosts consume the same values.
+ * Host-neutral placement of one tile, projected from the core tile plan:
+ * `position` is the top-left output corner, `expected_size` the planned
+ * extent when declared, `canvas` the declared output size when declared,
+ * and `processing` the recipe id the host applies before decoding.
  */
 export interface TilePlacement {
     position: Point;
@@ -81,27 +78,21 @@ export interface TilePlacement {
     canvas: Size | undefined;
     processing: ProcessingRecipe;
     /**
-     * Whether a successful probe is also part of the final output plan.
+     * Probe/output participation; see [`TileRole`].
      */
-    probe_output?: boolean;
+    role: TileRole;
 }
 
 /**
- * Host-observed fetch facts. Retry and recovery policy belongs to the shared algorithm.
+ * How an acquired tile participates in probing and final output. `probe`
+ * marks adaptive-probe acquisitions (a miss is an observation, never an
+ * output failure); `output` marks acquisitions joining the final canvas.
+ * Every planned tile sets at least one flag; `RequestPurpose` on a tile
+ * request derives from `probe` and never disagrees with it.
  */
-export interface FetchFailure {
-    code: FetchFailureCode;
-    message: string;
-    transport: ErrorTransport;
-    blocked_reason?: BlockedReason;
-    http?: number;
-    /**
-     * Host-observed `retry-after` in milliseconds, when the response
-     * carried one. The shared algorithm waits at least this long before the retry.
-     */
-    retry_after_ms?: number;
-    preview?: string;
-    detail?: string;
+export interface TileRole {
+    probe: boolean;
+    output: boolean;
 }
 
 /**
@@ -139,12 +130,19 @@ export interface MissingTile {
 }
 
 /**
+ * One typed failure. Grouped by domain: transport and fetch, discovery,
+ * job and planning, tiles, output, control, internals, and the composable
+ * [`Error::Resource`] context wrapper that preserves the exact URI and
+ * resource kind of any underlying failure.
+ */
+export type Error = ({ kind: "http-error" } & { status: number; retry_after_ms?: number; preview?: string; transport: ErrorTransport } & Failure) | ({ kind: "rate-limited" } & { retry_after_ms?: number; transport: ErrorTransport } & Failure) | ({ kind: "timeout" } & { transport: ErrorTransport } & Failure) | ({ kind: "network-failure" } & { transport: ErrorTransport } & Failure) | ({ kind: "policy-denied" } & { blocked_reason: BlockedReason; transport: ErrorTransport } & Failure) | ({ kind: "bad-url" } & Failure) | ({ kind: "bad-redirect" } & Failure) | { kind: "redirect-limit"; max: number } | { kind: "size-limit"; max_bytes: number } | { kind: "cancelled" } | { kind: "proxy-budget-exceeded" } | ({ kind: "proxy-error" } & { transport: ErrorTransport } & Failure) | ({ kind: "no-image-found" } & Failure) | ({ kind: "malformed-metadata" } & Failure) | { kind: "unknown-format"; format: string } | { kind: "empty-resource" } | ({ kind: "resource-limit" } & Failure) | { kind: "deferred-limit"; max: number } | ({ kind: "discovery-failed" } & { cause?: Error } & Failure) | ({ kind: "invalid-input" } & Failure) | ({ kind: "invalid-options" } & Failure) | ({ kind: "invalid-state" } & Failure) | { kind: "duplicate" } | { kind: "stale" } | { kind: "plan-empty" } | ({ kind: "plan-invalid" } & Failure) | { kind: "no-usable-tiles"; transient: boolean; retry_after_ms?: number } | { kind: "partial-discarded"; transient: boolean; retry_after_ms?: number } | ({ kind: "decode-failed" } & Failure) | ({ kind: "processing-failed" } & Failure) | { kind: "limit-exceeded"; limit: LimitContext } | ({ kind: "encode-failed" } & Failure) | ({ kind: "write-failed" } & Failure) | { kind: "output-exists" } | ({ kind: "destination-denied" } & Failure) | ({ kind: "unsupported-extension" } & Failure) | ({ kind: "output-unavailable" } & Failure) | { kind: "output-no-parent" } | ({ kind: "launch-failed" } & Failure) | { kind: "output-denied" } | { kind: "output-not-found" } | { kind: "invoke-failed" } | ({ kind: "start-failed" } & Failure) | ({ kind: "choice-failed" } & Failure) | { kind: "invalid-url" } | ({ kind: "invalid-settings" } & Failure) | ({ kind: "registration-failed" } & Failure) | ({ kind: "internal" } & Failure) | { kind: "shell-lock" } | ({ kind: "binding-invalid-value" } & Failure) | { kind: "interaction-expired" } | { kind: "auth-forbidden-header" } | { kind: "resource"; request: string; resource_kind: ResourceKind; source: Error };
+
+/**
  * Output summary: geometry, completeness, and the honest disposition.
  */
 export interface Output {
     canvas: Size | undefined;
     format: OutputFormat;
-    complete: boolean;
     missing: number[];
     disposition: OutputDisposition;
 }
@@ -155,14 +153,6 @@ export interface Output {
 export type RequestPurpose = "metadata" | "tile" | "probe";
 
 /**
- * Stable code for a host-observed fetch failure.
- *
- * Variant identifiers are the serialized values, so this enum
- * preserves stable error codes.
- */
-export type FetchFailureCode = "TRANSPORT_HTTP_ERROR" | "DISCOVERY_HTTP_ERROR" | "UPSTREAM_RATE_LIMITED" | "TRANSPORT_POLICY_DENIED" | "PROXY_BUDGET_EXCEEDED" | "PROXY_ERROR" | "PROXY_NETWORK_ERROR" | "PROXY_RATE_LIMITED" | "DISCOVERY_FAILED" | "TRANSPORT_TIMEOUT" | "TRANSPORT_NETWORK_ERROR" | "TRANSPORT_CANCELLED" | "TRANSPORT_BAD_URL" | "TRANSPORT_BAD_REDIRECT" | "TRANSPORT_REDIRECT_LIMIT" | "TRANSPORT_SIZE_LIMIT";
-
-/**
  * Stable ordered catalog projection (never exposes private core enums).
  */
 export interface Catalog {
@@ -170,9 +160,31 @@ export interface Catalog {
 }
 
 /**
+ * Structured facts behind an output-limit refusal. Every field is optional
+ * because only some limits know some facts; absent facts never fabricate
+ * display text.
+ */
+export interface LimitContext {
+    reason: LimitReason;
+    dimensions?: Size;
+    bytes_required?: number;
+    bytes_available?: number;
+}
+
+/**
  * The requested output encoding.
  */
 export type OutputFormat = "png" | "jpeg" | "tiff" | "zif" | "webp" | "iiif-dir";
+
+/**
+ * The shared failure context, defined once instead of per variant:
+ * `request` preserves the exact URI when known and `detail` carries the
+ * bounded diagnostic text (usually the preserved cause chain).
+ */
+export interface Failure {
+    request?: string;
+    detail?: string;
+}
 
 /**
  * The source of discovery evidence. Products report facts; core discovery
@@ -209,6 +221,13 @@ export interface DiagnosticReport {
     truncated_fields: number;
 }
 
+/**
+ * Which output limit refused the job. Structured limit facts live in
+ * [`LimitContext`]; `message` prose is presentation only and is never a
+ * data channel between languages.
+ */
+export type LimitReason = "memory" | "jpeg-side" | "webp-side";
+
 export interface DiagnosticFailureGroup {
     key: string;
     count: number;
@@ -222,21 +241,6 @@ export interface DiagnosticRecord {
     level: DiagnosticLevel;
     event: string;
     fields: Record<string, DiagnosticValue>;
-}
-
-export interface Error {
-    retry_after_ms?: number;
-    code: string;
-    phase: ErrorPhase;
-    retryable?: boolean;
-    message: string;
-    request?: string;
-    transport?: ErrorTransport;
-    blocked_reason?: BlockedReason;
-    resource_kind?: ResourceKind;
-    http?: number;
-    preview?: string;
-    detail?: string;
 }
 
 export interface FinishRequest {
@@ -303,8 +307,6 @@ export type DiagnosticLevel = "trace" | "debug" | "info" | "warn" | "error";
 
 export type DiagnosticValue = string | number | boolean;
 
-export type ErrorPhase = "validation" | "discovery" | "acquisition" | "decode" | "processing" | "output" | "publication" | "cleanup";
-
 export type ErrorTransport = "direct" | "metadata-proxy" | "browser-session" | "native" | "display-only";
 
 export type Gate = "cancellation" | "acquisition";
@@ -326,14 +328,36 @@ export type ResourceRead = { kind: "response"; response: ResourceResponse } | { 
 export type SelectionPolicy = { kind: "interactive" } | { kind: "fitting"; max_width: number; max_height: number; max_area: number } | { kind: "automatic"; image_index: number; largest: boolean; max_width: number | undefined; max_height: number | undefined; zoom_level: number | undefined };
 
 
+/**
+ * Whether a source URL carries secret-bearing query or fragment keys.
+ */
+export function hasSecretParams(url: string): boolean;
+
+/**
+ * The retry policy of `Error::retryable()`, exposed at the boundary:
+ * one policy in Rust; the shared UI reads the boundary-stamped
+ * `retryable` hint as plain data.
+ */
+export function isRetryable(error: any): boolean;
+
+/**
+ * The secret/credential query-key policy of `SENSITIVE_QUERY_KEYS`,
+ * exposed at the boundary: one vocabulary in Rust. The TypeScript list
+ * exists only for pure callers that load no runtime.
+ */
+export function isSecretKey(key: string): boolean;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly applyProcessing: (a: any, b: number, c: number) => [number, number, number, number];
     readonly dezoomify: (a: any, b: any, c: any) => any;
-    readonly wasm_bindgen_277e17f42a474b60___convert__closures_____invoke___js_sys_8d24da1f7e09aecf___Function_fn_wasm_bindgen_277e17f42a474b60___JsValue_____wasm_bindgen_277e17f42a474b60___sys__Undefined___js_sys_8d24da1f7e09aecf___Function_fn_wasm_bindgen_277e17f42a474b60___JsValue_____wasm_bindgen_277e17f42a474b60___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
-    readonly wasm_bindgen_277e17f42a474b60___convert__closures_____invoke___wasm_bindgen_277e17f42a474b60___JsValue__core_ed718c3d60ebd546___result__Result_____wasm_bindgen_277e17f42a474b60___JsError___true_: (a: number, b: number, c: any) => [number, number];
+    readonly hasSecretParams: (a: number, b: number) => number;
+    readonly isRetryable: (a: any) => [number, number, number];
+    readonly isSecretKey: (a: number, b: number) => number;
+    readonly wasm_bindgen_e33b60f91a8a334f___convert__closures_____invoke___js_sys_8e779189fe7504dc___Function_fn_wasm_bindgen_e33b60f91a8a334f___JsValue_____wasm_bindgen_e33b60f91a8a334f___sys__Undefined___js_sys_8e779189fe7504dc___Function_fn_wasm_bindgen_e33b60f91a8a334f___JsValue_____wasm_bindgen_e33b60f91a8a334f___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
+    readonly wasm_bindgen_e33b60f91a8a334f___convert__closures_____invoke___wasm_bindgen_e33b60f91a8a334f___JsValue__core_ed718c3d60ebd546___result__Result_____wasm_bindgen_e33b60f91a8a334f___JsError___true_: (a: number, b: number, c: any) => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

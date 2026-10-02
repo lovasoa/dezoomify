@@ -42,7 +42,6 @@ export interface ViewContext {
   jobActivity?: JobActivity;
   initialUrl?: string;
   sourceUrl?: string;
-  desktopHandoffUrl?: string;
   history?: HistoryEntry[];
 }
 

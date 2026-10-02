@@ -3,7 +3,7 @@
  * Tokens (parchment light, walnut dark, sapphire/sage links, beveled
  * buttons, 2px focus rings) live in packages/shared-ui/src/styles/theme.css.
  * This sheet only wires desktop-only DOM (footer sibling, aux panel,
- * settings panel, deep-link confirm) to those tokens. No pills, no nested
+ * settings panel) to those tokens. No pills, no nested
  * boxes, no neon. All body copy stays left-aligned; the footer stays pinned.
  *
  * Contrast (verified pairs, AA for body text):
@@ -190,35 +190,6 @@ body {
 #root .dz-notice-message,
 #root .dz-completed-summary,
 #root .dz-error-message {
-  text-align: left;
-}
-
-/* Deep-link confirm: reuse the shared modal geometry (backdrop + card).
- * Architectural radius only, never pills. */
-#dz-deep-link-confirm {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1.5rem;
-  background: rgba(18, 16, 15, 0.7);
-}
-
-#dz-deep-link-confirm .dz-modal-card {
-  border-radius: var(--dz-radius);
-  text-align: left;
-  width: min(100%, 640px);
-}
-
-#dz-deep-link-confirm .dz-modal-title,
-#dz-deep-link-confirm .dz-notice-title {
-  text-align: left;
-}
-
-#dz-deep-link-confirm .dz-notice-message,
-#dz-deep-link-confirm .dz-modal-subtitle {
   text-align: left;
 }
 
@@ -607,7 +578,7 @@ body {
  * cancel, reset, recovery choices, settings inputs, browse, help/about, and
  * confirm. Shared actions (Dezoomify/Cancel/Save buttons, URL input) already
  * use the same token in theme.css; these rules cover the desktop aux,
- * settings, help, and deep-link DOM. One token only, no blur, no neon halo. */
+ * settings and help DOM. One token only, no blur, no neon halo. */
 .dz-site-footer a:focus-visible,
 #dz-desktop-aux button:focus-visible,
 #dz-desktop-aux input:focus-visible,
@@ -618,10 +589,7 @@ body {
 #dz-desktop-settings input:focus-visible,
 #dz-desktop-settings textarea:focus-visible,
 #dz-desktop-settings a:focus-visible,
-#dz-desktop-settings summary:focus-visible,
-#dz-deep-link-confirm button:focus-visible,
-#dz-deep-link-confirm a:focus-visible,
-#dz-deep-link-confirm [tabindex]:focus-visible {
+#dz-desktop-settings summary:focus-visible {
   outline: none;
   box-shadow: var(--dz-focus-ring);
 }

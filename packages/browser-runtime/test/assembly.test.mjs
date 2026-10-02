@@ -141,7 +141,7 @@ test("finalize-output rejects a second call and release is idempotent", async ()
   await assembly.finalizeOutput({ width: 32, height: 32 });
   await assert.rejects(
     assembly.finalizeOutput({ width: 32, height: 32 }),
-    (error) => error.code === "OUTPUT_STATE",
+    (error) => error.kind === "internal",
   );
   assembly.release();
   assembly.release();
@@ -195,8 +195,7 @@ test("canvas limits are validated before allocation", async () => {
   assert.throws(
     () => assembly.prepare({ width: 40000, height: 40000 }),
     (error) => {
-      assert.equal(error.code, "PLAN_INVALID");
-      assert.equal(error.retryable, false);
+      assert.equal(error.kind, "plan-invalid");
       return true;
     },
   );
@@ -226,14 +225,17 @@ test("decode failures propagate so acquisition outcomes stay honest", async () =
       throw new Error("corrupt tile");
     },
   });
-  await assert.rejects(assembly.acquireTile(0, placement(0, 0), bytes16(16)), /corrupt tile/);
+  await assert.rejects(
+    assembly.acquireTile(0, placement(0, 0), bytes16(16)),
+    (error) => error.kind === "decode-failed" && /corrupt tile/.test(error.detail),
+  );
 });
 
 test("an empty output plan fails before allocating a canvas", async () => {
   const fresh = harness();
   await assert.rejects(
     fresh.assembly.finalizeOutput({ width: 0, height: 0 }),
-    (error) => error.code === "PLAN_INVALID",
+    (error) => error.kind === "plan-invalid",
   );
   assert.deepEqual(fresh.events.created, []);
 });

@@ -1,7 +1,7 @@
 //! Scenario route table: loading, matching, and payload rendering.
 
 use axum::http::{HeaderMap, HeaderValue};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -50,7 +50,7 @@ pub struct ScenarioRoute {
     pub generator: Option<GeneratorSpec>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum GeneratorSpec {
     #[serde(rename = "arts-tile")]
@@ -89,35 +89,34 @@ pub struct RenderedRoute {
     pub bytes: Vec<u8>,
 }
 
-/// Route id for a route that omitted one: stable, human-readable, derived
-/// from the match shape. Used only in logs and error messages.
-fn derive_route_id(route: &ScenarioRoute) -> String {
-    fn slug(s: &str) -> String {
-        s.chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() {
-                    c.to_ascii_lowercase()
-                } else {
-                    '-'
-                }
-            })
-            .collect()
+/// Canonical route-id derivation, shared by the server (derived ids for logs
+/// and error messages), the xtask fixture tooling (duplicate detection and
+/// capture), so the three cannot drift from one another. Stable and
+/// human-readable: lowercase ASCII alphanumerics with runs of anything else
+/// collapsed to a single dash, trimmed, and truncated to 100 characters.
+pub fn derive_route_id(host: &str, target: &str) -> String {
+    let mut id = String::new();
+    for ch in format!("{host}-{target}").chars() {
+        if ch.is_ascii_alphanumeric() {
+            id.push(ch.to_ascii_lowercase());
+        } else if !id.is_empty() && !id.ends_with('-') {
+            id.push('-');
+        }
     }
-    let host = route.host.as_deref().unwrap_or("any");
-    let target = route
-        .path
-        .as_deref()
-        .or(route.path_prefix.as_deref())
-        .or(route.path_regex.as_deref())
-        .unwrap_or("route");
-    format!("{}-{}", slug(host), slug(target))
+    while id.ends_with('-') {
+        id.pop();
+    }
+    if id.is_empty() {
+        return "route".to_string();
+    }
+    id.chars().take(100).collect()
 }
 
-/// Directory-mirror convention: any payload laid out as
+/// Payload layout convention: any payload laid out as
 /// `{scenario}/payloads/{host}/{url-path}` is served at `{host}{url-path}`
 /// unless an explicit route already claims it. A fixture that follows the
 /// layout needs no `routes.json` entry at all.
-fn mirror_routes(
+fn layout_routes(
     scenarios_dir: &Path,
     claimed: &HashSet<(String, String)>,
     served: &HashSet<(String, String, String)>,
@@ -126,7 +125,7 @@ fn mirror_routes(
     collect_payloads(scenarios_dir, scenarios_dir, &mut payloads)?;
     payloads.sort();
     let mut routes = Vec::new();
-    let mut mirrored: HashSet<(String, String)> = HashSet::new();
+    let mut laid_out: HashSet<(String, String)> = HashSet::new();
     for (scenario, payload) in payloads {
         if claimed.contains(&(scenario.clone(), payload.clone())) {
             continue;
@@ -142,19 +141,19 @@ fn mirror_routes(
         }
         let url_path = format!("/{tail}");
         if served.contains(&(host.to_string(), url_path.clone(), "GET".to_string()))
-            || !mirrored.insert((host.to_string(), url_path.clone()))
+            || !laid_out.insert((host.to_string(), url_path.clone()))
         {
             continue;
         }
         let mut headers = HashMap::new();
         headers.insert(
             "Content-Type".to_string(),
-            route_content_type(&url_path).to_string(),
+            super::content_type(&url_path).to_string(),
         );
         routes.push((
             scenario,
             ScenarioRoute {
-                route_id: format!("mirror-{host}-{tail}"),
+                route_id: format!("layout-{host}-{tail}"),
                 method: "GET".to_string(),
                 host: Some(host.to_string()),
                 path: Some(url_path),
@@ -206,28 +205,6 @@ fn collect_payloads(
     Ok(())
 }
 
-/// Content type for a mirrored payload by URL extension. Matches the
-/// `application/xml` convention fixtures use for `.xml`/`.dzi`.
-fn route_content_type(path: &str) -> &'static str {
-    let file = path.rsplit('/').next().unwrap_or(path);
-    let ext = file.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
-    match ext.to_ascii_lowercase().as_str() {
-        "html" => "text/html",
-        "js" | "mjs" => "application/javascript",
-        "css" => "text/css",
-        "json" => "application/json",
-        "xml" | "dzi" => "application/xml",
-        "txt" => "text/plain",
-        "svg" => "image/svg+xml",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "wasm" => "application/wasm",
-        "ico" => "image/x-icon",
-        "yaml" | "yml" => "application/yaml",
-        _ => "application/octet-stream",
-    }
-}
-
 impl RouteTable {
     /// Number of loaded route entries, for startup diagnostics.
     pub fn entry_count(&self) -> usize {
@@ -272,8 +249,8 @@ impl RouteTable {
         }
         dirs.sort();
         let mut entries = Vec::new();
-        // Explicit routes win over the directory-mirror convention, so track
-        // which payloads and served URLs they claim before mirroring.
+        // Explicit routes win over the payload layout convention, so track
+        // which payloads and served URLs they claim before deriving routes.
         let mut claimed: HashSet<(String, String)> = HashSet::new();
         let mut served: HashSet<(String, String, String)> = HashSet::new();
         for (id, dir) in &dirs {
@@ -291,10 +268,10 @@ impl RouteTable {
             }
             for mut route in file.routes {
                 if route.route_id.is_empty() {
-                    route.route_id = derive_route_id(&route);
+                    route.route_id = route.effective_id();
                 }
                 if let Some(payload) = &route.payload {
-                    if payload.contains("..") || payload.starts_with('/') {
+                    if !is_safe_payload_rel(payload) {
                         return Err(format!(
                             "unsafe payload path in {}: {payload}",
                             route.route_id
@@ -320,7 +297,7 @@ impl RouteTable {
                 entries.push((id.clone(), route, compiled));
             }
         }
-        entries.extend(mirror_routes(scenarios_dir, &claimed, &served)?);
+        entries.extend(layout_routes(scenarios_dir, &claimed, &served)?);
         Ok(RouteTable { entries })
     }
 
@@ -344,7 +321,7 @@ impl RouteTable {
 
     fn lookup_exact(&self, host: &str, path: &str, query: Option<&str>) -> Option<RouteHit<'_>> {
         // Exact path matches beat prefix/regex wildcards, regardless of load
-        // order: directory-mirror routes are appended last, and a concrete
+        // order: layout-derived routes are appended last, and a concrete
         // payload must not be shadowed by an earlier wildcard fallback.
         self.match_entries(host, path, query, true)
             .or_else(|| self.match_entries(host, path, query, false))
@@ -395,6 +372,24 @@ impl RouteTable {
 }
 
 impl ScenarioRoute {
+    /// A stable id for a route that omitted `route_id`: derived from its
+    /// match shape by the shared [`derive_route_id`], the same derivation the
+    /// xtask fixture tooling uses, so duplicate detection stays meaningful
+    /// across the server and the tooling.
+    pub fn effective_id(&self) -> String {
+        if !self.route_id.is_empty() {
+            return self.route_id.clone();
+        }
+        let host = self.host.as_deref().unwrap_or("any");
+        let target = self
+            .path
+            .as_deref()
+            .or(self.path_prefix.as_deref())
+            .or(self.path_regex.as_deref())
+            .unwrap_or("route");
+        derive_route_id(host, target)
+    }
+
     pub fn missing_required_header<'a>(
         &'a self,
         headers: &HeaderMap,
@@ -438,17 +433,6 @@ impl ScenarioRoute {
             );
         }
         let scenario_dir = state.scenarios_dir.join(scenario);
-        let join_under = |name: &str| -> Option<std::path::PathBuf> {
-            if name.contains("..") || name.starts_with('/') {
-                return None;
-            }
-            let full = scenario_dir.join(name);
-            if full.starts_with(&scenario_dir) {
-                Some(full)
-            } else {
-                None
-            }
-        };
         let bytes = if let Some(gen) = &self.generator {
             render_generator(
                 gen,
@@ -457,9 +441,7 @@ impl ScenarioRoute {
                 original.query.as_deref(),
             )?
         } else if let Some(payload) = &self.payload {
-            let full = join_under(payload).ok_or(axum::http::StatusCode::FORBIDDEN)?;
-            let mut bytes =
-                std::fs::read(&full).map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+            let mut bytes = read_payload(&scenario_dir, payload)?;
             if is_text(&headers) {
                 let text = String::from_utf8_lossy(&bytes).into_owned();
                 let localhost_origin = state.origin.replacen("127.0.0.1", "localhost", 1);
@@ -491,6 +473,29 @@ fn is_text(headers: &HeaderMap) -> bool {
         })
 }
 
+/// Fixture-relative payload names only: traversal and absolute paths are
+/// refused. Every payload resolution goes through this family of helpers:
+/// one spelling of the guard, not one per call site.
+fn is_safe_payload_rel(name: &str) -> bool {
+    !name.contains("..") && !name.starts_with('/')
+}
+
+fn safe_payload(scenario_dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    if !is_safe_payload_rel(name) {
+        return None;
+    }
+    let full = scenario_dir.join(name);
+    full.starts_with(scenario_dir).then_some(full)
+}
+
+fn read_payload(
+    scenario_dir: &std::path::Path,
+    name: &str,
+) -> Result<Vec<u8>, axum::http::StatusCode> {
+    let full = safe_payload(scenario_dir, name).ok_or(axum::http::StatusCode::FORBIDDEN)?;
+    std::fs::read(&full).map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)
+}
+
 fn render_generator(
     gen: &GeneratorSpec,
     scenario_dir: &Path,
@@ -499,29 +504,11 @@ fn render_generator(
 ) -> Result<Vec<u8>, axum::http::StatusCode> {
     match gen {
         GeneratorSpec::ArtsTile { image } => {
-            let full = if image.contains("..") || image.starts_with('/') {
-                return Err(axum::http::StatusCode::FORBIDDEN);
-            } else {
-                scenario_dir.join(image)
-            };
-            if !full.starts_with(scenario_dir) {
-                return Err(axum::http::StatusCode::FORBIDDEN);
-            }
-            let bytes =
-                std::fs::read(&full).map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+            let bytes = read_payload(scenario_dir, image)?;
             super::arts::verify_and_decrypt(path, &bytes).ok_or(axum::http::StatusCode::FORBIDDEN)
         }
         GeneratorSpec::ArtsSignedTile { image } => {
-            let full = if image.contains("..") || image.starts_with('/') {
-                return Err(axum::http::StatusCode::FORBIDDEN);
-            } else {
-                scenario_dir.join(image)
-            };
-            if !full.starts_with(scenario_dir) {
-                return Err(axum::http::StatusCode::FORBIDDEN);
-            }
-            let bytes =
-                std::fs::read(&full).map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+            let bytes = read_payload(scenario_dir, image)?;
             super::arts::verify_signature(path).ok_or(axum::http::StatusCode::FORBIDDEN)?;
             Ok(bytes)
         }
@@ -534,29 +521,11 @@ fn render_generator(
         GeneratorSpec::JpegStub { image } => {
             // Legacy serves the shared 256x256 fixture photo for stub tile
             // URLs; exact bytes matter (clients refine tile size from them).
-            let full = if image.contains("..") || image.starts_with('/') {
-                return Err(axum::http::StatusCode::FORBIDDEN);
-            } else {
-                scenario_dir.join(image)
-            };
-            if !full.starts_with(scenario_dir) {
-                return Err(axum::http::StatusCode::FORBIDDEN);
-            }
-            let bytes =
-                std::fs::read(&full).map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+            let bytes = read_payload(scenario_dir, image)?;
             Ok(bytes)
         }
         GeneratorSpec::GenericJpg { image } => {
-            let full = if image.contains("..") || image.starts_with('/') {
-                return Err(axum::http::StatusCode::FORBIDDEN);
-            } else {
-                scenario_dir.join(image)
-            };
-            if !full.starts_with(scenario_dir) {
-                return Err(axum::http::StatusCode::FORBIDDEN);
-            }
-            let bytes =
-                std::fs::read(&full).map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+            let bytes = read_payload(scenario_dir, image)?;
             super::svg::generic_jpg(&bytes, query).ok_or(axum::http::StatusCode::NOT_FOUND)
         }
     }

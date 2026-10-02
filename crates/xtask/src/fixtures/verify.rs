@@ -5,7 +5,8 @@
 //! traversal, provenance, and sensitive flags. Pure validation: no network,
 //! no writes, no side effects.
 
-use super::common::{check_traversal, collect_files, hex, load_manifest, Route, RoutesFile};
+use super::common::{check_traversal, collect_files, hex, load_manifest, RoutesFile};
+use dezoomify_fixture_server::ScenarioRoute;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -150,10 +151,11 @@ pub fn verify(args: &[String]) -> Result<(), String> {
             }
         }
     }
-    // Directory-mirror convention: a payload laid out as
+    // Payload layout convention: a payload laid out as
     // `{scenario}/payloads/{host}/{url-path}` serves at `{host}{url-path}`
-    // unless an explicit route claims it. Fold mirrors into `served` so the
-    // incompatible-duplicate check covers the whole served surface.
+    // unless an explicit route claims it. Fold layout-derived routes into
+    // `served` so the incompatible-duplicate check covers the whole served
+    // surface.
     for entry in &manifest.scenarios {
         let Some((scenario, rest)) = entry.path.split_once("/payloads/") else {
             continue;
@@ -223,7 +225,7 @@ pub fn verify(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn route_fingerprint(dir: &Path, scenario: &str, r: &Route) -> Result<String, String> {
+fn route_fingerprint(dir: &Path, scenario: &str, r: &ScenarioRoute) -> Result<String, String> {
     if let Some(gen) = &r.generator {
         let canonical = serde_json::to_string(gen).map_err(|e| format!("bad generator: {e}"))?;
         return Ok(format!("{}|gen|{canonical}", r.status));

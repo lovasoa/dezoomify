@@ -126,11 +126,11 @@ test("a queued source request cannot start after cancellation or its deadline", 
       deadlineAt: Date.now() + 30000,
     };
     await cancelSourceFetch(request.operationId, request.deadlineAt);
-    assert.equal((await fetchSource(request)).error.code, "TRANSPORT_CANCELLED");
+    assert.equal((await fetchSource(request)).error.kind, "cancelled");
     assert.equal(
       (await fetchSource({ ...request, operationId: "expired", deadlineAt: Date.now() - 1 })).error
-        .code,
-      "TRANSPORT_TIMEOUT",
+        .kind,
+      "timeout",
     );
     await cancelSourceFetch("never-started", Date.now() + 10);
     assert.equal(globalThis.__dezoomifySourceFetches.has("never-started"), true);
@@ -165,7 +165,7 @@ test("source cancellation acknowledges only after its fetch settles", async () =
     assert.equal(signal.aborted, true);
     assert.equal(acknowledged, false);
     rejectFetch(new DOMException("Cancelled", "AbortError"));
-    assert.equal((await pending).error.code, "TRANSPORT_CANCELLED");
+    assert.equal((await pending).error.kind, "cancelled");
     await cancellation;
     assert.equal(acknowledged, true);
   } finally {
@@ -229,11 +229,10 @@ test("source fetch classifies failures without returning response details", asyn
     assert.deepEqual(await fetchSource({ url: "https://gallery.example/info.json", headers: [] }), {
       ok: false,
       error: {
-        code: "TRANSPORT_HTTP_ERROR",
-        http: 403,
-        message: "The website refused this file.",
+        kind: "http-error",
+        status: 403,
+        request: "https://gallery.example/info.json",
         transport: "browser-session",
-        blocked_reason: "forbidden",
       },
       documentUrl: "",
     });

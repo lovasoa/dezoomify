@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![allow(unused_imports)]
 #![allow(clippy::result_large_err)]
 use dezoomify::model::Progress;
 use dezoomify_native::{Controls, JobOptions, NativeHost, OutputTarget, Publication};
@@ -22,21 +23,17 @@ pub fn run_host(host: &NativeHost<'_>) -> Result<Publication, dezoomify::model::
     ));
     if let Err(error) = &result {
         host.diagnostics.finish(
-            if error.code == "job.cancelled" {
+            if matches!(error.cause(), dezoomify::model::Error::Cancelled) {
                 "cancelled"
             } else {
                 "failed"
             },
-            serde_json::json!({"code": error.code, "message": error.message}),
+            serde_json::json!({ "error": error }),
         );
     }
     result?;
     host.publication().ok_or_else(|| {
-        dezoomify::model::Error::new(
-            "native.internal",
-            dezoomify::model::ErrorPhase::Output,
-            "output was not published",
-        )
+        dezoomify::model::Error::Internal("output was not published".to_string().into())
     })
 }
 
@@ -91,4 +88,106 @@ fn options_for_target(
     options.output = OutputTarget::File(output.into());
     options.overwrite = overwrite;
     options
+}
+
+// ── shared loopback and fixture harnesses ─────────────────────────
+// One copy for every integration test binary in this crate.
+
+pub use dezoomify_fixture_server::{start as start_fixture_server, temp_dir};
+
+pub fn http_response(status: &str, content_type: &str, body: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(format!("HTTP/1.1 {status}\r\n").as_bytes());
+    out.extend_from_slice(format!("content-type: {content_type}\r\n").as_bytes());
+    out.extend_from_slice(format!("content-length: {}\r\n", body.len()).as_bytes());
+    out.extend_from_slice(b"connection: close\r\n\r\n");
+    out.extend_from_slice(body);
+    out
+}
+
+pub fn scenario_payload(name: &str) -> Vec<u8> {
+    std::fs::read(
+        dezoomify_fixture_server::scenarios_dir()
+            .join("native/cli-dzi/payloads/fixtures.test/cli")
+            .join(name),
+    )
+    .unwrap_or_else(|e| panic!("read payload {name}: {e}"))
+}
+
+/// Thin adapter: one published result as the shared golden records it.
+pub fn golden_result(outcome: &Publication) -> dezoomify_fixture_server::GoldenResult {
+    let canvas = outcome.output.canvas.as_ref().expect("published canvas");
+    dezoomify_fixture_server::GoldenResult {
+        image_size: (canvas.width as u64, canvas.height as u64),
+        tile_count: outcome.tile_count as u64,
+        output_format: outcome.output.format.as_str().to_string(),
+        partial: !outcome.output.is_complete(),
+    }
+}
+
+pub const DZI_512: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Image TileSize="256" Format="png" Overlap="0" xmlns="http://schemas.microsoft.com/deepzoom/2008">
+  <Size Width="512" Height="512"/>
+</Image>
+"#;
+
+pub const DZI_256: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Image TileSize="256" Format="png" Overlap="0" xmlns="http://schemas.microsoft.com/deepzoom/2008">
+  <Size Width="256" Height="256"/>
+</Image>
+"#;
+
+/// Loopback server mapping request paths to canned byte responses while
+/// counting hits per path.
+pub fn serve_counted(
+    shared: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>>,
+    counts: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>>,
+) -> String {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let port = listener.local_addr().expect("addr").port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { break };
+            let shared = std::sync::Arc::clone(&shared);
+            let counts = std::sync::Arc::clone(&counts);
+            std::thread::spawn(move || {
+                use std::io::{Read, Write};
+                let mut head = Vec::new();
+                let mut byte = [0u8; 1];
+                while head.len() < 8192 {
+                    let Ok(n) = stream.read(&mut byte) else {
+                        return;
+                    };
+                    if n == 0 {
+                        break;
+                    }
+                    head.extend_from_slice(&byte);
+                    if head.ends_with(b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let path = String::from_utf8_lossy(&head)
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("/")
+                    .to_string();
+                counts
+                    .lock()
+                    .expect("lock")
+                    .entry(path.clone())
+                    .and_modify(|n| *n += 1)
+                    .or_insert(1);
+                let body = shared
+                    .lock()
+                    .expect("lock")
+                    .get(&path)
+                    .cloned()
+                    .unwrap_or_else(|| http_response("404 Not Found", "text/plain", b"not found"));
+                let _ = stream.write_all(&body);
+                let _ = stream.flush();
+            });
+        }
+    });
+    format!("http://127.0.0.1:{port}")
 }

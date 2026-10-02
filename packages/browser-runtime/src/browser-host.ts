@@ -1,5 +1,6 @@
 import type {
   Catalog,
+  ErrorTransport,
   FinishRequest,
   Gate,
   Host,
@@ -15,6 +16,7 @@ import type {
   Tile,
 } from "@dezoomify/wasm-bindings";
 import type { DiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
+import { causeOf, isJobError } from "../../shared-ui/src/failure.ts";
 import type { CanvasAssembly } from "./assembly.ts";
 import { originOfUrl } from "./fetch-primitives.ts";
 import { createProbeSize } from "./probe.ts";
@@ -34,6 +36,7 @@ export interface BrowserHostDependencies {
   loadDisplayImage?(url: string, signal: AbortSignal): Promise<TileImageLike>;
   onProgress(progress: Progress): void;
   choosePartial(missing: MissingTiles, signal: AbortSignal): Promise<RecoveryChoice>;
+  transport?(): ErrorTransport | null;
 }
 
 /** Concrete browser capabilities for one cancellable invocation. */
@@ -54,36 +57,29 @@ export class BrowserHost implements Host {
     this.signal = AbortSignal.any([deps.signal, this.resources.signal]);
   }
 
+  /** Classify one thrown value into the typed error contract, attaching the
+   * request context once (host operations wrap their failures a single time). */
   private failure(
     error: unknown,
     request?: ResourceRequest,
-    phase: JobError["phase"] = "acquisition",
+    domain: "fetch" | "output" = "fetch",
   ): JobError {
-    if (this.signal.aborted)
-      return {
-        code: "TRANSPORT_CANCELLED",
-        phase,
-        message: "The job was cancelled.",
-        retryable: false,
-      };
-    const facts = error && typeof error === "object" ? (error as Partial<JobError>) : {};
+    if (this.signal.aborted) return { kind: "cancelled" };
+    const typed: JobError = isJobError(error)
+      ? error
+      : domain === "output"
+        ? { kind: "write-failed", detail: String(error).slice(0, 2048) }
+        : {
+            kind: "network-failure",
+            transport: this.deps.transport?.() ?? "direct",
+            detail: String(error).slice(0, 2048),
+          };
+    if (!request || typed.kind === "resource") return typed;
     return {
-      ...facts,
-      code:
-        typeof facts.code === "string"
-          ? facts.code
-          : phase === "output"
-            ? "OUTPUT_FAILED"
-            : "TRANSPORT_NETWORK_ERROR",
-      message: typeof facts.message === "string" ? facts.message : String(error),
-      phase: facts.phase ?? phase,
-      retryable: facts.retryable ?? false,
-      ...(request
-        ? {
-            request: facts.request ?? request.uri,
-            resource_kind: facts.resource_kind ?? request.purpose,
-          }
-        : {}),
+      kind: "resource",
+      request: request.uri,
+      resource_kind: request.purpose,
+      source: typed,
     };
   }
 
@@ -101,11 +97,7 @@ export class BrowserHost implements Host {
       this.signal.throwIfAborted();
       return result;
     } catch (error) {
-      throw this.failure(
-        error,
-        request,
-        request.purpose === "metadata" ? "discovery" : "acquisition",
-      );
+      throw this.failure(error, request);
     }
   }
 
@@ -113,11 +105,11 @@ export class BrowserHost implements Host {
     const result = await this.fetch(request, "allowed");
     if (result.kind === "needs-access")
       throw {
-        code: "TRANSPORT_POLICY_DENIED",
-        message: `Access to ${result.origin} is required.`,
-        retryable: false,
-        phase: "acquisition",
-      };
+        kind: "policy-denied",
+        blocked_reason: "access-required",
+        transport: this.deps.transport?.() ?? "browser-session",
+        detail: `access to ${result.origin} is required`,
+      } satisfies JobError;
     return new Uint8Array(result.response.bytes);
   }
 
@@ -147,7 +139,7 @@ export class BrowserHost implements Host {
           : {}),
       });
       const tile_probe = await probe(tile.request, this.signal);
-      if (tile_probe.status === "available" && tile.placement.probe_output) {
+      if (tile_probe.status === "available" && tile.placement.role.output) {
         try {
           this.deps.assembly.prepare(tile.placement.canvas);
         } catch (error) {
@@ -243,10 +235,11 @@ export class BrowserHost implements Host {
         return;
       } catch (error) {
         const failure = this.failure(error, tile.request);
+        const cause = causeOf(failure);
         if (
           ordinary &&
-          failure.http === undefined &&
-          failure.code !== "TRANSPORT_POLICY_DENIED" &&
+          cause.kind !== "http-error" &&
+          cause.kind !== "policy-denied" &&
           !this.signal.aborted
         ) {
           await this.display(tile);
@@ -283,7 +276,6 @@ export class BrowserHost implements Host {
       return {
         canvas: this.deps.assembly.dimensions() ?? undefined,
         format: request.format,
-        complete: request.missing.length === 0,
         missing: request.missing,
         disposition,
       };

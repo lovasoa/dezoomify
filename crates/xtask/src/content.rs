@@ -16,10 +16,11 @@ pub fn verify(a: &[String]) -> Result<(), String> {
         return Err("usage: cargo xtask check (no options)".to_string());
     }
     let r = super::repo_root();
+    let canvas = canvas_constants_pattern(&r)?;
     f(
         &r,
-        &["268435456|16384", "docs/user/"],
-        "raw canvas constant in docs/user/ (state limits in GiB)",
+        &[canvas.as_str(), "docs/user/"],
+        "raw canvas constant in docs/user/ (state limits in user units)",
     )?;
     let o = g(
         &r,
@@ -60,19 +61,40 @@ pub fn verify(a: &[String]) -> Result<(), String> {
         std::fs::read_to_string(r.join("generated/desktop-capabilities.json"))
             .map_err(|e| format!("read desktop-capabilities.json: {e}"))?,
     );
-    let b = |t: &str| {
-        t.find("encoders `[")
-            .and_then(|i| t[i..].find(']').map(|j| t[i..i + j + 1].to_string()))
+    let caps: serde_json::Value =
+        serde_json::from_str(&d).map_err(|e| format!("bad desktop-capabilities.json: {e}"))?;
+    let encoders: Vec<String> = caps
+        .get("encoders")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("desktop-capabilities.json lacks an encoders array")?
+        .iter()
+        .map(|v| {
+            v.as_str()
+                .map(str::to_string)
+                .ok_or_else(|| "non-string encoder in desktop-capabilities.json".to_string())
+        })
+        .collect::<Result<_, _>>()?;
+    if encoders.is_empty() {
+        return Err("desktop-capabilities.json has an empty encoders array".to_string());
+    }
+    // The `encoders \`[...]\`` list in each contract doc must match the FULL
+    // parsed encoder array, in order: a subset is drift, and a missing list
+    // is drift too.
+    let docs_encoders = |text: &str| -> Option<Vec<String>> {
+        let rest = &text[text.find("encoders `[")? + "encoders `[".len()..];
+        let close = rest.find(']')?;
+        Some(
+            rest[..close]
+                .split(',')
+                .map(|item| item.trim().to_string())
+                .collect(),
+        )
     };
-    if b(&p) != b(&q)
-        || !["png", "jpeg", "tiff"]
-            .iter()
-            .all(|e| d.contains(&format!("\"{e}\"")))
-    {
+    let (pe, qe) = (docs_encoders(&p), docs_encoders(&q));
+    if pe.as_ref() != Some(&encoders) || qe.as_ref() != Some(&encoders) {
         return Err(format!(
-            "encoder-list drift: product.md {:?} vs bindings.md {:?} vs desktop capabilities [png, jpeg, tiff]",
-            b(&p),
-            b(&q)
+            "encoder-list drift: product.md {:?} vs bindings.md {:?} vs desktop capabilities {:?}",
+            pe, qe, encoders
         ));
     }
     // Contract docs agree with DIRECT_METADATA_TIMEOUT_MS in browser-runtime/tile-policy.ts.
@@ -143,6 +165,42 @@ fn f(r: &Path, a: &[&str], m: &str) -> Result<(), String> {
     }
 }
 
+/// Banned raw canvas constants, parsed from the real values in
+/// `packages/browser-runtime/src/limits.ts` so this guard cannot drift from
+/// them again. Every `export const *CANVAS* = <n>;` limit (desktop and
+/// mobile area/side pairs) is included, with word boundaries so longer
+/// unrelated numbers cannot collide. User-facing docs state limits in
+/// rounded user units, never these raw constants.
+fn canvas_constants_pattern(r: &Path) -> Result<String, String> {
+    let text = std::fs::read_to_string(r.join("packages/browser-runtime/src/limits.ts"))
+        .map_err(|e| format!("read limits.ts: {e}"))?;
+    let mut values: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let Some(rest) = line.trim().strip_prefix("export const ") else {
+            continue;
+        };
+        let Some((name, tail)) = rest.split_once(" = ") else {
+            continue;
+        };
+        if !name.contains("CANVAS") {
+            continue;
+        }
+        let Some(value) = tail.strip_suffix(';') else {
+            continue;
+        };
+        if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        if !values.iter().any(|v| v == value) {
+            values.push(value.to_string());
+        }
+    }
+    if values.is_empty() {
+        return Err("no canvas constants parsed from limits.ts".to_string());
+    }
+    Ok(format!("\\b({})\\b", values.join("|")))
+}
+
 /// Tracked size budgets in bytes (lines for the theme). Warn prints and
 /// passes; fail returns an error. The fail lines are shared with the
 /// build-time gates (`build extension` reuses `WASM_FAIL_BYTES` and
@@ -173,16 +231,9 @@ fn verdict(actual: u64, warn: u64, fail: u64) -> Verdict {
     }
 }
 
-/// One gitignored build output against its budget. A missing file skips
-/// with the rebuild note; a present file warns or fails by the verdict.
-fn budget_file(
-    r: &Path,
-    rel: &str,
-    warn: u64,
-    fail: u64,
-    unit: &str,
-    hint: &str,
-) -> Result<(), String> {
+/// One gitignored build output against its byte budget. A missing file
+/// skips with the rebuild note; a present file warns or fails by verdict.
+fn budget_file(r: &Path, rel: &str, warn: u64, fail: u64, hint: &str) -> Result<(), String> {
     let path = r.join(rel);
     let Ok(meta) = std::fs::metadata(&path) else {
         println!("sizes: {rel} missing ({hint}); skipped");
@@ -191,15 +242,15 @@ fn budget_file(
     let actual = meta.len();
     match verdict(actual, warn, fail) {
         Verdict::Pass => {
-            println!("sizes: {rel} {actual} {unit} ok");
+            println!("sizes: {rel} {actual} bytes ok");
             Ok(())
         }
         Verdict::Warn => {
-            println!("sizes: WARNING {rel} {actual} {unit} exceeds warn {warn} (fail {fail})");
+            println!("sizes: WARNING {rel} {actual} bytes exceeds warn {warn} (fail {fail})");
             Ok(())
         }
         Verdict::Fail => Err(format!(
-            "sizes: {rel} {actual} {unit} exceeds fail budget {fail} (warn {warn})"
+            "sizes: {rel} {actual} bytes exceeds fail budget {fail} (warn {warn})"
         )),
     }
 }
@@ -241,7 +292,6 @@ fn verify_sizes(r: &Path) -> Result<(), String> {
         "wasm/dezoomify-wasm_bg.wasm",
         WASM_WARN_BYTES,
         WASM_FAIL_BYTES,
-        "bytes",
         "run `cargo xtask build web`",
     )?;
     for name in ["dezoomify-chromium.zip", "dezoomify-firefox.zip"] {
@@ -250,7 +300,6 @@ fn verify_sizes(r: &Path) -> Result<(), String> {
             &format!("target/extension/{name}"),
             EXT_ZIP_WARN_BYTES,
             EXT_ZIP_FAIL_BYTES,
-            "bytes",
             "run `cargo xtask build extension`",
         )?;
     }

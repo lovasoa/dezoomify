@@ -86,21 +86,19 @@ const app = createBrowserApplication({
         if (!source) {
           if (sourceTabId === null)
             throw {
-              code: "DISCOVERY_FAILED",
+              kind: "policy-denied",
               blocked_reason: "source-document-lost",
-              phase: "discovery",
-              message: "Could not find the source tab for this job.",
-              retryable: false,
+              transport: "browser-session",
+              detail: "could not find the source tab for this job",
             };
           const tab = await api.tabs.get(sourceTabId);
           context.signal.throwIfAborted();
           if (typeof tab.url !== "string" || originOfUrl(tab.url) === "")
             throw {
-              code: "DISCOVERY_FAILED",
+              kind: "policy-denied",
               blocked_reason: "source-document-lost",
-              phase: "discovery",
-              message: "The source tab no longer has a readable web page.",
-              retryable: false,
+              transport: "browser-session",
+              detail: "the source tab no longer has a readable web page",
             };
           source = createSourceAccess(api, { tabId: sourceTabId, documentUrl: tab.url });
           installTestAccess();
@@ -145,11 +143,7 @@ const app = createBrowserApplication({
           },
         });
         if (scan.inputs.length === 0)
-          throw {
-            code: "no-candidates",
-            message: "No image references were found on this page.",
-            retryable: true,
-          };
+          throw { kind: "no-image-found", detail: "no image references were found on this page" };
         return scan.inputs;
       },
       fetchResource: (request, signal, interaction) => {

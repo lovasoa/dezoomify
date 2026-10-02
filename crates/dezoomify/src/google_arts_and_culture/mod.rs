@@ -70,6 +70,12 @@ fn decode(page: &Arc<PageInfo>, bytes: &[u8]) -> Result<ImagePlan, DiscoveryErro
                 x: tile_width,
                 y: tile_height,
             };
+            // A page without a signing path cannot tile; reject it once
+            // here instead of failing per tile.
+            let sign_path = page
+                .path()
+                .map_err(|error| DiscoveryError::InvalidMetadata(error.to_string()))?
+                .to_owned();
             let request_page = Arc::clone(page);
             let source = Grid::with_processed_requests(
                 size,
@@ -78,7 +84,15 @@ fn decode(page: &Arc<PageInfo>, bytes: &[u8]) -> Result<ImagePlan, DiscoveryErro
                 ProcessingRecipe::GoogleArtsDecrypt,
                 move |tile| {
                     let cell: Vec2d = tile.coord.into();
-                    Request::new(url::compute_url(&request_page, cell.x, cell.y, z))
+                    Request::new(url::compute_url(
+                        &request_page,
+                        &sign_path,
+                        url::TileCoord {
+                            x: cell.x,
+                            y: cell.y,
+                            z,
+                        },
+                    ))
                 },
             )
             .map_err(|error| {
@@ -94,24 +108,18 @@ mod tests {
     use super::*;
     use crate::core::{DiscoveredEntry, DiscoveryCatalog, TileSource};
 
+    const PAGE: &[u8] = include_bytes!(
+        "../../../../testdata/scenarios/rs-core/formats/payloads/google_arts_and_culture/page_source.html"
+    );
+    const TILE_INFO: &[u8] = include_bytes!(
+        "../../../../testdata/scenarios/rs-core/formats/payloads/google_arts_and_culture/tile_info.xml"
+    );
+
     fn fixture_catalog() -> DiscoveryCatalog {
         let (catalog, requests) = crate::test_support::discover(
             SPEC,
             "https://artsandculture.google.com/asset/test",
-            &[
-                (
-                    include_bytes!(
-                        "../../../../testdata/scenarios/rs-core/formats/payloads/google_arts_and_culture/page_source.html"
-                    ),
-                    None,
-                ),
-                (
-                    include_bytes!(
-                        "../../../../testdata/scenarios/rs-core/formats/payloads/google_arts_and_culture/tile_info.xml"
-                    ),
-                    None,
-                ),
-            ],
+            &[(PAGE, None), (TILE_INFO, None)],
         );
         assert_eq!(requests.len(), 2);
         assert!(requests[1].uri.ends_with("=g"));
@@ -119,77 +127,32 @@ mod tests {
     }
 
     #[test]
-    fn discovers_fixture_as_five_replayable_levels() {
-        let catalog = fixture_catalog();
-        let [DiscoveredEntry::Ready(image)] = catalog.entries() else {
-            panic!("Google Arts produces one ready image");
-        };
-        assert_eq!(image.levels.len(), 5);
-        // Level names must carry the page title, as they did before the core refactor.
-        assert!(
-            image
-                .levels
-                .iter()
-                .all(|level| level.title.as_deref() == Some(image.title.as_deref().unwrap_or("")))
-        );
-        assert!(image.levels.iter().enumerate().all(|(position, level)| {
-            level
-                .display_label(position)
-                .contains("©Designers Anonymes")
-        }));
-        assert!(
-            image
-                .levels
-                .windows(2)
-                .all(|levels| levels[0].source.image_size().unwrap().area()
-                    <= levels[1].source.image_size().unwrap().area())
-        );
-        let TileSource::Grid(plan) = &image.levels[0].source else {
-            panic!("Google Arts geometry is a grid");
-        };
-        let tile = plan.tiles_row_major().next().unwrap().unwrap();
-        assert_eq!(tile.processing, ProcessingRecipe::GoogleArtsDecrypt);
-    }
-
-    #[test]
-    fn rejects_non_google_urls_without_requesting_data() {
-        let (result, requests) =
-            crate::test_support::discover(SPEC, "https://example.com/test", &[]);
-        assert!(matches!(
-            result,
-            Err(DiscoveryError::NoCandidateAccepted { .. })
-        ));
-        assert!(requests.is_empty());
-    }
-
-    #[test]
-    fn does_not_advertise_tile_metadata_without_the_required_page_context() {
-        let (result, requests) = crate::test_support::discover(
-            SPEC,
-            "https://lh3.googleusercontent.com/image-id=g",
-            &[],
-        );
-        assert!(matches!(
-            result,
-            Err(DiscoveryError::NoCandidateAccepted { .. })
-        ));
-        assert!(requests.is_empty());
-    }
-
-    #[test]
-    fn recognizes_google_arts_short_urls() {
-        let (_, requests) = crate::test_support::discover(SPEC, "https://g.co/arts/fixture", &[]);
-        assert_eq!(requests[0].uri, "https://g.co/arts/fixture");
-    }
-
-    #[test]
-    fn catalog_preserves_page_identity_and_tile_geometry() {
+    fn fixture_preserves_identity_levels_and_tile_geometry() {
         let catalog = fixture_catalog();
         let [DiscoveredEntry::Ready(image)] = catalog.entries() else {
             panic!("Google Arts produces one ready image");
         };
         assert_eq!(image.format, "google_arts_and_culture");
         assert_eq!(image.title.as_deref(), Some("©Designers Anonymes"));
+        assert_eq!(image.levels.len(), 5);
+        // Level names must carry the page title, as they did before the core refactor.
+        assert!(
+            image
+                .levels
+                .iter()
+                .all(|level| level.title.as_deref() == Some("©Designers Anonymes"))
+        );
+        assert!(image.levels.iter().enumerate().all(|(position, level)| {
+            level
+                .display_label(position)
+                .contains("©Designers Anonymes")
+        }));
+        let areas: Vec<_> = image
+            .levels
+            .iter()
+            .map(|level| level.source.image_size().unwrap().area())
+            .collect();
+        assert!(areas.windows(2).all(|pair| pair[0] <= pair[1]));
 
         let level = image.levels.last().expect("largest level");
         assert_eq!(level.source.image_size(), Some(Vec2d { x: 5436, y: 4080 }));
@@ -211,25 +174,34 @@ mod tests {
     }
 
     #[test]
+    fn rejects_urls_without_the_required_google_context() {
+        for input in [
+            "https://example.com/test",
+            "https://lh3.googleusercontent.com/image-id=g",
+        ] {
+            let (result, requests) = crate::test_support::discover(SPEC, input, &[]);
+            assert!(
+                matches!(result, Err(DiscoveryError::NoCandidateAccepted { .. })),
+                "{input}"
+            );
+            assert!(requests.is_empty(), "{input}");
+        }
+    }
+
+    #[test]
+    fn recognizes_google_arts_short_urls() {
+        let (_, requests) = crate::test_support::discover(SPEC, "https://g.co/arts/fixture", &[]);
+        assert_eq!(requests[0].uri, "https://g.co/arts/fixture");
+    }
+
+    #[test]
     fn invalid_tile_information_is_reported_as_a_parser_error() {
         let (result, _) = crate::test_support::discover(
             SPEC,
             "https://artsandculture.google.com/asset/test",
-            &[
-                (
-                    include_bytes!(
-                        "../../../../testdata/scenarios/rs-core/formats/payloads/google_arts_and_culture/page_source.html"
-                    ),
-                    None,
-                ),
-                (b"<invalid>not a tile info</invalid>", None),
-            ],
+            &[(PAGE, None), (b"<invalid>not a tile info</invalid>", None)],
         );
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("invalid Google Arts tile XML")
-        );
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("invalid Google Arts tile XML"));
     }
 }

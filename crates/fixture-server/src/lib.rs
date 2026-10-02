@@ -1,7 +1,7 @@
 //! Deterministic loopback fixture server.
 //!
 //! Loads every `testdata/scenarios/*/routes.json` plus referenced payloads and
-//! serves them by exact method/host/path match. The directory mirror is the
+//! serves them by exact method/host/path match. The payload layout is the
 //! default route table: a payload at `payloads/{host}{url-path}` serves at
 //! `{host}{url-path}` with a type inferred from its extension, so `routes.json`
 //! only spells out exceptions. No public network access is
@@ -13,7 +13,7 @@ mod b64;
 mod routes;
 mod svg;
 
-pub use routes::{RouteTable, ScenarioRoute};
+pub use routes::{derive_route_id, RouteTable, ScenarioRoute};
 
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
@@ -92,8 +92,7 @@ async fn handle_fetch_path(
     State(state): State<AppState>,
     method: Method,
     headers: HeaderMap,
-    Path(path): Path<String>,
-    Query(params): Query<HashMap<String, String>>,
+    (Path(path), Query(params)): (Path<String>, Query<HashMap<String, String>>),
 ) -> Response {
     let original = params
         .get("url")
@@ -261,7 +260,7 @@ fn url_parts(original: &str) -> Option<UrlParts> {
         return None;
     }
     // Match routes on hostname only: ephemeral test ports must not affect
-    // fixture identity (mirrors legacy hostname-based lookup).
+    // fixture identity (matching the legacy hostname-based lookup).
     let (host, port) = match authority.rsplit_once(':') {
         Some((h, p)) if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) => {
             (h.to_lowercase(), p.parse::<u16>().ok())
@@ -334,9 +333,8 @@ async fn handle_static_root(
 async fn handle_static(
     State(state): State<AppState>,
     method: Method,
-    axum::extract::Path(path): axum::extract::Path<String>,
     headers: HeaderMap,
-    raw_query: axum::extract::RawQuery,
+    (axum::extract::Path(path), raw_query): (axum::extract::Path<String>, axum::extract::RawQuery),
 ) -> Response {
     serve_static(&state, method, path, &headers, raw_query).await
 }
@@ -361,7 +359,7 @@ async fn serve_static(
     // so URL-shape discovery gates see the true path (`/zoomify/...`,
     // `/xl/*.imgi`, `/arcgis/MapServer`, ...) and tile URLs derived as
     // direct `{{origin}}/...` stay fetchable. Host matching ignores the
-    // ephemeral port, mirroring the gateway path. Routes win over static
+    // ephemeral port, as the gateway path does. Routes win over static
     // files (no `dist/` path collides with scenario tile paths); unknown
     // direct paths fall through to the static handler below, preserving
     // the stable `not found` contract.
@@ -475,7 +473,7 @@ async fn serve_static(
     match std::fs::read(&full) {
         Ok(bytes) => {
             let mut headers = HeaderMap::new();
-            let ctype = content_type(full.extension().and_then(|e| e.to_str()).unwrap_or(""));
+            let ctype = content_type(&full.to_string_lossy());
             headers.insert("content-type", HeaderValue::from_str(ctype).expect("ctype"));
             bytes_response(200, headers, bytes, head_only)
         }
@@ -483,21 +481,224 @@ async fn serve_static(
     }
 }
 
-fn content_type(ext: &str) -> &'static str {
-    match ext {
+/// Content type inferred from the final path segment's extension. The single
+/// mapping for static files, layout-derived payload routes, and the xtask
+/// fixture tooling (capture), so none of them can drift from the others.
+/// `.xml`/`.dzi` are `application/xml`, the convention documented in
+/// `testdata/scenarios/README.md`.
+pub fn content_type(path: &str) -> &'static str {
+    let file = path.rsplit('/').next().unwrap_or(path);
+    let ext = file.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
+    match ext.to_ascii_lowercase().as_str() {
         "html" => "text/html",
-        "js" => "application/javascript",
+        "js" | "mjs" => "application/javascript",
         "css" => "text/css",
         "json" => "application/json",
-        "xml" | "dzi" => "text/xml",
+        "xml" | "dzi" => "application/xml",
         "txt" => "text/plain",
         "svg" => "image/svg+xml",
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
         "wasm" => "application/wasm",
-        "mjs" => "application/javascript",
         "ico" => "image/x-icon",
         "yaml" | "yml" => "application/yaml",
         _ => "application/octet-stream",
     }
+}
+
+// ---------------------------------------------------------------------------
+// Scenario corpus access: this test-tool crate owns testdata/scenarios.
+// ---------------------------------------------------------------------------
+
+/// The shared scenario corpus under `testdata/scenarios`.
+#[must_use]
+pub fn scenarios_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/scenarios")
+}
+
+/// One scenario's corpus entry: its documented `scenario.json` with the
+/// `expected/result.json` golden attached under `expected`.
+#[must_use]
+pub fn scenario(id: &str) -> serde_json::Value {
+    let dir = scenarios_dir().join(id);
+    let mut entry: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.join("scenario.json")).expect("scenario"),
+    )
+    .expect("scenario json");
+    entry["expected"] = serde_json::from_str(
+        &std::fs::read_to_string(dir.join("expected/result.json")).expect("expected result"),
+    )
+    .expect("expected json");
+    entry
+}
+
+/// One scenario's corpus entry as [`scenario`] loads it, with its input URL
+/// handed back ready to run: the `http://{{origin}}` fixture placeholder is
+/// substituted with the live loopback origin. The one loader adapter for the
+/// native, edge, and CLI drivers.
+#[must_use]
+pub fn scenario_input(id: &str, origin: &str) -> (serde_json::Value, String) {
+    let entry = scenario(id);
+    let input = entry["input"]["url"]
+        .as_str()
+        .expect("scenario input url")
+        .replace("http://{{origin}}", origin);
+    (entry, input)
+}
+
+/// A fresh temp directory for one scenario run, cleared of leftovers.
+#[must_use]
+pub fn temp_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("dezoomify-tests-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    dir
+}
+
+/// The whole scenario corpus served on an allocated loopback port: the one
+/// loopback harness for every test binary that drives jobs end to end. The
+/// serving runtime is leaked for the process lifetime.
+#[must_use]
+pub fn start() -> String {
+    let scenarios_dir = scenarios_dir();
+    let routes = RouteTable::load(&scenarios_dir).expect("load routes");
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
+    let _guard = rt.enter();
+    let listener = rt
+        .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
+        .expect("bind loopback");
+    let bound = listener.local_addr().expect("addr");
+    let state = AppState {
+        routes: Arc::new(routes),
+        scenarios_dir,
+        static_dir: None,
+        origin: format!("http://{bound}"),
+        log: Arc::new(Mutex::new(Vec::new())),
+        log_path: None,
+    };
+    tokio::spawn(async move {
+        axum::serve(listener, router(state))
+            .await
+            .expect("fixture server");
+    });
+    std::mem::forget(rt);
+    format!("http://{bound}")
+}
+
+/// One completed job as its golden records it. Each driver adapts its own
+/// observation (native publication, CLI event JSON) into this shape once.
+#[derive(Clone, Debug)]
+pub struct GoldenResult {
+    /// Assembled image size `(width, height)`.
+    pub image_size: (u64, u64),
+    /// Tiles the job acquired.
+    pub tile_count: u64,
+    /// Output format name as the model spells it (`png`, `jpeg`, ...).
+    pub output_format: String,
+    /// Whether the published output is partial.
+    pub partial: bool,
+}
+
+/// The one golden comparator: `(label, observed, golden)` triples, adapted
+/// once per driver, yield one readable mismatch line per divergence. Empty
+/// when every field matches.
+#[must_use]
+pub fn golden_mismatches(id: &str, fields: &[(&str, String, String)]) -> Vec<String> {
+    fields
+        .iter()
+        .filter(|(_, observed, golden)| observed != golden)
+        .map(|(name, observed, golden)| format!("{id} {name}: {observed} != golden {golden}"))
+        .collect()
+}
+
+/// Success-golden mismatches: image size, tile count, output format, and
+/// (when the golden pins one) the partial disposition and the `ok` code.
+/// Empty when the run matches its golden. `recovery` in success goldens
+/// documents the mechanism in prose and is never a typed fact.
+#[must_use]
+pub fn result_golden_mismatches(entry: &serde_json::Value, result: &GoldenResult) -> Vec<String> {
+    let id = entry["id"].as_str().unwrap_or("<scenario>");
+    let golden = &entry["expected"];
+    let (width, height) = result.image_size;
+    let mut mismatches = golden_mismatches(
+        id,
+        &[
+            (
+                "image size",
+                format!("{:?}", result.image_size),
+                format!("({width}, {height})"),
+            ),
+            (
+                "tile count",
+                result.tile_count.to_string(),
+                golden["tileCount"]
+                    .as_u64()
+                    .expect("golden tile count")
+                    .to_string(),
+            ),
+            (
+                "output format",
+                result.output_format.clone(),
+                golden["outputFormat"]
+                    .as_str()
+                    .expect("golden format")
+                    .to_string(),
+            ),
+        ],
+    );
+    if let Some(partial) = golden.get("partial") {
+        if partial.as_bool() != Some(result.partial) {
+            mismatches.push(format!(
+                "{id} partial disposition: {} != golden {partial}",
+                result.partial
+            ));
+        }
+    }
+    if let Some(code) = golden.get("code") {
+        if code != "ok" {
+            mismatches.push(format!("{id} success outcome: golden code {code} != ok"));
+        }
+    }
+    mismatches
+}
+
+/// Failure-golden mismatches: the run failed and the golden's `code`
+/// records the typed error's stable kind (the same identifier the CLI
+/// human line prints). `underlying`/`note`/`recovery` are documentation
+/// prose, never typed facts.
+#[must_use]
+pub fn failure_golden_mismatches(entry: &serde_json::Value, kind: &str) -> Vec<String> {
+    let id = entry["id"].as_str().unwrap_or("<scenario>");
+    let golden = &entry["expected"];
+    golden_mismatches(
+        id,
+        &[
+            (
+                "outcome",
+                "failed".to_string(),
+                golden["outcome"].as_str().unwrap_or_default().to_string(),
+            ),
+            (
+                "code",
+                kind.to_string(),
+                golden["code"].as_str().unwrap_or_default().to_string(),
+            ),
+        ],
+    )
+}
+
+/// Assert [`result_golden_mismatches`] is empty. Drivers that report a
+/// batch of scenarios at once call the mismatch form and collect.
+pub fn assert_result_golden(entry: &serde_json::Value, result: GoldenResult) {
+    let mismatches = result_golden_mismatches(entry, &result);
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+}
+
+/// Assert [`failure_golden_mismatches`] is empty.
+pub fn assert_failure_golden(entry: &serde_json::Value, kind: &str) {
+    let mismatches = failure_golden_mismatches(entry, kind);
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
 }

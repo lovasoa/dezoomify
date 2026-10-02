@@ -1,10 +1,10 @@
 {
   "outcome": "failed",
-  "code": "discovery.failed",
+  "code": "malformed-metadata",
   "recovery": "edit-input",
   "phase": "discovery",
   "retryable": false,
   "transport": "native",
   "resourceKind": "metadata",
-  "note": "native currently does not decompress gzip metadata; gzipped DZI fails honestly with discovery.failed, never TILE_FAILED"
+  "note": "native currently does not decompress gzip metadata; gzipped DZI fails honestly with malformed-metadata, never TILE_FAILED"
 }

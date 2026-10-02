@@ -17,6 +17,9 @@ wasm-bindgen-futures = "0.4"
 serde-wasm-bindgen.workspace = true
 tsify.workspace = true
 
+[dev-dependencies]
+serde_json.workspace = true
+
 # Portable bindings use the workspace's explicit lint policy.
 [lints.rust]
 missing_docs = "allow"

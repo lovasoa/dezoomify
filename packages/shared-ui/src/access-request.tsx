@@ -1,4 +1,5 @@
 import type { ReactElement } from "react";
+import { t } from "./i18n.ts";
 
 export function AccessRequestView({
   origin,
@@ -23,9 +24,9 @@ export function AccessRequestView({
           <rect x="5" y="10" width="14" height="10" rx="1" />
         </svg>
       </div>
-      <h1>Allow access to continue</h1>
-      <p>This image uses files from {origin}.</p>
-      <p>Dezoomify needs access to read those files and assemble your image in this browser.</p>
+      <h1>{t("view.access.title")}</h1>
+      <p>{t("view.access.usesOrigin", { origin })}</p>
+      <p>{t("view.access.needAccess")}</p>
       <button
         type="button"
         className="dz-btn-tactile dz-permission-button"
@@ -33,7 +34,7 @@ export function AccessRequestView({
         disabled={requesting}
         onClick={onRequest}
       >
-        {requesting ? "Requesting access…" : "Allow access and continue"}
+        {requesting ? t("view.access.requesting") : t("view.access.allow")}
       </button>
     </div>
   );

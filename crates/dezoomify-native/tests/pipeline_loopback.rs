@@ -1,52 +1,34 @@
+use dezoomify::model::Error;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use dezoomify_fixture_server::{router, AppState, RouteTable};
 use dezoomify_native::imaging;
 use dezoomify_native::JobOptions;
 mod support;
+use support::{http_response, scenario_payload, start_fixture_server, temp_dir, DZI_256, DZI_512};
 
-fn start_fixture_server() -> String {
-    let scenarios_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/scenarios");
-    let routes = RouteTable::load(&scenarios_dir).expect("load routes");
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .expect("tokio runtime");
-    let _guard = rt.enter();
-    let listener = rt
-        .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
-        .expect("bind loopback");
-    let bound = listener.local_addr().expect("addr");
-    let state = AppState {
-        routes: Arc::new(routes),
-        scenarios_dir,
-        static_dir: None,
-        origin: format!("http://{bound}"),
-        log: Arc::new(Mutex::new(Vec::new())),
-        log_path: None,
-    };
-    tokio::spawn(async move {
-        axum::serve(listener, router(state))
-            .await
-            .expect("fixture server");
-    });
-    // The runtime must outlive the server; leak it for the process lifetime.
-    std::mem::forget(rt);
-    format!("http://{bound}")
+/// Thin driver adapter over the shared corpus goldens: assert the
+/// published result against the scenario's `expected/result.json`
+/// contract. [`support::golden_result`] maps the publication once; the
+/// shared comparison lives in the fixture server (it owns the corpus).
+fn assert_result_golden(scenario: &str, outcome: &dezoomify_native::Publication) {
+    dezoomify_fixture_server::assert_result_golden(
+        &dezoomify_fixture_server::scenario(scenario),
+        support::golden_result(outcome),
+    );
 }
 
-fn temp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "dezoomify-native-pipeline-{}-{name}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    dir
+/// Thin driver adapter: assert the published failure contract of the
+/// scenario's `expected/result.json`: its recorded `code` is the typed
+/// error's stable kind (`error.cause().kind()`), the same identifier the
+/// CLI human line prints.
+fn assert_failure_golden(scenario: &str, error: &Error) {
+    dezoomify_fixture_server::assert_failure_golden(
+        &dezoomify_fixture_server::scenario(scenario),
+        error.cause().kind(),
+    );
 }
 
 #[test]
@@ -68,31 +50,7 @@ fn assembles_dzi_pyramid_from_fixture_scenario() {
     assert_eq!(outcome.output.canvas.as_ref().unwrap().width, 512);
     assert_eq!(outcome.output.canvas.as_ref().unwrap().height, 512);
     assert!(events > 0, "pipeline emitted progress events");
-
-    let expected: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../testdata/scenarios/native/cli-dzi/expected/result.json"
-        ))
-        .expect("expected result"),
-    )
-    .expect("expected json");
-    assert_eq!(
-        outcome.tile_count as u64,
-        expected["tileCount"].as_u64().unwrap()
-    );
-    assert_eq!(
-        outcome.output.canvas.as_ref().unwrap().width as u64,
-        expected["imageSize"]["x"].as_u64().unwrap()
-    );
-    assert_eq!(
-        outcome.output.canvas.as_ref().unwrap().height as u64,
-        expected["imageSize"]["y"].as_u64().unwrap()
-    );
-    assert_eq!(
-        outcome.output.format.as_str(),
-        expected["outputFormat"].as_str().unwrap()
-    );
+    assert_result_golden("native/cli-dzi", &outcome);
 
     let bytes = std::fs::read(&output).expect("output file written");
 
@@ -134,7 +92,8 @@ fn tile_failure_fails_honestly_without_output() {
         &mut |_| {},
     )
     .expect_err("pipeline fails on missing tiles");
-    assert_eq!(error.code, "job.partial-discarded");
+    assert_failure_golden("native/cli-tile-failure", &error);
+    assert!(matches!(error, Error::PartialDiscarded { .. }));
     assert!(
         !output.exists(),
         "no output may be written for a failed job"
@@ -175,7 +134,7 @@ fn file_uri_tiles_assemble_from_a_remote_manifest() {
         &JobOptions::default(),
         &mut |_| {},
     )
-    .unwrap_or_else(|e| panic!("file-uri tiles succeed: {} ({})", e.message, e.code));
+    .unwrap_or_else(|e| panic!("file-uri tiles succeed: {e} ({})", e.cause().kind()));
     assert_eq!(outcome.tile_count, 4);
     assert_eq!(
         (
@@ -207,7 +166,8 @@ fn corrupt_tile_fails_like_a_missing_tile() {
         &mut |_| {},
     )
     .expect_err("pipeline fails on corrupt tiles");
-    assert_eq!(error.code, "job.partial-discarded");
+    assert_failure_golden("native/cli-corrupt-tile", &error);
+    assert!(matches!(error, Error::PartialDiscarded { .. }));
     assert!(
         !output.exists(),
         "no output may be written for a failed job"
@@ -231,15 +191,11 @@ fn partial_keep_policy_encodes_acquired_tiles() {
         &mut |_| {},
     )
     .expect("keep policy publishes a partial");
-    assert!(!outcome.output.complete, "kept output is marked partial");
-    assert_eq!(outcome.tile_count, 3);
-    assert_eq!(
-        (
-            outcome.output.canvas.as_ref().unwrap().width,
-            outcome.output.canvas.as_ref().unwrap().height
-        ),
-        (512, 512)
+    assert!(
+        !outcome.output.is_complete(),
+        "kept output is marked partial"
     );
+    assert_result_golden("native/cli-partial-keep", &outcome);
     // Kept partials publish to a `.partial` sibling, never to the requested
     // complete-save path: the partial stays distinguishable on disk.
     let partial_path = out_dir.join("partial.partial.png");
@@ -293,7 +249,7 @@ fn max_width_selects_the_largest_fitting_level() {
         (256, 256)
     );
     assert_eq!(outcome.tile_count, 1);
-    assert!(outcome.output.complete);
+    assert!(outcome.output.is_complete());
 }
 
 #[test]
@@ -310,14 +266,7 @@ fn probe_planned_grid_matches_the_fixed_grid_output() {
         &mut |_| {},
     )
     .expect("probe-driven pipeline succeeds");
-    assert_eq!(
-        (
-            outcome.output.canvas.as_ref().unwrap().width,
-            outcome.output.canvas.as_ref().unwrap().height
-        ),
-        (512, 512)
-    );
-    assert_eq!(outcome.tile_count, 4);
+    assert_result_golden("native/cli-probe-grid", &outcome);
 }
 
 #[test]
@@ -336,7 +285,8 @@ fn existing_output_without_overwrite_is_refused() {
         &mut |_| events += 1,
     )
     .expect_err("overwrite refusal fails");
-    assert_eq!(error.code, "output.exists");
+    assert_failure_golden("native/cli-destination-denied", &error);
+    assert_eq!(error, Error::OutputExists);
     assert_eq!(events, 0, "refusal happens before any work");
     assert_eq!(
         std::fs::read(&output).expect("output preserved"),
@@ -367,7 +317,7 @@ fn jpg_output_decodes_at_full_size() {
         ),
         (512, 512)
     );
-    assert!(outcome.output.complete);
+    assert!(outcome.output.is_complete());
     let bytes = std::fs::read(&output).expect("jpeg output written");
     assert!(
         bytes.starts_with(&[0xFF, 0xD8, 0xFF]),
@@ -548,7 +498,7 @@ fn iiif_dir_writes_manifest_and_addressable_tiles() {
         ),
         (512, 512)
     );
-    assert!(outcome.output.complete);
+    assert!(outcome.output.is_complete());
     // The manifest is spec-shaped: v2 context, real dimensions, one tile
     // block matching the files on disk.
     let info: serde_json::Value = serde_json::from_slice(
@@ -633,7 +583,7 @@ fn tile_cache_reuses_tiles_after_the_server_loses_them() {
     )
     .expect("second run reuses the cache");
     assert_eq!(resumed.tile_count, 4);
-    assert!(resumed.output.complete);
+    assert!(resumed.output.is_complete());
 }
 
 #[test]
@@ -712,7 +662,7 @@ fn interrupted_job_resumes_without_refetching_completed_tiles() {
         &mut |_| {},
     )
     .expect_err("interrupted run fails honestly");
-    assert_eq!(error.code, "job.partial-discarded");
+    assert!(matches!(error, Error::PartialDiscarded { .. }));
     assert!(
         !first_output.exists(),
         "failed runs write no output even with cached tiles"
@@ -755,7 +705,7 @@ fn interrupted_job_resumes_without_refetching_completed_tiles() {
     )
     .expect("repeated run resumes from the cache");
     assert_eq!(resumed.tile_count, 4);
-    assert!(resumed.output.complete);
+    assert!(resumed.output.is_complete());
 }
 
 #[test]
@@ -775,15 +725,8 @@ fn resume_scenario_matches_the_pinned_golden() {
         &mut |_| {},
     )
     .expect("resume scenario succeeds");
-    assert_eq!(outcome.tile_count, 4);
-    assert_eq!(
-        (
-            outcome.output.canvas.as_ref().unwrap().width,
-            outcome.output.canvas.as_ref().unwrap().height
-        ),
-        (512, 512)
-    );
-    assert!(outcome.output.complete);
+    assert_result_golden("native/cli-resume-cache", &outcome);
+    assert!(outcome.output.is_complete());
 }
 
 #[test]
@@ -806,7 +749,8 @@ fn cancellation_before_publish_writes_nothing() {
         },
     )
     .expect_err("cancelled jobs fail");
-    assert_eq!(error.code, "job.cancelled");
+    assert_failure_golden("native/cli-cancel", &error);
+    assert!(matches!(error.cause(), Error::Cancelled));
     assert!(!output.exists(), "cancelled jobs write nothing");
 }
 
@@ -814,16 +758,6 @@ fn cancellation_before_publish_writes_nothing() {
 // Raw-TCP loopback: deferred follows need runtime-port absolute URLs, which
 // committed fixtures cannot express.
 // ---------------------------------------------------------------------------
-
-fn http_response(status: &str, content_type: &str, body: &[u8]) -> Vec<u8> {
-    let mut out = Vec::new();
-    out.extend_from_slice(format!("HTTP/1.1 {status}\r\n").as_bytes());
-    out.extend_from_slice(format!("content-type: {content_type}\r\n").as_bytes());
-    out.extend_from_slice(format!("content-length: {}\r\n", body.len()).as_bytes());
-    out.extend_from_slice(b"connection: close\r\n\r\n");
-    out.extend_from_slice(body);
-    out
-}
 
 /// Serve a shared path → response map on loopback with one thread per
 /// connection (tile fetches run concurrently). Unknown paths 404. The map
@@ -871,15 +805,6 @@ fn serve_shared_map(shared: Arc<Mutex<HashMap<String, Vec<u8>>>>) -> String {
     format!("http://127.0.0.1:{port}")
 }
 
-fn scenario_payload(name: &str) -> Vec<u8> {
-    std::fs::read(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../testdata/scenarios/native/cli-dzi/payloads/fixtures.test/cli")
-            .join(name),
-    )
-    .unwrap_or_else(|e| panic!("read payload {name}: {e}"))
-}
-
 fn solid_png(width: u32, height: u32, rgb: [u8; 3]) -> Vec<u8> {
     let mut image = image::RgbaImage::new(width, height);
     for pixel in image.pixels_mut() {
@@ -897,18 +822,6 @@ fn solid_png(width: u32, height: u32, rgb: [u8; 3]) -> Vec<u8> {
     .expect("encode solid tile");
     bytes
 }
-
-const DZI_512: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
-<Image TileSize="256" Format="png" Overlap="0" xmlns="http://schemas.microsoft.com/deepzoom/2008">
-  <Size Width="512" Height="512"/>
-</Image>
-"#;
-
-const DZI_256: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
-<Image TileSize="256" Format="png" Overlap="0" xmlns="http://schemas.microsoft.com/deepzoom/2008">
-  <Size Width="256" Height="256"/>
-</Image>
-"#;
 
 #[test]
 fn iiif_size_rounding_bug_falls_back_to_caret_width_without_refetching() {
@@ -1012,14 +925,7 @@ fn deferred_bulk_entry_resolves_to_identical_output() {
         &mut |_| {},
     )
     .expect("deferred follow succeeds");
-    assert_eq!(
-        (
-            outcome.output.canvas.as_ref().unwrap().width,
-            outcome.output.canvas.as_ref().unwrap().height
-        ),
-        (512, 512)
-    );
-    assert_eq!(outcome.tile_count, 4);
+    assert_result_golden("native/cli-deferred", &outcome);
 }
 
 #[test]
@@ -1045,7 +951,8 @@ fn self_referential_deferred_list_hits_the_resolution_limit() {
         &mut |_| {},
     )
     .expect_err("self-deferral exhausts the bound");
-    assert_eq!(error.code, "job.deferred-limit");
+    assert_failure_golden("native/cli-deferred-limit", &error);
+    assert!(matches!(error, Error::DeferredLimit { .. }));
     assert!(!output.exists());
 }
 
@@ -1095,14 +1002,7 @@ fn first_catalog_entry_wins_with_two_deferred_images() {
         &mut |_| {},
     )
     .expect("first entry resolves");
-    assert_eq!(
-        (
-            outcome.output.canvas.as_ref().unwrap().width,
-            outcome.output.canvas.as_ref().unwrap().height
-        ),
-        (256, 256)
-    );
-    assert_eq!(outcome.tile_count, 1);
+    assert_result_golden("native/cli-multi-image", &outcome);
     let bytes = std::fs::read(&output).expect("output written");
     let decoded = image::load_from_memory(&bytes).expect("decodes").to_rgba8();
     assert_eq!(decoded.get_pixel(8, 8).0[0..3], [196, 48, 48]);

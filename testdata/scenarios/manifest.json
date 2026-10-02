@@ -979,8 +979,8 @@
       "path": "native/cli-tile-failure/expected/result.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "a051dc05cb808735f169fc3bf0283268636a3c068063f50ea7d7f393076f966b",
-      "size": 60,
+      "sha256": "334e450e25e2ab817089523a9c11d445ba6edce9ed7eadf55ba49e3fa2d685db",
+      "size": 57,
       "source_path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
       "source_snapshot": "local"
     },

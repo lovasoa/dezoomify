@@ -268,7 +268,7 @@ impl Grid {
             destination: tile.destination,
             expected_size: Some(tile.expected_size),
             processing: self.requests.processing(),
-            role: TileRole::Output,
+            role: TileRole::output(),
         })
     }
 }
@@ -400,7 +400,7 @@ impl Iterator for PositionedTiles {
                 destination: tile.destination,
                 expected_size: None,
                 processing: tile.processing,
-                role: TileRole::Output,
+                role: TileRole::output(),
             })
         }))
     }

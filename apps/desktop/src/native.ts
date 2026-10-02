@@ -1,5 +1,7 @@
+import { isValidInputUrl } from "@dezoomify/shared-ui";
 import type {
   DiagnosticReport,
+  Error as JobError,
   MissingTiles,
   Output,
   Progress,
@@ -9,7 +11,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { assertNoTileBytes } from "./events.ts";
-import { type DesktopSettings, validateSettings } from "./settings.ts";
+import type { DesktopSettings } from "./settings.ts";
 
 export interface DesktopIpc {
   invoke(command: string, args?: Record<string, unknown>): Promise<unknown>;
@@ -18,6 +20,28 @@ export interface DesktopIpc {
 
 const ipc: DesktopIpc = { invoke, listen };
 let nextInvocation = 0;
+
+/** Stamp the shell's retry verdict (`is_retryable`, the one policy in Rust)
+ * onto a typed error in place as a plain `retryable` hint for the shared UI;
+ * the payload itself stays untouched. A value the shell cannot classify keeps
+ * no hint and so fails closed. */
+async function withVerdict<T>(error: T, api: DesktopIpc): Promise<T> {
+  try {
+    (error as JobError & { retryable?: boolean }).retryable =
+      (await api.invoke("is_retryable", { error })) === true;
+  } catch {
+    // No verdict: the hint stays absent and retry fails closed.
+  }
+  return error;
+}
+
+/** `withVerdict` across every retained failure of a partial decision. */
+async function withVerdictMissing(missing: MissingTiles, api: DesktopIpc): Promise<MissingTiles> {
+  await Promise.all(
+    missing.missing.flatMap((tile) => tile.failures.map((failure) => withVerdict(failure, api))),
+  );
+  return missing;
+}
 
 export interface NativeInvocation {
   id: string;
@@ -38,17 +62,8 @@ export async function invokeNative(
   },
   api: DesktopIpc = ipc,
 ): Promise<NativeInvocation> {
-  const input = new URL(request.inputUrl);
-  if (
-    !["http:", "https:"].includes(input.protocol) ||
-    input.username ||
-    input.password ||
-    request.inputUrl.length > 2048
-  ) {
-    throw { code: "desktop.invalid-source", message: "The image address is not usable." };
-  }
-  if (!validateSettings(request.settings).ok) {
-    throw { code: "desktop.invalid-settings", message: "The output settings are not valid." };
+  if (!isValidInputUrl(request.inputUrl)) {
+    throw { kind: "invalid-input", detail: "the image address is not usable" };
   }
   const id = `job:desktop-${Date.now()}-${++nextInvocation}`;
   let retired = false;
@@ -85,7 +100,12 @@ export async function invokeNative(
           typeof payload.question === "number" &&
           "missing" in payload
         ) {
-          callbacks.partial(payload.question, payload.missing as MissingTiles);
+          // The verdict rides along as plain data before the shared UI gates
+          // its retry action on the hint.
+          const question = payload.question;
+          void withVerdictMissing(payload.missing as MissingTiles, api).then((missing) => {
+            if (!retired) callbacks.partial(question, missing);
+          });
         }
       });
       if (typeof stop === "function") unlisten.push(stop as () => void);
@@ -95,18 +115,25 @@ export async function invokeNative(
     throw error;
   }
   const call = async (command: string, args?: Record<string, unknown>): Promise<void> => {
-    if (retired) throw { code: "desktop.result-retired", message: "The result has been retired." };
+    if (retired) throw { kind: "stale" };
     await api.invoke(command, { job: id, ...args });
   };
+  // Settings cross IPC raw as typed; Rust's `parse_settings` is the single
+  // validator and its typed rejection reason is authoritative.
   const finished = api
     .invoke("dezoomify", {
       job: id,
       inputUrl: request.inputUrl,
-      settings: { ...request.settings, headers: { ...request.settings.headers } },
+      settings: { ...request.settings, headers: [...request.settings.headers] },
     })
     .then((output) => {
       assertNoTileBytes(output);
       return output as Output;
+    })
+    .catch(async (error: unknown) => {
+      // The shell's retry verdict is stamped here, on the async path before
+      // any rendering, because the view's normalization is synchronous.
+      throw await withVerdict(error, api);
     })
     .finally(releaseListeners);
   // Controls may reach Rust on a different task from the dezoomify command.
@@ -138,11 +165,15 @@ export async function readNativeDiagnostics(
   return report as DiagnosticReport;
 }
 
-export async function listenDeepLinks(
-  callback: (payload: Record<string, unknown>) => void,
+/** Validate raw settings with the shell's `validate_settings` (the single
+ * validator, `parse_settings`) before anything is persisted. Rejects with the
+ * typed `invalid-settings` reason when the edit is refused. */
+export async function validateSettings(
+  settings: DesktopSettings,
+  api: DesktopIpc = ipc,
 ): Promise<void> {
-  await ipc.listen("dezoomify://deep-link-pending", ({ payload }) => {
-    if (payload && typeof payload === "object") callback(payload as Record<string, unknown>);
+  await api.invoke("validate_settings", {
+    settings: { ...settings, headers: [...settings.headers] },
   });
 }
 

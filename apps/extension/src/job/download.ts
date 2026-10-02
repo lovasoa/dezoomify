@@ -29,8 +29,7 @@ export function saveExtensionBlob(
       if ("id" in result) resolve(result.id);
       else reject(result.error);
     };
-    const failed = (detail: string) =>
-      outputError("OUTPUT_FAILED", "The browser could not save the image.", detail);
+    const failed = (detail: string) => outputError("write-failed", detail);
     const onChanged = (delta: DownloadDelta) => {
       if (delta.state?.current !== "complete" && delta.state?.current !== "interrupted") return;
       if (id === null) {

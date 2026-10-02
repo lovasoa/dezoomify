@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 
+use dezoomify::model::Error;
 use dezoomify_native::http::{FetchLimits, UserHeaders};
 use dezoomify_native::transport::NativeTransport;
 
@@ -213,7 +214,7 @@ fn redirect_rejects_userinfo_and_unsupported_schemes() {
             &limits(),
         )
         .expect_err("userinfo redirect rejected");
-    assert_eq!(error.code, "TRANSPORT_BAD_REDIRECT");
+    assert!(matches!(error, Error::BadRedirect { .. }));
     server.join().expect("server exits after one connection");
     assert_eq!(requests.load(Ordering::SeqCst), 1);
 }

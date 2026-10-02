@@ -2,50 +2,10 @@
 //! `None`/`auto` auto-detects; a named format restricts discovery to that
 //! format; unknown names fail typed.
 
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use dezoomify::model::Error;
 
-use dezoomify_fixture_server::{router, AppState, RouteTable};
 mod support;
-
-fn start_fixture_server() -> String {
-    let scenarios_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/scenarios");
-    let routes = RouteTable::load(&scenarios_dir).expect("load routes");
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .expect("tokio runtime");
-    let _guard = rt.enter();
-    let listener = rt
-        .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
-        .expect("bind loopback");
-    let bound = listener.local_addr().expect("addr");
-    let state = AppState {
-        routes: Arc::new(routes),
-        scenarios_dir,
-        static_dir: None,
-        origin: format!("http://{bound}"),
-        log: Arc::new(Mutex::new(Vec::new())),
-        log_path: None,
-    };
-    tokio::spawn(async move {
-        axum::serve(listener, router(state))
-            .await
-            .expect("fixture server");
-    });
-    std::mem::forget(rt);
-    format!("http://{bound}")
-}
-
-fn temp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "dezoomify-native-format-{}-{name}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    dir
-}
+use support::{start_fixture_server, temp_dir};
 
 #[allow(clippy::result_large_err)] // Exercise the same error type as the Host API.
 fn run_with_format(
@@ -71,7 +31,7 @@ fn named_deepzoom_selects_the_single_program() {
         .expect("named deepzoom succeeds");
     assert_eq!(outcome.source_format, "deepzoom");
     assert_eq!(outcome.tile_count, 4);
-    assert!(outcome.output.complete);
+    assert!(outcome.output.is_complete());
     assert!(output.is_file());
 }
 
@@ -108,7 +68,7 @@ fn named_mismatch_fails_instead_of_auto_detecting() {
     let output = out_dir.join("mismatch.png");
     let error = run_with_format(&input, &output, Some("iiif".to_string()))
         .expect_err("iiif-only registry cannot parse DZI");
-    assert_eq!(error.code, "job.discovery-failed");
+    assert_eq!(error.cause().kind(), "malformed-metadata");
     assert!(!output.exists(), "failed jobs write no output");
 }
 
@@ -120,12 +80,10 @@ fn unknown_format_fails_typed_without_output() {
     let output = out_dir.join("unknown.png");
     let error = run_with_format(&input, &output, Some("nope".to_string()))
         .expect_err("unknown format must fail");
-    // Stable code, never display-string matching.
-    assert_eq!(error.code, "job.unknown-format");
+    // Stable kind plus structured facts, never display-string matching.
     assert!(
-        error.message.contains("nope"),
-        "message names the bad format without credentials: {}",
-        error.message
+        matches!(&error, Error::UnknownFormat { format } if format == "nope"),
+        "unknown format: {error}"
     );
     assert!(!output.exists(), "unknown format writes no output");
 }

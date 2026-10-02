@@ -1,6 +1,6 @@
 {
   "outcome": "failed",
-  "code": "discovery.no-image",
+  "code": "no-image-found",
   "recovery": "edit-input",
   "phase": "discovery",
   "retryable": false,

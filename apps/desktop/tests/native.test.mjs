@@ -35,6 +35,8 @@ function platform({ deferRegistration = false } = {}) {
         if (!deferRegistration) this.register();
         return completion;
       }
+      // The retry verdict is a stateless shell query: no job, no registration.
+      if (command === "is_retryable") return false;
       assert.ok(registered, `${command} reached Rust before registration`);
     },
     emit(channel, payload) {
@@ -62,7 +64,7 @@ test("native invocation preserves settings, progress, completion, and result own
   );
   assert.equal(api.calls[0].command, "dezoomify");
   assert.equal(api.calls[0].args.inputUrl, request().inputUrl);
-  assert.deepEqual(api.calls[0].args.settings.headers, {});
+  assert.deepEqual(api.calls[0].args.settings.headers, []);
   api.emit("dezoomify://progress", { job: "job:other", progress: { completed: 100 } });
   assert.equal(progress.length, 0);
   const value = { phase: "acquisition", completed: 3, total: 4 };
@@ -73,6 +75,8 @@ test("native invocation preserves settings, progress, completion, and result own
     question: 4,
     missing: { missing: [{ tile: 3, failures: [] }] },
   });
+  // Delivery waits for the shell's retry verdicts to be stamped on.
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(partial[0][0], 4);
   await handle.pause();
   await handle.resume();
@@ -91,10 +95,7 @@ test("native invocation preserves settings, progress, completion, and result own
     args: { job: handle.id, reveal: true },
   });
   await handle.dispose();
-  await assert.rejects(
-    handle.openOutput(false),
-    (error) => error.code === "desktop.result-retired",
-  );
+  await assert.rejects(handle.openOutput(false), (error) => error.kind === "stale");
 });
 
 test("retired invocation rejects controls and ignores late progress", async () => {
@@ -112,9 +113,9 @@ test("retired invocation rejects controls and ignores late progress", async () =
   late({ payload: { job: handle.id, progress: { phase: "output" } } });
   assert.equal(progress.length, 0);
   assert.equal(api.calls.filter(({ command }) => command === "release_job").length, 1);
-  await assert.rejects(handle.pause(), (error) => error.code === "desktop.result-retired");
-  api.reject({ code: "job.cancelled", message: "cancelled" });
-  await assert.rejects(handle.finished, (error) => error.code === "job.cancelled");
+  await assert.rejects(handle.pause(), (error) => error.kind === "stale");
+  api.reject({ kind: "cancelled" });
+  await assert.rejects(handle.finished, (error) => error.kind === "cancelled");
 });
 
 test("early cancellation and replacement wait for native registration", async () => {
@@ -147,7 +148,7 @@ test("early cancellation and replacement wait for native registration", async ()
     api.register();
     const handle = await stopped;
     assert.equal(api.calls.at(-1).command, control === "cancel" ? "cancel_job" : "release_job");
-    const cancelled = { code: "job.cancelled", message: "cancelled before publication" };
+    const cancelled = { kind: "cancelled" };
     api.reject(cancelled);
     await assert.rejects(handle.finished, (error) => error === cancelled);
     api.emit("dezoomify://progress", { job: handle.id, progress: { phase: "output" } });
@@ -159,7 +160,7 @@ test("early cancellation and replacement wait for native registration", async ()
 test("failure before native registration rejects startup and removes all listeners", async () => {
   const api = platform({ deferRegistration: true });
   const starting = invokeNative(request(), { progress() {}, partial() {} }, api);
-  const failure = { code: "job.invalid-input", message: "invalid settings", detail: "width" };
+  const failure = { kind: "invalid-input", detail: "invalid settings: width" };
   const rejected = assert.rejects(starting, (error) => error === failure);
   await api.dispatched;
   api.reject(failure);
@@ -167,18 +168,18 @@ test("failure before native registration rejects startup and removes all listene
   assert.equal(api.handlers.size, 0);
   assert.deepEqual(
     api.calls.map(({ command }) => command),
-    ["dezoomify"],
+    ["dezoomify", "is_retryable"],
   );
 });
 
 test("typed failure and partial output retain the native outcome", async () => {
   for (const result of [
     { ...output, complete: false, missing: [3] },
-    { code: "job.partial-discarded", phase: "acquisition", retryable: false, message: "failed" },
+    { kind: "partial-discarded", failures: [{ kind: "decode-failed" }] },
   ]) {
     const api = platform();
     const handle = await invokeNative(request(), { progress() {}, partial() {} }, api);
-    if ("code" in result) {
+    if ("kind" in result) {
       api.reject(result);
       await assert.rejects(handle.finished, (error) => error === result);
     } else {
@@ -198,4 +199,25 @@ test("untrusted addresses fail before native IPC", async () => {
     );
     assert.equal(api.calls.length, 0);
   }
+});
+
+test("raw header lines cross IPC as typed and Rust rejections return untouched", async () => {
+  const headers = ["Referer: https://example.com/viewer", "not a header line", "X-Test: a b"];
+  const settings = { ...defaultSettings(), retries: 500, headers };
+  const api = platform();
+  const handle = await invokeNative(
+    { inputUrl: "https://example.com/image", settings },
+    { progress() {}, partial() {} },
+    api,
+  );
+  assert.deepEqual(
+    api.calls[0].args.settings.headers,
+    headers,
+    "raw header text is submitted as-is; Rust is the single validator",
+  );
+  assert.equal(api.calls[0].args.settings.retries, 500, "no client-side bounds pre-validate");
+  const rejection = { kind: "invalid-settings", detail: "invalid header: bad name" };
+  api.reject(rejection);
+  await assert.rejects(handle.finished, (error) => error === rejection);
+  await handle.dispose();
 });

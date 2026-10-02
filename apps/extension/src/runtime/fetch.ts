@@ -10,7 +10,7 @@
 
 import {
   forwardCoreHeaders,
-  isFetchFailure,
+  isJobError,
   isPublicHttpUrl,
   originOfUrl,
   readErrorPreview,
@@ -18,12 +18,7 @@ import {
   retryAfterMs,
 } from "@dezoomify/browser-runtime";
 import type { DiagnosticRecorder } from "@dezoomify/shared-ui";
-import type {
-  BlockedReason,
-  FetchFailure,
-  FetchFailureCode,
-  ResourceRequest,
-} from "@dezoomify/wasm-bindings";
+import type { Error as JobError, ResourceRequest } from "@dezoomify/wasm-bindings";
 
 export const PROXY_PATH = "/api/proxy";
 export const MAX_BYTES_DEFAULT = 8 * 1024 * 1024;
@@ -57,30 +52,38 @@ export function isProxyUrl(url: string): boolean {
 
 /** Canonical observations from the extension's browser transport. */
 export function transportError(
-  code: FetchFailureCode,
-  message: string,
-  blocked_reason?: BlockedReason,
-): FetchFailure {
-  return {
-    code,
-    message,
-    transport: "browser-session",
-    ...(blocked_reason ? { blocked_reason } : {}),
-  };
+  kind: "bad-url" | "cancelled" | "network-failure" | "timeout" | "source-lost",
+  detail: string,
+): JobError {
+  switch (kind) {
+    case "bad-url":
+      return { kind, detail };
+    case "cancelled":
+      return { kind };
+    case "network-failure":
+    case "timeout":
+      return { kind, transport: "browser-session", detail };
+    case "source-lost":
+      return {
+        kind: "policy-denied",
+        blocked_reason: "source-document-lost",
+        transport: "browser-session",
+        detail,
+      };
+  }
 }
 
 /** @param {string} url */
 function checkedUrl(url: string): URL {
   if (isProxyUrl(url))
-    throw transportError("TRANSPORT_BAD_URL", "proxy transport is forbidden in the extension");
+    throw transportError("bad-url", "proxy transport is forbidden in the extension");
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
-    throw transportError("TRANSPORT_BAD_URL", "invalid URL");
+    throw transportError("bad-url", "invalid URL");
   }
-  if (!isPublicHttpUrl(parsed.href))
-    throw transportError("TRANSPORT_BAD_URL", "unsupported URL scheme");
+  if (!isPublicHttpUrl(parsed.href)) throw transportError("bad-url", "unsupported URL scheme");
   return parsed;
 }
 
@@ -96,11 +99,12 @@ export function createExtensionFetcher(deps: FetchDeps) {
     const parsed = checkedUrl(request.uri);
     const origin = originOfUrl(parsed.href);
     if (!(await deps.hasPermission(origin))) {
-      throw transportError(
-        "TRANSPORT_POLICY_DENIED",
-        `Access to ${origin} requires an explicit action`,
-        "access-required",
-      );
+      throw {
+        kind: "policy-denied",
+        blocked_reason: "access-required",
+        transport: "browser-session",
+        detail: `access to ${origin} requires an explicit action`,
+      } satisfies JobError;
     }
     deps.diagnostics?.count("requests");
     deps.diagnostics?.count("requests_pending");
@@ -115,7 +119,7 @@ export function createExtensionFetcher(deps: FetchDeps) {
       controller.abort();
     }, timeoutMs);
     try {
-      if (signal.aborted) throw transportError("TRANSPORT_CANCELLED", "request cancelled");
+      if (signal.aborted) throw transportError("cancelled", "request cancelled");
       // Credential-free with browser-native redirect following: no
       // credentials are attached (CDNs answering
       // Access-Control-Allow-Origin: * stay readable, which "include"
@@ -142,19 +146,17 @@ export function createExtensionFetcher(deps: FetchDeps) {
         },
       );
       if (!response || typeof response.status !== "number")
-        throw transportError("TRANSPORT_BAD_URL", "malformed fetch response");
+        throw transportError("bad-url", "malformed fetch response");
       if (!response.ok) {
+        const retry_after_ms = retryAfterMs(response.headers.get("retry-after"));
         throw {
-          code: "TRANSPORT_HTTP_ERROR",
-          http: response.status,
-          message: "The website refused this file.",
+          kind: "http-error",
+          status: response.status,
+          request: request.uri,
           transport: "browser-session",
-          ...(response.status === 401 || response.status === 403
-            ? { blocked_reason: "forbidden" }
-            : {}),
           preview: await readErrorPreview(response, controller.signal),
-          retry_after_ms: retryAfterMs(response.headers.get("retry-after")),
-        } satisfies FetchFailure;
+          ...(retry_after_ms === undefined ? {} : { retry_after_ms }),
+        } satisfies JobError;
       }
       const contentType = response.headers.get("content-type") ?? "";
       const accepted =
@@ -162,7 +164,7 @@ export function createExtensionFetcher(deps: FetchDeps) {
           ? ALLOWED_MIME_PREFIXES
           : ALLOWED_MIME_PREFIXES.filter((mime) => mime !== "text/html");
       if (contentType && !accepted.some((prefix) => contentType.toLowerCase().startsWith(prefix)))
-        throw transportError("TRANSPORT_BAD_URL", `unsupported response type ${contentType}`);
+        throw transportError("bad-url", `unsupported response type ${contentType}`);
       const bytes = await readResponseBytes(
         response,
         deps.maxBytes ?? MAX_BYTES_DEFAULT,
@@ -180,28 +182,18 @@ export function createExtensionFetcher(deps: FetchDeps) {
         contentType,
       };
     } catch (error) {
-      let observed: FetchFailure;
-      if (isFetchFailure(error)) observed = error;
-      else if (signal.aborted || (controller.signal.aborted && !timedOut))
-        observed = transportError("TRANSPORT_CANCELLED", "request cancelled", "cancelled");
-      else if (timedOut) observed = transportError("TRANSPORT_TIMEOUT", "fetch timeout");
-      else if (
-        error &&
-        typeof error === "object" &&
-        "code" in error &&
-        error.code === "TRANSPORT_SIZE_LIMIT"
-      ) {
+      let observed: JobError;
+      if (isJobError(error) && error.kind === "size-limit") {
         controller.abort();
+        observed = error;
+      } else if (isJobError(error)) observed = error;
+      else if (signal.aborted || (controller.signal.aborted && !timedOut))
+        observed = transportError("cancelled", "request cancelled");
+      else if (timedOut) observed = transportError("timeout", "fetch timeout");
+      else
         observed = transportError(
-          "TRANSPORT_SIZE_LIMIT",
-          error instanceof Error ? error.message : "response exceeds byte limit",
-          "limit-exceeded",
-        );
-      } else
-        observed = transportError(
-          "TRANSPORT_NETWORK_ERROR",
+          "network-failure",
           error instanceof Error ? error.message : "network request failed",
-          "network",
         );
       deps.diagnostics?.count(signal.aborted ? "requests_cancelled" : "request_failures");
       if (!signal.aborted)

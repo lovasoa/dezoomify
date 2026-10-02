@@ -1,6 +1,0 @@
-{
-  "png_32_len": 2331,
-  "jpeg_32_len": 1947,
-  "tiff_32_len": 3035,
-  "note": "perf baseline: deterministic encode sizes for the 32px sweep; wall-time is tracked by criterion benches, byte sizes must stay within 20 percent"
-}

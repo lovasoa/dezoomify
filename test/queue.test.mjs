@@ -7,6 +7,7 @@ import {
   enqueueSequential,
   finishActiveQueueEntry,
   isValidInputUrl,
+  readInitialUrl,
   retryQueueEntry,
   summarizeQueue,
 } from "../packages/shared-ui/src/index.ts";
@@ -21,6 +22,17 @@ test("website input accepts ordinary HTTP(S) URLs only", () => {
   ])
     assert.equal(isValidInputUrl(bad), false);
   assert.equal(isValidInputUrl("  https://example.com/first  "), true);
+});
+
+test("prefill refuses secret-bearing candidates before any job starts", () => {
+  assert.equal(readInitialUrl({ search: "?url=https://example.com/ok" }), "https://example.com/ok");
+  for (const loc of [
+    { search: "?url=https://example.com/item?token=secret" },
+    { search: "?src=https://example.com/item?APIKEY=secret" },
+    { hash: "#url=https%3A%2F%2Fexample.com%2Fitem%3Fsig%3Dabc" },
+    { hash: "#https://example.com/item#session=abc" },
+  ])
+    assert.equal(readInitialUrl(loc), null, JSON.stringify(loc));
 });
 
 test("queue advances in order and retries with the same URL and a fresh identity", () => {

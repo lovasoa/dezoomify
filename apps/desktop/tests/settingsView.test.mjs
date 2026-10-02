@@ -1,19 +1,31 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement, useState } from "react";
-import { createRoot } from "react-dom/client";
 import { act, click, makeContainer } from "../../../test/react-dom.mjs";
 import { defaultSettings } from "../src/settings.ts";
-import { DesktopSettingsView } from "../src/settingsView.tsx";
 
-function renderSettings() {
+// linkedom documents lack `oninput`, which keeps React's text-input change
+// detection disabled. Arm it before react-dom loads so edits fire onChange.
+document.oninput = null;
+const { createRoot } = await import("react-dom/client");
+const { DesktopSettingsView } = await import("../src/settingsView.tsx");
+
+/** Type into a controlled field the way the select preset test does. */
+function typeInto(element, value) {
+  act(() => {
+    Object.defineProperty(element, "value", { configurable: true, writable: true, value });
+    element.dispatchEvent(new window.Event("change", { bubbles: true }));
+  });
+}
+
+function renderSettings({ error = null } = {}) {
   let currentSettings = defaultSettings();
   function SettingsHarness() {
     const [settings, setSettings] = useState(currentSettings);
     currentSettings = settings;
     return createElement(DesktopSettingsView, {
       settings,
-      error: null,
+      error,
       onChange: setSettings,
       onReset() {},
     });
@@ -46,5 +58,29 @@ test("desktop advanced settings open as a labelled dialog and dismiss cleanly", 
   assert.equal(dialog.querySelectorAll(".dz-preference-row").length, 4);
   click(dialog.querySelector(".dz-settings-close"));
   assert.equal(dialog.hasAttribute("open"), false);
+  act(() => root.unmount());
+});
+
+test("header text is submitted as raw lines without client-side parsing", () => {
+  const { container, root, current } = renderSettings();
+  click(container.querySelector(".dz-settings-more"));
+  const textarea = container.querySelector(".dz-headers-disclosure textarea");
+  assert.ok(textarea, "request headers stay in advanced settings");
+  const text = "Referer: https://example.com/viewer\nnot a header line\nX-Test: a b";
+  typeInto(textarea, text);
+  assert.deepEqual(
+    current().headers,
+    text.split("\n"),
+    "raw header text reaches the settings as-is; nothing is blocked client-side",
+  );
+  act(() => root.unmount());
+});
+
+test("Rust save rejection reasons are displayed as typed messages", () => {
+  const { container, root } = renderSettings({ error: "invalid header: bad name" });
+  const message = container.querySelector("#dz-settings-error");
+  assert.ok(message, "the save rejection reason is shown");
+  assert.equal(message.getAttribute("role"), "alert");
+  assert.match(message.textContent, /invalid header: bad name/);
   act(() => root.unmount());
 });

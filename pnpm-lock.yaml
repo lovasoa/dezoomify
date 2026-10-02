@@ -9,6 +9,7 @@ overrides:
   '@playwright/test': 1.63.0
   playwright: 1.63.0
   playwright-core: 1.63.0
+  undici: 7.29.1
 
 importers:
 
@@ -158,9 +159,6 @@ importers:
       playwright:
         specifier: 1.63.0
         version: 1.63.0
-      pngjs:
-        specifier: ^7.0.0
-        version: 7.0.0
       selenium-webdriver:
         specifier: ^4.50.0
         version: 4.50.0
@@ -1691,10 +1689,6 @@ packages:
     engines: {node: '>=20'}
     hasBin: true
 
-  pngjs@7.0.0:
-    resolution: {integrity: sha512-LKWqWJRhstyYo9pGvgor/ivk2w94eSjE3RGVuzLGlr3NmD8bf7RcYGze1mNdEHRP6TRP6rMuDHk5t44hnTRyow==}
-    engines: {node: '>=14.19.0'}
-
   postcss@8.5.28:
     resolution: {integrity: sha512-RRuzqDtt5Y9h3quz5hWhK+TPnsmVs6WwSU6LkJMeY4HstUEDuYTG8UJSdawMRzmzAtV+KEoG8N3Qg2qLy5vM/A==}
     engines: {node: ^10 || ^12 || >=14}
@@ -3146,8 +3140,6 @@ snapshots:
   playwright@1.63.0:
     dependencies:
       playwright-core: 1.63.0
-
-  pngjs@7.0.0: {}
 
   postcss@8.5.28:
     dependencies:

@@ -168,12 +168,6 @@ mod tests {
                 },
             ]
         );
-        let urls = parse_text_urls(
-            "http://example.com/image1.jpg My Custom Title\nhttps://example.org/manifest.json Another Title",
-        )
-        .unwrap();
-        assert_eq!(urls[0].title.as_deref(), Some("My Custom Title"));
-        assert_eq!(urls[1].title.as_deref(), Some("Another Title"));
         let error = parse_text_urls("not_a_valid_url").unwrap_err().to_string();
         assert!(error.contains("line 1") && error.contains("not_a_valid_url"));
     }

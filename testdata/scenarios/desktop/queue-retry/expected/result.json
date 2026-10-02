@@ -9,7 +9,6 @@
     }
   ],
   "golden": {
-    "human": "bulk: 2 succeeded, 0 failed, 2 total",
     "outcomes": [
       {
         "status": "done"
@@ -43,7 +42,7 @@
       "outcome": "done"
     },
     {
-      "errorCode": "job.partial-discarded",
+      "errorCode": "partial-discarded",
       "op": "finish",
       "outcome": "failed"
     },

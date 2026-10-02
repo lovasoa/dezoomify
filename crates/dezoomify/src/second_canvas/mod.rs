@@ -301,55 +301,40 @@ mod tests {
     use super::*;
     use crate::core::{DiscoveredEntry, TileSource};
 
-    fn fixture(name: &str) -> &'static [u8] {
-        match name {
-            "legacy" => include_bytes!(
-                "../../../../testdata/scenarios/rs-core/formats/payloads/second_canvas/legacy.json"
-            ),
-            "legacy-string" => include_bytes!(
-                "../../../../testdata/scenarios/rs-core/formats/payloads/second_canvas/legacy-string-level.json"
-            ),
-            "modern" => include_bytes!(
-                "../../../../testdata/scenarios/rs-core/formats/payloads/second_canvas/modern.json"
-            ),
-            _ => panic!("unknown fixture"),
-        }
-    }
+    const LEGACY: &[u8] = include_bytes!(
+        "../../../../testdata/scenarios/rs-core/formats/payloads/second_canvas/legacy.json"
+    );
+    const LEGACY_STRING: &[u8] = include_bytes!(
+        "../../../../testdata/scenarios/rs-core/formats/payloads/second_canvas/legacy-string-level.json"
+    );
+    const MODERN: &[u8] = include_bytes!(
+        "../../../../testdata/scenarios/rs-core/formats/payloads/second_canvas/modern.json"
+    );
 
     #[test]
     fn parses_legacy_and_modern_layer_variants() {
-        let legacy = catalog("https://fixtures.test/legacy.json", fixture("legacy")).unwrap();
+        let legacy = catalog("https://fixtures.test/legacy.json", LEGACY).unwrap();
         assert_eq!(legacy.len(), 4);
-        let legacy_string = catalog(
-            "https://fixtures.test/legacy-string.json",
-            fixture("legacy-string"),
-        )
-        .unwrap();
+        let legacy_string =
+            catalog("https://fixtures.test/legacy-string.json", LEGACY_STRING).unwrap();
         assert_eq!(legacy_string.len(), 2);
-        let modern = catalog("https://fixtures.test/modern.json", fixture("modern")).unwrap();
+        let modern = catalog("https://fixtures.test/modern.json", MODERN).unwrap();
         assert_eq!(modern.len(), 2);
     }
 
     #[test]
     fn builds_zero_based_jpeg_tile_urls_at_each_level() {
-        let catalog = catalog("https://fixtures.test/modern.json", fixture("modern")).unwrap();
+        let catalog = catalog("https://fixtures.test/modern.json", MODERN).unwrap();
         let DiscoveredEntry::Ready(image) = &catalog.entries()[0] else {
             panic!("expected ready image");
         };
         let TileSource::Positioned(tiles) = &image.levels.last().unwrap().source else {
             panic!("expected positioned tiles");
         };
-        let urls: Vec<_> = tiles
-            .tiles()
-            .map(|tile| tile.unwrap().request.uri)
-            .collect();
+        let first = tiles.tiles().next().unwrap().unwrap();
         assert_eq!(
-            urls[0],
+            first.request.uri,
             "https://sc.example.test/gigapixel/modern/normal_3_0_0.jpg"
-        );
-        assert_eq!(
-            urls.last().unwrap(),
-            "https://sc.example.test/gigapixel/modern/normal_3_2_1.jpg"
         );
         assert_eq!(tiles.image_size(), Some(Vec2d { x: 1300, y: 900 }));
         let last = tiles.tiles().last().unwrap().unwrap();
@@ -359,26 +344,20 @@ mod tests {
     }
 
     #[test]
-    fn viewer_js_parameter_resolves_against_the_viewer_page() {
-        assert_eq!(
-            viewer_config_uri(
+    fn viewer_pages_resolve_their_js_configuration() {
+        for (uri, page, expected) in [
+            (
                 "https://fixtures.test/web/index.html?js=metadata%2Fmodern.json&ua=test",
-                b"<script src=\"scw.min.js\"></script>",
-            )
-            .unwrap(),
-            "https://fixtures.test/web/metadata/modern.json"
-        );
-    }
-
-    #[test]
-    fn embedded_viewer_hash_resolves_against_the_viewer_page() {
-        assert_eq!(
-            viewer_config_uri(
+                br#"<script src="scw.min.js"></script>"#.as_slice(),
+                "https://fixtures.test/web/metadata/modern.json",
+            ),
+            (
                 "https://fixtures.test/web/gallery/metropolis_es.html",
                 br#"<script src="scv.min.js"></script><script>scv.load({ "hash":"metropolis_es.json" });</script>"#,
-            )
-            .unwrap(),
-            "https://fixtures.test/web/gallery/metropolis_es.json"
-        );
+                "https://fixtures.test/web/gallery/metropolis_es.json",
+            ),
+        ] {
+            assert_eq!(viewer_config_uri(uri, page).unwrap(), expected, "{uri}");
+        }
     }
 }

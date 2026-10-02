@@ -36,8 +36,7 @@ The lane builds the frontend, fixture server, and window shell (features
 `tauri,testing-webdriver`), stages lane-private copies, then runs
 `node --test specs/desktop.e2e.mjs`. The spec
 covers the user-visible journeys: automatic submit/save to an isolated output
-directory versus the `native/cli-dzi` golden, cancellation with no output, the
-deep-link confirmation (pending links perform no I/O), and a kept partial
+directory versus the `native/cli-dzi` golden, cancellation with no output, and a kept partial
 published to a `.partial` sibling. The harness configures the existing
 output-directory setting to an isolated temporary folder through the rendered
 settings panel, so generated filenames remain discoverable on every supported

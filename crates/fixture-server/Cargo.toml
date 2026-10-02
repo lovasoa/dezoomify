@@ -14,7 +14,7 @@ path = "src/lib.rs"
 
 [dependencies]
 axum.workspace = true
-tokio = { workspace = true, features = ["macros", "io-util", "sync", "time", "fs"] }
+tokio = { workspace = true, features = ["macros", "io-util", "sync", "time", "fs", "rt-multi-thread", "net"] }
 serde.workspace = true
 serde_json.workspace = true
 hmac.workspace = true

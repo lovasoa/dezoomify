@@ -1,7 +1,8 @@
-// Node adapter wiring: the local dev server's /api/proxy must drive the
-// exact same pure relay as the Cloudflare Pages Function. These tests mirror
-// test/proxy-function.test.mjs but go through handleNodeProxyRequest with
-// Node IncomingMessage/ServerResponse doubles instead of Request/Response.
+// Node adapter wiring: the local dev server's /api/proxy drives the same
+// pure relay as the Cloudflare Pages Function (`src/server/proxy.ts`). The
+// relay's policy is tested once in test/proxy-function.test.mjs and
+// test/proxy-policy.test.mjs; these tests cover only the Node
+// IncomingMessage/ServerResponse adapter shape around it.
 
 import assert from "node:assert/strict";
 import { Readable } from "node:stream";
@@ -49,7 +50,7 @@ function mockUpstream(upstreamImpl, t) {
   return t.mock.method(globalThis, "fetch", impl);
 }
 
-test("happy path: relays metadata JSON with CORS and content-type", async (t) => {
+test("the adapter relays through the shared policy and maps the response", async (t) => {
   const calls = mockUpstream(
     () => ({ status: 200, headers: { "content-type": "application/json" }, body: '{"x":1}' }),
     t,
@@ -70,108 +71,6 @@ test("happy path: relays metadata JSON with CORS and content-type", async (t) =>
   assert.equal(calls.mock.calls[0].arguments[1].method, "GET");
   // The adapter must never let fetch follow redirects itself.
   assert.equal(calls.mock.calls[0].arguments[1].redirect, "manual");
-});
-
-test("redirect hops are revalidated by the relay, not followed by fetch", async (t) => {
-  const calls = t.mock.method(globalThis, "fetch", () =>
-    Promise.resolve({
-      status: 302,
-      headers: {
-        get: (name) =>
-          name.toLowerCase() === "location" ? "http://169.254.169.254/latest/meta-data" : null,
-      },
-      arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
-    }),
-  );
-  const res = captureResponse();
-  await handleNodeProxyRequest(
-    nodeRequest({
-      headers: SAME_ORIGIN_HEADERS,
-      body: '{"targetUrl":"https://public.test/redirect.json","protocolVersion":1}',
-    }),
-    res,
-  );
-  assert.equal(res.status, 403);
-  assert.equal(calls.mock.callCount(), 1);
-  assert.equal(calls.mock.calls[0].arguments[1].redirect, "manual");
-});
-
-test("cross-origin request gets no CORS grant (browser blocks read)", async (t) => {
-  mockUpstream(() => ({ status: 200, headers: { "content-type": "text/plain" }, body: "ok" }), t);
-  const res = captureResponse();
-  await handleNodeProxyRequest(
-    nodeRequest({
-      headers: { ...SAME_ORIGIN_HEADERS, origin: "http://evil.example" },
-      body: '{"targetUrl":"https://public.test/x.txt","protocolVersion":1}',
-    }),
-    res,
-  );
-  assert.equal(res.headers["access-control-allow-origin"], undefined);
-});
-
-test("malformed JSON body -> 400", async () => {
-  const res = captureResponse();
-  await handleNodeProxyRequest(
-    nodeRequest({ headers: SAME_ORIGIN_HEADERS, body: "{not json" }),
-    res,
-  );
-  assert.equal(res.status, 400);
-});
-
-test("missing fields -> 422", async () => {
-  const res = captureResponse();
-  await handleNodeProxyRequest(
-    nodeRequest({ headers: SAME_ORIGIN_HEADERS, body: '{"protocolVersion":1}' }),
-    res,
-  );
-  assert.equal(res.status, 422);
-  assert.equal(JSON.parse(res.body.toString()).code, "PROXY_POLICY_DENIED");
-});
-
-test("blocked loopback target -> 403 without upstream call", async (t) => {
-  const calls = mockUpstream(() => ({ status: 200, headers: {}, body: "x" }), t);
-  const res = captureResponse();
-  await handleNodeProxyRequest(
-    nodeRequest({
-      headers: SAME_ORIGIN_HEADERS,
-      body: '{"targetUrl":"http://127.0.0.1:8080/x.json","protocolVersion":1}',
-    }),
-    res,
-  );
-  assert.equal(res.status, 403);
-  assert.equal(calls.mock.callCount(), 0);
-});
-
-test("tile-like image content type -> 415 (metadata only)", async (t) => {
-  mockUpstream(() => ({ status: 200, headers: { "content-type": "image/jpeg" }, body: "jpeg" }), t);
-  const res = captureResponse();
-  await handleNodeProxyRequest(
-    nodeRequest({
-      headers: SAME_ORIGIN_HEADERS,
-      body: '{"targetUrl":"https://public.test/tile.jpg","protocolVersion":1}',
-    }),
-    res,
-  );
-  assert.equal(res.status, 415);
-});
-
-test("relay exposes the post-redirect upstream URL for relative tile bases", async (t) => {
-  mockUpstream(
-    () => ({ status: 200, headers: { "content-type": "application/xml" }, body: "<krpano/>" }),
-    t,
-  );
-  const res = captureResponse();
-  await handleNodeProxyRequest(
-    nodeRequest({
-      headers: SAME_ORIGIN_HEADERS,
-      body: '{"targetUrl":"https://public.test/galleria_04.xml","protocolVersion":1}',
-    }),
-    res,
-  );
-  assert.equal(res.status, 200);
-  assert.equal(res.headers["x-proxy-upstream-url"], "https://public.test/galleria_04.xml");
-  const exposed = res.headers["access-control-expose-headers"] ?? "";
-  assert.match(exposed.toLowerCase(), /x-proxy-upstream-url/);
 });
 
 test("OPTIONS preflight: same origin allowed, cross origin refused", async () => {

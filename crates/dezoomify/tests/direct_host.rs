@@ -23,13 +23,13 @@ fn invoke(host: &MemoryHost, options: Options) -> Result<Output, Error> {
     futures::executor::block_on(dezoomify(input(), options, host))
 }
 fn failure(status: u16) -> Error {
-    let mut e = Error::new(
-        "TRANSPORT_HTTP_ERROR",
-        ErrorPhase::Acquisition,
-        "tile refused",
-    );
-    e.http = Some(status);
-    e
+    Error::HttpError {
+        status,
+        retry_after_ms: None,
+        preview: None,
+        transport: ErrorTransport::DisplayOnly,
+        failure: Failure::default(),
+    }
 }
 fn fail(host: &MemoryHost, index: u32, errors: impl IntoIterator<Item = Error>) {
     host.failures
@@ -42,7 +42,7 @@ fn full_output_uses_lazy_geometry_and_honest_disposition() {
     let host = MemoryHost::default();
     host.yield_tiles.set(true);
     let output = invoke(&host, options()).unwrap();
-    assert!(output.complete);
+    assert!(output.is_complete());
     assert_eq!(
         output.canvas,
         Some(Size {
@@ -77,19 +77,16 @@ fn discovery_preserves_the_rejected_lookup_cause_after_a_failed_alternative() {
             final_uri: None,
         },
     );
-    let mut earlier = failure(403);
-    earlier.phase = ErrorPhase::Discovery;
+    let earlier = failure(403);
     host.fetch_failures
         .insert("https://images.test/first.js".into(), earlier);
-    let mut rejected = failure(429);
-    rejected.phase = ErrorPhase::Discovery;
-    rejected.message = "the final viewer lookup was throttled".into();
-    rejected.transport = Some(ErrorTransport::BrowserSession);
-    rejected.blocked_reason = Some(BlockedReason::Throttled);
-    rejected.resource_kind = Some(ResourceKind::Metadata);
-    rejected.retry_after_ms = Some(7000);
-    rejected.preview = Some("slow down".into());
-    rejected.detail = Some("final lookup details".into());
+    let rejected = Error::HttpError {
+        status: 429,
+        retry_after_ms: Some(7000),
+        preview: Some("slow down".into()),
+        transport: ErrorTransport::BrowserSession,
+        failure: "final lookup details".to_string().into(),
+    };
     host.fetch_failures
         .insert("https://images.test/second.js".into(), rejected.clone());
     let error = futures::executor::block_on(dezoomify(
@@ -107,9 +104,21 @@ fn discovery_preserves_the_rejected_lookup_cause_after_a_failed_alternative() {
         &host,
     ))
     .unwrap_err();
-    rejected.retryable = true;
-    rejected.request = Some("https://images.test/second.js".into());
-    assert_eq!(error, rejected);
+    // The aggregate keeps the per-format evidence and the first typed
+    // cause's complete context and retry verdict.
+    let retained = rejected.resource("https://images.test/second.js", ResourceKind::Metadata);
+    assert_eq!(
+        error,
+        Error::DiscoveryFailed {
+            failure: " - krpano: HTTP 429 fetching this address"
+                .to_string()
+                .into(),
+            cause: Some(Box::new(retained)),
+        }
+    );
+    assert_eq!(error.cause().kind(), "http-error");
+    assert!(error.retryable());
+    assert_eq!(error.retry_after_ms(), Some(7000));
     assert_eq!(host.fetched.borrow().len(), 3);
     assert_eq!(host.settled.get(), 1);
 }
@@ -157,7 +166,7 @@ fn accepted_catalog_warns_once_for_malformed_siblings_and_keeps_valid_images() {
         &host,
     ))
     .unwrap();
-    assert!(output.complete);
+    assert!(output.is_complete());
     assert_eq!(host.acquired.borrow().len(), 1);
     assert_eq!(host.outputs.borrow()[0].title.as_deref(), Some("good"));
     assert_eq!(
@@ -168,9 +177,14 @@ fn accepted_catalog_warns_once_for_malformed_siblings_and_keeps_valid_images() {
 #[test]
 fn transient_failures_honor_exact_budget_and_retry_after() {
     let host = MemoryHost::default();
-    let mut error = failure(429);
-    error.retry_after_ms = Some(7000);
-    fail(&host, 0, [error, failure(503)]);
+    let throttled = Error::HttpError {
+        status: 429,
+        retry_after_ms: Some(7000),
+        preview: None,
+        transport: ErrorTransport::DisplayOnly,
+        failure: Failure::default(),
+    };
+    fail(&host, 0, [throttled, failure(503)]);
     invoke(&host, options()).unwrap();
     assert_eq!(
         host.attempts.borrow().iter().filter(|i| **i == 0).count(),
@@ -185,13 +199,13 @@ fn forbidden_is_permanent_and_partial_is_asked_after_all_tiles_settle() {
     fail(&host, 0, [failure(403)]);
     host.choices.borrow_mut().push_back(RecoveryChoice::Keep);
     let output = invoke(&host, options()).unwrap();
-    assert!(!output.complete);
+    assert!(!output.is_complete());
     assert_eq!(output.missing, [0]);
     assert_eq!(host.attempts.borrow().len(), 4);
     assert!(host.sleeps.borrow().is_empty());
     assert_eq!(
-        host.partials.borrow()[0].missing[0].failures[0].http,
-        Some(403)
+        host.partials.borrow()[0].missing[0].failures[0],
+        failure(403)
     );
     assert_eq!(host.acquired.borrow().len(), 3);
 }
@@ -208,7 +222,7 @@ fn partial_retry_only_reacquires_missing_tiles_with_a_fresh_budget() {
         },
     )
     .unwrap();
-    assert!(output.complete);
+    assert!(output.is_complete());
     assert_eq!(
         host.attempts.borrow().iter().filter(|i| **i == 1).count(),
         4
@@ -221,38 +235,49 @@ fn partial_retry_only_reacquires_missing_tiles_with_a_fresh_budget() {
 fn discard_and_empty_output_never_publish() {
     let host = MemoryHost::default();
     fail(&host, 0, [failure(404)]);
-    assert_eq!(
-        invoke(&host, options()).unwrap_err().code,
-        "job.partial-discarded"
-    );
+    let error = invoke(&host, options()).unwrap_err();
+    assert!(matches!(
+        &error,
+        Error::PartialDiscarded {
+            transient: false,
+            ..
+        }
+    ));
     assert!(host.outputs.borrow().is_empty());
     assert_eq!(host.settled.get(), 1);
     let host = MemoryHost::default();
     for tile in 0..4 {
         fail(&host, tile, [failure(404)]);
     }
-    assert_eq!(
-        invoke(
-            &host,
-            Options {
-                partial: PartialPolicy::Keep,
-                ..options()
-            }
-        )
-        .unwrap_err()
-        .code,
-        "job.no-usable-tiles"
-    );
+    let error = invoke(
+        &host,
+        Options {
+            partial: PartialPolicy::Keep,
+            ..options()
+        },
+    )
+    .unwrap_err();
+    // The aggregate retains every settled failure and derives its verdict
+    // from the whole set.
+    assert!(matches!(
+        &error,
+        Error::NoUsableTiles {
+            transient: false,
+            ..
+        }
+    ));
+    assert!(!error.retryable());
     assert!(host.outputs.borrow().is_empty());
 }
 #[test]
-fn invalid_binding_and_output_allocation_failures_abort_immediately() {
-    for (code, phase) in [
-        ("binding.invalid-value", ErrorPhase::Acquisition),
-        ("OUTPUT_ALLOCATION_FAILED", ErrorPhase::Output),
+fn invalid_binding_and_output_failures_abort_immediately() {
+    for error in [
+        Error::BindingInvalidValue("bad result".to_string().into()),
+        Error::OutputUnavailable("canvas allocation failed".to_string().into()),
     ] {
         let host = MemoryHost::default();
-        fail(&host, 0, [Error::new(code, phase, "bad result")]);
+        let expected = error.clone();
+        fail(&host, 0, [error]);
         assert_eq!(
             invoke(
                 &host,
@@ -261,9 +286,8 @@ fn invalid_binding_and_output_allocation_failures_abort_immediately() {
                     ..options()
                 }
             )
-            .unwrap_err()
-            .code,
-            code
+            .unwrap_err(),
+            expected
         );
         assert!(host.partials.borrow().is_empty());
         assert!(host.outputs.borrow().is_empty());
@@ -274,16 +298,18 @@ fn invalid_binding_and_output_allocation_failures_abort_immediately() {
 fn cancellation_and_publication_failure_always_settle() {
     let host = MemoryHost::default();
     host.cancel_after.set(Some(1));
-    assert_eq!(invoke(&host, options()).unwrap_err().code, "job.cancelled");
+    assert!(matches!(
+        invoke(&host, options()).unwrap_err(),
+        Error::Cancelled
+    ));
     assert!(host.outputs.borrow().is_empty());
     assert_eq!(host.settled.get(), 1);
     let host = MemoryHost::default();
-    *host.finish_error.borrow_mut() = Some(Error::new(
-        "output.denied",
-        ErrorPhase::Publication,
-        "denied",
+    *host.finish_error.borrow_mut() = Some(Error::OutputDenied);
+    assert!(matches!(
+        invoke(&host, options()).unwrap_err(),
+        Error::OutputDenied
     ));
-    assert_eq!(invoke(&host, options()).unwrap_err().code, "output.denied");
     assert_eq!(host.settled.get(), 1);
 }
 #[test]
@@ -296,87 +322,87 @@ fn host_reports_the_actual_output_disposition() {
 }
 #[test]
 fn invalid_inputs_and_limits_are_rejected_before_host_reads() {
-    for (options, code) in [
+    for (options, kind) in [
         (
             Options {
                 max_concurrent: 0,
                 ..options()
             },
-            "job.invalid-config",
+            "invalid-options",
         ),
         (
             Options {
                 max_tiles: 0,
                 ..options()
             },
-            "job.invalid-config",
+            "invalid-options",
         ),
         (
             Options {
                 max_bytes: 0,
                 ..options()
             },
-            "job.invalid-config",
+            "invalid-options",
         ),
         (
             Options {
                 max_concurrent: 65,
                 ..options()
             },
-            "job.resource-limit",
+            "resource-limit",
         ),
         (
             Options {
                 max_tiles: 16_777_217,
                 ..options()
             },
-            "job.resource-limit",
+            "resource-limit",
         ),
         (
             Options {
                 max_bytes: 1,
                 ..options()
             },
-            "job.resource-limit",
+            "resource-limit",
         ),
         (
             Options {
                 max_bytes: 4_294_967_297,
                 ..options()
             },
-            "job.resource-limit",
+            "resource-limit",
         ),
         (
             Options {
                 max_retries: 1025,
                 ..options()
             },
-            "job.resource-limit",
+            "resource-limit",
         ),
         (
             Options {
                 max_deferred_follows: 65,
                 ..options()
             },
-            "job.resource-limit",
+            "resource-limit",
         ),
         (
             Options {
                 retry_base_delay_ms: 300_001,
                 ..options()
             },
-            "job.resource-limit",
+            "resource-limit",
         ),
         (
             Options {
                 max_tiles: 1,
                 ..options()
             },
-            "job.invalid-config",
+            "invalid-options",
         ),
     ] {
         let host = MemoryHost::default();
-        assert_eq!(invoke(&host, options).unwrap_err().code, code);
+        assert_eq!(invoke(&host, options).unwrap_err().kind(), kind);
         assert!(host.fetched.borrow().is_empty());
         assert_eq!(host.settled.get(), 1);
     }
@@ -384,8 +410,8 @@ fn invalid_inputs_and_limits_are_rejected_before_host_reads() {
     assert_eq!(
         futures::executor::block_on(dezoomify(Vec::new(), options(), &host))
             .unwrap_err()
-            .code,
-        "job.invalid-input"
+            .kind(),
+        "invalid-input"
     );
     assert_eq!(host.settled.get(), 1);
 }
@@ -405,7 +431,7 @@ fn supplied_documents_obey_resource_limits_before_host_io() {
             &host,
         ))
         .unwrap_err();
-        assert_eq!(error.code, "job.resource-limit");
+        assert_eq!(error.kind(), "resource-limit");
         assert!(host.fetched.borrow().is_empty());
         assert!(host.probes.borrow().is_empty());
         assert!(host.acquired.borrow().is_empty());
@@ -418,14 +444,14 @@ fn image_and_level_choices_are_checked() {
     let host = MemoryHost::default();
     host.image.set(20);
     assert_eq!(
-        invoke(&host, options()).unwrap_err().code,
-        "job.invalid-selection"
+        invoke(&host, options()).unwrap_err().kind(),
+        "invalid-state"
     );
     let host = MemoryHost::default();
     host.level.set(Some(20));
     assert_eq!(
-        invoke(&host, options()).unwrap_err().code,
-        "job.invalid-selection"
+        invoke(&host, options()).unwrap_err().kind(),
+        "invalid-state"
     );
     let host = MemoryHost::default();
     assert_eq!(
@@ -438,8 +464,8 @@ fn image_and_level_choices_are_checked() {
             }
         )
         .unwrap_err()
-        .code,
-        "job.resource-limit"
+        .kind(),
+        "resource-limit"
     );
     assert!(host.acquired.borrow().is_empty());
 }
@@ -535,7 +561,10 @@ fn generic_probes_reuse_placed_tiles_and_keep_boundaries() {
     );
     assert!(host.acquired.borrow().is_empty());
     assert_eq!(host.probes.borrow().len(), 4);
-    assert!(host.probes.borrow()[0].placement.probe_output);
+    assert_eq!(
+        host.probes.borrow()[0].placement.role,
+        TileRole::probe_and_output()
+    );
 }
 
 #[test]
@@ -570,7 +599,7 @@ fn probe_budget_stops_generic_search_and_iiif_fallback_before_excess_io() {
             &host,
         ))
         .unwrap_err();
-        assert_eq!(error.code, "job.resource-limit");
+        assert_eq!(error.kind(), "resource-limit");
         assert_eq!(host.probes.borrow().len(), 1);
         assert!(host.fetched.borrow().is_empty());
         assert!(host.acquired.borrow().is_empty());
@@ -603,7 +632,7 @@ fn pause_blocks_new_acquisition_and_retry_waits_until_resume() {
         assert!(host.outputs.borrow().is_empty());
         host.paused.set(false);
         resume.send(()).unwrap();
-        assert!(futures::executor::block_on(future).unwrap().complete);
+        assert!(futures::executor::block_on(future).unwrap().is_complete());
         assert_eq!(host.acquired.borrow().len(), 4);
         assert_eq!(host.sleeps.borrow().len(), usize::from(failed));
     }
@@ -674,7 +703,7 @@ fn automatic_selection_follows_catalog_entries_and_rejects_cycles() {
         &host,
     ))
     .unwrap_err();
-    assert_eq!(error.code, "job.deferred-limit");
+    assert_eq!(error, Error::DeferredLimit { max: 8 });
     assert_eq!(host.fetched.borrow().len(), 1);
     assert!(host.outputs.borrow().is_empty());
 }
@@ -709,8 +738,7 @@ fn deferred_cycles_do_not_reacquire_supplied_sources_or_their_redirected_address
             &host,
         ))
         .unwrap_err();
-        assert_eq!(error.code, "job.deferred-limit");
-        assert_eq!(error.phase, ErrorPhase::Discovery);
+        assert_eq!(error, Error::DeferredLimit { max: 8 });
         assert_eq!(host.fetched.borrow().len(), usize::from(!supplied));
         assert!(host.outputs.borrow().is_empty());
         assert_eq!(host.settled.get(), 1);
@@ -729,7 +757,7 @@ fn unsupported_schemes_and_zero_canvas_limits_are_rejected() {
         let error =
             futures::executor::block_on(dezoomify(vec![JobInput::new(uri)], options(), &host))
                 .unwrap_err();
-        assert_eq!(error.code, "job.invalid-input");
+        assert_eq!(error.kind(), "invalid-input");
         assert!(host.fetched.borrow().is_empty());
     }
     let host = MemoryHost::default();
@@ -745,29 +773,30 @@ fn unsupported_schemes_and_zero_canvas_limits_are_rejected() {
         },
     )
     .unwrap_err();
-    assert_eq!(error.code, "job.invalid-options");
+    assert_eq!(error.kind(), "invalid-options");
 }
 
 #[test]
 fn missing_tiles_preserve_the_complete_original_host_error() {
     let host = MemoryHost::default();
-    let mut error = failure(403);
-    error.code = "native.future-refusal".into();
-    error.transport = Some(ErrorTransport::Native);
-    error.request = Some("https://redirected.test/image?signature=precise".into());
-    error.resource_kind = Some(ResourceKind::Tile);
-    error.retry_after_ms = Some(5000);
-    error.blocked_reason = Some(BlockedReason::Forbidden);
-    error.preview = Some("denied body".into());
-    error.detail = Some("original diagnostic context".into());
+    let error = Error::HttpError {
+        status: 403,
+        retry_after_ms: Some(5000),
+        preview: Some("denied body".into()),
+        transport: ErrorTransport::Native,
+        failure: Failure {
+            request: Some("https://redirected.test/image?signature=precise".into()),
+            detail: Some("original diagnostic context".into()),
+        },
+    };
     fail(&host, 0, [error.clone()]);
     host.choices.borrow_mut().push_back(RecoveryChoice::Keep);
     invoke(&host, options()).unwrap();
     let partials = host.partials.borrow();
     assert_eq!(partials[0].missing[0].failures[0], error);
-    assert!(!partials[0].missing[0].failures[0].retryable);
+    assert!(!partials[0].missing[0].failures[0].retryable());
     assert_eq!(
-        partials[0].missing[0].failures[0].retry_after_ms,
+        partials[0].missing[0].failures[0].retry_after_ms(),
         Some(5000)
     );
 }

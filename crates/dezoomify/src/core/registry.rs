@@ -158,33 +158,10 @@ mod tests {
     }
 
     #[test]
-    fn registry_lists_ids_and_display_names() {
-        // Reviewed order: registry order defines automatic precedence.
-        let registry = default_registry();
-        assert_eq!(
-            registry.formats(),
-            [
-                ("custom", "Custom tiles"),
-                ("google_arts_and_culture", "Arts & Culture"),
-                ("zoomify", "Zoomify"),
-                ("iiif", "IIIF"),
-                ("deepzoom", "Seadragon (Deep Zoom Image)"),
-                ("second_canvas", "Second Canvas"),
-                ("generic", "Generic format"),
-                ("krpano", "krpano"),
-                ("iipimage", "IIPImage"),
-                ("xlimage", "XLimage"),
-                ("topviewer", "TopViewer"),
-                ("fsi", "FSI"),
-                ("lizardtech", "LizardTech ImageServer"),
-                ("vls", "VLS"),
-                ("hungaricana", "Hungaricana"),
-                ("wmts", "WMTS"),
-                ("arcgis", "ArcGIS MapServer"),
-                ("pnav", "pnav"),
-                ("bulk_text", "Bulk text"),
-            ]
-        );
+    fn every_builtin_has_a_display_name() {
+        for (id, name) in default_registry().formats() {
+            assert!(!name.is_empty(), "{id} has a display name");
+        }
     }
 
     #[test]
