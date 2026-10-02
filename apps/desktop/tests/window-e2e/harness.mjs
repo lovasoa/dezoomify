@@ -3,9 +3,8 @@
 // The app embeds a W3C WebDriver server (tauri-plugin-wdio-webdriver, built via
 // the `testing-webdriver` cargo feature) and a `selenium-webdriver` client drives
 // it. This module owns the hermetic environment and the app lifecycle: an
-// ephemeral loopback fixture server, a loopback static server for the built
-// frontend (the debug window shell loads its embedded devUrl
-// `http://localhost:1420`), an isolated per-run profile, WebDriver port
+// ephemeral Node fixture server, an embedded frontend, an isolated per-run
+// profile, WebDriver port
 // allocation, app launch/readiness/teardown, and output
 // helpers. Inputs are fixed, there is no public network, and reports carry
 // origins, hashes, and stable codes only.
@@ -19,7 +18,6 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import http from "node:http";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -50,25 +48,7 @@ export const APP_BIN = withExe(
   process.env.DEZOOMIFY_WINDOW_E2E_APP_BIN ||
     path.join(CARGO_TARGET_DIR, "debug/dezoomify-desktop"),
 );
-export const FRONTEND_DIST =
-  process.env.DEZOOMIFY_WINDOW_E2E_DIST || path.join(REPO_ROOT, "apps/desktop/dist");
 const FIXTURE_SERVER_SCRIPT = path.join(REPO_ROOT, "test/fixture-server.mjs");
-
-// Fixed loopback port dictated by the embedded devUrl in `tauri.conf.json`.
-export const FRONTEND_PORT = 1420;
-
-const MIME = {
-  ".html": "text/html",
-  ".js": "text/javascript",
-  ".mjs": "text/javascript",
-  ".css": "text/css",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".ico": "image/x-icon",
-  ".json": "application/json",
-  ".map": "application/json",
-  ".txt": "text/plain",
-};
 
 // Linux needs a display; macOS and Windows runners provide a GUI session.
 // The xtask lane wraps the run in `xvfb-run` so this stays an explicit,
@@ -297,72 +277,6 @@ export function stopFixtureServer(fixture) {
   }
 }
 
-// Serves the freshly built frontend over loopback on the embedded devUrl port.
-// Fails closed when the port is held, naming the constraint.
-export async function startFrontendServer() {
-  if (!existsSync(path.join(FRONTEND_DIST, "index.html"))) {
-    throw new Error(
-      `window E2E: ${FRONTEND_DIST}/index.html is missing; ` +
-        "run `cargo xtask build desktop --unsigned-test` first",
-    );
-  }
-  const server = http.createServer((req, res) => {
-    // The shell loads `http://localhost:1420`; dual-stack binding accepts both
-    // the IPv6 (::1) and IPv4 (127.0.0.1) resolutions of localhost. Reject any
-    // non-loopback peer so the ephemeral server never serves the network.
-    const remote = req.socket.remoteAddress ?? "";
-    const loopback = remote === "127.0.0.1" || remote === "::1" || remote === "::ffff:127.0.0.1";
-    if (!loopback) {
-      res.writeHead(403);
-      res.end("forbidden");
-      return;
-    }
-    let name = "/";
-    try {
-      name = decodeURIComponent(new URL(req.url ?? "/", "http://loopback").pathname);
-    } catch {
-      res.writeHead(400);
-      res.end("bad path");
-      return;
-    }
-    if (name === "/") name = "/index.html";
-    const file = path.join(FRONTEND_DIST, name);
-    if (!file.startsWith(FRONTEND_DIST) || !existsSync(file)) {
-      res.writeHead(404);
-      res.end("not found");
-      return;
-    }
-    res.writeHead(200, {
-      "Content-Type": MIME[path.extname(file)] ?? "application/octet-stream",
-    });
-    res.end(readFileSync(file));
-  });
-  await new Promise((resolve, reject) => {
-    server.once("error", (err) => {
-      reject(
-        new Error(
-          `window E2E: cannot serve the built frontend on 127.0.0.1:${FRONTEND_PORT} ` +
-            `(the debug window shell loads that embedded devUrl address): ${err.message}`,
-        ),
-      );
-    });
-    server.listen(FRONTEND_PORT, resolve);
-  });
-  return server;
-}
-
-// Tear the shared frontend server down without hanging the spec process: idle
-// keep-alive sockets would otherwise make `close()` wait forever.
-export async function closeFrontendServer(server) {
-  if (!server) return;
-  if (typeof server.closeAllConnections === "function") server.closeAllConnections();
-  await new Promise((resolve) => {
-    const done = () => resolve();
-    server.close(done);
-    setTimeout(done, 5000).unref?.();
-  });
-}
-
 // One isolated run profile: a temp root, an isolated HOME, and an empty output
 // directory. The service inherits `HOME`/XDG from the process environment, so
 // the app never touches a real user profile.
@@ -445,5 +359,3 @@ export function outputFiles(outputDir, extension = ".png") {
     .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(extension))
     .map((entry) => path.join(outputDir, entry.name));
 }
-
-export { FIXTURE_SERVER_BIN };

@@ -11,14 +11,12 @@ import { Builder, By } from "selenium-webdriver";
 import { formats } from "../../../../../test/support/formats.cjs";
 import { assertSavedPyramid } from "../../../../../test/support/png.mjs";
 import {
-  closeFrontendServer,
   createRunDirs,
   gatewayInput,
   laneAppEnv,
   outputFiles,
   runOutputDir,
   startFixtureServer,
-  startFrontendServer,
   startWindowApp,
   stopFixtureServer,
   stopWindowApp,
@@ -136,7 +134,6 @@ describe("Dezoomify desktop window", () => {
   let driver = null;
   let app = null;
   let fixture = null;
-  let frontend = null;
   let runDirs = null;
 
   async function teardown() {
@@ -154,8 +151,6 @@ describe("Dezoomify desktop window", () => {
       if (logs) process.stderr.write(`window E2E app log:\n${logs.slice(-4000)}\n`);
     }
     app = null;
-    await closeFrontendServer(frontend);
-    frontend = null;
     if (fixture) {
       const requestLog = existsSync(fixture.requestLog)
         ? readFileSync(fixture.requestLog, "utf8")
@@ -184,9 +179,6 @@ describe("Dezoomify desktop window", () => {
       Object.assign(process.env, laneAppEnv(runDirs.home));
       fixture = await startFixtureServer(runDirs.root);
       process.env.DEZOOMIFY_WINDOW_E2E_BASE = fixture.base;
-      // The debug shell loads its embedded devUrl, so the frontend server must
-      // be listening before the app starts.
-      frontend = await startFrontendServer();
       app = await startWindowApp(runDirs.home);
       driver = await new Builder()
         .usingServer(WEBDRIVER_URL)

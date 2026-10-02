@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import {
   activeQueueEntry as activeDesktopEntry,
   cancelAllQueueEntries as cancelAllDesktop,
@@ -16,13 +13,6 @@ import {
   recordDesktopProgress,
   retryDesktopEntry,
 } from "../src/queue.ts";
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SCENARIOS = path.join(HERE, "..", "..", "..", "testdata", "scenarios", "desktop");
-
-function readJson(rel) {
-  return JSON.parse(fs.readFileSync(path.join(SCENARIOS, rel), "utf8"));
-}
 
 const queuedEntries = (q) => q.entries.filter((e) => e.status === "queued");
 
@@ -107,94 +97,9 @@ test("retry failed moves behind the line and preserves the input URL", () => {
   q = finishActiveDesktopEntry(q, "failed", "job.partial-discarded").queue;
   const retried = retryDesktopEntry(q, active);
   assert.equal(retried.code, "ok");
+  assert.notEqual(retried.entry.id, active);
   q = retried.queue;
   assert.equal(activeDesktopEntry(q).inputUrl, "https://example.com/a?token=CANARY");
   const bad = retryDesktopEntry(q, active);
   assert.equal(bad.code, "job.unknown");
 });
-
-// Deterministic queue scenarios (testdata/scenarios/desktop/queue-*): the
-// scripted steps drive the real queue module and the
-// golden per-entry outcomes, totals, and ordered transcript must match.
-function runQueueScript(doc) {
-  let q = createDesktopQueue();
-  const events = [];
-  const byIndex = [];
-  for (const step of doc.script) {
-    if (step.op === "enqueue") {
-      const url = doc.entries[step.index].url;
-      const res = enqueueDesktopQueue(q, url);
-      assert.equal(res.code, "ok", `enqueue ${url}`);
-      q = res.queue;
-      byIndex[step.index] = res.entry.id;
-      events.push({
-        entry: res.entry.id,
-        transition: res.entry.status,
-        ...(res.entry.status === "active" || res.entry.status === "queued"
-          ? { inputUrl: res.entry.inputUrl }
-          : {}),
-      });
-    } else if (step.op === "progress") {
-      const active = activeDesktopEntry(q);
-      assert.ok(active, "progress needs an active entry");
-      const res = recordDesktopProgress(q, active.id, step.acquired, step.total);
-      assert.equal(res.code, "ok");
-      q = res.queue;
-      events.push({
-        entry: active.id,
-        transition: "progress",
-        progress: { acquired: step.acquired, total: step.total },
-      });
-    } else if (step.op === "finish") {
-      const active = activeDesktopEntry(q);
-      assert.ok(active, "finish needs an active entry");
-      const detail = {};
-      if (step.errorCode) detail.errorCode = step.errorCode;
-      const res = finishActiveDesktopEntry(q, step.outcome, detail.errorCode);
-      events.push({
-        entry: active.id,
-        transition: step.outcome,
-        ...(step.errorCode ? { errorCode: step.errorCode } : {}),
-      });
-      q = res.queue;
-      if (res.next) {
-        events.push({ entry: res.next.id, transition: "active" });
-      }
-    } else if (step.op === "retry") {
-      const res = retryDesktopEntry(q, step.entry);
-      assert.equal(res.code, "ok", `retry ${step.entry}`);
-      q = res.queue;
-      assert.ok(res.entry);
-      events.push({
-        entry: res.entry.id,
-        transition: res.entry.status,
-        inputUrl: res.entry.inputUrl,
-      });
-    } else {
-      assert.fail(`unknown script op ${step.op}`);
-    }
-  }
-  return { queue: q, events, byIndex };
-}
-
-for (const id of ["queue-basic", "queue-retry"]) {
-  test(`scenario ${id}: scripted queue run matches golden outcomes and transcript`, () => {
-    const doc = readJson(`${id}/expected/result.json`);
-    const transcript = readJson(`${id}/expected/transcript.json`);
-    const { queue: q, events, byIndex } = runQueueScript(doc);
-    assert.deepEqual(events, transcript.events, "ordered queue transcript");
-    const outcomes = q.entries.map((e) => ({
-      status: e.status,
-      ...(e.errorCode ? { errorCode: e.errorCode } : {}),
-    }));
-    assert.deepEqual(outcomes, doc.golden.outcomes, "per-entry outcomes");
-    const summary = summarizeDesktopQueue(q);
-    assert.deepEqual(summary, doc.golden.summary, "totals");
-    if (doc.golden.retriedIdDiffers) {
-      const failedId = byIndex[1];
-      const retried = q.entries.find((e) => e.status === "done" && e.id !== byIndex[0]);
-      assert.ok(retried, "retried entry finished");
-      assert.notEqual(retried.id, failedId, "retry runs under a fresh id");
-    }
-  });
-}

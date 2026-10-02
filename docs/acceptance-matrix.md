@@ -8,7 +8,7 @@ tests contact no public source websites.
 | Behavior | Executable evidence | Lane |
 |---|---|---|
 | Saved pixels for every registered format | Shared `fixtures/` loop in CLI, website, extension and desktop window tests | `test native`, `test web --e2e`, `test extension`, `test desktop --e2e-window` |
-| Format parsing, geometry, exact URLs, headers, processing | Rust format tests, `core_parity.rs`, `discovery_navigation.rs` | `test core` |
+| Format parsing, geometry, exact URLs, headers, processing | Rust format tests, `core_parity.rs`, `discovery_navigation.rs`, historical `discovery_fixtures.rs` | `test core`, `test native` |
 | Image/level precedence, deferred resources, budgets | Direct async discovery and algorithm tests with injected capabilities | `test core` |
 | Bounded acquisition, retry, missing-only retry, cancellation | Direct Host tests and native loopback tests | `test core`, `test native` |
 | Async binding success, structured rejection, invalid values, binary data, concurrent invocations, late cancellation | `packages/wasm-harness/src/node.spec.mjs`, fresh WASM build | `test wasm` |
@@ -25,7 +25,7 @@ tests contact no public source websites.
 | Legacy `/` and new `/beta` routes, fresh WASM, packaged assets | Assembled-site build and website/extension E2E | `build web`, `test all` |
 
 `cargo xtask check` validates formatting, Clippy, TypeScript,
-fixtures, content, and generated bindings. `cargo xtask test` runs fast Rust and
+content, and generated bindings. `cargo xtask test` runs fast Rust and
 Node tests once. `test all` adds built-WASM and packaged-browser journeys.
 `ci local` also validates portability and dependencies.
 

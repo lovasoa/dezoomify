@@ -1,9 +1,13 @@
-# Testing
+All tests MUST be designed to have a high chance to catch future bugs and a low chance of churn.
+It's better not to write a test than to write a fragile test.
+Not all code changes require a new test. It's often better to improve existing tests than to add new ones.
+A single added test fixture that fits the existing test runner is preferable to many unit tests.
+"Architectural" tests or tests that try to make assertions on source file contents are forbidden.
 
 `cargo xtask test` runs the Rust workspace and Node units once.
 `cargo xtask test all` adds fresh WASM bindings, the website in Chromium, and
 packaged extensions in Chromium and Firefox. `cargo xtask ci local` adds static
-checks, WASM portability, and the dependency audit. Node 24.15.0 is the minimum.
+checks, WASM portability, and the dependency audit.
 
 ## Shared product matrix
 
@@ -26,9 +30,11 @@ cargo xtask test desktop --e2e-window
 
 The desktop window lane needs a GUI session (Linux: `xvfb-run -a`) and stays outside
 `test all` and `ci local`. Its workflow runs Linux, macOS, and Windows; fixture and
-test changes trigger it. Windows checkouts enable Git symlinks before checkout.
+test changes trigger it. The test build embeds its frontend, like the packaged
+app, and needs no development server. Windows checkouts enable Git symlinks
+before checkout.
 
-## What remains focused
+## Unit tests
 
 Pure parser tests cover malformed metadata and unusual geometry. Host tests
 cover retries, cancellation, resource limits, codecs, file publication, cache
@@ -60,7 +66,8 @@ Live tests are separate: `cargo xtask test live --public` is opt-in and advisory
 ## Coverage
 
 Coverage is evidence for deleting redundant tests, not a percentage gate.
-`cargo llvm-cov --workspace` measures Rust production line and function coverage;
+`cargo llvm-cov --workspace` measures Rust source line and function coverage
+(including inline unit tests; exclude integration harnesses and test tooling);
 the stable toolchain does not report branch coverage. Full browser saves supplement
 that measurement and are required by the corresponding CI lanes.
 Focused command grammar and CI ownership live in [xtask](../crates/xtask/README.md).

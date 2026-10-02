@@ -41,11 +41,12 @@ fn dimensions(path: &Path, size: u32) {
 }
 
 fn pixels(path: &Path) {
-    let image = image::open(path).expect("saved image").to_rgb8();
+    let image = image::open(path).expect("saved image").to_rgba8();
     assert_eq!(image.dimensions(), (512, 512));
     let colors: [[u8; 3]; 4] = [[196, 48, 48], [48, 168, 64], [48, 72, 200], [232, 220, 96]];
     for (x, y, pixel) in image.enumerate_pixels() {
         let expected = colors[(x / 256 + 2 * (y / 256)) as usize];
+        assert_eq!(pixel.0[3], 255, "transparent pixel ({x},{y})");
         assert!(
             pixel
                 .0
@@ -183,6 +184,12 @@ fn argument_errors_fail_without_stdout_or_output() {
     for (args, message) in [
         (["--logging", "verbose"], "invalid --logging value"),
         (["--format", "nope"], "unknown format"),
+        (["--nope", ""], "unknown flag --nope"),
+        (
+            ["--definitely-unknown", ""],
+            "unknown flag --definitely-unknown",
+        ),
+        (["-Z", ""], "unknown flag -Z"),
     ] {
         let run = cli(&dir, &[args[0], args[1], &source("pyramid.dzi"), "out.png"]);
         assert_eq!(run.status.code(), Some(2));

@@ -1,6 +1,1 @@
-<package>
-  <width>1000</width>
-  <height>700</height>
-  <tileside>256</tileside>
-  <maxzoom>4</maxzoom>
-</package>
+../../../../../../rs-core/formats/payloads/coverage/xlimage/pyramid.imgf.xml

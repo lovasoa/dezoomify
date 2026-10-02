@@ -1,9 +1,0 @@
-{
-  "outcome": "failed",
-  "code": "redirect-limit",
-  "recovery": "edit-input",
-  "phase": "discovery",
-  "retryable": false,
-  "transport": "native",
-  "resourceKind": "metadata"
-}

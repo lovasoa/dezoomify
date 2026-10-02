@@ -1,9 +1,0 @@
-{
-  "imageSize": {
-    "x": 512,
-    "y": 512
-  },
-  "tileCount": 3,
-  "outputFormat": "png",
-  "partial": true
-}

@@ -2,9 +2,10 @@
 
 New product fixtures live in [`fixtures/`](../../fixtures/README.md).
 These historical reproductions remain inputs to focused parser, transport, and
-product failure tests. Files and expectations are ordinary reviewed source;
-Git records their history. The former hash registry and capture/verification
-framework are removed.
+product failure tests. Files are ordinary reviewed source; Git records their
+history. Discovery and failure expectations live directly in the focused tests.
+The hash registry, scenario inventories, and capture/verification framework
+are removed. Identical payloads share relative symlinks.
 
 ## Provenance
 

@@ -95,17 +95,6 @@ fn options_for_target(
 
 pub use dezoomify_fixture_server::{start as start_fixture_server, temp_dir};
 
-/// Map a publication to the historical scenario's expected result.
-pub fn golden_result(outcome: &Publication) -> dezoomify_fixture_server::GoldenResult {
-    let canvas = outcome.output.canvas.as_ref().expect("published canvas");
-    dezoomify_fixture_server::GoldenResult {
-        image_size: (canvas.width as u64, canvas.height as u64),
-        tile_count: outcome.tile_count as u64,
-        output_format: outcome.output.format.as_str().to_string(),
-        partial: !outcome.output.is_complete(),
-    }
-}
-
 pub fn http_response(status: &str, content_type: &str, body: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(format!("HTTP/1.1 {status}\r\n").as_bytes());

@@ -64,4 +64,4 @@ tauri = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-dialog", "dep:tauri-p
 # Test-only embedded WebDriver server, used exclusively by
 # `cargo xtask test desktop --e2e-window` (selenium-webdriver client).
 # Never enable this in a release bundle.
-testing-webdriver = ["tauri", "dep:tauri-plugin-wdio-webdriver"]
+testing-webdriver = ["tauri", "tauri/custom-protocol", "dep:tauri-plugin-wdio-webdriver"]
