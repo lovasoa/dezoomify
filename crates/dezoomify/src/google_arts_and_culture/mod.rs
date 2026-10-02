@@ -36,9 +36,12 @@ fn page_info(resource: DiscoveryResource<'_>) -> Result<PageInfo, DiscoveryError
     let mut page = source
         .parse::<PageInfo>()
         .map_err(|error| DiscoveryError::InvalidMetadata(error.to_string()))?;
-    // The viewer supplies a protocol-relative URL; resolve its scheme from
-    // the actual page rather than forcing HTTPS on HTTP image servers.
-    page.base_url = crate::core::resolve_relative(resource.final_uri(), &page.base_url[6..]);
+    // Inherit a web page's scheme; saved pages retain the parser's HTTPS fallback.
+    if ::url::Url::parse(resource.final_uri())
+        .is_ok_and(|url| matches!(url.scheme(), "http" | "https"))
+    {
+        page.base_url = crate::core::resolve_relative(resource.final_uri(), &page.base_url[6..]);
+    }
     Ok(page)
 }
 
@@ -123,13 +126,25 @@ mod tests {
     );
 
     fn fixture_catalog() -> DiscoveryCatalog {
-        let (catalog, requests) = crate::test_support::discover(
-            SPEC,
-            "https://artsandculture.google.com/asset/test",
-            &[(PAGE, None), (TILE_INFO, None)],
-        );
-        assert_eq!(requests.len(), 2);
-        assert!(requests[1].uri.ends_with("=g"));
+        let mut catalog = None;
+        for (input, scheme) in [
+            ("https://artsandculture.google.com/asset/test", "https:"),
+            ("http://artsandculture.google.com/asset/test", "http:"),
+            ("/saved/artsandculture.google.com.html", "https:"),
+            ("file:///saved/artsandculture.google.com.html", "https:"),
+            (r"C:\saved\artsandculture.google.com.html", "https:"),
+        ] {
+            let (result, requests) =
+                crate::test_support::discover(SPEC, input, &[(PAGE, None), (TILE_INFO, None)]);
+            assert_eq!(requests.len(), 2, "{input}");
+            assert!(requests[1].uri.ends_with("=g"), "{input}");
+            assert!(
+                requests[1].uri.starts_with(scheme),
+                "{input}: {}",
+                requests[1].uri
+            );
+            catalog = Some(result.unwrap());
+        }
         catalog.unwrap()
     }
 
