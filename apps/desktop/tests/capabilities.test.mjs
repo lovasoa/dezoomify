@@ -44,11 +44,7 @@ const EXPECTED_COMMANDS = [
   "validate_settings",
   "is_retryable",
 ];
-const EXPECTED_CHANNELS = [
-  "dezoomify://registered",
-  "dezoomify://progress",
-  "dezoomify://partial",
-];
+const EXPECTED_CHANNELS = ["dezoomify://registered", "dezoomify://progress", "dezoomify://partial"];
 const EXPECTED_ENCODERS = ["png", "jpeg", "tiff", "zif", "webp"];
 
 const DESKTOP_META = readJson("../src-tauri/dezoomify.json");
