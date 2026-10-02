@@ -419,7 +419,8 @@ async function runFirefoxJob(base, work, runOptions = {}) {
         await driver.switchTo().window(handle);
         const url = await driver.getCurrentUrl();
         if (!url.includes("/test/driver.html")) continue;
-        const body = await driver.findElement(webdriver.By.css("body"));
+        const [body] = await driver.findElements(webdriver.By.css("body"));
+        if (!body) continue;
         const state = await body.getDomAttribute("data-driver");
         if (state === "failed") throw new Error(await body.getText());
         if (state === "ready") return true;
