@@ -51,4 +51,6 @@ Reports cap the timeline at 1,000 records and the entire serialized report at 1 
 
 GitHub issue drafts identify the source host and graphical product in the title. The entered URL comes first, followed by a different resolved URL when known for that input request, a quoted user-facing error, and a short account of the attempt with structured failure facts. A fenced block retains the full error and diagnostics within the link budget; truncation is explicit and directs users to copy or save the complete report.
 
+Drafts preselect `unconfirmed` and the product label (`website`, `extension`, or `desktop`). Known structured error kinds, including retained causes, also select `transport`, `image discovery`, or `output` as applicable. Unknown kinds add no category; display text never determines labels.
+
 Native callers keep the recorder even when validation or execution fails. Desktop reads it through `get_job_diagnostics`; the CLI uses its existing `--logging` levels to filter diagnostic events on stderr, independently of `--json` stdout. Human progress prints on phase changes and at most once per second within a phase.

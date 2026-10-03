@@ -127,7 +127,7 @@ test("static accessibility contract: failed view layers guidance with named reco
     "body carries the source address",
   );
   assert.ok(body.includes("No zoomable image could be found."), "body carries the discovery error");
-  assert.ok(body.includes("code: X"), "body carries the diagnostics code line");
+  assert.ok(body.includes('"code": "X"'), "body carries the full error in the code block");
 });
 
 test("native completion opens saved output without browser save guidance", () => {

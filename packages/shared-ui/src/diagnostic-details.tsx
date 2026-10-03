@@ -1,5 +1,5 @@
-import { useState } from "react";
 import type { Error as JobError } from "@dezoomify/wasm-bindings";
+import { useState } from "react";
 import { type DiagnosticReport, diagnosticFields, formatDiagnosticReport } from "./diagnostics.ts";
 import { plainMessageFor } from "./failure.ts";
 import { t } from "./i18n.ts";
@@ -7,19 +7,36 @@ import type { ViewCallbacks } from "./view-types.ts";
 
 export function diagnosticIssueUrl(report: DiagnosticReport, error?: JobError): string {
   const input = String(report.context.input ?? "unknown");
-  const finalUrl = report.context.effective_input ?? report.context.final_url ??
-    report.records.findLast((record) => record.fields.url === input && record.fields.final_url)
-      ?.fields.final_url;
+  const finalUrl =
+    report.context.effective_input ??
+    report.context.final_url ??
+    [...report.records]
+      .reverse()
+      .find((record) => record.fields.url === input && record.fields.final_url)?.fields.final_url;
   let host = "unknown host";
   try {
     host = new URL(String(finalUrl ?? input)).host;
-  } catch { /* Invalid input still deserves a report. */ }
+  } catch {
+    /* Invalid input still deserves a report. */
+  }
   const product = ["website", "extension", "desktop"].includes(String(report.context.product))
-    ? String(report.context.product) : "website";
-  const facts = error ? diagnosticFields(error) : report.outcome?.fields ?? {};
-  const message = error ? plainMessageFor(error, host) : String(facts.message ?? facts["error.message"] ?? report.outcome?.event ?? "No error message available.");
+    ? String(report.context.product)
+    : "website";
+  const facts = error ? diagnosticFields(error) : (report.outcome?.fields ?? {});
+  const message = error
+    ? plainMessageFor(error, host)
+    : String(
+        facts.message ??
+          facts["error.message"] ??
+          report.outcome?.event ??
+          "No error message available.",
+      );
   const summary = Object.entries(facts)
-    .filter(([key]) => /(?:^|\.)(kind|status|transport|blocked_reason|request|retry_after_ms|required_bytes|available_bytes|width|height)$/.test(key))
+    .filter(([key]) =>
+      /(?:^|\.)(kind|status|transport|blocked_reason|reason|request|retry_after_ms|bytes_required|bytes_available|width|height)$/.test(
+        key,
+      ),
+    )
     .map(([key, value]) => `${key}: ${value}`);
   const intro = [
     input,
@@ -33,11 +50,61 @@ export function diagnosticIssueUrl(report: DiagnosticReport, error?: JobError): 
     "<!-- Please add what you expected, what happened, and any steps needed to reproduce the problem. -->",
     "",
   ].join("\n");
-  const details = `Error\n${JSON.stringify(error ?? facts, null, 2)}\n\n${formatDiagnosticReport(report)}`;
+  const failures = report.failures
+    .map(({ count, first }) => `${count} × ${first.event}: ${JSON.stringify(first.fields)}`)
+    .join("\n");
+  const details = `Error\n${JSON.stringify(error ?? facts, null, 2)}\n\n${failures}\n\n${formatDiagnosticReport(report)}`;
   // A longer fence keeps server previews containing backticks inside the block.
-  const fence = "`".repeat(Math.max(3, ...Array.from(details.matchAll(/`+/g), (match) => match[0].length + 1)));
-  const params = new URLSearchParams({ title: `${host} : ${product} report`, body: "" });
-  const bodyFor = (length: number) => `${intro}${fence}text\n${details.slice(0, length)}${length < details.length ? "\n[Truncated; copy or save the complete diagnostics from Dezoomify.]" : ""}\n${fence}\n`;
+  const fence = "`".repeat(
+    Math.max(3, ...Array.from(details.matchAll(/`+/g), (match) => match[0].length + 1)),
+  );
+  const labels = new Set(["unconfirmed", product]);
+  for (const [key, kind] of Object.entries(facts)) {
+    if (!/(?:^|\.)kind$/.test(key)) continue;
+    switch (kind) {
+      case "http-error":
+      case "rate-limited":
+      case "timeout":
+      case "network-failure":
+      case "policy-denied":
+      case "bad-redirect":
+      case "redirect-limit":
+      case "size-limit":
+      case "proxy-budget-exceeded":
+      case "proxy-error":
+        labels.add("transport");
+        break;
+      case "no-image-found":
+      case "malformed-metadata":
+      case "unknown-format":
+      case "empty-resource":
+      case "deferred-limit":
+      case "discovery-failed":
+        labels.add("image discovery");
+        break;
+      case "limit-exceeded":
+      case "encode-failed":
+      case "write-failed":
+      case "output-exists":
+      case "destination-denied":
+      case "unsupported-extension":
+      case "output-unavailable":
+      case "output-no-parent":
+      case "launch-failed":
+      case "output-denied":
+      case "output-not-found":
+      case "invoke-failed":
+        labels.add("output");
+        break;
+    }
+  }
+  const params = new URLSearchParams({
+    title: `${host} : ${product} report`,
+    labels: [...labels].join(","),
+    body: "",
+  });
+  const bodyFor = (length: number) =>
+    `${intro}${fence}text\n${details.slice(0, length)}${length < details.length ? "\n[Truncated; copy or save the complete diagnostics from Dezoomify.]" : ""}\n${fence}\n`;
   let low = 0;
   let high = details.length;
   while (low < high) {
