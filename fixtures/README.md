@@ -14,3 +14,9 @@ Handlers share the ordinary `tiles/server.js` helper; the HTTP server knows no f
 All bytes here are synthetic GPL-3.0-or-later test data. Fixture changes are reviewed
 as ordinary source changes. No hash manifest, registration, or generated expectations.
 Focused tests still cover malformed input, credentials, retries, limits, and cancellation.
+
+Variants exercise viewer-to-metadata discovery (British Library, NLA, WDL,
+Hungaricana, National Gallery, Zoomify brokers and ETE), inline Zoomify geometry,
+IIIF v1 and constrained tile sizes, a multilingual IIIF manifest, TopViewer asset
+selection, and descending custom tile coordinates. They reuse the basic metadata
+and shared tiles; adding a variant requires no test or server changes.

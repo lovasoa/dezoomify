@@ -1,0 +1,2 @@
+<!doctype html>
+<pic-mediabank data-api-key="fixture-key" data-api-url="/fixtures/topviewer/detail/api/?rows=99&amp;apiKey=old" data-entities="image"></pic-mediabank>

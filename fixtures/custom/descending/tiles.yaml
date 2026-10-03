@@ -1,0 +1,9 @@
+url_template: "{{origin}}/fixtures/custom/basic/tiles/{{x}}-{{y}}.jpg"
+x_template: "x * tile_size"
+y_template: "y * tile_size"
+variables:
+  - {name: tile_size, value: 256}
+  - {name: x, from: 1, to: 0, step: -1}
+  - {name: y, from: 1, to: 0, step: -1}
+width: 512
+height: 512

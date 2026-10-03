@@ -1,0 +1,8 @@
+{
+  "type": "Manifest", "label": {"fr": ["Image"]},
+  "metadata": [{"label": "Title", "value": "Four quadrants"}],
+  "items": [{"type": "Canvas", "label": {"en": ["", "ignored"], "fr": ["Page"]},
+    "items": [{"type": "AnnotationPage", "items": [{"type": "Annotation",
+      "body": {"type": "Image", "service": [{"id": "../v3", "type": "ImageService3"}]}
+    }]}]}]
+}
