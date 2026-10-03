@@ -500,23 +500,21 @@ impl Sink {
         // Kept partials publish to the `.partial` sibling so a partial file
         // never masquerades as a complete save. Fail-closed on collision.
         let dest: PathBuf = if partial {
-            let sibling = partial_path_for(dest_path);
-            validate_destination(&sibling, &format, overwrite)?;
-            sibling
+            partial_path_for(dest_path)
         } else {
             dest_path.to_path_buf()
         };
         validate_destination(&dest, &format, overwrite)?;
         let canvas = self
             .canvas
-            .clone()
+            .as_ref()
             .ok_or_else(|| Error::Internal("commit without assembled canvas".to_string().into()))?;
         let (icc, exif) = self.first_meta(reused_tiles);
         let encoded_len: u64;
         match format {
             OutputFormat::Png => {
                 let encoded = encode_png(
-                    &canvas,
+                    canvas,
                     crate::imaging::png_compression_for(self.compression),
                     icc.as_deref(),
                     exif.as_deref(),
@@ -525,22 +523,22 @@ impl Sink {
                 commit_bytes(&dest, &encoded)?;
             }
             OutputFormat::Jpeg => {
-                let encoded = encode_jpeg(&canvas, self.jpeg_quality, icc.as_deref())?;
+                let encoded = encode_jpeg(canvas, self.jpeg_quality, icc.as_deref())?;
                 encoded_len = encoded.len() as u64;
                 commit_bytes(&dest, &encoded)?;
             }
             OutputFormat::Tiff => {
-                let encoded = encode_tiff(&canvas, self.compression, icc.as_deref())?;
+                let encoded = encode_tiff(canvas, self.compression, icc.as_deref())?;
                 encoded_len = encoded.len() as u64;
                 commit_bytes(&dest, &encoded)?;
             }
             OutputFormat::Zif => {
-                let encoded = encode_zif_pyramid(&canvas, self.compression, icc.as_deref())?;
+                let encoded = encode_zif_pyramid(canvas, self.compression, icc.as_deref())?;
                 encoded_len = encoded.len() as u64;
                 commit_bytes(&dest, &encoded)?;
             }
             OutputFormat::Webp => {
-                let encoded = encode_webp(&canvas, icc.as_deref())?;
+                let encoded = encode_webp(canvas, icc.as_deref())?;
                 encoded_len = encoded.len() as u64;
                 commit_bytes(&dest, &encoded)?;
             }
@@ -549,7 +547,7 @@ impl Sink {
                     .file_name()
                     .and_then(|name| name.to_str())
                     .unwrap_or("image");
-                let (info_json, tiles) = render_iiif_dir(&canvas, id, self.jpeg_quality)?;
+                let (info_json, tiles) = render_iiif_dir(canvas, id, self.jpeg_quality)?;
                 encoded_len =
                     info_json.len() as u64 + tiles.iter().map(|(_, b)| b.len() as u64).sum::<u64>();
                 commit_iiif_dir(&dest, &info_json, &tiles)?;

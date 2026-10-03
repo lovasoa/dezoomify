@@ -14,6 +14,8 @@ Selection preserves `--largest`, exact `--zoom-level`, width/height caps, and `-
 
 `sink.rs` owns deterministic placement and memory accounting. Known geometry paints directly. Unknown geometry spools under the configured disk cap; overlapping tiles retain plan order under the retained-memory cap. The canvas uses four bytes per pixel and cannot exceed available system memory.
 
+Output encoders borrow the assembled canvas without cloning its pixel buffer. Encoded output still buffers in memory before publication; format-specific conversion and pyramid buffers may require additional memory.
+
 Output publication checks cancellation and the destination before committing. Uncommitted temporary resources are invocation-owned and cleaned after failure. Published files remain intact. A publication that has committed returns success; otherwise cancellation publishes nothing and preserves any existing destination.
 
 Instrumentation records attempts, acquired tiles, failures, retries, wait time, fetched bytes, peak in-flight work, retained/spooled bytes, decode bytes, canvas, and encoded output.
