@@ -1,14 +1,18 @@
-const { globSync, readFileSync } = require("node:fs");
+const { existsSync, globSync, readFileSync } = require("node:fs");
 const path = require("node:path");
 
 const root = path.resolve(__dirname, "../..");
-const formats = globSync("fixtures/*/*/input.txt", { cwd: root })
+const formats = globSync("fixtures/*/*/viewer.html", { cwd: root })
   .map((file) => file.split(path.sep).join("/"))
   .sort()
-  .map((file) => ({
-    name: file.slice(9, -10),
-    tolerance: file.split("/")[2].startsWith("approximate-") ? 2 : 0,
-    input: `/fixtures/${file.slice(9, -9)}${readFileSync(path.join(root, file), "utf8").trim()}`,
-    viewer: `/${file.slice(0, -9)}viewer.html`,
-  }));
+  .map((file) => {
+    const dir = path.posix.dirname(file);
+    const override = path.join(root, dir, "input.txt");
+    return {
+      name: dir.slice(9),
+      tolerance: path.posix.basename(dir).startsWith("approximate-") ? 2 : 0,
+      input: `/${dir}/${existsSync(override) ? readFileSync(override, "utf8").trim() : "viewer.html"}`,
+      viewer: `/${file}`,
+    };
+  });
 module.exports = { formats };

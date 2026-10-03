@@ -12,8 +12,9 @@ checks, WASM portability, and the dependency audit.
 ## Shared product matrix
 
 [`fixtures/`](../fixtures/README.md) contains ordinary files and relative symlinks.
-Each `format/variant/input.txt` contains its relative input URL; no registration,
-hash manifest, generated expectations, or route schema is needed. Every basic
+Each `format/variant/viewer.html` is discovered automatically; an optional `input.txt`
+overrides the default viewer URL. No registration, hash manifest, generated
+expectations, or route schema is needed. Every basic
 input produces the same 512×512 picture from shared PNG or JPEG tiles.
 
 Each product iterates the same discovered inputs and checks saved dimensions

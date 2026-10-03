@@ -5,9 +5,10 @@ stable id in `core/registry.rs`. Parsing uses supplied bytes and injected Host
 capabilities, per [Architecture](architecture.md).
 
 Add a folder under [`fixtures/<format>/<variant>/`](../fixtures/README.md):
-an `input.txt` containing its relative input URL, minimal metadata, and links
-to shared tile images. Static responses use ordinary files. Query protocols use
-a local `server.js` exporting `serve(Request): Response`. Adding the input
+a `viewer.html`, minimal metadata, and links to shared tile images. Add `input.txt`
+only to override the viewer entry point with a relative input URL. Static responses
+use ordinary files. Query protocols use a local `server.js` exporting
+`serve(Request): Response`. Adding the viewer
 automatically adds a saved-pixel check to each product's matrix.
 
 Distill public metadata into the smallest reproduction that preserves the bug.

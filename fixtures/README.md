@@ -1,6 +1,8 @@
 # Product fixtures
 
-Each `format/variant/input.txt` contains one relative input URL. The same fixtures
+Each `format/variant/viewer.html` is a test entry point. An optional `input.txt`
+overrides the input with a relative URL for metadata, query parameters, or nested paths.
+The same fixtures
 run through CLI, website, and packaged extension tests, and the desktop window lane.
 Every basic fixture produces the same 512×512 image from shared 256×256 PNG or JPEG tiles in `tiles/`.
 Tests check every saved pixel exactly by default. Prefix the variant directory
@@ -10,9 +12,10 @@ is interpreted by shared discovery, without per-fixture registration.
 
 The historical CLI tile paths link to the shared PNGs; no product owns those bytes.
 
-Static resources are ordinary files and relative symlinks. `viewer.html` loads the
-input so the extension observes it as a real viewer request. The server substitutes
-`{{input}}` with the adjacent `input.txt` URL in the viewer template. `server.js` exports
+Static resources are ordinary files and relative symlinks. `viewer.html` signals
+`data-viewer-ready="true"` once its resources load, before the extension scans it.
+For direct inputs, link to the shared viewer template; the server substitutes
+`{{input}}` with the adjacent `input.txt` URL, defaulting to `viewer.html`. `server.js` exports
 `serve(Request): Response` only where a protocol needs query-based tile requests.
 Handlers share the ordinary `tiles/server.js` helper; the HTTP server knows no formats.
 

@@ -31,7 +31,9 @@ pub fn format_inputs() -> Vec<FormatInput> {
             .expect("variants")
             .flatten()
         {
-            if let Ok(input) = std::fs::read_to_string(variant.path().join("input.txt")) {
+            if variant.path().join("viewer.html").is_file() {
+                let input = std::fs::read_to_string(variant.path().join("input.txt"))
+                    .unwrap_or_else(|_| "viewer.html".to_owned());
                 inputs.push(FormatInput {
                     tolerance: if variant
                         .file_name()

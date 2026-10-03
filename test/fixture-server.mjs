@@ -221,7 +221,9 @@ export async function startFixtureServer({
                 .toString()
                 .replaceAll(
                   "{{input}}",
-                  fs.readFileSync(path.join(path.dirname(target), "input.txt"), "utf8").trim(),
+                  fs.existsSync(path.join(path.dirname(target), "input.txt"))
+                    ? fs.readFileSync(path.join(path.dirname(target), "input.txt"), "utf8").trim()
+                    : "viewer.html",
                 ),
             );
           return send(200, bytes, { "content-type": type });
