@@ -1,20 +1,23 @@
 # Security
 
+Apply judgement before blindly applying security rules.
+Do not implement protections against vulnerabilities that have not be proven to exist, do not have a real risk or impact.
+
 Source sites, metadata, tiles, and output names are all untrusted input. Each runtime takes only the access its active user-started job needs.
 
 ## Trust boundaries
 
 - The website runs under normal browser origin rules.
-- Page policy allows cross-origin images for plain tile display; shown tiles taint the canvas, keeping it unreadable to scripts, so no pixels leak that way.
-- The metadata proxy is a restricted fetcher for eligible public, non-credential metadata, never a credential endpoint or tile relay.
+- Page policy allows cross-origin images for plain tile display; shown tiles taint the canvas, keeping it unreadable to scripts.
 - The extension background accepts requests only from its own authenticated contexts.
 - Native apps reach network and filesystem, so they validate typed input and require user-picked local destinations.
 
-Parsers and decoders cap input, dimensions, tile counts, allocation, recursion, and decompression. URLs normalize before policy checks. Redirects carrying credentials revalidate every hop.
+Parsers and decoders cap input, dimensions, tile counts, allocation, recursion, and decompression, but dezoomify's entire purpose is to allow downloading very large, gigapixel images, so all caps must be high. URLs normalize before policy checks.
 
 ## Credentials
 
-Auth headers, cookies, signed URLs, and tokens appear in no analytics or user-visible cache keys. Diagnostic capture preserves supplied URLs, query parameters, paths, and settings as supplied. Capture sites record header names, never authorization-header or cookie values. Reports contain no image bytes or full response bodies; HTTP failures may retain a bounded server signal. Reports stay local until the user copies, saves, or opens a prefilled issue draft. The extension's technical-details panel shows a conditional sign-in warning before its sharing controls; it does not infer authentication from cookies. User guidance: [extension data use](user/browser-extension.md#what-the-extension-does-with-your-data).
+Auth headers including cookies should be stripped from logs on a best effort basis. Logs stay local unless the user explicitly sends them.
+Diagnostic capture preserves supplied URLs, query parameters, paths, and settings as supplied. Reports stay local until the user copies, saves, or opens a prefilled issue draft. The extension's technical-details panel shows a conditional sign-in warning before its sharing controls; it does not infer authentication from cookies. User guidance: [extension data use](user/browser-extension.md#what-the-extension-does-with-your-data).
 
 Website direct and proxy requests omit cookies and `Authorization`. The proxy also forwards no caller credentials upstream and never fetches credential-bearing resources. Signed or token-bearing URLs are proxy-ineligible. The extension fetches in the tab origin with the page's session and from the extension origin credential-free, only for origins under active host permissions. It does not send browser cookies or other credentials to another product.
 

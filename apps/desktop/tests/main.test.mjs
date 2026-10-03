@@ -2,6 +2,7 @@ import "../../../test/tsx-loader.mjs";
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import test from "node:test";
+import { getLocale, setLocale, t } from "../../../packages/shared-ui/src/i18n.ts";
 import { act, click, makeContainer } from "../../../test/react-dom.mjs";
 import { loadSettings } from "../src/settings.ts";
 
@@ -80,8 +81,23 @@ registerHooks({
 
 const root = makeContainer();
 root.id = "root";
+const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+Object.defineProperty(globalThis, "navigator", {
+  configurable: true,
+  value: { languages: ["es-ES", "de-AT", "fr"], language: "fr", userAgent: "test" },
+});
 await act(async () => {
   await import("../src/main.ts");
+});
+assert.equal(getLocale(), "de");
+assert.equal(document.documentElement.lang, "de");
+assert.equal(root.querySelector("#dz-url-input").placeholder, t("view.input.placeholder"));
+if (originalNavigator) Object.defineProperty(globalThis, "navigator", originalNavigator);
+else delete globalThis.navigator;
+setLocale("en");
+await act(async () => {
+  const { update } = await import("../src/main.ts");
+  update();
 });
 
 async function start() {

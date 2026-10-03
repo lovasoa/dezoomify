@@ -1,8 +1,6 @@
 import {
   copyDiagnosticText,
   createAttemptDiagnostics,
-  retainDiagnosticReport,
-  retainDiagnostics,
   saveDiagnosticReport,
 } from "@dezoomify/browser-runtime";
 import type { ViewContext } from "@dezoomify/shared-ui";
@@ -12,6 +10,7 @@ import {
   clearHistory as clearHistoryStore,
   detailOf,
   formatMissingSummary,
+  getLocale,
   HISTORY_KEY_DESKTOP,
   type HistoryEntry,
   isJobError,
@@ -19,6 +18,7 @@ import {
   loadHistory as loadHistoryStore,
   PartialDecisionActions,
   type Presentation,
+  pickLocale,
   presentFailure,
   presentIdle,
   presentOutput,
@@ -28,6 +28,7 @@ import {
   readInitialUrl,
   renderView,
   saveHistory as saveHistoryStore,
+  setLocale,
   t,
   toHistoryEntry,
   trimTechnical,
@@ -50,6 +51,17 @@ import {
 import type { DesktopSettings } from "./settings.ts";
 import { defaultOutputDirectory, loadSettings, resetSettings, saveSettings } from "./settings.ts";
 import { DesktopSettingsView } from "./settingsView.tsx";
+
+setLocale(
+  pickLocale(
+    typeof navigator === "undefined"
+      ? undefined
+      : navigator.languages?.length
+        ? navigator.languages
+        : navigator.language,
+  ),
+);
+if (typeof document !== "undefined") document.documentElement.lang = getLocale();
 
 const root = typeof document !== "undefined" ? document.getElementById("root") : null;
 
@@ -291,7 +303,6 @@ function handleSubmitUrl(url: string): void {
 function retireActiveJob(): void {
   const diagnostics = currentAttempt.diagnostics;
   diagnostics.finish("retired", { reason: "replaced-or-reset" });
-  retainDiagnostics(diagnostics);
   currentAttempt.retired = true;
   const handle = currentAttempt.activeHandle;
   currentAttempt.activeHandle = null;
@@ -300,11 +311,7 @@ function retireActiveJob(): void {
   currentAttempt.partial = null;
   currentAttempt.localFailure = null;
   clearJobViewState();
-  if (handle)
-    void readNativeDiagnostics(handle.id)
-      .then(retainDiagnosticReport, () => {})
-      .finally(() => handle.dispose())
-      .catch(() => undefined);
+  if (handle) void handle.dispose().catch(() => undefined);
   currentAttempt = newAttempt();
 }
 

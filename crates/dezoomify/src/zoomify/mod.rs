@@ -383,8 +383,6 @@ mod ngv;
 fn contains_zoomify_declaration(contents: &[u8]) -> bool {
     SHOW_IMAGE_RE.is_match(contents)
         || IMAGE_PATH_RE.is_match(contents)
-        || FLUID_ACCESS_RE.is_match(contents)
-        || OPENLAYERS_RE.is_match(contents)
         || script_blocks(contents)
             .iter()
             .any(|(_, script)| TILE_SERVICE_RE.is_match(script))
@@ -571,6 +569,51 @@ mod tests {
             panic!("Zoomify levels must be grids")
         };
         plan.tiles_row_major().next().unwrap().unwrap().request.uri
+    }
+
+    #[test]
+    fn specialized_viewers_follow_their_metadata_routes() {
+        let (catalog, requests) = crate::test_support::discover(
+            SPEC,
+            "https://museum.example/viewer/page",
+            &[
+                (br#"<script>accessnumber='object42';</script>"#, None),
+                (br#"<imagefile format="zoomify">https://museum.example/images/object42</imagefile>"#, None),
+                (XML, None),
+            ],
+        );
+        assert_eq!(
+            requests[1].uri,
+            "https://museum.example/scripts/XMLBroker.new.php?Lang=2&contentType=IMAGES&contentID=object42"
+        );
+        assert_eq!(
+            requests[2].uri,
+            "https://museum.example/images/object42/ImageProperties.xml"
+        );
+        assert_eq!(
+            first_tile(catalog.unwrap()),
+            "https://museum.example/images/object42/TileGroup0/0-0-0.jpg"
+        );
+
+        let (catalog, requests) = crate::test_support::discover(
+            SPEC,
+            "https://museum.example/viewer/page",
+            &[
+                (
+                    br#"<div class="ete-openlayers-src">../images/map</div>"#,
+                    None,
+                ),
+                (XML, None),
+            ],
+        );
+        assert_eq!(
+            requests[1].uri,
+            "https://museum.example/images/map/ImageProperties.xml"
+        );
+        assert_eq!(
+            first_tile(catalog.unwrap()),
+            "https://museum.example/images/map/TileGroup0/0-0-0.jpg"
+        );
     }
 
     #[test]

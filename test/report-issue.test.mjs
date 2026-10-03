@@ -29,6 +29,30 @@ test("issue draft keeps evidence and bounds the encoded URL", () => {
   assert.match(body, /challenge/);
   assert.ok(body.includes(r.context.input));
 });
+test("issue draft identifies the source and product and explains structured failures", () => {
+  for (const product of ["website", "extension", "desktop"]) {
+    const d = createDiagnosticRecorder({
+      id: "redirect", now: () => 0,
+      context: { input: "https://collection.example/item", product },
+    });
+    d.record("debug", "request", {
+      url: "https://collection.example/item", final_url: "https://images.example/viewer",
+    });
+    d.record("debug", "request", {
+      url: "https://tiles.example/0.jpg", final_url: "https://cdn.example/0.jpg",
+    });
+    const error = { kind: "http-error", status: 403, transport: "direct", request: "https://images.example/info.json", detail: "Server said ```denied```" };
+    d.finish("failed", error);
+    const url = new URL(diagnosticIssueUrl(d.report(), error));
+    assert.equal(url.searchParams.get("title"), `images.example : ${product} report`);
+    const body = url.searchParams.get("body");
+    assert.ok(body.startsWith("https://collection.example/item\nResolved URL: https://images.example/viewer"));
+    assert.match(body, /^> .+/m);
+    assert.ok(body.indexOf("status: 403") < body.indexOf("````text"));
+    assert.match(body, /"kind": "http-error"/);
+    assert.ok(body.endsWith("\n````\n"));
+  }
+});
 test("failed clipboard leaves selectable report and never claims success", async () => {
   const el = makeContainer();
   const root = createRoot(el);

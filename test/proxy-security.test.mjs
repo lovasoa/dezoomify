@@ -10,7 +10,6 @@ import {
   parseIPv4,
   stripUpstreamHeaders,
   validateProxyTarget,
-  validateUpstreamMethod,
 } from "../src/server/security.ts";
 
 function hdr(obj) {
@@ -96,11 +95,7 @@ test("DNS rebinding double-check blocks private resolution", () => {
   assert.equal(validateProxyTarget("https://evil.test/x.json", { resolveHost: resolve }).ok, false);
 });
 
-test("methods and content types", () => {
-  assert.equal(validateUpstreamMethod("GET"), true);
-  assert.equal(validateUpstreamMethod("HEAD"), true);
-  assert.equal(validateUpstreamMethod("POST"), false);
-  assert.equal(validateUpstreamMethod("PUT"), false);
+test("metadata content types", () => {
   assert.equal(isAllowedMetadataContentType("application/x-javascript"), true);
   assert.equal(isAllowedMetadataContentType("application/ecmascript; charset=utf-8"), true);
   assert.equal(isAllowedMetadataContentType("TEXT/JAVASCRIPT; charset=UTF-8"), true);

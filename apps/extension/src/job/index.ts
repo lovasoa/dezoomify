@@ -1,12 +1,21 @@
 import { createAttemptPermissions, loadTileImage, originOfUrl } from "@dezoomify/browser-runtime";
 import { createBrowserApplication } from "@dezoomify/browser-runtime/application";
-import { jobPageTitle, suggestedNameFor } from "@dezoomify/shared-ui";
+import {
+  getLocale,
+  jobPageTitle,
+  pickLocale,
+  setLocale,
+  suggestedNameFor,
+} from "@dezoomify/shared-ui";
 import type { ResourceRead } from "@dezoomify/wasm-bindings";
 import { browser as api } from "wxt/browser";
 import { createExtensionFetcher } from "../runtime/fetch.ts";
 import { saveExtensionBlob } from "./download.ts";
 import { createSourceAccess } from "./source-access.ts";
 import { createResourceFetcher } from "./transport.ts";
+
+setLocale(pickLocale(navigator.languages?.length ? navigator.languages : navigator.language));
+document.documentElement.lang = getLocale();
 
 const TESTING = import.meta.env.MODE === "testing";
 const sourceTabParam = new URLSearchParams(location.hash.slice(1)).get("sourceTabId");

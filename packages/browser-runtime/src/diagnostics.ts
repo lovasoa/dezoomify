@@ -7,7 +7,6 @@ import {
 
 let sequence = 0;
 declare const __DEZOOMIFY_VERSION__: string;
-const completed: DiagnosticReport[] = [];
 
 /** One recorder per product attempt, allocated before input validation. */
 export function createAttemptDiagnostics(
@@ -43,20 +42,6 @@ export async function copyDiagnosticText(text: string): Promise<void> {
   } finally {
     area.remove();
   }
-}
-
-export function retainDiagnostics(recorder: DiagnosticRecorder): void {
-  retainDiagnosticReport(recorder.report());
-}
-
-export function retainDiagnosticReport(report: DiagnosticReport): void {
-  completed.push(report);
-  while (completed.length > 10 || JSON.stringify(completed).length * 6 > 10 * 1024 * 1024)
-    completed.shift();
-}
-
-export function recentDiagnosticReports(): DiagnosticReport[] {
-  return structuredClone(completed);
 }
 
 /** Saving diagnostics is a distinct explicit user action, never a job save. */

@@ -55,14 +55,6 @@ export interface ViewRenderOptions {
 
 export type ViewPhase = Presentation["phase"];
 
-export interface ConfirmModalArgs {
-  id?: string;
-  title: string;
-  subtitle?: string;
-  bodyLines: string[];
-  confirmLabel: string;
-  declineLabel: string;
-}
 export interface PlatformHints {
   userAgent?: string;
   platform?: string;

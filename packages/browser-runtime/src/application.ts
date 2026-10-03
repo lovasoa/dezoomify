@@ -37,7 +37,6 @@ import { BrowserHost, type BrowserHostDependencies } from "./browser-host.ts";
 import {
   copyDiagnosticText,
   createAttemptDiagnostics,
-  retainDiagnostics,
   saveDiagnosticReport,
 } from "./diagnostics.ts";
 import { createJobActivity } from "./job-activity.ts";
@@ -170,7 +169,6 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
     retiring = Promise.all([retiring, a.host?.settle()]).then(() => {});
     a.capabilities?.dispose?.();
     a.diagnostics.finish("retired");
-    retainDiagnostics(a.diagnostics);
     return retiring;
   }
 

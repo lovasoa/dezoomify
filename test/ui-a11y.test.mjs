@@ -8,12 +8,7 @@ import {
   presentOutput,
   presentProgress,
 } from "../packages/shared-ui/src/presentation.ts";
-import {
-  openConfirmModal,
-  openModal,
-  renderView,
-  showExtensionGuidance,
-} from "../packages/shared-ui/src/view.tsx";
+import { openModal, renderView, showExtensionGuidance } from "../packages/shared-ui/src/view.tsx";
 import { act, click, document, makeContainer } from "./react-dom.mjs";
 
 const callbacks = {
@@ -271,46 +266,6 @@ test("static accessibility contract: extension guidance renders a labelled React
   assert.equal(backdrop.getAttribute("aria-modal"), "true");
   assertButtonsNamed(backdrop, "extension guidance");
   assert.match(backdrop.textContent, /Chrome Web Store/);
-});
-
-test("static accessibility contract: confirm dialog names its actions and focuses decline first", async () => {
-  const prototype = document.defaultView.HTMLElement.prototype;
-  const originalFocus = prototype.focus;
-  let focused = null;
-  prototype.focus = function focus() {
-    focused = this;
-  };
-  try {
-    let pending;
-    act(() => {
-      pending = openConfirmModal(document, {
-        title: "Send to desktop app?",
-        subtitle: "Destination: Dezoomify desktop app",
-        bodyLines: [
-          "Origins: https://museum.example/",
-          "Cookies: <img src=x>",
-          "Job: job:1",
-          "Nothing is sent until you confirm.",
-        ],
-        confirmLabel: "Send to desktop app",
-        declineLabel: "Stay in extension",
-      });
-    });
-    assert.ok(pending instanceof Promise, "consent resolves asynchronously on explicit choice");
-    const backdrop = document.querySelector(".dz-modal-backdrop");
-    assert.ok(backdrop, "dialog mounted");
-    assert.equal(backdrop.getAttribute("role"), "dialog");
-    assert.equal(backdrop.getAttribute("aria-modal"), "true");
-    assert.equal(backdrop.getAttribute("aria-labelledby"), "dz-modal-title");
-    assertButtonsNamed(backdrop, "confirm dialog");
-    const text = backdrop.textContent;
-    assert.match(text, /Send to desktop app\?/);
-    assert.match(text, /Stay in extension/);
-    assert.ok(text.includes("Cookies: <img src=x>"), "site-influenced lines stay literal text");
-    assert.equal(focused?.textContent, "Stay in extension", "initial focus fails safe on decline");
-  } finally {
-    prototype.focus = originalFocus;
-  }
 });
 
 function luminance(hex) {

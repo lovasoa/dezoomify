@@ -205,11 +205,6 @@ export function isBlockedIPv6(host: string): boolean {
   return false;
 }
 
-export function validateUpstreamMethod(method: string): boolean {
-  const m = method.toUpperCase();
-  return m === "GET" || m === "HEAD";
-}
-
 export function isAllowedMetadataContentType(contentType: string | null | undefined): boolean {
   const base = contentType?.split(";")[0]?.trim().toLowerCase() ?? "";
   return base.startsWith("application/vnd.") || METADATA_TYPE.test(base);

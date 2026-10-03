@@ -77,20 +77,11 @@ computer:
   site's own viewer.
 - **Viewing without saving.** Some sites show their pieces without letting
   the browser read the image data directly. The website then shows the
-  assembled picture below with a one-click **Send to desktop app** button:
-  the button names the image origin and the summary notes that no sign-in
-  details travel, one job only, kept in memory. The desktop app asks for
-  confirmation before anything runs. For a save that happens automatically, in the
-  format you choose, use the [desktop app](./desktop-app.md).
+  assembled picture below. To save it, copy the image address and paste it
+  into the [desktop app](./desktop-app.md).
 - **Colors may shift.** The browser save does not keep the original color
   profile (ICC) or photo metadata (EXIF). The desktop app preserves the
   first tile's color profile for exact colors.
-
-When an image is too large for the tab, the error offers the same one-click
-Send to desktop app with the origin named. Local files (`file:` addresses)
-cannot leave the browser: the error shows a local-only note instead of a
-link. Open the [desktop app](./desktop-app.md) and choose the file there;
-nothing is sent.
 
 ## Next steps
 

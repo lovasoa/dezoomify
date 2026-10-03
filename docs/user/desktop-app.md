@@ -82,11 +82,7 @@ argument, or drive it from the terminal; see the
 Use the [browser extension](./browser-extension.md) to work with pages that
 require your existing browser session.
 
-**From the website:** the **Send to desktop app** button carries
-only the image address, never passwords or cookies in the link. The app
-validates the link (http(s) only, no userinfo, no sensitive query or
-fragment keys) and shows the source plus provenance for explicit
-confirmation. Nothing runs until confirmation; declining does nothing.
+**From the website:** copy the image address and paste it into the desktop app.
 
 **Sites that refuse visitors:** some servers only send their image to
 requests that appear to come from the site's own viewer. If the save
