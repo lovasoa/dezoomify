@@ -75,7 +75,7 @@ fn rejects_unknown_flags_without_running_suites() {
     // network effect.
     let cases: &[&[&str]] = &[
         &["check", "--bogus"],
-        &["fixtures", "verify", "--bogus"],
+        &["fixtures", "capture"],
         &["fixtures", "serve", "--bogus"],
         &["test", "core", "--bogus"],
         &["test", "native", "--bogus"],

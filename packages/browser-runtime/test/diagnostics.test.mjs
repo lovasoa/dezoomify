@@ -5,11 +5,7 @@ import {
   diagnosticFields,
   formatDiagnosticReport,
 } from "../../shared-ui/src/diagnostics.ts";
-import {
-  copyDiagnosticText,
-  recentDiagnosticReports,
-  retainDiagnostics,
-} from "../src/diagnostics.ts";
+import { copyDiagnosticText } from "../src/diagnostics.ts";
 
 test("diagnostics preserve reproduction facts and Error causes without retaining payloads", () => {
   const url = "https://host/a%2Fb?token=abc&page=2&region=full&sig=def&lang=fr";
@@ -67,15 +63,6 @@ test("reports retain grouped causes and outcome under load independently of cons
   const other = createDiagnosticRecorder({ id: "b", now: () => now });
   d.record("error", "late-callback");
   assert.equal(other.report().failures.length, 0);
-});
-
-test("completed report retention is bounded and returns independent copies", () => {
-  for (let i = 0; i < 12; i++)
-    retainDiagnostics(createDiagnosticRecorder({ id: String(i), now: () => 0 }));
-  const reports = recentDiagnosticReports();
-  assert.equal(reports.length, 10);
-  reports[0].id = "changed";
-  assert.equal(recentDiagnosticReports()[0].id, "2");
 });
 
 test("clipboard rejection propagates instead of claiming a successful copy", async () => {

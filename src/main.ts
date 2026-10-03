@@ -10,8 +10,11 @@ import {
 } from "@dezoomify/browser-runtime";
 import { createBrowserApplication } from "@dezoomify/browser-runtime/application";
 import {
+  getLocale,
   HISTORY_KEY_WEBSITE,
   jobPageTitle,
+  pickLocale,
+  setLocale,
   showDesktopAppGuidance,
   showExtensionGuidance,
   suggestedNameFor,
@@ -19,6 +22,9 @@ import {
 import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.ts";
 import { createProxyTransport } from "./proxyTransport.ts";
 import { PROXY_MAX_BYTES } from "./server/security.ts";
+
+setLocale(pickLocale(navigator.languages?.length ? navigator.languages : navigator.language));
+document.documentElement.lang = getLocale();
 
 const preview = createPreviewControls();
 const proxyTransport = createProxyTransport(fetch, {

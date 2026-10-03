@@ -1,8 +1,7 @@
 //! `cargo xtask fixtures serve`: spawn the deterministic fixture server.
 //!
 //! Serves `testdata/scenarios` on loopback through the
-//! `dezoomify-fixture-server` binary (build it first with
-//! `cargo build -p dezoomify-fixture-server`). Unknown options fail instead
+//! Node server. Unknown options fail instead
 //! of being ignored.
 
 use std::path::PathBuf;
@@ -41,9 +40,9 @@ pub fn serve(args: &[String]) -> Result<(), String> {
         ));
     }
     let root = crate::repo_root();
-    let exe = crate::cargo_debug_binary("dezoomify-fixture-server")?;
-    let mut cmd = std::process::Command::new(&exe);
-    cmd.arg("--port")
+    let mut cmd = std::process::Command::new("node");
+    cmd.arg(root.join("test/fixture-server.mjs"))
+        .arg("--port")
         .arg(&port)
         .arg("--scenarios-dir")
         .arg(root.join("testdata/scenarios"))
@@ -51,12 +50,9 @@ pub fn serve(args: &[String]) -> Result<(), String> {
     if let Some(addr) = write_address {
         cmd.arg("--write-address").arg(addr);
     }
-    let status = cmd.status().map_err(|e| {
-        format!(
-            "failed to run {} (build it first with `cargo build -p dezoomify-fixture-server`): {e}",
-            exe.display()
-        )
-    })?;
+    let status = cmd
+        .status()
+        .map_err(|e| format!("failed to run Node fixture server: {e}"))?;
     if !status.success() {
         return Err("fixture server exited nonzero".to_string());
     }

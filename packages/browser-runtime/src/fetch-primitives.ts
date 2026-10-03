@@ -24,17 +24,6 @@ declare global {
 /** Byte cap for one tab-origin source response, enforced while streaming. */
 export const SOURCE_FETCH_BYTE_LIMIT = 8 * 1024 * 1024;
 
-/** HTTP methods a declared source request may use. */
-export const FETCH_METHODS: readonly string[] = Object.freeze([
-  "GET",
-  "POST",
-  "PUT",
-  "PATCH",
-  "DELETE",
-  "HEAD",
-  "OPTIONS",
-]);
-
 /** Shape bounds for declared request headers. */
 export const REQUEST_HEADER_LIMITS = Object.freeze({
   maxCount: 64,
@@ -74,31 +63,6 @@ export function originOfUrl(value: unknown): string {
   } catch {
     return "";
   }
-}
-
-/** Origin of a public URL, null when the URL is not publicly fetchable. @param {unknown} value */
-export function originOfPublicUrl(value: unknown): string | null {
-  if (!isPublicHttpUrl(value)) return null;
-  const origin = originOfUrl(value);
-  return origin === "" ? null : origin;
-}
-
-/**
- * Normalize a declared method, null when disallowed. `undefined`
- * means GET, matching fetch defaults.
- * @param {unknown} method
- */
-export function normalizeFetchMethod(method: unknown): string | null {
-  if (method === undefined) return "GET";
-  if (
-    typeof method !== "string" ||
-    method.length === 0 ||
-    method.length > 16 ||
-    !/^[A-Za-z]+$/.test(method)
-  )
-    return null;
-  const normalized = method.toUpperCase();
-  return (FETCH_METHODS as readonly string[]).includes(normalized) ? normalized : null;
 }
 
 /**
@@ -167,11 +131,6 @@ export function forwardCoreHeaders(
     out[name] = rawValue;
   }
   return out;
-}
-
-/** Integer HTTP success status (200-299). @param {unknown} status */
-export function isHttpSuccessStatus(status: unknown): status is number {
-  return typeof status === "number" && Number.isInteger(status) && status >= 200 && status <= 299;
 }
 
 /**

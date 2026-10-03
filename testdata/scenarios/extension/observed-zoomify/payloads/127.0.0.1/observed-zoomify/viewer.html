@@ -5,7 +5,7 @@
 <h1>Museum viewer</h1>
 <iframe src="{{localhost_origin}}/observed-zoomify/opt-out.html" title="Analytics opt-out"></iframe>
 <script>
-  fetch("/fetch/https://fixtures.test/redirect-tiles/ImageProperties.xml")
+  fetch("/extension-inputs/ImageProperties.xml")
     .then(response => { if (!response.ok) throw new Error("metadata"); return response.text(); })
     .then(() => { document.documentElement.dataset.viewerReady = "true"; });
   document.currentScript.remove();

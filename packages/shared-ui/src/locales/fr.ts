@@ -65,7 +65,7 @@ export const fr = {
     "Un onglet de navigateur ne peut contenir qu une certaine quantite d image. L application de bureau assemble l image en memoire (jusqu a sa limite de canevas de 8 Gio, avec la memoire libre correspondante) et ecrit le resultat sur le disque.",
   "view.desktop.why2Title": "Enregistre l image terminee :",
   "view.desktop.why2Body":
-    "Chaque tache est enregistree dans un fichier de sortie sur votre ordinateur. Vous pouvez mettre plusieurs taches en file ; elles sont enregistrees une par une.",
+    "Chaque tache est enregistree dans un fichier de sortie sur votre ordinateur.",
   "view.desktop.why3Title": "Quand le site web ne peut pas terminer :",
   "view.desktop.why3Body":
     "Le site web interrompt la tache avec une erreur et renvoie vers l application de bureau pour l image en pleine taille.",
@@ -268,20 +268,6 @@ export const fr = {
     "Enregistrement annule. Le nettoyage est termine et tout fichier inacheve a ete supprime.",
   "desktop.copy.diagnostics": "Copier les diagnostics",
   "desktop.copy.copied": "Copie !",
-  // Multi-job queue panel (desktop integration queue, todo 5.3). Jobs save
-  // one at a time in the order they were added; a failed job never stops the
-  // rest. Queue entries show their input addresses.
-  "desktop.queue.title": "File d attente",
-  "desktop.queue.statusQueued": "En attente",
-  "desktop.queue.statusActive": "En cours",
-  "desktop.queue.statusDone": "Termine",
-  "desktop.queue.statusFailed": "Echoue",
-  "desktop.queue.statusCancelled": "Annule",
-  "desktop.queue.cancel": "Annuler",
-  "desktop.queue.cancelAll": "Tout annuler",
-  "desktop.queue.retry": "Reessayer",
-  "desktop.queue.summary": "{succeeded} terminees, {failed} echouees, {total} au total",
-  "desktop.queue.progress": "{current} tuiles sur {total}",
   "desktop.panel.jobActions": "Actions de la tache de bureau",
   "desktop.settings.reset": "Reinitialiser les parametres",
   "desktop.quick.folder": "Dossier",

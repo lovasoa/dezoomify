@@ -8,25 +8,22 @@
     <h1>zoomable fixture page</h1>
     <script>
       // Simulates an embedded viewer: requests the zoomable source so the
-      // extension's traffic scan can observe it. The fixture gateway on this
-      // loopback origin serves the DZI for the virtual fixtures.test host.
-      // The query-preserving `/fetch/<original-path>` form keeps the `.dzi`
-      // suffix visible to URL-shape discovery (the bare `/fetch` outer path
-      // is opaque to it).
+      // extension's traffic scan can observe it on the fixture origin.
+      // Ordinary file URLs preserve the metadata suffix for traffic discovery.
+      // Build only the selected URL so HTML discovery cannot find other scenarios.
       const scenario = new URLSearchParams(location.search).get("scenario");
-      const source = scenario === "corrupt"
-        ? "https://fixtures.test/cli/corrupt.dzi"
+      const sourceName = scenario === "corrupt"
+        ? "corrupt"
         : scenario === "permission"
-          ? "https://fixtures.test/cli/permission-tiles.yaml"
+          ? "permission-tiles"
           : scenario === "tile-redirect"
-            ? "https://fixtures.test/redirect-tiles/ImageProperties.xml"
-        : "https://fixtures.test/cli/pyramid.dzi";
+            ? "ImageProperties"
+            : "pyramid";
+      const extension = scenario === "permission" ? "yaml" : scenario === "tile-redirect" ? "xml" : "dzi";
       // The permission fixture's metadata is source-tab readable, while its
       // tile URLs deliberately use the equivalent but ungranted localhost
       // origin. This isolates the optional-host boundary from CORS behavior.
-      const sourceUrl = scenario === "permission"
-        ? `${location.origin}/fetch/${source}`
-        : `${location.origin}/fetch/${source}?url=${encodeURIComponent(source)}`;
+      const sourceUrl = new URL(`/extension-inputs/${sourceName}.${extension}`, location.origin);
       fetch(sourceUrl)
         .then((r) => {
           if (!r.ok) throw new Error(`status ${r.status}`);

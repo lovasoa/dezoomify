@@ -1,9 +1,0 @@
-{
-  "outcome": "failed",
-  "code": "partial-discarded",
-  "recovery": "retry",
-  "phase": "acquisition",
-  "retryable": true,
-  "transport": "native",
-  "resourceKind": "tile"
-}

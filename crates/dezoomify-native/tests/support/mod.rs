@@ -114,17 +114,6 @@ pub fn scenario_payload(name: &str) -> Vec<u8> {
     .unwrap_or_else(|e| panic!("read payload {name}: {e}"))
 }
 
-/// Thin adapter: one published result as the shared golden records it.
-pub fn golden_result(outcome: &Publication) -> dezoomify_fixture_server::GoldenResult {
-    let canvas = outcome.output.canvas.as_ref().expect("published canvas");
-    dezoomify_fixture_server::GoldenResult {
-        image_size: (canvas.width as u64, canvas.height as u64),
-        tile_count: outcome.tile_count as u64,
-        output_format: outcome.output.format.as_str().to_string(),
-        partial: !outcome.output.is_complete(),
-    }
-}
-
 pub const DZI_512: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <Image TileSize="256" Format="png" Overlap="0" xmlns="http://schemas.microsoft.com/deepzoom/2008">
   <Size Width="512" Height="512"/>
@@ -143,51 +132,24 @@ pub fn serve_counted(
     shared: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>>,
     counts: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>>,
 ) -> String {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
-    let port = listener.local_addr().expect("addr").port();
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(mut stream) = stream else { break };
-            let shared = std::sync::Arc::clone(&shared);
-            let counts = std::sync::Arc::clone(&counts);
-            std::thread::spawn(move || {
-                use std::io::{Read, Write};
-                let mut head = Vec::new();
-                let mut byte = [0u8; 1];
-                while head.len() < 8192 {
-                    let Ok(n) = stream.read(&mut byte) else {
-                        return;
-                    };
-                    if n == 0 {
-                        break;
-                    }
-                    head.extend_from_slice(&byte);
-                    if head.ends_with(b"\r\n\r\n") {
-                        break;
-                    }
-                }
-                let path = String::from_utf8_lossy(&head)
-                    .lines()
-                    .next()
-                    .and_then(|line| line.split_whitespace().nth(1))
-                    .unwrap_or("/")
-                    .to_string();
-                counts
-                    .lock()
-                    .expect("lock")
-                    .entry(path.clone())
-                    .and_modify(|n| *n += 1)
-                    .or_insert(1);
-                let body = shared
-                    .lock()
-                    .expect("lock")
-                    .get(&path)
-                    .cloned()
-                    .unwrap_or_else(|| http_response("404 Not Found", "text/plain", b"not found"));
-                let _ = stream.write_all(&body);
-                let _ = stream.flush();
-            });
-        }
+    let server = dezoomify_fixture_server::NodeServer::raw("127.0.0.1", move |request| {
+        let path = request.path;
+        counts
+            .lock()
+            .expect("lock")
+            .entry(path.clone())
+            .and_modify(|n| *n += 1)
+            .or_insert(1);
+        shared
+            .lock()
+            .expect("lock")
+            .get(&path)
+            .cloned()
+            .unwrap_or_else(|| http_response("404 Not Found", "text/plain", b"not found"))
+            .into()
     });
-    format!("http://127.0.0.1:{port}")
+    let origin = server.origin.clone();
+    // Stdin closes when the test process exits, so Node cannot outlive it.
+    std::mem::forget(server);
+    origin
 }

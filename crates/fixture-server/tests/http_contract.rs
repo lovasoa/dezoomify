@@ -1,23 +1,19 @@
-//! HTTP contract tests: exact method/status/headers/body, HEAD semantics,
-//! templating, generators, Arts signing, traversal rejection, and deterministic
-//! startup. Ephemeral loopback ports only; in-process servers need no
-//! readiness sleep (the bound address implies listening); the one spawned
-//! subprocess test polls its address file with a bounded budget.
+//! HTTP fixture tests: file conventions, HEAD, templating, local handlers,
+//! authentication, Arts signing, and deterministic
+//! startup. Node owns ephemeral loopback ports; its readiness notification
+//! and address file are emitted only after listening.
 
 mod common;
 
 use common::TestServer;
+use dezoomify_fixture_server::replay_url;
 
 #[tokio::test]
 async fn layout_convention_serves_payloads_without_routes() {
-    // The payload layout convention has no routes.json entry: any payload laid
-    // out as `payloads/{host}{path}` serves at `{host}{path}` with an inferred
-    // type. `native/cli-dzi` relies on this for its DZI metadata route.
+    // Files at `payloads/{host}{path}` serve at `{host}{path}` with an inferred
+    // type. No registration is required.
     let srv = TestServer::start().await;
-    let url = format!(
-        "{}/fetch?url=https://fixtures.test/cli/pyramid.dzi",
-        srv.base
-    );
+    let url = replay_url(&srv.base, "https://fixtures.test/cli/pyramid.dzi");
     let res = reqwest::get(&url).await.expect("get");
     assert_eq!(res.status(), 200);
     assert_eq!(
@@ -36,14 +32,12 @@ async fn layout_convention_serves_payloads_without_routes() {
 }
 
 #[tokio::test]
-async fn exact_payload_beats_prefix_wildcard() {
-    // `web/iiif-discovery` serves a jpeg stub for any
-    // `/fixtures/iiif-private-id/` prefix; the concrete `info.json` route
-    // must win regardless of load order.
+async fn metadata_file_beats_tile_fallback() {
+    // The synthetic IIIF tile handler yields to the actual metadata file.
     let srv = TestServer::start().await;
-    let url = format!(
-        "{}/fetch?url=http://127.0.0.1/fixtures/iiif-private-id/info.json",
-        srv.base
+    let url = replay_url(
+        &srv.base,
+        "http://127.0.0.1/fixtures/iiif-private-id/info.json",
     );
     let res = reqwest::get(&url).await.expect("get");
     assert_eq!(res.status(), 200);
@@ -64,9 +58,9 @@ async fn exact_payload_beats_prefix_wildcard() {
 #[tokio::test]
 async fn static_payload_exact_bytes_and_headers() {
     let srv = TestServer::start().await;
-    let url = format!(
-        "{}/fetch?url=https://fixtures.test/zoomify/ImageProperties.xml",
-        srv.base
+    let url = replay_url(
+        &srv.base,
+        "https://fixtures.test/zoomify/ImageProperties.xml",
     );
     let res = reqwest::get(&url).await.expect("get");
     assert_eq!(res.status(), 200);
@@ -118,6 +112,11 @@ async fn protected_routes_require_a_session_without_logging_its_value() {
     let tile = format!("{}/protected/artwork_files/9/0_0.png", srv.base);
     let denied = reqwest::get(&tile).await.expect("unauthenticated tile");
     assert_eq!(denied.status(), 403);
+    // A static backing file cannot bypass the handler's directory protection.
+    let denied = reqwest::get(format!("{}/protected/tile-0_0.png", srv.base))
+        .await
+        .expect("unauthenticated backing file");
+    assert_eq!(denied.status(), 403);
     let allowed = reqwest::Client::new()
         .get(tile)
         .header("cookie", "fixture_session=extension-e2e")
@@ -144,7 +143,13 @@ async fn protected_routes_require_a_session_without_logging_its_value() {
     );
 
     let log = srv.log_text();
-    assert!(log.contains("missing-required-cookie"));
+    let events: Vec<serde_json::Value> = log
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("request event"))
+        .collect();
+    assert!(events
+        .iter()
+        .any(|event| event["path"] == "/protected/artwork.dzi" && event["status"] == 403));
     assert!(
         !log.contains("extension-e2e"),
         "cookie values stay out of fixture logs"
@@ -154,10 +159,7 @@ async fn protected_routes_require_a_session_without_logging_its_value() {
 #[tokio::test]
 async fn templating_substitutes_origin() {
     let srv = TestServer::start().await;
-    let url = format!(
-        "{}/fetch?url=https://fixtures.test/topviewer/data.json",
-        srv.base
-    );
+    let url = replay_url(&srv.base, "https://fixtures.test/topviewer/data.json");
     let body = reqwest::get(&url)
         .await
         .expect("get")
@@ -175,10 +177,7 @@ async fn templating_substitutes_origin() {
 #[tokio::test]
 async fn templating_substitutes_loopback_alias() {
     let srv = TestServer::start().await;
-    let url = format!(
-        "{}/fetch?url=https://fixtures.test/cli/permission-tiles.yaml",
-        srv.base
-    );
+    let url = replay_url(&srv.base, "https://fixtures.test/cli/permission-tiles.yaml");
     let body = reqwest::get(&url)
         .await
         .expect("get")
@@ -194,33 +193,11 @@ async fn templating_substitutes_loopback_alias() {
 }
 
 #[tokio::test]
-async fn fetch_path_preserves_the_fixture_url_shape() {
-    let srv = TestServer::start().await;
-    let url = format!(
-        "{}/fetch/https://fixtures.test/cli/permission-tiles.yaml",
-        srv.base
-    );
-    let res = reqwest::get(&url).await.expect("get");
-    assert_eq!(res.status(), 200);
-    assert!(res.text().await.expect("text").contains("url_template"));
-}
-
-#[tokio::test]
-async fn unknown_resource_is_stable_fixture_missing() {
-    let srv = TestServer::start().await;
-    let url = format!("{}/fetch?url=https://nope.test/missing.xml", srv.base);
-    let res = reqwest::get(&url).await.expect("get");
-    assert_eq!(res.status(), 404);
-    let v: serde_json::Value = res.json().await.expect("json");
-    assert_eq!(v["error"], "fixture-missing");
-}
-
-#[tokio::test]
 async fn head_returns_headers_without_body() {
     let srv = TestServer::start().await;
-    let url = format!(
-        "{}/fetch?url=https://fixtures.test/zoomify/ImageProperties.xml",
-        srv.base
+    let url = replay_url(
+        &srv.base,
+        "https://fixtures.test/zoomify/ImageProperties.xml",
     );
     let res = reqwest::Client::new()
         .head(&url)
@@ -232,28 +209,12 @@ async fn head_returns_headers_without_body() {
 }
 
 #[tokio::test]
-async fn unsupported_method_is_rejected() {
-    let srv = TestServer::start().await;
-    let url = format!(
-        "{}/fetch?url=https://fixtures.test/zoomify/ImageProperties.xml",
-        srv.base
-    );
-    let res = reqwest::Client::new()
-        .post(&url)
-        .send()
-        .await
-        .expect("post");
-    assert_eq!(res.status(), 405);
-}
-
-#[tokio::test]
 async fn generic_probe_success_and_missing() {
     let srv = TestServer::start().await;
-    let ok = format!(
-        "{}/fetch?url=http://127.0.0.1/fixtures/generic/padded.svg?x=0%26y=0",
-        srv.base
+    let ok = replay_url(
+        &srv.base,
+        "http://127.0.0.1/fixtures/generic/padded.svg?x=0&y=0",
     );
-    // Note: query params must be URL-encoded through /fetch.
     let res = reqwest::get(&ok).await.expect("get");
     assert_eq!(res.status(), 200);
     assert!(res
@@ -263,26 +224,55 @@ async fn generic_probe_success_and_missing() {
         .to_str()
         .unwrap()
         .contains("svg"));
-    let miss = format!(
-        "{}/fetch?url=http://127.0.0.1/fixtures/generic/padded.svg?x=9%26y=9",
-        srv.base
+    let miss = replay_url(
+        &srv.base,
+        "http://127.0.0.1/fixtures/generic/padded.svg?x=9&y=9",
     );
     let res = reqwest::get(&miss).await.expect("get");
     assert_eq!(res.status(), 404);
+    assert_eq!(res.text().await.unwrap(), "fixture error");
+    // A handler's 404 finishes a direct request too; it must not fall through.
+    let res = reqwest::get(format!("{}/fixtures/generic/padded.svg?x=9&y=9", srv.base))
+        .await
+        .expect("direct missing tile");
+    assert_eq!(res.status(), 404);
+    assert_eq!(res.text().await.unwrap(), "fixture error");
+}
+
+#[tokio::test]
+async fn compressed_metadata_is_sent_without_text_substitution() {
+    let srv = TestServer::start().await;
+    let res = reqwest::get(replay_url(
+        &srv.base,
+        "https://fixtures.test/edge/gzip-cache/pyramid.dzi",
+    ))
+    .await
+    .expect("compressed metadata");
+    assert_eq!(res.status(), 200);
+    assert_eq!(res.headers().get("content-encoding").unwrap(), "gzip");
+    // This client's gzip feature is disabled, so compare the exact wire bytes.
+    let expected = std::fs::read(TestServer::scenarios_path(
+        "native/edge-gzip-cache/payloads/fixtures.test/edge/gzip-cache/pyramid.dzi.gz",
+    ))
+    .expect("plain metadata");
+    assert_eq!(
+        res.bytes().await.expect("gzip body").as_ref(),
+        expected.as_slice()
+    );
 }
 
 #[tokio::test]
 async fn assembly_tile_valid_and_invalid() {
     let srv = TestServer::start().await;
-    let ok = format!(
-        "{}/fetch?url=http://127.0.0.1/fixtures/assembly/tile.svg?w=256%26h=256%26color=ff0000",
-        srv.base
+    let ok = replay_url(
+        &srv.base,
+        "http://127.0.0.1/fixtures/assembly/tile.svg?w=256&h=256&color=ff0000",
     );
     let res = reqwest::get(&ok).await.expect("get");
     assert_eq!(res.status(), 200);
-    let bad = format!(
-        "{}/fetch?url=http://127.0.0.1/fixtures/assembly/tile.svg?w=0%26h=256%26color=red",
-        srv.base
+    let bad = replay_url(
+        &srv.base,
+        "http://127.0.0.1/fixtures/assembly/tile.svg?w=0&h=256&color=red",
     );
     let res = reqwest::get(&bad).await.expect("get");
     assert_eq!(res.status(), 400);
@@ -291,10 +281,7 @@ async fn assembly_tile_valid_and_invalid() {
 #[tokio::test]
 async fn arts_wrong_signature_is_forbidden() {
     let srv = TestServer::start().await;
-    let url = format!(
-        "{}/fetch?url=http://127.0.0.1/arts/path=x0-y0-z0-tWRONG",
-        srv.base
-    );
+    let url = replay_url(&srv.base, "http://127.0.0.1/arts/path=x0-y0-z0-tWRONG");
     let res = reqwest::get(&url).await.expect("get");
     assert_eq!(res.status(), 403);
 }
@@ -303,9 +290,9 @@ async fn arts_wrong_signature_is_forbidden() {
 async fn arts_plain_tile_decrypts() {
     let srv = TestServer::start().await;
     let sig = arts_signature(0, 0, 0);
-    let url = format!(
-        "{}/fetch?url=http://127.0.0.1/arts/plain=x0-y0-z0-t{sig}",
-        srv.base
+    let url = replay_url(
+        &srv.base,
+        &format!("http://127.0.0.1/arts/plain=x0-y0-z0-t{sig}"),
     );
     let res = reqwest::get(&url).await.expect("get");
     assert_eq!(res.status(), 200);
@@ -342,25 +329,12 @@ fn arts_signature(x: u32, y: u32, z: u32) -> String {
 }
 
 #[tokio::test]
-async fn proxy_branch_serves_fixtures() {
-    let srv = TestServer::start().await;
-    let url = format!(
-        "{}/proxy?url=https://fixtures.test/zoomify/ImageProperties.xml",
-        srv.base
-    );
-    let res = reqwest::get(&url).await.expect("get");
-    assert_eq!(res.status(), 200);
-    let missing = format!("{}/proxy", srv.base);
-    let res = reqwest::get(&missing).await.expect("get");
-    assert_eq!(res.status(), 400);
-}
-
-#[tokio::test]
 async fn startup_writes_address_after_listening() {
     let dir = std::env::temp_dir().join(format!("dz-addr-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("tmpdir");
     let addr_file = dir.join("server.addr");
-    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_dezoomify-fixture-server"))
+    let mut child = std::process::Command::new("node")
+        .arg(dezoomify_fixture_server::server_script())
         .args([
             "--port",
             "0",

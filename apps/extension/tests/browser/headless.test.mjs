@@ -21,7 +21,9 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import webdriver from "selenium-webdriver";
 import firefox from "selenium-webdriver/firefox.js";
+import { formats } from "../../../../test/support/formats.cjs";
 import {
+  assertSavedPyramid,
   decodePngPixels,
   decodePngSize,
   EXPECTED_HEIGHT,
@@ -47,6 +49,7 @@ const TILE_DIR = path.join(
 );
 let fixtureServer;
 let fixtureWork;
+const packages = new Map();
 
 before(async () => {
   fixtureWork = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-fixture-"));
@@ -65,6 +68,21 @@ function stagePackage(
   { grantHostPermissions = true, sourceHostOnly = false, scenario, restartBackground = false } = {},
 ) {
   const zip = path.join(dir, `dezoomify-${browser}.zip`);
+  // Chromium shares one package and selects the fixture through the driver URL.
+  // Firefox requires its driver to open the configured URL from inside the package.
+  if (browser === "chromium" && scenario?.startsWith("fixtures/")) scenario = "idle";
+  const key = JSON.stringify([
+    browser,
+    origin,
+    grantHostPermissions,
+    sourceHostOnly,
+    scenario,
+    restartBackground,
+  ]);
+  if (packages.has(key)) {
+    copyFileSync(packages.get(key), zip);
+    return zip;
+  }
   const wxtBrowser = browser === "chromium" ? "chrome" : browser;
   const staged = spawnSync(
     "pnpm",
@@ -84,32 +102,17 @@ function stagePackage(
   );
   assert.equal(staged.status, 0, `WXT package ${browser} failed:\n${staged.stderr}`);
   copyFileSync(path.join(EXTENSION_ROOT, ".output", `dezoomify-${wxtBrowser}.zip`), zip);
+  const cached = path.join(fixtureWork, `package-${packages.size}.zip`);
+  copyFileSync(zip, cached);
+  packages.set(key, cached);
   return zip;
 }
 
 async function startFixtureServer(workDir) {
-  const metadata = spawnSync("cargo", ["metadata", "--format-version", "1", "--no-deps"], {
-    cwd: REPO_ROOT,
-    encoding: "utf8",
-  });
-  assert.equal(metadata.status, 0, `cargo metadata failed:\n${metadata.stderr}`);
-  const targetDir = JSON.parse(metadata.stdout).target_directory;
-  assert.equal(typeof targetDir, "string", "cargo metadata must report target_directory");
-  const bin = path.join(
-    targetDir,
-    "debug",
-    `dezoomify-fixture-server${process.platform === "win32" ? ".exe" : ""}`,
-  );
-  // Like the WASM glue, target/ is an untracked cache, not a source of
-  // truth. Cargo's incremental build is cheap and guarantees that the test
-  // server implements the routes in this checkout.
-  const build = spawnSync("cargo", ["build", "-p", "dezoomify-fixture-server"], {
-    cwd: REPO_ROOT,
-    encoding: "utf8",
-  });
-  assert.equal(build.status, 0, `fixture server build failed:\n${build.stderr}`);
   const addrFile = path.join(workDir, "server.addr");
-  const proc = spawn(bin, [
+  const proc = spawn(process.execPath, [
+    path.join(REPO_ROOT, "test/fixture-server.mjs"),
+    "--parent-stdio",
     "--port",
     "0",
     "--write-address",
@@ -275,6 +278,8 @@ async function runChromiumJob(base, work, options = {}) {
       driverPage = await context.newPage();
       await driverPage.goto(driverUrl);
     }
+    if (options.scenario?.startsWith("fixtures/"))
+      await driverPage.goto(`${driverUrl}?scenario=${encodeURIComponent(options.scenario)}`);
     await driverPage.waitForFunction(
       () => typeof globalThis.__DEZOOMIFY_TEST_RUN__?.then === "function",
       { timeout: 15000 },
@@ -399,7 +404,8 @@ async function runFirefoxJob(base, work, runOptions = {}) {
   browserOptions.setPreference("browser.download.useDownloadDir", true);
   browserOptions.setPreference("browser.helperApps.neverAsk.saveToDisk", "image/png");
   assert.ok(existsSync(GECKODRIVER), "the pinned geckodriver package is not installed");
-  const service = new firefox.ServiceBuilder(GECKODRIVER);
+  // Firefox treats extension documents as privileged WebDriver contexts.
+  const service = new firefox.ServiceBuilder(GECKODRIVER).addArguments("--allow-system-access");
   const driver = await new webdriver.Builder()
     .forBrowser("firefox")
     .setFirefoxOptions(browserOptions)
@@ -412,8 +418,10 @@ async function runFirefoxJob(base, work, runOptions = {}) {
     await driver.wait(async () => {
       for (const handle of await driver.getAllWindowHandles()) {
         await driver.switchTo().window(handle);
-        if (!(await driver.getCurrentUrl()).endsWith("/test/driver.html")) continue;
-        const body = await driver.findElement(webdriver.By.css("body"));
+        const url = await driver.getCurrentUrl();
+        if (!url.includes("/test/driver.html")) continue;
+        const [body] = await driver.findElements(webdriver.By.css("body"));
+        if (!body) continue;
         const state = await body.getDomAttribute("data-driver");
         if (state === "failed") throw new Error(await body.getText());
         if (state === "ready") return true;
@@ -454,7 +462,7 @@ async function runFirefoxJob(base, work, runOptions = {}) {
       await waitForFixtureEvent(
         fixtureServer.logFile,
         logOffset,
-        (event) => event.route === "extension-source-access-proof" && event.status === 200,
+        (event) => event.path === "/__source-access-proof" && event.status === 200,
         "the authenticated direct job-page fetch",
       );
     }
@@ -467,6 +475,25 @@ async function runFirefoxJob(base, work, runOptions = {}) {
     return output;
   } finally {
     await driver.quit();
+  }
+}
+
+for (const [browser, run] of [
+  ["chromium", runChromiumJob],
+  ["firefox", runFirefoxJob],
+]) {
+  for (const fixture of formats) {
+    test(`${browser}: ${fixture.name} saves the shared pixels`, { timeout: 180000 }, async () => {
+      const work = mkdtempSync(path.join(tmpdir(), "dezoomify-format-"));
+      try {
+        assertSavedPyramid(
+          await run(fixtureServer.base, work, { scenario: `fixtures/${fixture.name}` }),
+          fixture.tolerance,
+        );
+      } finally {
+        rmSync(work, { recursive: true, force: true });
+      }
+    });
   }
 }
 

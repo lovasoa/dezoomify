@@ -3,11 +3,8 @@ import test from "node:test";
 import {
   decodeBase64Payload,
   forwardCoreHeaders,
-  isHttpSuccessStatus,
   isPublicHttpUrl,
   normalizeErrorPreviewText,
-  normalizeFetchMethod,
-  originOfPublicUrl,
   originOfUrl,
   sanitizeHeaderPair,
   validateRequestHeaders,
@@ -34,18 +31,6 @@ test("origin helpers separate strict comparison from public origins", () => {
   assert.equal(originOfUrl("http://127.0.0.1:8080/t.png"), "http://127.0.0.1:8080");
   assert.equal(originOfUrl("not a url"), "");
   assert.equal(originOfUrl(null), "");
-  assert.equal(originOfPublicUrl("https://gallery.example/a"), "https://gallery.example");
-  assert.equal(originOfPublicUrl("ftp://gallery.example/a"), null);
-  assert.equal(originOfPublicUrl(null), null);
-});
-
-test("method normalization defaults, uppercases, and rejects", () => {
-  assert.equal(normalizeFetchMethod(undefined), "GET");
-  assert.equal(normalizeFetchMethod("get"), "GET");
-  assert.equal(normalizeFetchMethod("POST"), "POST");
-  for (const bad of ["", "FETCH", "GET ", "G@T", "x".repeat(17), null, 42]) {
-    assert.equal(normalizeFetchMethod(bad), null, String(bad));
-  }
 });
 
 test("request header validation accepts well-formed pairs and rejects the rest", () => {
@@ -84,13 +69,6 @@ test("core header forwarding keeps the allowlist and drops credentials", () => {
   });
   assert.deepEqual(forwardCoreHeaders({ Accept: "text/html" }, "tile"), { accept: "text/html" });
   assert.deepEqual(forwardCoreHeaders(null, "tile"), {});
-});
-
-test("HTTP success is an integer 200-299", () => {
-  assert.equal(isHttpSuccessStatus(200), true);
-  assert.equal(isHttpSuccessStatus(299), true);
-  for (const bad of [199, 300, 404, 200.5, "200", null])
-    assert.equal(isHttpSuccessStatus(bad), false, String(bad));
 });
 
 test("base64 payload decoding round-trips and enforces bounds", () => {

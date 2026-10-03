@@ -1,20 +1,16 @@
 import {
   copyDiagnosticText,
   createAttemptDiagnostics,
-  retainDiagnosticReport,
-  retainDiagnostics,
   saveDiagnosticReport,
 } from "@dezoomify/browser-runtime";
 import type { ViewContext } from "@dezoomify/shared-ui";
 import {
   boundDiagnosticReport,
-  cancelAllQueueEntries,
-  cancelQueueEntry,
   causeOf,
   clearHistory as clearHistoryStore,
   detailOf,
-  finishActiveQueueEntry,
   formatMissingSummary,
+  getLocale,
   HISTORY_KEY_DESKTOP,
   type HistoryEntry,
   isJobError,
@@ -22,6 +18,7 @@ import {
   loadHistory as loadHistoryStore,
   PartialDecisionActions,
   type Presentation,
+  pickLocale,
   presentFailure,
   presentIdle,
   presentOutput,
@@ -31,7 +28,7 @@ import {
   readInitialUrl,
   renderView,
   saveHistory as saveHistoryStore,
-  summarizeQueue,
+  setLocale,
   t,
   toHistoryEntry,
   trimTechnical,
@@ -51,16 +48,20 @@ import {
   readNativeDiagnostics,
   validateSettings,
 } from "./native.ts";
-import type { DesktopQueue } from "./queue.ts";
-import {
-  createDesktopQueue,
-  enqueueDesktopQueue,
-  recordDesktopProgress,
-  retryDesktopEntry,
-} from "./queue.ts";
 import type { DesktopSettings } from "./settings.ts";
 import { defaultOutputDirectory, loadSettings, resetSettings, saveSettings } from "./settings.ts";
 import { DesktopSettingsView } from "./settingsView.tsx";
+
+setLocale(
+  pickLocale(
+    typeof navigator === "undefined"
+      ? undefined
+      : navigator.languages?.length
+        ? navigator.languages
+        : navigator.language,
+  ),
+);
+if (typeof document !== "undefined") document.documentElement.lang = getLocale();
 
 const root = typeof document !== "undefined" ? document.getElementById("root") : null;
 
@@ -80,7 +81,6 @@ function newAttempt() {
     paused: false,
     localFailure: null as JobError | null,
     lastInputUrl: "",
-    activeQueueId: null as string | null,
     heartbeatTimer: null as ReturnType<typeof setInterval> | null,
     viewCtx: {} as ViewContext,
   };
@@ -90,8 +90,6 @@ let currentAttempt = newAttempt();
 function owns(attempt: DesktopAttempt): boolean {
   return currentAttempt === attempt && !attempt.retired;
 }
-
-let desktopQueue: DesktopQueue = createDesktopQueue();
 
 const desktopMemoryFallback = new Map<string, string>();
 const desktopHistoryStore = {
@@ -214,19 +212,14 @@ function touchProgress(): void {
   a.lastProgressAt = now;
 }
 
-function failLocally(error: JobError, opts?: { detail?: string; settle?: boolean }): void {
-  const { settle, detail } = opts ?? {};
+function failLocally(error: JobError): void {
   const base = detailOf(error);
-  const parts = [base, detail && detail !== base ? detail : undefined]
-    .filter((part): part is string => Boolean(part))
-    .map((part) => trimTechnical(part));
   currentAttempt.localFailure = {
     ...error,
-    ...(parts.length > 0 ? { detail: parts.join("\n\n") } : {}),
+    ...(base ? { detail: trimTechnical(base) } : {}),
   };
   currentAttempt.diagnostics.finish("failed", { error: currentAttempt.localFailure });
   stopHeartbeat();
-  if (settle !== false) settleActiveQueue("failed", { errorCode: error.kind });
   update();
 }
 
@@ -299,27 +292,10 @@ function clearJobViewState(): void {
 function handleSubmitUrl(url: string): void {
   const trimmed = typeof url === "string" ? url.trim() : "";
   if (!isValidInputUrl(trimmed)) {
-    failLocally({ kind: "invalid-url" }, { settle: false });
+    failLocally({ kind: "invalid-url" });
     return;
   }
-  if (!isTerminalNow()) {
-    const res = enqueueDesktopQueue(desktopQueue, trimmed);
-    desktopQueue = res.queue;
-    if (res.code !== "ok" || !res.entry) {
-      failLocally({ kind: "invalid-url" }, { settle: false });
-      return;
-    }
-    if (res.entry.status === "queued") {
-      update();
-      return;
-    }
-    currentAttempt.activeQueueId = res.entry.id;
-  } else {
-    retireActiveJob();
-    const res = enqueueDesktopQueue(desktopQueue, trimmed);
-    desktopQueue = res.queue;
-    currentAttempt.activeQueueId = res.entry ? res.entry.id : null;
-  }
+  retireActiveJob();
   launchNativeJob(trimmed);
 }
 
@@ -327,7 +303,6 @@ function handleSubmitUrl(url: string): void {
 function retireActiveJob(): void {
   const diagnostics = currentAttempt.diagnostics;
   diagnostics.finish("retired", { reason: "replaced-or-reset" });
-  retainDiagnostics(diagnostics);
   currentAttempt.retired = true;
   const handle = currentAttempt.activeHandle;
   currentAttempt.activeHandle = null;
@@ -336,11 +311,7 @@ function retireActiveJob(): void {
   currentAttempt.partial = null;
   currentAttempt.localFailure = null;
   clearJobViewState();
-  if (handle)
-    void readNativeDiagnostics(handle.id)
-      .then(retainDiagnosticReport, () => {})
-      .finally(() => handle.dispose())
-      .catch(() => undefined);
+  if (handle) void handle.dispose().catch(() => undefined);
   currentAttempt = newAttempt();
 }
 
@@ -372,14 +343,6 @@ function launchNativeJob(trimmed: string): void {
       attempt.progress = progress;
       attempt.diagnostics.observe(progress);
       touchProgress();
-      if (attempt.activeQueueId && typeof progress.total === "number") {
-        desktopQueue = recordDesktopProgress(
-          desktopQueue,
-          attempt.activeQueueId,
-          progress.completed,
-          progress.total,
-        ).queue;
-      }
       update();
     },
     partial(question, value) {
@@ -410,8 +373,7 @@ function launchNativeJob(trimmed: string): void {
           output.canvas?.height,
           output.format,
         );
-      settleActiveQueue("done");
-      if (owns(attempt)) update();
+      update();
     })
     .catch((error: unknown) => {
       if (!owns(attempt)) return;
@@ -419,7 +381,6 @@ function launchNativeJob(trimmed: string): void {
       attempt.partial = null;
       if (isJobError(error) && causeOf(error).kind === "cancelled") {
         stopHeartbeat();
-        settleActiveQueue("cancelled");
         update();
         return;
       }
@@ -437,161 +398,6 @@ function launchNativeJob(trimmed: string): void {
             },
       );
     });
-}
-
-function settleActiveQueue(
-  outcome: "done" | "failed" | "cancelled",
-  detail?: { errorCode?: string },
-): void {
-  if (!currentAttempt.activeQueueId) return;
-  const finished = finishActiveQueueEntry(desktopQueue, outcome, detail?.errorCode);
-  desktopQueue = finished.queue;
-  trimDesktopQueue();
-  currentAttempt.activeQueueId = null;
-  const next = finished.next;
-  if (!next) {
-    update();
-    return;
-  }
-
-  retireActiveJob();
-  currentAttempt.activeQueueId = next.id;
-  launchNativeJob(next.inputUrl);
-}
-
-function trimDesktopQueue(): void {
-  if (desktopQueue.entries.length <= 24) return;
-  const settled = desktopQueue.entries.filter(
-    (e) => e.status !== "queued" && e.status !== "active",
-  );
-  const drop = settled.length - 20;
-  if (drop <= 0) return;
-  const dropIds = new Set(settled.slice(0, drop).map((e) => e.id));
-  desktopQueue = {
-    entries: desktopQueue.entries.filter((e) => !dropIds.has(e.id)),
-    activeId: desktopQueue.activeId,
-    nextId: desktopQueue.nextId,
-    idPrefix: desktopQueue.idPrefix,
-  };
-}
-
-function handleQueueCancelOne(id: string): void {
-  if (id === currentAttempt.activeQueueId) {
-    handleCancel();
-    return;
-  }
-  const res = cancelQueueEntry(desktopQueue, id);
-  if (res.code !== "ok") return;
-  desktopQueue = res.queue;
-  update();
-}
-
-function handleQueueCancelAll(): void {
-  const hadActive = currentAttempt.activeQueueId !== null;
-  desktopQueue = cancelAllQueueEntries(desktopQueue);
-  currentAttempt.activeQueueId = null;
-  if (hadActive) {
-    handleCancel();
-    return;
-  }
-  update();
-}
-
-function handleQueueRetry(id: string): void {
-  const res = retryDesktopEntry(desktopQueue, id);
-  if (res.code !== "ok" || !res.entry) return;
-  desktopQueue = res.queue;
-  if (res.entry.status === "active") {
-    retireActiveJob();
-    currentAttempt.activeQueueId = res.entry.id;
-    launchNativeJob(res.entry.inputUrl);
-    return;
-  }
-  update();
-}
-
-function desktopQueueStatusLabel(status: string): string {
-  if (status === "active") return t("desktop.queue.statusActive");
-  if (status === "done") return t("desktop.queue.statusDone");
-  if (status === "failed") return t("desktop.queue.statusFailed");
-  if (status === "cancelled") return t("desktop.queue.statusCancelled");
-  return t("desktop.queue.statusQueued");
-}
-
-function appendDesktopQueuePanel(aux: HTMLElement, doc: Document): void {
-  if (desktopQueue.entries.length === 0) return;
-  const box = doc.createElement("div");
-  box.className = "dz-queue-panel";
-  box.setAttribute("role", "region");
-  box.setAttribute("aria-label", t("desktop.queue.title"));
-  const title = doc.createElement("h2");
-  title.className = "dz-notice-title";
-  title.textContent = t("desktop.queue.title");
-  box.appendChild(title);
-  const summary = summarizeQueue(desktopQueue);
-  const summaryLine = doc.createElement("p");
-  summaryLine.className = "dz-notice-message";
-  summaryLine.setAttribute("role", "status");
-  summaryLine.setAttribute("aria-live", "polite");
-  summaryLine.textContent = t("desktop.queue.summary", {
-    succeeded: summary.succeeded,
-    failed: summary.failed,
-    total: summary.total,
-  });
-  box.appendChild(summaryLine);
-  const list = doc.createElement("ul");
-  list.className = "dz-queue-list";
-  for (const entry of desktopQueue.entries) {
-    const item = doc.createElement("li");
-    item.className = "dz-queue-item";
-    const label = doc.createElement("span");
-    label.className = "dz-queue-label";
-    let text = `${entry.inputUrl} - ${desktopQueueStatusLabel(entry.status)}`;
-    if (entry.status === "active" && entry.progress.total > 0) {
-      text += ` - ${t("desktop.queue.progress", {
-        current: entry.progress.acquired,
-        total: entry.progress.total,
-      })}`;
-    }
-    if (entry.status === "failed" && entry.errorCode) {
-      text += ` - ${entry.errorCode}`;
-    }
-    label.textContent = text;
-    item.appendChild(label);
-    const row = doc.createElement("div");
-    row.className = "dz-actions-row";
-    const addBtn = (btnLabel: string, primary: boolean, onClick: () => void): void => {
-      const btn = doc.createElement("button");
-      btn.type = "button";
-      btn.className = primary ? "dz-btn-tactile" : "dz-btn-secondary";
-      btn.textContent = btnLabel;
-      btn.addEventListener("click", onClick);
-      row.appendChild(btn);
-    };
-    if (entry.status === "queued" || entry.status === "active") {
-      const id = entry.id;
-      addBtn(t("desktop.queue.cancel"), false, () => handleQueueCancelOne(id));
-    }
-    if (entry.status === "failed" || entry.status === "cancelled") {
-      const id = entry.id;
-      addBtn(t("desktop.queue.retry"), true, () => handleQueueRetry(id));
-    }
-    if (row.childElementCount > 0) item.appendChild(row);
-    list.appendChild(item);
-  }
-  box.appendChild(list);
-  if (summary.pending > 0) {
-    const allRow = doc.createElement("div");
-    allRow.className = "dz-actions-row";
-    const allBtn = doc.createElement("button");
-    allBtn.type = "button";
-    allBtn.className = "dz-btn-secondary";
-    allBtn.textContent = t("desktop.queue.cancelAll");
-    allBtn.addEventListener("click", () => handleQueueCancelAll());
-    allRow.appendChild(allBtn);
-    box.appendChild(allRow);
-  }
-  aux.appendChild(box);
 }
 
 function handleCancel(): void {
@@ -691,9 +497,6 @@ function answerPartial(
 function handleReset(): void {
   retireActiveJob();
 
-  desktopQueue = createDesktopQueue();
-  currentAttempt.activeQueueId = null;
-
   const prefilled = readInitialUrl(globalThis.location);
   if (prefilled) currentAttempt.viewCtx.initialUrl = prefilled;
   else currentAttempt.viewCtx.initialUrl = undefined;
@@ -735,8 +538,7 @@ function ensureDesktopAuxPanel(): void {
     presentation.output !== undefined &&
     presentation.output.missing.length > 0;
   const showCancelledNote = presentation.phase === "cancelled";
-  const showQueue = presentation.phase !== "completed" && desktopQueue.entries.length > 1;
-  if (!showPartialDone && !showCancelledNote && !showQueue) return;
+  if (!showPartialDone && !showCancelledNote) return;
   const card = root.querySelector(".dz-card");
   if (!card) return;
 
@@ -783,8 +585,6 @@ function ensureDesktopAuxPanel(): void {
     note.textContent = t("desktop.cancel.note");
     aux.appendChild(note);
   }
-
-  if (showQueue) appendDesktopQueuePanel(aux, doc);
 
   card.appendChild(aux);
 }

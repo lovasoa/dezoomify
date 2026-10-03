@@ -62,14 +62,13 @@ function harness(resetToIdle = true, fetchResource = async () => assert.fail("un
 
 test("a replacement invocation ignores late progress, output and history from its predecessor", async () => {
   const h = harness();
-  let first, second;
   act(() => {
-    first = h.app.run("https://first.test/image");
+    h.app.submit("https://first.test/image");
   });
   await tick();
   const old = h.calls[0];
   act(() => {
-    second = h.app.run("https://second.test/image");
+    h.app.submit("https://second.test/image");
   });
   await tick();
   assert.equal(h.contexts[0].signal.aborted, true);
@@ -77,14 +76,14 @@ test("a replacement invocation ignores late progress, output and history from it
     old.host.report({ ...progress, completed: 999 });
     old.resolve(output);
   });
-  await act(() => first);
+  await tick();
   assert.equal(h.app.currentUrl(), "https://second.test/image");
   assert.equal(h.store.has("history"), false);
   act(() => {
     h.calls[1].host.report(progress);
     h.calls[1].resolve(output);
   });
-  await act(() => second);
+  await tick();
   assert.equal(h.app.presentation().phase, "completed");
   assert.deepEqual(
     JSON.parse(h.store.get("history")).map((item) => item.url),
@@ -139,35 +138,10 @@ test("a replacement renders immediately and waits for prior resources before sta
   act(() => h.app.dispose());
 });
 
-test("the shared queue advances after failure and preserves successful history", async () => {
+test("cancel removes a pending permission prompt", async () => {
   const h = harness();
   act(() => {
     h.app.submit("https://one.test/image");
-    h.app.submit("https://two.test/image");
-    h.app.submit("https://three.test/image");
-  });
-  await tick();
-  assert.equal(h.calls.length, 1);
-  act(() => h.calls[0].reject({ kind: "discovery-failed", detail: "no image" }));
-  await tick();
-  assert.equal(h.calls[1].inputs[0].url, "https://two.test/image");
-  act(() => h.calls[1].resolve(output));
-  await tick();
-  assert.equal(h.calls[2].inputs[0].url, "https://three.test/image");
-  act(() => h.calls[2].resolve(output));
-  await tick();
-  assert.deepEqual(
-    JSON.parse(h.store.get("history")).map((item) => item.url),
-    ["https://three.test/image", "https://two.test/image"],
-  );
-  act(() => h.app.dispose());
-});
-
-test("cancel retires queued work and removes a pending permission prompt", async () => {
-  const h = harness();
-  act(() => {
-    h.app.submit("https://one.test/image");
-    h.app.submit("https://two.test/image");
   });
   await tick();
   act(() =>

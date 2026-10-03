@@ -20,7 +20,7 @@ cargo xtask release build --plan <path> --target <target>
 cargo xtask release verify --plan <path> --artifacts <path>
 cargo xtask release publish --plan <path> --artifacts <path>
 cargo xtask bindings <generate|check> [options]
-cargo xtask fixtures <verify|serve|capture> [options]
+cargo xtask fixtures serve [options]
 ```
 
 With no target, `test` runs `cargo test --workspace` exactly once with terse

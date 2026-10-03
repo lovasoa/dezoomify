@@ -5,6 +5,7 @@ const { test, expect } = require("@playwright/test");
 const fs = require("node:fs");
 const path = require("node:path");
 const assert = require("node:assert/strict");
+const { replayUrl } = require("../../../../test/fixture-files.mjs");
 const {
   assertSavedPyramid,
   decodePngPixels,
@@ -13,6 +14,19 @@ const {
 } = require("../../../../test/support/png.mjs");
 
 const ADDR = process.env.DEZOOMIFY_E2E_ADDR;
+const { formats } = require("../../../../test/support/formats.cjs");
+
+for (const fixture of formats) {
+  test(`website saves ${fixture.name} pixels`, async ({ page }) => {
+    await page.goto(`${ADDR}/beta/`);
+    await page.locator("#dz-url-input").fill(ADDR + fixture.input);
+    await page.getByRole("button", { name: /find image/i }).click();
+    await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 30000 });
+    const pending = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Save image" }).click();
+    assertSavedPyramid(fs.readFileSync(await (await pending).path()), fixture.tolerance);
+  });
+}
 
 test("webapp discovers, downloads, assembles, and saves a real DZI pyramid", async ({ page }) => {
   // Hold tile responses long enough to observe the acquisition state: the
@@ -218,7 +232,7 @@ test("webapp downloads a Google Arts & Culture image through the metadata proxy"
   const proxyTargets = [];
   const relayToFixture = async (route, targetUrl) => {
     const response = await route.fetch({
-      url: `${ADDR}/proxy?url=${encodeURIComponent(targetUrl)}`,
+      url: replayUrl(ADDR, targetUrl),
       method: "GET",
     });
     await route.fulfill({ response });
@@ -320,7 +334,7 @@ test("webapp follows a deferred IIIF manifest request to the info.json and tiles
     (url) => url.host === "fixtures.test",
     async (route) => {
       const response = await route.fetch({
-        url: `${ADDR}/fetch?url=${encodeURIComponent(route.request().url())}`,
+        url: replayUrl(ADDR, route.request().url()),
         method: "GET",
       });
       await route.fulfill({ response });
@@ -409,7 +423,7 @@ test("webapp proxy fallback matches the website/proxy-fallback flow contract", a
   const proxyTargets = [];
   const relayToFixture = async (route, targetUrl) => {
     const response = await route.fetch({
-      url: `${ADDR}/proxy?url=${encodeURIComponent(targetUrl)}`,
+      url: replayUrl(ADDR, targetUrl),
       method: "GET",
     });
     await route.fulfill({ response });
@@ -472,7 +486,7 @@ test("post-cutover proxy fallback with ordinary tiles keeps the visible transpor
   const transcript = [];
   const relayToFixture = async (route, targetUrl) => {
     const response = await route.fetch({
-      url: `${ADDR}/proxy?url=${encodeURIComponent(targetUrl)}`,
+      url: replayUrl(ADDR, targetUrl),
       method: "GET",
     });
     await route.fulfill({ response });

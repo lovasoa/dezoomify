@@ -66,7 +66,7 @@ export const it = {
     "Una scheda del browser puo contenere solo una certa quantita di immagine. L applicazione desktop compone l immagine in memoria in base alla memoria disponibile e scrive il risultato sul disco.",
   "view.desktop.why2Title": "Salva l immagine finita:",
   "view.desktop.why2Body":
-    "Ogni attivita viene salvata in un solo file di uscita sul tuo computer. Puoi accodare piu attivita; vengono salvate una alla volta.",
+    "Ogni attivita viene salvata in un solo file di uscita sul tuo computer.",
   "view.desktop.why3Title": "Quando il sito non riesce a finire:",
   "view.desktop.why3Body":
     "Il sito interrompe l attivita con un errore e rimanda all applicazione desktop per l immagine a piena dimensione.",
@@ -265,20 +265,6 @@ export const it = {
   "desktop.cancel.note": "Salvataggio annullato. Pulizia fatta e ogni file incompleto rimosso.",
   "desktop.copy.diagnostics": "Copia la diagnostica",
   "desktop.copy.copied": "Copiata!",
-  // Multi-job queue panel (desktop integration queue, todo 5.3). Jobs save
-  // one at a time in the order they were added; a failed job never stops the
-  // rest. Queue entries show their input addresses.
-  "desktop.queue.title": "Coda",
-  "desktop.queue.statusQueued": "In attesa",
-  "desktop.queue.statusActive": "In corso",
-  "desktop.queue.statusDone": "Fatta",
-  "desktop.queue.statusFailed": "Non riuscita",
-  "desktop.queue.statusCancelled": "Annullata",
-  "desktop.queue.cancel": "Annulla",
-  "desktop.queue.cancelAll": "Annulla tutto",
-  "desktop.queue.retry": "Riprova",
-  "desktop.queue.summary": "{succeeded} fatte, {failed} non riuscite, {total} totali",
-  "desktop.queue.progress": "{current} riquadri su {total}",
   "desktop.panel.jobActions": "Azioni dell attivita desktop",
   "desktop.settings.reset": "Reimposta le impostazioni",
   "desktop.quick.folder": "Cartella",

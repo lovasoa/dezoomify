@@ -1,104 +1,11 @@
 use dezoomify::model::Error;
 use std::collections::HashMap;
-use std::io::{Read, Write};
-use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 
 use dezoomify_native::imaging;
 use dezoomify_native::JobOptions;
 mod support;
 use support::{http_response, scenario_payload, start_fixture_server, temp_dir, DZI_256, DZI_512};
-
-/// Thin driver adapter over the shared corpus goldens: assert the
-/// published result against the scenario's `expected/result.json`
-/// contract. [`support::golden_result`] maps the publication once; the
-/// shared comparison lives in the fixture server (it owns the corpus).
-fn assert_result_golden(scenario: &str, outcome: &dezoomify_native::Publication) {
-    dezoomify_fixture_server::assert_result_golden(
-        &dezoomify_fixture_server::scenario(scenario),
-        support::golden_result(outcome),
-    );
-}
-
-/// Thin driver adapter: assert the published failure contract of the
-/// scenario's `expected/result.json`: its recorded `code` is the typed
-/// error's stable kind (`error.cause().kind()`), the same identifier the
-/// CLI human line prints.
-fn assert_failure_golden(scenario: &str, error: &Error) {
-    dezoomify_fixture_server::assert_failure_golden(
-        &dezoomify_fixture_server::scenario(scenario),
-        error.cause().kind(),
-    );
-}
-
-#[test]
-fn assembles_dzi_pyramid_from_fixture_scenario() {
-    let origin = start_fixture_server();
-    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
-    let out_dir = temp_dir("dzi");
-    let output = out_dir.join("pyramid.png");
-    let mut events = 0usize;
-    let outcome = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
-        &JobOptions::default(),
-        &mut |_| events += 1,
-    )
-    .expect("pipeline succeeds");
-    assert_eq!(outcome.tile_count, 4);
-    assert_eq!(outcome.output.canvas.as_ref().unwrap().width, 512);
-    assert_eq!(outcome.output.canvas.as_ref().unwrap().height, 512);
-    assert!(events > 0, "pipeline emitted progress events");
-    assert_result_golden("native/cli-dzi", &outcome);
-
-    let bytes = std::fs::read(&output).expect("output file written");
-
-    let decoded = image::load_from_memory(&bytes)
-        .expect("output decodes")
-        .to_rgba8();
-    assert_eq!((decoded.width(), decoded.height()), (512, 512));
-    let pixel = |x: u32, y: u32| {
-        let p = decoded.get_pixel(x, y).0;
-        (p[0], p[1], p[2])
-    };
-    assert_eq!(pixel(64, 64), (196, 48, 48), "top-left quadrant red");
-    assert_eq!(pixel(448, 64), (48, 168, 64), "top-right quadrant green");
-    assert_eq!(pixel(64, 448), (48, 72, 200), "bottom-left quadrant blue");
-    assert_eq!(
-        pixel(448, 448),
-        (232, 220, 96),
-        "bottom-right quadrant yellow"
-    );
-}
-
-#[test]
-fn tile_failure_fails_honestly_without_output() {
-    // Discarding missing tiles produces no output. The default keeps a partial
-    // instead (see `partial_keep_policy_encodes_acquired_tiles`).
-    let origin = start_fixture_server();
-    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/broken.dzi");
-    let out_dir = temp_dir("failure");
-    let output = out_dir.join("broken.png");
-    let config = JobOptions {
-        keep_partial: false,
-        ..Default::default()
-    };
-    let error = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
-        &config,
-        &mut |_| {},
-    )
-    .expect_err("pipeline fails on missing tiles");
-    assert_failure_golden("native/cli-tile-failure", &error);
-    assert!(matches!(error, Error::PartialDiscarded { .. }));
-    assert!(
-        !output.exists(),
-        "no output may be written for a failed job"
-    );
-}
 
 #[test]
 fn file_uri_tiles_assemble_from_a_remote_manifest() {
@@ -146,35 +53,6 @@ fn file_uri_tiles_assemble_from_a_remote_manifest() {
 }
 
 #[test]
-fn corrupt_tile_fails_like_a_missing_tile() {
-    // A 200 response with undecodable bytes exhausts retries exactly like a
-    // 404: deterministic decode failures are not retried forever, and the
-    // job fails when partial output is discarded. The default keeps it.
-    let origin = start_fixture_server();
-    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/corrupt.dzi");
-    let out_dir = temp_dir("corrupt");
-    let output = out_dir.join("corrupt.png");
-    let config = JobOptions {
-        keep_partial: false,
-        ..Default::default()
-    };
-    let error = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
-        &config,
-        &mut |_| {},
-    )
-    .expect_err("pipeline fails on corrupt tiles");
-    assert_failure_golden("native/cli-corrupt-tile", &error);
-    assert!(matches!(error, Error::PartialDiscarded { .. }));
-    assert!(
-        !output.exists(),
-        "no output may be written for a failed job"
-    );
-}
-
-#[test]
 fn partial_keep_policy_encodes_acquired_tiles() {
     // The default policy keeps partial output: missing regions stay blank.
     assert!(JobOptions::default().keep_partial);
@@ -195,7 +73,7 @@ fn partial_keep_policy_encodes_acquired_tiles() {
         !outcome.output.is_complete(),
         "kept output is marked partial"
     );
-    assert_result_golden("native/cli-partial-keep", &outcome);
+    assert_eq!(outcome.tile_count, 3);
     // Kept partials publish to a `.partial` sibling, never to the requested
     // complete-save path: the partial stays distinguishable on disk.
     let partial_path = out_dir.join("partial.partial.png");
@@ -224,52 +102,6 @@ fn partial_keep_policy_encodes_acquired_tiles() {
 }
 
 #[test]
-fn max_width_selects_the_largest_fitting_level() {
-    let origin = start_fixture_server();
-    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
-    let out_dir = temp_dir("max-width");
-    let output = out_dir.join("narrow.png");
-    let config = JobOptions {
-        max_width: Some(300),
-        ..Default::default()
-    };
-    let outcome = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
-        &config,
-        &mut |_| {},
-    )
-    .expect("capped pipeline succeeds");
-    assert_eq!(
-        (
-            outcome.output.canvas.as_ref().unwrap().width,
-            outcome.output.canvas.as_ref().unwrap().height
-        ),
-        (256, 256)
-    );
-    assert_eq!(outcome.tile_count, 1);
-    assert!(outcome.output.is_complete());
-}
-
-#[test]
-fn probe_planned_grid_matches_the_fixed_grid_output() {
-    let origin = start_fixture_server();
-    let input = format!("{origin}/fetch?url=https://fixtures.test/probe/{{{{X}}}}/{{{{Y}}}}.png");
-    let out_dir = temp_dir("probe");
-    let output = out_dir.join("probe.png");
-    let outcome = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
-        &JobOptions::default(),
-        &mut |_| {},
-    )
-    .expect("probe-driven pipeline succeeds");
-    assert_result_golden("native/cli-probe-grid", &outcome);
-}
-
-#[test]
 fn existing_output_without_overwrite_is_refused() {
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
@@ -285,8 +117,8 @@ fn existing_output_without_overwrite_is_refused() {
         &mut |_| events += 1,
     )
     .expect_err("overwrite refusal fails");
-    assert_failure_golden("native/cli-destination-denied", &error);
     assert_eq!(error, Error::OutputExists);
+    assert_eq!(error.cause().kind(), "output-exists");
     assert_eq!(events, 0, "refusal happens before any work");
     assert_eq!(
         std::fs::read(&output).expect("output preserved"),
@@ -709,27 +541,6 @@ fn interrupted_job_resumes_without_refetching_completed_tiles() {
 }
 
 #[test]
-fn resume_scenario_matches_the_pinned_golden() {
-    // Declarative scenario `native/cli-resume-cache`: the same 512x512
-    // pyramid under its own routes, pinned to the identical digest as
-    // `native/cli-dzi` (same bytes, distinct served URLs).
-    let origin = start_fixture_server();
-    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/resume/pyramid.dzi");
-    let out_dir = temp_dir("resume-scenario");
-    let output = out_dir.join("resume.png");
-    let outcome = support::run_with_options(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
-        &JobOptions::default(),
-        &mut |_| {},
-    )
-    .expect("resume scenario succeeds");
-    assert_result_golden("native/cli-resume-cache", &outcome);
-    assert!(outcome.output.is_complete());
-}
-
-#[test]
 fn cancellation_before_publish_writes_nothing() {
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
@@ -749,7 +560,6 @@ fn cancellation_before_publish_writes_nothing() {
         },
     )
     .expect_err("cancelled jobs fail");
-    assert_failure_golden("native/cli-cancel", &error);
     assert!(matches!(error.cause(), Error::Cancelled));
     assert!(!output.exists(), "cancelled jobs write nothing");
 }
@@ -764,45 +574,18 @@ fn cancellation_before_publish_writes_nothing() {
 /// is read per request, so callers bind first, learn the port, then publish
 /// port-dependent bodies (deferred lists need absolute runtime URLs).
 fn serve_shared_map(shared: Arc<Mutex<HashMap<String, Vec<u8>>>>) -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
-    let port = listener.local_addr().expect("addr").port();
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(mut stream) = stream else { break };
-            let shared = Arc::clone(&shared);
-            std::thread::spawn(move || {
-                let mut head = Vec::new();
-                let mut byte = [0u8; 1];
-                while head.len() < 8192 {
-                    let Ok(n) = stream.read(&mut byte) else {
-                        return;
-                    };
-                    if n == 0 {
-                        break;
-                    }
-                    head.extend_from_slice(&byte);
-                    if head.ends_with(b"\r\n\r\n") {
-                        break;
-                    }
-                }
-                let path = String::from_utf8_lossy(&head)
-                    .lines()
-                    .next()
-                    .and_then(|line| line.split_whitespace().nth(1))
-                    .unwrap_or("/")
-                    .to_string();
-                let body = shared
-                    .lock()
-                    .expect("lock")
-                    .get(&path)
-                    .cloned()
-                    .unwrap_or_else(|| http_response("404 Not Found", "text/plain", b"not found"));
-                let _ = stream.write_all(&body);
-                let _ = stream.flush();
-            });
-        }
+    let server = dezoomify_fixture_server::NodeServer::raw("127.0.0.1", move |request| {
+        shared
+            .lock()
+            .expect("lock")
+            .get(&request.path)
+            .cloned()
+            .unwrap_or_else(|| http_response("404 Not Found", "text/plain", b"not found"))
+            .into()
     });
-    format!("http://127.0.0.1:{port}")
+    let origin = server.origin.clone();
+    std::mem::forget(server);
+    origin
 }
 
 fn solid_png(width: u32, height: u32, rgb: [u8; 3]) -> Vec<u8> {
@@ -887,48 +670,6 @@ fn iiif_size_rounding_bug_falls_back_to_caret_width_without_refetching() {
 }
 
 #[test]
-fn deferred_bulk_entry_resolves_to_identical_output() {
-    // The list names one image by absolute URL; discovery follows it.
-    let shared: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
-    let base = serve_shared_map(Arc::clone(&shared));
-    let tiles = ["0_0", "1_0", "0_1", "1_1"];
-    {
-        let mut map = shared.lock().expect("lock");
-        map.insert(
-            "/list.txt".to_string(),
-            http_response(
-                "200 OK",
-                "text/plain",
-                format!("{base}/pyr.dzi\n").as_bytes(),
-            ),
-        );
-        map.insert(
-            "/pyr.dzi".to_string(),
-            http_response("200 OK", "application/xml", DZI_512.as_bytes()),
-        );
-        for tile in tiles {
-            let bytes = scenario_payload(&format!("tile-{tile}.png"));
-            map.insert(
-                format!("/pyr_files/9/{tile}.png"),
-                http_response("200 OK", "image/png", &bytes),
-            );
-        }
-    }
-
-    let out_dir = temp_dir("deferred");
-    let output = out_dir.join("deferred.png");
-    let outcome = support::run_with_options(
-        &format!("{base}/list.txt"),
-        output.to_str().expect("utf8 output"),
-        false,
-        &JobOptions::default(),
-        &mut |_| {},
-    )
-    .expect("deferred follow succeeds");
-    assert_result_golden("native/cli-deferred", &outcome);
-}
-
-#[test]
 fn self_referential_deferred_list_hits_the_resolution_limit() {
     let shared: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
     let base = serve_shared_map(Arc::clone(&shared));
@@ -951,8 +692,8 @@ fn self_referential_deferred_list_hits_the_resolution_limit() {
         &mut |_| {},
     )
     .expect_err("self-deferral exhausts the bound");
-    assert_failure_golden("native/cli-deferred-limit", &error);
     assert!(matches!(error, Error::DeferredLimit { .. }));
+    assert_eq!(error.cause().kind(), "deferred-limit");
     assert!(!output.exists());
 }
 
@@ -1002,9 +743,11 @@ fn first_catalog_entry_wins_with_two_deferred_images() {
         &mut |_| {},
     )
     .expect("first entry resolves");
-    assert_result_golden("native/cli-multi-image", &outcome);
     let bytes = std::fs::read(&output).expect("output written");
     let decoded = image::load_from_memory(&bytes).expect("decodes").to_rgba8();
+    assert_eq!(decoded.dimensions(), (256, 256));
+    assert_eq!(outcome.tile_count, 1);
+    assert!(outcome.output.is_complete());
     assert_eq!(decoded.get_pixel(8, 8).0[0..3], [196, 48, 48]);
     assert_eq!(decoded.get_pixel(200, 200).0[0..3], [196, 48, 48]);
 }

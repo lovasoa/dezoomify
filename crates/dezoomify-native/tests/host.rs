@@ -1,6 +1,4 @@
 use std::collections::HashMap;
-use std::io::{Read, Write};
-use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -340,55 +338,28 @@ fn serve_counted_with_tile_delay(
     counts: Arc<Mutex<HashMap<String, usize>>>,
     tile_delay: Duration,
 ) -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
-    let port = listener.local_addr().expect("addr").port();
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(mut stream) = stream else { break };
-            let shared = Arc::clone(&shared);
-            let counts = Arc::clone(&counts);
-            std::thread::spawn(move || {
-                let mut head = Vec::new();
-                let mut byte = [0u8; 1];
-                while head.len() < 8192 {
-                    let Ok(n) = stream.read(&mut byte) else {
-                        return;
-                    };
-                    if n == 0 {
-                        break;
-                    }
-                    head.extend_from_slice(&byte);
-                    if head.ends_with(b"\r\n\r\n") {
-                        break;
-                    }
-                }
-                let path = String::from_utf8_lossy(&head)
-                    .lines()
-                    .next()
-                    .and_then(|line| line.split_whitespace().nth(1))
-                    .unwrap_or("/")
-                    .to_string();
-                if path.contains("/pyr_files/") {
-                    std::thread::sleep(tile_delay);
-                }
-                counts
-                    .lock()
-                    .expect("lock")
-                    .entry(path.clone())
-                    .and_modify(|n| *n += 1)
-                    .or_insert(1);
-                let body = shared
-                    .lock()
-                    .expect("lock")
-                    .get(&path)
-                    .cloned()
-                    .unwrap_or_else(|| http_response("404 Not Found", "text/plain", b"not found"));
-                let _ = stream.write_all(&body);
-                let _ = stream.flush();
-            });
+    let server = dezoomify_fixture_server::NodeServer::raw("127.0.0.1", move |request| {
+        let path = request.path;
+        if path.contains("/pyr_files/") {
+            std::thread::sleep(tile_delay);
         }
+        counts
+            .lock()
+            .expect("lock")
+            .entry(path.clone())
+            .and_modify(|n| *n += 1)
+            .or_insert(1);
+        shared
+            .lock()
+            .expect("lock")
+            .get(&path)
+            .cloned()
+            .unwrap_or_else(|| http_response("404 Not Found", "text/plain", b"not found"))
+            .into()
     });
-    format!("http://127.0.0.1:{port}")
+    let origin = server.origin.clone();
+    std::mem::forget(server);
+    origin
 }
 
 #[test]

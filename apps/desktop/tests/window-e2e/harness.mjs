@@ -3,9 +3,8 @@
 // The app embeds a W3C WebDriver server (tauri-plugin-wdio-webdriver, built via
 // the `testing-webdriver` cargo feature) and a `selenium-webdriver` client drives
 // it. This module owns the hermetic environment and the app lifecycle: an
-// ephemeral loopback fixture server, a loopback static server for the built
-// frontend (the debug window shell loads its embedded devUrl
-// `http://localhost:1420`), an isolated per-run profile, WebDriver port
+// ephemeral Node fixture server, an embedded frontend, an isolated per-run
+// profile, WebDriver port
 // allocation, app launch/readiness/teardown, and output
 // helpers. Inputs are fixed, there is no public network, and reports carry
 // origins, hashes, and stable codes only.
@@ -19,11 +18,11 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import http from "node:http";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { replayUrl } from "../../../../test/fixture-files.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(HERE, "../../../..");
@@ -50,25 +49,7 @@ export const APP_BIN = withExe(
   process.env.DEZOOMIFY_WINDOW_E2E_APP_BIN ||
     path.join(CARGO_TARGET_DIR, "debug/dezoomify-desktop"),
 );
-export const FRONTEND_DIST =
-  process.env.DEZOOMIFY_WINDOW_E2E_DIST || path.join(REPO_ROOT, "apps/desktop/dist");
-const FIXTURE_SERVER_BIN = withExe(path.join(CARGO_TARGET_DIR, "debug/dezoomify-fixture-server"));
-
-// Fixed loopback port dictated by the embedded devUrl in `tauri.conf.json`.
-export const FRONTEND_PORT = 1420;
-
-const MIME = {
-  ".html": "text/html",
-  ".js": "text/javascript",
-  ".mjs": "text/javascript",
-  ".css": "text/css",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".ico": "image/x-icon",
-  ".json": "application/json",
-  ".map": "application/json",
-  ".txt": "text/plain",
-};
+const FIXTURE_SERVER_SCRIPT = path.join(REPO_ROOT, "test/fixture-server.mjs");
 
 // Linux needs a display; macOS and Windows runners provide a GUI session.
 // The xtask lane wraps the run in `xvfb-run` so this stays an explicit,
@@ -92,26 +73,6 @@ export function ensureWindowShell() {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// Independent Node-side view of the scenario tree, for diagnosing a fixture
-// server that loads a different route count than the checkout provides.
-function countScenarioRoutes(dir) {
-  let files = 0;
-  let routes = 0;
-  const stack = [dir];
-  while (stack.length > 0) {
-    const current = stack.pop();
-    for (const entry of readdirSync(current, { withFileTypes: true })) {
-      const full = path.join(current, entry.name);
-      if (entry.isDirectory()) stack.push(full);
-      else if (entry.name === "routes.json") {
-        files += 1;
-        routes += JSON.parse(readFileSync(full, "utf8")).routes.length;
-      }
-    }
-  }
-  return { files, routes };
 }
 
 // Set by `startWindowApp` before the app is launched; live binding so the spec
@@ -224,22 +185,14 @@ export async function stopWindowApp(app) {
   }
 }
 
-function buildBinary(bin, pkg) {
-  const build = spawnSync("cargo", ["build", "-p", pkg], { cwd: REPO_ROOT, encoding: "utf8" });
-  if (build.status !== 0) throw new Error(`cargo build -p ${pkg} failed:\n${build.stderr}`);
-  if (!existsSync(bin)) throw new Error(`binary missing after build: ${bin}`);
-}
-
-export function ensureFixtureServerBuilt() {
-  buildBinary(FIXTURE_SERVER_BIN, "dezoomify-fixture-server");
-}
-
-// Same binary and flags the `cargo xtask fixtures serve --port 0` path spawns:
+// Same Node server and flags the `cargo xtask fixtures serve --port 0` path spawns:
 // loopback only, kernel-allocated port, address readiness file.
 export async function startFixtureServer(workDir) {
   const addrFile = path.join(workDir, "server.addr");
   const requestLog = path.join(workDir, "requests.log");
-  const proc = spawn(FIXTURE_SERVER_BIN, [
+  const proc = spawn(process.execPath, [
+    FIXTURE_SERVER_SCRIPT,
+    "--parent-stdio",
     "--port",
     "0",
     "--write-address",
@@ -270,27 +223,18 @@ export async function startFixtureServer(workDir) {
   // Fail closed before the app launches if the harness itself cannot read the
   // gateway; otherwise an app-side discovery failure is hard to attribute.
   try {
-    const response = await fetch(
-      `${base}/fetch?url=${encodeURIComponent("https://fixtures.test/cli/pyramid.dzi")}`,
-      {
-        signal: AbortSignal.timeout(10000),
-      },
-    );
+    const response = await fetch(replayUrl(base, "https://fixtures.test/cli/pyramid.dzi"), {
+      signal: AbortSignal.timeout(10000),
+    });
     if (!response.ok) {
       throw new Error(`fixture gateway returned ${response.status}: ${await response.text()}`);
     }
   } catch (error) {
     stopFixtureServer(fixture);
     const log = existsSync(requestLog) ? readFileSync(requestLog, "utf8") : "";
-    let tree = "unavailable";
-    try {
-      tree = JSON.stringify(countScenarioRoutes(SCENARIOS_DIR));
-    } catch (treeError) {
-      tree = `error: ${treeError.message}`;
-    }
     throw new Error(
       `window E2E: fixture gateway unreachable at ${base}: ${error.message}\n` +
-        `node scenario tree: ${tree}\n${fixture.logs()}\n${log}`,
+        `${fixture.logs()}\n${log}`,
     );
   }
   return fixture;
@@ -303,72 +247,6 @@ export function stopFixtureServer(fixture) {
   } catch {
     // Already gone.
   }
-}
-
-// Serves the freshly built frontend over loopback on the embedded devUrl port.
-// Fails closed when the port is held, naming the constraint.
-export async function startFrontendServer() {
-  if (!existsSync(path.join(FRONTEND_DIST, "index.html"))) {
-    throw new Error(
-      `window E2E: ${FRONTEND_DIST}/index.html is missing; ` +
-        "run `cargo xtask build desktop --unsigned-test` first",
-    );
-  }
-  const server = http.createServer((req, res) => {
-    // The shell loads `http://localhost:1420`; dual-stack binding accepts both
-    // the IPv6 (::1) and IPv4 (127.0.0.1) resolutions of localhost. Reject any
-    // non-loopback peer so the ephemeral server never serves the network.
-    const remote = req.socket.remoteAddress ?? "";
-    const loopback = remote === "127.0.0.1" || remote === "::1" || remote === "::ffff:127.0.0.1";
-    if (!loopback) {
-      res.writeHead(403);
-      res.end("forbidden");
-      return;
-    }
-    let name = "/";
-    try {
-      name = decodeURIComponent(new URL(req.url ?? "/", "http://loopback").pathname);
-    } catch {
-      res.writeHead(400);
-      res.end("bad path");
-      return;
-    }
-    if (name === "/") name = "/index.html";
-    const file = path.join(FRONTEND_DIST, name);
-    if (!file.startsWith(FRONTEND_DIST) || !existsSync(file)) {
-      res.writeHead(404);
-      res.end("not found");
-      return;
-    }
-    res.writeHead(200, {
-      "Content-Type": MIME[path.extname(file)] ?? "application/octet-stream",
-    });
-    res.end(readFileSync(file));
-  });
-  await new Promise((resolve, reject) => {
-    server.once("error", (err) => {
-      reject(
-        new Error(
-          `window E2E: cannot serve the built frontend on 127.0.0.1:${FRONTEND_PORT} ` +
-            `(the debug window shell loads that embedded devUrl address): ${err.message}`,
-        ),
-      );
-    });
-    server.listen(FRONTEND_PORT, resolve);
-  });
-  return server;
-}
-
-// Tear the shared frontend server down without hanging the spec process: idle
-// keep-alive sockets would otherwise make `close()` wait forever.
-export async function closeFrontendServer(server) {
-  if (!server) return;
-  if (typeof server.closeAllConnections === "function") server.closeAllConnections();
-  await new Promise((resolve) => {
-    const done = () => resolve();
-    server.close(done);
-    setTimeout(done, 5000).unref?.();
-  });
 }
 
 // One isolated run profile: a temp root, an isolated HOME, and an empty output
@@ -443,7 +321,7 @@ export function fixtureBase() {
 }
 
 export function gatewayInput(innerUrl) {
-  return `${fixtureBase()}/fetch?url=${innerUrl}`;
+  return replayUrl(fixtureBase(), innerUrl);
 }
 
 // Automatic desktop saves derive their filename from the fixture catalog title,
@@ -453,5 +331,3 @@ export function outputFiles(outputDir, extension = ".png") {
     .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(extension))
     .map((entry) => path.join(outputDir, entry.name));
 }
-
-export { FIXTURE_SERVER_BIN };

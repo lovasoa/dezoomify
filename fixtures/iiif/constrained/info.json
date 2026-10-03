@@ -1,0 +1,7 @@
+{
+  "preferredFormats": ["png"],
+  "@context": "http://iiif.io/api/image/3/context.json",
+  "id": "{{origin}}/fixtures/iiif/v3", "type": "ImageService3",
+  "profile": {"maxWidth": 256, "maxHeight": 256, "maxArea": 65536},
+  "width": 512, "height": 512, "tiles": [{"width": 512, "scaleFactors": [1]}]
+}

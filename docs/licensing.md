@@ -28,12 +28,12 @@ behavior, and reimplemented (not copied) web logic are compatible with the
 GPL-3.0-or-later root. GPL-3.0-only Rust files keep their narrower grant when
 copied; they are not upgraded by the root license. No relicensing permission
 beyond these grants is inferred: every future copy must retain the source
-copyright notice and record provenance in the owning scenario manifest.
+copyright notice and record provenance in the owning fixture README.
 
 ## Notice retention
 
 - Keep every source copyright notice (`Copyright © 2011-2017 Lovasoa` for web
   material and equivalents) in copied files and in fixture provenance records.
 - Per-file notices narrower than the root license win for that file.
-- Fixtures with unclear provenance are blocked from the canonical corpus by
-  `cargo xtask fixtures verify`.
+- Fixture reviews retain source URLs, issue references, grants, and notices in
+  the owning README; fixtures with unclear provenance do not enter the corpus.

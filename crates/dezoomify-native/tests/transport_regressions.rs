@@ -1,14 +1,12 @@
 //! Transport regressions: single-attempt fetches, connection reuse on one
 //! job-scoped transport, per-hop redirect rescoping, and `retry-after`
-//! observation. Raw TCP listeners on loopback prove every byte crosses a
+//! observation. Node-owned loopback sockets prove every byte crosses a
 //! real socket and count exactly how many requests/connections arrive.
 
+use dezoomify_fixture_server::{NodeServer, RawResponse};
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
-use std::net::TcpListener;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::thread;
 
 use dezoomify::model::Error;
 use dezoomify_native::http::{FetchLimits, UserHeaders};
@@ -32,36 +30,26 @@ fn transport() -> NativeTransport {
 #[test]
 fn generated_requests_keep_headers_and_redirect_results_for_every_purpose() {
     use dezoomify::model::{Header, RequestPurpose, ResourceRequest};
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let origin = format!("http://{}", listener.local_addr().unwrap());
-    let server = thread::spawn(move || {
-        for hop in 0..6 {
-            let (mut socket, _) = listener.accept().unwrap();
-            socket
-                .set_read_timeout(Some(std::time::Duration::from_secs(3)))
-                .unwrap();
-            let mut head = Vec::new();
-            while !head.ends_with(b"\r\n\r\n") {
-                let mut byte = [0];
-                socket.read_exact(&mut byte).unwrap();
-                head.push(byte[0]);
-            }
-            assert!(String::from_utf8(head)
-                .unwrap()
-                .to_lowercase()
-                .contains("accept: application/xml"));
-            let reply = if hop % 2 == 0 {
-                response(
-                    "HTTP/1.1 302 Found",
-                    &[("location", "/final"), ("connection", "close")],
-                    b"",
-                )
-            } else {
-                response("HTTP/1.1 200 OK", &[("connection", "close")], b"resource")
-            };
-            socket.write_all(&reply).unwrap();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&requests);
+    let server = NodeServer::raw("127.0.0.1", move |request| {
+        assert!(request
+            .head
+            .to_lowercase()
+            .contains("accept: application/xml"));
+        let hop = count.fetch_add(1, Ordering::SeqCst);
+        if hop.is_multiple_of(2) {
+            response(
+                "HTTP/1.1 302 Found",
+                &[("location", "/final"), ("connection", "close")],
+                b"",
+            )
+            .into()
+        } else {
+            response("HTTP/1.1 200 OK", &[("connection", "close")], b"resource").into()
         }
     });
+    let origin = server.origin.clone();
     let transport = transport();
     for purpose in [
         RequestPurpose::Metadata,
@@ -83,6 +71,7 @@ fn generated_requests_keep_headers_and_redirect_results_for_every_purpose() {
         assert_eq!(result.body, b"resource");
     }
     server.join().unwrap();
+    assert_eq!(requests.load(Ordering::SeqCst), 6);
 }
 
 fn response(status_line: &str, headers: &[(&str, &str)], body: &[u8]) -> Vec<u8> {
@@ -98,70 +87,56 @@ fn response(status_line: &str, headers: &[(&str, &str)], body: &[u8]) -> Vec<u8>
     out
 }
 
-/// Serve canned responses round-robin, counting accepted connections.
-/// Each connection answers up to `per_connection` requests with keep-alive
-/// framing so sequential fetches can reuse one connection. The listener
-/// stops accepting after `expected_connections`; tests that know the exact
-/// count join the handle, pooled tests detach and poll the counters.
+/// Node serves canned bytes while Rust observes request and connection counts.
 fn serve_counted(
     responses: Vec<Vec<u8>>,
     per_connection: usize,
     expected_connections: usize,
-) -> (
-    u16,
-    Arc<AtomicUsize>,
-    Arc<AtomicUsize>,
-    thread::JoinHandle<()>,
-) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
-    let port = listener.local_addr().expect("addr").port();
+) -> (u16, Arc<AtomicUsize>, Arc<AtomicUsize>, NodeServer) {
     let connections = Arc::new(AtomicUsize::new(0));
     let requests = Arc::new(AtomicUsize::new(0));
     let conns = Arc::clone(&connections);
     let reqs = Arc::clone(&requests);
-    let handle = thread::spawn(move || {
-        // One thread per connection: concurrent fetches open concurrent
-        // connections and no connection head-of-line-blocks another.
-        for stream in listener.incoming().take(expected_connections) {
-            let Ok(mut stream) = stream else { break };
-            conns.fetch_add(1, Ordering::SeqCst);
-            let reqs = Arc::clone(&reqs);
-            let responses = responses.clone();
-            thread::spawn(move || {
-                for _ in 0..per_connection {
-                    let mut head = Vec::new();
-                    let mut byte = [0u8; 1];
-                    while head.len() < 8192 {
-                        let Ok(n) = stream.read(&mut byte) else {
-                            return;
-                        };
-                        if n == 0 {
-                            return;
-                        }
-                        head.extend_from_slice(&byte);
-                        if head.ends_with(b"\r\n\r\n") {
-                            break;
-                        }
-                    }
-                    if head.is_empty() {
-                        return;
-                    }
-                    let index = reqs.fetch_add(1, Ordering::SeqCst);
-                    let body = responses
-                        .get(index % responses.len().max(1))
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok".to_vec()
-                        });
-                    if stream.write_all(&body).is_err() {
-                        return;
-                    }
-                    let _ = stream.flush();
-                }
-            });
+    let per_conn = std::sync::Mutex::new(std::collections::HashMap::<usize, usize>::new());
+    let server = NodeServer::raw("127.0.0.1", move |request| {
+        assert!(
+            request.connection <= expected_connections,
+            "unexpected connection"
+        );
+        conns.fetch_max(request.connection, Ordering::SeqCst);
+        let mut counts = per_conn.lock().unwrap();
+        let count = counts.entry(request.connection).or_default();
+        *count += 1;
+        let close = *count >= per_connection;
+        drop(counts);
+        let index = reqs.fetch_add(1, Ordering::SeqCst);
+        RawResponse {
+            bytes: responses[index % responses.len()].clone(),
+            close,
         }
     });
-    (port, connections, requests, handle)
+    (server.port(), connections, requests, server)
+}
+
+#[test]
+fn sequential_fetches_reuse_the_job_transport_connection() {
+    let (port, connections, requests, server) =
+        serve_counted(vec![response("HTTP/1.1 200 OK", &[], b"tile")], 2, 1);
+    let transport = transport();
+    for _ in 0..2 {
+        let outcome = transport
+            .fetch(
+                &format!("http://127.0.0.1:{port}/tile"),
+                &BTreeMap::new(),
+                None,
+                &limits(),
+            )
+            .expect("fetch");
+        assert_eq!(outcome.body, b"tile");
+    }
+    server.join().expect("Node server");
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
+    assert_eq!(connections.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -227,42 +202,26 @@ fn redirect_drops_credentials_across_hosts() {
     let hop2_heads: Arc<std::sync::Mutex<Vec<String>>> =
         Arc::new(std::sync::Mutex::new(Vec::new()));
     let hop2_sink = Arc::clone(&hop2_heads);
-    // Hop two listens on 127.0.0.2 (same machine, different host name for
-    // credential scoping) while hop one stays on 127.0.0.1.
-    let hop2 = TcpListener::bind("127.0.0.2:0").expect("bind hop2");
-    let hop2_port = hop2.local_addr().expect("addr").port();
-    let hop2_server = thread::spawn(move || {
-        let Ok((mut stream, _)) = hop2.accept() else {
-            return;
-        };
-        let mut buffer = [0u8; 4096];
-        let n = stream.read(&mut buffer).unwrap_or(0);
-        hop2_sink
-            .lock()
-            .expect("lock")
-            .push(String::from_utf8_lossy(&buffer[..n]).to_string());
-        let _ = stream.write_all(&response(
+    // Different loopback hosts retain the original credential-scoping test.
+    let hop2_server = NodeServer::raw("127.0.0.2", move |request| {
+        hop2_sink.lock().expect("lock").push(request.head);
+        response(
             "HTTP/1.1 200 OK",
             &[("content-type", "text/plain")],
             b"final",
-        ));
-        let _ = stream.flush();
+        )
+        .into()
     });
-    let hop1 = TcpListener::bind("127.0.0.1:0").expect("bind hop1");
-    let hop1_port = hop1.local_addr().expect("addr").port();
-    let hop1_server = thread::spawn(move || {
-        let Ok((mut stream, _)) = hop1.accept() else {
-            return;
-        };
-        let mut buffer = [0u8; 4096];
-        let _ = stream.read(&mut buffer);
-        let _ = stream.write_all(&response(
+    let hop2_port = hop2_server.port();
+    let hop1_server = NodeServer::raw("127.0.0.1", move |_| {
+        response(
             "HTTP/1.1 302 Found",
             &[("location", &format!("http://127.0.0.2:{hop2_port}/final"))],
             b"",
-        ));
-        let _ = stream.flush();
+        )
+        .into()
     });
+    let hop1_port = hop1_server.port();
     let mut headers = BTreeMap::new();
     headers.insert("Cookie".to_string(), "session=abc".to_string());
     headers.insert("Accept".to_string(), "image/png".to_string());

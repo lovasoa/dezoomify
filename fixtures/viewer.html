@@ -1,0 +1,7 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Image viewer fixture</title>
+<script>
+  fetch("{{input}}")
+    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); document.documentElement.dataset.viewerReady = "true"; });
+</script>

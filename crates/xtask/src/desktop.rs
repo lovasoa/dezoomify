@@ -113,7 +113,7 @@ pub fn test_desktop(args: &[String]) -> Result<(), String> {
 /// compiled behind the test-only `testing-webdriver` cargo feature), so the
 /// lane needs no external tauri-driver or platform driver and runs on Linux,
 /// macOS, and Windows. `specs/desktop.e2e.mjs` owns the full lifecycle:
-/// fixture server, frontend server, isolated profile, app launch, and teardown.
+/// fixture server, isolated profile, app launch, and teardown.
 /// Opt-in only: bare `test desktop` (plus `test`, `test all`, and `ci`) stays
 /// lean and display-free.
 fn test_desktop_e2e_window() -> Result<(), String> {
@@ -128,7 +128,7 @@ fn test_desktop_e2e_window() -> Result<(), String> {
     }
     ensure_window_e2e_deps()?;
     // The harness launches this exact binary, so build it first: frontend,
-    // fixture server, and window shell with the embedded WebDriver server.
+    // and window shell with the embedded WebDriver server.
     // Skip the lean `build_desktop` path: the spec binary needs
     // `testing-webdriver`.
     if !tauri_system_ready() {
@@ -144,10 +144,10 @@ fn test_desktop_e2e_window() -> Result<(), String> {
         "--lib",
         "output_tests",
     ])?;
+    // The test feature embeds the frontend, matching the packaged app.
     // The harness starts this binary from Cargo's target directory. Always
     // ask Cargo to build it so source changes are rebuilt and no lane relies
     // on a binary left by an unrelated command.
-    super::command::cargo(&["build", "-p", "dezoomify-fixture-server"])?;
     build_frontend()?;
     super::command::cargo(&[
         "build",
@@ -159,7 +159,7 @@ fn test_desktop_e2e_window() -> Result<(), String> {
         "dezoomify-desktop",
     ])?;
     // Lane-private copies: the window and lean shells share one binary
-    // path (and the frontend one dist directory), so snapshot both before
+    // path, so snapshot the app before
     // the spec runs. A concurrent lean or frontend rebuild in the same
     // checkout then cannot swap the app mid-run; on CI runners the copies
     // are simply identical content.
@@ -172,12 +172,7 @@ fn test_desktop_e2e_window() -> Result<(), String> {
         "dezoomify-desktop"
     };
     let app_copy = stage_e2e_artifact(&app_src, &e2e_dir.join(app_dst_name))?;
-    let dist_copy = stage_e2e_artifact(
-        &super::repo_root().join("apps/desktop/dist"),
-        &e2e_dir.join("dist"),
-    )?;
-    // One compact spec owns the fixed frontend port. Its deadline bounds a
-    // leaked app or frontend server without inflating normal runs.
+    // Bound a leaked app without inflating normal runs.
     run_node_with_deadline(
         std::time::Duration::from_secs(20 * 60),
         &[
@@ -185,16 +180,10 @@ fn test_desktop_e2e_window() -> Result<(), String> {
             "--test-reporter=dot",
             "apps/desktop/tests/window-e2e/specs/desktop.e2e.mjs",
         ],
-        &[
-            (
-                "DEZOOMIFY_WINDOW_E2E_APP_BIN",
-                app_copy.to_str().unwrap_or(""),
-            ),
-            (
-                "DEZOOMIFY_WINDOW_E2E_DIST",
-                dist_copy.to_str().unwrap_or(""),
-            ),
-        ],
+        &[(
+            "DEZOOMIFY_WINDOW_E2E_APP_BIN",
+            app_copy.to_str().unwrap_or(""),
+        )],
         "desktop.e2e.mjs",
     )?;
     Ok(())
@@ -939,7 +928,7 @@ fn run_node(args: &[&str]) -> Result<(), String> {
 /// Run node under a hard deadline: when the child outlives it, the process
 /// is killed and the lane fails naming the spec. Guards the real-window
 /// specs against leaked children (a dead app instance can keep node's pipes
-/// or the frontend server open indefinitely), which would otherwise hang CI
+/// open indefinitely), which would otherwise hang CI
 /// until the job timeout instead of failing with the log as evidence.
 pub(crate) fn run_node_with_deadline(
     deadline: std::time::Duration,
@@ -973,7 +962,7 @@ pub(crate) fn run_node_with_deadline(
                     terminate_owned_process_tree(&mut child);
                     return Err(format!(
                         "node tests killed after {:.0} s ({label}): the spec process did not exit; \
-                         a leaked child is holding its pipes or the frontend server open",
+                         a leaked child is holding its pipes open",
                         deadline.as_secs_f32()
                     ));
                 }

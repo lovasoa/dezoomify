@@ -1,0 +1,7 @@
+{
+  "gigapixel": {
+    "url": "{{origin}}/fixtures/second_canvas/approximate-basic/tiles/",
+    "size": {"w": 512, "h": 512}, "tile": 256,
+    "types": [{"name": "Normal", "type": "normal", "pattern": "", "level": 0}]
+  }
+}

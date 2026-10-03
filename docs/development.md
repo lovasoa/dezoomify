@@ -11,7 +11,7 @@ One monorepo: Rust crates, generated WASM bindings, shared UI, hosts, extension 
 - `crates/dezoomify-native`: NativeHost operations for CLI and Tauri.
 - `crates/dezoomify-wasm`: generated Host calls and value conversion for browsers.
 - `packages/shared-ui`: shared React UI; `packages/browser-runtime`: the shared browser application, Host operations, decoding, canvases, and saving.
-- `crates/fixture-server`: controlled origins; `testdata/scenarios`: shared scenarios; `crates/xtask`: repository tasks.
+- `test/fixture-server.mjs`: Node controlled origins; `crates/fixture-server`: Rust corpus readers and Node process adapters; `testdata/scenarios`: shared scenarios; `crates/xtask`: repository tasks.
 
 Dependency direction: [Architecture](architecture.md). Task grammar: [`crates/xtask/README.md`](../crates/xtask/README.md). Test matrix: [Testing](testing.md).
 
@@ -73,11 +73,10 @@ Binding files derive from Rust; never hand-edit. Fixture and bindings commands a
 ```sh
 cargo xtask bindings generate
 cargo xtask bindings check
-cargo xtask fixtures verify
 cargo xtask fixtures serve --port 0 --write-address target/fixture-server.addr
 ```
 
-`bindings generate` refreshes the checked-in bindings; run it after changing the Rust contract. There is no byte-compare gate because `wasm-bindgen` output is only deterministic across an identical `wasm-bindgen` version, Rust version, and OS, so cross-platform regeneration shows glue-only differences. `bindings check` compiles the Rust contract, runs generated-package tests, and checks WASM portability. `fixtures verify` validates manifests, provenance, licenses, routes, and hashes.
+`bindings generate` refreshes the checked-in bindings; run it after changing the Rust contract. There is no byte-compare gate because `wasm-bindgen` output is only deterministic across an identical `wasm-bindgen` version, Rust version, and OS, so cross-platform regeneration shows glue-only differences. `bindings check` compiles the Rust contract, runs generated-package tests, and checks WASM portability.
 
 One Playwright version rules repo-wide via the `pnpm.overrides` pin in root `package.json`; website E2E and the extension gate share the browser binary. A Playwright bump moves override plus workspace specs together.
 
@@ -101,7 +100,7 @@ Signing, notarization, deployment, store submission, and publication run as sepa
 Follow [Contributing a format](CONTRIBUTING-format.md). In short:
 
 1. Add core parser/plan coverage plus scenario-local payloads.
-2. Run `cargo xtask fixtures verify` and `cargo xtask test core --parity`.
+2. Run `cargo xtask test core --parity`.
 3. Run `cargo xtask test scenario`.
 
 ### Change the shared UI

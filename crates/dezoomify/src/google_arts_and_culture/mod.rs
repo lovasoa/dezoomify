@@ -25,12 +25,24 @@ fn is_google_arts_url(uri: &str) -> bool {
 }
 
 fn parse_page(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+    Ok(ParsedResource::Follow(Request::new(
+        page_info(resource)?.tile_info_url(),
+    )))
+}
+
+fn page_info(resource: DiscoveryResource<'_>) -> Result<PageInfo, DiscoveryError> {
     let source = std::str::from_utf8(resource.bytes())
         .map_err(|error| DiscoveryError::InvalidMetadata(error.to_string()))?;
-    let page = source
+    let mut page = source
         .parse::<PageInfo>()
         .map_err(|error| DiscoveryError::InvalidMetadata(error.to_string()))?;
-    Ok(ParsedResource::Follow(Request::new(page.tile_info_url())))
+    // Inherit a web page's scheme; saved pages retain the parser's HTTPS fallback.
+    if ::url::Url::parse(resource.final_uri())
+        .is_ok_and(|url| matches!(url.scheme(), "http" | "https"))
+    {
+        page.base_url = crate::core::resolve_relative(resource.final_uri(), &page.base_url[6..]);
+    }
+    Ok(page)
 }
 
 fn parse_tile_information(
@@ -39,9 +51,7 @@ fn parse_tile_information(
     let page = resource
         .context()
         .resources()
-        .map(DiscoveryResource::bytes)
-        .filter_map(|bytes| std::str::from_utf8(bytes).ok())
-        .find_map(|source| source.parse::<PageInfo>().ok())
+        .find_map(|resource| page_info(resource).ok())
         .map(Arc::new)
         .ok_or_else(|| {
             DiscoveryError::InvalidMetadata("Google Arts page metadata is missing".into())
@@ -116,13 +126,25 @@ mod tests {
     );
 
     fn fixture_catalog() -> DiscoveryCatalog {
-        let (catalog, requests) = crate::test_support::discover(
-            SPEC,
-            "https://artsandculture.google.com/asset/test",
-            &[(PAGE, None), (TILE_INFO, None)],
-        );
-        assert_eq!(requests.len(), 2);
-        assert!(requests[1].uri.ends_with("=g"));
+        let mut catalog = None;
+        for (input, scheme) in [
+            ("https://artsandculture.google.com/asset/test", "https:"),
+            ("http://artsandculture.google.com/asset/test", "http:"),
+            ("/saved/artsandculture.google.com.html", "https:"),
+            ("file:///saved/artsandculture.google.com.html", "https:"),
+            (r"C:\saved\artsandculture.google.com.html", "https:"),
+        ] {
+            let (result, requests) =
+                crate::test_support::discover(SPEC, input, &[(PAGE, None), (TILE_INFO, None)]);
+            assert_eq!(requests.len(), 2, "{input}");
+            assert!(requests[1].uri.ends_with("=g"), "{input}");
+            assert!(
+                requests[1].uri.starts_with(scheme),
+                "{input}: {}",
+                requests[1].uri
+            );
+            catalog = Some(result.unwrap());
+        }
         catalog.unwrap()
     }
 

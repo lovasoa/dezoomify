@@ -1,6 +1,8 @@
-// Shared PNG probe for the fixed quadrant-pyramid save goldens across the
-// website, desktop, and extension E2Es: one decoder and one fixture geometry.
-// PNGs are 8-bit RGB/RGBA, non-interlaced.
+// PNG pixel helpers shared by product tests.
+//
+// The saved window output is verified against the same 512x512 pyramid
+// quadrants as the fixed native fixture.
+// No public network, no shared state; inputs are fixed.
 import assert from "node:assert/strict";
 import zlib from "node:zlib";
 
@@ -113,12 +115,20 @@ export function pixelAt({ pixels, bpp, width }, x, y) {
 }
 
 /** Save check: dimensions and quadrant placement. */
-export function assertSavedPyramid(bytes) {
+export function assertSavedPyramid(bytes, tolerance = 0) {
   const { width, height } = decodePngSize(bytes);
   assert.equal(width, EXPECTED_WIDTH, "saved image width");
   assert.equal(height, EXPECTED_HEIGHT, "saved image height");
   const decoded = decodePngPixels(bytes);
-  for (const { at, rgb, label } of QUADRANTS) {
-    assert.deepEqual(pixelAt(decoded, ...at).slice(0, 3), rgb, label);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const rgb = QUADRANTS[(y >> 8) * 2 + (x >> 8)].rgb;
+      const pixel = pixelAt(decoded, x, y);
+      assert.ok(
+        pixel[3] === 255 &&
+          rgb.every((value, channel) => Math.abs(value - pixel[channel]) <= tolerance),
+        `pixel (${x},${y}): ${pixel} != ${rgb}`,
+      );
+    }
   }
 }

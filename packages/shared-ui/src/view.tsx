@@ -2,7 +2,7 @@
 
 import type { Error as JobError } from "@dezoomify/wasm-bindings";
 import type { ReactElement, ReactNode } from "react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
@@ -11,17 +11,10 @@ import { canRetry, httpStatusOf, plainMessageFor } from "./failure.ts";
 import type { HistoryEntry } from "./history.ts";
 import type { Presentation, ResolutionChoice } from "./presentation.ts";
 import { displaySourceUrl, hostFromUrl } from "./view-helpers.ts";
-import type {
-  ConfirmModalArgs,
-  PlatformHints,
-  ViewCallbacks,
-  ViewContext,
-  ViewRenderOptions,
-} from "./view-types.ts";
+import type { PlatformHints, ViewCallbacks, ViewContext, ViewRenderOptions } from "./view-types.ts";
 
 export { DEFAULT_PAGE_TITLE, jobPageTitle } from "./view-helpers.ts";
 export type {
-  ConfirmModalArgs,
   PlatformHints,
   ViewCallbacks,
   ViewContext,
@@ -923,6 +916,7 @@ function SharedView({
     <DiagnosticDetails
       key={ctx.diagnosticReport.id}
       report={ctx.diagnosticReport}
+      error={presentation.error}
       callbacks={callbacks}
     />
   ) : null;
@@ -1116,70 +1110,6 @@ export function openModal(
       }
     />
   ));
-}
-
-/**
- * Explicit confirm/decline dialog for untrusted incoming deep links.
- * Site-influenced lines render as text, never markup. Initial focus fails
- * safe on decline.
- */
-export function openConfirmModal(hostDocument: Document, args: ConfirmModalArgs): Promise<boolean> {
-  return new Promise<boolean>((resolve) => {
-    mountOverlay(hostDocument, (close) => (
-      <ConfirmDialog args={args} close={close} resolve={resolve} hostDocument={hostDocument} />
-    ));
-  });
-}
-
-function ConfirmDialog({
-  args,
-  close,
-  resolve,
-  hostDocument,
-}: {
-  args: ConfirmModalArgs;
-  close(): void;
-  resolve(value: boolean): void;
-  hostDocument: Document;
-}) {
-  const declineRef = useRef<HTMLButtonElement>(null);
-  useLayoutEffect(() => {
-    declineRef.current?.focus();
-  }, []);
-  const decide = (value: boolean) => {
-    close();
-    resolve(value);
-  };
-  return (
-    <ModalCard
-      id={args.id}
-      title={args.title}
-      subtitle={args.subtitle}
-      hostDocument={hostDocument}
-      showClose={false}
-      onClose={() => decide(false)}
-      body={args.bodyLines.map((line) => <p key={line}>{line}</p>)}
-      actions={
-        <>
-          <button
-            ref={declineRef}
-            type="button"
-            className="dz-btn-secondary dz-modal-decline"
-            onClick={() => decide(false)}
-          >
-            {args.declineLabel}
-          </button>
-          <button
-            type="button"
-            className="dz-btn-tactile dz-modal-confirm"
-            onClick={() => decide(true)}
-          >
-            {args.confirmLabel}
-          </button>
-        </>
-      }
-    />
-  );
 }
 
 // Guidance dialogs.

@@ -4,27 +4,20 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 
-[[bin]]
-name = "dezoomify-fixture-server"
-path = "src/main.rs"
-
 [lib]
 name = "dezoomify_fixture_server"
 path = "src/lib.rs"
 
 [dependencies]
-axum.workspace = true
-tokio = { workspace = true, features = ["macros", "io-util", "sync", "time", "fs", "rt-multi-thread", "net"] }
 serde.workspace = true
 serde_json.workspace = true
-hmac.workspace = true
-sha1.workspace = true
-aes.workspace = true
-cbc.workspace = true
 base64.workspace = true
-regex.workspace = true
+url.workspace = true
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["macros", "io-util", "rt-multi-thread", "net"] }
+hmac.workspace = true
+sha1.workspace = true
 reqwest.workspace = true
 
 # 6.1 (unblocked for cargo 1.98): dev-only server docs pending.

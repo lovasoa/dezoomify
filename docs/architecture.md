@@ -20,13 +20,15 @@ Format references resolve against the redirected base, and routes that require a
 
 ## Shared UI and application
 
-`packages/shared-ui` contains React components, translations, pure presentation functions, history, queue utilities, labels, and bounded diagnostics, with no host globals. Browser application code may import the shared UI; browser transport and image operations receive callbacks.
+`packages/shared-ui` contains React components, translations, pure presentation functions, history, labels, and bounded diagnostics, with no host globals. Browser application code may import the shared UI; browser transport and image operations receive callbacks.
 
 One browser invocation owns cancellation, pause, pending interactions, progress, and retirement; a replacement invocation cannot receive its predecessor's progress or output, and completed output stays available until the user retires it. Desktop retains only the task ownership and IPC required by its process boundary. See [Application](application.md).
 
 ## Website and proxy
 
 The assembled website serves the legacy product at `/` and the new product at `/beta`; the deploy workflow builds both and never serves repository sources. `src/server/proxy.ts` owns metadata proxy policy; Cloudflare Pages and the local development server translate HTTP requests into the same function, so eligibility, credential restrictions, redirect checks, limits, and CORS behavior have one implementation. See [Browser runtime](browser-runtime.md) and [Security](security.md).
+
+Generated help pages include a copy of the shared UI theme beside their HTML under `/beta/help/`, so their typography, navigation, surfaces, and automatic light and dark colors use the same CSS as the app without depending on repository source URLs.
 
 ## Boundaries
 
@@ -38,4 +40,4 @@ The assembled website serves the legacy product at `/` and the new product at `/
 - Crossing values derive from Rust declarations. URLs, headers, errors, and geometry retain their exact meaning.
 - Errors are one typed enum: the `kind` tag names the failure and structured fields carry the facts; callers never branch on display text.
 
-Biome rejects product package and sibling-app imports, and `test/architecture.test.mjs` checks the compiled import inventory of authored product code at any directory depth. Shared packages and the website's deployed proxy entrypoints remain valid dependencies.
+Biome rejects product package and sibling-app imports. Shared packages and the website's deployed proxy entrypoints remain valid dependencies.

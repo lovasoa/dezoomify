@@ -1,15 +1,13 @@
-//! Shared test support: spawn the server in-process on an ephemeral loopback
-//! port. No sleep-based readiness: the bound address implies listen readiness.
+//! Shared support: Node owns the loopback server and signals readiness over stdio.
 
-use dezoomify_fixture_server::{AppState, RouteTable};
-use std::sync::{Arc, Mutex};
+use dezoomify_fixture_server::NodeServer;
 
 pub struct TestServer {
     pub base: String,
-    // Only security tests read the log today; other harnesses share this
-    // helper without log assertions.
+    // Other harnesses share this helper without log assertions.
     #[allow(dead_code)]
-    log: Arc<Mutex<Vec<serde_json::Value>>>,
+    log: std::path::PathBuf,
+    _server: NodeServer,
 }
 
 impl TestServer {
@@ -27,6 +25,7 @@ impl TestServer {
         std::fs::write(dir.join("index.html"), b"<html>static-index</html>").expect("index");
         std::fs::write(dir.join("secret.txt"), b"static-canary").expect("secret");
         std::fs::write(dir.join("sub").join("page.html"), b"<html>sub-page</html>").expect("sub");
+        std::fs::write(dir.join("app.wasm"), b"\0asm\xff{{origin}}").expect("asset");
         // Symlink escape: a file inside the root pointing outside it.
         #[cfg(unix)]
         std::os::unix::fs::symlink("/etc/hostname", dir.join("escape.txt")).expect("symlink");
@@ -35,71 +34,28 @@ impl TestServer {
     }
 
     async fn start_inner(static_dir: Option<std::path::PathBuf>) -> Self {
-        let scenarios_dir = Self::scenarios_path("");
-        let routes = RouteTable::load(&scenarios_dir).expect("load routes");
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind");
-        let bound = listener.local_addr().expect("addr");
-        let log = Arc::new(Mutex::new(Vec::new()));
-        let state = AppState {
-            routes: Arc::new(routes),
-            scenarios_dir,
-            static_dir,
-            origin: format!("http://{bound}"),
-            log: Arc::clone(&log),
-            log_path: None,
-        };
-        tokio::spawn(async move {
-            axum::serve(listener, dezoomify_fixture_server::router(state))
-                .await
-                .expect("serve");
-        });
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let log =
+            std::env::temp_dir().join(format!("dz-requests-{}-{id}.jsonl", std::process::id()));
+        let mut args = vec!["--request-log".into(), log.to_string_lossy().into_owned()];
+        if let Some(dir) = static_dir {
+            args.extend(["--static-dir".into(), dir.to_string_lossy().into_owned()]);
+        }
+        let server = NodeServer::fixture(&args);
         TestServer {
-            base: format!("http://{bound}"),
+            base: server.origin.clone(),
             log,
+            _server: server,
         }
     }
 
     #[allow(dead_code)]
     pub fn log_text(&self) -> String {
-        self.log
-            .lock()
-            .expect("log lock")
-            .iter()
-            .map(|v| v.to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
+        std::fs::read_to_string(&self.log).expect("request log")
     }
 
-    /// Sends one raw HTTP/1.1 GET over a socket and returns (status, body).
-    /// Used for hostile paths a real client would normalize before sending.
     #[allow(dead_code)]
-    pub async fn raw_get(&self, path: &str) -> (u16, String) {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let addr = self.base.trim_start_matches("http://").to_string();
-        let mut stream = tokio::net::TcpStream::connect(&addr)
-            .await
-            .expect("connect");
-        stream
-            .write_all(
-                format!("GET {path} HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n")
-                    .as_bytes(),
-            )
-            .await
-            .expect("write");
-        let mut buf = Vec::new();
-        stream.read_to_end(&mut buf).await.expect("read");
-        let text = String::from_utf8_lossy(&buf).to_string();
-        let status: u16 = text
-            .split_whitespace()
-            .nth(1)
-            .and_then(|p| p.parse().ok())
-            .unwrap_or(0);
-        let body = text.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
-        (status, body)
-    }
-
     pub fn scenarios_path(rel: &str) -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../testdata/scenarios")

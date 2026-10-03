@@ -3,7 +3,7 @@
 // docs/user is the single source of truth: never hand-edit help/; run
 // `node scripts/build-help.mjs` after editing any page.
 // Deterministic: same inputs produce byte-identical output.
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import MarkdownIt from "markdown-it";
@@ -189,8 +189,7 @@ function chrome({ title, description, topicsHtml, bodyHtml }) {
     <title>${escapeHtml(title)}</title>
     <link rel="icon" type="image/svg+xml" href="../favicon.svg" />
     <link rel="alternate icon" type="image/png" href="../favicon.png" />
-    <link rel="stylesheet" href="../src/styles.css" />
-    <link rel="stylesheet" href="../packages/shared-ui/src/styles/theme.css" />
+    <link rel="stylesheet" href="theme.css" />
 ${pageStyle}
   </head>
   <body>
@@ -261,6 +260,11 @@ for (const { stem } of PAGES) {
 }
 
 mkdirSync(outDir, { recursive: true });
+// Publish the app's actual theme beside the pages: dist/ never serves sources.
+copyFileSync(
+  path.join(root, "packages/shared-ui/src/styles/theme.css"),
+  path.join(outDir, "theme.css"),
+);
 
 for (const { stem, blurb } of PAGES) {
   const { title } = pageMeta.get(stem);

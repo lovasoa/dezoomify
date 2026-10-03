@@ -1,0 +1,16 @@
+<Capabilities xmlns="http://www.opengis.net/wmts/1.0" xmlns:ows="http://www.opengis.net/ows/1.1">
+  <Contents>
+    <Layer><ows:Identifier>image</ows:Identifier><Format>image/png</Format>
+      <Style><ows:Identifier><![CDATA[default]]></ows:Identifier></Style>
+      <ResourceURL format="image/png" resourceType="tile" template="{{origin}}/fixtures/wmts/limits/tiles/{TileCol}-{TileRow}.png" />
+      <TileMatrixSetLink><TileMatrixSet>EPSG3857</TileMatrixSet><TileMatrixSetLimits>
+        <TileMatrixLimits><TileMatrix>0</TileMatrix><MinTileCol>2</MinTileCol><MaxTileCol>3</MaxTileCol><MinTileRow>4</MinTileRow><MaxTileRow>5</MaxTileRow></TileMatrixLimits>
+      </TileMatrixSetLimits></TileMatrixSetLink>
+    </Layer>
+    <TileMatrixSet><ows:Identifier>EPSG3857</ows:Identifier><ows:SupportedCRS>urn:ogc:def:crs:EPSG::3857</ows:SupportedCRS>
+      <TileMatrix><ows:Identifier>0</ows:Identifier><ScaleDenominator>3571.4285714285716</ScaleDenominator><TopLeftCorner>0 512</TopLeftCorner>
+        <TileWidth>256</TileWidth><TileHeight>256</TileHeight><MatrixWidth>8</MatrixWidth><MatrixHeight>8</MatrixHeight>
+      </TileMatrix>
+    </TileMatrixSet>
+  </Contents>
+</Capabilities>

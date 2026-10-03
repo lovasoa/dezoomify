@@ -1,0 +1,5 @@
+<krpano title="Partial pyramid"><image tilesize="256">
+  <front url="tiles/%h-%v.png" multires="256,invalid" />
+  <level tiledimagewidth="0" tiledimageheight="512"><front url="tiles/%h-%v.png" /></level>
+  <level tiledimagewidth="512" tiledimageheight="512"><front url="tiles/%h-%v.png" /></level>
+</image></krpano>

@@ -134,8 +134,7 @@ const en = {
   "view.desktop.why1Body":
     "A browser tab can only hold a certain amount of picture. The desktop app assembles the image in memory subject to available memory and writes the finished output to disk.",
   "view.desktop.why2Title": "Saves the Finished Picture:",
-  "view.desktop.why2Body":
-    "Each job saves to one output file on your computer. You can queue several jobs; they save one at a time.",
+  "view.desktop.why2Body": "Each job saves to one output file on your computer.",
   "view.desktop.why3Title": "When the Website Cannot Finish:",
   "view.desktop.why3Body":
     "The website stops the job with an error and points to the desktop app for the full-size image.",
@@ -351,20 +350,6 @@ const en = {
   "desktop.cancel.note": "Save cancelled. Cleanup is done and any unfinished file was removed.",
   "desktop.copy.diagnostics": "Copy diagnostics",
   "desktop.copy.copied": "Copied!",
-  // Multi-job queue panel (desktop integration queue, todo 5.3). Jobs save
-  // one at a time in the order they were added; a failed job never stops the
-  // rest. Queue entries show their input addresses.
-  "desktop.queue.title": "Queue",
-  "desktop.queue.statusQueued": "Waiting",
-  "desktop.queue.statusActive": "Running",
-  "desktop.queue.statusDone": "Done",
-  "desktop.queue.statusFailed": "Failed",
-  "desktop.queue.statusCancelled": "Cancelled",
-  "desktop.queue.cancel": "Cancel",
-  "desktop.queue.cancelAll": "Cancel all",
-  "desktop.queue.retry": "Retry",
-  "desktop.queue.summary": "{succeeded} done, {failed} failed, {total} total",
-  "desktop.queue.progress": "{current} of {total} tiles",
   "desktop.panel.jobActions": "Desktop job actions",
   "desktop.settings.reset": "Reset settings",
   "desktop.quick.folder": "Folder",
