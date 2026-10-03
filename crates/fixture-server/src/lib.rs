@@ -13,8 +13,14 @@ pub fn scenarios_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/scenarios")
 }
 
+/// One product fixture and its expected pixel precision.
+pub struct FormatInput {
+    pub input: String,
+    pub tolerance: u8,
+}
+
 /// Product inputs discovered from ordinary fixture folders, without registration.
-pub fn format_inputs() -> Vec<String> {
+pub fn format_inputs() -> Vec<FormatInput> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures");
     let mut inputs = Vec::new();
     for format in std::fs::read_dir(root).expect("fixtures").flatten() {
@@ -26,16 +32,27 @@ pub fn format_inputs() -> Vec<String> {
             .flatten()
         {
             if let Ok(input) = std::fs::read_to_string(variant.path().join("input.txt")) {
-                inputs.push(format!(
-                    "/fixtures/{}/{}/{}",
-                    format.file_name().to_string_lossy(),
-                    variant.file_name().to_string_lossy(),
-                    input.trim()
-                ));
+                inputs.push(FormatInput {
+                    tolerance: if variant
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with("approximate-")
+                    {
+                        2
+                    } else {
+                        0
+                    },
+                    input: format!(
+                        "/fixtures/{}/{}/{}",
+                        format.file_name().to_string_lossy(),
+                        variant.file_name().to_string_lossy(),
+                        input.trim()
+                    ),
+                });
             }
         }
     }
-    inputs.sort();
+    inputs.sort_by(|a, b| a.input.cmp(&b.input));
     inputs
 }
 

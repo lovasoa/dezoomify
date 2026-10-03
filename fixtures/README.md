@@ -2,8 +2,13 @@
 
 Each `format/variant/input.txt` contains one relative input URL. The same fixtures
 run through CLI, website, and packaged extension tests, and the desktop window lane.
-Every basic fixture produces the same 512×512 image from four shared 256×256 JPEGs.
-Tests check the saved pixels, not JSON transcripts or implementation call sequences.
+Every basic fixture produces the same 512×512 image from shared 256×256 PNG or JPEG tiles in `tiles/`.
+Tests check every saved pixel exactly by default. Prefix the variant directory
+with `approximate-` when the result needs a two-value RGB tolerance, such as
+JPEG decoding. Dimensions and alpha are always exact. This naming convention
+is interpreted by shared discovery, without per-fixture registration.
+
+The historical CLI tile paths link to the shared PNGs; no product owns those bytes.
 
 Static resources are ordinary files and relative symlinks. `viewer.html` loads the
 input so the extension observes it as a real viewer request. The server substitutes

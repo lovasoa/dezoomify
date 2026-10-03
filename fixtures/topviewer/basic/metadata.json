@@ -1,5 +1,0 @@
-{
-  "topviews": [{"filepath": "image", "width": 512, "height": 512, "tileWidth": 256,
-    "layers": [{"no": 1, "width": 512, "starttile": 1, "cols": 2}]}],
-  "config": {"tileurl_v2": "{{origin}}/fixtures/topviewer/basic/tiles/{tile}.{extension}"}
-}

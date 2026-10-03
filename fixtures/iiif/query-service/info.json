@@ -1,5 +1,0 @@
-{
-  "@context": "http://iiif.io/api/image/2/context.json",
-  "@id": "{{origin}}/fixtures/iiif/query-service/image.jpg?IIIF=picture/info.json",
-  "width": 512, "height": 512, "tiles": [{"width": 512, "scaleFactors": [1]}]
-}

@@ -23,7 +23,7 @@ for (const fixture of formats) {
     await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 30000 });
     const pending = page.waitForEvent("download");
     await page.getByRole("button", { name: "Save image" }).click();
-    assertSavedPyramid(fs.readFileSync(await (await pending).path()), 2);
+    assertSavedPyramid(fs.readFileSync(await (await pending).path()), fixture.tolerance);
   });
 }
 

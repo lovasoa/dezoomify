@@ -14,10 +14,13 @@ checks, WASM portability, and the dependency audit.
 [`fixtures/`](../fixtures/README.md) contains ordinary files and relative symlinks.
 Each `format/variant/input.txt` contains its relative input URL; no registration,
 hash manifest, generated expectations, or route schema is needed. Every basic
-input produces the same 512×512 picture from the four shared JPEGs.
+input produces the same 512×512 picture from shared PNG or JPEG tiles.
 
 Each product iterates the same discovered inputs and checks saved dimensions
-and every pixel. JPEG decode differences have a two-value tolerance per channel.
+and every pixel. Pixel comparisons are exact by default. A variant directory prefixed with
+`approximate-` permits a two-value RGB tolerance for JPEG decode differences;
+dimensions and alpha remain exact. Discovery derives the tolerance from the
+directory name, without fixture-specific test rules.
 The website drives its real UI; extensions use real packaged job tabs; CLI tests
 invoke the binary. Desktop uses the real window in its explicit window lane.
 

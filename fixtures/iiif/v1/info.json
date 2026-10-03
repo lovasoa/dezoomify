@@ -2,6 +2,6 @@
   "@context": "http://library.stanford.edu/iiif/image-api/1.1/context.json",
   "@id": "{{origin}}/fixtures/iiif/v1", "width": 512, "height": 512,
   "tile_width": 256, "tile_height": 256, "scale_factors": [1],
-  "qualities": ["native"], "formats": ["jpg"],
+  "qualities": ["native"], "formats": ["png"],
   "profile": {"supports": ["sizeByW"]}
 }

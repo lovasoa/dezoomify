@@ -1,4 +1,4 @@
-url_template: "{{origin}}/fixtures/custom/basic/tiles/{{x / 256}}-{{y / 256}}.jpg"
+url_template: "{{origin}}/fixtures/custom/basic/tiles/{{x / 256}}-{{y / 256}}.png"
 variables:
   - {name: x, from: 0, to: 256, step: 256}
   - {name: y, from: 0, to: 256, step: 256}

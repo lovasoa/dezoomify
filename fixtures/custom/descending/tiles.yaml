@@ -1,4 +1,4 @@
-url_template: "{{origin}}/fixtures/custom/basic/tiles/{{x}}-{{y}}.jpg"
+url_template: "{{origin}}/fixtures/custom/basic/tiles/{{x}}-{{y}}.png"
 x_template: "x * tile_size"
 y_template: "y * tile_size"
 variables:

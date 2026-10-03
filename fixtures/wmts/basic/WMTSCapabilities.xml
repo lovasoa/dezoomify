@@ -4,7 +4,7 @@
       <ows:Identifier>image</ows:Identifier>
       <ows:BoundingBox crs="urn:ogc:def:crs:EPSG::3857"><ows:LowerCorner>0 1</ows:LowerCorner><ows:UpperCorner>511 512</ows:UpperCorner></ows:BoundingBox>
       <Style isDefault="true"><ows:Identifier>default</ows:Identifier></Style>
-      <ResourceURL format="image/jpeg" resourceType="tile" template="{{origin}}/fixtures/wmts/basic/tiles/{TileCol}-{TileRow}.jpg" />
+      <ResourceURL format="image/png" resourceType="tile" template="{{origin}}/fixtures/wmts/basic/tiles/{TileCol}-{TileRow}.png" />
     </Layer>
     <TileMatrixSet>
       <ows:Identifier>EPSG3857</ows:Identifier><ows:SupportedCRS>urn:ogc:def:crs:EPSG::3857</ows:SupportedCRS>

@@ -40,7 +40,7 @@ fn dimensions(path: &Path, size: u32) {
     );
 }
 
-fn pixels(path: &Path) {
+fn pixels(path: &Path, tolerance: u8) {
     let image = image::open(path).expect("saved image").to_rgba8();
     assert_eq!(image.dimensions(), (512, 512));
     let colors: [[u8; 3]; 4] = [[196, 48, 48], [48, 168, 64], [48, 72, 200], [232, 220, 96]];
@@ -52,7 +52,7 @@ fn pixels(path: &Path) {
                 .0
                 .iter()
                 .zip(expected)
-                .all(|(a, b)| a.abs_diff(b) <= 2),
+                .all(|(a, b)| a.abs_diff(b) <= tolerance),
             "pixel ({x},{y}): {pixel:?} != {expected:?}"
         );
     }
@@ -63,7 +63,8 @@ fn every_shared_format_saves_the_same_pixels() {
     let dir = temp_dir("cli-formats");
     let inputs = format_inputs();
     assert!(!inputs.is_empty());
-    for input in inputs {
+    for fixture in inputs {
+        let input = fixture.input;
         let url = format!("{}{input}", start());
         let run = cli(
             &dir,
@@ -88,7 +89,7 @@ fn every_shared_format_saves_the_same_pixels() {
         for pair in observed.windows(2) {
             assert!(pair[0]["seq"].as_u64() < pair[1]["seq"].as_u64());
         }
-        pixels(&dir.join("out.png"));
+        pixels(&dir.join("out.png"), fixture.tolerance);
     }
 }
 

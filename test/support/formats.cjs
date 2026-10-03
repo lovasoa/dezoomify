@@ -7,6 +7,7 @@ const formats = globSync("fixtures/*/*/input.txt", { cwd: root })
   .sort()
   .map((file) => ({
     name: file.slice(9, -10),
+    tolerance: file.split("/")[2].startsWith("approximate-") ? 2 : 0,
     input: `/fixtures/${file.slice(9, -9)}${readFileSync(path.join(root, file), "utf8").trim()}`,
     viewer: `/${file.slice(0, -9)}viewer.html`,
   }));

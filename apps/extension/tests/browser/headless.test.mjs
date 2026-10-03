@@ -487,7 +487,7 @@ for (const [browser, run] of [
       try {
         assertSavedPyramid(
           await run(fixtureServer.base, work, { scenario: `fixtures/${fixture.name}` }),
-          2,
+          fixture.tolerance,
         );
       } finally {
         rmSync(work, { recursive: true, force: true });

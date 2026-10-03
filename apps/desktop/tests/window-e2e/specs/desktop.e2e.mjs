@@ -245,7 +245,7 @@ describe("Dezoomify desktop window", () => {
       assert.equal(terminal.error, false, errorDetail(terminal));
       const outputs = outputFiles(runOutputDir());
       assert.equal(outputs.length, 1);
-      assertSavedPyramid(readFileSync(outputs[0]), 2);
+      assertSavedPyramid(readFileSync(outputs[0]), fixtureInput.tolerance);
     });
   }
 
