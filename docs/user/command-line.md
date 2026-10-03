@@ -80,8 +80,8 @@ dezoomify --bulk my-collection.txt --outfile collection.png
 
 This saves `collection_1.png`, `collection_2.png`, and so on. A failed image
 does not stop the rest; a per-image summary plus totals are printed at the
-end and the exit is 1 when any entry fails. The totals read the same as the
-desktop app queue (`bulk: X succeeded, Y failed, Z total`). You can also pass a single IIIF
+end and the exit is 1 when any entry fails. The totals read
+`bulk: X succeeded, Y failed, Z total`. You can also pass a single IIIF
 collection manifest address to `--bulk` to save the entries it lists
 (best-effort: `manifests`/`members`/`items` ids; a single manifest saves its
 first image). Between images `--min-interval` paces the queue.

@@ -14,17 +14,10 @@ Use it when:
 - the site **refuses visitors from other pages**: the app can introduce
   itself as coming from the site's own viewer page.
 
-Each job saves to one output file or IIIF tile folder. You can queue
-several jobs: an address submitted while a job runs waits in the queue table
-instead of replacing the running job, and jobs save one at a time in the
-order they were added. Each row shows its site, status, and progress; one
-entry can be cancelled without touching the rest, **Cancel all** stops new
-work, and failed jobs offer **Retry**. A failed job never stops the rest,
-and the totals read like the command line
-(`bulk: X succeeded, Y failed, Z total`). The app holds the full image in
-memory while it works (4
-bytes per pixel plus working space), so very large saves need matching
-free memory; when the image exceeds current available memory the save stops
+Each job saves to one output file or IIIF tile folder. The app holds the
+full image in memory while it works (4 bytes per pixel plus working space),
+so very large saves need matching free memory; when the image exceeds current
+available memory the save stops
 with a typed error before anything is written, and saving a smaller level
 fits the available memory.
 
@@ -52,7 +45,7 @@ Choose the folder, format, size, and network settings on the main screen.
 The app saves the image automatically in that folder. When **Image saved**
 appears, use **Open image** to open it with your usual image viewer, or
 **Show in folder** to find it in your file manager. There is no second save
-step. Settings and the queue do not appear on the finished image screen.
+step. Settings do not appear on the finished image screen.
 If some parts could not be retrieved, the app labels the image as saved with
 gaps; the open actions use that partial file.
 If opening fails, each attempt shows its own error. **Technical details &
@@ -138,8 +131,7 @@ choice.
 
 ## If a save fails
 
-A failed save says what went wrong and whether retrying can help; the queue
-row offers **Retry**, and a failed entry never stops the rest. Partially
+A failed save says what went wrong and whether retrying can help. Partially
 fetched saves need no decision from you: they are kept automatically as the
 `.partial` file described above.
 

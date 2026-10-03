@@ -42,6 +42,6 @@ Discovery, selection, acquisition, processing, and saving stay distinct, keeping
 
 ## App boundaries
 
-Browsers save PNG for jobs fitting browser memory and save limits; budgets: [Compatibility](compatibility.md#canvas-and-save-limits). Native apps support large images and local input, with [six output formats](native-apps.md#output-naming-and-encoders): native encoders `[png, jpeg, tiff, zif, webp]` plus `iiif-dir` output. Queues belong to the application: website submitted addresses wait their turn, desktop shows per-job progress with cancel one/all and retry failed. CLI `--bulk` runs one bounded invocation per entry with per-entry results and totals. Credentials: [Security](security.md).
+Browsers save PNG for jobs fitting browser memory and save limits; budgets: [Compatibility](compatibility.md#canvas-and-save-limits). Native apps support large images and local input, with [six output formats](native-apps.md#output-naming-and-encoders): native encoders `[png, jpeg, tiff, zif, webp]` plus `iiif-dir` output. CLI `--bulk` runs one bounded invocation per entry with per-entry results and totals. Credentials: [Security](security.md).
 
 dezoomify bypasses no authentication or access controls. Users are responsible for permission to retrieve and reproduce source material.

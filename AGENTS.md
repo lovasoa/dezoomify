@@ -11,7 +11,7 @@ desktop app, and CLI share one Rust algorithm that takes a `Host` argument to in
   and [Native apps](docs/native-apps.md).
 - `packages/shared-ui/`: host-neutral UI; follow its [AGENTS.md](packages/shared-ui/AGENTS.md).
   `packages/browser-runtime/` composes browser UI and Host capabilities.
-  [Application](docs/application.md) defines invocation, queue, and history ownership.
+  [Application](docs/application.md) defines invocation and history ownership.
 - [Docs index](docs/README.md): detailed contracts.
   [User docs](docs/user/README.md): source of all user-facing documentation.
 - `testdata/scenarios/`: deterministic fixtures, goldens, and transcripts.

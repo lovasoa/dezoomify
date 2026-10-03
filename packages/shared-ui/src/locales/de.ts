@@ -66,7 +66,7 @@ export const de = {
     "Ein Browser-Tab kann nur eine begrenzte Bildmenge halten. Die Desktop-App setzt das Bild im Speicher zusammen, soweit Speicher verfuegbar ist, und schreibt das fertige Ergebnis auf die Festplatte.",
   "view.desktop.why2Title": "Speichert das fertige Bild:",
   "view.desktop.why2Body":
-    "Jeder Auftrag wird in genau eine Ausgabedatei auf Ihrem Rechner gespeichert. Sie konnen mehrere Auftrage einreihen; sie werden nacheinander gespeichert.",
+    "Jeder Auftrag wird in genau eine Ausgabedatei auf Ihrem Rechner gespeichert.",
   "view.desktop.why3Title": "Wenn die Website nicht fertig wird:",
   "view.desktop.why3Body":
     "Die Website bricht den Auftrag mit einem Fehler ab und verweist fuer das vollstandige Bild auf die Desktop-App.",
@@ -272,20 +272,6 @@ export const de = {
     "Speichern abgebrochen. Aufgeraeumt, und jede unfertige Datei wurde entfernt.",
   "desktop.copy.diagnostics": "Diagnose kopieren",
   "desktop.copy.copied": "Kopiert!",
-  // Multi-job queue panel (desktop integration queue, todo 5.3). Jobs save
-  // one at a time in the order they were added; a failed job never stops the
-  // rest. Queue entries show their input addresses.
-  "desktop.queue.title": "Warteschlange",
-  "desktop.queue.statusQueued": "Wartet",
-  "desktop.queue.statusActive": "Lauft",
-  "desktop.queue.statusDone": "Fertig",
-  "desktop.queue.statusFailed": "Fehlgeschlagen",
-  "desktop.queue.statusCancelled": "Abgebrochen",
-  "desktop.queue.cancel": "Abbrechen",
-  "desktop.queue.cancelAll": "Alle abbrechen",
-  "desktop.queue.retry": "Erneut versuchen",
-  "desktop.queue.summary": "{succeeded} fertig, {failed} fehlgeschlagen, {total} gesamt",
-  "desktop.queue.progress": "{current} von {total} Kacheln",
   "desktop.panel.jobActions": "Desktop-Auftragsaktionen",
   "desktop.settings.reset": "Einstellungen zuruecksetzen",
   "desktop.quick.folder": "Ordner",

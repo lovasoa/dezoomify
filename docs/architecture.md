@@ -20,7 +20,7 @@ Format references resolve against the redirected base, and routes that require a
 
 ## Shared UI and application
 
-`packages/shared-ui` contains React components, translations, pure presentation functions, history, queue utilities, labels, and bounded diagnostics, with no host globals. Browser application code may import the shared UI; browser transport and image operations receive callbacks.
+`packages/shared-ui` contains React components, translations, pure presentation functions, history, labels, and bounded diagnostics, with no host globals. Browser application code may import the shared UI; browser transport and image operations receive callbacks.
 
 One browser invocation owns cancellation, pause, pending interactions, progress, and retirement; a replacement invocation cannot receive its predecessor's progress or output, and completed output stays available until the user retires it. Desktop retains only the task ownership and IPC required by its process boundary. See [Application](application.md).
 

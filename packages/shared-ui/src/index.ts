@@ -8,7 +8,6 @@ export * from "./i18n.ts";
 export * from "./labels.ts";
 export * from "./partial-decision.tsx";
 export * from "./presentation.ts";
-export * from "./sequential-queue.ts";
 export * from "./source-url.ts";
 export * from "./url-input.tsx";
 export * from "./view.tsx";

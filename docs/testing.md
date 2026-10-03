@@ -39,7 +39,7 @@ before checkout.
 Pure parser tests cover malformed metadata and unusual geometry. Host tests
 cover retries, cancellation, resource limits, codecs, file publication, cache
 isolation, credentials, and cleanup. UI and product tests cover accessibility,
-permissions, source navigation, queues, and recovery. These are behavior checks
+permissions, source navigation, and recovery. These are behavior checks
 where a normal successful save cannot exercise the relevant failure branch.
 Boundary rules use standard Biome and Clippy checks.
 

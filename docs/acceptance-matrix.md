@@ -16,12 +16,11 @@ tests contact no public source websites.
 | Body limits, decode disposal, image placement, canvas failure, ordinary image display | Browser operation tests, website assembly fixtures | `test browser`, `test web --e2e` |
 | Progress, completed output, partial gaps, resolution notice, error details | `test/presentation.test.mjs`, `test/view-rendering.test.mjs` | `test ui` |
 | Keyboard, accessible names, translated controls | `test/ui-a11y.test.mjs`, `test/ui-i18n.test.mjs` | `test ui` |
-| FIFO advancement, isolated failures, cancellation, retry | Shared queue tests and desktop queue tests | `test`, `test desktop` |
 | Local history retention and canonical labels | `test/history.test.mjs`, `test/labels.test.mjs` | `test` |
 | Source-document identity, scan limits, permission user activation, authenticated fetch, redirects | Extension source tests and packaged Chromium/Firefox fixture journeys | `test extension` |
 | Native file/HTTP reads, cache, output formats, ICC/EXIF, overwrite policy, publication | Native I/O tests and actual CLI scenarios | `test native`, `test scenario` |
 | Bounded decode, memory/spool accounting, cancellation/publication ordering | Native pipeline and sink tests | `test native` |
-| Desktop settings, save, cancel, queue, partial, open/reveal | Desktop tests and real-window fixture journeys | `test desktop`, `test desktop --e2e-window` |
+| Desktop settings, save, cancel, partial, open/reveal | Desktop tests and real-window fixture journeys | `test desktop`, `test desktop --e2e-window` |
 | Legacy `/` and new `/beta` routes, fresh WASM, packaged assets | Assembled-site build and website/extension E2E | `build web`, `test all` |
 
 `cargo xtask check` validates formatting, Clippy, TypeScript,

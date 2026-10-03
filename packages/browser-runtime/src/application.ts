@@ -1,10 +1,7 @@
 import {
   AccessRequestView,
   clearHistory,
-  createSequentialQueue,
   type DiagnosticRecorder,
-  enqueueSequential,
-  finishActiveQueueEntry,
   type HistoryEntry,
   type HistoryStore,
   isValidInputUrl,
@@ -17,7 +14,6 @@ import {
   presentProgress,
   presentStatus,
   pushHistory,
-  type QueueEntry,
   renderView,
   saveHistory,
   toHistoryEntry,
@@ -102,12 +98,11 @@ export interface BrowserApplicationOptions {
   openSource?(): void;
 }
 
-/** Website and extension share the entire invocation, interaction, queue, and presentation flow. */
+/** Website and extension share the entire invocation, interaction, and presentation flow. */
 export function createBrowserApplication(options: BrowserApplicationOptions) {
   let history: HistoryEntry[] = options.history
     ? loadHistory(options.history.store, options.history.key)
     : [];
-  let queue = createSequentialQueue<QueueEntry & { url: string }>("browser:");
   let current: ReturnType<typeof invocation> | undefined;
   let idle: Presentation = presentIdle();
   let initialUrl: string | undefined;
@@ -180,7 +175,6 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
   }
 
   function cancel(): void {
-    queue = createSequentialQueue("browser:");
     if (options.resetToIdle) {
       retire();
       idle = presentIdle();
@@ -203,7 +197,6 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
     options.onStart?.(url);
     a.activity.startHeartbeat();
     update();
-    let outcome: "done" | "failed" | "cancelled" = "done";
     try {
       await retired;
       a.controller.signal.throwIfAborted();
@@ -328,7 +321,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       options.onComplete?.(a.output);
     } catch (error) {
       if (current !== a) return;
-      outcome = a.controller.signal.aborted ? "cancelled" : "failed";
+      const outcome = a.controller.signal.aborted ? "cancelled" : "failed";
       if (outcome === "failed") {
         a.failure = await withVerdict(
           isJobError(error) ? error : { kind: "internal", detail: String(error).slice(0, 2048) },
@@ -342,9 +335,6 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       if (current === a) {
         a.done = true;
         update();
-        const next = finishActiveQueueEntry(queue, outcome);
-        queue = next.queue;
-        if (next.next) void run(next.next.url);
       }
     }
   }
@@ -387,10 +377,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       update();
       return;
     }
-    const queued = enqueueSequential(queue, (id, status) => ({ id, status, url }));
-    queue = queued.queue;
-    if (queued.entry.status === "active") void run(url);
-    else update();
+    void run(url);
   }
 
   function update(): void {

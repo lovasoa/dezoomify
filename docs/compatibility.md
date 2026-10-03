@@ -40,7 +40,7 @@ Browser apps show tainted tiles but save nothing clean from them ([Browser runti
 
 ### Bulk
 
-Queues run sequential invocations in the application: website single-queue (submitted addresses wait their turn), native multi-job queue (per-job progress, cancel one/all, retry failed). Each job still saves one output; failures never stop the rest. CLI `--bulk` runs one bounded run per entry (per-image plus totals summary; exit 1 when any entry fails). Bulk text discovery yields deferred entries resolving one at a time. User behavior: [Website guide](user/website.md#saving-several-images), [Desktop app guide](user/desktop-app.md), [Command-line guide](user/command-line.md#saving-many-images).
+CLI `--bulk` runs one bounded run per entry (per-image plus totals summary; exit 1 when any entry fails). Bulk text discovery yields deferred entries resolving one at a time. User behavior: [Command-line guide](user/command-line.md#saving-many-images).
 
 ## Reporting a problem
 

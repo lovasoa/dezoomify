@@ -35,12 +35,8 @@ you know it. See [finding the image address](./finding-the-image-address.md).
 
 ## Saving several images
 
-Pasting another address while a job runs queues it instead of stopping the
-current job. Queued jobs save one at a time in the order they were added; a
-failed address never stops the rest. The address bar always shows the job
-that is running now. To save many addresses at once from a list, use the
-[command-line tool](./command-line.md) with `--bulk`, or queue them in the
-[desktop app](./desktop-app.md).
+To save many addresses at once from a list, use the
+[command-line tool](./command-line.md) with `--bulk`.
 
 ## Recent pictures
 

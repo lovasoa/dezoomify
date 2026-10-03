@@ -43,10 +43,6 @@ The frontend subscribes before starting and waits for native registration before
 
 Every start carries an immutable copy of current settings. The shared native validation path checks input, dimensions, retries, cache, headers, and output. Titles determine output names; numeric suffixes avoid overwriting existing files.
 
-### Desktop queue
-
-The FIFO queue activates one address at a time, advances after failure, and supports cancel-one, cancel-all, and retry at the back. Rows show the address, progress, and result. Aggregate totals use the same succeeded/failed/total meaning as CLI bulk output. Rust validates each entry independently.
-
 ### Desktop output and settings
 
 Formats are PNG, JPEG, TIFF, ZIF, lossless WebP, and iiif-dir; PNG is the default. Settings persist under `dezoomify.desktop.settings.v1` and fall back to defaults on invalid saved data. Output directory, compression, width/height caps, retries, cache directory, and headers accompany each invocation. JPEG quality is `100 - compression` (default compression 5 gives quality 95).
