@@ -1,0 +1,8 @@
+{
+  "@context": ["http://iiif.io/api/presentation/2/context.json"],
+  "label": "Legacy manifest",
+  "sequences": [{"canvases": [{"label":"Map", "images":[{"resource":{
+    "@id":"{{origin}}/fixtures/tiles/whole.jpg", "width":512, "height":512,
+    "service":{"@id":"{{origin}}/fixtures/iiif/v2", "profile":"http://iiif.io/api/image/2/level2.json"}
+  }}]}]}]
+}

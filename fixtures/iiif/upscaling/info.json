@@ -1,0 +1,6 @@
+{
+  "@context": "http://iiif.io/api/image/3/context.json",
+  "id": "{{origin}}/fixtures/iiif/upscaling", "type": "ImageService3",
+  "profile": "level2", "extraFeatures": ["sizeUpscaling"],
+  "width": 512, "height": 512, "tiles": [{"width": 256, "scaleFactors": [1]}]
+}

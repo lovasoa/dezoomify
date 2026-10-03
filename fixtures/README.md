@@ -20,3 +20,16 @@ Hungaricana, National Gallery, Zoomify brokers and ETE), inline Zoomify geometry
 IIIF v1 and constrained tile sizes, a multilingual IIIF manifest, TopViewer asset
 selection, and descending custom tile coordinates. They reuse the basic metadata
 and shared tiles; adding a variant requires no test or server changes.
+
+Additional variants exercise FSI viewer discovery, WMTS matrix limits and geographic
+bounds, skipping unsupported WMTS layers and unusable Krpano levels, IIIF viewer
+parameters and upscaling recovery, inferred custom geometry, and alternate image
+entry points. Viewer syntax and metadata shapes reuse the small reproductions in
+`dezoomify-rs/dezoomify-core/testdata/coverage`; image bytes remain shared here.
+Captured Krpano and Google Arts pages already live in the historical corpus.
+
+CONTENTdm fixes its API paths at `/digital/`; its ordinary response files therefore
+live under `testdata/scenarios/formats/contentdm/payloads/127.0.0.1/`. The four
+viewer variants exercise absolute, site-relative, `/digital/`, and relative IIIF
+references. The existing historical iframe replay also follows a Polona record
+through its item JSON, preserving the same geometry and tile URL assertions.
