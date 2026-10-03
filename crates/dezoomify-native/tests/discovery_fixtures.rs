@@ -258,8 +258,7 @@ fn historical_inputs_preserve_geometry_and_addressed_tiles() {
                         let origin = &origin;
                         async move {
                             let response = client
-                                .get(format!("{origin}/proxy"))
-                                .query(&[("url", &request.uri)])
+                                .get(dezoomify_fixture_server::replay_url(origin, &request.uri))
                                 .send()
                                 .await
                                 .and_then(reqwest::Response::error_for_status)

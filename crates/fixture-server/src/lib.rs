@@ -13,6 +13,17 @@ pub fn scenarios_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/scenarios")
 }
 
+/// Loopback replay URL for one recorded resource, including its query parameters.
+#[must_use]
+pub fn replay_url(origin: &str, target: &str) -> String {
+    let mut replay = url::Url::parse(origin)
+        .expect("fixture origin")
+        .join("/fetch")
+        .expect("fixture endpoint");
+    replay.query_pairs_mut().append_pair("url", target);
+    replay.into()
+}
+
 /// One product fixture and its expected pixel precision.
 pub struct FormatInput {
     pub input: String,

@@ -16,7 +16,9 @@ Static resources are ordinary files and relative symlinks. `viewer.html` signals
 `data-viewer-ready="true"` once its resources load, before the extension scans it.
 For direct inputs, link to the shared viewer template; the server substitutes
 `{{input}}` with the adjacent `input.txt` URL, defaulting to `viewer.html`. `server.js` exports
-`serve(Request): Response` only where a protocol needs query-based tile requests.
+`serve(request, { file, origin }): Response | null` only where a protocol needs
+dynamic responses. Return null for unrelated requests or to serve a matching
+static file; a returned 404 finishes the request.
 Handlers share the ordinary `tiles/server.js` helper; the HTTP server knows no formats.
 
 All bytes here are synthetic GPL-3.0-or-later test data. Fixture changes are reviewed

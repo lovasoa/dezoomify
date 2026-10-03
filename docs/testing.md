@@ -53,14 +53,27 @@ regression tests. Provenance lives in their README; Git records content changes.
 ## HTTP fixtures
 
 Node is the only runtime for repository-authored HTTP servers.
+Clients use ordinary loopback file URLs. Recorded remote resources use only
+`/fetch?url=<encoded original URL>`; harnesses build it with `replayUrl`
+(Node) or `dezoomify_fixture_server::replay_url` (Rust).
+Extension traffic fixtures use real `.dzi`, `.xml`, and `.yaml` file paths so
+discovery sees the same URL shapes as source sites.
+The fixture server trusts test clients and uses the standard URL parser.
+Unexpected requests report their method, URL, and exception in server logs and
+the request transcript; missing recordings return a 404 naming the supplied URL.
 `test/fixture-server.mjs` serves files, symlinks, and fixture-local
-`serve(Request): Response` functions, optionally asynchronous. The server knows
-no image formats. Query protocols and signing belong in the fixture directory.
+`serve(request, { file, origin }): Response | null` functions, optionally asynchronous.
+Handlers return null for requests they do not own; a returned 404 is a final response.
+The optional file is the matching static file, so ordinary protocol handlers can
+yield to it while authentication handlers can protect it. The server knows no
+image formats. Query protocols and signing belong in the fixture directory.
 Native malformed-wire tests use `test/raw-server.mjs`; Rust supplies bytes over
 stdio while Node owns sockets. Parent stdin closes and stops the subprocess.
 
-The older corpus retains its URL-layout and exceptional `routes.json` mappings
-while its regression fixtures migrate. Unknown URLs never reach the internet.
+Historical files use `payloads/{host}/{path}`; symlinks supply alternate URL paths,
+and local handlers own exceptional statuses, headers, and authentication.
+Text-file extensions and directory indexes provide captured extensionless URLs.
+Unknown URLs never reach the internet.
 Ports are allocated on loopback. Third-party desktop WebDriver and unmodified
 image servers used as test subjects are outside the authored-server rule.
 

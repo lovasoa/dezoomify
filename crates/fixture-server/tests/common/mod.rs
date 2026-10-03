@@ -4,8 +4,7 @@ use dezoomify_fixture_server::NodeServer;
 
 pub struct TestServer {
     pub base: String,
-    // Only security tests read the log today; other harnesses share this
-    // helper without log assertions.
+    // Other harnesses share this helper without log assertions.
     #[allow(dead_code)]
     log: std::path::PathBuf,
     _server: NodeServer,
@@ -26,6 +25,7 @@ impl TestServer {
         std::fs::write(dir.join("index.html"), b"<html>static-index</html>").expect("index");
         std::fs::write(dir.join("secret.txt"), b"static-canary").expect("secret");
         std::fs::write(dir.join("sub").join("page.html"), b"<html>sub-page</html>").expect("sub");
+        std::fs::write(dir.join("app.wasm"), b"\0asm\xff{{origin}}").expect("asset");
         // Symlink escape: a file inside the root pointing outside it.
         #[cfg(unix)]
         std::os::unix::fs::symlink("/etc/hostname", dir.join("escape.txt")).expect("symlink");
@@ -53,34 +53,6 @@ impl TestServer {
     #[allow(dead_code)]
     pub fn log_text(&self) -> String {
         std::fs::read_to_string(&self.log).expect("request log")
-    }
-
-    /// Sends one raw HTTP/1.1 GET over a socket and returns (status, body).
-    /// Used for hostile paths a real client would normalize before sending.
-    #[allow(dead_code)]
-    pub async fn raw_get(&self, path: &str) -> (u16, String) {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let addr = self.base.trim_start_matches("http://").to_string();
-        let mut stream = tokio::net::TcpStream::connect(&addr)
-            .await
-            .expect("connect");
-        stream
-            .write_all(
-                format!("GET {path} HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n")
-                    .as_bytes(),
-            )
-            .await
-            .expect("write");
-        let mut buf = Vec::new();
-        stream.read_to_end(&mut buf).await.expect("read");
-        let text = String::from_utf8_lossy(&buf).to_string();
-        let status: u16 = text
-            .split_whitespace()
-            .nth(1)
-            .and_then(|p| p.parse().ok())
-            .unwrap_or(0);
-        let body = text.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
-        (status, body)
     }
 
     #[allow(dead_code)]

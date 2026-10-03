@@ -1,5 +1,7 @@
 export function serve(request) {
-  const params = new URL(request.url).searchParams;
+  const url = new URL(request.url);
+  if (url.hostname !== "127.0.0.1" || url.pathname !== "/fixtures/assembly/tile.svg") return null;
+  const params = url.searchParams;
   const width = params.get("w");
   const height = params.get("h");
   const color = params.get("color");

@@ -1,7 +1,16 @@
 import { readFile } from "node:fs/promises";
+import { fileResponse } from "../../../../test/fixture-files.mjs";
 
-export async function serve(request) {
-  const params = new URL(request.url).searchParams;
+export async function serve(request, { file }) {
+  const url = new URL(request.url);
+  if (
+    !file &&
+    ((url.hostname === "127.0.0.1" && url.pathname.startsWith("/iiif/")) ||
+      (url.hostname === "iiif.micr.io" && url.pathname.startsWith("/KEimL/")))
+  )
+    return fileResponse(new URL("./payloads/127.0.0.1/stub.jpg", import.meta.url));
+  if (url.hostname !== "127.0.0.1" || url.pathname !== "/fixtures/generic/tile.jpg") return null;
+  const params = url.searchParams;
   const available = ["x", "y"].every((name) => {
     const value = params.get(name);
     return /^-?\d+$/.test(value ?? "") && Number(value) >= 0 && Number(value) < 2;

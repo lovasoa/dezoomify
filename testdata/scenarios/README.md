@@ -31,14 +31,30 @@ Observed Zoomify inputs reproduce Museum Ludwig behavior with synthetic data.
 Live-triage fixtures (2026-09-07) are synthetic. Memorix demo keys and Arts
 fixture tokens are public test doubles; they are never real credentials.
 
-## Serving older reproductions
+## Serving reproductions
 
-A file at `payloads/{host}/{path}` answers that host/path. Extension and MIME
-fallbacks retain recorded URL spellings. `routes.json` records exceptional
-status, query, header, cookie, wildcard, or payload mappings. Exact matches
-precede wildcards. Text substitutes `{{origin}}`, `{{localhost_origin}}`, and
-`{{host}}`. A route without a payload calls its local `server.js` through the
-standard Request/Response interface. Format code stays outside the generic server.
+Use ordinary loopback URLs for local files. For a recorded remote URL, use
+`/fetch?url=<encoded URL>` (the Node `replayUrl` helper builds this).
+This is the only replay form. The standard URL parser normalizes requests;
+bad test requests produce a logged exception rather than a simulated API contract.
+
+A file at `payloads/{host}/{path}` answers that host/path. Alternate paths use
+relative symlinks; content types follow file extensions (or the symlink target
+for extensionless files). Captured text URLs can omit `.html`, `.json`, `.xml`,
+or `.txt`; directory URLs use `index` with those extensions. Percent-encoded
+paths and their decoded spellings identify the same file. Duplicate host/path
+files must contain identical bytes; conflicting copies fail at startup.
+
+A local `server.js` exports `serve(request, { file, origin })` and returns a
+standard Response for requests it owns, or null to fall through to static files.
+Returning a 404 finishes the request. The file argument is the matching static
+file; tile fallbacks yield to metadata files, while authentication checks run
+before protected files are served. Headers, cookies, redirects, and generated
+responses belong in these handlers. They can use `fileResponse` from
+`test/fixture-files.mjs` to infer MIME types and supply Response options.
+
+Text substitutes `{{origin}}`, `{{localhost_origin}}`, and `{{host}}`.
+Encoded bodies are sent unchanged. Format code stays outside the generic server.
 
 The server binds ephemeral loopback ports and never forwards unknown requests
 to public hosts. Cookie values stay out of request logs. Handlers use local bytes

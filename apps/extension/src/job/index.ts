@@ -227,7 +227,7 @@ api.runtime.onMessage.addListener((message: unknown) => {
           ? "/protected/artwork.dzi"
           : typeof value.scenario === "string" && value.scenario.startsWith("fixtures/")
             ? `/${value.scenario}/`
-            : "/fetch/";
+            : "/extension-inputs/";
       const input = scan.inputs.find((candidate) => candidate.url.includes(expected));
       if (!input) throw new Error(`direct scan did not find ${expected}`);
       const url =

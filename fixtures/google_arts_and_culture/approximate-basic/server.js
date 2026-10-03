@@ -1,10 +1,10 @@
 import { createHmac } from "node:crypto";
 import { tile } from "../../tiles/server.js";
 
-export function serve(request) {
+export function serve(request, { file }) {
+  if (file) return null;
   const url = new URL(request.url);
-  if (!url.pathname.startsWith("/fixtures/google_arts_and_culture/approximate-basic/"))
-    return new Response(null, { status: 404 });
+  if (!url.pathname.startsWith("/fixtures/google_arts_and_culture/approximate-basic/")) return null;
   if (url.pathname.endsWith(".html")) {
     const base = `${url.host}/fixtures/google_arts_and_culture/approximate-basic/tiles`;
     return new Response(`],"//${base}","sample-token"`, {
@@ -17,7 +17,7 @@ export function serve(request) {
       { headers: { "content-type": "application/xml" } },
     );
   const match = url.pathname.match(/=x(\d+)-y(\d+)-z0-t(.+)$/);
-  if (!match) return new Response(null, { status: 404 });
+  if (!match) return null;
   const path = url.pathname.slice(1, url.pathname.lastIndexOf("-t"));
   const signature = createHmac("sha1", Buffer.from("7b2b4e23de2cc5c5", "hex"))
     .update(`${path}-tsample-token`)

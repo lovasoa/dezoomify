@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 import { tile } from "../../tiles/server.js";
-export function serve(request) {
+export function serve(request, { file }) {
+  if (file) return null;
   if (!new URL(request.url).pathname.startsWith("/fixtures/iipimage/approximate-basic/"))
-    return new Response(null, { status: 404 });
+    return null;
   const query = new URL(request.url).searchParams;
   if (query.has("JTL")) {
     const [level, index] = query.get("JTL").split(",").map(Number);

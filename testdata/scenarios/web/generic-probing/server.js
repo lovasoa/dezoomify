@@ -1,5 +1,12 @@
 export function serve(request) {
   const url = new URL(request.url);
+  if (
+    url.hostname !== "127.0.0.1" ||
+    !/^\/fixtures\/generic\/(padded|large|edge|boundary|one|missing-origin|placeholder)\.svg$/.test(
+      url.pathname,
+    )
+  )
+    return null;
   const integer = (name) =>
     /^-?\d+$/.test(url.searchParams.get(name) ?? "") ? Number(url.searchParams.get(name)) : NaN;
   const x = integer("x");

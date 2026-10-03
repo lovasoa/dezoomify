@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 import { tile } from "../../tiles/server.js";
-export function serve(request) {
+export function serve(request, { file }) {
+  if (file) return null;
   if (!new URL(request.url).pathname.startsWith("/fixtures/xlimage/approximate-basic/"))
-    return new Response(null, { status: 404 });
+    return null;
   const query = new URL(request.url).searchParams;
   return query.get("cmd") === "tile"
     ? tile(Number(query.get("x")), Number(query.get("y")))

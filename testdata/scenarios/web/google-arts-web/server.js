@@ -2,7 +2,13 @@ import { readFileSync } from "node:fs";
 import { verifiedBase } from "./arts.js";
 
 export function serve(request) {
-  const pathname = new URL(request.url).pathname;
+  const url = new URL(request.url);
+  const pathname = url.pathname;
+  if (
+    url.hostname !== "fixtures.test" ||
+    !/^\/arts\/gap\/path=x[0-9]+-y[0-9]+-z[0-9]+-t[^/]+$/.test(pathname)
+  )
+    return null;
   if (!verifiedBase(pathname))
     return new Response("fixture error", {
       status: 403,

@@ -404,7 +404,8 @@ async function runFirefoxJob(base, work, runOptions = {}) {
   browserOptions.setPreference("browser.download.useDownloadDir", true);
   browserOptions.setPreference("browser.helperApps.neverAsk.saveToDisk", "image/png");
   assert.ok(existsSync(GECKODRIVER), "the pinned geckodriver package is not installed");
-  const service = new firefox.ServiceBuilder(GECKODRIVER);
+  // Firefox treats extension documents as privileged WebDriver contexts.
+  const service = new firefox.ServiceBuilder(GECKODRIVER).addArguments("--allow-system-access");
   const driver = await new webdriver.Builder()
     .forBrowser("firefox")
     .setFirefoxOptions(browserOptions)
@@ -461,7 +462,7 @@ async function runFirefoxJob(base, work, runOptions = {}) {
       await waitForFixtureEvent(
         fixtureServer.logFile,
         logOffset,
-        (event) => event.route === "extension-source-access-proof" && event.status === 200,
+        (event) => event.path === "/__source-access-proof" && event.status === 200,
         "the authenticated direct job-page fetch",
       );
     }

@@ -2,7 +2,9 @@ import { readFileSync } from "node:fs";
 import { decryptTile, verifiedBase } from "../google-arts-web/arts.js";
 
 export function serve(request) {
-  const base = verifiedBase(new URL(request.url).pathname);
+  const pathname = new URL(request.url).pathname;
+  if (!/^\/arts\/(path|plain)=x[0-9]+-y[0-9]+-z[0-9]+-t[^/]+$/.test(pathname)) return null;
+  const base = verifiedBase(pathname);
   if (!base)
     return new Response("fixture error", {
       status: 403,
