@@ -22,6 +22,9 @@ tiff = "0.11"
 scraper = { version = "0.27", default-features = false }
 tempfile = "3.27"
 
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+rustix = { version = "1", features = ["fs"] }
+
 [dev-dependencies]
 tokio.workspace = true
 dezoomify-fixture-server = { path = "../fixture-server" }

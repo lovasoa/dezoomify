@@ -96,6 +96,90 @@ impl Drop for StagedFile {
     }
 }
 
+/// One unpublished tile tree. Only final tile payloads are stored here.
+pub(crate) struct StagedDirectory {
+    pub(crate) path: std::path::PathBuf,
+}
+
+impl StagedDirectory {
+    pub(crate) fn new(destination: &Path) -> Result<Self, Error> {
+        if destination.exists() {
+            return Err(Error::OutputExists);
+        }
+        if let Some(parent) = destination.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| write_failed("output directory creation failed", &e))?;
+        }
+        let path = crate::sink::temp_sibling(destination);
+        std::fs::create_dir(&path)
+            .map_err(|e| write_failed("staging directory creation failed", &e))?;
+        Ok(Self { path })
+    }
+
+    pub(crate) fn write(
+        &self,
+        relative: &str,
+        bytes: &[u8],
+        cancelled: &AtomicBool,
+    ) -> Result<std::path::PathBuf, Error> {
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(Error::Cancelled);
+        }
+        let path = self.path.join(relative);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| write_failed("tile directory creation failed", &e))?;
+        }
+        let mut file =
+            std::fs::File::create(&path).map_err(|e| write_failed("tile creation failed", &e))?;
+        for chunk in bytes.chunks(64 << 10) {
+            if cancelled.load(Ordering::SeqCst) {
+                return Err(Error::Cancelled);
+            }
+            file.write_all(chunk)
+                .map_err(|e| write_failed("tile write failed", &e))?;
+        }
+        file.sync_all()
+            .map_err(|e| write_failed("tile sync failed", &e))?;
+        Ok(path)
+    }
+
+    pub(crate) fn publish(self, destination: &Path, cancelled: &AtomicBool) -> Result<(), Error> {
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(Error::Cancelled);
+        }
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let result = rustix::fs::renameat_with(
+            rustix::fs::CWD,
+            &self.path,
+            rustix::fs::CWD,
+            destination,
+            rustix::fs::RenameFlags::NOREPLACE,
+        )
+        .map_err(std::io::Error::from);
+        #[cfg(target_os = "windows")]
+        let result = std::fs::rename(&self.path, destination);
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+        let result = Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "atomic directory publication is unavailable",
+        ));
+        result.map_err(|e| {
+            if destination.exists() {
+                Error::OutputExists
+            } else {
+                write_failed("directory publication failed", &e)
+            }
+        })
+    }
+}
+
+impl Drop for StagedDirectory {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
 /// Standard Write/Seek adapter shared by the concrete native encoders.
 pub(crate) struct GuardedFile<'a, W = std::fs::File> {
     file: &'a mut W,
