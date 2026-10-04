@@ -17,8 +17,6 @@ jobs:
     # (crates/xtask/src/ci.rs); lane semantics live there, never here.
     name: deterministic (${{ matrix.lane-group }})
     runs-on: ubuntu-latest
-    env:
-      GECKODRIVER_CACHE_DIR: ${{ runner.temp }}/geckodriver
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -32,6 +30,9 @@ jobs:
           - extension
           - bindings+security
     steps:
+      - name: Locate Firefox driver cache
+        if: matrix.lane-group == 'extension'
+        run: echo "GECKODRIVER_CACHE_DIR=${{ runner.temp }}/geckodriver" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0

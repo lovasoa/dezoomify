@@ -164,7 +164,7 @@ async function readCompletedPng(outputDir, deadline) {
     if (outputs.length === 1) {
       try {
         const bytes = readFileSync(outputs[0]);
-        // Firefox creates the destination before the download stream has
+        // Browsers can create the destination before the download stream has
         // finished. Decode the bytes before returning so the E2E observes a
         // completed save, not merely a visible pathname.
         decodePngPixels(bytes);
@@ -175,7 +175,7 @@ async function readCompletedPng(outputDir, deadline) {
     } else if (outputs.length > 1) lastError = `expected one PNG, found ${outputs.length}`;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
-  throw new Error(`Firefox saved an incomplete PNG: ${lastError}`);
+  throw new Error(`Browser saved an incomplete PNG: ${lastError}`);
 }
 
 function newFixtureEvents(logFile, offset) {
@@ -243,8 +243,11 @@ async function runChromiumJob(base, work, options = {}) {
     });
     if (shared) matrixChromium = context;
   }
-  // Track downloads at context level so the test sees the extension API's
-  // Blob download regardless of which page initiated it.
+  // Browser-level events also see downloads from job tabs before Playwright
+  // has attached its page observer. Tiny fixtures can finish that quickly.
+  let downloadSession;
+  const downloadsDir = path.join(work, "downloads");
+  mkdirSync(downloadsDir, { recursive: true });
   const downloads = [];
   let resolveDownload;
   const downloadReady = new Promise((resolve) => {
@@ -264,16 +267,17 @@ async function runChromiumJob(base, work, options = {}) {
     downloads.push(download);
     resolveDownload(download);
   };
-  for (const page of context.pages()) {
-    page.on("download", onDownload);
-    observe(page);
-  }
-  const onPage = (page) => {
-    page.on("download", onDownload);
-    observe(page);
-  };
+  for (const page of context.pages()) observe(page);
+  const onPage = observe;
   context.on("page", onPage);
   try {
+    downloadSession = await context.browser().newBrowserCDPSession();
+    downloadSession.on("Browser.downloadWillBegin", onDownload);
+    await downloadSession.send("Browser.setDownloadBehavior", {
+      behavior: "allow",
+      downloadPath: downloadsDir,
+      eventsEnabled: true,
+    });
     const serviceWorker =
       context.serviceWorkers()[0] ??
       (await context.waitForEvent("serviceworker", { timeout: 15000 }));
@@ -338,17 +342,16 @@ async function runChromiumJob(base, work, options = {}) {
     await waitForVisible(jobPage, "#dz-btn-reveal", "show containing folder action");
     assert.equal(await jobPage.locator("#dz-btn-save").count(), 0, "no second save action");
     assert.match(
-      download.suggestedFilename(),
+      download.suggestedFilename,
       /\.png$/i,
       "the generated PNG filename keeps its extension",
     );
     assert.equal(
       downloads.length,
       1,
-      `the job starts exactly one image download: ${JSON.stringify(downloads.map((item) => ({ url: item.url(), filename: item.suggestedFilename() })))}\n${diagnostics.join("\n")}`,
+      `the job starts exactly one image download: ${JSON.stringify(downloads)}\n${diagnostics.join("\n")}`,
     );
     if (options.afterSave) await options.afterSave(jobPage);
-    const output = path.join(work, "saved-chromium.png");
     if (options.restartBackground) {
       await waitForVisible(jobPage, ".dz-completed-section", "completed job before worker restart");
       const cdp = await context.browser().newBrowserCDPSession();
@@ -384,9 +387,9 @@ async function runChromiumJob(base, work, options = {}) {
       ),
     );
     assert.deepEqual(navigationResult, { ok: true }, "source navigation invalidates direct access");
-    await download.saveAs(output);
-    return readFileSync(output);
+    return await readCompletedPng(downloadsDir, Date.now() + 10000);
   } finally {
+    await downloadSession?.detach();
     context.off("page", onPage);
     if (shared) {
       await context.clearCookies();
@@ -394,7 +397,6 @@ async function runChromiumJob(base, work, options = {}) {
       // to a fresh document, resetting its messages and completion promises.
       for (const page of context.pages()) {
         if (page.url().includes("/test/driver.html")) {
-          page.off("download", onDownload);
           page.removeAllListeners("console");
           page.removeAllListeners("pageerror");
           page.removeAllListeners("crash");
