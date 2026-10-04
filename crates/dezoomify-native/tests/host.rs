@@ -267,6 +267,62 @@ fn odd_sized_and_mixed_codec_iiif_trees_roundtrip_through_the_reader() {
 }
 
 #[test]
+fn zif_reuses_standalone_jpeg_and_rgb_png_tiles() {
+    let work = temp_dir("zif-reuse");
+    for extension in ["jpg", "png"] {
+        let source = work.join(format!("source-{extension}.dzi"));
+        let tiles = work.join(format!("source-{extension}_files/4"));
+        std::fs::create_dir_all(&tiles).unwrap();
+        std::fs::write(&source, format!("<Image TileSize=\"16\" Overlap=\"0\" Format=\"{extension}\" xmlns=\"http://schemas.microsoft.com/deepzoom/2008\"><Size Width=\"16\" Height=\"16\"/></Image>")).unwrap();
+        let pixels = image::RgbImage::from_pixel(16, 16, image::Rgb([40, 70, 90]));
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        pixels
+            .write_to(
+                &mut bytes,
+                if extension == "jpg" {
+                    image::ImageFormat::Jpeg
+                } else {
+                    image::ImageFormat::Png
+                },
+            )
+            .unwrap();
+        let bytes = bytes.into_inner();
+        std::fs::write(tiles.join(format!("0_0.{extension}")), &bytes).unwrap();
+        let destination = work.join(format!("out-{extension}.zif"));
+        let host = NativeHost::new(JobOptions {
+            input_url: source.to_str().unwrap().into(),
+            output: OutputTarget::File(destination.clone()),
+            largest: true,
+            compression: 99,
+            cache_dir: Some(work.join("cache")),
+            ..Default::default()
+        })
+        .unwrap();
+        host.transport
+            .block_on(dezoomify::dezoomify(
+                host.inputs(),
+                host.algorithm_options(),
+                &host,
+            ))
+            .unwrap();
+        assert_eq!(host.publication().unwrap().instrumentation.pixel_decodes, 0);
+        assert_eq!(host.publication().unwrap().instrumentation.canvas_bytes, 0);
+        let container = std::fs::read(destination).unwrap();
+        let metadata = zif_tiff::std::read_zif(std::io::Cursor::new(&container)).unwrap();
+        assert_eq!(metadata.level_count(), 1);
+        assert_eq!(metadata.level(0).unwrap().tile_size(), (16, 16));
+        let range = metadata
+            .level_tiles(0)
+            .unwrap()
+            .next()
+            .unwrap()
+            .byte_range();
+        assert_eq!(&container[range.start as usize..range.end as usize], bytes);
+    }
+    std::fs::remove_dir_all(work).unwrap();
+}
+
+#[test]
 fn truncated_source_tiles_reach_partial_handling_with_their_uri() {
     use dezoomify::model::{Error, RecoveryChoice};
     let work = temp_dir("iiif-truncated");

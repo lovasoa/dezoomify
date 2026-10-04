@@ -324,26 +324,77 @@ pub(crate) fn encode_zif_pyramid_to<W: std::io::Write + std::io::Seek>(
     compression: u8,
     icc_profile: Option<&[u8]>,
 ) -> Result<(), Error> {
+    let failed = |e: zif_tiff::Error| Error::EncodeFailed(format!("ZIF: {e}").into());
+    let mut container = zif_tiff::Writer::new()
+        .dimensions((u64::from(image.width()), u64::from(image.height())))
+        .tile_size((256, 256))
+        .map_err(failed)?
+        .pyramid()
+        .codec(zif_tiff::Codec::Png)
+        .color_model(zif_tiff::ColorModel::Rgb)
+        .channels(3)
+        .map_err(failed)?
+        .build()
+        .map_err(failed)?;
+    let mut output = zif_tiff::std::RangeWriter::wrap(writer);
+    output
+        .apply(container.init().map_err(failed)?)
+        .map_err(failed)?;
+    for (level, (width, height)) in tiff_pyramid_sizes(image.width(), image.height())
+        .into_iter()
+        .enumerate()
     {
-        let mut encoder = tiff::encoder::TiffEncoder::new(writer)
-            .map_err(tiff_failed)?
-            .with_compression(tiff::encoder::Compression::Deflate(tiff_compression_for(
-                compression,
-            )));
-        for (width, height) in tiff_pyramid_sizes(image.width(), image.height()) {
-            let downscaled;
-            let view: &image::RgbaImage = if width == image.width() && height == image.height() {
-                image
-            } else {
-                downscaled = image::imageops::resize(
-                    image,
-                    width,
-                    height,
-                    image::imageops::FilterType::Triangle,
+        let downscaled;
+        let view: &image::RgbaImage = if width == image.width() && height == image.height() {
+            image
+        } else {
+            downscaled = image::imageops::resize(
+                image,
+                width,
+                height,
+                image::imageops::FilterType::Triangle,
+            );
+            &downscaled
+        };
+        for y in (0..height).step_by(256) {
+            for x in (0..width).step_by(256) {
+                let tile = image::RgbImage::from_fn(
+                    (width - x).min(256),
+                    (height - y).min(256),
+                    |tx, ty| {
+                        let p = view.get_pixel(x + tx, y + ty);
+                        image::Rgb([p[0], p[1], p[2]])
+                    },
                 );
-                &downscaled
-            };
-            write_tiff_directory(&mut encoder, view, icc_profile)?;
+                let mut bytes = Vec::new();
+                let mut encoder = image::codecs::png::PngEncoder::new_with_quality(
+                    &mut bytes,
+                    png_compression_for(compression),
+                    image::codecs::png::FilterType::Adaptive,
+                );
+                if let Some(icc) = icc_profile {
+                    let _ = image::ImageEncoder::set_icc_profile(&mut encoder, icc.to_vec());
+                }
+                image::ImageEncoder::write_image(
+                    encoder,
+                    tile.as_raw(),
+                    tile.width(),
+                    tile.height(),
+                    image::ExtendedColorType::Rgb8,
+                )
+                .map_err(|e| Error::EncodeFailed(e.to_string().into()))?;
+                output
+                    .apply(
+                        container
+                            .put_tile_at_level(
+                                level,
+                                (u64::from(x / 256), u64::from(y / 256)),
+                                &bytes,
+                            )
+                            .map_err(failed)?,
+                    )
+                    .map_err(failed)?;
+            }
         }
     }
     Ok(())
@@ -354,9 +405,7 @@ fn tiff_failed(error: tiff::TiffError) -> Error {
 }
 
 /// Write one RGBA image as a single directory of an open TIFF encoder,
-/// embedding the ICC profile when present. Shared by the single-image
-/// [`encode_tiff`] and multi-directory [`encode_zif_pyramid`] paths so both
-/// stay byte-consistent per level.
+/// embedding the ICC profile when present.
 fn write_tiff_directory<W: std::io::Write + std::io::Seek>(
     encoder: &mut tiff::encoder::TiffEncoder<W>,
     image: &image::RgbaImage,
@@ -618,35 +667,32 @@ mod tests {
         }
         let zif = encode_zif_pyramid(&image, 5, None).expect("zif encodes");
         assert!(
-            zif.starts_with(&[0x49, 0x49, 0x2A, 0x00]),
-            "zif output is TIFF-compatible"
+            zif.starts_with(&[0x49, 0x49, 0x2B, 0x00, 8, 0, 0, 0]),
+            "ZIF requires BigTIFF"
         );
-        // Every directory decodes with the advertised dimensions; the first
-        // matches the canvas pixel-exact (lossless deflate).
-        let mut decoder =
-            tiff::decoder::Decoder::new(std::io::Cursor::new(&zif)).expect("zif decodes");
-        let mut level = 0;
-        loop {
-            let (width, height) = decoder.dimensions().expect("level dims");
+        let metadata = zif_tiff::std::read_zif(std::io::Cursor::new(&zif)).unwrap();
+        assert_eq!(metadata.level_count(), 2);
+        for (index, level) in metadata.levels().iter().enumerate() {
+            let expected = tiff_pyramid_sizes(512, 512)[index];
             assert_eq!(
-                (width, height),
-                tiff_pyramid_sizes(512, 512)[level],
-                "level {level} carries its own resolution"
+                (level.width(), level.height()),
+                (u64::from(expected.0), u64::from(expected.1))
             );
-            if level == 0 {
-                let decoded = image::load_from_memory(&zif)
-                    .expect("first level decodes")
-                    .to_rgba8();
-                assert_eq!(decoded.as_raw(), image.as_raw());
-            }
-            level += 1;
-            if decoder.more_images() {
-                decoder.next_image().expect("next level");
-            } else {
-                break;
+            assert_eq!(level.codec(), zif_tiff::Codec::Png);
+            for tile in metadata.level_tiles(index).unwrap() {
+                let range = tile.byte_range();
+                let decoded =
+                    image::load_from_memory(&zif[range.start as usize..range.end as usize])
+                        .unwrap()
+                        .to_rgba8();
+                let (x, y) = tile.position();
+                if index == 0 {
+                    for (tx, ty, pixel) in decoded.enumerate_pixels() {
+                        assert_eq!(pixel, image.get_pixel(x as u32 + tx, y as u32 + ty));
+                    }
+                }
             }
         }
-        assert_eq!(level, 2, "512px canvas yields two pyramid levels");
     }
 
     #[test]

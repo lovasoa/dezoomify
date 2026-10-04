@@ -15,6 +15,7 @@ pub mod output;
 pub mod sink;
 mod tile_output;
 pub mod transport;
+mod zif_output;
 
 pub use host::{Controls, Instrumentation, NativeHost, Publication};
 pub use options::{JobOptions, OutputTarget};

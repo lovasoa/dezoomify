@@ -100,3 +100,6 @@ target/debug/dezoomify-cli "https://museum.example/collection/painting" painting
 See the [development guide](docs/development.md) for build and test commands,
 and [Contributing a format](docs/CONTRIBUTING-format.md) to add support for a
 site format.
+
+The native CLI and desktop software is based in part on the work of the
+Independent JPEG Group. See [native notices](NOTICE).

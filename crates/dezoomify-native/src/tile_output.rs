@@ -5,7 +5,7 @@ use dezoomify::model::{
 };
 use std::{
     collections::BTreeMap,
-    io::Cursor,
+    io::{Cursor, Read, Seek},
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -407,6 +407,11 @@ impl Rect {
 pub(crate) enum TileBytes {
     File(PathBuf),
     Memory(Vec<u8>),
+    Range {
+        path: PathBuf,
+        offset: u64,
+        length: u64,
+    },
 }
 pub(crate) struct StoredTile {
     pub rect: Rect,
@@ -497,6 +502,7 @@ impl TileLevel {
                 TileBytes::File(path) => std::fs::metadata(path)
                     .map_err(|e| crate::output::write_failed("tile stat failed", &e))?
                     .len(),
+                TileBytes::Range { length, .. } => *length,
             };
             memory_check(
                 region_bytes
@@ -510,6 +516,27 @@ impl TileLevel {
                 TileBytes::File(path) => {
                     body = std::fs::read(path)
                         .map_err(|e| crate::output::write_failed("tile read failed", &e))?;
+                    &body
+                }
+                TileBytes::Range {
+                    path,
+                    offset,
+                    length,
+                } => {
+                    let mut file = std::fs::File::open(path)
+                        .map_err(|e| crate::output::write_failed("tile range open failed", &e))?;
+                    file.seek(std::io::SeekFrom::Start(*offset))
+                        .map_err(|e| crate::output::write_failed("tile range seek failed", &e))?;
+                    body = {
+                        let mut bytes = Vec::new();
+                        file.take(*length).read_to_end(&mut bytes).map_err(|e| {
+                            crate::output::write_failed("tile range read failed", &e)
+                        })?;
+                        bytes
+                    };
+                    if body.len() as u64 != *length {
+                        return Err(Error::WriteFailed("truncated encoded tile range".into()));
+                    }
                     &body
                 }
             };
@@ -659,6 +686,51 @@ pub(crate) struct IiifWriter {
     max_tiles: u32,
     icc_profile: Option<Vec<u8>>,
     index_bytes: u64,
+}
+
+/// Two concrete encoded-tile writers, with one acquisition/publication route.
+pub(crate) enum TileWriter {
+    Iiif(IiifWriter),
+    Zif(crate::zif_output::ZifWriter),
+}
+impl TileWriter {
+    pub(crate) fn new(
+        destination: &Path,
+        plan: &OutputPlan,
+        budget: u64,
+        compression: u8,
+    ) -> Result<Self, Error> {
+        match plan.format {
+            dezoomify::model::OutputFormat::IiifDir => {
+                IiifWriter::new(destination, plan, budget, compression).map(Self::Iiif)
+            }
+            dezoomify::model::OutputFormat::Zif => {
+                crate::zif_output::ZifWriter::new(destination, plan, budget, compression)
+                    .map(Self::Zif)
+            }
+            _ => Err(Error::InvalidState(
+                "encoded tile writer requires IIIF or ZIF".into(),
+            )),
+        }
+    }
+    pub(crate) fn place(&mut self, tile: EncodedTile, cancelled: &AtomicBool) -> Result<(), Error> {
+        match self {
+            Self::Iiif(writer) => writer.place(tile, cancelled),
+            Self::Zif(writer) => writer.place(tile, cancelled),
+        }
+    }
+    pub(crate) fn finish(
+        self,
+        destination: &Path,
+        overwrite: bool,
+        reused: &[ReusedTile],
+        cancelled: &AtomicBool,
+    ) -> Result<(Size, u64, u64), Error> {
+        match self {
+            Self::Iiif(writer) => writer.finish(destination, reused, cancelled),
+            Self::Zif(writer) => writer.finish(destination, overwrite, reused, cancelled),
+        }
+    }
 }
 
 impl IiifWriter {

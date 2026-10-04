@@ -36,7 +36,7 @@ Native handles images beyond browser-tab size and local sources, within availabl
 
 - `.png` PNG; `.jpg`/`.jpeg` JPEG at quality `100 - compression`;
 - `.tif`/`.tiff` single deflate TIFF; `.webp` lossless WebP;
-- `.zif` multi-level pyramid (full resolution plus halvings, each deflate-compressed; the canvas is re-encoded per level, never passed through as tiles);
+- `.zif` tiled BigTIFF pyramid with standalone JPEG/PNG payloads. Compatible square grids with tile sides divisible by 16 preserve bytes; other geometry is locally retiled. Baseline output uses 8-bit RGB PNG or YCbCr JPEG with matching sampling tags; alpha is omitted. Missing levels use bounded triangle conversion from the previous level. Compression affects only newly encoded tiles;
 - `.iiif` an `iiif-dir` tree at that path; extensionless paths (or existing directories) also save `iiif-dir`.
 
 Other extensions fail typed before any work. JPEG caps at 65535 px per side, WebP at 16383; larger canvases save as PNG, TIFF, ZIF, or `iiif-dir`. An `iiif-dir` holds a static `info.json`, JPEG or PNG tiles at real request paths (`{x},{y},{w},{h}/{tw},/0/default.{jpg,png}`), explicit-dimension aliases, and an overview at the smallest advertised full-image size. JPEG trees meet IIIF v2 level 0; PNG-only capabilities are described above. It is servable from a static file server. Directory publication refuses existing destinations, including overwrite requests, and uses atomic no-replace rename on supported platforms; existing trees remain intact.

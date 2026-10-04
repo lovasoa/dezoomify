@@ -30,7 +30,7 @@
     "category": "GraphicsAndDesign",
     "copyright": "GPL-3.0-or-later",
     "licenseFile": "../../../LICENSE",
-    "resources": [],
+    "resources": ["../../../NOTICE"],
     "shortDescription": "Dezoomify desktop",
     "targets": "all",
     "icon": [

@@ -10,6 +10,12 @@ exceptions = [
     { crate = "selectors", allow = ["MPL-2.0"] },
 ]
 
+# ZIF tile conversion needs configurable JPEG sampling. IJG-derived portions
+# are acknowledged in NOTICE, shipped with native installers and CLI archives.
+[[licenses.exceptions]]
+name = "jpeg-encoder"
+allow = ["IJG"]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "allow"
