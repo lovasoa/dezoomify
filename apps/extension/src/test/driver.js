@@ -116,6 +116,15 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
     }
     throw new Error("job page did not reject access after source navigation");
   })();
+  void globalThis.__DEZOOMIFY_TEST_AFTER_JOB__.then(
+    () => {
+      document.body.dataset.afterJob = "ready";
+    },
+    (error) => {
+      document.body.dataset.afterJob = "failed";
+      document.body.append(`Navigation proof failed: ${String(error?.stack ?? error)}`);
+    },
+  );
   return globalThis.__DEZOOMIFY_TEST_SOURCE_ACCESS_RESULT__;
 })();
 
