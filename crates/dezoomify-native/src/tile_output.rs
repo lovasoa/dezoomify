@@ -18,6 +18,117 @@ pub(crate) struct EncodedTile {
     pub format: image::ImageFormat,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn reusable_tiles_reject_truncated_structure_and_missing_terminators() {
+        let image = image::RgbaImage::new(8, 8);
+        for bytes in [
+            crate::imaging::encode_jpeg(&image, 90, None).unwrap(),
+            crate::imaging::encode_png(
+                &image,
+                image::codecs::png::CompressionType::Fast,
+                None,
+                None,
+            )
+            .unwrap(),
+        ] {
+            assert_eq!(
+                inspect(&bytes).unwrap().0,
+                Size {
+                    width: 8,
+                    height: 8
+                }
+            );
+            for length in [bytes.len() / 2, bytes.len() - 16, bytes.len() - 1] {
+                assert!(matches!(
+                    inspect(&bytes[..length]),
+                    Err(Error::DecodeFailed(_))
+                ));
+            }
+            let mut broken = bytes.clone();
+            let length = if bytes.starts_with(b"\x89PNG") { 8 } else { 4 };
+            broken[length..length + 2].fill(0xff);
+            assert!(inspect(&broken).is_err());
+        }
+    }
+    #[test]
+    fn region_borrows_already_accounted_encoded_memory() {
+        let pixels = image::RgbaImage::new(8, 8);
+        let bytes = crate::imaging::encode_png(
+            &pixels,
+            image::codecs::png::CompressionType::Fast,
+            None,
+            None,
+        )
+        .unwrap();
+        let size = Size {
+            width: 8,
+            height: 8,
+        };
+        let rect = Rect {
+            x: 0,
+            y: 0,
+            w: 8,
+            h: 8,
+        };
+        let level = TileLevel {
+            size: size.clone(),
+            cell: size.clone(),
+            regular: true,
+            tiles: BTreeMap::from([(
+                0,
+                StoredTile {
+                    rect,
+                    size,
+                    format: image::ImageFormat::Png,
+                    bytes: TileBytes::Memory(bytes),
+                },
+            )]),
+        };
+        let mut decoded = 0;
+        assert_eq!(
+            level
+                .region(rect, 8 * 8 * 12, &AtomicBool::new(false), &mut decoded)
+                .unwrap(),
+            pixels
+        );
+        assert_eq!(decoded, 1);
+    }
+}
+
+impl EncodedTile {
+    /// Conversion required by the output geometry/codec happens during acquisition.
+    pub(crate) fn convert_to_png(
+        &mut self,
+        size: Size,
+        budget: u64,
+        compression: u8,
+    ) -> Result<(), Error> {
+        let pixels = u64::from(self.size.width) * u64::from(self.size.height);
+        memory_check(self.bytes.len() as u64 + pixels * 16, budget)?;
+        let mut reader = image::ImageReader::with_format(Cursor::new(&self.bytes), self.format);
+        let mut limits = image::Limits::default();
+        limits.max_alloc = Some(pixels * 16);
+        reader.limits(limits);
+        let image = reader
+            .decode()
+            .map_err(|e| Error::DecodeFailed(e.to_string().into()))?
+            .into_rgba8();
+        let cropped = image::imageops::crop_imm(&image, 0, 0, size.width, size.height).to_image();
+        self.bytes = crate::imaging::encode_png(
+            &cropped,
+            crate::imaging::png_compression_for(compression),
+            None,
+            None,
+        )?;
+        self.format = image::ImageFormat::Png;
+        self.size = size;
+        Ok(())
+    }
+}
+
 /// Header inspection does not decode pixel data.
 pub(crate) fn inspect(bytes: &[u8]) -> Result<(Size, image::ImageFormat), Error> {
     let reader = image::ImageReader::new(Cursor::new(bytes))
@@ -26,10 +137,95 @@ pub(crate) fn inspect(bytes: &[u8]) -> Result<(Size, image::ImageFormat), Error>
     let format = reader
         .format()
         .ok_or_else(|| Error::DecodeFailed("unknown tile format".into()))?;
+    check_structure(bytes, format)?;
     let (width, height) = reader
         .into_dimensions()
         .map_err(|e| Error::DecodeFailed(e.to_string().into()))?;
     Ok((Size { width, height }, format))
+}
+
+// Bounded structural checks do not decompress pixels or validate entropy/zlib.
+fn check_structure(bytes: &[u8], format: image::ImageFormat) -> Result<(), Error> {
+    let invalid = || Error::DecodeFailed("truncated or invalid encoded tile structure".into());
+    match format {
+        image::ImageFormat::Png => {
+            let mut pos = 8usize;
+            let mut data = false;
+            while let Some(header) = bytes.get(pos..pos + 8) {
+                let len =
+                    u32::from_be_bytes(header[..4].try_into().expect("chunk length")) as usize;
+                let end = pos
+                    .checked_add(len)
+                    .and_then(|v| v.checked_add(12))
+                    .ok_or_else(invalid)?;
+                if end > bytes.len() {
+                    return Err(invalid());
+                }
+                match &header[4..] {
+                    b"IHDR" if pos == 8 && len != 13 => return Err(invalid()),
+                    b"IDAT" => data = true,
+                    b"IEND" => {
+                        return if len == 0 && data {
+                            Ok(())
+                        } else {
+                            Err(invalid())
+                        }
+                    }
+                    _ => {}
+                }
+                pos = end;
+            }
+            Err(invalid())
+        }
+        image::ImageFormat::Jpeg => {
+            let mut pos = 2;
+            let mut scan = false;
+            while bytes.get(pos) == Some(&0xff) {
+                while bytes.get(pos) == Some(&0xff) {
+                    pos += 1;
+                }
+                let marker = *bytes.get(pos).ok_or_else(invalid)?;
+                pos += 1;
+                if marker == 0xd9 {
+                    return if scan { Ok(()) } else { Err(invalid()) };
+                }
+                if marker == 0 || marker == 0xd8 {
+                    return Err(invalid());
+                }
+                if marker == 1 || (0xd0..=0xd7).contains(&marker) {
+                    continue;
+                }
+                let length = bytes.get(pos..pos + 2).ok_or_else(invalid)?;
+                let len = u16::from_be_bytes(length.try_into().expect("segment length")) as usize;
+                if len < 2 || len > bytes.len().saturating_sub(pos) {
+                    return Err(invalid());
+                }
+                pos += len;
+                if marker == 0xda {
+                    scan = true;
+                    while pos < bytes.len() {
+                        if bytes[pos] != 0xff {
+                            pos += 1;
+                            continue;
+                        }
+                        let start = pos;
+                        while bytes.get(pos) == Some(&0xff) {
+                            pos += 1;
+                        }
+                        let next = *bytes.get(pos).ok_or_else(invalid)?;
+                        if next == 0 || (0xd0..=0xd7).contains(&next) {
+                            pos += 1;
+                        } else {
+                            pos = start;
+                            break;
+                        }
+                    }
+                }
+            }
+            Err(invalid())
+        }
+        _ => Ok(()),
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -137,7 +333,7 @@ impl TileLevel {
                 return Err(Error::Cancelled);
             }
             let encoded_len = match &tile.bytes {
-                TileBytes::Memory(bytes) => bytes.len() as u64,
+                TileBytes::Memory(_) => 0, // Retained by the caller; borrowed below.
                 TileBytes::File(path) => std::fs::metadata(path)
                     .map_err(|e| crate::output::write_failed("tile stat failed", &e))?
                     .len(),
@@ -158,12 +354,6 @@ impl TileLevel {
                 }
             };
             // Decode plus RGBA conversion may temporarily own two pixel buffers.
-            memory_check(
-                region_bytes
-                    + u64::from(tile.size.width) * u64::from(tile.size.height) * 8
-                    + bytes.len() as u64,
-                budget,
-            )?;
             let image = image::load_from_memory(bytes)
                 .map_err(|e| Error::DecodeFailed(e.to_string().into()))?
                 .to_rgba8();
@@ -257,14 +447,24 @@ pub(crate) fn downsample(
     }))
 }
 
-fn tile_path(rect: Rect, scale: u32, format: image::ImageFormat, canvas: &Size) -> String {
+fn tile_path(
+    rect: Rect,
+    scale: u32,
+    format: image::ImageFormat,
+    canvas: &Size,
+    explicit: bool,
+) -> String {
     let x = rect.x * scale;
     let y = rect.y * scale;
     let w = rect.w.saturating_mul(scale).min(canvas.width - x);
     let h = rect.h.saturating_mul(scale).min(canvas.height - y);
     format!(
-        "{x},{y},{w},{h}/{},/0/default.{}",
-        rect.w,
+        "{x},{y},{w},{h}/{}/0/default.{}",
+        if explicit {
+            format!("{},{}", rect.w, rect.h)
+        } else {
+            format!("{},", rect.w)
+        },
         if format == image::ImageFormat::Jpeg {
             "jpg"
         } else {
@@ -278,7 +478,6 @@ pub(crate) struct IiifWriter {
     base: TileLevel,
     budget: u64,
     compression: u8,
-    pub(crate) encoded_bytes: u64,
     pub(crate) decoded_tiles: u64,
     retained: u64,
 }
@@ -315,13 +514,16 @@ impl IiifWriter {
             },
             budget,
             compression,
-            encoded_bytes: 0,
             decoded_tiles: 0,
             retained: 0,
         })
     }
 
-    pub(crate) fn place(&mut self, tile: EncodedTile, cancelled: &AtomicBool) -> Result<(), Error> {
+    pub(crate) fn place(
+        &mut self,
+        mut tile: EncodedTile,
+        cancelled: &AtomicBool,
+    ) -> Result<(), Error> {
         let extent = tile.placement.expected_size.as_ref().unwrap_or(&tile.size);
         let rect = Rect {
             x: tile.placement.position.x,
@@ -335,17 +537,34 @@ impl IiifWriter {
         } else {
             tile.id
         };
-        let compatible = matches!(
+        let mut compatible = matches!(
             tile.format,
             image::ImageFormat::Jpeg | image::ImageFormat::Png
         ) && tile.size.width == rect.w
             && tile.size.height == rect.h
             && self.base.regular
             && rect == self.base.rect(index);
+        if !compatible {
+            tile.convert_to_png(
+                Size {
+                    width: rect.w,
+                    height: rect.h,
+                },
+                self.budget.saturating_sub(self.retained),
+                self.compression,
+            )?;
+            self.decoded_tiles += 1;
+            compatible = self.base.regular && rect == self.base.rect(index);
+        }
         let bytes = if compatible {
-            let relative = tile_path(rect, 1, tile.format, &self.base.size);
-            self.encoded_bytes += tile.bytes.len() as u64;
-            TileBytes::File(self.staging.write(&relative, &tile.bytes, cancelled)?)
+            TileBytes::File(self.write_tile(
+                rect,
+                1,
+                tile.format,
+                &self.base.size,
+                &tile.bytes,
+                cancelled,
+            )?)
         } else {
             self.retained += tile.bytes.len() as u64;
             memory_check(self.retained, self.budget)?;
@@ -363,6 +582,29 @@ impl IiifWriter {
             },
         );
         Ok(())
+    }
+
+    fn write_tile(
+        &self,
+        rect: Rect,
+        scale: u32,
+        format: image::ImageFormat,
+        canvas: &Size,
+        bytes: &[u8],
+        cancelled: &AtomicBool,
+    ) -> Result<PathBuf, Error> {
+        let path = self.staging.write(
+            &tile_path(rect, scale, format, canvas, false),
+            bytes,
+            cancelled,
+        )?;
+        self.staging.alias(
+            &path,
+            &tile_path(rect, scale, format, canvas, true),
+            bytes,
+            cancelled,
+        )?;
+        Ok(path)
     }
 
     fn encode(
@@ -447,7 +689,6 @@ impl IiifWriter {
                     &mut self.decoded_tiles,
                 )?;
                 let bytes = self.encode(&pixels, format)?;
-                self.encoded_bytes += bytes.len() as u64;
                 StoredTile {
                     rect,
                     size: Size {
@@ -455,14 +696,37 @@ impl IiifWriter {
                         height: rect.h,
                     },
                     format,
-                    bytes: TileBytes::File(self.staging.write(
-                        &tile_path(rect, 1, format, &normalized.size),
+                    bytes: TileBytes::File(self.write_tile(
+                        rect,
+                        1,
+                        format,
+                        &normalized.size,
                         &bytes,
                         cancelled,
                     )?),
                 }
             };
             normalized.tiles.insert(index, stored);
+        }
+        // Conversion may read any source tile; remove superseded payloads only
+        // after all normalized base tiles have been produced.
+        for tile in self.base.tiles.values().filter(|t| t.format != format) {
+            if let TileBytes::File(path) = &tile.bytes {
+                for path in [
+                    path.clone(),
+                    self.staging.path.join(tile_path(
+                        tile.rect,
+                        1,
+                        tile.format,
+                        &self.base.size,
+                        true,
+                    )),
+                ] {
+                    std::fs::remove_file(path).map_err(|e| {
+                        crate::output::write_failed("obsolete tile removal failed", &e)
+                    })?;
+                }
+            }
         }
         self.base = normalized;
         self.retained = 0;
@@ -495,12 +759,7 @@ impl IiifWriter {
                     &mut self.decoded_tiles,
                 )?;
                 let bytes = self.encode(&pixels, format)?;
-                self.encoded_bytes += bytes.len() as u64;
-                let path = self.staging.write(
-                    &tile_path(rect, scale, format, &full_size),
-                    &bytes,
-                    cancelled,
-                )?;
+                let path = self.write_tile(rect, scale, format, &full_size, &bytes, cancelled)?;
                 next.tiles.insert(
                     index,
                     StoredTile {
@@ -541,17 +800,30 @@ impl IiifWriter {
             &bytes,
             cancelled,
         )?;
-        self.encoded_bytes += bytes.len() as u64;
+        if level.size == full_size {
+            self.staging.alias(
+                path,
+                &format!("full/full/0/default.{ext}"),
+                &bytes,
+                cancelled,
+            )?;
+        }
+        let capabilities = serde_json::json!({"formats": [ext], "qualities": ["default"], "supports": ["sizeByWhListed"]});
+        let profile = if format == image::ImageFormat::Jpeg {
+            serde_json::json!(["http://iiif.io/api/image/2/level0.json", capabilities])
+        } else {
+            serde_json::json!([capabilities])
+        };
         let info = serde_json::to_vec_pretty(&serde_json::json!({
-            "@context": "http://iiif.io/api/image/2/context.json", "@id": destination.file_name().and_then(|v| v.to_str()).unwrap_or("image"),
+            "@context": "http://iiif.io/api/image/2/context.json", "@id": ".",
             "protocol": "http://iiif.io/api/image", "width": full_size.width, "height": full_size.height,
             "tiles": [{ "width": self.base.cell.width, "height": self.base.cell.height, "scaleFactors": factors }],
             "sizes": [{"width": level.size.width, "height": level.size.height}],
-            "preferredFormats": [ext], "profile": ["http://iiif.io/api/image/2/level0.json", {"formats": [ext], "qualities": ["default"]}]
+            "preferredFormats": [ext], "profile": profile
         })).map_err(|e| Error::EncodeFailed(e.to_string().into()))?;
         self.staging.write("info.json", &info, cancelled)?;
-        self.encoded_bytes += info.len() as u64;
+        let bytes = crate::output::directory_bytes(&self.staging.path)?;
         self.staging.publish(destination, cancelled)?;
-        Ok((full_size, self.encoded_bytes, self.decoded_tiles))
+        Ok((full_size, bytes, self.decoded_tiles))
     }
 }

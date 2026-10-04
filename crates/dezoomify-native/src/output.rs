@@ -14,6 +14,24 @@ use dezoomify::model::{Error, Failure, LimitContext, OutputFormat};
 /// sorted relative-path order.
 pub type IiifTiles = Vec<(String, Vec<u8>)>;
 
+pub(crate) fn directory_bytes(path: &Path) -> Result<u64, Error> {
+    let mut bytes = 0;
+    for entry in
+        std::fs::read_dir(path).map_err(|e| write_failed("output directory stat failed", &e))?
+    {
+        let entry = entry.map_err(|e| write_failed("output entry stat failed", &e))?;
+        let metadata = entry
+            .metadata()
+            .map_err(|e| write_failed("output stat failed", &e))?;
+        bytes += if metadata.is_dir() {
+            directory_bytes(&entry.path())?
+        } else {
+            metadata.len()
+        };
+    }
+    Ok(bytes)
+}
+
 /// An exclusively created, invocation-owned file. Drop removes unpublished
 /// output, including when an encoder or publication fails.
 pub(crate) struct StagedFile {
@@ -142,6 +160,26 @@ impl StagedDirectory {
         file.sync_all()
             .map_err(|e| write_failed("tile sync failed", &e))?;
         Ok(path)
+    }
+
+    /// Alias one payload, falling back to identical bytes without hard links.
+    pub(crate) fn alias(
+        &self,
+        source: &Path,
+        relative: &str,
+        bytes: &[u8],
+        cancelled: &AtomicBool,
+    ) -> Result<(), Error> {
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(Error::Cancelled);
+        }
+        let alias = self.path.join(relative);
+        std::fs::create_dir_all(alias.parent().expect("tile parent"))
+            .map_err(|e| write_failed("alias directory creation failed", &e))?;
+        if std::fs::hard_link(source, alias).is_err() {
+            self.write(relative, bytes, cancelled)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn publish(self, destination: &Path, cancelled: &AtomicBool) -> Result<(), Error> {
