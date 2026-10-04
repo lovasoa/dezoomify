@@ -40,9 +40,11 @@ To save many addresses at once from a list, use the
 
 ## Recent pictures
 
-The start page keeps your last 20 saves on this device only. Each entry
-shows the full address, the picture size, the format, and the date. A **Clear
-history** button removes all entries.
+The start page keeps your last 20 started images on this device only, including
+failed and cancelled attempts. Each row shows the title (or source address),
+time since starting, known pixel dimensions, and status. Click the title to fill
+and focus the address field without starting a download. Use the trash icon to
+remove one row, or **Clear history** to remove all entries.
 Reloading the page stops the current run; enter the address again to restart it.
 
 ## Language

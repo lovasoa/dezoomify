@@ -171,13 +171,23 @@ export const fr = {
   // Job section and share chrome.
   "view.job.countsFull": "{current} fragments sur {total}",
   "view.job.countsActive": "{current} fragments sur {total} · {active} en cours",
-  // Recent-jobs history (todo 5.2): local-only ledger.
+  // Recent pictures, including unsuccessful attempts.
   "view.history.title": "Images récentes",
-  "view.history.empty":
-    "Aucune image récente pour le moment. Les images enregistrées apparaissent ici.",
+  "view.history.empty": "Aucune image récente pour le moment. Les images lancées apparaissent ici.",
   "view.history.localOnly": "Conservé uniquement sur cet appareil.",
   "view.history.clear": "Effacer l’historique",
-  "view.history.dims": "{w} par {h} pixels",
+  "view.history.image": "Image",
+  "view.history.time": "Début",
+  "view.history.size": "Taille (px)",
+  "view.history.status": "État",
+  "view.history.remove": "Supprimer",
+  "view.history.removeImage": "Supprimer {image} des images récentes",
+  "view.history.status.started": "Démarré",
+  "view.history.status.completed": "Terminé",
+  "view.history.status.partial": "Avec des lacunes",
+  "view.history.status.preview": "Aperçu seul",
+  "view.history.status.failed": "Échec",
+  "view.history.status.cancelled": "Annulé",
   "view.input.description":
     "Dezoomify télécharge des images zoomables sous forme de fragments depuis des bibliothèques, des musées, des galeries et d’autres sites web. Collez ci-dessous l’adresse d’une image pour la télécharger.",
   "view.input.placeholder": "Collez l’adresse d’une visionneuse ou d’un manifeste",

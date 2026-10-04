@@ -16,7 +16,7 @@ export interface ViewCallbacks {
   onSave?(): void;
   onOpenOutput?(): Promise<void>;
   onRevealOutput?(): Promise<void>;
-  onHistorySelect?(entry: HistoryEntry): void;
+  onRemoveHistory?(entry: HistoryEntry): void;
   onOpenExternalLink?(url: string): void;
   onCopyDiagnostics?(text: string): void | Promise<void>;
   onSaveDiagnostics?(report: DiagnosticReport): void | Promise<void>;
@@ -43,6 +43,7 @@ export interface ViewContext {
   initialUrl?: string;
   sourceUrl?: string;
   history?: HistoryEntry[];
+  historyNow?: number;
 }
 
 /** Host-owned React content rendered inside or instead of the generic card. */

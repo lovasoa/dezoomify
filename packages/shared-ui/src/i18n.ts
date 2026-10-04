@@ -242,12 +242,23 @@ const en = {
   // Job section and share chrome.
   "view.job.countsFull": "{current} of {total} tiles",
   "view.job.countsActive": "{current} of {total} tiles · {active} in progress",
-  // Recent-jobs history (todo 5.2): local-only ledger.
+  // Recent pictures, including unsuccessful attempts.
   "view.history.title": "Recent pictures",
-  "view.history.empty": "No recent pictures yet. Saved pictures appear here.",
+  "view.history.empty": "No recent pictures yet. Images you start appear here.",
   "view.history.localOnly": "Kept only on this device.",
   "view.history.clear": "Clear history",
-  "view.history.dims": "{w} by {h} pixels",
+  "view.history.image": "Image",
+  "view.history.time": "Started",
+  "view.history.size": "Size (px)",
+  "view.history.status": "Status",
+  "view.history.remove": "Remove",
+  "view.history.removeImage": "Remove {image} from recent pictures",
+  "view.history.status.started": "Started",
+  "view.history.status.completed": "Completed",
+  "view.history.status.partial": "With gaps",
+  "view.history.status.preview": "Preview only",
+  "view.history.status.failed": "Failed",
+  "view.history.status.cancelled": "Cancelled",
   "view.input.description":
     "Dezoomify downloads zoomable tiled images from libraries, museums, galleries, and other websites. Paste the URL of an image below to download it.",
   "view.input.placeholder": "Paste an image viewer or manifest URL",

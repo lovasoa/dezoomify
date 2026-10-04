@@ -78,7 +78,10 @@ test("a replacement invocation ignores late progress, output and history from it
   });
   await tick();
   assert.equal(h.app.currentUrl(), "https://second.test/image");
-  assert.equal(h.store.has("history"), false);
+  assert.deepEqual(
+    JSON.parse(h.store.get("history")).map((item) => item.status),
+    ["started", "cancelled"],
+  );
   act(() => {
     h.calls[1].host.report(progress);
     h.calls[1].resolve(output);
@@ -87,9 +90,9 @@ test("a replacement invocation ignores late progress, output and history from it
   assert.equal(h.app.presentation().phase, "completed");
   assert.deepEqual(
     JSON.parse(h.store.get("history")).map((item) => item.url),
-    ["https://second.test/image"],
+    ["https://second.test/image", "https://first.test/image"],
   );
-  act(() => h.app.dispose());
+  await act(() => h.app.dispose());
 });
 
 test("a replacement renders immediately and waits for prior resources before starting work", async () => {
@@ -135,7 +138,7 @@ test("a replacement renders immediately and waits for prior resources before sta
   });
   await act(() => Promise.all([first, second]));
   assert.equal(h.app.presentation().phase, "completed");
-  act(() => h.app.dispose());
+  await act(() => h.app.dispose());
 });
 
 test("cancel removes a pending permission prompt", async () => {
@@ -154,8 +157,8 @@ test("cancel removes a pending permission prompt", async () => {
   act(() => h.calls[0].resolve(output));
   await tick();
   assert.equal(h.calls.length, 1);
-  assert.equal(h.store.has("history"), false);
-  act(() => h.app.dispose());
+  assert.equal(JSON.parse(h.store.get("history"))[0].status, "cancelled");
+  await act(() => h.app.dispose());
 });
 
 test("cancel remains visible when its invocation resolves output late", async () => {
@@ -170,8 +173,8 @@ test("cancel remains visible when its invocation resolves output late", async ()
   act(() => h.calls[0].resolve(output));
   await act(() => run);
   assert.equal(h.app.presentation().phase, "cancelled");
-  assert.equal(h.store.has("history"), false);
-  act(() => h.app.dispose());
+  assert.equal(JSON.parse(h.store.get("history"))[0].status, "cancelled");
+  await act(() => h.app.dispose());
 });
 
 test("partial actions resolve the awaited choice and disappear before completed output", async () => {
@@ -211,5 +214,28 @@ test("partial actions resolve the awaited choice and disappear before completed 
   await act(() => run);
   assert.equal(h.root.querySelector("[data-dz-partial-decision]"), null);
   assert.deepEqual(h.app.presentation().output, { ...output, complete: false, missing: [2] });
-  act(() => h.app.dispose());
+  assert.equal(JSON.parse(h.store.get("history"))[0].status, "partial");
+  await act(() => h.app.dispose());
+});
+
+test("website persists a started URL and metadata before failure, then allows prefill and removal", async () => {
+  const h = harness();
+  act(() => h.app.submit("https://museum.test/image"));
+  assert.equal(JSON.parse(h.store.get("history"))[0].status, "started");
+  await tick();
+  act(() => h.calls[0].host.report({ ...progress, title: "A painting" }));
+  const enriched = JSON.parse(h.store.get("history"))[0];
+  assert.equal(enriched.title, "A painting");
+  assert.equal(enriched.width, 256);
+  act(() => h.calls[0].reject({ kind: "unknown-format" }));
+  await tick();
+  assert.equal(JSON.parse(h.store.get("history"))[0].status, "failed");
+  act(() => h.app.cancel());
+  click(h.root.querySelector(".dz-history-main"));
+  assert.equal(h.root.querySelector("#dz-url-input").value, "https://museum.test/image");
+  assert.equal(h.calls.length, 1);
+  click(h.root.querySelector(".dz-history-remove"));
+  assert.deepEqual(JSON.parse(h.store.get("history")), []);
+  assert.equal(h.root.querySelector("tbody tr"), null);
+  await act(() => h.app.dispose());
 });

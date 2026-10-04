@@ -1,11 +1,10 @@
 import {
   AccessRequestView,
-  clearHistory,
+  createHistory,
   type DiagnosticRecorder,
   type HistoryEntry,
   type HistoryStore,
   isValidInputUrl,
-  loadHistory,
   PartialDecisionActions,
   type Presentation,
   presentFailure,
@@ -13,10 +12,7 @@ import {
   presentOutput,
   presentProgress,
   presentStatus,
-  pushHistory,
   renderView,
-  saveHistory,
-  toHistoryEntry,
   type ViewContext,
 } from "@dezoomify/shared-ui";
 import type {
@@ -99,9 +95,7 @@ export interface BrowserApplicationOptions {
 
 /** Website and extension share the entire invocation, interaction, and presentation flow. */
 export function createBrowserApplication(options: BrowserApplicationOptions) {
-  let history: HistoryEntry[] = options.history
-    ? loadHistory(options.history.store, options.history.key)
-    : [];
+  const history = createHistory(options.history?.store, options.history?.key ?? "", Date.now);
   let current: ReturnType<typeof invocation> | undefined;
   let idle: Presentation = presentIdle();
   let initialUrl: string | undefined;
@@ -131,9 +125,9 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         | undefined,
       permission: undefined as PermissionWait | undefined,
       done: false,
+      historyEntry: null as HistoryEntry | null,
       view: {
         sourceUrl: url,
-        history: [...history],
         jobActivity: activity.state,
       } as ViewContext,
     };
@@ -163,6 +157,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
   function retire(): Promise<void> {
     const a = current;
     if (!a) return retiring;
+    if (!a.done && !a.output && !a.failure) history.update(a.historyEntry, { status: "cancelled" });
     current = undefined;
     a.controller.abort();
     a.activity.stopHeartbeat();
@@ -179,6 +174,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       initialUrl = undefined;
       options.onReset?.();
     } else if (current) {
+      history.update(current.historyEntry, { status: "cancelled" });
       current.controller.abort();
       current.permission = undefined;
       current.decision = undefined;
@@ -192,6 +188,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
     const retired = retire();
     const a = invocation(url);
     current = a;
+    a.historyEntry = options.history ? history.start(url) : null;
     options.onStart?.(url);
     a.activity.startHeartbeat();
     update();
@@ -245,8 +242,9 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         fetchResource: capabilities.fetchResource,
         loadDisplayImage: capabilities.loadDisplayImage,
         onProgress: (progress) => {
-          if (current === a) {
+          if (current === a && !a.controller.signal.aborted) {
             a.progress = progress;
+            history.progress(a.historyEntry, progress);
             a.activity.touchProgress();
             a.activity.scheduleUpdate();
           }
@@ -305,21 +303,12 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         a.output.missing.length === 0 ? "completed" : "partial-completed",
         a.output,
       );
-      const entry = toHistoryEntry(url, {
-        width: a.output.canvas?.width ?? 0,
-        height: a.output.canvas?.height ?? 0,
-        format: a.output.disposition === "display-only" ? "display" : "png",
-        at: a.activity.state.now,
-      });
-      if (entry && options.history) {
-        history = pushHistory(history, entry);
-        saveHistory(options.history.store, options.history.key, history);
-        a.view.history = [...history];
-      }
+      history.complete(a.historyEntry, a.output);
       options.onComplete?.(a.output);
     } catch (error) {
       if (current !== a) return;
       const outcome = a.controller.signal.aborted ? "cancelled" : "failed";
+      history.update(a.historyEntry, { status: outcome });
       if (outcome === "failed") {
         a.failure = await withVerdict(
           isJobError(error) ? error : { kind: "internal", detail: String(error).slice(0, 2048) },
@@ -431,9 +420,11 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         location.href = url;
       },
       onClearHistory: () => {
-        history = [];
-        if (options.history) clearHistory(options.history.store, options.history.key);
-        if (a) a.view.history = [];
+        history.clear();
+        update();
+      },
+      onRemoveHistory: (entry: HistoryEntry) => {
+        history.remove(entry);
         update();
       },
     };
@@ -441,7 +432,11 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       options.root,
       shown,
       callbacks,
-      a ? { ...a.view, diagnosticReport: report } : { history, initialUrl },
+      {
+        ...(a ? { ...a.view, diagnosticReport: report } : { initialUrl }),
+        history: history.entries(),
+        historyNow: Date.now(),
+      },
       {
         ...(a?.permission
           ? {

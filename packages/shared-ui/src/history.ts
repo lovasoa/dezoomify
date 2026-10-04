@@ -1,13 +1,22 @@
 // Shared job history ledger: last-20 jobs with their full addresses.
 // Pure and host-neutral: hosts inject a key-value store (localStorage,
 // sessionStorage, or an in-memory map) and a clock. History never leaves the
-// device; clearing removes every entry. This module is the canonical home;
-// product-specific re-exports point here.
+// device. Products share recording, enrichment, and removal through createHistory.
 //
 // Entries keep the full source address plus its origin for display. Only
 // http(s) addresses are kept; everything else is dropped fail-closed.
 
+import type { Output, Progress } from "@dezoomify/wasm-bindings";
+
 export const HISTORY_MAX = 20;
+
+export type HistoryStatus =
+  | "started"
+  | "completed"
+  | "partial"
+  | "preview"
+  | "failed"
+  | "cancelled";
 
 export const HISTORY_KEY_WEBSITE = "dezoomify.history.v2";
 
@@ -19,6 +28,8 @@ export interface HistoryEntry {
   width?: number;
   height?: number;
   format?: string;
+  title?: string;
+  status?: HistoryStatus;
   at: number;
 }
 
@@ -47,6 +58,8 @@ export interface HistoryDetails {
   width?: number;
   height?: number;
   format?: string;
+  title?: string;
+  status?: HistoryStatus;
   /** Host clock reading for the entry; the ledger itself never reads a clock. */
   at: number;
 }
@@ -71,6 +84,10 @@ export function toHistoryEntry(url: string, details: HistoryDetails): HistoryEnt
   if (typeof details.format === "string" && details.format.trim() !== "") {
     entry.format = details.format.trim().slice(0, 32);
   }
+  if (typeof details.title === "string" && details.title.trim() !== "") {
+    entry.title = details.title.trim().slice(0, 512);
+  }
+  if (details.status) entry.status = details.status;
   return entry;
 }
 
@@ -105,7 +122,12 @@ function isValidEntry(raw: unknown): raw is HistoryEntry {
   } catch {
     return false;
   }
-  if (typeof entry.at !== "number" || !Number.isFinite(entry.at as number)) return false;
+  if (
+    typeof entry.at !== "number" ||
+    !Number.isFinite(entry.at) ||
+    Number.isNaN(new Date(entry.at).getTime())
+  )
+    return false;
   for (const key of ["width", "height"] as const) {
     const value = entry[key];
     if (
@@ -137,6 +159,14 @@ export function parseHistoryJson(text: string | null | undefined): Array<History
         if (typeof typed.width === "number") entry.width = Math.floor(typed.width);
         if (typeof typed.height === "number") entry.height = Math.floor(typed.height);
         if (typeof typed.format === "string") entry.format = typed.format;
+        if (typeof typed.title === "string") entry.title = typed.title.trim().slice(0, 512);
+        if (
+          ["started", "completed", "partial", "preview", "failed", "cancelled"].includes(
+            typed.status ?? "",
+          )
+        ) {
+          entry.status = typed.status;
+        }
         out.push(entry);
         if (out.length >= HISTORY_MAX) break;
       }
@@ -187,4 +217,65 @@ export function clearHistory(store: HistoryStore | null | undefined, key: string
   } catch {
     // Clearing must never throw.
   }
+}
+
+/** A local ledger shared by products. Updates never resurrect removed or replaced entries. */
+export function createHistory(store: HistoryStore | undefined, key: string, now: () => number) {
+  let entries = loadHistory(store, key);
+  function update(entry: HistoryEntry | null, details: Partial<HistoryDetails>): void {
+    if (!entry) return;
+    const index = entries.findIndex((item) => item.url === entry.url && item.at === entry.at);
+    if (index < 0) return;
+    const previous = entries[index];
+    const next = toHistoryEntry(previous.url, { ...previous, ...details, at: previous.at });
+    if (
+      !next ||
+      !(Object.keys(next) as Array<keyof HistoryEntry>).some(
+        (field) => next[field] !== previous[field],
+      )
+    )
+      return;
+    entries = entries.map((item, i) => (i === index ? next : item));
+    saveHistory(store, key, entries);
+  }
+  return {
+    entries: () => [...entries],
+    start(url: string): HistoryEntry | null {
+      const entry = toHistoryEntry(url, { at: now(), status: "started" });
+      if (entry) {
+        entries = pushHistory(entries, entry);
+        saveHistory(store, key, entries);
+      }
+      return entry;
+    },
+    update,
+    progress(entry: HistoryEntry | null, progress: Progress): void {
+      update(entry, {
+        ...(progress.title ? { title: progress.title } : {}),
+        ...(progress.selected
+          ? { width: progress.selected.width, height: progress.selected.height }
+          : {}),
+      });
+    },
+    complete(entry: HistoryEntry | null, output: Output): void {
+      update(entry, {
+        status:
+          output.disposition === "display-only"
+            ? "preview"
+            : output.missing.length === 0
+              ? "completed"
+              : "partial",
+        ...(output.canvas ? { width: output.canvas.width, height: output.canvas.height } : {}),
+        format: output.format,
+      });
+    },
+    remove(entry: HistoryEntry): void {
+      entries = entries.filter((item) => item.url !== entry.url || item.at !== entry.at);
+      saveHistory(store, key, entries);
+    },
+    clear(): void {
+      entries = [];
+      clearHistory(store, key);
+    },
+  };
 }

@@ -1731,39 +1731,107 @@ abbr[title] {
   margin: 0 0 0.75rem;
 }
 
-.dz-history-list {
-  list-style: none;
-  margin: 0 0 0.75rem;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+.dz-history-scroll {
+  overflow-x: auto;
+  margin-bottom: 0.75rem;
 }
 
-.dz-history-item {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--dz-surface-border);
-  border-radius: var(--dz-radius);
-  background: rgba(0, 0, 0, 0.02);
+.dz-history-table {
+  width: 100%;
+  min-width: 34rem;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  text-align: left;
+  color: var(--dz-text-secondary);
 }
 
-@media (prefers-color-scheme: dark) {
-  .dz-history-item {
-    background: rgba(255, 255, 255, 0.02);
-  }
+.dz-history-table th,
+.dz-history-table td {
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--dz-surface-border);
+  white-space: nowrap;
+}
+
+.dz-history-table th {
+  font-weight: 500;
+  color: var(--dz-text-muted);
+}
+
+.dz-history-table th:nth-child(2) {
+  width: 7rem;
+}
+
+.dz-history-table th:nth-child(3) {
+  width: 7.5rem;
+}
+
+.dz-history-table th:nth-child(4) {
+  width: 7rem;
+}
+
+.dz-history-table th:last-child {
+  width: 2.25rem;
+}
+
+.dz-history-table td:nth-child(2),
+.dz-history-table td:nth-child(3) {
+  font-variant-numeric: tabular-nums;
 }
 
 .dz-history-main {
-  font-size: 0.88rem;
-  color: var(--dz-text-secondary);
-  overflow-wrap: anywhere;
-  flex: 1 1 auto;
-  min-width: 0;
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+.dz-history-main,
+.dz-history-remove,
+.dz-history-clear {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.dz-history-main:hover,
+.dz-history-clear:hover {
+  text-decoration: underline;
+}
+
+.dz-history-main:focus-visible,
+.dz-history-remove:focus-visible,
+.dz-history-clear:focus-visible {
+  outline: none;
+  box-shadow: var(--dz-focus-ring);
+}
+
+.dz-history-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.dz-history-clear {
+  font-size: 0.8rem;
+  color: var(--dz-text-muted);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .dz-history-remove {
+    opacity: 0;
+  }
+
+  .dz-history-table tr:hover .dz-history-remove,
+  .dz-history-table tr:focus-within .dz-history-remove {
+    opacity: 1;
+  }
 }
 
 /* Guidance Modal Dialog */

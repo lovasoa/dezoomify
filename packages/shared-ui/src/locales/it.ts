@@ -171,12 +171,23 @@ export const it = {
   // Job section and share chrome.
   "view.job.countsFull": "{current} frammenti su {total}",
   "view.job.countsActive": "{current} frammenti su {total} · {active} in corso",
-  // Recent-jobs history (todo 5.2): local-only ledger.
+  // Recent pictures, including unsuccessful attempts.
   "view.history.title": "Immagini recenti",
-  "view.history.empty": "Ancora nessuna immagine recente. Le immagini salvate appaiono qui.",
+  "view.history.empty": "Ancora nessuna immagine recente. Le immagini avviate appaiono qui.",
   "view.history.localOnly": "Conservate solo su questo dispositivo.",
   "view.history.clear": "Cancella la cronologia",
-  "view.history.dims": "{w} per {h} pixel",
+  "view.history.image": "Immagine",
+  "view.history.time": "Avvio",
+  "view.history.size": "Dimensioni (px)",
+  "view.history.status": "Stato",
+  "view.history.remove": "Rimuovi",
+  "view.history.removeImage": "Rimuovi {image} dalle immagini recenti",
+  "view.history.status.started": "Avviata",
+  "view.history.status.completed": "Completata",
+  "view.history.status.partial": "Con lacune",
+  "view.history.status.preview": "Solo anteprima",
+  "view.history.status.failed": "Non riuscita",
+  "view.history.status.cancelled": "Annullata",
   "view.input.description":
     "Dezoomify scarica immagini zoomabili in frammenti da biblioteche, musei, gallerie e altri siti web. Incolla qui sotto l’indirizzo di un’immagine per scaricarla.",
   "view.input.placeholder": "Incolla l’indirizzo di un visualizzatore o manifesto",

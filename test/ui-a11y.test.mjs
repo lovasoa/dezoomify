@@ -153,10 +153,9 @@ test("native completion opens saved output without browser save guidance", () =>
   );
 });
 
-test("history rows select a source without submitting it", () => {
+test("recent pictures prefill and focus the URL field without submitting, even after edits", () => {
   const el = makeContainer();
   const entry = { url: "https://museum.example/image", origin: "https://museum.example", at: 1 };
-  let selected;
   let submitted = false;
   render(
     el,
@@ -166,17 +165,65 @@ test("history rows select a source without submitting it", () => {
       onSubmitUrl() {
         submitted = true;
       },
-      onHistorySelect(value) {
-        selected = value;
-      },
     },
     { history: [entry] },
   );
   const button = el.querySelector(".dz-history-main");
   assert.equal(button.tagName, "BUTTON");
+  const input = el.querySelector("#dz-url-input");
+  let focused = false;
+  input.focus = () => {
+    focused = true;
+  };
+  input.value = "https://other.example/edited";
   click(button);
-  assert.equal(selected, entry);
+  assert.equal(input.value, entry.url);
+  assert.equal(focused, true);
+  assert.equal(el.querySelector("#dz-btn-clear").style.display, "flex");
+  input.value = "https://other.example/another-edit";
+  click(button);
+  assert.equal(input.value, entry.url);
   assert.equal(submitted, false);
+});
+
+test("recent table separates metadata and removes just the requested row", () => {
+  const el = makeContainer();
+  const entries = [
+    {
+      url: "https://museum.example/image",
+      origin: "https://museum.example",
+      at: 0,
+      title: "A painting",
+      width: 1200,
+      height: 800,
+      status: "failed",
+    },
+    { url: "https://museum.example/unknown", origin: "https://museum.example", at: 1 },
+  ];
+  let removed;
+  render(
+    el,
+    presentIdle(),
+    {
+      ...callbacks,
+      onRemoveHistory(entry) {
+        removed = entry;
+      },
+    },
+    { history: entries, historyNow: 120_000 },
+  );
+  const rows = el.querySelectorAll("tbody tr");
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].querySelector(".dz-history-main").textContent, "A painting");
+  assert.equal(rows[0].querySelector(".dz-history-main").title, entries[0].url);
+  assert.match(rows[0].textContent, /2 minutes ago/);
+  assert.match(rows[0].textContent, /1200 × 800/);
+  assert.match(rows[0].textContent, /Failed/);
+  assert.equal(rows[1].querySelector(".dz-history-main").textContent, entries[1].url);
+  assertButtonsNamed(el, "recent pictures");
+  click(rows[0].querySelector(".dz-history-remove"));
+  assert.equal(removed, entries[0]);
+  assert.equal(el.querySelector("#dz-url-input").value, "");
 });
 
 test("idle product content renders between the URL input and recent pictures", () => {

@@ -81,6 +81,12 @@ registerHooks({
 
 const root = makeContainer();
 root.id = "root";
+const historyStore = new Map();
+globalThis.localStorage = {
+  getItem: (key) => historyStore.get(key) ?? null,
+  setItem: (key, value) => historyStore.set(key, value),
+  removeItem: (key) => historyStore.delete(key),
+};
 const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
 Object.defineProperty(globalThis, "navigator", {
   configurable: true,
@@ -127,6 +133,17 @@ async function reset() {
 
 test("desktop failure preserves canonical refusal facts and diagnostic context", async () => {
   const invocation = await start();
+  const recent = () => JSON.parse(historyStore.get("dezoomify.desktop.history.v2"))[0];
+  assert.equal(recent().status, "started");
+  act(() =>
+    invocation.callbacks.progress({
+      ...progress,
+      title: "A painting",
+      selected: { width: 512, height: 512 },
+    }),
+  );
+  assert.equal(recent().title, "A painting");
+  assert.equal(recent().width, 512);
   await act(async () =>
     invocation.reject({
       kind: "no-usable-tiles",
@@ -157,7 +174,15 @@ test("desktop failure preserves canonical refusal facts and diagnostic context",
   assert.match(diagnostics, /source returned its signed-in challenge/);
   assert.match(diagnostics, /Sign in to see the collection/);
   assert.match(diagnostics, /kind=no-usable-tiles/);
+  assert.equal(recent().status, "failed");
   await reset();
+  const count = invocations.length;
+  root.querySelector("#dz-url-input").value = "https://other.test/image";
+  click(root.querySelector(".dz-history-main"));
+  assert.equal(root.querySelector("#dz-url-input").value, invocation.request.inputUrl);
+  assert.equal(invocations.length, count);
+  click(root.querySelector(".dz-history-remove"));
+  assert.deepEqual(JSON.parse(historyStore.get("dezoomify.desktop.history.v2")), []);
 });
 
 test("desktop partial actions honor retryability and retain a newer native question", async () => {

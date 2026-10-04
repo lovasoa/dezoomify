@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   clearHistory,
+  createHistory,
   HISTORY_KEY_WEBSITE,
   historyOriginOf,
   loadHistory,
@@ -99,4 +100,56 @@ test("history store load, save, and clear are best-effort", () => {
   clearHistory(store, HISTORY_KEY_WEBSITE);
   assert.deepEqual(loadHistory(store, HISTORY_KEY_WEBSITE), []);
   assert.deepEqual(loadHistory(null, HISTORY_KEY_WEBSITE), []);
+});
+
+test("started jobs persist immediately, metadata survives failure and reload, and progress avoids redundant writes", () => {
+  const store = memoryStore();
+  let writes = 0;
+  const countingStore = {
+    ...store,
+    setItem(key, value) {
+      writes++;
+      store.setItem(key, value);
+    },
+  };
+  const history = createHistory(countingStore, HISTORY_KEY_WEBSITE, () => 123);
+  const entry = history.start("https://museum.example/image");
+  assert.equal(loadHistory(store, HISTORY_KEY_WEBSITE)[0].status, "started");
+  assert.equal(writes, 1);
+  const progress = { title: " A painting ", selected: { width: 1200, height: 800 } };
+  history.progress(entry, progress);
+  history.progress(entry, { ...progress, completed: 2 });
+  assert.equal(writes, 2);
+  history.update(entry, { status: "failed" });
+  const loaded = createHistory(store, HISTORY_KEY_WEBSITE, () => 999).entries()[0];
+  assert.equal(loaded.title, "A painting");
+  assert.equal(loaded.width, 1200);
+  assert.equal(loaded.height, 800);
+  assert.equal(loaded.status, "failed");
+  assert.equal(loaded.at, 123);
+});
+
+test("history completion and removal preserve other entries and never resurrect removed jobs", () => {
+  const store = memoryStore();
+  let now = 0;
+  const history = createHistory(store, HISTORY_KEY_WEBSITE, () => ++now);
+  const first = history.start("https://museum.example/first");
+  const second = history.start("https://museum.example/second");
+  const output = {
+    disposition: "browser-save-ready",
+    format: "png",
+    canvas: { width: 100, height: 80 },
+    missing: [],
+  };
+  history.complete(second, output);
+  assert.equal(history.entries()[0].status, "completed");
+  history.remove(first);
+  history.complete(first, output);
+  assert.deepEqual(
+    history.entries().map((item) => item.url),
+    [second.url],
+  );
+  history.clear();
+  history.complete(second, output);
+  assert.deepEqual(loadHistory(store, HISTORY_KEY_WEBSITE), []);
 });

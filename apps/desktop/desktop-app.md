@@ -34,10 +34,11 @@ its image, remove the resume folder and start fresh.
 
 ## Recent pictures
 
-The app keeps your last 20 saves on this device only. Each entry shows the
-full address, the picture size, the format, and the date. Click an entry to
-put its address back in the main screen, where you can change the settings
-before starting again. **Clear history** removes all entries.
+The app keeps your last 20 started images on this device only, including failed
+and cancelled attempts. Each row shows the title (or source address), time since
+starting, known pixel dimensions, and status. Click the title to fill and focus
+the address field so you can review it before starting again. Use the trash
+icon to remove one row, or **Clear history** to remove all entries.
 
 ## Saving and opening images
 
