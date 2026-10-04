@@ -720,13 +720,14 @@ impl TileWriter {
         plan: &OutputPlan,
         budget: u64,
         compression: u8,
+        max_tiles: u32,
     ) -> Result<Self, Error> {
         match plan.format {
             dezoomify::model::OutputFormat::IiifDir => {
                 IiifWriter::new(destination, plan, budget, compression).map(Self::Iiif)
             }
             dezoomify::model::OutputFormat::Zif => {
-                crate::zif_output::ZifWriter::new(destination, plan, budget, compression)
+                crate::zif_output::ZifWriter::new(destination, plan, budget, compression, max_tiles)
                     .map(Self::Zif)
             }
             _ => Err(Error::InvalidState(

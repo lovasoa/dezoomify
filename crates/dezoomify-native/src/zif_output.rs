@@ -106,6 +106,9 @@ pub(crate) struct ZifWriter {
     peak_retained: u64,
     decoded: u64,
     metadata: BTreeMap<u32, TileMetadata>,
+    infer_canvas: bool,
+    max_tiles: u32,
+    index_bytes: u64,
 }
 
 impl ZifWriter {
@@ -130,6 +133,7 @@ impl ZifWriter {
         plan: &OutputPlan,
         budget: u64,
         compression: u8,
+        max_tiles: u32,
     ) -> Result<Self, Error> {
         let grid = plan.grid.as_ref().filter(|grid| {
             plan.canvas.is_some()
@@ -154,18 +158,31 @@ impl ZifWriter {
             tiles: BTreeMap::new(),
             regular: grid.is_some(),
         };
-        memory_check(u64::from(base.count()?) * 128, budget)?;
+        let count = base.count()?;
+        if count > max_tiles {
+            return Err(Error::ResourceLimit(
+                "ZIF output tile count exceeds max_tiles".into(),
+            ));
+        }
+        // Reserve container indexes, two simultaneous level maps, and input
+        // tile/metadata nodes. Payloads and conversion use only the remainder.
+        let index_bytes = u64::from(count) * 512;
+        let structural = index_bytes + u64::from(plan.tile_count) * 256;
+        memory_check(structural, budget)?;
         Ok(Self {
             staging: StagedFile::new(destination)?,
             base,
             writer: None,
             profile: None,
             compression,
-            budget,
+            budget: budget - structural,
             retained: 0,
             peak_retained: 0,
             decoded: 0,
             metadata: BTreeMap::new(),
+            infer_canvas: plan.canvas.is_none(),
+            max_tiles,
+            index_bytes,
         })
     }
 
@@ -265,12 +282,33 @@ impl ZifWriter {
         cancelled: &AtomicBool,
     ) -> Result<(), Error> {
         let extent = tile.placement.expected_size.as_ref().unwrap_or(&tile.size);
-        let rect = Rect {
+        let mut rect = Rect {
             x: tile.placement.position.x,
             y: tile.placement.position.y,
             w: extent.width.min(tile.size.width),
             h: extent.height.min(tile.size.height),
         };
+        if self.infer_canvas {
+            self.base.size.width = self.base.size.width.max(rect.x.saturating_add(rect.w));
+            self.base.size.height = self.base.size.height.max(rect.y.saturating_add(rect.h));
+            let count = self.base.count()?;
+            if count > self.max_tiles {
+                return Err(Error::ResourceLimit(
+                    "ZIF output tile count exceeds max_tiles".into(),
+                ));
+            }
+            let index_bytes = u64::from(count) * 512;
+            let growth = index_bytes.saturating_sub(self.index_bytes);
+            memory_check(growth + self.retained_bytes(), self.budget)?;
+            self.budget -= growth;
+            self.index_bytes = index_bytes;
+        } else {
+            rect.w = rect.w.min(self.base.size.width.saturating_sub(rect.x));
+            rect.h = rect.h.min(self.base.size.height.saturating_sub(rect.y));
+        }
+        if rect.w == 0 || rect.h == 0 {
+            return Ok(());
+        }
         let index = if self.base.regular {
             rect.y / self.base.cell.height * self.base.size.width.div_ceil(self.base.cell.width)
                 + rect.x / self.base.cell.width
@@ -348,10 +386,6 @@ impl ZifWriter {
                 bytes: TileBytes::Memory(tile.bytes),
             }
         };
-        if !self.base.regular {
-            self.base.size.width = self.base.size.width.max(rect.x.saturating_add(rect.w));
-            self.base.size.height = self.base.size.height.max(rect.y.saturating_add(rect.h));
-        }
         self.base.tiles.insert(index, stored);
         Ok(())
     }
@@ -612,6 +646,7 @@ mod tests {
             },
             budget,
             5,
+            100,
         )
         .unwrap();
         let error = writer
@@ -649,7 +684,7 @@ mod tests {
             title: None,
         };
         let mut writer =
-            ZifWriter::new(&directory.path().join("out.zif"), &plan, 1 << 20, 5).unwrap();
+            ZifWriter::new(&directory.path().join("out.zif"), &plan, 1 << 20, 5, 100).unwrap();
         assert_eq!(
             writer.initialize(Profile::PngRgb, &AtomicBool::new(true)),
             Err(Error::Cancelled)
