@@ -18,7 +18,7 @@ pub fn verify(a: &[String]) -> Result<(), String> {
     let canvas = canvas_constants_pattern(&r)?;
     f(
         &r,
-        &[canvas.as_str(), "docs/user/"],
+        &[canvas.as_str(), "docs/user/", "apps/desktop/desktop-app.md"],
         "raw canvas constant in docs/user/ (state limits in user units)",
     )?;
     let o = g(
@@ -28,6 +28,7 @@ pub fn verify(a: &[String]) -> Result<(), String> {
             "-i",
             "dezoomer|readable tile bytes|tainted|blob allocation|multi[ -]?core",
             "docs/user/",
+            "apps/desktop/desktop-app.md",
             "packages/shared-ui/src/view.tsx",
             "packages/shared-ui/src/components.ts",
         ],
@@ -42,6 +43,7 @@ pub fn verify(a: &[String]) -> Result<(), String> {
             "-N",
             "250 ?ms",
             "docs/user/",
+            "apps/desktop/desktop-app.md",
             "packages/shared-ui/src/view.tsx",
             "packages/shared-ui/src/components.ts",
         ],
@@ -81,6 +83,7 @@ pub fn verify(a: &[String]) -> Result<(), String> {
             "GPG|SHA256SUMS|only (the )?Linux|Linux only|no installer|on its way|coming soon|pending review|Firefox version|In Vorbereitung|En preparation|In arrivo",
             "README.md",
             "docs/user/",
+            "apps/desktop/desktop-app.md",
             "packages/shared-ui/src/",
         ],
         "stale installer or browser-extension availability copy in website sources",

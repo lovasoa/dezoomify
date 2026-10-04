@@ -55,18 +55,46 @@ You can still open the containing folder if the image has been moved.
 ## Install
 
 The [releases page](https://github.com/lovasoa/dezoomify/releases/latest)
-ships unsigned installers for Linux x86_64 (`.deb`), Windows x86_64 (`.msi`),
-and Apple silicon macOS (`.dmg`). There is no paid Apple or Azure signing, so
-the operating system may ask you to confirm that you trust the installer.
+ships installers for Linux x86_64 (`.deb`), Windows x86_64 (`.msi`),
+and Apple silicon macOS (`.dmg`). Linux and Windows installers are unsigned.
+The macOS app has an ad-hoc signature, which requires no paid Apple account,
+but is not signed with Developer ID or notarized by Apple. The operating
+system may ask you to confirm that you trust the app.
 
 There is no automatic in-app update: when a new version appears on the
 releases page, download it manually and install it yourself.
 
 You can also build the app locally with `cargo xtask build desktop`, which
-produces an unsigned installer for the matching host under
+produces an installer with the same signing policy for the matching host under
 `target/release/bundle/` (Linux `.deb` on a Linux host with the webview
 system packages; Windows `.msi` and macOS `.dmg` only on their matching
 hosts).
+
+### Opening the macOS app
+
+Download the `.dmg` from the releases page and open it. The installation
+window displays these steps beside the app and Applications icons:
+
+1. Drag **Dezoomify** into **Applications**.
+2. Open **Dezoomify** from **Applications**.
+3. If macOS cannot verify the developer or check for malicious software,
+   open **System Settings → Privacy & Security**.
+4. Under **Security**, click **Open Anyway** for Dezoomify, then confirm **Open**.
+
+Only approve a download you trust. This free app is not notarized by Apple.
+
+macOS remembers this app exception. See
+[Apple's instructions](https://support.apple.com/en-us/102445).
+Ad-hoc signing does not remove this approval step.
+
+If macOS instead says the app is damaged, will damage your computer, or has
+been moved to Trash, download a fresh copy from the releases page. If it
+still fails, report the exact warning (or a screenshot), your macOS version,
+and the release filename in a
+[GitHub issue](https://github.com/lovasoa/dezoomify/issues).
+A damaged-app warning can indicate a packaging or signature problem;
+automatic movement to Trash can indicate malware detection. Do not assume
+either warning is the ordinary developer-approval prompt.
 
 ## Save an image
 
@@ -76,10 +104,10 @@ the main screen; it does not ask for a second file choice. The native app
 uses the image title it finds to determine the file name and adds the extension
 for the selected format. You can also start the app with the address as an
 argument, or drive it from the terminal; see the
-[command-line guide](./command-line.md).
+[command-line guide](../../docs/user/command-line.md).
 
 **Members-only sites:** the desktop app cannot reuse your browser sign-in.
-Use the [browser extension](./browser-extension.md) to work with pages that
+Use the [browser extension](../../docs/user/browser-extension.md) to work with pages that
 require your existing browser session.
 
 **From the website:** copy the image address and paste it into the desktop app.
@@ -89,7 +117,7 @@ requests that appear to come from the site's own viewer. If the save
 fails with a "forbidden" style error, tell the app which page the image
 belongs to (most image viewers open with such a page) and it will introduce
 itself as coming from there. On the command line, this is the
-`-H/--header "Referer: …"` option; see [protected pages](./troubleshooting.md#forbidden-or-unauthorized-errors).
+`-H/--header "Referer: …"` option; see [protected pages](../../docs/user/troubleshooting.md#forbidden-or-unauthorized-errors).
 
 ## Choosing the file format
 
@@ -133,5 +161,5 @@ fetched saves need no decision from you: they are kept automatically as the
 
 ## Next steps
 
-- [Command-line usage](./command-line.md)
-- [Troubleshooting](./troubleshooting.md)
+- [Command-line usage](../../docs/user/command-line.md)
+- [Troubleshooting](../../docs/user/troubleshooting.md)

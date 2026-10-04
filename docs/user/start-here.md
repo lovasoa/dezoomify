@@ -24,9 +24,9 @@ Choose a different app when:
   own browser with your own session, so it can.
 - **The image is enormous** (a gigapixel panorama, a whole digitized
   manuscript). A browser tab can run out of room for very large pictures.
-  The [desktop app](./desktop-app.md) runs on your computer subject to
+  The [desktop app](../../apps/desktop/desktop-app.md) runs on your computer subject to
   available memory instead of a browser tab limit, and saves one
-  job to one file or IIIF tile folder ([file formats](./desktop-app.md#choosing-the-file-format)).
+  job to one file or IIIF tile folder ([file formats](../../apps/desktop/desktop-app.md#choosing-the-file-format)).
 - **You want to save from scripts.** The
   [command-line tool](./command-line.md) saves one image per run.
 
@@ -47,5 +47,5 @@ it cannot finish a job, and suggests the app that can.
 
 - [Save your first image from the website](./website.md)
 - [Install the browser extension](./browser-extension.md)
-- [Install the desktop app](./desktop-app.md)
+- [Install the desktop app](../../apps/desktop/desktop-app.md)
 - [Supported websites and image formats](./supported-formats.md)

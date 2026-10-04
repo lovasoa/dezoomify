@@ -32,7 +32,7 @@ From the tagged revision:
 4. `cargo xtask release verify --plan ... --artifacts target/release-dist/<version>` (names against plan).
 5. `cargo xtask release publish --plan ... --artifacts ...`.
 
-Then: GitHub Release publication, plus parallel submission of the exact Chromium ZIP to the Chrome Web Store and Firefox ZIP to AMO. Store jobs rebuild nothing; release artifacts are the source of truth. Submission is automatic; availability waits for store approval. Installers (Linux x86_64 `.deb`, Windows x86_64 `.msi`, Apple silicon `.dmg`) stay unsigned, no paid signing. No in-app updates; users check GitHub Releases manually. Working trees under `target/release-dist/<version>/` are never committed. User install note: [Desktop app guide](user/desktop-app.md#install).
+Then: GitHub Release publication, plus parallel submission of the exact Chromium ZIP to the Chrome Web Store and Firefox ZIP to AMO. Store jobs rebuild nothing; release artifacts are the source of truth. Submission is automatic; availability waits for store approval. Linux x86_64 `.deb` and Windows x86_64 `.msi` installers stay unsigned; the app in the Apple silicon `.dmg` is ad-hoc signed and its packaged signature is verified before upload, with no paid signing or notarization. No in-app updates; users check GitHub Releases manually. Working trees under `target/release-dist/<version>/` are never committed. User install note: [Desktop app guide](../apps/desktop/desktop-app.md#install).
 
 The `release` workflow runs all five stages. Signing and publishing stay separate protected jobs. It then waits for the parallel store submissions; a green release run has reached every target, though store approval is still pending in some cases.
 
@@ -45,7 +45,7 @@ One Cloudflare Pages project (the original `dezoomify`) builds from GitHub Actio
 3. GitHub records each deploy in `production`/`preview` and links it as the PR's **View deployment**; the preview URL survives new commits.
 4. The workflow probes the live deploy (production or preview): both apps, both proxy routes, wasm content types, generated help, no repository files served.
 
-`master` is the single production branch. Fork PRs get no previews: the normal `pull_request` event runs the credentialed job for same-repo PRs only, keeping untrusted code out of `pull_request_target`. Previews are public with `noindex` and share production's proxy and file-exposure gates. Internal docs and plans are never served.
+`master` is the single production branch. Fork PRs get no previews: the normal `pull_request` event runs the credentialed job for same-repo PRs only, keeping untrusted code out of `pull_request_target`. Previews are public with `noindex` and share production's proxy and file-exposure gates. Internal docs are never served.
 
 ## Rollback
 

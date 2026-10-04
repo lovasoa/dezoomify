@@ -22,6 +22,12 @@ See [Architecture](architecture.md) to choose where a change belongs and
 
 ## Builds
 
+`favicon.svg` is the canonical blue-tile logo for the beta website,
+help pages, and desktop icon generation. Native SVG UI markup mirrors that
+artwork; the extension uses its blue PNG sizes and grey inactive variants.
+The website builder copies these favicon assets only under `/beta/`. The legacy
+app served at `/` retains its original files and artwork unchanged.
+
 | Command | Output |
 |---|---|
 | `cargo xtask build web` | Assembled website in `dist/`: legacy at `/`, new app at `/beta`, WASM and generated help |

@@ -12,7 +12,8 @@ desktop app, and CLI share one Rust algorithm that takes a `Host` argument to in
   `packages/browser-runtime/` composes browser UI and Host capabilities.
   [Architecture](docs/architecture.md) explains invocation ownership.
 - [Docs index](docs/README.md): user and contributor guides.
-  [User docs](docs/user/README.md): source of all user-facing documentation.
+  [User docs](docs/user/README.md): user-facing documentation, including the
+  [Desktop guide](apps/desktop/desktop-app.md), packaged in the DMG.
 - `testdata/scenarios/`: deterministic fixtures, and transcripts.
   Read [Testing](docs/testing.md) before writing tests.
 - `crates/xtask/`: development and release tooling.
@@ -20,6 +21,10 @@ desktop app, and CLI share one Rust algorithm that takes a `Host` argument to in
 
 ## Invariants
 
+- Keep the legacy app served at `/` pristine. Do not include changes to
+  `legacy/` or alter its deployed files in PRs; website assembly must preserve
+  those files byte for byte. Product changes belong to the beta app and other
+  products, not the legacy app.
 - Keep parsers and geometry pure. The shared algorithm calls only injected
   Host capabilities; Hosts own I/O, clocks, codecs, resources, and task ownership.
   Products never import each other. Shared UI never accesses host globals;
@@ -51,14 +56,14 @@ If you cannot name the reader and the question it answers, do not add it.
 - Prefer editing, shortening, or deleting over adding pages. A new page needs a
   distinct, recurring reader need that an existing guide cannot serve concisely.
 - Keep user instructions in `docs/user/`, contributor guides in `docs/`, and
-  component setup or fixture provenance in the owning README. Link to one home.
+  the packaged desktop guide in `apps/desktop/desktop-app.md`. Keep component
+  setup or fixture provenance in the owning README. Link to one home.
 - Source code, generated types/manifests, tests, and command help own API shapes,
   constants, capability lists, and coverage. Link to them; do not mirror them in
   prose. Keep architectural rationale and operational pitfalls that they cannot
   explain on their own.
 - Do not add implementation inventories, change diaries, completion reports,
-  speculative guarantees, or a page per feature. Git history owns past changes;
-  use `plans/` only for requested, actionable future work.
+  speculative guarantees, or a page per feature. Git history owns past changes.
 - Write for someone new to the task: lead with what they need to do or know,
   omit repeated background, and remove obsolete guidance. These rules also apply
   to nested agent instructions; do not add blanket requirements to grow docs.
