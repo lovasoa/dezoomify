@@ -15,6 +15,9 @@ use super::model::{CatalogPlan, DiscoveryCatalog, ImagePlan, Request};
 use super::tile_plan::TileSourceError;
 use super::uri::resolve_relative;
 use crate::model::{DiscoveryInputKind, Error, HtmlDocument, HtmlElement, HtmlQuery};
+static SCRIPT_MARKUP: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(?i)<(?:script|base|body)\b").expect("constant markup pattern")
+});
 
 /// User source or host observation supplied to the shared discovery search.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -134,11 +137,19 @@ impl<'a> DiscoveryResource<'a> {
     }
 
     pub(crate) fn is_html(self) -> bool {
-        self.text_lossy()
+        let source = self.text_lossy();
+        source
             .trim_start_matches(['\u{feff}', ' ', '\n', '\r', '\t'])
             .starts_with('<')
-            || self.select("base[href], script").next().is_some()
-            || self.select("body[onload]").next().is_some()
+            || ((self.select("base[href], script").next().is_some()
+                || self.select("body[onload]").next().is_some())
+                && {
+                    let visible =
+                        crate::javascript::mask(&source.replace("<!--", "/*").replace("-->", "*/"));
+                    crate::javascript::captures(&SCRIPT_MARKUP, &visible)
+                        .next()
+                        .is_some()
+                })
     }
 
     pub fn element(self) -> Result<&'a HtmlElement, DiscoveryError> {
@@ -158,10 +169,19 @@ impl<'a> DiscoveryResource<'a> {
         String::from_utf8_lossy(self.bytes)
     }
 
-    /// Follow a resource reference against this response's post-redirect URI.
+    /// Follow a reference against the parsed document base or post-redirect URI.
     #[must_use]
     pub fn follow_relative(self, reference: &str) -> ParsedResource {
-        ParsedResource::Follow(Request::new(resolve_relative(self.final_uri, reference)))
+        ParsedResource::Follow(Request::new(resolve_relative(
+            &crate::web_page::page_base(self),
+            reference,
+        )))
+    }
+    pub fn follow_file(self, reference: &str, filename: &str) -> ParsedResource {
+        let uri = resolve_relative(&crate::web_page::page_base(self), reference);
+        ParsedResource::Follow(Request::new(super::uri::append_path_component(
+            &uri, filename,
+        )))
     }
 }
 impl HtmlElement {
@@ -219,7 +239,7 @@ pub enum DiscoveryMatch {
     UrlSuffix(&'static str),
     UrlPredicate(UrlPredicate),
     ContentPredicate(ContentPredicate),
-    Css(&'static str),
+    Css(&'static str, fn(&HtmlElement) -> bool),
     ResourcePredicate(for<'a> fn(DiscoveryResource<'a>) -> bool),
     ContentRegex(&'static LazyLock<BytesRegex>),
 }
@@ -235,7 +255,7 @@ impl DiscoveryMatch {
                 .ends_with(suffix),
             Self::UrlPredicate(predicate) => predicate(uri),
             Self::ContentPredicate(predicate) => bytes.is_some_and(predicate),
-            Self::Css(_) | Self::ResourcePredicate(_) => false,
+            Self::Css(..) | Self::ResourcePredicate(_) => false,
             Self::ContentRegex(regex) => bytes.is_some_and(|bytes| regex.is_match(bytes)),
         }
     }
@@ -272,7 +292,10 @@ pub const fn url_matches(predicate: UrlPredicate) -> DiscoveryMatch {
 }
 /// Match a CSS selector and pass its first selected element to the decoder.
 pub const fn css(selector: &'static str) -> DiscoveryMatch {
-    DiscoveryMatch::Css(selector)
+    css_when(selector, |_| true)
+}
+pub const fn css_when(selector: &'static str, accept: fn(&HtmlElement) -> bool) -> DiscoveryMatch {
+    DiscoveryMatch::Css(selector, accept)
 }
 
 pub const fn resource_matches(
@@ -325,6 +348,14 @@ impl RoutePattern {
     pub const fn text_file(self, filename: &'static str) -> DiscoveryRoute {
         self.route(RouteAction::TextFile(filename))
     }
+    /// Follow a metadata file beneath the first regex capture's URL.
+    pub const fn regex_file(
+        self,
+        regex: &'static LazyLock<BytesRegex>,
+        filename: &'static str,
+    ) -> DiscoveryRoute {
+        self.route(RouteAction::RegexLink(regex, "$1", Some(filename)))
+    }
     /// Insert a decoded attribute into a metadata reference.
     pub const fn attribute_url(
         self,
@@ -360,7 +391,7 @@ impl DiscoveryRoute {
         Self {
             matcher: DiscoveryMatch::ContentRegex(regex),
             kind: RouteKind::Viewer,
-            handler: RouteAction::RegexLink(template),
+            handler: RouteAction::RegexLink(regex, template, None),
         }
     }
 }
@@ -376,7 +407,11 @@ enum RouteAction {
         prefix: &'static str,
         suffix: &'static str,
     },
-    RegexLink(&'static str),
+    RegexLink(
+        &'static LazyLock<BytesRegex>,
+        &'static str,
+        Option<&'static str>,
+    ),
     TextFile(&'static str),
 }
 
@@ -386,11 +421,13 @@ fn parse_resource(
 ) -> Result<ParsedResource, DiscoveryError> {
     for route in routes {
         let selected = match route.matcher {
-            DiscoveryMatch::Css(selector) => resource.select(selector).next(),
+            DiscoveryMatch::Css(selector, accept) => {
+                resource.select(selector).find(|tag| accept(tag))
+            }
             _ => None,
         };
         let matched = match route.matcher {
-            DiscoveryMatch::Css(_) => selected.is_some(),
+            DiscoveryMatch::Css(..) => selected.is_some(),
             DiscoveryMatch::ResourcePredicate(predicate) => predicate(resource),
             matcher => {
                 matcher.matches(resource.final_uri(), Some(resource.bytes()))
@@ -412,32 +449,23 @@ fn parse_resource(
                 suffix,
             } => {
                 let reference = resource.element()?.required(attribute)?;
-                Ok(ParsedResource::Follow(Request::new(resolve_relative(
-                    &crate::web_page::page_base(resource),
-                    &format!("{prefix}{}{suffix}", reference.trim()),
-                ))))
+                Ok(resource.follow_relative(&format!("{prefix}{}{suffix}", reference.trim())))
             }
             RouteAction::TextFile(filename) => {
-                let uri = resolve_relative(
-                    &crate::web_page::page_base(resource),
-                    resource.element()?.text.trim(),
-                );
-                Ok(ParsedResource::Follow(Request::new(
-                    super::uri::append_path_component(&uri, filename),
-                )))
+                Ok(resource.follow_file(resource.element()?.text.trim(), filename))
             }
-            RouteAction::RegexLink(template) => {
-                let DiscoveryMatch::ContentRegex(regex) = route.matcher else {
-                    unreachable!("regex link route")
-                };
-                let captures = regex
-                    .captures(resource.bytes())
-                    .expect("matched regex route");
+            RouteAction::RegexLink(regex, template, filename) => {
+                let captures = regex.captures(resource.bytes()).ok_or_else(|| {
+                    DiscoveryError::InvalidMetadata("metadata path missing".into())
+                })?;
                 let mut link = Vec::new();
                 captures.expand(template.as_bytes(), &mut link);
-                Ok(resource.follow_relative(&html_escape::decode_html_entities(
-                    String::from_utf8_lossy(&link).trim(),
-                )))
+                let text = String::from_utf8_lossy(&link);
+                let reference = html_escape::decode_html_entities(text.trim());
+                Ok(match filename {
+                    Some(filename) => resource.follow_file(&reference, filename),
+                    None => resource.follow_relative(&reference),
+                })
             }
             RouteAction::MapUrl(_) | RouteAction::Plan(_) => continue,
         };
@@ -805,7 +833,7 @@ struct Resources<'a, F, P> {
     fetch: &'a F,
     parse_html: &'a P,
     selectors: Vec<String>,
-    supplied: BTreeMap<String, Vec<u8>>,
+    supplied: BTreeMap<Request, Vec<u8>>,
     reads: RefCell<Vec<(Request, bool, SharedRead<'a>)>>,
     responses: Rc<RefCell<Vec<ReadResource>>>,
     retained: Rc<Cell<usize>>,
@@ -838,7 +866,7 @@ where
                     "discovery resource limit exceeded",
                 ));
             }
-            let supplied = self.supplied.get(&request.uri).cloned();
+            let supplied = self.supplied.get(&request).cloned();
             let supplied_bytes = supplied.is_some();
             let parse_html = self.parse_html;
             let fetch = self.fetch;
@@ -1062,7 +1090,7 @@ where
             )
             .chain(specs.iter().flat_map(|spec| {
                 spec.routes.iter().filter_map(|route| match route.matcher {
-                    DiscoveryMatch::Css(selector) => Some(selector),
+                    DiscoveryMatch::Css(selector, _) => Some(selector),
                     _ => None,
                 })
             }))
@@ -1077,7 +1105,7 @@ where
                 input
                     .contents
                     .as_ref()
-                    .map(|bytes| (input.url.clone(), bytes.clone()))
+                    .map(|bytes| (Request::new(&input.url), bytes.clone()))
             })
             .collect(),
         reads: Default::default(),

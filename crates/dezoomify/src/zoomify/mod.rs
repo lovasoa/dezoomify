@@ -17,7 +17,7 @@ use crate::core::discovery::{
 };
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource, Request,
-    ResolvedLevel, append_path_component, resolve_relative,
+    ResolvedLevel, resolve_relative,
 };
 
 mod image_properties;
@@ -29,7 +29,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     viewer(resource_matches(has_inline_tile_service)).decode(inline_catalog),
     viewer(resource_matches(contains_zoomify_declaration)).decode(extract_image_properties_url),
     viewer(html_matches(has_fluid_access_number)).decode(extract_fluid_catalog),
-    viewer(url_matches(is_unibe_page)).decode(extract_unibe_catalog),
+    viewer(url_matches(is_unibe_page)).regex_file(&UNIBE_URL_RE, "ImageProperties.xml"),
     viewer(css(".ete-openlayers-src")).text_file("ImageProperties.xml"),
     ngv::ROUTE,
     viewer(css("url")).text_file("ImageProperties.xml"),
@@ -122,12 +122,7 @@ fn extract_image_properties_url(
     let image_path = extract_image_path(resource).ok_or_else(|| {
         DiscoveryError::InvalidMetadata("Zoomify viewer page does not declare an image path".into())
     })?;
-    let page_base_uri = crate::web_page::page_base(resource);
-    let image_uri = resolve_relative(&page_base_uri, &image_path);
-    Ok(ParsedResource::Follow(Request::new(append_path_component(
-        &image_uri,
-        "ImageProperties.xml",
-    ))))
+    Ok(resource.follow_file(&image_path, "ImageProperties.xml"))
 }
 
 /// Whether a script block declares an inline source *with* geometry.
@@ -264,22 +259,6 @@ fn extract_fluid_catalog(
 
 fn is_unibe_page(uri: &str) -> bool {
     uri.contains("biblio.unibe.ch/web-apps/maps/zoomify.php")
-}
-
-fn extract_unibe_catalog(
-    resource: crate::core::DiscoveryResource<'_>,
-) -> Result<ParsedResource, DiscoveryError> {
-    let path = UNIBE_URL_RE
-        .captures(resource.bytes())
-        .and_then(|captures| capture_text(&captures, "path"))
-        .ok_or_else(|| {
-            DiscoveryError::InvalidMetadata("Unibe page declares no image URL".into())
-        })?;
-    let image_uri = resolve_relative(resource.final_uri(), &path);
-    Ok(ParsedResource::Follow(Request::new(append_path_component(
-        &image_uri,
-        "ImageProperties.xml",
-    ))))
 }
 
 /// Scheme + authority of a URI for site-root service URLs.
@@ -570,7 +549,7 @@ mod tests {
         for (page, expected) in [
             (r#"if (a<b) showImage("viewer", "/zoomify");"#, "/zoomify"),
             (
-                r#"const html = '<div>'; showImage(viewer, "/zoomify");"#,
+                r#"const html = '<script src="x.js"></script><div>'; showImage(viewer, "/zoomify");"#,
                 "/zoomify",
             ),
             (

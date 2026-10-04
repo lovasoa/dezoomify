@@ -24,5 +24,4 @@ pub use tile_plan::{
     Grid, GridCoord, GridRequests, GridTile, Positioned, PositionedTile, TileSource,
     TileSourceError,
 };
-pub(crate) use uri::append_path_component;
 pub use uri::{image_title, origin_only, resolve_relative, resolve_url_template};

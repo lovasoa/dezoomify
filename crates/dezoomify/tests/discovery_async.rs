@@ -219,7 +219,11 @@ fn shared_reads_keep_branch_history_headers_and_redirected_bases() {
     registry.register(B);
     let calls = RefCell::new(Vec::new());
     let catalog = futures::executor::block_on(registry.discover(
-        vec![DiscoveryInput::new("https://test/root")],
+        vec![
+            DiscoveryInput::new("https://test/root"),
+            DiscoveryInput::with_contents("https://test/child", b"stale child")
+                .with_kind(dezoomify::model::DiscoveryInputKind::ObservedDocument),
+        ],
         Default::default(),
         |request, _| {
             calls.borrow_mut().push(request.clone());
