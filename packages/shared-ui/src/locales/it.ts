@@ -287,11 +287,13 @@ export const it = {
   "desktop.panel.jobActions": "Azioni dell’attività desktop",
   "desktop.settings.reset": "Reimposta le impostazioni",
   "desktop.quick.info": "Altre informazioni",
+  "desktop.quick.auto": "Automatico",
+  "desktop.quick.sizeEstimate": "<{size} MB",
   "desktop.quick.folderInfo": "Scegli dove salvare le immagini scaricate.",
   "desktop.quick.formatInfo":
-    "Scegli un formato. Auto salva JPEG fino a 65.535 pixel per lato, altrimenti PNG.",
+    "Scegli un formato. Automatico salva in JPEG le immagini opache fino a 65.535 pixel per lato, altrimenti in PNG.",
   "desktop.quick.sizeInfo":
-    "Le impostazioni predefinite limitano larghezza e altezza mantenendo le proporzioni, senza ingrandimento; il livello sorgente può essere più piccolo. MB stimati = larghezza × altezza × byte/pixel / 1.000.000. PNG: 1,6 byte/pixel; WebP senza perdita: 1,3; TIFF/ZIF: 3. JPEG è calibrato con l’encoder nativo su due dipinti e una mappa: qualità ≤25: 0,1; ≤50: 0,15; ≤75: 0,2; ≤90: 0,3; ≤95: 0,4; ≤98: 0,45; ≤100: 0,5 byte/pixel. Auto stima JPEG perché queste dimensioni rispettano i suoi limiti. ZIF/IIIF aggiungono un terzo per la piramide. Ogni stima aggiunge un margine del 10 %, poi viene arrotondata per eccesso a multipli di 5 MB. Sono euristiche, non limiti garantiti; dettaglio, compressione sorgente, proporzioni, metadati e impostazioni dell’encoder influenzano la dimensione reale. Dimensioni intere/personalizzate richiedono le dimensioni sorgente.",
+    "Le preimpostazioni selezionano il livello sorgente più grande entro queste dimensioni. Se nessuno rientra, viene usato il più piccolo, che può superare le dimensioni e i limiti dell’encoder. Le immagini non vengono ridimensionate. Le stime assumono le dimensioni indicate; dimensioni reali e compatibilità dipendono dalla sorgente. MB stimati = larghezza × altezza × byte/pixel / 1.000.000. PNG: 1,6 byte/pixel; WebP senza perdita: 1,3; TIFF/ZIF: 3. JPEG è calibrato con l’encoder nativo su due dipinti e una mappa: qualità ≤25: 0,1; ≤50: 0,15; ≤75: 0,2; ≤90: 0,3; ≤95: 0,4; ≤98: 0,45; ≤100: 0,5 byte/pixel. Automatico stima un JPEG opaco; la trasparenza usa PNG. ZIF/IIIF aggiungono un terzo per la piramide. Ogni stima aggiunge un margine del 10 %, poi viene arrotondata per eccesso a multipli di 5 MB. Sono euristiche, non limiti garantiti; dettaglio, compressione sorgente, proporzioni, metadati e impostazioni dell’encoder influenzano la dimensione reale. Dimensioni intere/personalizzate richiedono le dimensioni sorgente.",
   "desktop.quick.maxWidth": "Larghezza max.",
   "desktop.quick.maxHeight": "Altezza max.",
   "desktop.quick.original": "Originale",
@@ -310,7 +312,7 @@ export const it = {
   "desktop.quick.hint.zif": "ingrandibile",
   "desktop.quick.hint.iiifDir": "a tasselli",
   "desktop.quick.format.auto":
-    "JPEG fino a 65.535 pixel per lato, poi PNG. La qualità JPEG si applica anche ad Auto.",
+    "JPEG per immagini opache fino a 65.535 pixel per lato; PNG per trasparenza o immagini più grandi. La qualità JPEG vale anche per Automatico.",
   "desktop.quick.format.png":
     "Pixel senza perdita e trasparenza; file più grandi, adatti alla modifica.",
   "desktop.quick.format.jpeg":

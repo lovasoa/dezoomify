@@ -289,11 +289,13 @@ export const fr = {
   "desktop.panel.jobActions": "Actions de la tâche de bureau",
   "desktop.settings.reset": "Réinitialiser les paramètres",
   "desktop.quick.info": "Plus d’informations",
+  "desktop.quick.auto": "Automatique",
+  "desktop.quick.sizeEstimate": "<{size} Mo",
   "desktop.quick.folderInfo": "Choisissez où enregistrer les images téléchargées.",
   "desktop.quick.formatInfo":
-    "Choisissez un format. Auto enregistre en JPEG si chaque dimension est au plus de 65 535 pixels, sinon en PNG.",
+    "Choisissez un format. Le mode automatique enregistre en JPEG les images opaques jusqu’à 65 535 pixels par côté ; sinon en PNG.",
   "desktop.quick.sizeInfo":
-    "Les préréglages plafonnent largeur et hauteur en conservant les proportions, sans agrandissement ; le niveau source peut être plus petit. Mo estimés = largeur × hauteur × octets/pixel / 1 000 000. PNG : 1,6 octet/pixel ; WebP sans perte : 1,3 ; TIFF/ZIF : 3. JPEG est calibré avec l’encodeur natif sur deux peintures et une carte : qualité ≤25 : 0,1 ; ≤50 : 0,15 ; ≤75 : 0,2 ; ≤90 : 0,3 ; ≤95 : 0,4 ; ≤98 : 0,45 ; ≤100 : 0,5 octet/pixel. Auto estime le JPEG car ces préréglages respectent ses limites. ZIF/IIIF ajoutent un tiers pour la pyramide. Toutes les estimations ajoutent une marge de 10 %, puis sont arrondies au multiple de 5 Mo supérieur. Ce sont des approximations, pas des limites garanties ; le détail, la compression source, les proportions, les métadonnées et l’encodeur influencent la taille réelle. Les tailles entière/personnalisée nécessitent les dimensions source.",
+    "Les préréglages sélectionnent le plus grand niveau source respectant ces dimensions. Si aucun ne convient, le plus petit est utilisé et peut dépasser ces dimensions et les limites de l’encodeur. Les images ne sont pas redimensionnées. Les estimations supposent les dimensions indiquées ; la taille réelle et la compatibilité du format dépendent de la source. Mo estimés = largeur × hauteur × octets/pixel / 1 000 000. PNG : 1,6 octet/pixel ; WebP sans perte : 1,3 ; TIFF/ZIF : 3. JPEG est calibré avec l’encodeur natif sur deux peintures et une carte : qualité ≤25 : 0,1 ; ≤50 : 0,15 ; ≤75 : 0,2 ; ≤90 : 0,3 ; ≤95 : 0,4 ; ≤98 : 0,45 ; ≤100 : 0,5 octet/pixel. Le mode automatique estime un JPEG opaque ; la transparence utilise le PNG. ZIF/IIIF ajoutent un tiers pour la pyramide. Toutes les estimations ajoutent une marge de 10 %, puis sont arrondies au multiple de 5 Mo supérieur. Ce sont des approximations, pas des limites garanties ; le détail, la compression source, les proportions, les métadonnées et l’encodeur influencent la taille réelle. Les tailles entière/personnalisée nécessitent les dimensions source.",
   "desktop.quick.maxWidth": "Largeur max.",
   "desktop.quick.maxHeight": "Hauteur max.",
   "desktop.quick.original": "Originale",
@@ -312,7 +314,7 @@ export const fr = {
   "desktop.quick.hint.zif": "zoomable",
   "desktop.quick.hint.iiifDir": "tuilé",
   "desktop.quick.format.auto":
-    "JPEG jusqu’à 65 535 pixels par côté ; PNG au-delà. La qualité JPEG s’applique aussi à Auto.",
+    "JPEG pour les images opaques jusqu’à 65 535 pixels par côté ; PNG pour la transparence ou les images plus grandes. La qualité JPEG s’applique aussi au mode automatique.",
   "desktop.quick.format.png":
     "Pixels sans perte et transparence ; fichiers plus volumineux, adaptés à la retouche.",
   "desktop.quick.format.jpeg":

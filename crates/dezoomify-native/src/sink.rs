@@ -134,6 +134,9 @@ pub struct Sink {
 }
 
 impl Sink {
+    pub(crate) fn record_tile_output(&mut self, bytes: u64) {
+        self.stats.encoded_bytes = bytes;
+    }
     /// Create an empty sink. No allocation happens here; the canvas
     /// allocates on [`Sink::ensure_canvas`] after the memory pre-check.
     pub(crate) fn new(options: &SinkOptions) -> Self {
@@ -480,6 +483,12 @@ impl Sink {
             }
         }
         (icc, exif)
+    }
+
+    pub fn has_transparency(&self) -> bool {
+        self.canvas
+            .as_ref()
+            .is_some_and(|canvas| canvas.pixels().any(|pixel| pixel[3] != 255))
     }
 
     /// The single commit point. Ordering is explicit: cancellation first

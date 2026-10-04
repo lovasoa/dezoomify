@@ -190,7 +190,7 @@ describe("Dezoomify desktop window", () => {
       await waitForDefaultOutputDirectory(driver);
       // The format matrix checks exact pixels, so select lossless PNG
       // explicitly rather than relying on Auto's JPEG default.
-      await (await driver.findElement(By.css('summary[aria-label="Format"]'))).click();
+      await (await driver.findElement(By.css('summary[aria-label^="Format:"]'))).click();
       await (
         await driver.findElement(
           By.xpath('//fieldset[@aria-label="Format"]//button[span[1]="PNG"]'),

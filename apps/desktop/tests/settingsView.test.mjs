@@ -8,6 +8,7 @@ import { defaultSettings } from "../src/settings.ts";
 // detection disabled. Arm it before react-dom loads so edits fire onChange.
 document.oninput = null;
 const { createRoot } = await import("react-dom/client");
+const { setLocale } = await import("@dezoomify/shared-ui");
 const { DesktopSettingsView } = await import("../src/settingsView.tsx");
 
 /** Type into a controlled field the way the select preset test does. */
@@ -39,6 +40,7 @@ function renderSettings({ error = null, settings = {} } = {}) {
 test("desktop quick choices apply sizes and update estimates with the format", () => {
   const { container, root, current } = renderSettings();
   const size = container.querySelector('.dz-quick-menu[aria-label="Size"]');
+  assert.ok(container.querySelector('summary[aria-label="Format: Auto"]'));
   assert.ok(size, "size preset remains a quick setting");
   const presets = [...size.querySelectorAll("button")];
   assert.deepEqual(
@@ -81,6 +83,7 @@ test("desktop quick choices apply sizes and update estimates with the format", (
     [...format.querySelectorAll("button")].find((button) => button.textContent.startsWith("PNG")),
   );
   assert.equal(current().output_format, "png");
+  assert.ok(container.querySelector('summary[aria-label="Format: PNG"]'));
   assert.notEqual(button.querySelector(".dz-choice-hint").textContent, jpegEstimate);
   click(
     [...size.querySelectorAll("button")].find(
@@ -111,6 +114,22 @@ test("desktop quick choices apply sizes and update estimates with the format", (
     dimensions,
   );
   act(() => root.unmount());
+});
+
+test("quick settings translate the automatic preference and estimated units", () => {
+  setLocale("fr");
+  const { container, root } = renderSettings();
+  try {
+    assert.ok(container.querySelector('summary[aria-label="Format: Automatique"]'));
+    const hints = [...container.querySelectorAll(".dz-choice-hint")].map(
+      (hint) => hint.textContent,
+    );
+    assert.ok(hints.includes("<5 Mo"));
+    assert.ok(hints.some((hint) => hint === `<${new Intl.NumberFormat("fr").format(935)} Mo`));
+  } finally {
+    act(() => root.unmount());
+    setLocale("en");
+  }
 });
 
 test("size and format choices prevent exceeding JPEG and WebP dimensions", () => {

@@ -322,7 +322,7 @@ body {
   top: calc(100% + 6px);
   left: 0;
   z-index: 20;
-  min-width: 280px;
+  min-width: min(280px, calc(100vw - 2rem));
   max-height: 50vh;
   overflow-y: auto;
   padding: 0.35rem;
@@ -659,6 +659,16 @@ body {
 @media (max-width: 720px) {
   #dz-desktop-settings .dz-quick-options {
     grid-template-columns: repeat(2, minmax(0, 1fr)) 30px;
+  }
+
+  #dz-desktop-settings .dz-settings-more {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
+
+  #dz-desktop-settings .dz-quick-option:nth-child(even) .dz-quick-menu {
+    left: auto;
+    right: 0;
   }
 
   #dz-desktop-settings .dz-preference-row {

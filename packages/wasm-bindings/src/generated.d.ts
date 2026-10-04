@@ -208,6 +208,11 @@ export interface Output {
 export type RequestPurpose = "metadata" | "tile" | "probe";
 
 /**
+ * Saved encoding preference, distinct from the concrete published format.
+ */
+export type OutputPreference = "auto" | "png" | "jpeg" | "tiff" | "zif" | "webp" | "iiif-dir";
+
+/**
  * Selected elements in document order, with decoded attributes and textContent.
  */
 export type HtmlDocument = Record<string, HtmlElement[]>;

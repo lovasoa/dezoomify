@@ -20,13 +20,13 @@
 // Keep erasable syntax only so node type-stripping can read this file. No
 // imports from apps/web, apps/extension, or browser-runtime. No fetch/XHR.
 
-import type { OutputFormat } from "@dezoomify/wasm-bindings";
+import type { OutputPreference } from "@dezoomify/wasm-bindings";
 import { invoke } from "@tauri-apps/api/core";
 import { downloadDir } from "@tauri-apps/api/path";
 
 export interface DesktopSettings {
   readonly output_dir: string | null;
-  readonly output_format: OutputFormat | "auto";
+  readonly output_format: OutputPreference;
   readonly compression: number;
   readonly max_width: number | null;
   readonly max_height: number | null;

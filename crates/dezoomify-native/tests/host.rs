@@ -48,6 +48,267 @@ fn known_codec_limits_fail_before_ordinary_tile_fetches() {
 }
 
 #[test]
+fn compatible_single_tile_iiif_preserves_bytes_without_pixel_decoding() {
+    let work = temp_dir("iiif-reuse");
+    for extension in ["jpg", "png"] {
+        let source = work.join(format!("source-{extension}.dzi"));
+        let tiles = work.join(format!("source-{extension}_files/4"));
+        std::fs::create_dir_all(&tiles).unwrap();
+        std::fs::write(&source, format!("<Image TileSize=\"16\" Overlap=\"0\" Format=\"{extension}\" xmlns=\"http://schemas.microsoft.com/deepzoom/2008\"><Size Width=\"16\" Height=\"16\"/></Image>")).unwrap();
+        let pixels = image::RgbaImage::from_pixel(16, 16, image::Rgba([40, 70, 90, 255]));
+        let bytes = if extension == "jpg" {
+            dezoomify_native::imaging::encode_jpeg(&pixels, 83, None).unwrap()
+        } else {
+            dezoomify_native::imaging::encode_png(
+                &pixels,
+                image::codecs::png::CompressionType::Fast,
+                None,
+                None,
+            )
+            .unwrap()
+        };
+        std::fs::write(tiles.join(format!("0_0.{extension}")), &bytes).unwrap();
+        dezoomify_native::cache::store(
+            &work.join("cache"),
+            &dezoomify_native::cache::job_namespace(source.to_str().unwrap()),
+            tiles.join(format!("0_0.{extension}")).to_str().unwrap(),
+            &bytes[..bytes.len() - 1],
+        )
+        .unwrap();
+        let destination = work.join(format!("out-{extension}.iiif"));
+        let host = NativeHost::new(JobOptions {
+            input_url: source.to_str().unwrap().into(),
+            output: OutputTarget::File(destination.clone()),
+            largest: true,
+            compression: 99,
+            cache_dir: Some(work.join("cache")),
+            ..Default::default()
+        })
+        .unwrap();
+        host.transport
+            .block_on(dezoomify::dezoomify(
+                host.inputs(),
+                host.algorithm_options(),
+                &host,
+            ))
+            .unwrap();
+        let saved = host.publication().unwrap();
+        assert_eq!(saved.instrumentation.pixel_decodes, 0);
+        assert_eq!(saved.instrumentation.canvas_bytes, 0);
+        assert_eq!(
+            std::fs::read(destination.join(format!("0,0,16,16/16,/0/default.{extension}")))
+                .unwrap(),
+            bytes
+        );
+        assert_eq!(
+            std::fs::read(destination.join(format!("full/16,/0/default.{extension}"))).unwrap(),
+            bytes
+        );
+        for path in ["0,0,16,16/16,16", "full/full"] {
+            assert_eq!(
+                std::fs::read(destination.join(format!("{path}/0/default.{extension}"))).unwrap(),
+                bytes
+            );
+        }
+    }
+    std::fs::remove_dir_all(work).unwrap();
+}
+
+#[test]
+fn odd_sized_and_mixed_codec_iiif_trees_roundtrip_through_the_reader() {
+    use image::ImageDecoder as _;
+    let work = temp_dir("iiif-roundtrip");
+    let icc = vec![42; 1024];
+    for mixed in [false, true] {
+        let source = work.join("source.dzi");
+        let tiles = work.join("source_files/10");
+        std::fs::create_dir_all(&tiles).unwrap();
+        std::fs::write(
+            &source,
+            DZI_512
+                .replace("Width=\"512\"", "Width=\"513\"")
+                .replace("Height=\"512\"", "Height=\"513\"")
+                .replace("Format=\"png\"", "Format=\"jpg\""),
+        )
+        .unwrap();
+        let mut original = image::RgbaImage::new(513, 513);
+        for y in 0..3 {
+            for x in 0..3 {
+                let pixels = image::RgbaImage::from_pixel(
+                    if x == 2 { 1 } else { 256 },
+                    if y == 2 { 1 } else { 256 },
+                    image::Rgba([x * 60, y * 80, 90, 255]),
+                );
+                let bytes = if mixed && x == 0 {
+                    dezoomify_native::imaging::encode_jpeg(&pixels, 83, Some(&icc)).unwrap()
+                } else {
+                    dezoomify_native::imaging::encode_png(
+                        &pixels,
+                        image::codecs::png::CompressionType::Fast,
+                        Some(&icc),
+                        None,
+                    )
+                    .unwrap()
+                };
+                image::imageops::overlay(
+                    &mut original,
+                    &image::load_from_memory(&bytes).unwrap().into_rgba8(),
+                    i64::from(x) * 256,
+                    i64::from(y) * 256,
+                );
+                std::fs::write(tiles.join(format!("{x}_{y}.jpg")), bytes).unwrap();
+            }
+        }
+        let destination = work.join(format!("out-{mixed}.iiif"));
+        let result = support::run_file(source.to_str().unwrap(), &destination, |o| {
+            o.largest = true;
+            o.cache_dir = Some(work.join(format!("cache-{mixed}")));
+        })
+        .unwrap();
+        let info: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(destination.join("info.json")).unwrap()).unwrap();
+        assert!(info["profile"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(serde_json::Value::is_object));
+        assert_eq!(
+            std::fs::read(destination.join("512,512,1,1/1,/0/default.png")).unwrap(),
+            std::fs::read(tiles.join("2_2.jpg")).unwrap(),
+        );
+        let mut expected = image::RgbaImage::new(257, 257);
+        for (x, y, region, width, height) in [
+            (0, 0, "0,0,512,512", 256, 256),
+            (256, 0, "512,0,1,512", 1, 256),
+            (0, 256, "0,512,512,1", 256, 1),
+            (256, 256, "512,512,1,1", 1, 1),
+        ] {
+            let bytes =
+                std::fs::read(destination.join(format!("{region}/{width},{height}/0/default.png")))
+                    .unwrap();
+            assert_eq!(
+                image::codecs::png::PngDecoder::new(std::io::Cursor::new(&bytes))
+                    .unwrap()
+                    .icc_profile()
+                    .unwrap(),
+                Some(icc.clone()),
+            );
+            assert_eq!(
+                std::fs::read(destination.join(format!("{region}/{width},/0/default.png")))
+                    .unwrap(),
+                bytes
+            );
+            image::imageops::overlay(
+                &mut expected,
+                &image::load_from_memory(&bytes).unwrap().into_rgba8(),
+                x,
+                y,
+            );
+        }
+        let output = work.join(format!("roundtrip-{mixed}.png"));
+        support::run_file(
+            destination.join("info.json").to_str().unwrap(),
+            &output,
+            |o| {
+                o.zoom_level = Some(1);
+                o.cache_dir = Some(work.join("reader-cache"));
+            },
+        )
+        .unwrap();
+        assert_eq!(image::open(output).unwrap().into_rgba8(), expected);
+        let mut reference = original;
+        for side in [257, 129] {
+            reference = image::imageops::resize(
+                &reference,
+                side,
+                side,
+                image::imageops::FilterType::Triangle,
+            );
+        }
+        let overview = image::open(destination.join("full/129,/0/default.png"))
+            .unwrap()
+            .into_rgba8();
+        for (actual, expected) in overview
+            .get_pixel(128, 128)
+            .0
+            .into_iter()
+            .zip(reference.get_pixel(128, 128).0)
+        {
+            assert!(
+                actual.abs_diff(expected) <= 2,
+                "coarser level reused a public edge collision"
+            );
+        }
+        assert!(!destination.join(".pyramid").exists());
+        fn files(path: &std::path::Path) -> Vec<std::path::PathBuf> {
+            std::fs::read_dir(path)
+                .unwrap()
+                .flat_map(|e| {
+                    let p = e.unwrap().path();
+                    if p.is_dir() {
+                        files(&p)
+                    } else {
+                        vec![p]
+                    }
+                })
+                .collect()
+        }
+        let files = files(&destination);
+        assert!(files.iter().all(|p| p.extension().unwrap() != "jpg"));
+        assert_eq!(
+            result.instrumentation.encoded_bytes,
+            files
+                .iter()
+                .map(|p| p.metadata().unwrap().len())
+                .sum::<u64>()
+        );
+    }
+    std::fs::remove_dir_all(work).unwrap();
+}
+
+#[test]
+fn truncated_source_tiles_reach_partial_handling_with_their_uri() {
+    use dezoomify::model::{Error, RecoveryChoice};
+    let work = temp_dir("iiif-truncated");
+    let source = work.join("source.dzi");
+    let tiles = work.join("source_files/5");
+    std::fs::create_dir_all(&tiles).unwrap();
+    std::fs::write(&source, "<Image TileSize=\"16\" Overlap=\"0\" Format=\"png\" xmlns=\"http://schemas.microsoft.com/deepzoom/2008\"><Size Width=\"32\" Height=\"16\"/></Image>").unwrap();
+    let bytes = dezoomify_native::imaging::encode_png(
+        &image::RgbaImage::new(16, 16),
+        image::codecs::png::CompressionType::Fast,
+        None,
+        None,
+    )
+    .unwrap();
+    let bad = tiles.join("1_0.png");
+    std::fs::write(tiles.join("0_0.png"), &bytes).unwrap();
+    std::fs::write(&bad, &bytes[..bytes.len() - 1]).unwrap();
+    let chosen = std::cell::Cell::new(false);
+    let host = NativeHost::new(JobOptions {
+        input_url: source.to_string_lossy().into(),
+        output: OutputTarget::File(work.join("out.iiif")),
+        largest: true,
+        max_retries: 0,
+        cache_dir: Some(work.join("cache")),
+        ..Default::default()
+    })
+    .unwrap();
+    host.on_partial(|missing| {
+        assert_eq!(missing.missing.len(), 1);
+        assert!(matches!(&missing.missing[0].failures[0], Error::Resource { request, source, .. } if request == bad.to_str().unwrap() && matches!(source.cause(), Error::DecodeFailed(_))));
+        chosen.set(true);
+        Box::pin(async { Ok(RecoveryChoice::Keep) })
+    });
+    let result = support::run_host(&host).unwrap();
+    assert!(chosen.get());
+    assert_eq!(result.output.missing, [1]);
+    assert!(result.path.ends_with("out.partial.iiif"));
+    drop(host);
+    std::fs::remove_dir_all(work).unwrap();
+}
+
+#[test]
 fn generic_probe_metadata_uses_final_tile_order_without_refetching() {
     use image::codecs::png::CompressionType;
     use image::ImageDecoder as _;
@@ -401,6 +662,57 @@ fn automatic_output_uses_the_selected_title_and_avoids_overwriting() {
     assert_eq!(large.path.extension().unwrap(), "png");
     let image = image::open(&large.path).unwrap();
     assert_eq!((image.width(), image.height()), (65_536, 1));
+}
+
+#[test]
+fn automatic_partial_output_preserves_gaps_and_avoids_partial_collisions() {
+    let work = temp_dir("automatic-partial");
+    let source = work.join("source.dzi");
+    let tiles = work.join("source_files/5");
+    std::fs::create_dir_all(&tiles).unwrap();
+    std::fs::write(&source, "<Image TileSize=\"16\" Overlap=\"0\" Format=\"png\" xmlns=\"http://schemas.microsoft.com/deepzoom/2008\"><Size Width=\"32\" Height=\"16\"/></Image>").unwrap();
+    image::RgbaImage::from_pixel(16, 16, image::Rgba([100, 150, 200, 255]))
+        .save(tiles.join("0_0.png"))
+        .unwrap();
+    let options = JobOptions {
+        input_url: source.to_string_lossy().into(),
+        output: OutputTarget::AutoImageDir { dir: work.clone() },
+        largest: true,
+        max_retries: 0,
+        ..Default::default()
+    };
+    let first = support::run_options_observed(options.clone(), |_, _| {}).unwrap();
+    assert_eq!(first.path.extension().unwrap(), "png");
+    assert!(first.path.to_string_lossy().contains(".partial."));
+    let original = std::fs::read(&first.path).unwrap();
+    let image = image::open(&first.path).unwrap().into_rgba8();
+    assert_eq!(image.get_pixel(0, 0)[3], 255);
+    assert_eq!(image.get_pixel(31, 0)[3], 0);
+    let second = support::run_options_observed(options.clone(), |_, _| {}).unwrap();
+    assert_ne!(first.path, second.path);
+    assert_eq!(std::fs::read(&first.path).unwrap(), original);
+    let mut transparent = image::RgbaImage::from_pixel(16, 16, image::Rgba([100, 150, 200, 255]));
+    transparent.save(tiles.join("1_0.png")).unwrap();
+    transparent.put_pixel(0, 0, image::Rgba([0, 0, 0, 0]));
+    transparent.save(tiles.join("0_0.png")).unwrap();
+    let complete = support::run_options_observed(
+        JobOptions {
+            cache_dir: Some(work.join("fresh-cache")),
+            ..options
+        },
+        |_, _| {},
+    )
+    .unwrap();
+    assert!(complete.output.missing.is_empty());
+    assert_eq!(complete.path.extension().unwrap(), "png");
+    assert_eq!(
+        image::open(complete.path)
+            .unwrap()
+            .into_rgba8()
+            .get_pixel(0, 0)[3],
+        0
+    );
+    std::fs::remove_dir_all(work).unwrap();
 }
 
 /// Loopback server delaying tile bodies: at cancel time fetches are mid-air

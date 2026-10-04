@@ -126,8 +126,9 @@ itself as coming from there. On the command line, this is the
 ## Choosing the file format
 
 Use the **Format** quick setting to pick Auto (the default), PNG, JPEG, TIFF,
-ZIF, WebP, or an IIIF tile folder. Auto saves JPEG when both output dimensions
-are at most 65,535 pixels, otherwise PNG. The app remembers your choice.
+ZIF, WebP, or an IIIF tile folder. Auto saves JPEG for opaque images when both
+dimensions are at most 65,535 pixels; transparency or larger images use PNG.
+The app remembers your choice.
 The native app uses that choice to add the matching
 extension to its derived output name: `.png`, `.jpg`, `.tif`, `.zif`, `.webp`,
 or `.iiif`. An IIIF folder contains `info.json` and the image tiles, ready to

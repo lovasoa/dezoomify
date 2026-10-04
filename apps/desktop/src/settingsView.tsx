@@ -1,4 +1,4 @@
-import { t } from "@dezoomify/shared-ui";
+import { getLocale, t } from "@dezoomify/shared-ui";
 import type { ReactElement, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { DesktopSettings, NetworkProfile } from "./settings.ts";
@@ -11,15 +11,17 @@ interface Props {
   onReset(): void;
 }
 
-const formats: Array<{ value: DesktopSettings["output_format"]; label: string }> = [
-  { value: "auto", label: "Auto" },
-  { value: "png", label: "PNG" },
-  { value: "jpeg", label: "JPEG" },
-  { value: "tiff", label: "TIFF" },
-  { value: "webp", label: "WebP" },
-  { value: "zif", label: "ZIF" },
-  { value: "iiif-dir", label: "IIIF folder" },
-];
+function formatChoices(): Array<{ value: DesktopSettings["output_format"]; label: string }> {
+  return [
+    { value: "auto", label: t("desktop.quick.auto") },
+    { value: "png", label: "PNG" },
+    { value: "jpeg", label: "JPEG" },
+    { value: "tiff", label: "TIFF" },
+    { value: "webp", label: "WebP" },
+    { value: "zif", label: "ZIF" },
+    { value: "iiif-dir", label: "IIIF folder" },
+  ];
+}
 
 const profiles: NetworkProfile[] = ["maximum", "balanced", "gentle"];
 
@@ -65,7 +67,9 @@ function estimateSize(width: number, height: number, settings: DesktopSettings):
   const pyramid = format === "zif" || format === "iiif-dir" ? 4 / 3 : 1;
   const pixels = width * height;
   const mb = (pixels * bytesPerPixel * pyramid) / 1_000_000;
-  return `<${Math.ceil((mb * 1.1) / 5) * 5} MB`;
+  return t("desktop.quick.sizeEstimate", {
+    size: new Intl.NumberFormat(getLocale()).format(Math.ceil((mb * 1.1) / 5) * 5),
+  });
 }
 
 function sizePresetFor(settings: DesktopSettings): SizePreset {
@@ -109,7 +113,7 @@ function QuickChoice({
         if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
       }}
     >
-      <summary aria-label={label}>
+      <summary aria-label={`${label}: ${selected.label}`}>
         <span className="dz-choice-selected">{selected.label}</span>
         <span aria-hidden="true">▾</span>
       </summary>
@@ -190,6 +194,7 @@ function PreferenceRow({
 
 /** Desktop job preferences: the quick strip plus the advanced settings dialog. */
 export function DesktopSettingsView({ settings, error, onChange, onReset }: Props): ReactElement {
+  const formats = formatChoices();
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [help, setHelp] = useState<"folder" | "format" | "size" | "network" | null>(null);
   const [headersDraft, setHeadersDraft] = useState(() => headersToEditableText(settings.headers));
@@ -212,7 +217,10 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
     }
   }, [advancedOpen, help]);
 
-  // Rust validates on save and its typed rejection reason arrives through `error`.
+  // These caps select source levels, not resized output dimensions. The smallest
+  // available level may exceed them; native encoding validates the actual canvas.
+  // This guard only prevents combinations whose requested bounds already exceed
+  // the encoder limit. Estimates assume those bounds and cannot guarantee a size.
   const commit = (patch: Partial<DesktopSettings>) => {
     const next = { ...settings, ...patch };
     if (
@@ -402,8 +410,8 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
                     {sizes.map(({ label, width, height }) => (
                       <tr key={width}>
                         <th scope="row">{label}</th>
-                        <td>{width.toLocaleString()} px</td>
-                        <td>{height.toLocaleString()} px</td>
+                        <td>{width.toLocaleString(getLocale())} px</td>
+                        <td>{height.toLocaleString(getLocale())} px</td>
                         <td>{estimateSize(width, height, settings)}</td>
                       </tr>
                     ))}

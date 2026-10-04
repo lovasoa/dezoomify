@@ -372,11 +372,13 @@ const en = {
   "desktop.panel.jobActions": "Desktop job actions",
   "desktop.settings.reset": "Reset settings",
   "desktop.quick.info": "More information",
+  "desktop.quick.auto": "Auto",
+  "desktop.quick.sizeEstimate": "<{size} MB",
   "desktop.quick.folderInfo": "Choose where downloaded images are saved.",
   "desktop.quick.formatInfo":
-    "Choose an output format. Auto saves JPEG when both dimensions are at most 65,535 pixels, otherwise PNG.",
+    "Choose an output format. Auto saves JPEG for opaque images up to 65,535 pixels per side; otherwise PNG.",
   "desktop.quick.sizeInfo":
-    "Presets cap both width and height, preserving aspect ratio without upscaling; the source level may be smaller. Estimated MB = width × height × bytes/pixel / 1,000,000. PNG uses 1.6 bytes/pixel; lossless WebP 1.3; TIFF/ZIF 3. JPEG uses a small native-encoder calibration sample (two paintings and a map): quality ≤25: 0.1; ≤50: 0.15; ≤75: 0.2; ≤90: 0.3; ≤95: 0.4; ≤98: 0.45; ≤100: 0.5 bytes/pixel. Auto estimates JPEG because these presets fit its limits. ZIF/IIIF add one third for pyramid levels. Every estimate gets a 10% buffer, then rounds up to the next 5 MB. These are heuristics, not guaranteed file-size limits; detail, source compression, aspect ratio, metadata and encoder settings affect actual files. Full/custom sizes need source dimensions.",
+    "Presets select the largest source level within these width and height targets. If none fits, the smallest level is used, which may exceed the targets and encoder limits. Images are not resized. Estimates assume the listed dimensions; actual sizes and format compatibility depend on the source. Estimated MB = width × height × bytes/pixel / 1,000,000. PNG uses 1.6 bytes/pixel; lossless WebP 1.3; TIFF/ZIF 3. JPEG uses a small native-encoder calibration sample (two paintings and a map): quality ≤25: 0.1; ≤50: 0.15; ≤75: 0.2; ≤90: 0.3; ≤95: 0.4; ≤98: 0.45; ≤100: 0.5 bytes/pixel. Auto estimates an opaque JPEG; transparency uses PNG instead. ZIF/IIIF add one third for pyramid levels. Every estimate gets a 10% buffer, then rounds up to the next 5 MB. These are heuristics, not guaranteed file-size limits; detail, source compression, aspect ratio, metadata and encoder settings affect actual files. Full/custom sizes need source dimensions.",
   "desktop.quick.maxWidth": "Max width",
   "desktop.quick.maxHeight": "Max height",
   "desktop.quick.original": "Original",
@@ -395,7 +397,7 @@ const en = {
   "desktop.quick.hint.zif": "zoomable",
   "desktop.quick.hint.iiifDir": "tiled",
   "desktop.quick.format.auto":
-    "JPEG up to 65,535 pixels per side; PNG for larger images. JPEG quality also applies to Auto.",
+    "JPEG for opaque images up to 65,535 pixels per side; PNG for transparency or larger images. JPEG quality also applies to Auto.",
   "desktop.quick.format.png":
     "Lossless pixels and transparency; larger files, suitable for editing.",
   "desktop.quick.format.jpeg":

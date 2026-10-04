@@ -294,11 +294,13 @@ export const de = {
   "desktop.panel.jobActions": "Desktop-Auftragsaktionen",
   "desktop.settings.reset": "Einstellungen zurücksetzen",
   "desktop.quick.info": "Weitere Informationen",
+  "desktop.quick.auto": "Automatisch",
+  "desktop.quick.sizeEstimate": "<{size} MB",
   "desktop.quick.folderInfo": "Wählen Sie den Speicherort für heruntergeladene Bilder.",
   "desktop.quick.formatInfo":
-    "Wählen Sie ein Ausgabeformat. Auto speichert JPEG bis 65.535 Pixel pro Seite, sonst PNG.",
+    "Wählen Sie ein Ausgabeformat. Automatisch speichert undurchsichtige Bilder bis 65.535 Pixel pro Seite als JPEG, sonst als PNG.",
   "desktop.quick.sizeInfo":
-    "Vorgaben begrenzen Breite und Höhe unter Beibehaltung des Seitenverhältnisses, ohne Vergrößerung; die Quellstufe kann kleiner sein. Geschätzte MB = Breite × Höhe × Byte/Pixel / 1.000.000. PNG: 1,6 Byte/Pixel; verlustfreies WebP: 1,3; TIFF/ZIF: 3. JPEG wurde mit dem nativen Encoder an zwei Gemälden und einer Karte kalibriert: Qualität ≤25: 0,1; ≤50: 0,15; ≤75: 0,2; ≤90: 0,3; ≤95: 0,4; ≤98: 0,45; ≤100: 0,5 Byte/Pixel. Auto schätzt JPEG, da diese Vorgaben dessen Grenzen einhalten. ZIF/IIIF rechnen ein Drittel für Pyramidenstufen hinzu. Jede Schätzung erhält 10 % Reserve und wird dann auf die nächsten 5 MB aufgerundet. Heuristiken, keine garantierten Dateigrößen; Details, Quellkompression, Seitenverhältnis, Metadaten und Encoder-Einstellungen beeinflussen die tatsächliche Größe. Volle/eigene Größen benötigen Quelldimensionen.",
+    "Vorgaben wählen die größte Quellstufe innerhalb dieser Maße. Passt keine, wird die kleinste verwendet; sie kann die Vorgaben und Encodergrenzen überschreiten. Bilder werden nicht skaliert. Schätzungen nehmen die angegebenen Maße an; tatsächliche Größe und Formatkompatibilität hängen von der Quelle ab. Geschätzte MB = Breite × Höhe × Byte/Pixel / 1.000.000. PNG: 1,6 Byte/Pixel; verlustfreies WebP: 1,3; TIFF/ZIF: 3. JPEG wurde mit dem nativen Encoder an zwei Gemälden und einer Karte kalibriert: Qualität ≤25: 0,1; ≤50: 0,15; ≤75: 0,2; ≤90: 0,3; ≤95: 0,4; ≤98: 0,45; ≤100: 0,5 Byte/Pixel. Automatisch schätzt ein undurchsichtiges JPEG; Transparenz verwendet PNG. ZIF/IIIF rechnen ein Drittel für Pyramidenstufen hinzu. Jede Schätzung erhält 10 % Reserve und wird dann auf die nächsten 5 MB aufgerundet. Heuristiken, keine garantierten Dateigrößen; Details, Quellkompression, Seitenverhältnis, Metadaten und Encoder-Einstellungen beeinflussen die tatsächliche Größe. Volle/eigene Größen benötigen Quelldimensionen.",
   "desktop.quick.maxWidth": "Max. Breite",
   "desktop.quick.maxHeight": "Max. Höhe",
   "desktop.quick.original": "Original",
@@ -317,7 +319,7 @@ export const de = {
   "desktop.quick.hint.zif": "zoombar",
   "desktop.quick.hint.iiifDir": "gekachelt",
   "desktop.quick.format.auto":
-    "JPEG bis 65.535 Pixel pro Seite, darüber PNG. Die JPEG-Qualität gilt auch für Auto.",
+    "JPEG für undurchsichtige Bilder bis 65.535 Pixel pro Seite; PNG bei Transparenz oder größeren Bildern. Die JPEG-Qualität gilt auch für Automatisch.",
   "desktop.quick.format.png":
     "Verlustfreie Pixel und Transparenz; größere Dateien, für die Bearbeitung geeignet.",
   "desktop.quick.format.jpeg":
