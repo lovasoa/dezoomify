@@ -342,8 +342,10 @@ const en = {
   "view.partial.checkSource": "Open the source page and check that its image viewer works.",
   "view.partial.openSource": "Open source page",
   "desktop.rec.missingSome": "Some tiles could not be saved.",
-  "desktop.rec.missingCount": "{count} tile{plural} could not be saved.",
-  "desktop.rec.missingList": "{n} tile{plural} missing: {shown}{rest}.",
+  "desktop.rec.missingCount": "Could not save {count} fragments.",
+  "desktop.rec.missingOne": "Could not save {count} fragment.",
+  "desktop.rec.missingList": "{n} missing fragments: {shown}{rest}.",
+  "desktop.rec.missingOneList": "{n} missing fragment: {shown}{rest}.",
   "desktop.done.partialTitle": "Partial image saved",
   "desktop.done.partialDesc":
     "This file is marked as partial: {summary} Missing areas are left blank. This distinguishes it from a complete save.",

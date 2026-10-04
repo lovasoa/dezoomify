@@ -28,14 +28,14 @@ export const fr = {
     "Impossible d’ouvrir le dossier. Vérifiez qu’un gestionnaire de fichiers est installé.",
   "desktop.done.missingError": "L’image ou le dossier n’existe plus.",
   "view.partial.title": "L’image est incomplète",
-  "view.partial.summary": "{done} tuiles sur {total} ont été récupérées.",
+  "view.partial.summary": "{done} fragments sur {total} ont été récupérés.",
   "view.partial.gaps":
     "L’image enregistrée aura des zones manquantes. Aucun fichier n’a encore été enregistré.",
   "view.partial.refused":
-    "Le site a refusé les tuiles restantes. L’image enregistrée aura des zones manquantes.",
+    "Le site a refusé les fragments restants. L’image enregistrée aura des zones manquantes.",
   "view.partial.save": "Enregistrer l’image incomplète",
   "view.partial.cancel": "Annuler",
-  "view.partial.retry": "Réessayer les tuiles en échec",
+  "view.partial.retry": "Réessayer les fragments en échec",
   "view.partial.accessDenied": "Le site a refusé l’accès à cette image",
   "view.partial.empty": "L’image n’a pas pu être récupérée",
   "view.partial.noneSaved":
@@ -44,12 +44,12 @@ export const fr = {
   "view.partial.openSource": "Ouvrir la page source",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Compris",
-  "view.modal.closeDialog": "Fermer la boite de dialogue",
+  "view.modal.closeDialog": "Fermer la boîte de dialogue",
   "view.modal.closeTitle": "Fermer",
   // Desktop-app guidance modal.
   "view.desktop.title": "Application de bureau Dezoomify",
   "view.desktop.subtitle":
-    "Application native haute performance pour les oeuvres museales gigapixels et les numerisations locales",
+    "Application native haute performance pour les œuvres muséales gigapixels et les numérisations locales",
   "view.desktop.installer": "L’{installer} non signé pour {platform} est disponible sur",
   "view.desktop.releasesLink": "GitHub Releases",
   "view.desktop.releasesNote":
@@ -59,50 +59,50 @@ export const fr = {
   "view.desktop.installerDeb": "installeur .deb",
   "view.desktop.installerGeneric": "installeur",
   "view.desktop.platformGeneric": "votre plateforme",
-  "view.desktop.whyTitle": "Pourquoi utiliser l application de bureau ?",
-  "view.desktop.why1Title": "Prend en charge les oeuvres tres grandes :",
+  "view.desktop.whyTitle": "Pourquoi utiliser l’application de bureau ?",
+  "view.desktop.why1Title": "Prend en charge les œuvres très grandes :",
   "view.desktop.why1Body":
-    "Un onglet de navigateur ne peut contenir qu une certaine quantite d image. L application de bureau assemble l image en memoire (jusqu a sa limite de canevas de 8 Gio, avec la memoire libre correspondante) et ecrit le resultat sur le disque.",
-  "view.desktop.why2Title": "Enregistre l image terminee :",
+    "Un onglet de navigateur ne peut contenir qu’une certaine quantité d’image. L’application de bureau assemble l’image en mémoire (jusqu’à sa limite de canevas de 8 Gio, avec la mémoire libre correspondante) et écrit le résultat sur le disque.",
+  "view.desktop.why2Title": "Enregistre l’image terminée :",
   "view.desktop.why2Body":
-    "Chaque tache est enregistree dans un fichier de sortie sur votre ordinateur.",
+    "Chaque tâche est enregistrée dans un fichier de sortie sur votre ordinateur.",
   "view.desktop.why3Title": "Quand le site web ne peut pas terminer :",
   "view.desktop.why3Body":
-    "Le site web interrompt la tache avec une erreur et renvoie vers l application de bureau pour l image en pleine taille.",
-  "view.desktop.howTitle": "Comment l utiliser",
+    "Le site web interrompt la tâche avec une erreur et renvoie vers l’application de bureau pour l’image en pleine taille.",
+  "view.desktop.howTitle": "Comment l’utiliser",
   "view.desktop.step1":
     "Téléchargez l’{installer} non signé pour {platform} depuis notre page GitHub Releases, puis installez-le. Il n’y a pas de mise à jour automatique.",
   "view.desktop.step2":
-    "Lancez Dezoomify et collez l adresse de votre image zoomable ou de votre manifeste.",
+    "Lancez Dezoomify et collez l’adresse de votre image zoomable ou de votre manifeste.",
   "view.desktop.step3":
-    "Choisissez la resolution souhaitee et le dossier de destination pour enregistrer l image complete assemblee.",
-  "view.desktop.cliTitle": "Besoin d automatiser ? Essayez Dezoomify CLI",
+    "Choisissez la résolution souhaitée et le dossier de destination pour enregistrer l’image complète assemblée.",
+  "view.desktop.cliTitle": "Besoin d’automatiser ? Essayez Dezoomify CLI",
   "view.desktop.cliDesc":
-    "Le CLI offre un enregistrement scriptable sans interface, ideal pour les chaines automatisees et les serveurs sans ecran.",
+    "Le CLI offre un enregistrement scriptable sans interface, idéal pour les chaînes automatisées et les serveurs sans écran.",
   "view.desktop.cliLink": "Obtenir le CLI sur GitHub Releases",
   // Browser-extension guidance modal.
   "view.ext.title": "Extension de navigateur Dezoomify",
   "view.ext.subtitle":
-    "Detection automatique des visionneuses pour les archives numeriques protegees et les pages complexes",
+    "Détection automatique des visionneuses pour les archives numériques protégées et les pages complexes",
   "view.ext.availableOn": "Disponible sur",
   "view.ext.chromeStore": "Chrome Web Store",
   "view.ext.firefoxStore": "Firefox Browser Add-ons",
-  "view.ext.whyTitle": "Pourquoi utiliser l extension de navigateur ?",
+  "view.ext.whyTitle": "Pourquoi utiliser l’extension de navigateur ?",
   "view.ext.why1Title": "Pages avec connexion :",
   "view.ext.why1Body":
-    "Pendant que vous regardez une image zoomable, elle retrouve automatiquement l image derriere la visionneuse, y compris sur les pages ou vous etes connecte, comme les portails de bibliotheques, les abonnements museaux et les archives universitaires.",
-  "view.ext.why2Title": "Simple d utilisation :",
+    "Pendant que vous regardez une image zoomable, elle retrouve automatiquement l’image derrière la visionneuse, y compris sur les pages où vous êtes connecté, comme les portails de bibliothèques, les abonnements muséaux et les archives universitaires.",
+  "view.ext.why2Title": "Simple d’utilisation :",
   "view.ext.why2Body":
-    "Appuyez sur le bouton Dezoomify dans la barre d outils du navigateur et choisissez l image a enregistrer, ou envoyez la tache vers l application de bureau si l image est tres grande.",
-  "view.ext.why3Title": "Respectueux de la vie privee :",
+    "Appuyez sur le bouton Dezoomify dans la barre d’outils du navigateur et choisissez l’image à enregistrer, ou envoyez la tâche vers l’application de bureau si l’image est très grande.",
+  "view.ext.why3Title": "Respectueux de la vie privée :",
   "view.ext.why3Body":
-    "Elle examine uniquement la page que vous lui avez indiquee, et seulement apres que vous avez appuye sur le bouton. Elle n observe pas votre navigation en arriere-plan.",
-  "view.ext.howTitle": "Comment l utiliser en 3 etapes",
-  "view.ext.step1": "Installez l extension depuis le Chrome Web Store ou Firefox Browser Add-ons.",
+    "Elle examine uniquement la page que vous lui avez indiquée, et seulement après que vous avez appuyé sur le bouton. Elle n’observe pas votre navigation en arrière-plan.",
+  "view.ext.howTitle": "Comment l’utiliser en 3 étapes",
+  "view.ext.step1": "Installez l’extension depuis le Chrome Web Store ou Firefox Browser Add-ons.",
   "view.ext.step2":
-    "Rendez-vous sur la page du musee ou de la bibliotheque qui montre votre oeuvre, en vous connectant si besoin.",
+    "Rendez-vous sur la page du musée ou de la bibliothèque qui montre votre œuvre, en vous connectant si besoin.",
   "view.ext.step3":
-    "Cliquez sur l icone Dezoomify dans la barre d outils de votre navigateur pour detecter et extraire automatiquement l image en pleine resolution !",
+    "Cliquez sur l’icône Dezoomify dans la barre d’outils de votre navigateur pour détecter et extraire automatiquement l’image en pleine résolution !",
   // Access request (browser-session file access), shared access-request.tsx.
   "view.access.title": "Autoriser l’accès pour continuer",
   "view.access.usesOrigin": "Cette image utilise des fichiers de {origin}.",
@@ -114,16 +114,16 @@ export const fr = {
   "view.idle.clearTitle": "Effacer la saisie",
   "view.idle.submit": "Dezoomify !",
   // Job step labels.
-  "view.step.discovering": "Recherche de l image zoomable…",
-  "view.step.preflighting": "Verification de la taille de l image…",
-  "view.step.downloading": "Enregistrement des tuiles…",
-  "view.step.saving": "Assemblage de l image finale…",
-  "view.step.contactingDetail": "Contact de l'hote de l'image…",
+  "view.step.discovering": "Recherche de l’image zoomable…",
+  "view.step.preflighting": "Vérification de la taille de l’image…",
+  "view.step.downloading": "Téléchargement des fragments…",
+  "view.step.saving": "Assemblage de l’image finale…",
+  "view.step.contactingDetail": "Contact de l’hôte de l’image…",
   // Live job section.
-  "view.job.techDetails": "Details techniques et journaux",
+  "view.job.techDetails": "Détails techniques et journaux",
   "view.job.manyImages": "{count} images",
   "view.job.paused": "En pause",
-  "view.job.retryingTiles": "Nouvelle tentative sur les tuiles ({count})…",
+  "view.job.retryingTiles": "Nouvelle tentative pour {count} fragments…",
   "view.job.waiting": "En attente de {host}…",
   "view.job.sourceLabel": "Source",
   "view.job.pause": "Pause",
@@ -131,182 +131,185 @@ export const fr = {
   "view.job.stopReturn": "Arrêter et revenir au début",
   "view.job.progressValue": "{done} terminées, {active} en cours, {remaining} restantes",
   // Display-only section.
-  "view.display.title": "Apercu affiche, non enregistre",
-  "view.display.waysTitle": "Moyens d enregistrer cette oeuvre",
-  "view.display.extTitle": "Guide de l extension de navigateur",
+  "view.display.title": "Aperçu affiché, non enregistré",
+  "view.display.waysTitle": "Moyens d’enregistrer cette œuvre",
+  "view.display.extTitle": "Guide de l’extension de navigateur",
   "view.display.extDesc":
-    "Pour les pages demandant une connexion ou des cookies de session. Detecte automatiquement les visionneuses sur les pages actives.",
-  "view.display.deskTitle": "Guide de l application de bureau",
+    "Pour les pages demandant une connexion ou des cookies de session. Détecte automatiquement les visionneuses sur les pages actives.",
+  "view.display.deskTitle": "Guide de l’application de bureau",
   "view.display.deskDescClean":
-    "Pour un enregistrement propre en pleine taille quand le navigateur peut seulement montrer l image.",
+    "Pour un enregistrement propre en pleine taille quand le navigateur peut seulement montrer l’image.",
   "view.display.startOver": "Recommencer",
   "view.resolution.notice":
-    "Le téléchargement ne se fait pas à la résolution maximale à cause des limites du navigateur. Essayez l application de bureau pour supprimer les limites du navigateur.",
+    "Le téléchargement ne se fait pas à la résolution maximale à cause des limites du navigateur. Essayez l’application de bureau pour supprimer les limites du navigateur.",
   "view.resolution.sizes":
     "Enregistrement en {selected} pixels au lieu du maximum {maximum} pixels.",
-  "view.resolution.download": "Télécharger l application de bureau",
+  "view.resolution.download": "Télécharger l’application de bureau",
   "view.resolution.tryMaximum": "Essayer le maximum",
   "view.resolution.stop": "Arrêter",
   // Completion section.
-  "view.done.ready": "Votre image est prete.",
-  "view.done.readyTitle": "Pret a enregistrer",
-  "view.done.saveNow": "Enregistrer l image maintenant",
+  "view.done.ready": "Votre image est prête.",
+  "view.done.readyTitle": "Prêt à enregistrer",
+  "view.done.saveNow": "Enregistrer l’image maintenant",
   "view.done.another": "Dezoomifier une autre image",
   // Failure section.
-  "view.fail.title": "Impossible de dezoomifier l image",
+  "view.fail.title": "Impossible de dézoomifier l’image",
   "view.fail.deskDescLimits":
-    "Pour les images qui depassent les limites memoire du navigateur, dans la limite de canevas de 8 Gio (avec la memoire libre correspondante). Traitees en natif sur votre ordinateur.",
-  "view.fail.helpTitle": "Aide et extraction d URL",
+    "Pour les images qui dépassent les limites mémoire du navigateur, dans la limite de canevas de 8 Gio (avec la mémoire libre correspondante). Traitées en natif sur votre ordinateur.",
+  "view.fail.helpTitle": "Aide et extraction d’URL",
   "view.fail.helpDesc":
-    "Comment trouver l adresse de l image sur les sites de musees et d archives, et quoi essayer quand rien n est trouve.",
+    "Comment trouver l’adresse de l’image sur les sites de musées et d’archives, et quoi essayer quand rien n’est trouvé.",
   "view.fail.reportBug": "Signaler un bogue sur GitHub",
-  "view.fail.retry": "Reessayer",
+  "view.fail.retry": "Réessayer",
   "view.fail.canvasAllocation":
-    "Cette image est trop grande pour être assemblée dans cet onglet. L application de bureau peut l enregistrer en taille réelle.",
+    "Cette image est trop grande pour être assemblée dans cet onglet. L’application de bureau peut l’enregistrer en taille réelle.",
   "view.fail.canvasContext":
-    "Cet onglet n a pas pu créer la surface de l image à cette taille. L application de bureau peut l enregistrer en taille réelle.",
+    "Cet onglet n’a pas pu créer la surface de l’image à cette taille. L’application de bureau peut l’enregistrer en taille réelle.",
   // Cancelled section.
-  "view.cancel.title": "Enregistrement annule",
-  "view.cancel.message": "L enregistrement de l image a ete interrompu.",
+  "view.cancel.title": "Enregistrement annulé",
+  "view.cancel.message": "L’enregistrement de l’image a été interrompu.",
   // Job section and share chrome.
-  "view.job.countsFull": "{current} tuiles sur {total}",
-  "view.job.countsActive": "{current} tuiles sur {total} · {active} en cours",
+  "view.job.countsFull": "{current} fragments sur {total}",
+  "view.job.countsActive": "{current} fragments sur {total} · {active} en cours",
   // Recent-jobs history (todo 5.2): local-only ledger.
-  "view.history.title": "Images recentes",
+  "view.history.title": "Images récentes",
   "view.history.empty":
-    "Aucune image recente pour le moment. Les images enregistrees apparaissent ici.",
-  "view.history.localOnly": "Conserve uniquement sur cet appareil.",
-  "view.history.clear": "Effacer l historique",
+    "Aucune image récente pour le moment. Les images enregistrées apparaissent ici.",
+  "view.history.localOnly": "Conservé uniquement sur cet appareil.",
+  "view.history.clear": "Effacer l’historique",
   "view.history.dims": "{w} par {h} pixels",
   "view.input.description":
-    "Dezoomify télécharge des images zoomables en tuiles depuis des bibliothèques, des musées, des galeries et d’autres sites web. Collez ci-dessous l’adresse d’une image pour la télécharger.",
-  "view.input.placeholder": "Collez l adresse d une visionneuse ou d un manifeste",
+    "Dezoomify télécharge des images zoomables sous forme de fragments depuis des bibliothèques, des musées, des galeries et d’autres sites web. Collez ci-dessous l’adresse d’une image pour la télécharger.",
+  "view.input.placeholder": "Collez l’adresse d’une visionneuse ou d’un manifeste",
   "view.input.aria": "Adresse de la page contenant votre image zoomable",
-  "view.input.start": "Trouver l image",
+  "view.input.start": "Trouver l’image",
   // Rate-limit explainers (see failure.ts plainMessageFor).
   "view.fail.rateProxy":
-    "Le site qui heberge cette image limite le nombre de pages que notre serveur peut lui demander, et cette limite vient d etre atteinte, donc la page n a pas pu etre ouverte. L extension de navigateur et l application de bureau telechargent depuis votre propre connexion au lieu de notre serveur, elles ne sont donc pas concernees par cette limite.",
+    "Le site qui héberge cette image limite le nombre de pages que notre serveur peut lui demander, et cette limite vient d’être atteinte, donc la page n’a pas pu être ouverte. L’extension de navigateur et l’application de bureau téléchargent depuis votre propre connexion au lieu de notre serveur, elles ne sont donc pas concernées par cette limite.",
   "view.fail.rateDirect":
-    "Le site qui heberge cette image recoit actuellement trop de demandes depuis votre propre connexion. Attendre quelques minutes suffit generalement, et l extension de navigateur ou l application de bureau verront le meme signal d encombrement jusque-la.",
+    "Le site qui héberge cette image reçoit actuellement trop de demandes depuis votre propre connexion. Attendre quelques minutes suffit généralement, et l’extension de navigateur ou l’application de bureau verront le même signal d’encombrement jusque-là.",
   // Fetch-failure family (see failure.ts plainMessageFor).
-  "view.fail.httpNotFound": "Cette page est introuvable. Verifiez l adresse et reessayez.",
+  "view.fail.httpNotFound": "Cette page est introuvable. Vérifiez l’adresse et réessayez.",
   "view.fail.httpRefused":
-    "Le site a refuse de partager ce fichier (HTTP {http}). Il bloque peut-etre les serveurs partages ; l extension de navigateur ou l application de bureau peuvent peut-etre encore fonctionner.",
+    "Le site a refusé de partager ce fichier (HTTP {http}). Il bloque peut-être les serveurs partagés ; l’extension de navigateur ou l’application de bureau peuvent peut-être encore fonctionner.",
   "view.fail.httpSiteProblem":
-    "Le site a rencontre un probleme pour ouvrir cette page. Reessayez bientot.",
-  "view.fail.httpNotOpened": "Cette page n a pas pu etre ouverte. Verifiez l adresse et reessayez.",
+    "Le site a rencontré un problème pour ouvrir cette page. Réessayez bientôt.",
+  "view.fail.httpNotOpened": "Cette page n’a pas pu être ouverte. Vérifiez l’adresse et réessayez.",
   "view.fail.policyBlocked":
-    "Cette adresse ne peut pas etre ouverte via le site. {hint} L extension de navigateur ou l application de bureau peuvent peut-etre encore fonctionner.",
-  "view.fail.hintAddress": "Verifiez l adresse et reessayez.",
-  "view.fail.hintPrivate": "Le site ne peut pas ouvrir les adresses privees ou locales.",
+    "Cette adresse ne peut pas être ouverte via le site. {hint} L’extension de navigateur ou l’application de bureau peuvent peut-être encore fonctionner.",
+  "view.fail.hintAddress": "Vérifiez l’adresse et réessayez.",
+  "view.fail.hintPrivate": "Le site ne peut pas ouvrir les adresses privées ou locales.",
   "view.fail.hintContentType":
-    "Le site a repondu avec un type de fichier que le site ne verifie pas ici.",
-  "view.fail.hintRedirect": "Le site a redirige d une maniere que le site ne peut pas suivre.",
+    "Le site a répondu avec un type de fichier que le site ne vérifie pas ici.",
+  "view.fail.hintRedirect": "Le site a redirigé d’une manière que le site ne peut pas suivre.",
   "view.fail.proxyBudget":
-    "Cette page est trop volumineuse a verifier ici. Essayez l application de bureau pour les tres grandes images.",
+    "Cette page est trop volumineuse à vérifier ici. Essayez l’application de bureau pour les très grandes images.",
   "view.fail.proxyFetch":
-    "Le proxy de metadonnees n a pas pu recuperer cette adresse. Reessayez bientot.",
+    "Le proxy de métadonnées n’a pas pu récupérer cette adresse. Réessayez bientôt.",
   // Desktop app user copy (apps/desktop/src/main.tsx). Logs and technical
   // diagnostics stay literal English and never use these keys.
   "desktop.url.invalid":
-    "Veuillez saisir une adresse web valide commencant par http:// ou https://",
+    "Veuillez saisir une adresse web valide commençant par http:// ou https://",
   "desktop.settings.unusable":
-    "Ces parametres de telechargement ne peuvent pas etre utilises. Ajustez les parametres surlignes et reessayez.",
+    "Ces paramètres de téléchargement ne peuvent pas être utilisés. Ajustez les paramètres surlignés et réessayez.",
   "desktop.settings.invalidSubmit":
-    "Ces parametres de telechargement sont invalides. Ajustez-les et reessayez.",
+    "Ces paramètres de téléchargement sont invalides. Ajustez-les et réessayez.",
   "desktop.output.deniedPick":
-    "La destination d enregistrement n a pas ete acceptee. Choisissez un autre fichier pour continuer.",
+    "La destination d’enregistrement n’a pas été acceptée. Choisissez un autre fichier pour continuer.",
   "desktop.output.exists":
-    "Un fichier existe deja a la destination d enregistrement depuis {host}. Choisissez un autre fichier ou confirmez l ecrasement pour continuer.",
+    "Un fichier existe déjà à la destination d’enregistrement depuis {host}. Choisissez un autre fichier ou confirmez l’écrasement pour continuer.",
   "desktop.output.destDenied":
-    "La destination d enregistrement n a pas ete acceptee depuis {host}. Choisissez un autre fichier pour continuer.",
+    "La destination d’enregistrement n’a pas été acceptée depuis {host}. Choisissez un autre fichier pour continuer.",
   "desktop.job.gone":
-    "Cette tache n est plus active depuis {host}. Recommencez avec une adresse recente.",
+    "Cette tâche n’est plus active depuis {host}. Recommencez avec une adresse récente.",
   "desktop.msg.thisPicture": "cette image",
   "desktop.msg.dimsPixels": "{a} par {b} pixels",
-  "desktop.msg.needAbout": " Elle a besoin d environ {need} de memoire",
+  "desktop.msg.needAbout": " Elle a besoin d’environ {need} de mémoire",
   "desktop.output.canvasLimit":
-    "Cette image est trop grande pour etre assemblee sur cet ordinateur ({dims},{need} a 4 octets par pixel, limite {limit}). Enregistrez une version plus petite avec Largeur max (CLI : --max-width). Note : le JPEG accepte au plus {jpegMax} pixels par cote ; gardez le PNG pour les images plus grandes. Depuis {host}.",
+    "Cette image est trop grande pour être assemblée sur cet ordinateur ({dims},{need} à 4 octets par pixel, limite {limit}). Enregistrez une version plus petite avec Largeur max (CLI : --max-width). Note : le JPEG accepte au plus {jpegMax} pixels par côté ; gardez le PNG pour les images plus grandes. Depuis {host}.",
   "desktop.output.jpegLimit":
-    "Cette image ({dims}) est trop grande pour le JPEG, qui accepte au plus {jpegMax} pixels par cote. Enregistrez-la en PNG a la place. Depuis {host}.",
+    "Cette image ({dims}) est trop grande pour le JPEG, qui accepte au plus {jpegMax} pixels par côté. Enregistrez-la en PNG à la place. Depuis {host}.",
   "desktop.output.webpLimit":
-    "Cette image ({dims}) est trop grande pour le WebP, qui accepte au plus {webpMax} pixels par cote. Enregistrez-la en PNG a la place. Depuis {host}.",
+    "Cette image ({dims}) est trop grande pour le WebP, qui accepte au plus {webpMax} pixels par côté. Enregistrez-la en PNG à la place. Depuis {host}.",
   "desktop.tile.partialDiscarded":
-    "L image partielle a ete abandonnee, aucun fichier n a ete conserve. Reessayez depuis {host} avec une connexion stable.",
+    "L’image partielle a été abandonnée, aucun fichier n’a été conservé. Réessayez depuis {host} avec une connexion stable.",
   "desktop.tile.partialChoice":
-    "Certaines parties de cette image depuis {host} n ont pas pu etre enregistrees. Reessayez les parties manquees, ou conservez l image partielle avec des zones vides.",
+    "Certaines parties de cette image depuis {host} n’ont pas pu être enregistrées. Réessayez les parties manquées, ou conservez l’image partielle avec des zones vides.",
   "view.discovery.none":
-    "Aucune image zoomable trouvee a cette adresse. Essayez une page avec un visualiseur, ou essayez l extension.",
+    "Aucune image zoomable trouvée à cette adresse. Essayez une page avec un visualiseur, ou essayez l’extension.",
   "desktop.plan.none":
-    "Cette image n a aucune taille utilisable a enregistrer depuis {host}. Essayez une autre image ou une Largeur max plus petite.",
+    "Cette image n’a aucune taille utilisable à enregistrer depuis {host}. Essayez une autre image ou une Largeur max plus petite.",
   "desktop.transport.stalled":
-    "Enregistrement bloque lors du contact avec {host}. Verifiez votre connexion et reessayez.",
+    "Enregistrement bloqué lors du contact avec {host}. Vérifiez votre connexion et réessayez.",
   "desktop.output.writeFail":
-    "Impossible d ecrire cette image depuis {host}. Choisissez une autre destination et reessayez.",
+    "Impossible d’écrire cette image depuis {host}. Choisissez une autre destination et réessayez.",
   "desktop.job.cancelledMsg":
-    "L enregistrement de l image a ete interrompu. Tout fichier inacheve a ete supprime.",
+    "L’enregistrement de l’image a été interrompu. Tout fichier inachevé a été supprimé.",
   "desktop.start.failed":
-    "Impossible de demarrer l enregistrement de cette image depuis {host}. Reessayez.",
-  "desktop.choice.failed": "Ce choix n a pas ete accepte. Reessayez.",
+    "Impossible de démarrer l’enregistrement de cette image depuis {host}. Réessayez.",
+  "desktop.choice.failed": "Ce choix n’a pas été accepté. Réessayez.",
   "desktop.internal.error":
-    "Un probleme inattendu a interrompu cet enregistrement depuis {host}. Reessayez, et copiez les diagnostics si cela se reproduit.",
-  "desktop.save.fallback": "Impossible d enregistrer cette image depuis {host}. Reessayez.",
-  "desktop.invoke.startFallback": "Impossible de demarrer la tache.",
-  "desktop.invoke.partial": "Le choix d image partielle a ete refuse.",
-  "desktop.rec.missing": "Tuiles manquantes : {shown}{rest}.",
+    "Un problème inattendu a interrompu cet enregistrement depuis {host}. Réessayez, et copiez les diagnostics si cela se reproduit.",
+  "desktop.save.fallback": "Impossible d’enregistrer cette image depuis {host}. Réessayez.",
+  "desktop.invoke.startFallback": "Impossible de démarrer la tâche.",
+  "desktop.invoke.partial": "Le choix d’image partielle a été refusé.",
+  "desktop.rec.missing": "Fragments manquants : {shown}{rest}.",
   "desktop.rec.more": " et {n} de plus",
-  "desktop.rec.keep": "Conserver l image partielle",
+  "desktop.rec.keep": "Conserver l’image partielle",
   "desktop.rec.discard": "Abandonner la partie",
-  "desktop.rec.retryTiles": "Reessayer les tuiles manquees",
-  "desktop.rec.missingSome": "Certaines tuiles n ont pas pu etre enregistrees.",
-  "desktop.rec.missingCount": "{count} tuile{plural} n ont pas pu etre enregistrees.",
-  "desktop.rec.missingList": "{n} tuile{plural} manquante(s) : {shown}{rest}.",
-  "desktop.done.partialTitle": "Image partielle enregistree",
+  "desktop.rec.retryTiles": "Réessayer les fragments manqués",
+  "desktop.rec.missingSome": "Certains fragments n’ont pas pu être enregistrés.",
+  "desktop.rec.missingCount": "Impossible d’enregistrer {count} fragments.",
+  "desktop.rec.missingOne": "Impossible d’enregistrer {count} fragment.",
+  "desktop.rec.missingList": "{n} fragments manquants : {shown}{rest}.",
+  "desktop.rec.missingOneList": "{n} fragment manquant : {shown}{rest}.",
+  "desktop.done.partialTitle": "Image partielle enregistrée",
   "desktop.done.partialDesc":
-    "Ce fichier est marque comme partiel : {summary} Les zones manquantes restent vides. Cela le distingue d un enregistrement complet.",
+    "Ce fichier est marqué comme partiel : {summary} Les zones manquantes restent vides. Cela le distingue d’un enregistrement complet.",
   "desktop.cancel.note":
-    "Enregistrement annule. Le nettoyage est termine et tout fichier inacheve a ete supprime.",
+    "Enregistrement annulé. Le nettoyage est terminé et tout fichier inachevé a été supprimé.",
   "desktop.copy.diagnostics": "Copier les diagnostics",
   "desktop.copy.copied": "Copie !",
-  "desktop.panel.jobActions": "Actions de la tache de bureau",
-  "desktop.settings.reset": "Reinitialiser les parametres",
+  "desktop.panel.jobActions": "Actions de la tâche de bureau",
+  "desktop.settings.reset": "Réinitialiser les paramètres",
   "desktop.quick.folder": "Dossier",
-  "desktop.quick.askEachTime": "Demander a chaque fois",
+  "desktop.quick.askEachTime": "Demander à chaque fois",
   "desktop.quick.chosenFolder": "Dossier choisi",
-  "desktop.quick.chooseFolder": "Choisir le dossier de depart de la boite d enregistrement",
+  "desktop.quick.chooseFolder": "Choisir le dossier de départ de la boîte d’enregistrement",
   "desktop.quick.format": "Format",
   "desktop.quick.size": "Taille",
-  "desktop.quick.network": "Reseau",
+  "desktop.quick.network": "Réseau",
   "desktop.quick.fast": "Rapide",
-  "desktop.quick.balanced": "Equilibre · 5/s",
+  "desktop.quick.balanced": "Équilibré · 5/s",
   "desktop.quick.gentle": "Doux · 2/s",
-  "desktop.quick.fullResolution": "Resolution complete",
-  "desktop.quick.upTo4k": "Jusqu a 4K",
-  "desktop.quick.upTo2k": "Jusqu a 2K",
-  "desktop.quick.custom": "Personnalise…",
-  "desktop.quick.more": "Plus de reglages",
-  "desktop.advanced.title": "Reglages avances",
-  "desktop.advanced.done": "Termine",
-  "desktop.advanced.jpegQuality": "Qualite JPEG",
-  "desktop.advanced.jpegQualityDesc": "Une valeur plus elevee conserve davantage de details.",
+  "desktop.quick.fullResolution": "Résolution complète",
+  "desktop.quick.upTo4k": "Jusqu’à 4K",
+  "desktop.quick.upTo2k": "Jusqu’à 2K",
+  "desktop.quick.custom": "Personnalisé…",
+  "desktop.quick.more": "Plus de réglages",
+  "desktop.advanced.title": "Réglages avancés",
+  "desktop.advanced.done": "Terminé",
+  "desktop.advanced.jpegQuality": "Qualité JPEG",
+  "desktop.advanced.jpegQualityDesc": "Une valeur plus élevée conserve davantage de détails.",
   "desktop.advanced.compressionEffort": "Effort de compression",
   "desktop.advanced.compressionEffortDesc":
-    "La qualite reste sans perte ; une valeur plus elevee prend plus de temps.",
-  "desktop.advanced.dimensions": "Dimensions personnalisees",
+    "La qualité reste sans perte ; une valeur plus élevée prend plus de temps.",
+  "desktop.advanced.dimensions": "Dimensions personnalisées",
   "desktop.advanced.dimensionsDesc":
     "Laissez une valeur vide pour conserver les proportions originales.",
   "desktop.advanced.width": "Largeur",
   "desktop.advanced.height": "Hauteur",
   "desktop.advanced.retries": "Essais",
   "desktop.advanced.retriesDesc":
-    "Reessayer les tuiles echouees avant de conserver un resultat partiel.",
+    "Réessayer les fragments échoués avant de conserver un résultat partiel.",
   "desktop.advanced.resumeCache": "Cache de reprise",
-  "desktop.advanced.resumeCacheDesc": "Reutiliser les tuiles apres un enregistrement interrompu.",
+  "desktop.advanced.resumeCacheDesc":
+    "Réutiliser les fragments après un enregistrement interrompu.",
   "desktop.advanced.choose": "Choisir…",
   "desktop.advanced.change": "Modifier…",
-  "desktop.advanced.headers": "Entetes de requete",
+  "desktop.advanced.headers": "En-têtes de requête",
   "desktop.advanced.headersDesc":
-    "Pour les visionneuses protegees. Envoyees seulement a l origine de l image.",
+    "Pour les visionneuses protégées. Envoyées seulement à l’origine de l’image.",
   // Extension job-tab user copy, rendered through the same `t(key, vars)`
   // shape; log and diagnostics lines stay literal English and never use these
   // keys. `test/ui-i18n.test.mjs` fails when the page renders a key outside

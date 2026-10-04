@@ -14,6 +14,7 @@ import {
   setLocale,
   t,
 } from "../packages/shared-ui/src/i18n.ts";
+import { formatMissingSummary } from "../packages/shared-ui/src/view-helpers.ts";
 
 const LOCALES = { en: EN, fr: FR, de: DE, it: IT };
 
@@ -84,14 +85,32 @@ test("i18n: substitution renders per locale and degrades safely", () => {
     assert.equal(t("view.modal.ok", undefined, "fr"), "Compris");
     assert.equal(t("view.modal.ok", undefined, "de"), "Verstanden");
     assert.equal(t("view.modal.ok", undefined, "it"), "Capito");
-    assert.equal(t("view.step.discovering", undefined, "fr"), "Recherche de l image zoomable…");
+    assert.equal(t("view.step.discovering", undefined, "fr"), "Recherche de l’image zoomable…");
+    assert.equal(t("view.job.countsFull", { current: 2, total: 9 }, "fr"), "2 fragments sur 9");
+    assert.equal(
+      t("view.partial.summary", { done: 14, total: 16 }, "fr"),
+      "14 fragments sur 16 ont été récupérés.",
+    );
     assert.equal(t("view.step.discovering", undefined, "de"), "Zoombares Bild wird gesucht…");
-    assert.equal(t("view.step.discovering", undefined, "it"), "Ricerca dell immagine zoomabile…");
+    assert.equal(t("view.step.discovering", undefined, "it"), "Ricerca dell’immagine zoomabile…");
+    assert.equal(t("view.job.countsFull", { current: 2, total: 9 }, "de"), "2 von 9 Fragmenten");
+    assert.equal(t("view.job.countsFull", { current: 2, total: 9 }, "it"), "2 frammenti su 9");
+    assert.equal(formatMissingSummary([], 1), "Could not save 1 fragment.");
+    assert.equal(setLocale("fr"), true);
+    assert.equal(formatMissingSummary([], 1), "Impossible d’enregistrer 1 fragment.");
+    assert.equal(formatMissingSummary(["fragment-1"]), "1 fragment manquant : fragment-1.");
+    assert.equal(setLocale("de"), true);
+    assert.equal(formatMissingSummary([], 1), "1 Fragment konnte nicht gespeichert werden.");
+    assert.equal(formatMissingSummary(["fragment-1"]), "1 fehlendes Fragment: fragment-1.");
+    assert.equal(setLocale("it"), true);
+    assert.equal(formatMissingSummary([], 1), "Impossibile salvare 1 frammento.");
+    assert.equal(formatMissingSummary(["fragment-1"]), "1 frammento mancante: fragment-1.");
+    assert.equal(setLocale("en"), true);
     assert.equal(t("view.job.manyImages", { count: 3 }, "de"), "3 Bilder");
     assert.equal(t("view.job.manyImages", { count: 3 }, "fr"), "3 images");
     assert.equal(
       t("view.partial.summary", { done: 14, total: 16 }, "it"),
-      "Sono stati recuperati 14 riquadri su 16.",
+      "Sono stati recuperati 14 frammenti su 16.",
     );
     assert.ok(
       t("view.job.waiting", { host: "example.test" }, "fr").includes("example.test"),
