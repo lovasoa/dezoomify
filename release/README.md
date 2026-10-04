@@ -8,7 +8,9 @@ This directory is the single reviewed release inventory. Promotion steps
   configuration. App versions come only from numbered Git tags and history.
 - `targets.toml`: the mandatory artifact target inventory. Every listed target
   builds on its matching host; a missing host, tool, or artifact fails the
-  release. Desktop installers ship unsigned and automatic updates are disabled.
+  release. macOS apps are ad-hoc signed; Linux and Windows installers are
+  unsigned. Automatic updates are disabled. Installation policy:
+  [Desktop app guide](../apps/desktop/desktop-app.md#install).
 - Release notes use an annotated tag message or commit titles since the
   preceding release tag.
 

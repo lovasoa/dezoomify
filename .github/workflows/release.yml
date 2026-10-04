@@ -129,6 +129,19 @@ jobs:
           v="$DEZOOMIFY_VERSION"
           cargo xtask release build --plan "target/release-dist/$v/plan.json" --target "${{ matrix.target }}"
           rm "target/release-dist/$v/plan.json" "target/release-dist/$v/notes.md"
+      - name: Verify packaged macOS app signature
+        if: matrix.target == 'desktop-macos-aarch64'
+        env:
+          DEZOOMIFY_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          DMG="target/release-dist/$DEZOOMIFY_VERSION/desktop-macos-aarch64/dezoomify-desktop-v$DEZOOMIFY_VERSION-macos-aarch64.dmg"
+          MNT="$(mktemp -d)"
+          trap 'hdiutil detach "$MNT"; rmdir "$MNT"' EXIT
+          printf 'Y\n' | hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MNT"
+          cmp target/desktop-dmg/background.png "$MNT/.background/background.png"
+          test -s "$MNT/.DS_Store"
+          codesign --verify --deep --strict --verbose=4 "$MNT/Dezoomify.app"
       - name: Build artifact (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

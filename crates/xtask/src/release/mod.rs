@@ -1,6 +1,6 @@
 //! `cargo xtask release plan|build|verify|publish`: the real release
 //! pipeline. Every stage validates the frozen release plan and fails closed
-//! on missing inputs or tools (docs/releases.md).
+//! on missing inputs or tools (docs/operations.md).
 //!
 //! Layout under `target/release-dist/<version>/` (never committed; `target/`
 //! is chosen so website builds cannot clobber release trees):

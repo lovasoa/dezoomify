@@ -1,6 +1,7 @@
 # dezoomify user documentation
 
-This directory is the **single source of truth for everything users read**:
+The guides here and [the desktop guide](../../apps/desktop/desktop-app.md) are
+the **single source of truth for everything users read**:
 the help section of the website (`/help/`), the guidance shown inside every
 app, and any doc text surfaced elsewhere. Do not duplicate this content in
 READMEs, wikis, or external sites: link to it instead.
@@ -9,7 +10,8 @@ The pages are written for Dezoomify's users: historians, researchers,
 archivists, artists, and collectors. They are deliberately free of
 implementation vocabulary. Name user actions and outcomes, not mechanisms;
 state platform limits as facts about the app; give every problem at least
-one next step. `docs/product.md` defines the full writing rules.
+one next step. Lead with a specific outcome and the best next action; keep
+technical details expandable or linked.
 
 ## Pages
 
@@ -19,7 +21,7 @@ Rendered order (also the navigation order in the website help section):
 2. [website](website.md): the website, its abilities and limits.
 3. [browser-extension](browser-extension.md): finding images while you
    browse, including signed-in pages.
-4. [desktop-app](desktop-app.md): very large images, protected pages.
+4. [desktop-app](../../apps/desktop/desktop-app.md): very large images, protected pages.
 5. [command-line](command-line.md): scripts.
 6. [finding-the-image-address](finding-the-image-address.md): what to paste
    when the image is not found.
@@ -28,12 +30,12 @@ Rendered order (also the navigation order in the website help section):
 
 ## When to add or edit
 
-- A user-visible behavior, limitation, or app boundary changes.
-- A new app or capability ships.
-- A support question appears more than once.
-- An error message gains a recovery path worth explaining.
-
-Skip it for internal refactors with no user-visible change.
+Follow the root [documentation rule](../../AGENTS.md#documentation). Edit a guide
+when its advice becomes wrong or misses a step needed to finish the task.
+Repeated support questions can justify an explanation in an existing page.
+New capabilities and error variants do not each need their own documentation;
+add a page only for a distinct, recurring user task. Internal refactors need no
+user-doc edits.
 
 ## Editing rules
 
@@ -43,12 +45,15 @@ Skip it for internal refactors with no user-visible change.
 - Write in standard Markdown (headings, paragraphs, bullet and numbered
   lists, tables, fenced code, blockquotes, links, bold, and code). The
   help generator renders it with the markdown-it dependency.
-- Links between pages are relative to this directory (`./website.md`);
+- Links between pages are relative to their source file (`./website.md` here,
+  `../../docs/user/website.md` from the desktop guide);
   links to site pages use the same `./` form (`./index.html`). The
   generator rewrites both for the published pages.
 - Heading text is stable: error messages and apps deep-link to
   `help/<page>.html#<heading-slug>`. Changing a heading changes an address.
-- Add a page by adding a `.md` file here and registering it in
+- The desktop guide lives under `apps/desktop/` because its installation steps
+  are packaged in the DMG and must trigger desktop CI.
+- Add a page by adding a `.md` file here and registering its source in
   `scripts/build-help.mjs`; `node scripts/build-help.mjs` regenerates
   `help/` (untracked: the website-deploy workflow builds it at deploy
   time, and the web test lanes regenerate it before testing).

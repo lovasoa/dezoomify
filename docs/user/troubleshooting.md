@@ -23,10 +23,10 @@ remedies:
   without any sign-in, so the site does not recognize it. Use the
   [browser extension](./browser-extension.md), which works with your own
   signed-in browser, or get the image address with the extension and send
-  the job to the [desktop app](./desktop-app.md).
+  the job to the [desktop app](../../apps/desktop/desktop-app.md).
 - **The site only serves the image to its own pages.** Some servers check
   where a request comes from and refuse everyone else. The
-  [desktop app](./desktop-app.md) can introduce itself as coming from the
+  [desktop app](../../apps/desktop/desktop-app.md) can introduce itself as coming from the
   site's own viewer page; on the command line, pass
    `-H/--header "Referer: https://the-site.example/its/viewer/page"`.
 
@@ -38,7 +38,7 @@ chat messages, or bug reports.
 Very large pictures can exceed what a browser tab is allowed to hold. The
 website then saves the largest copy that fits and names the maximum
 resolution; **Try maximum** attempts the maximum and stops with an error
-pointing to the [desktop app](./desktop-app.md). Options:
+pointing to the [desktop app](../../apps/desktop/desktop-app.md). Options:
 
 - Use the desktop app, which assembles the image in memory (up to its
   currently available memory) and writes the
@@ -51,7 +51,7 @@ pointing to the [desktop app](./desktop-app.md). Options:
 
 Some browsers fail to save very large pictures even when they can display
 them. Nothing on the website can bypass that browser limit. Use the
-[desktop app](./desktop-app.md), which assembles the image in memory (up
+[desktop app](../../apps/desktop/desktop-app.md), which assembles the image in memory (up
 to its currently available memory) and writes the
 finished output to disk. The
 browser extension stays inside the same browser memory and save
@@ -73,7 +73,7 @@ Small network interruptions are retried automatically. The tile cache stays
 on by default, so run the job again and already-saved tiles are reused
 instead of fetched again (a custom folder uses `--tile-cache` on the
 command line):
-see [resuming an interrupted save](./desktop-app.md#resuming-an-interrupted-save).
+see [resuming an interrupted save](../../apps/desktop/desktop-app.md#resuming-an-interrupted-save).
 If the site changed its image since the first attempt, remove the resume
 folder and start fresh. On the website, reloading stops the current run;
 enter the address again to restart it.
@@ -105,7 +105,7 @@ browser session (the website reads directly, with a small public-metadata
 helper as fallback); nothing changes when you switch devices or networks
 except the request rate. Wait a few minutes and try the same address
 again, or save from your own connection with the
-[browser extension](./browser-extension.md) or the [desktop app](./desktop-app.md).
+[browser extension](./browser-extension.md) or the [desktop app](../../apps/desktop/desktop-app.md).
 
 ## The site asks you to wait a few minutes
 
@@ -123,7 +123,7 @@ the image there; see [finding the image address](./finding-the-image-address.md)
 That approval step is expected. The [browser extension](./browser-extension.md)
 asks first before passing anything needed for that job; see
 [what the extension does with your data](./browser-extension.md#what-the-extension-does-with-your-data)
-and the [desktop app](./desktop-app.md).
+and the [desktop app](../../apps/desktop/desktop-app.md).
 
 ## Still stuck?
 

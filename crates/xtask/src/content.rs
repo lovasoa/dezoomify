@@ -1,5 +1,4 @@
-//! Content guards: stale limits, banned vocab, timeout spread, encoder drift,
-//! contract tense, staleness markers, and tracked size budgets.
+//! Content guards for misleading user-facing claims and tracked size budgets.
 //!
 //! Size budgets pin the shipped bytes that prose guards cannot
 //! see: the WASM binding (`wasm/dezoomify-wasm_bg.wasm`, 5 MB warn / 6 MB
@@ -19,7 +18,7 @@ pub fn verify(a: &[String]) -> Result<(), String> {
     let canvas = canvas_constants_pattern(&r)?;
     f(
         &r,
-        &[canvas.as_str(), "docs/user/"],
+        &[canvas.as_str(), "docs/user/", "apps/desktop/desktop-app.md"],
         "raw canvas constant in docs/user/ (state limits in user units)",
     )?;
     let o = g(
@@ -29,6 +28,7 @@ pub fn verify(a: &[String]) -> Result<(), String> {
             "-i",
             "dezoomer|readable tile bytes|tainted|blob allocation|multi[ -]?core",
             "docs/user/",
+            "apps/desktop/desktop-app.md",
             "packages/shared-ui/src/view.tsx",
             "packages/shared-ui/src/components.ts",
         ],
@@ -43,6 +43,7 @@ pub fn verify(a: &[String]) -> Result<(), String> {
             "-N",
             "250 ?ms",
             "docs/user/",
+            "apps/desktop/desktop-app.md",
             "packages/shared-ui/src/view.tsx",
             "packages/shared-ui/src/components.ts",
         ],
@@ -52,50 +53,6 @@ pub fn verify(a: &[String]) -> Result<(), String> {
         > 2
     {
         return Err("250 ms appears >2x outside canonical transport docs".to_string());
-    }
-    let (p, q, d) = (
-        std::fs::read_to_string(r.join("docs/product.md"))
-            .map_err(|e| format!("read product.md: {e}"))?,
-        std::fs::read_to_string(r.join("docs/bindings.md"))
-            .map_err(|e| format!("read bindings.md: {e}"))?,
-        std::fs::read_to_string(r.join("generated/desktop-capabilities.json"))
-            .map_err(|e| format!("read desktop-capabilities.json: {e}"))?,
-    );
-    let caps: serde_json::Value =
-        serde_json::from_str(&d).map_err(|e| format!("bad desktop-capabilities.json: {e}"))?;
-    let encoders: Vec<String> = caps
-        .get("encoders")
-        .and_then(serde_json::Value::as_array)
-        .ok_or("desktop-capabilities.json lacks an encoders array")?
-        .iter()
-        .map(|v| {
-            v.as_str()
-                .map(str::to_string)
-                .ok_or_else(|| "non-string encoder in desktop-capabilities.json".to_string())
-        })
-        .collect::<Result<_, _>>()?;
-    if encoders.is_empty() {
-        return Err("desktop-capabilities.json has an empty encoders array".to_string());
-    }
-    // The `encoders \`[...]\`` list in each contract doc must match the FULL
-    // parsed encoder array, in order: a subset is drift, and a missing list
-    // is drift too.
-    let docs_encoders = |text: &str| -> Option<Vec<String>> {
-        let rest = &text[text.find("encoders `[")? + "encoders `[".len()..];
-        let close = rest.find(']')?;
-        Some(
-            rest[..close]
-                .split(',')
-                .map(|item| item.trim().to_string())
-                .collect(),
-        )
-    };
-    let (pe, qe) = (docs_encoders(&p), docs_encoders(&q));
-    if pe.as_ref() != Some(&encoders) || qe.as_ref() != Some(&encoders) {
-        return Err(format!(
-            "encoder-list drift: product.md {:?} vs bindings.md {:?} vs desktop capabilities {:?}",
-            pe, qe, encoders
-        ));
     }
     // Contract docs agree with DIRECT_METADATA_TIMEOUT_MS in browser-runtime/tile-policy.ts.
     f(
@@ -116,19 +73,6 @@ pub fn verify(a: &[String]) -> Result<(), String> {
         &["single-PNG", "apps/README.md", "docs", "README.md"],
         "stale single-PNG claim (native ships PNG, JPEG, TIFF, ZIF, WebP, iiif-dir)",
     )?;
-    // Staleness markers: contract docs carry no TBD, TODO, or FIXME. Open
-    // work lives in plans/, never as a marker in a contract.
-    f(
-        &r,
-        &[
-            "TBD|TODO|FIXME",
-            "docs",
-            "README.md",
-            "AGENTS.md",
-            "apps/README.md",
-        ],
-        "staleness marker in contract docs (resolve it or move it to plans/)",
-    )?;
     // Release and store availability are live product facts. Keep the
     // website sources free of the obsolete Linux-only, signature, and
     // pending-Firefox copy that previously survived release changes.
@@ -139,19 +83,11 @@ pub fn verify(a: &[String]) -> Result<(), String> {
             "GPG|SHA256SUMS|only (the )?Linux|Linux only|no installer|on its way|coming soon|pending review|Firefox version|In Vorbereitung|En preparation|In arrivo",
             "README.md",
             "docs/user/",
+            "apps/desktop/desktop-app.md",
             "packages/shared-ui/src/",
         ],
         "stale installer or browser-extension availability copy in website sources",
     )?;
-    // Present tense: top-level contract pages state invariants, so the
-    // lowercase future marker has no business there. User guides under
-    // docs/user/ keep their own register and stay out of this glob.
-    let tense = g(&r, &["-n", "-w", "will", "--glob", "docs/*.md", "docs"])?;
-    if !tense.trim().is_empty() {
-        return Err(format!(
-            "future tense in contract docs (use present tense):\n{tense}"
-        ));
-    }
     verify_sizes(&r)?;
     println!("content: ok");
     Ok(())

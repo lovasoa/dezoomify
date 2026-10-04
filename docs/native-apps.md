@@ -1,6 +1,6 @@
 # Native apps
 
-CLI and desktop construct NativeHost and await the shared Rust `dezoomify(inputs, options, host)` function. The Host owns HTTP, local files, cache, decoding, assembly, encoders, output publication, and resource cleanup. User behavior: [Desktop app guide](user/desktop-app.md) and [Command-line guide](user/command-line.md).
+CLI and desktop construct NativeHost and await the shared Rust `dezoomify(inputs, options, host)` function. The Host owns HTTP, local files, cache, decoding, assembly, encoders, output publication, and resource cleanup. User behavior: [Desktop app guide](../apps/desktop/desktop-app.md) and [Command-line guide](user/command-line.md).
 
 ## Native runtime
 
@@ -55,15 +55,26 @@ Settings render while idle, and history prefills input without starting work. Op
 
 ### Desktop updater
 
-Inert: no update host or key exists and production rejects every candidate, so new versions install manually from GitHub Releases. Enabling needs a new implemented update design plus deployed endpoints and a key ceremony. Policy and activation state: [Releases](releases.md#desktop-updater).
+No update host or key exists, so new versions install manually from GitHub
+Releases. Do not enable updater flags without implementing the update service
+and key provisioning.
 
 ### Desktop bundles
 
 `cargo xtask build desktop` compiles lean shell, frontend, Tauri window shell, icons, then bundles. `--unsigned-test` stops before the bundler. Targets follow the host: Linux `deb` (prebuilt Tauri CLI), Windows `msi`/`nsis`, macOS `dmg`. Missing tools fail naming prerequisites.
 
-Linux needs `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential` plus `dpkg-deb` (`dpkg-dev`); icons come from `scripts/gen-desktop-icons.py` before the bundler. macOS needs Xcode Command Line Tools plus `icons/icon.icns`. Windows needs WiX v3 (`msi`), NSIS (`nsis`), plus `icons/icon.ico`. Installers ship unsigned (Linux x86_64 `.deb`, Windows x86_64 `.msi`, Apple silicon `.dmg`); user note: [Desktop app guide](user/desktop-app.md#install).
+Linux needs `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential` plus `dpkg-deb` (`dpkg-dev`); icons come from `favicon.svg` via the pinned Tauri CLI (`scripts/gen-desktop-icons.mjs`) before the bundler, following [Tauri's icon guidance](https://v2.tauri.app/develop/icons/). macOS needs Xcode Command Line Tools plus `icons/icon.icns`. Windows needs WiX v3 (`msi`), NSIS (`nsis`), plus `icons/icon.ico`. Linux x86_64 `.deb` and Windows x86_64 `.msi` installers are unsigned; the app inside the Apple silicon `.dmg` is ad-hoc signed without Developer ID or notarization. User note: [Desktop app guide](../apps/desktop/desktop-app.md#install).
 
-Per-OS install smoke runs in the desktop CI `bundle-smoke` matrix (see [Testing](testing.md#desktop-window)): Linux `dpkg -i` plus timed stay-alive launch under Xvfb; macOS mounts the `dmg` and execs the binary from the image; Windows silent `msi` install (WiX and NSIS required). No `--version` flag exists, so every smoke proves install plus launch by holding the window 15–20 s. Gatekeeper/SIP untouched; the unsigned Windows binary carries no Mark-of-the-Web, so SmartScreen stays out and no OS policy is bypassed.
+Per-OS install smoke runs in the desktop CI `bundle-smoke` matrix: Linux installs
+and launches under Xvfb, macOS verifies the signature with
+`codesign --verify --deep --strict` and launches from the mounted image, and
+Windows uses a silent MSI install. There is no `--version` flag; smoke checks
+require the window to stay alive for 15–20 seconds. macOS smoke does not cover
+Finder approval of a quarantined browser download; validate that on a clean Mac.
+
+The DMG background uses installation steps from the desktop guide. Bundling
+writes it under `target/desktop-dmg/`; packaged smoke checks verify the PNG and
+Finder layout and capture the installation window for review.
 
 ### Real-window E2E hook
 
