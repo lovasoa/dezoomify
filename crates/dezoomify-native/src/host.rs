@@ -661,13 +661,14 @@ impl Host for NativeHost<'_> {
                     auto_output_path(dir, plan.title.as_deref(), *format)
                 }
             };
+            let probes = std::mem::take(&mut *self.encoded_probes.borrow_mut());
+            let pending: u64 = probes.iter().map(|tile| tile.bytes.len() as u64).sum();
             let mut writer = crate::tile_output::IiifWriter::new(
                 &destination,
                 &plan,
-                self.options.output_retain_cap,
+                self.options.output_retain_cap.saturating_sub(pending),
                 self.options.compression,
             )?;
-            let probes = std::mem::take(&mut *self.encoded_probes.borrow_mut());
             let controls = self.controls.clone();
             let permit = self.decode_tails.reserve(0);
             let writer = self
@@ -675,6 +676,7 @@ impl Host for NativeHost<'_> {
                     tokio::task::spawn_blocking(move || {
                         let _permit = permit;
                         for tile in probes {
+                            writer.release_probe_bytes(tile.bytes.len() as u64);
                             writer.place(tile, &controls.0.cancelled)?;
                         }
                         Ok(writer)
@@ -683,7 +685,8 @@ impl Host for NativeHost<'_> {
                     .map_err(|_| Error::Internal("tile preflight task failed".into()))?
                 })
                 .await?;
-            self.instrumentation.borrow_mut().peak_encoded_bytes = writer.peak_retained();
+            let mut stats = self.instrumentation.borrow_mut();
+            stats.peak_encoded_bytes = stats.peak_encoded_bytes.max(writer.peak_retained());
             *self.iiif.borrow_mut() = Some(Arc::new(std::sync::Mutex::new(writer)));
         }
         *self.output_plan.borrow_mut() = Some(plan);

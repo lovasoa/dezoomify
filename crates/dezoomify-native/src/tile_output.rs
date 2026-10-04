@@ -55,7 +55,13 @@ mod tests {
     }
     #[test]
     fn region_borrows_already_accounted_encoded_memory() {
-        let pixels = image::RgbaImage::new(8, 8);
+        let pixels = image::RgbaImage::from_fn(8, 8, |x, _| {
+            if x < 4 {
+                image::Rgba([220, 0, 0, 255])
+            } else {
+                image::Rgba([0, 0, 0, 0])
+            }
+        });
         let bytes = crate::imaging::encode_png(
             &pixels,
             image::codecs::png::CompressionType::Fast,
@@ -95,6 +101,39 @@ mod tests {
             pixels
         );
         assert_eq!(decoded, 1);
+        let size = Size {
+            width: 4,
+            height: 4,
+        };
+        let rect = Rect {
+            x: 0,
+            y: 0,
+            w: 4,
+            h: 4,
+        };
+        let reduced = downsample(
+            &level,
+            &size,
+            rect,
+            4096,
+            &AtomicBool::new(false),
+            &mut decoded,
+        )
+        .unwrap();
+        let edge = reduced.get_pixel(1, 0);
+        assert_eq!(edge[0], 220);
+        assert!(edge[3] > 0 && edge[3] < 255);
+        assert!(matches!(
+            downsample(
+                &level,
+                &size,
+                rect,
+                64,
+                &AtomicBool::new(false),
+                &mut decoded
+            ),
+            Err(Error::LimitExceeded { .. })
+        ));
     }
 }
 
@@ -392,6 +431,14 @@ pub(crate) fn downsample(
 ) -> Result<image::RgbaImage, Error> {
     let rx = f64::from(source.size.width) / f64::from(target.width);
     let ry = f64::from(source.size.height) / f64::from(target.height);
+    let output_bytes = u64::from(rect.w) * u64::from(rect.h) * 4;
+    let axis_bytes = |length: u32, ratio: f64| {
+        u64::from(length)
+            * (std::mem::size_of::<Vec<(u32, f64)>>() as u64
+                + ((2.0 * ratio).ceil() as u64 + 2) * std::mem::size_of::<(u32, f64)>() as u64)
+    };
+    let weight_bytes = axis_bytes(rect.w, rx) + axis_bytes(rect.h, ry);
+    memory_check(output_bytes + weight_bytes, budget)?;
     let weights = |pixel: u32, ratio: f64, side: u32| -> Vec<(u32, f64)> {
         let center = (f64::from(pixel) + 0.5) * ratio;
         let left = (center - ratio).floor().max(0.0) as u32;
@@ -420,8 +467,6 @@ pub(crate) fn downsample(
     let top = ys[0][0].0;
     let right = xs.last().and_then(|v| v.last()).map_or(left, |v| v.0) + 1;
     let bottom = ys.last().and_then(|v| v.last()).map_or(top, |v| v.0) + 1;
-    let output_bytes = u64::from(rect.w) * u64::from(rect.h) * 4;
-    memory_check(output_bytes, budget)?;
     let input = source.region(
         Rect {
             x: left,
@@ -429,7 +474,7 @@ pub(crate) fn downsample(
             w: right - left,
             h: bottom - top,
         },
-        budget - output_bytes,
+        budget - output_bytes - weight_bytes,
         cancelled,
         decoded,
     )?;
@@ -438,9 +483,15 @@ pub(crate) fn downsample(
         for (sy, wy) in &ys[y as usize] {
             for (sx, wx) in &xs[x as usize] {
                 let p = input.get_pixel(*sx - left, *sy - top);
-                for c in 0..4 {
-                    channels[c] += f64::from(p[c]) * wx * wy;
+                for c in 0..3 {
+                    channels[c] += f64::from(p[c]) * f64::from(p[3]) / 255.0 * wx * wy;
                 }
+                channels[3] += f64::from(p[3]) * wx * wy;
+            }
+        }
+        if channels[3] > 0.0 {
+            for c in 0..3 {
+                channels[c] *= 255.0 / channels[3];
             }
         }
         image::Rgba(channels.map(|v| v.round().clamp(0.0, 255.0) as u8))
@@ -485,6 +536,10 @@ pub(crate) struct IiifWriter {
 }
 
 impl IiifWriter {
+    pub(crate) fn release_probe_bytes(&mut self, bytes: u64) {
+        self.budget = self.budget.saturating_add(bytes);
+    }
+
     pub(crate) fn peak_retained(&self) -> u64 {
         self.peak_retained
     }
@@ -546,6 +601,7 @@ impl IiifWriter {
         if rect.w == 0 || rect.h == 0 {
             return Ok(());
         }
+        memory_check(self.retained + tile.bytes.len() as u64, self.budget)?;
         let index = if self.base.regular {
             (rect.y / self.base.cell.height) * self.base.size.width.div_ceil(self.base.cell.width)
                 + rect.x / self.base.cell.width
