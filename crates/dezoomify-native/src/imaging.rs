@@ -118,12 +118,20 @@ pub fn encode_png(
     exif_metadata: Option<&[u8]>,
 ) -> Result<Vec<u8>, Error> {
     let mut bytes = Vec::new();
+    encode_png_to(&mut bytes, image, compression, icc_profile, exif_metadata)?;
+    Ok(bytes)
+}
+
+pub(crate) fn encode_png_to<W: std::io::Write>(
+    writer: W,
+    image: &image::RgbaImage,
+    compression: image::codecs::png::CompressionType,
+    icc_profile: Option<&[u8]>,
+    exif_metadata: Option<&[u8]>,
+) -> Result<(), Error> {
     use image::codecs::png::FilterType;
-    let mut encoder = image::codecs::png::PngEncoder::new_with_quality(
-        &mut bytes,
-        compression,
-        FilterType::Adaptive,
-    );
+    let mut encoder =
+        image::codecs::png::PngEncoder::new_with_quality(writer, compression, FilterType::Adaptive);
     if let Some(profile) = icc_profile {
         let _ = image::ImageEncoder::set_icc_profile(&mut encoder, profile.to_vec());
     }
@@ -142,7 +150,7 @@ pub fn encode_png(
             format!("png encode failed: {}", dezoomify::model::chain_text(&e)).into(),
         )
     })?;
-    Ok(bytes)
+    Ok(())
 }
 
 /// Borrow RGB channels without copying the RGBA allocation.
@@ -168,6 +176,16 @@ pub fn encode_jpeg(
     icc_profile: Option<&[u8]>,
 ) -> Result<Vec<u8>, Error> {
     let mut bytes = Vec::new();
+    encode_jpeg_to(&mut bytes, image, quality, icc_profile)?;
+    Ok(bytes)
+}
+
+pub(crate) fn encode_jpeg_to<W: std::io::Write>(
+    writer: W,
+    image: &image::RgbaImage,
+    quality: u8,
+    icc_profile: Option<&[u8]>,
+) -> Result<(), Error> {
     check_dimensions(
         dezoomify::model::OutputFormat::Jpeg,
         &Size {
@@ -175,7 +193,7 @@ pub fn encode_jpeg(
             height: image.height(),
         },
     )?;
-    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, quality);
+    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(writer, quality);
     if let Some(profile) = icc_profile {
         let _ = image::ImageEncoder::set_icc_profile(&mut encoder, profile.to_vec());
     }
@@ -184,7 +202,7 @@ pub fn encode_jpeg(
             format!("jpeg encode failed: {}", dezoomify::model::chain_text(&e)).into(),
         )
     })?;
-    Ok(bytes)
+    Ok(())
 }
 
 /// Lossless WebP requires contiguous pixels; preserve the selected ICC profile.
