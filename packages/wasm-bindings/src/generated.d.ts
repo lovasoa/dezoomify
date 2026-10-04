@@ -54,6 +54,20 @@ export interface ImageRequest {
 }
 
 /**
+ * Compact coverage for a regular, row-major tile plan. Requests remain lazy.
+ */
+export interface OutputGrid {
+    /**
+     * Cell dimensions before overlap and edge clipping.
+     */
+    tile_size: Size;
+    /**
+     * Additional pixels on each side, clipped to the canvas.
+     */
+    overlap: Size;
+}
+
+/**
  * Final plan position and index of a tile already acquired during probing.
  */
 export interface ReusedTile {
@@ -136,6 +150,18 @@ export interface MissingTile {
  * resource kind of any underlying failure.
  */
 export type Error = ({ kind: "http-error" } & { status: number; retry_after_ms?: number; preview?: string; transport: ErrorTransport } & Failure) | ({ kind: "rate-limited" } & { retry_after_ms?: number; transport: ErrorTransport } & Failure) | ({ kind: "timeout" } & { transport: ErrorTransport } & Failure) | ({ kind: "network-failure" } & { transport: ErrorTransport } & Failure) | ({ kind: "policy-denied" } & { blocked_reason: BlockedReason; transport: ErrorTransport } & Failure) | ({ kind: "bad-url" } & Failure) | ({ kind: "bad-redirect" } & Failure) | { kind: "redirect-limit"; max: number } | { kind: "size-limit"; max_bytes: number } | { kind: "cancelled" } | { kind: "proxy-budget-exceeded" } | ({ kind: "proxy-error" } & { transport: ErrorTransport } & Failure) | ({ kind: "no-image-found" } & Failure) | ({ kind: "malformed-metadata" } & Failure) | { kind: "unknown-format"; format: string } | { kind: "empty-resource" } | ({ kind: "resource-limit" } & Failure) | { kind: "deferred-limit"; max: number } | ({ kind: "discovery-failed" } & { cause?: Error } & Failure) | ({ kind: "invalid-input" } & Failure) | ({ kind: "invalid-options" } & Failure) | ({ kind: "invalid-state" } & Failure) | { kind: "duplicate" } | { kind: "stale" } | { kind: "plan-empty" } | ({ kind: "plan-invalid" } & Failure) | { kind: "no-usable-tiles"; transient: boolean; retry_after_ms?: number } | { kind: "partial-discarded"; transient: boolean; retry_after_ms?: number } | ({ kind: "decode-failed" } & Failure) | ({ kind: "processing-failed" } & Failure) | { kind: "limit-exceeded"; limit: LimitContext } | ({ kind: "encode-failed" } & Failure) | ({ kind: "write-failed" } & Failure) | { kind: "output-exists" } | ({ kind: "destination-denied" } & Failure) | ({ kind: "unsupported-extension" } & Failure) | ({ kind: "output-unavailable" } & Failure) | { kind: "output-no-parent" } | ({ kind: "launch-failed" } & Failure) | { kind: "output-denied" } | { kind: "output-not-found" } | { kind: "invoke-failed" } | ({ kind: "start-failed" } & Failure) | ({ kind: "choice-failed" } & Failure) | { kind: "invalid-url" } | ({ kind: "invalid-settings" } & Failure) | ({ kind: "registration-failed" } & Failure) | ({ kind: "internal" } & Failure) | { kind: "shell-lock" } | ({ kind: "binding-invalid-value" } & Failure) | { kind: "interaction-expired" } | { kind: "auth-forbidden-header" } | { kind: "resource"; request: string; resource_kind: ResourceKind; source: Error };
+
+/**
+ * Output preflight after geometry probes and before ordinary acquisitions.
+ * Positioned or unresolved coverage has no grid and must finalize safely.
+ */
+export interface OutputPlan {
+    canvas: Size | undefined;
+    grid: OutputGrid | undefined;
+    tile_count: number;
+    format: OutputFormat;
+    title: string | undefined;
+}
 
 /**
  * Output summary: geometry, completeness, and the honest disposition.
@@ -259,6 +285,7 @@ export interface Header {
 export interface Host {
     fetch(request: ResourceRequest,interaction: Interaction,): Promise<ResourceRead>;
     probe(tile: Tile,): Promise<ProbeOutcome>;
+    beginOutput(plan: OutputPlan,): Promise<void>;
     acquireTile(tile: Tile,): Promise<void>;
     finish(request: FinishRequest,): Promise<Output>;
     chooseImage(catalog: Catalog,): Promise<number>;

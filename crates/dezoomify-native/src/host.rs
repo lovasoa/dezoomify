@@ -197,6 +197,7 @@ pub struct NativeHost<'a> {
     partial: RefCell<Option<PartialCallback<'a>>>,
     published: RefCell<Option<Publication>>,
     source_format: RefCell<Option<String>>,
+    output_plan: RefCell<Option<OutputPlan>>,
 }
 
 #[allow(clippy::result_large_err)] // Platform operations return the canonical Host error value.
@@ -264,6 +265,7 @@ impl<'a> NativeHost<'a> {
             partial: RefCell::new(None),
             published: RefCell::new(None),
             source_format: RefCell::new(None),
+            output_plan: RefCell::new(None),
         })
     }
 
@@ -462,6 +464,49 @@ impl<'a> NativeHost<'a> {
 }
 
 impl Host for NativeHost<'_> {
+    async fn begin_output(&self, plan: OutputPlan) -> Result<(), Error> {
+        self.controls.checkpoint(false).await?;
+        if plan.format != self.format || self.output_plan.borrow().is_some() {
+            return Err(Error::InvalidState(
+                "output preflight does not match invocation".into(),
+            ));
+        }
+        if let Some(dimensions) = &plan.canvas {
+            let reason = match self.format {
+                OutputFormat::Jpeg
+                    if dimensions.width > crate::imaging::JPEG_MAX_SIDE
+                        || dimensions.height > crate::imaging::JPEG_MAX_SIDE =>
+                {
+                    Some(LimitReason::JpegSide)
+                }
+                OutputFormat::Webp
+                    if dimensions.width > crate::imaging::WEBP_MAX_SIDE
+                        || dimensions.height > crate::imaging::WEBP_MAX_SIDE =>
+                {
+                    Some(LimitReason::WebpSide)
+                }
+                _ => None,
+            };
+            if let Some(reason) = reason {
+                return Err(Error::LimitExceeded {
+                    limit: LimitContext {
+                        reason,
+                        dimensions: Some(dimensions.clone()),
+                        bytes_required: None,
+                        bytes_available: None,
+                    },
+                });
+            }
+        }
+        if let OutputTarget::File(path) = &self.options.output {
+            crate::output::validate_destination(path, &self.format, self.options.overwrite)?;
+        }
+        self.sink
+            .borrow_mut()
+            .note_declared(plan.canvas.as_ref().map(size));
+        *self.output_plan.borrow_mut() = Some(plan);
+        Ok(())
+    }
     async fn fetch(
         &self,
         request: ResourceRequest,

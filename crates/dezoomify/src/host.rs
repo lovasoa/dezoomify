@@ -9,6 +9,7 @@ macro_rules! host_members {
             async {
                 fetch => fetch(request: ResourceRequest, interaction: Interaction) -> ResourceRead;
                 probe => probe(tile: Tile) -> ProbeOutcome;
+                begin_output => beginOutput(plan: OutputPlan) -> ();
                 acquire_tile => acquireTile(tile: Tile) -> ();
                 finish => finish(request: FinishRequest) -> Output;
                 choose_image => chooseImage(catalog: Catalog) -> u32;

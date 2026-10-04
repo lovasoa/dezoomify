@@ -31,6 +31,8 @@ pub struct MemoryHost {
     pub progress: RefCell<Vec<Progress>>,
     pub warnings: RefCell<Vec<String>>,
     pub outputs: RefCell<Vec<FinishRequest>>,
+    pub output_plans: RefCell<Vec<OutputPlan>>,
+    pub begin_error: RefCell<Option<Error>>,
     pub finish_error: RefCell<Option<Error>>,
     pub settled: Cell<u32>,
     pub active: Cell<u32>,
@@ -52,6 +54,17 @@ impl Drop for Active<'_> {
     }
 }
 impl Host for MemoryHost {
+    async fn begin_output(&self, plan: OutputPlan) -> Result<(), Error> {
+        assert!(
+            self.attempts.borrow().is_empty(),
+            "preflight precedes ordinary acquisition"
+        );
+        self.output_plans.borrow_mut().push(plan);
+        match self.begin_error.borrow_mut().take() {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
     async fn fetch(&self, request: ResourceRequest, _: Interaction) -> Result<ResourceRead, Error> {
         let result = self.resources.get(&request.uri).cloned();
         let failure = self.fetch_failures.get(&request.uri).cloned();

@@ -81,6 +81,21 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
         ));
     }
     let canvas = source.image_size().map(size);
+    host.begin_output(OutputPlan {
+        canvas: canvas.clone(),
+        grid: match &source {
+            TileSource::Grid(grid) => Some(OutputGrid {
+                tile_size: size(grid.tile_size()),
+                overlap: size(grid.overlap()),
+            }),
+            _ => None,
+        },
+        tile_count: u32::try_from(total)
+            .map_err(|_| Error::PlanInvalid("tile count overflow".into()))?,
+        format: options.output,
+        title: image.title.clone(),
+    })
+    .await?;
     let tiles: Box<dyn Iterator<Item = Result<TileSpec, core::TileSourceError>>> = match source {
         TileSource::Grid(grid) => Box::new(grid.tiles_row_major()),
         TileSource::Positioned(source) => Box::new(source.tiles()),

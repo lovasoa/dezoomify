@@ -12,6 +12,8 @@ Calls return their values through ordinary futures and promises. A rejected capa
 
 Metadata bytes use `Uint8Array` through serde_bytes. Pure tile processing uses `applyProcessing(recipe, bytes)` and returns `Uint8Array`. Independent invocations receive independent Host objects.
 
+After geometry probes, `beginOutput(OutputPlan)` supplies dimensions, compact grid coverage, tile count, format, and title before ordinary acquisition. It preserves lazy request generation. Native preflights destinations and known codec limits; BrowserHost checks cancellation and keeps its existing assembly behavior. Positioned coverage has no grid and may require deferred output preparation.
+
 ## Domain values
 
 Inputs preserve URLs, optional source contents, and evidence kind. Resource responses preserve bytes and redirected addresses. Tile values carry their index, exact request, placement (including the tile's probe and output participation), declared canvas, and processing recipe. The finish request identifies acquired probes by their final tile index and position. Missing tiles preserve the complete errors from their acquisition attempts.
