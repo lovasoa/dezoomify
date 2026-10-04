@@ -49,24 +49,7 @@ impl PreparedOutput {
         match &mut self.staging {
             StagedOutput::File(file) => file.publish(destination, overwrite, cancelled),
             StagedOutput::Directory(directory) => {
-                // An automatic-name collision can change the directory name.
-                let manifest = directory.path.join("info.json");
-                let mut info: serde_json::Value = serde_json::from_slice(
-                    &std::fs::read(&manifest)
-                        .map_err(|e| write_failed("manifest read failed", &e))?,
-                )
-                .map_err(|e| Error::EncodeFailed(e.to_string().into()))?;
-                info["@id"] = destination
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("image")
-                    .into();
-                directory.write(
-                    "info.json",
-                    &serde_json::to_vec_pretty(&info)
-                        .map_err(|e| Error::EncodeFailed(e.to_string().into()))?,
-                    cancelled,
-                )?;
+                // Relative service IDs remain valid across automatic renaming.
                 let bytes = directory_bytes(&directory.path, cancelled)?;
                 directory.publish(destination, cancelled)?;
                 Ok(bytes)
@@ -147,6 +130,7 @@ impl StagedFile {
         overwrite: bool,
         cancelled: &AtomicBool,
     ) -> Result<u64, Error> {
+        self.check_error()?;
         if let Some(file) = self.file.as_ref() {
             file.sync_all()
                 .map_err(|e| write_failed("output sync failed", &e))?;
@@ -167,7 +151,9 @@ impl StagedFile {
             tempfile::TempPath::try_from_path(self.path.clone())
                 .map_err(|e| write_failed("staging path failed", &e))?
                 .persist_noclobber(destination)
-                .map_err(|e| {
+                .map_err(|mut e| {
+                    // StagedFile owns cleanup and may retry an automatic name.
+                    e.path.disable_cleanup(true);
                     if e.error.kind() == std::io::ErrorKind::AlreadyExists {
                         Error::OutputExists
                     } else {
@@ -559,7 +545,7 @@ mod tests {
             }
         }
         for step in ["write", "seek", "flush"] {
-            let directory = crate::sink::temp_sibling(&std::env::temp_dir().join("io-test"));
+            let directory = temp_sibling(&std::env::temp_dir().join("io-test"));
             std::fs::create_dir(&directory).unwrap();
             let destination = directory.join("output.png");
             let mut staged = StagedFile::new(&destination).unwrap();
@@ -571,14 +557,14 @@ mod tests {
             };
             match step {
                 "write" => assert!(matches!(
-                    crate::imaging::encode_png_to(
-                        &mut writer,
-                        &image::RgbaImage::new(1, 1),
-                        image::codecs::png::CompressionType::Fast,
-                        None,
-                        None,
+                    image::ImageEncoder::write_image(
+                        image::codecs::png::PngEncoder::new(&mut writer),
+                        &[0; 4],
+                        1,
+                        1,
+                        image::ExtendedColorType::Rgba8,
                     ),
-                    Err(Error::EncodeFailed(_))
+                    Err(image::ImageError::IoError(_))
                 )),
                 "seek" => assert!(writer.seek(std::io::SeekFrom::Start(0)).is_err()),
                 _ => assert!(writer.flush().is_err()),
@@ -590,6 +576,7 @@ mod tests {
                 staged.publish(&destination, false, &cancelled),
                 Err(Error::WriteFailed(_))
             ));
+            drop(staged);
             assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
             std::fs::remove_dir(directory).unwrap();
         }

@@ -1017,7 +1017,7 @@ impl IiifWriter {
 
     pub(crate) fn finish(
         mut self,
-        destination: &Path,
+        _destination: &Path,
         reused: &[ReusedTile],
         cancelled: &AtomicBool,
     ) -> Result<crate::output::PreparedOutput, Error> {
@@ -1258,7 +1258,6 @@ impl IiifWriter {
             "preferredFormats": [ext], "profile": profile
         })).map_err(|e| Error::EncodeFailed(e.to_string().into()))?;
         self.staging.write("info.json", &info, cancelled)?;
-        self.encoded_bytes += info.len() as u64;
         Ok(crate::output::PreparedOutput {
             staging: crate::output::StagedOutput::Directory(self.staging),
             size: full_size,

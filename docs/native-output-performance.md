@@ -41,7 +41,10 @@ runs include process startup and have no missing pyramid levels. Native tests
 confirm zero pixel decodes and unchanged JPEG/RGB PNG payloads for this
 route; the pipe is bypassed.
 
-The ready queue holds two 64-row strips. An 8192×8192 raster requires 128
+The measured configuration limited the ready queue to two 64-row strips.
+The current pipeline instead bounds all strips by a shared budget based on
+80% of available memory; the tables above measure the identified revision,
+before that budgeting change. An 8192×8192 raster requires 128
 ownership handoffs. Previously measured direct comparisons with shared stripes
 (`44d6f0b5`) reduced PNG/JPEG/TIFF from 1.586/4.612/1.009 s to
 0.669/1.223/0.263 s; JPEG CPU dropped from 5.34 to 2.08 s. Those comparisons

@@ -239,6 +239,7 @@ fn encode(
     if let Some(error) = pipe.error() {
         return Err(error);
     }
+    staging.check_error()?;
     result?;
     let (icc, exif) = pipe.metadata()?;
     if matches!(format, OutputFormat::Png | OutputFormat::Jpeg)
