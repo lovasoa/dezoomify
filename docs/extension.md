@@ -47,6 +47,8 @@ The confirmed download ID drives the shared **Open image** and **Show in folder*
 
 The protected-session fixture requires both its HttpOnly session cookie and the exact source-page referrer for metadata and every tile. Both packaged browsers must save the readable image through this route; extension-tab requests with only the cookie fail the fixture.
 
+The browser format matrix builds one testing package per browser and selects each fixture through the test driver's URL. Every fixture still runs in a fresh browser profile and verifies the saved pixels; only package bytes are reused. Cases with different permissions or background behavior retain separate packages.
+
 WXT generates both MV3 manifests from `apps/extension/wxt.config.ts` (Chromium service worker and Firefox classic background script). The store package ships the launcher, job page, shared UI, browser runtime, icons, and WASM, with no content scripts or fallback pages. Build, dev, test, and release regenerate the WASM glue before WXT builds, and packaging needs root workspace dependencies (`cargo xtask setup` or `pnpm install --frozen-lockfile`). Browser-suite coverage: [Testing](testing.md).
 
 The same algorithm and fixture contracts as web and desktop govern job behavior. See the [user guide](user/browser-extension.md).

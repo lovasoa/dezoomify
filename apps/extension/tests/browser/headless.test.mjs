@@ -68,9 +68,9 @@ function stagePackage(
   { grantHostPermissions = true, sourceHostOnly = false, scenario, restartBackground = false } = {},
 ) {
   const zip = path.join(dir, `dezoomify-${browser}.zip`);
-  // Chromium shares one package and selects the fixture through the driver URL.
-  // Firefox requires its driver to open the configured URL from inside the package.
-  if (browser === "chromium" && scenario?.startsWith("fixtures/")) scenario = "idle";
+  // Format fixtures share one package per browser. The harness selects each
+  // fixture through the driver URL after the onInstalled page opens idle.
+  if (scenario?.startsWith("fixtures/")) scenario = "idle";
   const key = JSON.stringify([
     browser,
     origin,
@@ -415,11 +415,19 @@ async function runFirefoxJob(base, work, runOptions = {}) {
     await driver.manage().setTimeouts({ pageLoad: 15000, script: 15000, implicit: 0 });
     const addonId = await driver.installAddon(zip, true);
     assert.equal(addonId, GECKO_ID, `unexpected add-on id ${addonId}`);
+    let fixtureStarted = false;
     await driver.wait(async () => {
       for (const handle of await driver.getAllWindowHandles()) {
         await driver.switchTo().window(handle);
         const url = await driver.getCurrentUrl();
         if (!url.includes("/test/driver.html")) continue;
+        if (runOptions.scenario?.startsWith("fixtures/") && !fixtureStarted) {
+          // Navigate the privileged page through WebDriver without injecting
+          // script. The shared idle package starts exactly one fixture job.
+          await driver.get(`${url}?scenario=${encodeURIComponent(runOptions.scenario)}`);
+          fixtureStarted = true;
+          return false;
+        }
         const [body] = await driver.findElements(webdriver.By.css("body"));
         if (!body) continue;
         const state = await body.getDomAttribute("data-driver");
