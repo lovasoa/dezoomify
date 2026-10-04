@@ -128,6 +128,13 @@ impl ZifWriter {
                 .sum::<u64>()
     }
 
+    fn accept_metadata(&mut self, index: u32, metadata: Option<TileMetadata>) {
+        if let Some(metadata) = metadata {
+            self.metadata.insert(index, metadata);
+            self.peak_retained = self.peak_retained.max(self.retained_bytes());
+        }
+    }
+
     pub(crate) fn new(
         destination: &Path,
         plan: &OutputPlan,
@@ -316,22 +323,26 @@ impl ZifWriter {
             tile.id
         };
         use image::ImageDecoder as _;
-        if let Ok(mut decoder) = image::ImageReader::new(std::io::Cursor::new(&tile.bytes))
-            .with_guessed_format()
-            .and_then(|reader| reader.into_decoder().map_err(std::io::Error::other))
+        let mut metadata = if let Ok(mut decoder) =
+            image::ImageReader::new(std::io::Cursor::new(&tile.bytes))
+                .with_guessed_format()
+                .and_then(|reader| reader.into_decoder().map_err(std::io::Error::other))
         {
-            self.metadata.insert(
-                index,
-                (
-                    tile.placement.position.clone(),
-                    decoder.icc_profile().unwrap_or(None),
-                    decoder.exif_metadata().unwrap_or(None),
-                ),
-            );
-            let retained = self.retained_bytes();
-            self.peak_retained = self.peak_retained.max(retained);
-            memory_check(retained, self.budget)?;
-        }
+            Some((
+                tile.placement.position.clone(),
+                decoder.icc_profile().unwrap_or(None),
+                decoder.exif_metadata().unwrap_or(None),
+            ))
+        } else {
+            None
+        };
+        let metadata_bytes = metadata.as_ref().map_or(0, |(_, icc, exif)| {
+            icc.as_ref().map_or(0, Vec::len) as u64 + exif.as_ref().map_or(0, Vec::len) as u64
+        });
+        memory_check(self.retained_bytes() + metadata_bytes, self.budget)?;
+        let conversion_budget = self
+            .budget
+            .saturating_sub(self.retained_bytes() + metadata_bytes);
         let source_profile = profile(&tile.bytes);
         // The first received grid tile establishes the container codec.
         // Missing or slow tile zero must not retain the rest of the image.
@@ -345,6 +356,7 @@ impl ZifWriter {
             && source_profile.is_some()
             && source_profile == self.profile;
         let stored = if compatible {
+            self.accept_metadata(index, metadata.take());
             self.store(0, rect, &tile.bytes, cancelled)?
         } else if self.base.regular && rect == self.base.rect(index) && self.writer.is_some() {
             self.decoded += 1;
@@ -353,8 +365,9 @@ impl ZifWriter {
                     width: rect.w,
                     height: rect.h,
                 },
-                self.budget.saturating_sub(self.retained_bytes()),
+                conversion_budget,
             )?;
+            self.accept_metadata(index, metadata.take());
             drop(tile);
             let bytes = self.encode(&pixels)?;
             drop(pixels);
@@ -371,10 +384,11 @@ impl ZifWriter {
                         width: rect.w,
                         height: rect.h,
                     },
-                    self.budget.saturating_sub(self.retained_bytes()),
+                    conversion_budget,
                     self.compression,
                 )?;
             }
+            self.accept_metadata(index, metadata.take());
             self.retained += tile.bytes.len() as u64;
             let retained = self.retained_bytes();
             self.peak_retained = self.peak_retained.max(retained);
@@ -668,6 +682,10 @@ mod tests {
             )
             .unwrap_err();
         assert!(matches!(error, Error::LimitExceeded { .. }));
+        assert!(
+            writer.metadata.is_empty(),
+            "rejected tile metadata is not retained"
+        );
     }
 
     #[test]
