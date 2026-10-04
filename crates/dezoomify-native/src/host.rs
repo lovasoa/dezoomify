@@ -356,8 +356,8 @@ impl<'a> NativeHost<'a> {
         processing: dezoomify::core::model::ProcessingRecipe,
         store: Option<(PathBuf, String, String)>,
     ) -> Result<DecodedTile, Error> {
-        self.instrumentation.borrow_mut().pixel_decodes += 1;
         let permit = self.decode_tails.reserve(bytes.len());
+        let decode_tails = self.decode_tails.clone();
         self.controlled(async {
             tokio::task::spawn_blocking(move || {
                 let _permit = permit;
@@ -367,6 +367,7 @@ impl<'a> NativeHost<'a> {
                 if let Some((dir, namespace, uri)) = store {
                     let _ = crate::cache::store(&dir, &namespace, &uri, &bytes);
                 }
+                decode_tails.pixel_decodes.fetch_add(1, Ordering::SeqCst);
                 let image = load_image_with_metadata(&bytes)
                     .map_err(|error| Error::DecodeFailed(error.to_string().into()))?;
                 Ok::<_, Error>(DecodedTile {
@@ -545,14 +546,14 @@ impl<'a> NativeHost<'a> {
             stats.peak_encoded_bytes = stats.peak_encoded_bytes.max(peak);
         } else {
             let mut probes = self.encoded_probes.borrow_mut();
-            crate::tile_output::memory_check(
-                probes
-                    .iter()
-                    .map(|tile| tile.bytes.len() as u64)
-                    .sum::<u64>()
-                    + tile.bytes.len() as u64,
-                self.options.output_retain_cap,
-            )?;
+            let retained = probes
+                .iter()
+                .map(|tile| tile.bytes.len() as u64)
+                .sum::<u64>()
+                + tile.bytes.len() as u64;
+            crate::tile_output::memory_check(retained, self.options.output_retain_cap)?;
+            let mut stats = self.instrumentation.borrow_mut();
+            stats.peak_encoded_bytes = stats.peak_encoded_bytes.max(retained);
             probes.push(tile);
         }
         self.acquired.borrow_mut().insert(id);
@@ -747,7 +748,7 @@ impl Host for NativeHost<'_> {
     }
 
     async fn acquire_tile(&self, tile: Tile) -> Result<(), Error> {
-        async {
+        let result = async {
             if self.format == OutputFormat::IiifDir {
                 let encoded = self.encoded_tile(&tile).await?;
                 self.controls.checkpoint(false).await?;
@@ -757,20 +758,38 @@ impl Host for NativeHost<'_> {
             self.controls.checkpoint(false).await?;
             self.place(&tile, decoded)
         }
-        .await
-        .map_err(|error| resource_context(error, &tile.request))
-        .inspect_err(|error| {
-            let mut stats = self.instrumentation.borrow_mut();
-            if error.retryable() {
-                stats.failed_transient += 1;
-            } else {
-                stats.failed_permanent += 1;
-            }
-            if !matches!(error.cause(), Error::Cancelled) {
-                self.diagnostics
-                    .record(DiagnosticLevel::Warn, "tile", serde_json::json!(error));
-            }
-        })
+        .await;
+        if result
+            .as_ref()
+            .is_err_and(|e| matches!(e.cause(), Error::DecodeFailed(_)))
+        {
+            let dir = self
+                .options
+                .cache_dir
+                .clone()
+                .unwrap_or_else(crate::imaging::default_tile_cache_dir);
+            let _ = std::fs::remove_file(
+                dir.join(crate::cache::job_namespace(&self.options.input_url))
+                    .join(crate::cache::cache_key(&tile.request.uri)),
+            );
+        }
+        result
+            .map_err(|error| resource_context(error, &tile.request))
+            .inspect_err(|error| {
+                let mut stats = self.instrumentation.borrow_mut();
+                if error.retryable() {
+                    stats.failed_transient += 1;
+                } else {
+                    stats.failed_permanent += 1;
+                }
+                if !matches!(error.cause(), Error::Cancelled) {
+                    self.diagnostics.record(
+                        DiagnosticLevel::Warn,
+                        "tile",
+                        serde_json::json!(error),
+                    );
+                }
+            })
     }
 
     async fn finish(&self, request: FinishRequest) -> Result<Output, Error> {
@@ -829,6 +848,7 @@ impl Host for NativeHost<'_> {
             };
         let stats = sink.stats();
         let mut instrumentation = self.instrumentation.borrow().clone();
+        instrumentation.pixel_decodes += self.decode_tails.pixel_decodes.load(Ordering::SeqCst);
         instrumentation.peak_retained_bytes = stats.peak_retained_bytes;
         instrumentation.peak_decode_inflight_bytes =
             self.decode_tails.peak_bytes.load(Ordering::SeqCst);
@@ -985,6 +1005,7 @@ struct DecodeTails {
     active: AtomicUsize,
     bytes: AtomicU64,
     peak_bytes: AtomicU64,
+    pixel_decodes: AtomicU64,
     changed: tokio::sync::Notify,
 }
 
