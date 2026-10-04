@@ -154,6 +154,25 @@ impl ZifWriter {
     fn accept_metadata(&mut self, index: u32, metadata: Option<TileMetadata>) {
         if let Some(metadata) = metadata {
             self.metadata.insert(index, metadata);
+            if self.base.regular {
+                let icc_index = self
+                    .metadata
+                    .iter()
+                    .find_map(|(&index, (_, icc, _))| icc.is_some().then_some(index));
+                let exif_index = self
+                    .metadata
+                    .iter()
+                    .find_map(|(&index, (_, _, exif))| exif.is_some().then_some(index));
+                self.metadata.retain(|&index, (_, icc, exif)| {
+                    if Some(index) != icc_index {
+                        *icc = None;
+                    }
+                    if Some(index) != exif_index {
+                        *exif = None;
+                    }
+                    icc.is_some() || exif.is_some()
+                });
+            }
             self.peak_retained = self.peak_retained.max(self.retained_bytes());
         }
     }
@@ -360,40 +379,16 @@ impl ZifWriter {
         } else {
             tile.id
         };
-        use image::ImageDecoder as _;
         memory_check(
             tile.bytes.len() as u64 + self.retained_bytes() + index_growth,
             self.budget,
         )?;
-        let mut reader =
-            image::ImageReader::with_format(std::io::Cursor::new(&tile.bytes), tile.format);
-        let mut limits = image::Limits::default();
-        // Set before construction: PNG can inflate ICC metadata in read_info.
-        // Leave room for the encoded body and copies returned by metadata APIs.
         let metadata_cap = self
             .budget
-            .saturating_sub(self.retained_bytes() + index_growth + tile.bytes.len() as u64)
-            / 2;
-        limits.max_alloc = Some(metadata_cap);
-        reader.limits(limits);
-        let mut decoder = reader
-            .into_decoder()
-            .map_err(crate::tile_output::decode_error)?;
-        let mut metadata = Some((
-            tile.placement.position.clone(),
-            decoder
-                .icc_profile()
-                .map_err(crate::tile_output::decode_error)?,
-            decoder
-                .exif_metadata()
-                .map_err(crate::tile_output::decode_error)?,
-        ));
-        drop(decoder);
-        if let Some((_, icc, _)) = &mut metadata {
-            if icc.is_none() {
-                *icc = crate::tile_output::png_icc(&tile.bytes, metadata_cap)?;
-            }
-        }
+            .saturating_sub(self.retained_bytes() + index_growth + tile.bytes.len() as u64);
+        let (icc, exif) =
+            crate::tile_output::tile_metadata(&tile.bytes, tile.format, metadata_cap)?;
+        let mut metadata = Some((tile.placement.position.clone(), icc, exif));
         let metadata_bytes = metadata.as_ref().map_or(0, |(_, icc, exif)| {
             icc.as_ref().map_or(0, Vec::len) as u64 + exif.as_ref().map_or(0, Vec::len) as u64
         });
@@ -432,9 +427,12 @@ impl ZifWriter {
             if self.writer.is_none() {
                 self.initialize(selected, cancelled)?;
             }
-            self.accept_metadata(index, metadata.take());
             drop(tile);
-            let bytes = self.encode(&pixels)?;
+            // Preserve this tile's own metadata; other arrivals must not change
+            // its interpretation. Final pyramid metadata uses settled order.
+            let (_, icc, exif) = metadata.as_ref().expect("source metadata");
+            let bytes = self.encode_with_metadata(&pixels, icc.as_deref(), exif.as_deref())?;
+            self.accept_metadata(index, metadata.take());
             drop(pixels);
             self.store(0, rect, &bytes, cancelled)?
         } else {
@@ -473,18 +471,26 @@ impl ZifWriter {
     }
 
     fn encode(&self, pixels: &image::RgbaImage) -> Result<Vec<u8>, Error> {
-        let metadata_bytes = self
+        let icc = self
             .metadata
             .values()
-            .find_map(|(_, icc, _)| icc.as_ref())
-            .map_or(0, Vec::len) as u64
-            + self
-                .metadata
-                .values()
-                .find_map(|(_, _, exif)| exif.as_ref())
-                .map_or(0, Vec::len) as u64;
+            .find_map(|(_, icc, _)| icc.as_deref());
+        let exif = self
+            .metadata
+            .values()
+            .find_map(|(_, _, exif)| exif.as_deref());
+        self.encode_with_metadata(pixels, icc, exif)
+    }
+
+    fn encode_with_metadata(
+        &self,
+        pixels: &image::RgbaImage,
+        icc: Option<&[u8]>,
+        exif: Option<&[u8]>,
+    ) -> Result<Vec<u8>, Error> {
+        let metadata_bytes = icc.map_or(0, <[u8]>::len) as u64 + exif.map_or(0, <[u8]>::len) as u64;
         memory_check(
-            pixels.as_raw().len() as u64 * 3 + (64 << 10) + metadata_bytes.saturating_mul(3),
+            pixels.as_raw().len() as u64 * 3 + (64 << 10) + metadata_bytes.saturating_mul(4),
             self.budget.saturating_sub(self.retained_bytes()),
         )?;
         let mut bytes = Vec::new();
@@ -499,15 +505,11 @@ impl ZifWriter {
                     crate::imaging::png_compression_for(self.compression),
                     image::codecs::png::FilterType::Adaptive,
                 );
-                if let Some(icc) = self.metadata.values().find_map(|(_, icc, _)| icc.as_ref()) {
-                    let _ = image::ImageEncoder::set_icc_profile(&mut encoder, icc.clone());
+                if let Some(icc) = icc {
+                    let _ = image::ImageEncoder::set_icc_profile(&mut encoder, icc.to_vec());
                 }
-                if let Some(exif) = self
-                    .metadata
-                    .values()
-                    .find_map(|(_, _, exif)| exif.as_ref())
-                {
-                    let _ = image::ImageEncoder::set_exif_metadata(&mut encoder, exif.clone());
+                if let Some(exif) = exif {
+                    let _ = image::ImageEncoder::set_exif_metadata(&mut encoder, exif.to_vec());
                 }
                 image::ImageEncoder::write_image(
                     encoder,
@@ -526,7 +528,7 @@ impl ZifWriter {
                 } else {
                     jpeg_encoder::SamplingFactor::F_1_1
                 });
-                if let Some(icc) = self.metadata.values().find_map(|(_, icc, _)| icc.as_ref()) {
+                if let Some(icc) = icc {
                     encoder.add_icc_profile(icc).map_err(failed)?;
                 }
                 encoder
