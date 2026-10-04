@@ -60,15 +60,16 @@ pub struct Instrumentation {
     pub peak_decode_inflight_bytes: u64,
     /// Canvas bytes (4 bytes per pixel, zero until allocated).
     pub canvas_bytes: u64,
-    /// Transient encoded bytes for the committed output.
+    /// Total bytes in the committed output, not resident memory.
     pub encoded_bytes: u64,
+    /// Peak encoded bytes buffered outside codec workspace.
+    pub peak_encoded_bytes: u64,
     /// Peak spooled (on-disk) tile bytes.
     pub peak_spool_bytes: u64,
     /// Late paints below the painted frontier (same-tile retries).
     pub late_repaints: u64,
-    /// Accounted peak: canvas plus peak retained plus encoded. This is the
-    /// deterministic peak model for the shipped pipeline: canvas,
-    /// outstanding decode buffers, and codec buffers.
+    /// Canvas plus retained pixels plus the bounded output buffer. Codec
+    /// workspace and response bodies are reported separately.
     pub accounted_peak_bytes: u64,
 }
 
@@ -546,12 +547,13 @@ impl Host for NativeHost<'_> {
             self.decode_tails.peak_bytes.load(Ordering::SeqCst);
         instrumentation.canvas_bytes = stats.canvas_bytes;
         instrumentation.encoded_bytes = stats.encoded_bytes;
+        instrumentation.peak_encoded_bytes = stats.peak_encoded_bytes;
         instrumentation.peak_spool_bytes = stats.peak_spool_bytes;
         instrumentation.late_repaints = stats.late_repaints;
         instrumentation.accounted_peak_bytes = stats
             .canvas_bytes
             .saturating_add(stats.peak_retained_bytes)
-            .saturating_add(stats.encoded_bytes);
+            .saturating_add(stats.peak_encoded_bytes);
         let output = Output {
             canvas: Some(Size {
                 width: image_size.x,

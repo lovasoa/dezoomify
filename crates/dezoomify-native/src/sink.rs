@@ -18,9 +18,8 @@
 //! * First-tile ICC/EXIF metadata is deterministic: the earliest tile in
 //!   final plan order carrying each metadata block wins, including reused
 //!   probes and independently of arrival order or resource storage slots.
-//! * Encoders render one transient in-memory buffer (buffered codecs are
-//!   honestly accounted in [`SinkStats`]); bytes stream to temp files in
-//!   chunks with fsync before the atomic rename. `iiif-dir` stages into a
+//! * Single-file encoders write to an owned staging file through a bounded
+//!   writer with cancellation checks and fsync before publication. `iiif-dir` stages into a
 //!   temp directory and renames once, so a half-written tree never sits at
 //!   the destination.
 //! * [`Sink::commit`] is the single commit point: cancellation is checked
@@ -37,10 +36,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::imaging::{
-    blit_onto, encode_jpeg, encode_png, encode_tiff, encode_webp, encode_zif_pyramid,
-    render_iiif_dir, DecodedTile,
+    blit_onto, encode_jpeg_to, encode_png_to, encode_tiff_to, encode_webp_to,
+    encode_zif_pyramid_to, render_iiif_dir, DecodedTile,
 };
-use crate::output::{partial_path_for, validate_destination, write_iiif_dir};
+use crate::output::{partial_path_for, validate_destination, write_iiif_dir, StagedFile};
 use dezoomify::model::{Error, LimitContext, LimitReason, OutputFormat, ReusedTile, Size};
 use dezoomify::Vec2d;
 use image::RgbaImage;
@@ -90,8 +89,10 @@ pub struct SinkStats {
     pub peak_retained_bytes: u64,
     /// Canvas bytes (4 bytes per pixel).
     pub canvas_bytes: u64,
-    /// Transient encoded bytes for the committed output.
+    /// Total bytes written to the committed output (not resident memory).
     pub encoded_bytes: u64,
+    /// Peak encoded bytes buffered outside the codecs' own workspace.
+    pub peak_encoded_bytes: u64,
     /// Peak spooled (on-disk) tile bytes.
     pub peak_spool_bytes: u64,
     /// Late paints (ordinal below the painted frontier, same-tile retries).
@@ -512,36 +513,6 @@ impl Sink {
         let (icc, exif) = self.first_meta(reused_tiles);
         let encoded_len: u64;
         match format {
-            OutputFormat::Png => {
-                let encoded = encode_png(
-                    canvas,
-                    crate::imaging::png_compression_for(self.compression),
-                    icc.as_deref(),
-                    exif.as_deref(),
-                )?;
-                encoded_len = encoded.len() as u64;
-                commit_bytes(&dest, &encoded)?;
-            }
-            OutputFormat::Jpeg => {
-                let encoded = encode_jpeg(canvas, self.jpeg_quality, icc.as_deref())?;
-                encoded_len = encoded.len() as u64;
-                commit_bytes(&dest, &encoded)?;
-            }
-            OutputFormat::Tiff => {
-                let encoded = encode_tiff(canvas, self.compression, icc.as_deref())?;
-                encoded_len = encoded.len() as u64;
-                commit_bytes(&dest, &encoded)?;
-            }
-            OutputFormat::Zif => {
-                let encoded = encode_zif_pyramid(canvas, self.compression, icc.as_deref())?;
-                encoded_len = encoded.len() as u64;
-                commit_bytes(&dest, &encoded)?;
-            }
-            OutputFormat::Webp => {
-                let encoded = encode_webp(canvas, icc.as_deref())?;
-                encoded_len = encoded.len() as u64;
-                commit_bytes(&dest, &encoded)?;
-            }
             OutputFormat::IiifDir => {
                 let id = dest
                     .file_name()
@@ -550,7 +521,48 @@ impl Sink {
                 let (info_json, tiles) = render_iiif_dir(canvas, id, self.jpeg_quality)?;
                 encoded_len =
                     info_json.len() as u64 + tiles.iter().map(|(_, b)| b.len() as u64).sum::<u64>();
+                self.stats.peak_encoded_bytes = encoded_len;
                 commit_iiif_dir(&dest, &info_json, &tiles)?;
+            }
+            _ => {
+                use std::io::Write as _;
+                let mut staging = StagedFile::new(&dest)?;
+                let result = (|| {
+                    let mut writer =
+                        std::io::BufWriter::with_capacity(64 << 10, staging.writer(cancelled));
+                    match format {
+                        OutputFormat::Png => encode_png_to(
+                            &mut writer,
+                            canvas,
+                            crate::imaging::png_compression_for(self.compression),
+                            icc.as_deref(),
+                            exif.as_deref(),
+                        ),
+                        OutputFormat::Jpeg => {
+                            encode_jpeg_to(&mut writer, canvas, self.jpeg_quality, icc.as_deref())
+                        }
+                        OutputFormat::Tiff => {
+                            encode_tiff_to(&mut writer, canvas, self.compression, icc.as_deref())
+                        }
+                        OutputFormat::Zif => encode_zif_pyramid_to(
+                            &mut writer,
+                            canvas,
+                            self.compression,
+                            icc.as_deref(),
+                        ),
+                        OutputFormat::Webp => encode_webp_to(&mut writer, canvas, icc.as_deref()),
+                        OutputFormat::IiifDir => unreachable!(),
+                    }?;
+                    writer
+                        .flush()
+                        .map_err(|e| crate::output::write_failed("output flush failed", &e))
+                })();
+                if cancelled.load(Ordering::SeqCst) {
+                    return Err(Error::Cancelled);
+                }
+                result?;
+                self.stats.peak_encoded_bytes = 64 << 10;
+                encoded_len = staging.publish(&dest, overwrite, cancelled)?;
             }
         }
         self.stats.encoded_bytes = encoded_len;
@@ -594,32 +606,16 @@ impl Sink {
 
 /// Stream bytes to a temp sibling in chunks with fsync, then atomically
 /// rename into place. Only the temp path is ever uncommitted.
+#[cfg(test)]
 fn commit_bytes(dest: &Path, bytes: &[u8]) -> Result<(), Error> {
-    if let Some(parent) = dest.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| crate::output::write_failed("output write failed", &e))?;
-        }
-    }
-    let tmp = temp_sibling(dest);
-    let mut file = std::fs::File::create_new(&tmp)
+    use std::io::Write as _;
+    let cancelled = std::sync::atomic::AtomicBool::new(false);
+    let mut staging = StagedFile::new(dest)?;
+    staging
+        .writer(&cancelled)
+        .write_all(bytes)
         .map_err(|e| crate::output::write_failed("output write failed", &e))?;
-    let result = (|| {
-        use std::io::Write as _;
-        for chunk in bytes.chunks(64 << 10) {
-            file.write_all(chunk)
-                .map_err(|e| crate::output::write_failed("output write failed", &e))?;
-        }
-        file.sync_all()
-            .map_err(|e| crate::output::write_failed("output write failed", &e))?;
-        drop(file);
-        std::fs::rename(&tmp, dest)
-            .map_err(|e| crate::output::write_failed("output write failed", &e))
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    result
+    staging.publish(dest, true, &cancelled).map(|_| ())
 }
 
 /// Stage an `iiif-dir` tree in a temp directory, then rename once so a
@@ -658,7 +654,7 @@ fn commit_iiif_dir(
 
 /// Temp sibling for atomic publication: `<name>.tmp.<pid>-<unique>`.
 /// Unique per commit so concurrent jobs never share a temp path.
-fn temp_sibling(dest: &Path) -> PathBuf {
+pub(crate) fn temp_sibling(dest: &Path) -> PathBuf {
     let file_name = dest
         .file_name()
         .and_then(|name| name.to_str())
