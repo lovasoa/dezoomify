@@ -10,7 +10,7 @@ The HTML parser includes unmodified MPL-2.0 dependencies; source and license not
 - Sixteen concurrent tile operations by default. One acquisition includes fetch, processing, decode, and placement. Per-host pacing has a 200 ms floor.
 - Requests have a 30 s timeout and 6 s connection timeout. Each transport call makes one attempt; shared Rust code classifies failures and schedules retries.
 - Blocking decoding reserves body bytes before scheduling and releases them when the decoder exits. Cleanup waits for owned tasks and decoder tails.
-- Cache keys use versioned URL digests under an input-specific namespace. Cached bytes must still decode; corrupt entries trigger a fresh fetch. Headers, cookies, and credentials never enter cache keys.
+- Cache keys use versioned URL digests under an input-specific namespace. Cached bytes pass the chosen route's inspection or decoding checks; rejected entries trigger a fresh fetch. Headers, cookies, and credentials never enter cache keys.
 
 Selection preserves `--largest`, exact `--zoom-level`, width/height caps, and `--image-index`. Deferred catalogs resolve within the invocation with follow and cycle bounds. Unknown formats and invalid settings fail before output.
 
