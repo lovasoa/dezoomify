@@ -275,6 +275,10 @@ export interface Progress {
     maximum: Size | undefined;
     completed: number;
     total: number | undefined;
+    /**
+     * Native pixel preparation, separate from acquired tile counts.
+     */
+    preparation?: OutputPreparation;
 }
 
 /**
@@ -372,6 +376,11 @@ export interface Options {
     max_bytes?: number;
     max_deferred_follows?: number;
     retry_base_delay_ms?: number;
+}
+
+export interface OutputPreparation {
+    completed_pixels: number;
+    total_pixels: number;
 }
 
 export interface Tile {

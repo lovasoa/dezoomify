@@ -170,6 +170,7 @@ export const fr = {
   "view.cancel.message": "L’enregistrement de l’image a été interrompu.",
   // Job section and share chrome.
   "view.job.countsFull": "{current} fragments sur {total}",
+  "view.job.preparation": "{percent} % des pixels préparés. Finalisation de l’enregistrement de l’image.",
   "view.job.countsActive": "{current} fragments sur {total} · {active} en cours",
   // Recent pictures, including unsuccessful attempts.
   "view.history.title": "Images récentes",

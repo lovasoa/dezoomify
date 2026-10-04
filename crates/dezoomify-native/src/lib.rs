@@ -12,6 +12,8 @@ pub mod http;
 pub mod imaging;
 pub mod options;
 pub mod output;
+mod pixel_pipe;
+mod raster;
 pub mod sink;
 mod tile_output;
 pub mod transport;

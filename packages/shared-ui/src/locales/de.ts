@@ -171,6 +171,7 @@ export const de = {
   "view.cancel.message": "Das Speichern des Bildes wurde gestoppt.",
   // Job section and share chrome.
   "view.job.countsFull": "{current} von {total} Fragmenten",
+  "view.job.preparation": "{percent}% der Pixel vorbereitet. Das Bild wird fertig gespeichert.",
   "view.job.countsActive": "{current} von {total} Fragmenten · {active} in Arbeit",
   // Recent pictures, including unsuccessful attempts.
   "view.history.title": "Letzte Bilder",

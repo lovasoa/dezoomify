@@ -302,10 +302,11 @@ function deriveJob(presentation: Presentation, ctx?: ViewContext): JobDerived {
     : 0;
   const activePct = determinate ? (active / total) * 100 : 0;
   const retrying = Math.max(0, Math.min(ctx?.currentProgress?.retrying ?? 0, active));
-  const paused = presentation.paused || activity.paused === true;
+  const preparing = presentation.headlineKey === "view.step.saving";
+  const paused = !preparing && (presentation.paused || activity.paused === true);
   const now = activity.now;
   const startedAt = activity.startedAt ?? now;
-  const timerNow = activity.pausedAt ?? now;
+  const timerNow = preparing ? now : (activity.pausedAt ?? now);
   const elapsedMs = Math.max(0, timerNow - startedAt - (activity.pausedDurationMs ?? 0));
   const elapsed = formatElapsed(elapsedMs);
   const lastProgressAt = activity.lastProgressAt ?? startedAt;
@@ -380,8 +381,9 @@ function JobView({
       </section>
     );
   }
-  const showPause = !d.paused && typeof callbacks.onPause === "function";
-  const showResume = d.paused && typeof callbacks.onResume === "function";
+  const acquisitionControls = presentation.headlineKey !== "view.step.saving";
+  const showPause = acquisitionControls && !d.paused && typeof callbacks.onPause === "function";
+  const showResume = acquisitionControls && d.paused && typeof callbacks.onResume === "function";
   return (
     <div
       className={`dz-view-body dz-job-section dz-fade-in${d.paused ? " dz-job-paused" : ""}`}

@@ -1,8 +1,6 @@
 //! Image decoding, metadata, encoders, and memory limits.
 use std::path::PathBuf;
 
-use dezoomify::Vec2d;
-
 use dezoomify::model::{Error, LimitContext, LimitReason, Size};
 
 /// Default JPEG quality for `.jpg` output and `iiif-dir` tiles: `100`
@@ -35,17 +33,16 @@ pub fn canvas_bytes(width: u32, height: u32) -> Option<u64> {
         .checked_mul(4)
 }
 
-/// Peak model used by performance tests: canvas bytes plus one transient
-/// encode buffer (twice the canvas). The allocation gate itself checks the
-/// canvas bytes against current available memory.
+/// Legacy estimate for callers holding a canvas and a second image buffer.
+/// The native streaming pipeline uses MemoryBudget reservations instead.
 #[must_use]
 pub fn required_memory_bytes(width: u32, height: u32) -> Option<u64> {
     canvas_bytes(width, height)?.checked_mul(2)
 }
 
 /// Bytes currently available to the process according to the operating
-/// system. This is sampled immediately before the output canvas allocation;
-/// the value can change between the sample and the allocation.
+/// system. The native Host samples this to cap its invocation's RAM budget;
+/// availability can change after sampling.
 #[must_use]
 pub fn available_memory_bytes() -> u64 {
     let mut system = sysinfo::System::new();
@@ -107,11 +104,23 @@ pub(crate) struct ImageWithMetadata {
     pub exif_metadata: Option<Vec<u8>>,
 }
 
+#[cfg(test)]
 pub(crate) fn load_image_with_metadata(
     bytes: &[u8],
 ) -> Result<ImageWithMetadata, image::ImageError> {
+    load_image_with_limit(bytes, None)
+}
+pub(crate) fn load_image_with_limit(
+    bytes: &[u8],
+    max_alloc: Option<u64>,
+) -> Result<ImageWithMetadata, image::ImageError> {
     use image::ImageDecoder as _;
-    let reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?;
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?;
+    if let Some(max_alloc) = max_alloc {
+        let mut limits = image::Limits::default();
+        limits.max_alloc = Some(max_alloc);
+        reader.limits(limits);
+    }
     let mut decoder = reader.into_decoder()?;
     let icc_profile = decoder.icc_profile().unwrap_or(None);
     let exif_metadata = decoder.exif_metadata().unwrap_or(None);
@@ -121,32 +130,6 @@ pub(crate) fn load_image_with_metadata(
         icc_profile,
         exif_metadata,
     })
-}
-
-pub(crate) fn blit_onto(
-    target: &mut image::RgbaImage,
-    destination: Vec2d,
-    extent: Option<Vec2d>,
-    tile: &image::RgbaImage,
-) {
-    let extent = extent.unwrap_or(Vec2d {
-        x: tile.width(),
-        y: tile.height(),
-    });
-    let max_w = target.width().saturating_sub(destination.x);
-    let max_h = target.height().saturating_sub(destination.y);
-    let copy_w = extent.x.min(tile.width()).min(max_w);
-    let copy_h = extent.y.min(tile.height()).min(max_h);
-    if copy_w == 0 || copy_h == 0 {
-        return;
-    }
-    let cropped = image::imageops::crop_imm(tile, 0, 0, copy_w, copy_h);
-    image::imageops::overlay(
-        target,
-        &*cropped,
-        i64::from(destination.x),
-        i64::from(destination.y),
-    );
 }
 
 /// Encode PNG at the configured deflate tier, preserving ICC and EXIF metadata.
@@ -469,105 +452,6 @@ pub(crate) fn encode_webp_to<W: std::io::Write>(
         )
     })?;
     Ok(())
-}
-
-/// Powers of two covering the pyramid: 1 always, then doubling while the
-/// downscaled canvas still exceeds one tile side.
-pub(crate) fn iiif_scale_factors(width: u32, height: u32) -> Vec<u32> {
-    let mut factors = vec![1u32];
-    let mut scale = 1u32;
-    while width.div_ceil(scale) > IIIF_TILE_WIDTH || height.div_ceil(scale) > IIIF_TILE_WIDTH {
-        scale = scale.saturating_mul(2);
-        factors.push(scale);
-    }
-    factors
-}
-
-/// Minimal IIIF Image API v2 `info.json` for a static directory: the tile
-/// width and scale factors match the files [`render_iiif_dir`] writes, so a
-/// plain static file server answers each tile's IIIF URL. `id` names the
-/// image (the destination directory name); deployments serving the directory
-/// under a public URL replace it with that URL.
-pub(crate) fn iiif_info_json(id: &str, width: u32, height: u32) -> Vec<u8> {
-    let factors = iiif_scale_factors(width, height);
-    let sizes: Vec<serde_json::Value> = factors
-        .iter()
-        .map(|scale| {
-            serde_json::json!({
-                "width": width.div_ceil(*scale),
-                "height": height.div_ceil(*scale),
-            })
-        })
-        .collect();
-    serde_json::to_vec_pretty(&serde_json::json!({
-        "@context": "http://iiif.io/api/image/2/context.json",
-        "@id": id,
-        "protocol": "http://iiif.io/api/image",
-        "width": width,
-        "height": height,
-        "sizes": sizes,
-        "tiles": [{ "width": IIIF_TILE_WIDTH, "scaleFactors": factors }],
-        "profile": ["http://iiif.io/api/image/2/level1.json"],
-    }))
-    .unwrap_or_default()
-}
-
-/// Render one `iiif-dir` destination from the assembled canvas: the manifest
-/// plus JPEG tiles, each stored at its real IIIF request path
-/// (`{x},{y},{w},{h}/{tw},/0/default.jpg`, size-by-width) with one
-/// `full/max/0/default.jpg` overview. Files arrive sorted by relative path;
-/// tiles encode at `jpeg_quality` without
-/// embedded profiles.
-pub(crate) fn render_iiif_dir(
-    image: &image::RgbaImage,
-    id: &str,
-    jpeg_quality: u8,
-) -> Result<(Vec<u8>, crate::output::IiifTiles), Error> {
-    let (width, height) = (image.width(), image.height());
-    let mut files: crate::output::IiifTiles = Vec::new();
-    for scale in iiif_scale_factors(width, height) {
-        let down_w = width.div_ceil(scale).max(1);
-        let down_h = height.div_ceil(scale).max(1);
-        let downscaled;
-        let view: &image::RgbaImage = if scale == 1 {
-            image
-        } else {
-            downscaled = image::imageops::resize(
-                image,
-                down_w,
-                down_h,
-                image::imageops::FilterType::Triangle,
-            );
-            &downscaled
-        };
-        let cols = down_w.div_ceil(IIIF_TILE_WIDTH);
-        let rows = down_h.div_ceil(IIIF_TILE_WIDTH);
-        for row in 0..rows {
-            for col in 0..cols {
-                let tx = col * IIIF_TILE_WIDTH;
-                let ty = row * IIIF_TILE_WIDTH;
-                let tw = (down_w - tx).min(IIIF_TILE_WIDTH);
-                let th = (down_h - ty).min(IIIF_TILE_WIDTH);
-                let tile = image::imageops::crop_imm(view, tx, ty, tw, th).to_image();
-                let bytes = encode_jpeg(&tile, jpeg_quality, None)?;
-                let relative = format!(
-                    "{},{},{},{}/{},/0/default.jpg",
-                    u64::from(tx) * u64::from(scale),
-                    u64::from(ty) * u64::from(scale),
-                    u64::from(tw) * u64::from(scale),
-                    u64::from(th) * u64::from(scale),
-                    tw,
-                );
-                files.push((relative, bytes));
-            }
-        }
-    }
-    files.push((
-        "full/max/0/default.jpg".to_string(),
-        encode_jpeg(image, jpeg_quality, None)?,
-    ));
-    files.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok((iiif_info_json(id, width, height), files))
 }
 
 #[cfg(test)]

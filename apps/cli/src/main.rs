@@ -341,13 +341,18 @@ fn progress_view(
         ProgressPhase::Acquisition => "downloading",
         ProgressPhase::Output => "encoding",
     };
-    (
-        kind,
-        BTreeMap::from([
-            ("acquired".into(), progress.completed.to_string()),
-            ("total".into(), progress.total.unwrap_or(0).to_string()),
-        ]),
-    )
+    let mut detail = BTreeMap::from([
+        ("acquired".into(), progress.completed.to_string()),
+        ("total".into(), progress.total.unwrap_or(0).to_string()),
+    ]);
+    if let Some(preparation) = &progress.preparation {
+        detail.insert(
+            "prepared_pixels".into(),
+            preparation.completed_pixels.to_string(),
+        );
+        detail.insert("total_pixels".into(), preparation.total_pixels.to_string());
+    }
+    (kind, detail)
 }
 
 fn run_bulk(parsed: Args) {

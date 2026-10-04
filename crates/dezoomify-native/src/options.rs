@@ -52,8 +52,9 @@ pub struct JobOptions {
     /// `ZERO` disables staggering (the CLI default); bulk image pacing stays
     /// in the caller.
     pub min_interval: Duration,
-    /// Bounds for native output buffering and unknown-geometry spooling.
+    /// RAM budget for pixels, descriptors and reserved encoder workspace.
     pub output_retain_cap: u64,
+    /// Legacy compatibility setting; pixel spooling is no longer used.
     pub output_spool_cap: u64,
 }
 

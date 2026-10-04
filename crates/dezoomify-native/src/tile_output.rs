@@ -765,13 +765,12 @@ impl TileWriter {
     pub(crate) fn finish(
         self,
         destination: &Path,
-        overwrite: bool,
         reused: &[ReusedTile],
         cancelled: &AtomicBool,
-    ) -> Result<(Size, u64, u64), Error> {
+    ) -> Result<crate::output::PreparedOutput, Error> {
         match self {
             Self::Iiif(writer) => writer.finish(destination, reused, cancelled),
-            Self::Zif(writer) => writer.finish(destination, overwrite, reused, cancelled),
+            Self::Zif(writer) => writer.finish(reused, cancelled),
         }
     }
 }
@@ -1021,7 +1020,7 @@ impl IiifWriter {
         destination: &Path,
         reused: &[ReusedTile],
         cancelled: &AtomicBool,
-    ) -> Result<(Size, u64, u64), Error> {
+    ) -> Result<crate::output::PreparedOutput, Error> {
         if !self.base.regular {
             let mut tiles = BTreeMap::new();
             for (index, tile) in std::mem::take(&mut self.base.tiles) {
@@ -1167,16 +1166,13 @@ impl IiifWriter {
         self.retained = self.icc_profile.as_ref().map_or(0, Vec::len) as u64;
         let full_size = self.base.size.clone();
         let mut factors = vec![1u32];
-        let cell = self.base.cell.clone();
-        let mut level = std::mem::replace(
-            &mut self.base,
-            TileLevel {
-                size: full_size.clone(),
-                cell,
-                tiles: BTreeMap::new(),
-                regular: true,
-            },
-        );
+        let replacement = TileLevel {
+            size: full_size.clone(),
+            cell: self.base.cell.clone(),
+            tiles: BTreeMap::new(),
+            regular: true,
+        };
+        let mut level = std::mem::replace(&mut self.base, replacement);
         while level.size.width > level.cell.width || level.size.height > level.cell.height {
             let scale = factors.last().copied().unwrap_or(1) * 2;
             let mut next = TileLevel {
@@ -1262,8 +1258,12 @@ impl IiifWriter {
             "preferredFormats": [ext], "profile": profile
         })).map_err(|e| Error::EncodeFailed(e.to_string().into()))?;
         self.staging.write("info.json", &info, cancelled)?;
-        let bytes = crate::output::directory_bytes(&self.staging.path, cancelled)?;
-        self.staging.publish(destination, cancelled)?;
-        Ok((full_size, bytes, self.decoded_tiles))
+        self.encoded_bytes += info.len() as u64;
+        Ok(crate::output::PreparedOutput {
+            staging: crate::output::StagedOutput::Directory(self.staging),
+            size: full_size,
+            pixel_decodes: self.decoded_tiles,
+            late_writes: 0,
+        })
     }
 }

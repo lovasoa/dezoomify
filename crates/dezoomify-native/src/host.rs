@@ -15,9 +15,10 @@ use std::{
 use crate::{
     diagnostics::Diagnostics,
     http::{FetchLimits, FetchOutcome, TlsPolicy, UserHeaders},
-    imaging::{load_image_with_metadata, DecodedTile},
+    imaging::{load_image_with_limit, DecodedTile},
     options::{JobOptions, OutputTarget},
-    sink::{Sink, SinkOptions},
+    pixel_pipe::{MemoryBudget, PixelPipe, Reservation},
+    raster::EncoderTask,
     transport::NativeTransport,
 };
 use dezoomify::{host::Host, model::*, Vec2d};
@@ -31,13 +32,14 @@ struct ControlState {
     cancelled: AtomicBool,
     paused: AtomicBool,
     changed: tokio::sync::Notify,
+    reader: std::sync::Mutex<Option<std::sync::Weak<PixelPipe>>>,
 }
 /// Honest execution accounting, reported with every result.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Instrumentation {
     /// Tile/probe/metadata operations attempted.
     pub attempts: u64,
-    /// Tiles acquired (decoded and placed).
+    /// Tiles acquired and placed, including encoded tile reuse.
     pub acquired: u64,
     /// Failures classified transient by the algorithm.
     pub failed_transient: u64,
@@ -51,14 +53,14 @@ pub struct Instrumentation {
     pub bytes_fetched: u64,
     /// Peak concurrent in-flight tasks.
     pub peak_inflight: usize,
-    /// Peak retained (overlapping, unpainted) tile bytes in the sink.
+    /// Peak RAM reservations for raster pixels, descriptors and workspace.
     pub peak_retained_bytes: u64,
     /// Peak in-flight decode bytes: encoded bodies held by blocking decode
     /// tails (including tails detached by cancelling their parent task).
     /// Bounded by the algorithm slot budget times the fetch byte limit; counted
     /// against the retain cap alongside sink retention.
     pub peak_decode_inflight_bytes: u64,
-    /// Canvas bytes (4 bytes per pixel, zero until allocated).
+    /// Legacy counter; the streaming pipeline allocates no canvas (zero).
     pub canvas_bytes: u64,
     /// Total bytes in the committed output, not resident memory.
     pub encoded_bytes: u64,
@@ -66,12 +68,13 @@ pub struct Instrumentation {
     pub pixel_decodes: u64,
     /// Peak encoded bytes buffered outside codec workspace.
     pub peak_encoded_bytes: u64,
-    /// Peak spooled (on-disk) tile bytes.
+    /// Legacy counter; decoded pixels never spill (zero).
     pub peak_spool_bytes: u64,
-    /// Late paints below the painted frontier (same-tile retries).
+    /// Incoming stripes clipped because some pixels were already read.
     pub late_repaints: u64,
-    /// Canvas plus retained pixels plus the bounded output buffer. Codec
-    /// workspace and response bodies are reported separately.
+    /// Peak charged raster RAM, including temporary decode allowance and
+    /// reserved encoder workspace. Fetch bodies and allocator overhead are
+    /// not a process RSS measurement.
     pub accounted_peak_bytes: u64,
 }
 
@@ -175,6 +178,16 @@ impl Controls {
     pub fn cancel(&self) {
         self.0.cancelled.store(true, Ordering::SeqCst);
         self.0.changed.notify_waiters();
+        if let Some(reader) = self
+            .0
+            .reader
+            .lock()
+            .expect("control reader lock")
+            .as_ref()
+            .and_then(std::sync::Weak::upgrade)
+        {
+            reader.fail(cancelled());
+        }
     }
 
     pub fn pause(&self) {
@@ -189,6 +202,15 @@ impl Controls {
 
     pub fn is_cancelled(&self) -> bool {
         self.0.cancelled.load(Ordering::SeqCst)
+    }
+    pub(crate) fn watch(&self, pipe: &Arc<PixelPipe>) {
+        *self.0.reader.lock().expect("control reader lock") = Some(Arc::downgrade(pipe));
+        if self.is_cancelled() {
+            pipe.fail(cancelled());
+        }
+    }
+    pub(crate) fn cancel_flag(&self) -> &AtomicBool {
+        &self.0.cancelled
     }
 
     async fn wait_cancelled(&self) {
@@ -219,6 +241,16 @@ impl Controls {
 type PartialAnswer<'a> = Pin<Box<dyn Future<Output = Result<RecoveryChoice, Error>> + 'a>>;
 type PartialCallback<'a> = Box<dyn FnMut(MissingTiles) -> PartialAnswer<'a> + 'a>;
 
+struct ReceivedPixels {
+    decoded: DecodedTile,
+    reservation: Reservation,
+}
+struct PendingPixels {
+    id: u32,
+    placement: TilePlacement,
+    pixels: ReceivedPixels,
+}
+
 /// Concrete native resources and injected user interactions for one invocation.
 pub struct NativeHost<'a> {
     pub options: JobOptions,
@@ -228,13 +260,16 @@ pub struct NativeHost<'a> {
     fetch_limits: FetchLimits,
     user: UserHeaders,
     format: OutputFormat,
-    sink: RefCell<Sink>,
+    raster: RefCell<Option<EncoderTask>>,
+    pixels: Arc<MemoryBudget>,
+    pending_pixels: RefCell<Vec<PendingPixels>>,
     acquired: RefCell<BTreeSet<u32>>,
     instrumentation: RefCell<Instrumentation>,
     inflight: Cell<usize>,
     decode_tails: Arc<DecodeTails>,
     throttle: tokio::sync::Mutex<Option<Instant>>,
     progress: RefCell<Box<dyn FnMut(Progress) + 'a>>,
+    last_progress: RefCell<Progress>,
     partial: RefCell<Option<PartialCallback<'a>>>,
     published: RefCell<Option<Publication>>,
     source_format: RefCell<Option<String>>,
@@ -286,11 +321,11 @@ impl<'a> NativeHost<'a> {
                 .ok()
                 .and_then(|url| url.host_str().map(str::to_string)),
         );
-        let sink = Sink::new(&SinkOptions {
-            compression: options.compression,
-            retain_cap_bytes: options.output_retain_cap,
-            spool_cap_bytes: options.output_spool_cap,
-        });
+        let pixels = MemoryBudget::new(
+            options
+                .output_retain_cap
+                .min(crate::imaging::available_memory_bytes()),
+        );
         Ok(Self {
             options,
             controls: Controls::default(),
@@ -299,13 +334,16 @@ impl<'a> NativeHost<'a> {
             fetch_limits,
             user,
             format,
-            sink: RefCell::new(sink),
+            raster: RefCell::new(None),
+            pixels,
+            pending_pixels: RefCell::new(Vec::new()),
             acquired: RefCell::default(),
             instrumentation: RefCell::default(),
             inflight: Cell::new(0),
             decode_tails: Arc::default(),
             throttle: tokio::sync::Mutex::new(None),
             progress: RefCell::new(Box::new(|_| {})),
+            last_progress: RefCell::new(Progress::default()),
             partial: RefCell::new(None),
             published: RefCell::new(None),
             source_format: RefCell::new(None),
@@ -356,9 +394,21 @@ impl<'a> NativeHost<'a> {
         &self,
         future: impl Future<Output = Result<T, Error>>,
     ) -> Result<T, Error> {
+        let pipe = self
+            .raster
+            .borrow()
+            .as_ref()
+            .map(|task| Arc::clone(&task.pipe));
+        let failure = async {
+            match pipe {
+                Some(pipe) => pipe.wait_failed().await,
+                None => std::future::pending().await,
+            }
+        };
         tokio::select! {
             biased;
             () = self.controls.wait_cancelled() => Err(cancelled()),
+            error = failure => Err(error),
             result = future => result,
         }
     }
@@ -395,25 +445,53 @@ impl<'a> NativeHost<'a> {
         bytes: Vec<u8>,
         processing: dezoomify::core::model::ProcessingRecipe,
         store: Option<(PathBuf, String, String)>,
-    ) -> Result<DecodedTile, Error> {
+        placement: &TilePlacement,
+    ) -> Result<ReceivedPixels, Error> {
         let permit = self.decode_tails.reserve(bytes.len());
-        let decode_tails = self.decode_tails.clone();
+        let decode_tails = Arc::clone(&self.decode_tails);
+        let budget = Arc::clone(&self.pixels);
+        let credit = self
+            .raster
+            .borrow()
+            .as_ref()
+            .map_or(0, |task| task.pipe.priority_credit(placement));
         self.controlled(async {
             tokio::task::spawn_blocking(move || {
                 let _permit = permit;
                 let bytes = processing
                     .apply(bytes)
                     .map_err(|error| Error::ProcessingFailed(error.to_string().into()))?;
-                if let Some((dir, namespace, uri)) = store {
-                    let _ = crate::cache::store(&dir, &namespace, &uri, &bytes);
+                if let Some((dir, namespace, uri)) = &store {
+                    let _ = crate::cache::store(dir, namespace, uri, &bytes);
                 }
+                let (dimensions, _) = crate::tile_output::inspect(&bytes)?;
+                // Charge before the pixel decoder can allocate. The temporary
+                // allowance covers conversion and decoder workspace; only the
+                // actual RGBA allocation and descriptors remain charged later.
+                let pixels = u64::from(dimensions.width) * u64::from(dimensions.height);
+                let descriptors = u64::from(dimensions.height) * 192;
+                let mut reservation = budget.reserve(
+                    pixels
+                        .saturating_mul(16)
+                        .saturating_add(bytes.len() as u64)
+                        .saturating_add(descriptors),
+                    credit,
+                )?;
                 decode_tails.pixel_decodes.fetch_add(1, Ordering::SeqCst);
-                let image = load_image_with_metadata(&bytes)
-                    .map_err(|error| Error::DecodeFailed(error.to_string().into()))?;
-                Ok::<_, Error>(DecodedTile {
-                    image: image.image.to_rgba8(),
+                let image = load_image_with_limit(
+                    &bytes,
+                    Some(pixels.saturating_mul(16).saturating_add(bytes.len() as u64)),
+                )
+                .map_err(|error| Error::DecodeFailed(error.to_string().into()))?;
+                let decoded = DecodedTile {
+                    image: image.image.into_rgba8(),
                     icc_profile: image.icc_profile,
                     exif_metadata: image.exif_metadata,
+                };
+                reservation.shrink(crate::sink::tile_bytes(&decoded.image) + descriptors);
+                Ok::<_, Error>(ReceivedPixels {
+                    decoded,
+                    reservation,
                 })
             })
             .await
@@ -422,7 +500,7 @@ impl<'a> NativeHost<'a> {
         .await
     }
 
-    async fn tile(&self, tile: &Tile) -> Result<DecodedTile, Error> {
+    async fn tile(&self, tile: &Tile) -> Result<ReceivedPixels, Error> {
         let _flight = Flight::new(self);
         let namespace = crate::cache::job_namespace(&self.options.input_url);
         let dir = self
@@ -432,8 +510,13 @@ impl<'a> NativeHost<'a> {
             .unwrap_or_else(crate::imaging::default_tile_cache_dir);
         if let Some(bytes) = crate::cache::load(&dir, &namespace, &tile.request.uri) {
             self.diagnostics.count("cache_reads", 1.0);
-            if let Ok(decoded) = self.decode(bytes, Default::default(), None).await {
-                return Ok(decoded);
+            match self
+                .decode(bytes, Default::default(), None, &tile.placement)
+                .await
+            {
+                Ok(decoded) => return Ok(decoded),
+                Err(error) if error.is_terminal() || error.is_output() => return Err(error),
+                Err(_) => {}
             }
             self.controls.checkpoint(false).await?;
             let _ = std::fs::remove_file(
@@ -461,6 +544,7 @@ impl<'a> NativeHost<'a> {
             response.body,
             tile.placement.processing,
             Some((dir, namespace, tile.request.uri.clone())),
+            &tile.placement,
         )
         .await
     }
@@ -644,7 +728,7 @@ impl<'a> NativeHost<'a> {
                 })
                 .await?;
             let mut stats = self.instrumentation.borrow_mut();
-            stats.peak_encoded_bytes = stats.peak_encoded_bytes.max(peak);
+            stats.peak_retained_bytes = stats.peak_retained_bytes.max(peak);
         } else {
             let mut probes = self.encoded_probes.borrow_mut();
             let retained = probes
@@ -662,7 +746,7 @@ impl<'a> NativeHost<'a> {
         Ok(())
     }
 
-    fn place(&self, tile: &Tile, decoded: DecodedTile) -> Result<(), Error> {
+    fn place(&self, tile: &Tile, pixels: ReceivedPixels) -> Result<(), Error> {
         // Separate resource slots prevent probe indices from colliding with
         // final plan indices. Finish supplies the plan order of reused probes.
         let storage_index = if tile.placement.role.probe {
@@ -670,41 +754,87 @@ impl<'a> NativeHost<'a> {
         } else {
             tile.index
         };
-        let mut sink = self.sink.borrow_mut();
-        sink.note_declared(tile.placement.canvas.as_ref().map(size));
-        let retained = sink.retained_bytes();
-        let inflight = self.decode_tails.bytes.load(Ordering::SeqCst);
-        if decode_budget_exceeded(
-            DecodeLoad {
-                retained,
-                inflight,
-                tile: crate::sink::tile_bytes(&decoded.image),
-            },
-            sink.retain_cap_bytes(),
-        ) {
-            return Err(crate::output::memory_limit(LimitContext {
-                reason: LimitReason::Memory,
-                dimensions: None,
-                bytes_required: Some(
-                    retained
-                        .saturating_add(inflight)
-                        .saturating_add(crate::sink::tile_bytes(&decoded.image)),
-                ),
-                bytes_available: Some(sink.retain_cap_bytes()),
-            }));
+        if let Some(task) = self.raster.borrow().as_ref() {
+            task.pipe.place(
+                storage_index,
+                &tile.placement,
+                pixels.decoded,
+                pixels.reservation,
+            )?;
+        } else {
+            self.pending_pixels.borrow_mut().push(PendingPixels {
+                id: storage_index,
+                placement: tile.placement.clone(),
+                pixels,
+            });
         }
-        sink.place(
-            storage_index,
-            Vec2d {
-                x: tile.placement.position.x,
-                y: tile.placement.position.y,
-            },
-            tile.placement.expected_size.as_ref().map(size),
-            decoded,
-        )?;
         self.acquired.borrow_mut().insert(storage_index);
         self.instrumentation.borrow_mut().acquired = self.acquired.borrow().len() as u64;
         Ok(())
+    }
+
+    fn start_raster(
+        &self,
+        dimensions: Size,
+        tile_height: u32,
+        title: Option<&str>,
+    ) -> Result<(), Error> {
+        let destination = match &self.options.output {
+            OutputTarget::File(path) => path.clone(),
+            OutputTarget::AutoDir { dir, format } => auto_output_path(dir, title, *format),
+        };
+        let task = EncoderTask::start(
+            &destination,
+            dimensions,
+            tile_height,
+            self.format,
+            self.options.compression,
+            Arc::clone(&self.pixels),
+            self.controls.clone(),
+        )?;
+        let pipe = Arc::clone(&task.pipe);
+        *self.raster.borrow_mut() = Some(task);
+        for pending in self.pending_pixels.borrow_mut().drain(..) {
+            pipe.place(
+                pending.id,
+                &pending.placement,
+                pending.pixels.decoded,
+                pending.pixels.reservation,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn next_auto_destination(&self, title: Option<&str>, partial: bool) -> PathBuf {
+        let OutputTarget::AutoDir { dir, format } = &self.options.output else {
+            unreachable!("automatic destination")
+        };
+        let stem = safe_output_stem(title);
+        for suffix in 1..=9_999 {
+            let name = if suffix == 1 {
+                stem.clone()
+            } else {
+                format!("{stem}-{suffix}")
+            };
+            let path = dir.join(format!("{name}.{}", format.extension()));
+            let path = if partial {
+                crate::output::partial_path_for(&path)
+            } else {
+                path
+            };
+            if !path.exists() {
+                return path;
+            }
+        }
+        dir.join(format!("{stem}.{}", format.extension()))
+    }
+    fn report_preparation(&self, pipe: &PixelPipe) {
+        let mut progress = self.last_progress.borrow().clone();
+        progress.preparation = Some(OutputPreparation {
+            completed_pixels: pipe.consumed(),
+            total_pixels: u64::from(pipe.size.width) * u64::from(pipe.size.height),
+        });
+        self.report(progress);
     }
 }
 
@@ -752,9 +882,6 @@ impl Host for NativeHost<'_> {
         if let OutputTarget::File(path) = &self.options.output {
             crate::output::validate_destination(path, &self.format, self.options.overwrite)?;
         }
-        self.sink
-            .borrow_mut()
-            .note_declared(plan.canvas.as_ref().map(size));
         if matches!(self.format, OutputFormat::IiifDir | OutputFormat::Zif) {
             let destination = match &self.options.output {
                 OutputTarget::File(path) => path.clone(),
@@ -797,11 +924,17 @@ impl Host for NativeHost<'_> {
                 })
                 .await?;
             let mut stats = self.instrumentation.borrow_mut();
-            stats.peak_encoded_bytes = stats.peak_encoded_bytes.max(writer.peak_retained());
+            stats.peak_retained_bytes = stats.peak_retained_bytes.max(writer.peak_retained());
             self.decode_tails
                 .encoded_retained
                 .store(writer.retained_bytes(), Ordering::SeqCst);
             *self.tiled.borrow_mut() = Some(Arc::new(std::sync::Mutex::new(writer)));
+        } else if let Some(dimensions) = &plan.canvas {
+            self.start_raster(
+                dimensions.clone(),
+                plan.grid.as_ref().map_or(8, |grid| grid.tile_size.height),
+                plan.title.as_deref(),
+            )?;
         }
         *self.output_plan.borrow_mut() = Some(plan);
         Ok(())
@@ -895,8 +1028,8 @@ impl Host for NativeHost<'_> {
         }
         match self.tile(&tile).await {
             Ok(decoded) => {
-                let width = std::num::NonZeroU64::new(u64::from(decoded.image.width()));
-                let height = std::num::NonZeroU64::new(u64::from(decoded.image.height()));
+                let width = std::num::NonZeroU64::new(u64::from(decoded.decoded.image.width()));
+                let height = std::num::NonZeroU64::new(u64::from(decoded.decoded.image.height()));
                 if tile.placement.role.output {
                     self.place(&tile, decoded)
                         .map_err(|error| resource_context(error, &tile.request))?;
@@ -906,7 +1039,7 @@ impl Host for NativeHost<'_> {
                     _ => Ok(ProbeOutcome::Missing),
                 }
             }
-            Err(error) if matches!(error.cause(), Error::Cancelled) => {
+            Err(error) if error.is_terminal() || error.is_output() => {
                 Err(resource_context(error, &tile.request))
             }
             Err(_) => Ok(ProbeOutcome::Missing),
@@ -966,7 +1099,6 @@ impl Host for NativeHost<'_> {
                 destination.clone()
             };
             let controls = self.controls.clone();
-            let overwrite = self.options.overwrite;
             let reused = request.reused_tiles.clone();
             Some(
                 tokio::task::spawn_blocking(move || {
@@ -974,9 +1106,7 @@ impl Host for NativeHost<'_> {
                         .map_err(|_| Error::Internal("tile placement still active".into()))?
                         .into_inner()
                         .map_err(|_| Error::Internal("tile writer poisoned".into()))?;
-                    writer
-                        .finish(&destination, overwrite, &reused, &controls.0.cancelled)
-                        .map(|(size, bytes, decoded)| (destination, size, bytes, decoded))
+                    writer.finish(&destination, &reused, &controls.0.cancelled)
                 })
                 .await
                 .map_err(|_| Error::Internal("tile output task failed".into()))??,
@@ -984,49 +1114,116 @@ impl Host for NativeHost<'_> {
         } else {
             None
         };
-        let mut sink = self.sink.borrow_mut();
-        sink.note_declared(request.canvas.as_ref().map(size));
-        let acquired = self.acquired.borrow();
-        let (published, image_size, format) =
-            if let Some((published, dimensions, bytes, decoded)) = tiled_result {
-                self.instrumentation.borrow_mut().pixel_decodes += decoded;
-                sink.record_tile_output(bytes);
-                (published, size(&dimensions), self.format)
-            } else {
-                let image_size = sink.assemble()?;
-                let format = if matches!(self.options.output, OutputTarget::AutoImageDir { .. }) {
-                    automatic_image_format(image_size, sink.has_transparency())
-                } else {
-                    self.format
-                };
-                let destination = destination_for(format);
-                let published = sink.commit(crate::sink::CommitParams {
-                    dest: &destination,
-                    format,
-                    overwrite: self.options.overwrite,
-                    cancelled: &self.controls.0.cancelled,
-                    partial,
-                    reused_tiles: &request.reused_tiles,
-                })?;
-                (published, image_size, format)
+        let mut prepared = if let Some(prepared) = tiled_result {
+            prepared
+        } else {
+            if self.raster.borrow().is_none() {
+                let dimensions = request.canvas.clone().unwrap_or_else(|| {
+                    let mut dimensions = Size {
+                        width: 0,
+                        height: 0,
+                    };
+                    for pending in self.pending_pixels.borrow().iter() {
+                        let image = &pending.pixels.decoded.image;
+                        let w = image.width().min(
+                            pending
+                                .placement
+                                .expected_size
+                                .as_ref()
+                                .map_or(image.width(), |s| s.width),
+                        );
+                        let h = image.height().min(
+                            pending
+                                .placement
+                                .expected_size
+                                .as_ref()
+                                .map_or(image.height(), |s| s.height),
+                        );
+                        dimensions.width = dimensions
+                            .width
+                            .max(pending.placement.position.x.saturating_add(w));
+                        dimensions.height = dimensions
+                            .height
+                            .max(pending.placement.position.y.saturating_add(h));
+                    }
+                    dimensions
+                });
+                self.start_raster(dimensions, 8, request.title.as_deref())?;
+            }
+            let task = self.raster.borrow_mut().take().expect("raster task");
+            let pipe = Arc::clone(&task.pipe);
+            pipe.finish(&request.reused_tiles);
+            let mut wait = std::pin::pin!(task.wait());
+            let mut updates = tokio::time::interval(Duration::from_millis(100));
+            let staging = loop {
+                tokio::select! {
+                    result = &mut wait => break result?,
+                    _ = updates.tick() => self.report_preparation(&pipe),
+                }
             };
-        let stats = sink.stats();
+            self.report_preparation(&pipe);
+            crate::output::PreparedOutput {
+                staging: crate::output::StagedOutput::File(staging),
+                size: pipe.size.clone(),
+                pixel_decodes: 0,
+                late_writes: pipe.late(),
+            }
+        };
+        let image_size = size(&prepared.size);
+        self.instrumentation.borrow_mut().pixel_decodes += prepared.pixel_decodes;
+        let late_repaints = prepared.late_writes;
+        let mut published = if partial {
+            crate::output::partial_path_for(&destination)
+        } else {
+            destination
+        };
+        let mut collisions = 0;
+        let encoded_bytes = loop {
+            let validation = crate::output::validate_destination(
+                &published,
+                &self.format,
+                self.options.overwrite,
+            );
+            let result = if validation.is_ok() {
+                let path = published.clone();
+                let controls = self.controls.clone();
+                let overwrite = self.options.overwrite;
+                let (output, result) = tokio::task::spawn_blocking(move || {
+                    let result = prepared.publish(&path, overwrite, &controls.0.cancelled);
+                    (prepared, result)
+                })
+                .await
+                .map_err(|_| Error::Internal("output publication task failed".into()))?;
+                prepared = output;
+                result
+            } else {
+                validation.map(|_| 0)
+            };
+            match result {
+                Ok(bytes) => break bytes,
+                Err(Error::OutputExists)
+                    if matches!(self.options.output, OutputTarget::AutoDir { .. })
+                        && collisions < 9_999 =>
+                {
+                    collisions += 1;
+                    published = self.next_auto_destination(request.title.as_deref(), partial);
+                }
+                Err(error) => return Err(error),
+            }
+        };
+        let acquired = self.acquired.borrow();
         let mut instrumentation = self.instrumentation.borrow().clone();
         instrumentation.pixel_decodes += self.decode_tails.pixel_decodes.load(Ordering::SeqCst);
-        instrumentation.peak_retained_bytes = stats.peak_retained_bytes;
+        instrumentation.peak_retained_bytes =
+            instrumentation.peak_retained_bytes.max(self.pixels.peak());
         instrumentation.peak_decode_inflight_bytes =
             self.decode_tails.peak_bytes.load(Ordering::SeqCst);
-        instrumentation.canvas_bytes = stats.canvas_bytes;
-        instrumentation.encoded_bytes = stats.encoded_bytes;
-        instrumentation.peak_encoded_bytes = instrumentation
-            .peak_encoded_bytes
-            .max(stats.peak_encoded_bytes);
-        instrumentation.peak_spool_bytes = stats.peak_spool_bytes;
-        instrumentation.late_repaints = stats.late_repaints;
-        instrumentation.accounted_peak_bytes = stats
-            .canvas_bytes
-            .saturating_add(stats.peak_retained_bytes)
-            .saturating_add(instrumentation.peak_encoded_bytes);
+        instrumentation.canvas_bytes = 0;
+        instrumentation.encoded_bytes = encoded_bytes;
+        instrumentation.peak_encoded_bytes = 64 << 10;
+        instrumentation.peak_spool_bytes = 0;
+        instrumentation.late_repaints = late_repaints;
+        instrumentation.accounted_peak_bytes = instrumentation.peak_retained_bytes;
         let output = Output {
             canvas: Some(Size {
                 width: image_size.x,
@@ -1092,6 +1289,14 @@ impl Host for NativeHost<'_> {
     }
 
     async fn checkpoint(&self, gate: Gate) -> Result<(), Error> {
+        if let Some(error) = self
+            .raster
+            .borrow()
+            .as_ref()
+            .and_then(|task| task.pipe.error())
+        {
+            return Err(error);
+        }
         self.controls
             .checkpoint(matches!(gate, Gate::Acquisition))
             .await
@@ -1107,11 +1312,18 @@ impl Host for NativeHost<'_> {
         .await
     }
 
-    fn report(&self, progress: Progress) {
+    fn report(&self, mut progress: Progress) {
+        if let Some(task) = self.raster.borrow().as_ref() {
+            progress.preparation = Some(OutputPreparation {
+                completed_pixels: task.pipe.consumed(),
+                total_pixels: u64::from(task.pipe.size.width) * u64::from(task.pipe.size.height),
+            });
+        }
         if progress.source_format.is_some() {
             *self.source_format.borrow_mut() = progress.source_format.clone();
         }
         self.diagnostics.observe(&progress);
+        *self.last_progress.borrow_mut() = progress.clone();
         (self.progress.borrow_mut())(progress);
     }
 
@@ -1126,16 +1338,17 @@ impl Host for NativeHost<'_> {
     async fn settle(&self) {
         self.tiled.borrow_mut().take();
         self.encoded_probes.borrow_mut().clear();
+        let task = self.raster.borrow_mut().take();
+        if let Some(task) = task {
+            task.abort().await;
+        }
+        self.pending_pixels.borrow_mut().clear();
         while self.decode_tails.active.load(Ordering::SeqCst) != 0 {
             let changed = self.decode_tails.changed.notified();
             if self.decode_tails.active.load(Ordering::SeqCst) != 0 {
                 changed.await;
             }
         }
-        if self.published.borrow().is_none() {
-            self.sink.borrow_mut().rollback();
-        }
-        self.sink.borrow_mut().release();
     }
 }
 
@@ -1166,6 +1379,7 @@ fn cancelled() -> Error {
 
 #[derive(Default)]
 struct DecodeTails {
+    pixel_decodes: AtomicU64,
     active: AtomicUsize,
     bytes: AtomicU64,
     peak_bytes: AtomicU64,
@@ -1216,25 +1430,53 @@ impl Drop for Flight<'_, '_> {
     }
 }
 
-/// The byte load one more decoded tile adds on top of the retained and
-/// in-flight bytes. The three same-typed counts stay named here so the
-/// budget call site never reads as four bare numbers.
-struct DecodeLoad {
-    retained: u64,
-    inflight: u64,
-    tile: u64,
-}
-
-fn decode_budget_exceeded(load: DecodeLoad, cap: u64) -> bool {
-    load.retained
-        .saturating_add(load.inflight)
-        .saturating_add(load.tile)
-        > cap
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resource_limit_precedes_pixel_decoding_and_cleanup_awaits_every_worker() {
+        let directory = crate::sink::temp_sibling(&std::env::temp_dir().join("decode-reservation"));
+        std::fs::create_dir(&directory).expect("test directory");
+        let source = directory.join("image.dzi");
+        let tiles = directory.join("image_files/9");
+        std::fs::create_dir_all(&tiles).expect("tiles");
+        std::fs::write(&source, "<Image TileSize=\"512\" Overlap=\"0\" Format=\"png\" xmlns=\"http://schemas.microsoft.com/deepzoom/2008\"><Size Width=\"512\" Height=\"512\"/></Image>").expect("DZI");
+        image::RgbaImage::new(512, 512)
+            .save(tiles.join("0_0.png"))
+            .expect("tile");
+        let host = NativeHost::new(JobOptions {
+            input_url: source.to_string_lossy().into_owned(),
+            output: OutputTarget::File(directory.join("out.png")),
+            output_retain_cap: 2 << 20,
+            largest: true,
+            cache_dir: Some(directory.join("cache")),
+            ..Default::default()
+        })
+        .expect("host");
+        let error = host
+            .transport
+            .block_on(dezoomify::dezoomify(
+                host.inputs(),
+                host.algorithm_options(),
+                &host,
+            ))
+            .expect_err("tile cannot fit its decode reservation");
+        assert!(
+            matches!(error.cause(),Error::LimitExceeded {limit} if limit.reason == LimitReason::Memory)
+        );
+        assert_eq!(host.decode_tails.pixel_decodes.load(Ordering::SeqCst), 0);
+        assert_eq!(host.decode_tails.active.load(Ordering::SeqCst), 0);
+        assert_eq!(host.pixels.current(), 0);
+        assert!(host.raster.borrow().is_none());
+        assert!(!directory.join("out.png").exists());
+        assert!(!std::fs::read_dir(&directory).expect("directory").any(|e| e
+            .expect("entry")
+            .file_name()
+            .to_string_lossy()
+            .contains(".tmp.")));
+        std::fs::remove_dir_all(directory).expect("cleanup");
+    }
 
     #[test]
     fn pause_suspends_acquisition_and_cancel_releases_the_wait() {
@@ -1286,33 +1528,5 @@ mod tests {
             assert_eq!(tails.bytes.load(Ordering::SeqCst), 0);
             assert_eq!(tails.peak_bytes.load(Ordering::SeqCst), 1024);
         });
-    }
-
-    #[test]
-    fn decode_budget_counts_retained_pixels_and_unfinished_work() {
-        assert!(!decode_budget_exceeded(
-            DecodeLoad {
-                retained: 400,
-                inflight: 100,
-                tile: 12
-            },
-            512
-        ));
-        assert!(decode_budget_exceeded(
-            DecodeLoad {
-                retained: 400,
-                inflight: 100,
-                tile: 13
-            },
-            512
-        ));
-        assert!(decode_budget_exceeded(
-            DecodeLoad {
-                retained: u64::MAX,
-                inflight: u64::MAX,
-                tile: 1
-            },
-            u64::MAX - 1
-        ));
     }
 }

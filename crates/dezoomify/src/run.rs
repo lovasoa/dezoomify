@@ -50,6 +50,7 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
             .map(size),
         completed: 0,
         total: None,
+        preparation: None,
     };
     host.report(progress.clone());
     host.checkpoint(Gate::Cancellation).await?;

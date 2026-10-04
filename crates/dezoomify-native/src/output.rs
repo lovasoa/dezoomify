@@ -4,16 +4,63 @@
 //! encodes one multi-directory TIFF pyramid file; `iiif-dir`
 //! writes a static tiled directory holding an `info.json` beside JPEG tiles.
 
-use std::io::{Seek, Write};
+use std::io::{Read, Seek, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use dezoomify::model::{Error, Failure, LimitContext, OutputFormat};
+use dezoomify::model::{Error, Failure, OutputFormat, Size};
 
 /// One rendered `iiif-dir` tile set: `(relative path, bytes)` pairs in
 /// sorted relative-path order.
 pub type IiifTiles = Vec<(String, Vec<u8>)>;
 
+/// All routes end here, including a future encoded JPEG join. Preparation
+/// owns staging; publication can choose another name without re-encoding.
+pub(crate) struct PreparedOutput {
+    pub(crate) staging: StagedOutput,
+    pub(crate) size: Size,
+    pub(crate) pixel_decodes: u64,
+    pub(crate) late_writes: u64,
+}
+pub(crate) enum StagedOutput {
+    File(StagedFile),
+    Directory(StagedDirectory),
+}
+impl PreparedOutput {
+    pub(crate) fn publish(
+        &mut self,
+        destination: &Path,
+        overwrite: bool,
+        cancelled: &AtomicBool,
+    ) -> Result<u64, Error> {
+        match &mut self.staging {
+            StagedOutput::File(file) => file.publish(destination, overwrite, cancelled),
+            StagedOutput::Directory(directory) => {
+                // An automatic-name collision can change the directory name.
+                let manifest = directory.path.join("info.json");
+                let mut info: serde_json::Value = serde_json::from_slice(
+                    &std::fs::read(&manifest)
+                        .map_err(|e| write_failed("manifest read failed", &e))?,
+                )
+                .map_err(|e| Error::EncodeFailed(e.to_string().into()))?;
+                info["@id"] = destination
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("image")
+                    .into();
+                directory.write(
+                    "info.json",
+                    &serde_json::to_vec_pretty(&info)
+                        .map_err(|e| Error::EncodeFailed(e.to_string().into()))?,
+                    cancelled,
+                )?;
+                let bytes = directory_bytes(&directory.path, cancelled)?;
+                directory.publish(destination, cancelled)?;
+                Ok(bytes)
+            }
+        }
+    }
+}
 pub(crate) fn directory_bytes(path: &Path, cancelled: &AtomicBool) -> Result<u64, Error> {
     if cancelled.load(Ordering::SeqCst) {
         return Err(Error::Cancelled);
@@ -56,7 +103,11 @@ impl StagedFile {
                 .map_err(|e| write_failed("output directory creation failed", &e))?;
         }
         let path = crate::sink::temp_sibling(destination);
-        let file = std::fs::File::create_new(&path)
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
             .map_err(|e| write_failed("staging file creation failed", &e))?;
         Ok(Self {
             path,
@@ -78,20 +129,19 @@ impl StagedFile {
     }
 
     pub(crate) fn publish(
-        mut self,
+        &mut self,
         destination: &Path,
         overwrite: bool,
         cancelled: &AtomicBool,
     ) -> Result<u64, Error> {
-        self.check_error()?;
-        let file = self.file.take().expect("unpublished staging file");
-        file.sync_all()
-            .map_err(|e| write_failed("output sync failed", &e))?;
-        let bytes = file
-            .metadata()
+        if let Some(file) = self.file.as_ref() {
+            file.sync_all()
+                .map_err(|e| write_failed("output sync failed", &e))?;
+        }
+        let bytes = std::fs::metadata(&self.path)
             .map_err(|e| write_failed("output stat failed", &e))?
             .len();
-        drop(file);
+        self.file.take();
         if cancelled.load(Ordering::SeqCst) {
             return Err(Error::Cancelled);
         }
@@ -113,6 +163,44 @@ impl StagedFile {
                 })?;
         }
         Ok(bytes)
+    }
+
+    /// Insert finalized header metadata after streaming the pixels. Move the
+    /// already compressed payload backwards using a single bounded buffer.
+    pub(crate) fn insert_header(
+        &mut self,
+        offset: u64,
+        bytes: &[u8],
+        cancelled: &AtomicBool,
+    ) -> Result<(), Error> {
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        let file = self.file.as_mut().expect("unpublished staging file");
+        let len = file
+            .metadata()
+            .map_err(|e| write_failed("output stat failed", &e))?
+            .len();
+        let mut remaining = len.saturating_sub(offset);
+        let mut buffer = vec![0; 64 << 10];
+        while remaining > 0 {
+            if cancelled.load(Ordering::SeqCst) {
+                return Err(Error::Cancelled);
+            }
+            let count = remaining.min(buffer.len() as u64) as usize;
+            remaining -= count as u64;
+            file.seek(std::io::SeekFrom::Start(offset + remaining))
+                .and_then(|_| file.read_exact(&mut buffer[..count]))
+                .map_err(|e| write_failed("metadata payload read failed", &e))?;
+            file.seek(std::io::SeekFrom::Start(
+                offset + remaining + bytes.len() as u64,
+            ))
+            .and_then(|_| file.write_all(&buffer[..count]))
+            .map_err(|e| write_failed("metadata payload move failed", &e))?;
+        }
+        file.seek(std::io::SeekFrom::Start(offset))
+            .and_then(|_| file.write_all(bytes))
+            .map_err(|e| write_failed("metadata header write failed", &e))
     }
 }
 
@@ -219,7 +307,7 @@ impl StagedDirectory {
         Ok(())
     }
 
-    pub(crate) fn publish(self, destination: &Path, cancelled: &AtomicBool) -> Result<(), Error> {
+    pub(crate) fn publish(&self, destination: &Path, cancelled: &AtomicBool) -> Result<(), Error> {
         if cancelled.load(Ordering::SeqCst) {
             return Err(Error::Cancelled);
         }
@@ -512,12 +600,6 @@ pub fn write_iiif_dir(dir: &Path, info_json: &[u8], tiles: &IiifTiles) -> Result
     Ok(())
 }
 
-/// A memory- or format-budget refusal with structured facts for host copy;
-/// display prose is presentation only and never a data channel.
-pub(crate) fn memory_limit(limit: LimitContext) -> Error {
-    Error::LimitExceeded { limit }
-}
-
 fn output_exists() -> Error {
     Error::OutputExists
 }
@@ -638,12 +720,11 @@ mod tests {
             std::fs::read(&destination).unwrap(),
             b"created during encoding"
         );
-        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
-        std::fs::remove_file(&destination).unwrap();
-        let mut staged = StagedFile::new(&destination).unwrap();
-        staged.writer(&cancelled).write_all(b"published").unwrap();
-        assert_eq!(staged.publish(&destination, false, &cancelled).unwrap(), 9);
-        assert_eq!(std::fs::read(&destination).unwrap(), b"published");
+        let next = directory.join("output-2.png");
+        staged.publish(&next, false, &cancelled).unwrap();
+        assert_eq!(std::fs::read(&next).unwrap(), b"replacement");
+        drop(staged);
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 2);
         std::fs::remove_dir_all(directory).unwrap();
     }
 

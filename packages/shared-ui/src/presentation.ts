@@ -73,7 +73,21 @@ export function presentProgress(progress: Progress, opts?: { paused?: boolean })
       progress.total != null || progress.completed > 0
         ? { current: progress.completed, total: progress.total ?? null }
         : null,
-    paused: opts?.paused === true,
+    paused: opts?.paused === true && progress.phase !== "output",
+    ...(progress.phase === "output" && progress.preparation
+      ? {
+          detailKey: "view.job.preparation" as const,
+          detailVars: {
+            percent: Math.min(
+              100,
+              Math.floor(
+                (progress.preparation.completed_pixels * 100) /
+                  Math.max(1, progress.preparation.total_pixels),
+              ),
+            ),
+          },
+        }
+      : {}),
     ...(selected && maximum && selected.width * selected.height < maximum.width * maximum.height
       ? { resolution: { selected, maximum } }
       : {}),

@@ -681,11 +681,9 @@ impl ZifWriter {
 
     pub(crate) fn finish(
         mut self,
-        destination: &Path,
-        overwrite: bool,
         reused: &[ReusedTile],
         cancelled: &AtomicBool,
-    ) -> Result<(Size, u64, u64), Error> {
+    ) -> Result<crate::output::PreparedOutput, Error> {
         if !self.base.regular {
             let mut tiles = BTreeMap::new();
             for (index, tile) in std::mem::take(&mut self.base.tiles) {
@@ -840,8 +838,12 @@ impl ZifWriter {
             }
             previous = next;
         }
-        let bytes = self.staging.publish(destination, overwrite, cancelled)?;
-        Ok((full_size, bytes, self.decoded))
+        Ok(crate::output::PreparedOutput {
+            staging: crate::output::StagedOutput::File(self.staging),
+            size: full_size,
+            pixel_decodes: self.decoded,
+            late_writes: 0,
+        })
     }
 }
 

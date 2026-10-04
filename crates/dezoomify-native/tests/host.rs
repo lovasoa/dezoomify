@@ -985,17 +985,12 @@ fn bounded_concurrency_and_memory_accounting() {
     );
     assert!(stats.bytes_fetched > 0, "fetched bytes accounted");
     assert_eq!(
-        stats.canvas_bytes,
-        512 * 512 * 4,
-        "canvas costs 4 bytes per pixel"
+        stats.canvas_bytes, 0,
+        "streaming raster output allocates no full-image canvas"
     );
     assert_eq!(
-        stats.accounted_peak_bytes,
-        stats
-            .canvas_bytes
-            .saturating_add(stats.peak_retained_bytes)
-            .saturating_add(stats.peak_encoded_bytes),
-        "accounted peak includes the output buffer, not the file length"
+        stats.accounted_peak_bytes, stats.peak_retained_bytes,
+        "RAM reservations include the bounded output buffer"
     );
     assert!(
         stats.peak_retained_bytes <= 512 << 20,
