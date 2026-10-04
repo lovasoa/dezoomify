@@ -15,13 +15,14 @@ jobs:
     # Sharded `cargo xtask ci local`: each leg runs one lane group so PRs get
     # parallel feedback. Local repro stays serial via `cargo xtask ci local`
     # (crates/xtask/src/ci.rs); lane semantics live there, never here.
-    name: deterministic (${{ matrix.lane-group }})
+    name: deterministic (${{ matrix.lane-group }}, Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       max-parallel: 4
       matrix:
+        node-version: [22.18.0]
         lane-group:
           - check
           - rust
@@ -29,6 +30,13 @@ jobs:
           - browser+web
           - extension
           - bindings+security
+        include:
+          - lane-group: check
+            node-version: 24.x
+          - lane-group: browser+web
+            node-version: 24.x
+          - lane-group: extension
+            node-version: 24.x
     steps:
       - name: Locate Firefox driver cache
         if: matrix.lane-group == 'extension'
@@ -38,6 +46,7 @@ jobs:
           fetch-depth: 0
       - uses: ./.github/actions/setup-pnpm
         with:
+          node-version: ${{ matrix.node-version }}
           install: ${{ matrix.lane-group == 'check' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' || matrix.lane-group == 'bindings+security' }}
       - name: Set up Rust toolchain (WASM target)
         if: matrix.lane-group == 'check' || matrix.lane-group == 'wasm' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' || matrix.lane-group == 'bindings+security'

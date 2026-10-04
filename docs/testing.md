@@ -9,6 +9,10 @@ A single added test fixture that fits the existing test runner is preferable to 
 packaged extensions in Chromium and Firefox. `cargo xtask ci local` adds static
 checks, WASM portability, and the dependency audit.
 
+CI runs every deterministic lane group on the minimum Node 22.18.0 release.
+The check, browser/website, and extension lane groups also run on Node 24.x to
+cover both supported LTS lines without duplicating Rust-only lanes.
+
 ## Shared product matrix
 
 [`fixtures/`](../fixtures/README.md) contains ordinary files and relative symlinks.

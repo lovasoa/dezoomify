@@ -11,7 +11,7 @@ import type { RequestPurpose } from "@dezoomify/wasm-bindings";
 
 // Native base64 codec (Baseline 2025). The extension manifest requires
 // browsers that ship it; the atob fallback below exists only for older
-// runtimes such as the pinned Node 24 toolchain. Not in the ES2022 lib yet.
+// runtimes such as Node 22 and 24. Not in the ES2022 lib yet.
 declare global {
   interface Uint8ArrayConstructor {
     fromBase64(data: string): Uint8Array;
@@ -136,7 +136,7 @@ export function forwardCoreHeaders(
 /**
  * Decode one base64 source payload within a byte cap, null when malformed
  * or over budget. Prefers the native codec; the atob loop covers runtimes
- * older than the extension's minimum browsers (notably Node 24).
+ * older than the extension's minimum browsers (notably Node 22 and 24).
  * @param {unknown} data
  */
 export function decodeBase64Payload(data: unknown, maxBytes: number): Uint8Array | null {

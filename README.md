@@ -80,7 +80,7 @@ which app you used, and the error message or diagnostic report from
 
 ## Build and contribute
 
-Install Rust and Node.js 24.15.0 or newer, then run these commands from the
+Install Rust and Node.js 22.18.0 or newer, then run these commands from the
 repository root:
 
 ```sh

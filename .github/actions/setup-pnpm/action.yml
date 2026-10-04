@@ -1,6 +1,10 @@
 name: setup-node-pnpm
 description: Set up the repository-pinned Node and pnpm versions, optionally installing the workspace
 inputs:
+  node-version:
+    description: Override the minimum Node version pinned in .node-version
+    required: false
+    default: ""
   install:
     description: Install all workspace dependencies with the frozen root lockfile
     required: false
@@ -11,7 +15,8 @@ runs:
     - name: Set up Node
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
-        node-version-file: .node-version
+        node-version: ${{ inputs.node-version }}
+        node-version-file: ${{ inputs.node-version == '' && '.node-version' || '' }}
     - name: Resolve pnpm version from package.json
       id: resolve
       shell: bash
