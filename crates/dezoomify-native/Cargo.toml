@@ -24,7 +24,6 @@ tempfile = "3.27"
 fdeflate = "0.3"
 zif-tiff = "0.3.0"
 jpeg-encoder = "0.7.1"
-fdeflate = "0.3"
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 rustix = { version = "1", features = ["fs"] }
