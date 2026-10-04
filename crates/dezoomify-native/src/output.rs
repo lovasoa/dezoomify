@@ -4,13 +4,121 @@
 //! encodes one multi-directory TIFF pyramid file; `iiif-dir`
 //! writes a static tiled directory holding an `info.json` beside JPEG tiles.
 
+use std::io::{Seek, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use dezoomify::model::{Error, Failure, LimitContext, OutputFormat};
 
 /// One rendered `iiif-dir` tile set: `(relative path, bytes)` pairs in
 /// sorted relative-path order.
 pub type IiifTiles = Vec<(String, Vec<u8>)>;
+
+/// An exclusively created, invocation-owned file. Drop removes unpublished
+/// output, including when an encoder or publication fails.
+pub(crate) struct StagedFile {
+    path: std::path::PathBuf,
+    file: Option<std::fs::File>,
+}
+
+impl StagedFile {
+    pub(crate) fn new(destination: &Path) -> Result<Self, Error> {
+        if let Some(parent) = destination.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| write_failed("output directory creation failed", &e))?;
+        }
+        let path = crate::sink::temp_sibling(destination);
+        let file = std::fs::File::create_new(&path)
+            .map_err(|e| write_failed("staging file creation failed", &e))?;
+        Ok(Self {
+            path,
+            file: Some(file),
+        })
+    }
+
+    pub(crate) fn writer<'a>(&'a mut self, cancelled: &'a AtomicBool) -> GuardedFile<'a> {
+        GuardedFile {
+            file: self.file.as_mut().expect("unpublished staging file"),
+            cancelled,
+        }
+    }
+
+    pub(crate) fn publish(
+        mut self,
+        destination: &Path,
+        overwrite: bool,
+        cancelled: &AtomicBool,
+    ) -> Result<u64, Error> {
+        let file = self.file.take().expect("unpublished staging file");
+        file.sync_all()
+            .map_err(|e| write_failed("output sync failed", &e))?;
+        let bytes = file
+            .metadata()
+            .map_err(|e| write_failed("output stat failed", &e))?
+            .len();
+        drop(file);
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(Error::Cancelled);
+        }
+        if overwrite {
+            std::fs::rename(&self.path, destination)
+                .map_err(|e| write_failed("output publication failed", &e))?;
+        } else {
+            // Unlike rename, a hard link cannot overwrite a destination that
+            // appeared after preflight. Both paths are on the same filesystem.
+            std::fs::hard_link(&self.path, destination).map_err(|e| {
+                if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    Error::OutputExists
+                } else {
+                    write_failed("output publication failed", &e)
+                }
+            })?;
+        }
+        Ok(bytes)
+    }
+}
+
+impl Drop for StagedFile {
+    fn drop(&mut self) {
+        self.file.take();
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// Standard Write/Seek adapter shared by the concrete native encoders.
+pub(crate) struct GuardedFile<'a> {
+    file: &'a mut std::fs::File,
+    cancelled: &'a AtomicBool,
+}
+
+impl GuardedFile<'_> {
+    fn check(&self) -> std::io::Result<()> {
+        if self.cancelled.load(Ordering::SeqCst) {
+            // write_all retries Interrupted, so use a terminal error kind.
+            Err(std::io::Error::other("output cancelled"))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl Write for GuardedFile<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.check()?;
+        self.file.write(bytes)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.check()?;
+        self.file.flush()
+    }
+}
+
+impl Seek for GuardedFile<'_> {
+    fn seek(&mut self, position: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.check()?;
+        self.file.seek(position)
+    }
+}
 
 pub fn infer_from_path(path: &Path) -> Result<OutputFormat, Error> {
     if path.is_dir() {
@@ -258,6 +366,39 @@ pub(crate) fn write_failed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn staged_file_cancellation_and_late_collision_preserve_destination() {
+        let directory = crate::sink::temp_sibling(&std::env::temp_dir().join("staging-test"));
+        std::fs::create_dir(&directory).unwrap();
+        let destination = directory.join("output.png");
+        let cancelled = AtomicBool::new(false);
+        {
+            let mut staged = StagedFile::new(&destination).unwrap();
+            staged.writer(&cancelled).write_all(b"unpublished").unwrap();
+            cancelled.store(true, Ordering::SeqCst);
+            assert!(staged.writer(&cancelled).write_all(b"more").is_err());
+            assert!(matches!(
+                staged.publish(&destination, true, &cancelled),
+                Err(Error::Cancelled)
+            ));
+        }
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
+        cancelled.store(false, Ordering::SeqCst);
+        let mut staged = StagedFile::new(&destination).unwrap();
+        staged.writer(&cancelled).write_all(b"replacement").unwrap();
+        std::fs::write(&destination, b"created during encoding").unwrap();
+        assert!(matches!(
+            staged.publish(&destination, false, &cancelled),
+            Err(Error::OutputExists)
+        ));
+        assert_eq!(
+            std::fs::read(&destination).unwrap(),
+            b"created during encoding"
+        );
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn partial_path_inserts_partial_before_the_extension() {

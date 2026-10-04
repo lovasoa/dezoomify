@@ -156,13 +156,21 @@ pub fn encode_png(
     icc_profile: Option<&[u8]>,
     exif_metadata: Option<&[u8]>,
 ) -> Result<Vec<u8>, Error> {
-    use image::codecs::png::FilterType;
     let mut bytes = Vec::new();
-    let mut encoder = image::codecs::png::PngEncoder::new_with_quality(
-        &mut bytes,
-        compression,
-        FilterType::Adaptive,
-    );
+    encode_png_to(&mut bytes, image, compression, icc_profile, exif_metadata)?;
+    Ok(bytes)
+}
+
+pub(crate) fn encode_png_to<W: std::io::Write>(
+    writer: W,
+    image: &image::RgbaImage,
+    compression: image::codecs::png::CompressionType,
+    icc_profile: Option<&[u8]>,
+    exif_metadata: Option<&[u8]>,
+) -> Result<(), Error> {
+    use image::codecs::png::FilterType;
+    let mut encoder =
+        image::codecs::png::PngEncoder::new_with_quality(writer, compression, FilterType::Adaptive);
     if let Some(profile) = icc_profile {
         let _ = image::ImageEncoder::set_icc_profile(&mut encoder, profile.to_vec());
     }
@@ -181,7 +189,7 @@ pub fn encode_png(
             format!("png encode failed: {}", dezoomify::model::chain_text(&e)).into(),
         )
     })?;
-    Ok(bytes)
+    Ok(())
 }
 
 /// Encode the assembled canvas as JPEG at `quality` (native default
@@ -194,6 +202,33 @@ pub fn encode_jpeg(
     quality: u8,
     icc_profile: Option<&[u8]>,
 ) -> Result<Vec<u8>, Error> {
+    let mut bytes = Vec::new();
+    encode_jpeg_to(&mut bytes, image, quality, icc_profile)?;
+    Ok(bytes)
+}
+
+/// Borrow RGB channels without allocating an RGB copy of the canvas.
+struct RgbView<'a>(&'a image::RgbaImage);
+
+impl image::GenericImageView for RgbView<'_> {
+    type Pixel = image::Rgb<u8>;
+
+    fn dimensions(&self) -> (u32, u32) {
+        self.0.dimensions()
+    }
+
+    fn get_pixel(&self, x: u32, y: u32) -> Self::Pixel {
+        let pixel = self.0.get_pixel(x, y);
+        image::Rgb([pixel[0], pixel[1], pixel[2]])
+    }
+}
+
+pub(crate) fn encode_jpeg_to<W: std::io::Write>(
+    writer: W,
+    image: &image::RgbaImage,
+    quality: u8,
+    icc_profile: Option<&[u8]>,
+) -> Result<(), Error> {
     if image.width() > JPEG_MAX_SIDE || image.height() > JPEG_MAX_SIDE {
         return Err(Error::LimitExceeded {
             limit: LimitContext {
@@ -207,28 +242,16 @@ pub fn encode_jpeg(
             },
         });
     }
-    let mut bytes = Vec::new();
-    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, quality);
+    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(writer, quality);
     if let Some(profile) = icc_profile {
         let _ = image::ImageEncoder::set_icc_profile(&mut encoder, profile.to_vec());
     }
-    let rgb = image::RgbImage::from_fn(image.width(), image.height(), |x, y| {
-        let pixel = image.get_pixel(x, y);
-        image::Rgb([pixel[0], pixel[1], pixel[2]])
-    });
-    image::ImageEncoder::write_image(
-        encoder,
-        rgb.as_raw(),
-        rgb.width(),
-        rgb.height(),
-        image::ExtendedColorType::Rgb8,
-    )
-    .map_err(|e| {
+    encoder.encode_image(&RgbView(image)).map_err(|e| {
         Error::EncodeFailed(
             format!("jpeg encode failed: {}", dezoomify::model::chain_text(&e)).into(),
         )
     })?;
-    Ok(bytes)
+    Ok(())
 }
 
 /// Encode the assembled canvas as TIFF: one deflate-compressed image at the
@@ -243,15 +266,25 @@ pub fn encode_tiff(
     icc_profile: Option<&[u8]>,
 ) -> Result<Vec<u8>, Error> {
     let mut cursor = std::io::Cursor::new(Vec::new());
+    encode_tiff_to(&mut cursor, image, compression, icc_profile)?;
+    Ok(cursor.into_inner())
+}
+
+pub(crate) fn encode_tiff_to<W: std::io::Write + std::io::Seek>(
+    writer: W,
+    image: &image::RgbaImage,
+    compression: u8,
+    icc_profile: Option<&[u8]>,
+) -> Result<(), Error> {
     {
-        let mut encoder = tiff::encoder::TiffEncoder::new(&mut cursor)
+        let mut encoder = tiff::encoder::TiffEncoder::new(writer)
             .map_err(tiff_failed)?
             .with_compression(tiff::encoder::Compression::Deflate(tiff_compression_for(
                 compression,
             )));
         write_tiff_directory(&mut encoder, image, icc_profile)?;
     }
-    Ok(cursor.into_inner())
+    Ok(())
 }
 
 /// Smallest pyramid side kept in [`encode_zif_pyramid`]: levels halve until
@@ -281,8 +314,18 @@ pub fn encode_zif_pyramid(
     icc_profile: Option<&[u8]>,
 ) -> Result<Vec<u8>, Error> {
     let mut cursor = std::io::Cursor::new(Vec::new());
+    encode_zif_pyramid_to(&mut cursor, image, compression, icc_profile)?;
+    Ok(cursor.into_inner())
+}
+
+pub(crate) fn encode_zif_pyramid_to<W: std::io::Write + std::io::Seek>(
+    writer: W,
+    image: &image::RgbaImage,
+    compression: u8,
+    icc_profile: Option<&[u8]>,
+) -> Result<(), Error> {
     {
-        let mut encoder = tiff::encoder::TiffEncoder::new(&mut cursor)
+        let mut encoder = tiff::encoder::TiffEncoder::new(writer)
             .map_err(tiff_failed)?
             .with_compression(tiff::encoder::Compression::Deflate(tiff_compression_for(
                 compression,
@@ -303,7 +346,7 @@ pub fn encode_zif_pyramid(
             write_tiff_directory(&mut encoder, view, icc_profile)?;
         }
     }
-    Ok(cursor.into_inner())
+    Ok(())
 }
 
 fn tiff_failed(error: tiff::TiffError) -> Error {
@@ -336,6 +379,16 @@ fn write_tiff_directory<W: std::io::Write + std::io::Seek>(
 /// `--compression` does not apply here; the first tile's ICC profile is
 /// embedded when present.
 pub fn encode_webp(image: &image::RgbaImage, icc_profile: Option<&[u8]>) -> Result<Vec<u8>, Error> {
+    let mut bytes = Vec::new();
+    encode_webp_to(&mut bytes, image, icc_profile)?;
+    Ok(bytes)
+}
+
+pub(crate) fn encode_webp_to<W: std::io::Write>(
+    writer: W,
+    image: &image::RgbaImage,
+    icc_profile: Option<&[u8]>,
+) -> Result<(), Error> {
     if image.width() > WEBP_MAX_SIDE || image.height() > WEBP_MAX_SIDE {
         return Err(Error::LimitExceeded {
             limit: LimitContext {
@@ -349,8 +402,7 @@ pub fn encode_webp(image: &image::RgbaImage, icc_profile: Option<&[u8]>) -> Resu
             },
         });
     }
-    let mut bytes = Vec::new();
-    let mut encoder = image::codecs::webp::WebPEncoder::new_lossless(&mut bytes);
+    let mut encoder = image::codecs::webp::WebPEncoder::new_lossless(writer);
     if let Some(profile) = icc_profile {
         let _ = image::ImageEncoder::set_icc_profile(&mut encoder, profile.to_vec());
     }
@@ -366,7 +418,7 @@ pub fn encode_webp(image: &image::RgbaImage, icc_profile: Option<&[u8]>) -> Resu
             format!("webp encode failed: {}", dezoomify::model::chain_text(&e)).into(),
         )
     })?;
-    Ok(bytes)
+    Ok(())
 }
 
 /// Powers of two covering the pyramid: 1 always, then doubling while the

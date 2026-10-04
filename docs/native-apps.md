@@ -16,13 +16,13 @@ Selection preserves `--largest`, exact `--zoom-level`, width/height caps, and `-
 
 `sink.rs` owns deterministic placement and memory accounting. Known geometry paints directly. Unknown geometry spools under the configured disk cap; overlapping tiles retain plan order under the retained-memory cap. The canvas uses four bytes per pixel and cannot exceed available system memory.
 
-Tile placement borrows cropped pixels rather than copying them into a temporary image. Output encoders borrow the assembled canvas without cloning its pixel buffer. Encoded output still buffers in memory before publication; format-specific conversion and pyramid buffers may require additional memory.
+Tile placement borrows cropped pixels rather than copying them into a temporary image. Output encoders borrow the assembled canvas without cloning its pixel buffer. Single-file encoders write through a 64 KiB buffer directly to staging; JPEG borrows RGB channels without a full RGB copy. Codec workspace and pyramid pixels may require additional memory. IIIF directory rendering still buffers its encoded tile set.
 
 Output publication checks cancellation and the destination before committing. Uncommitted temporary resources are invocation-owned and cleaned after failure. Published files remain intact. A publication that has committed returns success; otherwise cancellation publishes nothing and preserves any existing destination.
 
-File and IIIF directory publication reserve unique staging paths exclusively. Failed writes or renames attempt to remove their own staging output before returning the original error.
+File and IIIF directory publication reserve unique staging paths exclusively. Failed writes or renames attempt to remove their own staging output before returning the original error. Single-file writes check cancellation during encoding and before publication. Without overwrite permission, file publication uses a same-filesystem hard link so a destination created after validation remains intact.
 
-Instrumentation records attempts, acquired tiles, failures, retries, wait time, fetched bytes, peak in-flight work, retained/spooled bytes, decode bytes, canvas, and encoded output.
+Instrumentation records attempts, acquired tiles, failures, retries, wait time, fetched bytes, peak in-flight work, retained/spooled bytes, decode bytes, canvas, and encoded output. `encoded_bytes` counts published bytes; `peak_encoded_bytes` counts the output buffer separately from codec workspace.
 
 ### Output naming and encoders
 
