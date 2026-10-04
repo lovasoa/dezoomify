@@ -61,7 +61,7 @@ export class BrowserHost implements Host {
   }
 
   async beginOutput(_plan: OutputPlan): Promise<void> {
-    this.signal.throwIfAborted();
+    await this.checkpoint("cancellation");
   }
 
   /** Classify one thrown value into the typed error contract, attaching the
