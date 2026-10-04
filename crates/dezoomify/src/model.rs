@@ -235,7 +235,8 @@ impl TileRole {
 
 /// Host-neutral placement of one tile, projected from the core tile plan:
 /// `position` is the top-left output corner, `expected_size` the planned
-/// extent when declared, `canvas` the declared output size when declared,
+/// extent when declared, `canvas` the declared level size when declared
+/// (the selected image, or a source level listed in `OutputPlan::source_levels`),
 /// and `processing` the recipe id the host applies before decoding.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
@@ -1190,6 +1191,10 @@ pub struct OutputGrid {
 pub struct OutputPlan {
     pub canvas: Option<Size>,
     pub grid: Option<OutputGrid>,
+    /// Compatible lower source levels, in decreasing size, sharing `grid`.
+    /// Their tiles use level-local coordinates and `TilePlacement::canvas`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_levels: Vec<Size>,
     pub tile_count: u32,
     pub format: OutputFormat,
     pub title: Option<String>,

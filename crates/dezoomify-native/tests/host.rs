@@ -294,6 +294,26 @@ fn zif_reuses_standalone_jpeg_and_rgb_png_tiles() {
             .unwrap();
         let bytes = bytes.into_inner();
         std::fs::write(tiles.join(format!("{index}_0.{extension}")), &bytes).unwrap();
+        let lower_bytes = if width == 32 {
+            let lower = work.join(format!("source-{extension}-{width}_files/4"));
+            std::fs::create_dir_all(&lower).unwrap();
+            let mut bytes = std::io::Cursor::new(Vec::new());
+            image::RgbImage::from_pixel(16, 8, image::Rgb([90, 70, 40]))
+                .write_to(
+                    &mut bytes,
+                    if extension == "jpg" {
+                        image::ImageFormat::Jpeg
+                    } else {
+                        image::ImageFormat::Png
+                    },
+                )
+                .unwrap();
+            let bytes = bytes.into_inner();
+            std::fs::write(lower.join(format!("0_0.{extension}")), &bytes).unwrap();
+            Some(bytes)
+        } else {
+            None
+        };
         dezoomify_native::cache::store(
             &work.join("cache"),
             &dezoomify_native::cache::job_namespace(source.to_str().unwrap()),
@@ -358,6 +378,58 @@ fn zif_reuses_standalone_jpeg_and_rgb_png_tiles() {
             .unwrap()
             .byte_range();
         assert_eq!(&container[range.start as usize..range.end as usize], bytes);
+        if let Some(bytes) = lower_bytes {
+            let range = metadata
+                .level_tiles(1)
+                .unwrap()
+                .next()
+                .unwrap()
+                .byte_range();
+            assert_eq!(&container[range.start as usize..range.end as usize], bytes);
+        }
+    }
+    let bytes = std::fs::read(
+        dezoomify_fixture_server::scenarios_dir()
+            .join("rs-core/formats/payloads/google_arts_and_culture/tile.jpg"),
+    )
+    .unwrap();
+    let source = work.join("subsampled.dzi");
+    std::fs::write(&source, "<Image TileSize=\"512\" Overlap=\"0\" Format=\"jpg\" xmlns=\"http://schemas.microsoft.com/deepzoom/2008\"><Size Width=\"1000\" Height=\"1000\"/></Image>").unwrap();
+    for (level, side) in [(10, 2), (9, 1)] {
+        let tiles = work.join(format!("subsampled_files/{level}"));
+        std::fs::create_dir_all(&tiles).unwrap();
+        for y in 0..side {
+            for x in 0..side {
+                std::fs::write(tiles.join(format!("{x}_{y}.jpg")), &bytes).unwrap();
+            }
+        }
+    }
+    let result = support::run_file(
+        source.to_str().unwrap(),
+        &work.join("subsampled.zif"),
+        |options| options.largest = true,
+    )
+    .unwrap();
+    assert_eq!(result.instrumentation.pixel_decodes, 0);
+    let container = std::fs::read(result.path).unwrap();
+    let metadata = zif_tiff::std::read_zif(std::io::Cursor::new(&container)).unwrap();
+    assert_eq!(metadata.level_count(), 2);
+    assert_eq!(
+        (
+            metadata.level(0).unwrap().width(),
+            metadata.level(1).unwrap().width()
+        ),
+        (1000, 500)
+    );
+    for level in 0..2 {
+        assert_eq!(
+            metadata.level(level).unwrap().ycbcr_subsampling(),
+            Some((2, 2))
+        );
+        for tile in metadata.level_tiles(level).unwrap() {
+            let range = tile.byte_range();
+            assert_eq!(&container[range.start as usize..range.end as usize], bytes);
+        }
     }
     std::fs::remove_dir_all(work).unwrap();
 }
@@ -379,6 +451,11 @@ fn truncated_source_tiles_reach_partial_handling_with_their_uri() {
     .unwrap();
     let bad = tiles.join("1_0.png");
     std::fs::write(tiles.join("0_0.png"), &bytes).unwrap();
+    let lower = work.join("source_files/4");
+    std::fs::create_dir_all(&lower).unwrap();
+    image::RgbImage::new(16, 8)
+        .save(lower.join("0_0.png"))
+        .unwrap();
     let mut clipped = dezoomify_native::imaging::encode_png(
         &image::RgbaImage::new(32, 16),
         image::codecs::png::CompressionType::Fast,

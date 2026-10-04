@@ -214,7 +214,7 @@ fn zif_output_writes_independently_decodable_pyramid_tiles() {
         &mut |_| {},
     )
     .expect("zif pipeline succeeds");
-    assert_eq!(outcome.tile_count, 4);
+    assert_eq!(outcome.tile_count, 5);
     assert_eq!(
         (
             outcome.output.canvas.as_ref().unwrap().width,

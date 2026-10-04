@@ -13,7 +13,7 @@ use std::{
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Profile {
     PngRgb,
-    Jpeg,
+    Jpeg { sampling: (u16, u16) },
 }
 
 /// Container eligibility only. Future coefficient joining can inspect the same
@@ -83,9 +83,9 @@ fn profile(bytes: &[u8]) -> Option<Profile> {
             {
                 return None;
             }
-            // The image encoder generates 4:4:4 JPEG. Other sampling needs
-            // conversion so reused and generated tiles match ZIF tags.
-            frame = (data[7] == 0x11).then_some(Profile::Jpeg);
+            let sampling = (u16::from(data[7] >> 4), u16::from(data[7] & 15));
+            frame = ((1..=4).contains(&sampling.0) && (1..=4).contains(&sampling.1))
+                .then_some(Profile::Jpeg { sampling });
         }
         at += length;
     }
@@ -104,11 +104,18 @@ fn failed(error: impl std::fmt::Display) -> Error {
     Error::EncodeFailed(format!("ZIF: {error}").into())
 }
 
+fn reusable_size(size: &Size, rect: Rect, cell: &Size) -> bool {
+    // Edge payloads may be clipped to the image or padded to a full TIFF cell.
+    (size.width == rect.w || size.width == cell.width)
+        && (size.height == rect.h || size.height == cell.height)
+}
+
 type TileMetadata = (Point, Option<Vec<u8>>, Option<Vec<u8>>);
 
 pub(crate) struct ZifWriter {
     staging: StagedFile,
     base: TileLevel,
+    source_levels: Vec<TileLevel>,
     writer: Option<zif_tiff::Writer>,
     profile: Option<Profile>,
     compression: u8,
@@ -205,6 +212,15 @@ impl ZifWriter {
             tiles: BTreeMap::new(),
             regular: grid.is_some(),
         };
+        let mut source_levels = Vec::new();
+        for size in &plan.source_levels {
+            source_levels.push(TileLevel {
+                size: size.clone(),
+                cell: base.cell.clone(),
+                tiles: BTreeMap::new(),
+                regular: true,
+            });
+        }
         let count = base.count()?;
         if count > max_tiles {
             return Err(Error::ResourceLimit(
@@ -213,12 +229,21 @@ impl ZifWriter {
         }
         // Reserve container indexes, two simultaneous level maps, and input
         // tile/metadata nodes. Payloads and conversion use only the remainder.
-        let index_bytes = u64::from(count) * 512;
+        let mut dimensions = base.size.clone();
+        let mut output_count = u64::from(count);
+        while dimensions.width > base.cell.width || dimensions.height > base.cell.height {
+            dimensions.width = dimensions.width.div_ceil(2);
+            dimensions.height = dimensions.height.div_ceil(2);
+            output_count += u64::from(dimensions.width.div_ceil(base.cell.width))
+                * u64::from(dimensions.height.div_ceil(base.cell.height));
+        }
+        let index_bytes = output_count * 512;
         let structural = index_bytes + u64::from(plan.tile_count) * 256;
         memory_check(structural, budget)?;
         Ok(Self {
             staging: StagedFile::new(destination)?,
             base,
+            source_levels,
             writer: None,
             profile: None,
             compression,
@@ -246,7 +271,7 @@ impl ZifWriter {
     fn initialize(&mut self, selected: Profile, cancelled: &AtomicBool) -> Result<(), Error> {
         let (codec, color) = match selected {
             Profile::PngRgb => (zif_tiff::Codec::Png, zif_tiff::ColorModel::Rgb),
-            Profile::Jpeg => (zif_tiff::Codec::Jpeg, zif_tiff::ColorModel::YCbCr),
+            Profile::Jpeg { .. } => (zif_tiff::Codec::Jpeg, zif_tiff::ColorModel::YCbCr),
         };
         let mut builder = zif_tiff::Writer::new()
             .dimensions((
@@ -255,13 +280,32 @@ impl ZifWriter {
             ))
             .tile_size((self.base.cell.width, self.base.cell.height))
             .map_err(failed)?
-            .pyramid()
             .codec(codec)
             .color_model(color)
             .channels(3)
             .map_err(failed)?;
-        if selected == Profile::Jpeg {
-            builder = builder.ycbcr_subsampling((1, 1)).map_err(failed)?;
+        if let Profile::Jpeg { sampling } = selected {
+            builder = if matches!(sampling, (1, 1) | (2, 2)) {
+                builder.ycbcr_subsampling(sampling)
+            } else {
+                builder.preserve_nonstandard_ycbcr_subsampling(sampling)
+            }
+            .map_err(failed)?;
+        }
+        if matches!(selected, Profile::Jpeg { sampling } if sampling != (1, 1)) {
+            // Source reuse is independent of our 4:4:4 pixel encoder. Only
+            // declared source levels are written for a subsampled container.
+            for level in std::iter::once(&self.base).chain(&self.source_levels) {
+                builder = builder.level(
+                    zif_tiff::LevelConfig::new(
+                        (u64::from(level.size.width), u64::from(level.size.height)),
+                        (level.cell.width, level.cell.height),
+                    )
+                    .map_err(failed)?,
+                );
+            }
+        } else {
+            builder = builder.pyramid();
         }
         let mut writer = builder.build().map_err(failed)?;
         let result = zif_tiff::std::RangeWriter::wrap(self.staging.writer(cancelled))
@@ -315,7 +359,7 @@ impl ZifWriter {
         }
         result?;
         let format = match self.profile.expect("initialized ZIF profile") {
-            Profile::Jpeg => image::ImageFormat::Jpeg,
+            Profile::Jpeg { .. } => image::ImageFormat::Jpeg,
             Profile::PngRgb => image::ImageFormat::Png,
         };
         Ok(StoredTile {
@@ -333,11 +377,105 @@ impl ZifWriter {
         })
     }
 
+    fn place_source_level(
+        &mut self,
+        tile: EncodedTile,
+        cancelled: &AtomicBool,
+    ) -> Result<(), Error> {
+        let source_index = self
+            .source_levels
+            .iter()
+            .position(|level| tile.placement.canvas.as_ref() == Some(&level.size))
+            .ok_or_else(|| failed("tile belongs to an undeclared source level"))?;
+        let level = &self.source_levels[source_index];
+        let position = &tile.placement.position;
+        if position.x >= level.size.width
+            || position.y >= level.size.height
+            || !position.x.is_multiple_of(level.cell.width)
+            || !position.y.is_multiple_of(level.cell.height)
+        {
+            return Err(failed(
+                "source pyramid tile does not align to the output grid",
+            ));
+        }
+        let index = position.y / level.cell.height * level.size.width.div_ceil(level.cell.width)
+            + position.x / level.cell.width;
+        let rect = level.rect(index);
+        let source_profile = profile(&tile.bytes);
+        if tile.size.width < rect.w
+            || tile.size.height < rect.h
+            || tile
+                .placement
+                .expected_size
+                .as_ref()
+                .is_some_and(|size| size.width != rect.w || size.height != rect.h)
+            || level.tiles.contains_key(&index)
+            || (source_profile.is_some() && source_profile != self.profile)
+        {
+            return Err(failed("source pyramid tiles must have matching codec, sampling, dimensions and non-overlapping placement"));
+        }
+        let writer = self
+            .writer
+            .as_ref()
+            .ok_or_else(|| failed("source level arrived before the base level"))?;
+        let output_level = (1..writer.level_count())
+            .find(|&index| {
+                writer.level_dimensions(index).ok()
+                    == Some((u64::from(level.size.width), u64::from(level.size.height)))
+            })
+            .ok_or_else(|| failed("source level is not represented in the output pyramid"))?;
+        let stored = if source_profile.is_some() && reusable_size(&tile.size, rect, &level.cell) {
+            let mut stored = self.store(output_level, rect, &tile.bytes, cancelled)?;
+            stored.size = tile.size;
+            stored
+        } else {
+            self.require_pixel_encoder()?;
+            let budget = self.budget.saturating_sub(self.retained_bytes());
+            let (icc, exif) = crate::tile_output::tile_metadata(
+                &tile.bytes,
+                tile.format,
+                budget.saturating_sub(tile.bytes.len() as u64),
+            )?;
+            let metadata_bytes =
+                icc.as_ref().map_or(0, Vec::len) as u64 + exif.as_ref().map_or(0, Vec::len) as u64;
+            self.decoded += 1;
+            let pixels = tile.decode_pixels(
+                &Size {
+                    width: rect.w,
+                    height: rect.h,
+                },
+                budget.saturating_sub(metadata_bytes.saturating_mul(4)),
+            )?;
+            drop(tile);
+            let bytes = self.encode_with_metadata(&pixels, icc.as_deref(), exif.as_deref())?;
+            drop(pixels);
+            self.store(output_level, rect, &bytes, cancelled)?
+        };
+        self.source_levels[source_index].tiles.insert(index, stored);
+        Ok(())
+    }
+
+    fn require_pixel_encoder(&self) -> Result<(), Error> {
+        if matches!(self.profile, Some(Profile::Jpeg { sampling }) if sampling != (1, 1)) {
+            Err(failed("subsampled JPEG passthrough requires complete compatible source tiles; pixel conversion would change sampling"))
+        } else {
+            Ok(())
+        }
+    }
+
     pub(crate) fn place(
         &mut self,
         mut tile: EncodedTile,
         cancelled: &AtomicBool,
     ) -> Result<(), Error> {
+        if tile
+            .placement
+            .canvas
+            .as_ref()
+            .is_some_and(|canvas| *canvas != self.base.size)
+        {
+            return self.place_source_level(tile, cancelled);
+        }
         let extent = tile.placement.expected_size.as_ref().unwrap_or(&tile.size);
         let mut rect = Rect {
             x: tile.placement.position.x,
@@ -400,19 +538,29 @@ impl ZifWriter {
         let source_profile = profile(&tile.bytes);
         // Commit the codec only after the first tile is accepted. Failed
         // conversion must not force later reusable tiles through that codec.
-        let selected = self.select_profile(source_profile);
+        let selected = self.select_profile(source_profile.filter(|_| {
+            self.base.regular
+                && rect == self.base.rect(index)
+                && reusable_size(&tile.size, rect, &self.base.cell)
+        }));
         let compatible = self.base.regular
             && rect == self.base.rect(index)
-            && tile.size.width == rect.w
-            && tile.size.height == rect.h
+            && reusable_size(&tile.size, rect, &self.base.cell)
             && source_profile.is_some()
             && source_profile == Some(selected);
+        if !compatible && matches!(selected, Profile::Jpeg { sampling } if sampling != (1, 1)) {
+            return Err(failed(
+                "cannot convert an incompatible tile into a subsampled JPEG passthrough container",
+            ));
+        }
         let stored = if compatible {
             if self.writer.is_none() {
                 self.initialize(selected, cancelled)?;
             }
             self.accept_metadata(index, metadata.take());
-            self.store(0, rect, &tile.bytes, cancelled)?
+            let mut stored = self.store(0, rect, &tile.bytes, cancelled)?;
+            stored.size = tile.size;
+            stored
         } else if self.base.regular && rect == self.base.rect(index) {
             self.decoded += 1;
             let pixels = tile.decode_pixels(
@@ -486,6 +634,7 @@ impl ZifWriter {
         icc: Option<&[u8]>,
         exif: Option<&[u8]>,
     ) -> Result<Vec<u8>, Error> {
+        self.require_pixel_encoder()?;
         let metadata_bytes = icc.map_or(0, <[u8]>::len) as u64 + exif.map_or(0, <[u8]>::len) as u64;
         memory_check(
             pixels.as_raw().len() as u64 * 3 + (64 << 10) + metadata_bytes.saturating_mul(4),
@@ -518,7 +667,7 @@ impl ZifWriter {
                 )
                 .map_err(failed)?;
             }
-            Profile::Jpeg => {
+            Profile::Jpeg { .. } => {
                 crate::imaging::encode_jpeg_to(
                     &mut bytes,
                     pixels,
@@ -591,8 +740,7 @@ impl ZifWriter {
             let reusable = self.base.tiles.get(&index).is_some_and(|tile| {
                 self.base.regular
                     && tile.rect == rect
-                    && tile.size.width == rect.w
-                    && tile.size.height == rect.h
+                    && reusable_size(&tile.size, rect, &normalized.cell)
                     && match &tile.bytes {
                         TileBytes::Range { .. } => true,
                         TileBytes::Memory(bytes) => {
@@ -614,6 +762,7 @@ impl ZifWriter {
                     tile
                 }
             } else {
+                self.require_pixel_encoder()?;
                 let pixels = self.base.region(
                     rect,
                     self.budget.saturating_sub(self.retained_bytes()),
@@ -660,10 +809,21 @@ impl ZifWriter {
                 tiles: BTreeMap::new(),
                 regular: true,
             };
+            if let Some(source) = self
+                .source_levels
+                .iter_mut()
+                .find(|source| source.size == next.size)
+            {
+                next.tiles = std::mem::take(&mut source.tiles);
+            }
             for index in 0..next.count()? {
                 if cancelled.load(Ordering::SeqCst) {
                     return Err(Error::Cancelled);
                 }
+                if next.tiles.contains_key(&index) {
+                    continue;
+                }
+                self.require_pixel_encoder()?;
                 let rect = next.rect(index);
                 let pixels = downsample(
                     &previous,
@@ -720,6 +880,7 @@ mod tests {
             &OutputPlan {
                 canvas: Some(size.clone()),
                 grid: None,
+                source_levels: Vec::new(),
                 tile_count: 1,
                 format: OutputFormat::Zif,
                 title: None,
@@ -767,6 +928,7 @@ mod tests {
                 height: 16,
             }),
             grid: None,
+            source_levels: Vec::new(),
             tile_count: 1,
             format: OutputFormat::Zif,
             title: None,
