@@ -346,15 +346,19 @@ fn truncated_source_tiles_reach_partial_handling_with_their_uri() {
     .unwrap();
     let bad = tiles.join("1_0.png");
     std::fs::write(tiles.join("0_0.png"), &bytes).unwrap();
-    let mut bitmap = std::io::Cursor::new(Vec::new());
-    image::RgbImage::new(16, 16)
-        .write_to(&mut bitmap, image::ImageFormat::Bmp)
-        .unwrap();
-    let bitmap = bitmap.into_inner();
-    // PNG fails structural inspection; BMP requires local pixel conversion.
+    let mut clipped = dezoomify_native::imaging::encode_png(
+        &image::RgbaImage::new(32, 16),
+        image::codecs::png::CompressionType::Fast,
+        None,
+        None,
+    )
+    .unwrap();
+    let data = clipped.windows(4).position(|v| v == b"IDAT").unwrap() + 4;
+    clipped[data] ^= 0xff;
+    // One fails inspection; the oversized PNG requires decoding before clipping.
     for (case, broken) in [
         ("png", &bytes[..bytes.len() - 1]),
-        ("bmp", &bitmap[..bitmap.len() - 1]),
+        ("clipped", clipped.as_slice()),
     ] {
         std::fs::write(&bad, broken).unwrap();
         for extension in ["iiif", "zif"] {
