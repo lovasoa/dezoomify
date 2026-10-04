@@ -539,7 +539,9 @@ impl<'a> NativeHost<'a> {
             .map(|tile| tile.bytes.len() as u64)
             .sum();
         crate::tile_output::memory_check(
-            probes.saturating_add(self.decode_tails.bytes.load(Ordering::SeqCst)),
+            probes
+                .saturating_add(self.decode_tails.bytes.load(Ordering::SeqCst))
+                .saturating_add(self.decode_tails.encoded_retained.load(Ordering::SeqCst)),
             self.options.output_retain_cap,
         )
     }
@@ -585,6 +587,10 @@ impl<'a> NativeHost<'a> {
                             writer.hold_queued_bytes(queued)?;
                             let result = writer.place(tile, &controls.0.cancelled);
                             writer.release_probe_bytes(queued);
+                            _permit
+                                .tails
+                                .encoded_retained
+                                .store(writer.retained_bytes(), Ordering::SeqCst);
                             result?;
                             Ok(writer.peak_retained())
                         })();
@@ -747,6 +753,9 @@ impl Host for NativeHost<'_> {
                 .await?;
             let mut stats = self.instrumentation.borrow_mut();
             stats.peak_encoded_bytes = stats.peak_encoded_bytes.max(writer.peak_retained());
+            self.decode_tails
+                .encoded_retained
+                .store(writer.retained_bytes(), Ordering::SeqCst);
             *self.iiif.borrow_mut() = Some(Arc::new(std::sync::Mutex::new(writer)));
         }
         *self.output_plan.borrow_mut() = Some(plan);
@@ -1103,6 +1112,7 @@ struct DecodeTails {
     bytes: AtomicU64,
     peak_bytes: AtomicU64,
     pixel_decodes: AtomicU64,
+    encoded_retained: AtomicU64,
     changed: tokio::sync::Notify,
 }
 

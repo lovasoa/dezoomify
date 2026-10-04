@@ -547,6 +547,10 @@ pub(crate) struct IiifWriter {
 }
 
 impl IiifWriter {
+    pub(crate) fn retained_bytes(&self) -> u64 {
+        self.retained
+    }
+
     pub(crate) fn hold_queued_bytes(&mut self, bytes: u64) -> Result<(), Error> {
         memory_check(self.retained.saturating_add(bytes), self.budget)?;
         self.budget -= bytes;
