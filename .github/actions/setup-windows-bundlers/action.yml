@@ -8,14 +8,21 @@ runs:
       run: |
         $ErrorActionPreference = 'Stop'
 
-        choco install wixtoolset --version=3.14.1.20250415 --yes --no-progress
-        if ($LASTEXITCODE -notin @(0, 1641, 3010)) {
-          throw "WiX installation failed with exit code $LASTEXITCODE"
+        function Install-Bundler($package, $version) {
+          # Chocolatey's community feed can return transient gateway errors.
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            choco install $package --version=$version --yes --no-progress
+            $code = $LASTEXITCODE
+            if ($code -in @(0, 1641, 3010)) { return }
+            if ($attempt -eq 3) {
+              throw "$package installation failed after $attempt attempts with exit code $code"
+            }
+            Write-Warning "$package installation failed with exit code $code; retrying in 15 seconds"
+            Start-Sleep -Seconds 15
+          }
         }
-        choco install nsis --version=3.12.0 --yes --no-progress
-        if ($LASTEXITCODE -notin @(0, 1641, 3010)) {
-          throw "NSIS installation failed with exit code $LASTEXITCODE"
-        }
+        Install-Bundler wixtoolset 3.14.1.20250415
+        Install-Bundler nsis 3.12.0
 
         $wix = Get-ChildItem "${env:ProgramFiles(x86)}\WiX Toolset v3*\bin\candle.exe" -ErrorAction SilentlyContinue |
           Sort-Object FullName -Descending | Select-Object -First 1
