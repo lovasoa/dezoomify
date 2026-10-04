@@ -716,7 +716,7 @@ impl<'a> NativeHost<'a> {
                 + tile.bytes.len() as u64;
             crate::tile_output::memory_check(retained, self.options.output_retain_cap)?;
             let mut stats = self.instrumentation.borrow_mut();
-            stats.peak_encoded_bytes = stats.peak_encoded_bytes.max(retained);
+            stats.peak_retained_bytes = stats.peak_retained_bytes.max(retained);
             probes.push(tile);
         }
         self.acquired.borrow_mut().insert(id);
@@ -1354,7 +1354,6 @@ struct DecodeTails {
     active: AtomicUsize,
     bytes: AtomicU64,
     peak_bytes: AtomicU64,
-    pixel_decodes: AtomicU64,
     encoded_retained: AtomicU64,
     changed: tokio::sync::Notify,
 }
