@@ -129,6 +129,7 @@ fn odd_sized_and_mixed_codec_iiif_trees_roundtrip_through_the_reader() {
                 .replace("Format=\"png\"", "Format=\"jpg\""),
         )
         .unwrap();
+        let mut original = image::RgbaImage::new(513, 513);
         for y in 0..3 {
             for x in 0..3 {
                 let pixels = image::RgbaImage::from_pixel(
@@ -147,6 +148,12 @@ fn odd_sized_and_mixed_codec_iiif_trees_roundtrip_through_the_reader() {
                     )
                     .unwrap()
                 };
+                image::imageops::overlay(
+                    &mut original,
+                    &image::load_from_memory(&bytes).unwrap().into_rgba8(),
+                    i64::from(x) * 256,
+                    i64::from(y) * 256,
+                );
                 std::fs::write(tiles.join(format!("{x}_{y}.jpg")), bytes).unwrap();
             }
         }
@@ -200,6 +207,30 @@ fn odd_sized_and_mixed_codec_iiif_trees_roundtrip_through_the_reader() {
         )
         .unwrap();
         assert_eq!(image::open(output).unwrap().into_rgba8(), expected);
+        let mut reference = original;
+        for side in [257, 129] {
+            reference = image::imageops::resize(
+                &reference,
+                side,
+                side,
+                image::imageops::FilterType::Triangle,
+            );
+        }
+        let overview = image::open(destination.join("full/129,/0/default.png"))
+            .unwrap()
+            .into_rgba8();
+        for (actual, expected) in overview
+            .get_pixel(128, 128)
+            .0
+            .into_iter()
+            .zip(reference.get_pixel(128, 128).0)
+        {
+            assert!(
+                actual.abs_diff(expected) <= 2,
+                "coarser level reused a public edge collision"
+            );
+        }
+        assert!(!destination.join(".pyramid").exists());
         fn files(path: &std::path::Path) -> Vec<std::path::PathBuf> {
             std::fs::read_dir(path)
                 .unwrap()

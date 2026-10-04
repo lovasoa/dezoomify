@@ -354,10 +354,10 @@ impl TileLevel {
                 }
             };
             // Decode plus RGBA conversion may temporarily own two pixel buffers.
+            *decoded += 1;
             let image = image::load_from_memory(bytes)
                 .map_err(|e| Error::DecodeFailed(e.to_string().into()))?
                 .to_rgba8();
-            *decoded += 1;
             let left = rect.x.max(tile.rect.x);
             let top = rect.y.max(tile.rect.y);
             let right = (rect.x + rect.w).min(tile.rect.x + tile.rect.w);
@@ -551,6 +551,7 @@ impl IiifWriter {
             && self.base.regular
             && rect == self.base.rect(index);
         if !compatible {
+            self.decoded_tiles += 1;
             tile.convert_to_png(
                 Size {
                     width: rect.w,
@@ -559,7 +560,6 @@ impl IiifWriter {
                 self.budget.saturating_sub(self.retained),
                 self.compression,
             )?;
-            self.decoded_tiles += 1;
             compatible = self.base.regular && rect == self.base.rect(index);
         }
         let bytes = if compatible {
@@ -623,21 +623,59 @@ impl IiifWriter {
         Ok(path)
     }
 
-    fn encode(
+    fn encode_tile(
         &self,
+        rect: Rect,
+        scale: u32,
+        canvas: &Size,
         pixels: &image::RgbaImage,
         format: image::ImageFormat,
-    ) -> Result<Vec<u8>, Error> {
-        if format == image::ImageFormat::Jpeg {
-            crate::imaging::encode_jpeg(pixels, 100 - self.compression, None)
+        cancelled: &AtomicBool,
+    ) -> Result<PathBuf, Error> {
+        let relative = tile_path(rect, scale, format, canvas, false);
+        let public = self.staging.path.join(&relative);
+        // Public edge routes can coincide across levels. Preserve their first
+        // payload, but keep the generated pixels for the next resampling pass.
+        let collision = public.is_file();
+        let path = if collision {
+            self.staging
+                .path
+                .join(format!(".pyramid/{scale}/{},{}", rect.x, rect.y))
         } else {
-            crate::imaging::encode_png(
+            public
+        };
+        let mut file = crate::output::StagedFile::new(&path)?;
+        // Stream compressed bytes instead of retaining a second tile buffer.
+        let result = if format == image::ImageFormat::Jpeg {
+            crate::imaging::encode_jpeg_to(
+                file.writer(cancelled),
+                pixels,
+                100 - self.compression,
+                None,
+            )
+        } else {
+            crate::imaging::encode_png_to(
+                file.writer(cancelled),
                 pixels,
                 crate::imaging::png_compression_for(self.compression),
                 None,
                 None,
             )
+        };
+        file.check_error()?;
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(Error::Cancelled);
         }
+        result?;
+        file.publish(&path, false, cancelled)?;
+        if !collision {
+            self.staging.alias_file(
+                &path,
+                &tile_path(rect, scale, format, canvas, true),
+                cancelled,
+            )?;
+        }
+        Ok(path)
     }
 
     pub(crate) fn finish(
@@ -704,7 +742,6 @@ impl IiifWriter {
                     cancelled,
                     &mut self.decoded_tiles,
                 )?;
-                let bytes = self.encode(&pixels, format)?;
                 StoredTile {
                     rect,
                     size: Size {
@@ -712,12 +749,12 @@ impl IiifWriter {
                         height: rect.h,
                     },
                     format,
-                    bytes: TileBytes::File(self.write_tile(
+                    bytes: TileBytes::File(self.encode_tile(
                         rect,
                         1,
-                        format,
                         &normalized.size,
-                        &bytes,
+                        &pixels,
+                        format,
                         cancelled,
                     )?),
                 }
@@ -774,8 +811,7 @@ impl IiifWriter {
                     cancelled,
                     &mut self.decoded_tiles,
                 )?;
-                let bytes = self.encode(&pixels, format)?;
-                let path = self.write_tile(rect, scale, format, &full_size, &bytes, cancelled)?;
+                let path = self.encode_tile(rect, scale, &full_size, &pixels, format, cancelled)?;
                 next.tiles.insert(
                     index,
                     StoredTile {
@@ -799,30 +835,29 @@ impl IiifWriter {
         let TileBytes::File(path) = &tile.bytes else {
             unreachable!()
         };
-        let bytes = std::fs::read(path)
-            .map_err(|e| crate::output::write_failed("overview read failed", &e))?;
         let ext = if format == image::ImageFormat::Jpeg {
             "jpg"
         } else {
             "png"
         };
         let overview = format!("full/{},/0/default.{ext}", level.size.width);
-        self.staging.write(&overview, &bytes, cancelled)?;
-        self.staging.write(
+        self.staging.alias_file(path, &overview, cancelled)?;
+        self.staging.alias_file(
+            path,
             &format!(
                 "full/{},{}/0/default.{ext}",
                 level.size.width, level.size.height
             ),
-            &bytes,
             cancelled,
         )?;
         if level.size == full_size {
-            self.staging.alias(
-                path,
-                &format!("full/full/0/default.{ext}"),
-                &bytes,
-                cancelled,
-            )?;
+            self.staging
+                .alias_file(path, &format!("full/full/0/default.{ext}"), cancelled)?;
+        }
+        let intermediate = self.staging.path.join(".pyramid");
+        if intermediate.exists() {
+            std::fs::remove_dir_all(intermediate)
+                .map_err(|e| crate::output::write_failed("pyramid cleanup failed", &e))?;
         }
         let capabilities = serde_json::json!({"formats": [ext], "qualities": ["default"], "supports": ["sizeByWhListed"]});
         let profile = if format == image::ImageFormat::Jpeg {
@@ -838,7 +873,7 @@ impl IiifWriter {
             "preferredFormats": [ext], "profile": profile
         })).map_err(|e| Error::EncodeFailed(e.to_string().into()))?;
         self.staging.write("info.json", &info, cancelled)?;
-        let bytes = crate::output::directory_bytes(&self.staging.path)?;
+        let bytes = crate::output::directory_bytes(&self.staging.path, cancelled)?;
         self.staging.publish(destination, cancelled)?;
         Ok((full_size, bytes, self.decoded_tiles))
     }

@@ -14,17 +14,23 @@ use dezoomify::model::{Error, Failure, LimitContext, OutputFormat};
 /// sorted relative-path order.
 pub type IiifTiles = Vec<(String, Vec<u8>)>;
 
-pub(crate) fn directory_bytes(path: &Path) -> Result<u64, Error> {
+pub(crate) fn directory_bytes(path: &Path, cancelled: &AtomicBool) -> Result<u64, Error> {
+    if cancelled.load(Ordering::SeqCst) {
+        return Err(Error::Cancelled);
+    }
     let mut bytes = 0;
     for entry in
         std::fs::read_dir(path).map_err(|e| write_failed("output directory stat failed", &e))?
     {
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(Error::Cancelled);
+        }
         let entry = entry.map_err(|e| write_failed("output entry stat failed", &e))?;
         let metadata = entry
             .metadata()
             .map_err(|e| write_failed("output stat failed", &e))?;
         bytes += if metadata.is_dir() {
-            directory_bytes(&entry.path())?
+            directory_bytes(&entry.path(), cancelled)?
         } else {
             metadata.len()
         };
@@ -178,6 +184,34 @@ impl StagedDirectory {
             .map_err(|e| write_failed("alias directory creation failed", &e))?;
         if std::fs::hard_link(source, alias).is_err() {
             self.write(relative, bytes, cancelled)?;
+        }
+        Ok(())
+    }
+
+    /// Alias a staged encoded payload without loading it into RAM.
+    pub(crate) fn alias_file(
+        &self,
+        source: &Path,
+        relative: &str,
+        cancelled: &AtomicBool,
+    ) -> Result<(), Error> {
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(Error::Cancelled);
+        }
+        let alias = self.path.join(relative);
+        std::fs::create_dir_all(alias.parent().expect("tile parent"))
+            .map_err(|e| write_failed("alias directory creation failed", &e))?;
+        if std::fs::hard_link(source, &alias).is_err() {
+            let mut input = std::fs::File::open(source)
+                .map_err(|e| write_failed("alias source open failed", &e))?;
+            let mut file = StagedFile::new(&alias)?;
+            let result = std::io::copy(&mut input, &mut file.writer(cancelled));
+            file.check_error()?;
+            if cancelled.load(Ordering::SeqCst) {
+                return Err(Error::Cancelled);
+            }
+            result.map_err(|e| write_failed("alias copy failed", &e))?;
+            file.publish(&alias, false, cancelled)?;
         }
         Ok(())
     }
