@@ -18,6 +18,8 @@ Output encoders borrow the assembled canvas without cloning its pixel buffer. En
 
 Output publication checks cancellation and the destination before committing. Uncommitted temporary resources are invocation-owned and cleaned after failure. Published files remain intact. A publication that has committed returns success; otherwise cancellation publishes nothing and preserves any existing destination.
 
+File and IIIF directory publication reserve unique staging paths exclusively. Failed writes or renames attempt to remove their own staging output before returning the original error.
+
 Instrumentation records attempts, acquired tiles, failures, retries, wait time, fetched bytes, peak in-flight work, retained/spooled bytes, decode bytes, canvas, and encoded output.
 
 ### Output naming and encoders

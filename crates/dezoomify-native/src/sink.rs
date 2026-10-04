@@ -602,20 +602,24 @@ fn commit_bytes(dest: &Path, bytes: &[u8]) -> Result<(), Error> {
         }
     }
     let tmp = temp_sibling(dest);
-    {
+    let mut file = std::fs::File::create_new(&tmp)
+        .map_err(|e| crate::output::write_failed("output write failed", &e))?;
+    let result = (|| {
         use std::io::Write as _;
-        let mut file = std::fs::File::create(&tmp)
-            .map_err(|e| crate::output::write_failed("output write failed", &e))?;
         for chunk in bytes.chunks(64 << 10) {
             file.write_all(chunk)
                 .map_err(|e| crate::output::write_failed("output write failed", &e))?;
         }
         file.sync_all()
             .map_err(|e| crate::output::write_failed("output write failed", &e))?;
+        drop(file);
+        std::fs::rename(&tmp, dest)
+            .map_err(|e| crate::output::write_failed("output write failed", &e))
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
     }
-    std::fs::rename(&tmp, dest)
-        .map_err(|e| crate::output::write_failed("output write failed", &e))?;
-    Ok(())
+    result
 }
 
 /// Stage an `iiif-dir` tree in a temp directory, then rename once so a
@@ -626,15 +630,30 @@ fn commit_iiif_dir(
     tiles: &crate::output::IiifTiles,
 ) -> Result<(), Error> {
     let staging = temp_sibling(dest);
-    // An existing file is replaced at commit before the tile tree is written. Validation already granted overwrite.
-    write_iiif_dir(&staging, info_json, tiles)?;
-    if dest.is_file() {
-        std::fs::remove_file(dest)
+    if let Some(parent) = dest
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent)
             .map_err(|e| crate::output::write_failed("output write failed", &e))?;
     }
-    std::fs::rename(&staging, dest)
+    std::fs::create_dir(&staging)
         .map_err(|e| crate::output::write_failed("output write failed", &e))?;
-    Ok(())
+    let result = (|| {
+        write_iiif_dir(&staging, info_json, tiles)?;
+        // Validation already granted overwrite of an existing file.
+        if dest.is_file() {
+            std::fs::remove_file(dest)
+                .map_err(|e| crate::output::write_failed("output write failed", &e))?;
+        }
+        std::fs::rename(&staging, dest)
+            .map_err(|e| crate::output::write_failed("output write failed", &e))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(&staging);
+    }
+    result
 }
 
 /// Temp sibling for atomic publication: `<name>.tmp.<pid>-<unique>`.
@@ -683,6 +702,45 @@ mod tests {
         assert_eq!(std::fs::read(&output).unwrap(), b"image bytes");
         assert_eq!(std::fs::read(&unrelated).unwrap(), b"unrelated");
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2);
+        // A blocked rename must remove its staged bytes and preserve the
+        // destination, including files owned by someone else.
+        let blocked = dir.join("blocked.png");
+        std::fs::create_dir(&blocked).unwrap();
+        std::fs::write(blocked.join("keep"), b"original").unwrap();
+        assert!(matches!(
+            commit_bytes(&blocked, b"replacement"),
+            Err(Error::WriteFailed(_))
+        ));
+        assert_eq!(std::fs::read(blocked.join("keep")).unwrap(), b"original");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 3);
+
+        let tiles = vec![("tile.jpg".to_string(), b"tile".to_vec())];
+        assert!(matches!(
+            commit_iiif_dir(&blocked, b"{}", &tiles),
+            Err(Error::WriteFailed(_))
+        ));
+        assert_eq!(std::fs::read(blocked.join("keep")).unwrap(), b"original");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 3);
+
+        let invalid_tiles = vec![
+            ("tile.jpg".to_string(), b"tile".to_vec()),
+            ("../escape.jpg".to_string(), b"invalid".to_vec()),
+        ];
+        let directory = dir.join("tiles.iiif");
+        assert!(matches!(
+            commit_iiif_dir(&directory, b"{}", &invalid_tiles),
+            Err(Error::DestinationDenied(_))
+        ));
+        assert!(!directory.exists());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 3);
+        let nested = dir.join("nested/tiles.iiif");
+        commit_iiif_dir(&nested, b"{}", &tiles).unwrap();
+        assert_eq!(std::fs::read(nested.join("info.json")).unwrap(), b"{}");
+        assert_eq!(std::fs::read(nested.join("tile.jpg")).unwrap(), b"tile");
+        assert_eq!(
+            std::fs::read_dir(nested.parent().unwrap()).unwrap().count(),
+            1
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
