@@ -95,10 +95,7 @@ test("i18n: substitution renders per locale and degrades safely", () => {
     assert.equal(t("view.step.discovering", undefined, "it"), "Ricerca dell’immagine zoomabile…");
     assert.equal(t("view.job.countsFull", { current: 2, total: 9 }, "de"), "2 von 9 Fragmenten");
     assert.equal(t("view.job.countsFull", { current: 2, total: 9 }, "it"), "2 frammenti su 9");
-    assert.equal(
-      formatMissingSummary([], 1),
-      "Could not save 1 fragment.",
-    );
+    assert.equal(formatMissingSummary([], 1), "Could not save 1 fragment.");
     assert.equal(setLocale("fr"), true);
     assert.equal(formatMissingSummary([], 1), "Impossible d’enregistrer 1 fragment.");
     assert.equal(formatMissingSummary(["fragment-1"]), "1 fragment manquant : fragment-1.");
