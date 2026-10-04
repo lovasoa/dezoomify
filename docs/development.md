@@ -1,6 +1,6 @@
 # Development
 
-One monorepo: Rust crates, generated WASM bindings, shared UI, hosts, extension packaging, and release tooling change together. Run tasks from the root through `cargo xtask`; direct Cargo/pnpm commands serve component debugging only. Node 22.18.0 minimum: tests and the development server import TypeScript directly using Node's default type stripping, and the TSX test loader uses synchronous module hooks.
+One monorepo: Rust crates, generated WASM bindings, shared UI, hosts, extension packaging, and release tooling change together. Run tasks from the root through `cargo xtask`; direct Cargo/pnpm commands serve component debugging only. [`.node-version`](../.node-version) defines the minimum Node version and the version used by CI. Tests and the development server import TypeScript directly using Node's default type stripping, and the TSX test loader uses synchronous module hooks.
 
 ## Working areas
 

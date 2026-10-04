@@ -58,7 +58,7 @@ fn check_node() -> Result<(), String> {
     let pin = std::fs::read_to_string(&pin_path)
         .map_err(|e| {
             format!(
-                "cannot read {}: {e} (restore the minimum Node version, e.g. `22.18.0`)",
+                "cannot read {}: {e} (restore the pinned minimum Node version)",
                 pin_path.display()
             )
         })?
@@ -66,8 +66,7 @@ fn check_node() -> Result<(), String> {
         .to_string();
     if pin.is_empty() {
         return Err(
-            ".node-version is empty (expected the minimum Node version, e.g. `22.18.0`)"
-                .to_string(),
+            ".node-version is empty (expected a full numeric minimum Node version)".to_string(),
         );
     }
     println!("node minimum (.node-version): {pin}");
@@ -76,7 +75,7 @@ fn check_node() -> Result<(), String> {
     println!("node: {node}");
     let minimum = node_version(&pin).ok_or_else(|| {
         format!(
-            "cannot parse Node version from .node-version pin `{pin}` (expected e.g. `22.18.0`)"
+            "cannot parse Node version from .node-version pin `{pin}` (expected major.minor.patch)"
         )
     })?;
     let found = node_version(&node).ok_or_else(|| {
@@ -287,7 +286,7 @@ fn report_playwright_browsers() {
     }
 }
 
-/// Parse a full numeric Node version such as `22.18.0` or `v22.18.0`.
+/// Parse a full numeric Node version with an optional `v` prefix.
 fn node_version(version: &str) -> Option<(u64, u64, u64)> {
     let stripped = version.trim().strip_prefix('v').unwrap_or(version.trim());
     let mut parts = stripped.split('.');
@@ -315,24 +314,24 @@ fn version_of(cmd: &str, args: &[&str]) -> Result<String, String> {
 mod tests {
     #[test]
     fn node_version_parses_pinned_and_runtime_forms() {
-        assert_eq!(super::node_version("22.18.0"), Some((22, 18, 0)));
-        assert_eq!(super::node_version("v22.18.0"), Some((22, 18, 0)));
-        assert_eq!(super::node_version("v26.8.2"), Some((26, 8, 2)));
-        assert!(super::node_version("22").is_none());
-        assert!(super::node_version("22.18").is_none());
-        assert!(super::node_version("22.x").is_none());
+        assert_eq!(super::node_version("1.2.3"), Some((1, 2, 3)));
+        assert_eq!(super::node_version("v1.2.3"), Some((1, 2, 3)));
+        assert_eq!(super::node_version("v4.5.6"), Some((4, 5, 6)));
+        assert!(super::node_version("1").is_none());
+        assert!(super::node_version("1.2").is_none());
+        assert!(super::node_version("1.x").is_none());
         assert!(super::node_version("").is_none());
         assert!(super::node_version("abc").is_none());
     }
 
     #[test]
     fn node_version_comparison_enforces_minor_and_patch_minimums() {
-        let minimum = super::node_version("22.18.0").unwrap();
-        assert!(super::node_version("v22.17.99").unwrap() < minimum);
-        assert!(super::node_version("v22.18.0").unwrap() >= minimum);
-        assert!(super::node_version("v22.18.1").unwrap() >= minimum);
-        assert!(super::node_version("v24.0.0").unwrap() >= minimum);
-        assert!(super::node_version("v25.0.0").unwrap() >= minimum);
-        assert!(super::node_version("v26.0.0").unwrap() >= minimum);
+        let minimum = super::node_version("1.2.3").unwrap();
+        assert!(super::node_version("v1.1.99").unwrap() < minimum);
+        assert!(super::node_version("v1.2.2").unwrap() < minimum);
+        assert!(super::node_version("v1.2.3").unwrap() >= minimum);
+        assert!(super::node_version("v1.2.4").unwrap() >= minimum);
+        assert!(super::node_version("v1.3.0").unwrap() >= minimum);
+        assert!(super::node_version("v2.0.0").unwrap() >= minimum);
     }
 }

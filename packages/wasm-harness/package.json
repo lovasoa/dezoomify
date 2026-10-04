@@ -7,8 +7,5 @@
   "scripts": {
     "test": "node --test-reporter=dot --test src/node.spec.mjs",
     "test:node": "node --test-reporter=dot --test src/node.spec.mjs"
-  },
-  "engines": {
-    "node": ">=22.18.0"
   }
 }

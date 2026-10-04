@@ -12,9 +12,6 @@
     "package": "wxt zip",
     "publish:store": "bash ./scripts/chrome-webstore-publish.sh"
   },
-  "engines": {
-    "node": ">=22.18.0"
-  },
   "dependencies": {
     "@dezoomify/browser-runtime": "workspace:*",
     "@dezoomify/shared-ui": "workspace:*",

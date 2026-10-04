@@ -47,7 +47,9 @@ impl NodeServer {
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
-            .expect("start Node fixture server (Node 22.18+ must be on PATH)");
+            .expect(
+                "start Node fixture server (the Node version from .node-version must be on PATH)",
+            );
         let input = Arc::new(Mutex::new(child.stdin.take().expect("server stdin")));
         let mut output = BufReader::new(child.stdout.take().expect("server stdout"));
         let (ready, waiting) = std::sync::mpsc::channel();
