@@ -49,7 +49,9 @@ Output publication checks cancellation and the destination before committing. Un
 
 File and IIIF directory publication reserve unique staging paths exclusively. Failed writes or renames attempt to remove their own staging output before returning the original error. Single-file writes check cancellation during encoding and before publication. Without overwrite permission, file publication uses atomic no-replace publication, including on ordinary removable drives, so a destination created after validation remains intact. The writer records filesystem write, seek and flush failures as `write-failed`, even when a codec wraps the I/O error.
 
-Instrumentation records attempts, acquired tiles, failures, retries, wait time, fetched bytes, peak in-flight work, raster RAM reservations, decode bodies and encoded output. Legacy canvas and spool counters are zero. `encoded_bytes` counts published bytes; the output buffer is bounded separately from the file length. Tile writers enforce local conversion limits independently of the raster budget.
+Instrumentation records attempts, acquired tiles, failures, retries, wait time, fetched bytes, peak in-flight work, raster RAM reservations, decode bodies and encoded output. `encoded_bytes` counts published bytes; the output buffer is bounded separately from the file length. Tile writers enforce local conversion limits independently of the raster budget. Retired canvas and spool settings, counters and encoder helpers are removed.
+
+[Native output performance](native-output-performance.md) records end-to-end timing and process RSS comparisons, their limits, and reproduction commands.
 
 Every route returns `PreparedOutput`, which owns a staged file or directory. A shared publication step finishes syncing and refuses collisions; automatic naming can choose another suffix without repeating encoding. A future lossless JPEG join can return the same prepared file while bypassing pixels entirely.
 

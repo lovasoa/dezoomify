@@ -54,8 +54,6 @@ pub struct JobOptions {
     pub min_interval: Duration,
     /// RAM budget for pixels, descriptors and reserved encoder workspace.
     pub output_retain_cap: u64,
-    /// Legacy compatibility setting; pixel spooling is no longer used.
-    pub output_spool_cap: u64,
 }
 
 impl Default for JobOptions {
@@ -85,7 +83,6 @@ impl Default for JobOptions {
             max_bytes: 64 << 20,
             min_interval: Duration::ZERO,
             output_retain_cap: 512 << 20,
-            output_spool_cap: 1 << 30,
         }
     }
 }

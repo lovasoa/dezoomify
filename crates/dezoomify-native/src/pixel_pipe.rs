@@ -5,10 +5,7 @@ use image::Pixel;
 use std::{
     collections::BTreeMap,
     ops::Range,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc, Condvar, Mutex,
-    },
+    sync::{Arc, Condvar, Mutex},
 };
 
 #[derive(Default)]
@@ -127,8 +124,10 @@ struct PipeState {
     // already represented by frontier/sealed; no per-pixel counter array.
     extra_reads: BTreeMap<u64, u32>,
     metadata: BTreeMap<u32, Metadata>,
-    finished: bool,
+    final_metadata: Option<TileMetadata>,
     failure: Option<Error>,
+    consumed: u64,
+    late: u64,
 }
 pub(crate) struct PixelPipe {
     pub(crate) size: Size,
@@ -136,10 +135,7 @@ pub(crate) struct PixelPipe {
     state: Mutex<PipeState>,
     producer: Mutex<()>,
     changed: Condvar,
-    pub(crate) events: tokio::sync::Notify,
-    consumed: AtomicU64,
-    late: AtomicU64,
-    final_metadata: Mutex<Option<TileMetadata>>,
+    events: tokio::sync::Notify,
     // Credit keeps later tiles from spending RAM needed by the first band.
     band_height: u32,
     reads: ReadCounts,
@@ -152,6 +148,9 @@ pub(crate) struct ReadCounts {
 }
 impl ReadCounts {
     fn at(self, position: u64, size: &Size) -> u32 {
+        if self.pad_x == 0 && self.pad_y == 0 {
+            return 1;
+        }
         let x = position % u64::from(size.width);
         let y = position / u64::from(size.width);
         (1 + if x + 1 == u64::from(size.width) {
@@ -196,9 +195,6 @@ impl PixelPipe {
             producer: Mutex::new(()),
             changed: Condvar::new(),
             events: tokio::sync::Notify::new(),
-            consumed: AtomicU64::new(0),
-            late: AtomicU64::new(0),
-            final_metadata: Mutex::new(None),
             band_height: band_height.max(8),
             reads,
         })
@@ -226,10 +222,10 @@ impl PixelPipe {
         self.events.notify_waiters();
     }
     pub(crate) fn consumed(&self) -> u64 {
-        self.consumed.load(Ordering::SeqCst)
+        self.state.lock().expect("pixel pipe lock").consumed
     }
     pub(crate) fn late(&self) -> u64 {
-        self.late.load(Ordering::SeqCst)
+        self.state.lock().expect("pixel pipe lock").late
     }
     #[cfg(test)]
     pub(crate) fn buffered_stripes(&self) -> usize {
@@ -276,8 +272,8 @@ impl PixelPipe {
         });
         let metadata_bytes = decoded.icc_profile.as_ref().map_or(0, Vec::len)
             + decoded.exif_metadata.as_ref().map_or(0, Vec::len);
-        let metadata_reservation = self.budget.reserve(metadata_bytes as u64 * 3 + 128, 0)?;
-        {
+        if metadata_bytes > 0 {
+            let metadata_reservation = self.budget.reserve(metadata_bytes as u64 * 3 + 128, 0)?;
             let mut state = self.state.lock().expect("pixel pipe lock");
             state.metadata.insert(
                 id,
@@ -288,16 +284,31 @@ impl PixelPipe {
                 },
             );
         }
-        for y in 0..h {
+        let rows = (0..h).map(|y| {
             let start = u64::from(placement.position.y + y) * u64::from(self.size.width)
                 + u64::from(placement.position.x);
             let bytes = (u64::from(y) * u64::from(width) * 4) as usize;
-            let incoming = PixelStripe {
+            PixelStripe {
                 start,
                 buffer: Arc::clone(&buffer),
                 bytes: bytes..bytes + w as usize * 4,
                 remaining_reads: 0,
-            };
+            }
+        });
+        if buffer.bytes.as_chunks::<4>().0.iter().all(|p| p[3] == 255) {
+            let mut state = self.state.lock().expect("pixel pipe lock");
+            if let Some(error) = &state.failure {
+                return Err(error.clone());
+            }
+            for stripe in rows {
+                self.publish(&mut state, stripe);
+            }
+            drop(state);
+            self.changed.notify_all();
+            return Ok(());
+        }
+        for incoming in rows {
+            let start = incoming.start;
             let old = {
                 let state = self.state.lock().expect("pixel pipe lock");
                 segments(&state.ready, start..start + u64::from(w))
@@ -344,20 +355,23 @@ impl PixelPipe {
             if let Some(error) = &state.failure {
                 return Err(error.clone());
             }
-            let writable = unsealed(&state, start..start + u64::from(w));
-            if writable.iter().map(|r| r.end - r.start).sum::<u64>() != u64::from(w) {
-                self.late.fetch_add(1, Ordering::SeqCst);
-            }
-            for range in writable {
-                self.remove(&mut state, range.clone());
-                let mut stripe = composite.slice(range.clone());
-                stripe.remaining_reads = self.reads.total(range, &self.size);
-                insert(&mut state.ready, stripe);
-            }
+            self.publish(&mut state, composite);
             drop(state);
             self.changed.notify_all();
         }
         Ok(())
+    }
+    fn publish(&self, state: &mut PipeState, stripe: PixelStripe) {
+        let writable = unsealed(state, stripe.start..stripe.end());
+        if writable.iter().map(|r| r.end - r.start).sum::<u64>() != stripe.end() - stripe.start {
+            state.late += 1;
+        }
+        for range in writable {
+            self.remove(state, range.clone());
+            let mut part = stripe.slice(range.clone());
+            part.remaining_reads = self.reads.total(range, &self.size);
+            insert(&mut state.ready, part);
+        }
     }
     /// Called only after acquisition and the Keep/complete decision. Until
     /// then a gap can still be repaired by Retry and cannot be read as black.
@@ -378,11 +392,9 @@ impl PixelPipe {
                 metadata.1.clone_from(&m.data.1);
             }
         }
-        *self.final_metadata.lock().expect("metadata lock") = Some(metadata);
-        state.finished = true;
+        state.final_metadata = Some(metadata);
         drop(state);
         self.changed.notify_all();
-        self.events.notify_waiters();
     }
     pub(crate) fn metadata(&self) -> Result<TileMetadata, Error> {
         let mut state = self.state.lock().expect("pixel pipe lock");
@@ -390,13 +402,8 @@ impl PixelPipe {
             if let Some(error) = &state.failure {
                 return Err(error.clone());
             }
-            if state.finished {
-                return Ok(self
-                    .final_metadata
-                    .lock()
-                    .expect("metadata lock")
-                    .clone()
-                    .expect("final metadata"));
+            if let Some(metadata) = &state.final_metadata {
+                return Ok(metadata.clone());
             }
             state = self.changed.wait(state).expect("pixel pipe lock");
         }
@@ -409,7 +416,7 @@ impl PixelPipe {
             }
             let stripes = segments(&state.ready, range.clone());
             let count: u64 = stripes.iter().map(|s| s.end() - s.start).sum();
-            if count == range.end - range.start || state.finished {
+            if count == range.end - range.start || state.final_metadata.is_some() {
                 let mut filled = Vec::new();
                 let mut position = range.start;
                 for stripe in stripes {
@@ -424,9 +431,7 @@ impl PixelPipe {
                 }
                 self.remove(&mut state, range.clone());
                 seal(&mut state, range.clone());
-                self.consumed
-                    .fetch_add(range.end - range.start, Ordering::SeqCst);
-                self.events.notify_waiters();
+                state.consumed += range.end - range.start;
                 return Ok(PixelLease { stripes: filled });
             }
             state = self.changed.wait(state).expect("pixel pipe lock");
@@ -492,30 +497,28 @@ impl PixelPipe {
             if let Some(error) = &state.failure {
                 return Err(error.clone());
             }
-            let key = state
+            let already_read = position < state.frontier
+                || state
+                    .sealed
+                    .range(..=position)
+                    .next_back()
+                    .is_some_and(|(_, &end)| position < end);
+            let count = if already_read {
+                1 + state.extra_reads.get(&position).copied().unwrap_or(0)
+            } else {
+                0
+            };
+            if let Some((&key, stripe)) = state
                 .ready
-                .range(..=position)
+                .range_mut(..=position)
                 .next_back()
                 .filter(|(_, s)| position < s.end())
-                .map(|(&key, _)| key);
-            if let Some(key) = key {
-                let already_read = position < state.frontier
-                    || state
-                        .sealed
-                        .range(..=position)
-                        .next_back()
-                        .is_some_and(|(_, &end)| position < end);
-                let count = if already_read {
-                    1 + state.extra_reads.get(&position).copied().unwrap_or(0)
-                } else {
-                    0
-                };
+            {
                 if count >= self.reads.at(position, &self.size) {
                     return Err(Error::Internal(
                         "codec exceeded declared pixel reads".into(),
                     ));
                 }
-                let stripe = state.ready.get_mut(&key).expect("indexed pixel");
                 let offset = stripe.bytes.start + ((position - stripe.start) * 4) as usize;
                 let bytes = &stripe.buffer.bytes[offset..offset + 3];
                 let pixel = image::Rgb([bytes[0], bytes[1], bytes[2]]);
@@ -526,7 +529,7 @@ impl PixelPipe {
                     *state.extra_reads.entry(position).or_default() += 1;
                 } else {
                     seal(&mut state, position..position + 1);
-                    self.consumed.fetch_add(1, Ordering::SeqCst);
+                    state.consumed += 1;
                 }
                 if done {
                     state.ready.remove(&key);
@@ -538,7 +541,7 @@ impl PixelPipe {
                 }
                 return Ok(pixel);
             }
-            if state.finished {
+            if state.final_metadata.is_some() {
                 // Keep finalized this hole. Black padding needs no allocation.
                 if position >= state.frontier
                     && !state
@@ -548,7 +551,7 @@ impl PixelPipe {
                         .is_some_and(|(_, &end)| position < end)
                 {
                     seal(&mut state, position..position + 1);
-                    self.consumed.fetch_add(1, Ordering::SeqCst);
+                    state.consumed += 1;
                 }
                 return Ok(image::Rgb([0, 0, 0]));
             }
@@ -618,29 +621,38 @@ fn unsealed(state: &PipeState, range: Range<u64>) -> Vec<Range<u64>> {
 fn seal(state: &mut PipeState, range: Range<u64>) {
     let mut a = range.start;
     let mut b = range.end;
-    let joined: Vec<_> = state
-        .sealed
-        .range(..=b)
-        .filter(|(_, end)| **end >= a)
-        .map(|(&a, &b)| (a, b))
-        .collect();
-    for (start, end) in joined {
-        state.sealed.remove(&start);
-        a = a.min(start);
-        b = b.max(end);
-    }
     if a <= state.frontier {
         state.frontier = state.frontier.max(b);
-    } else {
-        state.sealed.insert(a, b);
+        while let Some((&start, &end)) = state.sealed.first_key_value() {
+            if start > state.frontier {
+                break;
+            }
+            state.frontier = state.frontier.max(end);
+            state.sealed.pop_first();
+        }
+        return;
     }
+    if let Some((&start, &end)) = state.sealed.range(..=a).next_back() {
+        if end >= a {
+            a = start;
+            b = b.max(end);
+        }
+    }
+    while let Some((&start, &end)) = state.sealed.range(a + 1..=b).next() {
+        b = b.max(end);
+        state.sealed.remove(&start);
+    }
+    state.sealed.insert(a, b);
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::imaging::DecodedTile;
     use dezoomify::model::{Point, TileRole};
+    fn new_pipe(width: u32, height: u32, reads: ReadCounts) -> Arc<PixelPipe> {
+        PixelPipe::new(Size { width, height }, MemoryBudget::new(4096), 8, reads)
+    }
     pub(crate) fn placement(x: u32, y: u32) -> TilePlacement {
         TilePlacement {
             position: Point { x, y },
@@ -650,7 +662,7 @@ mod tests {
             role: TileRole::output(),
         }
     }
-    fn put(pipe: &PixelPipe, id: u32, x: u32, y: u32, image: image::RgbaImage) {
+    pub(crate) fn put(pipe: &PixelPipe, id: u32, x: u32, y: u32, image: image::RgbaImage) {
         let reservation = pipe
             .budget
             .reserve(image.as_raw().len() as u64, 0)
@@ -669,15 +681,7 @@ mod tests {
     }
     #[test]
     fn shuffled_stripes_share_buffers_and_release_after_the_last_row() {
-        let pipe = PixelPipe::new(
-            Size {
-                width: 8,
-                height: 2,
-            },
-            MemoryBudget::new(4096),
-            8,
-            ReadCounts::default(),
-        );
+        let pipe = new_pipe(8, 2, ReadCounts::default());
         put(
             &pipe,
             1,
@@ -723,15 +727,7 @@ mod tests {
     }
     #[test]
     fn producer_composites_unread_pixels_and_discards_late_writes() {
-        let pipe = PixelPipe::new(
-            Size {
-                width: 4,
-                height: 1,
-            },
-            MemoryBudget::new(4096),
-            8,
-            ReadCounts::default(),
-        );
+        let pipe = new_pipe(4, 1, ReadCounts::default());
         put(
             &pipe,
             0,
@@ -761,15 +757,7 @@ mod tests {
     #[test]
     fn retry_keeps_holes_unresolved_and_finish_or_failure_wakes_readers() {
         for fail in [false, true] {
-            let pipe = PixelPipe::new(
-                Size {
-                    width: 2,
-                    height: 1,
-                },
-                MemoryBudget::new(4096),
-                8,
-                ReadCounts::default(),
-            );
+            let pipe = new_pipe(2, 1, ReadCounts::default());
             put(
                 &pipe,
                 1,
@@ -817,15 +805,7 @@ mod tests {
             }
             thread.join().expect("reader exits");
         }
-        let pipe = PixelPipe::new(
-            Size {
-                width: 2,
-                height: 1,
-            },
-            MemoryBudget::new(4096),
-            8,
-            ReadCounts::default(),
-        );
+        let pipe = new_pipe(2, 1, ReadCounts::default());
         pipe.finish(&[]);
         assert_eq!(
             pipe.read(0..2)
@@ -857,15 +837,7 @@ mod tests {
     }
     #[test]
     fn padded_pixel_lives_until_read_64_and_counts_allow_arbitrary_order() {
-        let pipe = PixelPipe::new(
-            Size {
-                width: 1,
-                height: 1,
-            },
-            MemoryBudget::new(4096),
-            8,
-            ReadCounts { pad_x: 7, pad_y: 7 },
-        );
+        let pipe = new_pipe(1, 1, ReadCounts { pad_x: 7, pad_y: 7 });
         put(
             &pipe,
             0,

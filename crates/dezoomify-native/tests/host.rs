@@ -94,7 +94,6 @@ fn compatible_single_tile_iiif_preserves_bytes_without_pixel_decoding() {
             .unwrap();
         let saved = host.publication().unwrap();
         assert_eq!(saved.instrumentation.pixel_decodes, 0);
-        assert_eq!(saved.instrumentation.canvas_bytes, 0);
         assert_eq!(
             std::fs::read(destination.join(format!("0,0,16,16/16,/0/default.{extension}")))
                 .unwrap(),
@@ -350,10 +349,9 @@ fn zif_reuses_standalone_jpeg_and_rgb_png_tiles() {
             assert_eq!(publication.output.missing, [0]);
         }
         assert_eq!(
-            publication.instrumentation.peak_encoded_bytes, 0,
+            publication.instrumentation.peak_retained_bytes, 0,
             "received grid tiles stream even when tile zero is missing"
         );
-        assert_eq!(host.publication().unwrap().instrumentation.canvas_bytes, 0);
         let container = std::fs::read(publication.path).unwrap();
         let metadata = zif_tiff::std::read_zif(std::io::Cursor::new(&container)).unwrap();
         assert_eq!(metadata.level_count(), if index == 0 { 1 } else { 2 });
@@ -984,14 +982,6 @@ fn bounded_concurrency_and_memory_accounting() {
         stats.peak_inflight
     );
     assert!(stats.bytes_fetched > 0, "fetched bytes accounted");
-    assert_eq!(
-        stats.canvas_bytes, 0,
-        "streaming raster output allocates no full-image canvas"
-    );
-    assert_eq!(
-        stats.accounted_peak_bytes, stats.peak_retained_bytes,
-        "RAM reservations include the bounded output buffer"
-    );
     assert!(
         stats.peak_retained_bytes <= 512 << 20,
         "retention stays under the output cap on actual retained bytes"

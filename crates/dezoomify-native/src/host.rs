@@ -57,25 +57,15 @@ pub struct Instrumentation {
     pub peak_retained_bytes: u64,
     /// Peak in-flight decode bytes: encoded bodies held by blocking decode
     /// tails (including tails detached by cancelling their parent task).
-    /// Bounded by the algorithm slot budget times the fetch byte limit; counted
-    /// against the retain cap alongside sink retention.
+    /// Bounded by the acquisition slots times the response byte limit;
+    /// tracked separately from raster RAM reservations.
     pub peak_decode_inflight_bytes: u64,
-    /// Legacy counter; the streaming pipeline allocates no canvas (zero).
-    pub canvas_bytes: u64,
     /// Total bytes in the committed output, not resident memory.
     pub encoded_bytes: u64,
     /// Pixel decoder calls; header inspection and tile reuse do not count.
     pub pixel_decodes: u64,
-    /// Peak encoded bytes buffered outside codec workspace.
-    pub peak_encoded_bytes: u64,
-    /// Legacy counter; decoded pixels never spill (zero).
-    pub peak_spool_bytes: u64,
     /// Incoming stripes clipped because some pixels were already read.
     pub late_repaints: u64,
-    /// Peak charged raster RAM, including temporary decode allowance and
-    /// reserved encoder workspace. Fetch bodies and allocator overhead are
-    /// not a process RSS measurement.
-    pub accounted_peak_bytes: u64,
 }
 
 /// Honest native publication record: what was actually written.
@@ -478,17 +468,12 @@ impl<'a> NativeHost<'a> {
                     credit,
                 )?;
                 decode_tails.pixel_decodes.fetch_add(1, Ordering::SeqCst);
-                let image = load_image_with_limit(
+                let decoded = load_image_with_limit(
                     &bytes,
                     Some(pixels.saturating_mul(16).saturating_add(bytes.len() as u64)),
                 )
                 .map_err(|error| Error::DecodeFailed(error.to_string().into()))?;
-                let decoded = DecodedTile {
-                    image: image.image.into_rgba8(),
-                    icc_profile: image.icc_profile,
-                    exif_metadata: image.exif_metadata,
-                };
-                reservation.shrink(crate::sink::tile_bytes(&decoded.image) + descriptors);
+                reservation.shrink(decoded.image.as_raw().len() as u64 + descriptors);
                 Ok::<_, Error>(ReceivedPixels {
                     decoded,
                     reservation,
@@ -852,33 +837,6 @@ impl Host for NativeHost<'_> {
                 "output preflight does not match invocation".into(),
             ));
         }
-        if let Some(dimensions) = &plan.canvas {
-            let reason = match self.format {
-                OutputFormat::Jpeg
-                    if dimensions.width > crate::imaging::JPEG_MAX_SIDE
-                        || dimensions.height > crate::imaging::JPEG_MAX_SIDE =>
-                {
-                    Some(LimitReason::JpegSide)
-                }
-                OutputFormat::Webp
-                    if dimensions.width > crate::imaging::WEBP_MAX_SIDE
-                        || dimensions.height > crate::imaging::WEBP_MAX_SIDE =>
-                {
-                    Some(LimitReason::WebpSide)
-                }
-                _ => None,
-            };
-            if let Some(reason) = reason {
-                return Err(Error::LimitExceeded {
-                    limit: LimitContext {
-                        reason,
-                        dimensions: Some(dimensions.clone()),
-                        bytes_required: None,
-                        bytes_available: None,
-                    },
-                });
-            }
-        }
         if let OutputTarget::File(path) = &self.options.output {
             crate::output::validate_destination(path, &self.format, self.options.overwrite)?;
         }
@@ -1218,12 +1176,8 @@ impl Host for NativeHost<'_> {
             instrumentation.peak_retained_bytes.max(self.pixels.peak());
         instrumentation.peak_decode_inflight_bytes =
             self.decode_tails.peak_bytes.load(Ordering::SeqCst);
-        instrumentation.canvas_bytes = 0;
         instrumentation.encoded_bytes = encoded_bytes;
-        instrumentation.peak_encoded_bytes = 64 << 10;
-        instrumentation.peak_spool_bytes = 0;
         instrumentation.late_repaints = late_repaints;
-        instrumentation.accounted_peak_bytes = instrumentation.peak_retained_bytes;
         let output = Output {
             canvas: Some(Size {
                 width: image_size.x,
@@ -1436,7 +1390,8 @@ mod tests {
 
     #[test]
     fn resource_limit_precedes_pixel_decoding_and_cleanup_awaits_every_worker() {
-        let directory = crate::sink::temp_sibling(&std::env::temp_dir().join("decode-reservation"));
+        let directory =
+            crate::output::temp_sibling(&std::env::temp_dir().join("decode-reservation"));
         std::fs::create_dir(&directory).expect("test directory");
         let source = directory.join("image.dzi");
         let tiles = directory.join("image_files/9");
