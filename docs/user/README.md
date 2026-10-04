@@ -10,7 +10,8 @@ The pages are written for Dezoomify's users: historians, researchers,
 archivists, artists, and collectors. They are deliberately free of
 implementation vocabulary. Name user actions and outcomes, not mechanisms;
 state platform limits as facts about the app; give every problem at least
-one next step. `docs/product.md` defines the full writing rules.
+one next step. Lead with a specific outcome and the best next action; keep
+technical details expandable or linked.
 
 ## Pages
 
@@ -29,12 +30,12 @@ Rendered order (also the navigation order in the website help section):
 
 ## When to add or edit
 
-- A user-visible behavior, limitation, or app boundary changes.
-- A new app or capability ships.
-- A support question appears more than once.
-- An error message gains a recovery path worth explaining.
-
-Skip it for internal refactors with no user-visible change.
+Follow the root [documentation rule](../../AGENTS.md#documentation). Edit a guide
+when its advice becomes wrong or misses a step needed to finish the task.
+Repeated support questions can justify an explanation in an existing page.
+New capabilities and error variants do not each need their own documentation;
+add a page only for a distinct, recurring user task. Internal refactors need no
+user-doc edits.
 
 ## Editing rules
 

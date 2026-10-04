@@ -1,5 +1,9 @@
 # Shared UI Guidelines
 
+Follow the root [documentation rule](../../AGENTS.md#documentation). Keep user
+guidance in `docs/user/`; UI changes need doc edits only when existing guidance
+becomes misleading. Do not add a design or behavior page for each component.
+
 ## Visual Identity & Design System
 
 Retain Dezoomify's authentic parchment aesthetic, wide proportions, and distinctive tactile controls tailored to an audience of art historians, archivists, museum researchers, and cultural heritage enthusiasts:

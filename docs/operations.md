@@ -1,10 +1,20 @@
 # Operations
 
-On-call verifies asset digests before interpreting results; source URLs never enter monitoring.
+Use immutable release artifacts for publication and rollback. Source URLs never
+enter monitoring.
 
 ## Release runbook
 
-Stage guarantees: [`releases.md`](releases.md). Green `master` CI auto-publishes the next rolling version.
+Green `master` CI auto-publishes the next rolling version. One version covers
+all apps and bindings from the same revision. `cargo xtask release version`
+derives it from Git: `vX.Y.Z` is `X.Y.Z`; each subsequent first-parent commit
+bumps `Z`. Builds receive `DEZOOMIFY_VERSION`, rather than manifest edits.
+
+The release plan freezes the revision, capabilities, and targets from
+`release/targets.toml` and `generated/release-capabilities.json`. Every planned
+target is mandatory and builds on its matching host. Each stage validates the
+previous stage's digests; publication verifies again and requires `origin/master`
+to match the plan. Rolling tags use `rolling-v<version>`; numbered tags use `vX.Y.Z`.
 
 ### Preparing a release
 
@@ -35,31 +45,25 @@ One Cloudflare Pages project (the original `dezoomify`) builds from GitHub Actio
 3. GitHub records each deploy in `production`/`preview` and links it as the PR's **View deployment**; the preview URL survives new commits.
 4. The workflow probes the live deploy (production or preview): both apps, both proxy routes, wasm content types, generated help, no repository files served.
 
-`master` is the single production branch. Fork PRs get no previews: the normal `pull_request` event runs the credentialed job for same-repo PRs only, keeping untrusted code out of `pull_request_target`. Previews are public with `noindex` and share production's proxy and file-exposure gates. Internal docs and plans are never served.
-
-## Update and installer truth
-
-No auto-update endpoint exists; updater state: [Releases](releases.md#desktop-updater). Users download published artifacts from the corresponding GitHub Release, and Linux x86_64, Windows x86_64, and Apple silicon macOS installers ship in every release.
-
-## Service levels
-
-Volunteer best-effort, no uptime/latency/support SLO on website, proxy, or release pipeline. Issue triage is volunteer; see [Incident response](#incident-response). Reproducibility holds instead: every GitHub Release artifact is immutable, so failure means reinstalling the previous immutable release (see [Rollback](#rollback)).
+`master` is the single production branch. Fork PRs get no previews: the normal `pull_request` event runs the credentialed job for same-repo PRs only, keeping untrusted code out of `pull_request_target`. Previews are public with `noindex` and share production's proxy and file-exposure gates. Internal docs are never served.
 
 ## Rollback
 
-Manual reinstall of the previous immutable GitHub Release artifact, never a rebuild under an existing version. No rollout to pause, no staged deploy: releases publish at once; Chromium uploads stay drafts until published; AMO listed uploads enter review at once. Timing: plan plus per-target builds in minutes on matching hosts, verify under a minute, publish in minutes; missing planned artifacts fail the stage, never a partial release.
+Reinstall a previous immutable GitHub Release artifact; never rebuild under an
+existing version. There is no automatic desktop updater or staged rollout.
 
 1. Pick the previous immutable release tag (`release publish` refuses republishing a tag).
 2. Download its artifacts.
 3. Reinstall the matching previous `.deb` / `.msi` / `.dmg` by hand; no updater pulls the rollback.
 4. Stores accept no old version as a new submission. Revert on `master`, let it produce a higher rolling version, submit that through `store-submit`; never a new store item.
-5. Preserve user output and settings; record RTO and tags in the incident record. Verify with the same packaged parity commands.
+5. Preserve user output and settings; record affected tags and verify the restored app with packaged fixtures.
 
 ## Incident response
 
-Owners: release owners in `release/config.toml`. Severity: critical (remote code, key compromise, cookie theft), high (proxy abuse, store compromise), medium (flaky gate, store lag).
+Contact the release owners in `release/config.toml` for compromised keys,
+credential exposure, proxy abuse, or broken publication.
 
 1. Pause the affected promotion (website alias or store submission; no updater rollout exists) without rebuilding under the same version.
 2. Preserve logs, digests, evidence; revoke test credentials.
 3. Follow [Rollback](#rollback) for the affected channel only.
-4. Record actions and missing automation in the incident record.
+4. Record evidence and recovery actions in the incident issue.
