@@ -2,11 +2,7 @@
 
 CLI and desktop construct NativeHost and await the shared Rust `dezoomify(inputs, options, host)` function. The Host owns HTTP, local files, cache, inert HTML/CSS parsing, decoding, assembly, encoders, output publication, and resource cleanup. User behavior: [Desktop app guide](../apps/desktop/desktop-app.md) and [Command-line guide](user/command-line.md).
 
-The parser includes unmodified MPL-2.0 dependencies; source and license notices
-at the locked versions: [cssparser](https://docs.rs/crate/cssparser/0.37.0/source/),
-[cssparser-macros](https://docs.rs/crate/cssparser-macros/0.7.1/source/),
-[dtoa-short](https://docs.rs/crate/dtoa-short/0.3.5/source/), and
-[selectors](https://docs.rs/crate/selectors/0.38.0/source/).
+The HTML parser includes unmodified MPL-2.0 dependencies; source and license notices at the locked versions: [cssparser](https://docs.rs/crate/cssparser/0.37.0/source/), [cssparser-macros](https://docs.rs/crate/cssparser-macros/0.7.1/source/), [dtoa-short](https://docs.rs/crate/dtoa-short/0.3.5/source/), and [selectors](https://docs.rs/crate/selectors/0.38.0/source/).
 
 ## Native runtime
 
