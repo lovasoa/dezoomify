@@ -64,7 +64,31 @@ test("desktop quick choices apply sizes and update estimates with the format", (
   );
   assert.equal(current().max_width, null);
   assert.equal(current().max_height, null);
-  assert.match(size.querySelector(".dz-quick-info p").textContent, /width² × 0.75/);
+  assert.equal(size.querySelector(".dz-quick-info"), null);
+  click(container.querySelector('button[aria-label="Size: More information"]'));
+  assert.match(container.querySelector(".dz-settings-explanation").textContent, /width² × 0.75/);
+  act(() => root.unmount());
+});
+
+test("label information opens the existing modal with every format explanation", () => {
+  const { container, root } = renderSettings();
+  const info = container.querySelector('button[aria-label="Format: More information"]');
+  assert.ok(info.closest(".dz-quick-label"));
+  assert.equal(container.querySelectorAll(".dz-quick-menu .dz-quick-info").length, 0);
+  click(info);
+  const dialog = container.querySelector(".dz-settings-dialog");
+  assert.ok(dialog.hasAttribute("open"));
+  assert.equal(dialog.querySelector("h2").textContent, "Format");
+  assert.deepEqual(
+    [...dialog.querySelectorAll("dt")].map((item) => item.textContent),
+    ["Auto", "PNG", "JPEG", "TIFF", "WebP", "ZIF", "IIIF folder"],
+  );
+  assert.match(dialog.textContent, /65,535/);
+  assert.match(dialog.textContent, /16,383/);
+  click(dialog.querySelector(".dz-settings-close"));
+  assert.equal(dialog.hasAttribute("open"), false);
+  click(container.querySelector(".dz-settings-more"));
+  assert.equal(dialog.querySelector("h2").textContent, "Advanced settings");
   act(() => root.unmount());
 });
 

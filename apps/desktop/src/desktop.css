@@ -269,7 +269,7 @@ body {
 
 #dz-desktop-settings .dz-quick-option {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) 22px;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   height: 30px;
   min-width: 0;
@@ -285,8 +285,11 @@ body {
   text-transform: uppercase;
 }
 
-#dz-desktop-settings .dz-quick-option > span {
-  padding: 0 0.68rem 0 0.55rem;
+#dz-desktop-settings .dz-quick-label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0 0.4rem 0 0.55rem;
   white-space: nowrap;
 }
 
@@ -361,44 +364,41 @@ body {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-#dz-desktop-settings .dz-quick-info > summary {
-  padding: 0.2rem;
-  color: var(--dz-text-muted);
-  font: 400 0.85rem / 1 var(--dz-font-sans);
-  cursor: pointer;
-  list-style: none;
-}
-#dz-desktop-settings .dz-quick-info p {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 21;
-  width: min(320px, 80vw);
+#dz-desktop-settings .dz-quick-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 24px;
+  min-height: 0;
   margin: 0;
-  padding: 0.8rem;
-  color: var(--dz-text-primary);
-  background: var(--dz-page-bg);
-  border: 1px solid var(--dz-surface-border);
-  border-radius: var(--dz-radius);
-  font: 400 0.8rem / 1.5 var(--dz-font-sans);
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-#dz-desktop-settings .dz-quick-menu-row:has(.dz-quick-info[open]) {
-  flex-wrap: wrap;
-}
-#dz-desktop-settings .dz-quick-menu .dz-quick-info[open] {
-  width: 100%;
-}
-#dz-desktop-settings :where(.dz-quick-menu) .dz-quick-info:where([open]) > summary {
-  text-align: right;
-}
-#dz-desktop-settings :where(.dz-quick-menu) .dz-quick-info p {
-  position: static;
-  width: auto;
-  padding: 0.35rem 0.5rem 0.75rem;
+  padding: 0;
+  background: transparent;
   border: 0;
+  color: var(--dz-text-muted);
+  cursor: pointer;
+}
+#dz-desktop-settings .dz-quick-info:focus-visible {
+  outline: 2px solid var(--dz-accent-blue);
+  outline-offset: 1px;
+}
+#dz-desktop-settings .dz-settings-explanation {
+  padding-top: 0.5rem;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+#dz-desktop-settings .dz-settings-explanation dl > div {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  gap: 0.75rem;
+  margin-top: 1.1rem;
+}
+#dz-desktop-settings .dz-settings-explanation dt {
+  font-weight: 650;
+}
+#dz-desktop-settings .dz-settings-explanation dd {
+  margin: 0;
+  color: var(--dz-text-secondary);
 }
 
 #dz-desktop-settings .dz-quick-option select,

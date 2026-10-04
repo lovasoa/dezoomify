@@ -54,15 +54,6 @@ function folderName(path: string | null): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? t("desktop.quick.chosenFolder");
 }
 
-function Info({ text }: { text: string }) {
-  return (
-    <details className="dz-quick-info">
-      <summary aria-label={t("desktop.quick.info")}>ⓘ</summary>
-      <p>{text}</p>
-    </details>
-  );
-}
-
 function QuickChoice({
   label,
   value,
@@ -71,7 +62,7 @@ function QuickChoice({
 }: {
   label: string;
   value: string;
-  choices: Array<{ value: string; label: string; hint: string; info: string }>;
+  choices: Array<{ value: string; label: string; hint: string }>;
   onChange(value: string): void;
 }) {
   const ref = useRef<HTMLDetailsElement>(null);
@@ -111,7 +102,6 @@ function QuickChoice({
               <span>{choice.label}</span>
               <span className="dz-choice-hint">{choice.hint}</span>
             </button>
-            <Info text={choice.info} />
           </div>
         ))}
       </fieldset>
@@ -121,18 +111,30 @@ function QuickChoice({
 
 function QuickOption({
   label,
-  info,
+  onInfo,
   children,
 }: {
   label: string;
-  info: string;
+  onInfo(): void;
   children: ReactNode;
 }) {
   return (
     <div className="dz-quick-option">
-      <span>{label}</span>
+      <span className="dz-quick-label">
+        {label}
+        <button
+          type="button"
+          className="dz-quick-info"
+          aria-label={`${label}: ${t("desktop.quick.info")}`}
+          onClick={onInfo}
+        >
+          <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+            <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" />
+            <path d="M8 7v4M8 4.5v.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          </svg>
+        </button>
+      </span>
       {children}
-      <Info text={info} />
     </div>
   );
 }
@@ -160,6 +162,7 @@ function PreferenceRow({
 /** Desktop job preferences: the quick strip plus the advanced settings dialog. */
 export function DesktopSettingsView({ settings, error, onChange, onReset }: Props): ReactElement {
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [help, setHelp] = useState<"folder" | "format" | "size" | "network" | null>(null);
   const [headersDraft, setHeadersDraft] = useState(() => headersToEditableText(settings.headers));
   const dialogRef = useRef<HTMLDialogElement>(null);
 
@@ -171,14 +174,14 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
     const dialog = dialogRef.current;
     if (!dialog) return;
     const isOpen = dialog.open || dialog.hasAttribute("open");
-    if (advancedOpen && !isOpen) {
+    if ((advancedOpen || help) && !isOpen) {
       if (typeof dialog.showModal === "function") dialog.showModal();
       else dialog.setAttribute("open", "");
-    } else if (!advancedOpen && isOpen) {
+    } else if (!advancedOpen && !help && isOpen) {
       if (typeof dialog.close === "function") dialog.close();
       else dialog.removeAttribute("open");
     }
-  }, [advancedOpen]);
+  }, [advancedOpen, help]);
 
   // Raw values are submitted as typed; Rust validates on save and its typed
   // rejection reason arrives through `error`.
@@ -213,7 +216,7 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
       aria-label="Job options"
     >
       <div className="dz-quick-options">
-        <QuickOption label={t("desktop.quick.folder")} info={t("desktop.quick.folderInfo")}>
+        <QuickOption label={t("desktop.quick.folder")} onInfo={() => setHelp("folder")}>
           <button
             type="button"
             className="dz-quick-button"
@@ -224,7 +227,7 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
           </button>
         </QuickOption>
 
-        <QuickOption label={t("desktop.quick.format")} info={t("desktop.quick.formatInfo")}>
+        <QuickOption label={t("desktop.quick.format")} onInfo={() => setHelp("format")}>
           <QuickChoice
             label={t("desktop.quick.format")}
             value={settings.output_format}
@@ -236,14 +239,11 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
               hint: t(
                 `desktop.quick.hint.${format.value === "iiif-dir" ? "iiifDir" : format.value}`,
               ),
-              info: t(
-                `desktop.quick.format.${format.value === "iiif-dir" ? "iiifDir" : format.value}`,
-              ),
             }))}
           />
         </QuickOption>
 
-        <QuickOption label={t("desktop.quick.size")} info={t("desktop.quick.sizeInfo")}>
+        <QuickOption label={t("desktop.quick.size")} onInfo={() => setHelp("size")}>
           <QuickChoice
             label={t("desktop.quick.size")}
             value={sizePresetFor(settings)}
@@ -253,25 +253,22 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
                 value: "full",
                 label: t("desktop.quick.fullResolution"),
                 hint: t("desktop.quick.source"),
-                info: t("desktop.quick.sizeInfo"),
               },
               ...sizes.map((width, index) => ({
                 value: String(width),
                 label: t("desktop.quick.upTo", { size: 2 ** index }),
                 hint: estimateSize(width, settings),
-                info: t("desktop.quick.sizeInfo"),
               })),
               {
                 value: "custom",
                 label: t("desktop.quick.custom"),
                 hint: t("desktop.quick.exact"),
-                info: t("desktop.advanced.dimensionsDesc"),
               },
             ]}
           />
         </QuickOption>
 
-        <QuickOption label={t("desktop.quick.network")} info={t("desktop.quick.networkInfo")}>
+        <QuickOption label={t("desktop.quick.network")} onInfo={() => setHelp("network")}>
           <QuickChoice
             label={t("desktop.quick.network")}
             value={settings.network_profile}
@@ -280,7 +277,6 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
               value: profile,
               label: t(`desktop.quick.${profile === "maximum" ? "fast" : profile}`),
               hint: t(`desktop.quick.rate.${profile}`),
-              info: t("desktop.quick.networkInfo"),
             }))}
           />
         </QuickOption>
@@ -299,136 +295,201 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
         ref={dialogRef}
         className="dz-settings-dialog"
         aria-labelledby="dz-settings-dialog-title"
-        onClose={() => setAdvancedOpen(false)}
-        onCancel={() => setAdvancedOpen(false)}
+        onClose={() => {
+          setAdvancedOpen(false);
+          setHelp(null);
+        }}
+        onCancel={() => {
+          setAdvancedOpen(false);
+          setHelp(null);
+        }}
       >
         <div className="dz-settings-sheet">
           <header className="dz-settings-sheet-head">
-            <h2 id="dz-settings-dialog-title">{t("desktop.advanced.title")}</h2>
+            <h2 id="dz-settings-dialog-title">
+              {help ? t(`desktop.quick.${help}`) : t("desktop.advanced.title")}
+            </h2>
             <button
               type="button"
               className="dz-settings-close"
-              onClick={() => setAdvancedOpen(false)}
+              onClick={() => {
+                setAdvancedOpen(false);
+                setHelp(null);
+              }}
             >
               {t("desktop.advanced.done")}
             </button>
           </header>
 
-          {showCompression ? (
-            <PreferenceRow
-              title={compressionLabel}
-              description={
-                jpeg
-                  ? t("desktop.advanced.jpegQualityDesc")
-                  : t("desktop.advanced.compressionEffortDesc")
-              }
-            >
-              <div className="dz-slider-control">
+          {help ? (
+            <div className="dz-settings-explanation">
+              <p>{t(`desktop.quick.${help}Info`)}</p>
+              {help === "format" ? (
+                <dl>
+                  {formats.map((format) => (
+                    <div key={format.value}>
+                      <dt>{format.label}</dt>
+                      <dd>
+                        {t(
+                          `desktop.quick.format.${format.value === "iiif-dir" ? "iiifDir" : format.value}`,
+                        )}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
+              {help === "size" ? (
+                <dl>
+                  <div>
+                    <dt>{t("desktop.quick.fullResolution")}</dt>
+                    <dd>{t("desktop.quick.source")}</dd>
+                  </div>
+                  {sizes.map((width, index) => (
+                    <div key={width}>
+                      <dt>{t("desktop.quick.upTo", { size: 2 ** index })}</dt>
+                      <dd>
+                        {width.toLocaleString()} px · {estimateSize(width, settings)}
+                      </dd>
+                    </div>
+                  ))}
+                  <div>
+                    <dt>{t("desktop.quick.custom")}</dt>
+                    <dd>{t("desktop.advanced.dimensionsDesc")}</dd>
+                  </div>
+                </dl>
+              ) : null}
+              {help === "network" ? (
+                <dl>
+                  {profiles.map((profile) => (
+                    <div key={profile}>
+                      <dt>{t(`desktop.quick.${profile === "maximum" ? "fast" : profile}`)}</dt>
+                      <dd>{t(`desktop.quick.rate.${profile}`)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
+            </div>
+          ) : (
+            <>
+              {showCompression ? (
+                <PreferenceRow
+                  title={compressionLabel}
+                  description={
+                    jpeg
+                      ? t("desktop.advanced.jpegQualityDesc")
+                      : t("desktop.advanced.compressionEffortDesc")
+                  }
+                >
+                  <div className="dz-slider-control">
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      aria-label={compressionLabel}
+                      value={compressionValue}
+                      onChange={(event) => {
+                        const value = Number(event.currentTarget.value);
+                        commit({ compression: jpeg ? 100 - value : value });
+                      }}
+                    />
+                    <output>{jpeg ? `${compressionValue}%` : compressionValue}</output>
+                  </div>
+                </PreferenceRow>
+              ) : null}
+
+              <PreferenceRow
+                title={t("desktop.advanced.dimensions")}
+                description={t("desktop.advanced.dimensionsDesc")}
+              >
+                <div className="dz-size-control">
+                  <input
+                    type="number"
+                    min="1"
+                    max="1000000"
+                    placeholder={t("desktop.advanced.width")}
+                    aria-label={t("desktop.advanced.width")}
+                    value={settings.max_width ?? ""}
+                    onChange={(event) =>
+                      commit({
+                        max_width: event.currentTarget.value
+                          ? Number(event.currentTarget.value)
+                          : null,
+                      })
+                    }
+                  />
+                  <span aria-hidden="true">×</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="1000000"
+                    placeholder={t("desktop.advanced.height")}
+                    aria-label={t("desktop.advanced.height")}
+                    value={settings.max_height ?? ""}
+                    onChange={(event) =>
+                      commit({
+                        max_height: event.currentTarget.value
+                          ? Number(event.currentTarget.value)
+                          : null,
+                      })
+                    }
+                  />
+                </div>
+              </PreferenceRow>
+
+              <PreferenceRow
+                title={t("desktop.advanced.retries")}
+                description={t("desktop.advanced.retriesDesc")}
+              >
                 <input
-                  type="range"
+                  className="dz-number-control"
+                  type="number"
                   min="0"
                   max="100"
-                  aria-label={compressionLabel}
-                  value={compressionValue}
+                  aria-label={t("desktop.advanced.retries")}
+                  value={settings.retries}
+                  onChange={(event) => commit({ retries: Number(event.currentTarget.value) })}
+                />
+              </PreferenceRow>
+
+              <PreferenceRow
+                title={t("desktop.advanced.resumeCache")}
+                description={t("desktop.advanced.resumeCacheDesc")}
+              >
+                <button
+                  type="button"
+                  className="dz-compact-action"
+                  title={settings.cache_dir ?? undefined}
+                  onClick={() => void chooseDirectory("cache_dir")}
+                >
+                  {settings.cache_dir ? t("desktop.advanced.change") : t("desktop.advanced.choose")}
+                </button>
+              </PreferenceRow>
+
+              <details className="dz-headers-disclosure">
+                <summary>{t("desktop.advanced.headers")}</summary>
+                <p>{t("desktop.advanced.headersDesc")}</p>
+                <textarea
+                  rows={3}
+                  placeholder="Referer: https://example.com/viewer"
+                  value={headersDraft}
                   onChange={(event) => {
-                    const value = Number(event.currentTarget.value);
-                    commit({ compression: jpeg ? 100 - value : value });
+                    const draft = event.currentTarget.value;
+                    setHeadersDraft(draft);
+                    commit({ headers: draft.split("\n") });
                   }}
                 />
-                <output>{jpeg ? `${compressionValue}%` : compressionValue}</output>
-              </div>
-            </PreferenceRow>
-          ) : null}
+              </details>
 
-          <PreferenceRow
-            title={t("desktop.advanced.dimensions")}
-            description={t("desktop.advanced.dimensionsDesc")}
-          >
-            <div className="dz-size-control">
-              <input
-                type="number"
-                min="1"
-                max="1000000"
-                placeholder={t("desktop.advanced.width")}
-                aria-label={t("desktop.advanced.width")}
-                value={settings.max_width ?? ""}
-                onChange={(event) =>
-                  commit({
-                    max_width: event.currentTarget.value ? Number(event.currentTarget.value) : null,
-                  })
-                }
-              />
-              <span aria-hidden="true">×</span>
-              <input
-                type="number"
-                min="1"
-                max="1000000"
-                placeholder={t("desktop.advanced.height")}
-                aria-label={t("desktop.advanced.height")}
-                value={settings.max_height ?? ""}
-                onChange={(event) =>
-                  commit({
-                    max_height: event.currentTarget.value
-                      ? Number(event.currentTarget.value)
-                      : null,
-                  })
-                }
-              />
-            </div>
-          </PreferenceRow>
-
-          <PreferenceRow
-            title={t("desktop.advanced.retries")}
-            description={t("desktop.advanced.retriesDesc")}
-          >
-            <input
-              className="dz-number-control"
-              type="number"
-              min="0"
-              max="100"
-              aria-label={t("desktop.advanced.retries")}
-              value={settings.retries}
-              onChange={(event) => commit({ retries: Number(event.currentTarget.value) })}
-            />
-          </PreferenceRow>
-
-          <PreferenceRow
-            title={t("desktop.advanced.resumeCache")}
-            description={t("desktop.advanced.resumeCacheDesc")}
-          >
-            <button
-              type="button"
-              className="dz-compact-action"
-              title={settings.cache_dir ?? undefined}
-              onClick={() => void chooseDirectory("cache_dir")}
-            >
-              {settings.cache_dir ? t("desktop.advanced.change") : t("desktop.advanced.choose")}
-            </button>
-          </PreferenceRow>
-
-          <details className="dz-headers-disclosure">
-            <summary>{t("desktop.advanced.headers")}</summary>
-            <p>{t("desktop.advanced.headersDesc")}</p>
-            <textarea
-              rows={3}
-              placeholder="Referer: https://example.com/viewer"
-              value={headersDraft}
-              onChange={(event) => {
-                const draft = event.currentTarget.value;
-                setHeadersDraft(draft);
-                commit({ headers: draft.split("\n") });
-              }}
-            />
-          </details>
-
-          {error ? (
-            <p id="dz-settings-error" role="alert">
-              {error}
-            </p>
-          ) : null}
-          <button type="button" className="dz-settings-reset" onClick={onReset}>
-            {t("desktop.settings.reset")}
-          </button>
+              {error ? (
+                <p id="dz-settings-error" role="alert">
+                  {error}
+                </p>
+              ) : null}
+              <button type="button" className="dz-settings-reset" onClick={onReset}>
+                {t("desktop.settings.reset")}
+              </button>
+            </>
+          )}
         </div>
       </dialog>
     </section>
