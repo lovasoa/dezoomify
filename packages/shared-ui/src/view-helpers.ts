@@ -16,11 +16,10 @@ export function trimTechnical(text: string, max = 2000): string {
 export function formatMissingSummary(missing: Array<string>, failedCount?: number): string {
   const count = missing.length > 0 ? missing.length : (failedCount ?? 0);
   if (count <= 0) return t("desktop.rec.missingSome");
-  const plural = count === 1 ? "" : "s";
-  if (missing.length === 0) return t("desktop.rec.missingCount", { count, plural });
+  if (missing.length === 0) return t("desktop.rec.missingCount", { count });
   const shown = missing.slice(0, 20).join(", ");
   const rest = missing.length > 20 ? t("desktop.rec.more", { n: missing.length - 20 }) : "";
-  return t("desktop.rec.missingList", { n: missing.length, plural, shown, rest });
+  return t("desktop.rec.missingList", { n: missing.length, shown, rest });
 }
 
 export function displaySourceUrl(value: string): string {

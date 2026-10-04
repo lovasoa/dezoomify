@@ -84,14 +84,21 @@ test("i18n: substitution renders per locale and degrades safely", () => {
     assert.equal(t("view.modal.ok", undefined, "fr"), "Compris");
     assert.equal(t("view.modal.ok", undefined, "de"), "Verstanden");
     assert.equal(t("view.modal.ok", undefined, "it"), "Capito");
-    assert.equal(t("view.step.discovering", undefined, "fr"), "Recherche de l image zoomable…");
+    assert.equal(t("view.step.discovering", undefined, "fr"), "Recherche de l’image zoomable…");
+    assert.equal(t("view.job.countsFull", { current: 2, total: 9 }, "fr"), "2 fragments sur 9");
+    assert.equal(
+      t("view.partial.summary", { done: 14, total: 16 }, "fr"),
+      "14 fragments sur 16 ont été récupérés.",
+    );
     assert.equal(t("view.step.discovering", undefined, "de"), "Zoombares Bild wird gesucht…");
-    assert.equal(t("view.step.discovering", undefined, "it"), "Ricerca dell immagine zoomabile…");
+    assert.equal(t("view.step.discovering", undefined, "it"), "Ricerca dell’immagine zoomabile…");
+    assert.equal(t("view.job.countsFull", { current: 2, total: 9 }, "de"), "2 von 9 Fragmenten");
+    assert.equal(t("view.job.countsFull", { current: 2, total: 9 }, "it"), "2 frammenti su 9");
     assert.equal(t("view.job.manyImages", { count: 3 }, "de"), "3 Bilder");
     assert.equal(t("view.job.manyImages", { count: 3 }, "fr"), "3 images");
     assert.equal(
       t("view.partial.summary", { done: 14, total: 16 }, "it"),
-      "Sono stati recuperati 14 riquadri su 16.",
+      "Sono stati recuperati 14 frammenti su 16.",
     );
     assert.ok(
       t("view.job.waiting", { host: "example.test" }, "fr").includes("example.test"),
