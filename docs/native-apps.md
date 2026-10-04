@@ -14,6 +14,8 @@ The HTML parser includes unmodified MPL-2.0 dependencies; source and license not
 
 Selection preserves `--largest`, exact `--zoom-level`, width/height caps, and `--image-index`. Deferred catalogs resolve within the invocation with follow and cycle bounds. Unknown formats and invalid settings fail before output.
 
+After geometry probes, output preflight receives compact coverage without generating tile requests. Known JPEG/WebP side limits and explicit destinations are checked before ordinary tile acquisition; publication checks the destination again to handle later changes.
+
 `sink.rs` owns deterministic placement and memory accounting. Known geometry paints directly. Unknown geometry spools under the configured disk cap; overlapping tiles retain plan order under the retained-memory cap. The canvas uses four bytes per pixel and cannot exceed available system memory.
 
 Tile placement borrows cropped pixels rather than copying them into a temporary image. Output encoders borrow the assembled canvas without cloning its pixel buffer. Single-file encoders write through a 64 KiB buffer directly to staging; JPEG borrows RGB channels without a full RGB copy. Codec workspace and pyramid pixels may require additional memory. IIIF directory rendering still buffers its encoded tile set.
