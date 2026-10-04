@@ -430,10 +430,15 @@ impl<'a> NativeHost<'a> {
         bytes: Vec<u8>,
     ) -> Result<(Vec<u8>, Size, image::ImageFormat), Error> {
         let permit = self.decode_tails.reserve(bytes.len());
+        self.check_encoded_inflight()?;
+        let budget = self
+            .options
+            .output_retain_cap
+            .saturating_sub(self.decode_tails.bytes.load(Ordering::SeqCst));
         self.controlled(async {
             tokio::task::spawn_blocking(move || {
                 let _permit = permit;
-                let (size, format) = crate::tile_output::inspect(&bytes)?;
+                let (size, format) = crate::tile_output::inspect(&bytes, budget)?;
                 Ok((bytes, size, format))
             })
             .await
@@ -455,6 +460,7 @@ impl<'a> NativeHost<'a> {
                 Ok((bytes, size, format)) => {
                     self.diagnostics.count("cache_reads", 1.0);
                     return Ok(crate::tile_output::EncodedTile {
+                        request: Some(tile.request.clone()),
                         id: self.storage_index(tile),
                         placement: tile.placement.clone(),
                         bytes,
@@ -486,6 +492,12 @@ impl<'a> NativeHost<'a> {
         let response = self.read(&tile.request).await?;
         let processing = tile.placement.processing;
         let permit = self.decode_tails.reserve(response.body.len());
+        self.check_encoded_inflight()?;
+        let uri = tile.request.uri.clone();
+        let budget = self
+            .options
+            .output_retain_cap
+            .saturating_sub(self.decode_tails.bytes.load(Ordering::SeqCst));
         let (bytes, size, format) = self
             .controlled(async {
                 tokio::task::spawn_blocking(move || {
@@ -493,15 +505,16 @@ impl<'a> NativeHost<'a> {
                     let bytes = processing
                         .apply(response.body)
                         .map_err(|e| Error::ProcessingFailed(e.to_string().into()))?;
-                    let (size, format) = crate::tile_output::inspect(&bytes)?;
+                    let (size, format) = crate::tile_output::inspect(&bytes, budget)?;
+                    let _ = crate::cache::store(&dir, &namespace, &uri, &bytes);
                     Ok((bytes, size, format))
                 })
                 .await
                 .map_err(|_| Error::Internal("tile processing task failed".into()))?
             })
             .await?;
-        let _ = crate::cache::store(&dir, &namespace, &tile.request.uri, &bytes);
         Ok(crate::tile_output::EncodedTile {
+            request: Some(tile.request.clone()),
             id: self.storage_index(tile),
             placement: tile.placement.clone(),
             bytes,
@@ -518,11 +531,43 @@ impl<'a> NativeHost<'a> {
         }
     }
 
+    fn check_encoded_inflight(&self) -> Result<(), Error> {
+        let probes: u64 = self
+            .encoded_probes
+            .borrow()
+            .iter()
+            .map(|tile| tile.bytes.len() as u64)
+            .sum();
+        crate::tile_output::memory_check(
+            probes.saturating_add(self.decode_tails.bytes.load(Ordering::SeqCst)),
+            self.options.output_retain_cap,
+        )
+    }
+
+    fn evict_failed_tile<T>(&self, tile: &Tile, result: &Result<T, Error>) {
+        if matches!(self.format, OutputFormat::IiifDir | OutputFormat::Zif)
+            && result
+                .as_ref()
+                .is_err_and(|e| matches!(e.cause(), Error::DecodeFailed(_)))
+        {
+            let dir = self
+                .options
+                .cache_dir
+                .clone()
+                .unwrap_or_else(crate::imaging::default_tile_cache_dir);
+            let _ = std::fs::remove_file(
+                dir.join(crate::cache::job_namespace(&self.options.input_url))
+                    .join(crate::cache::cache_key(&tile.request.uri)),
+            );
+        }
+    }
+
     async fn place_encoded(&self, tile: crate::tile_output::EncodedTile) -> Result<(), Error> {
         let id = tile.id;
         let writer = self.iiif.borrow().as_ref().cloned();
         if let Some(writer) = writer {
             let permit = self.decode_tails.reserve(tile.bytes.len());
+            self.check_encoded_inflight()?;
             let controls = self.controls.clone();
             let peak = self
                 .controlled(async {
@@ -532,7 +577,15 @@ impl<'a> NativeHost<'a> {
                             let mut writer = writer
                                 .lock()
                                 .map_err(|_| Error::Internal("tile writer poisoned".into()))?;
-                            writer.place(tile, &controls.0.cancelled)?;
+                            let queued = _permit
+                                .tails
+                                .bytes
+                                .load(Ordering::SeqCst)
+                                .saturating_sub(_permit.bytes);
+                            writer.hold_queued_bytes(queued)?;
+                            let result = writer.place(tile, &controls.0.cancelled);
+                            writer.release_probe_bytes(queued);
+                            result?;
                             Ok(writer.peak_retained())
                         })();
                         drop(writer);
@@ -668,6 +721,7 @@ impl Host for NativeHost<'_> {
                 &plan,
                 self.options.output_retain_cap.saturating_sub(pending),
                 self.options.compression,
+                self.options.max_tiles as u32,
             )?;
             let controls = self.controls.clone();
             let permit = self.decode_tails.reserve(0);
@@ -677,7 +731,13 @@ impl Host for NativeHost<'_> {
                         let _permit = permit;
                         for tile in probes {
                             writer.release_probe_bytes(tile.bytes.len() as u64);
-                            writer.place(tile, &controls.0.cancelled)?;
+                            let request = tile.request.clone();
+                            writer.place(tile, &controls.0.cancelled).map_err(
+                                |e| match request {
+                                    Some(ref request) => resource_context(e, request),
+                                    None => e,
+                                },
+                            )?;
                         }
                         Ok(writer)
                     })
@@ -708,22 +768,69 @@ impl Host for NativeHost<'_> {
 
     async fn probe(&self, tile: Tile) -> Result<ProbeOutcome, Error> {
         if self.format == OutputFormat::IiifDir {
-            return match self.encoded_tile(&tile).await {
-                Ok(encoded) => {
-                    let width = std::num::NonZeroU64::new(u64::from(encoded.size.width));
-                    let height = std::num::NonZeroU64::new(u64::from(encoded.size.height));
-                    if tile.placement.role.output {
-                        self.place_encoded(encoded)
-                            .await
-                            .map_err(|e| resource_context(e, &tile.request))?;
+            let result = async {
+                let mut encoded = self.encoded_tile(&tile).await?;
+                let width = std::num::NonZeroU64::new(u64::from(encoded.size.width));
+                let height = std::num::NonZeroU64::new(u64::from(encoded.size.height));
+                if tile.placement.role.output {
+                    let extent = tile
+                        .placement
+                        .expected_size
+                        .as_ref()
+                        .unwrap_or(&encoded.size);
+                    let size = Size {
+                        width: extent.width.min(encoded.size.width),
+                        height: extent.height.min(encoded.size.height),
+                    };
+                    if size != encoded.size
+                        || !matches!(
+                            encoded.format,
+                            image::ImageFormat::Png | image::ImageFormat::Jpeg
+                        )
+                    {
+                        let permit = self.decode_tails.reserve(encoded.bytes.len());
+                        self.check_encoded_inflight()?;
+                        let budget = self.options.output_retain_cap.saturating_sub(
+                            self.decode_tails
+                                .bytes
+                                .load(Ordering::SeqCst)
+                                .saturating_sub(encoded.bytes.len() as u64)
+                                + self
+                                    .encoded_probes
+                                    .borrow()
+                                    .iter()
+                                    .map(|tile| tile.bytes.len() as u64)
+                                    .sum::<u64>(),
+                        );
+                        let compression = self.options.compression;
+                        encoded = self
+                            .controlled(async {
+                                tokio::task::spawn_blocking(move || {
+                                    let _permit = permit;
+                                    _permit.tails.pixel_decodes.fetch_add(1, Ordering::SeqCst);
+                                    encoded.convert_to_png(size, budget, compression)?;
+                                    Ok(encoded)
+                                })
+                                .await
+                                .map_err(|_| {
+                                    Error::Internal("probe conversion task failed".into())
+                                })?
+                            })
+                            .await?;
                     }
-                    match (width, height) {
-                        (Some(width), Some(height)) => {
-                            Ok(ProbeOutcome::Available { width, height })
-                        }
-                        _ => Ok(ProbeOutcome::Missing),
-                    }
+                    self.place_encoded(encoded)
+                        .await
+                        .map_err(|e| resource_context(e, &tile.request))?;
                 }
+                match (width, height) {
+                    (Some(width), Some(height)) => Ok(ProbeOutcome::Available { width, height }),
+                    _ => Ok(ProbeOutcome::Missing),
+                }
+            }
+            .await;
+            self.evict_failed_tile(&tile, &result);
+            return match result {
+                Ok(outcome) => Ok(outcome),
                 Err(error) if error.is_terminal() || error.is_output() => {
                     Err(resource_context(error, &tile.request))
                 }
@@ -762,21 +869,7 @@ impl Host for NativeHost<'_> {
             self.place(&tile, decoded)
         }
         .await;
-        if matches!(self.format, OutputFormat::IiifDir | OutputFormat::Zif)
-            && result
-                .as_ref()
-                .is_err_and(|e| matches!(e.cause(), Error::DecodeFailed(_)))
-        {
-            let dir = self
-                .options
-                .cache_dir
-                .clone()
-                .unwrap_or_else(crate::imaging::default_tile_cache_dir);
-            let _ = std::fs::remove_file(
-                dir.join(crate::cache::job_namespace(&self.options.input_url))
-                    .join(crate::cache::cache_key(&tile.request.uri)),
-            );
-        }
+        self.evict_failed_tile(&tile, &result);
         result
             .map_err(|error| resource_context(error, &tile.request))
             .inspect_err(|error| {

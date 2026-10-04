@@ -11,6 +11,7 @@ use std::{
 };
 
 pub(crate) struct EncodedTile {
+    pub request: Option<dezoomify::model::ResourceRequest>,
     pub id: u32,
     pub placement: TilePlacement,
     pub bytes: Vec<u8>,
@@ -35,7 +36,7 @@ mod tests {
             .unwrap(),
         ] {
             assert_eq!(
-                inspect(&bytes).unwrap().0,
+                inspect(&bytes, 4096).unwrap().0,
                 Size {
                     width: 8,
                     height: 8
@@ -43,14 +44,14 @@ mod tests {
             );
             for length in [bytes.len() / 2, bytes.len() - 16, bytes.len() - 1] {
                 assert!(matches!(
-                    inspect(&bytes[..length]),
+                    inspect(&bytes[..length], 4096),
                     Err(Error::DecodeFailed(_))
                 ));
             }
             let mut broken = bytes.clone();
             let length = if bytes.starts_with(b"\x89PNG") { 8 } else { 4 };
             broken[length..length + 2].fill(0xff);
-            assert!(inspect(&broken).is_err());
+            assert!(inspect(&broken, 4096).is_err());
         }
     }
     #[test]
@@ -149,12 +150,9 @@ impl EncodedTile {
         memory_check(self.bytes.len() as u64 + pixels * 16, budget)?;
         let mut reader = image::ImageReader::with_format(Cursor::new(&self.bytes), self.format);
         let mut limits = image::Limits::default();
-        limits.max_alloc = Some(pixels * 16);
+        limits.max_alloc = Some(budget.saturating_sub(self.bytes.len() as u64) / 2);
         reader.limits(limits);
-        let image = reader
-            .decode()
-            .map_err(|e| Error::DecodeFailed(e.to_string().into()))?
-            .into_rgba8();
+        let image = reader.decode().map_err(decode_error)?.into_rgba8();
         let cropped = image::imageops::crop_imm(&image, 0, 0, size.width, size.height).to_image();
         self.bytes = crate::imaging::encode_png(
             &cropped,
@@ -169,18 +167,28 @@ impl EncodedTile {
 }
 
 /// Header inspection does not decode pixel data.
-pub(crate) fn inspect(bytes: &[u8]) -> Result<(Size, image::ImageFormat), Error> {
-    let reader = image::ImageReader::new(Cursor::new(bytes))
+pub(crate) fn inspect(bytes: &[u8], budget: u64) -> Result<(Size, image::ImageFormat), Error> {
+    let mut reader = image::ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|e| Error::DecodeFailed(e.to_string().into()))?;
     let format = reader
         .format()
         .ok_or_else(|| Error::DecodeFailed("unknown tile format".into()))?;
     check_structure(bytes, format)?;
-    let (width, height) = reader
-        .into_dimensions()
-        .map_err(|e| Error::DecodeFailed(e.to_string().into()))?;
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(budget);
+    reader.limits(limits);
+    let (width, height) = reader.into_dimensions().map_err(decode_error)?;
     Ok((Size { width, height }, format))
+}
+
+pub(crate) fn decode_error(error: image::ImageError) -> Error {
+    match error {
+        image::ImageError::Limits(_) => {
+            Error::ResourceLimit("tile decoder memory limit exceeded".into())
+        }
+        error => Error::DecodeFailed(error.to_string().into()),
+    }
 }
 
 // Bounded structural checks do not decompress pixels or validate entropy/zlib.
@@ -394,9 +402,11 @@ impl TileLevel {
             };
             // Decode plus RGBA conversion may temporarily own two pixel buffers.
             *decoded += 1;
-            let image = image::load_from_memory(bytes)
-                .map_err(|e| Error::DecodeFailed(e.to_string().into()))?
-                .to_rgba8();
+            let mut reader = image::ImageReader::with_format(Cursor::new(bytes), tile.format);
+            let mut limits = image::Limits::default();
+            limits.max_alloc = Some(budget.saturating_sub(region_bytes + encoded_len) / 2);
+            reader.limits(limits);
+            let image = reader.decode().map_err(decode_error)?.into_rgba8();
             let left = rect.x.max(tile.rect.x);
             let top = rect.y.max(tile.rect.y);
             let right = (rect.x + rect.w).min(tile.rect.x + tile.rect.w);
@@ -533,9 +543,16 @@ pub(crate) struct IiifWriter {
     retained: u64,
     peak_retained: u64,
     infer_canvas: bool,
+    max_tiles: u32,
 }
 
 impl IiifWriter {
+    pub(crate) fn hold_queued_bytes(&mut self, bytes: u64) -> Result<(), Error> {
+        memory_check(self.retained.saturating_add(bytes), self.budget)?;
+        self.budget -= bytes;
+        Ok(())
+    }
+
     pub(crate) fn release_probe_bytes(&mut self, bytes: u64) {
         self.budget = self.budget.saturating_add(bytes);
     }
@@ -549,6 +566,7 @@ impl IiifWriter {
         plan: &OutputPlan,
         budget: u64,
         compression: u8,
+        max_tiles: u32,
     ) -> Result<Self, Error> {
         let regular = plan
             .grid
@@ -579,6 +597,7 @@ impl IiifWriter {
             retained: 0,
             peak_retained: 0,
             infer_canvas: plan.canvas.is_none(),
+            max_tiles,
         })
     }
 
@@ -780,6 +799,11 @@ impl IiifWriter {
             tiles: BTreeMap::new(),
             regular: true,
         };
+        if normalized.count()? > self.max_tiles {
+            return Err(Error::ResourceLimit(
+                "IIIF output tile count exceeds max_tiles".into(),
+            ));
+        }
         memory_check(
             u64::from(normalized.count()?) * std::mem::size_of::<StoredTile>() as u64,
             self.budget,
