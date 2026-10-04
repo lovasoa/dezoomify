@@ -40,6 +40,10 @@ function host(overrides = {}) {
     async probe() {
       return { status: "missing" };
     },
+    async beginOutput(plan) {
+      assert.equal(observed.tiles.length, 0);
+      observed.plan = plan;
+    },
     async acquireTile(tile) {
       await Promise.resolve();
       observed.tiles.push(tile);
@@ -85,6 +89,11 @@ test("async Host reads binary metadata and saves the full selected image", async
   assert.deepEqual(output.missing, []);
   assert.equal(output.disposition, "browser-save-ready");
   assert.equal(platform.observed.tiles.length, 4);
+  assert.deepEqual(platform.observed.plan.grid, {
+    tile_size: { width: 256, height: 256 },
+    overlap: { width: 0, height: 0 },
+  });
+  assert.equal(platform.observed.plan.tile_count, 4);
   assert.equal(platform.observed.settled, 1);
   assert.ok(platform.observed.reads.every((request) => request.uri === url));
   assert.ok(platform.observed.progress.some((progress) => progress.completed === 4));

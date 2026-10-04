@@ -8,6 +8,46 @@ mod support;
 use support::{http_response, scenario_payload, serve_counted, temp_dir, DZI_512};
 
 #[test]
+fn known_codec_limits_fail_before_ordinary_tile_fetches() {
+    use dezoomify::model::{Error, LimitReason};
+    let work = temp_dir("preflight");
+    let metadata = DZI_512.replace("512", "70000");
+    let counts = Arc::new(Mutex::new(HashMap::new()));
+    let base = serve_counted(
+        Arc::new(Mutex::new(HashMap::from([(
+            "/large.dzi".to_string(),
+            http_response("200 OK", "application/xml", metadata.as_bytes()),
+        )]))),
+        Arc::clone(&counts),
+    );
+    for (extension, reason) in [
+        ("jpg", LimitReason::JpegSide),
+        ("webp", LimitReason::WebpSide),
+    ] {
+        let host = NativeHost::new(JobOptions {
+            input_url: format!("{base}/large.dzi"),
+            output: OutputTarget::File(work.join(format!("image.{extension}"))),
+            largest: true,
+            cache_dir: Some(work.join("cache")),
+            ..Default::default()
+        })
+        .unwrap();
+        let error = host
+            .transport
+            .block_on(dezoomify::dezoomify(
+                host.inputs(),
+                host.algorithm_options(),
+                &host,
+            ))
+            .unwrap_err();
+        assert!(matches!(error.cause(), Error::LimitExceeded { limit } if limit.reason == reason));
+        assert!(host.publication().is_none());
+    }
+    assert_eq!(counts.lock().unwrap().len(), 1, "only metadata was fetched");
+    std::fs::remove_dir_all(work).unwrap();
+}
+
+#[test]
 fn generic_probe_metadata_uses_final_tile_order_without_refetching() {
     use image::codecs::png::CompressionType;
     use image::ImageDecoder as _;
