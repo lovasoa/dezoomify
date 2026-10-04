@@ -417,8 +417,8 @@ fn bounded_concurrency_and_memory_accounting() {
         stats
             .canvas_bytes
             .saturating_add(stats.peak_retained_bytes)
-            .saturating_add(stats.encoded_bytes),
-        "accounted peak is canvas plus retained plus encoded"
+            .saturating_add(stats.peak_encoded_bytes),
+        "accounted peak includes the output buffer, not the file length"
     );
     assert!(
         stats.peak_retained_bytes <= 512 << 20,
