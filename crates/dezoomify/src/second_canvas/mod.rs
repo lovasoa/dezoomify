@@ -16,7 +16,11 @@ use crate::core::{
 const ROUTES: &[DiscoveryRoute] = &[
     metadata(html_matches(contains_gigapixel)).decode(decode_catalog),
     viewer(html_matches(contains_viewer_script)).extract_metadata(follow_viewer_config),
-    DiscoveryRoute::html_relative_capture(&SECOND_CANVAS_IFRAME_RE, "src"),
+    viewer(html_matches(|bytes| viewer_iframe(bytes).is_some())).extract_metadata(|resource| {
+        viewer_iframe(resource.bytes())
+            .map(|uri| resource.follow_relative(&uri))
+            .ok_or_else(|| DiscoveryError::InvalidMetadata("missing Second Canvas iframe".into()))
+    }),
 ];
 
 pub const SPEC: FormatSpec =
@@ -34,12 +38,13 @@ fn contains_viewer_script(bytes: &[u8]) -> bool {
     page.contains("scw.min.js") || page.contains("scv.min.js")
 }
 
-static SECOND_CANVAS_IFRAME_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(
-        r#"(?is)<iframe\b[^>]*\bsrc\s*=\s*[\"'](?P<src>https?://[^\"']+\.s3\.amazonaws\.com/web/[^\"']+\.html(?:[?#][^\"']*)?)[\"']"#,
-    )
-    .expect("constant Second Canvas iframe pattern")
-});
+fn viewer_iframe(bytes: &[u8]) -> Option<String> {
+    static VIEWER_URL: LazyLock<BytesRegex> = LazyLock::new(|| {
+        BytesRegex::new(r"(?i)^https?://[^/]+\.s3\.amazonaws\.com/web/.+\.html(?:[?#].*)?$")
+            .expect("constant Second Canvas viewer URL pattern")
+    });
+    crate::web_page::iframe_sources(bytes).find(|uri| VIEWER_URL.is_match(uri.as_bytes()))
+}
 
 static EMBEDDED_CONFIG_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(
@@ -345,6 +350,21 @@ mod tests {
 
     #[test]
     fn viewer_pages_resolve_their_js_configuration() {
+        let frame = "https://museum.s3.amazonaws.com/web/image.html?x=1&y=2";
+        let page = br#"<iframe src=/other-image></iframe><template><iframe src=https://wrong.s3.amazonaws.com/web/image.html></iframe></template><iframe src='https://museum.s3.amazonaws.com/web/image.html?x=1&amp;y=2'></iframe>"#;
+        let (result, requests) = crate::test_support::discover(
+            SPEC,
+            "https://museum.test/",
+            &[(page, None), (MODERN, None)],
+        );
+        assert!(result.is_ok());
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| request.uri.as_str())
+                .collect::<Vec<_>>(),
+            ["https://museum.test/", frame]
+        );
         for (uri, page, expected) in [
             (
                 "https://fixtures.test/web/index.html?js=metadata%2Fmodern.json&ua=test",

@@ -27,7 +27,7 @@ sha1.workspace = true
 aes.workspace = true
 cbc.workspace = true
 thiserror.workspace = true
-html-escape.workspace = true
+html5gum = { version = "0.8.4", default-features = false }
 tsify = { workspace = true, optional = true }
 wasm-bindgen = { workspace = true, optional = true }
 futures-util = "0.3"

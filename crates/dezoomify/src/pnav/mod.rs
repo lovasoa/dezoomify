@@ -1,8 +1,7 @@
 //! Pure discovery for the crop-based pnav image service.
 
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
-use regex::Regex;
 use serde::Deserialize;
 
 use crate::Vec2d;
@@ -12,12 +11,9 @@ use crate::core::{
     ObservationResult, ParsedResource, Request, ResolvedGrid, ResolvedLevel, TileRole,
     TileSourceError, TileSpec, resolve_relative,
 };
-use crate::markup::attribute;
-use crate::web_page::page_title;
+use crate::web_page::{page_title, tags};
 
 const TILE_SIZE: u32 = 512;
-static META_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<meta\b[^>]*>").expect("constant pnav meta tag pattern"));
 const ROUTES: &[DiscoveryRoute] = &[
     viewer(url_matches(is_pnav_url)).extract_metadata(follow_image_json),
     metadata(url_matches(is_image_json)).child_metadata(complete_from_json),
@@ -48,23 +44,19 @@ fn is_image_json(uri: &str) -> bool {
 }
 
 fn extract_image_url(page: &str, page_uri: &str) -> Option<String> {
-    META_RE.captures_iter(page).find_map(|captures| {
-        let tag = captures.get(0)?.as_str();
-        let property = attribute(tag, "property")?;
-        if !property.eq_ignore_ascii_case("og:image") {
-            return None;
-        }
-        let content = attribute(tag, "content")?;
-        let image = content.split_once('?').map_or(content, |(image, _)| image);
-        let image = image.replace("&amp;", "&");
-        if image.is_empty() {
-            None
-        } else if page_uri.is_empty() {
-            Some(image)
-        } else {
-            Some(resolve_relative(page_uri, &image))
-        }
-    })
+    tags(page.as_bytes())
+        .filter(|tag| tag.name() == b"meta")
+        .find_map(|tag| {
+            let property = tag.attribute("property")?;
+            if !property.eq_ignore_ascii_case("og:image") {
+                return None;
+            }
+            let content = tag.attribute("content")?;
+            let image = content
+                .split_once('?')
+                .map_or(content.as_ref(), |(image, _)| image);
+            (!image.is_empty()).then(|| resolve_relative(page_uri, image))
+        })
 }
 
 fn follow_image_json(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
@@ -83,18 +75,16 @@ fn complete_from_json(resource: DiscoveryResource<'_>) -> Result<ParsedResource,
             "pnav image dimensions must be positive".into(),
         ));
     }
-    let page = context
+    let (page, image) = context
         .resources()
         .rev()
-        .find(|page| extract_image_url(&page.text_lossy(), page.final_uri()).is_some())
+        .find_map(|page| {
+            extract_image_url(&page.text_lossy(), page.final_uri()).map(|image| (page, image))
+        })
         .ok_or_else(|| {
             DiscoveryError::InvalidMetadata("pnav page is missing from discovery history".into())
         })?;
-    let page_text = page.text_lossy();
-    let image = extract_image_url(&page_text, page.final_uri()).ok_or_else(|| {
-        DiscoveryError::InvalidMetadata("pnav page is missing from discovery history".into())
-    })?;
-    let title = page_title(&page_text);
+    let title = page_title(&page.text_lossy());
     let source = AdaptiveSource::Pnav(PnavSource {
         image_url: image,
         width: metadata.width,
