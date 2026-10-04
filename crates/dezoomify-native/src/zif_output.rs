@@ -257,6 +257,16 @@ impl ZifWriter {
         })
     }
 
+    fn select_profile(&self, source: Option<Profile>) -> Profile {
+        self.profile
+            .or(source.filter(|profile| {
+                *profile == Profile::PngRgb
+                    || (self.base.cell.width.min(self.base.size.width) <= u16::MAX.into()
+                        && self.base.cell.height.min(self.base.size.height) <= u16::MAX.into())
+            }))
+            .unwrap_or(Profile::PngRgb)
+    }
+
     fn initialize(&mut self, selected: Profile, cancelled: &AtomicBool) -> Result<(), Error> {
         let (codec, color) = match selected {
             Profile::PngRgb => (zif_tiff::Codec::Png, zif_tiff::ColorModel::Rgb),
@@ -438,14 +448,7 @@ impl ZifWriter {
         let source_profile = profile(&tile.bytes);
         // Commit the codec only after the first tile is accepted. Failed
         // conversion must not force later reusable tiles through that codec.
-        let selected = self
-            .profile
-            .or(source_profile.filter(|profile| {
-                *profile == Profile::PngRgb
-                    || (self.base.cell.width.min(self.base.size.width) <= u16::MAX.into()
-                        && self.base.cell.height.min(self.base.size.height) <= u16::MAX.into())
-            }))
-            .unwrap_or(Profile::PngRgb);
+        let selected = self.select_profile(source_profile);
         let compatible = self.base.regular
             && rect == self.base.rect(index)
             && tile.size.width == rect.w
@@ -628,7 +631,7 @@ impl ZifWriter {
             } else {
                 Profile::PngRgb
             };
-            self.initialize(selected, cancelled)?;
+            self.initialize(self.select_profile(Some(selected)), cancelled)?;
         }
         let mut normalized = TileLevel {
             size: self.base.size.clone(),
