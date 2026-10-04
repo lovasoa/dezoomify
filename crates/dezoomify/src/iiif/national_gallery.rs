@@ -8,7 +8,7 @@ static IMAGE: LazyLock<BytesRegex> = LazyLock::new(|| {
 });
 pub(super) const ROUTES: &[crate::core::DiscoveryRoute] = &[
     crate::core::discovery::viewer(crate::core::discovery::css(
-        "[src*=\"?IIIF=\"][src*=\"/full/\"]",
+        "[src*=\"?IIIF=\" i][src*=\"/full/\" i]",
     ))
     .follow_attribute("src"),
     crate::core::DiscoveryRoute::regex_link(&IMAGE, "$image"),

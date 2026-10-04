@@ -568,10 +568,13 @@ mod tests {
     #[test]
     fn extracts_general_zoomify_declarations() {
         for (page, expected) in [
-            (r#"showImage("viewer", "/zoomify");"#, "/zoomify"),
-            (r#"showImage(viewer, "/zoomify");"#, "/zoomify"),
+            (r#"if (a<b) showImage("viewer", "/zoomify");"#, "/zoomify"),
             (
-                r#"Z.showImage("viewer", "https://example.com/proxy/IMAGE_ID/");"#,
+                r#"const html = '<div>'; showImage(viewer, "/zoomify");"#,
+                "/zoomify",
+            ),
+            (
+                r#"<body onload='Z.showImage("viewer", "https://example.com/proxy/IMAGE_ID/")'>"#,
                 "https://example.com/proxy/IMAGE_ID/",
             ),
         ] {

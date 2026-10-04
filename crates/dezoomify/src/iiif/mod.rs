@@ -144,7 +144,7 @@ static IMAGE_REQUEST_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
 });
 
 fn image_request_info(uri: &str) -> Option<Request> {
-    if uri.contains("?IIIF=")
+    if uri.to_ascii_lowercase().contains("?iiif=")
         && let Some((service, _)) = uri.rsplit_once("/full/")
     {
         return Some(Request::new(format!("{service}/info.json")));

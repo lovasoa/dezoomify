@@ -92,6 +92,12 @@ pub(crate) fn script_bodies(resource: DiscoveryResource<'_>) -> impl Iterator<It
         .select("base[href], script")
         .filter(|tag| tag.name == "script" && tag.attribute("src").is_none())
         .map(|tag| tag.text.as_bytes())
+        .chain(
+            resource
+                .select("body[onload]")
+                .filter_map(|tag| tag.attribute("onload"))
+                .map(str::as_bytes),
+        )
         .chain((!resource.is_html()).then(|| resource.bytes()))
 }
 
@@ -124,14 +130,11 @@ pub(crate) fn page_title(resource: DiscoveryResource<'_>) -> Option<String> {
         .map(str::to_owned)
 }
 
-pub fn decode_html_entities(text: &str) -> String {
-    html_escape::decode_html_entities(text).into_owned()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_support::resource;
+    use html_escape::decode_html_entities;
     fn ordered(bytes: &[u8], uri: &str) -> Vec<Script> {
         resource(uri, bytes, scripts)
     }

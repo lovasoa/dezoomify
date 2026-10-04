@@ -134,9 +134,11 @@ impl<'a> DiscoveryResource<'a> {
     }
 
     pub(crate) fn is_html(self) -> bool {
-        self.bytes.windows(2).any(|pair| {
-            pair[0] == b'<' && (pair[1].is_ascii_alphabetic() || matches!(pair[1], b'!' | b'/'))
-        })
+        self.text_lossy()
+            .trim_start_matches(['\u{feff}', ' ', '\n', '\r', '\t'])
+            .starts_with('<')
+            || self.select("base[href], script").next().is_some()
+            || self.select("body[onload]").next().is_some()
     }
 
     pub fn element(self) -> Result<&'a HtmlElement, DiscoveryError> {
@@ -409,9 +411,7 @@ fn parse_resource(
                 prefix,
                 suffix,
             } => {
-                let reference = resource.element()?.attribute(attribute).ok_or_else(|| {
-                    DiscoveryError::InvalidMetadata(format!("selected element has no {attribute}"))
-                })?;
+                let reference = resource.element()?.required(attribute)?;
                 Ok(ParsedResource::Follow(Request::new(resolve_relative(
                     &crate::web_page::page_base(resource),
                     &format!("{prefix}{}{suffix}", reference.trim()),
@@ -435,7 +435,9 @@ fn parse_resource(
                     .expect("matched regex route");
                 let mut link = Vec::new();
                 captures.expand(template.as_bytes(), &mut link);
-                Ok(resource.follow_relative(String::from_utf8_lossy(&link).trim()))
+                Ok(resource.follow_relative(&html_escape::decode_html_entities(
+                    String::from_utf8_lossy(&link).trim(),
+                )))
             }
             RouteAction::MapUrl(_) | RouteAction::Plan(_) => continue,
         };
@@ -1026,6 +1028,27 @@ where
                 .filter(|total| *total <= limits.retained_bytes)
         })
         .ok_or(DiscoveryError::MetadataSizeLimitExceeded)?;
+    let mut roots: Vec<_> = inputs
+        .into_iter()
+        .enumerate()
+        .map(|(order, input)| {
+            let evidence = match input.kind {
+                DiscoveryInputKind::Source => 0,
+                DiscoveryInputKind::ObservedDocument if input.contents.is_some() => 1,
+                _ => match specs
+                    .iter()
+                    .filter_map(|spec| spec.url_kind(&input.url))
+                    .min()
+                {
+                    Some(RouteKind::Metadata | RouteKind::Image) => 2,
+                    Some(RouteKind::Viewer) => 3,
+                    None => 4,
+                },
+            };
+            (evidence, 0usize, order, input)
+        })
+        .collect();
+    roots.sort_by_key(|(evidence, depth, order, _)| (*evidence, *depth, *order));
     let resources = Resources {
         fetch: &fetch,
         parse_html: &parse_html,
@@ -1047,9 +1070,10 @@ where
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect(),
-        supplied: inputs
+        supplied: roots
             .iter()
-            .filter_map(|input| {
+            .rev()
+            .filter_map(|(_, _, _, input)| {
                 input
                     .contents
                     .as_ref()
@@ -1063,26 +1087,6 @@ where
         depths: Default::default(),
         limits,
     };
-    let mut roots: Vec<_> = inputs
-        .into_iter()
-        .enumerate()
-        .map(|(order, input)| {
-            let evidence = match input.kind {
-                DiscoveryInputKind::Source => 0,
-                DiscoveryInputKind::ObservedDocument if input.contents.is_some() => 1,
-                _ => match specs
-                    .iter()
-                    .filter_map(|spec| spec.url_kind(&input.url))
-                    .min()
-                {
-                    Some(RouteKind::Metadata | RouteKind::Image) => 2,
-                    Some(RouteKind::Viewer) => 3,
-                    None => 4,
-                },
-            };
-            (evidence, 0usize, order, input)
-        })
-        .collect();
     let mut visited: HashSet<String> = roots
         .iter()
         .map(|(_, _, _, input)| input.url.clone())
@@ -1144,23 +1148,19 @@ where
                 use std::task::Poll;
                 // Ordinary earlier reads keep their precedence. A branch that has
                 // followed a deeper link no longer delays a shallower result.
-                if winner.as_ref().is_some_and(|(best, _)| {
-                    priorities
-                        .iter()
-                        .enumerate()
-                        .all(|(i, rank)| finished[i] || rank.get() >= *best)
-                }) {
+                let settled = || {
+                    winner.as_ref().is_some_and(|(best, _)| {
+                        priorities
+                            .iter()
+                            .zip(&finished)
+                            .all(|(rank, done)| *done || rank.get() >= *best)
+                    })
+                };
+                if settled() {
                     return Poll::Ready(None);
                 }
                 let result = std::pin::Pin::new(&mut results).poll_next(cx);
-                if result.is_pending()
-                    && winner.as_ref().is_some_and(|(best, _)| {
-                        priorities
-                            .iter()
-                            .enumerate()
-                            .all(|(i, rank)| finished[i] || rank.get() >= *best)
-                    })
-                {
+                if result.is_pending() && settled() {
                     return Poll::Ready(None);
                 }
                 result

@@ -15,8 +15,10 @@ static SOURCE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(?:^|[?&])source=([^&#]+)").expect("constant FSI source pattern")
 });
 static SERVER_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r#"(?i)(?P<server>[^\s\"']*/server[^\s\"']*[?&]source=[^&#\s\"']+[^\s\"']*)"#)
-        .expect("constant FSI server pattern")
+    BytesRegex::new(
+        r#"(?i)(?P<server>[^\s\"']*/server[^\s\"']*[?&](?:amp;)?source=[^&#\s\"']+[^\s\"']*)"#,
+    )
+    .expect("constant FSI server pattern")
 });
 const ROUTES: &[DiscoveryRoute] = &[
     metadata(url_matches(is_server_url)).resolve_metadata(metadata_url),
