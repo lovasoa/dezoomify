@@ -55,18 +55,43 @@ You can still open the containing folder if the image has been moved.
 ## Install
 
 The [releases page](https://github.com/lovasoa/dezoomify/releases/latest)
-ships unsigned installers for Linux x86_64 (`.deb`), Windows x86_64 (`.msi`),
-and Apple silicon macOS (`.dmg`). There is no paid Apple or Azure signing, so
-the operating system may ask you to confirm that you trust the installer.
+ships installers for Linux x86_64 (`.deb`), Windows x86_64 (`.msi`),
+and Apple silicon macOS (`.dmg`). Linux and Windows installers are unsigned.
+The macOS app has an ad-hoc signature, which requires no paid Apple account,
+but is not signed with Developer ID or notarized by Apple. The operating
+system may ask you to confirm that you trust the app.
 
 There is no automatic in-app update: when a new version appears on the
 releases page, download it manually and install it yourself.
 
 You can also build the app locally with `cargo xtask build desktop`, which
-produces an unsigned installer for the matching host under
+produces an installer with the same signing policy for the matching host under
 `target/release/bundle/` (Linux `.deb` on a Linux host with the webview
 system packages; Windows `.msi` and macOS `.dmg` only on their matching
 hosts).
+
+### Opening the macOS app
+
+Download the `.dmg` from the releases page, open it, and drag Dezoomify into
+Applications. Open Dezoomify from Applications. If macOS says the developer
+cannot be verified or Apple cannot check the app for malicious software:
+
+1. Open **System Settings → Privacy & Security**.
+2. Scroll to the Security section and click **Open Anyway** for Dezoomify.
+3. Confirm **Open** in the next dialog. macOS remembers this app exception.
+
+Only approve a download you trust. See
+[Apple's instructions](https://support.apple.com/en-us/102445).
+Ad-hoc signing does not remove this approval step.
+
+If macOS instead says the app is damaged, will damage your computer, or has
+been moved to Trash, download a fresh copy from the releases page. If it
+still fails, report the exact warning (or a screenshot), your macOS version,
+and the release filename in a
+[GitHub issue](https://github.com/lovasoa/dezoomify/issues).
+A damaged-app warning can indicate a packaging or signature problem;
+automatic movement to Trash can indicate malware detection. Do not assume
+either warning is the ordinary developer-approval prompt.
 
 ## Save an image
 

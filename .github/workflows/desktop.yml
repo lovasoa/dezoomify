@@ -124,6 +124,7 @@ jobs:
           MNT="/Volumes/DezoomifyCI"
           printf 'Y\n' | hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MNT"
           APP_DIR="$(ls -d "$MNT"/*.app | head -n 1)"
+          codesign --verify --deep --strict --verbose=4 "$APP_DIR" 2>&1 | tee signature.log
           APP_BIN="$APP_DIR/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$APP_DIR/Contents/Info.plist")"
           "$APP_BIN" >smoke-launch.log 2>&1 & APP_PID=$!
           sleep 15
@@ -156,4 +157,5 @@ jobs:
           path: |
             bundle.log
             smoke-launch.log
+            signature.log
           retention-days: 30
