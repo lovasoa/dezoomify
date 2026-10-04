@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const binaries = process.argv.slice(2);
 if (binaries.length !== 2) throw new Error("Expected old and new release CLI paths");
+await Promise.all(binaries.map((binary) => stat(binary)));
 const side = Number(process.env.SIDE ?? 8192);
 const repeats = Number(process.env.REPEATS ?? 3);
 const delay = Number(process.env.DELAY ?? 0);

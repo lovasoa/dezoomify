@@ -53,7 +53,7 @@ pub struct Instrumentation {
     pub bytes_fetched: u64,
     /// Peak concurrent in-flight tasks.
     pub peak_inflight: usize,
-    /// Peak RAM reservations for raster pixels, descriptors and workspace.
+    /// Peak RAM reservations for decoded tiles, strips and codec workspace.
     pub peak_retained_bytes: u64,
     /// Peak in-flight decode bytes: encoded bodies held by blocking decode
     /// tails (including tails detached by cancelling their parent task).
@@ -64,7 +64,7 @@ pub struct Instrumentation {
     pub encoded_bytes: u64,
     /// Pixel decoder calls; header inspection and tile reuse do not count.
     pub pixel_decodes: u64,
-    /// Incoming stripes clipped because some pixels were already read.
+    /// Incoming strip contributions discarded after ownership handoff.
     pub late_repaints: u64,
 }
 
@@ -457,14 +457,10 @@ impl<'a> NativeHost<'a> {
                 let (dimensions, _) = crate::tile_output::inspect(&bytes)?;
                 // Charge before the pixel decoder can allocate. The temporary
                 // allowance covers conversion and decoder workspace; only the
-                // actual RGBA allocation and descriptors remain charged later.
+                // actual RGBA allocation remains charged until placement.
                 let pixels = u64::from(dimensions.width) * u64::from(dimensions.height);
-                let descriptors = u64::from(dimensions.height) * 192;
                 let mut reservation = budget.reserve(
-                    pixels
-                        .saturating_mul(16)
-                        .saturating_add(bytes.len() as u64)
-                        .saturating_add(descriptors),
+                    pixels.saturating_mul(16).saturating_add(bytes.len() as u64),
                     credit,
                 )?;
                 decode_tails.pixel_decodes.fetch_add(1, Ordering::SeqCst);
@@ -473,7 +469,7 @@ impl<'a> NativeHost<'a> {
                     Some(pixels.saturating_mul(16).saturating_add(bytes.len() as u64)),
                 )
                 .map_err(|error| Error::DecodeFailed(error.to_string().into()))?;
-                reservation.shrink(decoded.image.as_raw().len() as u64 + descriptors);
+                reservation.shrink(decoded.image.as_raw().len() as u64);
                 Ok::<_, Error>(ReceivedPixels {
                     decoded,
                     reservation,
@@ -731,21 +727,18 @@ impl<'a> NativeHost<'a> {
         Ok(())
     }
 
-    fn place(&self, tile: &Tile, pixels: ReceivedPixels) -> Result<(), Error> {
+    async fn place(&self, tile: &Tile, pixels: ReceivedPixels) -> Result<(), Error> {
         // Separate resource slots prevent probe indices from colliding with
         // final plan indices. Finish supplies the plan order of reused probes.
-        let storage_index = if tile.placement.role.probe {
-            (self.options.max_tiles as u32).saturating_add(tile.index)
-        } else {
-            tile.index
-        };
-        if let Some(task) = self.raster.borrow().as_ref() {
-            task.pipe.place(
-                storage_index,
-                &tile.placement,
-                pixels.decoded,
-                pixels.reservation,
-            )?;
+        let storage_index = self.storage_index(tile);
+        let pipe = self
+            .raster
+            .borrow()
+            .as_ref()
+            .map(|task| Arc::clone(&task.pipe));
+        if let Some(pipe) = pipe {
+            self.place_pixels(pipe, storage_index, tile.placement.clone(), pixels)
+                .await?;
         } else {
             self.pending_pixels.borrow_mut().push(PendingPixels {
                 id: storage_index,
@@ -758,10 +751,31 @@ impl<'a> NativeHost<'a> {
         Ok(())
     }
 
-    fn start_raster(
+    async fn place_pixels(
+        &self,
+        pipe: Arc<PixelPipe>,
+        id: u32,
+        placement: TilePlacement,
+        pixels: ReceivedPixels,
+    ) -> Result<(), Error> {
+        // Queue backpressure belongs on a worker, never on the async control
+        // thread. The existing tail tracker owns cancelled placement work too.
+        let permit = self.decode_tails.reserve(0);
+        self.controlled(async {
+            tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                pipe.place(id, &placement, pixels.decoded, pixels.reservation)
+            })
+            .await
+            .map_err(|_| Error::Internal("pixel producer task failed".into()))?
+        })
+        .await
+    }
+
+    async fn start_raster(
         &self,
         dimensions: Size,
-        tile_height: u32,
+        tile_size: Option<Size>,
         title: Option<&str>,
     ) -> Result<(), Error> {
         let destination = match &self.options.output {
@@ -771,7 +785,7 @@ impl<'a> NativeHost<'a> {
         let task = EncoderTask::start(
             &destination,
             dimensions,
-            tile_height,
+            tile_size,
             self.format,
             self.options.compression,
             Arc::clone(&self.pixels),
@@ -779,13 +793,15 @@ impl<'a> NativeHost<'a> {
         )?;
         let pipe = Arc::clone(&task.pipe);
         *self.raster.borrow_mut() = Some(task);
-        for pending in self.pending_pixels.borrow_mut().drain(..) {
-            pipe.place(
+        let pending = std::mem::take(&mut *self.pending_pixels.borrow_mut());
+        for pending in pending {
+            self.place_pixels(
+                Arc::clone(&pipe),
                 pending.id,
-                &pending.placement,
-                pending.pixels.decoded,
-                pending.pixels.reservation,
-            )?;
+                pending.placement,
+                pending.pixels,
+            )
+            .await?;
         }
         Ok(())
     }
@@ -890,9 +906,10 @@ impl Host for NativeHost<'_> {
         } else if let Some(dimensions) = &plan.canvas {
             self.start_raster(
                 dimensions.clone(),
-                plan.grid.as_ref().map_or(8, |grid| grid.tile_size.height),
+                plan.grid.as_ref().map(|grid| grid.tile_size.clone()),
                 plan.title.as_deref(),
-            )?;
+            )
+            .await?;
         }
         *self.output_plan.borrow_mut() = Some(plan);
         Ok(())
@@ -990,6 +1007,7 @@ impl Host for NativeHost<'_> {
                 let height = std::num::NonZeroU64::new(u64::from(decoded.decoded.image.height()));
                 if tile.placement.role.output {
                     self.place(&tile, decoded)
+                        .await
                         .map_err(|error| resource_context(error, &tile.request))?;
                 }
                 match (width, height) {
@@ -1013,7 +1031,7 @@ impl Host for NativeHost<'_> {
             }
             let decoded = self.tile(&tile).await?;
             self.controls.checkpoint(false).await?;
-            self.place(&tile, decoded)
+            self.place(&tile, decoded).await
         }
         .await;
         self.evict_failed_tile(&tile, &result);
@@ -1106,11 +1124,23 @@ impl Host for NativeHost<'_> {
                     }
                     dimensions
                 });
-                self.start_raster(dimensions, 8, request.title.as_deref())?;
+                self.start_raster(dimensions, None, request.title.as_deref())
+                    .await?;
             }
+            let pipe = Arc::clone(&self.raster.borrow().as_ref().expect("raster task").pipe);
+            let producer = Arc::clone(&pipe);
+            let reused = request.reused_tiles.clone();
+            let permit = self.decode_tails.reserve(0);
+            self.controlled(async {
+                tokio::task::spawn_blocking(move || {
+                    let _permit = permit;
+                    producer.finish(&reused)
+                })
+                .await
+                .map_err(|_| Error::Internal("pixel producer task failed".into()))?
+            })
+            .await?;
             let task = self.raster.borrow_mut().take().expect("raster task");
-            let pipe = Arc::clone(&task.pipe);
-            pipe.finish(&request.reused_tiles);
             let mut wait = std::pin::pin!(task.wait());
             let mut updates = tokio::time::interval(Duration::from_millis(100));
             let staging = loop {

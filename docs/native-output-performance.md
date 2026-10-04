@@ -1,12 +1,12 @@
 # Native output performance
 
-The parallel pipeline reduces memory and overlaps encoding with downloads. It
-does **not** make every output faster. Immediate tile responses expose raster
-CPU overhead, especially JPEG's synchronized pixel reads.
+Owned full-width strips reduce memory and overlap encoding with downloads.
+On this fixture, raster outputs are faster than master even with immediate
+tile responses. JPEG indexes its owned strip without per-pixel synchronization.
 
 Measured on Linux, AMD Ryzen AI 7 350 (8 cores, 16 threads), with output on an
-NVMe-backed Btrfs filesystem and a Node 22.22.2 fixture server. Release CLI binaries compare master `9fafe8f6`
-with the pixel-stripe implementation in PR #1190 after cleanup. The CLI and
+NVMe-backed Btrfs filesystem and a Node 24.19.0 fixture server. Release CLI binaries compare master `9fafe8f6`
+with the owned-strip implementation in PR #1190. The CLI and
 desktop share this native backend; desktop window startup and IPC are excluded.
 
 The input is an 8192×8192 image: 1024 JPEG tiles of 256×256 pixels, repeating
@@ -23,36 +23,49 @@ models download latency without WAN variability; it is not a throughput limit.
 
 | Output | Immediate: master → current | Change | 50 ms/tile: master → current | Change |
 |---|---:|---:|---:|---:|
-| PNG | 0.791 → 1.244 s | 57% slower | 3.929 → 3.400 s | 13% faster |
-| JPEG | 1.441 → 3.808 s | 164% slower | 4.505 → 3.431 s | 24% faster |
-| TIFF | 0.676 → 0.990 s | 46% slower | 3.774 → 3.373 s | 11% faster |
-| IIIF | 4.100 → 3.226 s | 21% faster | 7.289 → 6.120 s | 16% faster |
-| ZIF | 2.023 → 2.128 s | 5% slower | 5.212 → 5.432 s | 4% slower |
+| PNG | 0.802 → 0.674 s | 16% faster | 3.930 → 3.542 s | 10% faster |
+| JPEG | 1.457 → 1.169 s | 20% faster | 4.610 → 3.711 s | 20% faster |
+| TIFF | 0.667 → 0.254 s | 62% faster | 3.662 → 3.385 s | 8% faster |
+| IIIF | 4.488 → 3.576 s | 20% faster | 7.565 → 6.636 s | 12% faster |
+| ZIF | 2.232 → 2.232 s | unchanged | 5.317 → 5.415 s | 2% slower |
 
-Immediate JPEG runs ranged from 1.365–1.483 s on master and 3.758–3.903 s
-currently. Their median process CPU times were 2.12 and 4.39 s respectively.
-Delayed JPEG ranges were 4.470–5.438 and 3.406–4.089 s. The slowest immediate
-TIFF run was 1.488 s, so its three-run result merits a larger sample before
-drawing conclusions about small changes.
+Immediate JPEG ranges were 1.429–1.764 s on master and 1.154–1.378 s
+currently; median process CPU times were 2.15 and 2.02 s. Delayed JPEG ranges
+were 4.482–4.644 and 3.702–3.738 s. ZIF ranges overlap substantially, so its
+small median change does not establish a meaningful speed difference.
 
 WebP uses the contiguous-buffer fallback. On a smaller 2048×2048 input,
-three immediate runs measured 0.076 → 0.061 s, with identical output lengths.
+three immediate runs measured 0.077 → 0.061 s, with identical output lengths.
 This short workload says little about larger WebP jobs; the default RAM limit
 rejects the 8192×8192 codec workspace before downloading tiles.
 
 ## Peak process RSS
 
 These are GNU `time` process measurements, not the internal reservation counter.
-Immediate responses can queue many decoded tiles; delayed acquisition lets the
-encoder release them before the next arrivals.
+The ready queue holds two strips. Raster lookahead is also bounded, preventing
+a slow early tile from allowing unlimited later decoding.
 
 | Output | Immediate: master → current | 50 ms/tile: master → current |
 |---|---:|---:|
-| PNG | 518 → 250 MiB | 515 → 28 MiB |
-| JPEG | 496 → 295 MiB | 494 → 37 MiB |
-| TIFF | 296 → 205 MiB | 294 → 29 MiB |
-| IIIF | 883 → 16 MiB | 881 → 16 MiB |
-| ZIF | 871 → 16 MiB | 870 → 16 MiB |
+| PNG | 519 → 60 MiB | 517 → 49 MiB |
+| JPEG | 495 → 62 MiB | 494 → 55 MiB |
+| TIFF | 295 → 62 MiB | 294 → 39 MiB |
+| IIIF | 882 → 16 MiB | 881 → 16 MiB |
+| ZIF | 871 → 16 MiB | 871 → 15 MiB |
+
+## Ownership handoff versus shared stripes
+
+Five alternating immediate-response pairs compare the previous implementation
+(`44d6f0b5`) directly with owned strips under the same Node 24 server:
+
+| Output | Shared stripes → owned strips | Peak RSS |
+|---|---:|---:|
+| PNG | 1.586 → 0.669 s | 244 → 58 MiB |
+| JPEG | 4.612 → 1.223 s | 294 → 60 MiB |
+| TIFF | 1.009 → 0.263 s | 209 → 56 MiB |
+
+JPEG process CPU time drops from 5.34 to 2.08 s. Its 67 million pixels now
+require 128 ownership handoffs instead of synchronization on every pixel read.
 
 ## What the comparison establishes
 
@@ -71,14 +84,11 @@ Current publication syncs staging output; master did not provide that same
 durability guarantee. Filesystem caches are warm, but application caches are
 fresh. This is one machine and one textured fixture, not a general benchmark.
 
-Cleanup removes duplicate full-canvas encoders, unused spool configuration and
-metrics, and tests of retired paths. Active encoder tests cover all four raster
-codecs, metadata, cancellation, shuffled arrivals, and JPEG padding. Pixel reads
-now avoid duplicate locking/tree lookup and per-read allocation or atomics;
-opaque producers publish a tile's stripes under one lock. The remaining JPEG
-adapter still locks and indexes for every requested pixel. That is a plausible
-source of its CPU overhead, not a profiler-confirmed attribution. Further speed
-work needs to preserve the single-buffer design and measured memory benefits.
+The producer copies contributions once into 64-row strips, then releases
+decoded tile buffers. Placement, clipping and alpha composition precede handoff;
+the encoder only reads owned memory. Active tests cover strip boundaries,
+JPEG padding, metadata, retry holes, full-queue cancellation and RAM release.
+Retired canvas/spool paths and shared-stripe read counters have been removed.
 
 ## Reproduce
 

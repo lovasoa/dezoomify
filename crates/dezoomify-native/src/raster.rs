@@ -1,12 +1,12 @@
-//! Concrete blocking encoder task. PNG rows reference stripe segments; JPEG
-//! requests individual pixels. No assembled canvas or second pixel cache.
+//! Concrete encoder worker: own contiguous strips, then read and compress.
 use crate::{
     host::Controls,
     output::StagedFile,
-    pixel_pipe::{MemoryBudget, PixelPipe, ReadCounts},
+    pixel_pipe::{MemoryBudget, PixelPipe, PixelStrip},
 };
 use dezoomify::model::{Error, OutputFormat, Size};
 use std::{
+    cell::{Cell, RefCell},
     io::{Read, Seek, Write},
     path::Path,
     sync::Arc,
@@ -20,7 +20,7 @@ impl EncoderTask {
     pub(crate) fn start(
         destination: &Path,
         size: Size,
-        tile_height: u32,
+        tile_size: Option<Size>,
         format: OutputFormat,
         compression: u8,
         budget: Arc<MemoryBudget>,
@@ -30,12 +30,7 @@ impl EncoderTask {
             return Err(Error::InvalidState("empty raster dimensions".into()));
         }
         crate::imaging::check_dimensions(format, &size)?;
-        let reads = if format == OutputFormat::Jpeg {
-            JpegView::read_counts(&size)
-        } else {
-            ReadCounts::default()
-        };
-        let pipe = PixelPipe::new(size.clone(), budget, tile_height, reads);
+        let pipe = PixelPipe::new(size.clone(), budget, tile_size);
         let work = match format {
             OutputFormat::Png => u64::from(size.width) * 16 + (1 << 20),
             OutputFormat::Tiff => {
@@ -142,25 +137,23 @@ fn encode(
                     let mut stream = writer
                         .stream_writer_with_size(64 << 10)
                         .map_err(encoding_error)?;
-                    for y in 0..pipe.size.height {
-                        let start = u64::from(y) * u64::from(pipe.size.width);
-                        let row = pipe.read(start..start + u64::from(pipe.size.width))?;
-                        for bytes in row.segments() {
-                            stream.write_all(bytes).map_err(encoding_error)?;
-                        }
+                    while let Some(strip) = pipe.receive()? {
+                        stream.write_all(&strip.rgba).map_err(encoding_error)?;
+                        pipe.consumed_strip(&strip);
                     }
                     stream.finish().map_err(encoding_error)?;
                 }
                 writer.finish().map_err(encoding_error)?;
             }
             OutputFormat::Jpeg => {
-                let view = JpegView { pipe };
+                let view = JpegView::new(pipe)?;
                 image::codecs::jpeg::JpegEncoder::new_with_quality(
                     &mut output,
                     100u8.saturating_sub(compression),
                 )
                 .encode_image(&view)
                 .map_err(encoding_error)?;
+                pipe.consumed_strip(&view.current.borrow());
             }
             OutputFormat::Tiff => {
                 // tiff 0.11's public write_strip does not enable its compressor.
@@ -193,26 +186,25 @@ fn encode(
                 let mut offsets = Vec::with_capacity(pipe.size.height as usize);
                 let mut lengths = Vec::with_capacity(pipe.size.height as usize);
                 let level = crate::imaging::tiff_compression_for(compression) as u32;
-                for y in 0..pipe.size.height {
-                    let mut compressed = flate2::write::ZlibEncoder::new(
-                        Vec::new(),
-                        flate2::Compression::new(level),
-                    );
-                    let start = u64::from(y) * u64::from(pipe.size.width);
-                    let lease = pipe.read(start..start + u64::from(pipe.size.width))?;
-                    for bytes in lease.segments() {
-                        compressed.write_all(bytes).map_err(encoding_error)?;
+                while let Some(strip) = pipe.receive()? {
+                    for row in strip.rgba.chunks_exact(pipe.size.width as usize * 4) {
+                        let mut compressed = flate2::write::ZlibEncoder::new(
+                            Vec::new(),
+                            flate2::Compression::new(level),
+                        );
+                        compressed.write_all(row).map_err(encoding_error)?;
+                        let bytes = compressed.finish().map_err(encoding_error)?;
+                        offsets.push(
+                            u32::try_from(
+                                directory
+                                    .write_data(bytes.as_slice())
+                                    .map_err(encoding_error)?,
+                            )
+                            .map_err(encoding_error)?,
+                        );
+                        lengths.push(u32::try_from(bytes.len()).map_err(encoding_error)?);
                     }
-                    let bytes = compressed.finish().map_err(encoding_error)?;
-                    offsets.push(
-                        u32::try_from(
-                            directory
-                                .write_data(bytes.as_slice())
-                                .map_err(encoding_error)?,
-                        )
-                        .map_err(encoding_error)?,
-                    );
-                    lengths.push(u32::try_from(bytes.len()).map_err(encoding_error)?);
+                    pipe.consumed_strip(&strip);
                 }
                 directory
                     .write_tag(Tag::StripOffsets, offsets.as_slice())
@@ -231,12 +223,9 @@ fn encode(
             OutputFormat::Webp => {
                 let mut pixels =
                     Vec::with_capacity(pipe.size.width as usize * pipe.size.height as usize * 4);
-                for y in 0..pipe.size.height {
-                    let start = u64::from(y) * u64::from(pipe.size.width);
-                    let lease = pipe.read(start..start + u64::from(pipe.size.width))?;
-                    for bytes in lease.segments() {
-                        pixels.extend_from_slice(bytes);
-                    }
+                while let Some(strip) = pipe.receive()? {
+                    pixels.extend_from_slice(&strip.rgba);
+                    pipe.consumed_strip(&strip);
                 }
                 let image = image::RgbaImage::from_raw(pipe.size.width, pipe.size.height, pixels)
                     .expect("complete WebP pixels");
@@ -283,17 +272,36 @@ fn encoding_error(error: impl std::fmt::Display) -> Error {
     Error::EncodeFailed(error.to_string().into())
 }
 
-/// The current image encoder reads each pixel once, except repeated edge
-/// pixels used to pad its 8x8 blocks. Counts are codec-specific; no leases.
+/// image's JPEG encoder finishes full-width eight-row bands in order.
+/// Only advancing to the next strip synchronizes with the producer.
 struct JpegView<'a> {
     pipe: &'a PixelPipe,
+    current: RefCell<PixelStrip>,
+    failed: Cell<bool>,
 }
-impl JpegView<'_> {
-    fn read_counts(size: &Size) -> ReadCounts {
-        ReadCounts {
-            pad_x: (8 - size.width % 8) % 8,
-            pad_y: (8 - size.height % 8) % 8,
+impl<'a> JpegView<'a> {
+    fn new(pipe: &'a PixelPipe) -> Result<Self, Error> {
+        let current = pipe
+            .receive()?
+            .ok_or_else(|| Error::Internal("empty pixel stream".into()))?;
+        Ok(Self {
+            pipe,
+            current: RefCell::new(current),
+            failed: Cell::new(false),
+        })
+    }
+    fn advance(&self, y: u32) -> Result<(), Error> {
+        let mut current = self.current.borrow_mut();
+        self.pipe.consumed_strip(&current);
+        let next = self
+            .pipe
+            .receive()?
+            .ok_or_else(|| Error::Internal("JPEG exceeded pixel stream".into()))?;
+        if y != next.first_row {
+            return Err(Error::Internal("JPEG traversal skipped a strip".into()));
         }
+        *current = next;
+        Ok(())
     }
 }
 impl image::GenericImageView for JpegView<'_> {
@@ -301,17 +309,32 @@ impl image::GenericImageView for JpegView<'_> {
     fn dimensions(&self) -> (u32, u32) {
         (self.pipe.size.width, self.pipe.size.height)
     }
+    #[inline]
     fn get_pixel(&self, x: u32, y: u32) -> Self::Pixel {
-        match self
-            .pipe
-            .pixel(u64::from(y) * u64::from(self.pipe.size.width) + u64::from(x))
-        {
-            Ok(pixel) => pixel,
-            Err(error) => {
-                self.pipe.fail(error);
-                image::Rgb([0, 0, 0])
-            }
+        if self.failed.get() {
+            return image::Rgb([0; 3]);
         }
+        let strip = self.current.borrow();
+        if y < strip.first_row {
+            drop(strip);
+            self.failed.set(true);
+            self.pipe
+                .fail(Error::Internal("JPEG revisited a released strip".into()));
+            return image::Rgb([0; 3]);
+        }
+        if y >= strip.first_row + strip.rows {
+            drop(strip);
+            if let Err(error) = self.advance(y) {
+                self.failed.set(true);
+                self.pipe.fail(error);
+                return image::Rgb([0; 3]);
+            }
+            return self.get_pixel(x, y);
+        }
+        let offset =
+            ((y - strip.first_row) as usize * self.pipe.size.width as usize + x as usize) * 4;
+        let rgb = &strip.rgba[offset..offset + 3];
+        image::Rgb([rgb[0], rgb[1], rgb[2]])
     }
 }
 /// Obtain just the ICC/EXIF chunks using the existing metadata encoders. The
@@ -383,7 +406,10 @@ mod tests {
         EncoderTask::start(
             path,
             size,
-            5,
+            Some(Size {
+                width: 5,
+                height: 5,
+            }),
             format,
             5,
             MemoryBudget::new(8 << 20),
@@ -392,7 +418,7 @@ mod tests {
         .unwrap()
     }
     async fn publish(task: EncoderTask, destination: &Path) -> Vec<u8> {
-        task.pipe.finish(&[]);
+        task.pipe.finish(&[]).unwrap();
         let mut staged = tokio::time::timeout(std::time::Duration::from_secs(3), task.wait())
             .await
             .expect("encoder must finish")
@@ -474,9 +500,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn codecs_match_pixels_and_jpeg_padding_releases_every_stripe() {
+    async fn codecs_match_pixels_across_strip_handoffs_and_jpeg_edge_padding() {
         let directory = directory();
-        for (width, height) in [(1, 1), (1, 9), (7, 7), (8, 8), (9, 9), (13, 19), (16, 17)] {
+        for (width, height) in [
+            (1, 1),
+            (1, 9),
+            (7, 7),
+            (8, 8),
+            (9, 9),
+            (13, 19),
+            (16, 17),
+            (1, 65),
+            (9, 64),
+            (13, 129),
+        ] {
             let source = image::RgbaImage::from_fn(width, height, |x, y| {
                 image::Rgba([
                     (x * 17) as u8,
@@ -528,7 +565,7 @@ mod tests {
                         "{format:?} {width}x{height}"
                     );
                 }
-                assert_eq!(pipe.buffered_stripes(), 0);
+                assert_eq!(pipe.queued_strips(), 0);
                 assert_eq!(pipe.consumed(), u64::from(width) * u64::from(height));
                 drop(pipe);
                 assert_eq!(budget.current(), 0, "all allocations released");
