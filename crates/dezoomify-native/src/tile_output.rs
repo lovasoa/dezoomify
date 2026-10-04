@@ -183,14 +183,9 @@ impl EncodedTile {
             (icc.as_ref().map_or(0, Vec::len) as u64 + exif.as_ref().map_or(0, Vec::len) as u64)
                 * 4,
         );
-        let mut reader = image::ImageReader::with_format(Cursor::new(&self.bytes), self.format);
-        let mut limits = image::Limits::default();
-        limits.max_alloc = Some(budget.saturating_sub(self.bytes.len() as u64) / 2);
-        reader.limits(limits);
-        let image = reader.decode().map_err(decode_error)?.into_rgba8();
-        let cropped = image::imageops::crop_imm(&image, 0, 0, size.width, size.height).to_image();
+        let image = self.decode_pixels(&size, budget)?;
         self.bytes = crate::imaging::encode_png(
-            &cropped,
+            &image,
             crate::imaging::png_compression_for(compression),
             icc.as_deref(),
             exif.as_deref(),
@@ -198,6 +193,25 @@ impl EncodedTile {
         self.format = image::ImageFormat::Png;
         self.size = size;
         Ok(())
+    }
+
+    pub(crate) fn decode_pixels(
+        &self,
+        size: &Size,
+        budget: u64,
+    ) -> Result<image::RgbaImage, Error> {
+        let pixels = u64::from(self.size.width) * u64::from(self.size.height);
+        memory_check(self.bytes.len() as u64 + pixels * 16, budget)?;
+        let mut reader = image::ImageReader::with_format(Cursor::new(&self.bytes), self.format);
+        let mut limits = image::Limits::default();
+        limits.max_alloc = Some(budget.saturating_sub(self.bytes.len() as u64) / 2);
+        reader.limits(limits);
+        let image = reader.decode().map_err(decode_error)?.into_rgba8();
+        Ok(if *size == self.size {
+            image
+        } else {
+            image::imageops::crop_imm(&image, 0, 0, size.width, size.height).to_image()
+        })
     }
 }
 

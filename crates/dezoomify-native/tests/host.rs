@@ -288,6 +288,13 @@ fn zif_reuses_standalone_jpeg_and_rgb_png_tiles() {
             .unwrap();
         let bytes = bytes.into_inner();
         std::fs::write(tiles.join(format!("0_0.{extension}")), &bytes).unwrap();
+        dezoomify_native::cache::store(
+            &work.join("cache"),
+            &dezoomify_native::cache::job_namespace(source.to_str().unwrap()),
+            tiles.join(format!("0_0.{extension}")).to_str().unwrap(),
+            &bytes[..bytes.len() - 1],
+        )
+        .unwrap();
         let destination = work.join(format!("out-{extension}.zif"));
         let host = NativeHost::new(JobOptions {
             input_url: source.to_str().unwrap().into(),
@@ -339,28 +346,43 @@ fn truncated_source_tiles_reach_partial_handling_with_their_uri() {
     .unwrap();
     let bad = tiles.join("1_0.png");
     std::fs::write(tiles.join("0_0.png"), &bytes).unwrap();
-    std::fs::write(&bad, &bytes[..bytes.len() - 1]).unwrap();
-    let chosen = std::cell::Cell::new(false);
-    let host = NativeHost::new(JobOptions {
-        input_url: source.to_string_lossy().into(),
-        output: OutputTarget::File(work.join("out.iiif")),
-        largest: true,
-        max_retries: 0,
-        cache_dir: Some(work.join("cache")),
-        ..Default::default()
-    })
-    .unwrap();
-    host.on_partial(|missing| {
+    let mut bitmap = std::io::Cursor::new(Vec::new());
+    image::RgbImage::new(16, 16)
+        .write_to(&mut bitmap, image::ImageFormat::Bmp)
+        .unwrap();
+    let bitmap = bitmap.into_inner();
+    // PNG fails structural inspection; BMP requires local pixel conversion.
+    for (case, broken) in [
+        ("png", &bytes[..bytes.len() - 1]),
+        ("bmp", &bitmap[..bitmap.len() - 1]),
+    ] {
+        std::fs::write(&bad, broken).unwrap();
+        for extension in ["iiif", "zif"] {
+            let chosen = std::cell::Cell::new(false);
+            let host = NativeHost::new(JobOptions {
+                input_url: source.to_string_lossy().into(),
+                output: OutputTarget::File(work.join(format!("out-{case}.{extension}"))),
+                largest: true,
+                max_retries: 0,
+                cache_dir: Some(work.join(format!("cache-{case}-{extension}"))),
+                ..Default::default()
+            })
+            .unwrap();
+            host.on_partial(|missing| {
         assert_eq!(missing.missing.len(), 1);
         assert!(matches!(&missing.missing[0].failures[0], Error::Resource { request, source, .. } if request == bad.to_str().unwrap() && matches!(source.cause(), Error::DecodeFailed(_))));
         chosen.set(true);
         Box::pin(async { Ok(RecoveryChoice::Keep) })
     });
-    let result = support::run_host(&host).unwrap();
-    assert!(chosen.get());
-    assert_eq!(result.output.missing, [1]);
-    assert!(result.path.ends_with("out.partial.iiif"));
-    drop(host);
+            let result = support::run_host(&host).unwrap();
+            assert!(chosen.get());
+            assert_eq!(result.output.missing, [1]);
+            assert!(result
+                .path
+                .ends_with(format!("out-{case}.partial.{extension}")));
+            drop(host);
+        }
+    }
     std::fs::remove_dir_all(work).unwrap();
 }
 

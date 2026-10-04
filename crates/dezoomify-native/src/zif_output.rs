@@ -97,6 +97,18 @@ pub(crate) struct ZifWriter {
 }
 
 impl ZifWriter {
+    fn retained_bytes(&self) -> u64 {
+        self.retained
+            + self
+                .metadata
+                .values()
+                .map(|(_, icc, exif)| {
+                    icc.as_ref().map_or(0, Vec::len) as u64
+                        + exif.as_ref().map_or(0, Vec::len) as u64
+                })
+                .sum::<u64>()
+    }
+
     pub(crate) fn new(
         destination: &Path,
         plan: &OutputPlan,
@@ -161,9 +173,11 @@ impl ZifWriter {
             builder = builder.ycbcr_subsampling(sampling).map_err(failed)?;
         }
         let mut writer = builder.build().map_err(failed)?;
-        zif_tiff::std::RangeWriter::wrap(self.staging.writer(cancelled))
+        let result = zif_tiff::std::RangeWriter::wrap(self.staging.writer(cancelled))
             .apply(writer.init().map_err(failed)?)
-            .map_err(failed)?;
+            .map_err(failed);
+        self.staging.check_error()?;
+        result?;
         self.profile = Some(selected);
         self.writer = Some(writer);
         Ok(())
@@ -179,7 +193,7 @@ impl ZifWriter {
         if cancelled.load(Ordering::SeqCst) {
             return Err(Error::Cancelled);
         }
-        memory_check(bytes.len() as u64 * 2, self.budget)?;
+        memory_check(self.retained_bytes() + bytes.len() as u64 * 2, self.budget)?;
         let writer = self.writer.as_mut().expect("initialized ZIF writer");
         let batch = writer
             .put_tile_at_level(
@@ -198,9 +212,11 @@ impl ZifWriter {
             .first()
             .ok_or_else(|| Error::Internal("missing ZIF tile action".into()))?
             .offset;
-        zif_tiff::std::RangeWriter::wrap(self.staging.writer(cancelled))
+        let result = zif_tiff::std::RangeWriter::wrap(self.staging.writer(cancelled))
             .apply(batch)
-            .map_err(failed)?;
+            .map_err(failed);
+        self.staging.check_error()?;
+        result?;
         let format = match self.profile.expect("initialized ZIF profile") {
             Profile::Jpeg { .. } => image::ImageFormat::Jpeg,
             Profile::PngRgb => image::ImageFormat::Png,
@@ -220,7 +236,11 @@ impl ZifWriter {
         })
     }
 
-    pub(crate) fn place(&mut self, tile: EncodedTile, cancelled: &AtomicBool) -> Result<(), Error> {
+    pub(crate) fn place(
+        &mut self,
+        mut tile: EncodedTile,
+        cancelled: &AtomicBool,
+    ) -> Result<(), Error> {
         let extent = tile.placement.expected_size.as_ref().unwrap_or(&tile.size);
         let rect = Rect {
             x: tile.placement.position.x,
@@ -247,30 +267,47 @@ impl ZifWriter {
                     decoder.exif_metadata().unwrap_or(None),
                 ),
             );
-            let metadata_bytes = self
-                .metadata
-                .values()
-                .map(|(_, icc, exif)| {
-                    icc.as_ref().map_or(0, Vec::len) as u64
-                        + exif.as_ref().map_or(0, Vec::len) as u64
-                })
-                .sum::<u64>();
-            memory_check(self.retained + metadata_bytes, self.budget)?;
+            memory_check(self.retained_bytes(), self.budget)?;
         }
+        let source_profile = profile(&tile.bytes);
         if self.writer.is_none() && self.base.regular && index == 0 {
-            self.initialize(profile(&tile.bytes).unwrap_or(Profile::PngRgb), cancelled)?;
+            self.initialize(source_profile.unwrap_or(Profile::PngRgb), cancelled)?;
         }
         let compatible = self.base.regular
             && rect == self.base.rect(index)
             && tile.size.width == rect.w
             && tile.size.height == rect.h
-            && profile(&tile.bytes).is_some()
-            && profile(&tile.bytes) == self.profile;
+            && source_profile.is_some()
+            && source_profile == self.profile;
         let stored = if compatible {
             self.store(0, rect, &tile.bytes, cancelled)?
+        } else if self.base.regular && rect == self.base.rect(index) && self.writer.is_some() {
+            let pixels = tile.decode_pixels(
+                &Size {
+                    width: rect.w,
+                    height: rect.h,
+                },
+                self.budget.saturating_sub(self.retained_bytes()),
+            )?;
+            self.decoded += 1;
+            drop(tile);
+            let bytes = self.encode(&pixels)?;
+            drop(pixels);
+            self.store(0, rect, &bytes, cancelled)?
         } else {
+            if source_profile.is_none() || tile.size.width != rect.w || tile.size.height != rect.h {
+                tile.convert_to_png(
+                    Size {
+                        width: rect.w,
+                        height: rect.h,
+                    },
+                    self.budget.saturating_sub(self.retained_bytes()),
+                    self.compression,
+                )?;
+                self.decoded += 1;
+            }
             self.retained += tile.bytes.len() as u64;
-            memory_check(self.retained, self.budget)?;
+            memory_check(self.retained_bytes(), self.budget)?;
             StoredTile {
                 rect,
                 size: tile.size,
@@ -289,7 +326,7 @@ impl ZifWriter {
     fn encode(&self, pixels: &image::RgbaImage) -> Result<Vec<u8>, Error> {
         memory_check(
             pixels.as_raw().len() as u64 * 3 + (64 << 10),
-            self.budget.saturating_sub(self.retained),
+            self.budget.saturating_sub(self.retained_bytes()),
         )?;
         let mut bytes = Vec::new();
         match self.profile.expect("initialized ZIF profile") {
@@ -432,11 +469,12 @@ impl ZifWriter {
             } else {
                 let pixels = self.base.region(
                     rect,
-                    self.budget.saturating_sub(self.retained),
+                    self.budget.saturating_sub(self.retained_bytes()),
                     cancelled,
                     &mut self.decoded,
                 )?;
                 let bytes = self.encode(&pixels)?;
+                drop(pixels);
                 self.store(0, rect, &bytes, cancelled)?
             };
             normalized.tiles.insert(index, stored);
@@ -484,11 +522,12 @@ impl ZifWriter {
                     &previous,
                     &next.size,
                     rect,
-                    self.budget,
+                    self.budget.saturating_sub(self.retained_bytes()),
                     cancelled,
                     &mut self.decoded,
                 )?;
                 let bytes = self.encode(&pixels)?;
+                drop(pixels);
                 next.tiles
                     .insert(index, self.store(level, rect, &bytes, cancelled)?);
             }
@@ -496,5 +535,60 @@ impl ZifWriter {
         }
         let bytes = self.staging.publish(destination, overwrite, cancelled)?;
         Ok((full_size, bytes, self.decoded))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dezoomify::model::{OutputFormat, ProcessingRecipe, TilePlacement, TileRole};
+
+    #[test]
+    fn retained_tile_and_metadata_share_one_budget() {
+        use image::ImageEncoder;
+        let mut bytes = Vec::new();
+        let mut encoder = image::codecs::png::PngEncoder::new(&mut bytes);
+        encoder.set_icc_profile(vec![42; 4096]).unwrap();
+        encoder
+            .write_image(&[1, 2, 3], 1, 1, image::ExtendedColorType::Rgb8)
+            .unwrap();
+        let size = Size {
+            width: 1,
+            height: 1,
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let budget = 4096 + bytes.len() as u64 - 1;
+        let mut writer = ZifWriter::new(
+            &directory.path().join("out.zif"),
+            &OutputPlan {
+                canvas: Some(size.clone()),
+                grid: None,
+                tile_count: 1,
+                format: OutputFormat::Zif,
+                title: None,
+            },
+            budget,
+            5,
+        )
+        .unwrap();
+        let error = writer
+            .place(
+                EncodedTile {
+                    id: 0,
+                    size: size.clone(),
+                    bytes,
+                    format: image::ImageFormat::Png,
+                    placement: TilePlacement {
+                        position: Point { x: 0, y: 0 },
+                        expected_size: None,
+                        canvas: Some(size),
+                        processing: ProcessingRecipe::None,
+                        role: TileRole::output(),
+                    },
+                },
+                &AtomicBool::new(false),
+            )
+            .unwrap_err();
+        assert!(matches!(error, Error::LimitExceeded { .. }));
     }
 }
