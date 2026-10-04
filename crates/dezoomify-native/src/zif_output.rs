@@ -21,15 +21,24 @@ enum Profile {
 fn profile(bytes: &[u8]) -> Option<Profile> {
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         let mut at = 8usize;
+        let mut color_chunks = false;
+        let mut icc = false;
         while let Some(header) = bytes.get(at..at.checked_add(8)?) {
             if &header[4..] == b"tRNS" {
                 return None;
             }
+            color_chunks |= matches!(&header[4..], b"gAMA" | b"cHRM" | b"sRGB");
+            icc |= &header[4..] == b"iCCP";
             if &header[4..] == b"IEND" {
                 break;
             }
             let length = u32::from_be_bytes(header[..4].try_into().ok()?) as usize;
             at = at.checked_add(length)?.checked_add(12)?;
+        }
+        // Normalize descriptions unsupported by the encoder, so generated
+        // levels and neighboring converted tiles use the same color model.
+        if color_chunks && !icc {
+            return None;
         }
         return (bytes.get(24) == Some(&8) && bytes.get(25) == Some(&2)).then_some(Profile::PngRgb);
     }
@@ -171,7 +180,7 @@ impl ZifWriter {
         self.peak_retained
     }
 
-    fn retained_bytes(&self) -> u64 {
+    pub(crate) fn retained_bytes(&self) -> u64 {
         self.retained
             + self
                 .metadata
@@ -429,7 +438,14 @@ impl ZifWriter {
         let source_profile = profile(&tile.bytes);
         // Commit the codec only after the first tile is accepted. Failed
         // conversion must not force later reusable tiles through that codec.
-        let selected = self.profile.or(source_profile).unwrap_or(Profile::PngRgb);
+        let selected = self
+            .profile
+            .or(source_profile.filter(|profile| {
+                *profile == Profile::PngRgb
+                    || (self.base.cell.width.min(self.base.size.width) <= u16::MAX.into()
+                        && self.base.cell.height.min(self.base.size.height) <= u16::MAX.into())
+            }))
+            .unwrap_or(Profile::PngRgb);
         let compatible = self.base.regular
             && rect == self.base.rect(index)
             && tile.size.width == rect.w
@@ -495,8 +511,18 @@ impl ZifWriter {
     }
 
     fn encode(&self, pixels: &image::RgbaImage) -> Result<Vec<u8>, Error> {
+        let metadata_bytes = self
+            .metadata
+            .values()
+            .find_map(|(_, icc, _)| icc.as_ref())
+            .map_or(0, Vec::len) as u64
+            + self
+                .metadata
+                .values()
+                .find_map(|(_, _, exif)| exif.as_ref())
+                .map_or(0, Vec::len) as u64;
         memory_check(
-            pixels.as_raw().len() as u64 * 3 + (64 << 10),
+            pixels.as_raw().len() as u64 * 3 + (64 << 10) + metadata_bytes.saturating_mul(3),
             self.budget.saturating_sub(self.retained_bytes()),
         )?;
         let mut bytes = Vec::new();
