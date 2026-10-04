@@ -480,9 +480,14 @@ pub(crate) struct IiifWriter {
     compression: u8,
     pub(crate) decoded_tiles: u64,
     retained: u64,
+    peak_retained: u64,
 }
 
 impl IiifWriter {
+    pub(crate) fn peak_retained(&self) -> u64 {
+        self.peak_retained
+    }
+
     pub(crate) fn new(
         destination: &Path,
         plan: &OutputPlan,
@@ -516,6 +521,7 @@ impl IiifWriter {
             compression,
             decoded_tiles: 0,
             retained: 0,
+            peak_retained: 0,
         })
     }
 
@@ -567,6 +573,7 @@ impl IiifWriter {
             )?)
         } else {
             self.retained += tile.bytes.len() as u64;
+            self.peak_retained = self.peak_retained.max(self.retained);
             memory_check(self.retained, self.budget)?;
             TileBytes::Memory(tile.bytes)
         };
@@ -593,6 +600,15 @@ impl IiifWriter {
         bytes: &[u8],
         cancelled: &AtomicBool,
     ) -> Result<PathBuf, Error> {
+        // Different pyramid levels can request the same clipped corner.
+        // Reuse its existing payload; writing would also truncate its aliases.
+        let existing = self
+            .staging
+            .path
+            .join(tile_path(rect, scale, format, canvas, false));
+        if existing.is_file() {
+            return Ok(existing);
+        }
         let path = self.staging.write(
             &tile_path(rect, scale, format, canvas, false),
             bytes,

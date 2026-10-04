@@ -200,7 +200,7 @@ pub struct NativeHost<'a> {
     published: RefCell<Option<Publication>>,
     source_format: RefCell<Option<String>>,
     output_plan: RefCell<Option<OutputPlan>>,
-    iiif: RefCell<Option<crate::tile_output::IiifWriter>>,
+    iiif: RefCell<Option<Arc<std::sync::Mutex<crate::tile_output::IiifWriter>>>>,
     encoded_probes: RefCell<Vec<crate::tile_output::EncodedTile>>,
 }
 
@@ -495,10 +495,32 @@ impl<'a> NativeHost<'a> {
         }
     }
 
-    fn place_encoded(&self, tile: crate::tile_output::EncodedTile) -> Result<(), Error> {
+    async fn place_encoded(&self, tile: crate::tile_output::EncodedTile) -> Result<(), Error> {
         let id = tile.id;
-        if let Some(writer) = self.iiif.borrow_mut().as_mut() {
-            writer.place(tile, &self.controls.0.cancelled)?;
+        let writer = self.iiif.borrow().as_ref().cloned();
+        if let Some(writer) = writer {
+            let permit = self.decode_tails.reserve(tile.bytes.len());
+            let controls = self.controls.clone();
+            let peak = self
+                .controlled(async {
+                    tokio::task::spawn_blocking(move || {
+                        let _permit = permit;
+                        let result = (|| {
+                            let mut writer = writer
+                                .lock()
+                                .map_err(|_| Error::Internal("tile writer poisoned".into()))?;
+                            writer.place(tile, &controls.0.cancelled)?;
+                            Ok(writer.peak_retained())
+                        })();
+                        drop(writer);
+                        result
+                    })
+                    .await
+                    .map_err(|_| Error::Internal("tile placement task failed".into()))?
+                })
+                .await?;
+            let mut stats = self.instrumentation.borrow_mut();
+            stats.peak_encoded_bytes = stats.peak_encoded_bytes.max(peak);
         } else {
             let mut probes = self.encoded_probes.borrow_mut();
             crate::tile_output::memory_check(
@@ -622,10 +644,24 @@ impl Host for NativeHost<'_> {
                 self.options.output_retain_cap,
                 self.options.compression,
             )?;
-            for tile in self.encoded_probes.borrow_mut().drain(..) {
-                writer.place(tile, &self.controls.0.cancelled)?;
-            }
-            *self.iiif.borrow_mut() = Some(writer);
+            let probes = std::mem::take(&mut *self.encoded_probes.borrow_mut());
+            let controls = self.controls.clone();
+            let permit = self.decode_tails.reserve(0);
+            let writer = self
+                .controlled(async {
+                    tokio::task::spawn_blocking(move || {
+                        let _permit = permit;
+                        for tile in probes {
+                            writer.place(tile, &controls.0.cancelled)?;
+                        }
+                        Ok(writer)
+                    })
+                    .await
+                    .map_err(|_| Error::Internal("tile preflight task failed".into()))?
+                })
+                .await?;
+            self.instrumentation.borrow_mut().peak_encoded_bytes = writer.peak_retained();
+            *self.iiif.borrow_mut() = Some(Arc::new(std::sync::Mutex::new(writer)));
         }
         *self.output_plan.borrow_mut() = Some(plan);
         Ok(())
@@ -652,6 +688,7 @@ impl Host for NativeHost<'_> {
                     let height = std::num::NonZeroU64::new(u64::from(encoded.size.height));
                     if tile.placement.role.output {
                         self.place_encoded(encoded)
+                            .await
                             .map_err(|e| resource_context(e, &tile.request))?;
                     }
                     match (width, height) {
@@ -692,7 +729,7 @@ impl Host for NativeHost<'_> {
             if self.format == OutputFormat::IiifDir {
                 let encoded = self.encoded_tile(&tile).await?;
                 self.controls.checkpoint(false).await?;
-                return self.place_encoded(encoded);
+                return self.place_encoded(encoded).await;
             }
             let decoded = self.tile(&tile).await?;
             self.controls.checkpoint(false).await?;
@@ -734,6 +771,10 @@ impl Host for NativeHost<'_> {
             let reused = request.reused_tiles.clone();
             Some(
                 tokio::task::spawn_blocking(move || {
+                    let writer = Arc::try_unwrap(writer)
+                        .map_err(|_| Error::Internal("tile placement still active".into()))?
+                        .into_inner()
+                        .map_err(|_| Error::Internal("tile writer poisoned".into()))?;
                     writer
                         .finish(&destination, &reused, &controls.0.cancelled)
                         .map(|(size, bytes, decoded)| (destination, size, bytes, decoded))
@@ -771,13 +812,15 @@ impl Host for NativeHost<'_> {
             self.decode_tails.peak_bytes.load(Ordering::SeqCst);
         instrumentation.canvas_bytes = stats.canvas_bytes;
         instrumentation.encoded_bytes = stats.encoded_bytes;
-        instrumentation.peak_encoded_bytes = stats.peak_encoded_bytes;
+        instrumentation.peak_encoded_bytes = instrumentation
+            .peak_encoded_bytes
+            .max(stats.peak_encoded_bytes);
         instrumentation.peak_spool_bytes = stats.peak_spool_bytes;
         instrumentation.late_repaints = stats.late_repaints;
         instrumentation.accounted_peak_bytes = stats
             .canvas_bytes
             .saturating_add(stats.peak_retained_bytes)
-            .saturating_add(stats.peak_encoded_bytes);
+            .saturating_add(instrumentation.peak_encoded_bytes);
         let output = Output {
             canvas: Some(Size {
                 width: image_size.x,

@@ -125,14 +125,15 @@ fn odd_sized_and_mixed_codec_iiif_trees_roundtrip_through_the_reader() {
             &source,
             DZI_512
                 .replace("Width=\"512\"", "Width=\"513\"")
+                .replace("Height=\"512\"", "Height=\"513\"")
                 .replace("Format=\"png\"", "Format=\"jpg\""),
         )
         .unwrap();
-        for y in 0..2 {
+        for y in 0..3 {
             for x in 0..3 {
                 let pixels = image::RgbaImage::from_pixel(
                     if x == 2 { 1 } else { 256 },
-                    256,
+                    if y == 2 { 1 } else { 256 },
                     image::Rgba([x * 60, y * 80, 90, 255]),
                 );
                 let bytes = if mixed && x == 0 {
@@ -162,10 +163,19 @@ fn odd_sized_and_mixed_codec_iiif_trees_roundtrip_through_the_reader() {
             .unwrap()
             .iter()
             .all(serde_json::Value::is_object));
-        let mut expected = image::RgbaImage::new(257, 256);
-        for (x, region, width) in [(0, "0,0,512,512", 256), (256, "512,0,1,512", 1)] {
+        assert_eq!(
+            std::fs::read(destination.join("512,512,1,1/1,/0/default.png")).unwrap(),
+            std::fs::read(tiles.join("2_2.jpg")).unwrap(),
+        );
+        let mut expected = image::RgbaImage::new(257, 257);
+        for (x, y, region, width, height) in [
+            (0, 0, "0,0,512,512", 256, 256),
+            (256, 0, "512,0,1,512", 1, 256),
+            (0, 256, "0,512,512,1", 256, 1),
+            (256, 256, "512,512,1,1", 1, 1),
+        ] {
             let bytes =
-                std::fs::read(destination.join(format!("{region}/{width},256/0/default.png")))
+                std::fs::read(destination.join(format!("{region}/{width},{height}/0/default.png")))
                     .unwrap();
             assert_eq!(
                 std::fs::read(destination.join(format!("{region}/{width},/0/default.png")))
@@ -176,7 +186,7 @@ fn odd_sized_and_mixed_codec_iiif_trees_roundtrip_through_the_reader() {
                 &mut expected,
                 &image::load_from_memory(&bytes).unwrap().into_rgba8(),
                 x,
-                0,
+                y,
             );
         }
         let output = work.join(format!("roundtrip-{mixed}.png"));
