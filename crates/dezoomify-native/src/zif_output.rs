@@ -309,6 +309,7 @@ impl ZifWriter {
         let stored = if compatible {
             self.store(0, rect, &tile.bytes, cancelled)?
         } else if self.base.regular && rect == self.base.rect(index) && self.writer.is_some() {
+            self.decoded += 1;
             let pixels = tile.decode_pixels(
                 &Size {
                     width: rect.w,
@@ -316,7 +317,6 @@ impl ZifWriter {
                 },
                 self.budget.saturating_sub(self.retained_bytes()),
             )?;
-            self.decoded += 1;
             drop(tile);
             let bytes = self.encode(&pixels)?;
             drop(pixels);
@@ -327,6 +327,7 @@ impl ZifWriter {
                 || tile.size.width != rect.w
                 || tile.size.height != rect.h
             {
+                self.decoded += 1;
                 tile.convert_to_png(
                     Size {
                         width: rect.w,
@@ -335,7 +336,6 @@ impl ZifWriter {
                     self.budget.saturating_sub(self.retained_bytes()),
                     self.compression,
                 )?;
-                self.decoded += 1;
             }
             self.retained += tile.bytes.len() as u64;
             let retained = self.retained_bytes();
