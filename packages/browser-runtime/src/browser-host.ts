@@ -11,6 +11,7 @@ import type {
   Error as JobError,
   MissingTiles,
   Output,
+  ProbeOutcome,
   Progress,
   RecoveryChoice,
   ResourceRead,
@@ -21,7 +22,6 @@ import type { DiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
 import { causeOf, isJobError } from "../../shared-ui/src/failure.ts";
 import type { CanvasAssembly } from "./assembly.ts";
 import { originOfUrl } from "./fetch-primitives.ts";
-import { createProbeSize } from "./probe.ts";
 import type { TileDecoder } from "./tile-decode.ts";
 import type { TileImageLike } from "./tile-draw.ts";
 
@@ -64,19 +64,19 @@ export class BrowserHost implements Host {
   private failure(
     error: unknown,
     request?: ResourceRequest,
-    domain: "fetch" | "output" = "fetch",
+    domain: "fetch" | "host" = "host",
   ): JobError {
     if (this.signal.aborted) return { kind: "cancelled" };
     const typed: JobError = isJobError(error)
       ? error
-      : domain === "output"
-        ? { kind: "write-failed", detail: String(error).slice(0, 2048) }
-        : {
+      : domain === "fetch"
+        ? {
             kind: "network-failure",
             transport: this.deps.transport?.() ?? "direct",
             detail: String(error).slice(0, 2048),
-          };
-    if (!request || typed.kind === "resource") return typed;
+          }
+        : { kind: "internal", detail: String(error).slice(0, 2048) };
+    if (!request || typed.kind === "resource" || typed.kind === "cancelled") return typed;
     return {
       kind: "resource",
       request: request.uri,
@@ -110,14 +110,7 @@ export class BrowserHost implements Host {
         ]),
       );
     }).catch((error) => {
-      throw this.failure(
-        isJobError(error)
-          ? error
-          : {
-              kind: "binding-invalid-value",
-              detail: String(error).slice(0, 2048),
-            },
-      );
+      throw this.failure(error);
     });
   }
 
@@ -131,11 +124,11 @@ export class BrowserHost implements Host {
       this.signal.throwIfAborted();
       return result;
     } catch (error) {
-      throw this.failure(error, request);
+      throw this.failure(error, request, "fetch");
     }
   }
 
-  private async readable(request: ResourceRequest): Promise<Uint8Array> {
+  private async readable(request: ResourceRequest): Promise<ArrayBuffer> {
     const result = await this.fetch(request, "allowed");
     if (result.kind === "needs-access")
       throw {
@@ -144,78 +137,67 @@ export class BrowserHost implements Host {
         transport: this.deps.transport?.() ?? "browser-session",
         detail: `access to ${result.origin} is required`,
       } satisfies JobError;
-    return new Uint8Array(result.response.bytes);
+    return new Uint8Array(result.response.bytes).buffer;
   }
 
-  probe(tile: Tile): Promise<import("@dezoomify/wasm-bindings").ProbeOutcome> {
+  probe(tile: Tile): Promise<ProbeOutcome> {
     return this.own(() => this.measureTile(tile));
   }
 
-  private async measureTile(tile: Tile): Promise<import("@dezoomify/wasm-bindings").ProbeOutcome> {
+  private async measureTile(tile: Tile): Promise<ProbeOutcome> {
     try {
-      const loadDisplayImage = this.deps.loadDisplayImage;
-      const probe = createProbeSize({
-        fetchResource: async (request) => ({
-          bytes: await this.readable(request),
-        }),
-        decode: (bytes) => this.deps.decoder.decode(bytes, this.signal),
-        ...(loadDisplayImage
-          ? {
-              loadImage: async (url: string, signal: AbortSignal) => {
-                const image = await loadDisplayImage(url, signal);
-                return {
-                  width: image.naturalWidth,
-                  height: image.naturalHeight,
-                  image,
-                };
-              },
-            }
-          : {}),
-      });
-      const tile_probe = await probe(tile.request, this.signal);
-      if (tile_probe.status === "available" && tile.placement.role.output) {
-        try {
-          this.deps.assembly.prepare(tile.placement.canvas);
-        } catch (error) {
-          throw this.failure(error, undefined, "output");
+      let resource: ArrayBuffer | TileImageLike;
+      let width: number, height: number;
+      try {
+        resource = await this.loadTile(tile);
+        if (resource instanceof ArrayBuffer) {
+          const bitmap = await this.deps.decoder.decode(resource, this.signal);
+          width = bitmap.width;
+          height = bitmap.height;
+          try {
+            bitmap.close();
+          } catch {
+            // Bitmap cleanup is best-effort.
+          }
+        } else {
+          width = resource.naturalWidth;
+          height = resource.naturalHeight;
         }
-        if (tile_probe.bytes)
-          await this.deps.assembly.acquireTile(tile.index, tile.placement, tile_probe.bytes);
-        else if (tile_probe.image)
-          this.deps.assembly.acquireDisplayTile(tile.index, tile.placement, tile_probe.image);
-        else return { status: "missing" as const };
+        this.signal.throwIfAborted();
+      } catch (error) {
+        const failure = this.failure(error, tile.request);
+        const cause = causeOf(failure);
+        if (cause.kind === "cancelled" || cause.kind === "policy-denied") throw failure;
+        return { status: "missing" };
       }
-      return tile_probe.status === "missing"
-        ? tile_probe
-        : {
-            status: "available" as const,
-            width: tile_probe.width,
-            height: tile_probe.height,
-          };
+      if (!(width > 0 && height > 0)) return { status: "missing" };
+      if (tile.placement.role.output) {
+        this.deps.assembly.prepare(tile.placement.canvas);
+        await this.paintLoaded(tile, resource);
+      }
+      return { status: "available", width, height };
     } catch (error) {
       throw this.failure(error, tile.request);
     }
   }
 
-  private async display(tile: Tile): Promise<void> {
+  private async display(request: ResourceRequest): Promise<TileImageLike> {
     this.deps.diagnostics?.count("requests");
     this.deps.diagnostics?.count("requests_pending");
     try {
       const loadDisplayImage = this.deps.loadDisplayImage;
       if (!loadDisplayImage) throw new Error("Ordinary image display is unavailable.");
-      const image = await loadDisplayImage(tile.request.uri, this.signal);
+      const image = await loadDisplayImage(request.uri, this.signal);
       this.signal.throwIfAborted();
-      this.deps.assembly.acquireDisplayTile(tile.index, tile.placement, image);
-      this.displayOrigins.add(originOfUrl(tile.request.uri));
+      this.displayOrigins.add(originOfUrl(request.uri));
       this.deps.diagnostics?.count("requests_completed");
-      this.deps.diagnostics?.count("displayed_tiles");
-      return;
+      return image;
     } catch (error) {
       this.deps.diagnostics?.count(this.signal.aborted ? "requests_cancelled" : "request_failures");
       if (!this.signal.aborted)
         this.deps.diagnostics?.record("warn", "request-failed", {
           transport: "ordinary-image",
-          url: tile.request.uri,
+          url: request.uri,
           http_status: "unavailable",
           error,
         });
@@ -230,10 +212,6 @@ export class BrowserHost implements Host {
   }
 
   private async paintTile(tile: Tile): Promise<void> {
-    const origin = originOfUrl(tile.request.uri);
-    const ordinary =
-      tile.placement.processing === "none" && this.deps.loadDisplayImage !== undefined;
-    let classified: ((displayOnly: boolean) => void) | undefined;
     try {
       this.signal.throwIfAborted();
       if (tile.index === 0)
@@ -244,44 +222,9 @@ export class BrowserHost implements Host {
             placement: tile.placement,
           },
         });
-      try {
-        this.deps.assembly.prepare(tile.placement.canvas);
-      } catch (error) {
-        throw this.failure(error, undefined, "output");
-      }
-      if (ordinary) {
-        if (this.displayOrigins.has(origin)) return await this.display(tile);
-        const pending = this.classifying.get(origin);
-        if (pending) {
-          if (await pending) return await this.display(tile);
-        } else
-          this.classifying.set(
-            origin,
-            new Promise((resolve) => {
-              classified = resolve;
-            }),
-          );
-      }
-      try {
-        const bytes = await this.readable(tile.request);
-        classified?.(false);
-        await this.deps.assembly.acquireTile(tile.index, tile.placement, bytes.slice().buffer);
-        return;
-      } catch (error) {
-        const failure = this.failure(error, tile.request);
-        const cause = causeOf(failure);
-        if (
-          ordinary &&
-          cause.kind !== "http-error" &&
-          cause.kind !== "policy-denied" &&
-          !this.signal.aborted
-        ) {
-          await this.display(tile);
-          classified?.(true);
-          return;
-        }
-        throw failure;
-      }
+      this.deps.assembly.prepare(tile.placement.canvas);
+      const resource = await this.loadTile(tile);
+      await this.paintLoaded(tile, resource);
     } catch (error) {
       const failure = this.failure(error, tile.request);
       if (!this.signal.aborted)
@@ -291,6 +234,57 @@ export class BrowserHost implements Host {
           placement: tile.placement,
         });
       throw failure;
+    }
+  }
+
+  private async paintLoaded(tile: Tile, resource: ArrayBuffer | TileImageLike): Promise<void> {
+    this.signal.throwIfAborted();
+    if (resource instanceof ArrayBuffer)
+      await this.deps.assembly.acquireTile(tile.index, tile.placement, resource);
+    else {
+      this.deps.assembly.acquireDisplayTile(tile.index, tile.placement, resource);
+      this.deps.diagnostics?.count("displayed_tiles");
+    }
+  }
+
+  private async loadTile(tile: Tile): Promise<ArrayBuffer | TileImageLike> {
+    const origin = originOfUrl(tile.request.uri);
+    const ordinary =
+      tile.placement.processing === "none" && this.deps.loadDisplayImage !== undefined;
+    let classified: ((displayOnly: boolean) => void) | undefined;
+    try {
+      this.signal.throwIfAborted();
+      if (ordinary) {
+        if (this.displayOrigins.has(origin)) return await this.display(tile.request);
+        const pending = this.classifying.get(origin);
+        if (pending) {
+          if (await this.wait(pending)) return await this.display(tile.request);
+        } else
+          this.classifying.set(
+            origin,
+            new Promise((resolve) => {
+              classified = resolve;
+            }),
+          );
+      }
+      let bytes: ArrayBuffer;
+      try {
+        bytes = await this.readable(tile.request);
+      } catch (error) {
+        const failure = this.failure(error, tile.request);
+        const cause = causeOf(failure);
+        if (
+          ordinary &&
+          (cause.kind === "network-failure" || cause.kind === "timeout") &&
+          !this.signal.aborted
+        ) {
+          const image = await this.display(tile.request);
+          classified?.(true);
+          return image;
+        }
+        throw failure;
+      }
+      return bytes;
     } finally {
       if (classified) {
         classified(false);
@@ -314,7 +308,7 @@ export class BrowserHost implements Host {
         disposition,
       };
     } catch (error) {
-      throw this.failure(error, undefined, "output");
+      throw this.failure(error);
     }
   }
 

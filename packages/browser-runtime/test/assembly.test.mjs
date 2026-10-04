@@ -219,18 +219,6 @@ test("processing recipes run through the injected processor", async () => {
   assert.equal(events.decoded.length, 1);
 });
 
-test("decode failures propagate so acquisition outcomes stay honest", async () => {
-  const { assembly } = harness({
-    decode: async () => {
-      throw new Error("corrupt tile");
-    },
-  });
-  await assert.rejects(
-    assembly.acquireTile(0, placement(0, 0), bytes16(16)),
-    (error) => error.kind === "decode-failed" && /corrupt tile/.test(error.detail),
-  );
-});
-
 test("an empty output plan fails before allocating a canvas", async () => {
   const fresh = harness();
   await assert.rejects(

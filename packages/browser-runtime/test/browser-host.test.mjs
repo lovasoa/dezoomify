@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createDiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
+import { createCanvasAssembly } from "../src/assembly.ts";
 import { BrowserHost } from "../src/browser-host.ts";
 import { createTileDecoder } from "../src/tile-decode.ts";
 
@@ -65,6 +66,32 @@ test("acquisition decodes and paints readable bytes before returning", async () 
   assert.equal(h.painted[0][1], tile.placement);
 });
 
+test("untyped errors become network failures only at the readable-fetch boundary", async () => {
+  const original = new Error("unexpected".repeat(300));
+  const h = setup({
+    fetchResource: async () => {
+      throw original;
+    },
+  });
+  await assert.rejects(h.host.fetch(tile.request, "forbidden"), {
+    kind: "resource",
+    request: tile.request.uri,
+    resource_kind: "tile",
+    source: {
+      kind: "network-failure",
+      transport: "direct",
+      detail: String(original).slice(0, 2048),
+    },
+  });
+  h.assembly.finalizeOutput = async () => {
+    throw original;
+  };
+  await assert.rejects(h.host.finish({ missing: [], format: "png" }), {
+    kind: "internal",
+    detail: String(original).slice(0, 2048),
+  });
+});
+
 test("discovery warnings reach diagnostics without changing progress and stop after cancellation", () => {
   const h = setup();
   h.host.warn("Some resolution information is missing.");
@@ -112,6 +139,7 @@ test("HTTP failures retain status, retry hints and preview without ordinary-imag
       },
     });
     assert.equal(reads, 1);
+    assert.deepEqual(await h.host.probe(tile), { status: "missing" });
     assert.equal(displays, 0);
     const failure = h.diagnostics.report().failures[0].first.fields;
     assert.equal(failure["source.status"], http);
@@ -119,7 +147,7 @@ test("HTTP failures retain status, retry hints and preview without ordinary-imag
   }
 });
 
-test("an unreadable origin is classified once across concurrent ordinary tiles", async () => {
+test("an unreadable origin is classified once across concurrent probes and ordinary tiles", async () => {
   let reads = 0,
     displays = 0;
   const h = setup({
@@ -132,9 +160,11 @@ test("an unreadable origin is classified once across concurrent ordinary tiles",
       return { naturalWidth: 256, naturalHeight: 256 };
     },
   });
-  const results = await Promise.all(
-    [0, 1, 2].map((index) => h.host.acquireTile({ ...tile, index })),
-  );
+  const [measured, ...results] = await Promise.all([
+    h.host.probe({ ...tile, placement: { ...tile.placement, role: { output: false } } }),
+    ...[1, 2].map((index) => h.host.acquireTile({ ...tile, index })),
+  ]);
+  assert.deepEqual(measured, { status: "available", width: 256, height: 256 });
   assert.equal(reads, 1);
   assert.equal(displays, 3);
   assert.ok(results.every((result) => result === undefined));
@@ -142,7 +172,7 @@ test("an unreadable origin is classified once across concurrent ordinary tiles",
   assert.equal(reads, 1);
 });
 
-test("processed tiles and permission denial never use ordinary images", async () => {
+test("processed tiles, policy and resource limits never use ordinary images", async () => {
   const network = { kind: "network-failure", transport: "direct" };
   const denied = {
     kind: "policy-denied",
@@ -152,17 +182,36 @@ test("processed tiles and permission denial never use ordinary images", async ()
   for (const [processing, failure] of [
     ["google-arts-decrypt", network],
     ["none", denied],
+    ["none", { kind: "size-limit", max_bytes: 1 }],
+    ["none", { kind: "resource-limit", detail: "budget exceeded" }],
+    ["none", { kind: "cancelled" }],
   ]) {
+    let displays = 0;
     const h = setup({
       fetchResource: async () => {
         throw failure;
       },
-      loadDisplayImage: async () => assert.fail("pixels must be readable"),
+      loadDisplayImage: async () => {
+        displays++;
+        assert.fail("pixels must be readable");
+      },
     });
+    const expected =
+      failure.kind === "cancelled"
+        ? failure
+        : { kind: "resource", request: tile.request.uri, resource_kind: "tile", source: failure };
     await assert.rejects(
       h.host.acquireTile({ ...tile, placement: { ...tile.placement, processing } }),
-      { kind: "resource", request: tile.request.uri, resource_kind: "tile", source: failure },
+      expected,
     );
+    if (["policy-denied", "cancelled"].includes(failure.kind))
+      await assert.rejects(h.host.probe(tile), expected);
+    else
+      assert.deepEqual(
+        await h.host.probe({ ...tile, placement: { ...tile.placement, processing } }),
+        { status: "missing" },
+      );
+    assert.equal(displays, 0);
   }
 });
 
@@ -183,6 +232,144 @@ test("probe output is painted from its first fetch without reacquisition", async
   );
   assert.equal(reads, 1);
   assert.equal(h.painted.length, 1);
+  h.painted.length = 0;
+  assert.deepEqual(
+    await h.host.probe({ ...tile, placement: { ...tile.placement, role: { output: false } } }),
+    { status: "available", width: 256, height: 256 },
+  );
+  assert.equal(h.painted.length, 0);
+});
+
+test("failed probe measurements stay missing without decode fallback", async () => {
+  for (const overrides of [
+    {
+      fetchResource: async () => {
+        throw new Error("unreadable");
+      },
+    },
+    {
+      decoder: createTileDecoder({
+        createImageBitmap: async () => {
+          throw new Error("corrupt");
+        },
+      }),
+      loadDisplayImage: async () => assert.fail("decode must not trigger fallback"),
+    },
+    {
+      decoder: createTileDecoder({
+        createImageBitmap: async () => ({ width: 0, height: 1, close() {} }),
+      }),
+    },
+  ]) {
+    const h = setup(overrides);
+    assert.deepEqual(await h.host.probe(tile), { status: "missing" });
+    assert.deepEqual(h.painted, []);
+  }
+});
+
+test("only successful ordinary-image loading establishes display-only mode", async () => {
+  let reads = 0,
+    displays = 0;
+  const h = setup({
+    fetchResource: async () => {
+      reads++;
+      throw { kind: "timeout", transport: "direct" };
+    },
+    loadDisplayImage: async () => {
+      if (++displays === 1) throw new Error("image failed");
+      return { naturalWidth: 256, naturalHeight: 256 };
+    },
+  });
+  assert.deepEqual(await h.host.probe(tile), { status: "missing" });
+  h.assembly.acquireDisplayTile = () => {
+    throw { kind: "output-unavailable", detail: "paint failed" };
+  };
+  for (let index = 1; index <= 2; index++)
+    await assert.rejects(h.host.acquireTile({ ...tile, index }), {
+      source: { kind: "output-unavailable", detail: "paint failed" },
+    });
+  assert.equal(
+    reads,
+    2,
+    "failed loading does not cache, successful loading does even if painting fails",
+  );
+  assert.equal(displays, 3);
+});
+
+test("decode, processing and painting failures retain their cause without transport fallback", async () => {
+  for (const stage of ["decode", "processing", "painting"])
+    for (const typed of [true, false]) {
+      const original = typed
+        ? { kind: stage === "painting" ? "output-unavailable" : `${stage}-failed`, detail: stage }
+        : new Error(stage);
+      let reads = 0,
+        displays = 0,
+        closed = 0;
+      const h = setup({
+        decoder: createTileDecoder({
+          createImageBitmap: async () => {
+            if (stage === "decode") throw original;
+            return {
+              width: 256,
+              height: 256,
+              close() {
+                closed++;
+              },
+            };
+          },
+        }),
+        fetchResource: async () => {
+          reads++;
+          return { kind: "response", response: { bytes: [1], final_uri: null } };
+        },
+        loadDisplayImage: async () => {
+          displays++;
+          assert.fail("post-fetch failures cannot trigger fallback");
+        },
+      });
+      h.deps.assembly = createCanvasAssembly({
+        decode: (bytes) => h.deps.decoder.decode(bytes, h.controller.signal),
+        processTile: () => {
+          throw original;
+        },
+        createCanvas: (width, height) => ({
+          width,
+          height,
+          ctx2d: {
+            drawImage() {
+              if (stage === "painting") throw original;
+            },
+          },
+        }),
+      });
+      const input = {
+        ...tile,
+        placement: {
+          ...tile.placement,
+          processing: stage === "processing" ? "google-arts-decrypt" : "none",
+        },
+      };
+      const expectedKind = stage === "painting" ? "internal" : `${stage}-failed`;
+      const rejects = (error) => {
+        assert.equal(error.kind, "resource");
+        assert.equal(error.request, tile.request.uri);
+        assert.equal(error.resource_kind, "tile");
+        if (typed) assert.equal(error.source, original);
+        else {
+          assert.equal(error.source.kind, expectedKind);
+          assert.equal(error.source.detail, String(original));
+        }
+        return true;
+      };
+      await assert.rejects(h.host.acquireTile(input), rejects);
+      if (stage === "decode") assert.deepEqual(await h.host.probe(input), { status: "missing" });
+      else await assert.rejects(h.host.probe(input), rejects);
+      assert.equal(reads, 2);
+      assert.equal(displays, 0);
+      if (stage === "painting")
+        assert.equal(closed, 3, "measurement and painted bitmaps close on failure");
+      await h.host.settle();
+    }
 });
 
 test("output waits for saving and preserves actual disposition and missing tiles", async () => {
@@ -426,25 +613,4 @@ test("settlement cancels a permission interaction and suppresses a late image", 
   image({ naturalWidth: 256, naturalHeight: 256 });
   await Promise.all([painting, choosing, cleanup]);
   assert.deepEqual(h.painted, []);
-});
-
-test("permission failures retain their canonical facts", async () => {
-  const denied = {
-    kind: "policy-denied",
-    blocked_reason: "access-required",
-    transport: "browser-session",
-    detail: "Denied",
-  };
-  const h = setup({
-    fetchResource: async () => {
-      throw denied;
-    },
-    loadDisplayImage: async () => assert.fail("denied permission is not display-only"),
-  });
-  await assert.rejects(h.host.acquireTile(tile), {
-    kind: "resource",
-    request: tile.request.uri,
-    resource_kind: "tile",
-    source: denied,
-  });
 });
