@@ -12,8 +12,7 @@
 //! shared inventory helpers (`common`) so no
 //! single file carries the whole pipeline (todo 6.2 xtask slim-down). The
 //! command surface and strict unknown-argument rejection are unchanged; the
-//! stable surface is documented in `crates/xtask/README.md` and pinned by
-//! `crates/xtask/tests/cli_surface.rs`.
+//! stable surface is documented in `crates/xtask/README.md`.
 
 mod build;
 mod common;

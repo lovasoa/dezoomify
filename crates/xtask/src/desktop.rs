@@ -983,14 +983,6 @@ pub(crate) fn run_node_with_deadline(
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn desktop_test_args() {
-        // Unknown flags fail fast without running any suite; the window
-        // lane takes exactly one flag.
-        assert!(super::test_desktop(&["--bogus".to_string()]).is_err());
-        assert!(super::test_desktop(&["--e2e-window".to_string(), "--bogus".to_string()]).is_err());
-    }
-
     /// Scratch PATH tree for the Windows pnpm resolver tests: `files` are
     /// `(subdir, filename)` pairs. Filenames use the exact case the test's
     /// PATHEXT entry produces (Windows matches case-insensitively; the

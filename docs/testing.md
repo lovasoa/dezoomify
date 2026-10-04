@@ -9,6 +9,8 @@ A single added test fixture that fits the existing test runner is preferable to 
 packaged extensions in Chromium and Firefox. `cargo xtask ci local` adds static
 checks, WASM portability, and the dependency audit.
 
+CI uses the version pinned in [`.node-version`](../.node-version) for every lane.
+
 ## Shared product matrix
 
 [`fixtures/`](../fixtures/README.md) contains ordinary files and relative symlinks.

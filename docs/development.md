@@ -1,7 +1,11 @@
 # Development
 
-Run tasks from the repository root through `cargo xtask`. Install Rust and
-Node.js 24.15.0 or newer, then:
+One monorepo: Rust crates, generated WASM bindings, shared UI, hosts, extension packaging, and release tooling change together.
+Tests and the development server import TypeScript directly using Node's default type stripping, and the TSX test loader uses synchronous module hooks.
+
+## Task grammar
+
+The canonical form is `cargo xtask <task> [target] [options]`.
 
 ```sh
 cargo xtask setup

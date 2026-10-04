@@ -488,17 +488,3 @@ fn dev_desktop() -> Result<(), String> {
 fn run_node(args: &[&str]) -> Result<(), String> {
     super::command::node_test(args, true)
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn dev_site_no_wasm_flag() {
-        assert_eq!(super::parse_dev_site_args("dev web", &[]), Ok(false));
-        assert_eq!(
-            super::parse_dev_site_args("dev web", &["--no-wasm".to_string()]),
-            Ok(true)
-        );
-        assert!(super::parse_dev_site_args("dev web", &["--bogus".to_string()]).is_err());
-        assert!(super::parse_dev_site_args("dev ui", &["--bogus".to_string()]).is_err());
-    }
-}

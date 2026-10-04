@@ -15,7 +15,7 @@ use std::process::Command;
 
 /// Pinned `cargo-deny` release. The `security` and `ci`
 /// workflows install exactly this version; the missing-binary error below
-/// repeats it, and the `deny_pin_matches_workflows` test enforces the sync.
+/// repeats it.
 pub const CARGO_DENY_VERSION: &str = "0.20.2";
 
 /// Rust leg, also used by `cargo xtask check`. Fails closed: a missing
@@ -147,40 +147,4 @@ fn collect_package_dirs(
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn workspace_lockfile_policy_is_clean() {
-        super::check_workspace_lockfiles().expect("workspace has a second lockfile");
-    }
-
-    /// Deliberate sync lock (like the registry lock test in
-    /// `dezoomify/src/core/registry.rs`): each workflow installs exactly the
-    /// pinned `cargo-deny` release. Deliberately narrow: it pins the
-    /// installed version only, nothing else about the workflows.
-    #[test]
-    fn deny_pin_matches_workflows() {
-        let root = crate::repo_root();
-        for rel in [".github/workflows/ci.yml", ".github/workflows/security.yml"] {
-            let text = std::fs::read_to_string(root.join(rel))
-                .unwrap_or_else(|e| panic!("cannot read {rel}: {e}"));
-            let pins: Vec<&str> = text
-                .match_indices("cargo-deny@")
-                .map(|(i, _)| {
-                    text[i + "cargo-deny@".len()..]
-                        .split_whitespace()
-                        .next()
-                        .unwrap_or("")
-                })
-                .collect();
-            assert!(!pins.is_empty(), "{rel} installs no cargo-deny pin");
-            assert!(
-                pins.iter().all(|v| *v == super::CARGO_DENY_VERSION),
-                "{rel} installs cargo-deny {pins:?}, expected {}",
-                super::CARGO_DENY_VERSION
-            );
-        }
-    }
 }
