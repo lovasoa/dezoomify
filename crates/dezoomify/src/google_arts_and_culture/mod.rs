@@ -65,7 +65,7 @@ fn decode(page: &Arc<PageInfo>, bytes: &[u8]) -> Result<ImagePlan, DiscoveryErro
         tile_height,
         pyramid_level,
         ..
-    } = serde_xml_rs::from_reader(bytes).map_err(|error| {
+    } = quick_xml::de::from_reader(bytes).map_err(|error| {
         DiscoveryError::InvalidMetadata(format!("invalid Google Arts tile XML: {error}"))
     })?;
     let levels: Vec<_> = pyramid_level

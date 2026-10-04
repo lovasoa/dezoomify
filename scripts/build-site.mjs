@@ -83,7 +83,7 @@ function main() {
   // 1. Help pages from docs/user.
   run(process.execPath, ["scripts/build-help.mjs"]);
 
-  // 2. WASM binding (release profile: the deployed artifact) and its glue.
+  // 2. WASM binding (wasm-release profile: the deployed artifact) and its glue.
   if (!noWasm) {
     const bindgen = spawnSync("wasm-bindgen", ["--version"], { encoding: "utf8" });
     if (bindgen.status !== 0) {
@@ -97,18 +97,20 @@ function main() {
       "build",
       "-p",
       "dezoomify-wasm",
-      "--release",
+      "--profile",
+      "wasm-release",
       "--target",
       "wasm32-unknown-unknown",
     ]);
     run("wasm-bindgen", [
+      "--remove-name-section",
       "--target",
       "web",
       "--out-dir",
       "wasm",
       "--out-name",
       "dezoomify-wasm",
-      "target/wasm32-unknown-unknown/release/dezoomify_wasm.wasm",
+      "target/wasm32-unknown-unknown/wasm-release/dezoomify_wasm.wasm",
     ]);
   }
 

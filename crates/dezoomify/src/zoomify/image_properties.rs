@@ -167,7 +167,7 @@ fn test_deserialize() {
             NUMIMAGES="1"
             VERSION="1.8"
             TILESIZE="256" />"#;
-    let props: ImageProperties = serde_xml_rs::from_str(src).unwrap();
+    let props: ImageProperties = quick_xml::de::from_str(src).unwrap();
     assert_eq!(props.width, 4000);
     assert_eq!(props.height, 2559);
     assert_eq!(props.tile_size, 256);

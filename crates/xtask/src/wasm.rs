@@ -11,7 +11,7 @@ pub(crate) fn build_wasm_artifact(release: bool) -> Result<PathBuf, String> {
     let mut build = Command::new("cargo");
     build.args(["build", "--quiet", "-p", "dezoomify-wasm"]);
     if release {
-        build.arg("--release");
+        build.args(["--profile", "wasm-release"]);
     }
     let status = build
         .args(["--target", "wasm32-unknown-unknown"])
@@ -21,7 +21,7 @@ pub(crate) fn build_wasm_artifact(release: bool) -> Result<PathBuf, String> {
     if !status.success() {
         return Err("wasm core build failed".to_string());
     }
-    let profile = if release { "release" } else { "debug" };
+    let profile = if release { "wasm-release" } else { "debug" };
     Ok(super::cargo_target_directory()?.join(format!(
         "wasm32-unknown-unknown/{profile}/dezoomify_wasm.wasm"
     )))
@@ -48,6 +48,9 @@ pub(crate) fn run_wasm_bindgen(input: &Path, bindgen: &Bindgen<'_>) -> Result<()
     } = bindgen;
     let mut command = Command::new("wasm-bindgen");
     command.args(["--target", target]);
+    if *target == "web" {
+        command.arg("--remove-name-section");
+    }
     if *typescript {
         command.arg("--typescript");
     }
@@ -103,7 +106,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
 fn browser_focus(_name: &str) -> Result<(), String> {
     run_node_harness()?;
     // Real headless browser run: the webapp E2E loads the compiled wasm
-    // function (wasm-bindgen glue, release profile) inside Chromium.
+    // function (wasm-bindgen glue, wasm-release profile) inside Chromium.
     super::browser::run_e2e()?;
     Ok(())
 }

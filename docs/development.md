@@ -45,7 +45,7 @@ Bare `test` is the fast aggregate and `test all` adds build-dependent WASM, webs
 | `cli` | real `dezoomify-cli` binary under `target/debug/` |
 | `desktop` | lean shell always compiles; Tauri window shell (feature `tauri`) compiles with platform webview packages present; with bundler prerequisites and without `--unsigned-test`, a real bundle for the matching host (Linux `deb`, Windows `msi`/`nsis`, macOS `dmg`; see [Native apps](native-apps.md#desktop-bundles)) |
 | `extension` | store-shaped Chromium and Firefox ZIPs under `target/extension/` |
-The browser-runtime build is `cargo xtask test browser --build-only`. Shared UI artifacts come from `build web`, `build desktop`, `build extension`; no `build browser`, `build ui`, `build native`, or `build all` aliases exist.
+Production WASM uses `wasm-release` (size optimization, LTO, one codegen unit) for the website, extension, and generated bindings; web glue omits the debugging name section. Native release settings stay independent. The browser-runtime build is `cargo xtask test browser --build-only`. Shared UI artifacts come from `build web`, `build desktop`, `build extension`; no `build browser`, `build ui`, `build native`, or `build all` aliases exist.
 
 The TypeScript/TSX sources (`src/*.ts` plus imported shared-UI and browser-runtime sources) are the single source of truth: type-checked, unit-tested, bundled by Vite (`base: "/beta/"`). Wasm glue (`wasm/`), Vite output (`dist/`), and help pages (`help/`) are generated, never committed: `website-deploy` builds them on every `master` push (see [Operations](operations.md#website-deployment-contract)); `cargo xtask build web` builds them locally.
 

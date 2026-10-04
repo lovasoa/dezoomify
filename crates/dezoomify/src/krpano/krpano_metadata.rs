@@ -17,27 +17,6 @@ pub struct KrpanoMetadata {
     #[serde(default)]
     source_details: Vec<SourceDetails>,
 
-    // Actions contain krpano scripts, not tile URL metadata.
-    #[serde(default, rename = "action")]
-    _action: Vec<de::IgnoredAny>,
-
-    // Events only bind scripts to viewer lifecycle hooks.
-    #[serde(default, rename = "events")]
-    _events: Vec<de::IgnoredAny>,
-
-    // Includes may add more metadata at runtime, but this parser only handles
-    // the XML document it was given and cannot fetch arbitrary tour UI files.
-    #[serde(default, rename = "include")]
-    _include: Vec<de::IgnoredAny>,
-
-    // Nested krpano elements set global viewer variables, not image levels.
-    #[serde(default, rename = "krpano")]
-    _krpano: Vec<de::IgnoredAny>,
-
-    // Security/cross-domain declarations do not affect tile geometry or URLs.
-    #[serde(default, rename = "security")]
-    _security: Vec<de::IgnoredAny>,
-
     #[serde(default, rename = "@name")]
     name: String,
 }
@@ -56,16 +35,12 @@ pub struct ImageInfo {
 
 impl KrpanoMetadata {
     #[cfg(test)]
-    fn from_str(s: &str) -> Result<Self, serde_xml_rs::Error> {
-        serde_xml_rs::SerdeXml::new()
-            .overlapping_sequences(true)
-            .from_str(s)
+    fn from_str(s: &str) -> Result<Self, quick_xml::DeError> {
+        quick_xml::de::from_str(s)
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, serde_xml_rs::Error> {
-        serde_xml_rs::SerdeXml::new()
-            .overlapping_sequences(true)
-            .from_reader(bytes)
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, quick_xml::DeError> {
+        quick_xml::de::from_reader(bytes)
     }
 
     fn into_image_iter_with_name(self, parent_name: &str) -> Box<dyn Iterator<Item = ImageInfo>> {
@@ -125,11 +100,11 @@ pub struct KrpanoImage {
     pub tilesize: Option<u32>,
     #[serde(default = "default_base_index", rename = "@baseindex")]
     pub baseindex: u32,
-    // Preview imagery is not a tiled level. Keep it out of the #content
+    // Preview imagery is not a tiled level. Keep it out of the $value
     // sequence so it cannot collide with the level parser.
     #[serde(default, rename = "preview")]
     _preview: Vec<PreviewDesc>,
-    #[serde(default, rename = "#content")]
+    #[serde(default, rename = "$value")]
     pub level: Vec<KrpanoLevel>,
     #[serde(default)]
     pub cube: Vec<ShapeDesc>,
@@ -214,7 +189,7 @@ pub struct LevelAttributes {
     tiledimagewidth: u32,
     #[serde(rename = "@tiledimageheight")]
     tiledimageheight: u32,
-    #[serde(rename = "#content")]
+    #[serde(rename = "$value")]
     shape: Vec<KrpanoLevel>,
 }
 
@@ -222,8 +197,8 @@ pub struct LevelAttributes {
 #[serde(rename_all = "lowercase")]
 pub enum KrpanoLevel {
     Level(LevelAttributes),
-    Mobile(Vec<KrpanoLevel>),
-    Tablet(Vec<KrpanoLevel>),
+    Mobile,
+    Tablet,
     Cube(ShapeDesc),
     Cylinder(ShapeDesc),
     Flat(ShapeDesc),
@@ -267,7 +242,7 @@ impl KrpanoLevel {
             Self::Back(d) => shape_descriptions("Back", d, size, level_index),
             Self::Up(d) => shape_descriptions("Up", d, size, level_index),
             Self::Down(d) => shape_descriptions("Down", d, size, level_index),
-            Self::Mobile(_) | Self::Tablet(_) => vec![], // Ignore
+            Self::Mobile | Self::Tablet => vec![], // Ignore
         }
     }
 }
@@ -441,7 +416,7 @@ pub enum XY {
 
 #[cfg(test)]
 mod test {
-    use super::KrpanoLevel::{Cube, Cylinder, Left, Mobile};
+    use super::KrpanoLevel::{Cylinder, Left, Mobile, Tablet};
     use super::TemplateVariable::{LevelIndex, X, Y};
     use super::*;
     use crate::template::Part::{Hole, Literal};
@@ -598,6 +573,9 @@ mod test {
             <mobile>
                 <cube url="test.jpg" />
             </mobile>
+            <tablet>
+                <cube url="tablet.jpg" />
+            </tablet>
         </image>
         </krpano>"#,
         )
@@ -606,13 +584,9 @@ mod test {
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].image.baseindex, 1);
         assert_eq!(images[0].image.tilesize, None);
-        assert_eq!(
-            images[0].image.level,
-            vec![Mobile(vec![Cube(ShapeDesc {
-                url: Template(vec![str("test.jpg")]),
-                multires: None,
-            })])]
-        );
+        assert_eq!(images[0].image.level, vec![Mobile, Tablet]);
+        assert!(Mobile.level_descriptions(None, 0).is_empty());
+        assert!(Tablet.level_descriptions(None, 0).is_empty());
     }
 
     #[test]

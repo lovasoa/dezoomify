@@ -36,7 +36,7 @@ struct Pal {
 #[derive(Deserialize)]
 struct Root {
     content: Option<Content>,
-    #[serde(alias = "#text")]
+    #[serde(alias = "$text")]
     title: Option<String>,
 }
 
@@ -91,7 +91,7 @@ fn version(value: &str) -> Result<(u32, u32), DiscoveryError> {
 }
 
 pub(super) fn image(text: &str, uri: &str) -> Result<ParsedResource, DiscoveryError> {
-    let pal: Pal = serde_xml_rs::from_str(text).map_err(invalid)?;
+    let pal: Pal = quick_xml::de::from_str(text).map_err(invalid)?;
     let declared = pal
         .ver
         .as_deref()
@@ -287,7 +287,7 @@ pub(super) fn index(
     text: &str,
     resource: DiscoveryResource<'_>,
 ) -> Result<ParsedResource, DiscoveryError> {
-    let index: Index = serde_xml_rs::from_str(text).map_err(invalid)?;
+    let index: Index = quick_xml::de::from_str(text).map_err(invalid)?;
     let base = viewer::resource_base(resource)
         .or_else(|| {
             let path = resource
