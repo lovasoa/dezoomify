@@ -116,7 +116,9 @@ fn compatible_single_tile_iiif_preserves_bytes_without_pixel_decoding() {
 
 #[test]
 fn odd_sized_and_mixed_codec_iiif_trees_roundtrip_through_the_reader() {
+    use image::ImageDecoder as _;
     let work = temp_dir("iiif-roundtrip");
+    let icc = vec![42; 1024];
     for mixed in [false, true] {
         let source = work.join("source.dzi");
         let tiles = work.join("source_files/10");
@@ -138,12 +140,12 @@ fn odd_sized_and_mixed_codec_iiif_trees_roundtrip_through_the_reader() {
                     image::Rgba([x * 60, y * 80, 90, 255]),
                 );
                 let bytes = if mixed && x == 0 {
-                    dezoomify_native::imaging::encode_jpeg(&pixels, 83, None).unwrap()
+                    dezoomify_native::imaging::encode_jpeg(&pixels, 83, Some(&icc)).unwrap()
                 } else {
                     dezoomify_native::imaging::encode_png(
                         &pixels,
                         image::codecs::png::CompressionType::Fast,
-                        None,
+                        Some(&icc),
                         None,
                     )
                     .unwrap()
@@ -184,6 +186,13 @@ fn odd_sized_and_mixed_codec_iiif_trees_roundtrip_through_the_reader() {
             let bytes =
                 std::fs::read(destination.join(format!("{region}/{width},{height}/0/default.png")))
                     .unwrap();
+            assert_eq!(
+                image::codecs::png::PngDecoder::new(std::io::Cursor::new(&bytes))
+                    .unwrap()
+                    .icc_profile()
+                    .unwrap(),
+                Some(icc.clone()),
+            );
             assert_eq!(
                 std::fs::read(destination.join(format!("{region}/{width},/0/default.png")))
                     .unwrap(),

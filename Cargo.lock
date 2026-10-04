@@ -1050,6 +1050,7 @@ version = "1.0.0"
 dependencies = [
  "dezoomify",
  "dezoomify-fixture-server",
+ "fdeflate",
  "image",
  "reqwest 0.12.28",
  "rustix",

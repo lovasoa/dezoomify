@@ -139,6 +139,22 @@ mod tests {
 }
 
 impl EncodedTile {
+    pub(crate) fn icc_profile(&self, budget: u64) -> Result<Option<Vec<u8>>, Error> {
+        if self.format == image::ImageFormat::Png {
+            return png_icc(&self.bytes, budget);
+        }
+        use image::ImageDecoder as _;
+        let mut reader = image::ImageReader::with_format(Cursor::new(&self.bytes), self.format);
+        let mut limits = image::Limits::default();
+        limits.max_alloc = Some(budget / 2);
+        reader.limits(limits);
+        reader
+            .into_decoder()
+            .map_err(decode_error)?
+            .icc_profile()
+            .map_err(decode_error)
+    }
+
     /// Conversion required by the output geometry/codec happens during acquisition.
     pub(crate) fn convert_to_png(
         &mut self,
@@ -148,6 +164,9 @@ impl EncodedTile {
     ) -> Result<(), Error> {
         let pixels = u64::from(self.size.width) * u64::from(self.size.height);
         memory_check(self.bytes.len() as u64 + pixels * 16, budget)?;
+        let icc =
+            self.icc_profile(budget.saturating_sub(self.bytes.len() as u64 + pixels * 16) / 3)?;
+        let budget = budget.saturating_sub(icc.as_ref().map_or(0, Vec::len) as u64 * 3);
         let mut reader = image::ImageReader::with_format(Cursor::new(&self.bytes), self.format);
         let mut limits = image::Limits::default();
         limits.max_alloc = Some(budget.saturating_sub(self.bytes.len() as u64) / 2);
@@ -157,13 +176,53 @@ impl EncodedTile {
         self.bytes = crate::imaging::encode_png(
             &cropped,
             crate::imaging::png_compression_for(compression),
-            None,
+            icc.as_deref(),
             None,
         )?;
         self.format = image::ImageFormat::Png;
         self.size = size;
         Ok(())
     }
+}
+
+// Extract PNG ICC data with bounded inflation, without decoding pixels.
+pub(crate) fn png_icc(bytes: &[u8], cap: u64) -> Result<Option<Vec<u8>>, Error> {
+    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Ok(None);
+    }
+    let mut at = 8;
+    while let Some(header) = bytes.get(at..at + 8) {
+        let len = u32::from_be_bytes(header[..4].try_into().expect("chunk length")) as usize;
+        let data = bytes
+            .get(at + 8..at + 8 + len)
+            .ok_or_else(|| Error::DecodeFailed("truncated PNG metadata".into()))?;
+        if &header[4..] == b"iCCP" {
+            let start = data
+                .iter()
+                .position(|&byte| byte == 0)
+                .filter(|&name| name > 0 && name <= 79)
+                .ok_or_else(|| Error::DecodeFailed("invalid PNG ICC name".into()))?
+                + 1;
+            if data.get(start) != Some(&0) {
+                return Err(Error::DecodeFailed("invalid PNG ICC compression".into()));
+            }
+            return fdeflate::decompress_to_vec_bounded(
+                &data[start + 1..],
+                usize::try_from(cap).unwrap_or(usize::MAX),
+            )
+            .map(Some)
+            .map_err(|error| match error {
+                fdeflate::BoundedDecompressionError::OutputTooLarge { .. } => {
+                    Error::ResourceLimit("PNG ICC metadata exceeds memory limit".into())
+                }
+                fdeflate::BoundedDecompressionError::DecompressionError { inner } => {
+                    Error::DecodeFailed(format!("PNG ICC inflation failed: {inner:?}").into())
+                }
+            });
+        }
+        at += len + 12;
+    }
+    Ok(None)
 }
 
 /// Header inspection does not decode pixel data.
@@ -544,6 +603,8 @@ pub(crate) struct IiifWriter {
     peak_retained: u64,
     infer_canvas: bool,
     max_tiles: u32,
+    icc_profile: Option<Vec<u8>>,
+    metadata_checked: bool,
 }
 
 impl IiifWriter {
@@ -572,6 +633,15 @@ impl IiifWriter {
         compression: u8,
         max_tiles: u32,
     ) -> Result<Self, Error> {
+        if plan
+            .canvas
+            .as_ref()
+            .is_some_and(|size| size.width == 0 || size.height == 0)
+        {
+            return Err(Error::PlanInvalid(
+                "IIIF canvas dimensions must be positive".into(),
+            ));
+        }
         let regular = plan
             .grid
             .as_ref()
@@ -602,6 +672,8 @@ impl IiifWriter {
             peak_retained: 0,
             infer_canvas: plan.canvas.is_none(),
             max_tiles,
+            icc_profile: None,
+            metadata_checked: false,
         })
     }
 
@@ -625,6 +697,16 @@ impl IiifWriter {
             return Ok(());
         }
         memory_check(self.retained + tile.bytes.len() as u64, self.budget)?;
+        let icc = if self.metadata_checked {
+            None
+        } else {
+            tile.icc_profile(
+                self.budget
+                    .saturating_sub(self.retained + tile.bytes.len() as u64)
+                    / 3,
+            )?
+        };
+        let icc_bytes = icc.as_ref().map_or(0, Vec::len) as u64;
         let index = if self.base.regular {
             (rect.y / self.base.cell.height) * self.base.size.width.div_ceil(self.base.cell.width)
                 + rect.x / self.base.cell.width
@@ -645,7 +727,7 @@ impl IiifWriter {
                     width: rect.w,
                     height: rect.h,
                 },
-                self.budget.saturating_sub(self.retained),
+                self.budget.saturating_sub(self.retained + icc_bytes * 3),
                 self.compression,
             )?;
             compatible = self.base.regular && rect == self.base.rect(index);
@@ -678,6 +760,12 @@ impl IiifWriter {
                 bytes,
             },
         );
+        if !self.metadata_checked {
+            self.icc_profile = icc;
+            self.metadata_checked = true;
+            self.retained += icc_bytes;
+            self.peak_retained = self.peak_retained.max(self.retained);
+        }
         Ok(())
     }
 
@@ -722,6 +810,10 @@ impl IiifWriter {
         format: image::ImageFormat,
         cancelled: &AtomicBool,
     ) -> Result<PathBuf, Error> {
+        memory_check(
+            pixels.as_raw().len() as u64 + self.icc_profile.as_ref().map_or(0, Vec::len) as u64 * 3,
+            self.budget.saturating_sub(self.retained),
+        )?;
         let relative = tile_path(rect, scale, format, canvas, false);
         let public = self.staging.path.join(&relative);
         // Public edge routes can coincide across levels. Preserve their first
@@ -741,14 +833,14 @@ impl IiifWriter {
                 file.writer(cancelled),
                 pixels,
                 100 - self.compression,
-                None,
+                self.icc_profile.as_deref(),
             )
         } else {
             crate::imaging::encode_png_to(
                 file.writer(cancelled),
                 pixels,
                 crate::imaging::png_compression_for(self.compression),
-                None,
+                self.icc_profile.as_deref(),
                 None,
             )
         };
@@ -859,6 +951,9 @@ impl IiifWriter {
         // Conversion may read any source tile; remove superseded payloads only
         // after all normalized base tiles have been produced.
         for tile in self.base.tiles.values().filter(|t| t.format != format) {
+            if cancelled.load(Ordering::SeqCst) {
+                return Err(Error::Cancelled);
+            }
             if let TileBytes::File(path) = &tile.bytes {
                 for path in [
                     path.clone(),
@@ -877,7 +972,7 @@ impl IiifWriter {
             }
         }
         self.base = normalized;
-        self.retained = 0;
+        self.retained = self.icc_profile.as_ref().map_or(0, Vec::len) as u64;
         let full_size = self.base.size.clone();
         let mut factors = vec![1u32];
         let mut level = &self.base;
@@ -902,7 +997,7 @@ impl IiifWriter {
                     level,
                     &next.size,
                     rect,
-                    self.budget,
+                    self.budget.saturating_sub(self.retained),
                     cancelled,
                     &mut self.decoded_tiles,
                 )?;
