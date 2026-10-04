@@ -481,6 +481,7 @@ pub(crate) struct IiifWriter {
     pub(crate) decoded_tiles: u64,
     retained: u64,
     peak_retained: u64,
+    infer_canvas: bool,
 }
 
 impl IiifWriter {
@@ -522,6 +523,7 @@ impl IiifWriter {
             decoded_tiles: 0,
             retained: 0,
             peak_retained: 0,
+            infer_canvas: plan.canvas.is_none(),
         })
     }
 
@@ -531,12 +533,19 @@ impl IiifWriter {
         cancelled: &AtomicBool,
     ) -> Result<(), Error> {
         let extent = tile.placement.expected_size.as_ref().unwrap_or(&tile.size);
-        let rect = Rect {
+        let mut rect = Rect {
             x: tile.placement.position.x,
             y: tile.placement.position.y,
             w: extent.width.min(tile.size.width),
             h: extent.height.min(tile.size.height),
         };
+        if !self.infer_canvas {
+            rect.w = rect.w.min(self.base.size.width.saturating_sub(rect.x));
+            rect.h = rect.h.min(self.base.size.height.saturating_sub(rect.y));
+        }
+        if rect.w == 0 || rect.h == 0 {
+            return Ok(());
+        }
         let index = if self.base.regular {
             (rect.y / self.base.cell.height) * self.base.size.width.div_ceil(self.base.cell.width)
                 + rect.x / self.base.cell.width
@@ -577,8 +586,10 @@ impl IiifWriter {
             memory_check(self.retained, self.budget)?;
             TileBytes::Memory(tile.bytes)
         };
-        self.base.size.width = self.base.size.width.max(rect.x.saturating_add(rect.w));
-        self.base.size.height = self.base.size.height.max(rect.y.saturating_add(rect.h));
+        if self.infer_canvas {
+            self.base.size.width = self.base.size.width.max(rect.x.saturating_add(rect.w));
+            self.base.size.height = self.base.size.height.max(rect.y.saturating_add(rect.h));
+        }
         self.base.tiles.insert(
             index,
             StoredTile {

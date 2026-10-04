@@ -424,6 +424,23 @@ impl<'a> NativeHost<'a> {
         .await
     }
 
+    async fn inspect_encoded(
+        &self,
+        bytes: Vec<u8>,
+    ) -> Result<(Vec<u8>, Size, image::ImageFormat), Error> {
+        let permit = self.decode_tails.reserve(bytes.len());
+        self.controlled(async {
+            tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                let (size, format) = crate::tile_output::inspect(&bytes)?;
+                Ok((bytes, size, format))
+            })
+            .await
+            .map_err(|_| Error::Internal("tile inspection task failed".into()))?
+        })
+        .await
+    }
+
     async fn encoded_tile(&self, tile: &Tile) -> Result<crate::tile_output::EncodedTile, Error> {
         let _flight = Flight::new(self);
         let namespace = crate::cache::job_namespace(&self.options.input_url);
@@ -433,15 +450,19 @@ impl<'a> NativeHost<'a> {
             .clone()
             .unwrap_or_else(crate::imaging::default_tile_cache_dir);
         if let Some(bytes) = crate::cache::load(&dir, &namespace, &tile.request.uri) {
-            if let Ok((size, format)) = crate::tile_output::inspect(&bytes) {
-                self.diagnostics.count("cache_reads", 1.0);
-                return Ok(crate::tile_output::EncodedTile {
-                    id: self.storage_index(tile),
-                    placement: tile.placement.clone(),
-                    bytes,
-                    size,
-                    format,
-                });
+            match self.inspect_encoded(bytes).await {
+                Ok((bytes, size, format)) => {
+                    self.diagnostics.count("cache_reads", 1.0);
+                    return Ok(crate::tile_output::EncodedTile {
+                        id: self.storage_index(tile),
+                        placement: tile.placement.clone(),
+                        bytes,
+                        size,
+                        format,
+                    });
+                }
+                Err(Error::DecodeFailed(_)) => {}
+                Err(error) => return Err(error),
             }
             let _ = std::fs::remove_file(
                 dir.join(&namespace)
@@ -464,19 +485,20 @@ impl<'a> NativeHost<'a> {
         let response = self.read(&tile.request).await?;
         let processing = tile.placement.processing;
         let permit = self.decode_tails.reserve(response.body.len());
-        let bytes = self
+        let (bytes, size, format) = self
             .controlled(async {
                 tokio::task::spawn_blocking(move || {
                     let _permit = permit;
-                    processing
+                    let bytes = processing
                         .apply(response.body)
-                        .map_err(|e| Error::ProcessingFailed(e.to_string().into()))
+                        .map_err(|e| Error::ProcessingFailed(e.to_string().into()))?;
+                    let (size, format) = crate::tile_output::inspect(&bytes)?;
+                    Ok((bytes, size, format))
                 })
                 .await
                 .map_err(|_| Error::Internal("tile processing task failed".into()))?
             })
             .await?;
-        let (size, format) = crate::tile_output::inspect(&bytes)?;
         let _ = crate::cache::store(&dir, &namespace, &tile.request.uri, &bytes);
         Ok(crate::tile_output::EncodedTile {
             id: self.storage_index(tile),
