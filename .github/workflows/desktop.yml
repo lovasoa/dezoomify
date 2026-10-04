@@ -127,7 +127,14 @@ jobs:
           cmp target/desktop-dmg/background.png "$MNT/.background/background.png"
           test -s "$MNT/.DS_Store"
           codesign --verify --deep --strict --verbose=4 "$APP_DIR" 2>&1 | tee signature.log
-          osascript -e 'tell application "Finder"' -e 'open disk "Dezoomify"' -e 'activate' -e 'end tell'
+          osascript - "$MNT" <<'APPLESCRIPT'
+          on run argv
+            tell application "Finder"
+              open (POSIX file (item 1 of argv) as alias)
+              activate
+            end tell
+          end run
+          APPLESCRIPT
           sleep 2
           screencapture -x dmg-installation.png
           APP_BIN="$APP_DIR/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$APP_DIR/Contents/Info.plist")"
