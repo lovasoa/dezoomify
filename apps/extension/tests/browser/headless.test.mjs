@@ -178,7 +178,7 @@ async function readCompletedPng(outputDir, deadline) {
         lastError = String(error?.message ?? error);
       }
     } else if (outputs.length > 1) lastError = `expected one PNG, found ${outputs.length}`;
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`Firefox saved an incomplete PNG: ${lastError}`);
 }
@@ -251,6 +251,10 @@ async function runChromiumJob(base, work, options = {}) {
   // Track downloads at context level so the test sees the extension API's
   // Blob download regardless of which page initiated it.
   const downloads = [];
+  let resolveDownload;
+  const downloadReady = new Promise((resolve) => {
+    resolveDownload = resolve;
+  });
   const diagnostics = [];
   const observe = (page) => {
     page.on("console", (message) => {
@@ -261,7 +265,10 @@ async function runChromiumJob(base, work, options = {}) {
     );
     page.on("crash", () => diagnostics.push("page crash"));
   };
-  const onDownload = (download) => downloads.push(download);
+  const onDownload = (download) => {
+    downloads.push(download);
+    resolveDownload(download);
+  };
   for (const page of context.pages()) {
     page.on("download", onDownload);
     observe(page);
@@ -310,18 +317,16 @@ async function runChromiumJob(base, work, options = {}) {
     );
     const jobPage = await waitForJobPage(context);
     if (options.beforeCompletion) await options.beforeCompletion(jobPage);
-    const deadline = Date.now() + 90000;
-    while (downloads.length === 0 && Date.now() < deadline) {
-      if (
-        await jobPage
-          .locator(".dz-error-section")
-          .isVisible()
-          .catch(() => false)
-      )
-        break;
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-    const download = downloads[0];
+    const download = await Promise.race([
+      downloadReady,
+      jobPage
+        .locator(".dz-error-section")
+        .waitFor({ state: "visible", timeout: 90000 })
+        .then(
+          () => null,
+          () => null,
+        ),
+    ]);
     if (!download) {
       const jobText = await jobPage
         .locator("body")
@@ -390,12 +395,16 @@ async function runChromiumJob(base, work, options = {}) {
     context.off("page", onPage);
     if (shared) {
       await context.clearCookies();
-      // Closing every tab retires the source-access objects and job runtimes.
-      // Keep the extension and browser process, then open a fresh driver tab.
-      for (const page of context.pages()) await page.close();
-      const page = await context.newPage();
-      const worker = context.serviceWorkers()[0];
-      await page.goto(`chrome-extension://${new URL(worker.url()).hostname}/test/driver.html`);
+      // Retire source/job tabs. The next fixture navigates the retained driver
+      // to a fresh document, resetting its messages and completion promises.
+      for (const page of context.pages()) {
+        if (page.url().includes("/test/driver.html")) {
+          page.off("download", onDownload);
+          page.removeAllListeners("console");
+          page.removeAllListeners("pageerror");
+          page.removeAllListeners("crash");
+        } else await page.close();
+      }
     } else await context.close();
   }
 }
@@ -456,7 +465,9 @@ async function runFirefoxJob(base, work, runOptions = {}) {
           if (runOptions.scenario?.startsWith("fixtures/") && !fixtureStarted) {
             // Navigate the privileged page through WebDriver without injecting
             // script. The shared idle package starts exactly one fixture job.
-            await driver.get(`${url}?scenario=${encodeURIComponent(runOptions.scenario)}`);
+            const driverUrl = new URL(url);
+            driverUrl.search = `scenario=${encodeURIComponent(runOptions.scenario)}`;
+            await driver.get(driverUrl.href);
             fixtureStarted = true;
             return false;
           }
@@ -510,12 +521,14 @@ async function runFirefoxJob(base, work, runOptions = {}) {
         "the authenticated direct job-page fetch",
       );
     }
-    await waitForFixtureEvent(
-      fixtureServer.logFile,
-      logOffset,
-      (event) => event.path === "/target.html" && event.query === "after-navigation=1",
-      "the source-tab navigation invalidation",
-    );
+    if (!shared) {
+      await waitForFixtureEvent(
+        fixtureServer.logFile,
+        logOffset,
+        (event) => event.path === "/target.html" && event.query === "after-navigation=1",
+        "the source-tab navigation invalidation",
+      );
+    }
     // Wait for the driver to verify invalidation, not just the navigation's
     // HTTP request, before retiring this fixture's source and job tabs.
     let driverTab;
@@ -545,9 +558,7 @@ async function runFirefoxJob(base, work, runOptions = {}) {
         await driver.close();
       }
       await driver.switchTo().window(driverTab);
-      const idleUrl = new URL(await driver.getCurrentUrl());
-      idleUrl.search = "";
-      await driver.get(idleUrl.href);
+      // The next fixture reloads this driver with its own scenario query.
     }
     return output;
   } finally {
@@ -556,6 +567,13 @@ async function runFirefoxJob(base, work, runOptions = {}) {
 }
 
 test("packaged browser format matrices", { concurrency: 2 }, async (matrix) => {
+  // WXT is synchronous. Finish both builds before launching browsers so it
+  // cannot block delivery of page/download events from a running fixture.
+  for (const browser of ["chromium", "firefox"]) {
+    const sessionWork = path.join(fixtureWork, browser);
+    mkdirSync(sessionWork, { recursive: true });
+    stagePackage(browser, sessionWork, fixtureServer.base, { scenario: "fixtures/idle" });
+  }
   await Promise.all(
     [
       ["chromium", runChromiumJob],

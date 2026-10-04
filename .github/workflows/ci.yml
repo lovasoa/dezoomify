@@ -48,6 +48,12 @@ jobs:
         with:
           toolchain: 1.98.1 # must match rust-toolchain.toml
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # This lane needs the release WASM and xtask on every UI-only change.
+          # Keep its workspace artifacts instead of pruning/recompiling them;
+          # isolate its cache from matrix legs that only build native/debug code.
+          key: ${{ matrix.lane-group == 'extension' && format('extension-{0}', hashFiles('crates/**', 'generated/*.json')) || '' }}
+          cache-workspace-crates: ${{ matrix.lane-group == 'extension' }}
       - id: bindgen
         # Version-coupled to Cargo.lock (see the action): every workflow that
         # consumes wasm-bindgen resolves the same CLI release, and the

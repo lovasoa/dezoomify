@@ -13,7 +13,7 @@ is interpreted by shared discovery, without per-fixture registration.
 The historical CLI tile paths link to the shared PNGs; no product owns those bytes.
 
 Static resources are ordinary files and relative symlinks. `viewer.html` signals
-`data-viewer-ready="true"` once its resources load, before the extension scans it.
+`data-viewer-ready="true"` once its response bodies finish loading, before the extension scans it. The shared template consumes the fetched body so the resource is present in the browser's performance timeline before signalling readiness; receiving headers alone is insufficient.
 For direct inputs, link to the shared viewer template; the server substitutes
 `{{input}}` with the adjacent `input.txt` URL, defaulting to `viewer.html`. `server.js` exports
 `serve(request, { file, origin }): Response | null` only where a protocol needs
