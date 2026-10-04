@@ -12,10 +12,12 @@ use image_properties::{ImageProperties, ZoomLevelInfo};
 use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
-use crate::core::discovery::{html_matches, image_url, metadata, url_matches, url_suffix, viewer};
+use crate::core::discovery::{
+    css, html_matches, image_url, metadata, resource_matches, url_matches, url_suffix, viewer,
+};
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource, Request,
-    ResolvedLevel, resolve_relative,
+    ResolvedLevel, append_path_component, resolve_relative,
 };
 
 mod image_properties;
@@ -23,15 +25,14 @@ mod image_properties;
 const ROUTES: &[DiscoveryRoute] = &[
     metadata(url_suffix("ImageProperties.xml")).decode(image_properties),
     image_url(is_tile_url).resolve_metadata(tile_metadata),
-    metadata(url_matches(is_broker_url)).extract_metadata(broker_catalog_step),
-    viewer(html_matches(has_inline_tile_service)).decode(inline_catalog),
-    viewer(html_matches(contains_zoomify_declaration))
-        .extract_metadata(extract_image_properties_url),
-    viewer(html_matches(has_fluid_access_number)).extract_metadata(extract_fluid_catalog),
-    viewer(url_matches(is_unibe_page)).extract_metadata(extract_unibe_catalog),
-    viewer(html_matches(has_openlayers_source)).extract_metadata(extract_openlayers_catalog),
+    metadata(css("imagefile[format=\"zoomify\" i]")).text_file("ImageProperties.xml"),
+    viewer(resource_matches(has_inline_tile_service)).decode(inline_catalog),
+    viewer(resource_matches(contains_zoomify_declaration)).decode(extract_image_properties_url),
+    viewer(html_matches(has_fluid_access_number)).decode(extract_fluid_catalog),
+    viewer(url_matches(is_unibe_page)).decode(extract_unibe_catalog),
+    viewer(css(".ete-openlayers-src")).text_file("ImageProperties.xml"),
     ngv::ROUTE,
-    viewer(html_matches(has_ete_url)).extract_metadata(extract_ete_catalog),
+    viewer(css("url")).text_file("ImageProperties.xml"),
 ];
 
 pub const SPEC: FormatSpec = FormatSpec::new("zoomify", ROUTES).with_display_name("Zoomify");
@@ -106,19 +107,6 @@ static UNIBE_URL_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(r"url\s*=\s*'(?P<path>[^']*)'").expect("constant Unibe URL pattern")
 });
 
-static OPENLAYERS_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r#"(?is)<[^>]*class="ete-openlayers-src"[^>]*>(?P<source>.*?)</.*?>"#)
-        .expect("constant OpenLayers source pattern")
-});
-
-static ETE_URL_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r"(?is)<url>(?P<page>.*?)</url>").expect("constant ETE URL pattern")
-});
-
-static BROKER_IMAGE_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r#"(?is)<imagefile[^>]*\bformat\s*=\s*["']zoomify["'][^>]*>(?P<image>[^<]*)"#)
-        .expect("constant XML broker image pattern")
-});
 static TILE_URL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?:^|/)TileGroup\d+/\d+-\d+-\d+\.jpe?g(?:[?#].*)?$")
         .expect("constant Zoomify tile URL pattern")
@@ -131,10 +119,10 @@ fn is_tile_url(uri: &str) -> bool {
 fn extract_image_properties_url(
     resource: crate::core::DiscoveryResource<'_>,
 ) -> Result<ParsedResource, DiscoveryError> {
-    let image_path = extract_image_path(resource.bytes()).ok_or_else(|| {
+    let image_path = extract_image_path(resource).ok_or_else(|| {
         DiscoveryError::InvalidMetadata("Zoomify viewer page does not declare an image path".into())
     })?;
-    let page_base_uri = crate::web_page::page_base(resource.bytes(), resource.final_uri());
+    let page_base_uri = crate::web_page::page_base(resource);
     let image_uri = resolve_relative(&page_base_uri, &image_path);
     Ok(ParsedResource::Follow(Request::new(append_path_component(
         &image_uri,
@@ -145,8 +133,8 @@ fn extract_image_properties_url(
 /// Whether a script block declares an inline source *with* geometry.
 /// Path-only declarations (`Z.showImage`, bare `tilesUrl`) keep the
 /// `ImageProperties.xml` route below; only full configurations qualify here.
-fn has_inline_tile_service(bytes: &[u8]) -> bool {
-    inline_tile_services(bytes, "", "").next().is_some()
+fn has_inline_tile_service(resource: crate::core::DiscoveryResource<'_>) -> bool {
+    inline_tile_services(resource).next().is_some()
 }
 
 struct InlineService {
@@ -156,19 +144,12 @@ struct InlineService {
     tiles_url: String,
 }
 
-fn inline_tile_services<'a>(
-    html: &'a [u8],
-    final_uri: &str,
-    base_href: &str,
-) -> impl Iterator<Item = InlineService> + 'a {
-    let page_base_uri = if base_href.is_empty() {
-        final_uri.to_owned()
-    } else {
-        resolve_relative(final_uri, base_href)
-    };
-    script_blocks(html)
-        .into_iter()
-        .flat_map(|(_, script)| all_json::<RawInlineTileService>(script).collect::<Vec<_>>())
+fn inline_tile_services(
+    resource: crate::core::DiscoveryResource<'_>,
+) -> impl Iterator<Item = InlineService> + '_ {
+    let page_base_uri = crate::web_page::page_base(resource);
+    crate::web_page::script_bodies(resource)
+        .flat_map(|script| all_json::<RawInlineTileService>(script).collect::<Vec<_>>())
         .filter_map(move |raw| {
             if !raw
                 .service_type
@@ -236,9 +217,7 @@ fn inline_levels(width: u32, height: u32, tile_size: u32) -> Vec<ZoomLevelInfo> 
 fn inline_catalog(
     resource: crate::core::DiscoveryResource<'_>,
 ) -> Result<ParsedResource, DiscoveryError> {
-    let (uri, bytes) = (resource.final_uri(), resource.bytes());
-    let base_href = crate::web_page::page_base(bytes, uri);
-    let services: Vec<InlineService> = inline_tile_services(bytes, uri, &base_href).collect();
+    let services: Vec<InlineService> = inline_tile_services(resource).collect();
     if services.is_empty() {
         return Err(DiscoveryError::InvalidMetadata(
             "Zoomify viewer page declares no inline image geometry".into(),
@@ -283,29 +262,6 @@ fn extract_fluid_catalog(
     Ok(ParsedResource::Follow(Request::new(broker)))
 }
 
-fn is_broker_url(uri: &str) -> bool {
-    uri.contains("/scripts/XMLBroker.new.php")
-}
-
-fn broker_catalog_step(
-    resource: crate::core::DiscoveryResource<'_>,
-) -> Result<ParsedResource, DiscoveryError> {
-    broker_catalog(resource.bytes())
-}
-
-fn broker_catalog(bytes: &[u8]) -> Result<ParsedResource, DiscoveryError> {
-    let path = BROKER_IMAGE_RE
-        .captures(bytes)
-        .and_then(|captures| capture_text(&captures, "image"))
-        .ok_or_else(|| {
-            DiscoveryError::InvalidMetadata("Fluid broker response has no zoomify image".into())
-        })?;
-    Ok(ParsedResource::Follow(Request::new(append_path_component(
-        &path,
-        "ImageProperties.xml",
-    ))))
-}
-
 fn is_unibe_page(uri: &str) -> bool {
     uri.contains("biblio.unibe.ch/web-apps/maps/zoomify.php")
 }
@@ -326,43 +282,6 @@ fn extract_unibe_catalog(
     ))))
 }
 
-fn has_openlayers_source(bytes: &[u8]) -> bool {
-    OPENLAYERS_RE.is_match(bytes)
-}
-
-fn extract_openlayers_catalog(
-    resource: crate::core::DiscoveryResource<'_>,
-) -> Result<ParsedResource, DiscoveryError> {
-    let path = OPENLAYERS_RE
-        .captures(resource.bytes())
-        .and_then(|captures| capture_text(&captures, "source"))
-        .ok_or_else(|| {
-            DiscoveryError::InvalidMetadata("OpenLayers page declares no image path".into())
-        })?;
-    let image_uri = resolve_relative(resource.final_uri(), &path);
-    Ok(ParsedResource::Follow(Request::new(append_path_component(
-        &image_uri,
-        "ImageProperties.xml",
-    ))))
-}
-
-fn has_ete_url(bytes: &[u8]) -> bool {
-    ETE_URL_RE.is_match(bytes)
-}
-
-fn extract_ete_catalog(
-    resource: crate::core::DiscoveryResource<'_>,
-) -> Result<ParsedResource, DiscoveryError> {
-    let path = ETE_URL_RE
-        .captures(resource.bytes())
-        .and_then(|captures| capture_text(&captures, "page"))
-        .ok_or_else(|| DiscoveryError::InvalidMetadata("page declares no ETE image URL".into()))?;
-    Ok(ParsedResource::Follow(Request::new(append_path_component(
-        &path,
-        "ImageProperties.xml",
-    ))))
-}
-
 /// Scheme + authority of a URI for site-root service URLs.
 fn origin_of(uri: &str) -> String {
     Url::parse(uri)
@@ -373,52 +292,21 @@ fn origin_of(uri: &str) -> String {
 
 mod ngv;
 
-fn contains_zoomify_declaration(contents: &[u8]) -> bool {
-    SHOW_IMAGE_RE.is_match(contents)
-        || IMAGE_PATH_RE.is_match(contents)
-        || script_blocks(contents)
-            .iter()
-            .any(|(_, script)| TILE_SERVICE_RE.is_match(script))
+fn contains_zoomify_declaration(resource: crate::core::DiscoveryResource<'_>) -> bool {
+    extract_image_path(resource).is_some()
 }
 
-fn append_path_component(uri: &str, component: &str) -> String {
-    let suffix_start = uri.find(['?', '#']).unwrap_or(uri.len());
-    let (path, suffix) = uri.split_at(suffix_start);
-    format!("{}/{component}{suffix}", path.trim_end_matches('/'))
-}
-
-fn extract_image_path(html: &[u8]) -> Option<String> {
-    // Earliest match wins across the page-level declaration forms.
-    let image_path = IMAGE_PATH_RE
-        .captures_iter(html)
-        .find_map(|captures| Some((captures.get(0)?.start(), capture_text(&captures, "image")?)));
-    let show_image = SHOW_IMAGE_RE
-        .captures_iter(html)
-        .find_map(|captures| Some((captures.get(0)?.start(), capture_text(&captures, "image")?)));
-    let tile_service = script_blocks(html).into_iter().find_map(|(start, script)| {
-        let captures = TILE_SERVICE_RE.captures(script)?;
-        let offset = start + captures.get(0)?.start();
-        Some((offset, capture_text(&captures, "image")?))
-    });
-    [image_path, show_image, tile_service]
-        .into_iter()
-        .flatten()
-        .min_by_key(|(offset, _)| *offset)
-        .map(|(_, path)| path)
-}
-
-/// Byte ranges of `<script>…</script>` contents with their document offsets.
-///
-/// Tile-service configurations are only meaningful inside script code;
-/// matching outside would pick up documentation snippets.
-fn script_blocks(html: &[u8]) -> Vec<(usize, &[u8])> {
-    crate::web_page::script_bodies(html)
-        .into_iter()
-        .map(|body| {
-            let offset = body.as_ptr() as usize - html.as_ptr() as usize;
-            (offset, body)
-        })
-        .collect()
+fn extract_image_path(resource: crate::core::DiscoveryResource<'_>) -> Option<String> {
+    crate::web_page::script_bodies(resource).find_map(|script| {
+        [&IMAGE_PATH_RE, &SHOW_IMAGE_RE, &TILE_SERVICE_RE]
+            .into_iter()
+            .filter_map(|regex| regex.captures(script))
+            .filter_map(|captures| {
+                Some((captures.get(0)?.start(), capture_text(&captures, "image")?))
+            })
+            .min_by_key(|(offset, _)| *offset)
+            .map(|(_, path)| path)
+    })
 }
 
 fn capture_text(captures: &regex::bytes::Captures<'_>, name: &str) -> Option<String> {
@@ -587,7 +475,7 @@ mod tests {
             "https://museum.example/viewer/page",
             &[
                 (
-                    br#"<div class="ete-openlayers-src">../images/map</div>"#,
+                    br#"<div class="ete-openlayers-src"><template>wrong/path</template>../images/map</div>"#,
                     None,
                 ),
                 (XML, None),
@@ -688,13 +576,13 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                extract_image_path(page.as_bytes()).as_deref(),
+                crate::test_support::resource("", page.as_bytes(), extract_image_path).as_deref(),
                 Some(expected)
             );
         }
-        assert_eq!(extract_image_path(br#"<script>var config = {"type": "zoomifytileservice", "tilesUrl": "/zoomify"};</script>"#).as_deref(), Some("/zoomify"));
+        assert_eq!(crate::test_support::resource("", br#"<script>var config = {"type": "zoomifytileservice", "tilesUrl": "/zoomify"};</script>"#, extract_image_path).as_deref(), Some("/zoomify"));
         // Configuration snippets displayed outside scripts are ignored.
-        assert_eq!(extract_image_path(br#"<pre>{"type": "zoomifytileservice", "tilesUrl": "/displayed-not-executed"}</pre>"#), None);
+        assert_eq!(crate::test_support::resource("", br#"<pre>{"type": "zoomifytileservice", "tilesUrl": "/displayed-not-executed"}</pre>"#, extract_image_path), None);
     }
 
     #[test]
@@ -795,13 +683,12 @@ mod tests {
 
     #[test]
     fn inline_service_accepts_string_dimensions_and_any_case() {
-        let services: Vec<InlineService> = inline_tile_services(
+        let services: Vec<InlineService> = crate::test_support::resource(
+            "https://example.com/page",
             br#"Server warning <script type="application/json">{type: 'ZoomifyTileService', width: "1024",
                 height: '768', tilesUrl: "/z/", tileSize: "64",};</script>"#,
-            "https://example.com/page",
-            "",
-        )
-        .collect();
+            |resource| inline_tile_services(resource).collect(),
+        );
         assert_eq!(services.len(), 1);
         assert_eq!(services[0].width, 1024);
         assert_eq!(services[0].height, 768);

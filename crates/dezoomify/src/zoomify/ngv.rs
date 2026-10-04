@@ -15,7 +15,7 @@ static IMAGE_PATH: LazyLock<BytesRegex> = LazyLock::new(|| {
 
 use crate::core::discovery::{url_matches, viewer};
 pub(super) const ROUTE: DiscoveryRoute =
-    viewer(url_matches(is_work_page)).extract_metadata(follow_image_path);
+    viewer(url_matches(is_work_page)).decode(follow_image_path);
 
 pub(super) fn is_work_page(uri: &str) -> bool {
     uri.contains("ngv.vic.gov.au/explore/collection/work")

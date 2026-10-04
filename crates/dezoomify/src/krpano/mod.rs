@@ -27,9 +27,9 @@ mod krpano_metadata;
 
 const ROUTES: &[DiscoveryRoute] = &[
     metadata(html_matches(looks_like_xml_or_encrypted)).decode(handle_xml),
-    viewer(html_matches(looks_like_viewer_js)).extract_metadata(handle_viewer_js),
-    viewer(html_matches(looks_like_krpano_html)).extract_metadata(handle_html),
-    viewer(url_matches(is_javascript_uri)).extract_metadata(handle_viewer_js),
+    viewer(html_matches(looks_like_viewer_js)).decode(handle_viewer_js),
+    viewer(html_matches(looks_like_krpano_html)).decode(handle_html),
+    viewer(url_matches(is_javascript_uri)).decode(handle_viewer_js),
     metadata(url_suffix("/tiles.xml")).decode(handle_xml),
     metadata(url_suffix("/tour.xml")).decode(handle_xml),
 ];
@@ -43,10 +43,9 @@ fn handle_html(resource: DiscoveryResource<'_>) -> Result<ParsedResource, Discov
     if find_xml(context).is_some() {
         return handle_viewer_js(resource);
     }
-    let html = resource.text_lossy();
     let xml_uri = extract_xml_from_query(resource.final_uri())
         .map(|reference| resolve_relative(resource.final_uri(), &reference))
-        .or_else(|| extract_xml_from_embedpano(&html, resource.final_uri()))
+        .or_else(|| extract_xml_from_embedpano(resource))
         .unwrap_or_else(|| sibling_uri(resource.final_uri(), "tour.xml"));
     Ok(ParsedResource::Follow(Request::new(xml_uri)))
 }
@@ -150,8 +149,7 @@ fn next_viewer_from_initial(
     xml_uri: &str,
 ) -> Option<String> {
     let mut candidates = if looks_like_krpano_html(initial.bytes()) {
-        let html = initial.text_lossy();
-        extract_js_candidates_from_html(&html, initial.final_uri())
+        extract_js_candidates_from_html(initial)
     } else if is_javascript_resource(initial) {
         Vec::new()
     } else {
@@ -215,13 +213,10 @@ fn looks_like_viewer_js(contents: &[u8]) -> bool {
 }
 
 /// Extract and rank viewer JavaScript candidates from a krpano HTML page.
-fn extract_js_candidates_from_html(html: &str, html_uri: &str) -> Vec<String> {
+fn extract_js_candidates_from_html(resource: DiscoveryResource<'_>) -> Vec<String> {
     let mut candidates = Vec::new();
     let mut seen = HashSet::new();
-    for (index, script) in crate::web_page::scripts(html, html_uri)
-        .into_iter()
-        .enumerate()
-    {
+    for (index, script) in crate::web_page::scripts(resource).into_iter().enumerate() {
         let Some(src) = script.source else {
             continue;
         };
@@ -249,16 +244,11 @@ fn extract_js_candidates_from_html(html: &str, html_uri: &str) -> Vec<String> {
         .collect()
 }
 
-fn extract_xml_from_embedpano(html: &str, uri: &str) -> Option<String> {
-    crate::web_page::scripts(html, uri)
+fn extract_xml_from_embedpano(resource: DiscoveryResource<'_>) -> Option<String> {
+    crate::web_page::scripts(resource)
         .into_iter()
         .filter(|script| script.source.is_none())
-        .map(|script| (script.body.to_owned(), script.base))
-        .chain(
-            crate::web_page::load_handlers(html, uri)
-                .into_iter()
-                .map(|script| (script.body, script.base)),
-        )
+        .map(|script| (script.body, script.base))
         .find_map(|(script, base)| {
             let source = crate::javascript::mask(&script);
             crate::javascript::captures(&EMBEDPANO_RE, &source).find_map(|call| {
@@ -745,9 +735,13 @@ mod tests {
     fn html_script_candidates_prefer_krpano_viewer() {
         let html = r#"<html><head><script src="/assets/jquery.min.js"></script><script src='https://www.googletagmanager.com/gtag/js?id=G-TEST'></script><script data-src="ignored.js" src = "assets/tour.js?cache=1"></script></head></html>"#;
         assert_eq!(
-            extract_js_candidates_from_html(html, "http://example.com/pano/index.html")
-                .first()
-                .map(String::as_str),
+            crate::test_support::resource(
+                "http://example.com/pano/index.html",
+                html.as_bytes(),
+                extract_js_candidates_from_html
+            )
+            .first()
+            .map(String::as_str),
             Some("http://example.com/pano/assets/tour.js?cache=1")
         );
     }

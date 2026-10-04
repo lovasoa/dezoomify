@@ -1,6 +1,6 @@
 # Browser runtime
 
-`packages/browser-runtime` contains BrowserHost and the shared browser application used by the website and extension. Host operations own fetching, decoding, painting, canvas resources, and saving; application modules own UI composition and invocation lifetime.
+`packages/browser-runtime` contains BrowserHost and the shared browser application used by the website and extension. Host operations own fetching, inert HTML/CSS parsing in a detached document, decoding, painting, canvas resources, and saving; application modules own UI composition and invocation lifetime.
 
 ## Host operations
 

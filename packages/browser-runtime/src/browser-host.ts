@@ -4,6 +4,8 @@ import type {
   FinishRequest,
   Gate,
   Host,
+  HtmlDocument,
+  HtmlQuery,
   Image,
   Interaction,
   Error as JobError,
@@ -85,6 +87,38 @@ export class BrowserHost implements Host {
 
   fetch(request: ResourceRequest, interaction: Interaction): Promise<ResourceRead> {
     return this.own(() => this.readResource(request, interaction));
+  }
+
+  parseHtml(query: HtmlQuery): Promise<HtmlDocument> {
+    return this.own(async () => {
+      this.signal.throwIfAborted();
+      // No browsing context: scripts, handlers and resource loads remain inert.
+      const inert = document.implementation.createHTMLDocument("");
+      inert.documentElement.innerHTML = query.source;
+      return Object.fromEntries(
+        query.selectors.map((selector) => [
+          selector,
+          Array.from(inert.querySelectorAll(selector))
+            .filter((element) => !element.closest("noscript, template"))
+            .map((element) => ({
+              name: element.localName,
+              attributes: Object.fromEntries(
+                Array.from(element.attributes, (attr) => [attr.name, attr.value]),
+              ),
+              text: element.textContent ?? "",
+            })),
+        ]),
+      );
+    }).catch((error) => {
+      throw this.failure(
+        isJobError(error)
+          ? error
+          : {
+              kind: "binding-invalid-value",
+              detail: String(error).slice(0, 2048),
+            },
+      );
+    });
   }
 
   private async readResource(

@@ -1,3 +1,4 @@
+mod support;
 use dezoomify::core::discovery::{DiscoveryError, DiscoveryInput, DiscoveryLimits};
 use dezoomify::core::{
     DiscoveredEntry, DiscoveryCatalog, Registry, default_registry, registry_for,
@@ -21,30 +22,18 @@ fn lookup(
     limits: DiscoveryLimits,
     redirect: Option<&str>,
 ) -> Result<DiscoveryCatalog, DiscoveryError> {
-    let requested = RefCell::new(Vec::new());
-    let result = futures::executor::block_on(registry.discover(inputs, limits, |request, _| {
-        requested.borrow_mut().push(request.uri.clone());
-        let found = replies
+    let (result, requests) = support::discover_inputs(registry, inputs, limits, |uri| {
+        replies
             .iter()
-            .find(|(uri, _)| *uri == request.uri)
-            .map(|(_, bytes)| ResourceRead::Response {
-                response: ResourceResponse {
-                    bytes: bytes.to_vec(),
-                    final_uri: if request.uri == PAGE {
-                        redirect.map(str::to_owned)
-                    } else {
-                        None
-                    },
-                },
-            });
-        async move {
-            found.ok_or_else(|| Error::DiscoveryFailed {
-                failure: format!("no fixture: {}", request.uri).into(),
-                cause: None,
+            .find(|(expected, _)| *expected == uri)
+            .map(|(_, bytes)| {
+                Ok((
+                    bytes.to_vec(),
+                    (uri == PAGE).then(|| redirect.map(str::to_owned)).flatten(),
+                ))
             })
-        }
-    }));
-    let requests = requested.borrow();
+    });
+    let requests: Vec<_> = requests.iter().map(|request| &request.uri).collect();
     for uri in requests.iter() {
         assert_eq!(
             requests
@@ -214,8 +203,11 @@ fn redirects_entities_and_explicit_format_apply_to_navigation() {
             observed("https://image.test/ImageProperties.xml"),
         ],
         &[
-            (PAGE, br#"<iframe src="art?x=1&amp;y=2"></iframe>"#),
-            ("https://viewer.test/final/art?x=1&y=2", DZI),
+            (
+                PAGE,
+                br#"<base href="../assets/"><iframe src="art?x=1&amp;y=2"></iframe>"#,
+            ),
+            ("https://viewer.test/assets/art?x=1&y=2", DZI),
         ],
         Default::default(),
         Some("https://viewer.test/final/page"),
@@ -296,21 +288,23 @@ fn supplied_inputs_and_fetched_documents_share_limits() {
             expected
         );
     }
-    let error = lookup(
-        default_registry(),
-        vec![DiscoveryInput::with_contents(PAGE, FRAME)],
-        &[("https://museum.test/art", DZI)],
-        DiscoveryLimits {
-            retained_bytes: DZI.len(),
-            ..Default::default()
-        },
-        None,
-    )
-    .unwrap_err();
-    assert!(matches!(
-        error,
-        DiscoveryError::Host(ref error) if matches!(error.cause(), Error::ResourceLimit { .. })
-    ));
+    for retained_bytes in [FRAME.len(), DZI.len()] {
+        let error = lookup(
+            default_registry(),
+            vec![DiscoveryInput::with_contents(PAGE, FRAME)],
+            &[("https://museum.test/art", DZI)],
+            DiscoveryLimits {
+                retained_bytes,
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            DiscoveryError::Host(ref error) if matches!(error.cause(), Error::ResourceLimit { .. })
+        ));
+    }
 }
 
 #[test]
@@ -337,6 +331,7 @@ fn observed_metadata_wins_without_reading_a_valid_but_lower_priority_frame() {
                 })
             }
         },
+        support::parse_html,
     ))
     .unwrap();
     assert!(matches!(&catalog.entries()[0],DiscoveredEntry::Ready(image) if image.format=="iiif"));

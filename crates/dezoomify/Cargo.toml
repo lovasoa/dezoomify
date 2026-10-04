@@ -27,7 +27,7 @@ sha1.workspace = true
 aes.workspace = true
 cbc.workspace = true
 thiserror.workspace = true
-html5gum = { version = "0.8.4", default-features = false }
+html-escape = "0.2"
 tsify = { workspace = true, optional = true }
 wasm-bindgen = { workspace = true, optional = true }
 futures-util = "0.3"
@@ -35,6 +35,7 @@ serde_bytes = "0.11"
 
 [dev-dependencies]
 futures = "0.3"
+scraper = { version = "0.27", default-features = false }
 
 [features]
 typescript = ["dep:tsify", "dep:wasm-bindgen"]

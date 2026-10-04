@@ -14,7 +14,7 @@ static DEEPZOOM_MANIFEST: LazyLock<BytesRegex> = LazyLock::new(|| {
 
 pub(super) const ARK_ROUTE: DiscoveryRoute = viewer(url_matches(is_ark)).resolve_metadata(reader);
 pub(super) const MANIFEST_ROUTE: DiscoveryRoute =
-    DiscoveryRoute::relative_capture(&DEEPZOOM_MANIFEST, "metadata");
+    DiscoveryRoute::regex_link(&DEEPZOOM_MANIFEST, "$metadata");
 
 pub(super) fn is_ark(uri: &str) -> bool {
     uri.starts_with("https://bibliotheques-specialisees.paris.fr/ark:/")

@@ -54,17 +54,20 @@ impl Registry {
     }
 
     /// Resolve supplied sources with platform resource acquisition.
-    pub async fn discover<F, Fut>(
+    pub async fn discover<F, Fut, P, PFut>(
         &self,
         inputs: Vec<DiscoveryInput>,
         limits: DiscoveryLimits,
         fetch: F,
+        parse_html: P,
     ) -> Result<super::DiscoveryCatalog, super::DiscoveryError>
     where
         F: Fn(super::Request, crate::model::Interaction) -> Fut,
         Fut: std::future::Future<Output = Result<crate::model::ResourceRead, crate::model::Error>>,
+        P: Fn(crate::model::HtmlQuery) -> PFut,
+        PFut: std::future::Future<Output = Result<crate::model::HtmlDocument, crate::model::Error>>,
     {
-        super::discovery::discover(inputs, &self.specs, limits, fetch).await
+        super::discovery::discover(inputs, &self.specs, limits, fetch, parse_html).await
     }
 
     /// Look up a registered format by stable id.
@@ -98,16 +101,14 @@ pub fn registry_for(name: &str) -> Option<Registry> {
         .iter()
         .find(|spec| spec.name().eq_ignore_ascii_case(name))
         .copied()?;
-    let mut registry = Registry::new();
-    registry.register(spec);
-    Some(registry)
+    Some(Registry { specs: vec![spec] })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Vec2d;
-    use crate::core::discovery::{ParsedResource, any, metadata};
+    use crate::core::discovery::{ParsedResource, css, metadata};
     use crate::core::{DiscoveredEntry, ImagePlan, Request, ResolvedLevel, TileSource};
 
     #[test]
@@ -115,8 +116,7 @@ mod tests {
         fn decode(
             resource: super::super::DiscoveryResource<'_>,
         ) -> Result<ParsedResource, super::super::DiscoveryError> {
-            let bytes = resource.bytes();
-            let width = u32::from(*bytes.first().unwrap());
+            let width = resource.element()?.positive_u32("data-width")?;
             let level = ResolvedLevel::grid(Vec2d { x: width, y: 2 }, Vec2d::square(2), |tile| {
                 Request::new(format!(
                     "memory://tile/{}/{}",
@@ -129,22 +129,21 @@ mod tests {
             )))
         }
 
-        const TOY: FormatSpec = FormatSpec::new("toy", &[metadata(any()).decode(decode)]);
+        const TOY: FormatSpec = FormatSpec::new(
+            "toy",
+            &[metadata(css(".viewer > a[data-width]:first-child")).decode(decode)],
+        );
         let mut registry = Registry::new();
         registry.register(TOY);
+        let parses = std::cell::Cell::new(0);
         let catalog = futures::executor::block_on(registry.discover(
-            vec![DiscoveryInput::new("memory://metadata")],
+            vec![DiscoveryInput::with_contents("memory://metadata", br#"<template><div class=viewer><a data-width=99></a></div></template><script>'<div class=viewer><a data-width=88></a></div>'</script><div class=viewer><a data-width=4 title='A > B &amp; C'></a></div>"#)],
             DiscoveryLimits::default(),
-            |_, _| async {
-                Ok(crate::model::ResourceRead::Response {
-                    response: crate::model::ResourceResponse {
-                        bytes: vec![4],
-                        final_uri: None,
-                    },
-                })
-            },
+            |_, _| async { panic!("supplied HTML must not be fetched") },
+            |query| { parses.set(parses.get() + 1); crate::test_support::parse_html(query) },
         ))
         .unwrap();
+        assert_eq!(parses.get(), 1);
         let [DiscoveredEntry::Ready(image)] = catalog.entries() else {
             panic!("toy decoder must publish an image")
         };
@@ -196,6 +195,7 @@ mod tests {
                         })
                     }
                 },
+                crate::test_support::parse_html,
             ));
             assert!(result.is_err());
             assert_eq!(calls.get(), 1, "{name}");

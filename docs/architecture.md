@@ -25,6 +25,12 @@ Cloudflare and the local server adapt the same metadata proxy implementation in
 `src/server/proxy.ts`; do not create a separate local policy.
 Deployment details: [Operations](operations.md#website-deployment-contract).
 
+Formats declare CSS routes; discovery queries `Host::parse_html` once per shared
+resource read. BrowserHost uses a detached document and NativeHost uses `scraper`,
+outside the WASM dependency graph. Neither executes scripts or fetches resources.
+Pure decoders consume selected elements, decoded attributes, and DOM text;
+projected strings share the metadata retention budget.
+
 ## Bindings and errors
 
 `crates/dezoomify/src/model.rs` defines cross-language values; `host.rs` defines

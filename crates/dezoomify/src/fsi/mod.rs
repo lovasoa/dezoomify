@@ -2,35 +2,33 @@
 
 use std::sync::LazyLock;
 
-use regex::Regex;
+use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
-use crate::core::discovery::{any, html_matches, metadata, url_matches, viewer};
+use crate::core::discovery::{any, css, metadata, url_matches, viewer};
 use crate::core::{
     DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource,
-    Request, ResolvedLevel, image_title, resolve_relative,
+    Request, ResolvedLevel, image_title,
 };
 
 static SOURCE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(?:^|[?&])source=([^&#]+)").expect("constant FSI source pattern")
 });
-static SERVER_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)([^\s\"']*/server[^\s\"']*)"#).expect("constant FSI server pattern")
+static SERVER_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+    BytesRegex::new(r#"(?i)(?P<server>[^\s\"']*/server[^\s\"']*[?&]source=[^&#\s\"']+[^\s\"']*)"#)
+        .expect("constant FSI server pattern")
 });
-static WIDTH_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)\bwidth\s+value\s*=\s*[\"']?(\d+)"#).expect("constant FSI width pattern")
-});
-static HEIGHT_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)\bheight\s+value\s*=\s*[\"']?(\d+)"#).expect("constant FSI height pattern")
-});
-
 const ROUTES: &[DiscoveryRoute] = &[
     metadata(url_matches(is_server_url)).resolve_metadata(metadata_url),
-    viewer(html_matches(contains_server)).extract_metadata(follow_page_server),
+    viewer(css("[src*=\"/server\"][src*=\"source=\" i]")).follow_attribute("src"),
+    viewer(css("[href*=\"/server\"][href*=\"source=\" i]")).follow_attribute("href"),
+    DiscoveryRoute::regex_link(&SERVER_RE, "$server"),
     metadata(any()).decode(decode),
 ];
 
-pub const SPEC: FormatSpec = FormatSpec::new("fsi", ROUTES).with_display_name("FSI");
+pub const SPEC: FormatSpec = FormatSpec::new("fsi", ROUTES)
+    .with_display_name("FSI")
+    .html_queries(&["property[width][value]", "property[height][value]"]);
 
 fn is_server_url(uri: &str) -> bool {
     uri.split_once('?').is_some_and(|(path, query)| {
@@ -50,28 +48,19 @@ fn metadata_url(uri: &str) -> Result<Request, DiscoveryError> {
     )))
 }
 
-fn contains_server(bytes: &[u8]) -> bool {
-    SERVER_RE.is_match(&String::from_utf8_lossy(bytes))
-}
-
-fn follow_page_server(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-    // Server URLs are embedded in HTML, where query separators are escaped.
-    let page = resource.text_lossy().replace("&amp;", "&");
-    let server = SERVER_RE
-        .captures_iter(&page)
-        .find_map(|captures| {
-            let server = captures.get(1)?.as_str();
-            SOURCE_RE.is_match(server).then_some(server.to_owned())
-        })
-        .ok_or_else(|| DiscoveryError::InvalidMetadata("no FSI URL found in page".into()))?;
-    let server = resolve_relative(resource.final_uri(), &server);
-    metadata_url(&server).map(ParsedResource::Follow)
-}
-
 fn decode(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-    let (url, bytes) = (resource.final_uri(), resource.bytes());
-    let width = number(&WIDTH_RE, bytes, "width")?;
-    let height = number(&HEIGHT_RE, bytes, "height")?;
+    let url = resource.final_uri();
+    let dimension = |selector| {
+        resource
+            .select(selector)
+            .next()
+            .ok_or_else(|| {
+                DiscoveryError::InvalidMetadata(format!("FSI metadata has no {selector}"))
+            })?
+            .positive_u32("value")
+    };
+    let width = dimension("property[width][value]")?;
+    let height = dimension("property[height][value]")?;
     let source = SOURCE_RE
         .captures(url)
         .and_then(|captures| captures.get(1))
@@ -110,15 +99,6 @@ fn decode(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryEr
         },
     )?;
     Ok(ParsedResource::Image(ImagePlan::new(title, vec![level])))
-}
-
-fn number(regex: &Regex, bytes: &[u8], name: &str) -> Result<u32, DiscoveryError> {
-    regex
-        .captures(&String::from_utf8_lossy(bytes))
-        .and_then(|captures| captures.get(1))
-        .and_then(|value| value.as_str().parse().ok())
-        .filter(|number| *number > 0)
-        .ok_or_else(|| DiscoveryError::InvalidMetadata(format!("FSI metadata has invalid {name}")))
 }
 
 fn ratio(numerator: u32, denominator: u32) -> f64 {

@@ -35,12 +35,14 @@ mod metadata;
 mod tests;
 mod viewer;
 
-use crate::core::discovery::{any, html_matches, metadata as route, viewer as viewer_route};
+use crate::core::discovery::{
+    any, html_matches, metadata as route, resource_matches, viewer as viewer_route,
+};
 use crate::core::{DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ParsedResource};
 
 const ROUTES: &[DiscoveryRoute] = &[
     route(html_matches(is_metadata)).decode(decode),
-    viewer_route(html_matches(viewer::recognizes)).extract_metadata(viewer::decode),
+    viewer_route(resource_matches(viewer::recognizes)).decode(viewer::decode),
     route(any()).child_metadata(decode),
 ];
 pub const SPEC: FormatSpec = FormatSpec::new("fzp", ROUTES)
