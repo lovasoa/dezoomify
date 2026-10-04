@@ -93,6 +93,47 @@ pub(crate) fn can_reuse(bytes: &[u8]) -> bool {
     profile(bytes).is_some()
 }
 
+// png discards invalid or oversized iCCP profiles without returning an error.
+// Recover the cause with the same bounded inflater when its metadata is absent.
+fn missing_png_icc(bytes: &[u8], cap: u64) -> Result<Option<Vec<u8>>, Error> {
+    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Ok(None);
+    }
+    let mut at = 8;
+    while let Some(header) = bytes.get(at..at + 8) {
+        let len = u32::from_be_bytes(header[..4].try_into().expect("chunk length")) as usize;
+        let data = bytes
+            .get(at + 8..at + 8 + len)
+            .ok_or_else(|| Error::DecodeFailed("truncated PNG metadata".into()))?;
+        if &header[4..] == b"iCCP" {
+            let start = data
+                .iter()
+                .position(|&byte| byte == 0)
+                .filter(|&name| name > 0 && name <= 79)
+                .ok_or_else(|| Error::DecodeFailed("invalid PNG ICC name".into()))?
+                + 1;
+            if data.get(start) != Some(&0) {
+                return Err(Error::DecodeFailed("invalid PNG ICC compression".into()));
+            }
+            return fdeflate::decompress_to_vec_bounded(
+                &data[start + 1..],
+                usize::try_from(cap).unwrap_or(usize::MAX),
+            )
+            .map(Some)
+            .map_err(|error| match error {
+                fdeflate::BoundedDecompressionError::OutputTooLarge { .. } => {
+                    Error::ResourceLimit("PNG ICC metadata exceeds memory limit".into())
+                }
+                fdeflate::BoundedDecompressionError::DecompressionError { inner } => {
+                    Error::DecodeFailed(inner.to_string().into())
+                }
+            });
+        }
+        at += len + 12;
+    }
+    Ok(None)
+}
+
 fn failed(error: impl std::fmt::Display) -> Error {
     Error::EncodeFailed(format!("ZIF: {error}").into())
 }
@@ -351,11 +392,11 @@ impl ZifWriter {
         let mut limits = image::Limits::default();
         // Set before construction: PNG can inflate ICC metadata in read_info.
         // Leave room for the encoded body and copies returned by metadata APIs.
-        limits.max_alloc = Some(
-            self.budget
-                .saturating_sub(self.retained_bytes() + index_growth + tile.bytes.len() as u64)
-                / 2,
-        );
+        let metadata_cap = self
+            .budget
+            .saturating_sub(self.retained_bytes() + index_growth + tile.bytes.len() as u64)
+            / 2;
+        limits.max_alloc = Some(metadata_cap);
         reader.limits(limits);
         let mut decoder = reader
             .into_decoder()
@@ -370,6 +411,11 @@ impl ZifWriter {
                 .map_err(crate::tile_output::decode_error)?,
         ));
         drop(decoder);
+        if let Some((_, icc, _)) = &mut metadata {
+            if icc.is_none() {
+                *icc = missing_png_icc(&tile.bytes, metadata_cap)?;
+            }
+        }
         let metadata_bytes = metadata.as_ref().map_or(0, |(_, icc, exif)| {
             icc.as_ref().map_or(0, Vec::len) as u64 + exif.as_ref().map_or(0, Vec::len) as u64
         });
