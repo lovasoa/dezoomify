@@ -22,7 +22,7 @@ Tile placement borrows cropped pixels rather than copying them into a temporary 
 
 Output publication checks cancellation and the destination before committing. Uncommitted temporary resources are invocation-owned and cleaned after failure. Published files remain intact. A publication that has committed returns success; otherwise cancellation publishes nothing and preserves any existing destination.
 
-File and IIIF directory publication reserve unique staging paths exclusively. Failed writes or renames attempt to remove their own staging output before returning the original error. Single-file writes check cancellation during encoding and before publication. Without overwrite permission, file publication uses a same-filesystem hard link so a destination created after validation remains intact.
+File and IIIF directory publication reserve unique staging paths exclusively. Failed writes or renames attempt to remove their own staging output before returning the original error. Single-file writes check cancellation during encoding and before publication. Without overwrite permission, file publication uses atomic no-replace publication, including on ordinary removable drives, so a destination created after validation remains intact. The writer records filesystem write, seek and flush failures as `write-failed`, even when a codec wraps the I/O error.
 
 Instrumentation records attempts, acquired tiles, failures, retries, wait time, fetched bytes, peak in-flight work, retained/spooled bytes, decode bytes, canvas, and encoded output. `encoded_bytes` counts published bytes; `peak_encoded_bytes` counts the output buffer separately from codec workspace.
 

@@ -560,6 +560,7 @@ impl Sink {
                 if cancelled.load(Ordering::SeqCst) {
                     return Err(Error::Cancelled);
                 }
+                staging.check_error()?;
                 result?;
                 self.stats.peak_encoded_bytes = 64 << 10;
                 encoded_len = staging.publish(&dest, overwrite, cancelled)?;

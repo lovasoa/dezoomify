@@ -19,6 +19,7 @@ pub type IiifTiles = Vec<(String, Vec<u8>)>;
 pub(crate) struct StagedFile {
     path: std::path::PathBuf,
     file: Option<std::fs::File>,
+    io_error: Option<Error>,
 }
 
 impl StagedFile {
@@ -33,6 +34,7 @@ impl StagedFile {
         Ok(Self {
             path,
             file: Some(file),
+            io_error: None,
         })
     }
 
@@ -40,7 +42,12 @@ impl StagedFile {
         GuardedFile {
             file: self.file.as_mut().expect("unpublished staging file"),
             cancelled,
+            io_error: &mut self.io_error,
         }
+    }
+
+    pub(crate) fn check_error(&self) -> Result<(), Error> {
+        self.io_error.clone().map_or(Ok(()), Err)
     }
 
     pub(crate) fn publish(
@@ -49,6 +56,7 @@ impl StagedFile {
         overwrite: bool,
         cancelled: &AtomicBool,
     ) -> Result<u64, Error> {
+        self.check_error()?;
         let file = self.file.take().expect("unpublished staging file");
         file.sync_all()
             .map_err(|e| write_failed("output sync failed", &e))?;
@@ -64,15 +72,18 @@ impl StagedFile {
             std::fs::rename(&self.path, destination)
                 .map_err(|e| write_failed("output publication failed", &e))?;
         } else {
-            // Unlike rename, a hard link cannot overwrite a destination that
-            // appeared after preflight. Both paths are on the same filesystem.
-            std::fs::hard_link(&self.path, destination).map_err(|e| {
-                if e.kind() == std::io::ErrorKind::AlreadyExists {
-                    Error::OutputExists
-                } else {
-                    write_failed("output publication failed", &e)
-                }
-            })?;
+            // Uses no-replace rename on Linux/macOS and MoveFileEx without
+            // replacement on Windows; ordinary removable drives need no links.
+            tempfile::TempPath::try_from_path(self.path.clone())
+                .map_err(|e| write_failed("staging path failed", &e))?
+                .persist_noclobber(destination)
+                .map_err(|e| {
+                    if e.error.kind() == std::io::ErrorKind::AlreadyExists {
+                        Error::OutputExists
+                    } else {
+                        write_failed("output publication failed", &e.error)
+                    }
+                })?;
         }
         Ok(bytes)
     }
@@ -86,12 +97,13 @@ impl Drop for StagedFile {
 }
 
 /// Standard Write/Seek adapter shared by the concrete native encoders.
-pub(crate) struct GuardedFile<'a> {
-    file: &'a mut std::fs::File,
+pub(crate) struct GuardedFile<'a, W = std::fs::File> {
+    file: &'a mut W,
     cancelled: &'a AtomicBool,
+    io_error: &'a mut Option<Error>,
 }
 
-impl GuardedFile<'_> {
+impl<W> GuardedFile<'_, W> {
     fn check(&self) -> std::io::Result<()> {
         if self.cancelled.load(Ordering::SeqCst) {
             // write_all retries Interrupted, so use a terminal error kind.
@@ -100,23 +112,41 @@ impl GuardedFile<'_> {
             Ok(())
         }
     }
+
+    fn record<T>(&mut self, result: std::io::Result<T>, step: &str) -> std::io::Result<T> {
+        if let Err(error) = &result {
+            if error.kind() != std::io::ErrorKind::Interrupted && self.io_error.is_none() {
+                *self.io_error = Some(write_failed(step, error));
+            }
+        }
+        result
+    }
 }
 
-impl Write for GuardedFile<'_> {
+impl<W: Write> Write for GuardedFile<'_, W> {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
         self.check()?;
-        self.file.write(bytes)
+        let result = self.file.write(bytes).and_then(|count| {
+            if count == 0 && !bytes.is_empty() {
+                Err(std::io::ErrorKind::WriteZero.into())
+            } else {
+                Ok(count)
+            }
+        });
+        self.record(result, "output write failed")
     }
     fn flush(&mut self) -> std::io::Result<()> {
         self.check()?;
-        self.file.flush()
+        let result = self.file.flush();
+        self.record(result, "output flush failed")
     }
 }
 
-impl Seek for GuardedFile<'_> {
+impl<W: Seek> Seek for GuardedFile<'_, W> {
     fn seek(&mut self, position: std::io::SeekFrom) -> std::io::Result<u64> {
         self.check()?;
-        self.file.seek(position)
+        let result = self.file.seek(position);
+        self.record(result, "output seek failed")
     }
 }
 
@@ -368,6 +398,59 @@ mod tests {
     use super::*;
 
     #[test]
+    fn writer_preserves_io_errors_wrapped_by_codecs() {
+        struct BrokenIo;
+        impl Write for BrokenIo {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("injected disk full"))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Err(std::io::Error::other("injected flush failure"))
+            }
+        }
+        impl Seek for BrokenIo {
+            fn seek(&mut self, _: std::io::SeekFrom) -> std::io::Result<u64> {
+                Err(std::io::Error::other("injected seek failure"))
+            }
+        }
+        for step in ["write", "seek", "flush"] {
+            let directory = crate::sink::temp_sibling(&std::env::temp_dir().join("io-test"));
+            std::fs::create_dir(&directory).unwrap();
+            let destination = directory.join("output.png");
+            let mut staged = StagedFile::new(&destination).unwrap();
+            let cancelled = AtomicBool::new(false);
+            let mut writer = GuardedFile {
+                file: &mut BrokenIo,
+                cancelled: &cancelled,
+                io_error: &mut staged.io_error,
+            };
+            match step {
+                "write" => assert!(matches!(
+                    crate::imaging::encode_png_to(
+                        &mut writer,
+                        &image::RgbaImage::new(1, 1),
+                        image::codecs::png::CompressionType::Fast,
+                        None,
+                        None,
+                    ),
+                    Err(Error::EncodeFailed(_))
+                )),
+                "seek" => assert!(writer.seek(std::io::SeekFrom::Start(0)).is_err()),
+                _ => assert!(writer.flush().is_err()),
+            }
+            assert!(
+                matches!(staged.check_error(), Err(Error::WriteFailed(detail)) if detail.detail.as_deref().unwrap().contains(step))
+            );
+            assert!(matches!(
+                staged.publish(&destination, false, &cancelled),
+                Err(Error::WriteFailed(_))
+            ));
+            assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
+            std::fs::remove_dir(directory).unwrap();
+        }
+    }
+
+    #[test]
     fn staged_file_cancellation_and_late_collision_preserve_destination() {
         let directory = crate::sink::temp_sibling(&std::env::temp_dir().join("staging-test"));
         std::fs::create_dir(&directory).unwrap();
@@ -397,6 +480,11 @@ mod tests {
             b"created during encoding"
         );
         assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
+        std::fs::remove_file(&destination).unwrap();
+        let mut staged = StagedFile::new(&destination).unwrap();
+        staged.writer(&cancelled).write_all(b"published").unwrap();
+        assert_eq!(staged.publish(&destination, false, &cancelled).unwrap(), 9);
+        assert_eq!(std::fs::read(&destination).unwrap(), b"published");
         std::fs::remove_dir_all(directory).unwrap();
     }
 
