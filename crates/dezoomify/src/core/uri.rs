@@ -84,6 +84,12 @@ fn has_uri_scheme(reference: &str) -> bool {
     reference[i..].starts_with("://")
 }
 
+pub(crate) fn append_path_component(uri: &str, component: &str) -> String {
+    let suffix_start = uri.find(['?', '#']).unwrap_or(uri.len());
+    let (path, suffix) = uri.split_at(suffix_start);
+    format!("{}/{component}{suffix}", path.trim_end_matches('/'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::resolve_relative;

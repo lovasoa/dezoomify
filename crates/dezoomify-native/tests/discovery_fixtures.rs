@@ -274,6 +274,7 @@ fn historical_inputs_preserve_geometry_and_addressed_tiles() {
                             })
                         }
                     },
+                    dezoomify_native::html::parse_html,
                 ))
                 .unwrap_or_else(|error| panic!("{input}: {error:?}"));
             match catalog.into_entries().into_iter().next().expect(input) {

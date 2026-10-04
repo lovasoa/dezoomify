@@ -1,8 +1,6 @@
 use super::*;
 use crate::Vec2d;
-use crate::core::{
-    DiscoveredEntry, DiscoveryCatalog, DiscoveryResource, ImagePlan, ParsedResource,
-};
+use crate::core::{DiscoveredEntry, DiscoveryCatalog, ImagePlan, ParsedResource};
 use crate::test_support::{grid, tile_urls};
 
 const VIEWER: &str = "https://images.test/views/book.html";
@@ -15,7 +13,7 @@ fn xml(version: &str, width: u32, height: u32, tile: u32, max: u32) -> String {
 }
 
 fn parse(text: &str) -> Result<ParsedResource, DiscoveryError> {
-    decode(DiscoveryResource::new(VIEWER, text.as_bytes()))
+    crate::test_support::resource(VIEWER, text.as_bytes(), decode)
 }
 
 fn image(text: &str) -> ImagePlan {
@@ -280,7 +278,11 @@ fn literal_navigation_and_comparison_catalog() {
         follow("jime_vars.IndexPath='../wrong/'; jime_vars.IndexPath=''; lime('book','xml');"),
         "https://images.test/views/book.xml"
     );
-    assert!(!viewer::recognizes(b"<script src=viewer.js></script>"));
+    assert!(!crate::test_support::resource(
+        VIEWER,
+        b"<script src=viewer.js></script>",
+        viewer::recognizes
+    ));
     assert!(viewer::image_uri("https://images.test/", "../image").is_err());
     for page in [
         "jime_vars.ResourcePath='../resources/'; lime('image','fzp',{path:choosePath()});",

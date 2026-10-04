@@ -11,6 +11,9 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]
 
+#[cfg(test)]
+extern crate self as dezoomify;
+
 pub mod arcgis;
 pub mod bulk_text;
 pub mod core;

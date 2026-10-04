@@ -6,9 +6,9 @@ use regex::Regex;
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{metadata, url_matches, viewer};
+use crate::core::discovery::{css, metadata, url_matches, viewer};
 use crate::core::{DiscoveryError, FormatSpec, ImagePlan, ParsedResource, Request, ResolvedLevel};
-use crate::web_page::{Tag, page_title, tags};
+use crate::web_page::page_title;
 
 static VIEW_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)/(?:thumbview|pageview|zoom)/\d+(?:[?#].*)?$")
@@ -21,10 +21,11 @@ pub const SPEC: FormatSpec = FormatSpec::new(
     "vls",
     &[
         viewer(url_matches(is_view_url)).resolve_metadata(normalize_url),
-        metadata(url_matches(is_view_url)).decode(decode),
+        metadata(css("map[id=map i], div[id=map i]")).decode(decode),
     ],
 )
-.with_display_name("VLS");
+.with_display_name("VLS")
+.html_queries(&["var[id=zoomTileSize i]"]);
 
 fn is_view_url(uri: &str) -> bool {
     VIEW_RE.is_match(uri)
@@ -38,34 +39,22 @@ fn normalize_url(uri: &str) -> Result<Request, DiscoveryError> {
 }
 
 fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-    let (url, bytes) = (resource.final_uri(), resource.bytes());
-    let page = String::from_utf8_lossy(bytes);
-    let map = tags(bytes)
-        .find(|tag| {
-            matches!(tag.name(), b"map" | b"div")
-                && tag
-                    .attribute("id")
-                    .is_some_and(|id| id.eq_ignore_ascii_case("map"))
-        })
-        .ok_or_else(|| DiscoveryError::InvalidMetadata("VLS page has no map element".into()))?;
+    let url = resource.final_uri();
+    let map = resource.element()?;
     let id = map
         .attribute("vls:ot_id")
         .or_else(|| map.attribute("ot_id"))
         .filter(|id| !id.is_empty())
         .ok_or_else(|| DiscoveryError::InvalidMetadata("VLS map has no image ID".into()))?;
-    let width = positive_attribute(&map, "vls:width")
-        .or_else(|| positive_attribute(&map, "width"))
-        .ok_or_else(|| DiscoveryError::InvalidMetadata("VLS map has invalid width".into()))?;
-    let height = positive_attribute(&map, "vls:height")
-        .or_else(|| positive_attribute(&map, "height"))
-        .ok_or_else(|| DiscoveryError::InvalidMetadata("VLS map has invalid height".into()))?;
-    let zoom_tile_size = tags(bytes)
-        .filter(|tag| tag.name() == b"var")
-        .find_map(|tag| {
-            tag.attribute("id")
-                .filter(|id| id.eq_ignore_ascii_case("zoomTileSize"))
-                .and_then(|_| positive_attribute(&tag, "value"))
-        })
+    let width = map
+        .positive_u32("vls:width")
+        .or_else(|_| map.positive_u32("width"))?;
+    let height = map
+        .positive_u32("vls:height")
+        .or_else(|_| map.positive_u32("height"))?;
+    let zoom_tile_size = resource
+        .select("var[id=zoomTileSize i]")
+        .find_map(|tag| tag.positive_u32("value").ok())
         .ok_or_else(|| {
             DiscoveryError::InvalidMetadata("VLS page has no valid zoom tile size".into())
         })?;
@@ -89,20 +78,14 @@ fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<ParsedResource
         move |tile| Request::new(format!("{base}/{}/{}", tile.coord.column, tile.coord.row)),
     )?;
     Ok(ParsedResource::Image(ImagePlan::new(
-        page_title(&page),
+        page_title(resource),
         vec![level],
     )))
 }
 
-fn positive_attribute(tag: &Tag<'_>, name: &str) -> Option<u32> {
-    tag.attribute(name)
-        .and_then(|value| value.parse().ok())
-        .filter(|value| *value > 0)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{decode, normalize_url};
+    use super::{SPEC, normalize_url};
 
     #[test]
     fn viewer_path_normalization_is_case_insensitive() {
@@ -120,10 +103,12 @@ mod tests {
             u32::MAX
         );
         assert!(
-            decode(crate::core::DiscoveryResource::new(
+            crate::test_support::discover(
+                SPEC,
                 "https://example.test/pageview/1",
-                page.as_bytes()
-            ))
+                &[(page.as_bytes(), None)]
+            )
+            .0
             .is_err()
         );
     }

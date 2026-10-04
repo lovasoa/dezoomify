@@ -11,6 +11,26 @@ use super::core::{
 use super::model::{Error, ResourceRead, ResourceResponse};
 use std::cell::RefCell;
 
+#[path = "../../dezoomify-native/src/html.rs"]
+pub mod html;
+pub use html::parse_html;
+
+pub fn resource<R>(
+    uri: &str,
+    bytes: &[u8],
+    decode: impl FnOnce(super::core::DiscoveryResource<'_>) -> R,
+) -> R {
+    let html = futures::executor::block_on(parse_html(super::model::HtmlQuery {
+        source: String::from_utf8_lossy(bytes).into_owned(),
+        selectors: super::model::HtmlDocument::PAGE_QUERIES
+            .iter()
+            .map(|selector| (*selector).into())
+            .collect(),
+    }))
+    .unwrap();
+    decode(super::core::DiscoveryResource::new(uri, bytes).with_html(&html))
+}
+
 /// Discovery over an injected byte lookup: the one fetch stub. Misses fail
 /// `discovery-failed` naming the URI; every request is logged in order.
 pub fn discover_with_responses(
@@ -18,11 +38,25 @@ pub fn discover_with_responses(
     input: &str,
     lookup: impl FnMut(&str) -> Option<Result<(Vec<u8>, Option<String>), Error>>,
 ) -> (Result<DiscoveryCatalog, DiscoveryError>, Vec<Request>) {
+    discover_inputs(
+        registry,
+        vec![DiscoveryInput::new(input)],
+        DiscoveryLimits::default(),
+        lookup,
+    )
+}
+
+pub fn discover_inputs(
+    registry: Registry,
+    inputs: Vec<DiscoveryInput>,
+    limits: DiscoveryLimits,
+    lookup: impl FnMut(&str) -> Option<Result<(Vec<u8>, Option<String>), Error>>,
+) -> (Result<DiscoveryCatalog, DiscoveryError>, Vec<Request>) {
     let lookup = RefCell::new(lookup);
     let requests = RefCell::new(Vec::new());
     let result = futures::executor::block_on(registry.discover(
-        vec![DiscoveryInput::new(input)],
-        DiscoveryLimits::default(),
+        inputs,
+        limits,
         |request, _| {
             let (uri, reply) = {
                 let uri = request.uri.clone();
@@ -43,6 +77,7 @@ pub fn discover_with_responses(
                 }
             }
         },
+        parse_html,
     ));
     (result, requests.into_inner())
 }

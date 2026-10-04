@@ -33,7 +33,7 @@ const ROUTES: &[DiscoveryRoute] = &[
         uri.contains("imagesize/") || uri.contains("/image/")
     }))
     .decode(decode),
-    viewer(url_matches(is_hungaricana_url)).extract_metadata(follow_layer),
+    viewer(url_matches(is_hungaricana_url)).decode(follow_layer),
 ];
 
 pub const SPEC: FormatSpec =

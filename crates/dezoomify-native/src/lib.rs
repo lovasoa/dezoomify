@@ -7,6 +7,7 @@ pub mod cache;
 pub mod client;
 pub mod diagnostics;
 pub mod host;
+pub mod html;
 pub mod http;
 pub mod imaging;
 pub mod options;

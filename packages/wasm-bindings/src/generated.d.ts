@@ -54,6 +54,14 @@ export interface ImageRequest {
 }
 
 /**
+ * Batched CSS queries against inert, UTF-8 HTML. Parsing never fetches or executes.
+ */
+export interface HtmlQuery {
+    source: string;
+    selectors: string[];
+}
+
+/**
  * Final plan position and index of a tile already acquired during probing.
  */
 export interface ReusedTile {
@@ -151,6 +159,11 @@ export interface Output {
  * Purpose of a resource request (metadata vs tile vs probe).
  */
 export type RequestPurpose = "metadata" | "tile" | "probe";
+
+/**
+ * Selected elements in document order, with decoded attributes and textContent.
+ */
+export type HtmlDocument = Record<string, HtmlElement[]>;
 
 /**
  * Stable ordered catalog projection (never exposes private core enums).
@@ -258,6 +271,7 @@ export interface Header {
 
 export interface Host {
     fetch(request: ResourceRequest,interaction: Interaction,): Promise<ResourceRead>;
+    parseHtml(query: HtmlQuery,): Promise<HtmlDocument>;
     probe(tile: Tile,): Promise<ProbeOutcome>;
     acquireTile(tile: Tile,): Promise<void>;
     finish(request: FinishRequest,): Promise<Output>;
@@ -271,6 +285,12 @@ export interface Host {
     settle(): Promise<void>;
 }
 
+
+export interface HtmlElement {
+    name: string;
+    attributes: Record<string, string>;
+    text: string;
+}
 
 export interface Level {
     label: string;

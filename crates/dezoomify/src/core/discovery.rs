@@ -1,16 +1,23 @@
 //! Format parsing and bounded asynchronous discovery.
 
-use std::borrow::Cow;
-use std::collections::HashSet;
-use std::fmt;
-use std::sync::LazyLock;
+use std::{
+    borrow::Cow,
+    cell::{Cell, RefCell},
+    collections::{BTreeMap, BTreeSet, HashSet},
+    fmt,
+    rc::Rc,
+    sync::{Arc, LazyLock},
+};
 
 use regex::bytes::Regex as BytesRegex;
 
 use super::model::{CatalogPlan, DiscoveryCatalog, ImagePlan, Request};
 use super::tile_plan::TileSourceError;
 use super::uri::resolve_relative;
-use crate::model::{DiscoveryInputKind, Error};
+use crate::model::{DiscoveryInputKind, Error, HtmlDocument, HtmlElement, HtmlQuery};
+static SCRIPT_MARKUP: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(?i)<(?:script|base|body)\b").expect("constant markup pattern")
+});
 
 /// User source or host observation supplied to the shared discovery search.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -89,6 +96,8 @@ pub struct DiscoveryResource<'a> {
     bytes: &'a [u8],
     final_uri: &'a str,
     context: DiscoveryContext<'a>,
+    html: Option<&'a HtmlDocument>,
+    selected: Option<&'a HtmlElement>,
 }
 
 impl<'a> DiscoveryResource<'a> {
@@ -99,6 +108,8 @@ impl<'a> DiscoveryResource<'a> {
             bytes,
             final_uri: uri,
             context: DiscoveryContext { history: &[] },
+            html: None,
+            selected: None,
         }
     }
     #[must_use]
@@ -119,18 +130,77 @@ impl<'a> DiscoveryResource<'a> {
         self.bytes
     }
 
+    pub fn select(self, selector: &str) -> impl Iterator<Item = &'a HtmlElement> {
+        self.html
+            .into_iter()
+            .flat_map(move |html| html.select(selector))
+    }
+
+    pub(crate) fn is_html(self) -> bool {
+        let source = self.text_lossy();
+        source
+            .trim_start_matches(['\u{feff}', ' ', '\n', '\r', '\t'])
+            .starts_with('<')
+            || ((self.select("base[href], script").next().is_some()
+                || self.select("body[onload]").next().is_some())
+                && {
+                    let visible =
+                        crate::javascript::mask(&source.replace("<!--", "/*").replace("-->", "*/"));
+                    crate::javascript::captures(&SCRIPT_MARKUP, &visible)
+                        .next()
+                        .is_some()
+                })
+    }
+
+    pub fn element(self) -> Result<&'a HtmlElement, DiscoveryError> {
+        self.selected.ok_or_else(|| {
+            DiscoveryError::InvalidMetadata("route has no selected HTML element".into())
+        })
+    }
+
+    pub fn with_html(mut self, html: &'a HtmlDocument) -> Self {
+        self.html = Some(html);
+        self
+    }
+
     /// Decode resource bytes as UTF-8, replacing malformed sequences.
     #[must_use]
     pub fn text_lossy(self) -> Cow<'a, str> {
         String::from_utf8_lossy(self.bytes)
     }
 
-    /// Follow a resource reference against this response's post-redirect URI.
+    /// Follow a reference against the parsed document base or post-redirect URI.
     #[must_use]
     pub fn follow_relative(self, reference: &str) -> ParsedResource {
-        ParsedResource::Follow(Request::new(resolve_relative(self.final_uri, reference)))
+        ParsedResource::Follow(Request::new(resolve_relative(
+            &crate::web_page::page_base(self),
+            reference,
+        )))
+    }
+    pub fn follow_file(self, reference: &str, filename: &str) -> ParsedResource {
+        let uri = resolve_relative(&crate::web_page::page_base(self), reference);
+        ParsedResource::Follow(Request::new(super::uri::append_path_component(
+            &uri, filename,
+        )))
     }
 }
+impl HtmlElement {
+    pub fn required(&self, name: &str) -> Result<&str, DiscoveryError> {
+        self.attribute(name)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| DiscoveryError::InvalidMetadata(format!("{} has no {name}", self.name)))
+    }
+    pub fn positive_u32(&self, name: &str) -> Result<u32, DiscoveryError> {
+        self.required(name)?
+            .parse()
+            .ok()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| {
+                DiscoveryError::InvalidMetadata(format!("{} has invalid {name}", self.name))
+            })
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct DiscoveryContext<'a> {
     history: &'a [ReadResource],
@@ -169,7 +239,8 @@ pub enum DiscoveryMatch {
     UrlSuffix(&'static str),
     UrlPredicate(UrlPredicate),
     ContentPredicate(ContentPredicate),
-    HtmlTag(&'static str),
+    Css(&'static str, fn(&HtmlElement) -> bool),
+    ResourcePredicate(for<'a> fn(DiscoveryResource<'a>) -> bool),
     ContentRegex(&'static LazyLock<BytesRegex>),
 }
 
@@ -184,10 +255,7 @@ impl DiscoveryMatch {
                 .ends_with(suffix),
             Self::UrlPredicate(predicate) => predicate(uri),
             Self::ContentPredicate(predicate) => bytes.is_some_and(predicate),
-            Self::HtmlTag(name) => bytes.is_some_and(|bytes| {
-                crate::web_page::tags(bytes)
-                    .any(|tag| tag.name().eq_ignore_ascii_case(name.as_bytes()))
-            }),
+            Self::Css(..) | Self::ResourcePredicate(_) => false,
             Self::ContentRegex(regex) => bytes.is_some_and(|bytes| regex.is_match(bytes)),
         }
     }
@@ -205,22 +273,13 @@ enum RouteKind {
 }
 
 pub const fn metadata(matcher: DiscoveryMatch) -> RoutePattern {
-    RoutePattern {
-        matcher,
-        kind: RouteKind::Metadata,
-    }
+    RoutePattern::new(matcher, RouteKind::Metadata)
 }
 pub const fn viewer(matcher: DiscoveryMatch) -> RoutePattern {
-    RoutePattern {
-        matcher,
-        kind: RouteKind::Viewer,
-    }
+    RoutePattern::new(matcher, RouteKind::Viewer)
 }
 pub const fn image_url(predicate: UrlPredicate) -> RoutePattern {
-    RoutePattern {
-        matcher: url_matches(predicate),
-        kind: RouteKind::Image,
-    }
+    RoutePattern::new(url_matches(predicate), RouteKind::Image)
 }
 pub const fn any() -> DiscoveryMatch {
     DiscoveryMatch::Any
@@ -231,9 +290,18 @@ pub const fn url_suffix(suffix: &'static str) -> DiscoveryMatch {
 pub const fn url_matches(predicate: UrlPredicate) -> DiscoveryMatch {
     DiscoveryMatch::UrlPredicate(predicate)
 }
-/// Match an active HTML element in source order, with HTML attribute tokenization.
-pub const fn html_tag(name: &'static str) -> DiscoveryMatch {
-    DiscoveryMatch::HtmlTag(name)
+/// Match a CSS selector and pass its first selected element to the decoder.
+pub const fn css(selector: &'static str) -> DiscoveryMatch {
+    css_when(selector, |_| true)
+}
+pub const fn css_when(selector: &'static str, accept: fn(&HtmlElement) -> bool) -> DiscoveryMatch {
+    DiscoveryMatch::Css(selector, accept)
+}
+
+pub const fn resource_matches(
+    predicate: for<'a> fn(DiscoveryResource<'a>) -> bool,
+) -> DiscoveryMatch {
+    DiscoveryMatch::ResourcePredicate(predicate)
 }
 
 pub const fn html_matches(predicate: ContentPredicate) -> DiscoveryMatch {
@@ -247,6 +315,10 @@ pub struct RoutePattern {
 }
 
 impl RoutePattern {
+    const fn new(matcher: DiscoveryMatch, kind: RouteKind) -> Self {
+        Self { matcher, kind }
+    }
+
     /// Compile a URL-only image plan without acquiring a document.
     #[must_use]
     pub const fn plan(
@@ -259,10 +331,6 @@ impl RoutePattern {
     pub const fn decode(self, decoder: Decoder) -> DiscoveryRoute {
         self.route(RouteAction::Decode(decoder))
     }
-    #[must_use]
-    pub const fn extract_metadata(self, handler: Decoder) -> DiscoveryRoute {
-        self.decode(handler)
-    }
     /// Metadata that is meaningful only after this format has read its parent.
     #[must_use]
     pub const fn child_metadata(self, handler: Decoder) -> DiscoveryRoute {
@@ -271,6 +339,35 @@ impl RoutePattern {
     #[must_use]
     pub const fn resolve_metadata(self, mapper: UrlMapper) -> DiscoveryRoute {
         self.route(RouteAction::MapUrl(mapper))
+    }
+    /// Follow a decoded attribute against the document's base URI.
+    pub const fn follow_attribute(self, attribute: &'static str) -> DiscoveryRoute {
+        self.attribute_url(attribute, "", "")
+    }
+    /// Follow a metadata file beneath the selected element's text URL.
+    pub const fn text_file(self, filename: &'static str) -> DiscoveryRoute {
+        self.route(RouteAction::TextFile(filename))
+    }
+    /// Follow a metadata file beneath the first regex capture's URL.
+    pub const fn regex_file(
+        self,
+        regex: &'static LazyLock<BytesRegex>,
+        filename: &'static str,
+    ) -> DiscoveryRoute {
+        self.route(RouteAction::RegexLink(regex, "$1", Some(filename)))
+    }
+    /// Insert a decoded attribute into a metadata reference.
+    pub const fn attribute_url(
+        self,
+        attribute: &'static str,
+        prefix: &'static str,
+        suffix: &'static str,
+    ) -> DiscoveryRoute {
+        self.route(RouteAction::FollowAttribute {
+            attribute,
+            prefix,
+            suffix,
+        })
     }
     const fn route(self, handler: RouteAction) -> DiscoveryRoute {
         DiscoveryRoute {
@@ -289,31 +386,12 @@ pub struct DiscoveryRoute {
 }
 
 impl DiscoveryRoute {
-    /// Follow a named regex capture against the resource's final URI.
-    #[must_use]
-    pub const fn relative_capture(
-        regex: &'static LazyLock<BytesRegex>,
-        capture: &'static str,
-    ) -> Self {
-        Self::capture_url(regex, capture, "", "")
-    }
-
-    /// Insert a named regex capture into a resource URL.
-    #[must_use]
-    pub const fn capture_url(
-        regex: &'static LazyLock<BytesRegex>,
-        capture: &'static str,
-        prefix: &'static str,
-        suffix: &'static str,
-    ) -> Self {
+    /// Expand named regex captures into a metadata reference (`$name`).
+    pub const fn regex_link(regex: &'static LazyLock<BytesRegex>, template: &'static str) -> Self {
         Self {
             matcher: DiscoveryMatch::ContentRegex(regex),
             kind: RouteKind::Viewer,
-            handler: RouteAction::FollowCapture {
-                capture,
-                prefix,
-                suffix,
-            },
+            handler: RouteAction::RegexLink(regex, template, None),
         }
     }
 }
@@ -324,53 +402,77 @@ enum RouteAction {
     ChildMetadata(Decoder),
     Decode(Decoder),
     MapUrl(UrlMapper),
-    FollowCapture {
-        capture: &'static str,
+    FollowAttribute {
+        attribute: &'static str,
         prefix: &'static str,
         suffix: &'static str,
     },
+    RegexLink(
+        &'static LazyLock<BytesRegex>,
+        &'static str,
+        Option<&'static str>,
+    ),
+    TextFile(&'static str),
 }
 
 fn parse_resource(
     routes: &[DiscoveryRoute],
     resource: DiscoveryResource<'_>,
-    unmatched: &str,
 ) -> Result<ParsedResource, DiscoveryError> {
     for route in routes {
-        let matches_final = route
-            .matcher
-            .matches(resource.final_uri(), Some(resource.bytes()));
-        let matches_requested = route
-            .matcher
-            .matches(resource.uri(), Some(resource.bytes()));
-        if !matches_final && !matches_requested {
+        let selected = match route.matcher {
+            DiscoveryMatch::Css(selector, accept) => {
+                resource.select(selector).find(|tag| accept(tag))
+            }
+            _ => None,
+        };
+        let matched = match route.matcher {
+            DiscoveryMatch::Css(..) => selected.is_some(),
+            DiscoveryMatch::ResourcePredicate(predicate) => predicate(resource),
+            matcher => {
+                matcher.matches(resource.final_uri(), Some(resource.bytes()))
+                    || matcher.matches(resource.uri(), Some(resource.bytes()))
+            }
+        };
+        if !matched {
             continue;
         }
+        let resource = DiscoveryResource {
+            selected,
+            ..resource
+        };
         return match route.handler {
             RouteAction::Decode(decoder) | RouteAction::ChildMetadata(decoder) => decoder(resource),
-            RouteAction::FollowCapture {
-                capture,
+            RouteAction::FollowAttribute {
+                attribute,
                 prefix,
                 suffix,
             } => {
-                let DiscoveryMatch::ContentRegex(regex) = route.matcher else {
-                    unreachable!("capture routes require a regex matcher")
-                };
-                let link = regex
-                    .captures(resource.bytes())
-                    .and_then(|captures| captures.name(capture))
-                    .ok_or_else(|| {
-                        DiscoveryError::InvalidMetadata("resource has no matching link".into())
-                    })?;
-                let link = String::from_utf8_lossy(link.as_bytes());
-                Ok(resource.follow_relative(&format!("{prefix}{}{suffix}", link.trim())))
+                let reference = resource.element()?.required(attribute)?;
+                Ok(resource.follow_relative(&format!("{prefix}{}{suffix}", reference.trim())))
+            }
+            RouteAction::TextFile(filename) => {
+                Ok(resource.follow_file(resource.element()?.text.trim(), filename))
+            }
+            RouteAction::RegexLink(regex, template, filename) => {
+                let captures = regex.captures(resource.bytes()).ok_or_else(|| {
+                    DiscoveryError::InvalidMetadata("metadata path missing".into())
+                })?;
+                let mut link = Vec::new();
+                captures.expand(template.as_bytes(), &mut link);
+                let text = String::from_utf8_lossy(&link);
+                let reference = html_escape::decode_html_entities(text.trim());
+                Ok(match filename {
+                    Some(filename) => resource.follow_file(&reference, filename),
+                    None => resource.follow_relative(&reference),
+                })
             }
             RouteAction::MapUrl(_) | RouteAction::Plan(_) => continue,
         };
     }
     Err(DiscoveryError::rejected(
         RejectionKind::DidNotMatchContent,
-        unmatched,
+        "resource did not match any discovery route",
     ))
 }
 
@@ -380,6 +482,7 @@ pub struct FormatSpec {
     display_name: &'static str,
     routes: &'static [DiscoveryRoute],
     on_failure: Option<FailureHandler>,
+    html_queries: &'static [&'static str],
 }
 
 impl FormatSpec {
@@ -390,11 +493,17 @@ impl FormatSpec {
             display_name: name,
             routes,
             on_failure: None,
+            html_queries: &[],
         }
     }
     #[must_use]
     pub const fn on_failure(mut self, handler: FailureHandler) -> Self {
         self.on_failure = Some(handler);
+        self
+    }
+    /// Additional CSS projections needed by this format's pure decoders.
+    pub const fn html_queries(mut self, selectors: &'static [&'static str]) -> Self {
+        self.html_queries = selectors;
         self
     }
     /// User-visible format name. Defaults to the stable id; formats with a
@@ -685,12 +794,13 @@ impl std::error::Error for DiscoveryError {}
 #[derive(Clone, Debug)]
 struct ReadResource {
     request: Request,
-    response: Result<std::sync::Arc<crate::model::ResourceResponse>, Error>,
+    response: Result<Arc<ParsedResponse>, Error>,
 }
 impl ReadResource {
     fn resource(&self) -> Option<DiscoveryResource<'_>> {
         let response = self.response.as_ref().ok()?;
         Some(DiscoveryResource {
+            html: Some(&response.html),
             final_uri: response
                 .final_uri
                 .as_deref()
@@ -701,9 +811,16 @@ impl ReadResource {
     }
 }
 
+#[derive(Clone, Debug)]
+struct ParsedResponse {
+    bytes: Vec<u8>,
+    final_uri: Option<String>,
+    html: HtmlDocument,
+}
+
 #[derive(Clone)]
 enum Read {
-    Response(std::sync::Arc<crate::model::ResourceResponse>),
+    Response(Arc<ParsedResponse>),
     NeedsAccess,
 }
 type SharedRead<'a> = futures_util::future::Shared<
@@ -712,53 +829,26 @@ type SharedRead<'a> = futures_util::future::Shared<
 
 type Priority = (u8, usize, usize, usize);
 
-struct Resources<'a, F> {
+struct Resources<'a, F, P> {
     fetch: &'a F,
-    reads: std::cell::RefCell<Vec<(Request, bool, SharedRead<'a>)>>,
-    responses: std::rc::Rc<std::cell::RefCell<Vec<ReadResource>>>,
-    retained: std::rc::Rc<std::cell::Cell<usize>>,
-    parsed: std::cell::Cell<usize>,
-    depths: std::cell::RefCell<std::collections::BTreeMap<Request, usize>>,
+    parse_html: &'a P,
+    selectors: Vec<String>,
+    supplied: BTreeMap<Request, Vec<u8>>,
+    reads: RefCell<Vec<(Request, bool, SharedRead<'a>)>>,
+    responses: Rc<RefCell<Vec<ReadResource>>>,
+    retained: Rc<Cell<usize>>,
+    parsed: Cell<usize>,
+    depths: RefCell<BTreeMap<Request, usize>>,
     limits: DiscoveryLimits,
 }
 
-impl<'a, F, Fut> Resources<'a, F>
+impl<'a, F, Fut, P, PFut> Resources<'a, F, P>
 where
     F: Fn(Request, crate::model::Interaction) -> Fut,
     Fut: std::future::Future<Output = Result<crate::model::ResourceRead, crate::model::Error>> + 'a,
+    P: Fn(HtmlQuery) -> PFut,
+    PFut: std::future::Future<Output = Result<HtmlDocument, Error>> + 'a,
 {
-    fn supplied(&self, input: &DiscoveryInput) -> Result<(), DiscoveryError> {
-        use futures_util::FutureExt;
-        if let Some(bytes) = &input.contents {
-            let retained = self
-                .retained
-                .get()
-                .checked_add(bytes.len())
-                .ok_or(DiscoveryError::MetadataSizeLimitExceeded)?;
-            if retained > self.limits.retained_bytes {
-                return Err(DiscoveryError::MetadataSizeLimitExceeded);
-            }
-            self.retained.set(retained);
-            let request = Request::new(&input.url);
-            let response = std::sync::Arc::new(crate::model::ResourceResponse {
-                bytes: bytes.clone(),
-                final_uri: None,
-            });
-            self.responses.borrow_mut().push(ReadResource {
-                request: request.clone(),
-                response: Ok(response.clone()),
-            });
-            self.reads.borrow_mut().push((
-                request,
-                false,
-                async move { Ok(Read::Response(response)) }
-                    .boxed_local()
-                    .shared(),
-            ));
-        }
-        Ok(())
-    }
-
     async fn read(&self, request: Request, interactive: bool) -> Result<Read, DiscoveryError> {
         use futures_util::FutureExt;
         let cached = self
@@ -776,40 +866,70 @@ where
                     "discovery resource limit exceeded",
                 ));
             }
-            let future = (self.fetch)(
-                request.clone(),
-                if interactive {
-                    crate::model::Interaction::Allowed
-                } else {
-                    crate::model::Interaction::Forbidden
-                },
-            );
+            let supplied = self.supplied.get(&request).cloned();
+            let supplied_bytes = supplied.is_some();
+            let parse_html = self.parse_html;
+            let fetch = self.fetch;
+            let selectors = self.selectors.clone();
             let responses = self.responses.clone();
             let retained = self.retained.clone();
             let limit = self.limits.retained_bytes;
             let key = request.clone();
             let future = async move {
-                match future.await? {
-                    crate::model::ResourceRead::NeedsAccess { .. } => Ok(Read::NeedsAccess),
-                    crate::model::ResourceRead::Response { response } => {
-                        let total = retained
-                            .get()
-                            .checked_add(response.bytes.len())
-                            .filter(|total| *total <= limit)
-                            .ok_or_else(|| {
-                                crate::model::Error::ResourceLimit(
-                                    "discovery metadata size limit exceeded".to_string().into(),
-                                )
-                            })?;
-                        retained.set(total);
-                        let response = std::sync::Arc::new(response);
-                        responses.borrow_mut().push(ReadResource {
-                            request: key,
-                            response: Ok(response.clone()),
-                        });
-                        Ok(Read::Response(response))
+                let response = if let Some(bytes) = supplied {
+                    crate::model::ResourceResponse {
+                        bytes,
+                        final_uri: None,
                     }
-                }
+                } else {
+                    let interaction = if interactive {
+                        crate::model::Interaction::Allowed
+                    } else {
+                        crate::model::Interaction::Forbidden
+                    };
+                    match (fetch)(key.clone(), interaction).await? {
+                        crate::model::ResourceRead::NeedsAccess { .. } => {
+                            return Ok(Read::NeedsAccess);
+                        }
+                        crate::model::ResourceRead::Response { response } => response,
+                    }
+                };
+                let added = if supplied_bytes {
+                    0
+                } else {
+                    response.bytes.len()
+                };
+                let total = retained
+                    .get()
+                    .checked_add(added)
+                    .filter(|total| *total <= limit)
+                    .ok_or_else(|| {
+                        Error::ResourceLimit("discovery metadata size limit exceeded".into())
+                    })?;
+                retained.set(total);
+                let html = parse_html(HtmlQuery {
+                    source: String::from_utf8_lossy(&response.bytes).into_owned(),
+                    selectors,
+                })
+                .await?;
+                let total = retained
+                    .get()
+                    .checked_add(html.byte_len())
+                    .filter(|total| *total <= limit)
+                    .ok_or_else(|| {
+                        Error::ResourceLimit("discovery HTML projection size limit exceeded".into())
+                    })?;
+                retained.set(total);
+                let response = Arc::new(ParsedResponse {
+                    bytes: response.bytes,
+                    final_uri: response.final_uri,
+                    html,
+                });
+                responses.borrow_mut().push(ReadResource {
+                    request: key,
+                    response: Ok(response.clone()),
+                });
+                Ok(Read::Response(response))
             }
             .boxed_local()
             .shared();
@@ -828,7 +948,7 @@ where
         spec: FormatSpec,
         uri: &str,
         interactive: bool,
-        priority: &std::cell::Cell<Priority>,
+        priority: &Cell<Priority>,
         base: Priority,
     ) -> Result<Option<(usize, DiscoveryCatalog)>, DiscoveryError> {
         let mut history = Vec::new();
@@ -903,7 +1023,6 @@ where
                     context,
                     ..record.resource().expect("read response")
                 },
-                "resource did not match any discovery route",
             )?;
             history.push(record);
         }
@@ -911,29 +1030,32 @@ where
 }
 
 /// Resolve formats through shared, bounded asynchronous resource reads.
-pub async fn discover<F, Fut>(
+pub async fn discover<F, Fut, P, PFut>(
     inputs: Vec<DiscoveryInput>,
     specs: &[FormatSpec],
     limits: DiscoveryLimits,
     fetch: F,
+    parse_html: P,
 ) -> Result<DiscoveryCatalog, DiscoveryError>
 where
     F: Fn(Request, crate::model::Interaction) -> Fut,
     Fut: std::future::Future<Output = Result<crate::model::ResourceRead, crate::model::Error>>,
+    P: Fn(HtmlQuery) -> PFut,
+    PFut: std::future::Future<Output = Result<HtmlDocument, Error>>,
 {
     use futures_util::{StreamExt, stream};
     if inputs.len() > limits.resources {
         return Err(DiscoveryError::ResourceLimitExceeded);
     }
-    let resources = Resources {
-        fetch: &fetch,
-        reads: Default::default(),
-        responses: Default::default(),
-        retained: Default::default(),
-        parsed: Default::default(),
-        depths: Default::default(),
-        limits,
-    };
+    let supplied_bytes = inputs
+        .iter()
+        .filter_map(|input| input.contents.as_ref())
+        .try_fold(0usize, |total, bytes| {
+            total
+                .checked_add(bytes.len())
+                .filter(|total| *total <= limits.retained_bytes)
+        })
+        .ok_or(DiscoveryError::MetadataSizeLimitExceeded)?;
     let mut roots: Vec<_> = inputs
         .into_iter()
         .enumerate()
@@ -954,9 +1076,45 @@ where
             (evidence, 0usize, order, input)
         })
         .collect();
-    for (_, _, _, input) in &roots {
-        resources.supplied(input)?;
-    }
+    roots.sort_by_key(|(evidence, depth, order, _)| (*evidence, *depth, *order));
+    let resources = Resources {
+        fetch: &fetch,
+        parse_html: &parse_html,
+        selectors: HtmlDocument::PAGE_QUERIES
+            .iter()
+            .copied()
+            .chain(
+                specs
+                    .iter()
+                    .flat_map(|spec| spec.html_queries.iter().copied()),
+            )
+            .chain(specs.iter().flat_map(|spec| {
+                spec.routes.iter().filter_map(|route| match route.matcher {
+                    DiscoveryMatch::Css(selector, _) => Some(selector),
+                    _ => None,
+                })
+            }))
+            .map(str::to_owned)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+        supplied: roots
+            .iter()
+            .rev()
+            .filter_map(|(_, _, _, input)| {
+                input
+                    .contents
+                    .as_ref()
+                    .map(|bytes| (Request::new(&input.url), bytes.clone()))
+            })
+            .collect(),
+        reads: Default::default(),
+        responses: Default::default(),
+        retained: Rc::new(Cell::new(supplied_bytes)),
+        parsed: Default::default(),
+        depths: Default::default(),
+        limits,
+    };
     let mut visited: HashSet<String> = roots
         .iter()
         .map(|(_, _, _, input)| input.url.clone())
@@ -991,7 +1149,7 @@ where
             .iter()
             .map(|(rank, spec, uri)| {
                 let direct = spec.url_kind(uri) == Some(RouteKind::Image);
-                std::cell::Cell::new((rank.0, rank.1 + usize::from(!direct), rank.2, rank.3))
+                Cell::new((rank.0, rank.1 + usize::from(!direct), rank.2, rank.3))
             })
             .collect();
         let mut finished = vec![false; candidates.len()];
@@ -1018,23 +1176,19 @@ where
                 use std::task::Poll;
                 // Ordinary earlier reads keep their precedence. A branch that has
                 // followed a deeper link no longer delays a shallower result.
-                if winner.as_ref().is_some_and(|(best, _)| {
-                    priorities
-                        .iter()
-                        .enumerate()
-                        .all(|(i, rank)| finished[i] || rank.get() >= *best)
-                }) {
+                let settled = || {
+                    winner.as_ref().is_some_and(|(best, _)| {
+                        priorities
+                            .iter()
+                            .zip(&finished)
+                            .all(|(rank, done)| *done || rank.get() >= *best)
+                    })
+                };
+                if settled() {
                     return Poll::Ready(None);
                 }
                 let result = std::pin::Pin::new(&mut results).poll_next(cx);
-                if result.is_pending()
-                    && winner.as_ref().is_some_and(|(best, _)| {
-                        priorities
-                            .iter()
-                            .enumerate()
-                            .all(|(i, rank)| finished[i] || rank.get() >= *best)
-                    })
-                {
+                if result.is_pending() && settled() {
                     return Poll::Ready(None);
                 }
                 result
@@ -1073,18 +1227,15 @@ where
             else {
                 continue;
             };
-            let Ok(response) = &resource.response else {
+            let Some(page) = resource.resource() else {
                 continue;
             };
-            let base = response
-                .final_uri
-                .as_deref()
-                .filter(|uri| !uri.is_empty())
-                .unwrap_or(&resource.request.uri);
+            let base = page.final_uri();
             visited.insert(resource.request.uri.clone());
             visited.insert(base.to_owned());
-            for source in crate::web_page::iframe_sources(&response.bytes) {
-                let uri = resolve_relative(base, &source);
+            let document_base = crate::web_page::page_base(page);
+            for source in crate::web_page::iframe_sources(page) {
+                let uri = resolve_relative(&document_base, source);
                 let supported = match url::Url::parse(&uri) {
                     Ok(url) => matches!(url.scheme(), "http" | "https" | "file"),
                     Err(url::ParseError::RelativeUrlWithoutBase) => url::Url::parse(base).is_err(),
@@ -1104,7 +1255,7 @@ where
     blocked.sort_by_key(|(rank, _, _)| *rank);
     for (rank, spec, uri) in blocked {
         match resources
-            .resolve(spec, &uri, true, &std::cell::Cell::new(rank), rank)
+            .resolve(spec, &uri, true, &Cell::new(rank), rank)
             .await
         {
             Ok(Some((_, catalog))) => return Ok(catalog),

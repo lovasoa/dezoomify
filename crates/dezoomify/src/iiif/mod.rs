@@ -41,10 +41,10 @@ const ROUTES: &[DiscoveryRoute] = &[
     contentdm::RECORD_ROUTE,
     contentdm::METADATA_ROUTE,
     micrio::ROUTE,
-    viewer(html_matches(national_gallery::contains_image))
-        .extract_metadata(national_gallery::follow_image),
+    national_gallery::ROUTES[0],
+    national_gallery::ROUTES[1],
     philadelphia::ROUTE,
-    viewer(html_matches(has_info_json_url)).extract_metadata(follow_info_json_url),
+    viewer(html_matches(has_info_json_url)).decode(follow_info_json_url),
     metadata(url_suffix("/info.json")).decode(decode),
     metadata(url_suffix("/manifest.json")).decode(decode),
     metadata(any()).decode(decode),
@@ -144,6 +144,11 @@ static IMAGE_REQUEST_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
 });
 
 fn image_request_info(uri: &str) -> Option<Request> {
+    if uri.to_ascii_lowercase().contains("?iiif=")
+        && let Some((service, _)) = uri.rsplit_once("/full/")
+    {
+        return Some(Request::new(format!("{service}/info.json")));
+    }
     let c = IMAGE_REQUEST_RE.captures(uri)?;
     Some(Request::new(format!(
         "{}/info.json{}",
@@ -171,28 +176,18 @@ const MAX_SCANNED_INFO_JSON_URLS: usize = 32;
 
 fn harvest_info_json_urls(bytes: &[u8]) -> Vec<String> {
     let mut urls: Vec<String> = Vec::new();
-    for captures in ABS_INFO_JSON_RE.captures_iter(bytes) {
-        if let Some(matched) = captures.get(0) {
-            let text = String::from_utf8_lossy(matched.as_bytes()).into_owned();
-            if !urls.contains(&text) {
-                urls.push(text);
-            }
+    let references = ABS_INFO_JSON_RE.find_iter(bytes).chain(
+        REL_INFO_JSON_RE
+            .captures_iter(bytes)
+            .filter_map(|captures| captures.name("url")),
+    );
+    for reference in references {
+        let text = String::from_utf8_lossy(reference.as_bytes()).into_owned();
+        if !urls.contains(&text) {
+            urls.push(text);
         }
         if urls.len() >= MAX_SCANNED_INFO_JSON_URLS {
             break;
-        }
-    }
-    if urls.len() < MAX_SCANNED_INFO_JSON_URLS {
-        for captures in REL_INFO_JSON_RE.captures_iter(bytes) {
-            if let Some(matched) = captures.name("url") {
-                let text = String::from_utf8_lossy(matched.as_bytes()).into_owned();
-                if !urls.contains(&text) {
-                    urls.push(text);
-                }
-            }
-            if urls.len() >= MAX_SCANNED_INFO_JSON_URLS {
-                break;
-            }
         }
     }
     urls.sort_by_key(|url| !url.to_lowercase().contains("iiif"));
@@ -210,7 +205,7 @@ fn follow_info_json_url(resource: DiscoveryResource<'_>) -> Result<ParsedResourc
     if let Ok(found) = catalog(resource.final_uri(), resource.bytes()) {
         return Ok(ParsedResource::Complete(found));
     }
-    let base = crate::web_page::page_base(resource.bytes(), resource.final_uri());
+    let base = crate::web_page::page_base(resource);
     let target = harvest_info_json_urls(resource.bytes())
         .into_iter()
         .map(|url| resolve_relative(&base, url.trim()))

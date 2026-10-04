@@ -11,15 +11,17 @@ use crate::core::{
     ObservationResult, ParsedResource, Request, ResolvedGrid, ResolvedLevel, TileRole,
     TileSourceError, TileSpec, resolve_relative,
 };
-use crate::web_page::{page_title, tags};
+use crate::web_page::page_title;
 
 const TILE_SIZE: u32 = 512;
 const ROUTES: &[DiscoveryRoute] = &[
-    viewer(url_matches(is_pnav_url)).extract_metadata(follow_image_json),
+    viewer(url_matches(is_pnav_url)).decode(follow_image_json),
     metadata(url_matches(is_image_json)).child_metadata(complete_from_json),
 ];
 
-pub const SPEC: FormatSpec = FormatSpec::new("pnav", ROUTES).with_display_name("pnav");
+pub const SPEC: FormatSpec = FormatSpec::new("pnav", ROUTES)
+    .with_display_name("pnav")
+    .html_queries(&["meta[property=\"og:image\" i]"]);
 
 fn is_pnav_url(uri: &str) -> bool {
     let path = uri.split_once(['?', '#']).map_or(uri, |(path, _)| path);
@@ -43,24 +45,18 @@ fn is_image_json(uri: &str) -> bool {
         .ends_with(".json")
 }
 
-fn extract_image_url(page: &str, page_uri: &str) -> Option<String> {
-    tags(page.as_bytes())
-        .filter(|tag| tag.name() == b"meta")
+fn extract_image_url(resource: DiscoveryResource<'_>) -> Option<String> {
+    resource
+        .select("meta[property=\"og:image\" i]")
         .find_map(|tag| {
-            let property = tag.attribute("property")?;
-            if !property.eq_ignore_ascii_case("og:image") {
-                return None;
-            }
             let content = tag.attribute("content")?;
-            let image = content
-                .split_once('?')
-                .map_or(content.as_ref(), |(image, _)| image);
-            (!image.is_empty()).then(|| resolve_relative(page_uri, image))
+            let image = content.split_once('?').map_or(content, |(image, _)| image);
+            (!image.is_empty()).then(|| resolve_relative(resource.final_uri(), image))
         })
 }
 
 fn follow_image_json(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-    let image = extract_image_url(&resource.text_lossy(), resource.final_uri())
+    let image = extract_image_url(resource)
         .ok_or_else(|| DiscoveryError::InvalidMetadata("pnav page has no og:image URL".into()))?;
     Ok(ParsedResource::Follow(Request::new(json_url(&image)?)))
 }
@@ -78,13 +74,11 @@ fn complete_from_json(resource: DiscoveryResource<'_>) -> Result<ParsedResource,
     let (page, image) = context
         .resources()
         .rev()
-        .find_map(|page| {
-            extract_image_url(&page.text_lossy(), page.final_uri()).map(|image| (page, image))
-        })
+        .find_map(|page| extract_image_url(page).map(|image| (page, image)))
         .ok_or_else(|| {
             DiscoveryError::InvalidMetadata("pnav page is missing from discovery history".into())
         })?;
-    let title = page_title(&page.text_lossy());
+    let title = page_title(page);
     let source = AdaptiveSource::Pnav(PnavSource {
         image_url: image,
         width: metadata.width,

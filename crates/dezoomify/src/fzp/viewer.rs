@@ -12,7 +12,7 @@ use crate::javascript::{
     captured, captured_literal, captures, function_body, inside_function, literal_regex,
     mask as javascript, property, property_exists,
 };
-use crate::web_page::{Script, load_handlers, scripts as page_scripts};
+use crate::web_page::{Script, scripts as page_scripts};
 
 use super::invalid;
 
@@ -221,7 +221,7 @@ fn jime_path(
             &DEPTH_INDEX
         })?;
         captures(&DEPTH_INIT, text).next()?;
-        page_scripts(&document.text_lossy(), document.final_uri())
+        page_scripts(document)
             .into_iter()
             .filter_map(|script| script.source)
             .find_map(|src| {
@@ -243,27 +243,13 @@ fn jime_path(
     })
 }
 
-pub(super) fn recognizes(bytes: &[u8]) -> bool {
-    declaration(&source(&String::from_utf8_lossy(bytes))).is_some()
-}
-
-fn source(text: &str) -> String {
-    page_scripts(text, "https://unused.test/")
-        .into_iter()
-        .filter(|script| script.source.is_none())
-        .map(|script| javascript(script.body))
-        .chain(
-            load_handlers(text, "https://unused.test/")
-                .into_iter()
-                .map(|script| javascript(&script.body)),
-        )
-        .collect::<Vec<_>>()
-        .join("\n")
+pub(super) fn recognizes(resource: DiscoveryResource<'_>) -> bool {
+    configuration(resource, &[]).is_some()
 }
 
 pub(super) fn resource_base(resource: DiscoveryResource<'_>) -> Option<String> {
     let history = resource.context().resources().collect::<Vec<_>>();
-    let viewer = history.iter().find(|r| recognizes(r.bytes()))?;
+    let viewer = history.iter().find(|r| recognizes(**r))?;
     let (declaration, text, base) = configuration(*viewer, &history)?;
     let path = if declaration.kind == "xml" {
         declaration
@@ -287,7 +273,7 @@ fn directory(path: &str) -> String {
     }
 }
 
-fn script_source(script: &Script<&str>, resources: &[DiscoveryResource<'_>]) -> Option<String> {
+fn script_source(script: &Script, resources: &[DiscoveryResource<'_>]) -> Option<String> {
     if let Some(src) = &script.source {
         let uri = resolve_relative(&script.fetch_base, src);
         resources
@@ -295,7 +281,7 @@ fn script_source(script: &Script<&str>, resources: &[DiscoveryResource<'_>]) -> 
             .find(|r| r.uri() == uri)
             .map(|r| javascript(&r.text_lossy()))
     } else {
-        Some(javascript(script.body))
+        Some(javascript(&script.body))
     }
 }
 
@@ -303,15 +289,9 @@ fn configuration(
     document: DiscoveryResource<'_>,
     resources: &[DiscoveryResource<'_>],
 ) -> Option<(Declaration, String, String)> {
-    let document_text = document.text_lossy();
-    let sources = page_scripts(&document_text, document.final_uri())
+    let sources = page_scripts(document)
         .into_iter()
         .filter_map(|script| script_source(&script, resources).map(|source| (script.base, source)))
-        .chain(
-            load_handlers(&document_text, document.final_uri())
-                .into_iter()
-                .map(|script| (script.base, javascript(&script.body))),
-        )
         .collect::<Vec<_>>();
     let base = sources
         .iter()
@@ -369,7 +349,7 @@ fn navigate(
 ) -> Result<ParsedResource, DiscoveryError> {
     let document = *resources
         .iter()
-        .find(|r| recognizes(r.bytes()))
+        .find(|r| recognizes(**r))
         .ok_or_else(|| invalid("no supported literal Lime declaration"))?;
     if let Some(request) = scripts(document, resources).find(|r| !visited(&r.uri)) {
         return Ok(ParsedResource::Follow(request));
@@ -433,7 +413,7 @@ fn scripts(
     resources: &[DiscoveryResource<'_>],
 ) -> impl Iterator<Item = Request> {
     let mut requests = Vec::new();
-    for script in page_scripts(&document.text_lossy(), document.final_uri()) {
+    for script in page_scripts(document) {
         if let Some(src) = &script.source {
             requests.push(Request::new(resolve_relative(&script.fetch_base, src)));
         }
@@ -451,7 +431,7 @@ pub(super) fn failed_script(
     error: &crate::model::Error,
 ) -> Result<ParsedResource, DiscoveryError> {
     let resources = context.resources().collect::<Vec<_>>();
-    for document in context.resources().filter(|r| recognizes(r.bytes())) {
+    for document in context.resources().filter(|r| recognizes(*r)) {
         if scripts(document, &resources).any(|r| r.uri == request.uri) {
             return navigate(&resources, |uri| {
                 uri == request.uri || context.has_visited(uri)

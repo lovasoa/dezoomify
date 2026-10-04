@@ -8,6 +8,7 @@ macro_rules! host_members {
         $consumer! {
             async {
                 fetch => fetch(request: ResourceRequest, interaction: Interaction) -> ResourceRead;
+                parse_html => parseHtml(query: HtmlQuery) -> HtmlDocument;
                 probe => probe(tile: Tile) -> ProbeOutcome;
                 acquire_tile => acquireTile(tile: Tile) -> ();
                 finish => finish(request: FinishRequest) -> Output;
