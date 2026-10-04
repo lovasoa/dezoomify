@@ -475,6 +475,14 @@ test("canonical failures retain their precise request and affected resource", as
   });
 });
 
+test("output preflight ignores acquisition pause and classifies cancellation", async () => {
+  const h = setup();
+  h.host.pause();
+  await h.host.beginOutput({ canvas: tile.placement.canvas, grid: null, title: null });
+  h.controller.abort();
+  await assert.rejects(h.host.beginOutput({}), { kind: "cancelled" });
+});
+
 test("pause gates acquisition, resume releases it, cancellation interrupts waits and late progress", async () => {
   const h = setup();
   h.host.pause();

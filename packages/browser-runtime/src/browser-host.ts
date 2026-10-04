@@ -11,6 +11,7 @@ import type {
   Error as JobError,
   MissingTiles,
   Output,
+  OutputPlan,
   ProbeOutcome,
   Progress,
   RecoveryChoice,
@@ -57,6 +58,10 @@ export class BrowserHost implements Host {
   constructor(deps: BrowserHostDependencies) {
     this.deps = deps;
     this.signal = AbortSignal.any([deps.signal, this.resources.signal]);
+  }
+
+  async beginOutput(_plan: OutputPlan): Promise<void> {
+    await this.checkpoint("cancellation");
   }
 
   /** Classify one thrown value into the typed error contract, attaching the

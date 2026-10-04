@@ -62,6 +62,20 @@ export interface HtmlQuery {
 }
 
 /**
+ * Compact coverage for a regular, row-major tile plan. Requests remain lazy.
+ */
+export interface OutputGrid {
+    /**
+     * Cell dimensions before overlap and edge clipping.
+     */
+    tile_size: Size;
+    /**
+     * Additional pixels on each side, clipped to the canvas.
+     */
+    overlap: Size;
+}
+
+/**
  * Current filesystem availability, queried separately from job completion.
  */
 export type SavedOutputState = "available" | "deleted";
@@ -165,6 +179,18 @@ export interface MissingTile {
  * resource kind of any underlying failure.
  */
 export type Error = ({ kind: "http-error" } & { status: number; retry_after_ms?: number; preview?: string; transport: ErrorTransport } & Failure) | ({ kind: "rate-limited" } & { retry_after_ms?: number; transport: ErrorTransport } & Failure) | ({ kind: "timeout" } & { transport: ErrorTransport } & Failure) | ({ kind: "network-failure" } & { transport: ErrorTransport } & Failure) | ({ kind: "policy-denied" } & { blocked_reason: BlockedReason; transport: ErrorTransport } & Failure) | ({ kind: "bad-url" } & Failure) | ({ kind: "bad-redirect" } & Failure) | { kind: "redirect-limit"; max: number } | { kind: "size-limit"; max_bytes: number } | { kind: "cancelled" } | { kind: "proxy-budget-exceeded" } | ({ kind: "proxy-error" } & { transport: ErrorTransport } & Failure) | ({ kind: "no-image-found" } & Failure) | ({ kind: "malformed-metadata" } & Failure) | { kind: "unknown-format"; format: string } | { kind: "empty-resource" } | ({ kind: "resource-limit" } & Failure) | { kind: "deferred-limit"; max: number } | ({ kind: "discovery-failed" } & { cause?: Error } & Failure) | ({ kind: "invalid-input" } & Failure) | ({ kind: "invalid-options" } & Failure) | ({ kind: "invalid-state" } & Failure) | { kind: "duplicate" } | { kind: "stale" } | { kind: "plan-empty" } | ({ kind: "plan-invalid" } & Failure) | { kind: "no-usable-tiles"; transient: boolean; retry_after_ms?: number } | { kind: "partial-discarded"; transient: boolean; retry_after_ms?: number } | ({ kind: "decode-failed" } & Failure) | ({ kind: "processing-failed" } & Failure) | { kind: "limit-exceeded"; limit: LimitContext } | ({ kind: "encode-failed" } & Failure) | ({ kind: "write-failed" } & Failure) | { kind: "output-exists" } | ({ kind: "destination-denied" } & Failure) | ({ kind: "unsupported-extension" } & Failure) | ({ kind: "output-unavailable" } & Failure) | { kind: "output-no-parent" } | ({ kind: "launch-failed" } & Failure) | { kind: "output-denied" } | { kind: "output-not-found" } | { kind: "invoke-failed" } | ({ kind: "start-failed" } & Failure) | ({ kind: "choice-failed" } & Failure) | { kind: "invalid-url" } | ({ kind: "invalid-settings" } & Failure) | ({ kind: "registration-failed" } & Failure) | ({ kind: "internal" } & Failure) | { kind: "shell-lock" } | ({ kind: "binding-invalid-value" } & Failure) | { kind: "interaction-expired" } | { kind: "auth-forbidden-header" } | { kind: "resource"; request: string; resource_kind: ResourceKind; source: Error };
+
+/**
+ * Output preflight after geometry probes and before ordinary acquisitions.
+ * Positioned or unresolved coverage has no grid and must finalize safely.
+ */
+export interface OutputPlan {
+    canvas: Size | undefined;
+    grid: OutputGrid | undefined;
+    tile_count: number;
+    format: OutputFormat;
+    title: string | undefined;
+}
 
 /**
  * Output summary: geometry, completeness, and the honest disposition.
@@ -294,6 +320,7 @@ export interface Host {
     fetch(request: ResourceRequest,interaction: Interaction,): Promise<ResourceRead>;
     parseHtml(query: HtmlQuery,): Promise<HtmlDocument>;
     probe(tile: Tile,): Promise<ProbeOutcome>;
+    beginOutput(plan: OutputPlan,): Promise<void>;
     acquireTile(tile: Tile,): Promise<void>;
     finish(request: FinishRequest,): Promise<Output>;
     chooseImage(catalog: Catalog,): Promise<number>;
@@ -397,8 +424,8 @@ export interface InitOutput {
     readonly hasSecretParams: (a: number, b: number) => number;
     readonly isRetryable: (a: any) => [number, number, number];
     readonly isSecretKey: (a: number, b: number) => number;
-    readonly wasm_bindgen_e33b60f91a8a334f___convert__closures_____invoke___js_sys_8e779189fe7504dc___Function_fn_wasm_bindgen_e33b60f91a8a334f___JsValue_____wasm_bindgen_e33b60f91a8a334f___sys__Undefined___js_sys_8e779189fe7504dc___Function_fn_wasm_bindgen_e33b60f91a8a334f___JsValue_____wasm_bindgen_e33b60f91a8a334f___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
-    readonly wasm_bindgen_e33b60f91a8a334f___convert__closures_____invoke___wasm_bindgen_e33b60f91a8a334f___JsValue__core_ed718c3d60ebd546___result__Result_____wasm_bindgen_e33b60f91a8a334f___JsError___true_: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_aa50da02252d0a0c___convert__closures_____invoke___js_sys_28922c544317ab39___Function_fn_wasm_bindgen_aa50da02252d0a0c___JsValue_____wasm_bindgen_aa50da02252d0a0c___sys__Undefined___js_sys_28922c544317ab39___Function_fn_wasm_bindgen_aa50da02252d0a0c___JsValue_____wasm_bindgen_aa50da02252d0a0c___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
+    readonly wasm_bindgen_aa50da02252d0a0c___convert__closures_____invoke___wasm_bindgen_aa50da02252d0a0c___JsValue__core_ed718c3d60ebd546___result__Result_____wasm_bindgen_aa50da02252d0a0c___JsError___true_: (a: number, b: number, c: any) => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

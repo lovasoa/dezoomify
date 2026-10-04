@@ -1144,6 +1144,28 @@ pub struct ReusedTile {
     pub position: Point,
 }
 
+/// Compact coverage for a regular, row-major tile plan. Requests remain lazy.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct OutputGrid {
+    /// Cell dimensions before overlap and edge clipping.
+    pub tile_size: Size,
+    /// Additional pixels on each side, clipped to the canvas.
+    pub overlap: Size,
+}
+
+/// Output preflight after geometry probes and before ordinary acquisitions.
+/// Positioned or unresolved coverage has no grid and must finalize safely.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct OutputPlan {
+    pub canvas: Option<Size>,
+    pub grid: Option<OutputGrid>,
+    pub tile_count: u32,
+    pub format: OutputFormat,
+    pub title: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct FinishRequest {
