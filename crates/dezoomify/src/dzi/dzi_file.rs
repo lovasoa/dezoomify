@@ -104,7 +104,7 @@ pub struct Size {
 
 #[test]
 fn test_dzi() {
-    let dzi: DziFile = serde_xml_rs::from_str(
+    let dzi: DziFile = quick_xml::de::from_str(
         r#"
         <Image
             Format="png" Overlap="2" TileSize="256">

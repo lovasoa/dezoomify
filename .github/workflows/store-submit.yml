@@ -98,8 +98,8 @@ jobs:
         if: inputs.commit == ''
         run: |
           set -euo pipefail
-          cargo build -p dezoomify-wasm --release --target wasm32-unknown-unknown
-          wasm-bindgen --target web --out-dir wasm --out-name dezoomify-wasm target/wasm32-unknown-unknown/release/dezoomify_wasm.wasm
+          cargo build -p dezoomify-wasm --profile wasm-release --target wasm32-unknown-unknown
+          wasm-bindgen --remove-name-section --target web --out-dir wasm --out-name dezoomify-wasm target/wasm32-unknown-unknown/wasm-release/dezoomify_wasm.wasm
           test -f wasm/dezoomify-wasm.js && test -f wasm/dezoomify-wasm_bg.wasm
       - name: Resolve extension ID from release config
         env:

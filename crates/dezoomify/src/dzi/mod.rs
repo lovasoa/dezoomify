@@ -201,7 +201,7 @@ mod paris;
 
 fn decode_catalog(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let (url, contents) = (resource.final_uri(), resource.bytes());
-    let xml_result = serde_xml_rs::from_reader::<'_, DziFile, _>(contents);
+    let xml_result = quick_xml::de::from_reader::<_, DziFile>(contents);
     let xml_err = xml_result.as_ref().err().map(ToString::to_string);
     let parsed = xml_result
         .ok()

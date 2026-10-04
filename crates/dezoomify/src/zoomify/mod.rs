@@ -324,7 +324,7 @@ fn image_properties(
     resource: crate::core::DiscoveryResource<'_>,
 ) -> Result<ParsedResource, DiscoveryError> {
     let (url, contents) = (resource.uri(), resource.bytes());
-    let properties: ImageProperties = serde_xml_rs::from_reader(contents).map_err(|error| {
+    let properties: ImageProperties = quick_xml::de::from_reader(contents).map_err(|error| {
         DiscoveryError::InvalidMetadata(format!("unable to parse Zoomify XML: {error}"))
     })?;
     if properties.width == 0 || properties.height == 0 || properties.tile_size == 0 {

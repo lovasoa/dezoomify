@@ -31,7 +31,7 @@ fn image_origin(url: &str) -> String {
 
 fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let (url, bytes) = (resource.final_uri(), resource.bytes());
-    let metadata: Metadata = serde_xml_rs::from_reader(bytes).map_err(|error| {
+    let metadata: Metadata = quick_xml::de::from_reader(bytes).map_err(|error| {
         DiscoveryError::InvalidMetadata(format!("unable to parse XLimage metadata: {error}"))
     })?;
     if metadata.width == 0
