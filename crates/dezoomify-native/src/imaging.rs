@@ -140,10 +140,10 @@ pub(crate) fn blit_onto(
     if copy_w == 0 || copy_h == 0 {
         return;
     }
-    let cropped = image::imageops::crop_imm(tile, 0, 0, copy_w, copy_h).to_image();
+    let cropped = image::imageops::crop_imm(tile, 0, 0, copy_w, copy_h);
     image::imageops::overlay(
         target,
-        &cropped,
+        &*cropped,
         i64::from(destination.x),
         i64::from(destination.y),
     );
