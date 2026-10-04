@@ -10,7 +10,7 @@ The HTML parser includes unmodified MPL-2.0 dependencies; source and license not
 - Sixteen concurrent tile operations by default. One acquisition includes fetch, processing, decode, and placement. Per-host pacing has a 200 ms floor.
 - Requests have a 30 s timeout and 6 s connection timeout. Each transport call makes one attempt; shared Rust code classifies failures and schedules retries.
 - Blocking decoding reserves body bytes before scheduling and releases them when the decoder exits. Cleanup waits for owned tasks and decoder tails.
-- Cache keys use versioned URL digests under an input-specific namespace. Cached bytes must still decode; corrupt entries trigger a fresh fetch. Headers, cookies, and credentials never enter cache keys.
+- Cache keys use versioned URL digests under an input-specific namespace. Cached bytes pass the chosen route's inspection or decoding checks; rejected entries trigger a fresh fetch. Headers, cookies, and credentials never enter cache keys.
 
 Selection preserves `--largest`, exact `--zoom-level`, width/height caps, and `--image-index`. Deferred catalogs resolve within the invocation with follow and cycle bounds. Unknown formats and invalid settings fail before output.
 
@@ -18,7 +18,11 @@ After geometry probes, output preflight receives compact coverage without genera
 
 `sink.rs` owns deterministic placement and memory accounting. Known geometry paints directly. Unknown geometry spools under the configured disk cap; overlapping tiles retain plan order under the retained-memory cap. The canvas uses four bytes per pixel and cannot exceed available system memory.
 
-Tile placement borrows cropped pixels rather than copying them into a temporary image. Output encoders borrow the assembled canvas without cloning its pixel buffer. Single-file encoders write through a 64 KiB buffer directly to staging; JPEG borrows RGB channels without a full RGB copy. Codec workspace and pyramid pixels may require additional memory. IIIF directory rendering still buffers its encoded tile set.
+Tile placement borrows cropped pixels rather than copying them into a temporary image. Output encoders borrow the assembled canvas without cloning its pixel buffer. Single-file encoders write through a 64 KiB buffer directly to staging; JPEG borrows RGB channels without a full RGB copy. Codec workspace and pyramid pixels may require additional memory.
+
+When changing tiled output, preserve compatible source bytes through the [encoded tile writer](../crates/dezoomify-native/src/tile_output.rs). Structural checks catch ordinary truncation without decoding; they do not promise detection of all compressed-data corruption. Convert tiles locally only when the output needs it, keeping failures within acquisition's retry and partial handling.
+
+When serving an IIIF directory, resolve its relative service identifier against the info.json URL. PNG-only output extends the [JPEG-required v2 profile](https://iiif.io/api/image/2.1/compliance/); configure the viewer to honor preferredFormats. With OpenSeadragon, use its IIIF `configure` method.
 
 Output publication checks cancellation and the destination before committing. Uncommitted temporary resources are invocation-owned and cleaned after failure. Published files remain intact. A publication that has committed returns success; otherwise cancellation publishes nothing and preserves any existing destination.
 
@@ -35,7 +39,7 @@ Native handles images beyond browser-tab size and local sources, within availabl
 - `.zif` multi-level pyramid (full resolution plus halvings, each deflate-compressed; the canvas is re-encoded per level, never passed through as tiles);
 - `.iiif` an `iiif-dir` tree at that path; extensionless paths (or existing directories) also save `iiif-dir`.
 
-Other extensions fail typed before any work. JPEG caps at 65535 px per side, WebP at 16383; larger canvases save as PNG, TIFF, ZIF, or `iiif-dir`. An `iiif-dir` holds IIIF Image API v2 `info.json` plus JPEG tiles at real request paths (`{x},{y},{w},{h}/{tw},/0/default.jpg`) with one `full/max/0/default.jpg` overview, servable from a static file server.
+Other extensions fail typed before any work. JPEG caps at 65535 px per side, WebP at 16383; larger canvases save as PNG, TIFF, ZIF, or `iiif-dir`. An `iiif-dir` holds a static `info.json`, JPEG or PNG tiles at real request paths (`{x},{y},{w},{h}/{tw},/0/default.{jpg,png}`), explicit-dimension aliases, and an overview at the smallest advertised full-image size. JPEG trees meet IIIF v2 level 0; PNG-only capabilities are described above. It is servable from a static file server. Directory publication refuses existing destinations, including overwrite requests, and uses atomic no-replace rename on supported platforms; existing trees remain intact.
 
 ### Partial output
 

@@ -13,6 +13,7 @@ pub mod imaging;
 pub mod options;
 pub mod output;
 pub mod sink;
+mod tile_output;
 pub mod transport;
 
 pub use host::{Controls, Instrumentation, NativeHost, Publication};

@@ -14,6 +14,30 @@ use dezoomify::model::{Error, Failure, LimitContext, OutputFormat};
 /// sorted relative-path order.
 pub type IiifTiles = Vec<(String, Vec<u8>)>;
 
+pub(crate) fn directory_bytes(path: &Path, cancelled: &AtomicBool) -> Result<u64, Error> {
+    if cancelled.load(Ordering::SeqCst) {
+        return Err(Error::Cancelled);
+    }
+    let mut bytes = 0;
+    for entry in
+        std::fs::read_dir(path).map_err(|e| write_failed("output directory stat failed", &e))?
+    {
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(Error::Cancelled);
+        }
+        let entry = entry.map_err(|e| write_failed("output entry stat failed", &e))?;
+        let metadata = entry
+            .metadata()
+            .map_err(|e| write_failed("output stat failed", &e))?;
+        bytes += if metadata.is_dir() {
+            directory_bytes(&entry.path(), cancelled)?
+        } else {
+            metadata.len()
+        };
+    }
+    Ok(bytes)
+}
+
 /// An exclusively created, invocation-owned file. Drop removes unpublished
 /// output, including when an encoder or publication fails.
 pub(crate) struct StagedFile {
@@ -93,6 +117,138 @@ impl Drop for StagedFile {
     fn drop(&mut self) {
         self.file.take();
         let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// One unpublished tile tree. Only final tile payloads are stored here.
+pub(crate) struct StagedDirectory {
+    pub(crate) path: std::path::PathBuf,
+}
+
+impl StagedDirectory {
+    pub(crate) fn new(destination: &Path) -> Result<Self, Error> {
+        if destination.exists() {
+            return Err(Error::OutputExists);
+        }
+        if let Some(parent) = destination.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| write_failed("output directory creation failed", &e))?;
+        }
+        let path = crate::sink::temp_sibling(destination);
+        std::fs::create_dir(&path)
+            .map_err(|e| write_failed("staging directory creation failed", &e))?;
+        Ok(Self { path })
+    }
+
+    pub(crate) fn write(
+        &self,
+        relative: &str,
+        bytes: &[u8],
+        cancelled: &AtomicBool,
+    ) -> Result<std::path::PathBuf, Error> {
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(Error::Cancelled);
+        }
+        let path = self.path.join(relative);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| write_failed("tile directory creation failed", &e))?;
+        }
+        let mut file =
+            std::fs::File::create(&path).map_err(|e| write_failed("tile creation failed", &e))?;
+        for chunk in bytes.chunks(64 << 10) {
+            if cancelled.load(Ordering::SeqCst) {
+                return Err(Error::Cancelled);
+            }
+            file.write_all(chunk)
+                .map_err(|e| write_failed("tile write failed", &e))?;
+        }
+        file.sync_all()
+            .map_err(|e| write_failed("tile sync failed", &e))?;
+        Ok(path)
+    }
+
+    /// Alias one payload, falling back to identical bytes without hard links.
+    pub(crate) fn alias(
+        &self,
+        source: &Path,
+        relative: &str,
+        bytes: &[u8],
+        cancelled: &AtomicBool,
+    ) -> Result<(), Error> {
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(Error::Cancelled);
+        }
+        let alias = self.path.join(relative);
+        std::fs::create_dir_all(alias.parent().expect("tile parent"))
+            .map_err(|e| write_failed("alias directory creation failed", &e))?;
+        if std::fs::hard_link(source, alias).is_err() {
+            self.write(relative, bytes, cancelled)?;
+        }
+        Ok(())
+    }
+
+    /// Alias a staged encoded payload without loading it into RAM.
+    pub(crate) fn alias_file(
+        &self,
+        source: &Path,
+        relative: &str,
+        cancelled: &AtomicBool,
+    ) -> Result<(), Error> {
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(Error::Cancelled);
+        }
+        let alias = self.path.join(relative);
+        std::fs::create_dir_all(alias.parent().expect("tile parent"))
+            .map_err(|e| write_failed("alias directory creation failed", &e))?;
+        if std::fs::hard_link(source, &alias).is_err() {
+            let mut input = std::fs::File::open(source)
+                .map_err(|e| write_failed("alias source open failed", &e))?;
+            let mut file = StagedFile::new(&alias)?;
+            let result = std::io::copy(&mut input, &mut file.writer(cancelled));
+            file.check_error()?;
+            if cancelled.load(Ordering::SeqCst) {
+                return Err(Error::Cancelled);
+            }
+            result.map_err(|e| write_failed("alias copy failed", &e))?;
+            file.publish(&alias, false, cancelled)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn publish(self, destination: &Path, cancelled: &AtomicBool) -> Result<(), Error> {
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(Error::Cancelled);
+        }
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let result = rustix::fs::renameat_with(
+            rustix::fs::CWD,
+            &self.path,
+            rustix::fs::CWD,
+            destination,
+            rustix::fs::RenameFlags::NOREPLACE,
+        )
+        .map_err(std::io::Error::from);
+        #[cfg(target_os = "windows")]
+        let result = std::fs::rename(&self.path, destination);
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+        let result = Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "atomic directory publication is unavailable",
+        ));
+        result.map_err(|e| {
+            if destination.exists() {
+                Error::OutputExists
+            } else {
+                write_failed("directory publication failed", &e)
+            }
+        })
+    }
+}
+
+impl Drop for StagedDirectory {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
     }
 }
 

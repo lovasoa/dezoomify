@@ -339,19 +339,19 @@ fn iiif_dir_writes_manifest_and_addressable_tiles() {
     .expect("info.json parses");
     assert_eq!(info["width"], 512);
     assert_eq!(info["height"], 512);
-    assert_eq!(info["tiles"][0]["width"], 512);
-    assert_eq!(info["tiles"][0]["scaleFactors"], serde_json::json!([1]));
+    assert_eq!(info["tiles"][0]["width"], 256);
+    assert_eq!(info["tiles"][0]["scaleFactors"], serde_json::json!([1, 2]));
     // Each tile sits at its real IIIF request path, so a plain static file
     // server answers IIIF URLs, plus one full-image overview.
-    let tile = output.join("0,0,512,512/512,/0/default.jpg");
-    let overview = output.join("full/max/0/default.jpg");
+    let tile = output.join("0,0,256,256/256,/0/default.png");
+    let overview = output.join("full/256,/0/default.png");
     for path in [&tile, &overview] {
         let bytes = std::fs::read(path).expect("tile file written");
-        assert!(bytes.starts_with(&[0xFF, 0xD8, 0xFF]), "tile is jpeg");
+        assert!(bytes.starts_with(b"\x89PNG"), "tile is png");
         let decoded = image::load_from_memory(&bytes)
             .expect("tile decodes")
             .to_rgba8();
-        assert_eq!((decoded.width(), decoded.height()), (512, 512));
+        assert_eq!((decoded.width(), decoded.height()), (256, 256));
     }
 }
 
