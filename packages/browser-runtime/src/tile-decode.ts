@@ -1,4 +1,5 @@
 import type { DiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
+import { tileError } from "./failure.ts";
 
 export interface TileBitmap {
   width: number;
@@ -25,11 +26,11 @@ export function createTileDecoder(
   return {
     decode(bytes, signal) {
       const owned = signal ? AbortSignal.any([signal, lifetime.signal]) : lifetime.signal;
-      if (owned.aborted) return Promise.reject(owned.reason);
+      if (owned.aborted) return Promise.reject({ kind: "cancelled" });
       const decode = host.createImageBitmap ?? globalThis.createImageBitmap;
       const BlobClass = host.blobCtor ?? Blob;
       return new Promise<TileBitmap>((resolve, reject) => {
-        const abort = () => reject(owned.reason);
+        const abort = () => reject({ kind: "cancelled" });
         owned.addEventListener("abort", abort, { once: true });
         const work = Promise.resolve()
           .then(() => {
@@ -42,13 +43,13 @@ export function createTileDecoder(
               const bitmap = value as TileBitmap;
               if (owned.aborted) {
                 bitmap.close();
-                reject(owned.reason);
+                reject({ kind: "cancelled" });
               } else resolve(bitmap);
             },
             (error) => {
               owned.removeEventListener("abort", abort);
               diagnostics?.record("debug", "decode-failed", error);
-              reject(error);
+              reject(owned.aborted ? { kind: "cancelled" } : tileError("decode-failed", error));
             },
           )
           .finally(() => pending.delete(work));

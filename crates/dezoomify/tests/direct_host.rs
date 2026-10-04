@@ -184,7 +184,13 @@ fn transient_failures_honor_exact_budget_and_retry_after() {
         transport: ErrorTransport::DisplayOnly,
         failure: Failure::default(),
     };
-    fail(&host, 0, [throttled, failure(503)]);
+    let network = Error::NetworkFailure {
+        transport: ErrorTransport::Direct,
+        failure: Failure::default(),
+    }
+    .resource("https://images.test/tile.jpg", ResourceKind::Tile);
+    assert!(network.retryable());
+    fail(&host, 0, [throttled, network]);
     invoke(&host, options()).unwrap();
     assert_eq!(
         host.attempts.borrow().iter().filter(|i| **i == 0).count(),
@@ -194,20 +200,26 @@ fn transient_failures_honor_exact_budget_and_retry_after() {
     assert!(host.partials.borrow().is_empty());
 }
 #[test]
-fn forbidden_is_permanent_and_partial_is_asked_after_all_tiles_settle() {
-    let host = MemoryHost::default();
-    fail(&host, 0, [failure(403)]);
-    host.choices.borrow_mut().push_back(RecoveryChoice::Keep);
-    let output = invoke(&host, options()).unwrap();
-    assert!(!output.is_complete());
-    assert_eq!(output.missing, [0]);
-    assert_eq!(host.attempts.borrow().len(), 4);
-    assert!(host.sleeps.borrow().is_empty());
-    assert_eq!(
-        host.partials.borrow()[0].missing[0].failures[0],
-        failure(403)
-    );
-    assert_eq!(host.acquired.borrow().len(), 3);
+fn permanent_failures_ask_partial_after_all_tiles_settle() {
+    for error in [
+        failure(403),
+        Error::DecodeFailed("corrupt tile".to_string().into())
+            .resource("https://images.test/tile.jpg", ResourceKind::Tile),
+        Error::ProcessingFailed("invalid encrypted tile".to_string().into())
+            .resource("https://images.test/tile.jpg", ResourceKind::Tile),
+    ] {
+        assert!(!error.retryable());
+        let host = MemoryHost::default();
+        fail(&host, 0, [error.clone()]);
+        host.choices.borrow_mut().push_back(RecoveryChoice::Keep);
+        let output = invoke(&host, options()).unwrap();
+        assert!(!output.is_complete());
+        assert_eq!(output.missing, [0]);
+        assert_eq!(host.attempts.borrow().len(), 4);
+        assert!(host.sleeps.borrow().is_empty());
+        assert_eq!(host.partials.borrow()[0].missing[0].failures[0], error);
+        assert_eq!(host.acquired.borrow().len(), 3);
+    }
 }
 #[test]
 fn partial_retry_only_reacquires_missing_tiles_with_a_fresh_budget() {

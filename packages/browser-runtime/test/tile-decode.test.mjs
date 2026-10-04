@@ -24,6 +24,26 @@ test("browser decoder returns the decoded dimensions", async () => {
   assert.equal(out.height, 5);
   decoder.dispose();
 });
+test("decoder rejection preserves typed causes and bounds unexpected error details", async () => {
+  for (const original of [
+    new Error("invalid bytes".repeat(200)),
+    { kind: "decode-failed", detail: "bad image" },
+  ]) {
+    const decoder = createTileDecoder({
+      createImageBitmap: async () => {
+        throw original;
+      },
+    });
+    await assert.rejects(decoder.decode(new ArrayBuffer(4)), (error) => {
+      if (original.kind) assert.equal(error, original);
+      else
+        assert.deepEqual(error, { kind: "decode-failed", detail: String(original).slice(0, 2048) });
+      return true;
+    });
+    await decoder.settle();
+    decoder.dispose();
+  }
+});
 for (const action of ["cancel", "dispose"])
   test(`${action} closes a late decoded bitmap and prevents publication`, async () => {
     let finish;
@@ -38,7 +58,7 @@ for (const action of ["cancel", "dispose"])
     await Promise.resolve();
     if (action === "cancel") controller.abort();
     else decoder.dispose();
-    await assert.rejects(pending, { name: "AbortError" });
+    await assert.rejects(pending, { kind: "cancelled" });
     decoder.dispose();
     let settled = false;
     const settling = decoder.settle().then(() => {

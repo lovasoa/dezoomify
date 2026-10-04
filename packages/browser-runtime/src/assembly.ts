@@ -139,8 +139,6 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
   ): Promise<void> {
     signal.throwIfAborted();
     placements.set(tile, placement);
-    // Processing and decoding failures are typed at their source so they
-    // classify as tile failures instead of the retryable fetch fallback.
     let input: ArrayBuffer;
     try {
       input =
@@ -150,13 +148,7 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
       throw tileError("processing-failed", error);
     }
     signal.throwIfAborted();
-    let bitmap: TileBitmap;
-    try {
-      bitmap = await deps.decode(input);
-    } catch (error) {
-      signal.throwIfAborted();
-      throw tileError("decode-failed", error);
-    }
+    const bitmap = await deps.decode(input);
     const mismatch =
       placement.expected_size &&
       (placement.expected_size.width !== bitmap.width ||
