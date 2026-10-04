@@ -837,6 +837,8 @@ impl Host for NativeHost<'_> {
                         height: extent.height.min(encoded.size.height),
                     };
                     if size != encoded.size
+                        || (self.format == OutputFormat::Zif
+                            && !crate::zif_output::can_reuse(&encoded.bytes))
                         || !matches!(
                             encoded.format,
                             image::ImageFormat::Png | image::ImageFormat::Jpeg

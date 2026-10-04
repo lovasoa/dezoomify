@@ -708,6 +708,13 @@ pub(crate) enum TileWriter {
     Zif(crate::zif_output::ZifWriter),
 }
 impl TileWriter {
+    pub(crate) fn hold_queued_bytes(&mut self, bytes: u64) -> Result<(), Error> {
+        match self {
+            Self::Iiif(writer) => writer.hold_queued_bytes(bytes),
+            Self::Zif(writer) => writer.hold_queued_bytes(bytes),
+        }
+    }
+
     pub(crate) fn release_probe_bytes(&mut self, bytes: u64) {
         match self {
             Self::Iiif(writer) => writer.release_probe_bytes(bytes),
@@ -731,7 +738,7 @@ impl TileWriter {
     ) -> Result<Self, Error> {
         match plan.format {
             dezoomify::model::OutputFormat::IiifDir => {
-                IiifWriter::new(destination, plan, budget, compression).map(Self::Iiif)
+                IiifWriter::new(destination, plan, budget, compression, max_tiles).map(Self::Iiif)
             }
             dezoomify::model::OutputFormat::Zif => {
                 crate::zif_output::ZifWriter::new(destination, plan, budget, compression, max_tiles)

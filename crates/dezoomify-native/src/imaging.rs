@@ -340,22 +340,22 @@ pub(crate) fn encode_zif_pyramid_to<W: std::io::Write + std::io::Seek>(
     output
         .apply(container.init().map_err(failed)?)
         .map_err(failed)?;
+    let mut previous = None;
     for (level, (width, height)) in tiff_pyramid_sizes(image.width(), image.height())
         .into_iter()
         .enumerate()
     {
-        let downscaled;
-        let view: &image::RgbaImage = if width == image.width() && height == image.height() {
-            image
+        let downscaled = if level == 0 {
+            None
         } else {
-            downscaled = image::imageops::resize(
-                image,
+            Some(image::imageops::resize(
+                previous.as_ref().unwrap_or(image),
                 width,
                 height,
                 image::imageops::FilterType::Triangle,
-            );
-            &downscaled
+            ))
         };
+        let view = downscaled.as_ref().unwrap_or(image);
         for y in (0..height).step_by(256) {
             for x in (0..width).step_by(256) {
                 let tile = image::RgbImage::from_fn(
@@ -396,6 +396,7 @@ pub(crate) fn encode_zif_pyramid_to<W: std::io::Write + std::io::Seek>(
                     .map_err(failed)?;
             }
         }
+        previous = downscaled;
     }
     Ok(())
 }

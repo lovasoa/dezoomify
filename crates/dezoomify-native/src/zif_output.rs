@@ -89,6 +89,10 @@ fn profile(bytes: &[u8]) -> Option<Profile> {
     }
 }
 
+pub(crate) fn can_reuse(bytes: &[u8]) -> bool {
+    profile(bytes).is_some()
+}
+
 fn failed(error: impl std::fmt::Display) -> Error {
     Error::EncodeFailed(format!("ZIF: {error}").into())
 }
@@ -112,6 +116,12 @@ pub(crate) struct ZifWriter {
 }
 
 impl ZifWriter {
+    pub(crate) fn hold_queued_bytes(&mut self, bytes: u64) -> Result<(), Error> {
+        memory_check(self.retained_bytes().saturating_add(bytes), self.budget)?;
+        self.budget -= bytes;
+        Ok(())
+    }
+
     pub(crate) fn release_probe_bytes(&mut self, bytes: u64) {
         self.budget = self.budget.saturating_add(bytes);
     }
@@ -332,19 +342,34 @@ impl ZifWriter {
             tile.id
         };
         use image::ImageDecoder as _;
-        let mut metadata = if let Ok(mut decoder) =
-            image::ImageReader::new(std::io::Cursor::new(&tile.bytes))
-                .with_guessed_format()
-                .and_then(|reader| reader.into_decoder().map_err(std::io::Error::other))
-        {
-            Some((
-                tile.placement.position.clone(),
-                decoder.icc_profile().unwrap_or(None),
-                decoder.exif_metadata().unwrap_or(None),
-            ))
-        } else {
-            None
-        };
+        memory_check(
+            tile.bytes.len() as u64 + self.retained_bytes() + index_growth,
+            self.budget,
+        )?;
+        let mut reader =
+            image::ImageReader::with_format(std::io::Cursor::new(&tile.bytes), tile.format);
+        let mut limits = image::Limits::default();
+        // Set before construction: PNG can inflate ICC metadata in read_info.
+        // Leave room for the encoded body and copies returned by metadata APIs.
+        limits.max_alloc = Some(
+            self.budget
+                .saturating_sub(self.retained_bytes() + index_growth + tile.bytes.len() as u64)
+                / 2,
+        );
+        reader.limits(limits);
+        let mut decoder = reader
+            .into_decoder()
+            .map_err(crate::tile_output::decode_error)?;
+        let mut metadata = Some((
+            tile.placement.position.clone(),
+            decoder
+                .icc_profile()
+                .map_err(crate::tile_output::decode_error)?,
+            decoder
+                .exif_metadata()
+                .map_err(crate::tile_output::decode_error)?,
+        ));
+        drop(decoder);
         let metadata_bytes = metadata.as_ref().map_or(0, |(_, icc, exif)| {
             icc.as_ref().map_or(0, Vec::len) as u64 + exif.as_ref().map_or(0, Vec::len) as u64
         });
@@ -356,21 +381,22 @@ impl ZifWriter {
             .budget
             .saturating_sub(self.retained_bytes() + metadata_bytes + index_growth);
         let source_profile = profile(&tile.bytes);
-        // The first received grid tile establishes the container codec.
-        // Missing or slow tile zero must not retain the rest of the image.
-        if self.writer.is_none() && self.base.regular {
-            self.initialize(source_profile.unwrap_or(Profile::PngRgb), cancelled)?;
-        }
+        // Commit the codec only after the first tile is accepted. Failed
+        // conversion must not force later reusable tiles through that codec.
+        let selected = self.profile.or(source_profile).unwrap_or(Profile::PngRgb);
         let compatible = self.base.regular
             && rect == self.base.rect(index)
             && tile.size.width == rect.w
             && tile.size.height == rect.h
             && source_profile.is_some()
-            && source_profile == self.profile;
+            && source_profile == Some(selected);
         let stored = if compatible {
+            if self.writer.is_none() {
+                self.initialize(selected, cancelled)?;
+            }
             self.accept_metadata(index, metadata.take());
             self.store(0, rect, &tile.bytes, cancelled)?
-        } else if self.base.regular && rect == self.base.rect(index) && self.writer.is_some() {
+        } else if self.base.regular && rect == self.base.rect(index) {
             self.decoded += 1;
             let pixels = tile.decode_pixels(
                 &Size {
@@ -379,6 +405,9 @@ impl ZifWriter {
                 },
                 conversion_budget,
             )?;
+            if self.writer.is_none() {
+                self.initialize(selected, cancelled)?;
+            }
             self.accept_metadata(index, metadata.take());
             drop(tile);
             let bytes = self.encode(&pixels)?;
@@ -681,6 +710,7 @@ mod tests {
         let error = writer
             .place(
                 EncodedTile {
+                    request: None,
                     id: 0,
                     size: size.clone(),
                     bytes,
@@ -696,7 +726,10 @@ mod tests {
                 &AtomicBool::new(false),
             )
             .unwrap_err();
-        assert!(matches!(error, Error::LimitExceeded { .. }));
+        assert!(matches!(
+            error,
+            Error::LimitExceeded { .. } | Error::ResourceLimit(_)
+        ));
         assert!(
             writer.metadata.is_empty(),
             "rejected tile metadata is not retained"
