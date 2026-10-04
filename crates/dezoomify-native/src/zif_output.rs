@@ -112,6 +112,10 @@ pub(crate) struct ZifWriter {
 }
 
 impl ZifWriter {
+    pub(crate) fn release_probe_bytes(&mut self, bytes: u64) {
+        self.budget = self.budget.saturating_add(bytes);
+    }
+
     pub(crate) fn peak_retained(&self) -> u64 {
         self.peak_retained
     }
@@ -295,10 +299,15 @@ impl ZifWriter {
             w: extent.width.min(tile.size.width),
             h: extent.height.min(tile.size.height),
         };
-        if self.infer_canvas {
-            self.base.size.width = self.base.size.width.max(rect.x.saturating_add(rect.w));
-            self.base.size.height = self.base.size.height.max(rect.y.saturating_add(rect.h));
-            let count = self.base.count()?;
+        let mut inferred_size = self.base.size.clone();
+        let index_growth = if self.infer_canvas {
+            inferred_size.width = inferred_size.width.max(rect.x.saturating_add(rect.w));
+            inferred_size.height = inferred_size.height.max(rect.y.saturating_add(rect.h));
+            let count = inferred_size
+                .width
+                .div_ceil(self.base.cell.width)
+                .checked_mul(inferred_size.height.div_ceil(self.base.cell.height))
+                .ok_or_else(|| Error::ResourceLimit("output tile count overflow".into()))?;
             if count > self.max_tiles {
                 return Err(Error::ResourceLimit(
                     "ZIF output tile count exceeds max_tiles".into(),
@@ -307,12 +316,12 @@ impl ZifWriter {
             let index_bytes = u64::from(count) * 512;
             let growth = index_bytes.saturating_sub(self.index_bytes);
             memory_check(growth + self.retained_bytes(), self.budget)?;
-            self.budget -= growth;
-            self.index_bytes = index_bytes;
+            growth
         } else {
             rect.w = rect.w.min(self.base.size.width.saturating_sub(rect.x));
             rect.h = rect.h.min(self.base.size.height.saturating_sub(rect.y));
-        }
+            0
+        };
         if rect.w == 0 || rect.h == 0 {
             return Ok(());
         }
@@ -339,10 +348,13 @@ impl ZifWriter {
         let metadata_bytes = metadata.as_ref().map_or(0, |(_, icc, exif)| {
             icc.as_ref().map_or(0, Vec::len) as u64 + exif.as_ref().map_or(0, Vec::len) as u64
         });
-        memory_check(self.retained_bytes() + metadata_bytes, self.budget)?;
+        memory_check(
+            self.retained_bytes() + metadata_bytes + index_growth,
+            self.budget,
+        )?;
         let conversion_budget = self
             .budget
-            .saturating_sub(self.retained_bytes() + metadata_bytes);
+            .saturating_sub(self.retained_bytes() + metadata_bytes + index_growth);
         let source_profile = profile(&tile.bytes);
         // The first received grid tile establishes the container codec.
         // Missing or slow tile zero must not retain the rest of the image.
@@ -392,7 +404,7 @@ impl ZifWriter {
             self.retained += tile.bytes.len() as u64;
             let retained = self.retained_bytes();
             self.peak_retained = self.peak_retained.max(retained);
-            memory_check(retained, self.budget)?;
+            memory_check(retained + index_growth, self.budget)?;
             StoredTile {
                 rect,
                 size: tile.size,
@@ -400,6 +412,9 @@ impl ZifWriter {
                 bytes: TileBytes::Memory(tile.bytes),
             }
         };
+        self.base.size = inferred_size;
+        self.budget -= index_growth;
+        self.index_bytes += index_growth;
         self.base.tiles.insert(index, stored);
         Ok(())
     }

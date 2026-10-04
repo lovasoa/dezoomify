@@ -708,6 +708,13 @@ pub(crate) enum TileWriter {
     Zif(crate::zif_output::ZifWriter),
 }
 impl TileWriter {
+    pub(crate) fn release_probe_bytes(&mut self, bytes: u64) {
+        match self {
+            Self::Iiif(writer) => writer.release_probe_bytes(bytes),
+            Self::Zif(writer) => writer.release_probe_bytes(bytes),
+        }
+    }
+
     pub(crate) fn peak_retained(&self) -> u64 {
         match self {
             Self::Iiif(writer) => writer.peak_retained(),
