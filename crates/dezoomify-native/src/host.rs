@@ -759,9 +759,10 @@ impl Host for NativeHost<'_> {
             self.place(&tile, decoded)
         }
         .await;
-        if result
-            .as_ref()
-            .is_err_and(|e| matches!(e.cause(), Error::DecodeFailed(_)))
+        if matches!(self.format, OutputFormat::IiifDir | OutputFormat::Zif)
+            && result
+                .as_ref()
+                .is_err_and(|e| matches!(e.cause(), Error::DecodeFailed(_)))
         {
             let dir = self
                 .options
