@@ -75,18 +75,16 @@ fn complete_from_json(resource: DiscoveryResource<'_>) -> Result<ParsedResource,
             "pnav image dimensions must be positive".into(),
         ));
     }
-    let page = context
+    let (page, image) = context
         .resources()
         .rev()
-        .find(|page| extract_image_url(&page.text_lossy(), page.final_uri()).is_some())
+        .find_map(|page| {
+            extract_image_url(&page.text_lossy(), page.final_uri()).map(|image| (page, image))
+        })
         .ok_or_else(|| {
             DiscoveryError::InvalidMetadata("pnav page is missing from discovery history".into())
         })?;
-    let page_text = page.text_lossy();
-    let image = extract_image_url(&page_text, page.final_uri()).ok_or_else(|| {
-        DiscoveryError::InvalidMetadata("pnav page is missing from discovery history".into())
-    })?;
-    let title = page_title(&page_text);
+    let title = page_title(&page.text_lossy());
     let source = AdaptiveSource::Pnav(PnavSource {
         image_url: image,
         width: metadata.width,
