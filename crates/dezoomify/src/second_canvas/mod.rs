@@ -16,7 +16,6 @@ use crate::core::{
 const ROUTES: &[DiscoveryRoute] = &[
     metadata(html_matches(contains_gigapixel)).decode(decode_catalog),
     viewer(html_matches(contains_viewer_script)).extract_metadata(follow_viewer_config),
-    DiscoveryRoute::html_relative_capture(&SECOND_CANVAS_IFRAME_RE, "src"),
 ];
 
 pub const SPEC: FormatSpec =
@@ -33,13 +32,6 @@ fn contains_viewer_script(bytes: &[u8]) -> bool {
     let page = String::from_utf8_lossy(bytes).to_ascii_lowercase();
     page.contains("scw.min.js") || page.contains("scv.min.js")
 }
-
-static SECOND_CANVAS_IFRAME_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(
-        r#"(?is)<iframe\b[^>]*\bsrc\s*=\s*[\"'](?P<src>https?://[^\"']+\.s3\.amazonaws\.com/web/[^\"']+\.html(?:[?#][^\"']*)?)[\"']"#,
-    )
-    .expect("constant Second Canvas iframe pattern")
-});
 
 static EMBEDDED_CONFIG_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(

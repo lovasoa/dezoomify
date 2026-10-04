@@ -137,10 +137,6 @@ static REL_INFO_JSON_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(r#"(?i)["'=\s(](?P<url>/?(?:[\w.-]+/)+info\.json(?:[?#][^\s"'<>()\[\]\\]*)?)"#)
         .expect("constant relative info.json pattern")
 });
-static HTML_BASE_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r#"(?is)<base\s+[^>]*\bhref\s*=\s*["'](?P<base>[^"']*)"#)
-        .expect("constant HTML base pattern")
-});
 static IMAGE_REQUEST_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(
     r"(?i)^(?P<base>https?://[^/?#]+/[^?#]+)/(?:full|square|\d+(?:,\d+){3}|pct:[\d.]+(?:,[\d.]+){3})/(?:\^?(?:max|full|\d+,\d+|\d+,|,\d+|pct:[\d.]+)|\^!?\d+,\d+)/!?\d+(?:\.\d+)?/[\w-]+\.(?:jpe?g|png|tiff?|webp|jp2|gif)(?P<query>\?[^#]*)?(?:#.*)?$",
@@ -208,24 +204,13 @@ fn has_info_json_url(bytes: &[u8]) -> bool {
     ABS_INFO_JSON_RE.is_match(bytes) || REL_INFO_JSON_RE.is_match(bytes)
 }
 
-fn page_base_uri(bytes: &[u8], final_uri: &str) -> String {
-    HTML_BASE_RE
-        .captures(bytes)
-        .and_then(|captures| captures.name("base"))
-        .map(|capture| String::from_utf8_lossy(capture.as_bytes()).into_owned())
-        .map_or_else(
-            || final_uri.to_owned(),
-            |base| resolve_relative(final_uri, base.trim()),
-        )
-}
-
 fn follow_info_json_url(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     // Payloads that already parse as IIIF (info.json bodies, manifests)
     // keep the standard extractor; harvesting is for embedder pages.
     if let Ok(found) = catalog(resource.final_uri(), resource.bytes()) {
         return Ok(ParsedResource::Complete(found));
     }
-    let base = page_base_uri(resource.bytes(), resource.final_uri());
+    let base = crate::web_page::page_base(resource.bytes(), resource.final_uri());
     let target = harvest_info_json_urls(resource.bytes())
         .into_iter()
         .map(|url| resolve_relative(&base, url.trim()))

@@ -8,21 +8,14 @@ use url::Url;
 use crate::Vec2d;
 use crate::core::discovery::{metadata, url_matches, viewer};
 use crate::core::{DiscoveryError, FormatSpec, ImagePlan, ParsedResource, Request, ResolvedLevel};
-use crate::markup::attribute;
-use crate::web_page::page_title;
+use crate::web_page::{Tag, page_title, tags};
 
 static VIEW_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)/(?:thumbview|pageview|zoom)/\d+(?:[?#].*)?$")
         .expect("constant VLS URL pattern")
 });
-static VAR_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<var\b([^>]*)>").expect("constant VLS var pattern"));
 static VIEW_PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)/(?:thumbview|pageview|zoom)/").expect("constant VLS view path pattern")
-});
-static MAP_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?is)<(?:map|div)\b([^>]*\bid\s*=\s*[\"']map[\"'][^>]*)>"#)
-        .expect("constant VLS map pattern")
 });
 pub const SPEC: FormatSpec = FormatSpec::new(
     "vls",
@@ -47,30 +40,32 @@ fn normalize_url(uri: &str) -> Result<Request, DiscoveryError> {
 fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let (url, bytes) = (resource.final_uri(), resource.bytes());
     let page = String::from_utf8_lossy(bytes);
-    let map = MAP_RE
-        .captures(&page)
-        .and_then(|captures| captures.get(1))
+    let map = tags(bytes)
+        .find(|tag| {
+            matches!(tag.name(), b"map" | b"div")
+                && tag
+                    .attribute("id")
+                    .is_some_and(|id| id.eq_ignore_ascii_case("map"))
+        })
         .ok_or_else(|| DiscoveryError::InvalidMetadata("VLS page has no map element".into()))?;
-    let id = attribute(map.as_str(), "vls:ot_id")
-        .or_else(|| attribute(map.as_str(), "ot_id"))
+    let id = map
+        .attribute("vls:ot_id")
+        .or_else(|| map.attribute("ot_id"))
         .filter(|id| !id.is_empty())
         .ok_or_else(|| DiscoveryError::InvalidMetadata("VLS map has no image ID".into()))?;
-    let width = positive_attribute(map.as_str(), "vls:width")
-        .or_else(|| positive_attribute(map.as_str(), "width"))
+    let width = positive_attribute(&map, "vls:width")
+        .or_else(|| positive_attribute(&map, "width"))
         .ok_or_else(|| DiscoveryError::InvalidMetadata("VLS map has invalid width".into()))?;
-    let height = positive_attribute(map.as_str(), "vls:height")
-        .or_else(|| positive_attribute(map.as_str(), "height"))
+    let height = positive_attribute(&map, "vls:height")
+        .or_else(|| positive_attribute(&map, "height"))
         .ok_or_else(|| DiscoveryError::InvalidMetadata("VLS map has invalid height".into()))?;
-    let zoom_tile_size = VAR_RE
-        .captures_iter(&page)
-        .find_map(|captures| {
-            let attributes = captures.get(1)?.as_str();
-            attribute(attributes, "id")
+    let zoom_tile_size = tags(bytes)
+        .filter(|tag| tag.name() == b"var")
+        .find_map(|tag| {
+            tag.attribute("id")
                 .filter(|id| id.eq_ignore_ascii_case("zoomTileSize"))
-                .and_then(|_| attribute(attributes, "value"))
-                .and_then(|value| value.parse::<u32>().ok())
+                .and_then(|_| positive_attribute(&tag, "value"))
         })
-        .filter(|size| *size > 0)
         .ok_or_else(|| {
             DiscoveryError::InvalidMetadata("VLS page has no valid zoom tile size".into())
         })?;
@@ -99,8 +94,8 @@ fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<ParsedResource
     )))
 }
 
-fn positive_attribute(tag: &str, name: &str) -> Option<u32> {
-    attribute(tag, name)
+fn positive_attribute(tag: &Tag<'_>, name: &str) -> Option<u32> {
+    tag.attribute(name)
         .and_then(|value| value.parse().ok())
         .filter(|value| *value > 0)
 }

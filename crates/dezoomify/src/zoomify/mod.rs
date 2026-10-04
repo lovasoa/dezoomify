@@ -92,10 +92,6 @@ where
 /// At most this many inline sources become catalog entries.
 const MAX_INLINE_SERVICES: usize = 8;
 
-static HTML_BASE_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r#"(?is)<base\s+[^>]*\bhref\s*=\s*["'](?P<base>[^"']*)"#)
-        .expect("constant HTML base pattern")
-});
 static IMAGE_PATH_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(r#"zoomifyImagePath\s*=\s*["']?(?P<image>[^"'&\s;]+)"#)
         .expect("constant Zoomify image path pattern")
@@ -138,10 +134,7 @@ fn extract_image_properties_url(
     let image_path = extract_image_path(resource.bytes()).ok_or_else(|| {
         DiscoveryError::InvalidMetadata("Zoomify viewer page does not declare an image path".into())
     })?;
-    let page_base_uri = extract_html_base(resource.bytes()).map_or_else(
-        || resource.final_uri().to_owned(),
-        |base| resolve_relative(resource.final_uri(), &base),
-    );
+    let page_base_uri = crate::web_page::page_base(resource.bytes(), resource.final_uri());
     let image_uri = resolve_relative(&page_base_uri, &image_path);
     Ok(ParsedResource::Follow(Request::new(append_path_component(
         &image_uri,
@@ -244,7 +237,7 @@ fn inline_catalog(
     resource: crate::core::DiscoveryResource<'_>,
 ) -> Result<ParsedResource, DiscoveryError> {
     let (uri, bytes) = (resource.final_uri(), resource.bytes());
-    let base_href = extract_html_base(bytes).unwrap_or_default();
+    let base_href = crate::web_page::page_base(bytes, uri);
     let services: Vec<InlineService> = inline_tile_services(bytes, uri, &base_href).collect();
     if services.is_empty() {
         return Err(DiscoveryError::InvalidMetadata(
@@ -432,12 +425,6 @@ fn capture_text(captures: &regex::bytes::Captures<'_>, name: &str) -> Option<Str
     captures
         .name(name)
         .map(|capture| String::from_utf8_lossy(capture.as_bytes()).replace("&amp;", "&"))
-}
-
-fn extract_html_base(html: &[u8]) -> Option<String> {
-    HTML_BASE_RE
-        .captures(html)
-        .and_then(|captures| capture_text(&captures, "base"))
 }
 
 #[allow(clippy::unnecessary_wraps)]

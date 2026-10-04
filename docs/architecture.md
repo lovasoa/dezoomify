@@ -8,6 +8,8 @@ All four products call `dezoomify(inputs, options, host)`, one asynchronous Rust
 
 `model.rs` defines the values crossing language boundaries; `host.rs` defines one capability list that generates the Rust trait and JavaScript method bindings. The generated TypeScript declaration is tracked in `packages/wasm-bindings`. See [Bindings](bindings.md) and [Algorithm](algorithm.md).
 
+HTML formats share a streaming `html5gum` tokenizer for tags and decoded attributes. Routing can match an active tag directly. The tokenizer skips template contents, treats raw-text elements as opaque, and keeps script body slices in their original encoding and source order. It supplies tokens rather than a DOM or XPath engine; JavaScript extraction stays static. Hosts acquire bytes without parsing or executing downloaded code.
+
 Formats register in one ordered registry; registry order breaks ties between equally relevant matches. `ImagePlan` validates ready images and their tile counts; `CatalogPlan` collects multiple ready images or deferred links. `ResolvedLevel::grid` provides regular geometry; format-owned tile sources provide overlap, padding, probes, and custom placement. Tile requests are lazy.
 
 Format references resolve against the redirected base, and routes that require a previously read parent retain that parent explicitly. Inline OpenSeadragon Zoomify services use floor-halving, including their smallest single-tile level. Tile groups count actual preceding tiles. XML `NUMTILES` heuristics apply only to XML metadata.

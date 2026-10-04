@@ -980,7 +980,7 @@ dependencies = [
  "futures",
  "futures-util",
  "hmac",
- "html-escape",
+ "html5gum",
  "itertools",
  "json5",
  "krpano-decrypt",
@@ -1963,12 +1963,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "html-escape"
-version = "0.2.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9356095b4b41197bba32173600e1582792cda618f65d12f68e2e77d273413c5"
-
-[[package]]
 name = "html5ever"
 version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1987,6 +1981,12 @@ dependencies = [
  "log",
  "markup5ever 0.39.0",
 ]
+
+[[package]]
+name = "html5gum"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "428502d3ec1742c35e015871aef742bc4722a9acfcb616b8ff79b519922e1c36"
 
 [[package]]
 name = "http"

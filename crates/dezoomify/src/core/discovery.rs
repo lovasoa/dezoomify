@@ -169,6 +169,7 @@ pub enum DiscoveryMatch {
     UrlSuffix(&'static str),
     UrlPredicate(UrlPredicate),
     ContentPredicate(ContentPredicate),
+    HtmlTag(&'static str),
     ContentRegex(&'static LazyLock<BytesRegex>),
 }
 
@@ -183,6 +184,10 @@ impl DiscoveryMatch {
                 .ends_with(suffix),
             Self::UrlPredicate(predicate) => predicate(uri),
             Self::ContentPredicate(predicate) => bytes.is_some_and(predicate),
+            Self::HtmlTag(name) => bytes.is_some_and(|bytes| {
+                crate::web_page::tags(bytes)
+                    .any(|tag| tag.name().eq_ignore_ascii_case(name.as_bytes()))
+            }),
             Self::ContentRegex(regex) => bytes.is_some_and(|bytes| regex.is_match(bytes)),
         }
     }
@@ -226,6 +231,11 @@ pub const fn url_suffix(suffix: &'static str) -> DiscoveryMatch {
 pub const fn url_matches(predicate: UrlPredicate) -> DiscoveryMatch {
     DiscoveryMatch::UrlPredicate(predicate)
 }
+/// Match an active HTML element in source order, with HTML attribute tokenization.
+pub const fn html_tag(name: &'static str) -> DiscoveryMatch {
+    DiscoveryMatch::HtmlTag(name)
+}
+
 pub const fn html_matches(predicate: ContentPredicate) -> DiscoveryMatch {
     DiscoveryMatch::ContentPredicate(predicate)
 }
@@ -288,19 +298,6 @@ impl DiscoveryRoute {
         Self::capture_url(regex, capture, "", "")
     }
 
-    /// Decode HTML entities before resolving an embedded link.
-    #[must_use]
-    pub const fn html_relative_capture(
-        regex: &'static LazyLock<BytesRegex>,
-        capture: &'static str,
-    ) -> Self {
-        let mut route = Self::relative_capture(regex, capture);
-        if let RouteAction::FollowCapture { html_entities, .. } = &mut route.handler {
-            *html_entities = true;
-        }
-        route
-    }
-
     /// Insert a named regex capture into a resource URL.
     #[must_use]
     pub const fn capture_url(
@@ -314,7 +311,6 @@ impl DiscoveryRoute {
             kind: RouteKind::Viewer,
             handler: RouteAction::FollowCapture {
                 capture,
-                html_entities: false,
                 prefix,
                 suffix,
             },
@@ -330,7 +326,6 @@ enum RouteAction {
     MapUrl(UrlMapper),
     FollowCapture {
         capture: &'static str,
-        html_entities: bool,
         prefix: &'static str,
         suffix: &'static str,
     },
@@ -355,7 +350,6 @@ fn parse_resource(
             RouteAction::Decode(decoder) | RouteAction::ChildMetadata(decoder) => decoder(resource),
             RouteAction::FollowCapture {
                 capture,
-                html_entities,
                 prefix,
                 suffix,
             } => {
@@ -369,11 +363,6 @@ fn parse_resource(
                         DiscoveryError::InvalidMetadata("resource has no matching link".into())
                     })?;
                 let link = String::from_utf8_lossy(link.as_bytes());
-                let link = if html_entities {
-                    html_escape::decode_html_entities(&link)
-                } else {
-                    link
-                };
                 Ok(resource.follow_relative(&format!("{prefix}{}{suffix}", link.trim())))
             }
             RouteAction::MapUrl(_) | RouteAction::Plan(_) => continue,

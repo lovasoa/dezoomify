@@ -7,31 +7,16 @@ use serde_json::Value;
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{html_matches, metadata, url_matches, viewer};
+use crate::core::discovery::{html_matches, html_tag, metadata, url_matches, viewer};
 use crate::core::{
     DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource,
     Request, ResolvedLevel, resolve_url_template,
 };
-use crate::web_page::decode_html_entities;
+use crate::web_page::tags;
 
 static THUMBNAIL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)images\.memorix\.nl/([^/]+)/thumb/[^/]+/(.*?)\.jpg")
         .expect("constant TopViewer thumbnail pattern")
-});
-static MEDIABANK_TAG_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?is)<pic-mediabank\b[^>]*>").expect("constant TopViewer mediabank pattern")
-});
-static API_KEY_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)\bdata-api-key\s*=\s*[\"']([^\"']+)[\"']"#)
-        .expect("constant TopViewer API key pattern")
-});
-static API_URL_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)\bdata-api-url\s*=\s*[\"']([^\"']+)[\"']"#)
-        .expect("constant TopViewer API URL pattern")
-});
-static ENTITIES_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)\bdata-entities\s*=\s*[\"']([^\"']+)[\"']"#)
-        .expect("constant TopViewer entities pattern")
 });
 static DETAIL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)/detail/([a-z0-9-]+)/media/([a-z0-9-]+)")
@@ -40,7 +25,7 @@ static DETAIL_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 const ROUTES: &[DiscoveryRoute] = &[
     viewer(url_matches(is_known_detail_url)).resolve_metadata(known_detail_url),
-    viewer(html_matches(contains_mediabank)).extract_metadata(follow_mediabank),
+    viewer(html_tag("pic-mediabank")).extract_metadata(follow_mediabank),
     viewer(html_matches(contains_thumbnail)).extract_metadata(follow_thumbnail),
     metadata(url_matches(is_media_api)).extract_metadata(follow_media),
     metadata(html_matches(contains_topviews)).decode(decode),
@@ -91,10 +76,6 @@ fn contains_thumbnail(bytes: &[u8]) -> bool {
     THUMBNAIL_RE.is_match(&String::from_utf8_lossy(bytes))
 }
 
-fn contains_mediabank(bytes: &[u8]) -> bool {
-    MEDIABANK_TAG_RE.is_match(&String::from_utf8_lossy(bytes))
-}
-
 fn follow_thumbnail(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let page = resource.text_lossy();
     let captures = THUMBNAIL_RE.captures(&page).ok_or_else(|| {
@@ -114,19 +95,24 @@ fn follow_thumbnail(resource: DiscoveryResource<'_>) -> Result<ParsedResource, D
 }
 
 fn follow_mediabank(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-    let page = resource.text_lossy();
-    let tag = MEDIABANK_TAG_RE
-        .find(&page)
-        .map(|match_| match_.as_str())
+    let tag = tags(resource.bytes())
+        .find(|tag| tag.name() == b"pic-mediabank")
         .ok_or_else(|| {
             DiscoveryError::InvalidMetadata("TopViewer page has no media element".into())
         })?;
-    let api_key = capture_attribute(&API_KEY_RE, tag, "API key")?;
-    let api_reference = capture_attribute(&API_URL_RE, tag, "API URL")?;
-    let entities = ENTITIES_RE
-        .captures(tag)
-        .and_then(|captures| captures.get(1))
-        .map(|value| decode_html_entities(value.as_str()));
+    let required = |name, label| {
+        tag.attribute(name)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.into_owned())
+            .ok_or_else(|| {
+                DiscoveryError::InvalidMetadata(format!("TopViewer media element has no {label}"))
+            })
+    };
+    let api_key = required("data-api-key", "API key")?;
+    let api_reference = required("data-api-url", "API URL")?;
+    let entities = tag
+        .attribute("data-entities")
+        .map(|value| value.into_owned());
     let page = Url::parse(resource.final_uri())
         .map_err(|_| DiscoveryError::InvalidMetadata("invalid TopViewer page URL".into()))?;
     let detail = DETAIL_RE
@@ -171,14 +157,6 @@ fn follow_mediabank(resource: DiscoveryResource<'_>) -> Result<ParsedResource, D
         }
     }
     Ok(ParsedResource::Follow(Request::new(api.to_string())))
-}
-
-fn capture_attribute(regex: &Regex, tag: &str, label: &str) -> Result<String, DiscoveryError> {
-    regex
-        .captures(tag)
-        .and_then(|captures| captures.get(1))
-        .map(|value| decode_html_entities(value.as_str()))
-        .ok_or_else(|| DiscoveryError::InvalidMetadata(format!("TopViewer element has no {label}")))
 }
 
 fn is_media_api(uri: &str) -> bool {
