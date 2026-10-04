@@ -2,7 +2,7 @@
 
 These proposals build on the shared asynchronous algorithm and injected Host
 capabilities. Product behavior and shipped capabilities are defined in
-[Product](../docs/product.md), [Native apps](../docs/native-apps.md), and
+[User guides](../docs/user/README.md), [Native apps](../docs/native-apps.md), and
 [Browser runtime](../docs/browser-runtime.md).
 
 ## Preview and estimate

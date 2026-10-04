@@ -55,7 +55,9 @@ Settings render while idle, and history prefills input without starting work. Op
 
 ### Desktop updater
 
-Inert: no update host or key exists and production rejects every candidate, so new versions install manually from GitHub Releases. Enabling needs a new implemented update design plus deployed endpoints and a key ceremony. Policy and activation state: [Releases](releases.md#desktop-updater).
+No update host or key exists, so new versions install manually from GitHub
+Releases. Do not enable updater flags without implementing the update service
+and key provisioning.
 
 ### Desktop bundles
 
@@ -63,7 +65,10 @@ Inert: no update host or key exists and production rejects every candidate, so n
 
 Linux needs `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential` plus `dpkg-deb` (`dpkg-dev`); icons come from `scripts/gen-desktop-icons.py` before the bundler. macOS needs Xcode Command Line Tools plus `icons/icon.icns`. Windows needs WiX v3 (`msi`), NSIS (`nsis`), plus `icons/icon.ico`. Installers ship unsigned (Linux x86_64 `.deb`, Windows x86_64 `.msi`, Apple silicon `.dmg`); user note: [Desktop app guide](user/desktop-app.md#install).
 
-Per-OS install smoke runs in the desktop CI `bundle-smoke` matrix (see [Testing](testing.md#desktop-window)): Linux `dpkg -i` plus timed stay-alive launch under Xvfb; macOS mounts the `dmg` and execs the binary from the image; Windows silent `msi` install (WiX and NSIS required). No `--version` flag exists, so every smoke proves install plus launch by holding the window 15–20 s. Gatekeeper/SIP untouched; the unsigned Windows binary carries no Mark-of-the-Web, so SmartScreen stays out and no OS policy is bypassed.
+Per-OS install smoke runs in the desktop CI `bundle-smoke` matrix: Linux installs
+and launches under Xvfb, macOS launches from the mounted image, and Windows uses
+a silent MSI install. There is no `--version` flag; smoke checks require the
+window to stay alive for 15–20 seconds.
 
 ### Real-window E2E hook
 
