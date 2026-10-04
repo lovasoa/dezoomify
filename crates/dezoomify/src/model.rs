@@ -165,6 +165,35 @@ impl OutputFormat {
     }
 }
 
+/// Saved encoding preference, distinct from the concrete published format.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum OutputPreference {
+    #[default]
+    Auto,
+    Png,
+    Jpeg,
+    Tiff,
+    Zif,
+    Webp,
+    IiifDir,
+}
+
+impl OutputPreference {
+    pub const fn format(self) -> Option<OutputFormat> {
+        match self {
+            Self::Auto => None,
+            Self::Png => Some(OutputFormat::Png),
+            Self::Jpeg => Some(OutputFormat::Jpeg),
+            Self::Tiff => Some(OutputFormat::Tiff),
+            Self::Zif => Some(OutputFormat::Zif),
+            Self::Webp => Some(OutputFormat::Webp),
+            Self::IiifDir => Some(OutputFormat::IiifDir),
+        }
+    }
+}
+
 /// How an acquired tile participates in probing and final output. `probe`
 /// marks adaptive-probe acquisitions (a miss is an observation, never an
 /// output failure); `output` marks acquisitions joining the final canvas.

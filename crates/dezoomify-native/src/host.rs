@@ -116,16 +116,55 @@ fn safe_output_stem(title: Option<&str>) -> String {
     }
 }
 
-fn auto_output_path(output_dir: &Path, title: Option<&str>, format: OutputFormat) -> PathBuf {
+fn automatic_image_format(size: Vec2d, transparent: bool) -> OutputFormat {
+    if !transparent
+        && size.x <= crate::imaging::JPEG_MAX_SIDE
+        && size.y <= crate::imaging::JPEG_MAX_SIDE
+    {
+        OutputFormat::Jpeg
+    } else {
+        OutputFormat::Png
+    }
+}
+
+#[test]
+fn automatic_format_checks_both_sides_at_the_jpeg_boundary() {
+    for (x, y, expected) in [
+        (65_535, 1, OutputFormat::Jpeg),
+        (1, 65_535, OutputFormat::Jpeg),
+        (65_536, 1, OutputFormat::Png),
+        (1, 65_536, OutputFormat::Png),
+    ] {
+        assert_eq!(automatic_image_format(Vec2d { x, y }, false), expected);
+    }
+    assert_eq!(
+        automatic_image_format(Vec2d { x: 1, y: 1 }, true),
+        OutputFormat::Png
+    );
+}
+
+fn auto_output_path(
+    output_dir: &Path,
+    title: Option<&str>,
+    format: OutputFormat,
+    partial: bool,
+) -> PathBuf {
     let stem = safe_output_stem(title);
     let extension = format.extension();
     let first = output_dir.join(format!("{stem}.{extension}"));
-    if !first.exists() {
+    let exists = |path: &Path| {
+        if partial {
+            crate::output::partial_path_for(path).exists()
+        } else {
+            path.exists()
+        }
+    };
+    if !exists(&first) {
         return first;
     }
     for suffix in 2..=9_999 {
         let candidate = output_dir.join(format!("{stem}-{suffix}.{extension}"));
-        if !candidate.exists() {
+        if !exists(&candidate) {
             return candidate;
         }
     }
@@ -228,6 +267,7 @@ impl<'a> NativeHost<'a> {
         let format = match &options.output {
             OutputTarget::File(path) => crate::output::infer_from_path(path)?,
             OutputTarget::AutoDir { format, .. } => *format,
+            OutputTarget::AutoImageDir { .. } => OutputFormat::Png,
         };
         let fetch_limits = FetchLimits {
             max_bytes: options.max_bytes,
@@ -717,7 +757,10 @@ impl Host for NativeHost<'_> {
             let destination = match &self.options.output {
                 OutputTarget::File(path) => path.clone(),
                 OutputTarget::AutoDir { dir, format } => {
-                    auto_output_path(dir, plan.title.as_deref(), *format)
+                    auto_output_path(dir, plan.title.as_deref(), *format, false)
+                }
+                OutputTarget::AutoImageDir { dir } => {
+                    auto_output_path(dir, plan.title.as_deref(), self.format, false)
                 }
             };
             let probes = std::mem::take(&mut *self.encoded_probes.borrow_mut());
@@ -900,15 +943,19 @@ impl Host for NativeHost<'_> {
 
     async fn finish(&self, request: FinishRequest) -> Result<Output, Error> {
         self.controls.checkpoint(false).await?;
-        let destination = match &self.options.output {
+        let partial = !request.missing.is_empty();
+        let destination_for = |format| match &self.options.output {
             OutputTarget::File(path) => path.clone(),
             OutputTarget::AutoDir { dir, format } => {
-                auto_output_path(dir, request.title.as_deref(), *format)
+                auto_output_path(dir, request.title.as_deref(), *format, partial)
+            }
+            OutputTarget::AutoImageDir { dir } => {
+                auto_output_path(dir, request.title.as_deref(), format, partial)
             }
         };
-        let partial = !request.missing.is_empty();
         let tiled = self.iiif.borrow_mut().take();
         let tiled_result = if let Some(writer) = tiled {
+            let destination = destination_for(self.format);
             let destination = if partial {
                 crate::output::partial_path_for(&destination)
             } else {
@@ -935,22 +982,28 @@ impl Host for NativeHost<'_> {
         let mut sink = self.sink.borrow_mut();
         sink.note_declared(request.canvas.as_ref().map(size));
         let acquired = self.acquired.borrow();
-        let (published, image_size) =
+        let (published, image_size, format) =
             if let Some((published, dimensions, bytes, decoded)) = tiled_result {
                 self.instrumentation.borrow_mut().pixel_decodes += decoded;
                 sink.record_tile_output(bytes);
-                (published, size(&dimensions))
+                (published, size(&dimensions), self.format)
             } else {
                 let image_size = sink.assemble()?;
+                let format = if matches!(self.options.output, OutputTarget::AutoImageDir { .. }) {
+                    automatic_image_format(image_size, sink.has_transparency())
+                } else {
+                    self.format
+                };
+                let destination = destination_for(format);
                 let published = sink.commit(crate::sink::CommitParams {
                     dest: &destination,
-                    format: self.format,
+                    format,
                     overwrite: self.options.overwrite,
                     cancelled: &self.controls.0.cancelled,
                     partial,
                     reused_tiles: &request.reused_tiles,
                 })?;
-                (published, image_size)
+                (published, image_size, format)
             };
         let stats = sink.stats();
         let mut instrumentation = self.instrumentation.borrow().clone();
@@ -974,12 +1027,12 @@ impl Host for NativeHost<'_> {
                 width: image_size.x,
                 height: image_size.y,
             }),
-            format: request.format,
+            format,
             missing: request.missing,
             disposition: OutputDisposition::NativePublication,
         };
         self.diagnostics.finish(if partial { "partial-completed" } else { "completed" },
-            serde_json::json!({"width": image_size.x, "height": image_size.y, "format": self.format.as_str(), "missing": output.missing.len()}));
+            serde_json::json!({"width": image_size.x, "height": image_size.y, "format": format.as_str(), "missing": output.missing.len()}));
         *self.published.borrow_mut() = Some(Publication {
             path: published,
             tile_count: acquired.len(),

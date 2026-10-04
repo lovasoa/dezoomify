@@ -485,6 +485,12 @@ impl Sink {
         (icc, exif)
     }
 
+    pub fn has_transparency(&self) -> bool {
+        self.canvas
+            .as_ref()
+            .is_some_and(|canvas| canvas.pixels().any(|pixel| pixel[3] != 255))
+    }
+
     /// The single commit point. Ordering is explicit: cancellation first
     /// (a lost race publishes nothing), then destination validation, then
     /// exactly one atomic publication. Returns the honest published record.

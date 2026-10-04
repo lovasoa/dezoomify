@@ -60,7 +60,7 @@ Every start carries an immutable copy of current settings. The shared native val
 
 ### Desktop output and settings
 
-Formats are PNG, JPEG, TIFF, ZIF, lossless WebP, and iiif-dir; PNG is the default. Settings persist under `dezoomify.desktop.settings.v1` and fall back to defaults on invalid saved data. Output directory, compression, width/height caps, retries, cache directory, and headers accompany each invocation. JPEG quality is `100 - compression` (default compression 5 gives quality 95).
+Formats are PNG, JPEG, TIFF, ZIF, lossless WebP, and iiif-dir. The desktop defaults to Auto: JPEG for opaque canvases within its dimension limits, otherwise PNG. Settings persist under `dezoomify.desktop.settings.v1` and fall back to defaults on invalid saved data. Output directory, compression, width/height caps, retries, cache directory, and headers accompany each invocation. JPEG quality is `100 - compression` (default compression 5 gives quality 95).
 
 Settings render while idle. History opens saved images by a durable native reference;
 attempts without a saved file prefill input without starting work. These references

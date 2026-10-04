@@ -2,7 +2,7 @@
 //
 // Fields:
 // - output dir (native dir picker; text input plus Browse button)
-// - output format (native encoder/directory picker, default png)
+// - output format (native encoder/directory picker, default auto)
 // - compression 0-100, default 5 (JPEG quality 100-x, PNG tier)
 // - max-width / max-height caps, optional positive ints
 // - retries, default 3 (0 allowed = no retries), bounded 0-100
@@ -20,13 +20,13 @@
 // Keep erasable syntax only so node type-stripping can read this file. No
 // imports from apps/web, apps/extension, or browser-runtime. No fetch/XHR.
 
-import type { OutputFormat } from "@dezoomify/wasm-bindings";
+import type { OutputPreference } from "@dezoomify/wasm-bindings";
 import { invoke } from "@tauri-apps/api/core";
 import { downloadDir } from "@tauri-apps/api/path";
 
 export interface DesktopSettings {
   readonly output_dir: string | null;
-  readonly output_format: OutputFormat;
+  readonly output_format: OutputPreference;
   readonly compression: number;
   readonly max_width: number | null;
   readonly max_height: number | null;
@@ -37,7 +37,8 @@ export interface DesktopSettings {
 }
 
 export const SETTINGS_STORAGE_KEY = "dezoomify.desktop.settings.v1" as const;
-export const OUTPUT_FORMATS: ReadonlyArray<OutputFormat> = [
+export const OUTPUT_FORMATS: ReadonlyArray<DesktopSettings["output_format"]> = [
+  "auto",
   "png",
   "jpeg",
   "tiff",
@@ -45,7 +46,7 @@ export const OUTPUT_FORMATS: ReadonlyArray<OutputFormat> = [
   "webp",
   "iiif-dir",
 ] as const;
-export const DEFAULT_OUTPUT_FORMAT: OutputFormat = "png" as const;
+export const DEFAULT_OUTPUT_FORMAT = "auto" as const;
 export const DEFAULT_COMPRESSION = 5 as const;
 export const DEFAULT_RETRIES = 3 as const;
 export type NetworkProfile = "maximum" | "balanced" | "gentle";
@@ -147,7 +148,7 @@ function normalizeSettings(raw: unknown): DesktopSettings {
   return {
     output_dir: typeof obj.output_dir === "string" && obj.output_dir !== "" ? obj.output_dir : null,
     output_format: (OUTPUT_FORMATS as ReadonlyArray<string>).includes(obj.output_format as string)
-      ? (obj.output_format as OutputFormat)
+      ? (obj.output_format as DesktopSettings["output_format"])
       : defaults.output_format,
     compression: typeof obj.compression === "number" ? obj.compression : defaults.compression,
     max_width: typeof obj.max_width === "number" ? obj.max_width : null,

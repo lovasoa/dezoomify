@@ -629,6 +629,90 @@ fn automatic_output_uses_the_selected_title_and_avoids_overwriting() {
     let second = support::run_options_observed(options, |_, _| {}).unwrap();
     assert_eq!(second.path.file_name().unwrap(), "An-image-title-2.png");
     assert_eq!(std::fs::read(first.path).unwrap(), original);
+    let automatic = support::run_options_observed(
+        JobOptions {
+            input_url: manifest.to_string_lossy().into_owned(),
+            output: OutputTarget::AutoImageDir { dir: work.clone() },
+            ..Default::default()
+        },
+        |_, _| {},
+    )
+    .unwrap();
+    assert_eq!(automatic.path.file_name().unwrap(), "An-image-title.jpg");
+    let image = image::open(&automatic.path).unwrap();
+    assert_eq!((image.width(), image.height()), (256, 256));
+    image::RgbImage::new(65_536, 1)
+        .save(work.join("tile.png"))
+        .unwrap();
+    let source = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(
+        &manifest,
+        source.replace("width: 256\nheight: 256", "width: 65536\nheight: 1"),
+    )
+    .unwrap();
+    let large = support::run_options_observed(
+        JobOptions {
+            input_url: manifest.to_string_lossy().into_owned(),
+            output: OutputTarget::AutoImageDir { dir: work.clone() },
+            ..Default::default()
+        },
+        |_, _| {},
+    )
+    .unwrap();
+    assert_eq!(large.path.extension().unwrap(), "png");
+    let image = image::open(&large.path).unwrap();
+    assert_eq!((image.width(), image.height()), (65_536, 1));
+}
+
+#[test]
+fn automatic_partial_output_preserves_gaps_and_avoids_partial_collisions() {
+    let work = temp_dir("automatic-partial");
+    let source = work.join("source.dzi");
+    let tiles = work.join("source_files/5");
+    std::fs::create_dir_all(&tiles).unwrap();
+    std::fs::write(&source, "<Image TileSize=\"16\" Overlap=\"0\" Format=\"png\" xmlns=\"http://schemas.microsoft.com/deepzoom/2008\"><Size Width=\"32\" Height=\"16\"/></Image>").unwrap();
+    image::RgbaImage::from_pixel(16, 16, image::Rgba([100, 150, 200, 255]))
+        .save(tiles.join("0_0.png"))
+        .unwrap();
+    let options = JobOptions {
+        input_url: source.to_string_lossy().into(),
+        output: OutputTarget::AutoImageDir { dir: work.clone() },
+        largest: true,
+        max_retries: 0,
+        ..Default::default()
+    };
+    let first = support::run_options_observed(options.clone(), |_, _| {}).unwrap();
+    assert_eq!(first.path.extension().unwrap(), "png");
+    assert!(first.path.to_string_lossy().contains(".partial."));
+    let original = std::fs::read(&first.path).unwrap();
+    let image = image::open(&first.path).unwrap().into_rgba8();
+    assert_eq!(image.get_pixel(0, 0)[3], 255);
+    assert_eq!(image.get_pixel(31, 0)[3], 0);
+    let second = support::run_options_observed(options.clone(), |_, _| {}).unwrap();
+    assert_ne!(first.path, second.path);
+    assert_eq!(std::fs::read(&first.path).unwrap(), original);
+    let mut transparent = image::RgbaImage::from_pixel(16, 16, image::Rgba([100, 150, 200, 255]));
+    transparent.save(tiles.join("1_0.png")).unwrap();
+    transparent.put_pixel(0, 0, image::Rgba([0, 0, 0, 0]));
+    transparent.save(tiles.join("0_0.png")).unwrap();
+    let complete = support::run_options_observed(
+        JobOptions {
+            cache_dir: Some(work.join("fresh-cache")),
+            ..options
+        },
+        |_, _| {},
+    )
+    .unwrap();
+    assert!(complete.output.missing.is_empty());
+    assert_eq!(complete.path.extension().unwrap(), "png");
+    assert_eq!(
+        image::open(complete.path)
+            .unwrap()
+            .into_rgba8()
+            .get_pixel(0, 0)[3],
+        0
+    );
+    std::fs::remove_dir_all(work).unwrap();
 }
 
 /// Loopback server delaying tile bodies: at cancel time fetches are mid-air

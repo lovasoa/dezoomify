@@ -6,7 +6,7 @@ use crate::commands;
 use crate::jobs::JobTable;
 use crate::saved_outputs::SavedOutputs;
 use crate::settings::parse_settings;
-use dezoomify::model::{DesktopOutput, Error, Failure, OutputFormat, SavedOutputState};
+use dezoomify::model::{DesktopOutput, Error, Failure, SavedOutputState};
 use dezoomify_native::{NativeHost, OutputTarget};
 
 #[cfg(all(test, target_os = "linux"))]
@@ -220,17 +220,10 @@ async fn dezoomify(
     }
     let mut options = crate::settings::job_options_for(&settings);
     options.input_url = input_url;
-    let format = match settings.output_format.as_str() {
-        "jpeg" => OutputFormat::Jpeg,
-        "tiff" => OutputFormat::Tiff,
-        "zif" => OutputFormat::Zif,
-        "webp" => OutputFormat::Webp,
-        "iiif-dir" => OutputFormat::IiifDir,
-        _ => OutputFormat::Png,
-    };
-    options.output = OutputTarget::AutoDir {
-        dir: settings.output_dir.unwrap_or_else(std::env::temp_dir),
-        format,
+    let dir = settings.output_dir.unwrap_or_else(std::env::temp_dir);
+    options.output = match settings.output_format.format() {
+        None => OutputTarget::AutoImageDir { dir },
+        Some(format) => OutputTarget::AutoDir { dir, format },
     };
     let saved_outputs = Arc::clone(&saved_outputs);
     tauri::async_runtime::spawn_blocking(move || {

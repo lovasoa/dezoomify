@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use dezoomify::model::OutputPreference;
 use dezoomify_native::JobOptions;
 
 /// Default compression; JPEG quality is 100-5 = 95.
@@ -18,8 +19,6 @@ pub const MAX_DIMENSION: u32 = 1_000_000;
 pub const MAX_PATH_LEN: usize = 4096;
 /// Upper bound for trusted user headers (repeatable -H, last wins).
 pub const MAX_HEADERS: usize = 32;
-/// Output formats selected on the desktop main screen.
-pub const OUTPUT_FORMATS: &[&str] = &["png", "jpeg", "tiff", "zif", "webp", "iiif-dir"];
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NetworkProfile {
@@ -38,7 +37,7 @@ pub struct DesktopSettings {
     pub output_dir: Option<PathBuf>,
     /// Encoder selected on the main screen. The native pipeline derives the
     /// matching extension after selecting an image title.
-    pub output_format: String,
+    pub output_format: OutputPreference,
     /// Output compression 0-100 (default 5).
     pub compression: u8,
     /// Optional width cap (positive int).
@@ -60,7 +59,7 @@ impl DesktopSettings {
     pub fn with_defaults() -> Self {
         Self {
             output_dir: None,
-            output_format: "png".to_string(),
+            output_format: OutputPreference::Auto,
             compression: DEFAULT_COMPRESSION,
             max_width: None,
             max_height: None,
@@ -113,19 +112,17 @@ fn parse_opt_dir(value: &serde_json::Value, field: &str) -> Result<Option<PathBu
     }
 }
 
-fn parse_output_format(value: Option<&serde_json::Value>) -> Result<String, String> {
+fn parse_output_format(value: Option<&serde_json::Value>) -> Result<OutputPreference, String> {
     let Some(value) = value else {
-        return Ok("png".to_string());
+        return Ok(OutputPreference::Auto);
     };
     let format = value
         .as_str()
         .map(str::to_ascii_lowercase)
         .ok_or_else(|| "output_format must be a string".to_string())?;
-    if OUTPUT_FORMATS.contains(&format.as_str()) {
-        Ok(format)
-    } else {
-        Err("output_format must be png, jpeg, tiff, zif, webp, or iiif-dir".to_string())
-    }
+    serde_json::from_value(serde_json::Value::String(format)).map_err(|_| {
+        "output_format must be auto, png, jpeg, tiff, zif, webp, or iiif-dir".to_string()
+    })
 }
 
 fn parse_opt_dimension(value: &serde_json::Value, field: &str) -> Result<Option<u32>, String> {
@@ -381,7 +378,7 @@ mod tests {
         let settings = parse_settings(&serde_json::Value::Null).unwrap();
         assert_eq!(settings, DesktopSettings::with_defaults());
         assert_eq!(parse_settings(&json!({})).unwrap(), settings);
-        assert_eq!(settings.output_format, "png");
+        assert_eq!(settings.output_format, OutputPreference::Auto);
         assert_eq!(settings.compression, 5);
         assert_eq!(settings.retries, 3);
         assert_eq!(settings.max_width, None);
@@ -411,7 +408,7 @@ mod tests {
             parse_settings(&json!({"output_format": "webp"}))
                 .unwrap()
                 .output_format,
-            "webp"
+            OutputPreference::Webp
         );
         assert!(parse_settings(&json!({"output_format": "exe"})).is_err());
     }

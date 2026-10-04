@@ -10,6 +10,8 @@ pub enum OutputTarget {
     File(PathBuf),
     /// Derive the basename from the catalog title inside this directory.
     AutoDir { dir: PathBuf, format: OutputFormat },
+    /// Choose JPEG when the assembled dimensions fit, otherwise PNG.
+    AutoImageDir { dir: PathBuf },
 }
 
 /// Validated options for one native job. Hosts map their own args/settings
@@ -140,7 +142,7 @@ impl JobOptions {
                 let format = crate::output::infer_from_path(path)?;
                 validate_destination(path, &format, self.overwrite)?;
             }
-            OutputTarget::AutoDir { dir: _, format: _ } => {}
+            OutputTarget::AutoDir { .. } | OutputTarget::AutoImageDir { .. } => {}
         }
         Ok(())
     }
