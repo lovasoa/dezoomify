@@ -125,7 +125,7 @@ fn missing_png_icc(bytes: &[u8], cap: u64) -> Result<Option<Vec<u8>>, Error> {
                     Error::ResourceLimit("PNG ICC metadata exceeds memory limit".into())
                 }
                 fdeflate::BoundedDecompressionError::DecompressionError { inner } => {
-                    Error::DecodeFailed(inner.to_string().into())
+                    Error::DecodeFailed(format!("PNG ICC inflation failed: {inner:?}").into())
                 }
             });
         }
