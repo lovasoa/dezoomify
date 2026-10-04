@@ -114,6 +114,26 @@ fn safe_output_stem(title: Option<&str>) -> String {
     }
 }
 
+fn automatic_image_format(size: Vec2d) -> OutputFormat {
+    if size.x <= crate::imaging::JPEG_MAX_SIDE && size.y <= crate::imaging::JPEG_MAX_SIDE {
+        OutputFormat::Jpeg
+    } else {
+        OutputFormat::Png
+    }
+}
+
+#[test]
+fn automatic_format_checks_both_sides_at_the_jpeg_boundary() {
+    for (x, y, expected) in [
+        (65_535, 1, OutputFormat::Jpeg),
+        (1, 65_535, OutputFormat::Jpeg),
+        (65_536, 1, OutputFormat::Png),
+        (1, 65_536, OutputFormat::Png),
+    ] {
+        assert_eq!(automatic_image_format(Vec2d { x, y }), expected);
+    }
+}
+
 fn auto_output_path(output_dir: &Path, title: Option<&str>, format: OutputFormat) -> PathBuf {
     let stem = safe_output_stem(title);
     let extension = format.extension();
@@ -224,6 +244,7 @@ impl<'a> NativeHost<'a> {
         let format = match &options.output {
             OutputTarget::File(path) => crate::output::infer_from_path(path)?,
             OutputTarget::AutoDir { format, .. } => *format,
+            OutputTarget::AutoImageDir { .. } => OutputFormat::Png,
         };
         let fetch_limits = FetchLimits {
             max_bytes: options.max_bytes,
@@ -572,20 +593,28 @@ impl Host for NativeHost<'_> {
 
     async fn finish(&self, request: FinishRequest) -> Result<Output, Error> {
         self.controls.checkpoint(false).await?;
+        let mut sink = self.sink.borrow_mut();
+        sink.note_declared(request.canvas.as_ref().map(size));
+        let acquired = self.acquired.borrow();
+        let image_size = sink.assemble()?;
+        let format = if matches!(self.options.output, OutputTarget::AutoImageDir { .. }) {
+            automatic_image_format(image_size)
+        } else {
+            self.format
+        };
         let destination = match &self.options.output {
             OutputTarget::File(path) => path.clone(),
             OutputTarget::AutoDir { dir, format } => {
                 auto_output_path(dir, request.title.as_deref(), *format)
             }
+            OutputTarget::AutoImageDir { dir } => {
+                auto_output_path(dir, request.title.as_deref(), format)
+            }
         };
-        let mut sink = self.sink.borrow_mut();
-        sink.note_declared(request.canvas.as_ref().map(size));
-        let acquired = self.acquired.borrow();
-        let image_size = sink.assemble()?;
         let partial = !request.missing.is_empty();
         let published = sink.commit(crate::sink::CommitParams {
             dest: &destination,
-            format: self.format,
+            format,
             overwrite: self.options.overwrite,
             cancelled: &self.controls.0.cancelled,
             partial,
@@ -610,12 +639,12 @@ impl Host for NativeHost<'_> {
                 width: image_size.x,
                 height: image_size.y,
             }),
-            format: request.format,
+            format,
             missing: request.missing,
             disposition: OutputDisposition::NativePublication,
         };
         self.diagnostics.finish(if partial { "partial-completed" } else { "completed" },
-            serde_json::json!({"width": image_size.x, "height": image_size.y, "format": self.format.as_str(), "missing": output.missing.len()}));
+            serde_json::json!({"width": image_size.x, "height": image_size.y, "format": format.as_str(), "missing": output.missing.len()}));
         *self.published.borrow_mut() = Some(Publication {
             path: published,
             tile_count: acquired.len(),

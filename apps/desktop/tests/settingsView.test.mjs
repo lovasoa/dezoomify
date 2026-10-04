@@ -36,16 +36,36 @@ function renderSettings({ error = null } = {}) {
   return { container, root, current: () => currentSettings };
 }
 
-test("desktop quick strip keeps the output size preset", () => {
-  const { container, current } = renderSettings();
-  const size = container.querySelector('select[aria-label="Size"]');
+test("desktop quick choices apply sizes and update estimates with the format", () => {
+  const { container, root, current } = renderSettings();
+  const size = container.querySelector('.dz-quick-menu[aria-label="Size"]');
   assert.ok(size, "size preset remains a quick setting");
-  act(() => {
-    Object.defineProperty(size, "value", { configurable: true, value: "3840" });
-    size.dispatchEvent(new window.Event("change", { bubbles: true }));
-  });
+  const button = [...size.querySelectorAll("button")].find((button) =>
+    button.textContent.includes("Up to 4K"),
+  );
+  const jpegEstimate = button.querySelector(".dz-choice-hint").textContent;
+  click(button);
   assert.equal(current().max_width, 3840);
   assert.equal(current().max_height, null);
+  const format = container.querySelector('.dz-quick-menu[aria-label="Format"]');
+  click(
+    [...format.querySelectorAll("button")].find((button) => button.textContent.startsWith("PNG")),
+  );
+  assert.equal(current().output_format, "png");
+  assert.notEqual(button.querySelector(".dz-choice-hint").textContent, jpegEstimate);
+  click(
+    [...size.querySelectorAll("button")].find((button) => button.textContent.includes("Up to 32K")),
+  );
+  assert.equal(current().max_width, 30720);
+  click(
+    [...size.querySelectorAll("button")].find((button) =>
+      button.textContent.includes("Full resolution"),
+    ),
+  );
+  assert.equal(current().max_width, null);
+  assert.equal(current().max_height, null);
+  assert.match(size.querySelector(".dz-quick-info p").textContent, /width² × 0.75/);
+  act(() => root.unmount());
 });
 
 test("desktop advanced settings open as a labelled dialog and dismiss cleanly", () => {

@@ -19,7 +19,7 @@ pub const MAX_PATH_LEN: usize = 4096;
 /// Upper bound for trusted user headers (repeatable -H, last wins).
 pub const MAX_HEADERS: usize = 32;
 /// Output formats selected on the desktop main screen.
-pub const OUTPUT_FORMATS: &[&str] = &["png", "jpeg", "tiff", "zif", "webp", "iiif-dir"];
+pub const OUTPUT_FORMATS: &[&str] = &["auto", "png", "jpeg", "tiff", "zif", "webp", "iiif-dir"];
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NetworkProfile {
@@ -60,7 +60,7 @@ impl DesktopSettings {
     pub fn with_defaults() -> Self {
         Self {
             output_dir: None,
-            output_format: "png".to_string(),
+            output_format: "auto".to_string(),
             compression: DEFAULT_COMPRESSION,
             max_width: None,
             max_height: None,
@@ -115,7 +115,7 @@ fn parse_opt_dir(value: &serde_json::Value, field: &str) -> Result<Option<PathBu
 
 fn parse_output_format(value: Option<&serde_json::Value>) -> Result<String, String> {
     let Some(value) = value else {
-        return Ok("png".to_string());
+        return Ok("auto".to_string());
     };
     let format = value
         .as_str()
@@ -124,7 +124,7 @@ fn parse_output_format(value: Option<&serde_json::Value>) -> Result<String, Stri
     if OUTPUT_FORMATS.contains(&format.as_str()) {
         Ok(format)
     } else {
-        Err("output_format must be png, jpeg, tiff, zif, webp, or iiif-dir".to_string())
+        Err("output_format must be auto, png, jpeg, tiff, zif, webp, or iiif-dir".to_string())
     }
 }
 
@@ -381,7 +381,7 @@ mod tests {
         let settings = parse_settings(&serde_json::Value::Null).unwrap();
         assert_eq!(settings, DesktopSettings::with_defaults());
         assert_eq!(parse_settings(&json!({})).unwrap(), settings);
-        assert_eq!(settings.output_format, "png");
+        assert_eq!(settings.output_format, "auto");
         assert_eq!(settings.compression, 5);
         assert_eq!(settings.retries, 3);
         assert_eq!(settings.max_width, None);

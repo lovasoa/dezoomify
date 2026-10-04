@@ -228,9 +228,11 @@ async fn dezoomify(
         "iiif-dir" => OutputFormat::IiifDir,
         _ => OutputFormat::Png,
     };
-    options.output = OutputTarget::AutoDir {
-        dir: settings.output_dir.unwrap_or_else(std::env::temp_dir),
-        format,
+    let dir = settings.output_dir.unwrap_or_else(std::env::temp_dir);
+    options.output = if settings.output_format == "auto" {
+        OutputTarget::AutoImageDir { dir }
+    } else {
+        OutputTarget::AutoDir { dir, format }
     };
     let saved_outputs = Arc::clone(&saved_outputs);
     tauri::async_runtime::spawn_blocking(move || {

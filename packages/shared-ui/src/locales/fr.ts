@@ -288,6 +288,39 @@ export const fr = {
   "desktop.copy.copied": "Copie !",
   "desktop.panel.jobActions": "Actions de la tâche de bureau",
   "desktop.settings.reset": "Réinitialiser les paramètres",
+  "desktop.quick.info": "Plus d’informations",
+  "desktop.quick.folderInfo": "Choisissez où enregistrer les images téléchargées.",
+  "desktop.quick.formatInfo":
+    "Choisissez un format. Auto enregistre en JPEG si chaque dimension est au plus de 65 535 pixels, sinon en PNG.",
+  "desktop.quick.sizeInfo":
+    "La largeur est plafonnée sans agrandissement ; le niveau source peut être plus petit. Estimations pour une œuvre RVB au ratio 4:3 : pixels = largeur² × 0,75. PNG/TIFF/ZIF : 1,5–3 octets/pixel ; WebP sans perte : 1–2,5. JPEG : 0,15 + 0,45q³ à 0,35 + 1,15q³ octets/pixel, q = qualité/100. Auto estime le JPEG. ZIF/IIIF ajoutent un tiers pour la pyramide. Mo = octets/1 000 000. Ces approximations excluent les métadonnées et varient selon le détail, le ratio et la compression. Les tailles entière/personnalisée nécessitent les dimensions source.",
+  "desktop.quick.networkInfo":
+    "Rapide utilise jusqu’à 16 requêtes simultanées sans délai. Équilibré lance jusqu’à 5 requêtes par seconde ; Doux jusqu’à 2. Un rythme réduit peut aider les serveurs chargés.",
+  "desktop.quick.source": "Selon la source",
+  "desktop.quick.exact": "Personnalisé",
+  "desktop.quick.upTo": "Jusqu’à {size}K",
+  "desktop.quick.hint.auto": "adaptatif",
+  "desktop.quick.hint.png": "sans perte",
+  "desktop.quick.hint.jpeg": "compressé",
+  "desktop.quick.hint.tiff": "archivage",
+  "desktop.quick.hint.webp": "sans perte",
+  "desktop.quick.hint.zif": "zoomable",
+  "desktop.quick.hint.iiifDir": "tuilé",
+  "desktop.quick.format.auto":
+    "JPEG jusqu’à 65 535 pixels par côté ; PNG au-delà. La qualité JPEG s’applique aussi à Auto.",
+  "desktop.quick.format.png":
+    "Pixels sans perte et transparence ; fichiers plus volumineux, adaptés à la retouche.",
+  "desktop.quick.format.jpeg":
+    "Fichiers plus petits avec perte. Sans transparence ; limite de 65 535 pixels par côté. Qualité réglable dans les paramètres.",
+  "desktop.quick.format.tiff": "Sortie sans perte pour l’archivage et la retouche.",
+  "desktop.quick.format.webp": "Sortie compressée sans perte, limitée à 16 383 pixels par côté.",
+  "desktop.quick.format.zif":
+    "Pyramide TIFF tuilée sans perte pour zoomer à plusieurs résolutions.",
+  "desktop.quick.format.iiifDir":
+    "Dossier de tuiles JPEG et info.json pour héberger une image IIIF.",
+  "desktop.quick.rate.maximum": "16 simultanées",
+  "desktop.quick.rate.balanced": "5/s",
+  "desktop.quick.rate.gentle": "2/s",
   "desktop.quick.folder": "Dossier",
   "desktop.quick.askEachTime": "Demander à chaque fois",
   "desktop.quick.chosenFolder": "Dossier choisi",
@@ -296,8 +329,8 @@ export const fr = {
   "desktop.quick.size": "Taille",
   "desktop.quick.network": "Réseau",
   "desktop.quick.fast": "Rapide",
-  "desktop.quick.balanced": "Équilibré · 5/s",
-  "desktop.quick.gentle": "Doux · 2/s",
+  "desktop.quick.balanced": "Équilibré",
+  "desktop.quick.gentle": "Doux",
   "desktop.quick.fullResolution": "Résolution complète",
   "desktop.quick.upTo4k": "Jusqu’à 4K",
   "desktop.quick.upTo2k": "Jusqu’à 2K",

@@ -1,5 +1,4 @@
 import { t } from "@dezoomify/shared-ui";
-import type { OutputFormat } from "@dezoomify/wasm-bindings";
 import type { ReactElement, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { DesktopSettings, NetworkProfile } from "./settings.ts";
@@ -12,7 +11,8 @@ interface Props {
   onReset(): void;
 }
 
-const formats: Array<{ value: OutputFormat; label: string }> = [
+const formats: Array<{ value: DesktopSettings["output_format"]; label: string }> = [
+  { value: "auto", label: "Auto" },
   { value: "png", label: "PNG" },
   { value: "jpeg", label: "JPEG" },
   { value: "tiff", label: "TIFF" },
@@ -23,12 +23,29 @@ const formats: Array<{ value: OutputFormat; label: string }> = [
 
 const profiles: NetworkProfile[] = ["maximum", "balanced", "gentle"];
 
-type SizePreset = "full" | "3840" | "2048" | "custom";
+const sizes = [1024, 2048, 3840, 7680, 15360, 30720];
+type SizePreset = string;
+
+function estimateSize(width: number, settings: DesktopSettings): string {
+  const format = settings.output_format;
+  const quality = (100 - settings.compression) / 100;
+  const jpeg = [0.15 + 0.45 * quality ** 3, 0.35 + 1.15 * quality ** 3];
+  const bytesPerPixel =
+    format === "auto" || format === "jpeg" || format === "iiif-dir"
+      ? jpeg
+      : format === "webp"
+        ? [1, 2.5]
+        : [1.5, 3];
+  const pyramid = format === "zif" || format === "iiif-dir" ? 4 / 3 : 1;
+  const pixels = width * width * 0.75;
+  const mb = bytesPerPixel.map((bytes) => (pixels * bytes * pyramid) / 1_000_000);
+  return `≈${mb[0].toFixed(1)}–${mb[1].toFixed(1)} MB`;
+}
 
 function sizePresetFor(settings: DesktopSettings): SizePreset {
   if (settings.max_width === null && settings.max_height === null) return "full";
-  if (settings.max_width === 3840 && settings.max_height === null) return "3840";
-  if (settings.max_width === 2048 && settings.max_height === null) return "2048";
+  if (sizes.includes(settings.max_width ?? 0) && settings.max_height === null)
+    return String(settings.max_width);
   return "custom";
 }
 
@@ -37,11 +54,85 @@ function folderName(path: string | null): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? t("desktop.quick.chosenFolder");
 }
 
-function QuickOption({ label, children }: { label: string; children: ReactNode }) {
+function Info({ text }: { text: string }) {
+  return (
+    <details className="dz-quick-info">
+      <summary aria-label={t("desktop.quick.info")}>ⓘ</summary>
+      <p>{text}</p>
+    </details>
+  );
+}
+
+function QuickChoice({
+  label,
+  value,
+  choices,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  choices: Array<{ value: string; label: string; hint: string; info: string }>;
+  onChange(value: string): void;
+}) {
+  const ref = useRef<HTMLDetailsElement>(null);
+  const selected = choices.find((choice) => choice.value === value) ?? choices[0];
+  return (
+    <details
+      className="dz-quick-choice"
+      ref={ref}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && ref.current) {
+          ref.current.open = false;
+          ref.current.querySelector("summary")?.focus();
+        }
+      }}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
+      }}
+    >
+      <summary aria-label={label}>
+        <span className="dz-choice-selected">{selected.label}</span>
+        <span aria-hidden="true">▾</span>
+      </summary>
+      <fieldset className="dz-quick-menu" aria-label={label}>
+        {choices.map((choice) => (
+          <div className="dz-quick-menu-row" key={choice.value}>
+            <button
+              type="button"
+              aria-pressed={value === choice.value}
+              onClick={() => {
+                onChange(choice.value);
+                if (ref.current) {
+                  ref.current.open = false;
+                  ref.current.querySelector("summary")?.focus();
+                }
+              }}
+            >
+              <span>{choice.label}</span>
+              <span className="dz-choice-hint">{choice.hint}</span>
+            </button>
+            <Info text={choice.info} />
+          </div>
+        ))}
+      </fieldset>
+    </details>
+  );
+}
+
+function QuickOption({
+  label,
+  info,
+  children,
+}: {
+  label: string;
+  info: string;
+  children: ReactNode;
+}) {
   return (
     <div className="dz-quick-option">
       <span>{label}</span>
       {children}
+      <Info text={info} />
     </div>
   );
 }
@@ -102,12 +193,12 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
 
   const chooseSize = (preset: SizePreset) => {
     if (preset === "full") commit({ max_width: null, max_height: null });
-    else if (preset === "3840") commit({ max_width: 3840, max_height: null });
-    else if (preset === "2048") commit({ max_width: 2048, max_height: null });
+    else if (sizes.includes(Number(preset)))
+      commit({ max_width: Number(preset), max_height: null });
     else setAdvancedOpen(true);
   };
 
-  const jpeg = settings.output_format === "jpeg";
+  const jpeg = settings.output_format === "jpeg" || settings.output_format === "auto";
   const showCompression =
     settings.output_format !== "webp" && settings.output_format !== "iiif-dir";
   const compressionValue = jpeg ? 100 - settings.compression : settings.compression;
@@ -122,7 +213,7 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
       aria-label="Job options"
     >
       <div className="dz-quick-options">
-        <QuickOption label={t("desktop.quick.folder")}>
+        <QuickOption label={t("desktop.quick.folder")} info={t("desktop.quick.folderInfo")}>
           <button
             type="button"
             className="dz-quick-button"
@@ -133,49 +224,65 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
           </button>
         </QuickOption>
 
-        <QuickOption label={t("desktop.quick.format")}>
-          <select
-            aria-label={t("desktop.quick.format")}
+        <QuickOption label={t("desktop.quick.format")} info={t("desktop.quick.formatInfo")}>
+          <QuickChoice
+            label={t("desktop.quick.format")}
             value={settings.output_format}
-            onChange={(event) =>
-              commit({ output_format: event.currentTarget.value as OutputFormat })
+            onChange={(value) =>
+              commit({ output_format: value as DesktopSettings["output_format"] })
             }
-          >
-            {formats.map((format) => (
-              <option key={format.value} value={format.value}>
-                {format.label}
-              </option>
-            ))}
-          </select>
+            choices={formats.map((format) => ({
+              ...format,
+              hint: t(
+                `desktop.quick.hint.${format.value === "iiif-dir" ? "iiifDir" : format.value}`,
+              ),
+              info: t(
+                `desktop.quick.format.${format.value === "iiif-dir" ? "iiifDir" : format.value}`,
+              ),
+            }))}
+          />
         </QuickOption>
 
-        <QuickOption label={t("desktop.quick.size")}>
-          <select
-            aria-label={t("desktop.quick.size")}
+        <QuickOption label={t("desktop.quick.size")} info={t("desktop.quick.sizeInfo")}>
+          <QuickChoice
+            label={t("desktop.quick.size")}
             value={sizePresetFor(settings)}
-            onChange={(event) => chooseSize(event.currentTarget.value as SizePreset)}
-          >
-            <option value="full">{t("desktop.quick.fullResolution")}</option>
-            <option value="3840">{t("desktop.quick.upTo4k")}</option>
-            <option value="2048">{t("desktop.quick.upTo2k")}</option>
-            <option value="custom">{t("desktop.quick.custom")}</option>
-          </select>
+            onChange={chooseSize}
+            choices={[
+              {
+                value: "full",
+                label: t("desktop.quick.fullResolution"),
+                hint: t("desktop.quick.source"),
+                info: t("desktop.quick.sizeInfo"),
+              },
+              ...sizes.map((width, index) => ({
+                value: String(width),
+                label: t("desktop.quick.upTo", { size: 2 ** index }),
+                hint: estimateSize(width, settings),
+                info: t("desktop.quick.sizeInfo"),
+              })),
+              {
+                value: "custom",
+                label: t("desktop.quick.custom"),
+                hint: t("desktop.quick.exact"),
+                info: t("desktop.advanced.dimensionsDesc"),
+              },
+            ]}
+          />
         </QuickOption>
 
-        <QuickOption label={t("desktop.quick.network")}>
-          <select
-            aria-label={t("desktop.quick.network")}
+        <QuickOption label={t("desktop.quick.network")} info={t("desktop.quick.networkInfo")}>
+          <QuickChoice
+            label={t("desktop.quick.network")}
             value={settings.network_profile}
-            onChange={(event) =>
-              commit({ network_profile: event.currentTarget.value as NetworkProfile })
-            }
-          >
-            {profiles.map((profile) => (
-              <option key={profile} value={profile}>
-                {t(`desktop.quick.${profile === "maximum" ? "fast" : profile}`)}
-              </option>
-            ))}
-          </select>
+            onChange={(value) => commit({ network_profile: value as NetworkProfile })}
+            choices={profiles.map((profile) => ({
+              value: profile,
+              label: t(`desktop.quick.${profile === "maximum" ? "fast" : profile}`),
+              hint: t(`desktop.quick.rate.${profile}`),
+              info: t("desktop.quick.networkInfo"),
+            }))}
+          />
         </QuickOption>
 
         <button

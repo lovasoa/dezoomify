@@ -368,6 +368,39 @@ fn automatic_output_uses_the_selected_title_and_avoids_overwriting() {
     let second = support::run_options_observed(options, |_, _| {}).unwrap();
     assert_eq!(second.path.file_name().unwrap(), "An-image-title-2.png");
     assert_eq!(std::fs::read(first.path).unwrap(), original);
+    let automatic = support::run_options_observed(
+        JobOptions {
+            input_url: manifest.to_string_lossy().into_owned(),
+            output: OutputTarget::AutoImageDir { dir: work.clone() },
+            ..Default::default()
+        },
+        |_, _| {},
+    )
+    .unwrap();
+    assert_eq!(automatic.path.file_name().unwrap(), "An-image-title.jpg");
+    let image = image::open(&automatic.path).unwrap();
+    assert_eq!((image.width(), image.height()), (256, 256));
+    image::RgbImage::new(65_536, 1)
+        .save(work.join("tile.png"))
+        .unwrap();
+    let source = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(
+        &manifest,
+        source.replace("width: 256\nheight: 256", "width: 65536\nheight: 1"),
+    )
+    .unwrap();
+    let large = support::run_options_observed(
+        JobOptions {
+            input_url: manifest.to_string_lossy().into_owned(),
+            output: OutputTarget::AutoImageDir { dir: work.clone() },
+            ..Default::default()
+        },
+        |_, _| {},
+    )
+    .unwrap();
+    assert_eq!(large.path.extension().unwrap(), "png");
+    let image = image::open(&large.path).unwrap();
+    assert_eq!((image.width(), image.height()), (65_536, 1));
 }
 
 /// Loopback server delaying tile bodies: at cancel time fetches are mid-air
