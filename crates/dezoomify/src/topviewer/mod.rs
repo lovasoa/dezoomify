@@ -2,20 +2,19 @@
 
 use std::sync::{Arc, LazyLock};
 
-use regex::Regex;
+use regex::{Regex, bytes::Regex as BytesRegex};
 use serde_json::Value;
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{html_matches, html_tag, metadata, url_matches, viewer};
+use crate::core::discovery::{css, html_matches, metadata, url_matches, viewer};
 use crate::core::{
     DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource,
     Request, ResolvedLevel, resolve_url_template,
 };
-use crate::web_page::tags;
 
-static THUMBNAIL_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)images\.memorix\.nl/([^/]+)/thumb/[^/]+/(.*?)\.jpg")
+static THUMBNAIL_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+    BytesRegex::new(r"(?i)images\.memorix\.nl/(?P<server>[^/]+)/thumb/[^/]+/(?P<image>.*?)\.jpg")
         .expect("constant TopViewer thumbnail pattern")
 });
 static DETAIL_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -25,9 +24,12 @@ static DETAIL_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 const ROUTES: &[DiscoveryRoute] = &[
     viewer(url_matches(is_known_detail_url)).resolve_metadata(known_detail_url),
-    viewer(html_tag("pic-mediabank")).extract_metadata(follow_mediabank),
-    viewer(html_matches(contains_thumbnail)).extract_metadata(follow_thumbnail),
-    metadata(url_matches(is_media_api)).extract_metadata(follow_media),
+    viewer(css("pic-mediabank")).decode(follow_mediabank),
+    DiscoveryRoute::regex_link(
+        &THUMBNAIL_RE,
+        "https://images.memorix.nl/$server/topviewjson/memorix/$image",
+    ),
+    metadata(url_matches(is_media_api)).decode(follow_media),
     metadata(html_matches(contains_topviews)).decode(decode),
 ];
 
@@ -72,47 +74,11 @@ fn contains_topviews(bytes: &[u8]) -> bool {
     String::from_utf8_lossy(bytes).contains("\"topviews\"")
 }
 
-fn contains_thumbnail(bytes: &[u8]) -> bool {
-    THUMBNAIL_RE.is_match(&String::from_utf8_lossy(bytes))
-}
-
-fn follow_thumbnail(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-    let page = resource.text_lossy();
-    let captures = THUMBNAIL_RE.captures(&page).ok_or_else(|| {
-        DiscoveryError::InvalidMetadata("unable to find a Memorix thumbnail".into())
-    })?;
-    let server = captures
-        .get(1)
-        .map(|value| value.as_str().to_owned())
-        .ok_or_else(|| DiscoveryError::InvalidMetadata("thumbnail has no image server".into()))?;
-    let image = captures
-        .get(2)
-        .map(|value| value.as_str().to_owned())
-        .ok_or_else(|| DiscoveryError::InvalidMetadata("thumbnail has no image ID".into()))?;
-    Ok(ParsedResource::Follow(Request::new(format!(
-        "https://images.memorix.nl/{server}/topviewjson/memorix/{image}"
-    ))))
-}
-
 fn follow_mediabank(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-    let tag = tags(resource.bytes())
-        .find(|tag| tag.name() == b"pic-mediabank")
-        .ok_or_else(|| {
-            DiscoveryError::InvalidMetadata("TopViewer page has no media element".into())
-        })?;
-    let required = |name, label| {
-        tag.attribute(name)
-            .filter(|value| !value.is_empty())
-            .map(|value| value.into_owned())
-            .ok_or_else(|| {
-                DiscoveryError::InvalidMetadata(format!("TopViewer media element has no {label}"))
-            })
-    };
-    let api_key = required("data-api-key", "API key")?;
-    let api_reference = required("data-api-url", "API URL")?;
-    let entities = tag
-        .attribute("data-entities")
-        .map(|value| value.into_owned());
+    let tag = resource.element()?;
+    let api_key = tag.required("data-api-key")?.to_owned();
+    let api_reference = tag.required("data-api-url")?;
+    let entities = tag.attribute("data-entities").map(str::to_owned);
     let page = Url::parse(resource.final_uri())
         .map_err(|_| DiscoveryError::InvalidMetadata("invalid TopViewer page URL".into()))?;
     let detail = DETAIL_RE
@@ -120,7 +86,7 @@ fn follow_mediabank(resource: DiscoveryResource<'_>) -> Result<ParsedResource, D
         .and_then(|captures| captures.get(1))
         .map(|value| value.as_str().to_owned());
     let mut api = page
-        .join(&api_reference)
+        .join(api_reference)
         .map_err(|_| DiscoveryError::InvalidMetadata("invalid TopViewer API URL".into()))?;
     let mut path = api.path().trim_end_matches('/').to_owned();
     path.push_str("/media");

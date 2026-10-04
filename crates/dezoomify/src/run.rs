@@ -248,6 +248,7 @@ async fn discover(
                 }
                 Ok(result)
             },
+            |query| host.parse_html(query),
         )
         .await
         .map_err(|error| match error {

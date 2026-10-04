@@ -461,6 +461,12 @@ impl<'a> NativeHost<'a> {
 }
 
 impl Host for NativeHost<'_> {
+    async fn parse_html(
+        &self,
+        query: dezoomify::model::HtmlQuery,
+    ) -> Result<dezoomify::model::HtmlDocument, Error> {
+        crate::html::parse_html(query).await
+    }
     async fn fetch(
         &self,
         request: ResourceRequest,

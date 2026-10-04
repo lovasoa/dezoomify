@@ -9,7 +9,7 @@ Each run saves one job to one output file (`.png`, `.jpg`/`.jpeg`,
 `.tif`/`.tiff`, `.zif`, `.webp`, `.iiif`, or extensionless `iiif-dir` by
 extension). `--tile-cache` keeps a resume folder so a repeated run
 reuses tiles instead of fetching them again; see
-[resuming an interrupted save](./desktop-app.md#resuming-an-interrupted-save).
+[resuming an interrupted save](../../apps/desktop/desktop-app.md#resuming-an-interrupted-save).
 
 ## Basic use
 
@@ -88,11 +88,11 @@ first image). Between images `--min-interval` paces the queue.
 
 ## Limits
 
-The command-line tool holds the image in memory subject to the memory currently available to the process, as does the [desktop app](./desktop-app.md).
+The command-line tool holds the image in memory subject to the memory currently available to the process, as does the [desktop app](../../apps/desktop/desktop-app.md).
 A larger save stops with a typed `limit-exceeded` error before anything is written; save a smaller level with `--max-width`.
 See [very large pictures](./troubleshooting.md#the-image-appears-blank-or-the-browser-slows-to-a-halt) when a browser tab cannot hold the image.
 
 ## Next steps
 
-- [Desktop app features](./desktop-app.md)
+- [Desktop app features](../../apps/desktop/desktop-app.md)
 - [Supported formats](./supported-formats.md)

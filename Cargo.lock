@@ -980,13 +980,14 @@ dependencies = [
  "futures",
  "futures-util",
  "hmac",
- "html5gum",
+ "html-escape",
  "itertools",
  "json5",
  "krpano-decrypt",
  "memchr",
  "quick-xml",
  "regex",
+ "scraper",
  "serde",
  "serde_bytes",
  "serde_json",
@@ -1051,6 +1052,7 @@ dependencies = [
  "image",
  "reqwest 0.12.28",
  "rustls",
+ "scraper",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -1237,6 +1239,12 @@ name = "dyn-clone"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
+
+[[package]]
+name = "ego-tree"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b04dc5a38e4f151a79d9f2451ae6037fb6eaf5cba34771f44781f80e508498e3"
 
 [[package]]
 name = "either"
@@ -1962,6 +1970,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "html-escape"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9356095b4b41197bba32173600e1582792cda618f65d12f68e2e77d273413c5"
+
+[[package]]
 name = "html5ever"
 version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1980,12 +1994,6 @@ dependencies = [
  "log",
  "markup5ever 0.39.0",
 ]
-
-[[package]]
-name = "html5gum"
-version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "428502d3ec1742c35e015871aef742bc4722a9acfcb616b8ff79b519922e1c36"
 
 [[package]]
 name = "http"
@@ -3871,6 +3879,20 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+
+[[package]]
+name = "scraper"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdd0be4d296f048bfb06dd01bbc80ef789ddd2e55583e8d2e6b804942abfabc2"
+dependencies = [
+ "cssparser 0.37.0",
+ "ego-tree",
+ "html5ever 0.39.0",
+ "precomputed-hash",
+ "selectors 0.38.0",
+ "tendril",
+]
 
 [[package]]
 name = "selectors"

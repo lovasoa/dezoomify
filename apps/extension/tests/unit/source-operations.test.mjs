@@ -6,7 +6,7 @@ import {
   fetchSource,
 } from "../../src/job/source-operations.ts";
 
-// Test-only polyfill: the pinned Node 24 toolchain predates
+// Test-only polyfill: the pinned Node toolchain predates
 // Uint8Array.prototype.toBase64 (Baseline 2025), while the extension
 // manifest requires browsers that ship it. This exercises fetchSource's
 // logic on old Node without touching shipped code.

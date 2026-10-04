@@ -1,3 +1,4 @@
+mod support;
 use core::discovery::{DiscoveryInput, DiscoveryLimits, any, metadata, url_suffix, viewer};
 use dezoomify::{
     core::{
@@ -75,6 +76,7 @@ fn an_earlier_ordinary_read_keeps_precedence_over_a_later_ready_image() {
                 Ok(response(&request.uri))
             }
         },
+        support::parse_html,
     );
     let mut future = Box::pin(future);
     assert!(future.as_mut().now_or_never().is_none());
@@ -111,6 +113,7 @@ fn a_later_stalled_read_cannot_delay_an_earlier_winner() {
                 Ok(response("first"))
             }
         },
+        support::parse_html,
     );
     let mut future = Box::pin(future);
     assert!(future.as_mut().now_or_never().is_none());
@@ -145,6 +148,7 @@ fn blocked_access_yields_to_ordinary_work_without_asking_for_permission() {
                 })
             }
         },
+        support::parse_html,
     ))
     .unwrap();
     assert_eq!(selected(catalog), "public");
@@ -180,6 +184,7 @@ fn deferred_access_runs_after_every_runnable_branch_and_reuses_its_resource() {
                 })
             }
         },
+        support::parse_html,
     ))
     .unwrap();
     assert_eq!(selected(catalog), "authorized");
@@ -214,7 +219,11 @@ fn shared_reads_keep_branch_history_headers_and_redirected_bases() {
     registry.register(B);
     let calls = RefCell::new(Vec::new());
     let catalog = futures::executor::block_on(registry.discover(
-        vec![DiscoveryInput::new("https://test/root")],
+        vec![
+            DiscoveryInput::new("https://test/root"),
+            DiscoveryInput::with_contents("https://test/child", b"stale child")
+                .with_kind(dezoomify::model::DiscoveryInputKind::ObservedDocument),
+        ],
         Default::default(),
         |request, _| {
             calls.borrow_mut().push(request.clone());
@@ -232,6 +241,7 @@ fn shared_reads_keep_branch_history_headers_and_redirected_bases() {
                 }
             }
         },
+        support::parse_html,
     ))
     .unwrap();
     assert_eq!(selected(catalog), "child");
@@ -277,6 +287,7 @@ fn live_resource_concurrency_stays_within_the_declared_bound() {
                 Ok(response(&request.uri))
             }
         },
+        support::parse_html,
     ))
     .unwrap();
     assert!(peak.get() <= 2);
@@ -304,6 +315,7 @@ fn rejected_candidates_retain_host_failure_facts() {
             vec![DiscoveryInput::new("https://test/root")],
             Default::default(),
             |_, _| futures::future::ready(Err(failure.clone())),
+            support::parse_html,
         ))
         .unwrap_err();
         let DiscoveryError::NoCandidateAccepted { diagnostics } = error else {

@@ -27,7 +27,7 @@ capabilities.
   can resume using cached tiles. Image size is limited by your available
   memory. It can work with some sites that refuse the website's requests,
   but cannot reuse your browser login; use the extension for signed-in pages.
-  [Guide](docs/user/desktop-app.md).
+  [Guide](apps/desktop/desktop-app.md).
 - **[Command-line tool](docs/user/command-line.md):** The same saving
   capabilities as the desktop app, for scripts. Choose a particular image or
   zoom level, limit the resolution, or save a list of addresses with `--bulk`.
@@ -80,7 +80,7 @@ which app you used, and the error message or diagnostic report from
 
 ## Build and contribute
 
-Install Rust and Node.js 24.15.0 or newer, then run these commands from the
+Install Rust and the Node.js version pinned in [`.node-version`](.node-version), then run these commands from the
 repository root:
 
 ```sh

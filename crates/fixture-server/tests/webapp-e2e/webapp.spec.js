@@ -22,6 +22,7 @@ for (const fixture of formats) {
     await page.locator("#dz-url-input").fill(ADDR + fixture.input);
     await page.getByRole("button", { name: /find image/i }).click();
     await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 30000 });
+    await expect(page.locator("html")).not.toHaveAttribute("data-viewer-ready", "true");
     const pending = page.waitForEvent("download");
     await page.getByRole("button", { name: "Save image" }).click();
     assertSavedPyramid(fs.readFileSync(await (await pending).path()), fixture.tolerance);

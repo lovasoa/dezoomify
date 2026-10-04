@@ -32,6 +32,9 @@ function host(overrides = {}) {
   const observed = { reads: [], tiles: [], progress: [], warnings: [], delays: [], settled: 0 };
   return {
     observed,
+    async parseHtml() {
+      return {}; // These bridge fixtures use XML metadata and need no HTML projections.
+    },
     async fetch(request) {
       observed.reads.push(request);
       await Promise.resolve();
@@ -178,16 +181,18 @@ test("malformed JavaScript arguments and Host returns fail as typed errors and s
     assert.equal(platform.observed.settled, 1);
     assert.deepEqual(platform.observed.reads, []);
   }
-  const platform = host({
-    async acquireTile() {
-      return "invalid";
-    },
-  });
-  await assert.rejects(wasm.dezoomify([{ url }], options, platform), (error) => {
-    assert.equal(error.kind, "binding-invalid-value");
-    assert.equal(platform.observed.settled, 1);
-    return true;
-  });
+  for (const method of ["parseHtml", "acquireTile"]) {
+    const platform = host({
+      async [method]() {
+        return "invalid";
+      },
+    });
+    await assert.rejects(wasm.dezoomify([{ url }], options, platform), (error) => {
+      assert.equal(error.kind, "binding-invalid-value");
+      assert.equal(platform.observed.settled, 1);
+      return true;
+    });
+  }
 });
 
 test("processing uses Uint8Array without numeric body arrays", () => {

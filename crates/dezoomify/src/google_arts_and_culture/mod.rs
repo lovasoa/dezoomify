@@ -14,7 +14,7 @@ mod url;
 
 const ROUTES: &[DiscoveryRoute] = &[
     metadata(url_suffix("=g")).child_metadata(parse_tile_information),
-    viewer(url_matches(is_google_arts_url)).extract_metadata(parse_page),
+    viewer(url_matches(is_google_arts_url)).decode(parse_page),
 ];
 
 pub const SPEC: FormatSpec =

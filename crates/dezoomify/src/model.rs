@@ -4,6 +4,63 @@
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroU64;
 
+/// Batched CSS queries against inert, UTF-8 HTML. Parsing never fetches or executes.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct HtmlQuery {
+    pub source: String,
+    pub selectors: Vec<String>,
+}
+
+/// Selected elements in document order, with decoded attributes and textContent.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify), tsify(hashmap_as_object))]
+#[serde(transparent)]
+pub struct HtmlDocument(pub std::collections::BTreeMap<String, Vec<HtmlElement>>);
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify), tsify(hashmap_as_object))]
+pub struct HtmlElement {
+    pub name: String,
+    pub attributes: std::collections::BTreeMap<String, String>,
+    pub text: String,
+}
+
+impl HtmlDocument {
+    pub const TITLE_META: &str = "meta[property=\"og:title\" i], meta[property=\"twitter:title\" i], meta:not([property])[name=\"og:title\" i], meta:not([property])[name=\"twitter:title\" i]";
+    pub const PAGE_QUERIES: &[&str] = &[
+        "base[href], script",
+        "base[href]",
+        "body[onload]",
+        "title",
+        Self::TITLE_META,
+        "iframe[src]",
+    ];
+    pub fn select(&self, selector: &str) -> impl Iterator<Item = &HtmlElement> {
+        self.0.get(selector).into_iter().flatten()
+    }
+    /// Retained element content; query keys are authored format selectors.
+    pub fn byte_len(&self) -> usize {
+        self.0
+            .values()
+            .flatten()
+            .flat_map(|element| {
+                [&element.name, &element.text]
+                    .into_iter()
+                    .chain(element.attributes.keys())
+                    .chain(element.attributes.values())
+            })
+            .map(String::len)
+            .sum()
+    }
+}
+
+impl HtmlElement {
+    pub fn attribute(&self, name: &str) -> Option<&str> {
+        self.attributes.get(name).map(String::as_str)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Requests and direct byte ownership
 // ---------------------------------------------------------------------------

@@ -52,6 +52,9 @@ impl Drop for Active<'_> {
     }
 }
 impl Host for MemoryHost {
+    async fn parse_html(&self, query: HtmlQuery) -> Result<HtmlDocument, Error> {
+        parse_html(query).await
+    }
     async fn fetch(&self, request: ResourceRequest, _: Interaction) -> Result<ResourceRead, Error> {
         let result = self.resources.get(&request.uri).cloned();
         let failure = self.fetch_failures.get(&request.uri).cloned();

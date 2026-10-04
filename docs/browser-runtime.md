@@ -1,6 +1,6 @@
 # Browser runtime
 
-`packages/browser-runtime` contains BrowserHost and the shared browser application used by the website and extension. Host operations own fetching, decoding, painting, canvas resources, and saving; application modules own UI composition and invocation lifetime.
+`packages/browser-runtime` contains BrowserHost and the shared browser application used by the website and extension. Host operations own fetching, inert HTML/CSS parsing in a detached document, decoding, painting, canvas resources, and saving; application modules own UI composition and invocation lifetime.
 
 ## Host operations
 
@@ -15,11 +15,11 @@ Extension fetches use the attempt signal and a local deadline: aborting the atte
 - Tiles draw at planned placement, 1:1 scale. Pixels past the planned edge crop from right and bottom (padded edge tiles); short tiles leave the gap empty. Each bitmap closes right after painting.
 - A clean output reports the product's actual save disposition: the website retains a Blob URL for a later save click, the extension awaits the download manager's confirmation and retains the saved-file identity for open/reveal actions, and a tainted display-only canvas skips encoding.
 
-Tiles the browser reads as bytes take the WASM `applyProcessing` path per the core recipe. Ordinary unprocessed tiles without readable bytes fall back to plain `<img>` (display-only): the canvas taints, no bytes result, and the job ends display-only. Only the first tile per origin tries readable bytes; later tiles go straight to `<img>`. Website and extension starts request the algorithm's largest-fitting selection policy with the device's automatic selection limits from [Compatibility](compatibility.md#canvas-and-save-limits); the device tier comes from `userAgentData.mobile` where the browser reports it, with an iOS/Android user-agent fallback. When automatic selection takes a smaller known level than the maximum, the shared UI names the selected and maximum resolutions and offers the desktop app, a maximum retry, and (while the job runs) stop; the choice stays after the smaller job completes. A maximum retry starts with unbounded selection caps, so the algorithm takes the largest known level and the canvas gate reports what cannot work (allocation, context, or PNG encoding) with the desktop-app action. The algorithm chooses the ready image and level, or follows deferred catalog entries on the same job within its existing bound. The shared UI has no manual image or level chooser; other callers can supply interactive selection through awaited chooseImage and chooseLevel capabilities.
+Tiles the browser reads as bytes take the WASM `applyProcessing` path per the core recipe. Ordinary unprocessed tiles without readable bytes fall back to plain `<img>` (display-only): the canvas taints, no bytes result, and the job ends display-only. Only the first tile per origin tries readable bytes; later tiles go straight to `<img>`. Website and extension starts request the algorithm's largest-fitting selection policy with the device's automatic selection limits from [configured limits](../packages/browser-runtime/src/limits.ts); the device tier comes from `userAgentData.mobile` where the browser reports it, with an iOS/Android user-agent fallback. When automatic selection takes a smaller known level than the maximum, the shared UI names the selected and maximum resolutions and offers the desktop app, a maximum retry, and (while the job runs) stop; the choice stays after the smaller job completes. A maximum retry starts with unbounded selection caps, so the algorithm takes the largest known level and the canvas gate reports what cannot work (allocation, context, or PNG encoding) with the desktop-app action. The algorithm chooses the ready image and level, or follows deferred catalog entries on the same job within its existing bound. The shared UI has no manual image or level chooser; other callers can supply interactive selection through awaited chooseImage and chooseLevel capabilities.
 
 ## Generated WASM boundary
 
-BrowserHost implements the generated Host interface. Metadata crosses as Uint8Array, choices and outputs as domain values, and failures as structured Error rejections. The bindings convert promises and futures without application policy. See [Bindings](bindings.md).
+BrowserHost implements the generated Host interface. Metadata crosses as Uint8Array, choices and outputs as domain values, and failures as structured Error rejections. The bindings convert promises and futures without application policy. See [Architecture](architecture.md#bindings-and-errors).
 
 ## Catalog boundary
 
@@ -37,11 +37,11 @@ For ordinary website tiles with `ProcessingRecipe::None`, the runtime loads thro
 
 Direct metadata streams stop at 8 MiB and direct tile streams at 64 MiB; the metadata proxy stops at 2 MiB. The transport cancels a body as soon as its limit or attempt signal is reached, and reads at most 4 KiB for an HTTP error preview. Decoding uses asynchronous browser image APIs; processing applies the shared Rust recipe before painting, and size limits are checked before allocation. Object URLs live for one job and are then revoked.
 
-Job diagnostics retain metadata requests and aggregate successful tile traffic. Failed acquisitions retain request, route, status, bounded preview, timing, and placement; repeated failures retain a count and first/last samples. Cancellation adds no fetch-failure noise. The shared report replaces console-dependent activity logs; see [Errors](errors.md#diagnostic-reports).
+Job diagnostics retain metadata requests and aggregate successful tile traffic. Failed acquisitions retain request, route, status, bounded preview, timing, and placement; repeated failures retain a count and first/last samples. Cancellation adds no fetch-failure noise. The shared report replaces console-dependent activity logs; see [Architecture](architecture.md#diagnostics).
 
 ## Request order
 
-This order is canonical; all other pages link here instead of restating it.
+Use this order when debugging website requests.
 
 1. Direct browser fetch with cookies, `Authorization`, and browser credentials omitted.
 2. After a classified CORS or network failure, or a direct fetch not completing within the 1500 ms metadata window, automatic metadata CORS proxy fallback when the metadata request is public and non-credential.

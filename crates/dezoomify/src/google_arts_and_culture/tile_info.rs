@@ -1,10 +1,9 @@
-use std::default::Default;
 use std::str::FromStr;
 
 use regex::Regex;
 use serde::Deserialize;
 
-use crate::web_page::decode_html_entities;
+use html_escape::decode_html_entities;
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct TileInfo {
@@ -61,7 +60,7 @@ fn get_name_from_gap_html(html: &str) -> String {
             &(c[4])));
 
     if let Some(result) = name {
-        return decode_html_entities(&result);
+        return decode_html_entities(&result).into_owned();
     }
 
     let fallback_name = Regex::new(r#""name":"([^"]+)"#)
@@ -72,7 +71,7 @@ fn get_name_from_gap_html(html: &str) -> String {
             |c| c[1].replace("\\u0026", "&").replace("&quot;", "\""),
         );
 
-    decode_html_entities(&fallback_name)
+    decode_html_entities(&fallback_name).into_owned()
 }
 
 impl FromStr for PageInfo {

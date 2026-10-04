@@ -8,7 +8,8 @@ file actions, and per-user `dezoomify://` protocol-handler registration.
 - First-run protocol registration is per-user only. The lean shell exposes
   `--register-protocol-handler` and `--unregister-protocol-handler`; the Tauri
   app registers the handler best-effort when it starts.
-- Installers ship unsigned (no paid Apple/Azure signing in this free project);
+- macOS apps use ad-hoc signing; Linux and Windows installers are unsigned
+  (no paid Apple/Azure signing in this free project);
   automatic updates are disabled, so check GitHub Releases manually.
 
 The Tauri entry point awaits `dezoomify::dezoomify` with NativeHost. IPC carries
@@ -55,8 +56,9 @@ deadline). The `bundle-smoke` job keeps actual per-platform bundle, install,
 and launch coverage:
 Linux installs the `deb` (`sudo dpkg -i`) and launches it briefly under
 Xvfb (a 20 s stay-alive proves install + launch + webview init; the window
-shell has no `--version` flag), macOS mounts the `dmg` and execs the binary
-directly (unsigned local build, Gatekeeper/SIP untouched), while Windows
+shell has no `--version` flag), macOS mounts the `dmg`, verifies the app's
+ad-hoc signature with `codesign --verify --deep --strict`, and execs the binary
+directly (local build, Gatekeeper/SIP untouched), while Windows
 requires WiX and NSIS, installs the `msi` bundle silently, and
 fails the job if the installer cannot be built or launched.
 Smoke logs upload as `desktop-bundle-smoke-<os>`. Platform smokes do not
@@ -68,18 +70,32 @@ exercised anywhere (updater inert).
 
 `cargo xtask build desktop` compiles the lean shell, then the frontend
 (`apps/desktop/dist/`), then the Tauri window shell, then generates icons
-(`scripts/gen-desktop-icons.py`), then bundles for the matching host:
+(`scripts/gen-desktop-icons.mjs`), then bundles for the matching host:
 Linux `deb` (Tauri CLI `tauri build --bundles deb`, needs `dpkg-deb`),
 Windows `msi`/`nsis` (needs WebView2, WiX, NSIS, `icons/icon.ico`),
 macOS `dmg` (needs Xcode CLT, `icons/icon.icns`).
+Icons use the website's `favicon.svg` artwork and the pinned Tauri CLI's
+`tauri icon` command, following [Tauri's platform icon guidance](https://v2.tauri.app/develop/icons/).
 `cargo xtask build desktop --unsigned-test` compiles everything but
 produces no bundle. Linux window builds need
 `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential`;
 macOS ships WebKit and Windows ships WebView2.
 
-Bundles are unsigned with no paid Apple/Azure signing in this free
-project; automatic updates are disabled (no update host or key), so check
+macOS apps use Tauri's `signingIdentity: "-"` for ad-hoc signing without
+an Apple account. Linux and Windows installers are unsigned. macOS apps
+are not Developer ID-signed or notarized, so downloaded apps still require
+user approval. The release workflow verifies the app signature inside the
+finished DMG before uploading the artifact. The local bundle smoke does not
+exercise Finder approval of a quarantined browser download; test that flow
+manually on a clean Mac using the user guide.
+The DMG's Finder background displays installation and first-launch steps
+generated from the macOS section of that guide by
+`scripts/generate-dmg-background.mjs` (PNG output under `target/desktop-dmg/`).
+The bundler enables Finder layout even in CI with
+`TAURI_BUNDLER_DMG_IGNORE_CI=true`; the smoke and release checks require the
+packaged background and saved Finder settings in addition to a valid signature.
+Automatic updates are disabled (no update host or key), so check
 GitHub Releases manually. Releases include Linux x86_64 `.deb`, Windows x86_64
 `.msi`, and Apple silicon macOS `.dmg` installers. The user-facing
 install note lives in the [Desktop app
-guide](../../docs/user/desktop-app.md#install).
+guide](./desktop-app.md#install).

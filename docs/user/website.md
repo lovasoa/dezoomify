@@ -68,17 +68,17 @@ computer:
   largest resolution that fits and names the chosen and maximum resolutions.
   **Try maximum** attempts the maximum resolution anyway; when the browser
   cannot hold it, the job stops with an error that points to the
-  [desktop app](./desktop-app.md) for the full-size image. To save a
+  [desktop app](../../apps/desktop/desktop-app.md) for the full-size image. To save a
   smaller copy, use the [command-line tool](./command-line.md) with
   `--max-width`.
 - **Some sites refuse visitors.** A few image servers only answer to their
   own pages and send an error to everyone else. The
-  [desktop app](./desktop-app.md) can introduce itself as coming from the
+  [desktop app](../../apps/desktop/desktop-app.md) can introduce itself as coming from the
   site's own viewer.
 - **Viewing without saving.** Some sites show their pieces without letting
   the browser read the image data directly. The website then shows the
   assembled picture below. To save it, copy the image address and paste it
-  into the [desktop app](./desktop-app.md).
+  into the [desktop app](../../apps/desktop/desktop-app.md).
 - **Colors may shift.** The browser save does not keep the original color
   profile (ICC) or photo metadata (EXIF). The desktop app preserves the
   first tile's color profile for exact colors.

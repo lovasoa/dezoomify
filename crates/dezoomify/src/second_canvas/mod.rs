@@ -7,7 +7,7 @@ use serde::{Deserialize, de::IntoDeserializer};
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{html_matches, metadata, viewer};
+use crate::core::discovery::{css, html_matches, metadata, viewer};
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
     ParsedResource, Positioned, Request, ResolvedLevel,
@@ -15,12 +15,11 @@ use crate::core::{
 
 const ROUTES: &[DiscoveryRoute] = &[
     metadata(html_matches(contains_gigapixel)).decode(decode_catalog),
-    viewer(html_matches(contains_viewer_script)).extract_metadata(follow_viewer_config),
-    viewer(html_matches(|bytes| viewer_iframe(bytes).is_some())).extract_metadata(|resource| {
-        viewer_iframe(resource.bytes())
-            .map(|uri| resource.follow_relative(&uri))
-            .ok_or_else(|| DiscoveryError::InvalidMetadata("missing Second Canvas iframe".into()))
-    }),
+    viewer(html_matches(contains_viewer_script)).decode(follow_viewer_config),
+    viewer(css(
+        "iframe[src*=\".s3.amazonaws.com/web/\" i][src*=\".html\" i]",
+    ))
+    .follow_attribute("src"),
 ];
 
 pub const SPEC: FormatSpec =
@@ -36,14 +35,6 @@ fn contains_gigapixel(bytes: &[u8]) -> bool {
 fn contains_viewer_script(bytes: &[u8]) -> bool {
     let page = String::from_utf8_lossy(bytes).to_ascii_lowercase();
     page.contains("scw.min.js") || page.contains("scv.min.js")
-}
-
-fn viewer_iframe(bytes: &[u8]) -> Option<String> {
-    static VIEWER_URL: LazyLock<BytesRegex> = LazyLock::new(|| {
-        BytesRegex::new(r"(?i)^https?://[^/]+\.s3\.amazonaws\.com/web/.+\.html(?:[?#].*)?$")
-            .expect("constant Second Canvas viewer URL pattern")
-    });
-    crate::web_page::iframe_sources(bytes).find(|uri| VIEWER_URL.is_match(uri.as_bytes()))
 }
 
 static EMBEDDED_CONFIG_RE: LazyLock<BytesRegex> = LazyLock::new(|| {

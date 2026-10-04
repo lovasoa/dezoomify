@@ -1,45 +1,72 @@
 # Architecture
 
-All four products call `dezoomify(inputs, options, host)`, one asynchronous Rust function. It discovers images, chooses a level, acquires tiles with bounded concurrency, resolves partial output, and awaits the actual save result. Products reach it through the generated WASM function (website, extension) or link the core directly (CLI, desktop), with `BrowserHost` or `NativeHost` supplying platform I/O.
-
-## Rust algorithm
-
-`crates/dezoomify` contains the shared algorithm, domain values, format parsers, geometry, selection rules, and retry policy. It performs platform operations only through injected `Host` methods and imports no network, filesystem, clock, UI, or image-codec implementation. Parsing and planning remain deterministic.
-
-`model.rs` defines the values crossing language boundaries; `host.rs` defines one capability list that generates the Rust trait and JavaScript method bindings. The generated TypeScript declaration is tracked in `packages/wasm-bindings`. See [Bindings](bindings.md) and [Algorithm](algorithm.md).
-
-HTML formats share a streaming `html5gum` tokenizer for tags and decoded attributes. Routing can match an active tag directly. The tokenizer skips template contents, treats raw-text elements as opaque, and keeps script body slices in their original encoding and source order. It supplies tokens rather than a DOM or XPath engine; JavaScript extraction stays static. Hosts acquire bytes without parsing or executing downloaded code.
-
-XML formats share `quick-xml` for streaming tokens and Serde deserialization, including interleaved element lists. Formats register in one ordered registry; registry order breaks ties between equally relevant matches. `ImagePlan` validates ready images and their tile counts; `CatalogPlan` collects multiple ready images or deferred links. `ResolvedLevel::grid` provides regular geometry; format-owned tile sources provide overlap, padding, probes, and custom placement. Tile requests are lazy.
-
-Format references resolve against the redirected base, and routes that require a previously read parent retain that parent explicitly. Inline OpenSeadragon Zoomify services use floor-halving, including their smallest single-tile level. Tile groups count actual preceding tiles. XML `NUMTILES` heuristics apply only to XML metadata.
-
-## Hosts
-
-`crates/dezoomify-native` implements `NativeHost` for CLI and desktop: HTTP and local resource reads, authentication, cache, decode workers, memory and spool accounting, encoders, publication, and cancellation cleanup. `packages/browser-runtime/src/browser-host.ts` implements `BrowserHost` for website and extension: readable bytes or ordinary image display, decoding, canvas assembly, output, and awaited interaction callbacks. Both browser products use one application flow with injected input, transport, permission, save, and optional toolbar capabilities.
-
-`crates/dezoomify-wasm` converts values and futures only and owns no platform I/O, canvas, storage, or application policy. Imported object methods call the supplied Host directly; the exported function awaits the same Rust algorithm as native.
-
-## Shared UI and application
-
-`packages/shared-ui` contains React components, translations, pure presentation functions, history, labels, and bounded diagnostics, with no host globals. Browser application code may import the shared UI; browser transport and image operations receive callbacks.
-
-One browser invocation owns cancellation, pause, pending interactions, progress, and retirement; a replacement invocation cannot receive its predecessor's progress or output, and completed output stays available until the user retires it. Desktop retains only the task ownership and IPC required by its process boundary. See [Application](application.md).
-
-## Website and proxy
-
-The assembled website serves the legacy product at `/` and the new product at `/beta`; the deploy workflow builds both and never serves repository sources. `src/server/proxy.ts` owns metadata proxy policy; Cloudflare Pages and the local development server translate HTTP requests into the same function, so eligibility, credential restrictions, redirect checks, limits, and CORS behavior have one implementation. See [Browser runtime](browser-runtime.md) and [Security](security.md).
-
-Generated help pages include a copy of the shared UI theme beside their HTML under `/beta/help/`, so their typography, navigation, surfaces, and automatic light and dark colors use the same CSS as the app without depending on repository source URLs.
+All four products call `dezoomify(inputs, options, host)`, one asynchronous Rust
+function. The core discovers images, chooses a level, downloads tiles, handles
+partial output, and awaits saving and cleanup. Hosts supply platform operations;
+they do not duplicate discovery, selection, or retry policy.
+See [Algorithm](algorithm.md) for that policy.
 
 ## Boundaries
 
-- Products never import each other.
-- Parsers and geometry import domain values; the shared algorithm calls injected Host methods.
-- Platform implementations own I/O, resources, and clocks, with no duplicate selection or retry policy.
-- Shared UI imports domain declarations and local utilities, with no host globals.
-- Browser application modules may compose UI and Host; image and transport modules remain independent of UI.
-- Crossing values derive from Rust declarations. URLs, headers, errors, and geometry retain their exact meaning.
-- Errors are one typed enum: the `kind` tag names the failure and structured fields carry the facts; callers never branch on display text.
+- `crates/dezoomify` owns domain values, pure parsers and geometry, and the
+  algorithm. It has no network, filesystem, clock, UI, or codec implementation.
+- `crates/dezoomify-native` supplies HTTP, files, codecs, cache, and publication
+  for CLI and desktop. [Native apps](native-apps.md) explains resource ownership.
+- `crates/dezoomify-wasm` converts values and futures without platform I/O.
+- `packages/browser-runtime` supplies BrowserHost and composes the website and
+  extension application. Transport and image modules receive callbacks rather
+  than importing UI. See [Browser runtime](browser-runtime.md).
+- `packages/shared-ui` owns React presentation and translations, without host
+  globals. Products inject storage, actions, and platform capabilities.
+- Products never import each other; Biome enforces package boundaries.
 
-Biome rejects product package and sibling-app imports. Shared packages and the website's deployed proxy entrypoints remain valid dependencies.
+The website build serves legacy at `/` and the new app at `/beta`.
+Cloudflare and the local server adapt the same metadata proxy implementation in
+`src/server/proxy.ts`; do not create a separate local policy.
+Deployment details: [Operations](operations.md#website-deployment-contract).
+
+Formats declare CSS routes; discovery queries `Host::parse_html` once per shared
+resource read. BrowserHost uses a detached document and NativeHost uses `scraper`,
+outside the WASM dependency graph. Neither executes scripts or fetches resources.
+Pure decoders consume selected elements, decoded attributes, and DOM text;
+projected strings share the metadata retention budget.
+
+## Bindings and errors
+
+`crates/dezoomify/src/model.rs` defines cross-language values; `host.rs` defines
+the capability list shared by the Rust trait and WASM imports. Import generated
+declarations from `packages/wasm-bindings`, never redeclare or hand-edit them.
+After changing the boundary, run `cargo xtask bindings generate`.
+The tracked declarations support typechecking before local WASM artifacts exist.
+
+Host calls use ordinary futures and promises. Metadata and processing bytes cross
+as `Uint8Array`; rejected calls preserve structured domain errors. Invalid JS
+values become `binding.invalid-value`, and invalid invocations still await Host
+settlement.
+
+Branch on the error's `kind` and structured facts, never display text. Preserve
+request context and underlying causes. Retry classification belongs to Rust
+(`Error::retryable`), including when exposed to browser presentation. Output
+failures must not become missing-tile failures.
+
+## Job ownership
+
+One browser invocation owns its cancellation, pause gate, pending choices,
+diagnostics, and cleanup. Replacing it updates the view immediately but waits for
+retirement before starting new work. Every asynchronous completion checks
+ownership before changing the view, history, or output. Cancel closes pending
+choices and aborts I/O; settlement waits for owned decode and encoding work.
+Completed previews remain available until retired.
+
+Desktop uses native task ownership across Tauri IPC; CLI awaits NativeHost
+directly. Published files survive retirement. UI drafts and expanded panels belong
+to presentation; selection, retry budgets, and partial-output policy belong to Rust.
+
+## Diagnostics
+
+Reports are local and bounded, independent of console verbosity. Preserve exact
+URLs, settings, and error causes; aggregate successful tile traffic rather than
+filling the timeline. The recorder caps reports at 1 MiB and 1,000 timeline records,
+and counts omissions. Reports survive cancellation and remain available while
+their result is shown. Sharing is a user action; credential precautions are in
+[Security](security.md#credentials). Copy failures must never claim success.
