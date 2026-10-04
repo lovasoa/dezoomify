@@ -260,7 +260,9 @@ export const fr = {
   "desktop.rec.retryTiles": "Réessayer les fragments manqués",
   "desktop.rec.missingSome": "Certains fragments n’ont pas pu être enregistrés.",
   "desktop.rec.missingCount": "Impossible d’enregistrer {count} fragments.",
+  "desktop.rec.missingOne": "Impossible d’enregistrer {count} fragment.",
   "desktop.rec.missingList": "{n} fragments manquants : {shown}{rest}.",
+  "desktop.rec.missingOneList": "{n} fragment manquant : {shown}{rest}.",
   "desktop.done.partialTitle": "Image partielle enregistrée",
   "desktop.done.partialDesc":
     "Ce fichier est marqué comme partiel : {summary} Les zones manquantes restent vides. Cela le distingue d’un enregistrement complet.",
@@ -301,7 +303,8 @@ export const fr = {
   "desktop.advanced.retriesDesc":
     "Réessayer les fragments échoués avant de conserver un résultat partiel.",
   "desktop.advanced.resumeCache": "Cache de reprise",
-  "desktop.advanced.resumeCacheDesc": "Réutiliser les fragments après un enregistrement interrompu.",
+  "desktop.advanced.resumeCacheDesc":
+    "Réutiliser les fragments après un enregistrement interrompu.",
   "desktop.advanced.choose": "Choisir…",
   "desktop.advanced.change": "Modifier…",
   "desktop.advanced.headers": "En-têtes de requête",

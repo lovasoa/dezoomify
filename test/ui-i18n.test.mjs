@@ -14,6 +14,7 @@ import {
   setLocale,
   t,
 } from "../packages/shared-ui/src/i18n.ts";
+import { formatMissingSummary } from "../packages/shared-ui/src/view-helpers.ts";
 
 const LOCALES = { en: EN, fr: FR, de: DE, it: IT };
 
@@ -94,6 +95,20 @@ test("i18n: substitution renders per locale and degrades safely", () => {
     assert.equal(t("view.step.discovering", undefined, "it"), "Ricerca dell’immagine zoomabile…");
     assert.equal(t("view.job.countsFull", { current: 2, total: 9 }, "de"), "2 von 9 Fragmenten");
     assert.equal(t("view.job.countsFull", { current: 2, total: 9 }, "it"), "2 frammenti su 9");
+    assert.equal(
+      formatMissingSummary([], 1),
+      "Could not save 1 fragment.",
+    );
+    assert.equal(setLocale("fr"), true);
+    assert.equal(formatMissingSummary([], 1), "Impossible d’enregistrer 1 fragment.");
+    assert.equal(formatMissingSummary(["fragment-1"]), "1 fragment manquant : fragment-1.");
+    assert.equal(setLocale("de"), true);
+    assert.equal(formatMissingSummary([], 1), "1 Fragment konnte nicht gespeichert werden.");
+    assert.equal(formatMissingSummary(["fragment-1"]), "1 fehlendes Fragment: fragment-1.");
+    assert.equal(setLocale("it"), true);
+    assert.equal(formatMissingSummary([], 1), "Impossibile salvare 1 frammento.");
+    assert.equal(formatMissingSummary(["fragment-1"]), "1 frammento mancante: fragment-1.");
+    assert.equal(setLocale("en"), true);
     assert.equal(t("view.job.manyImages", { count: 3 }, "de"), "3 Bilder");
     assert.equal(t("view.job.manyImages", { count: 3 }, "fr"), "3 images");
     assert.equal(

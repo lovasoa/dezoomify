@@ -258,7 +258,9 @@ export const it = {
   "desktop.rec.retryTiles": "Riprova i frammenti mancanti",
   "desktop.rec.missingSome": "Alcuni frammenti non si sono potuti salvare.",
   "desktop.rec.missingCount": "Impossibile salvare {count} frammenti.",
+  "desktop.rec.missingOne": "Impossibile salvare {count} frammento.",
   "desktop.rec.missingList": "{n} frammenti mancanti: {shown}{rest}.",
+  "desktop.rec.missingOneList": "{n} frammento mancante: {shown}{rest}.",
   "desktop.done.partialTitle": "Immagine parziale salvata",
   "desktop.done.partialDesc":
     "Questo file è marcato come parziale: {summary} Le aree mancanti restano vuote. Questo lo distingue da un salvataggio completo.",

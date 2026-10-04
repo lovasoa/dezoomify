@@ -264,7 +264,9 @@ export const de = {
   "desktop.rec.retryTiles": "Fehlende Fragmente erneut versuchen",
   "desktop.rec.missingSome": "Einige Fragmente konnten nicht gespeichert werden.",
   "desktop.rec.missingCount": "{count} Fragmente konnten nicht gespeichert werden.",
+  "desktop.rec.missingOne": "{count} Fragment konnte nicht gespeichert werden.",
   "desktop.rec.missingList": "{n} fehlende Fragmente: {shown}{rest}.",
+  "desktop.rec.missingOneList": "{n} fehlendes Fragment: {shown}{rest}.",
   "desktop.done.partialTitle": "Teilbild gespeichert",
   "desktop.done.partialDesc":
     "Diese Datei ist als Teilbild markiert: {summary} Fehlende Flächen bleiben leer. So unterscheidet sie sich von einem vollständigen Speichern.",
