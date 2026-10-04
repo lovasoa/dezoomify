@@ -31,17 +31,12 @@ import {
   pixelAt,
   QUADRANTS,
 } from "../../../../test/support/png.mjs";
+import { GECKODRIVER } from "./geckodriver.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "../../../..");
 const EXTENSION_ROOT = path.join(REPO_ROOT, "apps/extension");
 const GECKO_ID = "{14074c89-8a5f-4813-98df-a7117f062871}";
-const GECKODRIVER = path.join(
-  HERE,
-  "node_modules",
-  ".bin",
-  process.platform === "win32" ? "geckodriver.cmd" : "geckodriver",
-);
 const STATIC_DIR = path.join(HERE, "fixtures-static");
 const TILE_DIR = path.join(
   REPO_ROOT,
@@ -436,7 +431,10 @@ async function runFirefoxJob(base, work, runOptions = {}) {
   browserOptions.setPreference("browser.download.folderList", 2);
   browserOptions.setPreference("browser.download.useDownloadDir", true);
   browserOptions.setPreference("browser.helperApps.neverAsk.saveToDisk", "image/png");
-  assert.ok(existsSync(GECKODRIVER), "the pinned geckodriver package is not installed");
+  assert.ok(
+    existsSync(GECKODRIVER),
+    "the pinned geckodriver binary is missing; run cargo xtask setup",
+  );
   // Firefox treats extension documents as privileged WebDriver contexts.
   const service = new firefox.ServiceBuilder(GECKODRIVER).addArguments("--allow-system-access");
   const reused = shared && matrixFirefox;

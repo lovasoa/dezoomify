@@ -78,6 +78,11 @@ version-coupled to `Cargo.lock` in every workflow via
 `.github/actions/setup-wasm-bindgen`, and `cargo xtask setup` verifies the
 installed version matches.
 
+Setup also installs the Firefox driver version declared in
+`apps/extension/tests/browser/geckodriver.mjs`. The extension tests launch that
+native binary directly; they never query a latest release or download a driver.
+CI caches the driver separately by pin, OS, and architecture.
+
 ## Boundaries
 
 - Depend on workspace metadata, binding generators, and tooling

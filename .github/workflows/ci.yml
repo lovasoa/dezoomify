@@ -17,6 +17,8 @@ jobs:
     # (crates/xtask/src/ci.rs); lane semantics live there, never here.
     name: deterministic (${{ matrix.lane-group }})
     runs-on: ubuntu-latest
+    env:
+      GECKODRIVER_CACHE_DIR: ${{ runner.temp }}/geckodriver
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -92,6 +94,15 @@ jobs:
             # browser. Aligned versions make this a no-op.
             pnpm --filter dezoomify-extension-headless exec playwright install chromium
           fi
+      - name: Cache pinned Firefox driver
+        if: matrix.lane-group == 'extension'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.GECKODRIVER_CACHE_DIR }}
+          key: geckodriver-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/extension/tests/browser/geckodriver.mjs') }}
+      - name: Install pinned Firefox driver
+        if: matrix.lane-group == 'extension'
+        run: pnpm --filter dezoomify-extension-headless install:driver
       - name: CI lane (rust)
         if: matrix.lane-group == 'rust'
         run: cargo xtask ci rust

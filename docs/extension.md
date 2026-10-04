@@ -51,6 +51,8 @@ The browser format matrix builds one testing package and starts one browser sess
 
 Both testing packages are built before either matrix starts so synchronous WXT builds cannot block browser event delivery. The driver awaits tab load events, the fixture's completed-response signal, and the job page's test-only source-readiness message; Chromium saves await the download event. CI retains the extension lane's compiled workspace artifacts in a separate source-keyed Rust cache, while still invoking Cargo to verify and build the current sources.
 
+`cargo xtask setup` installs the pinned geckodriver binary; CI caches it separately. Firefox tests launch the binary directly instead of the npm CLI, which otherwise resolves the latest driver over the network on every launch. Missing binaries fail with setup instructions rather than fetching during tests.
+
 WXT generates both MV3 manifests from `apps/extension/wxt.config.ts` (Chromium service worker and Firefox classic background script). The store package ships the launcher, job page, shared UI, browser runtime, icons, and WASM, with no content scripts or fallback pages. Build, dev, test, and release regenerate the WASM glue before WXT builds, and packaging needs root workspace dependencies (`cargo xtask setup` or `pnpm install --frozen-lockfile`). Browser-suite coverage: [Testing](testing.md).
 
 The same algorithm and fixture contracts as web and desktop govern job behavior. See the [user guide](user/browser-extension.md).

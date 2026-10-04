@@ -136,13 +136,21 @@ fn install_workspace_dependencies() -> Result<(), String> {
     let root = super::repo_root();
     let status = super::desktop::pnpm_command()?
         .args(["install", "--frozen-lockfile"])
-        .current_dir(root)
+        .current_dir(&root)
         .status()
         .map_err(|e| format!("failed to run pnpm install: {e}"))?;
+    if !status.success() {
+        return Err("pnpm install --frozen-lockfile failed".to_string());
+    }
+    let status = super::desktop::pnpm_command()?
+        .args(["--filter", "dezoomify-extension-headless", "install:driver"])
+        .current_dir(root)
+        .status()
+        .map_err(|e| format!("failed to install pinned geckodriver: {e}"))?;
     status
         .success()
         .then_some(())
-        .ok_or_else(|| "pnpm install --frozen-lockfile failed".to_string())
+        .ok_or_else(|| "pinned geckodriver installation failed".to_string())
 }
 
 /// Verify the `wasm32-unknown-unknown` target is installed. Read-only:
