@@ -188,6 +188,14 @@ describe("Dezoomify desktop window", () => {
       // loaded CI runner, and the product's own startup can block the loop.
       await driver.manage().setTimeouts({ script: 120000, pageLoad: 180000, implicit: 0 });
       await waitForDefaultOutputDirectory(driver);
+      // The format matrix checks exact pixels, so select lossless PNG
+      // explicitly rather than relying on Auto's JPEG default.
+      await (await driver.findElement(By.css('summary[aria-label="Format"]'))).click();
+      await (
+        await driver.findElement(
+          By.xpath('//fieldset[@aria-label="Format"]//button[span[1]="PNG"]'),
+        )
+      ).click();
     } catch (error) {
       await teardown();
       throw error;
