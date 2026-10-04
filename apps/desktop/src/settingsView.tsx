@@ -38,20 +38,34 @@ function formatLimit(format: DesktopSettings["output_format"]): number {
   return format === "jpeg" ? 65_535 : format === "webp" ? 16_383 : 1_000_000;
 }
 
+// Rounded-up measurements from the native JPEG encoder on the Zoomify painting
+// and map fixtures plus Met artwork 437498. Small sample; these are heuristics.
+const jpegSizeCoefficients = [
+  { quality: 25, bytes: 0.1 },
+  { quality: 50, bytes: 0.15 },
+  { quality: 75, bytes: 0.2 },
+  { quality: 90, bytes: 0.3 },
+  { quality: 95, bytes: 0.4 },
+  { quality: 98, bytes: 0.45 },
+  { quality: 100, bytes: 0.5 },
+];
+
 function estimateSize(width: number, height: number, settings: DesktopSettings): string {
   const format = settings.output_format;
-  const quality = (100 - settings.compression) / 100;
-  const jpeg = 0.35 + 1.15 * quality ** 3;
+  const quality = 100 - settings.compression;
+  const jpeg = jpegSizeCoefficients.find((entry) => quality <= entry.quality)?.bytes ?? 0.5;
   const bytesPerPixel =
     format === "auto" || format === "jpeg" || format === "iiif-dir"
       ? jpeg
       : format === "webp"
-        ? 2.5
-        : 3;
+        ? 1.3
+        : format === "png"
+          ? 1.6
+          : 3;
   const pyramid = format === "zif" || format === "iiif-dir" ? 4 / 3 : 1;
   const pixels = width * height;
   const mb = (pixels * bytesPerPixel * pyramid) / 1_000_000;
-  return `<${Math.ceil(mb / 5) * 5} MB`;
+  return `<${Math.ceil((mb * 1.1) / 5) * 5} MB`;
 }
 
 function sizePresetFor(settings: DesktopSettings): SizePreset {

@@ -167,13 +167,13 @@ test("file size estimates follow the output encoder and JPEG quality", () => {
     act(() => root.unmount());
   }
   assert.deepEqual(estimates, {
-    auto: "<45 MB",
-    jpeg: "<45 MB",
-    png: "<100 MB",
-    tiff: "<100 MB",
-    webp: "<85 MB",
-    zif: "<135 MB",
-    "iiif-dir": "<60 MB",
+    auto: "<15 MB",
+    jpeg: "<15 MB",
+    png: "<60 MB",
+    tiff: "<110 MB",
+    webp: "<50 MB",
+    zif: "<150 MB",
+    "iiif-dir": "<20 MB",
   });
   const { container, root } = renderSettings({
     settings: { output_format: "jpeg", compression: 50 },
@@ -181,8 +181,31 @@ test("file size estimates follow the output encoder and JPEG quality", () => {
   const preset = [...container.querySelectorAll('.dz-quick-menu[aria-label="Size"] button')].find(
     (button) => button.firstElementChild.textContent === "8K",
   );
-  assert.equal(preset.querySelector(".dz-choice-hint").textContent, "<20 MB");
+  assert.equal(preset.querySelector(".dz-choice-hint").textContent, "<10 MB");
   act(() => root.unmount());
+});
+
+test("estimation buffer is applied consistently before rounding to 5 MB", () => {
+  for (const [format, compression, label, expected] of [
+    ["png", 5, "Full HD", "<5 MB"],
+    ["png", 5, "QHD", "<10 MB"],
+    // 32K PNG is 849.35 MB before buffering, 934.28 MB afterwards.
+    ["png", 5, "32K", "<935 MB"],
+    // Quality-50 8K JPEG crosses the 5 MB bucket only with the buffer.
+    ["jpeg", 50, "8K", "<10 MB"],
+    ["jpeg", 2, "8K", "<20 MB"],
+    ["jpeg", 0, "8K", "<20 MB"],
+    ["webp", 5, "8K", "<50 MB"],
+  ]) {
+    const { container, root } = renderSettings({
+      settings: { output_format: format, compression },
+    });
+    const preset = [...container.querySelectorAll('.dz-quick-menu[aria-label="Size"] button')].find(
+      (button) => button.firstElementChild.textContent === label,
+    );
+    assert.equal(preset.querySelector(".dz-choice-hint").textContent, expected);
+    act(() => root.unmount());
+  }
 });
 
 test("label information opens the existing modal with every format explanation", () => {
