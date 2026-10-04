@@ -20,7 +20,6 @@ impl EncoderTask {
     pub(crate) fn start(
         destination: &Path,
         size: Size,
-        tile_size: Option<Size>,
         format: OutputFormat,
         compression: u8,
         budget: Arc<MemoryBudget>,
@@ -30,7 +29,7 @@ impl EncoderTask {
             return Err(Error::InvalidState("empty raster dimensions".into()));
         }
         crate::imaging::check_dimensions(format, &size)?;
-        let pipe = PixelPipe::new(size.clone(), budget, tile_size);
+        let pipe = PixelPipe::new(size.clone(), budget);
         let work = match format {
             OutputFormat::Png => u64::from(size.width) * 16 + (1 << 20),
             OutputFormat::Tiff => {
@@ -41,7 +40,7 @@ impl EncoderTask {
             OutputFormat::Webp => u64::from(size.width) * u64::from(size.height) * 32 + (128 << 10),
             _ => 128 << 10,
         };
-        let workspace = pipe.budget.reserve(work, 0)?;
+        let workspace = pipe.budget.reserve(work)?;
         let staging = StagedFile::new(destination)?;
         controls.watch(&pipe);
         let reader = Arc::clone(&pipe);
@@ -248,7 +247,7 @@ fn encode(
         let metadata_bytes = icc.as_ref().map_or(0, Vec::len) + exif.as_ref().map_or(0, Vec::len);
         let _metadata_memory = pipe
             .budget
-            .reserve(metadata_bytes as u64 * 4 + (128 << 10), 0)?;
+            .reserve(metadata_bytes as u64 * 4 + (128 << 10))?;
         let bytes = metadata_header(format, icc.as_deref(), exif.as_deref())?;
         let offset = if format == OutputFormat::Png {
             33
@@ -403,19 +402,7 @@ mod tests {
         path
     }
     fn start(path: &Path, format: OutputFormat, size: Size, controls: Controls) -> EncoderTask {
-        EncoderTask::start(
-            path,
-            size,
-            Some(Size {
-                width: 5,
-                height: 5,
-            }),
-            format,
-            5,
-            MemoryBudget::new(8 << 20),
-            controls,
-        )
-        .unwrap()
+        EncoderTask::start(path, size, format, 5, MemoryBudget::new(8 << 20), controls).unwrap()
     }
     async fn publish(task: EncoderTask, destination: &Path) -> Vec<u8> {
         task.pipe.finish(&[]).unwrap();
@@ -463,7 +450,7 @@ mod tests {
                             icc_profile: (x == 1).then(|| icc.clone()),
                             exif_metadata: (x == 0).then(|| exif.clone()),
                         },
-                        task.pipe.budget.reserve(4, 0).unwrap(),
+                        task.pipe.budget.reserve(4).unwrap(),
                     )
                     .unwrap();
             }

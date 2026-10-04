@@ -140,7 +140,7 @@ fn concurrency_remains_bounded_across_acquisition() {
 }
 
 #[test]
-fn slow_first_raster_tile_bounds_lookahead_while_tile_outputs_accept_out_of_order_work() {
+fn slow_first_tile_does_not_hold_back_other_completions() {
     for output in [OutputFormat::Png, OutputFormat::Zif] {
         let host = MemoryHost::default();
         let (release, first) = futures::channel::oneshot::channel();
@@ -156,10 +156,7 @@ fn slow_first_raster_tile_bounds_lookahead_while_tile_outputs_accept_out_of_orde
         );
         futures::pin_mut!(job);
         assert!(job.as_mut().now_or_never().is_none());
-        assert_eq!(
-            host.attempts.borrow().len(),
-            if output == OutputFormat::Png { 2 } else { 4 }
-        );
+        assert_eq!(host.attempts.borrow().len(), 4);
         release.send(()).unwrap();
         assert!(futures::executor::block_on(job).unwrap().is_complete());
         assert_eq!(host.acquired.borrow().len(), 4);

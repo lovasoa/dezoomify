@@ -52,7 +52,8 @@ pub struct JobOptions {
     /// `ZERO` disables staggering (the CLI default); bulk image pacing stays
     /// in the caller.
     pub min_interval: Duration,
-    /// RAM budget for pixels, descriptors and reserved encoder workspace.
+    /// RAM budget for tile processing, pixels, descriptors and codec workspace.
+    /// Defaults to 80% of available RAM; callers may supply a smaller cap.
     pub output_retain_cap: u64,
 }
 
@@ -82,7 +83,7 @@ impl Default for JobOptions {
             max_tiles: 1 << 20,
             max_bytes: 64 << 20,
             min_interval: Duration::ZERO,
-            output_retain_cap: 512 << 20,
+            output_retain_cap: crate::imaging::available_memory_bytes() / 5 * 4,
         }
     }
 }

@@ -1,4 +1,4 @@
-//! Producer-owned reordering and a bounded queue of immutable owned strips.
+//! Producer-owned reordering and immutable strips sharing one byte budget.
 use dezoomify::model::{Error, ReusedTile, Size, TilePlacement};
 use image::Pixel;
 use std::{
@@ -26,16 +26,9 @@ impl MemoryBudget {
     /// Never wait for RAM: an unresolved missing tile can prevent the reader
     /// from freeing any pixels until the user chooses Keep. Fail with a typed
     /// limit instead of occupying every acquisition slot in a circular wait.
-    pub(crate) fn reserve(
-        self: &Arc<Self>,
-        bytes: u64,
-        priority_credit: u64,
-    ) -> Result<Reservation, Error> {
+    pub(crate) fn reserve(self: &Arc<Self>, bytes: u64) -> Result<Reservation, Error> {
         let mut usage = self.usage.lock().expect("memory accounting lock");
-        let required = usage
-            .current
-            .saturating_add(bytes)
-            .saturating_add(priority_credit);
+        let required = usage.current.saturating_add(bytes);
         crate::tile_output::memory_check(required, self.cap)?;
         usage.current += bytes;
         usage.peak = usage.peak.max(usage.current);
@@ -78,7 +71,6 @@ impl Drop for Reservation {
 }
 
 const STRIP_ROWS: u32 = 64; // JPEG finishes full-width eight-row bands.
-const QUEUED_STRIPS: usize = 2;
 
 pub(crate) struct PixelStrip {
     pub(crate) first_row: u32,
@@ -122,7 +114,6 @@ struct Queue {
     metadata: Option<TileMetadata>,
     failure: Option<Error>,
     consumed: u64,
-    handed_rows: u32,
 }
 pub(crate) struct PixelPipe {
     pub(crate) size: Size,
@@ -131,10 +122,9 @@ pub(crate) struct PixelPipe {
     queue: Mutex<Queue>,
     changed: Condvar,
     events: tokio::sync::Notify,
-    tile_size: Option<Size>,
 }
 impl PixelPipe {
-    pub(crate) fn new(size: Size, budget: Arc<MemoryBudget>, tile_size: Option<Size>) -> Arc<Self> {
+    pub(crate) fn new(size: Size, budget: Arc<MemoryBudget>) -> Arc<Self> {
         Arc::new(Self {
             size,
             budget,
@@ -142,7 +132,6 @@ impl PixelPipe {
             queue: Mutex::new(Queue::default()),
             changed: Condvar::new(),
             events: tokio::sync::Notify::new(),
-            tile_size,
         })
     }
     pub(crate) fn error(&self) -> Option<Error> {
@@ -163,7 +152,6 @@ impl PixelPipe {
             queue.failure.get_or_insert(error);
             queue.ready.clear();
         }
-        // Wake a producer blocked on the full queue before taking its lock.
         self.changed.notify_all();
         self.events.notify_waiters();
         let mut producer = self.producer.lock().expect("pixel producer lock");
@@ -184,31 +172,11 @@ impl PixelPipe {
     pub(crate) fn queued_strips(&self) -> usize {
         self.queue.lock().expect("strip queue lock").ready.len()
     }
-    fn credit(&self, row: u32) -> u64 {
-        // Admission must never wait for the producer's full-queue handoff.
-        let next_row = self.queue.lock().expect("strip queue lock").handed_rows;
-        if row <= next_row || next_row == self.size.height {
-            return 0;
-        }
-        let (width, height) = self.tile_size.as_ref().map_or(
-            (self.size.width, STRIP_ROWS.min(self.size.height)),
-            |tile| (tile.width, tile.height),
-        );
-        let decode = u64::from(width) * u64::from(height) * 16;
-        let strip =
-            u64::from(self.size.width) * u64::from(STRIP_ROWS.min(self.size.height - next_row)) * 4;
-        decode.saturating_add(strip)
-    }
-    pub(crate) fn priority_credit(&self, placement: &TilePlacement) -> u64 {
-        self.credit(placement.position.y)
-    }
-    fn blank(&self, first_row: u32, credit: u64) -> Result<PendingStrip, Error> {
+    fn blank(&self, first_row: u32) -> Result<PendingStrip, Error> {
         let rows = STRIP_ROWS.min(self.size.height - first_row);
         let pixels = u64::from(self.size.width) * u64::from(rows);
         let words = pixels.div_ceil(64) as usize;
-        let memory = self
-            .budget
-            .reserve(pixels * 4 + words as u64 * 8 + 128, credit)?;
+        let memory = self.budget.reserve(pixels * 4 + words as u64 * 8 + 128)?;
         Ok(PendingStrip {
             pixels: PixelStrip {
                 first_row,
@@ -221,6 +189,10 @@ impl PixelPipe {
         })
     }
     /// Geometry and composition operate only on producer-owned allocations.
+    /// Any contribution covers a pixel; overlaps composite until whole-strip
+    /// handoff freezes even unread pixels. Later contributions to handed-off
+    /// rows are discarded, but later rows still apply. Conflicting overlaps
+    /// have unspecified results across runs/strips; identical opaque ones do not.
     pub(crate) fn place(
         &self,
         id: u32,
@@ -241,7 +213,7 @@ impl PixelPipe {
                 Metadata {
                     position: (placement.position.x, placement.position.y),
                     data: (decoded.icc_profile, decoded.exif_metadata),
-                    _memory: self.budget.reserve(metadata_bytes as u64 * 3 + 128, 0)?,
+                    _memory: self.budget.reserve(metadata_bytes as u64 * 3 + 128)?,
                 },
             );
         }
@@ -283,8 +255,7 @@ impl PixelPipe {
                 if let std::collections::btree_map::Entry::Vacant(entry) =
                     producer.pending.entry(first_row)
                 {
-                    let credit = self.credit(first_row);
-                    let pending = self.blank(first_row, credit)?;
+                    let pending = self.blank(first_row)?;
                     entry.insert(pending);
                 }
                 let pending = producer.pending.get_mut(&first_row).expect("pending strip");
@@ -324,12 +295,9 @@ impl PixelPipe {
                 break;
             }
             if let std::collections::btree_map::Entry::Vacant(entry) = producer.pending.entry(row) {
-                entry.insert(self.blank(row, 0)?);
+                entry.insert(self.blank(row)?);
             }
             let mut queue = self.queue.lock().expect("strip queue lock");
-            while queue.ready.len() == QUEUED_STRIPS && queue.failure.is_none() {
-                queue = self.changed.wait(queue).expect("strip queue lock");
-            }
             if let Some(error) = &queue.failure {
                 return Err(error.clone());
             }
@@ -340,7 +308,8 @@ impl PixelPipe {
                 ._memory
                 .shrink(pending.pixels.rgba.len() as u64);
             producer.next_row += pending.pixels.rows;
-            queue.handed_rows = producer.next_row;
+            // Handoff freezes the whole strip. Its reservation follows it into
+            // the queue and encoder; there is no separate queue capacity/wait.
             queue.ready.push_back(pending.pixels);
             queue.closed = producer.next_row == self.size.height;
             drop(queue);
@@ -408,14 +377,7 @@ pub(crate) mod tests {
     use crate::imaging::DecodedTile;
     use dezoomify::model::{Point, TileRole};
     fn new_pipe(width: u32, height: u32) -> Arc<PixelPipe> {
-        PixelPipe::new(
-            Size { width, height },
-            MemoryBudget::new(8192),
-            Some(Size {
-                width: 8,
-                height: 8,
-            }),
-        )
+        PixelPipe::new(Size { width, height }, MemoryBudget::new(8192))
     }
     pub(crate) fn placement(x: u32, y: u32) -> TilePlacement {
         TilePlacement {
@@ -427,7 +389,7 @@ pub(crate) mod tests {
         }
     }
     pub(crate) fn put(pipe: &PixelPipe, id: u32, x: u32, y: u32, image: image::RgbaImage) {
-        let memory = pipe.budget.reserve(image.as_raw().len() as u64, 0).unwrap();
+        let memory = pipe.budget.reserve(image.as_raw().len() as u64).unwrap();
         pipe.place(
             id,
             &placement(x, y),
@@ -526,7 +488,7 @@ pub(crate) mod tests {
         assert_eq!(pipe.receive().unwrap().unwrap().rgba, [0; 8]);
     }
     #[test]
-    fn bounded_handoffs_release_owned_memory_and_cancellation_wakes_a_full_queue() {
+    fn handoffs_release_owned_memory_and_cancellation_clears_queued_strips() {
         for cancel in [false, true] {
             let pipe = new_pipe(1, 256);
             let producer = Arc::clone(&pipe);
@@ -534,7 +496,7 @@ pub(crate) mod tests {
             let thread = std::thread::spawn(move || {
                 let image =
                     image::RgbaImage::from_fn(1, 256, |_, y| image::Rgba([y as u8, 0, 0, 255]));
-                let memory = producer.budget.reserve(1024, 0).unwrap();
+                let memory = producer.budget.reserve(1024).unwrap();
                 sent.send(producer.place(
                     0,
                     &placement(0, 0),
@@ -547,24 +509,14 @@ pub(crate) mod tests {
                 ))
                 .unwrap();
             });
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-            while pipe.queued_strips() != QUEUED_STRIPS {
-                assert!(std::time::Instant::now() < deadline);
-                std::thread::yield_now();
-            }
-            assert!(
-                received.try_recv().is_err(),
-                "producer must wait at the bounded handoff"
-            );
+            received
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap()
+                .unwrap();
+            assert_eq!(pipe.queued_strips(), 4);
             if cancel {
                 pipe.fail(Error::Cancelled);
                 assert!(matches!(pipe.receive(), Err(Error::Cancelled)));
-                assert_eq!(
-                    received
-                        .recv_timeout(std::time::Duration::from_secs(2))
-                        .unwrap(),
-                    Err(Error::Cancelled)
-                );
             } else {
                 for row in [0, 64, 128, 192] {
                     let strip = pipe.receive().unwrap().unwrap();
@@ -572,24 +524,19 @@ pub(crate) mod tests {
                     assert_eq!(strip.rgba[0], row as u8);
                 }
                 assert!(pipe.receive().unwrap().is_none());
-                received
-                    .recv_timeout(std::time::Duration::from_secs(2))
-                    .unwrap()
-                    .unwrap();
             }
             thread.join().unwrap();
             assert_eq!(pipe.budget.current(), 0);
         }
     }
     #[test]
-    fn full_budget_preserves_credit_and_returns_a_limit_without_waiting() {
+    fn full_budget_returns_a_limit_without_waiting() {
         let budget = MemoryBudget::new(100);
-        let in_use = budget.reserve(60, 0).unwrap();
-        assert!(budget.reserve(30, 20).is_err());
-        let priority = budget.reserve(40, 0).unwrap();
+        let in_use = budget.reserve(60).unwrap();
+        let remainder = budget.reserve(40).unwrap();
         assert_eq!(budget.current(), 100);
-        assert!(budget.reserve(1, 0).is_err());
-        drop(priority);
+        assert!(budget.reserve(1).is_err());
+        drop(remainder);
         drop(in_use);
         assert_eq!(budget.current(), 0);
         assert_eq!(budget.peak(), 100);

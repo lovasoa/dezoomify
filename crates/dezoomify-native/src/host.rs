@@ -278,7 +278,10 @@ impl<'a> NativeHost<'a> {
     }
 
     pub fn with_diagnostics(options: JobOptions, diagnostics: Diagnostics) -> Result<Self, Error> {
-        let options = options.normalized();
+        let mut options = options.normalized();
+        options.output_retain_cap = options
+            .output_retain_cap
+            .min(crate::imaging::available_memory_bytes() / 5 * 4);
         options.validate()?;
         diagnostics.context(serde_json::json!({"input": options.input_url, "settings": {
             "format": options.format, "image_index": options.image_index, "zoom_level": options.zoom_level,
@@ -311,11 +314,7 @@ impl<'a> NativeHost<'a> {
                 .ok()
                 .and_then(|url| url.host_str().map(str::to_string)),
         );
-        let pixels = MemoryBudget::new(
-            options
-                .output_retain_cap
-                .min(crate::imaging::available_memory_bytes()),
-        );
+        let pixels = MemoryBudget::new(options.output_retain_cap);
         Ok(Self {
             options,
             controls: Controls::default(),
@@ -435,22 +434,25 @@ impl<'a> NativeHost<'a> {
         bytes: Vec<u8>,
         processing: dezoomify::core::model::ProcessingRecipe,
         store: Option<(PathBuf, String, String)>,
-        placement: &TilePlacement,
     ) -> Result<ReceivedPixels, Error> {
         let permit = self.decode_tails.reserve(bytes.len());
         let decode_tails = Arc::clone(&self.decode_tails);
         let budget = Arc::clone(&self.pixels);
-        let credit = self
-            .raster
-            .borrow()
-            .as_ref()
-            .map_or(0, |task| task.pipe.priority_credit(placement));
         self.controlled(async {
             tokio::task::spawn_blocking(move || {
                 let _permit = permit;
+                // Decryption can hold input, an encrypted chunk and output.
+                let mut processing_memory = budget.reserve(
+                    bytes.len() as u64
+                        * match processing {
+                            dezoomify::core::model::ProcessingRecipe::None => 1,
+                            dezoomify::core::model::ProcessingRecipe::GoogleArtsDecrypt => 3,
+                        },
+                )?;
                 let bytes = processing
                     .apply(bytes)
                     .map_err(|error| Error::ProcessingFailed(error.to_string().into()))?;
+                processing_memory.shrink(bytes.len() as u64);
                 if let Some((dir, namespace, uri)) = &store {
                     let _ = crate::cache::store(dir, namespace, uri, &bytes);
                 }
@@ -459,16 +461,15 @@ impl<'a> NativeHost<'a> {
                 // allowance covers conversion and decoder workspace; only the
                 // actual RGBA allocation remains charged until placement.
                 let pixels = u64::from(dimensions.width) * u64::from(dimensions.height);
-                let mut reservation = budget.reserve(
-                    pixels.saturating_mul(16).saturating_add(bytes.len() as u64),
-                    credit,
-                )?;
+                let mut reservation = budget.reserve(pixels.saturating_mul(16))?;
                 decode_tails.pixel_decodes.fetch_add(1, Ordering::SeqCst);
                 let decoded = load_image_with_limit(
                     &bytes,
                     Some(pixels.saturating_mul(16).saturating_add(bytes.len() as u64)),
                 )
                 .map_err(|error| Error::DecodeFailed(error.to_string().into()))?;
+                drop(bytes);
+                drop(processing_memory);
                 reservation.shrink(decoded.image.as_raw().len() as u64);
                 Ok::<_, Error>(ReceivedPixels {
                     decoded,
@@ -491,10 +492,7 @@ impl<'a> NativeHost<'a> {
             .unwrap_or_else(crate::imaging::default_tile_cache_dir);
         if let Some(bytes) = crate::cache::load(&dir, &namespace, &tile.request.uri) {
             self.diagnostics.count("cache_reads", 1.0);
-            match self
-                .decode(bytes, Default::default(), None, &tile.placement)
-                .await
-            {
+            match self.decode(bytes, Default::default(), None).await {
                 Ok(decoded) => return Ok(decoded),
                 Err(error) if error.is_terminal() || error.is_output() => return Err(error),
                 Err(_) => {}
@@ -525,7 +523,6 @@ impl<'a> NativeHost<'a> {
             response.body,
             tile.placement.processing,
             Some((dir, namespace, tile.request.uri.clone())),
-            &tile.placement,
         )
         .await
     }
@@ -758,8 +755,8 @@ impl<'a> NativeHost<'a> {
         placement: TilePlacement,
         pixels: ReceivedPixels,
     ) -> Result<(), Error> {
-        // Queue backpressure belongs on a worker, never on the async control
-        // thread. The existing tail tracker owns cancelled placement work too.
+        // Copy/composition belongs on a worker; placement never waits for queue
+        // capacity. The tail tracker owns cancelled placement work too.
         let permit = self.decode_tails.reserve(0);
         self.controlled(async {
             tokio::task::spawn_blocking(move || {
@@ -772,12 +769,7 @@ impl<'a> NativeHost<'a> {
         .await
     }
 
-    async fn start_raster(
-        &self,
-        dimensions: Size,
-        tile_size: Option<Size>,
-        title: Option<&str>,
-    ) -> Result<(), Error> {
+    async fn start_raster(&self, dimensions: Size, title: Option<&str>) -> Result<(), Error> {
         let destination = match &self.options.output {
             OutputTarget::File(path) => path.clone(),
             OutputTarget::AutoDir { dir, format } => auto_output_path(dir, title, *format),
@@ -785,7 +777,6 @@ impl<'a> NativeHost<'a> {
         let task = EncoderTask::start(
             &destination,
             dimensions,
-            tile_size,
             self.format,
             self.options.compression,
             Arc::clone(&self.pixels),
@@ -904,12 +895,8 @@ impl Host for NativeHost<'_> {
                 .store(writer.retained_bytes(), Ordering::SeqCst);
             *self.tiled.borrow_mut() = Some(Arc::new(std::sync::Mutex::new(writer)));
         } else if let Some(dimensions) = &plan.canvas {
-            self.start_raster(
-                dimensions.clone(),
-                plan.grid.as_ref().map(|grid| grid.tile_size.clone()),
-                plan.title.as_deref(),
-            )
-            .await?;
+            self.start_raster(dimensions.clone(), plan.title.as_deref())
+                .await?;
         }
         *self.output_plan.borrow_mut() = Some(plan);
         Ok(())
@@ -1124,7 +1111,7 @@ impl Host for NativeHost<'_> {
                     }
                     dimensions
                 });
-                self.start_raster(dimensions, None, request.title.as_deref())
+                self.start_raster(dimensions, request.title.as_deref())
                     .await?;
             }
             let pipe = Arc::clone(&self.raster.borrow().as_ref().expect("raster task").pipe);

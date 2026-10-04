@@ -20,12 +20,13 @@ Raster output starts a blocking encoder at preflight when dimensions are known. 
 
 ```mermaid
 flowchart TD
-    Fetch["Encoded tile bytes"] --> Process["Source processing, when required"]
+    Fetch["Fetch tiles concurrently; complete in any order"] --> Process["Source processing, when required"]
     Process --> Route{"Output format"}
     Route -->|IIIF / ZIF| Tiles["Write compatible encoded bytes to staging"]
     Route -->|PNG / JPEG / TIFF / WebP| Decode["Decode once into an owned RGBA allocation"]
     Decode --> Producer["Place, clip and composite producer-owned strips"]
-    Producer --> Queue["Complete strips: bounded ownership-transfer queue"]
+    Producer --> Done["Report tile completion immediately"]
+    Producer --> Queue["Transfer complete strips in row order"]
     Queue --> Encoder["Own a strip, index pixels, compress"]
     Encoder --> File["Staged image file"]
     Tiles --> Prepare["Local conversion and missing pyramid levels, when needed"]
@@ -43,11 +44,15 @@ struct PixelStrip {
 }
 ```
 
-Strips contain 64 rows, except the final strip, and publish in output order once every pixel is present. The queue holds at most two ready strips, independently of the strip owned by the encoder and the unfinished producer buffer. For an 8192-pixel-wide image, each full strip holds 2 MiB, and the entire image needs 128 handoffs. Copying contributions into strips does not allocate a second full-image canvas.
+Strips contain 64 rows, except the final strip, and publish in image order once every pixel is covered by any tile. They do not wait for other overlapping contributors. For an 8192-pixel-wide image, each full strip holds 2 MiB, and the entire image needs 128 handoffs. Copying contributions into strips does not allocate a second full-image canvas.
 
-Handoff makes the entire strip final. Overlaps composite in arrival order while producer-owned; later contributions to handed-off strips are discarded, even if the encoder has not read those pixels yet. This contract does not promise deterministic overlap ordering. A deterministic policy would need to finalize the necessary contributors before handoff. PNG and TIFF consume rows from their owned strip and drop it afterward. JPEG's concrete `GenericImageView` adapter retains its strip through the encoder's full-width eight-row bands and repeated edge padding, including all 64 reads of a 1×1 image. Within a strip, `get_pixel` does ordinary local indexing; synchronization and progress updates occur only at strip handoffs. There are no pixel read counters, consumed-range maps, block leases or additional pixel cache. Adapter tests exercise strip boundaries and padded dimensions.
+While the producer owns a strip, incoming contributions use copy/alpha compositing. Handoff freezes the entire strip, including pixels the encoder has not read. Later contributions to handed-off rows are discarded; contributions to later rows still apply. Conflicting overlaps have unspecified results that can vary between runs and strips. Identical opaque overlaps remain harmless.
 
-The RAM budget reserves before decoding and strip allocation, and preserves credit for the earliest strip and decoder workspace. Raster acquisition retains completed results behind earlier in-flight tiles, bounding lazy request/decode lookahead by the concurrency limit. Regular grids request earliest rows first. IIIF/ZIF continue accepting out-of-order results. Queue backpressure runs on owned blocking producer workers; async cancellation remains available. If unresolved holes or deferred geometry exhaust RAM, acquisition returns a typed memory error instead of waiting for a partial decision it cannot reach. The default budget is 512 MiB, capped by available memory. Instrumentation measures charged allocations, not process RSS. Response bodies remain separately bounded by request size and acquisition concurrency. WebP collects strips into its explicitly reserved contiguous codec buffer.
+PNG and TIFF consume rows from their owned strip and drop it afterward. JPEG's concrete `GenericImageView` adapter retains its strip through the encoder's full-width eight-row bands and repeated edge padding, including all 64 reads of a 1×1 image. Within a strip, `get_pixel` does ordinary local indexing; synchronization and progress updates occur only at strip handoffs. There are no pixel read counters, consumed-range maps, block leases or additional pixel cache. Adapter tests exercise strip boundaries and padded dimensions.
+
+All acquisition uses unordered completion with bounded concurrency. Placement returns after accepting pixels; it never waits for encoder queue capacity. The pipeline uses one RAM limit, by default `available_memory_bytes() / 5 * 4` (80% at invocation start). Pending strips, queued strips, the encoder's current strip, tile-processing buffers and codec workspace share this budget. Reservations follow ownership into the queue and encoder and are released when buffers are freed. There is no separate strip-count or queue limit. Acquisition reserves before processing, decoding and strip allocation; network responses remain bounded by request size and concurrency. Instrumentation measures charged allocations, not process RSS. WebP collects strips into its explicitly reserved contiguous codec buffer.
+
+An early missing tile or downloads outpacing encoding can exhaust the byte budget. Acquisition then returns the existing typed resource error; it neither spills pixels to disk nor waits for memory. Avoiding these failures would require additional scheduling.
 
 Metadata selection waits for completion: the earliest final-plan tile carrying ICC and EXIF wins independently, including reused probes. PNG/JPEG compression starts without waiting for that choice. Their finalized metadata chunks are inserted into the staged header by moving compressed bytes with a 64 KiB buffer; pixels are not decoded or recompressed. TIFF and WebP attach finalized metadata before finishing their encoders.
 

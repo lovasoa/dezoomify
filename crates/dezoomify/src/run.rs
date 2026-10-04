@@ -605,17 +605,7 @@ async fn acquire_round(
     let mut missing = Vec::new();
     let acquisitions =
         stream::iter(tiles.map(|tile| async { acquire(host, tile?, options).await }));
-    // Holding completed raster results behind an earlier in-flight tile bounds
-    // lazy acquisition/decode lookahead, without retaining decoded buffers.
-    let mut pending = if matches!(options.output, OutputFormat::IiifDir | OutputFormat::Zif) {
-        acquisitions
-            .buffer_unordered(options.max_concurrent as usize)
-            .left_stream()
-    } else {
-        acquisitions
-            .buffered(options.max_concurrent as usize)
-            .right_stream()
-    };
+    let mut pending = acquisitions.buffer_unordered(options.max_concurrent as usize);
     while let Some(result) = pending.next().await {
         let (tile, failures) = result?;
         if let Some(failures) = failures {
