@@ -55,7 +55,12 @@
     },
     "macOS": {
       "signingIdentity": "-",
-      "dmg": {}
+      "dmg": {
+        "background": "../../../target/desktop-dmg/background.png",
+        "windowSize": { "width": 760, "height": 660 },
+        "appPosition": { "x": 190, "y": 145 },
+        "applicationFolderPosition": { "x": 570, "y": 145 }
+      }
     }
   },
   "identifier": "dev.ophir.dezoomify",

@@ -86,6 +86,12 @@ user approval. The release workflow verifies the app signature inside the
 finished DMG before uploading the artifact. The local bundle smoke does not
 exercise Finder approval of a quarantined browser download; test that flow
 manually on a clean Mac using the user guide.
+The DMG's Finder background displays installation and first-launch steps
+generated from the macOS section of that guide by
+`scripts/generate-dmg-background.mjs` (PNG output under `target/desktop-dmg/`).
+The bundler enables Finder layout even in CI with
+`TAURI_BUNDLER_DMG_IGNORE_CI=true`; the smoke and release checks require the
+packaged background and saved Finder settings in addition to a valid signature.
 Automatic updates are disabled (no update host or key), so check
 GitHub Releases manually. Releases include Linux x86_64 `.deb`, Windows x86_64
 `.msi`, and Apple silicon macOS `.dmg` installers. The user-facing

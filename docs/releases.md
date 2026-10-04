@@ -41,6 +41,12 @@ The `release` workflow runs after green `master` CI and accepts dispatch with a 
 
 GitHub Releases holds provenance and the exact store-submitted artifacts. Linux and Windows installers stay unsigned. Tauri ad-hoc signs the macOS app with `bundle.macOS.signingIdentity = "-"`; no Apple account, Developer ID certificate, or notarization credentials are used. Before uploading the macOS artifact, the build job mounts the finished DMG and requires `codesign --verify --deep --strict` to pass for its app bundle. This checks signature integrity, not Gatekeeper acceptance; downloaded apps still need user approval. User note: [Desktop app guide](user/desktop-app.md#install).
 
+The DMG's Finder background displays the macOS installation steps from that
+guide. Bundling generates the background under `target/desktop-dmg/` and
+enables Finder layout in CI; smoke and release verification check the packaged
+PNG and saved Finder settings. Desktop smoke also captures the installation
+window for visual review.
+
 ## Desktop updater
 
 Automatic in-app updates are disabled: no update host is deployed and no updater key exists, and every candidate fails closed. Users install the [latest release](https://github.com/lovasoa/dezoomify/releases/latest) manually. The shipped desktop capability sets `updater.enabled: false` with an empty allowlist, `tauri.conf.json` ships empty endpoints, `release/config.toml` sets `[updater] enabled = false` with empty endpoints and no key file, and empty `UPDATER_PUBKEY` keeps the plugin failing closed. Activation needs an undone key ceremony: a real pubkey, deployed endpoints, `enabled = true`.

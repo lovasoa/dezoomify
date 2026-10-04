@@ -139,6 +139,8 @@ jobs:
           MNT="$(mktemp -d)"
           trap 'hdiutil detach "$MNT"; rmdir "$MNT"' EXIT
           printf 'Y\n' | hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MNT"
+          cmp target/desktop-dmg/background.png "$MNT/.background/background.png"
+          test -s "$MNT/.DS_Store"
           codesign --verify --deep --strict --verbose=4 "$MNT/Dezoomify.app"
       - name: Build artifact (Windows)
         if: runner.os == 'Windows'

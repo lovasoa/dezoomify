@@ -72,15 +72,18 @@ hosts).
 
 ### Opening the macOS app
 
-Download the `.dmg` from the releases page, open it, and drag Dezoomify into
-Applications. Open Dezoomify from Applications. If macOS says the developer
-cannot be verified or Apple cannot check the app for malicious software:
+Download the `.dmg` from the releases page and open it. The installation
+window displays these steps beside the app and Applications icons:
 
-1. Open **System Settings → Privacy & Security**.
-2. Scroll to the Security section and click **Open Anyway** for Dezoomify.
-3. Confirm **Open** in the next dialog. macOS remembers this app exception.
+1. Drag **Dezoomify** into **Applications**.
+2. Open **Dezoomify** from **Applications**.
+3. If macOS cannot verify the developer or check for malicious software,
+   open **System Settings → Privacy & Security**.
+4. Under **Security**, click **Open Anyway** for Dezoomify, then confirm **Open**.
 
-Only approve a download you trust. See
+Only approve a download you trust. This free app is not notarized by Apple.
+
+macOS remembers this app exception. See
 [Apple's instructions](https://support.apple.com/en-us/102445).
 Ad-hoc signing does not remove this approval step.
 
