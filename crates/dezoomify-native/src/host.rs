@@ -456,7 +456,7 @@ impl<'a> NativeHost<'a> {
                 if let Some((dir, namespace, uri)) = &store {
                     let _ = crate::cache::store(dir, namespace, uri, &bytes);
                 }
-                let (dimensions, _) = crate::tile_output::inspect(&bytes)?;
+                let (dimensions, _) = crate::tile_output::inspect(&bytes, budget.available())?;
                 // Charge before the pixel decoder can allocate. The temporary
                 // allowance covers conversion and decoder workspace; only the
                 // actual RGBA allocation remains charged until placement.

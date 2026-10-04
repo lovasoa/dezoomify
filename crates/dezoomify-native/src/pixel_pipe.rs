@@ -40,6 +40,9 @@ impl MemoryBudget {
     pub(crate) fn peak(&self) -> u64 {
         self.usage.lock().expect("memory accounting lock").peak
     }
+    pub(crate) fn available(&self) -> u64 {
+        self.cap - self.usage.lock().expect("memory accounting lock").current
+    }
     #[cfg(test)]
     pub(crate) fn current(&self) -> u64 {
         self.usage.lock().expect("memory accounting lock").current
