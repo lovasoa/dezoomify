@@ -62,6 +62,27 @@ export interface HtmlQuery {
 }
 
 /**
+ * Current filesystem availability, queried separately from job completion.
+ */
+export type SavedOutputState = "available" | "deleted";
+
+/**
+ * Desktop completion plus its independently owned saved-file reference.
+ */
+export interface DesktopOutput {
+    output: Output;
+    saved_output: SavedOutput | undefined;
+}
+
+/**
+ * Durable native reference to a published output; filesystem paths stay in the shell.
+ */
+export interface SavedOutput {
+    id: string;
+    filename: string;
+}
+
+/**
  * Final plan position and index of a tile already acquired during probing.
  */
 export interface ReusedTile {

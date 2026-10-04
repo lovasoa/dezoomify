@@ -188,6 +188,12 @@ export const it = {
   "view.history.status.preview": "Solo anteprima",
   "view.history.status.failed": "Non riuscita",
   "view.history.status.cancelled": "Annullata",
+  "view.history.status.deleted": "Eliminato",
+  "view.history.status.checking": "Verifica del file…",
+  "view.history.status.unavailable": "File non disponibile",
+  "view.history.status.opening": "Apertura…",
+  "view.history.openImage": "Apri {image}",
+  "view.history.openFailed": "Impossibile aprire il file.",
   "view.input.description":
     "Dezoomify scarica immagini zoomabili in frammenti da biblioteche, musei, gallerie e altri siti web. Incolla qui sotto l’indirizzo di un’immagine per scaricarla.",
   "view.input.placeholder": "Incolla l’indirizzo di un visualizzatore o manifesto",

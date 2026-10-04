@@ -6,7 +6,14 @@
 // Entries keep the full source address plus its origin for display. Only
 // http(s) addresses are kept; everything else is dropped fail-closed.
 
-import type { Output, Progress } from "@dezoomify/wasm-bindings";
+import type {
+  Error as JobError,
+  Output,
+  Progress,
+  SavedOutput,
+  SavedOutputState,
+} from "@dezoomify/wasm-bindings";
+import { causeOf, isJobError } from "./failure.ts";
 
 export const HISTORY_MAX = 20;
 
@@ -30,7 +37,22 @@ export interface HistoryEntry {
   format?: string;
   title?: string;
   status?: HistoryStatus;
+  savedOutput?: SavedOutput;
   at: number;
+}
+
+/** Ephemeral file state never becomes a persisted job outcome. */
+export interface HistoryRow extends HistoryEntry {
+  outputState?: SavedOutputState | "checking" | "unavailable";
+  opening?: boolean;
+  outputError?: JobError;
+}
+
+export interface HistoryOutputs {
+  inspect(saved: SavedOutput): Promise<SavedOutputState>;
+  open(saved: SavedOutput): Promise<void>;
+  forget(saved: SavedOutput): Promise<void>;
+  onChange(): void;
 }
 
 export interface HistoryStore {
@@ -60,8 +82,28 @@ export interface HistoryDetails {
   format?: string;
   title?: string;
   status?: HistoryStatus;
+  savedOutput?: SavedOutput;
   /** Host clock reading for the entry; the ledger itself never reads a clock. */
   at: number;
+}
+
+function savedOutputOf(raw: unknown): SavedOutput | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const value = raw as SavedOutput;
+  if (
+    typeof value.id !== "string" ||
+    !value.id ||
+    value.id.length > 128 ||
+    typeof value.filename !== "string" ||
+    !value.filename ||
+    value.filename.length > 512
+  )
+    return undefined;
+  return { id: value.id, filename: value.filename };
+}
+
+function outputError(error: unknown): JobError {
+  return isJobError(error) ? error : { kind: "internal", detail: String(error).slice(0, 512) };
 }
 
 /** Build one ledger entry keeping the full source address. */
@@ -88,6 +130,8 @@ export function toHistoryEntry(url: string, details: HistoryDetails): HistoryEnt
     entry.title = details.title.trim().slice(0, 512);
   }
   if (details.status) entry.status = details.status;
+  const saved = savedOutputOf(details.savedOutput);
+  if (saved) entry.savedOutput = saved;
   return entry;
 }
 
@@ -160,6 +204,8 @@ export function parseHistoryJson(text: string | null | undefined): Array<History
         if (typeof typed.height === "number") entry.height = Math.floor(typed.height);
         if (typeof typed.format === "string") entry.format = typed.format;
         if (typeof typed.title === "string") entry.title = typed.title.trim().slice(0, 512);
+        const saved = savedOutputOf(typed.savedOutput);
+        if (saved) entry.savedOutput = saved;
         if (
           ["started", "completed", "partial", "preview", "failed", "cancelled"].includes(
             typed.status ?? "",
@@ -220,8 +266,28 @@ export function clearHistory(store: HistoryStore | null | undefined, key: string
 }
 
 /** A local ledger shared by products. Updates never resurrect removed or replaced entries. */
-export function createHistory(store: HistoryStore | undefined, key: string, now: () => number) {
+export function createHistory(
+  store: HistoryStore | undefined,
+  key: string,
+  now: () => number,
+  outputs?: HistoryOutputs,
+) {
   let entries = loadHistory(store, key);
+  const files = new Map<string, Pick<HistoryRow, "outputState" | "opening" | "outputError">>();
+  let refreshing: Promise<void> | undefined;
+  const contains = (id: string) => entries.some((entry) => entry.savedOutput?.id === id);
+  function persist(previous: HistoryEntry[]): void {
+    saveHistory(store, key, entries);
+    for (const entry of previous) {
+      const saved = entry.savedOutput;
+      if (saved && !contains(saved.id)) {
+        files.delete(saved.id);
+        void Promise.resolve()
+          .then(() => outputs?.forget(saved))
+          .catch(() => {});
+      }
+    }
+  }
   function update(entry: HistoryEntry | null, details: Partial<HistoryDetails>): void {
     if (!entry) return;
     const index = entries.findIndex((item) => item.url === entry.url && item.at === entry.at);
@@ -230,21 +296,30 @@ export function createHistory(store: HistoryStore | undefined, key: string, now:
     const next = toHistoryEntry(previous.url, { ...previous, ...details, at: previous.at });
     if (
       !next ||
-      !(Object.keys(next) as Array<keyof HistoryEntry>).some(
-        (field) => next[field] !== previous[field],
+      !(Object.keys(next) as Array<keyof HistoryEntry>).some((field) =>
+        field === "savedOutput"
+          ? next.savedOutput?.id !== previous.savedOutput?.id ||
+            next.savedOutput?.filename !== previous.savedOutput?.filename
+          : next[field] !== previous[field],
       )
     )
       return;
+    const old = entries;
     entries = entries.map((item, i) => (i === index ? next : item));
-    saveHistory(store, key, entries);
+    persist(old);
   }
   return {
-    entries: () => [...entries],
+    entries: (): HistoryRow[] =>
+      entries.map((entry) => ({
+        ...entry,
+        ...(entry.savedOutput ? files.get(entry.savedOutput.id) : {}),
+      })),
     start(url: string): HistoryEntry | null {
       const entry = toHistoryEntry(url, { at: now(), status: "started" });
       if (entry) {
+        const previous = entries;
         entries = pushHistory(entries, entry);
-        saveHistory(store, key, entries);
+        persist(previous);
       }
       return entry;
     },
@@ -257,7 +332,7 @@ export function createHistory(store: HistoryStore | undefined, key: string, now:
           : {}),
       });
     },
-    complete(entry: HistoryEntry | null, output: Output): void {
+    complete(entry: HistoryEntry | null, output: Output, savedOutput?: SavedOutput | null): void {
       update(entry, {
         status:
           output.disposition === "display-only"
@@ -267,15 +342,87 @@ export function createHistory(store: HistoryStore | undefined, key: string, now:
               : "partial",
         ...(output.canvas ? { width: output.canvas.width, height: output.canvas.height } : {}),
         format: output.format,
+        ...(savedOutput ? { savedOutput } : {}),
       });
     },
     remove(entry: HistoryEntry): void {
+      const previous = entries;
       entries = entries.filter((item) => item.url !== entry.url || item.at !== entry.at);
-      saveHistory(store, key, entries);
+      persist(previous);
     },
     clear(): void {
+      const previous = entries;
       entries = [];
+      persist(previous);
       clearHistory(store, key);
+    },
+    /** At most two independent checks; callers render first and never await this in the job path. */
+    refresh(): Promise<void> {
+      const provider = outputs;
+      if (!provider) return Promise.resolve();
+      if (refreshing) return refreshing;
+      const checked = new Set<string>();
+      function next() {
+        const saved = entries
+          .map((entry) => entry.savedOutput)
+          .find((saved) => saved && !checked.has(saved.id));
+        if (saved) checked.add(saved.id);
+        return saved;
+      }
+      const worker = async () => {
+        for (let saved = next(); saved; saved = next()) {
+          if (!files.has(saved.id)) files.set(saved.id, { outputState: "checking" });
+          const before = files.get(saved.id);
+          try {
+            const outputState = await provider.inspect(saved);
+            if (contains(saved.id) && files.get(saved.id) === before)
+              files.set(saved.id, { ...files.get(saved.id), outputState, outputError: undefined });
+          } catch (error) {
+            if (contains(saved.id) && files.get(saved.id) === before)
+              files.set(saved.id, {
+                ...files.get(saved.id),
+                outputState: "unavailable",
+                outputError: outputError(error),
+              });
+          }
+          provider.onChange();
+        }
+      };
+      refreshing = Promise.all([worker(), worker()])
+        .then(() => {})
+        .finally(() => {
+          refreshing = undefined;
+        });
+      return refreshing;
+    },
+    async open(entry: HistoryEntry): Promise<void> {
+      const saved = entry.savedOutput;
+      if (!outputs || !saved || !contains(saved.id) || files.get(saved.id)?.opening) return;
+      files.set(saved.id, { ...files.get(saved.id), opening: true, outputError: undefined });
+      outputs.onChange();
+      try {
+        await outputs.open(saved);
+        if (contains(saved.id)) files.set(saved.id, { outputState: "available" });
+      } catch (error) {
+        if (contains(saved.id)) {
+          const state = files.get(saved.id);
+          files.set(
+            saved.id,
+            isJobError(error) && causeOf(error).kind === "output-not-found"
+              ? { outputState: "deleted" }
+              : {
+                  ...state,
+                  outputState:
+                    !state?.outputState || state.outputState === "checking"
+                      ? "unavailable"
+                      : state.outputState,
+                  opening: false,
+                  outputError: outputError(error),
+                },
+          );
+        }
+      }
+      outputs.onChange();
     },
   };
 }

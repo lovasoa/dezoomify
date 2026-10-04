@@ -43,7 +43,10 @@ The CLI applies its configured partial policy immediately. The desktop awaits a 
 
 ## Desktop
 
-Tauri owns the actual native tasks and saved-file handles. Its dezoomify call returns the same Output value as the shared algorithm. Progress and awaited partial choices use generated values associated with the owning invocation. Dedicated pause, resume, cancel, answer, and release calls control that task.
+Tauri owns the actual native tasks and saved-file handles. Its dezoomify call returns
+the shared algorithm's Output alongside an optional saved-file reference. Progress
+and awaited partial choices use generated values associated with the owning
+invocation. Dedicated pause, resume, cancel, answer, and release calls control that task.
 
 The frontend subscribes before starting and waits for native registration before exposing task controls, so a quick cancel or replacement reaches the registered task. Retired tasks cannot update a replacement view. Releasing unfinished work cancels it; the invocation completes after cleanup. A completed result keeps its output handle until retirement, without deleting the published file.
 
@@ -53,7 +56,13 @@ Every start carries an immutable copy of current settings. The shared native val
 
 Formats are PNG, JPEG, TIFF, ZIF, lossless WebP, and iiif-dir; PNG is the default. Settings persist under `dezoomify.desktop.settings.v1` and fall back to defaults on invalid saved data. Output directory, compression, width/height caps, retries, cache directory, and headers accompany each invocation. JPEG quality is `100 - compression` (default compression 5 gives quality 95).
 
-Settings render while idle, and history prefills input without starting work. Open/reveal uses the registered published path, including a partial sibling; caller-supplied paths never cross IPC. File existence, launcher, and IPC errors remain distinct, and pending or failed actions belong to the owning completed result.
+Settings render while idle. History opens saved images by a durable native reference;
+attempts without a saved file prefill input without starting work. These references
+outlive invocation resources and keep paths out of IPC. Persistence, availability
+checks, and opening run on workers: history must never delay rendering or job
+completion. A missing file shows Deleted; access errors remain distinct.
+Open/reveal from a completed result uses its registered published path, including
+a partial sibling; pending or failed actions belong to that result.
 
 ### Desktop updater
 

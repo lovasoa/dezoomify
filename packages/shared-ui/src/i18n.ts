@@ -259,6 +259,12 @@ const en = {
   "view.history.status.preview": "Preview only",
   "view.history.status.failed": "Failed",
   "view.history.status.cancelled": "Cancelled",
+  "view.history.status.deleted": "Deleted",
+  "view.history.status.checking": "Checking file…",
+  "view.history.status.unavailable": "File unavailable",
+  "view.history.status.opening": "Opening…",
+  "view.history.openImage": "Open {image}",
+  "view.history.openFailed": "Could not open file.",
   "view.input.description":
     "Dezoomify downloads zoomable tiled images from libraries, museums, galleries, and other websites. Paste the URL of an image below to download it.",
   "view.input.placeholder": "Paste an image viewer or manifest URL",

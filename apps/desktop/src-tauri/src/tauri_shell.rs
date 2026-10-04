@@ -1,11 +1,12 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::commands;
 use crate::jobs::JobTable;
+use crate::saved_outputs::SavedOutputs;
 use crate::settings::parse_settings;
-use dezoomify::model::{Error, Failure, OutputFormat};
+use dezoomify::model::{DesktopOutput, Error, Failure, OutputFormat, SavedOutputState};
 use dezoomify_native::{NativeHost, OutputTarget};
 
 #[cfg(all(test, target_os = "linux"))]
@@ -146,6 +147,39 @@ fn launch_saved_output(path: std::path::PathBuf, reveal: bool) -> Result<(), Err
     ))
 }
 
+#[tauri::command]
+async fn inspect_saved_output(
+    outputs: State<'_, Arc<SavedOutputs>>,
+    id: String,
+) -> Result<SavedOutputState, Error> {
+    let outputs = Arc::clone(&outputs);
+    tauri::async_runtime::spawn_blocking(move || outputs.inspect(&id))
+        .await
+        .map_err(|error| Error::Internal(error.to_string().into()))?
+}
+
+#[tauri::command]
+async fn open_history_output(
+    outputs: State<'_, Arc<SavedOutputs>>,
+    id: String,
+) -> Result<(), Error> {
+    let outputs = Arc::clone(&outputs);
+    tauri::async_runtime::spawn_blocking(move || launch_saved_output(outputs.resolve(&id)?, false))
+        .await
+        .map_err(|error| Error::LaunchFailed(error.to_string().into()))?
+}
+
+#[tauri::command]
+async fn forget_saved_output(
+    outputs: State<'_, Arc<SavedOutputs>>,
+    id: String,
+) -> Result<(), Error> {
+    let outputs = Arc::clone(&outputs);
+    tauri::async_runtime::spawn_blocking(move || outputs.forget(&id))
+        .await
+        .map_err(|error| Error::Internal(error.to_string().into()))?
+}
+
 fn lock_table<'a>(
     state: &'a State<'_, Mutex<JobTable>>,
 ) -> Result<std::sync::MutexGuard<'a, JobTable>, Error> {
@@ -156,11 +190,12 @@ fn lock_table<'a>(
 #[allow(clippy::too_many_arguments)] // IPC payload fields + injected handles
 async fn dezoomify(
     state: State<'_, Mutex<JobTable>>,
+    saved_outputs: State<'_, Arc<SavedOutputs>>,
     app: AppHandle,
     job: String,
     input_url: String,
     settings: Option<serde_json::Value>,
-) -> Result<dezoomify::model::Output, dezoomify::model::Error> {
+) -> Result<DesktopOutput, Error> {
     if !commands::is_valid_input_url(&input_url) {
         return Err(Error::InvalidInput(
             "input_url must be an http(s) URL up to 2048 bytes without userinfo"
@@ -197,6 +232,7 @@ async fn dezoomify(
         dir: settings.output_dir.unwrap_or_else(std::env::temp_dir),
         format,
     };
+    let saved_outputs = Arc::clone(&saved_outputs);
     tauri::async_runtime::spawn_blocking(move || {
         let mut host = match NativeHost::with_diagnostics(options, registration.diagnostics.clone())
         {
@@ -229,7 +265,16 @@ async fn dezoomify(
             host.algorithm_options(),
             &host,
         ));
-        registration.finish(host.publication().map(|output| output.path));
+        let path = host.publication().map(|output| output.path);
+        registration.finish(path.clone());
+        let saved_output = path
+            .filter(|_| result.is_ok())
+            .and_then(|path| saved_outputs.register(path, &job).ok());
+        if let Some(saved) = &saved_output {
+            let id = saved.id.clone();
+            // History persistence is best effort and does not hold up completion.
+            tauri::async_runtime::spawn_blocking(move || saved_outputs.persist(&id));
+        }
         if let Err(error) = &result {
             registration.diagnostics.finish(
                 if matches!(error.cause(), Error::Cancelled) {
@@ -240,7 +285,10 @@ async fn dezoomify(
                 serde_json::json!({ "error": error }),
             );
         }
-        result
+        result.map(|output| DesktopOutput {
+            output,
+            saved_output,
+        })
     })
     .await
     .map_err(|_| Error::Internal("native task failed".to_string().into()))?
@@ -318,6 +366,12 @@ pub fn run() {
     }
     builder
         .manage(Mutex::new(JobTable::new()))
+        .setup(|app| {
+            app.manage(Arc::new(SavedOutputs::new(
+                app.path().app_data_dir()?.join("saved-outputs"),
+            )));
+            Ok(())
+        })
         .invoke_handler(desktop_commands!(command_handler))
         .build(tauri::generate_context!())
         .unwrap_or_else(|e| {

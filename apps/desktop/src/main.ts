@@ -38,9 +38,12 @@ import type {
 } from "@dezoomify/wasm-bindings";
 import { createElement } from "react";
 import {
+  forgetSavedOutput,
+  inspectSavedOutput,
   invokeNative,
   type NativeInvocation,
   openExternalLink,
+  openHistoryOutput,
   readNativeDiagnostics,
   validateSettings,
 } from "./native.ts";
@@ -125,7 +128,13 @@ const desktopHistoryStore = {
     desktopMemoryFallback.delete(key);
   },
 };
-const desktopHistory = createHistory(desktopHistoryStore, HISTORY_KEY_DESKTOP, Date.now);
+const desktopHistory = createHistory(desktopHistoryStore, HISTORY_KEY_DESKTOP, Date.now, {
+  inspect: inspectSavedOutput,
+  open: openHistoryOutput,
+  forget: forgetSavedOutput,
+  onChange: () => update(),
+});
+let historyVisible = false;
 
 let desktopSettings: DesktopSettings = loadSettings();
 
@@ -345,13 +354,13 @@ function launchNativeJob(trimmed: string): void {
       attempt.activeHandle = handle;
       attempt.diagnostics.context({ host_job: handle.id });
       update();
-      const output = await handle.finished;
+      const { output, saved_output } = await handle.finished;
       if (!owns(attempt)) return;
       attempt.settled = true;
       attempt.output = output;
       attempt.partial = null;
       stopHeartbeat();
-      desktopHistory.complete(attempt.historyEntry, output);
+      desktopHistory.complete(attempt.historyEntry, output, saved_output);
       update();
     })
     .catch((error: unknown) => {
@@ -634,6 +643,8 @@ function update() {
   if (!root) return;
   const attempt = currentAttempt;
   const presentation = currentPresentation();
+  const refreshHistory = presentation.phase === "idle" && !historyVisible;
+  historyVisible = presentation.phase === "idle";
   const partial = presentation.decision ? attempt.partial : null;
   if (currentAttempt.viewCtx.jobActivity && presentation.phase === "job") {
     activity().now = Date.now();
@@ -697,6 +708,7 @@ function update() {
         desktopHistory.remove(entry);
         update();
       },
+      onOpenHistory: desktopHistory.open,
     },
     {
       diagnosticReport: attempt.diagnostics.report(),
@@ -742,12 +754,16 @@ function update() {
   );
   ensureDesktopAuxPanel();
   ensureDesktopExternalNav();
+  if (refreshHistory) void desktopHistory.refresh();
 }
 
 initInitialUrl();
 
 if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
   window.addEventListener("hashchange", () => syncInitialUrlFromLocation());
+  window.addEventListener("focus", () => {
+    if (historyVisible) void desktopHistory.refresh();
+  });
 }
 
 if (root !== null) {

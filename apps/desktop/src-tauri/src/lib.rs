@@ -16,6 +16,7 @@ pub const APP_VERSION: &str = match option_env!("DEZOOMIFY_VERSION") {
 
 pub mod commands;
 pub mod jobs;
+pub mod saved_outputs;
 pub mod settings;
 
 // The real window shell is behind the `tauri` feature; the default build

@@ -1779,6 +1779,15 @@ abbr[title] {
   font-variant-numeric: tabular-nums;
 }
 
+.dz-history-table td:nth-child(4) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.dz-history-table td [role="alert"] {
+  display: block;
+}
+
 .dz-history-main {
   display: block;
   width: 100%;
@@ -1801,6 +1810,11 @@ abbr[title] {
 .dz-history-main:hover,
 .dz-history-clear:hover {
   text-decoration: underline;
+}
+
+.dz-history-main:disabled {
+  cursor: default;
+  text-decoration: none;
 }
 
 .dz-history-main:focus-visible,

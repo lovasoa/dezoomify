@@ -36,9 +36,12 @@ its image, remove the resume folder and start fresh.
 
 The app keeps your last 20 started images on this device only, including failed
 and cancelled attempts. Each row shows the title (or source address), time since
-starting, known pixel dimensions, and status. Click the title to fill and focus
-the address field so you can review it before starting again. Use the trash
-icon to remove one row, or **Clear history** to remove all entries.
+starting, known pixel dimensions, and status. Saved images show their file name;
+click the row to open the local image. Files that are no longer there show
+**Deleted**. Other rows fill and focus the address field so you can review it
+before starting again. File availability is checked in the background when you
+return to the main screen or app. Use the trash icon to remove one row, or
+**Clear history** to remove all entries; this never deletes your saved images.
 
 ## Saving and opening images
 

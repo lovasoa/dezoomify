@@ -1,11 +1,13 @@
 import { isValidInputUrl } from "@dezoomify/shared-ui";
 import type {
+  DesktopOutput,
   DiagnosticReport,
   Error as JobError,
   MissingTiles,
-  Output,
   Progress,
   RecoveryChoice,
+  SavedOutput,
+  SavedOutputState,
 } from "@dezoomify/wasm-bindings";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -45,7 +47,7 @@ async function withVerdictMissing(missing: MissingTiles, api: DesktopIpc): Promi
 
 export interface NativeInvocation {
   id: string;
-  finished: Promise<Output>;
+  finished: Promise<DesktopOutput>;
   cancel(): Promise<void>;
   pause(): Promise<void>;
   resume(): Promise<void>;
@@ -126,9 +128,9 @@ export async function invokeNative(
       inputUrl: request.inputUrl,
       settings: { ...request.settings, headers: [...request.settings.headers] },
     })
-    .then((output) => {
-      assertNoTileBytes(output);
-      return output as Output;
+    .then((response) => {
+      assertNoTileBytes(response);
+      return response as DesktopOutput;
     })
     .catch(async (error: unknown) => {
       // The shell's retry verdict is stamped here, on the async path before
@@ -154,6 +156,21 @@ export async function invokeNative(
       await api.invoke("release_job", { job: id });
     },
   };
+}
+
+export async function inspectSavedOutput(
+  saved: SavedOutput,
+  api: DesktopIpc = ipc,
+): Promise<SavedOutputState> {
+  return (await api.invoke("inspect_saved_output", { id: saved.id })) as SavedOutputState;
+}
+
+export async function openHistoryOutput(saved: SavedOutput, api: DesktopIpc = ipc): Promise<void> {
+  await api.invoke("open_history_output", { id: saved.id });
+}
+
+export async function forgetSavedOutput(saved: SavedOutput, api: DesktopIpc = ipc): Promise<void> {
+  await api.invoke("forget_saved_output", { id: saved.id });
 }
 
 export async function readNativeDiagnostics(

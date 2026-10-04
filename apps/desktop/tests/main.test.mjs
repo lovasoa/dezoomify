@@ -41,7 +41,9 @@ globalThis.desktopTestNative = {
     const invocation = {
       request,
       callbacks,
-      resolve,
+      resolve(output, saved_output) {
+        resolve({ output, saved_output });
+      },
       reject,
       answers,
       id: `job:test-${invocations.length}`,
@@ -70,6 +72,9 @@ registerHooks({
         shortCircuit: true,
         source: `
           export const invokeNative = (...args) => globalThis.desktopTestNative.invokeNative(...args);
+          export const inspectSavedOutput = async (saved) => await globalThis.desktopTestNative.inspectSavedOutput?.(saved) ?? "available";
+          export const openHistoryOutput = async (saved) => { await globalThis.desktopTestNative.openHistoryOutput?.(saved); };
+          export const forgetSavedOutput = async () => {};
           export const openExternalLink = async () => {};
           export const readNativeDiagnostics = async () => { throw new Error("No native report"); };
           export const validateSettings = async (settings) => { await globalThis.desktopTestNative.validateSettings?.(settings); };
@@ -183,6 +188,56 @@ test("desktop failure preserves canonical refusal facts and diagnostic context",
   assert.equal(invocations.length, count);
   click(root.querySelector(".dz-history-remove"));
   assert.deepEqual(JSON.parse(historyStore.get("dezoomify.desktop.history.v2")), []);
+});
+
+test("saved history renders during slow disk checks, opens the file after retirement, and detects deletion at click time", async () => {
+  const invocation = await start();
+  const saved = { id: "saved:test", filename: "A painting.png" };
+  await act(async () => invocation.resolve(output, saved));
+  const check = Promise.withResolvers();
+  globalThis.desktopTestNative.inspectSavedOutput = () => check.promise;
+  await reset();
+  assert.ok(
+    root.querySelector("#dz-url-input"),
+    "the main input is ready while the disk check is pending",
+  );
+  assert.equal(root.querySelector(".dz-history-main").textContent, saved.filename);
+  assert.match(root.querySelector("tbody tr").textContent, /Checking file/);
+  root.querySelector("#dz-url-input").value = "https://other.test/image";
+  await act(async () => check.resolve("available"));
+  await tick();
+  assert.equal(root.querySelector("#dz-url-input").value, "https://other.test/image");
+  const count = invocations.length;
+  globalThis.desktopTestNative.openHistoryOutput = async (reference) => {
+    assert.deepEqual(reference, saved);
+    throw { kind: "output-not-found" };
+  };
+  click(root.querySelector("tbody tr td:nth-child(3)"));
+  await tick();
+  assert.equal(root.querySelector("#dz-url-input").value, "https://other.test/image");
+  assert.equal(invocations.length, count);
+  assert.match(root.querySelector("tbody tr").textContent, /Deleted/);
+  assert.equal(root.querySelector(".dz-history-main").disabled, true);
+  globalThis.desktopTestNative.inspectSavedOutput = async () => "available";
+  act(() => window.dispatchEvent(new window.Event("focus")));
+  await tick();
+  assert.equal(
+    root.querySelector(".dz-history-main").disabled,
+    false,
+    "a restored file becomes available again",
+  );
+  let opened = 0;
+  globalThis.desktopTestNative.openHistoryOutput = async () => {
+    opened++;
+  };
+  click(root.querySelector(".dz-history-main"));
+  await tick();
+  assert.equal(opened, 1);
+  click(root.querySelector(".dz-history-remove"));
+  await tick();
+  assert.equal(opened, 1, "removing a row never opens the image");
+  delete globalThis.desktopTestNative.openHistoryOutput;
+  delete globalThis.desktopTestNative.inspectSavedOutput;
 });
 
 test("desktop partial actions honor retryability and retain a newer native question", async () => {

@@ -189,6 +189,12 @@ export const de = {
   "view.history.status.preview": "Nur Vorschau",
   "view.history.status.failed": "Fehlgeschlagen",
   "view.history.status.cancelled": "Abgebrochen",
+  "view.history.status.deleted": "Gelöscht",
+  "view.history.status.checking": "Datei wird geprüft…",
+  "view.history.status.unavailable": "Datei nicht verfügbar",
+  "view.history.status.opening": "Wird geöffnet…",
+  "view.history.openImage": "{image} öffnen",
+  "view.history.openFailed": "Datei konnte nicht geöffnet werden.",
   "view.input.description":
     "Dezoomify lädt zoombare Bilder in Fragmenten aus Bibliotheken, Museen, Galerien und anderen Websites herunter. Fügen Sie unten die Adresse eines Bildes ein, um es herunterzuladen.",
   "view.input.placeholder": "Adresse eines Bildbetrachters oder Manifests einfügen",
