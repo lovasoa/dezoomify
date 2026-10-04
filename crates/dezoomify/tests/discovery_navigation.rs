@@ -127,8 +127,7 @@ fn source_catalogs_and_readable_documents_precede_observed_previews() {
     image(
         vec![
             DiscoveryInput::with_contents(PAGE, FRAME),
-            DiscoveryInput::with_contents(PAGE, b"stale observed page")
-                .with_kind(DiscoveryInputKind::ObservedDocument),
+            DiscoveryInput::with_contents(PAGE, b"stale source page"),
             preview,
             DiscoveryInput::with_contents("https://museum.test/child", DZI)
                 .with_kind(DiscoveryInputKind::ObservedDocument),
