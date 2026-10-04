@@ -12,7 +12,8 @@ desktop app, and CLI share one Rust algorithm that takes a `Host` argument to in
   `packages/browser-runtime/` composes browser UI and Host capabilities.
   [Application](docs/application.md) defines invocation and history ownership.
 - [Docs index](docs/README.md): detailed contracts.
-  [User docs](docs/user/README.md): source of all user-facing documentation.
+  [User docs](docs/user/README.md): sources of all user-facing documentation,
+  including [Desktop guide](apps/desktop/desktop-app.md), packaged in the DMG.
 - `testdata/scenarios/`: deterministic fixtures, and transcripts.
   Read [Testing](docs/testing.md) before writing tests. [Acceptance matrix](docs/acceptance-matrix.md).
 - `crates/xtask/`: development and release tooling.

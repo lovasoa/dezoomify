@@ -98,4 +98,4 @@ Automatic updates are disabled (no update host or key), so check
 GitHub Releases manually. Releases include Linux x86_64 `.deb`, Windows x86_64
 `.msi`, and Apple silicon macOS `.dmg` installers. The user-facing
 install note lives in the [Desktop app
-guide](../../docs/user/desktop-app.md#install).
+guide](./desktop-app.md#install).

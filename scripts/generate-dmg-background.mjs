@@ -1,12 +1,12 @@
 // Render the canonical macOS installation steps into the DMG's Finder background.
-// Build output stays in target/; edit docs/user/desktop-app.md to change the copy.
+// Build output stays in target/; edit apps/desktop/desktop-app.md to change the copy.
 import { mkdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import MarkdownIt from "markdown-it";
 import sharp from "sharp";
 
 const root = new URL("../", import.meta.url);
-const markdown = await readFile(new URL("docs/user/desktop-app.md", root), "utf8");
+const markdown = await readFile(new URL("apps/desktop/desktop-app.md", root), "utf8");
 const tokens = new MarkdownIt().parse(markdown, {});
 const start = tokens.findIndex(
   (token, index) =>

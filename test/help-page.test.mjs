@@ -12,7 +12,8 @@ const srcDir = path.join(webDir, "docs", "user");
 const helpDir = path.join(webDir, "help");
 const PAGES = readdirSync(srcDir)
   .filter((f) => f.endsWith(".md") && f !== "README.md")
-  .map((f) => f.replace(/\.md$/, ""));
+  .map((f) => f.replace(/\.md$/, ""))
+  .concat("desktop-app");
 
 test("every generated page exists with chrome, topics, and no legacy doc links", () => {
   for (const stem of PAGES) {
@@ -46,6 +47,7 @@ test("all help links resolve within the generated site", () => {
       if (/^(https?:|mailto:)/.test(href)) continue;
       const [rel, anchor] = href.split("#");
       const target = path.resolve(helpDir, rel);
+      assert.ok(!target.endsWith(".md"), `${file} must link rendered pages, not Markdown sources`);
       assert.ok(
         !target.startsWith(`${webDir + path.sep}docs`),
         `${file} must not link into docs/ source`,

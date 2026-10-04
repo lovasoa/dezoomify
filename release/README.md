@@ -10,7 +10,7 @@ This directory is the single reviewed release inventory. Promotion steps
   builds on its matching host; a missing host, tool, or artifact fails the
   release. macOS apps are ad-hoc signed; Linux and Windows installers are
   unsigned. Automatic updates are disabled. Installation policy:
-  [Desktop app guide](../docs/user/desktop-app.md#install).
+  [Desktop app guide](../apps/desktop/desktop-app.md#install).
 - Release notes use an annotated tag message or commit titles since the
   preceding release tag.
 

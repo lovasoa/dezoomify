@@ -104,10 +104,10 @@ the main screen; it does not ask for a second file choice. The native app
 uses the image title it finds to determine the file name and adds the extension
 for the selected format. You can also start the app with the address as an
 argument, or drive it from the terminal; see the
-[command-line guide](./command-line.md).
+[command-line guide](../../docs/user/command-line.md).
 
 **Members-only sites:** the desktop app cannot reuse your browser sign-in.
-Use the [browser extension](./browser-extension.md) to work with pages that
+Use the [browser extension](../../docs/user/browser-extension.md) to work with pages that
 require your existing browser session.
 
 **From the website:** copy the image address and paste it into the desktop app.
@@ -117,7 +117,7 @@ requests that appear to come from the site's own viewer. If the save
 fails with a "forbidden" style error, tell the app which page the image
 belongs to (most image viewers open with such a page) and it will introduce
 itself as coming from there. On the command line, this is the
-`-H/--header "Referer: …"` option; see [protected pages](./troubleshooting.md#forbidden-or-unauthorized-errors).
+`-H/--header "Referer: …"` option; see [protected pages](../../docs/user/troubleshooting.md#forbidden-or-unauthorized-errors).
 
 ## Choosing the file format
 
@@ -161,5 +161,5 @@ fetched saves need no decision from you: they are kept automatically as the
 
 ## Next steps
 
-- [Command-line usage](./command-line.md)
-- [Troubleshooting](./troubleshooting.md)
+- [Command-line usage](../../docs/user/command-line.md)
+- [Troubleshooting](../../docs/user/troubleshooting.md)

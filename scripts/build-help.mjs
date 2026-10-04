@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Generates the website help section under help/ from docs/user/*.md.
-// docs/user is the single source of truth: never hand-edit help/; run
+// Generates website help from docs/user/*.md and apps/desktop/desktop-app.md.
+// These guides are the single source of truth: never hand-edit help/; run
 // `node scripts/build-help.mjs` after editing any page.
 // Deterministic: same inputs produce byte-identical output.
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -19,6 +19,7 @@ const PAGES = [
   { stem: "browser-extension", blurb: "Find images while you browse, including signed-in pages." },
   {
     stem: "desktop-app",
+    source: path.join(root, "apps/desktop/desktop-app.md"),
     blurb: "Very large images, more file formats, resuming, protected pages.",
   },
   { stem: "command-line", blurb: "Scripts and downloading many images at once." },
@@ -43,12 +44,18 @@ function slugify(s) {
 }
 
 // Rewrite a markdown link target for publication under /help/.
-function rewriteHref(href) {
+function rewriteHref(href, sourcePath) {
   if (/^(https?:|mailto:)/i.test(href)) return { href, external: true };
-  let m = href.match(/^\.\/([a-z0-9-]+)\.md(#.*)?$/);
-  if (m) return { href: `${m[1]}.html${m[2] ?? ""}` };
+  const [relative, anchor] = href.split("#");
+  if (relative.endsWith(".md")) {
+    const target = path.resolve(path.dirname(sourcePath), relative);
+    const page = PAGES.find(
+      ({ stem, source }) => target === (source ?? path.join(srcDir, `${stem}.md`)),
+    );
+    if (page) return { href: `${page.stem}.html${anchor ? `#${anchor}` : ""}` };
+  }
   // Site pages (index.html, privacy.html, terms.html) live one level up.
-  m = href.match(/^\.\/([a-z0-9-]+\.[a-z]+)(#.*)?$/);
+  const m = href.match(/^\.\/([a-z0-9-]+\.[a-z]+)(#.*)?$/);
   if (m) return { href: `../${m[1]}${m[2] ?? ""}` };
   return { href };
 }
@@ -81,7 +88,7 @@ const defaultLinkOpen = mdIt.renderer.rules.link_open;
 mdIt.renderer.rules.link_open = (tokens, idx, options, env, self) => {
   const href = tokens[idx].attrGet("href");
   if (href) {
-    const { href: out, external } = rewriteHref(href);
+    const { href: out, external } = rewriteHref(href, env.sourcePath);
     tokens[idx].attrSet("href", out);
     if (external) {
       tokens[idx].attrSet("target", "_blank");
@@ -92,8 +99,8 @@ mdIt.renderer.rules.link_open = (tokens, idx, options, env, self) => {
   return self.renderToken(tokens, idx, options);
 };
 
-function renderMarkdown(src) {
-  return mdIt.render(src).trim();
+function renderMarkdown(src, sourcePath) {
+  return mdIt.render(src, { sourcePath }).trim();
 }
 
 const LOGO_SVG = readFileSync(path.join(root, "favicon.svg"), "utf8").replace(
@@ -246,8 +253,9 @@ function topicsNav(currentStem) {
 // the page title.
 const pageMeta = new Map();
 const rendered = new Map();
-for (const { stem } of PAGES) {
-  const md = readFileSync(path.join(srcDir, `${stem}.md`), "utf8");
+for (const { stem, source } of PAGES) {
+  const sourcePath = source ?? path.join(srcDir, `${stem}.md`);
+  const md = readFileSync(sourcePath, "utf8");
   const marker = md.match(/^# (\S+)\n/m);
   if (!marker || marker[1] !== stem) {
     throw new Error(`${stem}.md must start with a "# ${stem}" marker line`);
@@ -256,7 +264,7 @@ for (const { stem } of PAGES) {
   if (!titleMatch) throw new Error(`${stem}.md lacks an H1 title after the marker`);
   const title = titleMatch[1].trim();
   pageMeta.set(stem, { title });
-  rendered.set(stem, renderMarkdown(md.slice(marker[0].length).trimStart()));
+  rendered.set(stem, renderMarkdown(md.slice(marker[0].length).trimStart(), sourcePath));
 }
 
 mkdirSync(outDir, { recursive: true });

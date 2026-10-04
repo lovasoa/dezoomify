@@ -92,4 +92,4 @@ information. Review them before sharing.
 ## Next steps
 
 - [The extension found nothing? See troubleshooting](./troubleshooting.md)
-- [Very large images belong in the desktop app](./desktop-app.md)
+- [Very large images belong in the desktop app](../../apps/desktop/desktop-app.md)
