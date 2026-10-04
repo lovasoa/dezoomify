@@ -13,7 +13,7 @@ use std::{
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Profile {
     PngRgb,
-    Jpeg { sampling: (u16, u16) },
+    Jpeg,
 }
 
 /// Container eligibility only. Future coefficient joining can inspect the same
@@ -83,16 +83,14 @@ fn profile(bytes: &[u8]) -> Option<Profile> {
             {
                 return None;
             }
-            frame = match data[7] {
-                0x11 => Some((1, 1)),
-                0x22 => Some((2, 2)),
-                _ => None,
-            };
+            // The image encoder generates 4:4:4 JPEG. Other sampling needs
+            // conversion so reused and generated tiles match ZIF tags.
+            frame = (data[7] == 0x11).then_some(Profile::Jpeg);
         }
         at += length;
     }
     if jfif {
-        frame.map(|sampling| Profile::Jpeg { sampling })
+        frame
     } else {
         None
     }
@@ -248,7 +246,7 @@ impl ZifWriter {
     fn initialize(&mut self, selected: Profile, cancelled: &AtomicBool) -> Result<(), Error> {
         let (codec, color) = match selected {
             Profile::PngRgb => (zif_tiff::Codec::Png, zif_tiff::ColorModel::Rgb),
-            Profile::Jpeg { .. } => (zif_tiff::Codec::Jpeg, zif_tiff::ColorModel::YCbCr),
+            Profile::Jpeg => (zif_tiff::Codec::Jpeg, zif_tiff::ColorModel::YCbCr),
         };
         let mut builder = zif_tiff::Writer::new()
             .dimensions((
@@ -262,8 +260,8 @@ impl ZifWriter {
             .color_model(color)
             .channels(3)
             .map_err(failed)?;
-        if let Profile::Jpeg { sampling } = selected {
-            builder = builder.ycbcr_subsampling(sampling).map_err(failed)?;
+        if selected == Profile::Jpeg {
+            builder = builder.ycbcr_subsampling((1, 1)).map_err(failed)?;
         }
         let mut writer = builder.build().map_err(failed)?;
         let result = zif_tiff::std::RangeWriter::wrap(self.staging.writer(cancelled))
@@ -317,7 +315,7 @@ impl ZifWriter {
         }
         result?;
         let format = match self.profile.expect("initialized ZIF profile") {
-            Profile::Jpeg { .. } => image::ImageFormat::Jpeg,
+            Profile::Jpeg => image::ImageFormat::Jpeg,
             Profile::PngRgb => image::ImageFormat::Png,
         };
         Ok(StoredTile {
@@ -520,25 +518,13 @@ impl ZifWriter {
                 )
                 .map_err(failed)?;
             }
-            Profile::Jpeg { sampling } => {
-                let mut encoder =
-                    jpeg_encoder::Encoder::new(&mut bytes, (100 - self.compression).max(1));
-                encoder.set_sampling_factor(if sampling == (2, 2) {
-                    jpeg_encoder::SamplingFactor::F_2_2
-                } else {
-                    jpeg_encoder::SamplingFactor::F_1_1
-                });
-                if let Some(icc) = icc {
-                    encoder.add_icc_profile(icc).map_err(failed)?;
-                }
-                encoder
-                    .encode(
-                        pixels.as_raw(),
-                        u16::try_from(pixels.width()).map_err(failed)?,
-                        u16::try_from(pixels.height()).map_err(failed)?,
-                        jpeg_encoder::ColorType::Rgba,
-                    )
-                    .map_err(failed)?;
+            Profile::Jpeg => {
+                crate::imaging::encode_jpeg_to(
+                    &mut bytes,
+                    pixels,
+                    (100 - self.compression).max(1),
+                    icc,
+                )?;
             }
         }
         Ok(bytes)

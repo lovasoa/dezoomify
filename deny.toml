@@ -8,8 +8,6 @@ exceptions = [
     { crate = "cssparser-macros", allow = ["MPL-2.0"] },
     { crate = "dtoa-short", allow = ["MPL-2.0"] },
     { crate = "selectors", allow = ["MPL-2.0"] },
-    # ZIF conversion uses IJG-derived code; NOTICE ships with native packages.
-    { crate = "jpeg-encoder", allow = ["IJG"] },
 ]
 
 [bans]

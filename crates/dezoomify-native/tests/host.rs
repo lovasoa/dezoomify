@@ -338,6 +338,19 @@ fn zif_reuses_standalone_jpeg_and_rgb_png_tiles() {
         let metadata = zif_tiff::std::read_zif(std::io::Cursor::new(&container)).unwrap();
         assert_eq!(metadata.level_count(), if index == 0 { 1 } else { 2 });
         assert_eq!(metadata.level(0).unwrap().tile_size(), (16, 16));
+        for level in metadata.levels() {
+            assert_eq!(
+                level.ycbcr_subsampling(),
+                (extension == "jpg").then_some((1, 1))
+            );
+        }
+        for level in 0..metadata.level_count() {
+            for tile in metadata.level_tiles(level).unwrap() {
+                let range = tile.byte_range();
+                image::load_from_memory(&container[range.start as usize..range.end as usize])
+                    .unwrap();
+            }
+        }
         let range = metadata
             .level_tiles(0)
             .unwrap()
