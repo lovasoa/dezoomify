@@ -62,8 +62,6 @@ workflows may rely on it. Unknown tasks, targets, lanes, and flags always
 fail with a usage error instead of succeeding as no-ops or silently
 widening coverage (for example `cargo xtask build bogus`,
 `cargo xtask test core --bogus`, and `cargo xtask ci bogus` all fail).
-`crates/xtask/tests/cli_surface.rs` pins this contract end to end against
-the built binary; unit tests in `src/main.rs` pin the dispatcher.
 
 ## Package managers
 

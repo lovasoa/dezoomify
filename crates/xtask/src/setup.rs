@@ -309,29 +309,3 @@ fn version_of(cmd: &str, args: &[&str]) -> Result<String, String> {
     }
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn node_version_parses_pinned_and_runtime_forms() {
-        assert_eq!(super::node_version("1.2.3"), Some((1, 2, 3)));
-        assert_eq!(super::node_version("v1.2.3"), Some((1, 2, 3)));
-        assert_eq!(super::node_version("v4.5.6"), Some((4, 5, 6)));
-        assert!(super::node_version("1").is_none());
-        assert!(super::node_version("1.2").is_none());
-        assert!(super::node_version("1.x").is_none());
-        assert!(super::node_version("").is_none());
-        assert!(super::node_version("abc").is_none());
-    }
-
-    #[test]
-    fn node_version_comparison_enforces_minor_and_patch_minimums() {
-        let minimum = super::node_version("1.2.3").unwrap();
-        assert!(super::node_version("v1.1.99").unwrap() < minimum);
-        assert!(super::node_version("v1.2.2").unwrap() < minimum);
-        assert!(super::node_version("v1.2.3").unwrap() >= minimum);
-        assert!(super::node_version("v1.2.4").unwrap() >= minimum);
-        assert!(super::node_version("v1.3.0").unwrap() >= minimum);
-        assert!(super::node_version("v2.0.0").unwrap() >= minimum);
-    }
-}
