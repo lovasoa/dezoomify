@@ -20,6 +20,17 @@ enum Profile {
 /// encoded input without inheriting these output-specific rules.
 fn profile(bytes: &[u8]) -> Option<Profile> {
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        let mut at = 8usize;
+        while let Some(header) = bytes.get(at..at.checked_add(8)?) {
+            if &header[4..] == b"tRNS" {
+                return None;
+            }
+            if &header[4..] == b"IEND" {
+                break;
+            }
+            let length = u32::from_be_bytes(header[..4].try_into().ok()?) as usize;
+            at = at.checked_add(length)?.checked_add(12)?;
+        }
         return (bytes.get(24) == Some(&8) && bytes.get(25) == Some(&2)).then_some(Profile::PngRgb);
     }
     if !bytes.starts_with(&[0xff, 0xd8]) {
@@ -92,11 +103,16 @@ pub(crate) struct ZifWriter {
     compression: u8,
     budget: u64,
     retained: u64,
+    peak_retained: u64,
     decoded: u64,
     metadata: BTreeMap<u32, TileMetadata>,
 }
 
 impl ZifWriter {
+    pub(crate) fn peak_retained(&self) -> u64 {
+        self.peak_retained
+    }
+
     fn retained_bytes(&self) -> u64 {
         self.retained
             + self
@@ -147,6 +163,7 @@ impl ZifWriter {
             compression,
             budget,
             retained: 0,
+            peak_retained: 0,
             decoded: 0,
             metadata: BTreeMap::new(),
         })
@@ -273,10 +290,14 @@ impl ZifWriter {
                     decoder.exif_metadata().unwrap_or(None),
                 ),
             );
-            memory_check(self.retained_bytes(), self.budget)?;
+            let retained = self.retained_bytes();
+            self.peak_retained = self.peak_retained.max(retained);
+            memory_check(retained, self.budget)?;
         }
         let source_profile = profile(&tile.bytes);
-        if self.writer.is_none() && self.base.regular && index == 0 {
+        // The first received grid tile establishes the container codec.
+        // Missing or slow tile zero must not retain the rest of the image.
+        if self.writer.is_none() && self.base.regular {
             self.initialize(source_profile.unwrap_or(Profile::PngRgb), cancelled)?;
         }
         let compatible = self.base.regular
@@ -301,7 +322,11 @@ impl ZifWriter {
             drop(pixels);
             self.store(0, rect, &bytes, cancelled)?
         } else {
-            if source_profile.is_none() || tile.size.width != rect.w || tile.size.height != rect.h {
+            if !self.base.regular
+                || source_profile.is_none()
+                || tile.size.width != rect.w
+                || tile.size.height != rect.h
+            {
                 tile.convert_to_png(
                     Size {
                         width: rect.w,
@@ -313,7 +338,9 @@ impl ZifWriter {
                 self.decoded += 1;
             }
             self.retained += tile.bytes.len() as u64;
-            memory_check(self.retained_bytes(), self.budget)?;
+            let retained = self.retained_bytes();
+            self.peak_retained = self.peak_retained.max(retained);
+            memory_check(retained, self.budget)?;
             StoredTile {
                 rect,
                 size: tile.size,
@@ -558,6 +585,16 @@ mod tests {
         encoder
             .write_image(&[1, 2, 3], 1, 1, image::ExtendedColorType::Rgb8)
             .unwrap();
+        assert!(matches!(profile(&bytes), Some(Profile::PngRgb)));
+        let mut transparent = bytes.clone();
+        // Valid RGB tRNS chunk for the encoded pixel [1, 2, 3].
+        transparent.splice(
+            33..33,
+            [
+                0, 0, 0, 6, b't', b'R', b'N', b'S', 0, 1, 0, 2, 0, 3, 201, 75, 171, 245,
+            ],
+        );
+        assert!(profile(&transparent).is_none());
         let size = Size {
             width: 1,
             height: 1,

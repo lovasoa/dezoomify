@@ -269,11 +269,17 @@ fn odd_sized_and_mixed_codec_iiif_trees_roundtrip_through_the_reader() {
 #[test]
 fn zif_reuses_standalone_jpeg_and_rgb_png_tiles() {
     let work = temp_dir("zif-reuse");
-    for extension in ["jpg", "png"] {
-        let source = work.join(format!("source-{extension}.dzi"));
-        let tiles = work.join(format!("source-{extension}_files/4"));
+    for (extension, width, index) in [
+        ("jpg", 16, 0),
+        ("png", 16, 0),
+        ("jpg", 32, 1),
+        ("png", 32, 1),
+    ] {
+        let source = work.join(format!("source-{extension}-{width}.dzi"));
+        let level = if width == 16 { 4 } else { 5 };
+        let tiles = work.join(format!("source-{extension}-{width}_files/{level}"));
         std::fs::create_dir_all(&tiles).unwrap();
-        std::fs::write(&source, format!("<Image TileSize=\"16\" Overlap=\"0\" Format=\"{extension}\" xmlns=\"http://schemas.microsoft.com/deepzoom/2008\"><Size Width=\"16\" Height=\"16\"/></Image>")).unwrap();
+        std::fs::write(&source, format!("<Image TileSize=\"16\" Overlap=\"0\" Format=\"{extension}\" xmlns=\"http://schemas.microsoft.com/deepzoom/2008\"><Size Width=\"{width}\" Height=\"16\"/></Image>")).unwrap();
         let pixels = image::RgbImage::from_pixel(16, 16, image::Rgb([40, 70, 90]));
         let mut bytes = std::io::Cursor::new(Vec::new());
         pixels
@@ -287,20 +293,25 @@ fn zif_reuses_standalone_jpeg_and_rgb_png_tiles() {
             )
             .unwrap();
         let bytes = bytes.into_inner();
-        std::fs::write(tiles.join(format!("0_0.{extension}")), &bytes).unwrap();
+        std::fs::write(tiles.join(format!("{index}_0.{extension}")), &bytes).unwrap();
         dezoomify_native::cache::store(
             &work.join("cache"),
             &dezoomify_native::cache::job_namespace(source.to_str().unwrap()),
-            tiles.join(format!("0_0.{extension}")).to_str().unwrap(),
+            tiles
+                .join(format!("{index}_0.{extension}"))
+                .to_str()
+                .unwrap(),
             &bytes[..bytes.len() - 1],
         )
         .unwrap();
-        let destination = work.join(format!("out-{extension}.zif"));
+        let destination = work.join(format!("out-{extension}-{width}.zif"));
         let host = NativeHost::new(JobOptions {
             input_url: source.to_str().unwrap().into(),
             output: OutputTarget::File(destination.clone()),
             largest: true,
             compression: 99,
+            keep_partial: true,
+            max_retries: 0,
             cache_dir: Some(work.join("cache")),
             ..Default::default()
         })
@@ -312,16 +323,25 @@ fn zif_reuses_standalone_jpeg_and_rgb_png_tiles() {
                 &host,
             ))
             .unwrap();
-        assert_eq!(host.publication().unwrap().instrumentation.pixel_decodes, 0);
+        let publication = host.publication().unwrap();
+        if index == 0 {
+            assert_eq!(publication.instrumentation.pixel_decodes, 0);
+        } else {
+            assert_eq!(publication.output.missing, [0]);
+        }
+        assert_eq!(
+            publication.instrumentation.peak_encoded_bytes, 0,
+            "received grid tiles stream even when tile zero is missing"
+        );
         assert_eq!(host.publication().unwrap().instrumentation.canvas_bytes, 0);
-        let container = std::fs::read(destination).unwrap();
+        let container = std::fs::read(publication.path).unwrap();
         let metadata = zif_tiff::std::read_zif(std::io::Cursor::new(&container)).unwrap();
-        assert_eq!(metadata.level_count(), 1);
+        assert_eq!(metadata.level_count(), if index == 0 { 1 } else { 2 });
         assert_eq!(metadata.level(0).unwrap().tile_size(), (16, 16));
         let range = metadata
             .level_tiles(0)
             .unwrap()
-            .next()
+            .nth(index as usize)
             .unwrap()
             .byte_range();
         assert_eq!(&container[range.start as usize..range.end as usize], bytes);

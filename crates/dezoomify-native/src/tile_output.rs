@@ -708,6 +708,13 @@ pub(crate) enum TileWriter {
     Zif(crate::zif_output::ZifWriter),
 }
 impl TileWriter {
+    pub(crate) fn peak_retained(&self) -> u64 {
+        match self {
+            Self::Iiif(writer) => writer.peak_retained(),
+            Self::Zif(writer) => writer.peak_retained(),
+        }
+    }
+
     pub(crate) fn new(
         destination: &Path,
         plan: &OutputPlan,
