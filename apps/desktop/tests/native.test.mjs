@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { invokeNative } from "../src/native.ts";
+import { inspectSavedOutput, invokeNative, openHistoryOutput } from "../src/native.ts";
 import { defaultSettings } from "../src/settings.ts";
 
 function platform({ deferRegistration = false } = {}) {
@@ -17,7 +17,9 @@ function platform({ deferRegistration = false } = {}) {
   return {
     handlers,
     calls,
-    resolve,
+    resolve(output) {
+      resolve({ output, saved_output: { id: "saved:test", filename: "saved image.png" } });
+    },
     reject,
     dispatched: dispatched.promise,
     register() {
@@ -87,7 +89,7 @@ test("native invocation preserves settings, progress, completion, and result own
   );
   assert.deepEqual(api.calls.at(-1).args, { job: handle.id, question: 4, answer: "retry" });
   api.resolve(output);
-  assert.deepEqual(await handle.finished, output);
+  assert.deepEqual((await handle.finished).output, output);
   assert.equal(api.handlers.size, 0);
   await handle.openOutput(true);
   assert.deepEqual(api.calls.at(-1), {
@@ -184,7 +186,7 @@ test("typed failure and partial output retain the native outcome", async () => {
       await assert.rejects(handle.finished, (error) => error === result);
     } else {
       api.resolve(result);
-      assert.deepEqual(await handle.finished, result);
+      assert.deepEqual((await handle.finished).output, result);
     }
     assert.equal(api.handlers.size, 0);
     await handle.dispose();
@@ -220,4 +222,19 @@ test("raw header lines cross IPC as typed and Rust rejections return untouched",
   api.reject(rejection);
   await assert.rejects(handle.finished, (error) => error === rejection);
   await handle.dispose();
+});
+
+test("saved references remain usable independently of the invocation and never send filesystem paths", async () => {
+  const api = platform();
+  const handle = await invokeNative(request(), { progress() {}, partial() {} }, api);
+  api.resolve(output);
+  const { saved_output: saved } = await handle.finished;
+  assert.deepEqual(saved, { id: "saved:test", filename: "saved image.png" });
+  await handle.dispose();
+  await inspectSavedOutput(saved, api);
+  await openHistoryOutput(saved, api);
+  assert.deepEqual(api.calls.slice(-2), [
+    { command: "inspect_saved_output", args: { id: "saved:test" } },
+    { command: "open_history_output", args: { id: "saved:test" } },
+  ]);
 });

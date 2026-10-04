@@ -8,7 +8,7 @@ import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
 import type { JobActivity } from "./activity.ts";
 import { canRetry, httpStatusOf, plainMessageFor } from "./failure.ts";
-import type { HistoryEntry } from "./history.ts";
+import { HistorySection } from "./history-view.tsx";
 import type { Presentation, ResolutionChoice } from "./presentation.ts";
 import { displaySourceUrl, hostFromUrl } from "./view-helpers.ts";
 import type { PlatformHints, ViewCallbacks, ViewContext, ViewRenderOptions } from "./view-types.ts";
@@ -26,30 +26,6 @@ import { formatElapsed, renderCompletion, renderSaveGuidance } from "./component
 import { DiagnosticDetails } from "./diagnostic-details.tsx";
 import { t } from "./i18n.ts";
 import { UrlInput } from "./url-input.tsx";
-
-// Pure helpers (host-neutral, no DOM).
-
-function historyDimsLabel(entry: HistoryEntry): string {
-  if (
-    typeof entry.width === "number" &&
-    typeof entry.height === "number" &&
-    entry.width > 0 &&
-    entry.height > 0
-  ) {
-    return t("view.history.dims", { w: entry.width, h: entry.height });
-  }
-  return "";
-}
-
-function historyDateLabel(at: number): string {
-  try {
-    const date = new Date(at);
-    if (Number.isNaN(date.getTime())) return "";
-    return date.toLocaleDateString();
-  } catch {
-    return "";
-  }
-}
 
 // Presentational atoms.
 
@@ -264,70 +240,35 @@ function resolutionNoticeOf(
 
 // Input / history.
 
-function HistorySection({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: ViewContext }) {
-  const entries = ctx?.history;
-  if (!Array.isArray(entries)) return <div className="dz-history-section" id="dz-history" />;
+function IdleView({
+  callbacks,
+  ctx,
+  options,
+}: {
+  callbacks: ViewCallbacks;
+  ctx?: ViewContext;
+  options?: ViewRenderOptions;
+}) {
+  const [selection, setSelection] = useState<{ url: string }>();
   return (
-    <div className="dz-history-section" id="dz-history">
-      <h2 className="dz-history-title">{t("view.history.title")}</h2>
-      <p className="dz-history-note">{t("view.history.localOnly")}</p>
-      {entries.length === 0 ? (
-        <p className="dz-history-empty">{t("view.history.empty")}</p>
-      ) : (
-        <ul className="dz-history-list">
-          {entries.slice(0, 20).map((entry) => {
-            const parts = [entry.url || entry.origin];
-            const dims = historyDimsLabel(entry);
-            const date = historyDateLabel(entry.at);
-            if (dims !== "") parts.push(dims);
-            if (typeof entry.format === "string" && entry.format !== "") parts.push(entry.format);
-            if (date !== "") parts.push(date);
-            return (
-              <li className="dz-history-item" key={`${entry.at}-${entry.url}`}>
-                {callbacks.onHistorySelect ? (
-                  <button
-                    type="button"
-                    className="dz-history-main"
-                    onClick={() => callbacks.onHistorySelect?.(entry)}
-                  >
-                    {parts.join(" ")}
-                  </button>
-                ) : (
-                  <span className="dz-history-main">{parts.join(" ")}</span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {typeof callbacks.onClearHistory === "function" && entries.length > 0 ? (
-        <button
-          type="button"
-          className="dz-btn-secondary"
-          id="dz-history-clear"
-          onClick={() => {
-            try {
-              callbacks.onClearHistory?.();
-            } catch {
-              // Clearing must never break the view.
-            }
-          }}
-        >
-          {t("view.history.clear")}
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-function IdleView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: ViewContext }) {
-  return (
-    <div className="dz-view-body dz-fade-in">
-      <div className="dz-description">
-        <p>{t("view.input.description")}</p>
+    <>
+      <div className="dz-view-body dz-fade-in">
+        <div className="dz-description">
+          <p>{t("view.input.description")}</p>
+        </div>
+        <UrlInput
+          initialUrl={ctx?.initialUrl}
+          selection={selection}
+          onSubmit={callbacks.onSubmitUrl}
+        />
       </div>
-      <UrlInput initialUrl={ctx?.initialUrl} onSubmit={callbacks.onSubmitUrl} />
-    </div>
+      {options?.idleBeforeHistory}
+      <HistorySection
+        callbacks={callbacks}
+        ctx={ctx}
+        onSelect={(entry) => setSelection({ url: entry.url })}
+      />
+    </>
   );
 }
 
@@ -561,7 +502,6 @@ function JobView({
 
 function DisplayOnlyView({
   callbacks,
-  ctx,
   hostDocument,
 }: {
   callbacks: ViewCallbacks;
@@ -952,9 +892,7 @@ function SharedView({
       <div className="dz-header" style={{ display: phase === "idle" ? "" : "none" }}>
         <Logo />
       </div>
-      {phase === "idle" ? <IdleView callbacks={callbacks} ctx={ctx} /> : null}
-      {phase === "idle" ? options?.idleBeforeHistory : null}
-      {phase === "idle" ? <HistorySection callbacks={callbacks} ctx={ctx} /> : null}
+      {phase === "idle" ? <IdleView callbacks={callbacks} ctx={ctx} options={options} /> : null}
       {phase === "job" ? (
         <JobView
           presentation={presentation}

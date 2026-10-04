@@ -5,9 +5,11 @@ import { t } from "./i18n.ts";
 /** The canonical URL entry and submit control used by graphical products. */
 export function UrlInput({
   initialUrl,
+  selection,
   onSubmit,
 }: {
   initialUrl?: string;
+  selection?: { url: string };
   onSubmit(url: string): void;
 }): ReactElement {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -20,6 +22,15 @@ export function UrlInput({
       setHasValue(true);
     }
   }, [initialUrl]);
+
+  useEffect(() => {
+    const input = inputRef.current;
+    if (input && selection) {
+      input.value = selection.url;
+      setHasValue(true);
+      input.focus();
+    }
+  }, [selection]);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();

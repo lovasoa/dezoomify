@@ -37,6 +37,7 @@ dezoomify-native = { path = "../../../crates/dezoomify-native" }
 # Lean offline shell: pure Rust only (no webview system packages).
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 # Real window shell (optional; see the `tauri` feature below).
 # Tauri 2.12 moved to WebView2 0.39 / windows 0.62, but the test-only

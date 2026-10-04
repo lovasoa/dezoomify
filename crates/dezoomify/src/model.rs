@@ -985,6 +985,31 @@ pub struct Output {
     pub disposition: OutputDisposition,
 }
 
+/// Durable native reference to a published output; filesystem paths stay in the shell.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct SavedOutput {
+    pub id: String,
+    pub filename: String,
+}
+
+/// Current filesystem availability, queried separately from job completion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum SavedOutputState {
+    Available,
+    Deleted,
+}
+
+/// Desktop completion plus its independently owned saved-file reference.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct DesktopOutput {
+    pub output: Output,
+    pub saved_output: Option<SavedOutput>,
+}
+
 impl Output {
     /// Complete output has no missing tiles; the two cannot disagree.
     #[must_use]

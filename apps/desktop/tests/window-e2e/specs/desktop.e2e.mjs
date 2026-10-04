@@ -226,6 +226,33 @@ describe("Dezoomify desktop window", () => {
     assert.equal(outputs.length, 1, "automatic save writes exactly one PNG");
     assert.ok(!outputs[0].includes(".partial."), "a complete save is not a partial sibling");
     assertSavedPyramid(readFileSync(outputs[0]));
+    await resetToIdle(driver);
+    await waitFor(
+      driver,
+      async () =>
+        driver.executeScript(() => {
+          const row = document.querySelector(".dz-history-table tbody tr");
+          return row?.cells[3]?.textContent.trim() === "Completed";
+        }),
+      30000,
+      "saved file history",
+    );
+    const title = await driver.findElement(By.css(".dz-history-main"));
+    assert.equal(await title.getText(), path.basename(outputs[0]));
+    assert.equal(await title.isEnabled(), true);
+    rmSync(outputs[0]);
+    await driver.executeScript(() => window.dispatchEvent(new Event("focus")));
+    await waitFor(
+      driver,
+      async () =>
+        driver.executeScript(() => {
+          const row = document.querySelector(".dz-history-table tbody tr");
+          return row?.cells[3]?.textContent.trim() === "Deleted";
+        }),
+      30000,
+      "deleted file history",
+    );
+    assert.equal(await title.isEnabled(), false);
   });
 
   for (const fixtureInput of formats) {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   clearHistory,
+  createHistory,
   HISTORY_KEY_WEBSITE,
   historyOriginOf,
   loadHistory,
@@ -99,4 +100,174 @@ test("history store load, save, and clear are best-effort", () => {
   clearHistory(store, HISTORY_KEY_WEBSITE);
   assert.deepEqual(loadHistory(store, HISTORY_KEY_WEBSITE), []);
   assert.deepEqual(loadHistory(null, HISTORY_KEY_WEBSITE), []);
+});
+
+test("started jobs persist immediately, metadata survives failure and reload, and progress avoids redundant writes", () => {
+  const store = memoryStore();
+  let writes = 0;
+  const countingStore = {
+    ...store,
+    setItem(key, value) {
+      writes++;
+      store.setItem(key, value);
+    },
+  };
+  const history = createHistory(countingStore, HISTORY_KEY_WEBSITE, () => 123);
+  const entry = history.start("https://museum.example/image");
+  assert.equal(loadHistory(store, HISTORY_KEY_WEBSITE)[0].status, "started");
+  assert.equal(writes, 1);
+  const progress = { title: " A painting ", selected: { width: 1200, height: 800 } };
+  history.progress(entry, progress);
+  history.progress(entry, { ...progress, completed: 2 });
+  assert.equal(writes, 2);
+  history.update(entry, { status: "failed" });
+  const loaded = createHistory(store, HISTORY_KEY_WEBSITE, () => 999).entries()[0];
+  assert.equal(loaded.title, "A painting");
+  assert.equal(loaded.width, 1200);
+  assert.equal(loaded.height, 800);
+  assert.equal(loaded.status, "failed");
+  assert.equal(loaded.at, 123);
+});
+
+test("history completion and removal preserve other entries and never resurrect removed jobs", () => {
+  const store = memoryStore();
+  let now = 0;
+  const history = createHistory(store, HISTORY_KEY_WEBSITE, () => ++now);
+  const first = history.start("https://museum.example/first");
+  const second = history.start("https://museum.example/second");
+  const output = {
+    disposition: "browser-save-ready",
+    format: "png",
+    canvas: { width: 100, height: 80 },
+    missing: [],
+  };
+  history.complete(second, output);
+  assert.equal(history.entries()[0].status, "completed");
+  history.remove(first);
+  history.complete(first, output);
+  assert.deepEqual(
+    history.entries().map((item) => item.url),
+    [second.url],
+  );
+  history.clear();
+  history.complete(second, output);
+  assert.deepEqual(loadHistory(store, HISTORY_KEY_WEBSITE), []);
+});
+
+const savedOutput = { id: "saved:test", filename: "A painting.png" };
+const diskOutput = {
+  disposition: "native-publication",
+  format: "png",
+  canvas: { width: 100, height: 80 },
+  missing: [],
+};
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+
+test("saved references reload, disk checks are bounded, and removed rows ignore late checks", async () => {
+  const store = memoryStore();
+  const pending = [];
+  const forgotten = [];
+  const history = createHistory(store, HISTORY_KEY_WEBSITE, () => 1, {
+    inspect(saved) {
+      const deferred = Promise.withResolvers();
+      pending.push({ saved, ...deferred });
+      return deferred.promise;
+    },
+    open: async () => {},
+    forget: async (saved) => {
+      forgotten.push(saved.id);
+    },
+    onChange: () => {},
+  });
+  for (let i = 0; i < 3; i++) {
+    const entry = history.start(`https://museum.example/${i}`);
+    history.complete(entry, diskOutput, { ...savedOutput, id: `saved:${i}` });
+  }
+  assert.equal(
+    loadHistory(store, HISTORY_KEY_WEBSITE)[0].savedOutput.filename,
+    savedOutput.filename,
+  );
+  const stored = store.getItem(HISTORY_KEY_WEBSITE);
+  const refresh = history.refresh();
+  assert.equal(history.refresh(), refresh, "concurrent refreshes share the pending work");
+  assert.equal(pending.length, 2, "only two inspections run at once");
+  assert.equal(history.entries().length, 3, "rows are available before disk responds");
+  const removed = history.entries()[0];
+  history.remove(removed);
+  pending[0].resolve("deleted");
+  await tick();
+  assert.equal(pending.length, 3);
+  pending[1].resolve("available");
+  pending[2].resolve("available");
+  await refresh;
+  assert.equal(history.entries().length, 2);
+  assert.deepEqual(forgotten, [removed.savedOutput.id]);
+  assert.ok(history.entries().every((entry) => entry.outputState === "available"));
+  assert.ok(!store.getItem(HISTORY_KEY_WEBSITE).includes("outputState"));
+  assert.equal(JSON.parse(stored).length, 3);
+});
+
+test("file access errors stay distinct from deletion and restored files can be opened", async () => {
+  let inspection = "available";
+  let failure;
+  const history = createHistory(memoryStore(), HISTORY_KEY_WEBSITE, () => 1, {
+    inspect: async () => {
+      if (failure) throw failure;
+      return inspection;
+    },
+    open: async () => {
+      if (failure) throw failure;
+    },
+    forget: async () => {},
+    onChange: () => {},
+  });
+  const entry = history.start("https://museum.example/painting");
+  history.complete(entry, diskOutput, savedOutput);
+  failure = { kind: "output-unavailable", detail: "permission denied" };
+  await history.refresh();
+  assert.equal(history.entries()[0].outputState, "unavailable");
+  assert.deepEqual(history.entries()[0].outputError, failure);
+  failure = { kind: "output-not-found" };
+  await history.open(history.entries()[0]);
+  assert.equal(history.entries()[0].outputState, "deleted");
+  assert.equal(history.entries()[0].status, "completed");
+  failure = undefined;
+  inspection = "available";
+  await history.refresh();
+  assert.equal(history.entries()[0].outputState, "available");
+  await history.open(history.entries()[0]);
+  assert.equal(history.entries()[0].opening, undefined);
+});
+
+test("opening is not duplicated and an older disk check cannot overwrite its failure result", async () => {
+  for (const [failure, expected] of [
+    [{ kind: "output-not-found" }, "deleted"],
+    [{ kind: "launch-failed", detail: "no viewer installed" }, "unavailable"],
+  ]) {
+    const check = Promise.withResolvers();
+    const opening = Promise.withResolvers();
+    let opens = 0;
+    const history = createHistory(memoryStore(), HISTORY_KEY_WEBSITE, () => 1, {
+      inspect: () => check.promise,
+      open: () => {
+        opens++;
+        return opening.promise;
+      },
+      forget: async () => {},
+      onChange: () => {},
+    });
+    const entry = history.start("https://museum.example/painting");
+    history.complete(entry, diskOutput, savedOutput);
+    const refresh = history.refresh();
+    const row = history.entries()[0];
+    const first = history.open(row);
+    await history.open(row);
+    assert.equal(opens, 1);
+    opening.reject(failure);
+    await first;
+    check.resolve("available");
+    await refresh;
+    assert.equal(history.entries()[0].outputState, expected);
+    assert.ok(!history.entries()[0].opening);
+  }
 });

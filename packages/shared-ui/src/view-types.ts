@@ -1,7 +1,7 @@
 import type { ReactElement, ReactNode } from "react";
 import type { JobActivity } from "./activity.ts";
 import type { DiagnosticReport } from "./diagnostics.ts";
-import type { HistoryEntry } from "./history.ts";
+import type { HistoryEntry, HistoryRow } from "./history.ts";
 import type { Presentation } from "./presentation.ts";
 
 /** User actions supplied by the graphical product that hosts the shared UI. */
@@ -16,7 +16,8 @@ export interface ViewCallbacks {
   onSave?(): void;
   onOpenOutput?(): Promise<void>;
   onRevealOutput?(): Promise<void>;
-  onHistorySelect?(entry: HistoryEntry): void;
+  onRemoveHistory?(entry: HistoryEntry): void;
+  onOpenHistory?(entry: HistoryEntry): Promise<void>;
   onOpenExternalLink?(url: string): void;
   onCopyDiagnostics?(text: string): void | Promise<void>;
   onSaveDiagnostics?(report: DiagnosticReport): void | Promise<void>;
@@ -42,7 +43,8 @@ export interface ViewContext {
   jobActivity?: JobActivity;
   initialUrl?: string;
   sourceUrl?: string;
-  history?: HistoryEntry[];
+  history?: HistoryRow[];
+  historyNow?: number;
 }
 
 /** Host-owned React content rendered inside or instead of the generic card. */

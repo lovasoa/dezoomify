@@ -7,7 +7,7 @@ import type { ViewContext } from "@dezoomify/shared-ui";
 import {
   boundDiagnosticReport,
   causeOf,
-  clearHistory as clearHistoryStore,
+  createHistory,
   detailOf,
   formatMissingSummary,
   getLocale,
@@ -15,7 +15,6 @@ import {
   type HistoryEntry,
   isJobError,
   isValidInputUrl,
-  loadHistory as loadHistoryStore,
   PartialDecisionActions,
   type Presentation,
   pickLocale,
@@ -24,13 +23,10 @@ import {
   presentOutput,
   presentProgress,
   presentStatus,
-  pushHistory,
   readInitialUrl,
   renderView,
-  saveHistory as saveHistoryStore,
   setLocale,
   t,
-  toHistoryEntry,
   trimTechnical,
 } from "@dezoomify/shared-ui";
 import type {
@@ -42,9 +38,12 @@ import type {
 } from "@dezoomify/wasm-bindings";
 import { createElement } from "react";
 import {
+  forgetSavedOutput,
+  inspectSavedOutput,
   invokeNative,
   type NativeInvocation,
   openExternalLink,
+  openHistoryOutput,
   readNativeDiagnostics,
   validateSettings,
 } from "./native.ts";
@@ -81,6 +80,7 @@ function newAttempt() {
     paused: false,
     localFailure: null as JobError | null,
     lastInputUrl: "",
+    historyEntry: null as HistoryEntry | null,
     heartbeatTimer: null as ReturnType<typeof setInterval> | null,
     viewCtx: {} as ViewContext,
   };
@@ -128,22 +128,13 @@ const desktopHistoryStore = {
     desktopMemoryFallback.delete(key);
   },
 };
-let desktopHistory: Array<HistoryEntry> = loadHistoryStore(
-  desktopHistoryStore,
-  HISTORY_KEY_DESKTOP,
-);
-
-function recordDesktopHistory(url: string, width?: number, height?: number, format?: string): void {
-  const entry = toHistoryEntry(url, {
-    ...(typeof width === "number" ? { width } : {}),
-    ...(typeof height === "number" ? { height } : {}),
-    ...(typeof format === "string" ? { format } : {}),
-    at: Date.now(),
-  });
-  if (!entry) return;
-  desktopHistory = pushHistory(desktopHistory, entry);
-  saveHistoryStore(desktopHistoryStore, HISTORY_KEY_DESKTOP, desktopHistory);
-}
+const desktopHistory = createHistory(desktopHistoryStore, HISTORY_KEY_DESKTOP, Date.now, {
+  inspect: inspectSavedOutput,
+  open: openHistoryOutput,
+  forget: forgetSavedOutput,
+  onChange: () => update(),
+});
+let historyVisible = false;
 
 let desktopSettings: DesktopSettings = loadSettings();
 
@@ -301,6 +292,7 @@ function handleSubmitUrl(url: string): void {
 
 /** Stop following the current job; its late events can never move the view. */
 function retireActiveJob(): void {
+  if (!isTerminalNow()) desktopHistory.update(currentAttempt.historyEntry, { status: "cancelled" });
   const diagnostics = currentAttempt.diagnostics;
   diagnostics.finish("retired", { reason: "replaced-or-reset" });
   currentAttempt.retired = true;
@@ -318,6 +310,7 @@ function retireActiveJob(): void {
 function launchNativeJob(trimmed: string): void {
   const attempt = currentAttempt;
   attempt.lastInputUrl = trimmed;
+  attempt.historyEntry = desktopHistory.start(trimmed);
   attempt.diagnostics.context({
     input: trimmed,
     submitted: {
@@ -341,6 +334,7 @@ function launchNativeJob(trimmed: string): void {
     progress(progress) {
       if (!owns(attempt) || attempt.settled) return;
       attempt.progress = progress;
+      desktopHistory.progress(attempt.historyEntry, progress);
       attempt.diagnostics.observe(progress);
       touchProgress();
       update();
@@ -360,19 +354,13 @@ function launchNativeJob(trimmed: string): void {
       attempt.activeHandle = handle;
       attempt.diagnostics.context({ host_job: handle.id });
       update();
-      const output = await handle.finished;
+      const { output, saved_output } = await handle.finished;
       if (!owns(attempt)) return;
       attempt.settled = true;
       attempt.output = output;
       attempt.partial = null;
       stopHeartbeat();
-      if (attempt.lastInputUrl)
-        recordDesktopHistory(
-          attempt.lastInputUrl,
-          output.canvas?.width,
-          output.canvas?.height,
-          output.format,
-        );
+      desktopHistory.complete(attempt.historyEntry, output, saved_output);
       update();
     })
     .catch((error: unknown) => {
@@ -380,10 +368,12 @@ function launchNativeJob(trimmed: string): void {
       attempt.settled = true;
       attempt.partial = null;
       if (isJobError(error) && causeOf(error).kind === "cancelled") {
+        desktopHistory.update(attempt.historyEntry, { status: "cancelled" });
         stopHeartbeat();
         update();
         return;
       }
+      desktopHistory.update(attempt.historyEntry, { status: "failed" });
       if (isJobError(error) && error.kind === "invalid-settings") {
         // The Rust save command rejected the settings; surface its typed
         // reason in the settings panel as well as the failure view.
@@ -653,6 +643,8 @@ function update() {
   if (!root) return;
   const attempt = currentAttempt;
   const presentation = currentPresentation();
+  const refreshHistory = presentation.phase === "idle" && !historyVisible;
+  historyVisible = presentation.phase === "idle";
   const partial = presentation.decision ? attempt.partial : null;
   if (currentAttempt.viewCtx.jobActivity && presentation.phase === "job") {
     activity().now = Date.now();
@@ -705,21 +697,18 @@ function update() {
             onRevealOutput: () => handleOpenOutput(attempt, true),
           }
         : {}),
-      onHistorySelect(entry: HistoryEntry) {
-        currentAttempt.viewCtx.initialUrl = entry.url;
-        const input = root.querySelector<HTMLInputElement>("#dz-url-input");
-        if (input) input.value = entry.url;
-        update();
-        root.querySelector<HTMLInputElement>("#dz-url-input")?.focus();
-      },
       onOpenExternalLink(url: string) {
         handleOpenExternalLink(url);
       },
       onClearHistory() {
-        desktopHistory = [];
-        clearHistoryStore(desktopHistoryStore, HISTORY_KEY_DESKTOP);
+        desktopHistory.clear();
         update();
       },
+      onRemoveHistory(entry: HistoryEntry) {
+        desktopHistory.remove(entry);
+        update();
+      },
+      onOpenHistory: desktopHistory.open,
     },
     {
       diagnosticReport: attempt.diagnostics.report(),
@@ -730,7 +719,8 @@ function update() {
       ...(currentAttempt.viewCtx.initialUrl
         ? { initialUrl: currentAttempt.viewCtx.initialUrl }
         : {}),
-      history: [...desktopHistory],
+      history: desktopHistory.entries(),
+      historyNow: Date.now(),
     },
     {
       ...(presentation.phase === "idle"
@@ -764,12 +754,16 @@ function update() {
   );
   ensureDesktopAuxPanel();
   ensureDesktopExternalNav();
+  if (refreshHistory) void desktopHistory.refresh();
 }
 
 initInitialUrl();
 
 if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
   window.addEventListener("hashchange", () => syncInitialUrlFromLocation());
+  window.addEventListener("focus", () => {
+    if (historyVisible) void desktopHistory.refresh();
+  });
 }
 
 if (root !== null) {
