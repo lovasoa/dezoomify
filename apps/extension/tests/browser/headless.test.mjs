@@ -67,9 +67,9 @@ function stagePackage(
   { grantHostPermissions = true, sourceHostOnly = false, scenario, restartBackground = false } = {},
 ) {
   const zip = path.join(dir, `dezoomify-${browser}.zip`);
-  // Format fixtures share one package per browser. The harness selects each
-  // fixture through the driver URL after the onInstalled page opens idle.
-  if (scenario?.startsWith("fixtures/")) scenario = "idle";
+  // Scenarios use the driver URL, so only actual build options split packages.
+  // Start idle so observers attach before even a cold session launches its job.
+  scenario = "idle";
   const key = JSON.stringify([
     browser,
     origin,
@@ -297,8 +297,7 @@ async function runChromiumJob(base, work, options = {}) {
       driverPage = await context.newPage();
       await driverPage.goto(driverUrl);
     }
-    if (options.scenario?.startsWith("fixtures/"))
-      await driverPage.goto(`${driverUrl}?scenario=${encodeURIComponent(options.scenario)}`);
+    await driverPage.goto(`${driverUrl}?scenario=${encodeURIComponent(options.scenario ?? "")}`);
     await driverPage.waitForFunction(
       () => typeof globalThis.__DEZOOMIFY_TEST_RUN__?.then === "function",
       { timeout: 15000 },
@@ -462,11 +461,11 @@ async function runFirefoxJob(base, work, runOptions = {}) {
           await driver.switchTo().window(handle);
           const url = await driver.getCurrentUrl();
           if (!url.includes("/test/driver.html")) continue;
-          if (runOptions.scenario?.startsWith("fixtures/") && !fixtureStarted) {
+          if (!fixtureStarted) {
             // Navigate the privileged page through WebDriver without injecting
             // script. The shared idle package starts exactly one fixture job.
             const driverUrl = new URL(url);
-            driverUrl.search = `scenario=${encodeURIComponent(runOptions.scenario)}`;
+            driverUrl.search = `scenario=${encodeURIComponent(runOptions.scenario ?? "")}`;
             await driver.get(driverUrl.href);
             fixtureStarted = true;
             return false;
