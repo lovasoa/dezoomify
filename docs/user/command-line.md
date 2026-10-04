@@ -90,6 +90,7 @@ first image). Between images `--min-interval` paces the queue.
 
 The command-line tool holds the image in memory subject to the memory currently available to the process, as does the [desktop app](./desktop-app.md).
 A larger save stops with a typed `limit-exceeded` error before anything is written; save a smaller level with `--max-width`.
+IIIF directory output keeps compatible JPEG/PNG tiles in their original encoding and grid. `--compression` affects only converted tiles and new pyramid levels. Choose an unused directory destination; existing directories and files are preserved even with `--overwrite`.
 See [very large pictures](./troubleshooting.md#the-image-appears-blank-or-the-browser-slows-to-a-halt) when a browser tab cannot hold the image.
 
 ## Next steps

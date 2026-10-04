@@ -1051,6 +1051,7 @@ dependencies = [
  "dezoomify-fixture-server",
  "image",
  "reqwest 0.12.28",
+ "rustix",
  "rustls",
  "serde",
  "serde_json",

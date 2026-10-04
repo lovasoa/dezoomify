@@ -48,6 +48,60 @@ fn known_codec_limits_fail_before_ordinary_tile_fetches() {
 }
 
 #[test]
+fn compatible_single_tile_iiif_preserves_bytes_without_pixel_decoding() {
+    let work = temp_dir("iiif-reuse");
+    for extension in ["jpg", "png"] {
+        let source = work.join(format!("source-{extension}.dzi"));
+        let tiles = work.join(format!("source-{extension}_files/4"));
+        std::fs::create_dir_all(&tiles).unwrap();
+        std::fs::write(&source, format!("<Image TileSize=\"16\" Overlap=\"0\" Format=\"{extension}\" xmlns=\"http://schemas.microsoft.com/deepzoom/2008\"><Size Width=\"16\" Height=\"16\"/></Image>")).unwrap();
+        let pixels = image::RgbaImage::from_pixel(16, 16, image::Rgba([40, 70, 90, 255]));
+        let bytes = if extension == "jpg" {
+            dezoomify_native::imaging::encode_jpeg(&pixels, 83, None).unwrap()
+        } else {
+            dezoomify_native::imaging::encode_png(
+                &pixels,
+                image::codecs::png::CompressionType::Fast,
+                None,
+                None,
+            )
+            .unwrap()
+        };
+        std::fs::write(tiles.join(format!("0_0.{extension}")), &bytes).unwrap();
+        let destination = work.join(format!("out-{extension}.iiif"));
+        let host = NativeHost::new(JobOptions {
+            input_url: source.to_str().unwrap().into(),
+            output: OutputTarget::File(destination.clone()),
+            largest: true,
+            compression: 99,
+            cache_dir: Some(work.join("cache")),
+            ..Default::default()
+        })
+        .unwrap();
+        host.transport
+            .block_on(dezoomify::dezoomify(
+                host.inputs(),
+                host.algorithm_options(),
+                &host,
+            ))
+            .unwrap();
+        let saved = host.publication().unwrap();
+        assert_eq!(saved.instrumentation.pixel_decodes, 0);
+        assert_eq!(saved.instrumentation.canvas_bytes, 0);
+        assert_eq!(
+            std::fs::read(destination.join(format!("0,0,16,16/16,/0/default.{extension}")))
+                .unwrap(),
+            bytes
+        );
+        assert_eq!(
+            std::fs::read(destination.join(format!("full/16,/0/default.{extension}"))).unwrap(),
+            bytes
+        );
+    }
+    std::fs::remove_dir_all(work).unwrap();
+}
+
+#[test]
 fn generic_probe_metadata_uses_final_tile_order_without_refetching() {
     use image::codecs::png::CompressionType;
     use image::ImageDecoder as _;

@@ -134,6 +134,9 @@ pub struct Sink {
 }
 
 impl Sink {
+    pub(crate) fn record_tile_output(&mut self, bytes: u64) {
+        self.stats.encoded_bytes = bytes;
+    }
     /// Create an empty sink. No allocation happens here; the canvas
     /// allocates on [`Sink::ensure_canvas`] after the memory pre-check.
     pub(crate) fn new(options: &SinkOptions) -> Self {

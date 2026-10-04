@@ -16,7 +16,9 @@ After geometry probes, output preflight receives compact coverage without genera
 
 `sink.rs` owns deterministic placement and memory accounting. Known geometry paints directly. Unknown geometry spools under the configured disk cap; overlapping tiles retain plan order under the retained-memory cap. The canvas uses four bytes per pixel and cannot exceed available system memory.
 
-Tile placement borrows cropped pixels rather than copying them into a temporary image. Output encoders borrow the assembled canvas without cloning its pixel buffer. Single-file encoders write through a 64 KiB buffer directly to staging; JPEG borrows RGB channels without a full RGB copy. Codec workspace and pyramid pixels may require additional memory. IIIF directory rendering still buffers its encoded tile set.
+Tile placement borrows cropped pixels rather than copying them into a temporary image. Output encoders borrow the assembled canvas without cloning its pixel buffer. Single-file encoders write through a 64 KiB buffer directly to staging; JPEG borrows RGB channels without a full RGB copy. Codec workspace and pyramid pixels may require additional memory.
+
+IIIF chooses an encoded-tile route before pixel decoding, including probes. Compatible JPEG/PNG grid tiles copy unchanged to their final staging paths. The manifest preserves the source grid and preferred encoding; compression applies only to new tiles. Mixed codecs, clipping, overlaps, and missing tiles require local conversion. Pyramid levels are produced from bounded regions of the previous level, with triangle sampling in global coordinates. Unresolved encoded inputs stay in RAM under the retain cap; decoded pixels never spill. `pixel_decodes` distinguishes pixel work from header inspection and byte reuse.
 
 Output publication checks cancellation and the destination before committing. Uncommitted temporary resources are invocation-owned and cleaned after failure. Published files remain intact. A publication that has committed returns success; otherwise cancellation publishes nothing and preserves any existing destination.
 
@@ -33,7 +35,7 @@ Native handles images beyond browser-tab size and local sources, within availabl
 - `.zif` multi-level pyramid (full resolution plus halvings, each deflate-compressed; the canvas is re-encoded per level, never passed through as tiles);
 - `.iiif` an `iiif-dir` tree at that path; extensionless paths (or existing directories) also save `iiif-dir`.
 
-Other extensions fail typed before any work. JPEG caps at 65535 px per side, WebP at 16383; larger canvases save as PNG, TIFF, ZIF, or `iiif-dir`. An `iiif-dir` holds IIIF Image API v2 `info.json` plus JPEG tiles at real request paths (`{x},{y},{w},{h}/{tw},/0/default.jpg`) with one `full/max/0/default.jpg` overview, servable from a static file server.
+Other extensions fail typed before any work. JPEG caps at 65535 px per side, WebP at 16383; larger canvases save as PNG, TIFF, ZIF, or `iiif-dir`. An `iiif-dir` holds a static IIIF Image API v2 level-0 `info.json`, JPEG or PNG tiles at real request paths (`{x},{y},{w},{h}/{tw},/0/default.{jpg,png}`), and an overview at the smallest advertised full-image size. It is servable from a static file server. Directory publication refuses existing destinations, including overwrite requests, and uses atomic no-replace rename on supported platforms; existing trees remain intact.
 
 ### Partial output
 
