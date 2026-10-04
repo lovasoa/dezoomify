@@ -404,6 +404,17 @@ body {
   margin: 0;
   color: var(--dz-text-secondary);
 }
+#dz-desktop-settings .dz-settings-explanation table {
+  width: 100%;
+  border-collapse: collapse;
+}
+#dz-desktop-settings .dz-settings-explanation :is(th, td) {
+  padding: 0.5rem 0.3rem;
+  text-align: left;
+}
+#dz-desktop-settings .dz-settings-explanation td {
+  color: var(--dz-text-secondary);
+}
 
 #dz-desktop-settings .dz-quick-option select,
 #dz-desktop-settings .dz-quick-button,

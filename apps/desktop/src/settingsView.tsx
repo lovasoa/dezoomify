@@ -23,15 +23,22 @@ const formats: Array<{ value: DesktopSettings["output_format"]; label: string }>
 
 const profiles: NetworkProfile[] = ["maximum", "balanced", "gentle"];
 
-const sizes = [1024, 2048, 3072, 3840, 7680, 15360, 30720];
-const sizeLabels = [1, 2, 3, 4, 8, 16, 32];
+const sizes = [
+  { label: "Full HD", width: 1920, height: 1080 },
+  { label: "QHD", width: 2560, height: 1440 },
+  { label: "4K", width: 3840, height: 2160 },
+  { label: "8K", width: 7680, height: 4320 },
+  { label: "16K", width: 15360, height: 8640 },
+  { label: "32K", width: 30720, height: 17280 },
+  { label: "64K", width: 61440, height: 34560 },
+];
 type SizePreset = string;
 
 function formatLimit(format: DesktopSettings["output_format"]): number {
   return format === "jpeg" ? 65_535 : format === "webp" ? 16_383 : 1_000_000;
 }
 
-function estimateSize(width: number, settings: DesktopSettings): string {
+function estimateSize(width: number, height: number, settings: DesktopSettings): string {
   const format = settings.output_format;
   const quality = (100 - settings.compression) / 100;
   const jpeg = 0.35 + 1.15 * quality ** 3;
@@ -42,15 +49,17 @@ function estimateSize(width: number, settings: DesktopSettings): string {
         ? 2.5
         : 3;
   const pyramid = format === "zif" || format === "iiif-dir" ? 4 / 3 : 1;
-  const pixels = width * width * 0.75;
+  const pixels = width * height;
   const mb = (pixels * bytesPerPixel * pyramid) / 1_000_000;
   return `<${Math.ceil(mb / 5) * 5} MB`;
 }
 
 function sizePresetFor(settings: DesktopSettings): SizePreset {
   if (settings.max_width === null && settings.max_height === null) return "full";
-  if (sizes.includes(settings.max_width ?? 0) && settings.max_height === null)
-    return String(settings.max_width);
+  const preset = sizes.find(
+    (size) => size.width === settings.max_width && size.height === settings.max_height,
+  );
+  if (preset) return String(preset.width);
   return "custom";
 }
 
@@ -206,9 +215,9 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
   };
 
   const chooseSize = (preset: SizePreset) => {
+    const size = sizes.find((size) => String(size.width) === preset);
     if (preset === "full") commit({ max_width: null, max_height: null });
-    else if (sizes.includes(Number(preset)))
-      commit({ max_width: Number(preset), max_height: null });
+    else if (size) commit({ max_width: size.width, max_height: size.height });
     else setAdvancedOpen(true);
   };
 
@@ -268,11 +277,11 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
                 label: t("desktop.quick.fullResolution"),
                 hint: t("desktop.quick.source"),
               },
-              ...sizes.map((width, index) => ({
+              ...sizes.map(({ label, width, height }) => ({
                 value: String(width),
-                label: t("desktop.quick.upTo", { size: sizeLabels[index] }),
-                hint: estimateSize(width, settings),
-                disabled: width > formatLimit(settings.output_format),
+                label,
+                hint: estimateSize(width, height, settings),
+                disabled: Math.max(width, height) > formatLimit(settings.output_format),
               })),
               {
                 value: "custom",
@@ -354,24 +363,44 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
                 </dl>
               ) : null}
               {help === "size" ? (
-                <dl>
-                  <div>
-                    <dt>{t("desktop.quick.fullResolution")}</dt>
-                    <dd>{t("desktop.quick.source")}</dd>
-                  </div>
-                  {sizes.map((width, index) => (
-                    <div key={width}>
-                      <dt>{t("desktop.quick.upTo", { size: sizeLabels[index] })}</dt>
-                      <dd>
-                        {width.toLocaleString()} px · {estimateSize(width, settings)}
-                      </dd>
-                    </div>
-                  ))}
-                  <div>
-                    <dt>{t("desktop.quick.custom")}</dt>
-                    <dd>{t("desktop.advanced.dimensionsDesc")}</dd>
-                  </div>
-                </dl>
+                <table>
+                  <thead>
+                    <tr>
+                      <th scope="col">{t("desktop.quick.size")}</th>
+                      <th scope="col">{t("desktop.quick.maxWidth")}</th>
+                      <th scope="col">{t("desktop.quick.maxHeight")}</th>
+                      <th scope="col">
+                        {t("desktop.quick.estimatedSize", {
+                          format:
+                            formats.find((format) => format.value === settings.output_format)
+                              ?.label ?? "",
+                        })}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th scope="row">{t("desktop.quick.fullResolution")}</th>
+                      <td>{t("desktop.quick.original")}</td>
+                      <td>{t("desktop.quick.original")}</td>
+                      <td>{t("desktop.quick.source")}</td>
+                    </tr>
+                    {sizes.map(({ label, width, height }) => (
+                      <tr key={width}>
+                        <th scope="row">{label}</th>
+                        <td>{width.toLocaleString()} px</td>
+                        <td>{height.toLocaleString()} px</td>
+                        <td>{estimateSize(width, height, settings)}</td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <th scope="row">{t("desktop.quick.custom")}</th>
+                      <td>{t("desktop.quick.userDefined")}</td>
+                      <td>{t("desktop.quick.userDefined")}</td>
+                      <td>{t("desktop.quick.source")}</td>
+                    </tr>
+                  </tbody>
+                </table>
               ) : null}
               {help === "network" ? (
                 <dl>

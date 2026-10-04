@@ -298,7 +298,12 @@ export const de = {
   "desktop.quick.formatInfo":
     "Wählen Sie ein Ausgabeformat. Auto speichert JPEG bis 65.535 Pixel pro Seite, sonst PNG.",
   "desktop.quick.sizeInfo":
-    "Breitenbegrenzung ohne Vergrößerung; die Quellstufe kann kleiner sein. Schätzung für ein RGB-Kunstwerk im Verhältnis 4:3: Pixel = Breite² × 0,75. PNG/TIFF/ZIF: 3 Byte/Pixel; verlustfreies WebP: 2,5. JPEG: 0,35 + 1,15q³ Byte/Pixel, q = Qualität/100. Auto schätzt JPEG. ZIF/IIIF rechnen ein Drittel für Pyramidenstufen hinzu. MB = Byte/1.000.000, auf die nächsten 5 MB aufgerundet. Die oberen Schätzwerte sind grobe Richtwerte, keine garantierten Grenzen; Dateien variieren mit Details, Seitenverhältnis, Metadaten und Kompression. Volle/eigene Größen benötigen Quelldimensionen.",
+    "Vorgaben begrenzen Breite und Höhe unter Beibehaltung des Seitenverhältnisses, ohne Vergrößerung; die Quellstufe kann kleiner sein. Schätzungen verwenden das gewählte Format und die maximale Pixelzahl: Breite × Höhe. PNG/TIFF/ZIF: 3 Byte/Pixel; verlustfreies WebP: 2,5. JPEG: 0,35 + 1,15q³ Byte/Pixel, q = Qualität/100. Auto schätzt JPEG, da diese Vorgaben dessen Grenzen einhalten. ZIF/IIIF rechnen ein Drittel für Pyramidenstufen hinzu. MB = Byte/1.000.000, auf die nächsten 5 MB aufgerundet. Grobe obere Schätzwerte für typische Kunstwerke, keine garantierten Grenzen; Dateien variieren mit Details, Seitenverhältnis, Metadaten und Kompression. Volle/eigene Größen benötigen Quelldimensionen.",
+  "desktop.quick.maxWidth": "Max. Breite",
+  "desktop.quick.maxHeight": "Max. Höhe",
+  "desktop.quick.original": "Original",
+  "desktop.quick.userDefined": "Benutzerdefiniert",
+  "desktop.quick.estimatedSize": "Geschätzte Größe ({format})",
   "desktop.quick.networkInfo":
     "Schnell nutzt bis zu 16 gleichzeitige Anfragen ohne Drosselung. Ausgewogen startet bis zu 5 Anfragen pro Sekunde, Schonend bis zu 2. Langsameres Tempo kann ausgelasteten Servern helfen.",
   "desktop.quick.source": "Quellabhängig",
