@@ -119,7 +119,11 @@ function main() {
   // 4. Assemble the legacy site at /, help below /beta/, and Function routes.
   copyLegacy();
   // Both website shells use the canonical logo, including the legacy / site.
-  for (const name of ["favicon.svg", "favicon.png"]) copyTree(name, name);
+  for (const name of ["favicon.svg", "favicon.png"]) {
+    copyTree(name, name);
+    // Help pages at /beta/help/ reference their parent directory's favicon.
+    copyTree(name, path.join(BETA, name));
+  }
   copyTree("help", path.join(BETA, "help"));
   fs.writeFileSync(path.join(DIST, "_routes.json"), `${JSON.stringify(ROUTES, null, 2)}\n`);
 
