@@ -20,6 +20,10 @@ desktop app, and CLI share one Rust algorithm that takes a `Host` argument to in
 
 ## Invariants
 
+- Keep the legacy app served at `/` pristine. Do not include changes to
+  `legacy/` or alter its deployed files in PRs; website assembly must preserve
+  those files byte for byte. Product changes belong to the beta app and other
+  products, not the legacy app.
 - Keep parsers and geometry pure. The shared algorithm calls only injected
   Host capabilities; Hosts own I/O, clocks, codecs, resources, and task ownership.
   Products never import each other. Shared UI never accesses host globals;

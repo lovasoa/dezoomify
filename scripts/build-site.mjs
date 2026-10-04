@@ -118,9 +118,8 @@ function main() {
 
   // 4. Assemble the legacy site at /, help below /beta/, and Function routes.
   copyLegacy();
-  // Both website shells use the canonical logo, including the legacy / site.
+  // The beta help pages use the beta app's canonical logo.
   for (const name of ["favicon.svg", "favicon.png"]) {
-    copyTree(name, name);
     // Help pages at /beta/help/ reference their parent directory's favicon.
     copyTree(name, path.join(BETA, name));
   }

@@ -36,10 +36,11 @@ Bare `test` is the fast aggregate and `test all` adds build-dependent WASM, webs
 
 ## Builds
 
-`favicon.svg` is the canonical blue-tile logo, shared by both website shells,
+`favicon.svg` is the canonical blue-tile logo for the beta website,
 help pages, and desktop icon generation. Native SVG UI markup mirrors that
 artwork; the extension uses its blue PNG sizes and grey inactive variants.
-The website builder copies the root favicon assets alongside the legacy shell.
+The website builder copies these favicon assets only under `/beta/`. The legacy
+app served at `/` retains its original files and artwork unchanged.
 
 `cargo xtask build <target>` output:
 
