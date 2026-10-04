@@ -352,9 +352,13 @@ body {
   text-align: left;
   cursor: pointer;
 }
-#dz-desktop-settings .dz-quick-menu-row > button:hover,
+#dz-desktop-settings .dz-quick-menu-row > button:enabled:hover,
 #dz-desktop-settings .dz-quick-menu-row > button[aria-pressed="true"] {
   background: var(--dz-btn-secondary-hover-bg);
+}
+#dz-desktop-settings .dz-quick-menu-row > button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 #dz-desktop-settings .dz-choice-hint {
   color: var(--dz-text-muted);

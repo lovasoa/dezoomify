@@ -291,7 +291,7 @@ export const it = {
   "desktop.quick.formatInfo":
     "Scegli un formato. Auto salva JPEG fino a 65.535 pixel per lato, altrimenti PNG.",
   "desktop.quick.sizeInfo":
-    "Limite di larghezza senza ingrandimento; il livello sorgente può essere più piccolo. Stime per un’opera RGB in rapporto 4:3: pixel = larghezza² × 0,75. PNG/TIFF/ZIF: 1,5–3 byte/pixel; WebP senza perdita: 1–2,5. JPEG: da 0,15 + 0,45q³ a 0,35 + 1,15q³ byte/pixel, q = qualità/100. Auto stima JPEG. ZIF/IIIF aggiungono un terzo per la piramide. MB = byte/1.000.000. Stime indicative senza metadati, variabili con dettaglio, proporzioni e compressione. Dimensioni intere/personalizzate richiedono le dimensioni sorgente.",
+    "Limite di larghezza senza ingrandimento; il livello sorgente può essere più piccolo. Stime per un’opera RGB in rapporto 4:3: pixel = larghezza² × 0,75. PNG/TIFF/ZIF: 3 byte/pixel; WebP senza perdita: 2,5. JPEG: 0,35 + 1,15q³ byte/pixel, q = qualità/100. Auto stima JPEG. ZIF/IIIF aggiungono un terzo per la piramide. MB = byte/1.000.000, arrotondati per eccesso a multipli di 5 MB. Le stime superiori sono indicative, non limiti garantiti; i file variano con dettaglio, proporzioni, metadati e compressione. Dimensioni intere/personalizzate richiedono le dimensioni sorgente.",
   "desktop.quick.networkInfo":
     "Veloce usa fino a 16 richieste simultanee senza attesa. Bilanciato avvia fino a 5 richieste al secondo; Delicato fino a 2. Un ritmo ridotto può aiutare i server occupati.",
   "desktop.quick.source": "Dipende dalla fonte",

@@ -23,23 +23,28 @@ const formats: Array<{ value: DesktopSettings["output_format"]; label: string }>
 
 const profiles: NetworkProfile[] = ["maximum", "balanced", "gentle"];
 
-const sizes = [1024, 2048, 3840, 7680, 15360, 30720];
+const sizes = [1024, 2048, 3072, 3840, 7680, 15360, 30720];
+const sizeLabels = [1, 2, 3, 4, 8, 16, 32];
 type SizePreset = string;
+
+function formatLimit(format: DesktopSettings["output_format"]): number {
+  return format === "jpeg" ? 65_535 : format === "webp" ? 16_383 : 1_000_000;
+}
 
 function estimateSize(width: number, settings: DesktopSettings): string {
   const format = settings.output_format;
   const quality = (100 - settings.compression) / 100;
-  const jpeg = [0.15 + 0.45 * quality ** 3, 0.35 + 1.15 * quality ** 3];
+  const jpeg = 0.35 + 1.15 * quality ** 3;
   const bytesPerPixel =
     format === "auto" || format === "jpeg" || format === "iiif-dir"
       ? jpeg
       : format === "webp"
-        ? [1, 2.5]
-        : [1.5, 3];
+        ? 2.5
+        : 3;
   const pyramid = format === "zif" || format === "iiif-dir" ? 4 / 3 : 1;
   const pixels = width * width * 0.75;
-  const mb = bytesPerPixel.map((bytes) => (pixels * bytes * pyramid) / 1_000_000);
-  return `≈${mb[0].toFixed(1)}–${mb[1].toFixed(1)} MB`;
+  const mb = (pixels * bytesPerPixel * pyramid) / 1_000_000;
+  return `<${Math.ceil(mb / 5) * 5} MB`;
 }
 
 function sizePresetFor(settings: DesktopSettings): SizePreset {
@@ -62,7 +67,7 @@ function QuickChoice({
 }: {
   label: string;
   value: string;
-  choices: Array<{ value: string; label: string; hint: string }>;
+  choices: Array<{ value: string; label: string; hint: string; disabled?: boolean }>;
   onChange(value: string): void;
 }) {
   const ref = useRef<HTMLDetailsElement>(null);
@@ -90,6 +95,7 @@ function QuickChoice({
           <div className="dz-quick-menu-row" key={choice.value}>
             <button
               type="button"
+              disabled={choice.disabled}
               aria-pressed={value === choice.value}
               onClick={() => {
                 onChange(choice.value);
@@ -183,10 +189,15 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
     }
   }, [advancedOpen, help]);
 
-  // Raw values are submitted as typed; Rust validates on save and its typed
-  // rejection reason arrives through `error`.
+  // Rust validates on save and its typed rejection reason arrives through `error`.
   const commit = (patch: Partial<DesktopSettings>) => {
-    onChange({ ...settings, ...patch });
+    const next = { ...settings, ...patch };
+    if (
+      ("output_format" in patch || "max_width" in patch || "max_height" in patch) &&
+      Math.max(next.max_width ?? 0, next.max_height ?? 0) > formatLimit(next.output_format)
+    )
+      return;
+    onChange(next);
   };
 
   const chooseDirectory = async (key: "output_dir" | "cache_dir") => {
@@ -236,6 +247,9 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
             }
             choices={formats.map((format) => ({
               ...format,
+              disabled:
+                Math.max(settings.max_width ?? 0, settings.max_height ?? 0) >
+                formatLimit(format.value),
               hint: t(
                 `desktop.quick.hint.${format.value === "iiif-dir" ? "iiifDir" : format.value}`,
               ),
@@ -256,8 +270,9 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
               },
               ...sizes.map((width, index) => ({
                 value: String(width),
-                label: t("desktop.quick.upTo", { size: 2 ** index }),
+                label: t("desktop.quick.upTo", { size: sizeLabels[index] }),
                 hint: estimateSize(width, settings),
+                disabled: width > formatLimit(settings.output_format),
               })),
               {
                 value: "custom",
@@ -346,7 +361,7 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
                   </div>
                   {sizes.map((width, index) => (
                     <div key={width}>
-                      <dt>{t("desktop.quick.upTo", { size: 2 ** index })}</dt>
+                      <dt>{t("desktop.quick.upTo", { size: sizeLabels[index] })}</dt>
                       <dd>
                         {width.toLocaleString()} px · {estimateSize(width, settings)}
                       </dd>
@@ -405,7 +420,7 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
                   <input
                     type="number"
                     min="1"
-                    max="1000000"
+                    max={formatLimit(settings.output_format)}
                     placeholder={t("desktop.advanced.width")}
                     aria-label={t("desktop.advanced.width")}
                     value={settings.max_width ?? ""}
@@ -421,7 +436,7 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
                   <input
                     type="number"
                     min="1"
-                    max="1000000"
+                    max={formatLimit(settings.output_format)}
                     placeholder={t("desktop.advanced.height")}
                     aria-label={t("desktop.advanced.height")}
                     value={settings.max_height ?? ""}

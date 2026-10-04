@@ -293,7 +293,7 @@ export const fr = {
   "desktop.quick.formatInfo":
     "Choisissez un format. Auto enregistre en JPEG si chaque dimension est au plus de 65 535 pixels, sinon en PNG.",
   "desktop.quick.sizeInfo":
-    "La largeur est plafonnée sans agrandissement ; le niveau source peut être plus petit. Estimations pour une œuvre RVB au ratio 4:3 : pixels = largeur² × 0,75. PNG/TIFF/ZIF : 1,5–3 octets/pixel ; WebP sans perte : 1–2,5. JPEG : 0,15 + 0,45q³ à 0,35 + 1,15q³ octets/pixel, q = qualité/100. Auto estime le JPEG. ZIF/IIIF ajoutent un tiers pour la pyramide. Mo = octets/1 000 000. Ces approximations excluent les métadonnées et varient selon le détail, le ratio et la compression. Les tailles entière/personnalisée nécessitent les dimensions source.",
+    "La largeur est plafonnée sans agrandissement ; le niveau source peut être plus petit. Estimations pour une œuvre RVB au ratio 4:3 : pixels = largeur² × 0,75. PNG/TIFF/ZIF : 3 octets/pixel ; WebP sans perte : 2,5. JPEG : 0,35 + 1,15q³ octets/pixel, q = qualité/100. Auto estime le JPEG. ZIF/IIIF ajoutent un tiers pour la pyramide. Mo = octets/1 000 000, arrondis au multiple de 5 Mo supérieur. Les estimations hautes sont indicatives, sans limite garantie ; les fichiers varient selon le détail, le ratio, les métadonnées et la compression. Les tailles entière/personnalisée nécessitent les dimensions source.",
   "desktop.quick.networkInfo":
     "Rapide utilise jusqu’à 16 requêtes simultanées sans délai. Équilibré lance jusqu’à 5 requêtes par seconde ; Doux jusqu’à 2. Un rythme réduit peut aider les serveurs chargés.",
   "desktop.quick.source": "Selon la source",

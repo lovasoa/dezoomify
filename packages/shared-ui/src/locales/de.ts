@@ -298,7 +298,7 @@ export const de = {
   "desktop.quick.formatInfo":
     "Wählen Sie ein Ausgabeformat. Auto speichert JPEG bis 65.535 Pixel pro Seite, sonst PNG.",
   "desktop.quick.sizeInfo":
-    "Breitenbegrenzung ohne Vergrößerung; die Quellstufe kann kleiner sein. Schätzung für ein RGB-Kunstwerk im Verhältnis 4:3: Pixel = Breite² × 0,75. PNG/TIFF/ZIF: 1,5–3 Byte/Pixel; verlustfreies WebP: 1–2,5. JPEG: 0,15 + 0,45q³ bis 0,35 + 1,15q³ Byte/Pixel, q = Qualität/100. Auto schätzt JPEG. ZIF/IIIF rechnen ein Drittel für Pyramidenstufen hinzu. MB = Byte/1.000.000. Grobe Richtwerte ohne Metadaten; abhängig von Details, Seitenverhältnis und Kompression. Volle/eigene Größen benötigen Quelldimensionen.",
+    "Breitenbegrenzung ohne Vergrößerung; die Quellstufe kann kleiner sein. Schätzung für ein RGB-Kunstwerk im Verhältnis 4:3: Pixel = Breite² × 0,75. PNG/TIFF/ZIF: 3 Byte/Pixel; verlustfreies WebP: 2,5. JPEG: 0,35 + 1,15q³ Byte/Pixel, q = Qualität/100. Auto schätzt JPEG. ZIF/IIIF rechnen ein Drittel für Pyramidenstufen hinzu. MB = Byte/1.000.000, auf die nächsten 5 MB aufgerundet. Die oberen Schätzwerte sind grobe Richtwerte, keine garantierten Grenzen; Dateien variieren mit Details, Seitenverhältnis, Metadaten und Kompression. Volle/eigene Größen benötigen Quelldimensionen.",
   "desktop.quick.networkInfo":
     "Schnell nutzt bis zu 16 gleichzeitige Anfragen ohne Drosselung. Ausgewogen startet bis zu 5 Anfragen pro Sekunde, Schonend bis zu 2. Langsameres Tempo kann ausgelasteten Servern helfen.",
   "desktop.quick.source": "Quellabhängig",

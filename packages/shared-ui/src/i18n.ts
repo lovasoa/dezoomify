@@ -376,7 +376,7 @@ const en = {
   "desktop.quick.formatInfo":
     "Choose an output format. Auto saves JPEG when both dimensions are at most 65,535 pixels, otherwise PNG.",
   "desktop.quick.sizeInfo":
-    "Sizes cap width without upscaling; the available source level may be smaller. Estimates assume a 4:3 RGB artwork at the cap: pixels = width² × 0.75. PNG/TIFF/ZIF use 1.5–3 bytes/pixel; lossless WebP uses 1–2.5. JPEG uses 0.15 + 0.45q³ to 0.35 + 1.15q³ bytes/pixel, where q = quality/100. Auto estimates JPEG. ZIF/IIIF add one third for pyramid levels. MB = bytes/1,000,000. These rough heuristics exclude metadata and vary with detail, aspect ratio and compression; full/custom sizes need source dimensions.",
+    "Sizes cap width without upscaling; the available source level may be smaller. Estimates assume a 4:3 RGB artwork at the cap: pixels = width² × 0.75. PNG/TIFF/ZIF use 3 bytes/pixel; lossless WebP uses 2.5. JPEG uses 0.35 + 1.15q³ bytes/pixel, where q = quality/100. Auto estimates JPEG. ZIF/IIIF add one third for pyramid levels. MB = bytes/1,000,000, rounded up to the next 5 MB. The displayed upper estimates are rough guides, not guaranteed limits; actual files vary with detail, aspect ratio, metadata and compression. Full/custom sizes need source dimensions.",
   "desktop.quick.networkInfo":
     "Fast uses up to 16 simultaneous requests without pacing. Balanced starts up to 5 requests per second; Gentle starts up to 2. Slower pacing can help busy servers.",
   "desktop.quick.source": "Source-dependent",
