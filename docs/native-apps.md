@@ -1,6 +1,6 @@
 # Native apps
 
-CLI and desktop construct NativeHost and await the shared Rust `dezoomify(inputs, options, host)` function. The Host owns HTTP, local files, cache, decoding, assembly, encoders, output publication, and resource cleanup. User behavior: [Desktop app guide](user/desktop-app.md) and [Command-line guide](user/command-line.md).
+CLI and desktop construct NativeHost and await the shared Rust `dezoomify(inputs, options, host)` function. The Host owns HTTP, local files, cache, decoding, assembly, encoders, output publication, and resource cleanup. User behavior: [Desktop app guide](../apps/desktop/desktop-app.md) and [Command-line guide](user/command-line.md).
 
 ## Native runtime
 
@@ -61,9 +61,9 @@ Inert: no update host or key exists and production rejects every candidate, so n
 
 `cargo xtask build desktop` compiles lean shell, frontend, Tauri window shell, icons, then bundles. `--unsigned-test` stops before the bundler. Targets follow the host: Linux `deb` (prebuilt Tauri CLI), Windows `msi`/`nsis`, macOS `dmg`. Missing tools fail naming prerequisites.
 
-Linux needs `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential` plus `dpkg-deb` (`dpkg-dev`); icons come from `scripts/gen-desktop-icons.py` before the bundler. macOS needs Xcode Command Line Tools plus `icons/icon.icns`. Windows needs WiX v3 (`msi`), NSIS (`nsis`), plus `icons/icon.ico`. Installers ship unsigned (Linux x86_64 `.deb`, Windows x86_64 `.msi`, Apple silicon `.dmg`); user note: [Desktop app guide](user/desktop-app.md#install).
+Linux needs `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential` plus `dpkg-deb` (`dpkg-dev`); icons come from `favicon.svg` via the pinned Tauri CLI (`scripts/gen-desktop-icons.mjs`) before the bundler, following [Tauri's icon guidance](https://v2.tauri.app/develop/icons/). macOS needs Xcode Command Line Tools plus `icons/icon.icns`. Windows needs WiX v3 (`msi`), NSIS (`nsis`), plus `icons/icon.ico`. Linux x86_64 `.deb` and Windows x86_64 `.msi` installers are unsigned; the app inside the Apple silicon `.dmg` is ad-hoc signed without Developer ID or notarization. User note: [Desktop app guide](../apps/desktop/desktop-app.md#install).
 
-Per-OS install smoke runs in the desktop CI `bundle-smoke` matrix (see [Testing](testing.md#desktop-window)): Linux `dpkg -i` plus timed stay-alive launch under Xvfb; macOS mounts the `dmg` and execs the binary from the image; Windows silent `msi` install (WiX and NSIS required). No `--version` flag exists, so every smoke proves install plus launch by holding the window 15–20 s. Gatekeeper/SIP untouched; the unsigned Windows binary carries no Mark-of-the-Web, so SmartScreen stays out and no OS policy is bypassed.
+Per-OS install smoke runs in the desktop CI `bundle-smoke` matrix (see [Testing](testing.md#desktop-window)): Linux `dpkg -i` plus timed stay-alive launch under Xvfb; macOS mounts the `dmg`, verifies the app signature with `codesign --verify --deep --strict`, and execs the binary from the image; Windows silent `msi` install (WiX and NSIS required). No `--version` flag exists, so every smoke proves install plus launch by holding the window 15–20 s. Gatekeeper/SIP untouched; the unsigned Windows binary carries no Mark-of-the-Web, so SmartScreen stays out and no OS policy is bypassed. The macOS local-build smoke does not cover Finder approval of a quarantined browser download; that flow requires manual validation on a clean Mac.
 
 ### Real-window E2E hook
 

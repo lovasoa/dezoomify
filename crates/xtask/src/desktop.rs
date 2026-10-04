@@ -858,14 +858,12 @@ fn bundle() -> Result<(), String> {
         );
     }
     // The icons must exist before the bundler runs.
-    let status = Command::new("python3")
-        .arg("scripts/gen-desktop-icons.py")
-        .current_dir(super::repo_root())
-        .status()
-        .map_err(|e| format!("failed to run python3: {e}"))?;
-    if !status.success() {
-        return Err("icon generation failed".to_string());
-    }
+    run_node_with_deadline(
+        Duration::from_secs(60),
+        &["scripts/gen-desktop-icons.mjs"],
+        &[],
+        "desktop icon generation",
+    )?;
     for name in ["icons/32x32.png", "icons/128x128.png"] {
         let path = super::repo_root().join("apps/desktop/src-tauri").join(name);
         if !path.is_file() {
@@ -891,9 +889,19 @@ fn bundle() -> Result<(), String> {
     }
     // The prebuilt CLI goes through `pnpm_command()` so Windows resolves the
     // `.cmd` shim via `cmd /c`.
-    let status = pnpm_command()?
-        .args(&pnpm_args)
-        .current_dir(super::repo_root())
+    #[cfg(target_os = "macos")]
+    run_node_with_deadline(
+        Duration::from_secs(60),
+        &["scripts/generate-dmg-background.mjs"],
+        &[],
+        "DMG installation background",
+    )?;
+    let mut bundler = pnpm_command()?;
+    bundler.args(&pnpm_args).current_dir(super::repo_root());
+    // Tauri otherwise skips Finder layout in CI, hiding the install instructions.
+    #[cfg(target_os = "macos")]
+    bundler.env("TAURI_BUNDLER_DMG_IGNORE_CI", "true");
+    let status = bundler
         .status()
         .map_err(|e| format!("failed to run the Tauri CLI via pnpm: {e}"))?;
     status

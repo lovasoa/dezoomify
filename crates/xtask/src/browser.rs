@@ -283,6 +283,7 @@ fn dist_fresh() -> bool {
         "scripts/build-site.mjs",
         "vite.config.ts",
         "scripts/build-help.mjs",
+        "apps/desktop/desktop-app.md",
         "index.html",
         "privacy.html",
         "terms.html",

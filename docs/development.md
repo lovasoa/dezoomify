@@ -36,6 +36,12 @@ Bare `test` is the fast aggregate and `test all` adds build-dependent WASM, webs
 
 ## Builds
 
+`favicon.svg` is the canonical blue-tile logo for the beta website,
+help pages, and desktop icon generation. Native SVG UI markup mirrors that
+artwork; the extension uses its blue PNG sizes and grey inactive variants.
+The website builder copies these favicon assets only under `/beta/`. The legacy
+app served at `/` retains its original files and artwork unchanged.
+
 `cargo xtask build <target>` output:
 
 | Target | Output |
@@ -82,7 +88,7 @@ One Playwright version rules repo-wide via the `pnpm.overrides` pin in root `pac
 
 ## Releases
 
-Release tasks consume an immutable plan; building signs and publishes nothing, verification uses public keys only. Operator steps: [Operations](operations.md#release-runbook). Versioning and gates: [Releases](releases.md).
+Release tasks consume an immutable plan; building applies the macOS app's ad-hoc signature but publishes nothing. Operator steps: [Operations](operations.md#release-runbook). Versioning and gates: [Releases](releases.md).
 
 ```sh
 export DEZOOMIFY_VERSION="$(cargo xtask release version)"
@@ -91,7 +97,7 @@ cargo xtask release build --plan target/release-dist/<version>/plan.json --targe
 cargo xtask release verify --plan target/release-dist/<version>/plan.json --artifacts target/release-dist/<version>
 ```
 
-Signing, notarization, deployment, store submission, and publication run as separate protected CI operations against the verified artifact digests.
+macOS ad-hoc signing runs during bundling without Apple credentials; Developer ID signing and notarization are not configured. Deployment, store submission, and publication run as separate CI operations against the verified artifacts.
 
 ## Common workflows
 

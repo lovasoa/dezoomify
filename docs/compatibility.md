@@ -10,7 +10,7 @@
 | Desktop app | Windows x86_64, Apple silicon macOS, and Linux x86_64 through the Tauri shell (WebView2 on Windows, WebKit on macOS, webkit2gtk on Linux) | Display-free `cargo xtask test desktop` plus explicit `test desktop --e2e-window`; each installer builds and launches on its matching host |
 | CLI | Native binary (Linux `cli-linux-x86_64` target; the same native runtime as the desktop app) | `cargo xtask test native` plus scenario parity |
 
-Desktop installers ship unsigned and no in-app updates exist (see [Releases](releases.md#desktop-updater)). User install note: [Desktop app guide](user/desktop-app.md#install).
+Linux and Windows desktop installers ship unsigned; macOS apps are ad-hoc signed without Developer ID or notarization. No in-app updates exist (see [Releases](releases.md#desktop-updater)). User install note: [Desktop app guide](../apps/desktop/desktop-app.md#install).
 
 ## Canvas and save limits
 

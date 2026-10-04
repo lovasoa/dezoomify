@@ -37,6 +37,7 @@
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
+      "icons/icon.png",
       "icons/icon.icns",
       "icons/icon.ico"
     ],
@@ -54,7 +55,13 @@
       }
     },
     "macOS": {
-      "dmg": {}
+      "signingIdentity": "-",
+      "dmg": {
+        "background": "../../../target/desktop-dmg/background.png",
+        "windowSize": { "width": 760, "height": 660 },
+        "appPosition": { "x": 190, "y": 145 },
+        "applicationFolderPosition": { "x": 570, "y": 145 }
+      }
     }
   },
   "identifier": "dev.ophir.dezoomify",
