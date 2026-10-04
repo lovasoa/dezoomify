@@ -208,6 +208,9 @@ function installTestAccess() {
       return { byteLength: result.bytes.byteLength };
     },
   };
+  void api.runtime
+    .sendMessage({ type: "dezoomify-test-source-ready", sourceTabId })
+    .catch(() => {});
 }
 
 api.runtime.onMessage.addListener((message: unknown) => {

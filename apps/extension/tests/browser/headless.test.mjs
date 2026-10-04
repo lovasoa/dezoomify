@@ -31,17 +31,12 @@ import {
   pixelAt,
   QUADRANTS,
 } from "../../../../test/support/png.mjs";
+import { GECKODRIVER } from "./geckodriver.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "../../../..");
 const EXTENSION_ROOT = path.join(REPO_ROOT, "apps/extension");
 const GECKO_ID = "{14074c89-8a5f-4813-98df-a7117f062871}";
-const GECKODRIVER = path.join(
-  HERE,
-  "node_modules",
-  ".bin",
-  process.platform === "win32" ? "geckodriver.cmd" : "geckodriver",
-);
 const STATIC_DIR = path.join(HERE, "fixtures-static");
 const TILE_DIR = path.join(
   REPO_ROOT,
@@ -50,15 +45,19 @@ const TILE_DIR = path.join(
 let fixtureServer;
 let fixtureWork;
 const packages = new Map();
+let matrixChromium;
+let matrixFirefox;
 
 before(async () => {
   fixtureWork = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-fixture-"));
   fixtureServer = await startFixtureServer(fixtureWork);
 });
 
-after(() => {
+after(async () => {
+  const cleanup = await Promise.allSettled([matrixChromium?.close(), matrixFirefox?.quit()]);
   fixtureServer?.proc.kill();
   if (fixtureWork) rmSync(fixtureWork, { recursive: true, force: true });
+  for (const result of cleanup) if (result.status === "rejected") throw result.reason;
 });
 
 function stagePackage(
@@ -68,9 +67,9 @@ function stagePackage(
   { grantHostPermissions = true, sourceHostOnly = false, scenario, restartBackground = false } = {},
 ) {
   const zip = path.join(dir, `dezoomify-${browser}.zip`);
-  // Chromium shares one package and selects the fixture through the driver URL.
-  // Firefox requires its driver to open the configured URL from inside the package.
-  if (browser === "chromium" && scenario?.startsWith("fixtures/")) scenario = "idle";
+  // Scenarios use the driver URL, so only actual build options split packages.
+  // Start idle so observers attach before even a cold session launches its job.
+  scenario = "idle";
   const key = JSON.stringify([
     browser,
     origin,
@@ -165,7 +164,7 @@ async function readCompletedPng(outputDir, deadline) {
     if (outputs.length === 1) {
       try {
         const bytes = readFileSync(outputs[0]);
-        // Firefox creates the destination before the download stream has
+        // Browsers can create the destination before the download stream has
         // finished. Decode the bytes before returning so the E2E observes a
         // completed save, not merely a visible pathname.
         decodePngPixels(bytes);
@@ -174,9 +173,9 @@ async function readCompletedPng(outputDir, deadline) {
         lastError = String(error?.message ?? error);
       }
     } else if (outputs.length > 1) lastError = `expected one PNG, found ${outputs.length}`;
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await new Promise((resolve) => setTimeout(resolve, 25));
   }
-  throw new Error(`Firefox saved an incomplete PNG: ${lastError}`);
+  throw new Error(`Browser saved an incomplete PNG: ${lastError}`);
 }
 
 function newFixtureEvents(logFile, offset) {
@@ -229,17 +228,31 @@ async function waitForVisible(page, selector, label) {
 }
 
 async function runChromiumJob(base, work, options = {}) {
-  const zip = stagePackage("chromium", work, base, options);
-  const pkgDir = path.join(work, "pkg");
-  spawnSync("python3", ["-m", "zipfile", "-e", zip, pkgDir], { encoding: "utf8" });
-  const context = await chromium.launchPersistentContext(path.join(work, "profile"), {
-    channel: "chromium",
-    headless: true,
-    args: [`--disable-extensions-except=${pkgDir}`, `--load-extension=${pkgDir}`],
-  });
-  // Track downloads at context level so the test sees the extension API's
-  // Blob download regardless of which page initiated it.
+  const shared = options.scenario?.startsWith("fixtures/");
+  let context = shared ? matrixChromium : null;
+  if (!context) {
+    const sessionWork = shared ? path.join(fixtureWork, "chromium") : work;
+    mkdirSync(sessionWork, { recursive: true });
+    const zip = stagePackage("chromium", sessionWork, base, options);
+    const pkgDir = path.join(sessionWork, "pkg");
+    spawnSync("python3", ["-m", "zipfile", "-e", zip, pkgDir], { encoding: "utf8" });
+    context = await chromium.launchPersistentContext(path.join(sessionWork, "profile"), {
+      channel: "chromium",
+      headless: true,
+      args: [`--disable-extensions-except=${pkgDir}`, `--load-extension=${pkgDir}`],
+    });
+    if (shared) matrixChromium = context;
+  }
+  // Browser-level events also see downloads from job tabs before Playwright
+  // has attached its page observer. Tiny fixtures can finish that quickly.
+  let downloadSession;
+  const downloadsDir = path.join(work, "downloads");
+  mkdirSync(downloadsDir, { recursive: true });
   const downloads = [];
+  let resolveDownload;
+  const downloadReady = new Promise((resolve) => {
+    resolveDownload = resolve;
+  });
   const diagnostics = [];
   const observe = (page) => {
     page.on("console", (message) => {
@@ -250,15 +263,21 @@ async function runChromiumJob(base, work, options = {}) {
     );
     page.on("crash", () => diagnostics.push("page crash"));
   };
-  for (const page of context.pages()) {
-    page.on("download", (download) => downloads.push(download));
-    observe(page);
-  }
-  context.on("page", (page) => {
-    page.on("download", (download) => downloads.push(download));
-    observe(page);
-  });
+  const onDownload = (download) => {
+    downloads.push(download);
+    resolveDownload(download);
+  };
+  for (const page of context.pages()) observe(page);
+  const onPage = observe;
+  context.on("page", onPage);
   try {
+    downloadSession = await context.browser().newBrowserCDPSession();
+    downloadSession.on("Browser.downloadWillBegin", onDownload);
+    await downloadSession.send("Browser.setDownloadBehavior", {
+      behavior: "allow",
+      downloadPath: downloadsDir,
+      eventsEnabled: true,
+    });
     const serviceWorker =
       context.serviceWorkers()[0] ??
       (await context.waitForEvent("serviceworker", { timeout: 15000 }));
@@ -268,7 +287,7 @@ async function runChromiumJob(base, work, options = {}) {
     // so its test driver starts only one job; create a page only as fallback.
     const extensionId = new URL(serviceWorker.url()).hostname;
     const driverUrl = `chrome-extension://${extensionId}/test/driver.html`;
-    let driverPage = context.pages().find((page) => page.url() === driverUrl);
+    let driverPage = context.pages().find((page) => page.url().startsWith(driverUrl));
     const driverDeadline = Date.now() + 5000;
     while (!driverPage && Date.now() < driverDeadline) {
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -278,8 +297,7 @@ async function runChromiumJob(base, work, options = {}) {
       driverPage = await context.newPage();
       await driverPage.goto(driverUrl);
     }
-    if (options.scenario?.startsWith("fixtures/"))
-      await driverPage.goto(`${driverUrl}?scenario=${encodeURIComponent(options.scenario)}`);
+    await driverPage.goto(`${driverUrl}?scenario=${encodeURIComponent(options.scenario ?? "")}`);
     await driverPage.waitForFunction(
       () => typeof globalThis.__DEZOOMIFY_TEST_RUN__?.then === "function",
       { timeout: 15000 },
@@ -297,18 +315,16 @@ async function runChromiumJob(base, work, options = {}) {
     );
     const jobPage = await waitForJobPage(context);
     if (options.beforeCompletion) await options.beforeCompletion(jobPage);
-    const deadline = Date.now() + 90000;
-    while (downloads.length === 0 && Date.now() < deadline) {
-      if (
-        await jobPage
-          .locator(".dz-error-section")
-          .isVisible()
-          .catch(() => false)
-      )
-        break;
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-    const download = downloads[0];
+    const download = await Promise.race([
+      downloadReady,
+      jobPage
+        .locator(".dz-error-section")
+        .waitFor({ state: "visible", timeout: 90000 })
+        .then(
+          () => null,
+          () => null,
+        ),
+    ]);
     if (!download) {
       const jobText = await jobPage
         .locator("body")
@@ -325,17 +341,16 @@ async function runChromiumJob(base, work, options = {}) {
     await waitForVisible(jobPage, "#dz-btn-reveal", "show containing folder action");
     assert.equal(await jobPage.locator("#dz-btn-save").count(), 0, "no second save action");
     assert.match(
-      download.suggestedFilename(),
+      download.suggestedFilename,
       /\.png$/i,
       "the generated PNG filename keeps its extension",
     );
     assert.equal(
       downloads.length,
       1,
-      `the job starts exactly one image download: ${JSON.stringify(downloads.map((item) => ({ url: item.url(), filename: item.suggestedFilename() })))}\n${diagnostics.join("\n")}`,
+      `the job starts exactly one image download: ${JSON.stringify(downloads)}\n${diagnostics.join("\n")}`,
     );
     if (options.afterSave) await options.afterSave(jobPage);
-    const output = path.join(work, "saved-chromium.png");
     if (options.restartBackground) {
       await waitForVisible(jobPage, ".dz-completed-section", "completed job before worker restart");
       const cdp = await context.browser().newBrowserCDPSession();
@@ -371,10 +386,22 @@ async function runChromiumJob(base, work, options = {}) {
       ),
     );
     assert.deepEqual(navigationResult, { ok: true }, "source navigation invalidates direct access");
-    await download.saveAs(output);
-    return readFileSync(output);
+    return await readCompletedPng(downloadsDir, Date.now() + 10000);
   } finally {
-    await context.close();
+    await downloadSession?.detach();
+    context.off("page", onPage);
+    if (shared) {
+      await context.clearCookies();
+      // Retire source/job tabs. The next fixture navigates the retained driver
+      // to a fresh document, resetting its messages and completion promises.
+      for (const page of context.pages()) {
+        if (page.url().includes("/test/driver.html")) {
+          page.removeAllListeners("console");
+          page.removeAllListeners("pageerror");
+          page.removeAllListeners("crash");
+        } else await page.close();
+      }
+    } else await context.close();
   }
 }
 
@@ -390,11 +417,13 @@ async function runFirefoxJob(base, work, runOptions = {}) {
   const logOffset = existsSync(fixtureServer.logFile)
     ? readFileSync(fixtureServer.logFile, "utf8").length
     : 0;
-  const zip = stagePackage("firefox", work, base, runOptions);
+  const shared = runOptions.scenario?.startsWith("fixtures/");
+  const sessionWork = shared ? path.join(fixtureWork, "firefox") : work;
   const binary = findFirefoxBinary();
   assert.ok(binary, "no Firefox binary found; set DEZOOMIFY_FIREFOX_BIN");
-  const downloadsDir = path.join(work, "downloads");
-  mkdirSync(downloadsDir);
+  const downloadsDir = path.join(sessionWork, "downloads");
+  mkdirSync(downloadsDir, { recursive: true });
+  for (const file of readdirSync(downloadsDir)) rmSync(path.join(downloadsDir, file));
   const browserOptions = new firefox.Options();
   browserOptions.addArguments("-headless");
   browserOptions.setPageLoadStrategy("eager");
@@ -403,31 +432,56 @@ async function runFirefoxJob(base, work, runOptions = {}) {
   browserOptions.setPreference("browser.download.folderList", 2);
   browserOptions.setPreference("browser.download.useDownloadDir", true);
   browserOptions.setPreference("browser.helperApps.neverAsk.saveToDisk", "image/png");
-  assert.ok(existsSync(GECKODRIVER), "the pinned geckodriver package is not installed");
+  assert.ok(
+    existsSync(GECKODRIVER),
+    "the pinned geckodriver binary is missing; run cargo xtask setup",
+  );
   // Firefox treats extension documents as privileged WebDriver contexts.
   const service = new firefox.ServiceBuilder(GECKODRIVER).addArguments("--allow-system-access");
-  const driver = await new webdriver.Builder()
-    .forBrowser("firefox")
-    .setFirefoxOptions(browserOptions)
-    .setFirefoxService(service)
-    .build();
+  const reused = shared && matrixFirefox;
+  const driver =
+    reused ||
+    (await new webdriver.Builder()
+      .forBrowser("firefox")
+      .setFirefoxOptions(browserOptions)
+      .setFirefoxService(service)
+      .build());
+  if (shared) matrixFirefox = driver;
   try {
     await driver.manage().setTimeouts({ pageLoad: 15000, script: 15000, implicit: 0 });
-    const addonId = await driver.installAddon(zip, true);
-    assert.equal(addonId, GECKO_ID, `unexpected add-on id ${addonId}`);
-    await driver.wait(async () => {
-      for (const handle of await driver.getAllWindowHandles()) {
-        await driver.switchTo().window(handle);
-        const url = await driver.getCurrentUrl();
-        if (!url.includes("/test/driver.html")) continue;
-        const [body] = await driver.findElements(webdriver.By.css("body"));
-        if (!body) continue;
-        const state = await body.getDomAttribute("data-driver");
-        if (state === "failed") throw new Error(await body.getText());
-        if (state === "ready") return true;
-      }
-      return false;
-    }, 30000);
+    if (!reused) {
+      const zip = stagePackage("firefox", sessionWork, base, runOptions);
+      const addonId = await driver.installAddon(zip, true);
+      assert.equal(addonId, GECKO_ID, `unexpected add-on id ${addonId}`);
+    }
+    let fixtureStarted = false;
+    await driver.wait(
+      async () => {
+        for (const handle of await driver.getAllWindowHandles()) {
+          await driver.switchTo().window(handle);
+          const url = await driver.getCurrentUrl();
+          if (!url.includes("/test/driver.html")) continue;
+          if (!fixtureStarted) {
+            // Navigate the privileged page through WebDriver without injecting
+            // script. The shared idle package starts exactly one fixture job.
+            const driverUrl = new URL(url);
+            driverUrl.search = `scenario=${encodeURIComponent(runOptions.scenario ?? "")}`;
+            await driver.get(driverUrl.href);
+            fixtureStarted = true;
+            return false;
+          }
+          const [body] = await driver.findElements(webdriver.By.css("body"));
+          if (!body) continue;
+          const state = await body.getDomAttribute("data-driver");
+          if (state === "failed") throw new Error(await body.getText());
+          if (state === "ready") return true;
+        }
+        return false;
+      },
+      30000,
+      undefined,
+      50,
+    );
     const deadline = Date.now() + 90000;
     const output = await readCompletedPng(downloadsDir, deadline).catch(async (error) => {
       const pages = [];
@@ -466,36 +520,88 @@ async function runFirefoxJob(base, work, runOptions = {}) {
         "the authenticated direct job-page fetch",
       );
     }
-    await waitForFixtureEvent(
-      fixtureServer.logFile,
-      logOffset,
-      (event) => event.path === "/target.html" && event.query === "after-navigation=1",
-      "the source-tab navigation invalidation",
+    if (!shared) {
+      await waitForFixtureEvent(
+        fixtureServer.logFile,
+        logOffset,
+        (event) => event.path === "/target.html" && event.query === "after-navigation=1",
+        "the source-tab navigation invalidation",
+      );
+    }
+    // Wait for the driver to verify invalidation, not just the navigation's
+    // HTTP request, before retiring this fixture's source and job tabs.
+    let driverTab;
+    for (const handle of await driver.getAllWindowHandles()) {
+      await driver.switchTo().window(handle);
+      if ((await driver.getCurrentUrl()).includes("/test/driver.html")) {
+        driverTab = handle;
+        break;
+      }
+    }
+    assert.ok(driverTab, "Firefox test driver remains available");
+    await driver.wait(
+      async () => {
+        const body = await driver.findElement(By.css("body"));
+        const state = await body.getDomAttribute("data-after-job");
+        if (state === "failed") throw new Error(await body.getText());
+        return state === "ready";
+      },
+      15000,
+      undefined,
+      50,
     );
+    if (shared) {
+      for (const handle of await driver.getAllWindowHandles()) {
+        if (handle === driverTab) continue;
+        await driver.switchTo().window(handle);
+        await driver.close();
+      }
+      await driver.switchTo().window(driverTab);
+      // The next fixture reloads this driver with its own scenario query.
+    }
     return output;
   } finally {
-    await driver.quit();
+    if (!shared) await driver.quit();
   }
 }
 
-for (const [browser, run] of [
-  ["chromium", runChromiumJob],
-  ["firefox", runFirefoxJob],
-]) {
-  for (const fixture of formats) {
-    test(`${browser}: ${fixture.name} saves the shared pixels`, { timeout: 180000 }, async () => {
-      const work = mkdtempSync(path.join(tmpdir(), "dezoomify-format-"));
-      try {
-        assertSavedPyramid(
-          await run(fixtureServer.base, work, { scenario: `fixtures/${fixture.name}` }),
-          fixture.tolerance,
-        );
-      } finally {
-        rmSync(work, { recursive: true, force: true });
-      }
-    });
+test("packaged browser format matrices", { concurrency: 2 }, async (matrix) => {
+  // WXT is synchronous. Finish both builds before launching browsers so it
+  // cannot block delivery of page/download events from a running fixture.
+  for (const browser of ["chromium", "firefox"]) {
+    const sessionWork = path.join(fixtureWork, browser);
+    mkdirSync(sessionWork, { recursive: true });
+    stagePackage(browser, sessionWork, fixtureServer.base, { scenario: "fixtures/idle" });
   }
-}
+  await Promise.all(
+    [
+      ["chromium", runChromiumJob],
+      ["firefox", runFirefoxJob],
+    ].map(([browser, run]) =>
+      matrix.test(browser, async (suite) => {
+        // Each browser owns one session; its fixtures stay sequential. Only the
+        // independent browsers overlap. Special cases below run after both finish.
+        for (const fixture of formats) {
+          await suite.test(
+            `${fixture.name} saves the shared pixels`,
+            { timeout: 180000 },
+            async () => {
+              const work = mkdtempSync(path.join(tmpdir(), "dezoomify-format-"));
+              try {
+                assertSavedPyramid(
+                  await run(fixtureServer.base, work, { scenario: `fixtures/${fixture.name}` }),
+                  fixture.tolerance,
+                );
+              } finally {
+                rmSync(work, { recursive: true, force: true });
+              }
+            },
+          );
+        }
+      }),
+    ),
+  );
+});
 
 test("chromium: packaged extension runs the job-tab flow", { timeout: 180000 }, async () => {
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-chromium-"));

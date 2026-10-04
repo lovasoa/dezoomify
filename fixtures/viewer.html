@@ -3,5 +3,9 @@
 <title>Image viewer fixture</title>
 <script>
   fetch("{{input}}")
-    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); document.documentElement.dataset.viewerReady = "true"; });
+    .then(async r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      await r.arrayBuffer();
+      document.documentElement.dataset.viewerReady = "true";
+    });
 </script>

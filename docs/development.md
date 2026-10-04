@@ -28,7 +28,7 @@ cargo xtask build web
 cargo xtask dev web
 ```
 
-`setup` checks Rust, Node, WASM, and wasm-bindgen tools, bootstraps pinned pnpm when needed, installs frozen workspace dependencies, and reports browser status. It installs no browser binaries or Rust toolchains. `check` runs format, lint, type checking, boundaries, generated-file checks, and manifest validation without rewriting sources.
+`setup` checks Rust, Node, WASM, and wasm-bindgen tools, bootstraps pinned pnpm when needed, installs frozen workspace dependencies and the pinned Firefox driver, and reports browser status. It installs no browser binaries or Rust toolchains. `check` runs format, lint, type checking, boundaries, generated-file checks, and manifest validation without rewriting sources.
 
 Bare `test` is the fast aggregate and `test all` adds build-dependent WASM, website, and extension integration; the desktop real-window test stays explicit and only `test live` touches public sites. Coverage details: [Testing](testing.md).
 

@@ -3,6 +3,25 @@
 // Firefox). A successful saved PNG is the only completion signal.
 globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
   const api = globalThis.browser ?? globalThis.chrome;
+  function waitForTab(tabId, url) {
+    return new Promise((resolve, reject) => {
+      const finish = (error) => {
+        clearTimeout(timer);
+        api.tabs.onUpdated.removeListener(updated);
+        if (error) reject(error);
+        else resolve();
+      };
+      const check = (tab) => {
+        if (tab.status === "complete" && tab.url === url) finish();
+      };
+      const updated = (id, _change, tab) => {
+        if (id === tabId) check(tab);
+      };
+      const timer = setTimeout(() => finish(new Error("source tab did not finish loading")), 10000);
+      api.tabs.onUpdated.addListener(updated);
+      void api.tabs.get(tabId).then(check, finish);
+    });
+  }
   const origin = globalThis.__DEZOOMIFY_TEST_ORIGIN__;
   const scenario =
     new URLSearchParams(location.search).get("scenario") ?? globalThis.__DEZOOMIFY_TEST_SCENARIO__;
@@ -15,8 +34,14 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
   const jobCompleted = new Promise((resolve) => {
     signalCompleted = resolve;
   });
+  let signalSourceReady;
+  const sourceReady = new Promise((resolve) => {
+    signalSourceReady = resolve;
+  });
   api.runtime.onMessage.addListener((message) => {
     if (message?.type === "dezoomify-test-job-complete") signalCompleted();
+    if (message?.type === "dezoomify-test-source-ready" && message.sourceTabId === target.id)
+      signalSourceReady();
   });
 
   const targetUrl = scenario.startsWith("fixtures/")
@@ -29,24 +54,31 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
   const target = await api.tabs.create({ url: targetUrl, active: true });
   if (typeof target?.id !== "number") throw new Error("extension E2E source tab did not open");
 
-  let loaded = target.status === "complete" && target.url === targetUrl;
-  for (let attempt = 0; attempt < 100 && !loaded; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    const current = await api.tabs.get(target.id);
-    loaded = current?.status === "complete" && current.url === targetUrl;
-  }
-  if (!loaded) throw new Error("extension E2E source fixture did not load");
+  await waitForTab(target.id, targetUrl);
   // A completed page load does not imply its viewer's metadata fetch has
   // settled. Wait for the fixture's explicit signal before the finite scan.
-  let viewerReady = false;
-  for (let attempt = 0; attempt < 100 && !viewerReady; attempt += 1) {
-    const results = await api.scripting.executeScript({
-      target: { tabId: target.id, frameIds: [0] },
-      func: () => document.documentElement.dataset.viewerReady === "true",
-    });
-    viewerReady = results.some((result) => result.result === true);
-    if (!viewerReady) await new Promise((resolve) => setTimeout(resolve, 100));
-  }
+  const results = await api.scripting.executeScript({
+    target: { tabId: target.id, frameIds: [0] },
+    func: () => {
+      if (document.documentElement.dataset.viewerReady === "true") return true;
+      return new Promise((resolve) => {
+        const finish = (ready) => {
+          observer.disconnect();
+          clearTimeout(timer);
+          resolve(ready);
+        };
+        const observer = new MutationObserver(() => {
+          if (document.documentElement.dataset.viewerReady === "true") finish(true);
+        });
+        const timer = setTimeout(() => finish(false), 10000);
+        observer.observe(document.documentElement, {
+          attributes: true,
+          attributeFilter: ["data-viewer-ready"],
+        });
+      });
+    },
+  });
+  const viewerReady = results.some((result) => result.result === true);
   if (!viewerReady) throw new Error("extension E2E viewer did not finish its metadata fetch");
 
   const started = await api.runtime.sendMessage({
@@ -58,24 +90,29 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
 
   // Ask the job page itself to exercise its direct source access. The source
   // tab grants the cookie session; no background proxy participates here.
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  // Dedicated flow cases cover this host behavior. The format matrix checks
+  // its real algorithm save without repeating a second scan and fetch.
+  if (!scenario.startsWith("fixtures/")) {
+    let readyTimer;
     try {
-      const result = await api.runtime.sendMessage({
-        type: "dezoomify-test-source-access",
-        scenario,
-      });
-      if (result?.ok) {
-        globalThis.__DEZOOMIFY_TEST_SOURCE_ACCESS_RESULT__ = result;
-        break;
-      }
-      if (result?.ok === false) throw new Error(result.error || "direct source access failed");
-    } catch (error) {
-      if (attempt === 99) throw error;
+      await Promise.race([
+        sourceReady,
+        new Promise((_, reject) => {
+          readyTimer = setTimeout(
+            () => reject(new Error("job page source access was not ready")),
+            10000,
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(readyTimer);
     }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  if (!globalThis.__DEZOOMIFY_TEST_SOURCE_ACCESS_RESULT__) {
-    throw new Error("job page did not answer the direct source-access proof");
+    const result = await api.runtime.sendMessage({
+      type: "dezoomify-test-source-access",
+      scenario,
+    });
+    if (!result?.ok) throw new Error(result?.error || "direct source access failed");
+    globalThis.__DEZOOMIFY_TEST_SOURCE_ACCESS_RESULT__ = result;
   }
   globalThis.__DEZOOMIFY_TEST_AFTER_JOB__ = (async () => {
     await Promise.race([
@@ -84,6 +121,7 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
         setTimeout(() => reject(new Error("job did not complete")), 90000),
       ),
     ]);
+    if (scenario.startsWith("fixtures/")) return true;
     if (restartBackground) {
       await new Promise((resolve) => {
         globalThis.__DEZOOMIFY_TEST_RELEASE__ = resolve;
@@ -94,13 +132,7 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
     // page stays open.
     const navigatedUrl = `${origin}/target.html?after-navigation=1`;
     await api.tabs.update(target.id, { url: navigatedUrl });
-    let sourceLoaded = false;
-    for (let attempt = 0; attempt < 100 && !sourceLoaded; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      const current = await api.tabs.get(target.id);
-      sourceLoaded = current?.status === "complete" && current.url === navigatedUrl;
-    }
-    if (!sourceLoaded) throw new Error("source tab did not finish the navigation proof");
+    await waitForTab(target.id, navigatedUrl);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       try {
         const result = await api.runtime.sendMessage({ type: "dezoomify-test-source-navigation" });
@@ -116,6 +148,15 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
     }
     throw new Error("job page did not reject access after source navigation");
   })();
+  void globalThis.__DEZOOMIFY_TEST_AFTER_JOB__.then(
+    () => {
+      document.body.dataset.afterJob = "ready";
+    },
+    (error) => {
+      document.body.dataset.afterJob = "failed";
+      document.body.append(`Navigation proof failed: ${String(error?.stack ?? error)}`);
+    },
+  );
   return globalThis.__DEZOOMIFY_TEST_SOURCE_ACCESS_RESULT__;
 })();
 

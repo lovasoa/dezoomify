@@ -30,6 +30,9 @@ jobs:
           - extension
           - bindings+security
     steps:
+      - name: Locate Firefox driver cache
+        if: matrix.lane-group == 'extension'
+        run: echo "GECKODRIVER_CACHE_DIR=${{ runner.temp }}/geckodriver" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -48,6 +51,12 @@ jobs:
         with:
           toolchain: 1.98.1 # must match rust-toolchain.toml
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # This lane needs the release WASM and xtask on every UI-only change.
+          # Keep its workspace artifacts instead of pruning/recompiling them;
+          # isolate its cache from matrix legs that only build native/debug code.
+          key: ${{ matrix.lane-group == 'extension' && format('extension-{0}', hashFiles('crates/**', 'generated/*.json')) || '' }}
+          cache-workspace-crates: ${{ matrix.lane-group == 'extension' }}
       - id: bindgen
         # Version-coupled to Cargo.lock (see the action): every workflow that
         # consumes wasm-bindgen resolves the same CLI release, and the
@@ -86,6 +95,15 @@ jobs:
             # browser. Aligned versions make this a no-op.
             pnpm --filter dezoomify-extension-headless exec playwright install chromium
           fi
+      - name: Cache pinned Firefox driver
+        if: matrix.lane-group == 'extension'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.GECKODRIVER_CACHE_DIR }}
+          key: geckodriver-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/extension/tests/browser/geckodriver.mjs') }}
+      - name: Install pinned Firefox driver
+        if: matrix.lane-group == 'extension'
+        run: pnpm --filter dezoomify-extension-headless install:driver
       - name: CI lane (rust)
         if: matrix.lane-group == 'rust'
         run: cargo xtask ci rust
