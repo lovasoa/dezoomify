@@ -53,7 +53,7 @@ pub struct Instrumentation {
     pub bytes_fetched: u64,
     /// Peak concurrent in-flight tasks.
     pub peak_inflight: usize,
-    /// Peak RAM reservations for decoded tiles, strips and codec workspace.
+    /// Peak raster RAM reservations, or retained encoded tiles and metadata.
     pub peak_retained_bytes: u64,
     /// Peak in-flight decode bytes: encoded bodies held by blocking decode
     /// tails (including tails detached by cancelling their parent task).

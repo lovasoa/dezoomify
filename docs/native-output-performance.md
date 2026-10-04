@@ -1,7 +1,7 @@
 # Native output performance
 
-Owned full-width strips reduce raster wall time and memory. Final review fixes
-were measured against master `9fafe8f6`, using release code at `7095e228`.
+The measurements below compare owned full-width strips at release revision
+`7095e228` against master `9fafe8f6`.
 The CLI and desktop share this backend; desktop startup and IPC are excluded.
 
 Measurements use Linux, an AMD Ryzen AI 7 350, NVMe-backed Btrfs, and a Node
