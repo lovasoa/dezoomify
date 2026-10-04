@@ -19,7 +19,7 @@ const output = (extra = {}) => ({
   ...extra,
 });
 
-test("native output preparation keeps tile counts and does not pause compression", () => {
+test("native output preparation uses pixel progress and does not pause compression", () => {
   const view = presentProgress(
     progress({
       phase: "output",
@@ -28,10 +28,11 @@ test("native output preparation keeps tile counts and does not pause compression
     }),
     { paused: true },
   );
-  assert.deepEqual(view.progress, { current: 4, total: 4 });
+  assert.deepEqual(view.progress, { current: 24, total: 32, unit: "pixels" });
   assert.equal(view.detailKey, "view.job.preparation");
   assert.deepEqual(view.detailVars, { percent: 75 });
   assert.equal(view.paused, false);
+  assert.equal(presentProgress(progress({ phase: "output" })).progress, null);
 });
 
 test("idle, discovery, pause, and cancellation describe the current work", () => {

@@ -1,4 +1,19 @@
-import { t } from "./i18n.ts";
+import { getLocale, t } from "./i18n.ts";
+
+export function formatPixelCount(pixels: number): string {
+  const [scale, key] =
+    pixels >= 1e9
+      ? ([1e9, "view.job.gigapixels"] as const)
+      : pixels >= 1e6
+        ? ([1e6, "view.job.megapixels"] as const)
+        : ([1, "view.job.pixels"] as const);
+  const value = Math.round((pixels / scale) * 10) / 10;
+  const locale = getLocale();
+  return t(key, {
+    count: new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value),
+    plural: locale === "de" || locale === "it" || value === 1 ? "" : "s",
+  });
+}
 
 export function truncateMiddle(value: string, max = 90): string {
   const text = String(value ?? "");

@@ -170,6 +170,10 @@ export const it = {
   "view.cancel.message": "Il salvataggio dell’immagine è stato interrotto.",
   // Job section and share chrome.
   "view.job.countsFull": "{current} frammenti su {total}",
+  "view.job.pixelCounts": "{current} su {total}",
+  "view.job.pixels": "{count} pixel{plural}",
+  "view.job.megapixels": "{count} megapixel{plural}",
+  "view.job.gigapixels": "{count} gigapixel{plural}",
   "view.job.preparation": "{percent}% dei pixel preparati. Completamento del salvataggio.",
   "view.job.countsActive": "{current} frammenti su {total} · {active} in corso",
   // Recent pictures, including unsuccessful attempts.

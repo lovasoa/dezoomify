@@ -241,6 +241,10 @@ const en = {
   "view.cancel.message": "The image save was stopped.",
   // Job section and share chrome.
   "view.job.countsFull": "{current} of {total} tiles",
+  "view.job.pixelCounts": "{current} of {total}",
+  "view.job.pixels": "{count} pixel{plural}",
+  "view.job.megapixels": "{count} megapixel{plural}",
+  "view.job.gigapixels": "{count} gigapixel{plural}",
   "view.job.preparation": "{percent}% of pixels prepared. Finishing the saved image.",
   "view.job.countsActive": "{current} of {total} tiles · {active} in progress",
   // Recent pictures, including unsuccessful attempts.
