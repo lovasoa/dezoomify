@@ -36,6 +36,11 @@ Bare `test` is the fast aggregate and `test all` adds build-dependent WASM, webs
 
 ## Builds
 
+`favicon.svg` is the canonical blue-tile logo, shared by both website shells,
+help pages, and desktop icon generation. Native SVG UI markup mirrors that
+artwork; the extension uses its blue PNG sizes and grey inactive variants.
+The website builder copies the root favicon assets alongside the legacy shell.
+
 `cargo xtask build <target>` output:
 
 | Target | Output |

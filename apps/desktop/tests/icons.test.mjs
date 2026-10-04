@@ -41,7 +41,7 @@ test("committed desktop icons match the logo and pinned Tauri generator", () => 
   }
 });
 
-test("desktop PNGs contain the transparent blue and coral logo at each required size", async () => {
+test("desktop PNGs contain the transparent blue-tile logo at each required size", async () => {
   for (const [name, size] of [
     ["32x32.png", 32],
     ["128x128.png", 128],
@@ -59,8 +59,8 @@ test("desktop PNGs contain the transparent blue and coral logo at each required 
     for (let i = 0; i < data.length; i += 4) {
       if (data[i + 3] === 255) colors.add(data.subarray(i, i + 3).toString("hex"));
     }
-    assert.ok(colors.has("3c7bff"), `${name} lacks the blue magnifier`);
-    assert.ok(colors.has("ff8080"), `${name} lacks the coral tiles`);
+    assert.ok(colors.has("4197a6"), `${name} lacks the blue tiles`);
+    assert.ok(!colors.has("ff8080"), `${name} still contains pink tiles`);
   }
 });
 

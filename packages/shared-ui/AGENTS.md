@@ -5,7 +5,7 @@
 Retain Dezoomify's authentic parchment aesthetic, wide proportions, and distinctive tactile controls tailored to an audience of art historians, archivists, museum researchers, and cultural heritage enthusiasts:
 
 1. **Logo & Heritage:**
-   - Always use the authentic Dezoomify logo: sapphire blue magnifying glass (`#3c7bff`) framing coral-salmon tile quadrants (`#ff8080`). Render it as native SVG markup, never injected HTML.
+   - Use the blue-tile Dezoomify logo from the canonical `../../favicon.svg`: blue tile quadrants (`#4197a6`), a blue gradient magnifying glass, and its translucent lens. Render it as native SVG markup, never injected HTML.
    - Pair with clean navigation buttons (`Browser Extension`, `Desktop App`), right-anchored `Help`, and bold `Donate`. Do not link to obsolete legacy external sites or duplicate links in the bottom footer.
 
 2. **Colors & Atmosphere (No Sci-Fi / LLM Smell):**
