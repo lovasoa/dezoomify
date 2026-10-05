@@ -57,7 +57,9 @@ publishes width-only plus explicit-dimension aliases: 58.7 MB of logical file
 bytes versus 62.0 MB. Hard links share payload storage where available.
 ZIF writes conforming tiled BigTIFF with JPEG payloads, rather than the old
 TIFF-frame pyramid: 27.2 MB versus 20.6 MB. Container comparisons therefore
-include changed packaging; lower pyramid levels still require local codecs.
+include changed packaging. That measured ZIF revision generated lower levels
+locally; current ZIF can reuse compatible source pyramid levels, so these
+timings do not measure its current pyramid passthrough route.
 
 Current publication syncs staging output; master did not provide the same
 durability guarantee. Filesystem caches are warm and application caches fresh.
