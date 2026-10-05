@@ -769,15 +769,21 @@ impl<'a> NativeHost<'a> {
         .await
     }
 
-    async fn start_raster(&self, dimensions: Size, title: Option<&str>) -> Result<(), Error> {
+    async fn start_raster(
+        &self,
+        dimensions: Size,
+        title: Option<&str>,
+        format: OutputFormat,
+    ) -> Result<(), Error> {
         let destination = match &self.options.output {
             OutputTarget::File(path) => path.clone(),
-            OutputTarget::AutoDir { dir, format } => auto_output_path(dir, title, *format),
+            OutputTarget::AutoDir { dir, format } => auto_output_path(dir, title, *format, false),
+            OutputTarget::AutoImageDir { dir } => auto_output_path(dir, title, format, false),
         };
         let task = EncoderTask::start(
             &destination,
             dimensions,
-            self.format,
+            format,
             self.options.compression,
             Arc::clone(&self.pixels),
             self.controls.clone(),
@@ -797,9 +803,15 @@ impl<'a> NativeHost<'a> {
         Ok(())
     }
 
-    fn next_auto_destination(&self, title: Option<&str>, partial: bool) -> PathBuf {
-        let OutputTarget::AutoDir { dir, format } = &self.options.output else {
-            unreachable!("automatic destination")
+    fn next_auto_destination(
+        &self,
+        title: Option<&str>,
+        partial: bool,
+        format: OutputFormat,
+    ) -> PathBuf {
+        let dir = match &self.options.output {
+            OutputTarget::AutoDir { dir, .. } | OutputTarget::AutoImageDir { dir } => dir,
+            OutputTarget::File(_) => unreachable!("automatic destination"),
         };
         let stem = safe_output_stem(title);
         for suffix in 1..=9_999 {
@@ -895,8 +907,10 @@ impl Host for NativeHost<'_> {
                 .store(writer.retained_bytes(), Ordering::SeqCst);
             *self.tiled.borrow_mut() = Some(Arc::new(std::sync::Mutex::new(writer)));
         } else if let Some(dimensions) = &plan.canvas {
-            self.start_raster(dimensions.clone(), plan.title.as_deref())
-                .await?;
+            if !matches!(self.options.output, OutputTarget::AutoImageDir { .. }) {
+                self.start_raster(dimensions.clone(), plan.title.as_deref(), self.format)
+                    .await?;
+            }
         }
         *self.output_plan.borrow_mut() = Some(plan);
         Ok(())
@@ -1077,6 +1091,7 @@ impl Host for NativeHost<'_> {
         } else {
             None
         };
+        let mut format = self.format;
         let mut prepared = if let Some(prepared) = tiled_result {
             prepared
         } else {
@@ -1111,7 +1126,37 @@ impl Host for NativeHost<'_> {
                     }
                     dimensions
                 });
-                self.start_raster(dimensions, request.title.as_deref())
+                if matches!(self.options.output, OutputTarget::AutoImageDir { .. }) {
+                    // Auto waits for alpha and coverage; explicit formats can
+                    // encode while acquisition is still running.
+                    let pending = self.pending_pixels.borrow();
+                    let covered = pending.len() == 1
+                        && pending[0].placement.position == (Point { x: 0, y: 0 })
+                        && pending[0].pixels.decoded.image.width() >= dimensions.width
+                        && pending[0].pixels.decoded.image.height() >= dimensions.height;
+                    let grid_covered = self
+                        .output_plan
+                        .borrow()
+                        .as_ref()
+                        .is_some_and(|plan| plan.grid.is_some())
+                        && pending.iter().all(|tile| {
+                            tile.placement.expected_size.as_ref().is_some_and(|extent| {
+                                tile.pixels.decoded.image.width() >= extent.width
+                                    && tile.pixels.decoded.image.height() >= extent.height
+                            })
+                        });
+                    let transparent = partial
+                        || !(covered || grid_covered)
+                        || pending.iter().any(|tile| {
+                            tile.pixels
+                                .decoded
+                                .image
+                                .pixels()
+                                .any(|pixel| pixel[3] != 255)
+                        });
+                    format = automatic_image_format(size(&dimensions), transparent);
+                }
+                self.start_raster(dimensions, request.title.as_deref(), format)
                     .await?;
             }
             let pipe = Arc::clone(&self.raster.borrow().as_ref().expect("raster task").pipe);
@@ -1145,6 +1190,7 @@ impl Host for NativeHost<'_> {
             }
         };
         let image_size = size(&prepared.size);
+        let destination = destination_for(format);
         self.instrumentation.borrow_mut().pixel_decodes += prepared.pixel_decodes;
         let late_repaints = prepared.late_writes;
         let mut published = if partial {
@@ -1154,11 +1200,8 @@ impl Host for NativeHost<'_> {
         };
         let mut collisions = 0;
         let encoded_bytes = loop {
-            let validation = crate::output::validate_destination(
-                &published,
-                &self.format,
-                self.options.overwrite,
-            );
+            let validation =
+                crate::output::validate_destination(&published, &format, self.options.overwrite);
             let result = if validation.is_ok() {
                 let path = published.clone();
                 let controls = self.controls.clone();
@@ -1177,11 +1220,14 @@ impl Host for NativeHost<'_> {
             match result {
                 Ok(bytes) => break bytes,
                 Err(Error::OutputExists)
-                    if matches!(self.options.output, OutputTarget::AutoDir { .. })
-                        && collisions < 9_999 =>
+                    if matches!(
+                        self.options.output,
+                        OutputTarget::AutoDir { .. } | OutputTarget::AutoImageDir { .. }
+                    ) && collisions < 9_999 =>
                 {
                     collisions += 1;
-                    published = self.next_auto_destination(request.title.as_deref(), partial);
+                    published =
+                        self.next_auto_destination(request.title.as_deref(), partial, format);
                 }
                 Err(error) => return Err(error),
             }

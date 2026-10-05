@@ -159,7 +159,14 @@ fn slow_first_tile_does_not_hold_back_other_completions() {
         assert_eq!(host.attempts.borrow().len(), 4);
         release.send(()).unwrap();
         assert!(futures::executor::block_on(job).unwrap().is_complete());
-        assert_eq!(host.acquired.borrow().len(), 4);
+        assert_eq!(
+            host.acquired.borrow().len(),
+            if output == OutputFormat::Zif { 5 } else { 4 }
+        );
+        assert_eq!(
+            host.output_plans.borrow()[0].tile_count,
+            if output == OutputFormat::Zif { 5 } else { 4 }
+        );
         assert_eq!(host.settled.get(), 1);
     }
 }
