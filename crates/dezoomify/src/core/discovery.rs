@@ -695,12 +695,17 @@ pub fn diagnostic_bullets(diagnostics: &[CandidateDiagnostic]) -> Vec<String> {
                 }
         });
         match group {
-            Some((_, names)) => names.push(diagnostic.format.as_str()),
+            Some((_, names)) => {
+                let name = diagnostic.format.as_str();
+                if !names.contains(&name) {
+                    names.push(name);
+                }
+            }
             None => grouped.push((diagnostic, vec![diagnostic.format.as_str()])),
         }
     }
     let mut lines = Vec::new();
-    for (diagnostic, names) in grouped {
+    for (diagnostic, names) in grouped.iter().take(8) {
         let text = if let Some(cause) = &diagnostic.cause {
             describe_fetch(cause)
         } else {
@@ -709,7 +714,23 @@ pub fn diagnostic_bullets(diagnostics: &[CandidateDiagnostic]) -> Vec<String> {
                 .clone()
                 .unwrap_or_else(|| "rejected".into())
         };
-        lines.push(format!(" - {}: {}", names.join(", "), text));
+        const MAX_NAMES: usize = 5;
+        let mut shown = names
+            .iter()
+            .take(MAX_NAMES)
+            .map(|s| (*s).to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        if names.len() > MAX_NAMES {
+            shown.push_str(&format!(" and {} more", names.len() - MAX_NAMES));
+        }
+        lines.push(format!(" - {shown}: {text}"));
+    }
+    if grouped.len() > 8 {
+        lines.push(format!(
+            " - {} more rejection(s) omitted",
+            grouped.len() - 8
+        ));
     }
     if url_misses > 0 {
         lines.push(format!(
@@ -780,6 +801,12 @@ impl DiscoveryError {
                         diagnostics: Vec::new(),
                     }
                     .to_string()
+                } else if block.len() > 512 {
+                    let mut cut = 512;
+                    while cut > 0 && !block.is_char_boundary(cut) {
+                        cut -= 1;
+                    }
+                    format!("{}...", &block[..cut])
                 } else {
                     block
                 }
@@ -1307,6 +1334,26 @@ mod tests {
                 detail: None,
             },
         })
+    }
+
+    #[test]
+    fn repeated_formats_list_once_and_stay_bounded() {
+        let diagnostics = (0..30)
+            .flat_map(|_| {
+                ["zoomify", "krpano", "topviewer", "vls"].map(|format| CandidateDiagnostic {
+                    format: format.into(),
+                    kind: RejectionKind::InvalidMetadata,
+                    cause: None,
+                    detail: Some("unreadable metadata".into()),
+                })
+            })
+            .collect::<Vec<_>>();
+        let bullets = diagnostic_bullets(&diagnostics);
+        assert_eq!(bullets.len(), 1);
+        assert!(bullets[0].starts_with(" - zoomify, krpano, topviewer, vls: "));
+        assert!(!bullets[0].contains("zoomify, krpano, topviewer, vls, zoomify"));
+        let detail = DiscoveryError::NoCandidateAccepted { diagnostics }.detail();
+        assert!(detail.len() <= 515);
     }
 
     #[test]
