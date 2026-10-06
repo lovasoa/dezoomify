@@ -7,7 +7,7 @@ test("unknown throws never render as [object Object]", () => {
     unknownDetail({ kind: "http-error", status: 404 }),
     '{"kind":"http-error","status":404}',
   );
-  assert.equal(unknownDetail(new Error("boom")), "boom");
+  assert.equal(unknownDetail(new Error("boom")), "Error: boom");
   assert.equal(unknownDetail("plain"), "plain");
   assert.ok(!unknownDetail({ a: 1 }).includes("[object Object]"));
 });
