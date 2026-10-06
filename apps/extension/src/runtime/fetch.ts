@@ -16,6 +16,7 @@ import {
   readErrorPreview,
   readResponseBytes,
   retryAfterMs,
+  unknownDetail,
 } from "@dezoomify/browser-runtime";
 import type { DiagnosticRecorder } from "@dezoomify/shared-ui";
 import type { Error as JobError, ResourceRequest } from "@dezoomify/wasm-bindings";
@@ -190,11 +191,7 @@ export function createExtensionFetcher(deps: FetchDeps) {
       else if (signal.aborted || (controller.signal.aborted && !timedOut))
         observed = transportError("cancelled", "request cancelled");
       else if (timedOut) observed = transportError("timeout", "fetch timeout");
-      else
-        observed = transportError(
-          "network-failure",
-          error instanceof Error ? error.message : "network request failed",
-        );
+      else observed = transportError("network-failure", unknownDetail(error));
       deps.diagnostics?.count(signal.aborted ? "requests_cancelled" : "request_failures");
       if (!signal.aborted)
         deps.diagnostics?.record("warn", "request-failed", {
