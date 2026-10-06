@@ -467,7 +467,7 @@ impl<'a> NativeHost<'a> {
 
     async fn inspect_encoded(
         &self,
-        bytes: Vec<u8>,
+        mut bytes: Vec<u8>,
     ) -> Result<(Vec<u8>, Size, image::ImageFormat), Error> {
         let permit = self.decode_tails.reserve(bytes.len());
         self.check_encoded_inflight()?;
@@ -478,6 +478,7 @@ impl<'a> NativeHost<'a> {
         self.controlled(async {
             tokio::task::spawn_blocking(move || {
                 let _permit = permit;
+                crate::tile_output::normalize_orientation(&mut bytes);
                 let (size, format) = crate::tile_output::inspect(&bytes, budget)?;
                 Ok((bytes, size, format))
             })
@@ -542,9 +543,10 @@ impl<'a> NativeHost<'a> {
             .controlled(async {
                 tokio::task::spawn_blocking(move || {
                     let _permit = permit;
-                    let bytes = processing
+                    let mut bytes = processing
                         .apply(response.body)
                         .map_err(|e| Error::ProcessingFailed(e.to_string().into()))?;
+                    crate::tile_output::normalize_orientation(&mut bytes);
                     let (size, format) = crate::tile_output::inspect(&bytes, budget)?;
                     let _ = crate::cache::store(&dir, &namespace, &uri, &bytes);
                     Ok((bytes, size, format))

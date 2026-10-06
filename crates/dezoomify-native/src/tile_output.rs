@@ -138,23 +138,33 @@ mod tests {
     }
 }
 
-impl EncodedTile {
-    pub(crate) fn icc_profile(&self, budget: u64) -> Result<Option<Vec<u8>>, Error> {
-        if self.format == image::ImageFormat::Png {
-            return png_icc(&self.bytes, budget);
-        }
-        use image::ImageDecoder as _;
-        let mut reader = image::ImageReader::with_format(Cursor::new(&self.bytes), self.format);
-        let mut limits = image::Limits::default();
-        limits.max_alloc = Some(budget / 2);
-        reader.limits(limits);
-        reader
-            .into_decoder()
-            .map_err(decode_error)?
-            .icc_profile()
-            .map_err(decode_error)
-    }
+type Metadata = (Option<Vec<u8>>, Option<Vec<u8>>);
 
+pub(crate) fn tile_metadata(
+    bytes: &[u8],
+    format: image::ImageFormat,
+    budget: u64,
+) -> Result<Metadata, Error> {
+    use image::ImageDecoder as _;
+    let mut reader = image::ImageReader::with_format(Cursor::new(bytes), format);
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(budget / 3);
+    reader.limits(limits);
+    let mut decoder = reader.into_decoder().map_err(decode_error)?;
+    let mut icc = decoder.icc_profile().map_err(decode_error)?;
+    let exif = decoder.exif_metadata().map_err(decode_error)?;
+    drop(decoder);
+    if icc.is_none() && format == image::ImageFormat::Png {
+        icc = png_icc(bytes, budget / 3)?;
+    }
+    memory_check(
+        (icc.as_ref().map_or(0, Vec::len) as u64 + exif.as_ref().map_or(0, Vec::len) as u64) * 3,
+        budget,
+    )?;
+    Ok((icc, exif))
+}
+
+impl EncodedTile {
     /// Conversion required by the output geometry/codec happens during acquisition.
     pub(crate) fn convert_to_png(
         &mut self,
@@ -164,9 +174,15 @@ impl EncodedTile {
     ) -> Result<(), Error> {
         let pixels = u64::from(self.size.width) * u64::from(self.size.height);
         memory_check(self.bytes.len() as u64 + pixels * 16, budget)?;
-        let icc =
-            self.icc_profile(budget.saturating_sub(self.bytes.len() as u64 + pixels * 16) / 3)?;
-        let budget = budget.saturating_sub(icc.as_ref().map_or(0, Vec::len) as u64 * 3);
+        let (icc, exif) = tile_metadata(
+            &self.bytes,
+            self.format,
+            budget.saturating_sub(self.bytes.len() as u64 + pixels * 16),
+        )?;
+        let budget = budget.saturating_sub(
+            (icc.as_ref().map_or(0, Vec::len) as u64 + exif.as_ref().map_or(0, Vec::len) as u64)
+                * 4,
+        );
         let mut reader = image::ImageReader::with_format(Cursor::new(&self.bytes), self.format);
         let mut limits = image::Limits::default();
         limits.max_alloc = Some(budget.saturating_sub(self.bytes.len() as u64) / 2);
@@ -177,7 +193,7 @@ impl EncodedTile {
             &cropped,
             crate::imaging::png_compression_for(compression),
             icc.as_deref(),
-            None,
+            exif.as_deref(),
         )?;
         self.format = image::ImageFormat::Png;
         self.size = size;
@@ -223,6 +239,44 @@ pub(crate) fn png_icc(bytes: &[u8], cap: u64) -> Result<Option<Vec<u8>>, Error> 
         at += len + 12;
     }
     Ok(None)
+}
+
+/// Tile positions refer to the stored raster. Remove JPEG display transforms
+/// in place, preserving compressed pixels and all other EXIF fields.
+pub(crate) fn normalize_orientation(bytes: &mut [u8]) {
+    if !bytes.starts_with(b"\xff\xd8") {
+        return;
+    }
+    let mut at = 2;
+    while bytes.get(at) == Some(&0xff) {
+        while bytes.get(at) == Some(&0xff) {
+            at += 1;
+        }
+        let Some(&marker) = bytes.get(at) else { break };
+        at += 1;
+        if matches!(marker, 0xda | 0xd9) {
+            break;
+        }
+        if marker == 1 || (0xd0..=0xd7).contains(&marker) {
+            continue;
+        }
+        let Some(length) = bytes.get(at..at + 2) else {
+            break;
+        };
+        let len = usize::from(u16::from_be_bytes(
+            length.try_into().expect("segment length"),
+        ));
+        if len < 2 {
+            break;
+        }
+        let Some(data) = bytes.get_mut(at + 2..at + len) else {
+            break;
+        };
+        if marker == 0xe1 && data.starts_with(b"Exif\0\0") {
+            let _ = image::metadata::Orientation::remove_from_exif_chunk(&mut data[6..]);
+        }
+        at += len;
+    }
 }
 
 /// Header inspection does not decode pixel data.
@@ -604,12 +658,12 @@ pub(crate) struct IiifWriter {
     infer_canvas: bool,
     max_tiles: u32,
     icc_profile: Option<Vec<u8>>,
-    metadata_checked: bool,
+    index_bytes: u64,
 }
 
 impl IiifWriter {
     pub(crate) fn retained_bytes(&self) -> u64 {
-        self.retained
+        self.retained + self.index_bytes
     }
 
     pub(crate) fn hold_queued_bytes(&mut self, bytes: u64) -> Result<(), Error> {
@@ -654,6 +708,9 @@ impl IiifWriter {
                 height: 512,
             }
         };
+        let index_bytes = u64::from(plan.tile_count)
+            * (std::mem::size_of::<StoredTile>() + destination.as_os_str().len() + 128) as u64;
+        memory_check(index_bytes, budget)?;
         Ok(Self {
             staging: StagedDirectory::new(destination)?,
             base: TileLevel {
@@ -665,15 +722,15 @@ impl IiifWriter {
                 tiles: BTreeMap::new(),
                 regular,
             },
-            budget,
+            budget: budget - index_bytes,
             compression,
             decoded_tiles: 0,
             retained: 0,
-            peak_retained: 0,
+            peak_retained: index_bytes,
             infer_canvas: plan.canvas.is_none(),
             max_tiles,
             icc_profile: None,
-            metadata_checked: false,
+            index_bytes,
         })
     }
 
@@ -697,16 +754,6 @@ impl IiifWriter {
             return Ok(());
         }
         memory_check(self.retained + tile.bytes.len() as u64, self.budget)?;
-        let icc = if self.metadata_checked {
-            None
-        } else {
-            tile.icc_profile(
-                self.budget
-                    .saturating_sub(self.retained + tile.bytes.len() as u64)
-                    / 3,
-            )?
-        };
-        let icc_bytes = icc.as_ref().map_or(0, Vec::len) as u64;
         let index = if self.base.regular {
             (rect.y / self.base.cell.height) * self.base.size.width.div_ceil(self.base.cell.width)
                 + rect.x / self.base.cell.width
@@ -727,7 +774,7 @@ impl IiifWriter {
                     width: rect.w,
                     height: rect.h,
                 },
-                self.budget.saturating_sub(self.retained + icc_bytes * 3),
+                self.budget.saturating_sub(self.retained),
                 self.compression,
             )?;
             compatible = self.base.regular && rect == self.base.rect(index);
@@ -743,7 +790,7 @@ impl IiifWriter {
             )?)
         } else {
             self.retained += tile.bytes.len() as u64;
-            self.peak_retained = self.peak_retained.max(self.retained);
+            self.peak_retained = self.peak_retained.max(self.retained_bytes());
             memory_check(self.retained, self.budget)?;
             TileBytes::Memory(tile.bytes)
         };
@@ -760,12 +807,6 @@ impl IiifWriter {
                 bytes,
             },
         );
-        if !self.metadata_checked {
-            self.icc_profile = icc;
-            self.metadata_checked = true;
-            self.retained += icc_bytes;
-            self.peak_retained = self.peak_retained.max(self.retained);
-        }
         Ok(())
     }
 
@@ -900,10 +941,46 @@ impl IiifWriter {
                 "IIIF output tile count exceeds max_tiles".into(),
             ));
         }
-        memory_check(
-            u64::from(normalized.count()?) * std::mem::size_of::<StoredTile>() as u64,
-            self.budget,
-        )?;
+        let indexes = u64::from(normalized.count()?)
+            * 2
+            * (std::mem::size_of::<StoredTile>() + self.staging.path.as_os_str().len() + 128)
+                as u64;
+        let growth = indexes.saturating_sub(self.index_bytes);
+        memory_check(self.retained + growth, self.budget)?;
+        self.budget -= growth;
+        self.index_bytes += growth;
+        // Acquisition has settled and reused probes now have their final order.
+        // Read just one profile at a time; no completion-order metadata cache.
+        for tile in self.base.tiles.values() {
+            if cancelled.load(Ordering::SeqCst) {
+                return Err(Error::Cancelled);
+            }
+            let body;
+            let bytes = if let TileBytes::Memory(bytes) = &tile.bytes {
+                bytes.as_slice()
+            } else if let TileBytes::File(path) = &tile.bytes {
+                let len = std::fs::metadata(path)
+                    .map_err(|e| crate::output::write_failed("tile stat failed", &e))?
+                    .len();
+                memory_check(self.retained + len, self.budget)?;
+                body = std::fs::read(path)
+                    .map_err(|e| crate::output::write_failed("tile read failed", &e))?;
+                &body
+            } else {
+                return Err(Error::Internal("unexpected IIIF tile storage".into()));
+            };
+            let extra = if matches!(tile.bytes, TileBytes::Memory(_)) {
+                0
+            } else {
+                bytes.len() as u64
+            };
+            let budget = self.budget.saturating_sub(self.retained + extra);
+            if let (Some(icc), _) = tile_metadata(bytes, tile.format, budget)? {
+                self.retained += icc.len() as u64;
+                self.icc_profile = Some(icc);
+                break;
+            }
+        }
         for index in 0..normalized.count()? {
             let rect = normalized.rect(index);
             let existing = self.base.tiles.get(&index).filter(|tile| {
@@ -975,8 +1052,16 @@ impl IiifWriter {
         self.retained = self.icc_profile.as_ref().map_or(0, Vec::len) as u64;
         let full_size = self.base.size.clone();
         let mut factors = vec![1u32];
-        let mut level = &self.base;
-        let mut generated: Vec<TileLevel> = Vec::new();
+        let cell = self.base.cell.clone();
+        let mut level = std::mem::replace(
+            &mut self.base,
+            TileLevel {
+                size: full_size.clone(),
+                cell,
+                tiles: BTreeMap::new(),
+                regular: true,
+            },
+        );
         while level.size.width > level.cell.width || level.size.height > level.cell.height {
             let scale = factors.last().copied().unwrap_or(1) * 2;
             let mut next = TileLevel {
@@ -994,7 +1079,7 @@ impl IiifWriter {
                 }
                 let rect = next.rect(index);
                 let pixels = downsample(
-                    level,
+                    &level,
                     &next.size,
                     rect,
                     self.budget.saturating_sub(self.retained),
@@ -1016,8 +1101,7 @@ impl IiifWriter {
                 );
             }
             factors.push(scale);
-            generated.push(next);
-            level = generated.last().expect("generated level");
+            level = next;
         }
         // A real overview at the smallest advertised size. The full-size
         // response remains available through the tile API, without JPEG's cap.
