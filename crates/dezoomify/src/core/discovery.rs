@@ -789,6 +789,9 @@ impl DiscoveryError {
                         diagnostics: Vec::new(),
                     }
                     .to_string()
+                } else if block.len() > 4000 {
+                    // Typed error detail must fit the 4096-char bound checked downstream.
+                    format!("{}...", &block[..block.floor_char_boundary(4000)])
                 } else {
                     block
                 }
