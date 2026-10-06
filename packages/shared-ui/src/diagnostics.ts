@@ -14,7 +14,7 @@ const FIELD_LIMIT = 4096;
 const MAX_FIELDS = 48;
 const MAX_GROUPS = 16;
 // Typed error facts that distinguish failure groups; prose fields never do.
-const FACT_FIELD = /^(?:.*\.)?(?:kind|status|transport|resource_kind|purpose)$/;
+const FACT_FIELD = /^(?:.*\.)?(?:kind|status|transport|blocked_reason|resource_kind|purpose)$/;
 // JSON escaping and UTF-8 use at most six bytes per UTF-16 code unit.
 const size = (value: unknown) => JSON.stringify(value).length * 6;
 
