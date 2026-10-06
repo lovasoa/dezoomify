@@ -112,3 +112,17 @@ test("a request deadline stays distinguishable from user cancellation", async ()
   expire();
   await assert.rejects(pending, { kind: "timeout" });
 });
+
+test("non-error fetch throws keep their payload instead of a generic message", async () => {
+  const thrown = { code: "ECONNREFUSED" };
+  const failing = fetcher({
+    fetchImpl: () => {
+      throw thrown;
+    },
+  });
+  await assert.rejects(failing.fetchResource(resource("/image", "metadata"), signal()), (error) => {
+    assert.equal(error.kind, "network-failure");
+    assert.equal(error.detail, JSON.stringify(thrown));
+    return true;
+  });
+});
