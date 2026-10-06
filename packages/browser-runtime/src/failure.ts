@@ -3,16 +3,16 @@
 // across the Rust/TypeScript boundary unchanged. The closed-enum vocabulary
 // lives beside its validation in the shared UI's failure module.
 import type { Error as JobError } from "@dezoomify/wasm-bindings";
-import { blockedReason, isJobError } from "../../shared-ui/src/failure.ts";
+import { blockedReason, isJobError, unknownDetail } from "../../shared-ui/src/failure.ts";
 
-export { blockedReason, isJobError };
+export { blockedReason, isJobError, unknownDetail };
 
 /** Typed tile failure with its diagnostic cause retained in `detail`.
  * Already-typed causes pass through unchanged; decoding and processing
  * failures are deterministic, so they never degrade to the retryable
  * transport fallback. */
 export function tileError(kind: "decode-failed" | "processing-failed", cause: unknown): JobError {
-  return isJobError(cause) ? cause : { kind, detail: String(cause).slice(0, 2048) };
+  return isJobError(cause) ? cause : { kind, detail: unknownDetail(cause) };
 }
 
 /** Typed output failure with its diagnostic cause retained in `detail`. */

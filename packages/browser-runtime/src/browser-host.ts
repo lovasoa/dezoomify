@@ -20,7 +20,7 @@ import type {
   Tile,
 } from "@dezoomify/wasm-bindings";
 import type { DiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
-import { causeOf, isJobError } from "../../shared-ui/src/failure.ts";
+import { causeOf, isJobError, unknownDetail } from "../../shared-ui/src/failure.ts";
 import type { CanvasAssembly } from "./assembly.ts";
 import { originOfUrl } from "./fetch-primitives.ts";
 import type { TileDecoder } from "./tile-decode.ts";
@@ -78,9 +78,9 @@ export class BrowserHost implements Host {
         ? {
             kind: "network-failure",
             transport: this.deps.transport?.() ?? "direct",
-            detail: String(error).slice(0, 2048),
+            detail: unknownDetail(error),
           }
-        : { kind: "internal", detail: String(error).slice(0, 2048) };
+        : { kind: "internal", detail: unknownDetail(error) };
     if (!request || typed.kind === "resource" || typed.kind === "cancelled") return typed;
     return {
       kind: "resource",

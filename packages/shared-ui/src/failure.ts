@@ -99,6 +99,23 @@ export function isJobError(value: unknown): value is JobError {
   return isJobErrorAt(value, 0);
 }
 
+/** Bounded text for an unknown throw: strings pass through, Error objects
+ * keep their existing `String(error)` rendering, and plain objects render
+ * as JSON instead of `[object Object]`. */
+export function unknownDetail(error: unknown, limit = 2048): string {
+  if (typeof error === "string") return error.slice(0, limit);
+  if (error instanceof Error) return String(error).slice(0, limit);
+  if (error !== null && typeof error === "object") {
+    try {
+      const text = JSON.stringify(error);
+      if (typeof text === "string" && text !== "{}") return text.slice(0, limit);
+    } catch {
+      /* Fall through to String(error) below. */
+    }
+  }
+  return String(error).slice(0, limit);
+}
+
 const TRANSPORTS = new Set([
   "direct",
   "metadata-proxy",

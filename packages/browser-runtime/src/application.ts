@@ -26,7 +26,7 @@ import type {
   RecoveryChoice,
 } from "@dezoomify/wasm-bindings";
 import { createElement } from "react";
-import { isJobError } from "../../shared-ui/src/failure.ts";
+import { isJobError, unknownDetail } from "../../shared-ui/src/failure.ts";
 import type { BrowserSaveDisposition } from "./assembly.ts";
 import { createBrowserAssembly } from "./browser-assembly.ts";
 import { BrowserHost, type BrowserHostDependencies } from "./browser-host.ts";
@@ -311,7 +311,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       history.update(a.historyEntry, { status: outcome });
       if (outcome === "failed") {
         a.failure = await withVerdict(
-          isJobError(error) ? error : { kind: "internal", detail: String(error).slice(0, 2048) },
+          isJobError(error) ? error : { kind: "internal", detail: unknownDetail(error) },
         );
       }
       a.diagnostics.finish(outcome, error);
