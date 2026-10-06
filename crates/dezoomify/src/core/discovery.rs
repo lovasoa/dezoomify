@@ -679,11 +679,14 @@ fn observed_cause(
 /// URL-shape misses collapse to one count.
 #[must_use]
 pub fn diagnostic_bullets(diagnostics: &[CandidateDiagnostic]) -> Vec<String> {
-    let mut url_misses = 0_usize;
+    let mut url_misses: Vec<&str> = Vec::new();
     let mut grouped: Vec<(&CandidateDiagnostic, Vec<&str>)> = Vec::new();
     for diagnostic in diagnostics {
         if diagnostic.kind == RejectionKind::DidNotMatchUrl {
-            url_misses += 1;
+            let name = diagnostic.format.as_str();
+            if !url_misses.contains(&name) {
+                url_misses.push(name);
+            }
             continue;
         }
         let group = grouped.iter_mut().find(|(existing, _)| {
@@ -716,9 +719,10 @@ pub fn diagnostic_bullets(diagnostics: &[CandidateDiagnostic]) -> Vec<String> {
         };
         lines.push(format!(" - {}: {}", names.join(", "), text));
     }
-    if url_misses > 0 {
+    if !url_misses.is_empty() {
         lines.push(format!(
-            " - {url_misses} other format(s) did not match this page address"
+            " - {} other format(s) did not match this page address",
+            url_misses.len()
         ));
     }
     lines
@@ -1368,6 +1372,13 @@ mod tests {
                     None,
                     Some("unable to parse DZI metadata"),
                 ),
+                diagnostic(
+                    "generic",
+                    RejectionKind::DidNotMatchUrl,
+                    None,
+                    Some("not a generic X/Y tile template"),
+                ),
+                // A repeated URL miss from another scanned input counts once.
                 diagnostic(
                     "generic",
                     RejectionKind::DidNotMatchUrl,
