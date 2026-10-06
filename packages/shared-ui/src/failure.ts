@@ -99,6 +99,20 @@ export function isJobError(value: unknown): value is JobError {
   return isJobErrorAt(value, 0);
 }
 
+/** Bounded text for an unknown throw: Error messages first, then JSON, never
+ * `[object Object]`. */
+export function unknownDetail(error: unknown, limit = 2048): string {
+  if (typeof error === "string") return error.slice(0, limit);
+  if (error instanceof Error) return (error.message || String(error)).slice(0, limit);
+  try {
+    const text =
+      error !== null && typeof error === "object" ? JSON.stringify(error) : String(error);
+    return text.slice(0, limit);
+  } catch {
+    return String(error).slice(0, limit);
+  }
+}
+
 const TRANSPORTS = new Set([
   "direct",
   "metadata-proxy",

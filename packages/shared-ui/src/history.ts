@@ -13,7 +13,7 @@ import type {
   SavedOutput,
   SavedOutputState,
 } from "@dezoomify/wasm-bindings";
-import { causeOf, isJobError } from "./failure.ts";
+import { causeOf, isJobError, unknownDetail } from "./failure.ts";
 
 export const HISTORY_MAX = 20;
 
@@ -103,7 +103,7 @@ function savedOutputOf(raw: unknown): SavedOutput | undefined {
 }
 
 function outputError(error: unknown): JobError {
-  return isJobError(error) ? error : { kind: "internal", detail: String(error).slice(0, 512) };
+  return isJobError(error) ? error : { kind: "internal", detail: unknownDetail(error, 512) };
 }
 
 /** Build one ledger entry keeping the full source address. */
