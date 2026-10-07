@@ -14,7 +14,7 @@
     "@dezoomify/shared-ui": "workspace:*",
     "@dezoomify/wasm-bindings": "workspace:*",
     "@tauri-apps/api": "2.11.1",
-    "@tauri-apps/plugin-opener": "2.5.5",
+    "@tauri-apps/plugin-opener": "2.7.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
