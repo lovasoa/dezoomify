@@ -1,7 +1,7 @@
 //! Native scenario tests: header scope, redirects, cache, limits.
 
+use dezoomify::model::Error;
 use dezoomify::model::OutputFormat;
-use dezoomify::model::{Error, LimitContext, LimitReason};
 use dezoomify_native::cache;
 use dezoomify_native::client;
 use dezoomify_native::output;
@@ -184,7 +184,7 @@ fn output_format_follows_the_destination_extension() {
     // A non-empty directory refuses without overwrite, like a file does.
     std::fs::write(dir.join("info.json"), b"{}").unwrap();
     assert!(output::validate_destination(&dir, &OutputFormat::IiifDir, false).is_err());
-    assert!(output::validate_destination(&dir, &OutputFormat::IiifDir, true).is_ok());
+    assert!(output::validate_destination(&dir, &OutputFormat::IiifDir, true).is_err());
     // A `.zif` path validates as ZIF (never as single-image TIFF or PNG);
     // a `.iiif` path validates as a directory destination and never as a
     // single file.
@@ -200,39 +200,12 @@ fn output_format_follows_the_destination_extension() {
     let iiif = dir.join("out.iiif");
     assert!(output::validate_destination(&iiif, &OutputFormat::IiifDir, false).is_ok());
     assert!(output::validate_destination(&iiif, &OutputFormat::Tiff, true).is_err());
-    // A stale file at a `.iiif` path refuses without overwrite but is
-    // replaced with overwrite.
+    // Existing tile output is preserved even when overwrite is requested.
     std::fs::write(&iiif, b"stale").unwrap();
     assert!(output::validate_destination(&iiif, &OutputFormat::IiifDir, false).is_err());
-    assert!(output::validate_destination(&iiif, &OutputFormat::IiifDir, true).is_ok());
-    output::write_iiif_dir(&iiif, b"{}", &Vec::new()).unwrap();
-    assert!(iiif.is_dir());
-    assert!(iiif.join("info.json").is_file());
+    assert!(output::validate_destination(&iiif, &OutputFormat::IiifDir, true).is_err());
+    assert_eq!(std::fs::read(&iiif).unwrap(), b"stale");
     let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn jpeg_and_tiff_encode_and_decode_round_trip() {
-    use dezoomify_native::imaging::{encode_jpeg, encode_tiff, JPEG_QUALITY};
-    let mut image = image::RgbaImage::new(16, 16);
-    for (x, y, pixel) in image.enumerate_pixels_mut() {
-        *pixel = image::Rgba([(x * 16) as u8, (y * 16) as u8, 128, 255]);
-    }
-    let jpeg = encode_jpeg(&image, JPEG_QUALITY, None).expect("jpeg encodes");
-    assert!(
-        jpeg.starts_with(&[0xFF, 0xD8, 0xFF]),
-        "jpeg output carries the SOI marker"
-    );
-    let decoded = image::load_from_memory(&jpeg)
-        .expect("jpeg decodes")
-        .to_rgba8();
-    assert_eq!((decoded.width(), decoded.height()), (16, 16));
-    let tiff = encode_tiff(&image, 5, None).expect("tiff encodes");
-    let decoded = image::load_from_memory(&tiff)
-        .expect("tiff decodes")
-        .to_rgba8();
-    assert_eq!((decoded.width(), decoded.height()), (16, 16));
-    assert_eq!(decoded.get_pixel(3, 5), image.get_pixel(3, 5));
 }
 
 #[test]
@@ -247,22 +220,4 @@ fn transport_and_concurrency_defaults_match_documented_limits() {
     assert_eq!(fetch.timeout, std::time::Duration::from_secs(30));
     assert_eq!(fetch.connect_timeout, std::time::Duration::from_secs(6));
     assert_eq!(fetch.max_idle_per_host, 32);
-}
-
-#[test]
-fn jpeg_rejects_canvases_beyond_its_side_limit() {
-    use dezoomify_native::imaging::encode_jpeg;
-    // A 1x1 stand-in cannot allocate gigapixels; assert the guard directly
-    // through the dimension check on a wide image instead.
-    let wide = image::RgbaImage::new(65_536, 1);
-    let error = encode_jpeg(&wide, 92, None).expect_err("jpeg side limit applies");
-    assert!(matches!(
-        error,
-        Error::LimitExceeded {
-            limit: LimitContext {
-                reason: LimitReason::JpegSide,
-                ..
-            }
-        }
-    ));
 }

@@ -38,6 +38,7 @@ pub struct MemoryHost {
     pub active: Cell<u32>,
     pub peak: Cell<u32>,
     pub yield_tiles: Cell<bool>,
+    pub first_tile: RefCell<Option<futures::channel::oneshot::Receiver<()>>>,
     pub cancelled: Cell<bool>,
     pub cancel_after: Cell<Option<usize>>,
     pub paused: Cell<bool>,
@@ -95,6 +96,12 @@ impl Host for MemoryHost {
         self.peak.set(self.peak.get().max(self.active.get()));
         let _active = Active(&self.active);
         self.attempts.borrow_mut().push(tile.index);
+        if tile.index == 0 {
+            let first = self.first_tile.borrow_mut().take();
+            if let Some(first) = first {
+                first.await.unwrap();
+            }
+        }
         if self
             .pause_after_attempt
             .get()

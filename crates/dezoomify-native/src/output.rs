@@ -4,16 +4,59 @@
 //! encodes one multi-directory TIFF pyramid file; `iiif-dir`
 //! writes a static tiled directory holding an `info.json` beside JPEG tiles.
 
-use std::io::{Seek, Write};
+use std::io::{Read, Seek, Write};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use dezoomify::model::{Error, Failure, LimitContext, OutputFormat};
+use dezoomify::model::{Error, Failure, OutputFormat, Size};
 
-/// One rendered `iiif-dir` tile set: `(relative path, bytes)` pairs in
-/// sorted relative-path order.
-pub type IiifTiles = Vec<(String, Vec<u8>)>;
+pub(crate) fn temp_sibling(destination: &Path) -> std::path::PathBuf {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let name = destination
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output");
+    let time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    destination.with_file_name(format!(
+        "{name}.tmp.{}-{time}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ))
+}
 
+/// All routes end here, including a future encoded JPEG join. Preparation
+/// owns staging; publication can choose another name without re-encoding.
+pub(crate) struct PreparedOutput {
+    pub(crate) staging: StagedOutput,
+    pub(crate) size: Size,
+    pub(crate) pixel_decodes: u64,
+    pub(crate) late_writes: u64,
+}
+pub(crate) enum StagedOutput {
+    File(StagedFile),
+    Directory(StagedDirectory),
+}
+impl PreparedOutput {
+    pub(crate) fn publish(
+        &mut self,
+        destination: &Path,
+        overwrite: bool,
+        cancelled: &AtomicBool,
+    ) -> Result<u64, Error> {
+        match &mut self.staging {
+            StagedOutput::File(file) => file.publish(destination, overwrite, cancelled),
+            StagedOutput::Directory(directory) => {
+                // Relative service IDs remain valid across automatic renaming.
+                let bytes = directory_bytes(&directory.path, cancelled)?;
+                directory.publish(destination, cancelled)?;
+                Ok(bytes)
+            }
+        }
+    }
+}
 pub(crate) fn directory_bytes(path: &Path, cancelled: &AtomicBool) -> Result<u64, Error> {
     if cancelled.load(Ordering::SeqCst) {
         return Err(Error::Cancelled);
@@ -55,8 +98,12 @@ impl StagedFile {
             std::fs::create_dir_all(parent)
                 .map_err(|e| write_failed("output directory creation failed", &e))?;
         }
-        let path = crate::sink::temp_sibling(destination);
-        let file = std::fs::File::create_new(&path)
+        let path = temp_sibling(destination);
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
             .map_err(|e| write_failed("staging file creation failed", &e))?;
         Ok(Self {
             path,
@@ -78,20 +125,20 @@ impl StagedFile {
     }
 
     pub(crate) fn publish(
-        mut self,
+        &mut self,
         destination: &Path,
         overwrite: bool,
         cancelled: &AtomicBool,
     ) -> Result<u64, Error> {
         self.check_error()?;
-        let file = self.file.take().expect("unpublished staging file");
-        file.sync_all()
-            .map_err(|e| write_failed("output sync failed", &e))?;
-        let bytes = file
-            .metadata()
+        if let Some(file) = self.file.as_ref() {
+            file.sync_all()
+                .map_err(|e| write_failed("output sync failed", &e))?;
+        }
+        let bytes = std::fs::metadata(&self.path)
             .map_err(|e| write_failed("output stat failed", &e))?
             .len();
-        drop(file);
+        self.file.take();
         if cancelled.load(Ordering::SeqCst) {
             return Err(Error::Cancelled);
         }
@@ -104,7 +151,9 @@ impl StagedFile {
             tempfile::TempPath::try_from_path(self.path.clone())
                 .map_err(|e| write_failed("staging path failed", &e))?
                 .persist_noclobber(destination)
-                .map_err(|e| {
+                .map_err(|mut e| {
+                    // StagedFile owns cleanup and may retry an automatic name.
+                    e.path.disable_cleanup(true);
                     if e.error.kind() == std::io::ErrorKind::AlreadyExists {
                         Error::OutputExists
                     } else {
@@ -113,6 +162,44 @@ impl StagedFile {
                 })?;
         }
         Ok(bytes)
+    }
+
+    /// Insert finalized header metadata after streaming the pixels. Move the
+    /// already compressed payload backwards using a single bounded buffer.
+    pub(crate) fn insert_header(
+        &mut self,
+        offset: u64,
+        bytes: &[u8],
+        cancelled: &AtomicBool,
+    ) -> Result<(), Error> {
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        let file = self.file.as_mut().expect("unpublished staging file");
+        let len = file
+            .metadata()
+            .map_err(|e| write_failed("output stat failed", &e))?
+            .len();
+        let mut remaining = len.saturating_sub(offset);
+        let mut buffer = vec![0; 64 << 10];
+        while remaining > 0 {
+            if cancelled.load(Ordering::SeqCst) {
+                return Err(Error::Cancelled);
+            }
+            let count = remaining.min(buffer.len() as u64) as usize;
+            remaining -= count as u64;
+            file.seek(std::io::SeekFrom::Start(offset + remaining))
+                .and_then(|_| file.read_exact(&mut buffer[..count]))
+                .map_err(|e| write_failed("metadata payload read failed", &e))?;
+            file.seek(std::io::SeekFrom::Start(
+                offset + remaining + bytes.len() as u64,
+            ))
+            .and_then(|_| file.write_all(&buffer[..count]))
+            .map_err(|e| write_failed("metadata payload move failed", &e))?;
+        }
+        file.seek(std::io::SeekFrom::Start(offset))
+            .and_then(|_| file.write_all(bytes))
+            .map_err(|e| write_failed("metadata header write failed", &e))
     }
 }
 
@@ -137,7 +224,7 @@ impl StagedDirectory {
             std::fs::create_dir_all(parent)
                 .map_err(|e| write_failed("output directory creation failed", &e))?;
         }
-        let path = crate::sink::temp_sibling(destination);
+        let path = temp_sibling(destination);
         std::fs::create_dir(&path)
             .map_err(|e| write_failed("staging directory creation failed", &e))?;
         Ok(Self { path })
@@ -219,7 +306,7 @@ impl StagedDirectory {
         Ok(())
     }
 
-    pub(crate) fn publish(self, destination: &Path, cancelled: &AtomicBool) -> Result<(), Error> {
+    pub(crate) fn publish(&self, destination: &Path, cancelled: &AtomicBool) -> Result<(), Error> {
         if cancelled.load(Ordering::SeqCst) {
             return Err(Error::Cancelled);
         }
@@ -356,95 +443,25 @@ pub fn validate_destination(
             return Err(crate::output::destination_denied("path traversal rejected"));
         }
     }
-    match format {
-        OutputFormat::Png => {
-            if path.is_dir() {
-                return Err(crate::output::destination_denied(
-                    "destination is a directory, not a png file",
-                ));
-            }
-            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if !ext.eq_ignore_ascii_case("png") {
-                return Err(crate::output::destination_denied(
-                    "extension does not match format",
-                ));
-            }
+    if format.is_directory() {
+        if is_single_file_extension(path) && !path.is_dir() {
+            return Err(destination_denied("extension does not match format"));
         }
-        OutputFormat::Jpeg => {
-            if path.is_dir() {
-                return Err(crate::output::destination_denied(
-                    "destination is a directory, not a jpeg file",
-                ));
-            }
-            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if !(ext.eq_ignore_ascii_case("jpg") || ext.eq_ignore_ascii_case("jpeg")) {
-                return Err(crate::output::destination_denied(
-                    "extension does not match format",
-                ));
-            }
+        if path.exists() {
+            return Err(output_exists());
         }
-        OutputFormat::Tiff => {
-            if path.is_dir() {
-                return Err(crate::output::destination_denied(
-                    "destination is a directory, not a tiff file",
-                ));
-            }
-            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if !(ext.eq_ignore_ascii_case("tif") || ext.eq_ignore_ascii_case("tiff")) {
-                return Err(crate::output::destination_denied(
-                    "extension does not match format",
-                ));
-            }
+    } else {
+        if path.is_dir() {
+            return Err(destination_denied(
+                "destination is a directory, not an image file",
+            ));
         }
-        OutputFormat::Zif => {
-            if path.is_dir() {
-                return Err(crate::output::destination_denied(
-                    "destination is a directory, not a zif file",
-                ));
-            }
-            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if !ext.eq_ignore_ascii_case("zif") {
-                return Err(crate::output::destination_denied(
-                    "extension does not match format",
-                ));
-            }
+        if infer_from_path(path).ok().as_ref() != Some(format) {
+            return Err(destination_denied("extension does not match format"));
         }
-        OutputFormat::Webp => {
-            if path.is_dir() {
-                return Err(crate::output::destination_denied(
-                    "destination is a directory, not a webp file",
-                ));
-            }
-            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if !ext.eq_ignore_ascii_case("webp") {
-                return Err(crate::output::destination_denied(
-                    "extension does not match format",
-                ));
-            }
+        if path.exists() && !overwrite {
+            return Err(output_exists());
         }
-        OutputFormat::IiifDir => {
-            if path.is_file() && !overwrite {
-                return Err(crate::output::destination_denied(
-                    "destination is a file, not a directory",
-                ));
-            }
-            if is_single_file_extension(path) && !path.is_dir() {
-                return Err(crate::output::destination_denied(
-                    "extension does not match format",
-                ));
-            }
-            if path.is_dir() && !overwrite {
-                let non_empty = std::fs::read_dir(path)
-                    .map(|mut entries| entries.next().is_some())
-                    .unwrap_or(false);
-                if non_empty {
-                    return Err(crate::output::output_exists());
-                }
-            }
-        }
-    }
-    if !format.is_directory() && path.exists() && !overwrite {
-        return Err(crate::output::output_exists());
     }
     Ok(())
 }
@@ -471,51 +488,6 @@ pub(crate) fn partial_path_for(path: &Path) -> std::path::PathBuf {
         Some(parent) if !parent.as_os_str().is_empty() => parent.join(partial_name),
         _ => std::path::PathBuf::from(partial_name),
     }
-}
-
-/// Write one `iiif-dir` destination: `info.json` plus JPEG tiles at
-/// `<scale>/<col>_<row>.jpg`, each file committed via temp-write plus
-/// rename. `tiles` must arrive in sorted relative-path order; `info.json`
-/// is written last so a half-written directory never carries a manifest.
-pub fn write_iiif_dir(dir: &Path, info_json: &[u8], tiles: &IiifTiles) -> Result<(), Error> {
-    // Validation granted overwrite before this runs: a stale file at the
-    // directory path is replaced before the tile tree is written.
-    if dir.is_file() {
-        std::fs::remove_file(dir)
-            .map_err(|e| crate::output::write_failed("output write failed", &e))?;
-    }
-    std::fs::create_dir_all(dir)
-        .map_err(|e| crate::output::write_failed("output write failed", &e))?;
-    for (relative, bytes) in tiles {
-        if relative.contains("..") || relative.contains('\\') || Path::new(relative).is_absolute() {
-            return Err(crate::output::destination_denied(
-                "tile path escapes the destination",
-            ));
-        }
-        let dest = dir.join(relative);
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| crate::output::write_failed("output write failed", &e))?;
-        }
-        let tmp = dest.with_extension("tmp");
-        std::fs::write(&tmp, bytes)
-            .map_err(|e| crate::output::write_failed("output write failed", &e))?;
-        std::fs::rename(&tmp, &dest)
-            .map_err(|e| crate::output::write_failed("output write failed", &e))?;
-    }
-    let manifest = dir.join("info.json");
-    let tmp = manifest.with_extension("tmp");
-    std::fs::write(&tmp, info_json)
-        .map_err(|e| crate::output::write_failed("output write failed", &e))?;
-    std::fs::rename(&tmp, &manifest)
-        .map_err(|e| crate::output::write_failed("output write failed", &e))?;
-    Ok(())
-}
-
-/// A memory- or format-budget refusal with structured facts for host copy;
-/// display prose is presentation only and never a data channel.
-pub(crate) fn memory_limit(limit: LimitContext) -> Error {
-    Error::LimitExceeded { limit }
 }
 
 fn output_exists() -> Error {
@@ -573,7 +545,7 @@ mod tests {
             }
         }
         for step in ["write", "seek", "flush"] {
-            let directory = crate::sink::temp_sibling(&std::env::temp_dir().join("io-test"));
+            let directory = temp_sibling(&std::env::temp_dir().join("io-test"));
             std::fs::create_dir(&directory).unwrap();
             let destination = directory.join("output.png");
             let mut staged = StagedFile::new(&destination).unwrap();
@@ -585,14 +557,14 @@ mod tests {
             };
             match step {
                 "write" => assert!(matches!(
-                    crate::imaging::encode_png_to(
-                        &mut writer,
-                        &image::RgbaImage::new(1, 1),
-                        image::codecs::png::CompressionType::Fast,
-                        None,
-                        None,
+                    image::ImageEncoder::write_image(
+                        image::codecs::png::PngEncoder::new(&mut writer),
+                        &[0; 4],
+                        1,
+                        1,
+                        image::ExtendedColorType::Rgba8,
                     ),
-                    Err(Error::EncodeFailed(_))
+                    Err(image::ImageError::IoError(_))
                 )),
                 "seek" => assert!(writer.seek(std::io::SeekFrom::Start(0)).is_err()),
                 _ => assert!(writer.flush().is_err()),
@@ -604,6 +576,7 @@ mod tests {
                 staged.publish(&destination, false, &cancelled),
                 Err(Error::WriteFailed(_))
             ));
+            drop(staged);
             assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
             std::fs::remove_dir(directory).unwrap();
         }
@@ -611,7 +584,7 @@ mod tests {
 
     #[test]
     fn staged_file_cancellation_and_late_collision_preserve_destination() {
-        let directory = crate::sink::temp_sibling(&std::env::temp_dir().join("staging-test"));
+        let directory = temp_sibling(&std::env::temp_dir().join("staging-test"));
         std::fs::create_dir(&directory).unwrap();
         let destination = directory.join("output.png");
         let cancelled = AtomicBool::new(false);
@@ -638,12 +611,11 @@ mod tests {
             std::fs::read(&destination).unwrap(),
             b"created during encoding"
         );
-        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
-        std::fs::remove_file(&destination).unwrap();
-        let mut staged = StagedFile::new(&destination).unwrap();
-        staged.writer(&cancelled).write_all(b"published").unwrap();
-        assert_eq!(staged.publish(&destination, false, &cancelled).unwrap(), 9);
-        assert_eq!(std::fs::read(&destination).unwrap(), b"published");
+        let next = directory.join("output-2.png");
+        staged.publish(&next, false, &cancelled).unwrap();
+        assert_eq!(std::fs::read(&next).unwrap(), b"replacement");
+        drop(staged);
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 2);
         std::fs::remove_dir_all(directory).unwrap();
     }
 

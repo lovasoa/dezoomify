@@ -14,12 +14,19 @@ Use it when:
 - the site **refuses visitors from other pages**: the app can introduce
   itself as coming from the site's own viewer page.
 
-Each job saves to one output file or IIIF tile folder. The app holds the
-full image in memory while it works (4 bytes per pixel plus working space),
-so very large saves need matching free memory; when the image exceeds current
-available memory the save stops
-with a typed error before anything is written, and saving a smaller level
-fits the available memory.
+Each job saves to one output file or IIIF tile folder. PNG, JPEG and TIFF
+compress while pieces arrive and release decoded pieces as their pixels are
+read. Compatible IIIF/ZIF pieces keep their compressed bytes. Working pixels
+stay in RAM, with a budget based on 80% of available memory at job start.
+Pixel processing and codec working space share that budget; network response
+buffers need additional memory. Unknown dimensions, missing
+early pieces and WebP output can need more buffering. If the working data
+cannot fit, the save stops with a typed error and removes unpublished output.
+Choose a smaller resolution in that case.
+
+Tile counts show acquisition; the progress bar and counts switch to pixels
+while the saved image finishes. Pause affects acquisition. Cancel remains available
+through output preparation.
 
 ## Resuming an interrupted save
 

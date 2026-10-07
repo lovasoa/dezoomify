@@ -23,7 +23,7 @@ export interface Presentation {
   headlineVars?: Record<string, string | number>;
   detailKey?: I18nKey;
   detailVars?: Record<string, string | number>;
-  progress: { current: number; total: number | null } | null;
+  progress: { current: number; total: number | null; unit?: "pixels" } | null;
   paused: boolean;
   error?: JobError;
   output?: Output;
@@ -67,13 +67,32 @@ export function presentProgress(progress: Progress, opts?: { paused?: boolean })
   } as const;
   const selected = progress.selected;
   const maximum = progress.maximum;
+  const preparation = progress.phase === "output" ? progress.preparation : undefined;
   return {
     ...presentStatus(status[progress.phase]),
-    progress:
-      progress.total != null || progress.completed > 0
+    progress: preparation
+      ? {
+          current: preparation.completed_pixels,
+          total: preparation.total_pixels,
+          unit: "pixels",
+        }
+      : progress.phase !== "output" && (progress.total != null || progress.completed > 0)
         ? { current: progress.completed, total: progress.total ?? null }
         : null,
-    paused: opts?.paused === true,
+    paused: opts?.paused === true && progress.phase !== "output",
+    ...(preparation
+      ? {
+          detailKey: "view.job.preparation" as const,
+          detailVars: {
+            percent: Math.min(
+              100,
+              Math.floor(
+                (preparation.completed_pixels * 100) / Math.max(1, preparation.total_pixels),
+              ),
+            ),
+          },
+        }
+      : {}),
     ...(selected && maximum && selected.width * selected.height < maximum.width * maximum.height
       ? { resolution: { selected, maximum } }
       : {}),

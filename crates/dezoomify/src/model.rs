@@ -970,6 +970,16 @@ pub struct Progress {
     pub maximum: Option<Size>,
     pub completed: u64,
     pub total: Option<u64>,
+    /// Native pixel preparation, separate from acquired tile counts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preparation: Option<OutputPreparation>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct OutputPreparation {
+    pub completed_pixels: u64,
+    pub total_pixels: u64,
 }
 
 impl Default for Progress {
@@ -982,6 +992,7 @@ impl Default for Progress {
             maximum: None,
             completed: 0,
             total: Some(0),
+            preparation: None,
         }
     }
 }

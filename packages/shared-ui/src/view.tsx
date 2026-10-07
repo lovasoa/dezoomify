@@ -10,7 +10,7 @@ import type { JobActivity } from "./activity.ts";
 import { canRetry, httpStatusOf, plainMessageFor } from "./failure.ts";
 import { HistorySection } from "./history-view.tsx";
 import type { Presentation, ResolutionChoice } from "./presentation.ts";
-import { displaySourceUrl, hostFromUrl } from "./view-helpers.ts";
+import { displaySourceUrl, formatPixelCount, hostFromUrl } from "./view-helpers.ts";
 import type { PlatformHints, ViewCallbacks, ViewContext, ViewRenderOptions } from "./view-types.ts";
 
 export { DEFAULT_PAGE_TITLE, jobPageTitle } from "./view-helpers.ts";
@@ -295,17 +295,20 @@ function deriveJob(presentation: Presentation, ctx?: ViewContext): JobDerived {
   const activity: JobActivity = ctx?.jobActivity ?? { now: 0 };
   const current = presentation.progress?.current ?? 0;
   const total = presentation.progress?.total ?? 0;
+  const pixels = presentation.progress?.unit === "pixels";
   const determinate = total > 0;
   const donePct = determinate ? Math.max(0, Math.min(100, (current / total) * 100)) : 0;
-  const active = determinate
-    ? Math.max(0, Math.min(ctx?.currentProgress?.active ?? 0, Math.max(0, total - current)))
-    : 0;
+  const active =
+    determinate && !pixels
+      ? Math.max(0, Math.min(ctx?.currentProgress?.active ?? 0, Math.max(0, total - current)))
+      : 0;
   const activePct = determinate ? (active / total) * 100 : 0;
   const retrying = Math.max(0, Math.min(ctx?.currentProgress?.retrying ?? 0, active));
-  const paused = presentation.paused || activity.paused === true;
+  const preparing = presentation.headlineKey === "view.step.saving";
+  const paused = !preparing && (presentation.paused || activity.paused === true);
   const now = activity.now;
   const startedAt = activity.startedAt ?? now;
-  const timerNow = activity.pausedAt ?? now;
+  const timerNow = preparing ? now : (activity.pausedAt ?? now);
   const elapsedMs = Math.max(0, timerNow - startedAt - (activity.pausedDurationMs ?? 0));
   const elapsed = formatElapsed(elapsedMs);
   const lastProgressAt = activity.lastProgressAt ?? startedAt;
@@ -322,18 +325,24 @@ function deriveJob(presentation: Presentation, ctx?: ViewContext): JobDerived {
         ? t("view.job.waiting", { host: hostFromUrl(activity.url) })
         : t(presentation.headlineKey, presentation.headlineVars);
   const sourceUrl = activity.url ? displaySourceUrl(activity.url) : "";
-  const estimatedTotalMs =
-    ctx?.currentProgress?.estimatedTotalMs ??
-    (determinate && current >= 2 && elapsedMs >= 2000
-      ? Math.round((elapsedMs / current) * total)
-      : undefined);
+  const estimatedTotalMs = preparing
+    ? undefined
+    : (ctx?.currentProgress?.estimatedTotalMs ??
+      (determinate && current >= 2 && elapsedMs >= 2000
+        ? Math.round((elapsedMs / current) * total)
+        : undefined));
   const timeText = elapsed
     ? `${elapsed}${typeof estimatedTotalMs === "number" && estimatedTotalMs > elapsedMs ? ` / ~${formatElapsed(estimatedTotalMs)}` : ""}`
     : "";
   const countsText = determinate
-    ? active > 0
-      ? t("view.job.countsActive", { current, total, active })
-      : t("view.job.countsFull", { current, total })
+    ? pixels
+      ? t("view.job.pixelCounts", {
+          current: formatPixelCount(current),
+          total: formatPixelCount(total),
+        })
+      : active > 0
+        ? t("view.job.countsActive", { current, total, active })
+        : t("view.job.countsFull", { current, total })
     : "";
   return {
     paused,
@@ -380,8 +389,9 @@ function JobView({
       </section>
     );
   }
-  const showPause = !d.paused && typeof callbacks.onPause === "function";
-  const showResume = d.paused && typeof callbacks.onResume === "function";
+  const acquisitionControls = presentation.headlineKey !== "view.step.saving";
+  const showPause = acquisitionControls && !d.paused && typeof callbacks.onPause === "function";
+  const showResume = acquisitionControls && d.paused && typeof callbacks.onResume === "function";
   return (
     <div
       className={`dz-view-body dz-job-section dz-fade-in${d.paused ? " dz-job-paused" : ""}`}
@@ -470,11 +480,13 @@ function JobView({
           aria-label={d.step}
           aria-valuetext={
             d.determinate
-              ? t("view.job.progressValue", {
-                  done: d.current,
-                  active: d.active,
-                  remaining: Math.max(0, d.total - d.current - d.active),
-                })
+              ? presentation.progress?.unit === "pixels"
+                ? d.countsText
+                : t("view.job.progressValue", {
+                    done: d.current,
+                    active: d.active,
+                    remaining: Math.max(0, d.total - d.current - d.active),
+                  })
               : d.step
           }
         >

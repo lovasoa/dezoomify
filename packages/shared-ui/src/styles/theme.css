@@ -977,7 +977,6 @@ abbr[title] {
 .dz-progress-done {
   left: 0;
   background: var(--dz-progress-bar);
-  transition: width 0.25s ease;
 }
 
 .dz-progress-active {

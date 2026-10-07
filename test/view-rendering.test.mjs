@@ -136,6 +136,34 @@ test("renderView mounts card and updates job section in place without DOM destru
     assert.equal(details.open, true, `tick ${tick}: open details must never close`);
   }
 
+  // Assembly replaces tile counts with pixel progress, including accessibility.
+  for (const [current, total, counts, percent] of [
+    [0, 32, "0 pixels of 32 pixels", "0%"],
+    [24, 32, "24 pixels of 32 pixels", "75%"],
+    [3e6, 5e9, "3 megapixels of 5 gigapixels", "0.06%"],
+    [1.5e9, 5e9, "1.5 gigapixels of 5 gigapixels", "30%"],
+  ]) {
+    render(
+      el,
+      presentProgress({
+        phase: "output",
+        completed: 60,
+        total: 60,
+        preparation: { completed_pixels: current, total_pixels: total },
+      }),
+      callbacks,
+      ctx,
+    );
+    const track = card.querySelector("#dz-job-track");
+    assert.equal(countsEl.textContent, counts);
+    assert.equal(barEl.style.width, percent);
+    assert.equal(track.getAttribute("aria-valuenow"), String(current));
+    assert.equal(track.getAttribute("aria-valuemax"), String(total));
+    assert.equal(track.getAttribute("aria-valuetext"), counts);
+    assert.equal(card.querySelector("#dz-btn-pause").style.display, "none");
+    assert.ok(!card.querySelector("#dz-job-time").textContent.includes("~"));
+  }
+
   // 5. Transition to completed
   render(
     el,

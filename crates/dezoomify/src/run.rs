@@ -50,6 +50,7 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
             .map(size),
         completed: 0,
         total: None,
+        preparation: None,
     };
     host.report(progress.clone());
     host.checkpoint(Gate::Cancellation).await?;
@@ -602,8 +603,9 @@ async fn acquire_round(
     progress: &mut Progress,
 ) -> Result<Vec<(Tile, Vec<Error>)>, Error> {
     let mut missing = Vec::new();
-    let mut pending = stream::iter(tiles.map(|tile| async { acquire(host, tile?, options).await }))
-        .buffer_unordered(options.max_concurrent as usize);
+    let acquisitions =
+        stream::iter(tiles.map(|tile| async { acquire(host, tile?, options).await }));
+    let mut pending = acquisitions.buffer_unordered(options.max_concurrent as usize);
     while let Some(result) = pending.next().await {
         let (tile, failures) = result?;
         if let Some(failures) = failures {

@@ -1,63 +1,48 @@
 //! Image decoding, metadata, encoders, and memory limits.
 use std::path::PathBuf;
 
-use dezoomify::Vec2d;
-
 use dezoomify::model::{Error, LimitContext, LimitReason, Size};
 
-/// Default JPEG quality for `.jpg` output and `iiif-dir` tiles: `100`
-/// minus the default compression 5.
-pub const JPEG_QUALITY: u8 = 95;
-
-/// JPEG (ISO 10918-1) caps both dimensions at 65535 px; larger canvases must
-/// use PNG, TIFF, or `iiif-dir`.
-///
-/// WebP (VP8L lossless) caps both dimensions at 16383 px; larger canvases
-/// must use PNG, TIFF, ZIF, or `iiif-dir`.
+/// JPEG caps both dimensions at 65535 pixels.
 pub const JPEG_MAX_SIDE: u32 = 65_535;
 
 /// WebP lossless caps both dimensions at 16383 px.
 pub const WEBP_MAX_SIDE: u32 = 16_383;
 
-/// `iiif-dir` tile width: one entry of the `tiles` block in `info.json`.
-pub const IIIF_TILE_WIDTH: u32 = 512;
+pub(crate) fn check_dimensions(
+    format: dezoomify::model::OutputFormat,
+    size: &Size,
+) -> Result<(), Error> {
+    use dezoomify::model::OutputFormat;
+    let (maximum, reason) = match format {
+        OutputFormat::Jpeg => (JPEG_MAX_SIDE, LimitReason::JpegSide),
+        OutputFormat::Webp => (WEBP_MAX_SIDE, LimitReason::WebpSide),
+        _ => return Ok(()),
+    };
+    if size.width > maximum || size.height > maximum {
+        return Err(Error::LimitExceeded {
+            limit: LimitContext {
+                reason,
+                dimensions: Some(size.clone()),
+                bytes_required: None,
+                bytes_available: None,
+            },
+        });
+    }
+    Ok(())
+}
 
 /// Default number of tile acquisitions in flight.
 pub const MAX_CONCURRENT: usize = 16;
 
-/// Composed canvas bytes (RGBA, 4 bytes/pixel) for a `width` by `height`
-/// image. `None` on overflow (callers fail closed with
-/// `output.canvas-limit`).
-#[must_use]
-pub fn canvas_bytes(width: u32, height: u32) -> Option<u64> {
-    u64::from(width)
-        .checked_mul(u64::from(height))?
-        .checked_mul(4)
-}
-
-/// Peak model used by performance tests: canvas bytes plus one transient
-/// encode buffer (twice the canvas). The allocation gate itself checks the
-/// canvas bytes against current available memory.
-#[must_use]
-pub fn required_memory_bytes(width: u32, height: u32) -> Option<u64> {
-    canvas_bytes(width, height)?.checked_mul(2)
-}
-
 /// Bytes currently available to the process according to the operating
-/// system. This is sampled immediately before the output canvas allocation;
-/// the value can change between the sample and the allocation.
+/// system. The native Host samples this to cap its invocation's RAM budget;
+/// availability can change after sampling.
 #[must_use]
 pub fn available_memory_bytes() -> u64 {
     let mut system = sysinfo::System::new();
     system.refresh_memory();
     system.available_memory()
-}
-
-/// Whether an allocation of `required` bytes exceeds the sampled available
-/// memory. Kept pure so the allocation gate can be tested deterministically.
-#[must_use]
-pub fn exceeds_available_memory(required: u64, available: u64) -> bool {
-    required > available
 }
 
 /// Default on-disk tile-cache root: `<tmp>/dezoomify-tile-cache`. The cache
@@ -92,61 +77,37 @@ pub(crate) fn tiff_compression_for(compression: u8) -> tiff::encoder::compressio
     }
 }
 
-/// Decoded pixels and embedded metadata, retained by the output sink.
+/// One owned tile decode, with its embedded metadata.
 pub struct DecodedTile {
     pub image: image::RgbaImage,
     pub icc_profile: Option<Vec<u8>>,
     pub exif_metadata: Option<Vec<u8>>,
 }
 
-/// Decode image bytes while preserving the available ICC profile and EXIF
-/// metadata.
-pub(crate) struct ImageWithMetadata {
-    pub image: image::DynamicImage,
-    pub icc_profile: Option<Vec<u8>>,
-    pub exif_metadata: Option<Vec<u8>>,
+#[cfg(test)]
+pub(crate) fn load_image_with_metadata(bytes: &[u8]) -> Result<DecodedTile, image::ImageError> {
+    load_image_with_limit(bytes, None)
 }
-
-pub(crate) fn load_image_with_metadata(
+pub(crate) fn load_image_with_limit(
     bytes: &[u8],
-) -> Result<ImageWithMetadata, image::ImageError> {
+    max_alloc: Option<u64>,
+) -> Result<DecodedTile, image::ImageError> {
     use image::ImageDecoder as _;
-    let reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?;
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?;
+    if let Some(max_alloc) = max_alloc {
+        let mut limits = image::Limits::default();
+        limits.max_alloc = Some(max_alloc);
+        reader.limits(limits);
+    }
     let mut decoder = reader.into_decoder()?;
     let icc_profile = decoder.icc_profile().unwrap_or(None);
     let exif_metadata = decoder.exif_metadata().unwrap_or(None);
-    let image = image::DynamicImage::from_decoder(decoder)?;
-    Ok(ImageWithMetadata {
+    let image = image::DynamicImage::from_decoder(decoder)?.into_rgba8();
+    Ok(DecodedTile {
         image,
         icc_profile,
         exif_metadata,
     })
-}
-
-pub(crate) fn blit_onto(
-    target: &mut image::RgbaImage,
-    destination: Vec2d,
-    extent: Option<Vec2d>,
-    tile: &image::RgbaImage,
-) {
-    let extent = extent.unwrap_or(Vec2d {
-        x: tile.width(),
-        y: tile.height(),
-    });
-    let max_w = target.width().saturating_sub(destination.x);
-    let max_h = target.height().saturating_sub(destination.y);
-    let copy_w = extent.x.min(tile.width()).min(max_w);
-    let copy_h = extent.y.min(tile.height()).min(max_h);
-    if copy_w == 0 || copy_h == 0 {
-        return;
-    }
-    let cropped = image::imageops::crop_imm(tile, 0, 0, copy_w, copy_h);
-    image::imageops::overlay(
-        target,
-        &*cropped,
-        i64::from(destination.x),
-        i64::from(destination.y),
-    );
 }
 
 /// Encode PNG at the configured deflate tier, preserving ICC and EXIF metadata.
@@ -192,22 +153,7 @@ pub(crate) fn encode_png_to<W: std::io::Write>(
     Ok(())
 }
 
-/// Encode the assembled canvas as JPEG at `quality` (native default
-/// [`JPEG_QUALITY`]). Sides beyond [`JPEG_MAX_SIDE`] fail with typed
-/// `output.encode-failed`: JPEG cannot address them. JPEG carries no alpha,
-/// so transparent canvas regions (kept-partial holes) save as black. The
-/// first tile's ICC profile is embedded when present. EXIF is not written.
-pub fn encode_jpeg(
-    image: &image::RgbaImage,
-    quality: u8,
-    icc_profile: Option<&[u8]>,
-) -> Result<Vec<u8>, Error> {
-    let mut bytes = Vec::new();
-    encode_jpeg_to(&mut bytes, image, quality, icc_profile)?;
-    Ok(bytes)
-}
-
-/// Borrow RGB channels without allocating an RGB copy of the canvas.
+/// Borrow RGB channels without copying the RGBA allocation.
 struct RgbView<'a>(&'a image::RgbaImage);
 
 impl image::GenericImageView for RgbView<'_> {
@@ -223,25 +169,30 @@ impl image::GenericImageView for RgbView<'_> {
     }
 }
 
+/// Encode a local RGB tile, borrowing the RGBA allocation.
+pub fn encode_jpeg(
+    image: &image::RgbaImage,
+    quality: u8,
+    icc_profile: Option<&[u8]>,
+) -> Result<Vec<u8>, Error> {
+    let mut bytes = Vec::new();
+    encode_jpeg_to(&mut bytes, image, quality, icc_profile)?;
+    Ok(bytes)
+}
+
 pub(crate) fn encode_jpeg_to<W: std::io::Write>(
     writer: W,
     image: &image::RgbaImage,
     quality: u8,
     icc_profile: Option<&[u8]>,
 ) -> Result<(), Error> {
-    if image.width() > JPEG_MAX_SIDE || image.height() > JPEG_MAX_SIDE {
-        return Err(Error::LimitExceeded {
-            limit: LimitContext {
-                reason: LimitReason::JpegSide,
-                dimensions: Some(Size {
-                    width: image.width(),
-                    height: image.height(),
-                }),
-                bytes_required: None,
-                bytes_available: None,
-            },
-        });
-    }
+    check_dimensions(
+        dezoomify::model::OutputFormat::Jpeg,
+        &Size {
+            width: image.width(),
+            height: image.height(),
+        },
+    )?;
     let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(writer, quality);
     if let Some(profile) = icc_profile {
         let _ = image::ImageEncoder::set_icc_profile(&mut encoder, profile.to_vec());
@@ -254,204 +205,19 @@ pub(crate) fn encode_jpeg_to<W: std::io::Write>(
     Ok(())
 }
 
-/// Encode the assembled canvas as TIFF: one deflate-compressed image at the
-/// level selected by `compression` (see [`tiff_compression_for`]; the
-/// default 5 selects fast), with no side limit. The output stays lossless
-/// at every level: higher compression only trades slower encodes for
-/// smaller files, never quality. The first tile's ICC profile is embedded
-/// when present.
-pub fn encode_tiff(
-    image: &image::RgbaImage,
-    compression: u8,
-    icc_profile: Option<&[u8]>,
-) -> Result<Vec<u8>, Error> {
-    let mut cursor = std::io::Cursor::new(Vec::new());
-    encode_tiff_to(&mut cursor, image, compression, icc_profile)?;
-    Ok(cursor.into_inner())
-}
-
-pub(crate) fn encode_tiff_to<W: std::io::Write + std::io::Seek>(
-    writer: W,
-    image: &image::RgbaImage,
-    compression: u8,
-    icc_profile: Option<&[u8]>,
-) -> Result<(), Error> {
-    {
-        let mut encoder = tiff::encoder::TiffEncoder::new(writer)
-            .map_err(tiff_failed)?
-            .with_compression(tiff::encoder::Compression::Deflate(tiff_compression_for(
-                compression,
-            )));
-        write_tiff_directory(&mut encoder, image, icc_profile)?;
-    }
-    Ok(())
-}
-
-/// Smallest pyramid side kept in [`encode_zif_pyramid`]: levels halve until
-/// both sides fit, so every directory is a real downscaled resolution of
-/// the canvas rather than padding.
-pub(crate) const ZIF_PYRAMID_MIN_SIDE: u32 = 256;
-
-/// Pyramid sizes for [`encode_zif_pyramid`]: the full canvas followed by
-/// halved (rounding up) levels until both sides fit in
-/// [`ZIF_PYRAMID_MIN_SIDE`]. A canvas that already fits yields a single
-/// level; larger canvases yield real multi-resolution output.
-pub(crate) fn tiff_pyramid_sizes(width: u32, height: u32) -> Vec<(u32, u32)> {
-    let mut sizes = vec![(width.max(1), height.max(1))];
-    while sizes
-        .last()
-        .is_some_and(|(w, h)| *w > ZIF_PYRAMID_MIN_SIDE || *h > ZIF_PYRAMID_MIN_SIDE)
-    {
-        let (w, h) = sizes.last().copied().unwrap_or((1, 1));
-        sizes.push((w.div_ceil(2).max(1), h.div_ceil(2).max(1)));
-    }
-    sizes
-}
-
-pub fn encode_zif_pyramid(
-    image: &image::RgbaImage,
-    compression: u8,
-    icc_profile: Option<&[u8]>,
-) -> Result<Vec<u8>, Error> {
-    let mut cursor = std::io::Cursor::new(Vec::new());
-    encode_zif_pyramid_to(&mut cursor, image, compression, icc_profile)?;
-    Ok(cursor.into_inner())
-}
-
-pub(crate) fn encode_zif_pyramid_to<W: std::io::Write + std::io::Seek>(
-    writer: W,
-    image: &image::RgbaImage,
-    compression: u8,
-    icc_profile: Option<&[u8]>,
-) -> Result<(), Error> {
-    let failed = |e: zif_tiff::Error| Error::EncodeFailed(format!("ZIF: {e}").into());
-    let mut container = zif_tiff::Writer::new()
-        .dimensions((u64::from(image.width()), u64::from(image.height())))
-        .tile_size((256, 256))
-        .map_err(failed)?
-        .pyramid()
-        .codec(zif_tiff::Codec::Png)
-        .color_model(zif_tiff::ColorModel::Rgb)
-        .channels(3)
-        .map_err(failed)?
-        .build()
-        .map_err(failed)?;
-    let mut output = zif_tiff::std::RangeWriter::wrap(writer);
-    output
-        .apply(container.init().map_err(failed)?)
-        .map_err(failed)?;
-    let mut previous = None;
-    for (level, (width, height)) in tiff_pyramid_sizes(image.width(), image.height())
-        .into_iter()
-        .enumerate()
-    {
-        let downscaled = if level == 0 {
-            None
-        } else {
-            Some(image::imageops::resize(
-                previous.as_ref().unwrap_or(image),
-                width,
-                height,
-                image::imageops::FilterType::Triangle,
-            ))
-        };
-        let view = downscaled.as_ref().unwrap_or(image);
-        for y in (0..height).step_by(256) {
-            for x in (0..width).step_by(256) {
-                let tile = image::RgbImage::from_fn(
-                    (width - x).min(256),
-                    (height - y).min(256),
-                    |tx, ty| {
-                        let p = view.get_pixel(x + tx, y + ty);
-                        image::Rgb([p[0], p[1], p[2]])
-                    },
-                );
-                let mut bytes = Vec::new();
-                let mut encoder = image::codecs::png::PngEncoder::new_with_quality(
-                    &mut bytes,
-                    png_compression_for(compression),
-                    image::codecs::png::FilterType::Adaptive,
-                );
-                if let Some(icc) = icc_profile {
-                    let _ = image::ImageEncoder::set_icc_profile(&mut encoder, icc.to_vec());
-                }
-                image::ImageEncoder::write_image(
-                    encoder,
-                    tile.as_raw(),
-                    tile.width(),
-                    tile.height(),
-                    image::ExtendedColorType::Rgb8,
-                )
-                .map_err(|e| Error::EncodeFailed(e.to_string().into()))?;
-                output
-                    .apply(
-                        container
-                            .put_tile_at_level(
-                                level,
-                                (u64::from(x / 256), u64::from(y / 256)),
-                                &bytes,
-                            )
-                            .map_err(failed)?,
-                    )
-                    .map_err(failed)?;
-            }
-        }
-        previous = downscaled;
-    }
-    Ok(())
-}
-
-fn tiff_failed(error: tiff::TiffError) -> Error {
-    Error::EncodeFailed(format!("tiff encode failed: {error}").into())
-}
-
-/// Write one RGBA image as a single directory of an open TIFF encoder,
-/// embedding the ICC profile when present.
-fn write_tiff_directory<W: std::io::Write + std::io::Seek>(
-    encoder: &mut tiff::encoder::TiffEncoder<W>,
-    image: &image::RgbaImage,
-    icc_profile: Option<&[u8]>,
-) -> Result<(), Error> {
-    let mut directory = encoder
-        .new_image::<tiff::encoder::colortype::RGBA8>(image.width(), image.height())
-        .map_err(tiff_failed)?;
-    if let Some(profile) = icc_profile {
-        let _ = directory
-            .encoder()
-            .write_tag(tiff::tags::Tag::IccProfile, profile);
-    }
-    directory.write_data(image.as_raw()).map_err(tiff_failed)
-}
-
-/// Encode the assembled canvas as lossless WebP (no side limit beyond
-/// [`WEBP_MAX_SIDE`]; sides beyond it fail with typed
-/// `output.encode-failed`). WebP lossless has no quality knob, so
-/// `--compression` does not apply here; the first tile's ICC profile is
-/// embedded when present.
-pub fn encode_webp(image: &image::RgbaImage, icc_profile: Option<&[u8]>) -> Result<Vec<u8>, Error> {
-    let mut bytes = Vec::new();
-    encode_webp_to(&mut bytes, image, icc_profile)?;
-    Ok(bytes)
-}
-
+/// Lossless WebP requires contiguous pixels; preserve the selected ICC profile.
 pub(crate) fn encode_webp_to<W: std::io::Write>(
     writer: W,
     image: &image::RgbaImage,
     icc_profile: Option<&[u8]>,
 ) -> Result<(), Error> {
-    if image.width() > WEBP_MAX_SIDE || image.height() > WEBP_MAX_SIDE {
-        return Err(Error::LimitExceeded {
-            limit: LimitContext {
-                reason: LimitReason::WebpSide,
-                dimensions: Some(Size {
-                    width: image.width(),
-                    height: image.height(),
-                }),
-                bytes_required: None,
-                bytes_available: None,
-            },
-        });
-    }
+    check_dimensions(
+        dezoomify::model::OutputFormat::Webp,
+        &Size {
+            width: image.width(),
+            height: image.height(),
+        },
+    )?;
     let mut encoder = image::codecs::webp::WebPEncoder::new_lossless(writer);
     if let Some(profile) = icc_profile {
         let _ = image::ImageEncoder::set_icc_profile(&mut encoder, profile.to_vec());
@@ -469,315 +235,4 @@ pub(crate) fn encode_webp_to<W: std::io::Write>(
         )
     })?;
     Ok(())
-}
-
-/// Powers of two covering the pyramid: 1 always, then doubling while the
-/// downscaled canvas still exceeds one tile side.
-pub(crate) fn iiif_scale_factors(width: u32, height: u32) -> Vec<u32> {
-    let mut factors = vec![1u32];
-    let mut scale = 1u32;
-    while width.div_ceil(scale) > IIIF_TILE_WIDTH || height.div_ceil(scale) > IIIF_TILE_WIDTH {
-        scale = scale.saturating_mul(2);
-        factors.push(scale);
-    }
-    factors
-}
-
-/// Minimal IIIF Image API v2 `info.json` for a static directory: the tile
-/// width and scale factors match the files [`render_iiif_dir`] writes, so a
-/// plain static file server answers each tile's IIIF URL. `id` names the
-/// image (the destination directory name); deployments serving the directory
-/// under a public URL replace it with that URL.
-pub(crate) fn iiif_info_json(id: &str, width: u32, height: u32) -> Vec<u8> {
-    let factors = iiif_scale_factors(width, height);
-    let sizes: Vec<serde_json::Value> = factors
-        .iter()
-        .map(|scale| {
-            serde_json::json!({
-                "width": width.div_ceil(*scale),
-                "height": height.div_ceil(*scale),
-            })
-        })
-        .collect();
-    serde_json::to_vec_pretty(&serde_json::json!({
-        "@context": "http://iiif.io/api/image/2/context.json",
-        "@id": id,
-        "protocol": "http://iiif.io/api/image",
-        "width": width,
-        "height": height,
-        "sizes": sizes,
-        "tiles": [{ "width": IIIF_TILE_WIDTH, "scaleFactors": factors }],
-        "profile": ["http://iiif.io/api/image/2/level1.json"],
-    }))
-    .unwrap_or_default()
-}
-
-/// Render one `iiif-dir` destination from the assembled canvas: the manifest
-/// plus JPEG tiles, each stored at its real IIIF request path
-/// (`{x},{y},{w},{h}/{tw},/0/default.jpg`, size-by-width) with one
-/// `full/max/0/default.jpg` overview. Files arrive sorted by relative path;
-/// tiles encode at `jpeg_quality` without
-/// embedded profiles.
-pub(crate) fn render_iiif_dir(
-    image: &image::RgbaImage,
-    id: &str,
-    jpeg_quality: u8,
-) -> Result<(Vec<u8>, crate::output::IiifTiles), Error> {
-    let (width, height) = (image.width(), image.height());
-    let mut files: crate::output::IiifTiles = Vec::new();
-    for scale in iiif_scale_factors(width, height) {
-        let down_w = width.div_ceil(scale).max(1);
-        let down_h = height.div_ceil(scale).max(1);
-        let downscaled;
-        let view: &image::RgbaImage = if scale == 1 {
-            image
-        } else {
-            downscaled = image::imageops::resize(
-                image,
-                down_w,
-                down_h,
-                image::imageops::FilterType::Triangle,
-            );
-            &downscaled
-        };
-        let cols = down_w.div_ceil(IIIF_TILE_WIDTH);
-        let rows = down_h.div_ceil(IIIF_TILE_WIDTH);
-        for row in 0..rows {
-            for col in 0..cols {
-                let tx = col * IIIF_TILE_WIDTH;
-                let ty = row * IIIF_TILE_WIDTH;
-                let tw = (down_w - tx).min(IIIF_TILE_WIDTH);
-                let th = (down_h - ty).min(IIIF_TILE_WIDTH);
-                let tile = image::imageops::crop_imm(view, tx, ty, tw, th).to_image();
-                let bytes = encode_jpeg(&tile, jpeg_quality, None)?;
-                let relative = format!(
-                    "{},{},{},{}/{},/0/default.jpg",
-                    u64::from(tx) * u64::from(scale),
-                    u64::from(ty) * u64::from(scale),
-                    u64::from(tw) * u64::from(scale),
-                    u64::from(th) * u64::from(scale),
-                    tw,
-                );
-                files.push((relative, bytes));
-            }
-        }
-    }
-    files.push((
-        "full/max/0/default.jpg".to_string(),
-        encode_jpeg(image, jpeg_quality, None)?,
-    ));
-    files.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok((iiif_info_json(id, width, height), files))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn compression_maps_to_png_and_tiff_tiers() {
-        use image::codecs::png::CompressionType;
-        use tiff::encoder::compression::DeflateLevel;
-        assert_eq!(png_compression_for(0), CompressionType::Fast);
-        assert_eq!(png_compression_for(19), CompressionType::Fast);
-        assert_eq!(png_compression_for(20), CompressionType::Default);
-        assert_eq!(png_compression_for(60), CompressionType::Default);
-        assert_eq!(png_compression_for(61), CompressionType::Best);
-        assert_eq!(png_compression_for(100), CompressionType::Best);
-        // TIFF deflate follows the same tiers: one flag drives every
-        // lossless encoder identically.
-        assert_eq!(tiff_compression_for(0), DeflateLevel::Fast);
-        assert_eq!(tiff_compression_for(5), DeflateLevel::Fast);
-        assert_eq!(tiff_compression_for(20), DeflateLevel::Balanced);
-        assert_eq!(tiff_compression_for(60), DeflateLevel::Balanced);
-        assert_eq!(tiff_compression_for(61), DeflateLevel::Best);
-        assert_eq!(tiff_compression_for(100), DeflateLevel::Best);
-    }
-
-    #[test]
-    fn tiff_deflate_levels_decode_pixel_exact() {
-        let mut image = image::RgbaImage::new(16, 16);
-        for (x, y, pixel) in image.enumerate_pixels_mut() {
-            *pixel = image::Rgba([(x * 16) as u8, (y * 16) as u8, 128, 255]);
-        }
-        // Every compression level writes a real little-endian TIFF and
-        // decodes back pixel-exact: deflate trades size for time, never
-        // quality.
-        for compression in [0, 5, 20, 60, 61, 100] {
-            let tiff = encode_tiff(&image, compression, None).expect("tiff encodes");
-            assert!(
-                tiff.starts_with(&[0x49, 0x49, 0x2A, 0x00]),
-                "tiff output carries the little-endian magic at compression {compression}"
-            );
-            let decoded = image::load_from_memory(&tiff)
-                .expect("tiff decodes")
-                .to_rgba8();
-            assert_eq!((decoded.width(), decoded.height()), (16, 16));
-            assert_eq!(
-                decoded.as_raw(),
-                image.as_raw(),
-                "deflate must be lossless at compression {compression}"
-            );
-        }
-    }
-
-    #[test]
-    fn tiff_embeds_icc_profile() {
-        let icc = vec![
-            0x00, 0x00, 0x02, 0x0C, 0x61, 0x64, 0x73, 0x70, 0x00, 0x00, 0x00, 0x00, 0x6D, 0x6E,
-            0x74, 0x72, 0x52, 0x47, 0x42, 0x20,
-        ];
-        let image = image::RgbaImage::from_pixel(4, 4, image::Rgba([9, 9, 9, 255]));
-        let tiff = encode_tiff(&image, 5, Some(&icc)).expect("tiff encodes");
-        // Assert through the TIFF decoder: the tag is present with the exact
-        // profile bytes. (`load_image_with_metadata` applies the image
-        // crate's default decode limits, under which its TIFF ICC accessor
-        // reports `None` even for a conformant tag, so it cannot observe
-        // this; the PNG/JPEG ICC round-trip above covers that path.)
-        let mut decoder =
-            tiff::decoder::Decoder::new(std::io::Cursor::new(&tiff)).expect("tiff decodes");
-        assert_eq!(
-            decoder
-                .get_tag_u8_vec(tiff::tags::Tag::IccProfile)
-                .expect("icc tag present"),
-            icc,
-        );
-    }
-
-    #[test]
-    fn zif_pyramid_sizes_halve_to_the_minimum_side() {
-        assert_eq!(tiff_pyramid_sizes(16, 16), vec![(16, 16)]);
-        assert_eq!(tiff_pyramid_sizes(256, 256), vec![(256, 256)]);
-        assert_eq!(tiff_pyramid_sizes(512, 512), vec![(512, 512), (256, 256)]);
-        assert_eq!(
-            tiff_pyramid_sizes(1024, 768),
-            vec![(1024, 768), (512, 384), (256, 192)]
-        );
-        // Odd sides round up so no level collapses to zero.
-        assert_eq!(
-            tiff_pyramid_sizes(513, 100),
-            vec![(513, 100), (257, 50), (129, 25)]
-        );
-    }
-
-    #[test]
-    fn zif_pyramid_holds_real_downscaled_levels() {
-        let mut image = image::RgbaImage::new(512, 512);
-        for (x, y, pixel) in image.enumerate_pixels_mut() {
-            *pixel = image::Rgba([(x / 2) as u8, (y / 2) as u8, 128, 255]);
-        }
-        let zif = encode_zif_pyramid(&image, 5, None).expect("zif encodes");
-        assert!(
-            zif.starts_with(&[0x49, 0x49, 0x2B, 0x00, 8, 0, 0, 0]),
-            "ZIF requires BigTIFF"
-        );
-        let metadata = zif_tiff::std::read_zif(std::io::Cursor::new(&zif)).unwrap();
-        assert_eq!(metadata.level_count(), 2);
-        for (index, level) in metadata.levels().iter().enumerate() {
-            let expected = tiff_pyramid_sizes(512, 512)[index];
-            assert_eq!(
-                (level.width(), level.height()),
-                (u64::from(expected.0), u64::from(expected.1))
-            );
-            assert_eq!(level.codec(), zif_tiff::Codec::Png);
-            for tile in metadata.level_tiles(index).unwrap() {
-                let range = tile.byte_range();
-                let decoded =
-                    image::load_from_memory(&zif[range.start as usize..range.end as usize])
-                        .unwrap()
-                        .to_rgba8();
-                let (x, y) = tile.position();
-                if index == 0 {
-                    for (tx, ty, pixel) in decoded.enumerate_pixels() {
-                        assert_eq!(pixel, image.get_pixel(x as u32 + tx, y as u32 + ty));
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn webp_lossless_round_trip_is_pixel_exact() {
-        let mut image = image::RgbaImage::new(16, 16);
-        for (x, y, pixel) in image.enumerate_pixels_mut() {
-            *pixel = image::Rgba([(x * 16) as u8, (y * 16) as u8, 128, 255]);
-        }
-        let webp = encode_webp(&image, None).expect("webp encodes");
-        assert!(
-            webp.starts_with(b"RIFF") && webp.get(8..12) == Some(b"WEBP".as_slice()),
-            "webp output carries the RIFF/WEBP container markers"
-        );
-        let decoded = image::load_from_memory(&webp)
-            .expect("webp decodes")
-            .to_rgba8();
-        assert_eq!((decoded.width(), decoded.height()), (16, 16));
-        assert_eq!(decoded.as_raw(), image.as_raw());
-        // An ICC profile never breaks the lossless path.
-        let icc = vec![1u8, 2, 3, 4, 5, 6, 7, 8];
-        let tagged = encode_webp(&image, Some(&icc)).expect("webp encodes with icc");
-        let back = image::load_from_memory(&tagged)
-            .expect("tagged webp decodes")
-            .to_rgba8();
-        assert_eq!(back.as_raw(), image.as_raw());
-    }
-
-    #[test]
-    fn webp_rejects_canvases_beyond_its_side_limit() {
-        let wide = image::RgbaImage::new(WEBP_MAX_SIDE + 1, 1);
-        let error = encode_webp(&wide, None).expect_err("webp side limit applies");
-        assert_eq!(
-            error,
-            Error::LimitExceeded {
-                limit: LimitContext {
-                    reason: LimitReason::WebpSide,
-                    dimensions: Some(Size {
-                        width: WEBP_MAX_SIDE + 1,
-                        height: 1,
-                    }),
-                    bytes_required: None,
-                    bytes_available: None,
-                }
-            }
-        );
-    }
-
-    #[test]
-    fn tile_metadata_survives_decode_and_reencode() {
-        use image::codecs::png::CompressionType;
-        let icc = vec![
-            0x00, 0x00, 0x02, 0x0C, 0x61, 0x64, 0x73, 0x70, 0x00, 0x00, 0x00, 0x00, 0x6D, 0x6E,
-            0x74, 0x72, 0x52, 0x47, 0x42, 0x20,
-        ];
-        let exif = vec![0x45, 0x78, 0x69, 0x66, 0x00, 0x00, 0x4D, 0x4D, 0x00, 0x2A];
-        // A PNG carrying both blocks decodes with its metadata attached.
-        let mut tagged = Vec::new();
-        {
-            use image::ImageEncoder as _;
-            let mut encoder = image::codecs::png::PngEncoder::new(&mut tagged);
-            encoder.set_icc_profile(icc.clone()).unwrap();
-            encoder.set_exif_metadata(exif.clone()).unwrap();
-            encoder
-                .write_image(&[255, 0, 0, 255], 1, 1, image::ExtendedColorType::Rgba8)
-                .unwrap();
-        }
-        let loaded = load_image_with_metadata(&tagged).expect("decodes");
-        assert_eq!(loaded.image.width(), 1);
-        assert_eq!(loaded.icc_profile.as_deref(), Some(icc.as_slice()));
-        assert_eq!(loaded.exif_metadata.as_deref(), Some(exif.as_slice()));
-        // Re-encoding through the pipeline encoders preserves the blocks.
-        let rgba = loaded.image.to_rgba8();
-        let png =
-            encode_png(&rgba, CompressionType::Fast, Some(&icc), Some(&exif)).expect("png encodes");
-        let png_back = load_image_with_metadata(&png).expect("png decodes");
-        assert_eq!(png_back.icc_profile.as_deref(), Some(icc.as_slice()));
-        assert_eq!(png_back.exif_metadata.as_deref(), Some(exif.as_slice()));
-        let jpeg = encode_jpeg(&rgba, 95, Some(&icc)).expect("jpeg encodes");
-        let jpeg_back = load_image_with_metadata(&jpeg).expect("jpeg decodes");
-        assert_eq!(jpeg_back.icc_profile.as_deref(), Some(icc.as_slice()));
-        // No metadata in, no metadata out: byte-identical to the plain path.
-        let plain_png = encode_png(&rgba, CompressionType::Fast, None, None).expect("png encodes");
-        let plain_back = load_image_with_metadata(&plain_png).expect("decodes");
-        assert_eq!(plain_back.icc_profile, None);
-        assert_eq!(plain_back.exif_metadata, None);
-    }
 }

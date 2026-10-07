@@ -16,9 +16,45 @@ Selection preserves `--largest`, exact `--zoom-level`, width/height caps, and `-
 
 After geometry probes, output preflight receives compact coverage without generating tile requests. Known JPEG/WebP side limits and explicit destinations are checked before ordinary tile acquisition; publication checks the destination again to handle later changes.
 
-`sink.rs` owns deterministic placement and memory accounting. Known geometry paints directly. Unknown geometry spools under the configured disk cap; overlapping tiles retain plan order under the retained-memory cap. The canvas uses four bytes per pixel and cannot exceed available system memory.
+Explicit raster output starts a blocking encoder at preflight when dimensions are known. Acquisition workers decode while it compresses. Unknown geometry keeps decoded inputs in RAM until final dimensions are available. Auto format also retains decoded inputs until acquisition settles so it can preserve transparency and gaps when choosing PNG or JPEG; uncertain coverage chooses PNG. For large images, choosing an explicit format allows streaming within a smaller RAM budget. There is no raw pixel spill or assembled canvas for PNG, JPEG or TIFF.
 
-Tile placement borrows cropped pixels rather than copying them into a temporary image. Output encoders borrow the assembled canvas without cloning its pixel buffer. Single-file encoders write through a 64 KiB buffer directly to staging; JPEG borrows RGB channels without a full RGB copy. Codec workspace and pyramid pixels may require additional memory.
+```mermaid
+flowchart TD
+    Fetch["Fetch tiles concurrently; complete in any order"] --> Process["Source processing, when required"]
+    Process --> Route{"Output format"}
+    Route -->|IIIF / ZIF| Tiles["Write compatible encoded bytes to staging"]
+    Route -->|PNG / JPEG / TIFF / WebP| Decode["Decode once into an owned RGBA allocation"]
+    Decode --> Producer["Place, clip and composite producer-owned strips"]
+    Producer --> Done["Report tile completion immediately"]
+    Producer --> Queue["Transfer complete strips in row order"]
+    Queue --> Encoder["Own a strip, index pixels, compress"]
+    Encoder --> File["Staged image file"]
+    Tiles --> Prepare["Local conversion and missing pyramid levels, when needed"]
+    Prepare --> Publish["Finish, sync, publish"]
+    File --> Publish
+```
+
+`pixel_pipe.rs` keeps a producer-owned reorder buffer of contiguous full-width strips. Tiles are copied into those allocations, clipped and composited before publication, then their decode buffers are released. A coverage bitmap records which pixels have arrived; it is discarded at handoff. The encoder owns this simple value (RAM reservation omitted):
+
+```rust
+struct PixelStrip {
+    first_row: u32,
+    rows: u32,
+    rgba: Vec<u8>,
+}
+```
+
+Strips contain 64 rows, except the final strip, and publish in image order once every pixel is covered by any tile. They do not wait for other overlapping contributors. For an 8192-pixel-wide image, each full strip holds 2 MiB, and the entire image needs 128 handoffs. Copying contributions into strips does not allocate a second full-image canvas.
+
+While the producer owns a strip, incoming contributions use copy/alpha compositing. Handoff freezes the entire strip, including pixels the encoder has not read. Later contributions to handed-off rows are discarded; contributions to later rows still apply. Conflicting overlaps have unspecified results that can vary between runs and strips. Identical opaque overlaps remain harmless.
+
+PNG and TIFF consume rows from their owned strip and drop it afterward. JPEG's concrete `GenericImageView` adapter retains its strip through the encoder's full-width eight-row bands and repeated edge padding, including all 64 reads of a 1×1 image. Within a strip, `get_pixel` does ordinary local indexing; synchronization and progress updates occur only at strip handoffs. There are no pixel read counters, consumed-range maps, block leases or additional pixel cache. Adapter tests exercise strip boundaries and padded dimensions.
+
+All acquisition uses unordered completion with bounded concurrency. Placement returns after accepting pixels; it never waits for encoder queue capacity. The pipeline uses one RAM limit, by default `available_memory_bytes() / 5 * 4` (80% at invocation start). Pending strips, queued strips, the encoder's current strip, tile-processing buffers and codec workspace share this budget. Reservations follow ownership into the queue and encoder and are released when buffers are freed. There is no separate strip-count or queue limit. Acquisition reserves before processing, decoding and strip allocation; network responses remain bounded by request size and concurrency. Instrumentation measures charged allocations, not process RSS. WebP collects strips into its explicitly reserved contiguous codec buffer.
+
+An early missing tile or downloads outpacing encoding can exhaust the byte budget. Acquisition then returns the existing typed resource error; it neither spills pixels to disk nor waits for memory. Avoiding these failures would require additional scheduling.
+
+Metadata selection waits for completion: the earliest final-plan tile carrying ICC and EXIF wins independently, including reused probes. PNG/JPEG compression starts without waiting for that choice. Their finalized metadata chunks are inserted into the staged header by moving compressed bytes with a 64 KiB buffer; pixels are not decoded or recompressed. TIFF and WebP attach finalized metadata before finishing their encoders.
 
 When changing tiled output, preserve compatible source bytes through the [encoded tile writer](../crates/dezoomify-native/src/tile_output.rs). Structural checks catch ordinary truncation without decoding; they do not promise detection of all compressed-data corruption. Convert tiles locally only when the output needs it, keeping failures within acquisition's retry and partial handling.
 
@@ -28,7 +64,11 @@ Output publication checks cancellation and the destination before committing. Un
 
 File and IIIF directory publication reserve unique staging paths exclusively. Failed writes or renames attempt to remove their own staging output before returning the original error. Single-file writes check cancellation during encoding and before publication. Without overwrite permission, file publication uses atomic no-replace publication, including on ordinary removable drives, so a destination created after validation remains intact. The writer records filesystem write, seek and flush failures as `write-failed`, even when a codec wraps the I/O error.
 
-Instrumentation records attempts, acquired tiles, failures, retries, wait time, fetched bytes, peak in-flight work, retained/spooled bytes, decode bytes, canvas, and encoded output. `encoded_bytes` counts published bytes; `peak_encoded_bytes` counts the output buffer separately from codec workspace.
+Instrumentation records attempts, acquired tiles, failures, retries, wait time, fetched bytes, peak in-flight work, raster RAM reservations, decode bodies and encoded output. `encoded_bytes` counts published bytes; the output buffer is bounded separately from the file length. Tile writers enforce local conversion limits independently of the raster budget. Retired canvas and spool settings, counters and encoder helpers are removed.
+
+[Native output performance](native-output-performance.md) records end-to-end timing and process RSS comparisons, their limits, and reproduction commands.
+
+Every route returns `PreparedOutput`, which owns a staged file or directory. A shared publication step finishes syncing and refuses collisions; automatic naming can choose another suffix without repeating encoding. A future lossless JPEG join can return the same prepared file while bypassing pixels entirely.
 
 ### Output naming and encoders
 
@@ -46,6 +86,8 @@ Other extensions fail typed before any work. JPEG caps at 65535 px per side, Web
 Post-retry failures can save a gappy result at a `.partial` sibling (`out.png` → `out.partial.png`). The intended complete destination stays untouched. Retry acquires only missing tiles with a fresh budget and preserves good tiles. Discard writes nothing and reports `job.partial-discarded`; CLI reporting uses its public `tile.download-failed` code.
 
 The CLI applies its configured partial policy immediately. The desktop awaits a user keep/discard/retry choice and applies the configured default after 60 seconds. Missing-tile details and partial naming remain visible in the result.
+
+An unresolved hole blocks its reader until Retry supplies pixels or Keep finalizes transparent/black holes. Discard, cancellation and producer failures wake the encoder. Encoder failures stop acquisition. Settlement awaits owned decoder and encoder work before removing staging. Tile acquisition counts and pixel preparation are reported separately; preparation continues while acquisition is paused, and Cancel remains available.
 
 ## Desktop
 

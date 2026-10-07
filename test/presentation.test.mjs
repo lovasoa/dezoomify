@@ -19,6 +19,22 @@ const output = (extra = {}) => ({
   ...extra,
 });
 
+test("native output preparation uses pixel progress and does not pause compression", () => {
+  const view = presentProgress(
+    progress({
+      phase: "output",
+      completed: 4,
+      preparation: { completed_pixels: 24, total_pixels: 32 },
+    }),
+    { paused: true },
+  );
+  assert.deepEqual(view.progress, { current: 24, total: 32, unit: "pixels" });
+  assert.equal(view.detailKey, "view.job.preparation");
+  assert.deepEqual(view.detailVars, { percent: 75 });
+  assert.equal(view.paused, false);
+  assert.equal(presentProgress(progress({ phase: "output" })).progress, null);
+});
+
 test("idle, discovery, pause, and cancellation describe the current work", () => {
   assert.equal(presentIdle().phase, "idle");
   const live = presentProgress(progress({ phase: "discovery" }), { paused: true });
