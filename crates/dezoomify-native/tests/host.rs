@@ -267,6 +267,174 @@ fn odd_sized_and_mixed_codec_iiif_trees_roundtrip_through_the_reader() {
 }
 
 #[test]
+fn zif_reuses_standalone_jpeg_and_rgb_png_tiles() {
+    let work = temp_dir("zif-reuse");
+    for (extension, width, index) in [
+        ("jpg", 16, 0),
+        ("png", 16, 0),
+        ("jpg", 32, 1),
+        ("png", 32, 1),
+    ] {
+        let source = work.join(format!("source-{extension}-{width}.dzi"));
+        let level = if width == 16 { 4 } else { 5 };
+        let tiles = work.join(format!("source-{extension}-{width}_files/{level}"));
+        std::fs::create_dir_all(&tiles).unwrap();
+        std::fs::write(&source, format!("<Image TileSize=\"16\" Overlap=\"0\" Format=\"{extension}\" xmlns=\"http://schemas.microsoft.com/deepzoom/2008\"><Size Width=\"{width}\" Height=\"16\"/></Image>")).unwrap();
+        let pixels = image::RgbImage::from_pixel(16, 16, image::Rgb([40, 70, 90]));
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        pixels
+            .write_to(
+                &mut bytes,
+                if extension == "jpg" {
+                    image::ImageFormat::Jpeg
+                } else {
+                    image::ImageFormat::Png
+                },
+            )
+            .unwrap();
+        let bytes = bytes.into_inner();
+        std::fs::write(tiles.join(format!("{index}_0.{extension}")), &bytes).unwrap();
+        let lower_bytes = if width == 32 {
+            let lower = work.join(format!("source-{extension}-{width}_files/4"));
+            std::fs::create_dir_all(&lower).unwrap();
+            let mut bytes = std::io::Cursor::new(Vec::new());
+            image::RgbImage::from_pixel(16, 8, image::Rgb([90, 70, 40]))
+                .write_to(
+                    &mut bytes,
+                    if extension == "jpg" {
+                        image::ImageFormat::Jpeg
+                    } else {
+                        image::ImageFormat::Png
+                    },
+                )
+                .unwrap();
+            let bytes = bytes.into_inner();
+            std::fs::write(lower.join(format!("0_0.{extension}")), &bytes).unwrap();
+            Some(bytes)
+        } else {
+            None
+        };
+        dezoomify_native::cache::store(
+            &work.join("cache"),
+            &dezoomify_native::cache::job_namespace(source.to_str().unwrap()),
+            tiles
+                .join(format!("{index}_0.{extension}"))
+                .to_str()
+                .unwrap(),
+            &bytes[..bytes.len() - 1],
+        )
+        .unwrap();
+        let destination = work.join(format!("out-{extension}-{width}.zif"));
+        let host = NativeHost::new(JobOptions {
+            input_url: source.to_str().unwrap().into(),
+            output: OutputTarget::File(destination.clone()),
+            largest: true,
+            compression: 99,
+            keep_partial: true,
+            max_retries: 0,
+            cache_dir: Some(work.join("cache")),
+            ..Default::default()
+        })
+        .unwrap();
+        host.transport
+            .block_on(dezoomify::dezoomify(
+                host.inputs(),
+                host.algorithm_options(),
+                &host,
+            ))
+            .unwrap();
+        let publication = host.publication().unwrap();
+        if index == 0 {
+            assert_eq!(publication.instrumentation.pixel_decodes, 0);
+        } else {
+            assert_eq!(publication.output.missing, [0]);
+        }
+        assert_eq!(
+            publication.instrumentation.peak_encoded_bytes, 0,
+            "received grid tiles stream even when tile zero is missing"
+        );
+        assert_eq!(host.publication().unwrap().instrumentation.canvas_bytes, 0);
+        let container = std::fs::read(publication.path).unwrap();
+        let metadata = zif_tiff::std::read_zif(std::io::Cursor::new(&container)).unwrap();
+        assert_eq!(metadata.level_count(), if index == 0 { 1 } else { 2 });
+        assert_eq!(metadata.level(0).unwrap().tile_size(), (16, 16));
+        for level in metadata.levels() {
+            assert_eq!(
+                level.ycbcr_subsampling(),
+                (extension == "jpg").then_some((1, 1))
+            );
+        }
+        for level in 0..metadata.level_count() {
+            for tile in metadata.level_tiles(level).unwrap() {
+                let range = tile.byte_range();
+                image::load_from_memory(&container[range.start as usize..range.end as usize])
+                    .unwrap();
+            }
+        }
+        let range = metadata
+            .level_tiles(0)
+            .unwrap()
+            .nth(index as usize)
+            .unwrap()
+            .byte_range();
+        assert_eq!(&container[range.start as usize..range.end as usize], bytes);
+        if let Some(bytes) = lower_bytes {
+            let range = metadata
+                .level_tiles(1)
+                .unwrap()
+                .next()
+                .unwrap()
+                .byte_range();
+            assert_eq!(&container[range.start as usize..range.end as usize], bytes);
+        }
+    }
+    let bytes = std::fs::read(
+        dezoomify_fixture_server::scenarios_dir()
+            .join("rs-core/formats/payloads/google_arts_and_culture/tile.jpg"),
+    )
+    .unwrap();
+    let source = work.join("subsampled.dzi");
+    std::fs::write(&source, "<Image TileSize=\"512\" Overlap=\"0\" Format=\"jpg\" xmlns=\"http://schemas.microsoft.com/deepzoom/2008\"><Size Width=\"1000\" Height=\"1000\"/></Image>").unwrap();
+    for (level, side) in [(10, 2), (9, 1)] {
+        let tiles = work.join(format!("subsampled_files/{level}"));
+        std::fs::create_dir_all(&tiles).unwrap();
+        for y in 0..side {
+            for x in 0..side {
+                std::fs::write(tiles.join(format!("{x}_{y}.jpg")), &bytes).unwrap();
+            }
+        }
+    }
+    let result = support::run_file(
+        source.to_str().unwrap(),
+        &work.join("subsampled.zif"),
+        |options| options.largest = true,
+    )
+    .unwrap();
+    assert_eq!(result.instrumentation.pixel_decodes, 0);
+    let container = std::fs::read(result.path).unwrap();
+    let metadata = zif_tiff::std::read_zif(std::io::Cursor::new(&container)).unwrap();
+    assert_eq!(metadata.level_count(), 2);
+    assert_eq!(
+        (
+            metadata.level(0).unwrap().width(),
+            metadata.level(1).unwrap().width()
+        ),
+        (1000, 500)
+    );
+    for level in 0..2 {
+        assert_eq!(
+            metadata.level(level).unwrap().ycbcr_subsampling(),
+            Some((2, 2))
+        );
+        for tile in metadata.level_tiles(level).unwrap() {
+            let range = tile.byte_range();
+            assert_eq!(&container[range.start as usize..range.end as usize], bytes);
+        }
+    }
+    std::fs::remove_dir_all(work).unwrap();
+}
+
+#[test]
 fn truncated_source_tiles_reach_partial_handling_with_their_uri() {
     use dezoomify::model::{Error, RecoveryChoice};
     let work = temp_dir("iiif-truncated");
@@ -283,28 +451,52 @@ fn truncated_source_tiles_reach_partial_handling_with_their_uri() {
     .unwrap();
     let bad = tiles.join("1_0.png");
     std::fs::write(tiles.join("0_0.png"), &bytes).unwrap();
-    std::fs::write(&bad, &bytes[..bytes.len() - 1]).unwrap();
-    let chosen = std::cell::Cell::new(false);
-    let host = NativeHost::new(JobOptions {
-        input_url: source.to_string_lossy().into(),
-        output: OutputTarget::File(work.join("out.iiif")),
-        largest: true,
-        max_retries: 0,
-        cache_dir: Some(work.join("cache")),
-        ..Default::default()
-    })
+    let lower = work.join("source_files/4");
+    std::fs::create_dir_all(&lower).unwrap();
+    image::RgbImage::new(16, 8)
+        .save(lower.join("0_0.png"))
+        .unwrap();
+    let mut clipped = dezoomify_native::imaging::encode_png(
+        &image::RgbaImage::new(32, 16),
+        image::codecs::png::CompressionType::Fast,
+        None,
+        None,
+    )
     .unwrap();
-    host.on_partial(|missing| {
+    let data = clipped.windows(4).position(|v| v == b"IDAT").unwrap() + 4;
+    clipped[data] ^= 0xff;
+    // One fails inspection; the oversized PNG requires decoding before clipping.
+    for (case, broken) in [
+        ("png", &bytes[..bytes.len() - 1]),
+        ("clipped", clipped.as_slice()),
+    ] {
+        std::fs::write(&bad, broken).unwrap();
+        for extension in ["iiif", "zif"] {
+            let chosen = std::cell::Cell::new(false);
+            let host = NativeHost::new(JobOptions {
+                input_url: source.to_string_lossy().into(),
+                output: OutputTarget::File(work.join(format!("out-{case}.{extension}"))),
+                largest: true,
+                max_retries: 0,
+                cache_dir: Some(work.join(format!("cache-{case}-{extension}"))),
+                ..Default::default()
+            })
+            .unwrap();
+            host.on_partial(|missing| {
         assert_eq!(missing.missing.len(), 1);
         assert!(matches!(&missing.missing[0].failures[0], Error::Resource { request, source, .. } if request == bad.to_str().unwrap() && matches!(source.cause(), Error::DecodeFailed(_))));
         chosen.set(true);
         Box::pin(async { Ok(RecoveryChoice::Keep) })
     });
-    let result = support::run_host(&host).unwrap();
-    assert!(chosen.get());
-    assert_eq!(result.output.missing, [1]);
-    assert!(result.path.ends_with("out.partial.iiif"));
-    drop(host);
+            let result = support::run_host(&host).unwrap();
+            assert!(chosen.get());
+            assert_eq!(result.output.missing, [1]);
+            assert!(result
+                .path
+                .ends_with(format!("out-{case}.partial.{extension}")));
+            drop(host);
+        }
+    }
     std::fs::remove_dir_all(work).unwrap();
 }
 

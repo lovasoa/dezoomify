@@ -167,7 +167,7 @@ fn build_desktop_artifact(target: &str, target_os: &str, out: &Path) -> Result<(
     Ok(())
 }
 
-/// Deterministic tar.gz containing one file renamed to `inner_name`.
+/// Native CLI archive with its executable and license.
 fn tar_gz(file: &Path, inner_name: &str, out: &Path) -> Result<(), String> {
     let staging = out
         .parent()
@@ -176,12 +176,15 @@ fn tar_gz(file: &Path, inner_name: &str, out: &Path) -> Result<(), String> {
     std::fs::create_dir_all(&staging).map_err(|e| format!("create staging: {e}"))?;
     let staged = staging.join(inner_name);
     std::fs::copy(file, &staged).map_err(|e| format!("stage {}: {e}", file.display()))?;
+    std::fs::copy(crate::repo_root().join("LICENSE"), staging.join("LICENSE"))
+        .map_err(|e| format!("stage LICENSE: {e}"))?;
     let status = Command::new("tar")
         .arg("-czf")
         .arg(out)
         .arg("-C")
         .arg(&staging)
         .arg(inner_name)
+        .arg("LICENSE")
         .status()
         .map_err(|e| format!("failed to run tar: {e}"));
     let _ = std::fs::remove_dir_all(&staging);

@@ -47,6 +47,9 @@ pub(crate) struct StagedFile {
 }
 
 impl StagedFile {
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
     pub(crate) fn new(destination: &Path) -> Result<Self, Error> {
         if let Some(parent) = destination.parent().filter(|p| !p.as_os_str().is_empty()) {
             std::fs::create_dir_all(parent)

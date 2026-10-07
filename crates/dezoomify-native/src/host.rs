@@ -239,7 +239,7 @@ pub struct NativeHost<'a> {
     published: RefCell<Option<Publication>>,
     source_format: RefCell<Option<String>>,
     output_plan: RefCell<Option<OutputPlan>>,
-    iiif: RefCell<Option<Arc<std::sync::Mutex<crate::tile_output::IiifWriter>>>>,
+    tiled: RefCell<Option<Arc<std::sync::Mutex<crate::tile_output::TileWriter>>>>,
     encoded_probes: RefCell<Vec<crate::tile_output::EncodedTile>>,
 }
 
@@ -310,7 +310,7 @@ impl<'a> NativeHost<'a> {
             published: RefCell::new(None),
             source_format: RefCell::new(None),
             output_plan: RefCell::new(None),
-            iiif: RefCell::new(None),
+            tiled: RefCell::new(None),
             encoded_probes: RefCell::new(Vec::new()),
         })
     }
@@ -608,7 +608,7 @@ impl<'a> NativeHost<'a> {
 
     async fn place_encoded(&self, tile: crate::tile_output::EncodedTile) -> Result<(), Error> {
         let id = tile.id;
-        let writer = self.iiif.borrow().as_ref().cloned();
+        let writer = self.tiled.borrow().as_ref().cloned();
         if let Some(writer) = writer {
             let permit = self.decode_tails.reserve(tile.bytes.len());
             self.check_encoded_inflight()?;
@@ -755,7 +755,7 @@ impl Host for NativeHost<'_> {
         self.sink
             .borrow_mut()
             .note_declared(plan.canvas.as_ref().map(size));
-        if self.format == OutputFormat::IiifDir {
+        if matches!(self.format, OutputFormat::IiifDir | OutputFormat::Zif) {
             let destination = match &self.options.output {
                 OutputTarget::File(path) => path.clone(),
                 OutputTarget::AutoDir { dir, format } => {
@@ -767,7 +767,7 @@ impl Host for NativeHost<'_> {
             };
             let probes = std::mem::take(&mut *self.encoded_probes.borrow_mut());
             let pending: u64 = probes.iter().map(|tile| tile.bytes.len() as u64).sum();
-            let mut writer = crate::tile_output::IiifWriter::new(
+            let mut writer = crate::tile_output::TileWriter::new(
                 &destination,
                 &plan,
                 self.options.output_retain_cap.saturating_sub(pending),
@@ -801,7 +801,7 @@ impl Host for NativeHost<'_> {
             self.decode_tails
                 .encoded_retained
                 .store(writer.retained_bytes(), Ordering::SeqCst);
-            *self.iiif.borrow_mut() = Some(Arc::new(std::sync::Mutex::new(writer)));
+            *self.tiled.borrow_mut() = Some(Arc::new(std::sync::Mutex::new(writer)));
         }
         *self.output_plan.borrow_mut() = Some(plan);
         Ok(())
@@ -821,7 +821,7 @@ impl Host for NativeHost<'_> {
     }
 
     async fn probe(&self, tile: Tile) -> Result<ProbeOutcome, Error> {
-        if self.format == OutputFormat::IiifDir {
+        if matches!(self.format, OutputFormat::IiifDir | OutputFormat::Zif) {
             let result = async {
                 let mut encoded = self.encoded_tile(&tile).await?;
                 let width = std::num::NonZeroU64::new(u64::from(encoded.size.width));
@@ -837,6 +837,8 @@ impl Host for NativeHost<'_> {
                         height: extent.height.min(encoded.size.height),
                     };
                     if size != encoded.size
+                        || (self.format == OutputFormat::Zif
+                            && !crate::zif_output::can_reuse(&encoded.bytes))
                         || !matches!(
                             encoded.format,
                             image::ImageFormat::Png | image::ImageFormat::Jpeg
@@ -913,7 +915,7 @@ impl Host for NativeHost<'_> {
 
     async fn acquire_tile(&self, tile: Tile) -> Result<(), Error> {
         let result = async {
-            if self.format == OutputFormat::IiifDir {
+            if matches!(self.format, OutputFormat::IiifDir | OutputFormat::Zif) {
                 let encoded = self.encoded_tile(&tile).await?;
                 self.controls.checkpoint(false).await?;
                 return self.place_encoded(encoded).await;
@@ -955,7 +957,7 @@ impl Host for NativeHost<'_> {
                 auto_output_path(dir, request.title.as_deref(), format, partial)
             }
         };
-        let tiled = self.iiif.borrow_mut().take();
+        let tiled = self.tiled.borrow_mut().take();
         let tiled_result = if let Some(writer) = tiled {
             let destination = destination_for(self.format);
             let destination = if partial {
@@ -964,6 +966,7 @@ impl Host for NativeHost<'_> {
                 destination.clone()
             };
             let controls = self.controls.clone();
+            let overwrite = self.options.overwrite;
             let reused = request.reused_tiles.clone();
             Some(
                 tokio::task::spawn_blocking(move || {
@@ -972,7 +975,7 @@ impl Host for NativeHost<'_> {
                         .into_inner()
                         .map_err(|_| Error::Internal("tile writer poisoned".into()))?;
                     writer
-                        .finish(&destination, &reused, &controls.0.cancelled)
+                        .finish(&destination, overwrite, &reused, &controls.0.cancelled)
                         .map(|(size, bytes, decoded)| (destination, size, bytes, decoded))
                 })
                 .await
@@ -1121,7 +1124,7 @@ impl Host for NativeHost<'_> {
     }
 
     async fn settle(&self) {
-        self.iiif.borrow_mut().take();
+        self.tiled.borrow_mut().take();
         self.encoded_probes.borrow_mut().clear();
         while self.decode_tails.active.load(Ordering::SeqCst) != 0 {
             let changed = self.decode_tails.changed.notified();

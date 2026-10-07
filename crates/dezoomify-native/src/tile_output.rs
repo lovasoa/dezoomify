@@ -5,7 +5,7 @@ use dezoomify::model::{
 };
 use std::{
     collections::BTreeMap,
-    io::Cursor,
+    io::{Cursor, Read, Seek},
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -183,14 +183,9 @@ impl EncodedTile {
             (icc.as_ref().map_or(0, Vec::len) as u64 + exif.as_ref().map_or(0, Vec::len) as u64)
                 * 4,
         );
-        let mut reader = image::ImageReader::with_format(Cursor::new(&self.bytes), self.format);
-        let mut limits = image::Limits::default();
-        limits.max_alloc = Some(budget.saturating_sub(self.bytes.len() as u64) / 2);
-        reader.limits(limits);
-        let image = reader.decode().map_err(decode_error)?.into_rgba8();
-        let cropped = image::imageops::crop_imm(&image, 0, 0, size.width, size.height).to_image();
+        let image = self.decode_pixels(&size, budget)?;
         self.bytes = crate::imaging::encode_png(
-            &cropped,
+            &image,
             crate::imaging::png_compression_for(compression),
             icc.as_deref(),
             exif.as_deref(),
@@ -198,6 +193,25 @@ impl EncodedTile {
         self.format = image::ImageFormat::Png;
         self.size = size;
         Ok(())
+    }
+
+    pub(crate) fn decode_pixels(
+        &self,
+        size: &Size,
+        budget: u64,
+    ) -> Result<image::RgbaImage, Error> {
+        let pixels = u64::from(self.size.width) * u64::from(self.size.height);
+        memory_check(self.bytes.len() as u64 + pixels * 16, budget)?;
+        let mut reader = image::ImageReader::with_format(Cursor::new(&self.bytes), self.format);
+        let mut limits = image::Limits::default();
+        limits.max_alloc = Some(budget.saturating_sub(self.bytes.len() as u64) / 2);
+        reader.limits(limits);
+        let image = reader.decode().map_err(decode_error)?.into_rgba8();
+        Ok(if *size == self.size {
+            image
+        } else {
+            image::imageops::crop_imm(&image, 0, 0, size.width, size.height).to_image()
+        })
     }
 }
 
@@ -407,6 +421,11 @@ impl Rect {
 pub(crate) enum TileBytes {
     File(PathBuf),
     Memory(Vec<u8>),
+    Range {
+        path: PathBuf,
+        offset: u64,
+        length: u64,
+    },
 }
 pub(crate) struct StoredTile {
     pub rect: Rect,
@@ -497,6 +516,7 @@ impl TileLevel {
                 TileBytes::File(path) => std::fs::metadata(path)
                     .map_err(|e| crate::output::write_failed("tile stat failed", &e))?
                     .len(),
+                TileBytes::Range { length, .. } => *length,
             };
             memory_check(
                 region_bytes
@@ -510,6 +530,27 @@ impl TileLevel {
                 TileBytes::File(path) => {
                     body = std::fs::read(path)
                         .map_err(|e| crate::output::write_failed("tile read failed", &e))?;
+                    &body
+                }
+                TileBytes::Range {
+                    path,
+                    offset,
+                    length,
+                } => {
+                    let mut file = std::fs::File::open(path)
+                        .map_err(|e| crate::output::write_failed("tile range open failed", &e))?;
+                    file.seek(std::io::SeekFrom::Start(*offset))
+                        .map_err(|e| crate::output::write_failed("tile range seek failed", &e))?;
+                    body = {
+                        let mut bytes = Vec::new();
+                        file.take(*length).read_to_end(&mut bytes).map_err(|e| {
+                            crate::output::write_failed("tile range read failed", &e)
+                        })?;
+                        bytes
+                    };
+                    if body.len() as u64 != *length {
+                        return Err(Error::WriteFailed("truncated encoded tile range".into()));
+                    }
                     &body
                 }
             };
@@ -659,6 +700,80 @@ pub(crate) struct IiifWriter {
     max_tiles: u32,
     icc_profile: Option<Vec<u8>>,
     index_bytes: u64,
+}
+
+/// Two concrete encoded-tile writers, with one acquisition/publication route.
+pub(crate) enum TileWriter {
+    Iiif(IiifWriter),
+    Zif(crate::zif_output::ZifWriter),
+}
+impl TileWriter {
+    pub(crate) fn retained_bytes(&self) -> u64 {
+        match self {
+            Self::Iiif(writer) => writer.retained_bytes(),
+            Self::Zif(writer) => writer.retained_bytes(),
+        }
+    }
+
+    pub(crate) fn hold_queued_bytes(&mut self, bytes: u64) -> Result<(), Error> {
+        match self {
+            Self::Iiif(writer) => writer.hold_queued_bytes(bytes),
+            Self::Zif(writer) => writer.hold_queued_bytes(bytes),
+        }
+    }
+
+    pub(crate) fn release_probe_bytes(&mut self, bytes: u64) {
+        match self {
+            Self::Iiif(writer) => writer.release_probe_bytes(bytes),
+            Self::Zif(writer) => writer.release_probe_bytes(bytes),
+        }
+    }
+
+    pub(crate) fn peak_retained(&self) -> u64 {
+        match self {
+            Self::Iiif(writer) => writer.peak_retained(),
+            Self::Zif(writer) => writer.peak_retained(),
+        }
+    }
+
+    pub(crate) fn new(
+        destination: &Path,
+        plan: &OutputPlan,
+        budget: u64,
+        compression: u8,
+        max_tiles: u32,
+    ) -> Result<Self, Error> {
+        match plan.format {
+            dezoomify::model::OutputFormat::IiifDir => {
+                IiifWriter::new(destination, plan, budget, compression, max_tiles).map(Self::Iiif)
+            }
+            dezoomify::model::OutputFormat::Zif => {
+                crate::zif_output::ZifWriter::new(destination, plan, budget, compression, max_tiles)
+                    .map(Self::Zif)
+            }
+            _ => Err(Error::InvalidState(
+                "encoded tile writer requires IIIF or ZIF".into(),
+            )),
+        }
+    }
+    pub(crate) fn place(&mut self, tile: EncodedTile, cancelled: &AtomicBool) -> Result<(), Error> {
+        match self {
+            Self::Iiif(writer) => writer.place(tile, cancelled),
+            Self::Zif(writer) => writer.place(tile, cancelled),
+        }
+    }
+    pub(crate) fn finish(
+        self,
+        destination: &Path,
+        overwrite: bool,
+        reused: &[ReusedTile],
+        cancelled: &AtomicBool,
+    ) -> Result<(Size, u64, u64), Error> {
+        match self {
+            Self::Iiif(writer) => writer.finish(destination, reused, cancelled),
+            Self::Zif(writer) => writer.finish(destination, overwrite, reused, cancelled),
+        }
+    }
 }
 
 impl IiifWriter {

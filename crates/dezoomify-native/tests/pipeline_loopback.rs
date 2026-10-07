@@ -201,10 +201,7 @@ fn tiff_output_decodes_losslessly() {
 }
 
 #[test]
-fn zif_output_writes_tiff_pyramid() {
-    // `.zif` selects the ZIF pyramid encoder: TIFF-compatible bytes whose
-    // first directory decodes losslessly to the full canvas, followed by
-    // real downscaled levels (512px canvas yields 512 + 256).
+fn zif_output_writes_independently_decodable_pyramid_tiles() {
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("zif");
@@ -217,7 +214,7 @@ fn zif_output_writes_tiff_pyramid() {
         &mut |_| {},
     )
     .expect("zif pipeline succeeds");
-    assert_eq!(outcome.tile_count, 4);
+    assert_eq!(outcome.tile_count, 5);
     assert_eq!(
         (
             outcome.output.canvas.as_ref().unwrap().width,
@@ -226,23 +223,21 @@ fn zif_output_writes_tiff_pyramid() {
         (512, 512)
     );
     let bytes = std::fs::read(&output).expect("zif output written");
-    let decoded = image::load_from_memory(&bytes)
-        .expect("zif output decodes")
+    assert!(bytes.starts_with(&[0x49, 0x49, 0x2B, 0, 8, 0, 0, 0]));
+    let metadata = zif_tiff::std::read_zif(std::io::Cursor::new(&bytes)).unwrap();
+    let tile = metadata.level_tiles(0).unwrap().next().unwrap();
+    let range = tile.byte_range();
+    let decoded = image::load_from_memory(&bytes[range.start as usize..range.end as usize])
+        .unwrap()
         .to_rgba8();
-    assert_eq!((decoded.width(), decoded.height()), (512, 512));
+    assert_eq!((decoded.width(), decoded.height()), (256, 256));
     let pixel = decoded.get_pixel(64, 64).0;
     assert_eq!((pixel[0], pixel[1], pixel[2]), (196, 48, 48));
-    let mut decoder =
-        tiff::decoder::Decoder::new(std::io::Cursor::new(&bytes)).expect("zif directories decode");
-    let mut dims = Vec::new();
-    loop {
-        dims.push(decoder.dimensions().expect("level dims"));
-        if decoder.more_images() {
-            decoder.next_image().expect("next level");
-        } else {
-            break;
-        }
-    }
+    let dims: Vec<_> = metadata
+        .levels()
+        .iter()
+        .map(|level| (level.width(), level.height()))
+        .collect();
     assert_eq!(dims, vec![(512, 512), (256, 256)]);
 }
 

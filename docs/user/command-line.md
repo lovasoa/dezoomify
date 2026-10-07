@@ -90,7 +90,7 @@ first image). Between images `--min-interval` paces the queue.
 
 The command-line tool holds the image in memory subject to the memory currently available to the process, as does the [desktop app](../../apps/desktop/desktop-app.md).
 A larger save stops with a typed `limit-exceeded` error before anything is written; save a smaller level with `--max-width`.
-IIIF directory output keeps compatible JPEG/PNG tiles in their original encoding and grid. `--compression` affects only converted tiles and new pyramid levels. Choose an unused directory destination; existing directories and files are preserved even with `--overwrite`.
+IIIF and ZIF output keep compatible JPEG/PNG tiles in their original encoding and grid. `--compression` affects only converted tiles and new pyramid levels. ZIF uses a tiled BigTIFF container and omits alpha. For IIIF, choose an unused directory destination; existing directories and files are preserved even with `--overwrite`.
 JPEG folders advertise IIIF v2 level 0. PNG-only folders preserve PNG bytes and declare their capabilities without claiming that JPEG-required profile. Dezoomify can reopen these folders. For a web viewer, resolve the relative `@id` against the `info.json` URL and honor `preferredFormats`; width-only and explicit-dimension paths are both available.
 See [very large pictures](./troubleshooting.md#the-image-appears-blank-or-the-browser-slows-to-a-halt) when a browser tab cannot hold the image.
 

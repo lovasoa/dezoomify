@@ -71,7 +71,38 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
         TileSource::Grid(grid) => (TileSource::Grid(grid.clone()), Vec::new()),
         TileSource::Positioned(source) => (TileSource::Positioned(source.clone()), Vec::new()),
     };
-    let total = source.count().ok_or_else(empty_plan)?;
+    let base_count = source.count().ok_or_else(empty_plan)?;
+    // ZIF can reuse the source pyramid without asking a pixel encoder to
+    // reproduce its codec or JPEG sampling. Keep requests lazy and preserve
+    // the selected level as the full-size output.
+    let mut lower = Vec::new();
+    if options.output == OutputFormat::Zif
+        && let TileSource::Grid(base) = &source
+        && base.overlap() == Vec2d::default()
+        && base.tile_size().x == base.tile_size().y
+        && base.tile_size().x.is_multiple_of(16)
+    {
+        let mut dimensions = base.image_size();
+        while dimensions.x > base.tile_size().x || dimensions.y > base.tile_size().y {
+            dimensions = Vec2d {
+                x: dimensions.x.div_ceil(2),
+                y: dimensions.y.div_ceil(2),
+            };
+            if let Some(grid) = image.levels.iter().find_map(|level| match &level.source {
+                TileSource::Grid(grid)
+                    if grid.image_size() == dimensions
+                        && grid.tile_size() == base.tile_size()
+                        && grid.overlap() == Vec2d::default() =>
+                {
+                    Some(grid.clone())
+                }
+                _ => None,
+            }) {
+                lower.push(grid);
+            }
+        }
+    }
+    let total = base_count + lower.iter().map(core::tile_plan::Grid::count).sum::<u64>();
     if total == 0 {
         return Err(empty_plan());
     }
@@ -90,6 +121,7 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
             }),
             _ => None,
         },
+        source_levels: lower.iter().map(|grid| size(grid.image_size())).collect(),
         tile_count: u32::try_from(total)
             .map_err(|_| Error::PlanInvalid("tile count overflow".into()))?,
         format: options.output,
@@ -130,13 +162,31 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
         });
     let mut missing = acquire_round(tiles, host, options, &mut progress).await?;
     if progress.completed == 0 {
-        // Derived facts over the complete settled set; the evidence stays
-        // in the missing-tile records and the diagnostics report.
+        // Lower levels cannot turn an unusable selected image into success.
         let settled: Vec<&Error> = missing.iter().flat_map(|(_, f)| f.iter()).collect();
         return Err(Error::NoUsableTiles {
             transient: settled.iter().any(|f| f.retryable()),
             retry_after_ms: settled.iter().filter_map(|f| f.retry_after_ms()).max(),
         });
+    }
+    let mut offset = base_count as u32;
+    for grid in lower {
+        let dimensions = Some(size(grid.image_size()));
+        let count = grid.count() as u32;
+        missing.extend(
+            acquire_round(
+                grid.tiles_row_major().map(|tile| {
+                    let mut tile = portable_tile(tile.map_err(Error::from)?, dimensions.clone());
+                    tile.index += offset;
+                    Ok(tile)
+                }),
+                host,
+                options,
+                &mut progress,
+            )
+            .await?,
+        );
+        offset += count;
     }
     while !missing.is_empty() {
         missing.sort_by_key(|(tile, _)| tile.index);
