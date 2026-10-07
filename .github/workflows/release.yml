@@ -37,7 +37,7 @@ jobs:
           fetch-depth: 0
       - id: commit
         run: echo "value=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # pinned
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # pinned
         with:
           toolchain: 1.98.1
       - name: Require green CI for a numbered release
@@ -96,7 +96,7 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
         with:
           install: true
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # pinned
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # pinned
         with:
           toolchain: 1.98.1
           targets: wasm32-unknown-unknown
@@ -166,7 +166,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.commit }}
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # pinned
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # pinned
         with:
           toolchain: 1.98.1
       - name: Reassemble artifacts
@@ -199,7 +199,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.commit }}
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # pinned
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # pinned
         with:
           toolchain: 1.98.1
       - name: Download verified artifacts
