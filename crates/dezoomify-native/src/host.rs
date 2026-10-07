@@ -15,9 +15,9 @@ use std::{
 use crate::{
     diagnostics::Diagnostics,
     http::{FetchLimits, FetchOutcome, TlsPolicy, UserHeaders},
-    imaging::{load_image_with_limit, DecodedTile},
+    imaging::load_image_with_limit,
     options::{JobOptions, OutputTarget},
-    pixel_pipe::{MemoryBudget, PixelPipe, Reservation},
+    pixel_pipe::{MemoryBudget, PixelPipe, ReceivedPixels},
     raster::EncoderTask,
     transport::NativeTransport,
 };
@@ -231,10 +231,6 @@ impl Controls {
 type PartialAnswer<'a> = Pin<Box<dyn Future<Output = Result<RecoveryChoice, Error>> + 'a>>;
 type PartialCallback<'a> = Box<dyn FnMut(MissingTiles) -> PartialAnswer<'a> + 'a>;
 
-struct ReceivedPixels {
-    decoded: DecodedTile,
-    reservation: Reservation,
-}
 struct PendingPixels {
     id: u32,
     placement: TilePlacement,
@@ -459,22 +455,19 @@ impl<'a> NativeHost<'a> {
                 let (dimensions, _) = crate::tile_output::inspect(&bytes, budget.available())?;
                 // Charge before the pixel decoder can allocate. The temporary
                 // allowance covers conversion and decoder workspace; only the
-                // actual RGBA allocation remains charged until placement.
+                // actual pixels and metadata remain charged until placement.
                 let pixels = u64::from(dimensions.width) * u64::from(dimensions.height);
-                let mut reservation = budget.reserve(pixels.saturating_mul(16))?;
+                let reservation = budget.reserve(pixels.saturating_mul(16))?;
                 decode_tails.pixel_decodes.fetch_add(1, Ordering::SeqCst);
                 let decoded = load_image_with_limit(
                     &bytes,
                     Some(pixels.saturating_mul(16).saturating_add(bytes.len() as u64)),
                 )
                 .map_err(|error| Error::DecodeFailed(error.to_string().into()))?;
+                let received = ReceivedPixels::new(decoded, reservation)?;
                 drop(bytes);
                 drop(processing_memory);
-                reservation.shrink(decoded.image.as_raw().len() as u64);
-                Ok::<_, Error>(ReceivedPixels {
-                    decoded,
-                    reservation,
-                })
+                Ok::<_, Error>(received)
             })
             .await
             .map_err(|_| Error::Internal("tile decode task failed".to_string().into()))?
@@ -761,7 +754,7 @@ impl<'a> NativeHost<'a> {
         self.controlled(async {
             tokio::task::spawn_blocking(move || {
                 let _permit = permit;
-                pipe.place(id, &placement, pixels.decoded, pixels.reservation)
+                pipe.place(id, &placement, pixels)
             })
             .await
             .map_err(|_| Error::Internal("pixel producer task failed".into()))?
@@ -1449,6 +1442,48 @@ impl Drop for Flight<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decoded_metadata_stays_budgeted_before_placement() {
+        let image = image::RgbaImage::new(1, 1);
+        let exif = vec![7; 32 << 10];
+        let bytes = crate::imaging::encode_png(
+            &image,
+            image::codecs::png::CompressionType::Fast,
+            None,
+            Some(&exif),
+        )
+        .unwrap();
+        let host = NativeHost::new(JobOptions {
+            input_url: "image.png".into(),
+            output: OutputTarget::File(
+                crate::output::temp_sibling(&std::env::temp_dir().join("metadata"))
+                    .with_extension("png"),
+            ),
+            output_retain_cap: 200 << 10,
+            ..Default::default()
+        })
+        .unwrap();
+        host.transport.block_on(async {
+            let first = host
+                .decode(bytes.clone(), Default::default(), None)
+                .await
+                .unwrap();
+            assert_eq!(first.decoded.exif_metadata.as_ref(), Some(&exif));
+            assert!(host.pixels.current() >= exif.len() as u64);
+            let second = host.decode(bytes.clone(), Default::default(), None).await;
+            assert!(
+                matches!(second, Err(Error::LimitExceeded { .. })),
+                "{:?}",
+                second.err()
+            );
+            drop(first);
+            assert_eq!(host.pixels.current(), 0);
+            drop(host.decode(bytes, Default::default(), None).await.unwrap());
+            host.settle().await;
+            assert_eq!(host.pixels.current(), 0);
+        });
+    }
 
     #[test]
     fn resource_limit_precedes_pixel_decoding_and_cleanup_awaits_every_worker() {
