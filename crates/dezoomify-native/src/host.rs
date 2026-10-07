@@ -813,24 +813,12 @@ impl<'a> NativeHost<'a> {
             OutputTarget::AutoDir { dir, .. } | OutputTarget::AutoImageDir { dir } => dir,
             OutputTarget::File(_) => unreachable!("automatic destination"),
         };
-        let stem = safe_output_stem(title);
-        for suffix in 1..=9_999 {
-            let name = if suffix == 1 {
-                stem.clone()
-            } else {
-                format!("{stem}-{suffix}")
-            };
-            let path = dir.join(format!("{name}.{}", format.extension()));
-            let path = if partial {
-                crate::output::partial_path_for(&path)
-            } else {
-                path
-            };
-            if !path.exists() {
-                return path;
-            }
+        let path = auto_output_path(dir, title, format, partial);
+        if partial {
+            crate::output::partial_path_for(&path)
+        } else {
+            path
         }
-        dir.join(format!("{stem}.{}", format.extension()))
     }
     fn report_preparation(&self, pipe: &PixelPipe) {
         let mut progress = self.last_progress.borrow().clone();
