@@ -24,12 +24,13 @@ impl EncoderTask {
         compression: u8,
         budget: Arc<MemoryBudget>,
         controls: Controls,
+        streaming: bool,
     ) -> Result<Self, Error> {
         if size.width == 0 || size.height == 0 {
             return Err(Error::InvalidState("empty raster dimensions".into()));
         }
         crate::imaging::check_dimensions(format, &size)?;
-        let pipe = PixelPipe::new(size.clone(), budget);
+        let pipe = PixelPipe::new(size.clone(), budget, streaming);
         let work = match format {
             OutputFormat::Png => u64::from(size.width) * 16 + (1 << 20),
             OutputFormat::Tiff => {
@@ -403,7 +404,16 @@ mod tests {
         path
     }
     fn start(path: &Path, format: OutputFormat, size: Size, controls: Controls) -> EncoderTask {
-        EncoderTask::start(path, size, format, 5, MemoryBudget::new(8 << 20), controls).unwrap()
+        EncoderTask::start(
+            path,
+            size,
+            format,
+            5,
+            MemoryBudget::new(8 << 20),
+            controls,
+            true,
+        )
+        .unwrap()
     }
     async fn publish(task: EncoderTask, destination: &Path) -> Vec<u8> {
         task.pipe.finish(&[]).unwrap();

@@ -16,7 +16,13 @@ Selection preserves `--largest`, exact `--zoom-level`, width/height caps, and `-
 
 After geometry probes, output preflight receives compact coverage without generating tile requests. Known JPEG/WebP side limits and explicit destinations are checked before ordinary tile acquisition; publication checks the destination again to handle later changes.
 
-Explicit raster output starts a blocking encoder at preflight when dimensions are known. Acquisition workers decode while it compresses. Unknown geometry keeps decoded inputs in RAM until final dimensions are available. Auto format also retains decoded inputs until acquisition settles so it can preserve transparency and gaps when choosing PNG or JPEG; uncertain coverage chooses PNG. For large images, choosing an explicit format allows streaming within a smaller RAM budget. There is no raw pixel spill or assembled canvas for PNG, JPEG or TIFF.
+Explicit raster output streams when dimensions and a regular grid are known.
+Positioned layouts and unknown geometry retain decoded inputs until acquisition
+settles; positioned tiles then compose in plan order so overlays are preserved.
+Auto format also retains inputs to preserve transparency and gaps when choosing
+PNG or JPEG; uncertain coverage chooses PNG. For large grid images, choosing an
+explicit format allows streaming within a smaller RAM budget. Deferred composition
+uses the same RAM limit and does not spill pixels to disk.
 
 ```mermaid
 flowchart TD

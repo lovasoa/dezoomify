@@ -121,16 +121,18 @@ struct Queue {
 pub(crate) struct PixelPipe {
     pub(crate) size: Size,
     pub(crate) budget: Arc<MemoryBudget>,
+    streaming: bool,
     producer: Mutex<Producer>,
     queue: Mutex<Queue>,
     changed: Condvar,
     events: tokio::sync::Notify,
 }
 impl PixelPipe {
-    pub(crate) fn new(size: Size, budget: Arc<MemoryBudget>) -> Arc<Self> {
+    pub(crate) fn new(size: Size, budget: Arc<MemoryBudget>, streaming: bool) -> Arc<Self> {
         Arc::new(Self {
             size,
             budget,
+            streaming,
             producer: Mutex::new(Producer::default()),
             queue: Mutex::new(Queue::default()),
             changed: Condvar::new(),
@@ -192,10 +194,9 @@ impl PixelPipe {
         })
     }
     /// Geometry and composition operate only on producer-owned allocations.
-    /// Any contribution covers a pixel; overlaps composite until whole-strip
-    /// handoff freezes even unread pixels. Later contributions to handed-off
-    /// rows are discarded, but later rows still apply. Conflicting overlaps
-    /// have unspecified results across runs/strips; identical opaque ones do not.
+    /// Regular grids can hand off covered strips during acquisition. Positioned
+    /// layouts compose in plan order and retain strips until finish, because
+    /// coverage alone cannot establish that all overlays have arrived.
     pub(crate) fn place(
         &self,
         id: u32,
@@ -294,7 +295,9 @@ impl PixelPipe {
     fn publish(&self, producer: &mut Producer, keep: bool) -> Result<(), Error> {
         while producer.next_row < self.size.height {
             let row = producer.next_row;
-            if !keep && !producer.pending.get(&row).is_some_and(|s| s.missing == 0) {
+            if !keep
+                && (!self.streaming || !producer.pending.get(&row).is_some_and(|s| s.missing == 0))
+            {
                 break;
             }
             if let std::collections::btree_map::Entry::Vacant(entry) = producer.pending.entry(row) {
@@ -380,7 +383,7 @@ pub(crate) mod tests {
     use crate::imaging::DecodedTile;
     use dezoomify::model::{Point, TileRole};
     fn new_pipe(width: u32, height: u32) -> Arc<PixelPipe> {
-        PixelPipe::new(Size { width, height }, MemoryBudget::new(8192))
+        PixelPipe::new(Size { width, height }, MemoryBudget::new(8192), true)
     }
     pub(crate) fn placement(x: u32, y: u32) -> TilePlacement {
         TilePlacement {

@@ -774,6 +774,7 @@ impl<'a> NativeHost<'a> {
         dimensions: Size,
         title: Option<&str>,
         format: OutputFormat,
+        streaming: bool,
     ) -> Result<(), Error> {
         let destination = match &self.options.output {
             OutputTarget::File(path) => path.clone(),
@@ -787,10 +788,14 @@ impl<'a> NativeHost<'a> {
             self.options.compression,
             Arc::clone(&self.pixels),
             self.controls.clone(),
+            streaming,
         )?;
         let pipe = Arc::clone(&task.pipe);
         *self.raster.borrow_mut() = Some(task);
-        let pending = std::mem::take(&mut *self.pending_pixels.borrow_mut());
+        let mut pending = std::mem::take(&mut *self.pending_pixels.borrow_mut());
+        if !streaming {
+            pending.sort_by_key(|tile| tile.id);
+        }
         for pending in pending {
             self.place_pixels(
                 Arc::clone(&pipe),
@@ -907,8 +912,13 @@ impl Host for NativeHost<'_> {
                 .store(writer.retained_bytes(), Ordering::SeqCst);
             *self.tiled.borrow_mut() = Some(Arc::new(std::sync::Mutex::new(writer)));
         } else if let Some(dimensions) = &plan.canvas {
-            if !matches!(self.options.output, OutputTarget::AutoImageDir { .. }) {
-                self.start_raster(dimensions.clone(), plan.title.as_deref(), self.format)
+            crate::imaging::check_dimensions(self.format, dimensions)?;
+            // Positioned layouts can overlap. Reuse deferred storage so they
+            // compose in final plan order before any strip is handed off.
+            if plan.grid.is_some()
+                && !matches!(self.options.output, OutputTarget::AutoImageDir { .. })
+            {
+                self.start_raster(dimensions.clone(), plan.title.as_deref(), self.format, true)
                     .await?;
             }
         }
@@ -1156,7 +1166,12 @@ impl Host for NativeHost<'_> {
                         });
                     format = automatic_image_format(size(&dimensions), transparent);
                 }
-                self.start_raster(dimensions, request.title.as_deref(), format)
+                let streaming = self
+                    .output_plan
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|plan| plan.grid.is_some());
+                self.start_raster(dimensions, request.title.as_deref(), format, streaming)
                     .await?;
             }
             let pipe = Arc::clone(&self.raster.borrow().as_ref().expect("raster task").pipe);

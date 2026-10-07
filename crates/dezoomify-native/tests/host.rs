@@ -595,6 +595,92 @@ fn generic_probe_metadata_uses_final_tile_order_without_refetching() {
 }
 
 #[test]
+fn positioned_overlays_keep_plan_order_across_strip_boundaries() {
+    use dezoomify::{host::Host, model::*};
+    use image::Pixel as _;
+
+    let work = temp_dir("positioned-overlays");
+    let background = image::RgbaImage::from_pixel(4, 130, image::Rgba([100, 0, 0, 255]));
+    let overlay = image::RgbaImage::from_pixel(2, 65, image::Rgba([0, 100, 0, 128]));
+    background.save(work.join("background.png")).unwrap();
+    overlay.save(work.join("overlay.png")).unwrap();
+    for known_size in [false, true] {
+        for order in [[0, 1], [1, 0]] {
+            let destination = work.join(format!("out-{known_size}-{}.png", order[0]));
+            let canvas = known_size.then_some(Size {
+                width: 4,
+                height: 130,
+            });
+            let host = NativeHost::new(JobOptions {
+                input_url: work.join("background.png").to_string_lossy().into_owned(),
+                output: OutputTarget::File(destination.clone()),
+                cache_dir: Some(work.join("cache")),
+                ..Default::default()
+            })
+            .unwrap();
+            host.transport.block_on(async {
+                host.begin_output(OutputPlan {
+                    canvas: canvas.clone(),
+                    grid: None,
+                    source_levels: Vec::new(),
+                    tile_count: 2,
+                    format: OutputFormat::Png,
+                    title: None,
+                })
+                .await
+                .unwrap();
+                for index in order {
+                    let (name, position) = if index == 0 {
+                        ("background.png", Point { x: 0, y: 0 })
+                    } else {
+                        ("overlay.png", Point { x: 1, y: 50 })
+                    };
+                    host.acquire_tile(Tile {
+                        index,
+                        request: ResourceRequest {
+                            uri: work.join(name).to_string_lossy().into_owned(),
+                            headers: Vec::new(),
+                            purpose: RequestPurpose::Tile,
+                        },
+                        placement: TilePlacement {
+                            position,
+                            expected_size: None,
+                            canvas: None,
+                            processing: Default::default(),
+                            role: TileRole::output(),
+                        },
+                    })
+                    .await
+                    .unwrap();
+                }
+                host.finish(FinishRequest {
+                    canvas,
+                    format: OutputFormat::Png,
+                    title: None,
+                    missing: Vec::new(),
+                    reused_tiles: Vec::new(),
+                })
+                .await
+                .unwrap();
+                host.settle().await;
+            });
+            let saved = image::open(destination).unwrap().to_rgba8();
+            let mut expected = background.clone();
+            for y in 50..115 {
+                for x in 1..3 {
+                    expected
+                        .get_pixel_mut(x, y)
+                        .blend(overlay.get_pixel(x - 1, y - 50));
+                }
+            }
+            assert_eq!(saved, expected);
+            assert_eq!(host.publication().unwrap().instrumentation.late_repaints, 0);
+        }
+    }
+    std::fs::remove_dir_all(work).unwrap();
+}
+
+#[test]
 fn http_failures_retain_the_request_context_and_transport() {
     use dezoomify::{host::Host, model::*};
 
