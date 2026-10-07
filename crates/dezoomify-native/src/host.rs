@@ -791,6 +791,7 @@ impl<'a> NativeHost<'a> {
         let pipe = Arc::clone(&task.pipe);
         *self.raster.borrow_mut() = Some(task);
         let pending = std::mem::take(&mut *self.pending_pixels.borrow_mut());
+        self.report_preparation(&pipe);
         for pending in pending {
             self.place_pixels(
                 Arc::clone(&pipe),
@@ -799,6 +800,7 @@ impl<'a> NativeHost<'a> {
                 pending.pixels,
             )
             .await?;
+            self.report_preparation(&pipe);
         }
         Ok(())
     }
