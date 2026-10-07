@@ -11,7 +11,6 @@ export function formatPixelCount(pixels: number): string {
   const locale = getLocale();
   return t(key, {
     count: new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value),
-    plural: locale === "de" || locale === "it" || value === 1 ? "" : "s",
   });
 }
 

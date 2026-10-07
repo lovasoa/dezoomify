@@ -172,9 +172,9 @@ export const de = {
   // Job section and share chrome.
   "view.job.countsFull": "{current} von {total} Fragmenten",
   "view.job.pixelCounts": "{current} von {total}",
-  "view.job.pixels": "{count} Pixel{plural}",
-  "view.job.megapixels": "{count} Megapixel{plural}",
-  "view.job.gigapixels": "{count} Gigapixel{plural}",
+  "view.job.pixels": "{count} px",
+  "view.job.megapixels": "{count} Mpx",
+  "view.job.gigapixels": "{count} Gpx",
   "view.job.preparation": "{percent}% der Pixel vorbereitet. Das Bild wird fertig gespeichert.",
   "view.job.countsActive": "{current} von {total} Fragmenten · {active} in Arbeit",
   // Recent pictures, including unsuccessful attempts.
