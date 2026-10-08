@@ -76,5 +76,12 @@ During iteration, use `cargo xtask check`, `cargo xtask test`, and focused
 is explicit: `cargo xtask test desktop --e2e-window`.
 Live source-site checks are opt-in, advisory, and never substitute for fixtures.
 
+To compare native output performance on Linux, build release CLIs in separate
+checkouts and Cargo target directories with
+`cargo build --release --locked -p dezoomify-cli`, then run
+`node scripts/bench-native-output.mjs /path/to/old-cli /path/to/current-cli`.
+The [benchmark script](../scripts/bench-native-output.mjs) emits timing, peak process
+RSS, request counts, exit status, and output size using fresh tile caches.
+
 For a new site format, follow [Contributing a format](CONTRIBUTING-format.md).
 For releases and deployment, follow [Operations](operations.md).
