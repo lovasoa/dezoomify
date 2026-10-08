@@ -138,10 +138,11 @@ test("renderView mounts card and updates job section in place without DOM destru
 
   // Assembly replaces tile counts with pixel progress, including accessibility.
   for (const [current, total, counts, percent] of [
-    [0, 32, "0 pixels of 32 pixels", "0%"],
-    [24, 32, "24 pixels of 32 pixels", "75%"],
-    [3e6, 5e9, "3 megapixels of 5 gigapixels", "0.06%"],
-    [1.5e9, 5e9, "1.5 gigapixels of 5 gigapixels", "30%"],
+    [0, 32, "0 px of 32 px", "0%"],
+    [24, 32, "24 px of 32 px", "75%"],
+    [1e6, 2e6, "1 Mpx of 2 Mpx", "50%"],
+    [3e6, 5e9, "3 Mpx of 5 Gpx", "0.06%"],
+    [1.5e9, 5e9, "1.5 Gpx of 5 Gpx", "30%"],
   ]) {
     render(
       el,
