@@ -6,9 +6,7 @@ use tile_info::ImageInfo;
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{
-    any, html_matches, image_url, metadata, url_matches, url_suffix, viewer,
-};
+use crate::core::discovery::{html_matches, image_url, metadata, url_matches, url_suffix, viewer};
 use crate::core::{
     AdaptiveSource, CatalogPlan, DeferredResource, DiscoveryCatalog, DiscoveryError,
     DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, GridRequests, GridTile, ImagePlan,
@@ -47,7 +45,15 @@ const ROUTES: &[DiscoveryRoute] = &[
     viewer(html_matches(has_info_json_url)).decode(follow_info_json_url),
     metadata(url_suffix("/info.json")).decode(decode),
     metadata(url_suffix("/manifest.json")).decode(decode),
-    metadata(any()).decode(decode),
+    // Required keys cover bare manifests and embedded JSON/JSON5 services.
+    // Escaped keys stay eligible for the full parser.
+    metadata(html_matches(|bytes| {
+        bytes.contains(&b'{')
+            && [b"width".as_slice(), b"items", b"sequences", b"\\"]
+                .iter()
+                .any(|key| memchr::memmem::find(bytes, key).is_some())
+    }))
+    .decode(decode),
 ];
 
 /// IIIF format. See <https://iiif.io/>.

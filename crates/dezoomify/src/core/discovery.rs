@@ -420,6 +420,11 @@ fn parse_resource(
     resource: DiscoveryResource<'_>,
 ) -> Result<ParsedResource, DiscoveryError> {
     for route in routes {
+        if matches!(route.handler, RouteAction::ChildMetadata(_))
+            && resource.context.history.is_empty()
+        {
+            continue;
+        }
         let selected = match route.matcher {
             DiscoveryMatch::Css(selector, accept) => {
                 resource.select(selector).find(|tag| accept(tag))
@@ -431,7 +436,8 @@ fn parse_resource(
             DiscoveryMatch::ResourcePredicate(predicate) => predicate(resource),
             matcher => {
                 matcher.matches(resource.final_uri(), Some(resource.bytes()))
-                    || matcher.matches(resource.uri(), Some(resource.bytes()))
+                    || (resource.uri() != resource.final_uri()
+                        && matcher.matches(resource.uri(), Some(resource.bytes())))
             }
         };
         if !matched {
@@ -676,16 +682,19 @@ fn observed_cause(
 
 /// Fetch rejections group by their observed facts (variant, HTTP status,
 /// transport, and policy reason); other rejections group by detail.
-/// URL-shape misses collapse to one count.
+/// URL and content misses collapse to one count.
 #[must_use]
 pub fn diagnostic_bullets(diagnostics: &[CandidateDiagnostic]) -> Vec<String> {
-    let mut url_misses: Vec<&str> = Vec::new();
+    let mut misses: Vec<&str> = Vec::new();
     let mut grouped: Vec<(&CandidateDiagnostic, Vec<&str>)> = Vec::new();
     for diagnostic in diagnostics {
-        if diagnostic.kind == RejectionKind::DidNotMatchUrl {
+        if matches!(
+            diagnostic.kind,
+            RejectionKind::DidNotMatchUrl | RejectionKind::DidNotMatchContent
+        ) {
             let name = diagnostic.format.as_str();
-            if !url_misses.contains(&name) {
-                url_misses.push(name);
+            if !misses.contains(&name) {
+                misses.push(name);
             }
             continue;
         }
@@ -719,10 +728,10 @@ pub fn diagnostic_bullets(diagnostics: &[CandidateDiagnostic]) -> Vec<String> {
         };
         lines.push(format!(" - {}: {}", names.join(", "), text));
     }
-    if !url_misses.is_empty() {
+    if !misses.is_empty() {
         lines.push(format!(
-            " - {} other format(s) did not match this page address",
-            url_misses.len()
+            " - {} other format(s) did not match this resource",
+            misses.len()
         ));
     }
     lines
@@ -1340,7 +1349,7 @@ mod tests {
     }
 
     #[test]
-    fn diagnostics_group_by_typed_cause_and_collapse_url_misses() {
+    fn diagnostics_group_by_typed_cause_and_collapse_route_misses() {
         let diagnostic = |format: &str, kind, cause: Option<Box<Error>>, detail: Option<&str>| {
             CandidateDiagnostic {
                 format: format.into(),
@@ -1381,12 +1390,12 @@ mod tests {
                     None,
                     Some("not a generic X/Y tile template"),
                 ),
-                // A repeated URL miss from another scanned input counts once.
+                // URL and content misses from another scanned input count once.
                 diagnostic(
                     "generic",
-                    RejectionKind::DidNotMatchUrl,
+                    RejectionKind::DidNotMatchContent,
                     None,
-                    Some("not a generic X/Y tile template"),
+                    Some("resource did not match any discovery route"),
                 ),
             ],
         };
@@ -1395,14 +1404,14 @@ mod tests {
             "no discovery candidate accepted the input\
              \n - iiif, zoomify: HTTP 403 fetching this address\
              \n - deepzoom: unable to parse DZI metadata\
-             \n - 2 other format(s) did not match this page address"
+             \n - 2 other format(s) did not match this resource"
         );
         // Detailed diagnostics carry no headline.
         assert_eq!(
             error.detail(),
             " - iiif, zoomify: HTTP 403 fetching this address\
              \n - deepzoom: unable to parse DZI metadata\
-             \n - 2 other format(s) did not match this page address"
+             \n - 2 other format(s) did not match this resource"
         );
     }
 

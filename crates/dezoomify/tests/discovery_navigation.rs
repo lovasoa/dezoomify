@@ -1,7 +1,7 @@
 mod support;
 use dezoomify::core::discovery::{DiscoveryError, DiscoveryInput, DiscoveryLimits};
 use dezoomify::core::{
-    DiscoveredEntry, DiscoveryCatalog, Registry, default_registry, registry_for,
+    DiscoveredEntry, DiscoveryCatalog, Registry, RejectionKind, default_registry, registry_for,
 };
 use dezoomify::model::{DiscoveryInputKind, Error, ResourceRead, ResourceResponse};
 use std::cell::RefCell;
@@ -62,6 +62,72 @@ fn image(inputs: Vec<DiscoveryInput>, replies: &[(&str, &[u8])], format: &str) {
         panic!("one ready image expected")
     };
     assert_eq!(image.format, format);
+}
+
+#[test]
+fn unrelated_content_is_a_route_miss_but_declared_metadata_keeps_its_error() {
+    for bytes in [
+        br#"<html><script>const settings = {theme: 'dark'};</script><body>Welcome</body></html>"#
+            .as_slice(),
+        br#"<?xml version="1.0"?><document><title>Welcome</title></document>"#,
+        br#"{"theme":"dark"}"#,
+    ] {
+        for (uri, expected) in [
+            (PAGE, None),
+            ("https://museum.test/settings.js", None),
+            ("https://museum.test/art.dzi", Some("deepzoom")),
+            ("https://museum.test/info.json", Some("iiif")),
+            ("https://museum.test/wmts.xml", Some("wmts")),
+            ("https://museum.test/tour.xml", Some("krpano")),
+        ] {
+            let error = lookup(
+                default_registry(),
+                vec![DiscoveryInput::with_contents(uri, bytes)],
+                &[],
+                Default::default(),
+                None,
+            )
+            .unwrap_err();
+            let DiscoveryError::NoCandidateAccepted { diagnostics } = error else {
+                panic!("expected candidate diagnostics")
+            };
+            let failures: Vec<_> = diagnostics
+                .iter()
+                .filter(|diagnostic| {
+                    !matches!(
+                        diagnostic.kind,
+                        RejectionKind::DidNotMatchUrl | RejectionKind::DidNotMatchContent
+                    )
+                })
+                .collect();
+            assert_eq!(
+                failures.len(),
+                usize::from(expected.is_some()),
+                "{uri}: {failures:?}"
+            );
+            if let Some(format) = expected {
+                assert_eq!(failures[0].format, format);
+                assert_eq!(failures[0].kind, RejectionKind::InvalidMetadata);
+            }
+        }
+    }
+}
+
+#[test]
+fn opaque_metadata_and_embedded_objects_remain_discoverable() {
+    for (bytes, format) in [
+        (IIIF, "iiif"),
+        (DZI, "deepzoom"),
+        (br#"<script>const service = {width:512,height:512,tiles:[{width:256,scaleFactors:[1]}]};</script>"#, "iiif"),
+        (br#"<script>OpenSeadragon({tileSources:{Image:{'Tile\u0053ize':256,Format:'jpg',Size:{Width:512,Height:512}}}});</script>"#, "deepzoom"),
+        (br#"{"w\u0069dth":512,"height":512}"#, "iiif"),
+        (include_bytes!("../../../fixtures/wmts/basic/WMTSCapabilities.xml"), "wmts"),
+        (include_bytes!("../../../fixtures/krpano/basic/tour.xml"), "krpano"),
+        (br#"<?xml version="1.0"?><k:krpano xmlns:k="urn:krpano"><image tilesize="256"><level tiledimagewidth="512" tiledimageheight="512"><front url="tiles/%h-%v.png"/></level></image></k:krpano>"#, "krpano"),
+    ] {
+        let bytes = String::from_utf8_lossy(bytes).replace("{{origin}}", "https://museum.test");
+        image(vec![DiscoveryInput::with_contents(PAGE, bytes)], &[], format);
+    }
 }
 
 #[test]

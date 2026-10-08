@@ -223,7 +223,7 @@ fn failures_and_partial_policy_control_publication() {
         } else {
             assert!(
                 String::from_utf8_lossy(&run.stderr).contains(if input == "pyramid.dzi" {
-                    "malformed-metadata"
+                    "discovery-failed"
                 } else {
                     "partial-discarded"
                 })

@@ -17,8 +17,8 @@ use crate::core::discovery::{html_matches, metadata, url_matches, url_suffix, vi
 use crate::core::resolve_relative;
 use crate::core::{
     CatalogPlan, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryResource,
-    DiscoveryRoute, FormatSpec, Grid, GridRequests, GridTile, ImagePlan, ParsedResource, Request,
-    ResolvedLevel,
+    DiscoveryRoute, FormatSpec, Grid, GridRequests, GridTile, ImagePlan, ParsedResource,
+    RejectionKind, Request, ResolvedLevel,
 };
 use crate::krpano::krpano_metadata::{ImageInfo, LevelDesc};
 use crate::template::Template;
@@ -80,8 +80,9 @@ fn handle_viewer_js(resource: DiscoveryResource<'_>) -> Result<ParsedResource, D
     let context = resource.context();
     let Some(xml) = find_xml(context) else {
         if extract_viewer_js(resource.bytes()).is_none() {
-            return Err(DiscoveryError::InvalidMetadata(
-                "not krpano viewer JavaScript".into(),
+            return Err(DiscoveryError::rejected(
+                RejectionKind::DidNotMatchContent,
+                "not krpano viewer JavaScript",
             ));
         }
         return Ok(ParsedResource::Follow(Request::new(sibling_uri(
@@ -182,8 +183,11 @@ fn complete(uri: &str, bytes: &[u8]) -> Result<ParsedResource, DiscoveryError> {
 /// True if the content looks like a krpano XML file rather than HTML.
 fn looks_like_krpano_xml(contents: &[u8]) -> bool {
     let contents = contents.strip_prefix(b"\xef\xbb\xbf").unwrap_or(contents);
-    let trimmed = contents.trim_ascii_start();
-    trimmed.starts_with(b"<?xml") || trimmed.starts_with(b"<krpano")
+    memmem::find(contents, b"<krpano").is_some()
+        || (contents.trim_ascii_start().starts_with(b"<?xml")
+            && [b"image".as_slice(), b"scene"]
+                .iter()
+                .any(|key| memmem::find(contents, key).is_some()))
 }
 
 /// True if the content has krpano-specific HTML evidence.

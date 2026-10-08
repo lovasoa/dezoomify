@@ -6,9 +6,7 @@ use dzi_file::DziFile;
 use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
-use crate::core::discovery::{
-    any, html_matches, image_url, metadata, url_matches, url_suffix, viewer,
-};
+use crate::core::discovery::{html_matches, image_url, metadata, url_matches, url_suffix, viewer};
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
     ParsedResource, RejectionKind, Request, ResolvedLevel,
@@ -39,7 +37,12 @@ const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryRoute::regex_link(&DZI_LINK_RE, "$url"),
     DiscoveryRoute::regex_link(&DZI_ATTR_RE, "$url"),
     metadata(url_suffix(".dzi")).decode(decode_catalog),
-    metadata(any()).decode(decode_catalog),
+    // XML requires TileSize; JSON/JSON5 may spell that key with escapes.
+    metadata(html_matches(|bytes| {
+        memchr::memmem::find(bytes, b"TileSize").is_some()
+            || (bytes.contains(&b'{') && bytes.contains(&b'\\'))
+    }))
+    .decode(decode_catalog),
 ];
 
 pub const SPEC: FormatSpec =

@@ -1,6 +1,6 @@
 //! Pure discovery for Web Map Tile Service capabilities documents.
 
-use crate::core::discovery::{any, metadata, url_matches};
+use crate::core::discovery::{html_matches, metadata, url_matches};
 use crate::core::{DiscoveryError, FormatSpec, ImagePlan, ParsedResource};
 
 mod capabilities;
@@ -11,7 +11,10 @@ pub const SPEC: FormatSpec = FormatSpec::new(
     "wmts",
     &[
         metadata(url_matches(is_wmts_url)).decode(decode),
-        metadata(any()).decode(decode),
+        metadata(html_matches(|bytes| {
+            memchr::memmem::find(bytes, b"TileMatrixSet").is_some()
+        }))
+        .decode(decode),
     ],
 )
 .with_display_name("WMTS");

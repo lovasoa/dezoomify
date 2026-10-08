@@ -60,7 +60,7 @@ fn explicit_auto_behaves_like_default() {
 
 #[test]
 fn named_mismatch_fails_instead_of_auto_detecting() {
-    // A DZI document parsed as IIIF cannot succeed: the named selector must
+    // A DZI document does not match IIIF: the named selector must
     // not fall back to auto-detection.
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
@@ -68,7 +68,7 @@ fn named_mismatch_fails_instead_of_auto_detecting() {
     let output = out_dir.join("mismatch.png");
     let error = run_with_format(&input, &output, Some("iiif".to_string()))
         .expect_err("iiif-only registry cannot parse DZI");
-    assert_eq!(error.cause().kind(), "malformed-metadata");
+    assert_eq!(error.cause().kind(), "discovery-failed");
     assert!(!output.exists(), "failed jobs write no output");
 }
 
