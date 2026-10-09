@@ -2,9 +2,9 @@ name: ci
 on:
   pull_request: {}
   push:
-    # Single-branch repository: master holds legacy/ and the new app.
+    # Single-branch repository: main holds legacy/ and the new app.
 
-    branches: [master]
+    branches: [main]
 permissions:
   contents: read
 concurrency:

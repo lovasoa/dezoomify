@@ -26,7 +26,7 @@ on:
       - .github/workflows/desktop.yml
       - .github/actions/setup-windows-bundlers/action.yml
   push:
-    branches: [master]
+    branches: [main]
     paths: *desktop-paths
 permissions:
   contents: read
