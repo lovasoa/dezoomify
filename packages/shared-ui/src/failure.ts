@@ -52,10 +52,9 @@ const COPY = {
   stale: "desktop.job.gone",
   "plan-empty": "desktop.plan.none",
   "plan-invalid": "view.fail.canvasAllocation",
-  "no-usable-tiles": "desktop.tile.partialChoice",
-  "partial-discarded": "desktop.tile.partialDiscarded",
-  "decode-failed": "desktop.tile.partialChoice",
-  "processing-failed": "desktop.tile.partialChoice",
+  "tile-failed": "desktop.tile.failed",
+  "decode-failed": "desktop.tile.failed",
+  "processing-failed": "desktop.tile.failed",
   "limit-exceeded": "desktop.output.canvasLimit",
   "encode-failed": "desktop.output.writeFail",
   "write-failed": "desktop.output.writeFail",
@@ -216,9 +215,8 @@ function isJobErrorAt(value: unknown, depth: number): boolean {
         (limit.bytes_available === undefined || num(limit.bytes_available))
       );
     }
-    case "no-usable-tiles":
-    case "partial-discarded":
-      return typeof record.transient === "boolean";
+    case "tile-failed":
+      return num(record.tile) && num(record.attempts) && isJobErrorAt(record.cause, depth + 1);
     case "resource":
       return (
         typeof record.request === "string" &&
@@ -241,6 +239,7 @@ export type RootCause = Exclude<JobError, { kind: "resource" }>;
 
 export function causeOf(error: JobError): RootCause {
   if (error.kind === "resource") return causeOf(error.source);
+  if (error.kind === "tile-failed") return causeOf(error.cause);
   if (error.kind === "discovery-failed" && error.cause) return causeOf(error.cause);
   return error;
 }
@@ -268,7 +267,7 @@ export function detailOf(error: JobError): string | undefined {
     current =
       current.kind === "resource"
         ? current.source
-        : current.kind === "discovery-failed"
+        : current.kind === "discovery-failed" || current.kind === "tile-failed"
           ? current.cause
           : undefined;
   }

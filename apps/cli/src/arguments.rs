@@ -63,13 +63,6 @@ pub struct Args {
     /// Bulk source: local text-list file or URL (including IIIF collection
     /// manifests, best-effort). When present, one output per entry.
     pub bulk: Option<String>,
-    /// Partial output policy: keep a partial image with blank regions when
-    /// some tiles fail after retries (default), published to a `.partial` sibling (`out.png` becomes
-    /// `out.partial.png`) so it never masquerades as a complete save.
-    /// `--no-partial` discards instead with
-    /// `tile.download-failed` and no output. `--keep-partial` is the
-    /// explicit opt-in spelling of the default; last flag wins.
-    pub keep_partial: bool,
 }
 
 impl Args {
@@ -138,7 +131,6 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     let mut parallelism: usize = 16;
     let mut tile_cache: Option<PathBuf> = None;
     let mut bulk: Option<String> = None;
-    let mut keep_partial = true;
     let mut i = 0;
     while i < args.len() {
         let (flag, inline_value) = split_flag_value(&args[i]);
@@ -154,14 +146,6 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
             "--json" => {
                 reject_inline_value(flag, inline_value)?;
                 json = true;
-            }
-            "--keep-partial" => {
-                reject_inline_value(flag, inline_value)?;
-                keep_partial = true;
-            }
-            "--no-partial" => {
-                reject_inline_value(flag, inline_value)?;
-                keep_partial = false;
             }
             "--format" | "-d" => {
                 let raw = take_value(args, &mut i, inline_value, "--format")?;
@@ -355,7 +339,6 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         parallelism,
         tile_cache,
         bulk,
-        keep_partial,
     })
 }
 
@@ -522,9 +505,6 @@ fn help() -> String {
         "  --connect-timeout <duration> max time to connect (default 6s)",
         "  --logging <level>           log verbosity: error, warn, info, debug, trace (default info)",
         "  -c, --tile-cache <dir>      resume folder reusing downloaded tiles",
-        "  --keep-partial              keep partial output with blank regions on tile failure (default,",
-        "                              saved to a .partial sibling: out.png becomes out.partial.png)",
-        "  --no-partial                discard partial output on tile failure (fail with no output)",
         "  --bulk <file-or-url>        text list file (URL plus optional title per line, # comments)",
         "                              or IIIF collection manifest URL; saves one output per entry",
         "  --outfile <file>            explicit output file (.png, .jpg, .jpeg, .tif, .tiff, .zif, .webp, .iiif,",
@@ -974,34 +954,9 @@ mod tests {
     }
 
     #[test]
-    fn keep_partial_defaults_to_keep_and_last_flag_wins() {
-        let args = parse(&[
-            "https://example.com/x.dzi".to_string(),
-            "out.png".to_string(),
-        ])
-        .expect("defaults");
-        assert!(args.keep_partial, "partial output is kept by default");
-        let kept = parse(&[
-            "--keep-partial".to_string(),
-            "https://example.com/x.dzi".to_string(),
-            "out.png".to_string(),
-        ])
-        .expect("keep-partial parses");
-        assert!(kept.keep_partial);
-        let discarded = parse(&[
-            "--no-partial".to_string(),
-            "https://example.com/x.dzi".to_string(),
-            "out.png".to_string(),
-        ])
-        .expect("no-partial parses");
-        assert!(!discarded.keep_partial);
-        let last_wins = parse(&[
-            "--no-partial".to_string(),
-            "--keep-partial".to_string(),
-            "https://example.com/x.dzi".to_string(),
-            "out.png".to_string(),
-        ])
-        .expect("last flag wins");
-        assert!(last_wins.keep_partial);
+    fn removed_partial_flags_are_rejected() {
+        for flag in ["--keep-partial", "--no-partial"] {
+            assert!(parse(&[flag.to_string(), "https://example.com/x.dzi".to_string()]).is_err());
+        }
     }
 }

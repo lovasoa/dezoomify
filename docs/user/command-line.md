@@ -40,8 +40,6 @@ ignores caps).
 | Cap the height | `-h, --max-height 800` |
 | Pick a level by index | `--zoom-level 0` (0 is smallest; too large uses last; wins over largest and caps) |
 | Pick a specific image when several are found | `--image-index 2` (0-based; too large uses last) |
-| Keep a partial image when some tiles fail | `--keep-partial` (default; missing regions stay blank, saved to a `.partial` sibling: `out.png` becomes `out.partial.png`) |
-| Discard partial output on tile failure | `--no-partial` (fails with `partial-discarded` and no output) |
 | Retry more often on an unreliable server | `-r, --retries 5` (default 3; 0 means no retries) |
 | Wait before retrying | `--retry-delay 2s` (base wait, doubling per attempt to 30 s max, `Retry-After` honored) |
 | Tune output compression | `--compression 5` (JPEG quality `100 - compression`, default 95; PNG fast/balanced/best tiers) |
@@ -58,7 +56,9 @@ ignores caps).
 
 Run `dezoomify --help` (`-?` is an alias) for the full list. `-V` shows the version.
 
-A failure prints one plain sentence followed by its stable `kind` on stderr (`error: <sentence> (<kind>)`), for example `error: partial output was discarded (partial-discarded)`. The sentence is rendered from the typed failure facts; the `kind` is the identifier to quote in bug reports.
+A failure prints one plain sentence followed by its stable `kind` on stderr (`error: <sentence> (<kind>)`). The sentence is rendered from the typed failure facts; the `kind` is the identifier to quote in bug reports.
+
+Tile failures stop the job without publishing an image. The error preserves the tile address, attempt count, and original cause. Increase `--retries` for transient failures; the resume cache can reuse successfully downloaded tiles on a later run.
 
 ## Saving many images
 

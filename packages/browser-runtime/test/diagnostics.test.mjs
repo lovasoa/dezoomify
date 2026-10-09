@@ -48,7 +48,7 @@ test("reports retain grouped causes and outcome under load independently of cons
     d.record("warn", "request", { http: 403, url: `https://host/${i}` });
     d.record("debug", "sample", { text: "界".repeat(1000) });
   }
-  d.finish("failed", { code: "job.partial-discarded", initiator: "policy" });
+  d.finish("failed", { code: "tile-failed", initiator: "policy" });
   d.finish("retired");
   const report = d.report();
   assert.ok(Buffer.byteLength(JSON.stringify(report)) <= 1024 * 1024);

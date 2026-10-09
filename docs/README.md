@@ -9,7 +9,7 @@ or solve a download problem. These pages also generate the website help.
 
 - [Development](development.md): setup, build outputs, local servers, and validation.
 - [Architecture](architecture.md): dependency boundaries, bindings, and job ownership.
-- [Algorithm](algorithm.md): discovery precedence, retries, cancellation, and partial output.
+- [Algorithm](algorithm.md): discovery precedence, retries, cancellation, and recovery.
 - [Contributing a format](CONTRIBUTING-format.md): add a parser and a reproducible fixture.
 - [Testing](testing.md): choose coverage and build deterministic fixtures.
 - [Browser runtime](browser-runtime.md): fetching and canvas behavior.

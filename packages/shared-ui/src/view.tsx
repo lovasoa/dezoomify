@@ -7,7 +7,7 @@ import { flushSync } from "react-dom";
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
 import type { JobActivity } from "./activity.ts";
-import { canRetry, httpStatusOf, plainMessageFor } from "./failure.ts";
+import { canRetry, plainMessageFor } from "./failure.ts";
 import { HistorySection } from "./history-view.tsx";
 import type { Presentation, ResolutionChoice } from "./presentation.ts";
 import { displaySourceUrl, formatPixelCount, hostFromUrl } from "./view-helpers.ts";
@@ -25,6 +25,8 @@ export type {
 import { formatElapsed, renderCompletion, renderSaveGuidance } from "./components.ts";
 import { DiagnosticDetails } from "./diagnostic-details.tsx";
 import { t } from "./i18n.ts";
+import { Notice, NoticeAction, NoticeActions } from "./notice.tsx";
+import { RetryActions } from "./retry-actions.tsx";
 import { UrlInput } from "./url-input.tsx";
 
 // Presentational atoms.
@@ -143,79 +145,41 @@ function ResolutionNotice({
 }) {
   const dims = (size: { width: number; height: number }) => `${size.width}×${size.height}`;
   return (
-    <div className="dz-resolution-notice" id="dz-resolution-notice">
-      <svg
-        className="dz-notice-icon"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-        <line x1="12" y1="9" x2="12" y2="13" />
-        <line x1="12" y1="17" x2="12.01" y2="17" />
-      </svg>
-      <div className="dz-resolution-text">
-        <p className="dz-notice-message" id="dz-resolution-message">
-          {t("view.resolution.notice")}
-        </p>
-        <p className="dz-resolution-sizes" id="dz-resolution-sizes">
+    <Notice
+      id="dz-resolution-notice"
+      className="dz-resolution-notice"
+      tone="warning"
+      title={t("view.resolution.title")}
+      message={t("view.resolution.notice")}
+      messageId="dz-resolution-message"
+      details={
+        <p id="dz-resolution-sizes">
           {t("view.resolution.sizes", {
             selected: dims(choice.selected),
             maximum: dims(choice.maximum),
           })}
         </p>
-      </div>
-      <div className="dz-resolution-actions">
-        <button
-          type="button"
-          className="dz-resolution-download"
-          id="dz-btn-download-desktop"
-          onClick={() => showDesktopAppGuidance(hostDocument)}
-        >
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
+      }
+      actions={
+        <NoticeActions>
+          <NoticeAction
+            primary
+            id="dz-btn-download-desktop"
+            onClick={() => showDesktopAppGuidance(hostDocument)}
           >
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-          {t("view.resolution.download")}
-        </button>
-        <button
-          type="button"
-          className="dz-btn-secondary"
-          id="dz-btn-try-maximum"
-          onClick={() => callbacks.onTryMaximum?.()}
-        >
-          {t("view.resolution.tryMaximum")}
-        </button>
-        {running ? (
-          <button
-            type="button"
-            className="dz-btn-secondary dz-resolution-stop"
-            id="dz-btn-resolution-stop"
-            onClick={() => callbacks.onCancel()}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <rect x="6" y="6" width="12" height="12" />
-            </svg>
-            {t("view.resolution.stop")}
-          </button>
-        ) : null}
-      </div>
-    </div>
+            {t("view.resolution.download")}
+          </NoticeAction>
+          <NoticeAction id="dz-btn-try-maximum" onClick={() => callbacks.onTryMaximum?.()}>
+            {t("view.resolution.tryMaximum")}
+          </NoticeAction>
+          {running ? (
+            <NoticeAction id="dz-btn-resolution-stop" onClick={() => callbacks.onCancel()}>
+              {t("view.resolution.stop")}
+            </NoticeAction>
+          ) : null}
+        </NoticeActions>
+      }
+    />
   );
 }
 
@@ -372,23 +336,22 @@ function JobView({
   hostDocument: Document;
 }) {
   const d = deriveJob(presentation, ctx);
-  if (presentation.decision) {
-    const missing = presentation.decision?.missing ?? [];
-    const refused =
-      missing.length > 0 &&
-      missing.every(({ failures }) => {
-        const failure = failures.at(-1);
-        const status = failure ? httpStatusOf(failure) : undefined;
-        return status === 401 || status === 403;
-      });
+  if (presentation.retryApproval) {
     return (
-      <section className="dz-view-body dz-partial-section" aria-labelledby="dz-partial-title">
-        <h2 id="dz-partial-title">{t("view.partial.title")}</h2>
-        <p>{t("view.partial.summary", { done: d.current, total: d.total })}</p>
-        <p>{t(refused ? "view.partial.refused" : "view.partial.gaps")}</p>
-      </section>
+      <Notice
+        id="dz-retry"
+        className="dz-retry-section"
+        tone="warning"
+        title={t("view.retry.title")}
+        message={t("view.retry.explanation")}
+        details={<p>{t("view.retry.summary", { done: d.current, total: d.total })}</p>}
+        actions={
+          callbacks.onRetryChoice ? <RetryActions onAnswer={callbacks.onRetryChoice} /> : null
+        }
+      />
     );
   }
+
   const acquisitionControls = presentation.headlineKey !== "view.step.saving";
   const showPause = acquisitionControls && !d.paused && typeof callbacks.onPause === "function";
   const showResume = acquisitionControls && d.paused && typeof callbacks.onResume === "function";
@@ -602,9 +565,7 @@ function CompletedView({
   const saved =
     output?.disposition === "native-publication" ||
     output?.disposition === "browser-save-initiated";
-  const title = saved
-    ? t(output.missing.length === 0 ? "desktop.done.title" : "desktop.done.partial")
-    : t("view.done.readyTitle");
+  const title = saved ? t("desktop.done.title") : t("view.done.readyTitle");
   const summary = saved
     ? canvas
       ? t("desktop.done.size", { width: canvas.width, height: canvas.height })
@@ -725,64 +686,38 @@ function FailedView({
   hostDocument: Document;
 }) {
   const error: JobError = presentation.error ?? { kind: "internal" };
+  const retry = canRetry(error) ? callbacks.onRetrySameUrl : undefined;
   const source =
     typeof ctx?.sourceUrl === "string"
       ? ctx.sourceUrl
       : typeof ctx?.jobActivity?.url === "string"
         ? ctx.jobActivity.url
         : "";
-  if (error.kind === "no-usable-tiles") {
-    const status = httpStatusOf(error);
-    const refused = status === 401 || status === 403;
-    return (
-      <section className="dz-view-body dz-error-section">
-        <h2>{t(refused ? "view.partial.accessDenied" : "view.partial.empty")}</h2>
-        <p>{t("view.partial.noneSaved")}</p>
-        {callbacks.onOpenSource ? <p>{t("view.partial.checkSource")}</p> : null}
-        <div className="dz-actions-row">
-          {callbacks.onOpenSource ? (
-            <button type="button" className="dz-btn-tactile" onClick={callbacks.onOpenSource}>
-              {t("view.partial.openSource")}
-            </button>
-          ) : null}
-          {canRetry(error) && callbacks.onRetrySameUrl ? (
-            <button type="button" className="dz-btn-secondary" onClick={callbacks.onRetrySameUrl}>
-              {t("view.fail.retry")}
-            </button>
-          ) : null}
-          {callbacks.onReset ? (
-            <button type="button" className="dz-btn-secondary" onClick={callbacks.onReset}>
-              {t("view.display.startOver")}
-            </button>
-          ) : null}
-        </div>
-      </section>
-    );
-  }
   return (
-    <div className="dz-view-body dz-error-section dz-fade-in">
-      <div className="dz-error-header">
-        <svg
-          className="dz-error-icon"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <circle cx="12" cy="12" r="10" />
-          <line x1="12" y1="8" x2="12" y2="12" />
-          <line x1="12" y1="16" x2="12.01" y2="16" />
-        </svg>
-        <div>
-          <h2 className="dz-error-title">{t("view.fail.title")}</h2>
-          <p className="dz-error-message" id="dz-error-message">
-            {plainMessageFor(error, hostFromUrl(source))}
-          </p>
-        </div>
-      </div>
+    <Notice
+      id="dz-failure"
+      className="dz-error-section dz-fade-in"
+      tone="error"
+      title={t("view.fail.title")}
+      message={plainMessageFor(error, hostFromUrl(source))}
+      messageId="dz-error-message"
+      actions={
+        retry || callbacks.onReset ? (
+          <NoticeActions>
+            {retry ? (
+              <NoticeAction primary id="dz-btn-try-again" onClick={retry}>
+                {t("view.fail.retry")}
+              </NoticeAction>
+            ) : null}
+            {callbacks.onReset ? (
+              <NoticeAction id="dz-btn-start-over" onClick={() => callbacks.onReset?.()}>
+                {t("view.display.startOver")}
+              </NoticeAction>
+            ) : null}
+          </NoticeActions>
+        ) : null
+      }
+    >
       <div className="dz-guidance-section">
         <h3 className="dz-guidance-title">{t("view.display.waysTitle")}</h3>
         <div className="dz-guidance-grid">
@@ -818,30 +753,7 @@ function FailedView({
           </a>
         </div>
       </div>
-      <div className="dz-actions-row">
-        {canRetry(error) && callbacks.onRetrySameUrl ? (
-          <button
-            type="button"
-            className="dz-btn-tactile"
-            id="dz-btn-try-again"
-            style={{ minWidth: "140px" }}
-            onClick={() => callbacks.onRetrySameUrl?.()}
-          >
-            {t("view.fail.retry")}
-          </button>
-        ) : null}
-        {callbacks.onReset ? (
-          <button
-            type="button"
-            className="dz-btn-secondary"
-            id="dz-btn-start-over"
-            onClick={() => callbacks.onReset?.()}
-          >
-            {t("view.display.startOver")}
-          </button>
-        ) : null}
-      </div>
-    </div>
+    </Notice>
   );
 }
 

@@ -69,7 +69,10 @@ export function collectCandidates(): {
   const visit = (doc: Document, url: string, kind: DiscoveryInputKind) => {
     let html = "";
     try {
-      html = String(doc.documentElement?.outerHTML ?? "");
+      // Browsers render XML, JSON, and plain text inside their own viewers.
+      // Only HTML DOM is source evidence; other documents need original bytes.
+      if (doc.contentType === "text/html" || doc.contentType === "application/xhtml+xml")
+        html = String(doc.documentElement?.outerHTML ?? "");
     } catch {}
     append(url, kind, html);
     let frames: Element[] = [];

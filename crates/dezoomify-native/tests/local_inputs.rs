@@ -54,7 +54,7 @@ fn plain_path_input_with_file_uri_tiles_assembles() {
         ),
         (512, 512)
     );
-    assert!(outcome.output.is_complete());
+    assert!(outcome.output.disposition == dezoomify::model::OutputDisposition::NativePublication);
 }
 
 #[test]

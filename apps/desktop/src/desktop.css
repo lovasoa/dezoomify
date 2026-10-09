@@ -157,8 +157,7 @@ body {
   margin-top: 0.5rem;
 }
 
-/* Missing-tile and partial/cancel notes: plain left-aligned flow, no box. */
-#dz-desktop-aux .dz-missing-list,
+/* Cancellation cleanup stays in the main flow. */
 #dz-cancel-cleanup-note {
   text-align: left;
   font-variant-numeric: tabular-nums;
@@ -188,8 +187,7 @@ body {
 #root .dz-tile-counts,
 #root .dz-pending-line,
 #root .dz-notice-message,
-#root .dz-completed-summary,
-#root .dz-error-message {
+#root .dz-completed-summary {
   text-align: left;
 }
 
@@ -697,21 +695,8 @@ body {
   }
 }
 
-/* Partial output details remain inline with the completed result. */
-#dz-desktop-aux .dz-partial-note {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  border-radius: 0;
-  padding: 0;
-  text-align: left;
-}
-
 /* Crisp 2px architectural focus for every desktop-only action: submit, save,
- * cancel, reset, recovery choices, settings inputs, browse, help/about, and
+ * cancel, reset, retry approval, settings inputs, browse, help/about, and
  * confirm. Shared actions (Dezoomify/Cancel/Save buttons, URL input) already
  * use the same token in theme.css; these rules cover the desktop aux,
  * settings and help DOM. One token only, no blur, no neon halo. */

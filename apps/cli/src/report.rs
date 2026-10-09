@@ -34,8 +34,6 @@ pub fn machine_event_detail(
 }
 
 /// Fields for the terminal machine-readable completion record.
-/// `partial` distinguishes a kept
-/// `.partial` sibling (`partial-completed`) from a complete save.
 pub struct CompletedOutput<'a> {
     pub job: &'a str,
     pub seq: u64,
@@ -43,7 +41,6 @@ pub struct CompletedOutput<'a> {
     pub width: u32,
     pub height: u32,
     pub tile_count: usize,
-    pub partial: bool,
 }
 
 #[must_use]
@@ -51,12 +48,11 @@ pub fn machine_completed(summary: &CompletedOutput<'_>) -> String {
     serde_json::json!({
         "job": summary.job,
         "seq": summary.seq,
-        "kind": if summary.partial { "partial-completed" } else { "completed" },
+        "kind": "completed",
         "format": summary.format,
         "width": summary.width,
         "height": summary.height,
         "tileCount": summary.tile_count,
-        "partial": summary.partial,
     })
     .to_string()
 }
@@ -175,13 +171,7 @@ pub fn job_diagnostics(level: &str) -> Diagnostics {
         if rank > threshold
             || matches!(
                 record.event.as_str(),
-                "start"
-                    | "phase"
-                    | "completed"
-                    | "partial-completed"
-                    | "failed"
-                    | "runtime-failed"
-                    | "validation-failed"
+                "start" | "phase" | "completed" | "failed" | "runtime-failed" | "validation-failed"
             )
         {
             return;

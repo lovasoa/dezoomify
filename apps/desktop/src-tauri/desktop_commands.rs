@@ -10,7 +10,7 @@ macro_rules! desktop_commands {
             cancel_job,
             pause_job,
             resume_job,
-            answer_partial,
+            answer_retry,
             open_saved_output,
             inspect_saved_output,
             open_history_output,

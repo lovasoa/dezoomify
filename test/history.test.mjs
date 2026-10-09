@@ -80,7 +80,13 @@ test("history serialize and parse round-trip and reject bad entries", () => {
   assert.deepEqual(parseHistoryJson(null), []);
   // Entries without a usable address are ignored when old entries are loaded.
   const sneaky = JSON.stringify([
-    { origin: "https://example.com", url: "https://example.com/x?token=abc", at: 1 },
+    {
+      origin: "https://example.com",
+      url: "https://example.com/x?token=abc",
+      at: 1,
+      status: "unsupported-outcome",
+      savedOutput: { id: "saved:existing", filename: "existing.png" },
+    },
     { origin: "https://example.com", url: "", at: 1 },
     { origin: "", url: "https://example.com/x", at: 1 },
     clean,
@@ -88,6 +94,8 @@ test("history serialize and parse round-trip and reject bad entries", () => {
   const parsed = parseHistoryJson(sneaky);
   assert.equal(parsed.length, 2);
   assert.equal(parsed[0].url, "https://example.com/x?token=abc");
+  assert.equal(parsed[0].status, undefined, "unsupported outcomes do not become completion");
+  assert.deepEqual(parsed[0].savedOutput, { id: "saved:existing", filename: "existing.png" });
   assert.equal(parsed[1].url, clean.url);
 });
 
@@ -139,7 +147,6 @@ test("history completion and removal preserve other entries and never resurrect 
     disposition: "browser-save-ready",
     format: "png",
     canvas: { width: 100, height: 80 },
-    missing: [],
   };
   history.complete(second, output);
   assert.equal(history.entries()[0].status, "completed");
@@ -159,7 +166,6 @@ const diskOutput = {
   disposition: "native-publication",
   format: "png",
   canvas: { width: 100, height: 80 },
-  missing: [],
 };
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 

@@ -140,6 +140,17 @@ export interface TileRole {
 }
 
 /**
+ * One acquisition attempt. The core owns retries; Hosts await approval for
+ * optional attempts before performing I/O. Attempt zero is the initial request.
+ */
+export interface TileAcquisition {
+    tile: Tile;
+    attempt: number;
+    requires_approval: boolean;
+    previous_failure: Error | undefined;
+}
+
+/**
  * One discovery input. An omitted kind is a user-supplied source for
  * products that have no browser observations.
  */
@@ -166,20 +177,12 @@ export interface ResourceRequest {
 }
 
 /**
- * One tile settled as missing, with its full structured detail.
- */
-export interface MissingTile {
-    tile: number;
-    failures: Error[];
-}
-
-/**
  * One typed failure. Grouped by domain: transport and fetch, discovery,
  * job and planning, tiles, output, control, internals, and the composable
  * [`Error::Resource`] context wrapper that preserves the exact URI and
  * resource kind of any underlying failure.
  */
-export type Error = ({ kind: "http-error" } & { status: number; retry_after_ms?: number; preview?: string; transport: ErrorTransport } & Failure) | ({ kind: "rate-limited" } & { retry_after_ms?: number; transport: ErrorTransport } & Failure) | ({ kind: "timeout" } & { transport: ErrorTransport } & Failure) | ({ kind: "network-failure" } & { transport: ErrorTransport } & Failure) | ({ kind: "policy-denied" } & { blocked_reason: BlockedReason; transport: ErrorTransport } & Failure) | ({ kind: "bad-url" } & Failure) | ({ kind: "bad-redirect" } & Failure) | { kind: "redirect-limit"; max: number } | { kind: "size-limit"; max_bytes: number } | { kind: "cancelled" } | { kind: "proxy-budget-exceeded" } | ({ kind: "proxy-error" } & { transport: ErrorTransport } & Failure) | ({ kind: "no-image-found" } & Failure) | ({ kind: "malformed-metadata" } & Failure) | { kind: "unknown-format"; format: string } | { kind: "empty-resource" } | ({ kind: "resource-limit" } & Failure) | { kind: "deferred-limit"; max: number } | ({ kind: "discovery-failed" } & { cause?: Error } & Failure) | ({ kind: "invalid-input" } & Failure) | ({ kind: "invalid-options" } & Failure) | ({ kind: "invalid-state" } & Failure) | { kind: "duplicate" } | { kind: "stale" } | { kind: "plan-empty" } | ({ kind: "plan-invalid" } & Failure) | { kind: "no-usable-tiles"; transient: boolean; retry_after_ms?: number } | { kind: "partial-discarded"; transient: boolean; retry_after_ms?: number } | ({ kind: "decode-failed" } & Failure) | ({ kind: "processing-failed" } & Failure) | { kind: "limit-exceeded"; limit: LimitContext } | ({ kind: "encode-failed" } & Failure) | ({ kind: "write-failed" } & Failure) | { kind: "output-exists" } | ({ kind: "destination-denied" } & Failure) | ({ kind: "unsupported-extension" } & Failure) | ({ kind: "output-unavailable" } & Failure) | { kind: "output-no-parent" } | ({ kind: "launch-failed" } & Failure) | { kind: "output-denied" } | { kind: "output-not-found" } | { kind: "invoke-failed" } | ({ kind: "start-failed" } & Failure) | ({ kind: "choice-failed" } & Failure) | { kind: "invalid-url" } | ({ kind: "invalid-settings" } & Failure) | ({ kind: "registration-failed" } & Failure) | ({ kind: "internal" } & Failure) | { kind: "shell-lock" } | ({ kind: "binding-invalid-value" } & Failure) | { kind: "interaction-expired" } | { kind: "auth-forbidden-header" } | { kind: "resource"; request: string; resource_kind: ResourceKind; source: Error };
+export type Error = ({ kind: "http-error" } & { status: number; retry_after_ms?: number; preview?: string; transport: ErrorTransport } & Failure) | ({ kind: "rate-limited" } & { retry_after_ms?: number; transport: ErrorTransport } & Failure) | ({ kind: "timeout" } & { transport: ErrorTransport } & Failure) | ({ kind: "network-failure" } & { transport: ErrorTransport } & Failure) | ({ kind: "policy-denied" } & { blocked_reason: BlockedReason; transport: ErrorTransport } & Failure) | ({ kind: "bad-url" } & Failure) | ({ kind: "bad-redirect" } & Failure) | { kind: "redirect-limit"; max: number } | { kind: "size-limit"; max_bytes: number } | { kind: "cancelled" } | { kind: "proxy-budget-exceeded" } | ({ kind: "proxy-error" } & { transport: ErrorTransport } & Failure) | ({ kind: "no-image-found" } & Failure) | ({ kind: "malformed-metadata" } & Failure) | { kind: "unknown-format"; format: string } | { kind: "empty-resource" } | ({ kind: "resource-limit" } & Failure) | { kind: "deferred-limit"; max: number } | ({ kind: "discovery-failed" } & { cause?: Error } & Failure) | ({ kind: "invalid-input" } & Failure) | ({ kind: "invalid-options" } & Failure) | ({ kind: "invalid-state" } & Failure) | { kind: "duplicate" } | { kind: "stale" } | { kind: "plan-empty" } | ({ kind: "plan-invalid" } & Failure) | { kind: "tile-failed"; tile: number; attempts: number; cause: Error } | ({ kind: "decode-failed" } & Failure) | ({ kind: "processing-failed" } & Failure) | { kind: "limit-exceeded"; limit: LimitContext } | ({ kind: "encode-failed" } & Failure) | ({ kind: "write-failed" } & Failure) | { kind: "output-exists" } | ({ kind: "destination-denied" } & Failure) | ({ kind: "unsupported-extension" } & Failure) | ({ kind: "output-unavailable" } & Failure) | { kind: "output-no-parent" } | ({ kind: "launch-failed" } & Failure) | { kind: "output-denied" } | { kind: "output-not-found" } | { kind: "invoke-failed" } | ({ kind: "start-failed" } & Failure) | ({ kind: "choice-failed" } & Failure) | { kind: "invalid-url" } | ({ kind: "invalid-settings" } & Failure) | ({ kind: "registration-failed" } & Failure) | ({ kind: "internal" } & Failure) | { kind: "shell-lock" } | ({ kind: "binding-invalid-value" } & Failure) | { kind: "interaction-expired" } | { kind: "auth-forbidden-header" } | { kind: "resource"; request: string; resource_kind: ResourceKind; source: Error };
 
 /**
  * Output preflight after geometry probes and before ordinary acquisitions.
@@ -199,12 +202,11 @@ export interface OutputPlan {
 }
 
 /**
- * Output summary: geometry, completeness, and the honest disposition.
+ * Output summary after every required tile has been acquired.
  */
 export interface Output {
     canvas: Size | undefined;
     format: OutputFormat;
-    missing: number[];
     disposition: OutputDisposition;
 }
 
@@ -322,7 +324,6 @@ export interface FinishRequest {
     canvas: Size | undefined;
     format: OutputFormat;
     title: string | undefined;
-    missing: number[];
     reused_tiles: ReusedTile[];
 }
 
@@ -336,11 +337,10 @@ export interface Host {
     parseHtml(query: HtmlQuery,): Promise<HtmlDocument>;
     probe(tile: Tile,): Promise<ProbeOutcome>;
     beginOutput(plan: OutputPlan,): Promise<void>;
-    acquireTile(tile: Tile,): Promise<void>;
+    acquireTile(request: TileAcquisition,): Promise<void>;
     finish(request: FinishRequest,): Promise<Output>;
     chooseImage(catalog: Catalog,): Promise<number>;
     chooseLevel(image: Image,): Promise<number>;
-    choosePartial(missing: MissingTiles,): Promise<RecoveryChoice>;
     checkpoint(gate: Gate,): Promise<void>;
     sleep(delay_ms: number,): Promise<void>;
     report(progress: Progress): void;
@@ -361,14 +361,13 @@ export interface Level {
     tileSize?: Size;
 }
 
-export interface MissingTiles {
-    missing: MissingTile[];
-}
-
 export interface Options {
     format?: string | undefined;
     selection?: SelectionPolicy;
-    partial?: PartialPolicy;
+    /**
+     * Issue approval-required attempts after the automatic retry allowance.
+     */
+    interactive_retries?: boolean;
     output?: OutputFormat;
     max_concurrent?: number;
     max_tiles?: number;
@@ -401,17 +400,15 @@ export type Gate = "cancellation" | "acquisition";
 
 export type Interaction = "forbidden" | "allowed";
 
-export type PartialPolicy = "prompt" | "keep" | "discard";
-
 export type ProbeOutcome = { status: "missing" } | { status: "available"; width: number; height: number };
 
 export type ProgressPhase = "discovery" | "planning" | "acquisition" | "output";
 
-export type RecoveryChoice = "keep" | "retry" | "discard";
-
 export type ResourceKind = "metadata" | "tile" | "probe" | "output";
 
 export type ResourceRead = { kind: "response"; response: ResourceResponse } | { kind: "needs-access"; origin: string };
+
+export type RetryChoice = "retry" | "cancel";
 
 export type SelectionPolicy = { kind: "interactive" } | { kind: "fitting"; max_width: number; max_height: number; max_area: number } | { kind: "automatic"; image_index: number; largest: boolean; max_width: number | undefined; max_height: number | undefined; zoom_level: number | undefined };
 

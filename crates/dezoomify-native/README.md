@@ -4,7 +4,8 @@ The CLI and desktop call `dezoomify::dezoomify` with `NativeHost`. It provides
 HTTP and local resource reads, bounded blocking image decoding, tile caching,
 canvas assembly, and atomic file publication. Each invocation owns its pooled
 HTTP client, cancellation and pause controls, temporary files, and decode work.
-The shared Rust algorithm owns discovery, selection, retries, and partial choices.
+The shared Rust algorithm owns discovery, selection, retry limits, and backoff.
+Native acquisitions await user approval before optional retries.
 
 The output encoders support PNG, JPEG, TIFF, ZIF pyramids, lossless WebP, and
 static IIIF directories. Response bodies are cached under URL digests; headers

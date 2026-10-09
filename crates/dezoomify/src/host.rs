@@ -11,11 +11,10 @@ macro_rules! host_members {
                 parse_html => parseHtml(query: HtmlQuery) -> HtmlDocument;
                 probe => probe(tile: Tile) -> ProbeOutcome;
                 begin_output => beginOutput(plan: OutputPlan) -> ();
-                acquire_tile => acquireTile(tile: Tile) -> ();
+                acquire_tile => acquireTile(request: TileAcquisition) -> ();
                 finish => finish(request: FinishRequest) -> Output;
                 choose_image => chooseImage(catalog: Catalog) -> u32;
                 choose_level => chooseLevel(image: Image) -> u32;
-                choose_partial => choosePartial(missing: MissingTiles) -> RecoveryChoice;
                 checkpoint => checkpoint(gate: Gate) -> ();
                 sleep => sleep(delay_ms: u32) -> ();
             }

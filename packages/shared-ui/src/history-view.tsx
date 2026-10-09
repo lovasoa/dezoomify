@@ -63,9 +63,7 @@ export function HistorySection({
                   file && entry.outputState !== "available"
                     ? (entry.outputState ?? "checking")
                     : undefined;
-                const status = entry.opening
-                  ? "opening"
-                  : (fileStatus ?? entry.status ?? "completed");
+                const status = entry.opening ? "opening" : (fileStatus ?? entry.status);
                 return (
                   <tr key={`${entry.at}-${entry.url}`} onClick={() => activate(entry)}>
                     <td>
@@ -95,7 +93,7 @@ export function HistorySection({
                       {entry.width && entry.height ? `${entry.width} × ${entry.height}` : "–"}
                     </td>
                     <td title={entry.outputError ? detailOf(entry.outputError) : undefined}>
-                      {t(`view.history.status.${status}`)}
+                      {status ? t(`view.history.status.${status}`) : "–"}
                       {entry.outputError && entry.outputState !== "unavailable" ? (
                         <span role="alert" title={detailOf(entry.outputError)}>
                           {t("view.history.openFailed")}

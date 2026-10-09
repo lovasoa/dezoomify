@@ -48,6 +48,89 @@ fn known_codec_limits_fail_before_ordinary_tile_fetches() {
 }
 
 #[test]
+fn concurrent_optional_acquisitions_share_approval_and_keep_user_pause() {
+    use dezoomify::{model::*, Host};
+    let work = temp_dir("shared-retry-approval");
+    let source = work.join("tile.png");
+    image::RgbaImage::new(16, 16).save(&source).unwrap();
+    let host = NativeHost::new(JobOptions {
+        input_url: source.to_string_lossy().into(),
+        output: OutputTarget::File(work.join("out.png")),
+        cache_dir: Some(work.join("cache")),
+        ..Default::default()
+    })
+    .unwrap();
+    let prompts = std::rc::Rc::new(std::cell::Cell::new(0));
+    let asked = std::rc::Rc::clone(&prompts);
+    let (send, receive) = tokio::sync::oneshot::channel();
+    let receive = std::cell::RefCell::new(Some(receive));
+    host.on_retry(move |request| {
+        assert_eq!(request.attempt, 4);
+        asked.set(asked.get() + 1);
+        let receive = receive.borrow_mut().take().unwrap();
+        Box::pin(async move { receive.await.map_err(|_| Error::Cancelled) })
+    });
+    let request = |index| TileAcquisition {
+        tile: Tile {
+            index,
+            request: ResourceRequest {
+                uri: source.to_string_lossy().into(),
+                headers: Vec::new(),
+                purpose: RequestPurpose::Tile,
+            },
+            placement: TilePlacement {
+                position: Point {
+                    x: index * 16,
+                    y: 0,
+                },
+                expected_size: Some(Size {
+                    width: 16,
+                    height: 16,
+                }),
+                canvas: Some(Size {
+                    width: 48,
+                    height: 16,
+                }),
+                processing: ProcessingRecipe::None,
+                role: TileRole::output(),
+            },
+        },
+        attempt: 4,
+        requires_approval: true,
+        previous_failure: Some(Box::new(Error::Timeout {
+            transport: ErrorTransport::Native,
+            failure: Failure::default(),
+        })),
+    };
+    host.transport.block_on(async {
+        let (first, second, ()) = tokio::join!(
+            host.acquire_tile(request(0)),
+            host.acquire_tile(request(1)),
+            async {
+                tokio::task::yield_now().await;
+                assert_eq!(prompts.get(), 1);
+                host.controls.pause();
+                send.send(RetryChoice::Retry).unwrap();
+                tokio::task::yield_now().await;
+                host.controls.resume();
+            }
+        );
+        first.unwrap();
+        second.unwrap();
+        host.acquire_tile(request(2)).await.unwrap();
+        assert_eq!(
+            prompts.get(),
+            1,
+            "later tiles at the approved attempt need no new question"
+        );
+        host.settle().await;
+    });
+    assert!(host.publication().is_none());
+    drop(host);
+    std::fs::remove_dir_all(work).unwrap();
+}
+
+#[test]
 fn compatible_single_tile_iiif_preserves_bytes_without_pixel_decoding() {
     let work = temp_dir("iiif-reuse");
     for extension in ["jpg", "png"] {
@@ -329,25 +412,29 @@ fn zif_reuses_standalone_jpeg_and_rgb_png_tiles() {
             output: OutputTarget::File(destination.clone()),
             largest: true,
             compression: 99,
-            keep_partial: true,
+
             max_retries: 0,
             cache_dir: Some(work.join("cache")),
             ..Default::default()
         })
         .unwrap();
-        host.transport
-            .block_on(dezoomify::dezoomify(
-                host.inputs(),
-                host.algorithm_options(),
-                &host,
-            ))
-            .unwrap();
-        let publication = host.publication().unwrap();
-        if index == 0 {
-            assert_eq!(publication.instrumentation.pixel_decodes, 0);
-        } else {
-            assert_eq!(publication.output.missing, [0]);
+        let result = host.transport.block_on(dezoomify::dezoomify(
+            host.inputs(),
+            host.algorithm_options(),
+            &host,
+        ));
+        if index != 0 {
+            assert!(matches!(
+                result,
+                Err(dezoomify::model::Error::TileFailed { tile: 0, .. })
+            ));
+            assert!(host.publication().is_none());
+            assert!(!destination.exists());
+            continue;
         }
+        result.unwrap();
+        let publication = host.publication().unwrap();
+        assert_eq!(publication.instrumentation.pixel_decodes, 0);
         assert_eq!(
             publication.instrumentation.peak_retained_bytes, 0,
             "received grid tiles stream even when tile zero is missing"
@@ -433,8 +520,8 @@ fn zif_reuses_standalone_jpeg_and_rgb_png_tiles() {
 }
 
 #[test]
-fn truncated_source_tiles_reach_partial_handling_with_their_uri() {
-    use dezoomify::model::{Error, RecoveryChoice};
+fn truncated_source_tiles_fail_with_their_uri() {
+    use dezoomify::model::Error;
     let work = temp_dir("iiif-truncated");
     let source = work.join("source.dzi");
     let tiles = work.join("source_files/5");
@@ -470,7 +557,6 @@ fn truncated_source_tiles_reach_partial_handling_with_their_uri() {
     ] {
         std::fs::write(&bad, broken).unwrap();
         for extension in ["iiif", "zif"] {
-            let chosen = std::cell::Cell::new(false);
             let host = NativeHost::new(JobOptions {
                 input_url: source.to_string_lossy().into(),
                 output: OutputTarget::File(work.join(format!("out-{case}.{extension}"))),
@@ -480,18 +566,14 @@ fn truncated_source_tiles_reach_partial_handling_with_their_uri() {
                 ..Default::default()
             })
             .unwrap();
-            host.on_partial(|missing| {
-        assert_eq!(missing.missing.len(), 1);
-        assert!(matches!(&missing.missing[0].failures[0], Error::Resource { request, source, .. } if request == bad.to_str().unwrap() && matches!(source.cause(), Error::DecodeFailed(_))));
-        chosen.set(true);
-        Box::pin(async { Ok(RecoveryChoice::Keep) })
-    });
-            let result = support::run_host(&host).unwrap();
-            assert!(chosen.get());
-            assert_eq!(result.output.missing, [1]);
-            assert!(result
-                .path
-                .ends_with(format!("out-{case}.partial.{extension}")));
+            let error = support::run_host(&host).unwrap_err();
+            assert!(
+                matches!(&error, Error::TileFailed { tile: 1, attempts: 1, cause }
+                if matches!(&**cause, Error::Resource { request, source, .. }
+                    if request == bad.to_str().unwrap() && matches!(source.cause(), Error::DecodeFailed(_))))
+            );
+            assert!(host.publication().is_none());
+            assert!(!work.join(format!("out-{case}.{extension}")).exists());
             drop(host);
         }
     }
@@ -571,7 +653,9 @@ fn generic_probe_metadata_uses_final_tile_order_without_refetching() {
         .unwrap();
     let publication = host.publication().unwrap();
     assert_eq!(publication.tile_count, 4);
-    assert!(publication.output.is_complete());
+    assert!(
+        publication.output.disposition == dezoomify::model::OutputDisposition::NativePublication
+    );
     let mut saved =
         image::codecs::png::PngDecoder::new(std::io::Cursor::new(std::fs::read(output).unwrap()))
             .unwrap();
@@ -623,20 +707,23 @@ fn http_failures_retain_the_request_context_and_transport() {
             .await
             .unwrap_err();
         let tile = host
-            .acquire_tile(Tile {
-                index: 0,
-                request: ResourceRequest {
-                    purpose: RequestPurpose::Tile,
-                    ..request
-                },
-                placement: TilePlacement {
-                    position: Point { x: 0, y: 0 },
-                    expected_size: None,
-                    canvas: None,
-                    processing: ProcessingRecipe::None,
-                    role: TileRole::output(),
-                },
-            })
+            .acquire_tile(
+                Tile {
+                    index: 0,
+                    request: ResourceRequest {
+                        purpose: RequestPurpose::Tile,
+                        ..request
+                    },
+                    placement: TilePlacement {
+                        position: Point { x: 0, y: 0 },
+                        expected_size: None,
+                        canvas: None,
+                        processing: ProcessingRecipe::None,
+                        role: TileRole::output(),
+                    },
+                }
+                .into(),
+            )
             .await
             .unwrap_err();
         for (error, kind) in [
@@ -675,11 +762,10 @@ fn http_failures_retain_the_request_context_and_transport() {
 }
 
 #[test]
-fn malformed_encrypted_tile_retains_processing_failure_and_good_partial_pixels() {
+fn malformed_encrypted_tile_retains_processing_failure_without_publication() {
     use dezoomify::{host::Host, model::*};
-    use image::GenericImageView;
 
-    let work = temp_dir("encrypted-partial");
+    let work = temp_dir("encrypted-failure");
     let valid = scenario_payload("tile-0_0.png");
     std::fs::write(work.join("good.png"), &valid).unwrap();
     // Encryption marker followed by an impossible plaintext header length.
@@ -718,8 +804,11 @@ fn malformed_encrypted_tile_retains_processing_failure_and_good_partial_pixels()
         },
     };
     host.transport.block_on(async {
-        host.acquire_tile(tile(0, "good.png")).await.unwrap();
-        let error = host.acquire_tile(tile(1, "bad.bin")).await.unwrap_err();
+        host.acquire_tile(tile(0, "good.png").into()).await.unwrap();
+        let error = host
+            .acquire_tile(tile(1, "bad.bin").into())
+            .await
+            .unwrap_err();
         let Error::Resource {
             request,
             resource_kind,
@@ -740,49 +829,16 @@ fn malformed_encrypted_tile_retains_processing_failure_and_good_partial_pixels()
         assert!(!error.retryable());
         let mut corrupt_image = tile(1, "bad.bin");
         corrupt_image.placement.processing = ProcessingRecipe::None;
-        let decode_error = host.acquire_tile(corrupt_image).await.unwrap_err();
+        let decode_error = host.acquire_tile(corrupt_image.into()).await.unwrap_err();
         assert!(
             matches!(decode_error.cause(), Error::DecodeFailed(_)),
             "decode failure: {decode_error}"
         );
-        let decision = host
-            .choose_partial(MissingTiles {
-                missing: vec![MissingTile {
-                    tile: 1,
-                    failures: vec![error],
-                }],
-            })
-            .await
-            .unwrap();
-        assert_eq!(decision, RecoveryChoice::Keep);
-        let result = host
-            .finish(FinishRequest {
-                canvas: Some(canvas.clone()),
-                format: OutputFormat::Png,
-                title: None,
-                missing: vec![1],
-                reused_tiles: Vec::new(),
-            })
-            .await
-            .unwrap();
-        assert!(!result.is_complete());
-        assert_eq!(result.missing, vec![1]);
         host.settle().await;
     });
     assert!(!output.exists());
-    let partial = image::open(work.join("image.partial.png"))
-        .unwrap()
-        .to_rgba8();
-    let expected = image::load_from_memory(&valid).unwrap().to_rgba8();
-    assert_eq!(
-        image::imageops::crop_imm(&partial, 0, 0, 256, 256).to_image(),
-        expected
-    );
-    assert!(image::imageops::crop_imm(&partial, 256, 0, 256, 256)
-        .pixels()
-        .all(|(_, _, pixel)| pixel[3] == 0));
+    assert!(host.publication().is_none());
     let report = host.diagnostics.report();
-    assert_eq!(report.outcome.unwrap().event, "partial-completed");
     let fields = serde_json::to_value(&report.failures[0].first.fields).unwrap();
     assert_eq!(fields["kind"], "resource");
     assert_eq!(fields["resource_kind"], "tile");
@@ -855,8 +911,8 @@ fn automatic_output_uses_the_selected_title_and_avoids_overwriting() {
 }
 
 #[test]
-fn automatic_partial_output_preserves_gaps_and_avoids_partial_collisions() {
-    let work = temp_dir("automatic-partial");
+fn automatic_output_requires_all_tiles_and_preserves_source_alpha() {
+    let work = temp_dir("automatic-required-tiles");
     let source = work.join("source.dzi");
     let tiles = work.join("source_files/5");
     std::fs::create_dir_all(&tiles).unwrap();
@@ -871,16 +927,10 @@ fn automatic_partial_output_preserves_gaps_and_avoids_partial_collisions() {
         max_retries: 0,
         ..Default::default()
     };
-    let first = support::run_options_observed(options.clone(), |_, _| {}).unwrap();
-    assert_eq!(first.path.extension().unwrap(), "png");
-    assert!(first.path.to_string_lossy().contains(".partial."));
-    let original = std::fs::read(&first.path).unwrap();
-    let image = image::open(&first.path).unwrap().into_rgba8();
-    assert_eq!(image.get_pixel(0, 0)[3], 255);
-    assert_eq!(image.get_pixel(31, 0)[3], 0);
-    let second = support::run_options_observed(options.clone(), |_, _| {}).unwrap();
-    assert_ne!(first.path, second.path);
-    assert_eq!(std::fs::read(&first.path).unwrap(), original);
+    let error = support::run_options_observed(options.clone(), |_, _| {}).unwrap_err();
+    assert!(matches!(error, dezoomify::model::Error::TileFailed { .. }));
+    assert!(!work.join("source.png").exists());
+    assert!(!work.join("source.jpg").exists());
     let mut transparent = image::RgbaImage::from_pixel(16, 16, image::Rgba([100, 150, 200, 255]));
     transparent.save(tiles.join("1_0.png")).unwrap();
     transparent.put_pixel(0, 0, image::Rgba([0, 0, 0, 0]));
@@ -893,7 +943,7 @@ fn automatic_partial_output_preserves_gaps_and_avoids_partial_collisions() {
         |_, _| {},
     )
     .unwrap();
-    assert!(complete.output.missing.is_empty());
+
     assert_eq!(complete.path.extension().unwrap(), "png");
     assert_eq!(
         image::open(complete.path)
@@ -960,7 +1010,7 @@ fn bounded_concurrency_and_memory_accounting() {
     let output = work.join("memory.png");
     let config = JobOptions {
         max_concurrent: 2,
-        keep_partial: false,
+
         // Hermetic tile cache: never share the default on-disk cache
         // between loopback tests (see verbatim test).
         cache_dir: Some(work.join("tile-cache")),
@@ -989,11 +1039,10 @@ fn bounded_concurrency_and_memory_accounting() {
     assert!(output.exists());
 }
 
-/// Partial retry preserves good tiles: only the settled-as-failed tile is
-/// requeued with a fresh budget, successes are never refetched.
+/// Approved retries preserve good tiles; successes are never refetched.
 #[test]
-fn partial_retry_preserves_good_tiles() {
-    use dezoomify::model::RecoveryChoice;
+fn approved_retry_preserves_good_tiles() {
+    use dezoomify::model::RetryChoice;
     let shared: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
     let counts: Arc<Mutex<HashMap<String, usize>>> = Arc::new(Mutex::new(HashMap::new()));
     {
@@ -1016,13 +1065,12 @@ fn partial_retry_preserves_good_tiles() {
         );
     }
     let base = serve_counted(Arc::clone(&shared), Arc::clone(&counts));
-    let work = temp_dir("retry-keep");
+    let work = temp_dir("retry-approval");
     let output = work.join("retry.png");
     let host = NativeHost::new(JobOptions {
         input_url: format!("{base}/pyr.dzi"),
         output: OutputTarget::File(output.clone()),
-        // Generous transient budget so the tile is still retrying when the
-        // partial decision arrives; the Retry requeues with a fresh budget.
+        // Exhaust automatic retries before asking for one additional attempt.
         max_retries: 1,
         // Hermetic tile cache: see above (ephemeral-port reuse + shared
         // default cache leaks stale entries into exact-count assertions).
@@ -1032,20 +1080,20 @@ fn partial_retry_preserves_good_tiles() {
     .expect("host initializes");
     let answered = std::rc::Rc::new(std::cell::Cell::new(false));
     let answer_record = answered.clone();
-    host.on_partial(move |_| {
+    host.on_retry(move |_| {
         answer_record.set(true);
         let good = scenario_payload("tile-1_1.png");
         shared.lock().expect("lock").insert(
             "/pyr_files/9/1_1.png".to_string(),
             http_response("200 OK", "image/png", &good),
         );
-        Box::pin(async { Ok(RecoveryChoice::Retry) })
+        Box::pin(async { Ok(RetryChoice::Retry) })
     });
     let summary = support::run_host(&host).expect("retry heals the job");
-    assert!(answered.get(), "partial decision surfaced for retry");
+    assert!(answered.get(), "retry approval surfaced");
     assert_eq!(summary.tile_count, 4);
-    assert!(summary.output.missing.is_empty());
-    assert!(summary.output.is_complete());
+
+    assert!(summary.output.disposition == dezoomify::model::OutputDisposition::NativePublication);
     assert!(output.exists());
     let counts = counts.lock().expect("lock");
     // Good tiles are never refetched after the retry: successes preserved.
@@ -1093,7 +1141,7 @@ fn decode_inflight_bytes_are_bounded_and_accounted() {
     let output = work.join("decode.png");
     let config = JobOptions {
         max_concurrent: 2,
-        keep_partial: false,
+
         // Hermetic tile cache: never share the default on-disk cache
         // between loopback tests (see verbatim test).
         cache_dir: Some(work.join("tile-cache")),
@@ -1123,8 +1171,7 @@ fn decode_inflight_bytes_are_bounded_and_accounted() {
 
 /// Cancel mid-acquisition with slow tiles: the terminal waits for tracked
 /// async tasks and blocking decode tails (quiescence including detached
-/// tails), then reports cancel with nothing published -- no output, no
-/// `.partial` sibling, pre-existing destination byte-identical.
+/// tails), leaving the pre-existing destination byte-identical.
 #[test]
 fn cancel_during_acquisition_quiesces_without_publication() {
     let shared: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -1180,17 +1227,18 @@ fn cancel_during_acquisition_quiesces_without_publication() {
         "cancel never touches the pre-existing destination"
     );
     assert!(
-        !work.join("tails.partial.png").exists(),
-        "cancel publishes no partial sibling either"
+        std::fs::read_dir(&work).unwrap().all(|entry| {
+            let path = entry.unwrap().path();
+            path == output || path == work.join("tile-cache")
+        }),
+        "cancellation removes job-owned staging"
     );
 }
 
-/// Cancel/publication race: the commit point refuses publication once
-/// cancellation was requested, so cancel reports quiescence with nothing
-/// published and a pre-existing destination stays byte-identical. Cleanup
-/// removes only job-owned temp resources, never the destination.
+/// Cancellation settles an unanswered approval and removes job-owned staging
+/// while preserving the destination.
 #[test]
-fn cancel_publication_race_orders_commit_or_nothing() {
+fn cancellation_during_unanswered_approval_preserves_destination() {
     let shared: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
     let counts: Arc<Mutex<HashMap<String, usize>>> = Arc::new(Mutex::new(HashMap::new()));
     {
@@ -1206,11 +1254,11 @@ fn cancel_publication_race_orders_commit_or_nothing() {
                 http_response("200 OK", "image/png", &bytes),
             );
         }
-        // One tile never arrives: the invocation awaits a partial choice where
+        // One tile never arrives: the invocation awaits retry approval where
         // the cancel race is deterministic.
         map.insert(
             "/pyr_files/9/1_1.png".to_string(),
-            http_response("404 Not Found", "text/plain", b"missing"),
+            http_response("503 Service Unavailable", "text/plain", b"missing"),
         );
     }
     let base = serve_counted(Arc::clone(&shared), Arc::clone(&counts));
@@ -1222,15 +1270,17 @@ fn cancel_publication_race_orders_commit_or_nothing() {
         input_url: format!("{base}/pyr.dzi"),
         output: OutputTarget::File(output.clone()),
         overwrite: true,
+        max_retries: 0,
+        retry_base_delay: Duration::ZERO,
         // Hermetic tile cache: see verbatim test.
         cache_dir: Some(work.join("tile-cache")),
         ..Default::default()
     })
     .expect("host initializes");
     let controls = host.controls.clone();
-    host.on_partial(move |_| {
+    host.on_retry(move |_| {
         controls.cancel();
-        Box::pin(async { Ok(dezoomify::model::RecoveryChoice::Keep) })
+        Box::pin(std::future::pending())
     });
     let error = support::run_host(&host).expect_err("cancel wins the race");
     assert!(matches!(error.cause(), dezoomify::model::Error::Cancelled));
@@ -1246,7 +1296,10 @@ fn cancel_publication_race_orders_commit_or_nothing() {
         "cancel never touches the pre-existing destination"
     );
     assert!(
-        !work.join("race.partial.png").exists(),
-        "cancel publishes no partial sibling either"
+        std::fs::read_dir(&work).unwrap().all(|entry| {
+            let path = entry.unwrap().path();
+            path == output || path == work.join("tile-cache")
+        }),
+        "cancellation removes job-owned staging"
     );
 }

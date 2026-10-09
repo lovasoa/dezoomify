@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createElement } from "react";
 import { createDiagnosticRecorder } from "../packages/shared-ui/src/diagnostics.ts";
 import { setLocale, t } from "../packages/shared-ui/src/i18n.ts";
-import { PartialDecisionActions } from "../packages/shared-ui/src/partial-decision.tsx";
 import {
   presentFailure,
   presentIdle,
@@ -171,8 +169,7 @@ test("renderView mounts card and updates job section in place without DOM destru
     presentOutput(
       {
         format: "png",
-        complete: true,
-        missing: [],
+
         disposition: "browser-save-ready",
         canvas: { width: 4000, height: 3000 },
       },
@@ -194,7 +191,7 @@ test("output actions belong to their completed result", async () => {
   const el = container();
   const old = Promise.withResolvers();
   const done = presentOutput(
-    { format: "png", complete: true, missing: [], disposition: "native-publication" },
+    { format: "png", disposition: "native-publication" },
     { phase: "acquisition", completed: 0, total: null },
   );
   render(el, done, { ...callbacks, onOpenOutput: () => old.promise }, { outputKey: "old" });
@@ -207,82 +204,54 @@ test("output actions belong to their completed result", async () => {
   assert.equal(el.querySelector("#dz-btn-open").disabled, false);
 });
 
-test("partial controls return the selected choice", () => {
+test("retry controls return retry or cancel", () => {
   const el = container();
   const answers = [];
-  act(() =>
-    renderView(el, presentIdle(), callbacks, undefined, {
-      after: createElement(PartialDecisionActions, {
-        decision: {
-          missing: [
-            { tile: 1, failures: [{ kind: "timeout", transport: "direct", retryable: true }] },
-          ],
-        },
-        onAnswer: (command) => answers.push(command),
-      }),
-    }),
+  render(
+    el,
+    {
+      ...presentProgress({ phase: "acquisition", completed: 3, total: 4 }),
+      retryApproval: { tile: {}, attempt: 4, requires_approval: true },
+    },
+    { ...callbacks, onRetryChoice: (choice) => answers.push(choice) },
   );
-  for (const choice of ["keep", "discard", "retry"])
-    click(el.querySelector(`[data-dz-partial-choice="${choice}"]`));
-  assert.deepEqual(answers, ["keep", "discard", "retry"]);
+  for (const choice of ["retry", "cancel"])
+    click(el.querySelector(`[data-dz-retry-choice="${choice}"]`));
+  assert.deepEqual(answers, ["retry", "cancel"]);
 });
 
-test("partial refusal is a static decision with useful actions before diagnostics", () => {
+test("retry approval replaces running progress with one warning before diagnostics", () => {
   const el = container();
-  const decision = {
-    missing: [
-      {
-        tile: 1,
-        failures: [
-          { kind: "http-error", status: 403, transport: "browser-session", retryable: false },
-        ],
-      },
-    ],
-  };
   const presentation = {
     ...presentProgress({ phase: "acquisition", completed: 3, total: 4 }),
-    decision,
+    retryApproval: { tile: {}, attempt: 4, requires_approval: true },
   };
   act(() =>
     renderView(
       el,
       presentation,
-      callbacks,
-      { diagnosticReport: createDiagnosticRecorder({ id: "partial", now: () => 0 }).report() },
-      {
-        after: createElement(PartialDecisionActions, { decision, onAnswer() {} }),
-      },
+      { ...callbacks, onRetryChoice() {} },
+      { diagnosticReport: createDiagnosticRecorder({ id: "retry", now: () => 0 }).report() },
     ),
   );
-  assert.match(el.textContent, /The image is incomplete/);
+  const notice = el.querySelector(".dz-retry-section");
+  const status = notice.querySelector('[role="status"]');
+  assert.equal(notice.querySelector("h2").id, notice.getAttribute("aria-labelledby"));
+  assert.equal(notice.querySelectorAll("[data-dz-retry-actions]").length, 1);
+  assert.equal(
+    status.querySelector("button"),
+    null,
+    "live announcements exclude interactive actions",
+  );
+  assert.match(el.textContent, /Download paused/);
   assert.match(el.textContent, /3 of 4 tiles/);
-  assert.match(el.textContent, /website refused/);
-  assert.match(el.textContent, /Save incomplete image/);
+  assert.match(el.textContent, /no file has been saved/);
+  assert.match(el.textContent, /Retry once more/);
   assert.equal(el.querySelector("[role=progressbar]"), null);
   assert.equal(el.querySelector(".dz-pulse"), null);
-  assert.equal(el.querySelector("[data-dz-partial-choice=retry]"), null);
   assert.ok(
-    el.innerHTML.indexOf("data-dz-partial-decision") < el.innerHTML.indexOf("dz-job-diagnostics"),
+    el.innerHTML.indexOf("data-dz-retry-actions") < el.innerHTML.indexOf("dz-job-diagnostics"),
   );
-});
-
-test("zero-tile refusal has no partial controls and opens the source", () => {
-  const el = container();
-  let opened = false;
-  render(el, presentFailure({ kind: "no-usable-tiles", transient: false }), {
-    ...callbacks,
-    onOpenSource() {
-      opened = true;
-    },
-  });
-  assert.ok(el.textContent.includes(t("view.partial.empty")));
-  assert.match(el.textContent, /No file was saved/);
-  assert.equal(el.querySelector("[role=progressbar]"), null);
-  assert.equal(el.querySelector("[data-dz-partial-decision]"), null);
-  click(
-    [...el.querySelectorAll("button")].find((button) => button.textContent === "Open source page"),
-  );
-  assert.equal(opened, true);
 });
 
 test("slow discovery replaces the phase with one waiting status", () => {
@@ -519,6 +488,11 @@ test("resolution notice offers maximum retry and stop while fetching, keeps the 
     actions,
   );
   assert.ok(el.querySelector("#dz-resolution-notice"), "shown while tiles are still in flight");
+  const notice = el.querySelector("#dz-resolution-notice");
+  assert.equal(notice.querySelector("h2").textContent, "Image too large for this browser");
+  assert.ok(notice.querySelector('[role="status"]'));
+  assert.ok(el.querySelector('[role="progressbar"]'), "size warning leaves downloading visible");
+  assert.ok(notice.querySelector("#dz-btn-download-desktop"));
   const sizes = el.querySelector("#dz-resolution-sizes").textContent;
   assert.match(sizes, /20000×10000/, "selected resolution");
   assert.match(sizes, /40000×20000/, "maximum resolution");
@@ -532,7 +506,7 @@ test("resolution notice offers maximum retry and stop while fetching, keeps the 
   render(
     el,
     presentOutput(
-      { format: "png", complete: true, missing: [], disposition: "browser-save-ready" },
+      { format: "png", disposition: "browser-save-ready" },
       {
         phase: "acquisition",
         completed: 4,
