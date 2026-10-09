@@ -130,6 +130,7 @@ export const fr = {
   "view.display.deskDescClean":
     "Pour un enregistrement propre en pleine taille quand le navigateur peut seulement montrer l’image.",
   "view.display.startOver": "Recommencer",
+  "view.resolution.title": "Image trop grande pour ce navigateur",
   "view.resolution.notice":
     "Le téléchargement ne se fait pas à la résolution maximale à cause des limites du navigateur. Essayez l’application de bureau pour supprimer les limites du navigateur.",
   "view.resolution.sizes":

@@ -21,7 +21,6 @@ import {
   presentOutput,
   presentProgress,
   presentStatus,
-  RetryActions,
   readInitialUrl,
   renderView,
   setLocale,
@@ -636,6 +635,9 @@ function update() {
         if (!owns(attempt)) return;
         handleResume();
       },
+      ...(retry
+        ? { onRetryChoice: (choice: RetryChoice) => answerRetry(attempt, retry, choice) }
+        : {}),
       onCopyDiagnostics: copyDiagnosticText,
       onSaveDiagnostics: saveDiagnosticReport,
       async onLoadDiagnostics() {
@@ -700,14 +702,6 @@ function update() {
                 void runPersistSettingsFromPanel();
               },
               onReset: runResetDesktopSettings,
-            }),
-          }
-        : {}),
-      ...(retry
-        ? {
-            after: createElement(RetryActions, {
-              key: `${attempt.activeHandle?.id}:${retry.question}`,
-              onAnswer: (choice: RetryChoice) => answerRetry(attempt, retry, choice),
             }),
           }
         : {}),

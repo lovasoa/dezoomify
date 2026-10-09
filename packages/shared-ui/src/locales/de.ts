@@ -131,6 +131,7 @@ export const de = {
   "view.display.deskDescClean":
     "Für ein sauberes Speichern in voller Größe, wenn der Browser das Bild nur zeigen kann.",
   "view.display.startOver": "Von vorn beginnen",
+  "view.resolution.title": "Bild zu groß für diesen Browser",
   "view.resolution.notice":
     "Wegen Browser-Beschränkungen wird nicht in maximaler Auflösung geladen. Die Desktop-App entfernt diese Beschränkungen.",
   "view.resolution.sizes": "Speichert mit {selected} Pixeln statt des Maximums {maximum} Pixel.",

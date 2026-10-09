@@ -11,6 +11,7 @@ export interface ViewCallbacks {
   onOpenSource?(): void;
   onReset?(): void;
   onRetrySameUrl?(): void;
+  onRetryChoice?(choice: RetryChoice): void;
   /** Restart the job at the maximum known resolution (browser products). */
   onTryMaximum?(): void;
   onSave?(): void;
@@ -61,3 +62,5 @@ export interface PlatformHints {
   userAgent?: string;
   platform?: string;
 }
+
+import type { RetryChoice } from "@dezoomify/wasm-bindings";

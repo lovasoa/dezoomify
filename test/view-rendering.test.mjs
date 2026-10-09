@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createElement } from "react";
 import { createDiagnosticRecorder } from "../packages/shared-ui/src/diagnostics.ts";
 import { setLocale, t } from "../packages/shared-ui/src/i18n.ts";
 import {
@@ -10,7 +9,6 @@ import {
   presentProgress,
   presentStatus,
 } from "../packages/shared-ui/src/presentation.ts";
-import { RetryActions } from "../packages/shared-ui/src/retry-actions.tsx";
 import { renderView } from "../packages/shared-ui/src/view.tsx";
 import { act, click } from "./react-dom.mjs";
 
@@ -209,10 +207,13 @@ test("output actions belong to their completed result", async () => {
 test("retry controls return retry or cancel", () => {
   const el = container();
   const answers = [];
-  act(() =>
-    renderView(el, presentIdle(), callbacks, undefined, {
-      after: createElement(RetryActions, { onAnswer: (choice) => answers.push(choice) }),
-    }),
+  render(
+    el,
+    {
+      ...presentProgress({ phase: "acquisition", completed: 3, total: 4 }),
+      retryApproval: { tile: {}, attempt: 4, requires_approval: true },
+    },
+    { ...callbacks, onRetryChoice: (choice) => answers.push(choice) },
   );
   for (const choice of ["retry", "cancel"])
     click(el.querySelector(`[data-dz-retry-choice="${choice}"]`));
@@ -229,10 +230,18 @@ test("retry approval replaces running progress with one warning before diagnosti
     renderView(
       el,
       presentation,
-      callbacks,
+      { ...callbacks, onRetryChoice() {} },
       { diagnosticReport: createDiagnosticRecorder({ id: "retry", now: () => 0 }).report() },
-      { after: createElement(RetryActions, { onAnswer() {} }) },
     ),
+  );
+  const notice = el.querySelector(".dz-retry-section");
+  const status = notice.querySelector('[role="status"]');
+  assert.equal(notice.querySelector("h2").id, notice.getAttribute("aria-labelledby"));
+  assert.equal(notice.querySelectorAll("[data-dz-retry-actions]").length, 1);
+  assert.equal(
+    status.querySelector("button"),
+    null,
+    "live announcements exclude interactive actions",
   );
   assert.match(el.textContent, /Download paused/);
   assert.match(el.textContent, /3 of 4 tiles/);
@@ -479,6 +488,11 @@ test("resolution notice offers maximum retry and stop while fetching, keeps the 
     actions,
   );
   assert.ok(el.querySelector("#dz-resolution-notice"), "shown while tiles are still in flight");
+  const notice = el.querySelector("#dz-resolution-notice");
+  assert.equal(notice.querySelector("h2").textContent, "Image too large for this browser");
+  assert.ok(notice.querySelector('[role="status"]'));
+  assert.ok(el.querySelector('[role="progressbar"]'), "size warning leaves downloading visible");
+  assert.ok(notice.querySelector("#dz-btn-download-desktop"));
   const sizes = el.querySelector("#dz-resolution-sizes").textContent;
   assert.match(sizes, /20000×10000/, "selected resolution");
   assert.match(sizes, /40000×20000/, "maximum resolution");

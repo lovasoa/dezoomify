@@ -130,6 +130,7 @@ export const it = {
   "view.display.deskDescClean":
     "Per un salvataggio pulito a piena dimensione quando il browser può solo mostrare l’immagine.",
   "view.display.startOver": "Ricomincia",
+  "view.resolution.title": "Immagine troppo grande per questo browser",
   "view.resolution.notice":
     "A causa dei limiti del browser non si scarica alla risoluzione massima. Prova l’applicazione desktop per rimuovere i limiti del browser.",
   "view.resolution.sizes": "Salvataggio a {selected} pixel invece del massimo {maximum} pixel.",

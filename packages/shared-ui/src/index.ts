@@ -6,6 +6,7 @@ export * from "./failure.ts";
 export * from "./history.ts";
 export * from "./i18n.ts";
 export * from "./labels.ts";
+export * from "./notice.tsx";
 export * from "./presentation.ts";
 export * from "./retry-actions.tsx";
 export * from "./retry-approval.ts";

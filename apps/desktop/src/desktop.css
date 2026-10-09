@@ -187,8 +187,7 @@ body {
 #root .dz-tile-counts,
 #root .dz-pending-line,
 #root .dz-notice-message,
-#root .dz-completed-summary,
-#root .dz-error-message {
+#root .dz-completed-summary {
   text-align: left;
 }
 

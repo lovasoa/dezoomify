@@ -11,7 +11,6 @@ import {
   presentOutput,
   presentProgress,
   presentStatus,
-  RetryActions,
   RetryApproval,
   renderView,
   type ViewContext,
@@ -372,6 +371,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
     const callbacks = {
       onSubmitUrl: submit,
       onCancel: cancel,
+      onRetryChoice: a?.retryApproval?.answer,
       ...(options.resetToIdle ? { onReset: cancel } : {}),
       onRetrySameUrl: () => {
         if (a && current === a) void run(a.url);
@@ -428,13 +428,6 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
                 origin: a.permission.origin,
                 requesting: a.permission.requesting,
                 onRequest: a.permission.request,
-              }),
-            }
-          : {}),
-        ...(a?.retryApproval && !a.permission
-          ? {
-              after: createElement(RetryActions, {
-                onAnswer: a.retryApproval.answer,
               }),
             }
           : {}),

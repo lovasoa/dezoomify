@@ -108,6 +108,10 @@ test("static accessibility contract: failed view layers guidance with named reco
     { sourceUrl: "https://museum.example.org/viewer?page=1" },
   );
   const card = el.querySelector(".dz-card");
+  const notice = card.querySelector(".dz-error-section");
+  assert.equal(notice.querySelector("h2").id, notice.getAttribute("aria-labelledby"));
+  assert.ok(notice.querySelector('[role="alert"]'), "the failure message is announced");
+  assert.equal(notice.querySelector('[role="alert"] button'), null);
   assert.ok(
     (card.querySelector("#dz-error-message").textContent || "").length > 0,
     "error message slot is populated",

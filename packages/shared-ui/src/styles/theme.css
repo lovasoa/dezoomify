@@ -922,21 +922,6 @@ abbr[title] {
   white-space: nowrap;
 }
 
-.dz-retry-section {
-  text-align: left;
-  overflow-wrap: anywhere;
-}
-
-.dz-retry-section h2 {
-  margin: 0 0 1rem;
-  white-space: normal;
-}
-
-.dz-retry-section p {
-  margin: 0 0 1rem;
-  font-variant-numeric: tabular-nums;
-}
-
 .dz-progress-percent,
 .dz-progress-count {
   font-variant-numeric: tabular-nums;
@@ -1285,47 +1270,6 @@ abbr[title] {
   margin-top: 1.75rem;
 }
 
-/* ============================================================
-   ERROR & FAILED STATE (Airy, Dignified, ZERO Nested Boxes)
-   ============================================================ */
-.dz-error-section {
-  display: flex;
-  flex-direction: column;
-  padding: 0.5rem 0 0;
-}
-
-.dz-error-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 1.15rem;
-  padding-bottom: 1.5rem;
-  border-bottom: 1px solid var(--dz-surface-border);
-}
-
-.dz-error-icon {
-  flex-shrink: 0;
-  width: 1.75rem;
-  height: 1.75rem;
-  color: var(--dz-error-accent);
-  margin-top: 0.1rem;
-}
-
-.dz-error-title {
-  margin: 0 0 0.4rem;
-  font-size: 1.35rem;
-  font-weight: 600;
-  line-height: 1.25;
-  color: var(--dz-error-text);
-  letter-spacing: -0.01em;
-}
-
-.dz-error-message {
-  margin: 0;
-  font-size: 1.02rem;
-  color: var(--dz-text-secondary);
-  line-height: 1.6;
-}
-
 /* Suggested Alternatives (Open, Breathable Layout - No Nested Cards) */
 .dz-guidance-section {
   margin: 1.75rem 0 1.25rem;
@@ -1574,83 +1518,64 @@ abbr[title] {
   white-space: pre-line;
 }
 
-/* ============================================================
-   RESOLUTION DOWNGRADE NOTICE (browser limits)
-   ============================================================ */
-.dz-resolution-notice {
+/* Shared failures and warnings use the card's single surface. */
+.dz-notice {
+  --dz-feedback-accent: var(--dz-notice-accent);
+  --dz-feedback-text: var(--dz-notice-text);
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 1rem;
-  margin-top: 1.35rem;
-  padding: 0.95rem 1.15rem;
-  border: 1px solid var(--dz-surface-border);
-  border-radius: var(--dz-radius);
-  background: rgba(0, 0, 0, 0.03);
+  flex-direction: column;
+  min-width: 0;
+  text-align: left;
+  overflow-wrap: anywhere;
 }
 
-.dz-resolution-notice .dz-notice-icon {
-  margin-top: 0;
+.dz-notice--error {
+  --dz-feedback-accent: var(--dz-error-accent);
+  --dz-feedback-text: var(--dz-error-text);
 }
 
-.dz-resolution-text {
-  flex: 1 1 22rem;
+.dz-notice .dz-notice-header {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.dz-notice .dz-notice-icon {
+  color: var(--dz-feedback-accent);
+}
+
+.dz-notice .dz-notice-title {
+  color: var(--dz-feedback-text);
+}
+
+.dz-notice-content {
   min-width: 0;
 }
 
-.dz-resolution-sizes {
-  margin: 0.35rem 0 0;
+.dz-notice-details {
+  margin-top: 0.65rem;
   font-size: 0.95rem;
+  line-height: 1.6;
   color: var(--dz-text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
-.dz-resolution-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem;
+.dz-notice-details p {
+  margin: 0;
 }
 
-.dz-resolution-download {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  height: 2.6rem;
-  padding: 0 1.25rem;
-  background: var(--dz-btn-gradient);
-  border: 1px solid var(--dz-btn-border);
-  border-radius: var(--dz-radius);
-  color: var(--dz-btn-text);
-  font-size: 0.95rem;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  transition:
-    background 0.15s ease,
-    border-color 0.15s ease;
+.dz-notice-actions {
+  margin-top: 1.25rem;
 }
 
-.dz-resolution-download:hover {
-  background: var(--dz-btn-hover-gradient);
-  border-color: var(--dz-btn-hover-border);
+.dz-notice > .dz-guidance-section {
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--dz-surface-border);
 }
 
-.dz-resolution-stop {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.dz-resolution-stop svg {
-  width: 0.85rem;
-  height: 0.85rem;
-  fill: currentColor;
-}
-
-@media (prefers-color-scheme: dark) {
-  .dz-resolution-notice {
-    background: rgba(255, 255, 255, 0.03);
-  }
+.dz-resolution-notice {
+  margin-top: 1.75rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--dz-surface-border);
 }
 
 /* ============================================================

@@ -215,6 +215,7 @@ const en = {
   "view.display.startOver": "Start over",
   // Resolution downgrade notice: automatic selection took a smaller known
   // level than the maximum because of browser limits (website and extension).
+  "view.resolution.title": "Image too large for this browser",
   "view.resolution.notice":
     "Not downloading at maximal resolution due to browser limitations. Try the desktop app to remove browser limitations.",
   "view.resolution.sizes": "Saving at {selected} pixels instead of the maximum {maximum} pixels.",
