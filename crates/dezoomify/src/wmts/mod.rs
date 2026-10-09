@@ -1,23 +1,25 @@
 //! Pure discovery for Web Map Tile Service capabilities documents.
 
-use crate::core::discovery::{html_matches, metadata, url_matches};
-use crate::core::{DiscoveryError, FormatSpec, ImagePlan, ParsedResource};
+use std::sync::LazyLock;
+
+use regex::bytes::Regex;
+
+use crate::core::discovery::{content_matches, metadata, url_matches};
+use crate::core::{DiscoveryError, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource};
 
 mod capabilities;
 mod layer;
 mod tilematrix;
 
-pub const SPEC: FormatSpec = FormatSpec::new(
-    "wmts",
-    &[
-        metadata(url_matches(is_wmts_url)).decode(decode),
-        metadata(html_matches(|bytes| {
-            memchr::memmem::find(bytes, b"TileMatrixSet").is_some()
-        }))
-        .decode(decode),
-    ],
-)
-.with_display_name("WMTS");
+static METADATA_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new("TileMatrixSet").expect("constant WMTS metadata pattern"));
+
+const ROUTES: &[DiscoveryRoute] = &[
+    metadata(url_matches(is_wmts_url)).decode(decode),
+    metadata(content_matches(&METADATA_RE)).decode(decode),
+];
+
+pub const SPEC: FormatSpec = FormatSpec::new("wmts", ROUTES).with_display_name("WMTS");
 
 fn is_wmts_url(uri: &str) -> bool {
     let uri = uri.to_ascii_lowercase();

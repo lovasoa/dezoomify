@@ -123,10 +123,46 @@ fn opaque_metadata_and_embedded_objects_remain_discoverable() {
         (br#"{"w\u0069dth":512,"height":512}"#, "iiif"),
         (include_bytes!("../../../fixtures/wmts/basic/WMTSCapabilities.xml"), "wmts"),
         (include_bytes!("../../../fixtures/krpano/basic/tour.xml"), "krpano"),
+        (include_bytes!("../../../fixtures/second_canvas/approximate-basic/metadata.json"), "second_canvas"),
+        (include_bytes!("../../../fixtures/fzp/approximate-basic/metadata.xml"), "fzp"),
         (br#"<?xml version="1.0"?><k:krpano xmlns:k="urn:krpano"><image tilesize="256"><level tiledimagewidth="512" tiledimageheight="512"><front url="tiles/%h-%v.png"/></level></image></k:krpano>"#, "krpano"),
     ] {
-        let bytes = String::from_utf8_lossy(bytes).replace("{{origin}}", "https://museum.test");
+        let bytes = String::from_utf8_lossy(bytes)
+            .replace("{{origin}}", "https://museum.test")
+            .replace("\"gigapixel\"", "\"giga\\u0070ixel\"");
         image(vec![DiscoveryInput::with_contents(PAGE, bytes)], &[], format);
+    }
+}
+
+#[test]
+fn misleading_format_clues_keep_the_decoder_error() {
+    for (bytes, format) in [
+        (br#"{"gigapixel":false}"#.as_slice(), "second_canvas"),
+        (br#"{"other":{"gigapixel":{}}}"#, "second_canvas"),
+        (br#"<document><pal/></document>"#, "fzp"),
+    ] {
+        let error = lookup(
+            default_registry(),
+            vec![DiscoveryInput::with_contents(PAGE, bytes)],
+            &[],
+            Default::default(),
+            None,
+        )
+        .unwrap_err();
+        let DiscoveryError::NoCandidateAccepted { diagnostics } = error else {
+            panic!("expected candidate diagnostics")
+        };
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.format == format)
+            .unwrap();
+        assert_eq!(diagnostic.kind, RejectionKind::InvalidMetadata);
+        assert!(
+            diagnostic
+                .detail
+                .as_ref()
+                .is_some_and(|detail| !detail.is_empty())
+        );
     }
 }
 

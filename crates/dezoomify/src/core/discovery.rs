@@ -231,14 +231,12 @@ type FailureHandler = for<'a> fn(
 ) -> Result<ParsedResource, DiscoveryError>;
 type UrlMapper = fn(&str) -> Result<Request, DiscoveryError>;
 type UrlPredicate = fn(&str) -> bool;
-type ContentPredicate = fn(&[u8]) -> bool;
 
 #[derive(Clone, Copy, Debug)]
 pub enum DiscoveryMatch {
     Any,
     UrlSuffix(&'static str),
     UrlPredicate(UrlPredicate),
-    ContentPredicate(ContentPredicate),
     Css(&'static str, fn(&HtmlElement) -> bool),
     ResourcePredicate(for<'a> fn(DiscoveryResource<'a>) -> bool),
     ContentRegex(&'static LazyLock<BytesRegex>),
@@ -254,7 +252,6 @@ impl DiscoveryMatch {
                 .unwrap_or(uri)
                 .ends_with(suffix),
             Self::UrlPredicate(predicate) => predicate(uri),
-            Self::ContentPredicate(predicate) => bytes.is_some_and(predicate),
             Self::Css(..) | Self::ResourcePredicate(_) => false,
             Self::ContentRegex(regex) => bytes.is_some_and(|bytes| regex.is_match(bytes)),
         }
@@ -304,8 +301,8 @@ pub const fn resource_matches(
     DiscoveryMatch::ResourcePredicate(predicate)
 }
 
-pub const fn html_matches(predicate: ContentPredicate) -> DiscoveryMatch {
-    DiscoveryMatch::ContentPredicate(predicate)
+pub const fn content_matches(regex: &'static LazyLock<BytesRegex>) -> DiscoveryMatch {
+    DiscoveryMatch::ContentRegex(regex)
 }
 
 /// Semantic input pattern paired with a decoding or reference-resolution action.
@@ -434,6 +431,7 @@ fn parse_resource(
         let matched = match route.matcher {
             DiscoveryMatch::Css(..) => selected.is_some(),
             DiscoveryMatch::ResourcePredicate(predicate) => predicate(resource),
+            DiscoveryMatch::ContentRegex(regex) => regex.is_match(resource.bytes()),
             matcher => {
                 matcher.matches(resource.final_uri(), Some(resource.bytes()))
                     || (resource.uri() != resource.final_uri()

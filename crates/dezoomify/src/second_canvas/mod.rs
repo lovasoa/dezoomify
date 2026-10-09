@@ -7,15 +7,24 @@ use serde::{Deserialize, de::IntoDeserializer};
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{css, html_matches, metadata, viewer};
+use crate::core::discovery::{content_matches, css, metadata, viewer};
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
     ParsedResource, Positioned, Request, ResolvedLevel,
 };
 
+static METADATA_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+    // Escaped JSON keys remain eligible for the decoder.
+    BytesRegex::new(r#"(?s-u)\{.*(?:"gigapixel"\s*:|\\u)"#)
+        .expect("constant Second Canvas metadata pattern")
+});
+static VIEWER_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+    BytesRegex::new(r"(?i-u)sc[wv]\.min\.js").expect("constant Second Canvas viewer pattern")
+});
+
 const ROUTES: &[DiscoveryRoute] = &[
-    metadata(html_matches(contains_gigapixel)).decode(decode_catalog),
-    viewer(html_matches(contains_viewer_script)).decode(follow_viewer_config),
+    metadata(content_matches(&METADATA_RE)).decode(decode_catalog),
+    viewer(content_matches(&VIEWER_RE)).decode(follow_viewer_config),
     viewer(css(
         "iframe[src*=\".s3.amazonaws.com/web/\" i][src*=\".html\" i]",
     ))
@@ -24,18 +33,6 @@ const ROUTES: &[DiscoveryRoute] = &[
 
 pub const SPEC: FormatSpec =
     FormatSpec::new("second_canvas", ROUTES).with_display_name("Second Canvas");
-
-fn contains_gigapixel(bytes: &[u8]) -> bool {
-    serde_json::from_slice::<serde_json::Value>(bytes)
-        .ok()
-        .and_then(|document| document.get("gigapixel").cloned())
-        .is_some_and(|gigapixel| gigapixel.is_object())
-}
-
-fn contains_viewer_script(bytes: &[u8]) -> bool {
-    let page = String::from_utf8_lossy(bytes).to_ascii_lowercase();
-    page.contains("scw.min.js") || page.contains("scv.min.js")
-}
 
 static EMBEDDED_CONFIG_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(

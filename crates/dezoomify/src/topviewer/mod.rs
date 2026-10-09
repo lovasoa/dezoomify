@@ -7,7 +7,7 @@ use serde_json::Value;
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{css, html_matches, metadata, url_matches, viewer};
+use crate::core::discovery::{content_matches, css, metadata, url_matches, viewer};
 use crate::core::{
     DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource,
     Request, ResolvedLevel, resolve_url_template,
@@ -21,6 +21,9 @@ static DETAIL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)/detail/([a-z0-9-]+)/media/([a-z0-9-]+)")
         .expect("constant TopViewer detail pattern")
 });
+static METADATA_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+    BytesRegex::new(r#""topviews""#).expect("constant TopViewer metadata pattern")
+});
 
 const ROUTES: &[DiscoveryRoute] = &[
     viewer(url_matches(is_known_detail_url)).resolve_metadata(known_detail_url),
@@ -30,7 +33,7 @@ const ROUTES: &[DiscoveryRoute] = &[
         "https://images.memorix.nl/$server/topviewjson/memorix/$image",
     ),
     metadata(url_matches(is_media_api)).decode(follow_media),
-    metadata(html_matches(contains_topviews)).decode(decode),
+    metadata(content_matches(&METADATA_RE)).decode(decode),
 ];
 
 /// Institution URL prefixes and their Memorix image servers. Institution
@@ -69,10 +72,6 @@ fn known_detail_url(uri: &str) -> Result<Request, DiscoveryError> {
 }
 
 pub const SPEC: FormatSpec = FormatSpec::new("topviewer", ROUTES).with_display_name("TopViewer");
-
-fn contains_topviews(bytes: &[u8]) -> bool {
-    String::from_utf8_lossy(bytes).contains("\"topviews\"")
-}
 
 fn follow_mediabank(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let tag = resource.element()?;

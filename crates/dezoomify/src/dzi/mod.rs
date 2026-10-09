@@ -6,7 +6,9 @@ use dzi_file::DziFile;
 use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
-use crate::core::discovery::{html_matches, image_url, metadata, url_matches, url_suffix, viewer};
+use crate::core::discovery::{
+    content_matches, image_url, metadata, url_matches, url_suffix, viewer,
+};
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
     ParsedResource, RejectionKind, Request, ResolvedLevel,
@@ -24,6 +26,12 @@ static SEADRAGON_EMBED: LazyLock<BytesRegex> = LazyLock::new(|| {
     )
     .expect("constant Seadragon embed pattern")
 });
+static METADATA_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+    // XML requires TileSize; JSON/JSON5 may spell that key with escapes.
+    BytesRegex::new(r"(?s-u)TileSize|\{.*\\|\\.*\{").expect("constant DZI metadata pattern")
+});
+static WDL_MARKER_RE: LazyLock<BytesRegex> =
+    LazyLock::new(|| BytesRegex::new("dziUrlTemplate").expect("constant WDL marker pattern"));
 const ROUTES: &[DiscoveryRoute] = &[
     image_url(is_tile_url).resolve_metadata(tile_metadata),
     viewer(url_matches(is_bl_viewer_url)).resolve_metadata(bl_metadata),
@@ -32,17 +40,12 @@ const ROUTES: &[DiscoveryRoute] = &[
     metadata(url_matches(is_polona_json_url)).decode(follow_polona_dzi),
     paris::ARK_ROUTE,
     paris::MANIFEST_ROUTE,
-    viewer(html_matches(contains_seadragon_embed)).decode(follow_seadragon_embed),
-    viewer(html_matches(has_wdl_template)).decode(follow_wdl_template),
+    viewer(content_matches(&SEADRAGON_EMBED)).decode(follow_seadragon_embed),
+    viewer(content_matches(&WDL_MARKER_RE)).decode(follow_wdl_template),
     DiscoveryRoute::regex_link(&DZI_LINK_RE, "$url"),
     DiscoveryRoute::regex_link(&DZI_ATTR_RE, "$url"),
     metadata(url_suffix(".dzi")).decode(decode_catalog),
-    // XML requires TileSize; JSON/JSON5 may spell that key with escapes.
-    metadata(html_matches(|bytes| {
-        memchr::memmem::find(bytes, b"TileSize").is_some()
-            || (bytes.contains(&b'{') && bytes.contains(&b'\\'))
-    }))
-    .decode(decode_catalog),
+    metadata(content_matches(&METADATA_RE)).decode(decode_catalog),
 ];
 
 pub const SPEC: FormatSpec =
@@ -69,12 +72,6 @@ static WDL_TEMPLATE_RE: LazyLock<BytesRegex> =
 
 static WDL_VIEW_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"view/(\d+)/(\d+)").expect("constant WDL view pattern"));
-
-fn has_wdl_template(bytes: &[u8]) -> bool {
-    bytes
-        .windows(b"dziUrlTemplate".len())
-        .any(|window| window == b"dziUrlTemplate")
-}
 
 fn follow_wdl_template(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let template = WDL_TEMPLATE_RE
@@ -179,10 +176,6 @@ fn follow_polona_dzi(resource: DiscoveryResource<'_>) -> Result<ParsedResource, 
         .and_then(|url| url.as_str())
         .ok_or_else(|| DiscoveryError::InvalidMetadata("Polona JSON has no page DZI URL".into()))?;
     Ok(ParsedResource::Follow(Request::new(dzi.to_owned())))
-}
-
-fn contains_seadragon_embed(contents: &[u8]) -> bool {
-    SEADRAGON_EMBED.is_match(contents)
 }
 
 fn follow_seadragon_embed(

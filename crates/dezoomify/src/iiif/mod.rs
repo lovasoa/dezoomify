@@ -6,7 +6,9 @@ use tile_info::ImageInfo;
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{html_matches, image_url, metadata, url_matches, url_suffix, viewer};
+use crate::core::discovery::{
+    content_matches, image_url, metadata, url_matches, url_suffix, viewer,
+};
 use crate::core::{
     AdaptiveSource, CatalogPlan, DeferredResource, DiscoveryCatalog, DiscoveryError,
     DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, GridRequests, GridTile, ImagePlan,
@@ -30,6 +32,12 @@ pub mod tile_info;
 #[cfg(test)]
 mod title_tests;
 
+static METADATA_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+    // Keep escaped keys and embedded JSON/JSON5 services eligible.
+    BytesRegex::new(r"(?s-u)\{.*(?:width|items|sequences|\\)|(?:width|items|sequences|\\).*\{")
+        .expect("constant IIIF metadata pattern")
+});
+
 const ROUTES: &[DiscoveryRoute] = &[
     image_url(|uri| image_request_info(uri).is_some()).resolve_metadata(|uri| {
         Ok(image_request_info(uri).expect("route matched IIIF image request"))
@@ -42,18 +50,11 @@ const ROUTES: &[DiscoveryRoute] = &[
     national_gallery::ROUTES[0],
     national_gallery::ROUTES[1],
     philadelphia::ROUTE,
-    viewer(html_matches(has_info_json_url)).decode(follow_info_json_url),
+    viewer(content_matches(&ABS_INFO_JSON_RE)).decode(follow_info_json_url),
+    viewer(content_matches(&REL_INFO_JSON_RE)).decode(follow_info_json_url),
     metadata(url_suffix("/info.json")).decode(decode),
     metadata(url_suffix("/manifest.json")).decode(decode),
-    // Required keys cover bare manifests and embedded JSON/JSON5 services.
-    // Escaped keys stay eligible for the full parser.
-    metadata(html_matches(|bytes| {
-        bytes.contains(&b'{')
-            && [b"width".as_slice(), b"items", b"sequences", b"\\"]
-                .iter()
-                .any(|key| memchr::memmem::find(bytes, key).is_some())
-    }))
-    .decode(decode),
+    metadata(content_matches(&METADATA_RE)).decode(decode),
 ];
 
 /// IIIF format. See <https://iiif.io/>.
@@ -199,10 +200,6 @@ fn harvest_info_json_urls(bytes: &[u8]) -> Vec<String> {
     urls.sort_by_key(|url| !url.to_lowercase().contains("iiif"));
     urls.truncate(MAX_HARVESTED_INFO_JSON_URLS);
     urls
-}
-
-fn has_info_json_url(bytes: &[u8]) -> bool {
-    ABS_INFO_JSON_RE.is_match(bytes) || REL_INFO_JSON_RE.is_match(bytes)
 }
 
 fn follow_info_json_url(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {

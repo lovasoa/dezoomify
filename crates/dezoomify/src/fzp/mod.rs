@@ -35,26 +35,27 @@ mod metadata;
 mod tests;
 mod viewer;
 
+use std::sync::LazyLock;
+
+use regex::bytes::Regex;
+
 use crate::core::discovery::{
-    any, html_matches, metadata as route, resource_matches, viewer as viewer_route,
+    any, content_matches, metadata as route, resource_matches, viewer as viewer_route,
 };
 use crate::core::{DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ParsedResource};
 
+static METADATA_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?-u)<(?:pal|items?)[\s/>]").expect("constant FreezoomPack metadata pattern")
+});
+
 const ROUTES: &[DiscoveryRoute] = &[
-    route(html_matches(is_metadata)).decode(decode),
+    route(content_matches(&METADATA_RE)).decode(decode),
     viewer_route(resource_matches(viewer::recognizes)).decode(viewer::decode),
     route(any()).child_metadata(decode),
 ];
 pub const SPEC: FormatSpec = FormatSpec::new("fzp", ROUTES)
     .with_display_name("FreezoomPack")
     .on_failure(viewer::failed_script);
-
-fn is_metadata(bytes: &[u8]) -> bool {
-    matches!(
-        metadata::root_name(&String::from_utf8_lossy(bytes)).as_deref(),
-        Some("pal" | "item" | "items")
-    )
-}
 
 fn invalid(detail: impl std::fmt::Display) -> DiscoveryError {
     let detail = detail.to_string();

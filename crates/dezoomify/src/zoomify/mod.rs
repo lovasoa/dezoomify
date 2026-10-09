@@ -13,7 +13,7 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    css, html_matches, image_url, metadata, resource_matches, url_matches, url_suffix, viewer,
+    content_matches, css, image_url, metadata, resource_matches, url_matches, url_suffix, viewer,
 };
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource, Request,
@@ -28,7 +28,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     metadata(css("imagefile[format=\"zoomify\" i]")).text_file("ImageProperties.xml"),
     viewer(resource_matches(has_inline_tile_service)).decode(inline_catalog),
     viewer(resource_matches(contains_zoomify_declaration)).decode(extract_image_properties_url),
-    viewer(html_matches(has_fluid_access_number)).decode(extract_fluid_catalog),
+    viewer(content_matches(&FLUID_ACCESS_RE)).decode(extract_fluid_catalog),
     viewer(url_matches(is_unibe_page)).regex_file(&UNIBE_URL_RE, "ImageProperties.xml"),
     viewer(css(".ete-openlayers-src")).text_file("ImageProperties.xml"),
     ngv::ROUTE,
@@ -233,10 +233,6 @@ fn inline_catalog(
         );
     }
     Ok(ParsedResource::Catalog(CatalogPlan::images(images)))
-}
-
-fn has_fluid_access_number(bytes: &[u8]) -> bool {
-    FLUID_ACCESS_RE.is_match(bytes)
 }
 
 fn extract_fluid_catalog(
