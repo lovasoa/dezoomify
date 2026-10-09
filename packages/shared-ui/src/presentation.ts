@@ -32,7 +32,7 @@ export interface Presentation {
   paused: boolean;
   error?: JobError;
   output?: Output;
-  decision?: TileAcquisition;
+  retryApproval?: TileAcquisition;
   resolution?: ResolutionChoice;
 }
 

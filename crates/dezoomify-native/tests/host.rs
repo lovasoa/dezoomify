@@ -911,8 +911,8 @@ fn automatic_output_uses_the_selected_title_and_avoids_overwriting() {
 }
 
 #[test]
-fn automatic_output_rejects_missing_tiles_and_preserves_source_alpha() {
-    let work = temp_dir("automatic-missing-tile");
+fn automatic_output_requires_all_tiles_and_preserves_source_alpha() {
+    let work = temp_dir("automatic-required-tiles");
     let source = work.join("source.dzi");
     let tiles = work.join("source_files/5");
     std::fs::create_dir_all(&tiles).unwrap();
@@ -1065,7 +1065,7 @@ fn approved_retry_preserves_good_tiles() {
         );
     }
     let base = serve_counted(Arc::clone(&shared), Arc::clone(&counts));
-    let work = temp_dir("retry-keep");
+    let work = temp_dir("retry-approval");
     let output = work.join("retry.png");
     let host = NativeHost::new(JobOptions {
         input_url: format!("{base}/pyr.dzi"),
@@ -1171,8 +1171,7 @@ fn decode_inflight_bytes_are_bounded_and_accounted() {
 
 /// Cancel mid-acquisition with slow tiles: the terminal waits for tracked
 /// async tasks and blocking decode tails (quiescence including detached
-/// tails), then reports cancel with nothing published -- no output, no
-/// `.partial` sibling, pre-existing destination byte-identical.
+/// tails), leaving the pre-existing destination byte-identical.
 #[test]
 fn cancel_during_acquisition_quiesces_without_publication() {
     let shared: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -1228,17 +1227,18 @@ fn cancel_during_acquisition_quiesces_without_publication() {
         "cancel never touches the pre-existing destination"
     );
     assert!(
-        !work.join("tails.partial.png").exists(),
-        "cancel publishes no partial sibling either"
+        std::fs::read_dir(&work).unwrap().all(|entry| {
+            let path = entry.unwrap().path();
+            path == output || path == work.join("tile-cache")
+        }),
+        "cancellation removes job-owned staging"
     );
 }
 
-/// Cancel/publication race: the commit point refuses publication once
-/// cancellation was requested, so cancel reports quiescence with nothing
-/// published and a pre-existing destination stays byte-identical. Cleanup
-/// removes only job-owned temp resources, never the destination.
+/// Cancellation settles an unanswered approval and removes job-owned staging
+/// while preserving the destination.
 #[test]
-fn cancel_publication_race_orders_commit_or_nothing() {
+fn cancellation_during_unanswered_approval_preserves_destination() {
     let shared: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
     let counts: Arc<Mutex<HashMap<String, usize>>> = Arc::new(Mutex::new(HashMap::new()));
     {
@@ -1296,7 +1296,10 @@ fn cancel_publication_race_orders_commit_or_nothing() {
         "cancel never touches the pre-existing destination"
     );
     assert!(
-        !work.join("race.partial.png").exists(),
-        "cancel publishes no partial sibling either"
+        std::fs::read_dir(&work).unwrap().all(|entry| {
+            let path = entry.unwrap().path();
+            path == output || path == work.join("tile-cache")
+        }),
+        "cancellation removes job-owned staging"
     );
 }

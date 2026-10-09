@@ -11,8 +11,8 @@ import {
   presentOutput,
   presentProgress,
   presentStatus,
+  RetryActions,
   RetryApproval,
-  RetryDecisionActions,
   renderView,
   type ViewContext,
 } from "@dezoomify/shared-ui";
@@ -119,7 +119,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       progress: undefined as Progress | undefined,
       output: undefined as Output | undefined,
       failure: undefined as JobError | undefined,
-      decision: undefined as
+      retryApproval: undefined as
         | { request: TileAcquisition; answer(choice: RetryChoice): void }
         | undefined,
       permission: undefined as PermissionWait | undefined,
@@ -146,8 +146,8 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
           paused: a.host?.paused,
         })
       : presentStatus("discovering");
-    if (a.decision) {
-      view.decision = a.decision.request;
+    if (a.retryApproval) {
+      view.retryApproval = a.retryApproval.request;
       view.headlineKey = "view.retry.title";
     }
     return view;
@@ -176,7 +176,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       history.update(current.historyEntry, { status: "cancelled" });
       current.controller.abort();
       current.permission = undefined;
-      current.decision = undefined;
+      current.retryApproval = undefined;
       current.activity.stopHeartbeat();
       current.diagnostics.finish("cancelled");
     }
@@ -235,7 +235,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       });
       const approval = new RetryApproval((request) => {
         a.host?.waitForRetry(request !== undefined);
-        a.decision = request
+        a.retryApproval = request
           ? {
               request,
               answer(choice) {
@@ -431,10 +431,10 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
               }),
             }
           : {}),
-        ...(a?.decision && !a.permission
+        ...(a?.retryApproval && !a.permission
           ? {
-              after: createElement(RetryDecisionActions, {
-                onAnswer: a.decision.answer,
+              after: createElement(RetryActions, {
+                onAnswer: a.retryApproval.answer,
               }),
             }
           : {}),

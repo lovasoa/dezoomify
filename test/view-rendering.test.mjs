@@ -10,7 +10,7 @@ import {
   presentProgress,
   presentStatus,
 } from "../packages/shared-ui/src/presentation.ts";
-import { RetryDecisionActions } from "../packages/shared-ui/src/retry-decision.tsx";
+import { RetryActions } from "../packages/shared-ui/src/retry-actions.tsx";
 import { renderView } from "../packages/shared-ui/src/view.tsx";
 import { act, click } from "./react-dom.mjs";
 
@@ -211,7 +211,7 @@ test("retry controls return retry or cancel", () => {
   const answers = [];
   act(() =>
     renderView(el, presentIdle(), callbacks, undefined, {
-      after: createElement(RetryDecisionActions, { onAnswer: (choice) => answers.push(choice) }),
+      after: createElement(RetryActions, { onAnswer: (choice) => answers.push(choice) }),
     }),
   );
   for (const choice of ["retry", "cancel"])
@@ -223,7 +223,7 @@ test("retry approval replaces running progress with one warning before diagnosti
   const el = container();
   const presentation = {
     ...presentProgress({ phase: "acquisition", completed: 3, total: 4 }),
-    decision: { tile: {}, attempt: 4, requires_approval: true },
+    retryApproval: { tile: {}, attempt: 4, requires_approval: true },
   };
   act(() =>
     renderView(
@@ -231,7 +231,7 @@ test("retry approval replaces running progress with one warning before diagnosti
       presentation,
       callbacks,
       { diagnosticReport: createDiagnosticRecorder({ id: "retry", now: () => 0 }).report() },
-      { after: createElement(RetryDecisionActions, { onAnswer() {} }) },
+      { after: createElement(RetryActions, { onAnswer() {} }) },
     ),
   );
   assert.match(el.textContent, /Download paused/);
@@ -241,7 +241,7 @@ test("retry approval replaces running progress with one warning before diagnosti
   assert.equal(el.querySelector("[role=progressbar]"), null);
   assert.equal(el.querySelector(".dz-pulse"), null);
   assert.ok(
-    el.innerHTML.indexOf("data-dz-retry-decision") < el.innerHTML.indexOf("dz-job-diagnostics"),
+    el.innerHTML.indexOf("data-dz-retry-actions") < el.innerHTML.indexOf("dz-job-diagnostics"),
   );
 });
 

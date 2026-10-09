@@ -219,6 +219,11 @@ test("recent table separates metadata and removes just the requested row", () =>
   assert.match(rows[0].textContent, /1200 × 800/);
   assert.match(rows[0].textContent, /Failed/);
   assert.equal(rows[1].querySelector(".dz-history-main").textContent, entries[1].url);
+  assert.equal(
+    rows[1].querySelectorAll("td")[3].textContent,
+    "–",
+    "unknown outcomes remain neutral",
+  );
   assertButtonsNamed(el, "recent pictures");
   click(rows[0].querySelector(".dz-history-remove"));
   assert.equal(removed, entries[0]);

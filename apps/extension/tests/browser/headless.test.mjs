@@ -675,7 +675,7 @@ test("chromium: exhausted retries pause once and approval saves the complete ima
         scenario: "retry",
         async beforeCompletion(jobPage) {
           await waitForVisible(jobPage, "[data-dz-retry-choice=retry]", "retry approval");
-          assert.equal(await jobPage.locator("[data-dz-retry-decision]").count(), 1);
+          assert.equal(await jobPage.locator("[data-dz-retry-actions]").count(), 1);
           assert.match(
             await jobPage.locator(".dz-retry-section").innerText(),
             /no file has been saved/,

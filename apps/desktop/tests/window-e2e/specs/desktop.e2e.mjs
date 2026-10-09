@@ -27,7 +27,7 @@ const GATEWAY_DZI = "https://fixtures.test/cli/pyramid.dzi";
 // Two tiles answer 429 with Retry-After, so the job stays running through
 // retry backoff long enough to cancel deterministically.
 const SLOW_DZI = "https://fixtures.test/edge/throttle-429/pyramid.dzi";
-const CORRUPT_DZI = "https://fixtures.test/desktop/tile-failure-keep/corrupt.dzi";
+const CORRUPT_DZI = "https://fixtures.test/cli/corrupt.dzi";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -231,7 +231,6 @@ describe("Dezoomify desktop window", () => {
     assert.equal(terminal.completed, true, "the completion view is shown");
     const outputs = outputFiles(runOutputDir());
     assert.equal(outputs.length, 1, "automatic save writes exactly one PNG");
-    assert.ok(!outputs[0].includes(".partial."), "a complete save is not a partial sibling");
     assertSavedPyramid(readFileSync(outputs[0]));
     await resetToIdle(driver);
     await waitFor(

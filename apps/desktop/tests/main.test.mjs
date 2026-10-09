@@ -245,7 +245,7 @@ test("desktop retry actions retain a newer native question", async () => {
   const invocation = await start();
   const request = { tile: { index: 3 }, attempt: 4, requires_approval: true };
   act(() => invocation.callbacks.retry(1, request));
-  assert.equal(root.querySelectorAll("[data-dz-retry-decision]").length, 1);
+  assert.equal(root.querySelectorAll("[data-dz-retry-actions]").length, 1);
   assert.equal(root.querySelectorAll(".dz-retry-section").length, 1);
   click(root.querySelector("[data-dz-retry-choice=retry]"));
   assert.equal(invocation.answers[0].question, 1);
@@ -257,7 +257,7 @@ test("desktop retry actions retain a newer native question", async () => {
   assert.equal(invocation.answers[1].question, 2);
   assert.equal(invocation.answers[1].choice, "cancel");
   await act(async () => invocation.answers[1].resolve());
-  assert.equal(root.querySelector("[data-dz-retry-decision]"), null);
+  assert.equal(root.querySelector("[data-dz-retry-actions]"), null);
   await reset();
 });
 

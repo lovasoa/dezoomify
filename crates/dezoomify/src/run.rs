@@ -161,12 +161,12 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
             tile.map(|tile| portable_tile(tile, canvas.clone()))
                 .map_err(Error::from)
         });
-    acquire_round(tiles, host, options, &mut progress).await?;
+    acquire_tiles(tiles, host, options, &mut progress).await?;
     let mut offset = base_count as u32;
     for grid in lower {
         let dimensions = Some(size(grid.image_size()));
         let count = grid.count() as u32;
-        acquire_round(
+        acquire_tiles(
             grid.tiles_row_major().map(|tile| {
                 let mut tile = portable_tile(tile.map_err(Error::from)?, dimensions.clone());
                 tile.index += offset;
@@ -544,7 +544,7 @@ pub(crate) async fn probe(
     }
 }
 
-async fn acquire_round(
+async fn acquire_tiles(
     tiles: impl Iterator<Item = Result<Tile, Error>>,
     host: &impl Host,
     options: &Options,

@@ -47,7 +47,7 @@ settlement.
 Branch on the error's `kind` and structured facts, never display text. Preserve
 request context and underlying causes. Retry classification belongs to Rust
 (`Error::retryable`), including when exposed to browser presentation. Output
-failures must not become missing-tile failures.
+failures stop the job immediately.
 
 ## Job ownership
 

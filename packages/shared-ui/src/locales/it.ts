@@ -178,7 +178,6 @@ export const it = {
   "view.history.removeImage": "Rimuovi {image} dalle immagini recenti",
   "view.history.status.started": "Avviata",
   "view.history.status.completed": "Completata",
-  "view.history.status.partial": "Con lacune",
   "view.history.status.preview": "Solo anteprima",
   "view.history.status.failed": "Non riuscita",
   "view.history.status.cancelled": "Annullata",

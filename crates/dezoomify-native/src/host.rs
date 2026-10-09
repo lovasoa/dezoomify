@@ -141,13 +141,12 @@ fn auto_output_path(output_dir: &Path, title: Option<&str>, format: OutputFormat
     let stem = safe_output_stem(title);
     let extension = format.extension();
     let first = output_dir.join(format!("{stem}.{extension}"));
-    let exists = |path: &Path| path.exists();
-    if !exists(&first) {
+    if !first.exists() {
         return first;
     }
     for suffix in 2..=9_999 {
         let candidate = output_dir.join(format!("{stem}-{suffix}.{extension}"));
-        if !exists(&candidate) {
+        if !candidate.exists() {
             return candidate;
         }
     }

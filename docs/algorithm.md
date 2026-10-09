@@ -24,7 +24,7 @@ Acquisition bounds complete fetch/process/decode/place operations. A tile retain
 
 Transient failures retry within the configured budget. Default exponential backoff starts at 1 s and caps at 30 s; an observed Retry-After is honored up to 300 s. Permanent failures, including HTTP 403, settle without retry. The shared algorithm owns retry classification and asks the Host to sleep.
 
-Progress reports the active work and acquired/total counts. Host output failures remain output failures, not missing tiles.
+Progress reports the active work and acquired/total counts. Output failures stop the job immediately.
 
 ## Pause and cancellation
 
@@ -32,7 +32,7 @@ Cancellation checkpoints apply to discovery and acquisition; acquisition checkpo
 
 Hosts abort actual operations and await owned decoding and output work during cleanup. Late browser completions cannot draw into a replacement image, and native cancellation cannot overwrite an existing output file.
 
-## Recovery and save
+## Retry approval and save
 
 Every required tile must succeed before finalization. Permanent tile failures and exhausted noninteractive retries fail with the tile identity, attempt count, and original cause. GUI invocations allow additional attempts marked as requiring approval. The Host awaits Retry or Cancel inside acquisition, pauses new work while waiting, and lets in-flight work settle. Approval grants one further attempt at that attempt number across tiles; successful tiles are retained. Cancellation must settle the awaiting acquisition so cleanup can finish.
 

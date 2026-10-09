@@ -23,9 +23,9 @@ impl MemoryBudget {
             usage: Mutex::new(Usage::default()),
         })
     }
-    /// Never wait for RAM: an unresolved missing tile can prevent the reader
-    /// from freeing any pixels until a retry supplies pixels. Fail with a typed
-    /// limit instead of occupying every acquisition slot in a circular wait.
+    /// Never wait for RAM: an outstanding acquisition can prevent the reader
+    /// from freeing pixels. Fail with a typed limit instead of occupying every
+    /// acquisition slot in a circular wait.
     pub(crate) fn reserve(self: &Arc<Self>, bytes: u64) -> Result<Reservation, Error> {
         let mut usage = self.usage.lock().expect("memory accounting lock");
         let required = usage.current.saturating_add(bytes);
@@ -84,7 +84,7 @@ pub(crate) struct PixelStrip {
 struct PendingStrip {
     pixels: PixelStrip,
     coverage: Vec<u64>,
-    missing: u64,
+    uncovered: u64,
 }
 impl PendingStrip {
     fn cover(&mut self, start: usize, end: usize) {
@@ -92,7 +92,7 @@ impl PendingStrip {
             let a = start.saturating_sub(word * 64);
             let b = (end - word * 64).min(64);
             let mask = (u64::MAX << a) & (u64::MAX >> (64 - b));
-            self.missing -= u64::from((mask & !self.coverage[word]).count_ones());
+            self.uncovered -= u64::from((mask & !self.coverage[word]).count_ones());
             self.coverage[word] |= mask;
         }
     }
@@ -215,7 +215,7 @@ impl PixelPipe {
                 _memory: memory,
             },
             coverage: vec![0; words],
-            missing: pixels,
+            uncovered: pixels,
         })
     }
     /// Geometry and composition operate only on producer-owned allocations.
@@ -312,39 +312,44 @@ impl PixelPipe {
                     }
                     pending.cover(start, start + width as usize);
                 }
-                self.publish(&mut producer, false)?;
+                self.publish_ready(&mut producer)?;
             }
             y = until;
         }
         Ok(())
     }
-    fn publish(&self, producer: &mut Producer, keep: bool) -> Result<(), Error> {
-        while producer.next_row < self.size.height {
-            let row = producer.next_row;
-            if !keep && !producer.pending.get(&row).is_some_and(|s| s.missing == 0) {
-                break;
-            }
-            if let std::collections::btree_map::Entry::Vacant(entry) = producer.pending.entry(row) {
-                entry.insert(self.blank(row)?);
-            }
-            let mut queue = self.queue.lock().expect("strip queue lock");
-            if let Some(error) = &queue.failure {
-                return Err(error.clone());
-            }
-            let mut pending = producer.pending.remove(&row).expect("ready strip");
-            drop(pending.coverage);
-            pending
-                .pixels
-                ._memory
-                .shrink(pending.pixels.rgba.len() as u64);
-            producer.next_row += pending.pixels.rows;
-            // Handoff freezes the whole strip. Its reservation follows it into
-            // the queue and encoder; there is no separate queue capacity/wait.
-            queue.ready.push_back(pending.pixels);
-            queue.closed = producer.next_row == self.size.height;
-            drop(queue);
-            self.changed.notify_all();
+    fn publish_ready(&self, producer: &mut Producer) -> Result<(), Error> {
+        while producer
+            .pending
+            .get(&producer.next_row)
+            .is_some_and(|strip| strip.uncovered == 0)
+        {
+            self.publish_next(producer)?;
         }
+        Ok(())
+    }
+    fn publish_next(&self, producer: &mut Producer) -> Result<(), Error> {
+        let row = producer.next_row;
+        if let std::collections::btree_map::Entry::Vacant(entry) = producer.pending.entry(row) {
+            entry.insert(self.blank(row)?);
+        }
+        let mut queue = self.queue.lock().expect("strip queue lock");
+        if let Some(error) = &queue.failure {
+            return Err(error.clone());
+        }
+        let mut pending = producer.pending.remove(&row).expect("ready strip");
+        drop(pending.coverage);
+        pending
+            .pixels
+            ._memory
+            .shrink(pending.pixels.rgba.len() as u64);
+        producer.next_row += pending.pixels.rows;
+        // Handoff freezes the whole strip. Its reservation follows it into
+        // the queue and encoder; there is no separate queue capacity/wait.
+        queue.ready.push_back(pending.pixels);
+        queue.closed = producer.next_row == self.size.height;
+        drop(queue);
+        self.changed.notify_all();
         Ok(())
     }
     /// Finalize uncovered pixels for positioned layouts after acquisition succeeds.
@@ -367,7 +372,10 @@ impl PixelPipe {
         }
         self.queue.lock().expect("strip queue lock").metadata = Some(metadata);
         self.changed.notify_all();
-        self.publish(&mut producer, true)
+        while producer.next_row < self.size.height {
+            self.publish_next(&mut producer)?;
+        }
+        Ok(())
     }
     pub(crate) fn metadata(&self) -> Result<TileMetadata, Error> {
         let mut queue = self.queue.lock().expect("strip queue lock");
@@ -479,7 +487,7 @@ pub(crate) mod tests {
         assert_eq!(pipe.budget.current(), 0);
     }
     #[test]
-    fn retry_and_finish_preserve_holes_and_failure_wakes_the_reader() {
+    fn reader_waits_for_required_pixels_and_failure_wakes_it() {
         for fail in [false, true] {
             let pipe = new_pipe(2, 1);
             put(
@@ -516,9 +524,23 @@ pub(crate) mod tests {
             }
             thread.join().unwrap();
         }
+    }
+    #[test]
+    fn finish_fills_uncovered_layout_pixels() {
         let pipe = new_pipe(2, 1);
+        put(
+            &pipe,
+            0,
+            1,
+            0,
+            image::RgbaImage::from_pixel(1, 1, image::Rgba([9, 8, 7, 255])),
+        );
+        assert_eq!(pipe.queued_strips(), 0);
         pipe.finish(&[]).unwrap();
-        assert_eq!(pipe.receive().unwrap().unwrap().rgba, [0; 8]);
+        assert_eq!(
+            pipe.receive().unwrap().unwrap().rgba,
+            [0, 0, 0, 0, 9, 8, 7, 255]
+        );
     }
     #[test]
     fn handoffs_release_owned_memory_and_cancellation_clears_queued_strips() {

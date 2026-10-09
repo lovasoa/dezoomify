@@ -372,7 +372,7 @@ function JobView({
   hostDocument: Document;
 }) {
   const d = deriveJob(presentation, ctx);
-  if (presentation.decision) {
+  if (presentation.retryApproval) {
     return (
       <section className="dz-view-body dz-retry-section" aria-labelledby="dz-retry-title">
         <h2 id="dz-retry-title">{t("view.retry.title")}</h2>

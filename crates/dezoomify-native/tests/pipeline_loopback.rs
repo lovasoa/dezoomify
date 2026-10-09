@@ -67,8 +67,11 @@ fn failed_tiles_publish_nothing() {
     )
     .expect_err("corrupt tiles must not produce an incomplete save");
     assert!(matches!(error, Error::TileFailed { .. }));
-    assert!(!output.exists());
-    assert!(!out_dir.join("output.partial.png").exists());
+    assert_eq!(
+        std::fs::read_dir(&out_dir).unwrap().count(),
+        0,
+        "failed acquisition removes all staging"
+    );
 }
 
 #[test]

@@ -265,7 +265,6 @@ const en = {
   "view.history.removeImage": "Remove {image} from recent pictures",
   "view.history.status.started": "Started",
   "view.history.status.completed": "Completed",
-  "view.history.status.partial": "With gaps",
   "view.history.status.preview": "Preview only",
   "view.history.status.failed": "Failed",
   "view.history.status.cancelled": "Cancelled",

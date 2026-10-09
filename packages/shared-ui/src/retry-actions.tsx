@@ -1,9 +1,9 @@
 import type { RetryChoice } from "@dezoomify/wasm-bindings";
 import { t } from "./i18n.ts";
 
-export function RetryDecisionActions({ onAnswer }: { onAnswer(choice: RetryChoice): void }) {
+export function RetryActions({ onAnswer }: { onAnswer(choice: RetryChoice): void }) {
   return (
-    <div className="dz-actions-row" data-dz-retry-decision="true">
+    <div className="dz-actions-row" data-dz-retry-actions="true">
       <button
         type="button"
         className="dz-btn-tactile"

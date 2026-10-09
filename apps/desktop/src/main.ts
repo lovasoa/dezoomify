@@ -21,7 +21,7 @@ import {
   presentOutput,
   presentProgress,
   presentStatus,
-  RetryDecisionActions,
+  RetryActions,
   readInitialUrl,
   renderView,
   setLocale,
@@ -268,7 +268,7 @@ function currentPresentation(): Presentation {
   const presentation = presentProgress(currentAttempt.progress, {
     paused: currentAttempt.paused,
   });
-  if (currentAttempt.retry) presentation.decision = currentAttempt.retry.value;
+  if (currentAttempt.retry) presentation.retryApproval = currentAttempt.retry.value;
   return presentation;
 }
 
@@ -612,7 +612,7 @@ function update() {
   const presentation = currentPresentation();
   const refreshHistory = presentation.phase === "idle" && !historyVisible;
   historyVisible = presentation.phase === "idle";
-  const retry = presentation.decision ? attempt.retry : null;
+  const retry = presentation.retryApproval ? attempt.retry : null;
   if (currentAttempt.viewCtx.jobActivity && presentation.phase === "job") {
     activity().now = Date.now();
   }
@@ -705,7 +705,7 @@ function update() {
         : {}),
       ...(retry
         ? {
-            after: createElement(RetryDecisionActions, {
+            after: createElement(RetryActions, {
               key: `${attempt.activeHandle?.id}:${retry.question}`,
               onAnswer: (choice: RetryChoice) => answerRetry(attempt, retry, choice),
             }),

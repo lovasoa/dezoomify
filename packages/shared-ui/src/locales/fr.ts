@@ -180,7 +180,6 @@ export const fr = {
   "view.history.removeImage": "Supprimer {image} des images récentes",
   "view.history.status.started": "Démarré",
   "view.history.status.completed": "Terminé",
-  "view.history.status.partial": "Avec des lacunes",
   "view.history.status.preview": "Aperçu seul",
   "view.history.status.failed": "Échec",
   "view.history.status.cancelled": "Annulé",

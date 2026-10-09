@@ -179,7 +179,6 @@ export const de = {
   "view.history.removeImage": "{image} aus den letzten Bildern entfernen",
   "view.history.status.started": "Gestartet",
   "view.history.status.completed": "Abgeschlossen",
-  "view.history.status.partial": "Mit Lücken",
   "view.history.status.preview": "Nur Vorschau",
   "view.history.status.failed": "Fehlgeschlagen",
   "view.history.status.cancelled": "Abgebrochen",

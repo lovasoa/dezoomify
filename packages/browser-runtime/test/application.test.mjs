@@ -209,7 +209,7 @@ test("retry approval pauses the job, resumes acquisition, and disappears on comp
   assert.equal(call.host.retryWaiting, false);
   act(() => call.resolve(output));
   await act(() => run);
-  assert.equal(h.root.querySelector("[data-dz-retry-decision]"), null);
+  assert.equal(h.root.querySelector("[data-dz-retry-actions]"), null);
   assert.deepEqual(h.app.presentation().output, output);
   assert.equal(JSON.parse(h.store.get("history"))[0].status, "completed");
   await act(() => h.app.dispose());

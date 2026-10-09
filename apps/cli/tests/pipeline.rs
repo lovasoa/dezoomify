@@ -198,8 +198,11 @@ fn tile_failures_preserve_context_without_publication() {
         let url = source(input);
         let run = cli(&dir, &["--json", &url, "out.png"]);
         assert!(!run.status.success());
-        assert!(!dir.join("out.png").exists());
-        assert!(!dir.join("out.partial.png").exists());
+        assert_eq!(
+            std::fs::read_dir(&dir).unwrap().count(),
+            0,
+            "failed jobs leave no files"
+        );
         let terminal = events(&run).pop().unwrap();
         assert_eq!(terminal["kind"], "failed");
         assert_eq!(terminal["error"]["kind"], "tile-failed");

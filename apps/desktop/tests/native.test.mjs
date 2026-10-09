@@ -175,7 +175,12 @@ test("failure before native registration rejects startup and removes all listene
 test("typed failure and complete output retain the native outcome", async () => {
   for (const result of [
     output,
-    { kind: "retry-discarded", failures: [{ kind: "decode-failed" }] },
+    {
+      kind: "tile-failed",
+      tile: 3,
+      attempts: 1,
+      cause: { kind: "decode-failed", detail: "invalid PNG" },
+    },
   ]) {
     const api = platform();
     const handle = await invokeNative(request(), { progress() {}, retry() {} }, api);
