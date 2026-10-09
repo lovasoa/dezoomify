@@ -46,11 +46,13 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
 
   const targetUrl = scenario.startsWith("fixtures/")
     ? `${origin}/${scenario}/viewer.html`
-    : scenario === "observed-zoomify"
-      ? `${origin}/observed-zoomify/viewer.html`
-      : scenario === ""
-        ? `${origin}/target.html`
-        : `${origin}/target.html?scenario=${encodeURIComponent(scenario)}`;
+    : scenario === "retry"
+      ? `${origin}/fixtures/failures/retry-approval/retry.dzi`
+      : scenario === "observed-zoomify"
+        ? `${origin}/observed-zoomify/viewer.html`
+        : scenario === ""
+          ? `${origin}/target.html`
+          : `${origin}/target.html?scenario=${encodeURIComponent(scenario)}`;
   const target = await api.tabs.create({ url: targetUrl, active: true });
   if (typeof target?.id !== "number") throw new Error("extension E2E source tab did not open");
 
@@ -60,6 +62,10 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
   const results = await api.scripting.executeScript({
     target: { tabId: target.id, frameIds: [0] },
     func: () => {
+      // Direct metadata documents are ready at load; HTML viewers signal
+      // completion of their asynchronous metadata request below.
+      if (document.contentType !== "text/html" && document.contentType !== "application/xhtml+xml")
+        return true;
       if (document.documentElement.dataset.viewerReady === "true") return true;
       return new Promise((resolve) => {
         const finish = (ready) => {

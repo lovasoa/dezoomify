@@ -665,7 +665,7 @@ test("chromium: optional host grant keeps the React job view mounted", {
   }
 });
 
-test("chromium: exhausted retries pause once and approval saves the complete image", {
+test("chromium: a direct DZI tab pauses exhausted retries and approval saves the complete image", {
   timeout: 180000,
 }, async () => {
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-retry-"));
