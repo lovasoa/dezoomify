@@ -1,20 +1,18 @@
 //! Pure discovery for Web Map Tile Service capabilities documents.
 
 use crate::core::discovery::{any, metadata, url_matches};
-use crate::core::{DiscoveryError, FormatSpec, ImagePlan, ParsedResource};
+use crate::core::{DiscoveryError, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource};
 
 mod capabilities;
 mod layer;
 mod tilematrix;
 
-pub const SPEC: FormatSpec = FormatSpec::new(
-    "wmts",
-    &[
-        metadata(url_matches(is_wmts_url)).decode(decode),
-        metadata(any()).decode(decode),
-    ],
-)
-.with_display_name("WMTS");
+const ROUTES: &[DiscoveryRoute] = &[
+    metadata(url_matches(is_wmts_url)).decode(decode),
+    metadata(any()).try_decode(try_decode),
+];
+
+pub const SPEC: FormatSpec = FormatSpec::new("wmts", ROUTES).with_display_name("WMTS");
 
 fn is_wmts_url(uri: &str) -> bool {
     let uri = uri.to_ascii_lowercase();
@@ -26,6 +24,21 @@ fn is_wmts_url(uri: &str) -> bool {
 fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let (url, bytes) = (resource.final_uri(), resource.bytes());
     let document = capabilities::parse_document(bytes)?;
+    decode_document(url, document)
+}
+
+fn try_decode(
+    resource: crate::core::DiscoveryResource<'_>,
+) -> Option<Result<ParsedResource, DiscoveryError>> {
+    let document = capabilities::parse_document(resource.bytes()).ok()?;
+    capabilities::find_descendant(&document, "TileMatrixSet")?;
+    Some(decode_document(resource.final_uri(), document))
+}
+
+fn decode_document(
+    url: &str,
+    document: capabilities::XmlElement,
+) -> Result<ParsedResource, DiscoveryError> {
     let context = layer::parse_context(url, &document)?;
     let levels = layer::build_levels(&context)?;
     if levels.is_empty() {

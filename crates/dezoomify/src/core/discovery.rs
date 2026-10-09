@@ -74,17 +74,27 @@ impl Default for DiscoveryLimits {
 
 pub enum ParsedResource {
     Follow(Request),
+    /// A reference whose decoder is known by the resource that produced it.
+    FollowWith(Request, Decoder),
     Image(ImagePlan),
     Catalog(CatalogPlan),
     Complete(DiscoveryCatalog),
 }
 impl ParsedResource {
+    /// Attach a decoder to an unresolved reference; preserve other results.
+    pub fn decode_with(self, decoder: Decoder) -> Self {
+        match self {
+            Self::Follow(request) => Self::FollowWith(request, decoder),
+            parsed => parsed,
+        }
+    }
+
     pub(crate) fn compile(self, format: &'static str) -> Result<DiscoveryCatalog, DiscoveryError> {
         match self {
             Self::Image(plan) => plan.compile(format),
             Self::Catalog(plan) => plan.compile(format),
             Self::Complete(catalog) => Ok(catalog),
-            Self::Follow(_) => Err(DiscoveryError::InvalidMetadata(
+            Self::Follow(_) | Self::FollowWith(..) => Err(DiscoveryError::InvalidMetadata(
                 "a metadata reference has no image plan".into(),
             )),
         }
@@ -223,7 +233,7 @@ impl<'a> DiscoveryContext<'a> {
         })
     }
 }
-type Decoder = for<'a> fn(DiscoveryResource<'a>) -> Result<ParsedResource, DiscoveryError>;
+pub type Decoder = for<'a> fn(DiscoveryResource<'a>) -> Result<ParsedResource, DiscoveryError>;
 type FailureHandler = for<'a> fn(
     &DiscoveryContext<'a>,
     &'a Request,
@@ -231,21 +241,21 @@ type FailureHandler = for<'a> fn(
 ) -> Result<ParsedResource, DiscoveryError>;
 type UrlMapper = fn(&str) -> Result<Request, DiscoveryError>;
 type UrlPredicate = fn(&str) -> bool;
-type ContentPredicate = fn(&[u8]) -> bool;
 
 #[derive(Clone, Copy, Debug)]
 pub enum DiscoveryMatch {
     Any,
     UrlSuffix(&'static str),
     UrlPredicate(UrlPredicate),
-    ContentPredicate(ContentPredicate),
     Css(&'static str, fn(&HtmlElement) -> bool),
     ResourcePredicate(for<'a> fn(DiscoveryResource<'a>) -> bool),
     ContentRegex(&'static LazyLock<BytesRegex>),
+    MarkupRegex(&'static LazyLock<BytesRegex>),
+    ScriptRegex(&'static LazyLock<BytesRegex>),
 }
 
 impl DiscoveryMatch {
-    fn matches(self, uri: &str, bytes: Option<&[u8]>) -> bool {
+    fn matches_url(self, uri: &str) -> bool {
         match self {
             Self::Any => true,
             Self::UrlSuffix(suffix) => uri
@@ -254,14 +264,16 @@ impl DiscoveryMatch {
                 .unwrap_or(uri)
                 .ends_with(suffix),
             Self::UrlPredicate(predicate) => predicate(uri),
-            Self::ContentPredicate(predicate) => bytes.is_some_and(predicate),
-            Self::Css(..) | Self::ResourcePredicate(_) => false,
-            Self::ContentRegex(regex) => bytes.is_some_and(|bytes| regex.is_match(bytes)),
+            Self::Css(..)
+            | Self::ResourcePredicate(_)
+            | Self::ContentRegex(_)
+            | Self::MarkupRegex(_)
+            | Self::ScriptRegex(_) => false,
         }
     }
 
     fn url_match(self, uri: &str) -> Option<bool> {
-        matches!(self, Self::UrlSuffix(_) | Self::UrlPredicate(_)).then(|| self.matches(uri, None))
+        matches!(self, Self::UrlSuffix(_) | Self::UrlPredicate(_)).then(|| self.matches_url(uri))
     }
 }
 
@@ -304,8 +316,35 @@ pub const fn resource_matches(
     DiscoveryMatch::ResourcePredicate(predicate)
 }
 
-pub const fn html_matches(predicate: ContentPredicate) -> DiscoveryMatch {
-    DiscoveryMatch::ContentPredicate(predicate)
+/// A permissive markup guard: XML and HTML need not be distinguished here.
+pub const fn html_matches(regex: &'static LazyLock<BytesRegex>) -> DiscoveryMatch {
+    DiscoveryMatch::MarkupRegex(regex)
+}
+
+pub const fn js_matches(regex: &'static LazyLock<BytesRegex>) -> DiscoveryMatch {
+    DiscoveryMatch::ScriptRegex(regex)
+}
+
+/// Parsed wire metadata converts directly into a format result.
+pub trait Metadata: serde::de::DeserializeOwned {
+    fn decode(self, resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError>;
+}
+
+/// Schema failures are route misses; conversion errors retain their cause.
+pub const fn json_metadata<T: Metadata>() -> DiscoveryRoute {
+    metadata(any()).try_decode(|resource| {
+        serde_json::from_slice::<T>(resource.bytes())
+            .ok()
+            .map(|metadata| metadata.decode(resource))
+    })
+}
+
+pub const fn xml_metadata<T: Metadata>() -> DiscoveryRoute {
+    metadata(any()).try_decode(|resource| {
+        quick_xml::de::from_reader::<_, T>(resource.bytes())
+            .ok()
+            .map(|metadata| metadata.decode(resource))
+    })
 }
 
 /// Semantic input pattern paired with a decoding or reference-resolution action.
@@ -331,10 +370,13 @@ impl RoutePattern {
     pub const fn decode(self, decoder: Decoder) -> DiscoveryRoute {
         self.route(RouteAction::Decode(decoder))
     }
-    /// Metadata that is meaningful only after this format has read its parent.
-    #[must_use]
-    pub const fn child_metadata(self, handler: Decoder) -> DiscoveryRoute {
-        self.route(RouteAction::ChildMetadata(handler))
+    pub const fn try_decode(
+        self,
+        decoder: for<'a> fn(
+            DiscoveryResource<'a>,
+        ) -> Option<Result<ParsedResource, DiscoveryError>>,
+    ) -> DiscoveryRoute {
+        self.route(RouteAction::TryDecode(decoder))
     }
     #[must_use]
     pub const fn resolve_metadata(self, mapper: UrlMapper) -> DiscoveryRoute {
@@ -374,6 +416,7 @@ impl RoutePattern {
             matcher: self.matcher,
             handler,
             kind: self.kind,
+            followed_decoder: None,
         }
     }
 }
@@ -383,6 +426,7 @@ pub struct DiscoveryRoute {
     matcher: DiscoveryMatch,
     handler: RouteAction,
     kind: RouteKind,
+    followed_decoder: Option<Decoder>,
 }
 
 impl DiscoveryRoute {
@@ -392,6 +436,21 @@ impl DiscoveryRoute {
             matcher: DiscoveryMatch::ContentRegex(regex),
             kind: RouteKind::Viewer,
             handler: RouteAction::RegexLink(regex, template, None),
+            followed_decoder: None,
+        }
+    }
+
+    /// Decode references produced by this route without running discovery again.
+    #[must_use]
+    pub const fn then_decode(mut self, decoder: Decoder) -> Self {
+        self.followed_decoder = Some(decoder);
+        self
+    }
+
+    fn followed(self, parsed: ParsedResource) -> ParsedResource {
+        match self.followed_decoder {
+            Some(decoder) => parsed.decode_with(decoder),
+            None => parsed,
         }
     }
 }
@@ -399,8 +458,8 @@ impl DiscoveryRoute {
 #[derive(Clone, Copy, Debug)]
 enum RouteAction {
     Plan(fn(&str) -> Result<ImagePlan, DiscoveryError>),
-    ChildMetadata(Decoder),
     Decode(Decoder),
+    TryDecode(for<'a> fn(DiscoveryResource<'a>) -> Option<Result<ParsedResource, DiscoveryError>>),
     MapUrl(UrlMapper),
     FollowAttribute {
         attribute: &'static str,
@@ -429,9 +488,17 @@ fn parse_resource(
         let matched = match route.matcher {
             DiscoveryMatch::Css(..) => selected.is_some(),
             DiscoveryMatch::ResourcePredicate(predicate) => predicate(resource),
+            DiscoveryMatch::ContentRegex(regex) => regex.is_match(resource.bytes()),
+            DiscoveryMatch::MarkupRegex(regex) => {
+                resource.is_html() && regex.is_match(resource.bytes())
+            }
+            DiscoveryMatch::ScriptRegex(regex) => {
+                crate::web_page::script_bodies(resource).any(|bytes| regex.is_match(bytes))
+            }
             matcher => {
-                matcher.matches(resource.final_uri(), Some(resource.bytes()))
-                    || matcher.matches(resource.uri(), Some(resource.bytes()))
+                matcher.matches_url(resource.final_uri())
+                    || (resource.uri() != resource.final_uri()
+                        && matcher.matches_url(resource.uri()))
             }
         };
         if !matched {
@@ -442,7 +509,11 @@ fn parse_resource(
             ..resource
         };
         return match route.handler {
-            RouteAction::Decode(decoder) | RouteAction::ChildMetadata(decoder) => decoder(resource),
+            RouteAction::Decode(decoder) => decoder(resource),
+            RouteAction::TryDecode(decoder) => match decoder(resource) {
+                Some(result) => result,
+                None => continue,
+            },
             RouteAction::FollowAttribute {
                 attribute,
                 prefix,
@@ -468,7 +539,8 @@ fn parse_resource(
                 })
             }
             RouteAction::MapUrl(_) | RouteAction::Plan(_) => continue,
-        };
+        }
+        .map(|parsed| route.followed(parsed));
     }
     Err(DiscoveryError::rejected(
         RejectionKind::DidNotMatchContent,
@@ -526,35 +598,30 @@ impl FormatSpec {
     fn url_kind(&self, uri: &str) -> Option<RouteKind> {
         self.routes
             .iter()
-            .filter(|route| {
-                !matches!(route.handler, RouteAction::ChildMetadata(_))
-                    && route.matcher.url_match(uri) == Some(true)
-            })
+            .filter(|route| route.matcher.url_match(uri) == Some(true))
             .map(|route| route.kind)
             .min()
     }
 
-    fn follow(
-        &self,
-        request: Request,
-        has_history: bool,
-    ) -> Result<ParsedResource, DiscoveryError> {
-        if !self.routes.iter().any(|route| {
-            (has_history || !matches!(route.handler, RouteAction::ChildMetadata(_)))
-                && route.matcher.url_match(&request.uri) != Some(false)
-        }) {
+    fn follow(&self, request: Request) -> Result<ParsedResource, DiscoveryError> {
+        if !self
+            .routes
+            .iter()
+            .any(|route| route.matcher.url_match(&request.uri) != Some(false))
+        {
             return Err(DiscoveryError::rejected(
                 RejectionKind::DidNotMatchUrl,
                 "no matching URL route",
             ));
         }
         for route in self.routes {
-            if !route.matcher.matches(&request.uri, None) {
+            if !route.matcher.matches_url(&request.uri) {
                 continue;
             }
             match route.handler {
                 RouteAction::MapUrl(mapper) => {
-                    return mapper(&request.uri).map(ParsedResource::Follow);
+                    return mapper(&request.uri)
+                        .map(|request| route.followed(ParsedResource::Follow(request)));
                 }
                 RouteAction::Plan(decode) => {
                     return decode(&request.uri).map(ParsedResource::Image);
@@ -676,16 +743,19 @@ fn observed_cause(
 
 /// Fetch rejections group by their observed facts (variant, HTTP status,
 /// transport, and policy reason); other rejections group by detail.
-/// URL-shape misses collapse to one count.
+/// URL and content misses collapse to one count.
 #[must_use]
 pub fn diagnostic_bullets(diagnostics: &[CandidateDiagnostic]) -> Vec<String> {
-    let mut url_misses: Vec<&str> = Vec::new();
+    let mut misses: Vec<&str> = Vec::new();
     let mut grouped: Vec<(&CandidateDiagnostic, Vec<&str>)> = Vec::new();
     for diagnostic in diagnostics {
-        if diagnostic.kind == RejectionKind::DidNotMatchUrl {
+        if matches!(
+            diagnostic.kind,
+            RejectionKind::DidNotMatchUrl | RejectionKind::DidNotMatchContent
+        ) {
             let name = diagnostic.format.as_str();
-            if !url_misses.contains(&name) {
-                url_misses.push(name);
+            if !misses.contains(&name) {
+                misses.push(name);
             }
             continue;
         }
@@ -719,10 +789,10 @@ pub fn diagnostic_bullets(diagnostics: &[CandidateDiagnostic]) -> Vec<String> {
         };
         lines.push(format!(" - {}: {}", names.join(", "), text));
     }
-    if !url_misses.is_empty() {
+    if !misses.is_empty() {
         lines.push(format!(
-            " - {} other format(s) did not match this page address",
-            url_misses.len()
+            " - {} other format(s) did not match this resource",
+            misses.len()
         ));
     }
     lines
@@ -966,14 +1036,17 @@ where
         let mut history = Vec::new();
         let mut parsed = ParsedResource::Follow(Request::new(uri));
         loop {
-            let ParsedResource::Follow(request) = parsed else {
-                return parsed
-                    .compile(spec.name)
-                    .map(|catalog| Some((history.len(), catalog)));
-            };
-            parsed = spec.follow(request, !history.is_empty())?;
-            let ParsedResource::Follow(request) = parsed else {
-                continue;
+            if let ParsedResource::Follow(request) = parsed {
+                parsed = spec.follow(request)?;
+            }
+            let (request, decoder) = match parsed {
+                ParsedResource::Follow(request) => (request, None),
+                ParsedResource::FollowWith(request, decoder) => (request, Some(decoder)),
+                parsed => {
+                    return parsed
+                        .compile(spec.name)
+                        .map(|catalog| Some((history.len(), catalog)));
+                }
             };
             priority.set((
                 base.0.min(if history.is_empty() { base.0 } else { 2 }),
@@ -1029,13 +1102,14 @@ where
                 }
                 Err(error) => return Err(error),
             };
-            parsed = parse_resource(
-                spec.routes,
-                DiscoveryResource {
-                    context,
-                    ..record.resource().expect("read response")
-                },
-            )?;
+            let resource = DiscoveryResource {
+                context,
+                ..record.resource().expect("read response")
+            };
+            parsed = match decoder {
+                Some(decode) => decode(resource),
+                None => parse_resource(spec.routes, resource),
+            }?;
             history.push(record);
         }
     }
@@ -1308,6 +1382,52 @@ mod tests {
     use super::*;
     use crate::model::{BlockedReason, ErrorTransport, Failure};
 
+    #[test]
+    fn metadata_routes_convert_the_value_deserialized_once() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static PARSES: AtomicUsize = AtomicUsize::new(0);
+
+        fn width<'de, D: serde::Deserializer<'de>>(decoder: D) -> Result<u32, D::Error> {
+            PARSES.fetch_add(1, Ordering::Relaxed);
+            serde::Deserialize::deserialize(decoder)
+        }
+        #[derive(serde::Deserialize)]
+        struct Document {
+            #[serde(rename = "@width", alias = "width", deserialize_with = "width")]
+            width: u32,
+        }
+        impl Metadata for Document {
+            fn decode(self, _: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+                Ok(ParsedResource::Image(ImagePlan::new(
+                    None,
+                    vec![super::super::model::ResolvedLevel::grid(
+                        crate::Vec2d::square(self.width),
+                        crate::Vec2d::square(2),
+                        |_| Request::new("memory://tile"),
+                    )?],
+                )))
+            }
+        }
+
+        for (route, bytes) in [
+            (json_metadata::<Document>(), br#"{"width":4}"#.as_slice()),
+            (xml_metadata::<Document>(), br#"<Image width="4"/>"#),
+        ] {
+            PARSES.store(0, Ordering::Relaxed);
+            let ParsedResource::Image(image) =
+                parse_resource(&[route], DiscoveryResource::new("memory://metadata", bytes))
+                    .unwrap()
+            else {
+                panic!("expected an image")
+            };
+            assert_eq!(
+                image.levels[0].source.image_size(),
+                Some(crate::Vec2d::square(4))
+            );
+            assert_eq!(PARSES.load(Ordering::Relaxed), 1);
+        }
+    }
+
     fn http_cause(status: u16, transport: ErrorTransport) -> Box<Error> {
         Box::new(Error::HttpError {
             status,
@@ -1340,7 +1460,7 @@ mod tests {
     }
 
     #[test]
-    fn diagnostics_group_by_typed_cause_and_collapse_url_misses() {
+    fn diagnostics_group_by_typed_cause_and_collapse_route_misses() {
         let diagnostic = |format: &str, kind, cause: Option<Box<Error>>, detail: Option<&str>| {
             CandidateDiagnostic {
                 format: format.into(),
@@ -1381,12 +1501,12 @@ mod tests {
                     None,
                     Some("not a generic X/Y tile template"),
                 ),
-                // A repeated URL miss from another scanned input counts once.
+                // URL and content misses from another scanned input count once.
                 diagnostic(
                     "generic",
-                    RejectionKind::DidNotMatchUrl,
+                    RejectionKind::DidNotMatchContent,
                     None,
-                    Some("not a generic X/Y tile template"),
+                    Some("resource did not match any discovery route"),
                 ),
             ],
         };
@@ -1395,14 +1515,14 @@ mod tests {
             "no discovery candidate accepted the input\
              \n - iiif, zoomify: HTTP 403 fetching this address\
              \n - deepzoom: unable to parse DZI metadata\
-             \n - 2 other format(s) did not match this page address"
+             \n - 2 other format(s) did not match this resource"
         );
         // Detailed diagnostics carry no headline.
         assert_eq!(
             error.detail(),
             " - iiif, zoomify: HTTP 403 fetching this address\
              \n - deepzoom: unable to parse DZI metadata\
-             \n - 2 other format(s) did not match this page address"
+             \n - 2 other format(s) did not match this resource"
         );
     }
 

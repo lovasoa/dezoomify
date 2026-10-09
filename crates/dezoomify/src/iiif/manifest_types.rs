@@ -69,11 +69,10 @@ pub struct Manifest {
     pub context: Option<String>, // Can be string or array of strings
     #[serde(default)] // If ID is missing, we might use the fetch URL as a fallback later
     pub id: String,
-    #[serde(default, rename = "type")]
-    pub manifest_type: String, // Should be "Manifest"
+    #[serde(default, rename = "type", alias = "@type")]
+    pub manifest_type: serde_json::Value, // Kept for lenient type warnings.
     #[serde(default)]
     pub label: IiifLabel,
-    #[serde(default)]
     pub items: Vec<Canvas>,
     #[serde(default)]
     pub metadata: Option<Vec<MetadataEntry>>,
@@ -179,9 +178,10 @@ pub struct ImageService {
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct LegacyManifest {
+    #[serde(default, rename = "@type", alias = "type")]
+    pub manifest_type: serde_json::Value,
     #[serde(default)]
     pub label: IiifLabel,
-    #[serde(default)]
     pub sequences: Vec<LegacySequence>,
     #[serde(default)]
     pub metadata: Option<Vec<MetadataEntry>>,

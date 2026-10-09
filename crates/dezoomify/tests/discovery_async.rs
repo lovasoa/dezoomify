@@ -1,5 +1,5 @@
 mod support;
-use core::discovery::{DiscoveryInput, DiscoveryLimits, any, metadata, url_suffix, viewer};
+use core::discovery::{DiscoveryInput, DiscoveryLimits, url_suffix, viewer};
 use dezoomify::{
     core::{
         self, DiscoveredEntry, DiscoveryCatalog, DiscoveryError, DiscoveryResource, FormatSpec,
@@ -23,17 +23,15 @@ fn catalog(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryE
 }
 const FIRST: FormatSpec = FormatSpec::new(
     "first",
-    &[
-        viewer(url_suffix("/root")).resolve_metadata(|_| Ok(Request::new("https://test/a"))),
-        metadata(any()).decode(catalog),
-    ],
+    &[viewer(url_suffix("/root"))
+        .resolve_metadata(|_| Ok(Request::new("https://test/a")))
+        .then_decode(catalog)],
 );
 const SECOND: FormatSpec = FormatSpec::new(
     "second",
-    &[
-        viewer(url_suffix("/root")).resolve_metadata(|_| Ok(Request::new("https://test/b"))),
-        metadata(any()).decode(catalog),
-    ],
+    &[viewer(url_suffix("/root"))
+        .resolve_metadata(|_| Ok(Request::new("https://test/b")))
+        .then_decode(catalog)],
 );
 fn registry() -> core::Registry {
     let mut r = core::Registry::new();
@@ -199,8 +197,9 @@ fn deferred_access_runs_after_every_runnable_branch_and_reuses_its_resource() {
 }
 fn branch(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     if resource.context().resources().next().is_none() {
-        return Ok(ParsedResource::Follow(
+        return Ok(ParsedResource::FollowWith(
             Request::new("https://test/child").with_header("X-Image", "kept"),
+            branch,
         ));
     }
     assert!(resource.context().has_visited("https://redirect.test/root"));
@@ -208,12 +207,13 @@ fn branch(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryEr
         resource.context().resources().next().unwrap().bytes(),
         b"root"
     );
+    assert_eq!(resource.final_uri(), "https://redirect.test/child");
     catalog(resource)
 }
 #[test]
 fn shared_reads_keep_branch_history_headers_and_redirected_bases() {
-    const A: FormatSpec = FormatSpec::new("first", &[metadata(any()).decode(branch)]);
-    const B: FormatSpec = FormatSpec::new("second", &[metadata(any()).decode(branch)]);
+    const A: FormatSpec = FormatSpec::new("first", &[viewer(url_suffix("/root")).decode(branch)]);
+    const B: FormatSpec = FormatSpec::new("second", &[viewer(url_suffix("/root")).decode(branch)]);
     let mut registry = core::Registry::new();
     registry.register(A);
     registry.register(B);
@@ -237,7 +237,12 @@ fn shared_reads_keep_branch_history_headers_and_redirected_bases() {
                     })
                 } else {
                     assert_eq!(request.header("X-Image"), Some("kept"));
-                    Ok(response("child"))
+                    Ok(ResourceRead::Response {
+                        response: ResourceResponse {
+                            bytes: b"child".to_vec(),
+                            final_uri: Some("https://redirect.test/child".into()),
+                        },
+                    })
                 }
             }
         },
@@ -253,10 +258,9 @@ fn live_resource_concurrency_stays_within_the_declared_bound() {
     let peak = Rc::new(Cell::new(0));
     const THIRD: FormatSpec = FormatSpec::new(
         "third",
-        &[
-            viewer(url_suffix("/root")).resolve_metadata(|_| Ok(Request::new("https://test/c"))),
-            metadata(any()).decode(catalog),
-        ],
+        &[viewer(url_suffix("/root"))
+            .resolve_metadata(|_| Ok(Request::new("https://test/c")))
+            .then_decode(catalog)],
     );
     let mut registry = registry();
     registry.register(THIRD);

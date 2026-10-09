@@ -7,7 +7,7 @@ use serde_json::Value;
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{css, html_matches, metadata, url_matches, viewer};
+use crate::core::discovery::{Metadata, css, json_metadata, metadata, url_matches, viewer};
 use crate::core::{
     DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource,
     Request, ResolvedLevel, resolve_url_template,
@@ -21,16 +21,24 @@ static DETAIL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)/detail/([a-z0-9-]+)/media/([a-z0-9-]+)")
         .expect("constant TopViewer detail pattern")
 });
+#[derive(serde::Deserialize)]
+struct Document {
+    topviews: Vec<Value>,
+    config: Value,
+}
 
 const ROUTES: &[DiscoveryRoute] = &[
-    viewer(url_matches(is_known_detail_url)).resolve_metadata(known_detail_url),
+    viewer(url_matches(is_known_detail_url))
+        .resolve_metadata(known_detail_url)
+        .then_decode(decode),
     viewer(css("pic-mediabank")).decode(follow_mediabank),
     DiscoveryRoute::regex_link(
         &THUMBNAIL_RE,
         "https://images.memorix.nl/$server/topviewjson/memorix/$image",
-    ),
+    )
+    .then_decode(decode),
     metadata(url_matches(is_media_api)).decode(follow_media),
-    metadata(html_matches(contains_topviews)).decode(decode),
+    json_metadata::<Document>(),
 ];
 
 /// Institution URL prefixes and their Memorix image servers. Institution
@@ -69,10 +77,6 @@ fn known_detail_url(uri: &str) -> Result<Request, DiscoveryError> {
 }
 
 pub const SPEC: FormatSpec = FormatSpec::new("topviewer", ROUTES).with_display_name("TopViewer");
-
-fn contains_topviews(bytes: &[u8]) -> bool {
-    String::from_utf8_lossy(bytes).contains("\"topviews\"")
-}
 
 fn follow_mediabank(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let tag = resource.element()?;
@@ -122,7 +126,10 @@ fn follow_mediabank(resource: DiscoveryResource<'_>) -> Result<ParsedResource, D
             query.append_pair(&name, &value);
         }
     }
-    Ok(ParsedResource::Follow(Request::new(api.to_string())))
+    Ok(ParsedResource::FollowWith(
+        Request::new(api.to_string()),
+        follow_media,
+    ))
 }
 
 fn is_media_api(uri: &str) -> bool {
@@ -164,68 +171,71 @@ fn follow_media(resource: DiscoveryResource<'_>) -> Result<ParsedResource, Disco
         .ok_or_else(|| {
             DiscoveryError::InvalidMetadata("no zoomable image found in TopViewer response".into())
         })?;
-    Ok(resource.follow_relative(asset))
+    Ok(resource.follow_relative(asset).decode_with(decode))
 }
 
 fn decode(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-    let (url, bytes) = (resource.final_uri(), resource.bytes());
-    let value: Value = serde_json::from_slice(bytes).map_err(|error| {
+    let document: Document = serde_json::from_slice(resource.bytes()).map_err(|error| {
         DiscoveryError::InvalidMetadata(format!("unable to parse TopViewer metadata: {error}"))
     })?;
-    let view = value
-        .get("topviews")
-        .and_then(Value::as_array)
-        .and_then(|views| views.first())
-        .ok_or_else(|| {
+    document.decode(resource)
+}
+
+impl Metadata for Document {
+    fn decode(self, resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+        let url = resource.final_uri();
+        let view = self.topviews.first().ok_or_else(|| {
             DiscoveryError::InvalidMetadata("TopViewer metadata has no topviews".into())
         })?;
-    let config = value
-        .get("config")
-        .and_then(Value::as_object)
-        .and_then(|config| config.get("tileurl_v2"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            DiscoveryError::InvalidMetadata("TopViewer metadata has no tile URL template".into())
-        })?;
-    let width = number(view, "width")?;
-    let height = number(view, "height")?;
-    let tile_size = number(view, "tileWidth")?;
-    let layers = view
-        .get("layers")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            DiscoveryError::InvalidMetadata("TopViewer metadata has no layers".into())
-        })?;
-    let layer = layers
-        .iter()
-        .max_by_key(|layer| layer.get("width").and_then(Value::as_u64).unwrap_or(0))
-        .ok_or_else(|| {
-            DiscoveryError::InvalidMetadata("TopViewer metadata has no usable layer".into())
-        })?;
-    let first_tile = number(layer, "starttile")?;
-    let columns = number(layer, "cols")?;
-    let filepath = view.get("filepath").and_then(Value::as_str);
-    let template = resolve_url_template(url, config)
-        .replace("{file}", filepath.unwrap_or("image"))
-        .replace("{extension}", "jpg");
-    let template: Arc<str> = template.into();
-    let level = ResolvedLevel::grid(
-        Vec2d {
-            x: width,
-            y: height,
-        },
-        Vec2d::square(tile_size),
-        move |tile| {
-            let tile_number = u64::from(first_tile)
-                + u64::from(tile.coord.column)
-                + u64::from(tile.coord.row) * u64::from(columns);
-            Request::new(template.replace("{tile}", &tile_number.to_string()))
-        },
-    )?;
-    Ok(ParsedResource::Image(ImagePlan::new(
-        filepath.and_then(image_title),
-        vec![level],
-    )))
+        let config = self
+            .config
+            .get("tileurl_v2")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                DiscoveryError::InvalidMetadata(
+                    "TopViewer metadata has no tile URL template".into(),
+                )
+            })?;
+        let width = number(view, "width")?;
+        let height = number(view, "height")?;
+        let tile_size = number(view, "tileWidth")?;
+        let layers = view
+            .get("layers")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                DiscoveryError::InvalidMetadata("TopViewer metadata has no layers".into())
+            })?;
+        let layer = layers
+            .iter()
+            .max_by_key(|layer| layer.get("width").and_then(Value::as_u64).unwrap_or(0))
+            .ok_or_else(|| {
+                DiscoveryError::InvalidMetadata("TopViewer metadata has no usable layer".into())
+            })?;
+        let first_tile = number(layer, "starttile")?;
+        let columns = number(layer, "cols")?;
+        let filepath = view.get("filepath").and_then(Value::as_str);
+        let template = resolve_url_template(url, config)
+            .replace("{file}", filepath.unwrap_or("image"))
+            .replace("{extension}", "jpg");
+        let template: Arc<str> = template.into();
+        let level = ResolvedLevel::grid(
+            Vec2d {
+                x: width,
+                y: height,
+            },
+            Vec2d::square(tile_size),
+            move |tile| {
+                let tile_number = u64::from(first_tile)
+                    + u64::from(tile.coord.column)
+                    + u64::from(tile.coord.row) * u64::from(columns);
+                Request::new(template.replace("{tile}", &tile_number.to_string()))
+            },
+        )?;
+        Ok(ParsedResource::Image(ImagePlan::new(
+            filepath.and_then(image_title),
+            vec![level],
+        )))
+    }
 }
 
 fn image_title(filepath: &str) -> Option<String> {

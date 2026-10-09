@@ -7,7 +7,8 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    any, html_matches, image_url, metadata, url_matches, url_suffix, viewer,
+    Metadata, any, html_matches, image_url, js_matches, json_metadata, metadata, url_matches,
+    url_suffix, viewer,
 };
 use crate::core::{
     AdaptiveSource, CatalogPlan, DeferredResource, DiscoveryCatalog, DiscoveryError,
@@ -32,22 +33,54 @@ pub mod tile_info;
 #[cfg(test)]
 mod title_tests;
 
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum Document {
+    #[serde(deserialize_with = "image_metadata")]
+    Image(ImageInfo),
+    Current(manifest_types::Manifest),
+    Legacy(manifest_types::LegacyManifest),
+}
+
+fn image_metadata<'de, D: serde::Deserializer<'de>>(decoder: D) -> Result<ImageInfo, D::Error> {
+    let info = <ImageInfo as serde::Deserialize>::deserialize(decoder)?;
+    if matches!(info.iiif_type.as_deref(), Some("Manifest" | "sc:Manifest"))
+        || info.context.as_deref().is_some_and(|context| {
+            context.contains("iiif.io/api/presentation")
+                || context.contains("shared-canvas.org/ns/context")
+        })
+    {
+        return Err(serde::de::Error::custom(
+            "presentation metadata is not an image service",
+        ));
+    }
+    Ok(info)
+}
+
 const ROUTES: &[DiscoveryRoute] = &[
-    image_url(|uri| image_request_info(uri).is_some()).resolve_metadata(|uri| {
-        Ok(image_request_info(uri).expect("route matched IIIF image request"))
-    }),
-    viewer(url_matches(has_manifest_parameter)).resolve_metadata(manifest_parameter),
-    onb::ROUTE,
-    contentdm::RECORD_ROUTE,
+    image_url(|uri| image_request_info(uri).is_some())
+        .resolve_metadata(|uri| {
+            Ok(image_request_info(uri).expect("route matched IIIF image request"))
+        })
+        .then_decode(decode),
+    viewer(url_matches(has_manifest_parameter))
+        .resolve_metadata(manifest_parameter)
+        .then_decode(decode),
+    onb::ROUTE.then_decode(decode),
+    contentdm::RECORD_ROUTE.then_decode(contentdm::follow_info),
     contentdm::METADATA_ROUTE,
-    micrio::ROUTE,
+    micrio::ROUTE.then_decode(decode),
     national_gallery::ROUTES[0],
     national_gallery::ROUTES[1],
-    philadelphia::ROUTE,
-    viewer(html_matches(has_info_json_url)).decode(follow_info_json_url),
+    philadelphia::ROUTE.then_decode(decode),
     metadata(url_suffix("/info.json")).decode(decode),
     metadata(url_suffix("/manifest.json")).decode(decode),
-    metadata(any()).decode(decode),
+    json_metadata::<Document>(),
+    metadata(any()).try_decode(embedded_metadata),
+    viewer(html_matches(&ABS_INFO_JSON_RE)).decode(follow_info_json_url),
+    viewer(html_matches(&REL_INFO_JSON_RE)).decode(follow_info_json_url),
+    viewer(js_matches(&ABS_INFO_JSON_RE)).decode(follow_info_json_url),
+    viewer(js_matches(&REL_INFO_JSON_RE)).decode(follow_info_json_url),
 ];
 
 /// IIIF format. See <https://iiif.io/>.
@@ -55,6 +88,45 @@ pub const SPEC: FormatSpec = FormatSpec::new("iiif", ROUTES).with_display_name("
 
 fn decode(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     catalog(resource.final_uri(), resource.bytes()).map(ParsedResource::Complete)
+}
+
+impl Metadata for Document {
+    fn decode(self, resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+        let (infos, warning) = match self {
+            Self::Current(manifest) => (
+                manifest.extract_image_infos(resource.final_uri()),
+                manifest_type_warning(&manifest.manifest_type),
+            ),
+            Self::Legacy(manifest) => (
+                manifest.extract_image_infos(resource.final_uri()),
+                manifest_type_warning(&manifest.manifest_type),
+            ),
+            Self::Image(info) => {
+                return catalog_from_levels(levels_from_info(resource.final_uri(), info)?)
+                    .map(ParsedResource::Complete);
+            }
+        };
+        Ok(ParsedResource::Catalog(catalog_from_manifest_info(
+            infos, warning,
+        )))
+    }
+}
+
+fn embedded_metadata(
+    resource: DiscoveryResource<'_>,
+) -> Option<Result<ParsedResource, DiscoveryError>> {
+    let mut infos = all_json::<ImageInfo>(resource.bytes())
+        .filter(ImageInfo::has_distinctive_iiif_properties)
+        .peekable();
+    infos.peek()?;
+    Some(
+        infos
+            .map(|info| levels_from_info(resource.final_uri(), info))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(DiscoveryError::from)
+            .and_then(|levels| catalog_from_levels(levels.into_iter().flatten().collect()))
+            .map(ParsedResource::Complete),
+    )
 }
 
 /// Determines the best title for an image from IIIF manifest metadata
@@ -195,16 +267,7 @@ fn harvest_info_json_urls(bytes: &[u8]) -> Vec<String> {
     urls
 }
 
-fn has_info_json_url(bytes: &[u8]) -> bool {
-    ABS_INFO_JSON_RE.is_match(bytes) || REL_INFO_JSON_RE.is_match(bytes)
-}
-
 fn follow_info_json_url(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-    // Payloads that already parse as IIIF (info.json bodies, manifests)
-    // keep the standard extractor; harvesting is for embedder pages.
-    if let Ok(found) = catalog(resource.final_uri(), resource.bytes()) {
-        return Ok(ParsedResource::Complete(found));
-    }
     let base = crate::web_page::page_base(resource);
     let target = harvest_info_json_urls(resource.bytes())
         .into_iter()
@@ -213,64 +276,18 @@ fn follow_info_json_url(resource: DiscoveryResource<'_>) -> Result<ParsedResourc
         .ok_or_else(|| {
             DiscoveryError::InvalidMetadata("page declares no IIIF info.json URL".into())
         })?;
-    Ok(ParsedResource::Follow(Request::new(target)))
+    Ok(ParsedResource::FollowWith(Request::new(target), decode))
 }
 
 fn catalog(uri: &str, contents: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
-    // First, try to determine what type of IIIF content this is by doing a quick parse
-    // to check the "type" field without generating warnings
-    if let Ok(quick_check) = serde_json::from_slice::<serde_json::Value>(contents)
-        && let Some(type_value) = quick_check.get("type").or_else(|| quick_check.get("@type"))
-        && let Some(type_str) = type_value.as_str()
-    {
-        match type_str {
-            "ImageService2" | "ImageService3" | "iiif:ImageProfile" => {
-                // This is clearly an Image Service info.json, try parsing it directly
-                return catalog_from_info(uri, contents);
-            }
-            "Manifest" | "sc:Manifest" => {
-                // This is clearly a manifest, try parsing it as such
-                match parse_iiif_manifest_from_bytes(contents, uri) {
-                    Ok(image_infos) if !image_infos.is_empty() => {
-                        return catalog_from_manifest_info(image_infos, None).compile("iiif");
-                    }
-                    Ok(_) => {
-                        // Empty image_infos, fall through to heuristic approach
-                    }
-                    Err(e) => return Err(e.into()),
-                }
-            }
-            _ => {
-                // Unknown type, fall through to heuristic detection below
-            }
+    let resource = DiscoveryResource::new(uri, contents);
+    let parsed = match serde_json::from_slice::<Document>(contents) {
+        Ok(document) => document.decode(resource),
+        Err(error) => {
+            embedded_metadata(resource).unwrap_or_else(|| Err(IIIFError::from(error).into()))
         }
-    }
-
-    // If type detection didn't work or type is unknown, use heuristic approach
-    // Check if URL suggests it's an info.json file
-    if uri.ends_with("/info.json") {
-        // Likely an Image Service, try parsing as info.json first
-        if let Ok(catalog) = catalog_from_info(uri, contents) {
-            return Ok(catalog);
-        }
-        // Fall through to try as manifest
-    }
-
-    // Try to parse as IIIF manifest
-    let manifest_warning = manifest_type_warning(contents);
-    match parse_iiif_manifest_from_bytes(contents, uri) {
-        Ok(image_infos) if !image_infos.is_empty() => {
-            // Successfully parsed as manifest with images
-            catalog_from_manifest_info(image_infos, manifest_warning).compile("iiif")
-        }
-        _ => {
-            // Not a manifest or failed to parse as manifest, try as info.json
-            match catalog_from_info(uri, contents) {
-                Ok(catalog) => Ok(catalog),
-                Err(e) => Err(e),
-            }
-        }
-    }
+    }?;
+    parsed.compile("iiif")
 }
 
 fn catalog_from_manifest_info(
@@ -289,8 +306,7 @@ fn catalog_from_manifest_info(
     CatalogPlan::deferred(resources)
 }
 
-fn catalog_from_info(url: &str, raw_info: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
-    let mut levels = levels(url, raw_info)?;
+fn catalog_from_levels(mut levels: Vec<ResolvedLevel>) -> Result<DiscoveryCatalog, DiscoveryError> {
     let mut warnings = Vec::new();
     for level in &mut levels {
         for warning in level.warnings.drain(..) {
@@ -304,10 +320,8 @@ fn catalog_from_info(url: &str, raw_info: &[u8]) -> Result<DiscoveryCatalog, Dis
         .compile("iiif")
 }
 
-fn manifest_type_warning(contents: &[u8]) -> Option<String> {
-    let value = serde_json::from_slice::<serde_json::Value>(contents).ok()?;
-    let type_value = value.get("type").or_else(|| value.get("@type"))?;
-    let type_name = type_value.as_str()?;
+fn manifest_type_warning(value: &serde_json::Value) -> Option<String> {
+    let type_name = value.as_str()?;
     (!matches!(
         type_name,
         "Manifest" | "sc:Manifest" | "ImageService2" | "ImageService3" | "iiif:ImageProfile"
@@ -315,6 +329,7 @@ fn manifest_type_warning(contents: &[u8]) -> Option<String> {
     .then(|| format!("IIIF manifest has unexpected type '{type_name}'; attempting lenient parsing"))
 }
 
+#[cfg(test)]
 fn levels(url: &str, raw_info: &[u8]) -> Result<Vec<ResolvedLevel>, IIIFError> {
     match serde_json::from_slice(raw_info) {
         Ok(info) => levels_from_info(url, info),
@@ -652,82 +667,13 @@ pub fn parse_iiif_manifest_from_bytes(
     bytes: &[u8],
     manifest_url: &str,
 ) -> Result<Vec<manifest_types::ExtractedImageInfo>, IIIFError> {
-    let value: serde_json::Value = serde_json::from_slice(bytes).map_err(IIIFError::JsonError)?;
-
-    if is_legacy_presentation_manifest(&value) {
-        parse_legacy_presentation_manifest(bytes, manifest_url)
-    } else if is_presentation3_manifest(&value) {
-        parse_presentation3_manifest(bytes, manifest_url)
-    } else {
-        parse_unknown_manifest(bytes, manifest_url)
-    }
-}
-
-fn is_presentation3_manifest(value: &serde_json::Value) -> bool {
-    manifest_type(value) == Some("Manifest")
-        || json_context_contains(value, "iiif.io/api/presentation/3")
-}
-
-fn is_legacy_presentation_manifest(value: &serde_json::Value) -> bool {
-    manifest_type(value) == Some("sc:Manifest")
-        || json_context_contains(value, "iiif.io/api/presentation/2")
-        || json_context_contains(value, "shared-canvas.org/ns/context")
-}
-
-fn manifest_type(value: &serde_json::Value) -> Option<&str> {
-    value
-        .get("type")
-        .or_else(|| value.get("@type"))
-        .and_then(|type_value| type_value.as_str())
-}
-
-fn json_context_contains(value: &serde_json::Value, needle: &str) -> bool {
-    match value.get("@context") {
-        Some(serde_json::Value::String(context)) => context.contains(needle),
-        Some(serde_json::Value::Array(contexts)) => contexts.iter().any(|context| {
-            context
-                .as_str()
-                .is_some_and(|context| context.contains(needle))
-        }),
-        _ => false,
-    }
-}
-
-fn parse_presentation3_manifest(
-    bytes: &[u8],
-    manifest_url: &str,
-) -> Result<Vec<manifest_types::ExtractedImageInfo>, IIIFError> {
-    let manifest: manifest_types::Manifest =
-        serde_json::from_slice(bytes).map_err(IIIFError::JsonError)?;
-
-    Ok(manifest.extract_image_infos(manifest_url))
-}
-
-fn parse_legacy_presentation_manifest(
-    bytes: &[u8],
-    manifest_url: &str,
-) -> Result<Vec<manifest_types::ExtractedImageInfo>, IIIFError> {
-    let manifest: manifest_types::LegacyManifest =
-        serde_json::from_slice(bytes).map_err(IIIFError::JsonError)?;
-
-    Ok(manifest.extract_image_infos(manifest_url))
-}
-
-fn parse_unknown_manifest(
-    bytes: &[u8],
-    manifest_url: &str,
-) -> Result<Vec<manifest_types::ExtractedImageInfo>, IIIFError> {
-    match parse_presentation3_manifest(bytes, manifest_url) {
-        Ok(image_infos) if !image_infos.is_empty() => Ok(image_infos),
-        Ok(_) => match parse_legacy_presentation_manifest(bytes, manifest_url) {
-            Ok(image_infos) if !image_infos.is_empty() => Ok(image_infos),
-            _ => Ok(Vec::new()),
+    Ok(
+        match serde_json::from_slice::<Document>(bytes).map_err(IIIFError::JsonError)? {
+            Document::Current(manifest) => manifest.extract_image_infos(manifest_url),
+            Document::Legacy(manifest) => manifest.extract_image_infos(manifest_url),
+            Document::Image(_) => Vec::new(),
         },
-        Err(v3_error) => match parse_legacy_presentation_manifest(bytes, manifest_url) {
-            Ok(image_infos) if !image_infos.is_empty() => Ok(image_infos),
-            _ => Err(v3_error),
-        },
-    }
+    )
 }
 
 #[test]

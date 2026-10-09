@@ -39,6 +39,10 @@ impl KrpanoMetadata {
         quick_xml::de::from_str(s)
     }
 
+    pub fn has_images(&self) -> bool {
+        !self.image.is_empty() || self.scene.iter().any(Self::has_images)
+    }
+
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, quick_xml::DeError> {
         quick_xml::de::from_reader(bytes)
     }

@@ -35,26 +35,16 @@ mod metadata;
 mod tests;
 mod viewer;
 
-use crate::core::discovery::{
-    any, html_matches, metadata as route, resource_matches, viewer as viewer_route,
-};
+use crate::core::discovery::{Metadata, resource_matches, viewer as viewer_route, xml_metadata};
 use crate::core::{DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ParsedResource};
 
 const ROUTES: &[DiscoveryRoute] = &[
-    route(html_matches(is_metadata)).decode(decode),
+    xml_metadata::<metadata::Document>(),
     viewer_route(resource_matches(viewer::recognizes)).decode(viewer::decode),
-    route(any()).child_metadata(decode),
 ];
 pub const SPEC: FormatSpec = FormatSpec::new("fzp", ROUTES)
     .with_display_name("FreezoomPack")
     .on_failure(viewer::failed_script);
-
-fn is_metadata(bytes: &[u8]) -> bool {
-    matches!(
-        metadata::root_name(&String::from_utf8_lossy(bytes)).as_deref(),
-        Some("pal" | "item" | "items")
-    )
-}
 
 fn invalid(detail: impl std::fmt::Display) -> DiscoveryError {
     let detail = detail.to_string();
@@ -70,13 +60,7 @@ fn invalid(detail: impl std::fmt::Display) -> DiscoveryError {
 }
 
 fn decode(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-    let text = resource.text_lossy();
-    match metadata::root_name(&text).as_deref() {
-        Some("pal") => metadata::image(&text, resource.final_uri()),
-        Some("item") => metadata::index(&text, resource),
-        Some("items") => Err(invalid(
-            "unsupported legacy page index layout: items/field/name",
-        )),
-        _ => viewer::decode(resource),
-    }
+    quick_xml::de::from_reader::<_, metadata::Document>(resource.bytes())
+        .map_err(invalid)?
+        .decode(resource)
 }

@@ -7,15 +7,19 @@ use serde::{Deserialize, de::IntoDeserializer};
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{css, html_matches, metadata, viewer};
+use crate::core::discovery::{Metadata, css, html_matches, json_metadata, viewer};
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
     ParsedResource, Positioned, Request, ResolvedLevel,
 };
 
+static VIEWER_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+    BytesRegex::new(r"(?i-u)sc[wv]\.min\.js").expect("constant Second Canvas viewer pattern")
+});
+
 const ROUTES: &[DiscoveryRoute] = &[
-    metadata(html_matches(contains_gigapixel)).decode(decode_catalog),
-    viewer(html_matches(contains_viewer_script)).decode(follow_viewer_config),
+    json_metadata::<Document>(),
+    viewer(html_matches(&VIEWER_RE)).decode(follow_viewer_config),
     viewer(css(
         "iframe[src*=\".s3.amazonaws.com/web/\" i][src*=\".html\" i]",
     ))
@@ -25,18 +29,6 @@ const ROUTES: &[DiscoveryRoute] = &[
 pub const SPEC: FormatSpec =
     FormatSpec::new("second_canvas", ROUTES).with_display_name("Second Canvas");
 
-fn contains_gigapixel(bytes: &[u8]) -> bool {
-    serde_json::from_slice::<serde_json::Value>(bytes)
-        .ok()
-        .and_then(|document| document.get("gigapixel").cloned())
-        .is_some_and(|gigapixel| gigapixel.is_object())
-}
-
-fn contains_viewer_script(bytes: &[u8]) -> bool {
-    let page = String::from_utf8_lossy(bytes).to_ascii_lowercase();
-    page.contains("scw.min.js") || page.contains("scv.min.js")
-}
-
 static EMBEDDED_CONFIG_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(
         r#"(?is)\bsc[wv]\s*\.\s*load\s*\(\s*\{\s*[\"']hash[\"']\s*:\s*[\"'](?P<config>[^\"']+\.json)[\"']"#,
@@ -45,10 +37,10 @@ static EMBEDDED_CONFIG_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
 });
 
 fn follow_viewer_config(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-    Ok(ParsedResource::Follow(Request::new(viewer_config_uri(
-        resource.final_uri(),
-        resource.bytes(),
-    )?)))
+    Ok(ParsedResource::FollowWith(
+        Request::new(viewer_config_uri(resource.final_uri(), resource.bytes())?),
+        decode_catalog,
+    ))
 }
 
 fn viewer_config_uri(viewer_uri: &str, viewer_bytes: &[u8]) -> Result<String, DiscoveryError> {
@@ -83,47 +75,55 @@ fn decode_catalog(resource: DiscoveryResource<'_>) -> Result<ParsedResource, Dis
     let document: Document = serde_json::from_slice(bytes).map_err(|error| {
         DiscoveryError::InvalidMetadata(format!("unable to parse Second Canvas metadata: {error}"))
     })?;
-    let gigapixel = document.gigapixel;
-    if gigapixel.url.is_empty()
-        || gigapixel.size.w == 0
-        || gigapixel.size.h == 0
-        || gigapixel.tile == 0
-    {
-        return Err(DiscoveryError::InvalidMetadata(
-            "Second Canvas metadata must declare a URL and positive size and tile values".into(),
-        ));
-    }
-    let layers = gigapixel.layers()?;
-    let normal_level = layers
-        .iter()
-        .find(|layer| layer.is_normal())
-        .or_else(|| layers.first())
-        .map(|layer| layer.level)
-        .ok_or_else(|| {
-            DiscoveryError::InvalidMetadata("Second Canvas metadata has no image layers".into())
-        })?;
+    document.decode(resource)
+}
 
-    let images = layers
-        .into_iter()
-        .map(|layer| {
-            let image_size = layer_size(gigapixel.size, normal_level, layer.level)?;
-            let levels = build_levels(&gigapixel, &layer, image_size)?;
-            let layer_title = layer.title();
-            Ok(ImagePlan::new(
-                document.title.clone().map(|title| {
-                    if layer.is_normal() {
-                        title
-                    } else {
-                        layer_title.map_or(title.clone(), |layer_title| {
-                            format!("{title} ({layer_title})")
-                        })
-                    }
-                }),
-                levels,
-            ))
-        })
-        .collect::<Result<Vec<_>, DiscoveryError>>()?;
-    Ok(ParsedResource::Catalog(CatalogPlan::images(images)))
+impl Metadata for Document {
+    fn decode(self, _resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+        let document = self;
+        let gigapixel = document.gigapixel;
+        if gigapixel.url.is_empty()
+            || gigapixel.size.w == 0
+            || gigapixel.size.h == 0
+            || gigapixel.tile == 0
+        {
+            return Err(DiscoveryError::InvalidMetadata(
+                "Second Canvas metadata must declare a URL and positive size and tile values"
+                    .into(),
+            ));
+        }
+        let layers = gigapixel.layers()?;
+        let normal_level = layers
+            .iter()
+            .find(|layer| layer.is_normal())
+            .or_else(|| layers.first())
+            .map(|layer| layer.level)
+            .ok_or_else(|| {
+                DiscoveryError::InvalidMetadata("Second Canvas metadata has no image layers".into())
+            })?;
+
+        let images = layers
+            .into_iter()
+            .map(|layer| {
+                let image_size = layer_size(gigapixel.size, normal_level, layer.level)?;
+                let levels = build_levels(&gigapixel, &layer, image_size)?;
+                let layer_title = layer.title();
+                Ok(ImagePlan::new(
+                    document.title.clone().map(|title| {
+                        if layer.is_normal() {
+                            title
+                        } else {
+                            layer_title.map_or(title.clone(), |layer_title| {
+                                format!("{title} ({layer_title})")
+                            })
+                        }
+                    }),
+                    levels,
+                ))
+            })
+            .collect::<Result<Vec<_>, DiscoveryError>>()?;
+        Ok(ParsedResource::Catalog(CatalogPlan::images(images)))
+    }
 }
 
 #[cfg(test)]

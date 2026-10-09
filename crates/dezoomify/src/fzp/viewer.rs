@@ -352,7 +352,7 @@ fn navigate(
         .find(|r| recognizes(**r))
         .ok_or_else(|| invalid("no supported literal Lime declaration"))?;
     if let Some(request) = scripts(document, resources).find(|r| !visited(&r.uri)) {
-        return Ok(ParsedResource::Follow(request));
+        return Ok(ParsedResource::FollowWith(request, decode));
     }
     let (declaration, text, document_base) = configuration(document, resources)
         .ok_or_else(|| invalid("no supported literal Lime declaration"))?;
@@ -401,7 +401,7 @@ fn navigate(
         } else {
             resolve_relative(&base, &format!("{name}.xml"))
         };
-        return Ok(ParsedResource::Follow(Request::new(uri)));
+        return Ok(ParsedResource::FollowWith(Request::new(uri), super::decode));
     }
     Err(invalid(
         "Lime declaration has no supported resource/index path configuration",

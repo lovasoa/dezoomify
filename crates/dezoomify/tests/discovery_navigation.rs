@@ -1,7 +1,7 @@
 mod support;
 use dezoomify::core::discovery::{DiscoveryError, DiscoveryInput, DiscoveryLimits};
 use dezoomify::core::{
-    DiscoveredEntry, DiscoveryCatalog, Registry, default_registry, registry_for,
+    DiscoveredEntry, DiscoveryCatalog, Registry, RejectionKind, default_registry, registry_for,
 };
 use dezoomify::model::{DiscoveryInputKind, Error, ResourceRead, ResourceResponse};
 use std::cell::RefCell;
@@ -62,6 +62,240 @@ fn image(inputs: Vec<DiscoveryInput>, replies: &[(&str, &[u8])], format: &str) {
         panic!("one ready image expected")
     };
     assert_eq!(image.format, format);
+}
+
+#[test]
+fn unrelated_content_is_a_route_miss_but_declared_metadata_keeps_its_error() {
+    for bytes in [
+        br#"<html><script>const settings = {theme: 'dark'};</script><body>Welcome</body></html>"#
+            .as_slice(),
+        br#"<?xml version="1.0"?><document><title>Welcome</title></document>"#,
+        br#"{"theme":"dark"}"#,
+        br#"{"description":"scw.min.js TileMatrixSet <krpano> topviews TileSize"}"#,
+        br#"<p>Seadragon.embed('x', 'y', 'unrelated')</p>"#,
+    ] {
+        for (uri, expected) in [
+            (PAGE, None),
+            ("https://museum.test/settings.js", None),
+            ("https://museum.test/art.dzi", Some("deepzoom")),
+            ("https://museum.test/info.json", Some("iiif")),
+            ("https://museum.test/wmts.xml", Some("wmts")),
+            ("https://museum.test/tour.xml", Some("krpano")),
+        ] {
+            let error = lookup(
+                default_registry(),
+                vec![DiscoveryInput::with_contents(uri, bytes)],
+                &[],
+                Default::default(),
+                None,
+            )
+            .unwrap_err();
+            let DiscoveryError::NoCandidateAccepted { diagnostics } = error else {
+                panic!("expected candidate diagnostics")
+            };
+            let failures: Vec<_> = diagnostics
+                .iter()
+                .filter(|diagnostic| {
+                    !matches!(
+                        diagnostic.kind,
+                        RejectionKind::DidNotMatchUrl | RejectionKind::DidNotMatchContent
+                    )
+                })
+                .collect();
+            assert_eq!(
+                failures.len(),
+                usize::from(expected.is_some()),
+                "{uri}: {failures:?}"
+            );
+            if let Some(format) = expected {
+                assert_eq!(failures[0].format, format);
+                assert_eq!(failures[0].kind, RejectionKind::InvalidMetadata);
+            }
+        }
+    }
+}
+
+#[test]
+fn opaque_metadata_and_embedded_objects_remain_discoverable() {
+    for (bytes, format) in [
+        (IIIF, "iiif"),
+        (DZI, "deepzoom"),
+        (br#"<script>const service = {width:512,height:512,tiles:[{width:256,scaleFactors:[1]}]};</script>"#, "iiif"),
+        (br#"<script>OpenSeadragon({tileSources:{Image:{'Tile\u0053ize':256,Format:'jpg',Size:{Width:512,Height:512}}}});</script>"#, "deepzoom"),
+        (br#"{"w\u0069dth":512,"height":512}"#, "iiif"),
+        (br#"{"type":"ImageService3","width":512,"height":512,"items":[]}"#, "iiif"),
+        (include_bytes!("../../../fixtures/wmts/basic/WMTSCapabilities.xml"), "wmts"),
+        (include_bytes!("../../../fixtures/krpano/basic/tour.xml"), "krpano"),
+        (include_bytes!("../../../fixtures/second_canvas/approximate-basic/metadata.json"), "second_canvas"),
+        (include_bytes!("../../../fixtures/fzp/approximate-basic/metadata.xml"), "fzp"),
+        (include_bytes!("../../../fixtures/topviewer/approximate-basic/metadata.json"), "topviewer"),
+        (br#"<?xml version="1.0"?><k:krpano xmlns:k="urn:krpano"><image tilesize="256"><level tiledimagewidth="512" tiledimageheight="512"><front url="tiles/%h-%v.png"/></level></image></k:krpano>"#, "krpano"),
+    ] {
+        let bytes = String::from_utf8_lossy(bytes)
+            .replace("{{origin}}", "https://museum.test")
+            .replace("\"gigapixel\"", "\"giga\\u0070ixel\"");
+        image(vec![DiscoveryInput::with_contents(PAGE, bytes)], &[], format);
+    }
+    for bytes in [
+        include_bytes!("../../../fixtures/iiif/manifest/manifest.json").as_slice(),
+        include_bytes!("../../../fixtures/iiif/legacy-context/manifest.json"),
+    ] {
+        let bytes = String::from_utf8_lossy(bytes).replace(
+            "\"type\": \"Manifest\"",
+            "\"type\": \"Manifest\", \"width\": 512, \"height\": 512",
+        );
+        let catalog = trace(vec![DiscoveryInput::with_contents(PAGE, bytes)], &[]);
+        assert!(matches!(catalog.entries(), [DiscoveredEntry::Deferred(_)]));
+    }
+}
+
+#[test]
+fn metadata_shapes_reject_unrelated_clues_but_keep_decoder_errors() {
+    use RejectionKind::{DidNotMatchContent, InvalidMetadata};
+    for (bytes, format, kind) in [
+        (
+            br#"{"gigapixel":false}"#.as_slice(),
+            "second_canvas",
+            DidNotMatchContent,
+        ),
+        (
+            br#"{"other":{"gigapixel":{}}}"#,
+            "second_canvas",
+            DidNotMatchContent,
+        ),
+        (br#"<document><pal/></document>"#, "fzp", DidNotMatchContent),
+        (br#"<pal/>"#, "fzp", InvalidMetadata),
+        (br#"{"topviews":false}"#, "topviewer", DidNotMatchContent),
+        (br#"{"items":false}"#, "iiif", DidNotMatchContent),
+        (
+            br#"{"gigapixel":{"url":"tiles","size":{"w":512,"h":512},"tile":0}}"#,
+            "second_canvas",
+            InvalidMetadata,
+        ),
+        (
+            br#"{"n\u0061me":"Museum"}"#,
+            "second_canvas",
+            DidNotMatchContent,
+        ),
+    ] {
+        let error = lookup(
+            default_registry(),
+            vec![DiscoveryInput::with_contents(PAGE, bytes)],
+            &[],
+            Default::default(),
+            None,
+        )
+        .unwrap_err();
+        let DiscoveryError::NoCandidateAccepted { diagnostics } = error else {
+            panic!("expected candidate diagnostics")
+        };
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.format == format)
+            .unwrap();
+        assert_eq!(diagnostic.kind, kind);
+        assert!(
+            diagnostic
+                .detail
+                .as_ref()
+                .is_some_and(|detail| !detail.is_empty())
+        );
+    }
+}
+
+#[test]
+fn followed_metadata_retains_errors_even_without_a_content_match() {
+    for (format, page, bytes, metadata) in [
+        (
+            "deepzoom",
+            PAGE,
+            br#"<script>Seadragon.embed('viewer', 'title', '/metadata');</script>"#.as_slice(),
+            "https://museum.test/metadata",
+        ),
+        (
+            "krpano",
+            PAGE,
+            br#"<script>function viewer() { return krpano; } embedpano({xml:'/metadata'});</script>"#,
+            "https://museum.test/metadata",
+        ),
+        (
+            "second_canvas",
+            "https://museum.test/viewer?js=/metadata.json",
+            br#"<script src="scw.min.js"></script>"#.as_slice(),
+            "https://museum.test/metadata.json",
+        ),
+        (
+            "iiif",
+            "https://museum.test/viewer?manifest=https://museum.test/metadata",
+            b"".as_slice(),
+            "https://museum.test/metadata",
+        ),
+        (
+            "topviewer",
+            PAGE,
+            br#"<img src="https://images.memorix.nl/museum/thumb/example/art.jpg">"#,
+            "https://images.memorix.nl/museum/topviewjson/memorix/art",
+        ),
+    ] {
+        let error = lookup(
+            registry_for(format).unwrap(),
+            vec![DiscoveryInput::with_contents(page, bytes)],
+            &[(metadata, b"<html>Unavailable</html>")],
+            Default::default(),
+            None,
+        )
+        .unwrap_err();
+        let DiscoveryError::NoCandidateAccepted { diagnostics } = error else {
+            panic!("expected candidate diagnostics")
+        };
+        assert_eq!(
+            diagnostics[0].kind,
+            RejectionKind::InvalidMetadata,
+            "{format}: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn followed_viewers_do_not_enable_metadata_fallbacks() {
+    image(
+        vec![DiscoveryInput::with_contents(
+            PAGE,
+            br#"<a href="viewer.xml">View</a>"#,
+        )],
+        &[
+            (
+                "https://museum.test/viewer.xml",
+                br#"<script>Seadragon.embed('viewer', 'title', '/art');</script>"#,
+            ),
+            ("https://museum.test/art", DZI),
+        ],
+        "deepzoom",
+    );
+    let error = lookup(
+        registry_for("second_canvas").unwrap(),
+        vec![DiscoveryInput::with_contents(
+            PAGE,
+            br#"<iframe src="https://museum.s3.amazonaws.com/web/viewer.html"></iframe>"#,
+        )],
+        &[(
+            "https://museum.s3.amazonaws.com/web/viewer.html",
+            b"<html>Unavailable</html>",
+        )],
+        Default::default(),
+        None,
+    )
+    .unwrap_err();
+    let DiscoveryError::NoCandidateAccepted { diagnostics } = error else {
+        panic!("expected candidate diagnostics")
+    };
+    assert!(
+        diagnostics.iter().all(|diagnostic| matches!(
+            diagnostic.kind,
+            RejectionKind::DidNotMatchUrl | RejectionKind::DidNotMatchContent
+        )),
+        "{diagnostics:?}"
+    );
 }
 
 #[test]
@@ -239,18 +473,23 @@ fn local_paths_and_only_supported_iframe_sources_are_followed() {
 }
 #[test]
 fn navigation_cycles_and_resource_budgets_are_independent_of_parser_count() {
-    for resources in [1, 2] {
-        let result = lookup(
-            default_registry(),
-            vec![DiscoveryInput::new(PAGE)],
-            &[(PAGE, FRAME), ("https://museum.test/art", DZI)],
-            DiscoveryLimits {
-                resources,
-                ..Default::default()
-            },
-            None,
-        );
-        assert_eq!(result.is_ok(), resources == 2);
+    for page in [
+        FRAME,
+        br#"<script>Seadragon.embed('viewer', 'title', '/art');</script>"#,
+    ] {
+        for resources in [1, 2] {
+            let result = lookup(
+                default_registry(),
+                vec![DiscoveryInput::new(PAGE)],
+                &[(PAGE, page), ("https://museum.test/art", DZI)],
+                DiscoveryLimits {
+                    resources,
+                    ..Default::default()
+                },
+                None,
+            );
+            assert_eq!(result.is_ok(), resources == 2);
+        }
     }
     assert!(
         lookup(

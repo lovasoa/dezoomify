@@ -5,7 +5,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::Vec2d;
-use crate::core::discovery::{metadata, url_matches, viewer};
+use crate::core::discovery::{url_matches, viewer};
 use crate::core::{
     AdaptiveSource, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
     ObservationResult, ParsedResource, Request, ResolvedGrid, ResolvedLevel, TileRole,
@@ -14,10 +14,7 @@ use crate::core::{
 use crate::web_page::page_title;
 
 const TILE_SIZE: u32 = 512;
-const ROUTES: &[DiscoveryRoute] = &[
-    viewer(url_matches(is_pnav_url)).decode(follow_image_json),
-    metadata(url_matches(is_image_json)).child_metadata(complete_from_json),
-];
+const ROUTES: &[DiscoveryRoute] = &[viewer(url_matches(is_pnav_url)).decode(follow_image_json)];
 
 pub const SPEC: FormatSpec = FormatSpec::new("pnav", ROUTES)
     .with_display_name("pnav")
@@ -38,13 +35,6 @@ fn is_pnav_url(uri: &str) -> bool {
             .is_some_and(|value| value.eq_ignore_ascii_case("entity"))
 }
 
-fn is_image_json(uri: &str) -> bool {
-    uri.split_once(['?', '#'])
-        .map_or(uri, |(path, _)| path)
-        .to_ascii_lowercase()
-        .ends_with(".json")
-}
-
 fn extract_image_url(resource: DiscoveryResource<'_>) -> Option<String> {
     resource
         .select("meta[property=\"og:image\" i]")
@@ -58,7 +48,10 @@ fn extract_image_url(resource: DiscoveryResource<'_>) -> Option<String> {
 fn follow_image_json(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let image = extract_image_url(resource)
         .ok_or_else(|| DiscoveryError::InvalidMetadata("pnav page has no og:image URL".into()))?;
-    Ok(ParsedResource::Follow(Request::new(json_url(&image)?)))
+    Ok(ParsedResource::FollowWith(
+        Request::new(json_url(&image)?),
+        complete_from_json,
+    ))
 }
 
 fn complete_from_json(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {

@@ -1,4 +1,3 @@
-use quick_xml::{Reader, events::Event};
 use serde::Deserialize;
 
 use crate::Vec2d;
@@ -8,22 +7,30 @@ use crate::core::{
 };
 
 use super::{invalid, viewer};
+use crate::core::discovery::Metadata;
 
-pub(super) fn root_name(text: &str) -> Option<String> {
-    let mut reader = Reader::from_str(text);
-    loop {
-        match reader.read_event().ok()? {
-            Event::Start(tag) | Event::Empty(tag) => {
-                return Some(tag.name().as_ref().to_owned());
-            }
-            Event::Eof => return None,
-            _ => {}
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(super) enum Document {
+    Pal(Pal),
+    Item(Index),
+    Items,
+}
+
+impl Metadata for Document {
+    fn decode(self, resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+        match self {
+            Self::Pal(pal) => image(pal, resource.final_uri()),
+            Self::Item(value) => index(value, resource),
+            Self::Items => Err(invalid(
+                "unsupported legacy page index layout: items/field/name",
+            )),
         }
     }
 }
 
 #[derive(Deserialize)]
-struct Pal {
+pub(super) struct Pal {
     #[serde(rename = "@ver")]
     ver: Option<String>,
     #[serde(rename = "@version")]
@@ -90,8 +97,7 @@ fn version(value: &str) -> Result<(u32, u32), DiscoveryError> {
     ))
 }
 
-pub(super) fn image(text: &str, uri: &str) -> Result<ParsedResource, DiscoveryError> {
-    let pal: Pal = quick_xml::de::from_str(text).map_err(invalid)?;
+fn image(pal: Pal, uri: &str) -> Result<ParsedResource, DiscoveryError> {
     let declared = pal
         .ver
         .as_deref()
@@ -264,7 +270,7 @@ fn validate_fields(size: u32, tile: u32, span: u32, original: u32) -> Result<(),
 }
 
 #[derive(Deserialize)]
-struct Index {
+pub(super) struct Index {
     #[serde(rename = "@title")]
     title: Option<String>,
     #[serde(rename = "item", default)]
@@ -283,11 +289,7 @@ struct Item {
     page: Option<String>,
 }
 
-pub(super) fn index(
-    text: &str,
-    resource: DiscoveryResource<'_>,
-) -> Result<ParsedResource, DiscoveryError> {
-    let index: Index = quick_xml::de::from_str(text).map_err(invalid)?;
+fn index(index: Index, resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let base = viewer::resource_base(resource)
         .or_else(|| {
             let path = resource

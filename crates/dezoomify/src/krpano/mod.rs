@@ -6,32 +6,43 @@ use std::sync::{Arc, LazyLock};
 
 use itertools::Itertools;
 use memchr::memmem;
-use regex::Regex;
+use regex::{Regex, bytes::Regex as BytesRegex};
 use url::Url;
 
 use krpano_decrypt::{decrypt_xml, is_encrypted_xml};
 use krpano_metadata::{KrpanoMetadata, XY, all_sides};
 
 use crate::Vec2d;
-use crate::core::discovery::{html_matches, metadata, url_matches, url_suffix, viewer};
+use crate::core::discovery::{
+    any, html_matches, js_matches, metadata, url_matches, url_suffix, viewer,
+};
 use crate::core::resolve_relative;
 use crate::core::{
     CatalogPlan, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryResource,
-    DiscoveryRoute, FormatSpec, Grid, GridRequests, GridTile, ImagePlan, ParsedResource, Request,
-    ResolvedLevel,
+    DiscoveryRoute, FormatSpec, Grid, GridRequests, GridTile, ImagePlan, ParsedResource,
+    RejectionKind, Request, ResolvedLevel,
 };
 use crate::krpano::krpano_metadata::{ImageInfo, LevelDesc};
 use crate::template::Template;
 
 mod krpano_metadata;
 
+static VIEWER_JS_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+    BytesRegex::new(r"(?s-u)\A(?:\xEF\xBB\xBF)?(?:/\*.*krpano|function .*(?:krpano|embedpano|createPanoViewer))")
+        .expect("constant krpano JavaScript pattern")
+});
+static HTML_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+    BytesRegex::new(r"(?s-u)embedpano\(|createPanoViewer\(|<script.*(?:krpano|tour\.js)|(?:krpano|tour\.js).*<script")
+        .expect("constant krpano HTML pattern")
+});
+
 const ROUTES: &[DiscoveryRoute] = &[
-    metadata(html_matches(looks_like_xml_or_encrypted)).decode(handle_xml),
-    viewer(html_matches(looks_like_viewer_js)).decode(handle_viewer_js),
-    viewer(html_matches(looks_like_krpano_html)).decode(handle_html),
-    viewer(url_matches(is_javascript_uri)).decode(handle_viewer_js),
     metadata(url_suffix("/tiles.xml")).decode(handle_xml),
     metadata(url_suffix("/tour.xml")).decode(handle_xml),
+    metadata(any()).try_decode(try_xml),
+    viewer(html_matches(&HTML_RE)).decode(handle_html),
+    viewer(js_matches(&VIEWER_JS_RE)).decode(handle_viewer_js),
+    viewer(url_matches(is_javascript_uri)).decode(handle_viewer_js),
 ];
 
 pub const SPEC: FormatSpec = FormatSpec::new("krpano", ROUTES)
@@ -47,7 +58,10 @@ fn handle_html(resource: DiscoveryResource<'_>) -> Result<ParsedResource, Discov
         .map(|reference| resolve_relative(resource.final_uri(), &reference))
         .or_else(|| extract_xml_from_embedpano(resource))
         .unwrap_or_else(|| sibling_uri(resource.final_uri(), "tour.xml"));
-    Ok(ParsedResource::Follow(Request::new(xml_uri)))
+    Ok(ParsedResource::FollowWith(
+        Request::new(xml_uri),
+        handle_xml,
+    ))
 }
 
 fn handle_xml(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
@@ -71,23 +85,40 @@ fn handle_xml(resource: DiscoveryResource<'_>) -> Result<ParsedResource, Discove
                     "unable to decrypt krpano XML: {error}"
                 )))
             },
-            |uri| Ok(ParsedResource::Follow(Request::new(uri))),
+            |uri| {
+                Ok(ParsedResource::FollowWith(
+                    Request::new(uri),
+                    handle_viewer_js,
+                ))
+            },
         ),
     }
+}
+
+fn try_xml(resource: DiscoveryResource<'_>) -> Option<Result<ParsedResource, DiscoveryError>> {
+    if is_encrypted_xml(resource.bytes()) && resource.is_html() {
+        return Some(handle_xml(resource));
+    }
+    let metadata = KrpanoMetadata::from_bytes(resource.bytes()).ok()?;
+    if !metadata.has_images() {
+        return None;
+    }
+    Some(catalog_from_metadata(resource.final_uri(), metadata).map(ParsedResource::Catalog))
 }
 
 fn handle_viewer_js(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let context = resource.context();
     let Some(xml) = find_xml(context) else {
         if extract_viewer_js(resource.bytes()).is_none() {
-            return Err(DiscoveryError::InvalidMetadata(
-                "not krpano viewer JavaScript".into(),
+            return Err(DiscoveryError::rejected(
+                RejectionKind::DidNotMatchContent,
+                "not krpano viewer JavaScript",
             ));
         }
-        return Ok(ParsedResource::Follow(Request::new(sibling_uri(
-            resource.final_uri(),
-            "tour.xml",
-        ))));
+        return Ok(ParsedResource::FollowWith(
+            Request::new(sibling_uri(resource.final_uri(), "tour.xml")),
+            handle_xml,
+        ));
     };
     let viewer_js =
         extract_viewer_js(resource.bytes()).unwrap_or_else(|| resource.bytes().to_vec());
@@ -99,7 +130,12 @@ fn handle_viewer_js(resource: DiscoveryResource<'_>) -> Result<ParsedResource, D
                     "unable to decrypt krpano XML: {error}"
                 )))
             },
-            |uri| Ok(ParsedResource::Follow(Request::new(uri))),
+            |uri| {
+                Ok(ParsedResource::FollowWith(
+                    Request::new(uri),
+                    handle_viewer_js,
+                ))
+            },
         ),
     }
 }
@@ -112,7 +148,10 @@ fn handle_failure(
     if let Some(xml) = find_xml(context)
         && let Some(uri) = next_viewer_after_failure(context, request.uri.as_str(), xml.final_uri())
     {
-        return Ok(ParsedResource::Follow(Request::new(uri)));
+        return Ok(ParsedResource::FollowWith(
+            Request::new(uri),
+            handle_viewer_js,
+        ));
     }
     Err(DiscoveryError::fetch_failed(failure.clone()))
 }
@@ -121,7 +160,7 @@ fn find_xml<'a>(context: &DiscoveryContext<'a>) -> Option<DiscoveryResource<'a>>
     context
         .resources()
         .rev()
-        .find(|resource| looks_like_xml_or_encrypted(resource.bytes()))
+        .find(|resource| is_encrypted_xml(resource.bytes()))
 }
 
 fn next_viewer(
@@ -148,7 +187,7 @@ fn next_viewer_from_initial(
     current_uri: &str,
     xml_uri: &str,
 ) -> Option<String> {
-    let mut candidates = if looks_like_krpano_html(initial.bytes()) {
+    let mut candidates = if HTML_RE.is_match(initial.bytes()) {
         extract_js_candidates_from_html(initial)
     } else if is_javascript_resource(initial) {
         Vec::new()
@@ -171,45 +210,8 @@ fn contains_viewer_js(contents: &[u8]) -> bool {
     extract_viewer_js(contents).is_some()
 }
 
-fn looks_like_xml_or_encrypted(contents: &[u8]) -> bool {
-    is_encrypted_xml(contents) || looks_like_krpano_xml(contents)
-}
-
 fn complete(uri: &str, bytes: &[u8]) -> Result<ParsedResource, DiscoveryError> {
     load_catalog(uri, bytes).map(ParsedResource::Complete)
-}
-
-/// True if the content looks like a krpano XML file rather than HTML.
-fn looks_like_krpano_xml(contents: &[u8]) -> bool {
-    let contents = contents.strip_prefix(b"\xef\xbb\xbf").unwrap_or(contents);
-    let trimmed = contents.trim_ascii_start();
-    trimmed.starts_with(b"<?xml") || trimmed.starts_with(b"<krpano")
-}
-
-/// True if the content has krpano-specific HTML evidence.
-fn looks_like_krpano_html(contents: &[u8]) -> bool {
-    memmem::find(contents, b"embedpano(").is_some()
-        || memmem::find(contents, b"createPanoViewer(").is_some()
-        || (memmem::find(contents, b"<script").is_some()
-            && (memmem::find(contents, b"krpano").is_some()
-                || memmem::find(contents, b"tour.js").is_some()))
-}
-
-/// True if the content looks like a krpano viewer JavaScript file.
-fn looks_like_viewer_js(contents: &[u8]) -> bool {
-    let contents = contents.strip_prefix(b"\xef\xbb\xbf").unwrap_or(contents);
-    if contents.starts_with(b"/*") {
-        return contents[..contents.len().min(512)]
-            .windows(6)
-            .any(|window| window == b"krpano");
-    }
-    if contents.starts_with(b"function ") {
-        let window = &contents[..contents.len().min(8192)];
-        return window.windows(6).any(|part| part == b"krpano")
-            || window.windows(9).any(|part| part == b"embedpano")
-            || window.windows(16).any(|part| part == b"createPanoViewer");
-    }
-    false
 }
 
 /// Extract and rank viewer JavaScript candidates from a krpano HTML page.
@@ -267,14 +269,14 @@ fn extract_xml_from_query(uri: &str) -> Option<String> {
 }
 
 fn extract_viewer_js(contents: &[u8]) -> Option<Vec<u8>> {
-    if looks_like_viewer_js(contents) {
+    if VIEWER_JS_RE.is_match(contents) {
         return Some(contents.to_vec());
     }
     let start = memmem::find(contents, b"<script>")?;
     let body = &contents[start + 8..];
     let end = memmem::find(body, b"</script>")?;
     let script = body[..end].trim_ascii();
-    looks_like_viewer_js(script).then(|| script.to_vec())
+    VIEWER_JS_RE.is_match(script).then(|| script.to_vec())
 }
 
 fn viewer_js_candidates_for_xml(xml_uri: &str) -> Vec<String> {
@@ -392,6 +394,13 @@ fn decode_catalog(url: &str, contents: &[u8]) -> Result<CatalogPlan, DiscoveryEr
     let metadata = KrpanoMetadata::from_bytes(contents).map_err(|error| {
         DiscoveryError::InvalidMetadata(format!("unable to parse krpano XML: {error}"))
     })?;
+    catalog_from_metadata(url, metadata)
+}
+
+fn catalog_from_metadata(
+    url: &str,
+    metadata: KrpanoMetadata,
+) -> Result<CatalogPlan, DiscoveryError> {
     let global_title = metadata.get_title().unwrap_or_default().to_owned();
     let mut images = Vec::new();
 
@@ -855,24 +864,6 @@ mod tests {
     }
 
     #[test]
-    fn looks_like_krpano_xml_detects_xml_roots() {
-        for xml in [
-            b"<?xml version=\"1.0\"?><krpano></krpano>".as_slice(),
-            b"<krpano><image></image></krpano>",
-            b"\xef\xbb\xbf<?xml version=\"1.0\"?><krpano/>",
-            b"<?xml version=\"1.0\"?><krpano><action><![CDATA[embedpano();]]></action></krpano>",
-        ] {
-            assert!(looks_like_krpano_xml(xml));
-        }
-        for xml in [
-            b"<html><body></body></html>".as_slice(),
-            b"/* krpano */ function() {}",
-        ] {
-            assert!(!looks_like_krpano_xml(xml));
-        }
-    }
-
-    #[test]
     fn failed_viewer_attempts_advance_to_the_next_candidate() {
         for http_failure in [false, true] {
             let (result, requests) = viewer_failures(http_failure);
@@ -936,21 +927,21 @@ mod tests {
     }
 
     #[test]
-    fn looks_like_krpano_html_requires_krpano_evidence() {
+    fn html_routes_require_format_evidence() {
         for html in [
             b"<html><script>embedpano({xml:'tour.xml'})</script></html>".as_slice(),
             b"<script>createPanoViewer({xml:'tour.xml'});</script>".as_slice(),
             b"<html><script src='krpano.js'></script></html>".as_slice(),
             b"<html><script src='tour.js'></script></html>".as_slice(),
         ] {
-            assert!(looks_like_krpano_html(html));
+            assert!(HTML_RE.is_match(html));
         }
         for html in [
             b"<html><script src='jquery.min.js'></script></html>".as_slice(),
             b"<HTML><SCRIPT src='analytics.js'></SCRIPT></HTML>".as_slice(),
             b"<html><body>Hello</body></html>".as_slice(),
         ] {
-            assert!(!looks_like_krpano_html(html));
+            assert!(!HTML_RE.is_match(html));
         }
     }
 }
