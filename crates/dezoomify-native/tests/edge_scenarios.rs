@@ -19,13 +19,13 @@ fn edge_responses_control_publication_and_keep_request_context() {
         ),
         (
             "malformed-json/info.json",
-            "malformed-metadata",
+            "discovery-failed",
             false,
             "metadata",
         ),
         (
             "malformed-xml/broken.dzi",
-            "malformed-metadata",
+            "discovery-failed",
             false,
             "metadata",
         ),

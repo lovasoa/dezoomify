@@ -71,6 +71,8 @@ fn unrelated_content_is_a_route_miss_but_declared_metadata_keeps_its_error() {
             .as_slice(),
         br#"<?xml version="1.0"?><document><title>Welcome</title></document>"#,
         br#"{"theme":"dark"}"#,
+        br#"{"description":"scw.min.js TileMatrixSet <krpano> topviews TileSize"}"#,
+        br#"<p>Seadragon.embed('x', 'y', 'unrelated')</p>"#,
     ] {
         for (uri, expected) in [
             (PAGE, None),
@@ -125,6 +127,7 @@ fn opaque_metadata_and_embedded_objects_remain_discoverable() {
         (include_bytes!("../../../fixtures/krpano/basic/tour.xml"), "krpano"),
         (include_bytes!("../../../fixtures/second_canvas/approximate-basic/metadata.json"), "second_canvas"),
         (include_bytes!("../../../fixtures/fzp/approximate-basic/metadata.xml"), "fzp"),
+        (include_bytes!("../../../fixtures/topviewer/approximate-basic/metadata.json"), "topviewer"),
         (br#"<?xml version="1.0"?><k:krpano xmlns:k="urn:krpano"><image tilesize="256"><level tiledimagewidth="512" tiledimageheight="512"><front url="tiles/%h-%v.png"/></level></image></k:krpano>"#, "krpano"),
     ] {
         let bytes = String::from_utf8_lossy(bytes)
@@ -132,14 +135,38 @@ fn opaque_metadata_and_embedded_objects_remain_discoverable() {
             .replace("\"gigapixel\"", "\"giga\\u0070ixel\"");
         image(vec![DiscoveryInput::with_contents(PAGE, bytes)], &[], format);
     }
+    for bytes in [
+        include_bytes!("../../../fixtures/iiif/manifest/manifest.json").as_slice(),
+        include_bytes!("../../../fixtures/iiif/legacy-context/manifest.json"),
+    ] {
+        let catalog = trace(vec![DiscoveryInput::with_contents(PAGE, bytes)], &[]);
+        assert!(matches!(catalog.entries(), [DiscoveredEntry::Deferred(_)]));
+    }
 }
 
 #[test]
-fn misleading_format_clues_keep_the_decoder_error() {
-    for (bytes, format) in [
-        (br#"{"gigapixel":false}"#.as_slice(), "second_canvas"),
-        (br#"{"other":{"gigapixel":{}}}"#, "second_canvas"),
-        (br#"<document><pal/></document>"#, "fzp"),
+fn metadata_shapes_reject_unrelated_clues_but_keep_decoder_errors() {
+    use RejectionKind::{DidNotMatchContent, InvalidMetadata};
+    for (bytes, format, kind) in [
+        (
+            br#"{"gigapixel":false}"#.as_slice(),
+            "second_canvas",
+            InvalidMetadata,
+        ),
+        (
+            br#"{"other":{"gigapixel":{}}}"#,
+            "second_canvas",
+            DidNotMatchContent,
+        ),
+        (br#"<document><pal/></document>"#, "fzp", DidNotMatchContent),
+        (br#"<pal/>"#, "fzp", InvalidMetadata),
+        (br#"{"topviews":false}"#, "topviewer", InvalidMetadata),
+        (br#"{"items":false}"#, "iiif", InvalidMetadata),
+        (
+            br#"{"n\u0061me":"Museum"}"#,
+            "second_canvas",
+            DidNotMatchContent,
+        ),
     ] {
         let error = lookup(
             default_registry(),
@@ -156,12 +183,59 @@ fn misleading_format_clues_keep_the_decoder_error() {
             .iter()
             .find(|diagnostic| diagnostic.format == format)
             .unwrap();
-        assert_eq!(diagnostic.kind, RejectionKind::InvalidMetadata);
+        assert_eq!(diagnostic.kind, kind);
         assert!(
             diagnostic
                 .detail
                 .as_ref()
                 .is_some_and(|detail| !detail.is_empty())
+        );
+    }
+}
+
+#[test]
+fn followed_metadata_retains_errors_even_without_a_content_match() {
+    for (format, page, bytes, metadata) in [
+        (
+            "deepzoom",
+            PAGE,
+            br#"<script>Seadragon.embed('viewer', 'title', '/metadata');</script>"#.as_slice(),
+            "https://museum.test/metadata",
+        ),
+        (
+            "krpano",
+            PAGE,
+            br#"<script>function viewer() { return krpano; } embedpano({xml:'/metadata'});</script>"#,
+            "https://museum.test/metadata",
+        ),
+        (
+            "second_canvas",
+            "https://museum.test/viewer?js=/metadata",
+            br#"<script src="scw.min.js"></script>"#.as_slice(),
+            "https://museum.test/metadata",
+        ),
+        (
+            "topviewer",
+            PAGE,
+            br#"<img src="https://images.memorix.nl/museum/thumb/example/art.jpg">"#,
+            "https://images.memorix.nl/museum/topviewjson/memorix/art",
+        ),
+    ] {
+        let error = lookup(
+            registry_for(format).unwrap(),
+            vec![DiscoveryInput::with_contents(page, bytes)],
+            &[(metadata, b"<html>Unavailable</html>")],
+            Default::default(),
+            None,
+        )
+        .unwrap_err();
+        let DiscoveryError::NoCandidateAccepted { diagnostics } = error else {
+            panic!("expected candidate diagnostics")
+        };
+        assert_eq!(
+            diagnostics[0].kind,
+            RejectionKind::InvalidMetadata,
+            "{format}: {diagnostics:?}"
         );
     }
 }

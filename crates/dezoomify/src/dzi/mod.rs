@@ -7,7 +7,8 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    content_matches, image_url, metadata, url_matches, url_suffix, viewer,
+    any, image_url, js_matches, json5_metadata, metadata, url_matches, url_suffix, viewer,
+    xml_metadata,
 };
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
@@ -26,10 +27,6 @@ static SEADRAGON_EMBED: LazyLock<BytesRegex> = LazyLock::new(|| {
     )
     .expect("constant Seadragon embed pattern")
 });
-static METADATA_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    // XML requires TileSize; JSON/JSON5 may spell that key with escapes.
-    BytesRegex::new(r"(?s-u)TileSize|\{.*\\|\\.*\{").expect("constant DZI metadata pattern")
-});
 static WDL_MARKER_RE: LazyLock<BytesRegex> =
     LazyLock::new(|| BytesRegex::new("dziUrlTemplate").expect("constant WDL marker pattern"));
 const ROUTES: &[DiscoveryRoute] = &[
@@ -40,12 +37,14 @@ const ROUTES: &[DiscoveryRoute] = &[
     metadata(url_matches(is_polona_json_url)).decode(follow_polona_dzi),
     paris::ARK_ROUTE,
     paris::MANIFEST_ROUTE,
-    viewer(content_matches(&SEADRAGON_EMBED)).decode(follow_seadragon_embed),
-    viewer(content_matches(&WDL_MARKER_RE)).decode(follow_wdl_template),
+    viewer(js_matches(&SEADRAGON_EMBED)).decode(follow_seadragon_embed),
+    viewer(js_matches(&WDL_MARKER_RE)).decode(follow_wdl_template),
     DiscoveryRoute::regex_link(&DZI_LINK_RE, "$url"),
     DiscoveryRoute::regex_link(&DZI_ATTR_RE, "$url"),
     metadata(url_suffix(".dzi")).decode(decode_catalog),
-    metadata(content_matches(&METADATA_RE)).decode(decode_catalog),
+    xml_metadata::<DziFile>().decode(decode_catalog),
+    json5_metadata::<DziFile>().decode(decode_catalog),
+    metadata(any()).child_metadata(decode_catalog),
 ];
 
 pub const SPEC: FormatSpec =

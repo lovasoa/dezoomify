@@ -7,7 +7,8 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    content_matches, image_url, metadata, url_matches, url_suffix, viewer,
+    any, html_matches, image_url, js_matches, json_metadata, json5_metadata, metadata, url_matches,
+    url_suffix, viewer,
 };
 use crate::core::{
     AdaptiveSource, CatalogPlan, DeferredResource, DiscoveryCatalog, DiscoveryError,
@@ -32,11 +33,20 @@ pub mod tile_info;
 #[cfg(test)]
 mod title_tests;
 
-static METADATA_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    // Keep escaped keys and embedded JSON/JSON5 services eligible.
-    BytesRegex::new(r"(?s-u)\{.*(?:width|items|sequences|\\)|(?:width|items|sequences|\\).*\{")
-        .expect("constant IIIF metadata pattern")
-});
+// The full manifest structs default every field. Require a catalog clue here,
+// but leave its value to the decoder so malformed entries retain diagnostics.
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum ManifestMatch {
+    Current {
+        #[serde(rename = "items")]
+        _items: serde::de::IgnoredAny,
+    },
+    Legacy {
+        #[serde(rename = "sequences")]
+        _sequences: serde::de::IgnoredAny,
+    },
+}
 
 const ROUTES: &[DiscoveryRoute] = &[
     image_url(|uri| image_request_info(uri).is_some()).resolve_metadata(|uri| {
@@ -50,11 +60,16 @@ const ROUTES: &[DiscoveryRoute] = &[
     national_gallery::ROUTES[0],
     national_gallery::ROUTES[1],
     philadelphia::ROUTE,
-    viewer(content_matches(&ABS_INFO_JSON_RE)).decode(follow_info_json_url),
-    viewer(content_matches(&REL_INFO_JSON_RE)).decode(follow_info_json_url),
     metadata(url_suffix("/info.json")).decode(decode),
     metadata(url_suffix("/manifest.json")).decode(decode),
-    metadata(content_matches(&METADATA_RE)).decode(decode),
+    json_metadata::<ImageInfo>().decode(decode),
+    json_metadata::<ManifestMatch>().decode(decode),
+    json5_metadata::<ImageInfo>().decode(decode),
+    viewer(html_matches(&ABS_INFO_JSON_RE)).decode(follow_info_json_url),
+    viewer(html_matches(&REL_INFO_JSON_RE)).decode(follow_info_json_url),
+    viewer(js_matches(&ABS_INFO_JSON_RE)).decode(follow_info_json_url),
+    viewer(js_matches(&REL_INFO_JSON_RE)).decode(follow_info_json_url),
+    metadata(any()).child_metadata(decode),
 ];
 
 /// IIIF format. See <https://iiif.io/>.

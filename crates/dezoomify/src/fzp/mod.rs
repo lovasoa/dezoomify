@@ -35,21 +35,21 @@ mod metadata;
 mod tests;
 mod viewer;
 
-use std::sync::LazyLock;
-
-use regex::bytes::Regex;
-
 use crate::core::discovery::{
-    any, content_matches, metadata as route, resource_matches, viewer as viewer_route,
+    any, metadata as route, resource_matches, viewer as viewer_route, xml_metadata,
 };
 use crate::core::{DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ParsedResource};
 
-static METADATA_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?-u)<(?:pal|items?)[\s/>]").expect("constant FreezoomPack metadata pattern")
-});
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum MetadataMatch {
+    Pal(serde::de::IgnoredAny),
+    Item(serde::de::IgnoredAny),
+    Items(serde::de::IgnoredAny),
+}
 
 const ROUTES: &[DiscoveryRoute] = &[
-    route(content_matches(&METADATA_RE)).decode(decode),
+    xml_metadata::<MetadataMatch>().decode(decode),
     viewer_route(resource_matches(viewer::recognizes)).decode(viewer::decode),
     route(any()).child_metadata(decode),
 ];

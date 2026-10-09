@@ -240,10 +240,12 @@ pub enum DiscoveryMatch {
     Css(&'static str, fn(&HtmlElement) -> bool),
     ResourcePredicate(for<'a> fn(DiscoveryResource<'a>) -> bool),
     ContentRegex(&'static LazyLock<BytesRegex>),
+    MarkupRegex(&'static LazyLock<BytesRegex>),
+    ScriptRegex(&'static LazyLock<BytesRegex>),
 }
 
 impl DiscoveryMatch {
-    fn matches(self, uri: &str, bytes: Option<&[u8]>) -> bool {
+    fn matches_url(self, uri: &str) -> bool {
         match self {
             Self::Any => true,
             Self::UrlSuffix(suffix) => uri
@@ -252,13 +254,16 @@ impl DiscoveryMatch {
                 .unwrap_or(uri)
                 .ends_with(suffix),
             Self::UrlPredicate(predicate) => predicate(uri),
-            Self::Css(..) | Self::ResourcePredicate(_) => false,
-            Self::ContentRegex(regex) => bytes.is_some_and(|bytes| regex.is_match(bytes)),
+            Self::Css(..)
+            | Self::ResourcePredicate(_)
+            | Self::ContentRegex(_)
+            | Self::MarkupRegex(_)
+            | Self::ScriptRegex(_) => false,
         }
     }
 
     fn url_match(self, uri: &str) -> Option<bool> {
-        matches!(self, Self::UrlSuffix(_) | Self::UrlPredicate(_)).then(|| self.matches(uri, None))
+        matches!(self, Self::UrlSuffix(_) | Self::UrlPredicate(_)).then(|| self.matches_url(uri))
     }
 }
 
@@ -301,8 +306,40 @@ pub const fn resource_matches(
     DiscoveryMatch::ResourcePredicate(predicate)
 }
 
-pub const fn content_matches(regex: &'static LazyLock<BytesRegex>) -> DiscoveryMatch {
-    DiscoveryMatch::ContentRegex(regex)
+/// A permissive markup guard: XML and HTML need not be distinguished here.
+pub const fn html_matches(regex: &'static LazyLock<BytesRegex>) -> DiscoveryMatch {
+    DiscoveryMatch::MarkupRegex(regex)
+}
+
+pub const fn xml_matches(regex: &'static LazyLock<BytesRegex>) -> DiscoveryMatch {
+    DiscoveryMatch::MarkupRegex(regex)
+}
+
+pub const fn js_matches(regex: &'static LazyLock<BytesRegex>) -> DiscoveryMatch {
+    DiscoveryMatch::ScriptRegex(regex)
+}
+
+/// Speculative decoding failures are ordinary route misses. URL routes can
+/// still send declared metadata directly to its decoder to retain the error.
+pub const fn json_metadata<T: serde::de::DeserializeOwned>() -> RoutePattern {
+    metadata(resource_matches(|resource| {
+        serde_json::from_slice::<T>(resource.bytes()).is_ok()
+    }))
+}
+
+pub const fn xml_metadata<T: serde::de::DeserializeOwned>() -> RoutePattern {
+    metadata(resource_matches(|resource| {
+        quick_xml::de::from_reader::<_, T>(resource.bytes()).is_ok()
+    }))
+}
+
+/// Formats with embedded descriptors also accept nested JSON/JSON5 objects.
+pub const fn json5_metadata<T: serde::de::DeserializeOwned>() -> RoutePattern {
+    metadata(resource_matches(|resource| {
+        crate::json_utils::all_json::<T>(resource.bytes())
+            .next()
+            .is_some()
+    }))
 }
 
 /// Semantic input pattern paired with a decoding or reference-resolution action.
@@ -432,10 +469,16 @@ fn parse_resource(
             DiscoveryMatch::Css(..) => selected.is_some(),
             DiscoveryMatch::ResourcePredicate(predicate) => predicate(resource),
             DiscoveryMatch::ContentRegex(regex) => regex.is_match(resource.bytes()),
+            DiscoveryMatch::MarkupRegex(regex) => {
+                resource.is_html() && regex.is_match(resource.bytes())
+            }
+            DiscoveryMatch::ScriptRegex(regex) => {
+                crate::web_page::script_bodies(resource).any(|bytes| regex.is_match(bytes))
+            }
             matcher => {
-                matcher.matches(resource.final_uri(), Some(resource.bytes()))
+                matcher.matches_url(resource.final_uri())
                     || (resource.uri() != resource.final_uri()
-                        && matcher.matches(resource.uri(), Some(resource.bytes())))
+                        && matcher.matches_url(resource.uri()))
             }
         };
         if !matched {
@@ -553,7 +596,7 @@ impl FormatSpec {
             ));
         }
         for route in self.routes {
-            if !route.matcher.matches(&request.uri, None) {
+            if !route.matcher.matches_url(&request.uri) {
                 continue;
             }
             match route.handler {

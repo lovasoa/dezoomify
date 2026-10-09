@@ -7,28 +7,29 @@ use serde::{Deserialize, de::IntoDeserializer};
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{content_matches, css, metadata, viewer};
+use crate::core::discovery::{any, css, html_matches, json_metadata, metadata, viewer};
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
     ParsedResource, Positioned, Request, ResolvedLevel,
 };
 
-static METADATA_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    // Escaped JSON keys remain eligible for the decoder.
-    BytesRegex::new(r#"(?s-u)\{.*(?:"gigapixel"\s*:|\\u)"#)
-        .expect("constant Second Canvas metadata pattern")
-});
+#[derive(Deserialize)]
+struct MetadataMatch {
+    #[serde(rename = "gigapixel")]
+    _gigapixel: serde::de::IgnoredAny,
+}
 static VIEWER_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(r"(?i-u)sc[wv]\.min\.js").expect("constant Second Canvas viewer pattern")
 });
 
 const ROUTES: &[DiscoveryRoute] = &[
-    metadata(content_matches(&METADATA_RE)).decode(decode_catalog),
-    viewer(content_matches(&VIEWER_RE)).decode(follow_viewer_config),
+    json_metadata::<MetadataMatch>().decode(decode_catalog),
+    viewer(html_matches(&VIEWER_RE)).decode(follow_viewer_config),
     viewer(css(
         "iframe[src*=\".s3.amazonaws.com/web/\" i][src*=\".html\" i]",
     ))
     .follow_attribute("src"),
+    metadata(any()).child_metadata(decode_catalog),
 ];
 
 pub const SPEC: FormatSpec =

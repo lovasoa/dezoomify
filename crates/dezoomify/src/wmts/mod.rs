@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 
 use regex::bytes::Regex;
 
-use crate::core::discovery::{content_matches, metadata, url_matches};
+use crate::core::discovery::{metadata, url_matches, xml_matches};
 use crate::core::{DiscoveryError, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource};
 
 mod capabilities;
@@ -16,7 +16,7 @@ static METADATA_RE: LazyLock<Regex> =
 
 const ROUTES: &[DiscoveryRoute] = &[
     metadata(url_matches(is_wmts_url)).decode(decode),
-    metadata(content_matches(&METADATA_RE)).decode(decode),
+    metadata(xml_matches(&METADATA_RE)).decode(decode),
 ];
 
 pub const SPEC: FormatSpec = FormatSpec::new("wmts", ROUTES).with_display_name("WMTS");
