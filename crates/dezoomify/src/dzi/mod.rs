@@ -7,8 +7,7 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    any, image_url, js_matches, json5_metadata, metadata, url_matches, url_suffix, viewer,
-    xml_metadata,
+    Metadata, any, image_url, js_matches, metadata, url_matches, url_suffix, viewer, xml_metadata,
 };
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
@@ -42,8 +41,8 @@ const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryRoute::regex_link(&DZI_LINK_RE, "$url"),
     DiscoveryRoute::regex_link(&DZI_ATTR_RE, "$url"),
     metadata(url_suffix(".dzi")).decode(decode_catalog),
-    xml_metadata::<DziFile>().decode(decode_catalog),
-    json5_metadata::<DziFile>().decode(decode_catalog),
+    xml_metadata::<DziFile>(),
+    metadata(any()).try_decode(embedded_metadata),
     metadata(any()).child_metadata(decode_catalog),
 ];
 
@@ -193,6 +192,20 @@ fn follow_seadragon_embed(
 }
 
 mod paris;
+
+impl Metadata for DziFile {
+    fn decode(self, resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+        catalog_from_dzi(resource.final_uri(), [self]).map(ParsedResource::Catalog)
+    }
+}
+
+fn embedded_metadata(
+    resource: DiscoveryResource<'_>,
+) -> Option<Result<ParsedResource, DiscoveryError>> {
+    let mut images = all_json::<DziFile>(resource.bytes()).peekable();
+    images.peek()?;
+    Some(catalog_from_dzi(resource.final_uri(), images).map(ParsedResource::Catalog))
+}
 
 fn decode_catalog(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let (url, contents) = (resource.final_uri(), resource.bytes());

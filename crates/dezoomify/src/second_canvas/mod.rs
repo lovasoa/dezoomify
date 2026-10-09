@@ -7,23 +7,18 @@ use serde::{Deserialize, de::IntoDeserializer};
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{any, css, html_matches, json_metadata, metadata, viewer};
+use crate::core::discovery::{Metadata, any, css, html_matches, json_metadata, metadata, viewer};
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
     ParsedResource, Positioned, Request, ResolvedLevel,
 };
 
-#[derive(Deserialize)]
-struct MetadataMatch {
-    #[serde(rename = "gigapixel")]
-    _gigapixel: serde::de::IgnoredAny,
-}
 static VIEWER_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(r"(?i-u)sc[wv]\.min\.js").expect("constant Second Canvas viewer pattern")
 });
 
 const ROUTES: &[DiscoveryRoute] = &[
-    json_metadata::<MetadataMatch>().decode(decode_catalog),
+    json_metadata::<Document>(),
     viewer(html_matches(&VIEWER_RE)).decode(follow_viewer_config),
     viewer(css(
         "iframe[src*=\".s3.amazonaws.com/web/\" i][src*=\".html\" i]",
@@ -81,47 +76,55 @@ fn decode_catalog(resource: DiscoveryResource<'_>) -> Result<ParsedResource, Dis
     let document: Document = serde_json::from_slice(bytes).map_err(|error| {
         DiscoveryError::InvalidMetadata(format!("unable to parse Second Canvas metadata: {error}"))
     })?;
-    let gigapixel = document.gigapixel;
-    if gigapixel.url.is_empty()
-        || gigapixel.size.w == 0
-        || gigapixel.size.h == 0
-        || gigapixel.tile == 0
-    {
-        return Err(DiscoveryError::InvalidMetadata(
-            "Second Canvas metadata must declare a URL and positive size and tile values".into(),
-        ));
-    }
-    let layers = gigapixel.layers()?;
-    let normal_level = layers
-        .iter()
-        .find(|layer| layer.is_normal())
-        .or_else(|| layers.first())
-        .map(|layer| layer.level)
-        .ok_or_else(|| {
-            DiscoveryError::InvalidMetadata("Second Canvas metadata has no image layers".into())
-        })?;
+    document.decode(resource)
+}
 
-    let images = layers
-        .into_iter()
-        .map(|layer| {
-            let image_size = layer_size(gigapixel.size, normal_level, layer.level)?;
-            let levels = build_levels(&gigapixel, &layer, image_size)?;
-            let layer_title = layer.title();
-            Ok(ImagePlan::new(
-                document.title.clone().map(|title| {
-                    if layer.is_normal() {
-                        title
-                    } else {
-                        layer_title.map_or(title.clone(), |layer_title| {
-                            format!("{title} ({layer_title})")
-                        })
-                    }
-                }),
-                levels,
-            ))
-        })
-        .collect::<Result<Vec<_>, DiscoveryError>>()?;
-    Ok(ParsedResource::Catalog(CatalogPlan::images(images)))
+impl Metadata for Document {
+    fn decode(self, _resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+        let document = self;
+        let gigapixel = document.gigapixel;
+        if gigapixel.url.is_empty()
+            || gigapixel.size.w == 0
+            || gigapixel.size.h == 0
+            || gigapixel.tile == 0
+        {
+            return Err(DiscoveryError::InvalidMetadata(
+                "Second Canvas metadata must declare a URL and positive size and tile values"
+                    .into(),
+            ));
+        }
+        let layers = gigapixel.layers()?;
+        let normal_level = layers
+            .iter()
+            .find(|layer| layer.is_normal())
+            .or_else(|| layers.first())
+            .map(|layer| layer.level)
+            .ok_or_else(|| {
+                DiscoveryError::InvalidMetadata("Second Canvas metadata has no image layers".into())
+            })?;
+
+        let images = layers
+            .into_iter()
+            .map(|layer| {
+                let image_size = layer_size(gigapixel.size, normal_level, layer.level)?;
+                let levels = build_levels(&gigapixel, &layer, image_size)?;
+                let layer_title = layer.title();
+                Ok(ImagePlan::new(
+                    document.title.clone().map(|title| {
+                        if layer.is_normal() {
+                            title
+                        } else {
+                            layer_title.map_or(title.clone(), |layer_title| {
+                                format!("{title} ({layer_title})")
+                            })
+                        }
+                    }),
+                    levels,
+                ))
+            })
+            .collect::<Result<Vec<_>, DiscoveryError>>()?;
+        Ok(ParsedResource::Catalog(CatalogPlan::images(images)))
+    }
 }
 
 #[cfg(test)]

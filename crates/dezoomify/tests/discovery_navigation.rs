@@ -123,6 +123,7 @@ fn opaque_metadata_and_embedded_objects_remain_discoverable() {
         (br#"<script>const service = {width:512,height:512,tiles:[{width:256,scaleFactors:[1]}]};</script>"#, "iiif"),
         (br#"<script>OpenSeadragon({tileSources:{Image:{'Tile\u0053ize':256,Format:'jpg',Size:{Width:512,Height:512}}}});</script>"#, "deepzoom"),
         (br#"{"w\u0069dth":512,"height":512}"#, "iiif"),
+        (br#"{"type":"ImageService3","width":512,"height":512,"items":[]}"#, "iiif"),
         (include_bytes!("../../../fixtures/wmts/basic/WMTSCapabilities.xml"), "wmts"),
         (include_bytes!("../../../fixtures/krpano/basic/tour.xml"), "krpano"),
         (include_bytes!("../../../fixtures/second_canvas/approximate-basic/metadata.json"), "second_canvas"),
@@ -139,6 +140,10 @@ fn opaque_metadata_and_embedded_objects_remain_discoverable() {
         include_bytes!("../../../fixtures/iiif/manifest/manifest.json").as_slice(),
         include_bytes!("../../../fixtures/iiif/legacy-context/manifest.json"),
     ] {
+        let bytes = String::from_utf8_lossy(bytes).replace(
+            "\"type\": \"Manifest\"",
+            "\"type\": \"Manifest\", \"width\": 512, \"height\": 512",
+        );
         let catalog = trace(vec![DiscoveryInput::with_contents(PAGE, bytes)], &[]);
         assert!(matches!(catalog.entries(), [DiscoveredEntry::Deferred(_)]));
     }
@@ -151,7 +156,7 @@ fn metadata_shapes_reject_unrelated_clues_but_keep_decoder_errors() {
         (
             br#"{"gigapixel":false}"#.as_slice(),
             "second_canvas",
-            InvalidMetadata,
+            DidNotMatchContent,
         ),
         (
             br#"{"other":{"gigapixel":{}}}"#,
@@ -160,8 +165,13 @@ fn metadata_shapes_reject_unrelated_clues_but_keep_decoder_errors() {
         ),
         (br#"<document><pal/></document>"#, "fzp", DidNotMatchContent),
         (br#"<pal/>"#, "fzp", InvalidMetadata),
-        (br#"{"topviews":false}"#, "topviewer", InvalidMetadata),
-        (br#"{"items":false}"#, "iiif", InvalidMetadata),
+        (br#"{"topviews":false}"#, "topviewer", DidNotMatchContent),
+        (br#"{"items":false}"#, "iiif", DidNotMatchContent),
+        (
+            br#"{"gigapixel":{"url":"tiles","size":{"w":512,"h":512},"tile":0}}"#,
+            "second_canvas",
+            InvalidMetadata,
+        ),
         (
             br#"{"n\u0061me":"Museum"}"#,
             "second_canvas",

@@ -14,7 +14,7 @@ use krpano_metadata::{KrpanoMetadata, XY, all_sides};
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    any, html_matches, js_matches, metadata, url_matches, url_suffix, viewer, xml_matches,
+    any, html_matches, js_matches, metadata, url_matches, url_suffix, viewer,
 };
 use crate::core::resolve_relative;
 use crate::core::{
@@ -27,10 +27,6 @@ use crate::template::Template;
 
 mod krpano_metadata;
 
-static XML_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r"(?s-u)<krpano|(?i:<encrypted>.*</encrypted>)|\A(?:\xEF\xBB\xBF)?\s*<\?xml.*(?:image|scene)")
-        .expect("constant krpano XML pattern")
-});
 static VIEWER_JS_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(r"(?s-u)\A(?:\xEF\xBB\xBF)?(?:/\*.*krpano|function .*(?:krpano|embedpano|createPanoViewer))")
         .expect("constant krpano JavaScript pattern")
@@ -41,12 +37,12 @@ static HTML_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
 });
 
 const ROUTES: &[DiscoveryRoute] = &[
-    metadata(xml_matches(&XML_RE)).decode(handle_xml),
+    metadata(url_suffix("/tiles.xml")).decode(handle_xml),
+    metadata(url_suffix("/tour.xml")).decode(handle_xml),
+    metadata(any()).try_decode(try_xml),
     viewer(html_matches(&HTML_RE)).decode(handle_html),
     viewer(js_matches(&VIEWER_JS_RE)).decode(handle_viewer_js),
     viewer(url_matches(is_javascript_uri)).decode(handle_viewer_js),
-    metadata(url_suffix("/tiles.xml")).decode(handle_xml),
-    metadata(url_suffix("/tour.xml")).decode(handle_xml),
     metadata(any()).child_metadata(handle_xml),
 ];
 
@@ -90,6 +86,17 @@ fn handle_xml(resource: DiscoveryResource<'_>) -> Result<ParsedResource, Discove
             |uri| Ok(ParsedResource::Follow(Request::new(uri))),
         ),
     }
+}
+
+fn try_xml(resource: DiscoveryResource<'_>) -> Option<Result<ParsedResource, DiscoveryError>> {
+    if is_encrypted_xml(resource.bytes()) && resource.is_html() {
+        return Some(handle_xml(resource));
+    }
+    let metadata = KrpanoMetadata::from_bytes(resource.bytes()).ok()?;
+    if !metadata.has_images() {
+        return None;
+    }
+    Some(catalog_from_metadata(resource.final_uri(), metadata).map(ParsedResource::Catalog))
 }
 
 fn handle_viewer_js(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
@@ -138,7 +145,7 @@ fn find_xml<'a>(context: &DiscoveryContext<'a>) -> Option<DiscoveryResource<'a>>
     context
         .resources()
         .rev()
-        .find(|resource| XML_RE.is_match(resource.bytes()))
+        .find(|resource| is_encrypted_xml(resource.bytes()))
 }
 
 fn next_viewer(
@@ -372,6 +379,13 @@ fn decode_catalog(url: &str, contents: &[u8]) -> Result<CatalogPlan, DiscoveryEr
     let metadata = KrpanoMetadata::from_bytes(contents).map_err(|error| {
         DiscoveryError::InvalidMetadata(format!("unable to parse krpano XML: {error}"))
     })?;
+    catalog_from_metadata(url, metadata)
+}
+
+fn catalog_from_metadata(
+    url: &str,
+    metadata: KrpanoMetadata,
+) -> Result<CatalogPlan, DiscoveryError> {
     let global_title = metadata.get_title().unwrap_or_default().to_owned();
     let mut images = Vec::new();
 
@@ -831,24 +845,6 @@ mod tests {
         for (input, page, next) in cases {
             let (_, requests) = crate::test_support::discover(SPEC, input, &[(page, None)]);
             assert_eq!(requests[1].uri, *next, "{input}");
-        }
-    }
-
-    #[test]
-    fn xml_routes_require_format_evidence() {
-        for xml in [
-            b"<?xml version=\"1.0\"?><krpano></krpano>".as_slice(),
-            b"<krpano><image></image></krpano>",
-            b"\xef\xbb\xbf<?xml version=\"1.0\"?><krpano/>",
-            b"<?xml version=\"1.0\"?><krpano><action><![CDATA[embedpano();]]></action></krpano>",
-        ] {
-            assert!(XML_RE.is_match(xml));
-        }
-        for xml in [
-            b"<html><body></body></html>".as_slice(),
-            b"/* krpano */ function() {}",
-        ] {
-            assert!(!XML_RE.is_match(xml));
         }
     }
 

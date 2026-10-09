@@ -311,35 +311,30 @@ pub const fn html_matches(regex: &'static LazyLock<BytesRegex>) -> DiscoveryMatc
     DiscoveryMatch::MarkupRegex(regex)
 }
 
-pub const fn xml_matches(regex: &'static LazyLock<BytesRegex>) -> DiscoveryMatch {
-    DiscoveryMatch::MarkupRegex(regex)
-}
-
 pub const fn js_matches(regex: &'static LazyLock<BytesRegex>) -> DiscoveryMatch {
     DiscoveryMatch::ScriptRegex(regex)
 }
 
-/// Speculative decoding failures are ordinary route misses. URL routes can
-/// still send declared metadata directly to its decoder to retain the error.
-pub const fn json_metadata<T: serde::de::DeserializeOwned>() -> RoutePattern {
-    metadata(resource_matches(|resource| {
-        serde_json::from_slice::<T>(resource.bytes()).is_ok()
-    }))
+/// Parsed wire metadata converts directly into a format result.
+pub trait Metadata: serde::de::DeserializeOwned {
+    fn decode(self, resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError>;
 }
 
-pub const fn xml_metadata<T: serde::de::DeserializeOwned>() -> RoutePattern {
-    metadata(resource_matches(|resource| {
-        quick_xml::de::from_reader::<_, T>(resource.bytes()).is_ok()
-    }))
+/// Schema failures are route misses; conversion errors retain their cause.
+pub const fn json_metadata<T: Metadata>() -> DiscoveryRoute {
+    metadata(any()).try_decode(|resource| {
+        serde_json::from_slice::<T>(resource.bytes())
+            .ok()
+            .map(|metadata| metadata.decode(resource))
+    })
 }
 
-/// Formats with embedded descriptors also accept nested JSON/JSON5 objects.
-pub const fn json5_metadata<T: serde::de::DeserializeOwned>() -> RoutePattern {
-    metadata(resource_matches(|resource| {
-        crate::json_utils::all_json::<T>(resource.bytes())
-            .next()
-            .is_some()
-    }))
+pub const fn xml_metadata<T: Metadata>() -> DiscoveryRoute {
+    metadata(any()).try_decode(|resource| {
+        quick_xml::de::from_reader::<_, T>(resource.bytes())
+            .ok()
+            .map(|metadata| metadata.decode(resource))
+    })
 }
 
 /// Semantic input pattern paired with a decoding or reference-resolution action.
@@ -364,6 +359,14 @@ impl RoutePattern {
     #[must_use]
     pub const fn decode(self, decoder: Decoder) -> DiscoveryRoute {
         self.route(RouteAction::Decode(decoder))
+    }
+    pub const fn try_decode(
+        self,
+        decoder: for<'a> fn(
+            DiscoveryResource<'a>,
+        ) -> Option<Result<ParsedResource, DiscoveryError>>,
+    ) -> DiscoveryRoute {
+        self.route(RouteAction::TryDecode(decoder))
     }
     /// Metadata that is meaningful only after this format has read its parent.
     #[must_use]
@@ -435,6 +438,7 @@ enum RouteAction {
     Plan(fn(&str) -> Result<ImagePlan, DiscoveryError>),
     ChildMetadata(Decoder),
     Decode(Decoder),
+    TryDecode(for<'a> fn(DiscoveryResource<'a>) -> Option<Result<ParsedResource, DiscoveryError>>),
     MapUrl(UrlMapper),
     FollowAttribute {
         attribute: &'static str,
@@ -490,6 +494,10 @@ fn parse_resource(
         };
         return match route.handler {
             RouteAction::Decode(decoder) | RouteAction::ChildMetadata(decoder) => decoder(resource),
+            RouteAction::TryDecode(decoder) => match decoder(resource) {
+                Some(result) => result,
+                None => continue,
+            },
             RouteAction::FollowAttribute {
                 attribute,
                 prefix,
@@ -1357,6 +1365,52 @@ fn record_diagnostic(
 mod tests {
     use super::*;
     use crate::model::{BlockedReason, ErrorTransport, Failure};
+
+    #[test]
+    fn metadata_routes_convert_the_value_deserialized_once() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static PARSES: AtomicUsize = AtomicUsize::new(0);
+
+        fn width<'de, D: serde::Deserializer<'de>>(decoder: D) -> Result<u32, D::Error> {
+            PARSES.fetch_add(1, Ordering::Relaxed);
+            serde::Deserialize::deserialize(decoder)
+        }
+        #[derive(serde::Deserialize)]
+        struct Document {
+            #[serde(rename = "@width", alias = "width", deserialize_with = "width")]
+            width: u32,
+        }
+        impl Metadata for Document {
+            fn decode(self, _: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+                Ok(ParsedResource::Image(ImagePlan::new(
+                    None,
+                    vec![super::super::model::ResolvedLevel::grid(
+                        crate::Vec2d::square(self.width),
+                        crate::Vec2d::square(2),
+                        |_| Request::new("memory://tile"),
+                    )?],
+                )))
+            }
+        }
+
+        for (route, bytes) in [
+            (json_metadata::<Document>(), br#"{"width":4}"#.as_slice()),
+            (xml_metadata::<Document>(), br#"<Image width="4"/>"#),
+        ] {
+            PARSES.store(0, Ordering::Relaxed);
+            let ParsedResource::Image(image) =
+                parse_resource(&[route], DiscoveryResource::new("memory://metadata", bytes))
+                    .unwrap()
+            else {
+                panic!("expected an image")
+            };
+            assert_eq!(
+                image.levels[0].source.image_size(),
+                Some(crate::Vec2d::square(4))
+            );
+            assert_eq!(PARSES.load(Ordering::Relaxed), 1);
+        }
+    }
 
     fn http_cause(status: u16, transport: ErrorTransport) -> Box<Error> {
         Box::new(Error::HttpError {

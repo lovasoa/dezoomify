@@ -36,20 +36,12 @@ mod tests;
 mod viewer;
 
 use crate::core::discovery::{
-    any, metadata as route, resource_matches, viewer as viewer_route, xml_metadata,
+    Metadata, any, metadata as route, resource_matches, viewer as viewer_route, xml_metadata,
 };
 use crate::core::{DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ParsedResource};
 
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum MetadataMatch {
-    Pal(serde::de::IgnoredAny),
-    Item(serde::de::IgnoredAny),
-    Items(serde::de::IgnoredAny),
-}
-
 const ROUTES: &[DiscoveryRoute] = &[
-    xml_metadata::<MetadataMatch>().decode(decode),
+    xml_metadata::<metadata::Document>(),
     viewer_route(resource_matches(viewer::recognizes)).decode(viewer::decode),
     route(any()).child_metadata(decode),
 ];
@@ -71,13 +63,11 @@ fn invalid(detail: impl std::fmt::Display) -> DiscoveryError {
 }
 
 fn decode(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-    let text = resource.text_lossy();
-    match metadata::root_name(&text).as_deref() {
-        Some("pal") => metadata::image(&text, resource.final_uri()),
-        Some("item") => metadata::index(&text, resource),
-        Some("items") => Err(invalid(
-            "unsupported legacy page index layout: items/field/name",
-        )),
-        _ => viewer::decode(resource),
+    match quick_xml::de::from_reader::<_, metadata::Document>(resource.bytes()) {
+        Ok(document) => document.decode(resource),
+        Err(error) => viewer::decode(resource).map_err(|viewer_error| match viewer_error {
+            DiscoveryError::InvalidMetadata(_) if resource.is_html() => invalid(error),
+            other => other,
+        }),
     }
 }

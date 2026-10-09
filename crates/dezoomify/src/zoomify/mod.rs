@@ -13,7 +13,7 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    css, image_url, js_matches, metadata, resource_matches, url_matches, url_suffix, viewer,
+    any, css, image_url, js_matches, metadata, resource_matches, url_matches, url_suffix, viewer,
 };
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource, Request,
@@ -26,7 +26,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     metadata(url_suffix("ImageProperties.xml")).decode(image_properties),
     image_url(is_tile_url).resolve_metadata(tile_metadata),
     metadata(css("imagefile[format=\"zoomify\" i]")).text_file("ImageProperties.xml"),
-    viewer(resource_matches(has_inline_tile_service)).decode(inline_catalog),
+    viewer(any()).try_decode(inline_catalog),
     viewer(resource_matches(contains_zoomify_declaration)).decode(extract_image_properties_url),
     viewer(js_matches(&FLUID_ACCESS_RE)).decode(extract_fluid_catalog),
     viewer(url_matches(is_unibe_page)).regex_file(&UNIBE_URL_RE, "ImageProperties.xml"),
@@ -125,13 +125,6 @@ fn extract_image_properties_url(
     Ok(resource.follow_file(&image_path, "ImageProperties.xml"))
 }
 
-/// Whether a script block declares an inline source *with* geometry.
-/// Path-only declarations (`Z.showImage`, bare `tilesUrl`) keep the
-/// `ImageProperties.xml` route below; only full configurations qualify here.
-fn has_inline_tile_service(resource: crate::core::DiscoveryResource<'_>) -> bool {
-    inline_tile_services(resource).next().is_some()
-}
-
 struct InlineService {
     width: u32,
     height: u32,
@@ -211,28 +204,25 @@ fn inline_levels(width: u32, height: u32, tile_size: u32) -> Vec<ZoomLevelInfo> 
 
 fn inline_catalog(
     resource: crate::core::DiscoveryResource<'_>,
-) -> Result<ParsedResource, DiscoveryError> {
-    let services: Vec<InlineService> = inline_tile_services(resource).collect();
-    if services.is_empty() {
-        return Err(DiscoveryError::InvalidMetadata(
-            "Zoomify viewer page declares no inline image geometry".into(),
-        ));
-    }
-    let mut images = Vec::with_capacity(services.len());
-    for service in &services {
-        images.push(
-            plan_from_levels(
-                &service.tiles_url,
-                inline_levels(service.width, service.height, service.tile_size),
-                false,
-                Vec::new(),
-            )
-            .map_err(|_| {
-                DiscoveryError::InvalidMetadata("invalid inline Zoomify geometry".into())
-            })?,
-        );
-    }
-    Ok(ParsedResource::Catalog(CatalogPlan::images(images)))
+) -> Option<Result<ParsedResource, DiscoveryError>> {
+    let mut services = inline_tile_services(resource).peekable();
+    services.peek()?;
+    Some(
+        services
+            .map(|service| {
+                plan_from_levels(
+                    &service.tiles_url,
+                    inline_levels(service.width, service.height, service.tile_size),
+                    false,
+                    Vec::new(),
+                )
+                .map_err(|_| {
+                    DiscoveryError::InvalidMetadata("invalid inline Zoomify geometry".into())
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(|images| ParsedResource::Catalog(CatalogPlan::images(images))),
+    )
 }
 
 fn extract_fluid_catalog(
