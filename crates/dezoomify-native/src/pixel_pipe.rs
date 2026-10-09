@@ -24,7 +24,7 @@ impl MemoryBudget {
         })
     }
     /// Never wait for RAM: an unresolved missing tile can prevent the reader
-    /// from freeing any pixels until the user chooses Keep. Fail with a typed
+    /// from freeing any pixels until a retry supplies pixels. Fail with a typed
     /// limit instead of occupying every acquisition slot in a circular wait.
     pub(crate) fn reserve(self: &Arc<Self>, bytes: u64) -> Result<Reservation, Error> {
         let mut usage = self.usage.lock().expect("memory accounting lock");
@@ -347,7 +347,7 @@ impl PixelPipe {
         }
         Ok(())
     }
-    /// Keep is the only operation that finalizes uncovered pixels as holes.
+    /// Finalize uncovered pixels for positioned layouts after acquisition succeeds.
     pub(crate) fn finish(&self, reused: &[ReusedTile]) -> Result<(), Error> {
         let mut producer = self.producer.lock().expect("pixel producer lock");
         let mapping: BTreeMap<_, _> = reused
@@ -479,7 +479,7 @@ pub(crate) mod tests {
         assert_eq!(pipe.budget.current(), 0);
     }
     #[test]
-    fn retry_and_keep_preserve_holes_and_failure_wakes_the_reader() {
+    fn retry_and_finish_preserve_holes_and_failure_wakes_the_reader() {
         for fail in [false, true] {
             let pipe = new_pipe(2, 1);
             put(

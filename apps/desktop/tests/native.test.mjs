@@ -48,8 +48,6 @@ function platform({ deferRegistration = false } = {}) {
 }
 const request = () => ({ inputUrl: "https://example.com/image", settings: defaultSettings() });
 const output = {
-  complete: true,
-  missing: [],
   canvas: { width: 512, height: 512 },
   format: "png",
   disposition: "native-publication",
@@ -58,10 +56,10 @@ const output = {
 test("native invocation preserves settings, progress, completion, and result ownership", async () => {
   const api = platform();
   const progress = [];
-  const partial = [];
+  const retry = [];
   const handle = await invokeNative(
     request(),
-    { progress: (value) => progress.push(value), partial: (...value) => partial.push(value) },
+    { progress: (value) => progress.push(value), retry: (...value) => retry.push(value) },
     api,
   );
   assert.equal(api.calls[0].command, "dezoomify");
@@ -72,20 +70,20 @@ test("native invocation preserves settings, progress, completion, and result own
   const value = { phase: "acquisition", completed: 3, total: 4 };
   api.emit("dezoomify://progress", { job: handle.id, progress: value });
   assert.deepEqual(progress, [value]);
-  api.emit("dezoomify://partial", {
+  api.emit("dezoomify://retry", {
     job: handle.id,
     question: 4,
-    missing: { missing: [{ tile: 3, failures: [] }] },
+    request: { tile: { index: 3 }, attempt: 4, requires_approval: true },
   });
   // Delivery waits for the shell's retry verdicts to be stamped on.
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(partial[0][0], 4);
+  assert.equal(retry[0][0], 4);
   await handle.pause();
   await handle.resume();
   await handle.answer(4, "retry");
   assert.deepEqual(
     api.calls.slice(1).map(({ command }) => command),
-    ["pause_job", "resume_job", "answer_partial"],
+    ["pause_job", "resume_job", "answer_retry"],
   );
   assert.deepEqual(api.calls.at(-1).args, { job: handle.id, question: 4, answer: "retry" });
   api.resolve(output);
@@ -105,7 +103,7 @@ test("retired invocation rejects controls and ignores late progress", async () =
   const progress = [];
   const handle = await invokeNative(
     request(),
-    { progress: (value) => progress.push(value), partial() {} },
+    { progress: (value) => progress.push(value), retry() {} },
     api,
   );
   const late = api.handlers.get("dezoomify://progress");
@@ -127,7 +125,7 @@ test("early cancellation and replacement wait for native registration", async ()
     let exposed = false;
     const starting = invokeNative(
       request(),
-      { progress: (value) => progress.push(value), partial() {} },
+      { progress: (value) => progress.push(value), retry() {} },
       api,
     );
     // A replaced view disposes the handle as soon as invokeNative returns it.
@@ -161,7 +159,7 @@ test("early cancellation and replacement wait for native registration", async ()
 
 test("failure before native registration rejects startup and removes all listeners", async () => {
   const api = platform({ deferRegistration: true });
-  const starting = invokeNative(request(), { progress() {}, partial() {} }, api);
+  const starting = invokeNative(request(), { progress() {}, retry() {} }, api);
   const failure = { kind: "invalid-input", detail: "invalid settings: width" };
   const rejected = assert.rejects(starting, (error) => error === failure);
   await api.dispatched;
@@ -174,13 +172,13 @@ test("failure before native registration rejects startup and removes all listene
   );
 });
 
-test("typed failure and partial output retain the native outcome", async () => {
+test("typed failure and complete output retain the native outcome", async () => {
   for (const result of [
-    { ...output, complete: false, missing: [3] },
-    { kind: "partial-discarded", failures: [{ kind: "decode-failed" }] },
+    output,
+    { kind: "retry-discarded", failures: [{ kind: "decode-failed" }] },
   ]) {
     const api = platform();
-    const handle = await invokeNative(request(), { progress() {}, partial() {} }, api);
+    const handle = await invokeNative(request(), { progress() {}, retry() {} }, api);
     if ("kind" in result) {
       api.reject(result);
       await assert.rejects(handle.finished, (error) => error === result);
@@ -197,7 +195,7 @@ test("untrusted addresses fail before native IPC", async () => {
   for (const inputUrl of ["file:///etc/passwd", "https://user:pass@example.com/image", "invalid"]) {
     const api = platform();
     await assert.rejects(
-      invokeNative({ ...request(), inputUrl }, { progress() {}, partial() {} }, api),
+      invokeNative({ ...request(), inputUrl }, { progress() {}, retry() {} }, api),
     );
     assert.equal(api.calls.length, 0);
   }
@@ -209,7 +207,7 @@ test("raw header lines cross IPC as typed and Rust rejections return untouched",
   const api = platform();
   const handle = await invokeNative(
     { inputUrl: "https://example.com/image", settings },
-    { progress() {}, partial() {} },
+    { progress() {}, retry() {} },
     api,
   );
   assert.deepEqual(
@@ -226,7 +224,7 @@ test("raw header lines cross IPC as typed and Rust rejections return untouched",
 
 test("saved references remain usable independently of the invocation and never send filesystem paths", async () => {
   const api = platform();
-  const handle = await invokeNative(request(), { progress() {}, partial() {} }, api);
+  const handle = await invokeNative(request(), { progress() {}, retry() {} }, api);
   api.resolve(output);
   const { saved_output: saved } = await handle.finished;
   assert.deepEqual(saved, { id: "saved:test", filename: "saved image.png" });

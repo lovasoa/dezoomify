@@ -355,10 +355,9 @@ impl JobInput {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum RecoveryChoice {
-    Keep,
+pub enum RetryChoice {
     Retry,
-    Discard,
+    Cancel,
 }
 
 // ---------------------------------------------------------------------------
@@ -656,22 +655,14 @@ pub enum Error {
     PlanEmpty,
     #[error("the tile plan is invalid{}", .0.suffix())]
     PlanInvalid(Failure),
-    /// The derived verdict and largest hint of the settled failure set;
-    /// the evidence itself lives in `missing[]` and the diagnostics report.
-    #[error("no usable tiles were acquired")]
-    NoUsableTiles {
-        transient: bool,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        retry_after_ms: Option<u64>,
-    },
-    #[error("partial output was discarded")]
-    PartialDiscarded {
-        transient: bool,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        retry_after_ms: Option<u64>,
-    },
-
     // ---- Tiles ----
+    #[error("tile {tile} failed after {}: {cause}", attempt_count(.attempts))]
+    TileFailed {
+        tile: u32,
+        attempts: u32,
+        #[source]
+        cause: Box<Error>,
+    },
     #[error("a tile could not be decoded{}", .0.suffix())]
     DecodeFailed(Failure),
     #[error("a tile could not be processed{}", .0.suffix())]
@@ -757,6 +748,13 @@ pub fn bounded_uri(uri: impl Into<String>) -> String {
     uri
 }
 
+fn attempt_count(attempts: &u32) -> String {
+    format!(
+        "{attempts} attempt{}",
+        if *attempts == 1 { "" } else { "s" }
+    )
+}
+
 /// Structured limit facts for message templates; the localized copy layer
 /// reads the same fields and never parses this text.
 fn limit_facts(limit: &LimitContext) -> String {
@@ -798,6 +796,7 @@ impl Error {
     pub fn cause(&self) -> &Self {
         match self {
             Self::Resource { source, .. } => source.cause(),
+            Self::TileFailed { cause, .. } => cause.cause(),
             Self::DiscoveryFailed {
                 cause: Some(cause), ..
             } => cause.cause(),
@@ -837,8 +836,7 @@ impl Error {
             Self::Stale => "stale",
             Self::PlanEmpty => "plan-empty",
             Self::PlanInvalid { .. } => "plan-invalid",
-            Self::NoUsableTiles { .. } => "no-usable-tiles",
-            Self::PartialDiscarded { .. } => "partial-discarded",
+            Self::TileFailed { .. } => "tile-failed",
             Self::DecodeFailed { .. } => "decode-failed",
             Self::ProcessingFailed { .. } => "processing-failed",
             Self::LimitExceeded { .. } => "limit-exceeded",
@@ -886,9 +884,7 @@ impl Error {
             Self::DiscoveryFailed {
                 cause: Some(cause), ..
             } => cause.retryable(),
-            Self::NoUsableTiles { transient, .. } | Self::PartialDiscarded { transient, .. } => {
-                *transient
-            }
+            Self::TileFailed { cause, .. } => cause.retryable(),
             _ => false,
         }
     }
@@ -906,15 +902,8 @@ impl Error {
             | Self::RateLimited {
                 retry_after_ms: Some(hint),
                 ..
-            }
-            | Self::NoUsableTiles {
-                retry_after_ms: Some(hint),
-                ..
-            }
-            | Self::PartialDiscarded {
-                retry_after_ms: Some(hint),
-                ..
             } => Some(*hint),
+            Self::TileFailed { cause, .. } => cause.retry_after_ms(),
             Self::Resource { source, .. } => source.retry_after_ms(),
             Self::DiscoveryFailed {
                 cause: Some(cause), ..
@@ -997,14 +986,6 @@ impl Default for Progress {
     }
 }
 
-/// One tile settled as missing, with its full structured detail.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub struct MissingTile {
-    pub tile: u32,
-    pub failures: Vec<Error>,
-}
-
 /// Honest output disposition reported by the host that performed the save.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -1016,13 +997,12 @@ pub enum OutputDisposition {
     DisplayOnly,
 }
 
-/// Output summary: geometry, completeness, and the honest disposition.
+/// Output summary after every required tile has been acquired.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct Output {
     pub canvas: Option<Size>,
     pub format: OutputFormat,
-    pub missing: Vec<u32>,
     pub disposition: OutputDisposition,
 }
 
@@ -1049,14 +1029,6 @@ pub enum SavedOutputState {
 pub struct DesktopOutput {
     pub output: Output,
     pub saved_output: Option<SavedOutput>,
-}
-
-impl Output {
-    /// Complete output has no missing tiles; the two cannot disagree.
-    #[must_use]
-    pub fn is_complete(&self) -> bool {
-        self.missing.is_empty()
-    }
 }
 
 // Bounded diagnostic observations.
@@ -1177,6 +1149,28 @@ pub struct Tile {
     pub placement: TilePlacement,
 }
 
+/// One acquisition attempt. The core owns retries; Hosts await approval for
+/// optional attempts before performing I/O. Attempt zero is the initial request.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct TileAcquisition {
+    pub tile: Tile,
+    pub attempt: u32,
+    pub requires_approval: bool,
+    pub previous_failure: Option<Box<Error>>,
+}
+
+impl From<Tile> for TileAcquisition {
+    fn from(tile: Tile) -> Self {
+        Self {
+            tile,
+            attempt: 0,
+            requires_approval: false,
+            previous_failure: None,
+        }
+    }
+}
+
 /// Final plan position and index of a tile already acquired during probing.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
@@ -1217,14 +1211,7 @@ pub struct FinishRequest {
     pub canvas: Option<Size>,
     pub format: OutputFormat,
     pub title: Option<String>,
-    pub missing: Vec<u32>,
     pub reused_tiles: Vec<ReusedTile>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub struct MissingTiles {
-    pub missing: Vec<MissingTile>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1247,23 +1234,14 @@ pub enum SelectionPolicy {
     },
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum PartialPolicy {
-    #[default]
-    Prompt,
-    Keep,
-    Discard,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct Options {
     pub format: Option<String>,
     pub selection: SelectionPolicy,
-    pub partial: PartialPolicy,
+    /// Issue approval-required attempts after the automatic retry allowance.
+    pub interactive_retries: bool,
     pub output: OutputFormat,
     pub max_concurrent: u32,
     pub max_tiles: u32,
@@ -1278,7 +1256,7 @@ impl Default for Options {
         Self {
             format: None,
             selection: SelectionPolicy::default(),
-            partial: PartialPolicy::default(),
+            interactive_retries: false,
             output: OutputFormat::Png,
             max_concurrent: 4,
             max_tiles: 4096,
@@ -1458,11 +1436,12 @@ mod tests {
         assert!(throttled.retryable());
         assert_eq!(throttled.retry_after_ms(), Some(9_000));
         assert_eq!(throttled.cause().kind(), "rate-limited");
-        // Aggregates report the largest retained hint.
-        let aggregate = Error::NoUsableTiles {
-            transient: true,
-            retry_after_ms: Some(9_000),
+        // Exhaustion preserves the last failure's retry hint.
+        let exhausted = Error::TileFailed {
+            tile: 0,
+            attempts: 4,
+            cause: Box::new(throttled),
         };
-        assert_eq!(aggregate.retry_after_ms(), Some(9_000));
+        assert_eq!(exhausted.retry_after_ms(), Some(9_000));
     }
 }

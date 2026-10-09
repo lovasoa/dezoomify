@@ -157,8 +157,7 @@ body {
   margin-top: 0.5rem;
 }
 
-/* Missing-tile and partial/cancel notes: plain left-aligned flow, no box. */
-#dz-desktop-aux .dz-missing-list,
+/* Cancellation cleanup stays in the main flow. */
 #dz-cancel-cleanup-note {
   text-align: left;
   font-variant-numeric: tabular-nums;
@@ -695,19 +694,6 @@ body {
   #dz-desktop-settings .dz-settings-summary-value {
     display: none;
   }
-}
-
-/* Partial output details remain inline with the completed result. */
-#dz-desktop-aux .dz-partial-note {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  border-radius: 0;
-  padding: 0;
-  text-align: left;
 }
 
 /* Crisp 2px architectural focus for every desktop-only action: submit, save,

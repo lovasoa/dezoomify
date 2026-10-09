@@ -32,6 +32,7 @@ struct ControlState {
     cancelled: AtomicBool,
     paused: AtomicBool,
     changed: tokio::sync::Notify,
+    retry_waiting: AtomicBool,
     reader: std::sync::Mutex<Option<std::sync::Weak<PixelPipe>>>,
 }
 /// Honest execution accounting, reported with every result.
@@ -136,22 +137,11 @@ fn automatic_format_checks_both_sides_at_the_jpeg_boundary() {
     );
 }
 
-fn auto_output_path(
-    output_dir: &Path,
-    title: Option<&str>,
-    format: OutputFormat,
-    partial: bool,
-) -> PathBuf {
+fn auto_output_path(output_dir: &Path, title: Option<&str>, format: OutputFormat) -> PathBuf {
     let stem = safe_output_stem(title);
     let extension = format.extension();
     let first = output_dir.join(format!("{stem}.{extension}"));
-    let exists = |path: &Path| {
-        if partial {
-            crate::output::partial_path_for(path).exists()
-        } else {
-            path.exists()
-        }
-    };
+    let exists = |path: &Path| path.exists();
     if !exists(&first) {
         return first;
     }
@@ -220,7 +210,10 @@ impl Controls {
             if self.is_cancelled() {
                 return Err(cancelled());
             }
-            if !acquisition || !self.0.paused.load(Ordering::SeqCst) {
+            if !acquisition
+                || !(self.0.paused.load(Ordering::SeqCst)
+                    || self.0.retry_waiting.load(Ordering::SeqCst))
+            {
                 return Ok(());
             }
             changed.await;
@@ -228,8 +221,8 @@ impl Controls {
     }
 }
 
-type PartialAnswer<'a> = Pin<Box<dyn Future<Output = Result<RecoveryChoice, Error>> + 'a>>;
-type PartialCallback<'a> = Box<dyn FnMut(MissingTiles) -> PartialAnswer<'a> + 'a>;
+type RetryAnswer<'a> = Pin<Box<dyn Future<Output = Result<RetryChoice, Error>> + 'a>>;
+type RetryCallback<'a> = Box<dyn FnMut(TileAcquisition) -> RetryAnswer<'a> + 'a>;
 
 struct PendingPixels {
     id: u32,
@@ -256,7 +249,9 @@ pub struct NativeHost<'a> {
     throttle: tokio::sync::Mutex<Option<Instant>>,
     progress: RefCell<Box<dyn FnMut(Progress) + 'a>>,
     last_progress: RefCell<Progress>,
-    partial: RefCell<Option<PartialCallback<'a>>>,
+    retry: RefCell<Option<RetryCallback<'a>>>,
+    approved_attempt: Cell<u32>,
+    retry_pending: Cell<bool>,
     published: RefCell<Option<Publication>>,
     source_format: RefCell<Option<String>>,
     output_plan: RefCell<Option<OutputPlan>>,
@@ -283,7 +278,7 @@ impl<'a> NativeHost<'a> {
             "format": options.format, "image_index": options.image_index, "zoom_level": options.zoom_level,
             "largest": options.largest, "max_width": options.max_width, "max_height": options.max_height,
             "parallelism": options.max_concurrent, "retries": options.max_retries,
-            "retry_delay_ms": options.retry_base_delay.as_millis(), "keep_partial": options.keep_partial,
+            "retry_delay_ms": options.retry_base_delay.as_millis(),
             "compression": options.compression, "header_names": options.headers.keys().collect::<Vec<_>>(),
             "credentials_present": !options.headers.is_empty(), "cache_enabled": true,
             "max_tiles": options.max_tiles, "max_bytes": options.max_bytes
@@ -329,7 +324,9 @@ impl<'a> NativeHost<'a> {
             throttle: tokio::sync::Mutex::new(None),
             progress: RefCell::new(Box::new(|_| {})),
             last_progress: RefCell::new(Progress::default()),
-            partial: RefCell::new(None),
+            retry: RefCell::new(None),
+            approved_attempt: Cell::new(0),
+            retry_pending: Cell::new(false),
             published: RefCell::new(None),
             source_format: RefCell::new(None),
             output_plan: RefCell::new(None),
@@ -342,8 +339,43 @@ impl<'a> NativeHost<'a> {
         *self.progress.borrow_mut() = Box::new(callback);
     }
 
-    pub fn on_partial(&self, callback: impl FnMut(MissingTiles) -> PartialAnswer<'a> + 'a) {
-        *self.partial.borrow_mut() = Some(Box::new(callback));
+    pub fn on_retry(&self, callback: impl FnMut(TileAcquisition) -> RetryAnswer<'a> + 'a) {
+        *self.retry.borrow_mut() = Some(Box::new(callback));
+    }
+
+    async fn approve_retry(&self, request: &TileAcquisition) -> Result<(), Error> {
+        if !request.requires_approval {
+            return Ok(());
+        }
+        loop {
+            if request.attempt <= self.approved_attempt.get() {
+                return Ok(());
+            }
+            if self.retry_pending.get() {
+                self.controls.checkpoint(true).await?;
+                continue;
+            }
+            let answer = self
+                .retry
+                .borrow_mut()
+                .as_mut()
+                .ok_or_else(|| Error::InvalidState("retry approval is unavailable".into()))?(
+                request.clone(),
+            );
+            self.retry_pending.set(true);
+            self.controls.0.retry_waiting.store(true, Ordering::SeqCst);
+            let choice = self.controlled(answer).await;
+            self.retry_pending.set(false);
+            self.controls.0.retry_waiting.store(false, Ordering::SeqCst);
+            self.controls.0.changed.notify_waiters();
+            match choice? {
+                RetryChoice::Retry => self.approved_attempt.set(request.attempt),
+                RetryChoice::Cancel => {
+                    self.controls.cancel();
+                    return Err(Error::Cancelled);
+                }
+            }
+        }
     }
 
     pub fn publication(&self) -> Option<Publication> {
@@ -368,10 +400,10 @@ impl<'a> NativeHost<'a> {
             max_concurrent: self.options.max_concurrent as u32,
             max_tiles: self.options.max_tiles as u32,
             max_retries: self.options.max_retries,
+            interactive_retries: self.retry.borrow().is_some(),
             max_bytes: self.options.max_bytes,
             max_deferred_follows: 10,
             retry_base_delay_ms: self.options.retry_base_delay.as_millis().min(300_000) as u64,
-            ..Options::default()
         }
     }
 
@@ -770,8 +802,8 @@ impl<'a> NativeHost<'a> {
     ) -> Result<(), Error> {
         let destination = match &self.options.output {
             OutputTarget::File(path) => path.clone(),
-            OutputTarget::AutoDir { dir, format } => auto_output_path(dir, title, *format, false),
-            OutputTarget::AutoImageDir { dir } => auto_output_path(dir, title, format, false),
+            OutputTarget::AutoDir { dir, format } => auto_output_path(dir, title, *format),
+            OutputTarget::AutoImageDir { dir } => auto_output_path(dir, title, format),
         };
         let task = EncoderTask::start(
             &destination,
@@ -798,12 +830,7 @@ impl<'a> NativeHost<'a> {
         Ok(())
     }
 
-    fn next_auto_destination(
-        &self,
-        title: Option<&str>,
-        partial: bool,
-        format: OutputFormat,
-    ) -> PathBuf {
+    fn next_auto_destination(&self, title: Option<&str>, format: OutputFormat) -> PathBuf {
         let dir = match &self.options.output {
             OutputTarget::AutoDir { dir, .. } | OutputTarget::AutoImageDir { dir } => dir,
             OutputTarget::File(_) => unreachable!("automatic destination"),
@@ -816,11 +843,6 @@ impl<'a> NativeHost<'a> {
                 format!("{stem}-{suffix}")
             };
             let path = dir.join(format!("{name}.{}", format.extension()));
-            let path = if partial {
-                crate::output::partial_path_for(&path)
-            } else {
-                path
-            };
             if !path.exists() {
                 return path;
             }
@@ -858,10 +880,10 @@ impl Host for NativeHost<'_> {
             let destination = match &self.options.output {
                 OutputTarget::File(path) => path.clone(),
                 OutputTarget::AutoDir { dir, format } => {
-                    auto_output_path(dir, plan.title.as_deref(), *format, false)
+                    auto_output_path(dir, plan.title.as_deref(), *format)
                 }
                 OutputTarget::AutoImageDir { dir } => {
-                    auto_output_path(dir, plan.title.as_deref(), self.format, false)
+                    auto_output_path(dir, plan.title.as_deref(), self.format)
                 }
             };
             let probes = std::mem::take(&mut *self.encoded_probes.borrow_mut());
@@ -1018,7 +1040,10 @@ impl Host for NativeHost<'_> {
         }
     }
 
-    async fn acquire_tile(&self, tile: Tile) -> Result<(), Error> {
+    async fn acquire_tile(&self, request: TileAcquisition) -> Result<(), Error> {
+        self.approve_retry(&request).await?;
+        self.controls.checkpoint(true).await?;
+        let tile = request.tile;
         let result = async {
             if matches!(self.format, OutputFormat::IiifDir | OutputFormat::Zif) {
                 let encoded = self.encoded_tile(&tile).await?;
@@ -1052,24 +1077,18 @@ impl Host for NativeHost<'_> {
 
     async fn finish(&self, request: FinishRequest) -> Result<Output, Error> {
         self.controls.checkpoint(false).await?;
-        let partial = !request.missing.is_empty();
         let destination_for = |format| match &self.options.output {
             OutputTarget::File(path) => path.clone(),
             OutputTarget::AutoDir { dir, format } => {
-                auto_output_path(dir, request.title.as_deref(), *format, partial)
+                auto_output_path(dir, request.title.as_deref(), *format)
             }
             OutputTarget::AutoImageDir { dir } => {
-                auto_output_path(dir, request.title.as_deref(), format, partial)
+                auto_output_path(dir, request.title.as_deref(), format)
             }
         };
         let tiled = self.tiled.borrow_mut().take();
         let tiled_result = if let Some(writer) = tiled {
             let destination = destination_for(self.format);
-            let destination = if partial {
-                crate::output::partial_path_for(&destination)
-            } else {
-                destination.clone()
-            };
             let controls = self.controls.clone();
             let reused = request.reused_tiles.clone();
             Some(
@@ -1140,8 +1159,7 @@ impl Host for NativeHost<'_> {
                                     && tile.pixels.decoded.image.height() >= extent.height
                             })
                         });
-                    let transparent = partial
-                        || !(covered || grid_covered)
+                    let transparent = !(covered || grid_covered)
                         || pending.iter().any(|tile| {
                             tile.pixels
                                 .decoded
@@ -1188,11 +1206,7 @@ impl Host for NativeHost<'_> {
         let destination = destination_for(format);
         self.instrumentation.borrow_mut().pixel_decodes += prepared.pixel_decodes;
         let late_repaints = prepared.late_writes;
-        let mut published = if partial {
-            crate::output::partial_path_for(&destination)
-        } else {
-            destination
-        };
+        let mut published = destination;
         let mut collisions = 0;
         let encoded_bytes = loop {
             let validation =
@@ -1221,8 +1235,7 @@ impl Host for NativeHost<'_> {
                     ) && collisions < 9_999 =>
                 {
                     collisions += 1;
-                    published =
-                        self.next_auto_destination(request.title.as_deref(), partial, format);
+                    published = self.next_auto_destination(request.title.as_deref(), format);
                 }
                 Err(error) => return Err(error),
             }
@@ -1242,11 +1255,10 @@ impl Host for NativeHost<'_> {
                 height: image_size.y,
             }),
             format,
-            missing: request.missing,
             disposition: OutputDisposition::NativePublication,
         };
-        self.diagnostics.finish(if partial { "partial-completed" } else { "completed" },
-            serde_json::json!({"width": image_size.x, "height": image_size.y, "format": format.as_str(), "missing": output.missing.len()}));
+        self.diagnostics.finish("completed",
+            serde_json::json!({"width": image_size.x, "height": image_size.y, "format": format.as_str()}));
         *self.published.borrow_mut() = Some(Publication {
             path: published,
             tile_count: acquired.len(),
@@ -1271,33 +1283,6 @@ impl Host for NativeHost<'_> {
                 .to_string()
                 .into(),
         ))
-    }
-
-    async fn choose_partial(&self, missing: MissingTiles) -> Result<RecoveryChoice, Error> {
-        let answer = self
-            .partial
-            .borrow_mut()
-            .as_mut()
-            .map(|callback| callback(missing));
-        if let Some(answer) = answer {
-            self.controlled(async {
-                match tokio::time::timeout(Duration::from_secs(60), answer).await {
-                    Ok(result) => result,
-                    Err(_) => Ok(if self.options.keep_partial {
-                        RecoveryChoice::Keep
-                    } else {
-                        RecoveryChoice::Discard
-                    }),
-                }
-            })
-            .await
-        } else {
-            Ok(if self.options.keep_partial {
-                RecoveryChoice::Keep
-            } else {
-                RecoveryChoice::Discard
-            })
-        }
     }
 
     async fn checkpoint(&self, gate: Gate) -> Result<(), Error> {

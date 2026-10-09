@@ -21,8 +21,6 @@ function typeInto(element, value) {
 
 const invocations = [];
 const output = {
-  complete: true,
-  missing: [],
   canvas: { width: 512, height: 512 },
   format: "png",
   disposition: "native-publication",
@@ -151,22 +149,25 @@ test("desktop failure preserves canonical refusal facts and diagnostic context",
   assert.equal(recent().width, 512);
   await act(async () =>
     invocation.reject({
-      kind: "no-usable-tiles",
-      transient: false,
-      failures: [
-        {
+      kind: "tile-failed",
+      tile: 0,
+      attempts: 1,
+      cause: {
+        kind: "resource",
+        request: "https://tiles.test/redirected/0.jpg?token=exact",
+        resource_kind: "tile",
+        source: {
           kind: "http-error",
           status: 403,
-          request: "https://tiles.test/redirected/0.jpg?token=exact",
           transport: "native",
           preview: "Sign in to see the collection",
           detail: "the source returned its signed-in challenge",
         },
-      ],
+      },
     }),
   );
   await tick();
-  assert.match(root.textContent, /could not be retrieved/);
+  assert.match(root.textContent, /refused to share/);
   assert.equal(root.querySelector("#dz-btn-try-again"), null);
   assert.equal(
     [...root.querySelectorAll(".dz-error-section button")].some((button) =>
@@ -178,7 +179,7 @@ test("desktop failure preserves canonical refusal facts and diagnostic context",
   assert.match(diagnostics, /https:\/\/tiles.test\/redirected\/0.jpg\?token=exact/);
   assert.match(diagnostics, /source returned its signed-in challenge/);
   assert.match(diagnostics, /Sign in to see the collection/);
-  assert.match(diagnostics, /kind=no-usable-tiles/);
+  assert.match(diagnostics, /kind=tile-failed/);
   assert.equal(recent().status, "failed");
   await reset();
   const count = invocations.length;
@@ -240,57 +241,38 @@ test("saved history renders during slow disk checks, opens the file after retire
   delete globalThis.desktopTestNative.inspectSavedOutput;
 });
 
-test("desktop partial actions honor retryability and retain a newer native question", async () => {
+test("desktop retry actions retain a newer native question", async () => {
   const invocation = await start();
-  const missing = (retryable) => ({
-    missing: [
-      {
-        tile: 3,
-        failures: [
-          { kind: "http-error", status: retryable ? 503 : 403, transport: "native", retryable },
-        ],
-      },
-    ],
-  });
-  act(() => invocation.callbacks.partial(1, missing(false)));
-  assert.equal(root.querySelectorAll("[data-dz-partial-decision]").length, 1);
-  assert.equal(root.querySelectorAll(".dz-partial-section").length, 1);
-  assert.equal(root.querySelector("[data-dz-partial-choice=retry]"), null);
-  assert.match(root.querySelector("[data-dz-partial-choice=keep]").textContent, /Keep/);
-  act(() => invocation.callbacks.partial(2, missing(true)));
-  click(root.querySelector("[data-dz-partial-choice=retry]"));
-  assert.equal(invocation.answers[0].question, 2);
+  const request = { tile: { index: 3 }, attempt: 4, requires_approval: true };
+  act(() => invocation.callbacks.retry(1, request));
+  assert.equal(root.querySelectorAll("[data-dz-retry-decision]").length, 1);
+  assert.equal(root.querySelectorAll(".dz-retry-section").length, 1);
+  click(root.querySelector("[data-dz-retry-choice=retry]"));
+  assert.equal(invocation.answers[0].question, 1);
   assert.equal(invocation.answers[0].choice, "retry");
-  act(() => invocation.callbacks.partial(3, missing(false)));
+  act(() => invocation.callbacks.retry(2, { ...request, attempt: 5 }));
   await act(async () => invocation.answers[0].resolve());
-  assert.ok(root.querySelector("[data-dz-partial-choice=keep]"));
-  click(root.querySelector("[data-dz-partial-choice=keep]"));
-  assert.equal(invocation.answers[1].question, 3);
-  assert.equal(invocation.answers[1].choice, "keep");
+  assert.ok(root.querySelector("[data-dz-retry-choice=cancel]"));
+  click(root.querySelector("[data-dz-retry-choice=cancel]"));
+  assert.equal(invocation.answers[1].question, 2);
+  assert.equal(invocation.answers[1].choice, "cancel");
   await act(async () => invocation.answers[1].resolve());
-  assert.equal(root.querySelector("[data-dz-partial-decision]"), null);
+  assert.equal(root.querySelector("[data-dz-retry-decision]"), null);
   await reset();
 });
 
-test("a late partial answer failure cannot replace the next invocation", async () => {
+test("a late retry answer failure cannot replace the next invocation", async () => {
   const first = await start();
-  act(() =>
-    first.callbacks.partial(1, {
-      missing: [{ tile: 3, failures: [{ kind: "network-failure", transport: "native" }] }],
-    }),
-  );
-  click(root.querySelector("[data-dz-partial-choice=discard]"));
+  const request = { tile: { index: 3 }, attempt: 4, requires_approval: true };
+  act(() => first.callbacks.retry(1, request));
+  click(root.querySelector("[data-dz-retry-choice=cancel]"));
   await reset();
   const second = await start();
   await act(async () => first.answers[0].reject({ kind: "interaction-expired" }));
   assert.equal(root.querySelector(".dz-error-section"), null);
   assert.ok(root.querySelector(".dz-job-section"));
-  act(() =>
-    second.callbacks.partial(2, {
-      missing: [{ tile: 1, failures: [{ kind: "decode-failed" }] }],
-    }),
-  );
-  assert.ok(root.querySelector("[data-dz-partial-choice=keep]"));
+  act(() => second.callbacks.retry(2, request));
+  assert.ok(root.querySelector("[data-dz-retry-choice=retry]"));
   await reset();
 });
 

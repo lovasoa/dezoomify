@@ -922,17 +922,17 @@ abbr[title] {
   white-space: nowrap;
 }
 
-.dz-partial-section {
+.dz-retry-section {
   text-align: left;
   overflow-wrap: anywhere;
 }
 
-.dz-partial-section h2 {
+.dz-retry-section h2 {
   margin: 0 0 1rem;
   white-space: normal;
 }
 
-.dz-partial-section p {
+.dz-retry-section p {
   margin: 0 0 1rem;
   font-variant-numeric: tabular-nums;
 }

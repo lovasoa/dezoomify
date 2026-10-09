@@ -20,7 +20,7 @@ Deferred catalog entries resolve within the invocation with bounded follows and 
 
 ## Retry and progress
 
-Acquisition bounds complete fetch/process/decode/place operations. A tile retains its identity across attempts, concurrent successes settle before partial output is decided, and a lazy plan does not allocate every tile URL in advance.
+Acquisition bounds complete fetch/process/decode/place operations. A tile retains its identity across attempts, successes remain acquired across retries, and a lazy plan does not allocate every tile URL in advance.
 
 Transient failures retry within the configured budget. Default exponential backoff starts at 1 s and caps at 30 s; an observed Retry-After is honored up to 300 s. Permanent failures, including HTTP 403, settle without retry. The shared algorithm owns retry classification and asks the Host to sleep.
 
@@ -32,8 +32,8 @@ Cancellation checkpoints apply to discovery and acquisition; acquisition checkpo
 
 Hosts abort actual operations and await owned decoding and output work during cleanup. Late browser completions cannot draw into a replacement image, and native cancellation cannot overwrite an existing output file.
 
-## Partial output and save
+## Recovery and save
 
-After every tile settles, missing tiles retain structured failure details. Retry resets the budget for missing tiles only and keeps acquired tiles. Keep saves a partial result; discard fails with the stable partial-discarded code. A job with no usable tiles fails rather than presenting empty partial output.
+Every required tile must succeed before finalization. Permanent tile failures and exhausted noninteractive retries fail with the tile identity, attempt count, and original cause. GUI invocations allow additional attempts marked as requiring approval. The Host awaits Retry or Cancel inside acquisition, pauses new work while waiting, and lets in-flight work settle. Approval grants one further attempt at that attempt number across tiles; successful tiles are retained. Cancellation must settle the awaiting acquisition so cleanup can finish.
 
 The algorithm awaits `host.finish` and returns its actual output disposition: native publication, browser save initiated, browser save ready, or display only. Ordinary image display never claims readable pixels or a programmatic save.

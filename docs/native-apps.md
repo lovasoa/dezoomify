@@ -33,7 +33,7 @@ Metadata selection follows final plan order, including reused probes. Compressio
 can start before selection finishes; PNG and JPEG attach the chosen metadata to
 staging without recompressing pixels.
 
-When changing tiled output, preserve compatible source bytes through the [encoded tile writer](../crates/dezoomify-native/src/tile_output.rs). Structural checks catch ordinary truncation without decoding; they do not promise detection of all compressed-data corruption. Convert tiles locally only when the output needs it, keeping failures within acquisition's retry and partial handling.
+When changing tiled output, preserve compatible source bytes through the [encoded tile writer](../crates/dezoomify-native/src/tile_output.rs). Structural checks catch ordinary truncation without decoding; they do not promise detection of all compressed-data corruption. Convert tiles locally only when the output needs it, keeping failures within acquisition's retry handling.
 
 When serving an IIIF directory, resolve its relative service identifier against the info.json URL. PNG-only output extends the [JPEG-required v2 profile](https://iiif.io/api/image/2.1/compliance/); configure the viewer to honor preferredFormats. With OpenSeadragon, use its IIIF `configure` method.
 
@@ -55,19 +55,17 @@ Native handles images beyond browser-tab size and local sources, within availabl
 
 Other extensions fail typed before any work. JPEG caps at 65535 px per side, WebP at 16383; larger canvases save as PNG, TIFF, ZIF, or `iiif-dir`. An `iiif-dir` holds a static `info.json`, JPEG or PNG tiles at real request paths (`{x},{y},{w},{h}/{tw},/0/default.{jpg,png}`), explicit-dimension aliases, and an overview at the smallest advertised full-image size. JPEG trees meet IIIF v2 level 0; PNG-only capabilities are described above. It is servable from a static file server. Directory publication refuses existing destinations, including overwrite requests, and uses atomic no-replace rename on supported platforms; existing trees remain intact.
 
-### Partial output
+### Retry approval
 
-Post-retry failures can save a gappy result at a `.partial` sibling (`out.png` → `out.partial.png`). The intended complete destination stays untouched. Retry acquires only missing tiles with a fresh budget and preserves good tiles. Discard writes nothing and reports `job.partial-discarded`; CLI reporting uses its public `tile.download-failed` code.
+CLI tile failures stop publication when the configured automatic retries are exhausted. Desktop tile acquisitions await Retry or Cancel before optional attempts; there is no automatic answer or incomplete save. Approval grants one further attempt at that attempt number across tiles, preserving successful acquisitions. Cancellation releases pending approval and awaits decoder and encoder cleanup.
 
-The CLI applies its configured partial policy immediately. The desktop awaits a user keep/discard/retry choice and applies the configured default after 60 seconds. Missing-tile details and partial naming remain visible in the result.
-
-An unresolved hole blocks its reader until Retry supplies pixels or Keep finalizes transparent/black holes. Discard, cancellation and producer failures wake the encoder. Encoder failures stop acquisition. Settlement awaits owned decoder and encoder work before removing staging. Tile acquisition counts and pixel preparation are reported separately; preparation continues while acquisition is paused, and Cancel remains available.
+An unresolved hole blocks its encoder reader until a retry supplies pixels. Finalization handles uncovered pixels in positioned layouts. Cancellation and producer failures wake the encoder, and encoder failures stop acquisition. Tile acquisition counts and pixel preparation are reported separately; preparation continues while acquisition is paused.
 
 ## Desktop
 
 Tauri owns the actual native tasks and saved-file handles. Its dezoomify call returns
 the shared algorithm's Output alongside an optional saved-file reference. Progress
-and awaited partial choices use generated values associated with the owning
+and awaited retry approvals use generated values associated with the owning
 invocation. Dedicated pause, resume, cancel, answer, and release calls control that task.
 
 The frontend subscribes before starting and waits for native registration before exposing task controls, so a quick cancel or replacement reaches the registered task. Retired tasks cannot update a replacement view. Releasing unfinished work cancels it; the invocation completes after cleanup. A completed result keeps its output handle until retirement, without deleting the published file.
@@ -83,8 +81,7 @@ attempts without a saved file prefill input without starting work. These referen
 outlive invocation resources and keep paths out of IPC. Persistence, availability
 checks, and opening run on workers: history must never delay rendering or job
 completion. A missing file shows Deleted; access errors remain distinct.
-Open/reveal from a completed result uses its registered published path, including
-a partial sibling; pending or failed actions belong to that result.
+Open/reveal from a completed result uses its registered published path; pending or failed actions belong to that result.
 
 ### Desktop updater
 
@@ -111,7 +108,7 @@ Finder layout and capture the installation window for review.
 
 ### Real-window E2E hook
 
-`cargo xtask test desktop --e2e-window` (display required; headless Linux uses Xvfb) builds fixtures, frontend, and the shell with the test-only `testing-webdriver` feature, then drives the real window over its embedded W3C WebDriver server (`tauri-plugin-wdio-webdriver`, no IPC commands, no capability entry). `specs/desktop.e2e.mjs` covers auto submit-to-save, cancellation, and kept partials as `.partial` siblings. No external driver needed; same lane on Linux, macOS, Windows. Output directory is a fail-closed temp dir set through the settings panel. Harness: `apps/desktop/tests/window-e2e/`.
+`cargo xtask test desktop --e2e-window` (display required; headless Linux uses Xvfb) builds fixtures, frontend, and the shell with the test-only `testing-webdriver` feature, then drives the real window over its embedded W3C WebDriver server (`tauri-plugin-wdio-webdriver`, no IPC commands, no capability entry). `specs/desktop.e2e.mjs` covers auto submit-to-save, cancellation, and corrupt tiles without publication. No external driver needed; same lane on Linux, macOS, Windows. Output directory is a fail-closed temp dir set through the settings panel. Harness: `apps/desktop/tests/window-e2e/`.
 
 ## CLI
 

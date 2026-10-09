@@ -2,7 +2,7 @@
 
 All four products call `dezoomify(inputs, options, host)`, one asynchronous Rust
 function. The core discovers images, chooses a level, downloads tiles, handles
-partial output, and awaits saving and cleanup. Hosts supply platform operations;
+retries, and awaits saving and cleanup. Hosts supply platform operations;
 they do not duplicate discovery, selection, or retry policy.
 See [Algorithm](algorithm.md) for that policy.
 
@@ -60,7 +60,7 @@ Completed previews remain available until retired.
 
 Desktop uses native task ownership across Tauri IPC; CLI awaits NativeHost
 directly. Published files survive retirement. UI drafts and expanded panels belong
-to presentation; selection, retry budgets, and partial-output policy belong to Rust.
+to presentation; selection, retry budgets, and backoff belong to Rust. Hosts await user approval inside optional tile acquisitions.
 
 ## Diagnostics
 

@@ -1,4 +1,9 @@
-import type { Error as JobError, MissingTiles, Output, Progress } from "@dezoomify/wasm-bindings";
+import type {
+  Error as JobError,
+  Output,
+  Progress,
+  TileAcquisition,
+} from "@dezoomify/wasm-bindings";
 import type { I18nKey } from "./i18n.ts";
 
 export interface ResolutionChoice {
@@ -27,7 +32,7 @@ export interface Presentation {
   paused: boolean;
   error?: JobError;
   output?: Output;
-  decision?: MissingTiles;
+  decision?: TileAcquisition;
   resolution?: ResolutionChoice;
 }
 

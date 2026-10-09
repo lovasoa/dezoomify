@@ -25,7 +25,6 @@ import { formats } from "../../../../test/support/formats.cjs";
 import {
   assertSavedPyramid,
   decodePngPixels,
-  decodePngSize,
   EXPECTED_HEIGHT,
   EXPECTED_WIDTH,
   pixelAt,
@@ -148,11 +147,6 @@ function assertPng(bytes) {
     const actual = pixelAt(decoded, ...center);
     assert.deepEqual(actual, expected, `${tile} center pixel`);
   }
-}
-
-function assertPngShape(bytes) {
-  const { width, height } = decodePngSize(bytes);
-  assert.deepEqual([width, height], [EXPECTED_WIDTH, EXPECTED_HEIGHT], "saved image dimensions");
 }
 
 async function readCompletedPng(outputDir, deadline) {
@@ -315,6 +309,12 @@ async function runChromiumJob(base, work, options = {}) {
     );
     const jobPage = await waitForJobPage(context);
     if (options.beforeCompletion) await options.beforeCompletion(jobPage);
+    if (options.expectFailure) {
+      await waitForVisible(jobPage, ".dz-error-section", "failed acquisition");
+      assert.equal(downloads.length, 0, "a failed acquisition publishes no download");
+      assert.equal(await jobPage.locator("[data-dz-retry-choice]").count(), 0);
+      return null;
+    }
     const download = await Promise.race([
       downloadReady,
       jobPage
@@ -665,23 +665,38 @@ test("chromium: optional host grant keeps the React job view mounted", {
   }
 });
 
-test("chromium: partial-output actions disappear after the terminal event", {
+test("chromium: exhausted retries pause once and approval saves the complete image", {
   timeout: 180000,
 }, async () => {
-  const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-partial-"));
+  const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-retry-"));
   try {
-    assertPngShape(
+    assertPng(
       await runChromiumJob(fixtureServer.base, work, {
-        scenario: "corrupt",
+        scenario: "retry",
         async beforeCompletion(jobPage) {
-          const keep = jobPage.locator("[data-dz-partial-choice=keep]");
-          await waitForVisible(jobPage, "[data-dz-partial-choice=keep]", "partial-output action");
-          await keep.click();
-          await waitForVisible(jobPage, ".dz-completed-section", "partial completion");
-          assert.equal(await jobPage.locator("[data-dz-partial-choice]").count(), 0);
+          await waitForVisible(jobPage, "[data-dz-retry-choice=retry]", "retry approval");
+          assert.equal(await jobPage.locator("[data-dz-retry-decision]").count(), 1);
+          assert.match(
+            await jobPage.locator(".dz-retry-section").innerText(),
+            /no file has been saved/,
+          );
+          await jobPage.locator("[data-dz-retry-choice=retry]").click();
+          await waitForVisible(jobPage, ".dz-completed-section", "complete save after approval");
+          assert.equal(await jobPage.locator("[data-dz-retry-choice]").count(), 0);
         },
       }),
     );
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("chromium: a corrupt tile fails without saving an incomplete image", {
+  timeout: 180000,
+}, async () => {
+  const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-corrupt-"));
+  try {
+    await runChromiumJob(fixtureServer.base, work, { scenario: "corrupt", expectFailure: true });
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

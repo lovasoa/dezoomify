@@ -1,5 +1,5 @@
 //! Native resources retained for a desktop invocation and its saved result.
-use dezoomify::model::{DiagnosticReport, Error, RecoveryChoice};
+use dezoomify::model::{DiagnosticReport, Error, RetryChoice};
 use dezoomify_native::{diagnostics::Diagnostics, Controls};
 use std::{
     collections::HashMap,
@@ -12,7 +12,7 @@ use std::{
 
 pub const CHANNEL_REGISTERED: &str = "dezoomify://registered";
 pub const CHANNEL_PROGRESS: &str = "dezoomify://progress";
-pub const CHANNEL_PARTIAL: &str = "dezoomify://partial";
+pub const CHANNEL_RETRY: &str = "dezoomify://retry";
 
 pub struct Registration {
     pub controls: Controls,
@@ -20,7 +20,7 @@ pub struct Registration {
     pub completed: AtomicBool,
     pub saved_path: Mutex<Option<PathBuf>>,
     next_question: AtomicU64,
-    partial: Mutex<Option<(u64, tokio::sync::oneshot::Sender<RecoveryChoice>)>>,
+    retry: Mutex<Option<(u64, tokio::sync::oneshot::Sender<RetryChoice>)>>,
 }
 
 impl Registration {
@@ -31,25 +31,19 @@ impl Registration {
             completed: AtomicBool::new(false),
             saved_path: Mutex::new(None),
             next_question: AtomicU64::new(0),
-            partial: Mutex::new(None),
+            retry: Mutex::new(None),
         }
     }
 
-    pub fn request_partial(&self) -> (u64, tokio::sync::oneshot::Receiver<RecoveryChoice>) {
+    pub fn request_retry(&self) -> (u64, tokio::sync::oneshot::Receiver<RetryChoice>) {
         let question = self.next_question.fetch_add(1, Ordering::SeqCst);
         let (send, receive) = tokio::sync::oneshot::channel();
-        *self
-            .partial
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = Some((question, send));
+        *self.retry.lock().unwrap_or_else(|error| error.into_inner()) = Some((question, send));
         (question, receive)
     }
 
-    pub fn answer_partial(&self, question: u64, answer: RecoveryChoice) -> Result<(), Error> {
-        let mut pending = self
-            .partial
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
+    pub fn answer_retry(&self, question: u64, answer: RetryChoice) -> Result<(), Error> {
+        let mut pending = self.retry.lock().unwrap_or_else(|error| error.into_inner());
         if !pending.as_ref().is_some_and(|(id, _)| *id == question) {
             return Err(Error::InteractionExpired);
         }
@@ -64,7 +58,7 @@ impl Registration {
             .saved_path
             .lock()
             .unwrap_or_else(|error| error.into_inner()) = path;
-        self.partial
+        self.retry
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .take();
@@ -203,15 +197,15 @@ mod tests {
     #[test]
     fn expired_interaction_cannot_answer_a_new_question() {
         let registration = Registration::new();
-        let (first, first_answer) = registration.request_partial();
+        let (first, first_answer) = registration.request_retry();
         drop(first_answer);
-        let (second, mut answer) = registration.request_partial();
+        let (second, mut answer) = registration.request_retry();
         assert!(registration
-            .answer_partial(first, RecoveryChoice::Discard)
+            .answer_retry(first, RetryChoice::Cancel)
             .is_err());
         registration
-            .answer_partial(second, RecoveryChoice::Keep)
+            .answer_retry(second, RetryChoice::Retry)
             .unwrap();
-        assert_eq!(answer.try_recv().unwrap(), RecoveryChoice::Keep);
+        assert_eq!(answer.try_recv().unwrap(), RetryChoice::Retry);
     }
 }

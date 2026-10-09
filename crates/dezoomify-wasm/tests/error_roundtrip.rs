@@ -54,13 +54,10 @@ fn host_thrown_objects_deserialize_into_the_same_enum() {
                 .into(),
         }
     );
-    // Aggregates carry their derived verdict and largest hint; the settled
-    // evidence lives in the job's `missing[]` collection and the diagnostics
-    // report, never one nested error per failed attempt.
+    // Exhaustion preserves attempt counts and the original structured cause.
     let thrown = serde_json::json!({
-        "kind": "no-usable-tiles",
-        "transient": true,
-        "retry_after_ms": 3_000,
+        "kind": "tile-failed", "tile": 2, "attempts": 4,
+        "cause": { "kind": "http-error", "status": 429, "retry_after_ms": 3_000, "transport": "native" },
     });
     let error: Error = serde_json::from_value(thrown).expect("deserializes");
     assert!(error.retryable(), "a transient aggregate invites retry");

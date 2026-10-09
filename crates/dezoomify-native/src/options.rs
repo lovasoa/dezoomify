@@ -33,7 +33,6 @@ pub struct JobOptions {
     /// Base retry wait (attempt `n` waits this doubled `n-1` times);
     /// algorithm-owned backoff, default 2 s to match the CLI default.
     pub retry_base_delay: Duration,
-    pub keep_partial: bool,
     pub compression: u8,
     pub headers: BTreeMap<String, String>,
     pub cache_dir: Option<PathBuf>,
@@ -71,7 +70,6 @@ impl Default for JobOptions {
             max_height: None,
             max_retries: 3,
             retry_base_delay: Duration::from_secs(2),
-            keep_partial: true,
             compression: 5,
             headers: BTreeMap::new(),
             cache_dir: None,

@@ -137,8 +137,7 @@ test("native completion opens saved output without browser save guidance", () =>
     presentOutput({
       disposition: "native-publication",
       format: "png",
-      complete: true,
-      missing: [],
+
       canvas: { width: 100, height: 80 },
     }),
     { ...callbacks, onOpenOutput() {}, onRevealOutput() {} },
@@ -241,7 +240,7 @@ test("idle product content renders between the URL input and recent pictures", (
   );
 });
 
-test("confirmed partial saves name the incomplete output and never offer another save", () => {
+test("confirmed saves name the output and never offer another save", () => {
   for (const disposition of ["native-publication", "browser-save-initiated"]) {
     const el = makeContainer();
     render(
@@ -249,13 +248,12 @@ test("confirmed partial saves name the incomplete output and never offer another
       presentOutput({
         disposition,
         format: "png",
-        complete: false,
-        missing: [1],
+
         canvas: { width: 100, height: 80 },
       }),
       callbacks,
     );
-    assert.equal(el.querySelector(".dz-completed-title").textContent, "Image saved with gaps");
+    assert.equal(el.querySelector(".dz-completed-title").textContent, "Image saved");
     assert.equal(el.querySelector("#dz-btn-save"), null);
     assertButtonsNamed(el, disposition);
   }
@@ -268,8 +266,7 @@ test("static accessibility contract: completed and display-only views keep every
     presentOutput({
       disposition: "browser-save-ready",
       format: "png",
-      complete: true,
-      missing: [],
+
       canvas: { width: 100, height: 80 },
     }),
     callbacks,
@@ -283,8 +280,7 @@ test("static accessibility contract: completed and display-only views keep every
     presentOutput({
       disposition: "display-only",
       format: "png",
-      complete: true,
-      missing: [],
+
       canvas: { width: 100, height: 80 },
     }),
     callbacks,

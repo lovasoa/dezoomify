@@ -9,13 +9,11 @@ import {
   causeOf,
   createHistory,
   detailOf,
-  formatMissingSummary,
   getLocale,
   HISTORY_KEY_DESKTOP,
   type HistoryEntry,
   isJobError,
   isValidInputUrl,
-  PartialDecisionActions,
   type Presentation,
   pickLocale,
   presentFailure,
@@ -23,6 +21,7 @@ import {
   presentOutput,
   presentProgress,
   presentStatus,
+  RetryDecisionActions,
   readInitialUrl,
   renderView,
   setLocale,
@@ -31,10 +30,10 @@ import {
 } from "@dezoomify/shared-ui";
 import type {
   Error as JobError,
-  MissingTiles,
   Output,
   Progress,
-  RecoveryChoice,
+  RetryChoice,
+  TileAcquisition,
 } from "@dezoomify/wasm-bindings";
 import { createElement } from "react";
 import {
@@ -76,7 +75,7 @@ function newAttempt() {
     activeHandle: null as NativeInvocation | null,
     progress: null as Progress | null,
     output: null as Output | null,
-    partial: null as { question: number; value: MissingTiles } | null,
+    retry: null as { question: number; value: TileAcquisition } | null,
     paused: false,
     localFailure: null as JobError | null,
     lastInputUrl: "",
@@ -269,7 +268,7 @@ function currentPresentation(): Presentation {
   const presentation = presentProgress(currentAttempt.progress, {
     paused: currentAttempt.paused,
   });
-  if (currentAttempt.partial) presentation.decision = currentAttempt.partial.value;
+  if (currentAttempt.retry) presentation.decision = currentAttempt.retry.value;
   return presentation;
 }
 
@@ -300,7 +299,7 @@ function retireActiveJob(): void {
   currentAttempt.activeHandle = null;
   currentAttempt.progress = null;
   currentAttempt.output = null;
-  currentAttempt.partial = null;
+  currentAttempt.retry = null;
   currentAttempt.localFailure = null;
   clearJobViewState();
   if (handle) void handle.dispose().catch(() => undefined);
@@ -339,9 +338,9 @@ function launchNativeJob(trimmed: string): void {
       touchProgress();
       update();
     },
-    partial(question, value) {
+    retry(question, value) {
       if (!owns(attempt) || attempt.settled) return;
-      attempt.partial = { question, value };
+      attempt.retry = { question, value };
       update();
     },
   })
@@ -358,7 +357,7 @@ function launchNativeJob(trimmed: string): void {
       if (!owns(attempt)) return;
       attempt.settled = true;
       attempt.output = output;
-      attempt.partial = null;
+      attempt.retry = null;
       stopHeartbeat();
       desktopHistory.complete(attempt.historyEntry, output, saved_output);
       update();
@@ -366,7 +365,7 @@ function launchNativeJob(trimmed: string): void {
     .catch((error: unknown) => {
       if (!owns(attempt)) return;
       attempt.settled = true;
-      attempt.partial = null;
+      attempt.retry = null;
       if (isJobError(error) && causeOf(error).kind === "cancelled") {
         desktopHistory.update(attempt.historyEntry, { status: "cancelled" });
         stopHeartbeat();
@@ -460,25 +459,25 @@ async function handleOpenOutput(attempt: DesktopAttempt, reveal: boolean): Promi
   }
 }
 
-function answerPartial(
+function answerRetry(
   attempt: DesktopAttempt,
-  partial: NonNullable<DesktopAttempt["partial"]>,
-  choice: RecoveryChoice,
+  retry: NonNullable<DesktopAttempt["retry"]>,
+  choice: RetryChoice,
 ): void {
   const handle = attempt.activeHandle;
-  if (!owns(attempt) || attempt.partial !== partial || !handle || isTerminalNow()) return;
-  void handle.answer(partial.question, choice).then(
+  if (!owns(attempt) || attempt.retry !== retry || !handle || isTerminalNow()) return;
+  void handle.answer(retry.question, choice).then(
     () => {
-      if (!owns(attempt) || attempt.partial !== partial) return;
-      attempt.partial = null;
+      if (!owns(attempt) || attempt.retry !== retry) return;
+      attempt.retry = null;
       touchProgress();
       update();
     },
     (error: unknown) => {
-      if (!owns(attempt) || attempt.partial !== partial) return;
+      if (!owns(attempt) || attempt.retry !== retry) return;
       failLocally({
         kind: "choice-failed",
-        detail: invokeDetail(error, t("desktop.invoke.partial")),
+        detail: invokeDetail(error, t("desktop.invoke.retry")),
       });
     },
   );
@@ -523,12 +522,8 @@ function ensureDesktopAuxPanel(): void {
   const presentation = currentPresentation();
   const doc = root.ownerDocument;
   doc.getElementById("dz-desktop-aux")?.remove();
-  const showPartialDone =
-    presentation.phase === "completed" &&
-    presentation.output !== undefined &&
-    presentation.output.missing.length > 0;
   const showCancelledNote = presentation.phase === "cancelled";
-  if (!showPartialDone && !showCancelledNote) return;
+  if (!showCancelledNote) return;
   const card = root.querySelector(".dz-card");
   if (!card) return;
 
@@ -537,34 +532,6 @@ function ensureDesktopAuxPanel(): void {
   aux.className = "dz-view-body dz-desktop-aux";
   aux.setAttribute("role", "region");
   aux.setAttribute("aria-label", t("desktop.panel.jobActions"));
-
-  if (showPartialDone) {
-    const completedMissing = (currentAttempt.output?.missing ?? []).map(String);
-    const doneBox = doc.createElement("div");
-    doneBox.className = "dz-partial-note";
-    doneBox.setAttribute("role", "status");
-    doneBox.setAttribute("aria-live", "polite");
-    const title = doc.createElement("h2");
-    title.className = "dz-notice-title";
-    title.textContent = t("desktop.done.partialTitle");
-    const desc = doc.createElement("p");
-    desc.className = "dz-notice-message";
-    const summary = formatMissingSummary(completedMissing, completedMissing.length);
-    desc.textContent = t("desktop.done.partialDesc", { summary });
-    doneBox.append(title, desc);
-    if (completedMissing.length > 0) {
-      const list = doc.createElement("p");
-      list.className = "dz-notice-message dz-missing-list";
-      const shown = completedMissing.slice(0, 20).join(", ");
-      const rest =
-        completedMissing.length > 20
-          ? t("desktop.rec.more", { n: completedMissing.length - 20 })
-          : "";
-      list.textContent = t("desktop.rec.missing", { shown, rest });
-      doneBox.appendChild(list);
-    }
-    aux.appendChild(doneBox);
-  }
 
   if (showCancelledNote) {
     const note = doc.createElement("p");
@@ -645,7 +612,7 @@ function update() {
   const presentation = currentPresentation();
   const refreshHistory = presentation.phase === "idle" && !historyVisible;
   historyVisible = presentation.phase === "idle";
-  const partial = presentation.decision ? attempt.partial : null;
+  const retry = presentation.decision ? attempt.retry : null;
   if (currentAttempt.viewCtx.jobActivity && presentation.phase === "job") {
     activity().now = Date.now();
   }
@@ -736,17 +703,11 @@ function update() {
             }),
           }
         : {}),
-      ...(partial
+      ...(retry
         ? {
-            after: createElement(PartialDecisionActions, {
-              key: `${attempt.activeHandle?.id}:${partial.question}`,
-              decision: partial.value,
-              onAnswer: (choice: RecoveryChoice) => answerPartial(attempt, partial, choice),
-              labels: {
-                keep: t("desktop.rec.keep"),
-                discard: t("desktop.rec.discard"),
-                retry: t("desktop.rec.retryTiles"),
-              },
+            after: createElement(RetryDecisionActions, {
+              key: `${attempt.activeHandle?.id}:${retry.question}`,
+              onAnswer: (choice: RetryChoice) => answerRetry(attempt, retry, choice),
             }),
           }
         : {}),

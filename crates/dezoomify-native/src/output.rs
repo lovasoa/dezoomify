@@ -466,30 +466,6 @@ pub fn validate_destination(
     Ok(())
 }
 
-/// Sibling path for a kept partial output: inserts `.partial` before the
-/// last extension when one exists (`out.png` becomes `out.partial.png`,
-/// `tiles.iiif` becomes `tiles.partial.iiif`), else appends `.partial`
-/// (`out` becomes `out.partial` for extensionless `iiif-dir` destinations).
-/// A kept partial stays distinguishable from complete success on disk;
-/// `--no-partial` writes nothing.
-#[must_use]
-pub(crate) fn partial_path_for(path: &Path) -> std::path::PathBuf {
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("");
-    let partial_name = match file_name.rsplit_once('.') {
-        Some((stem, ext)) if !stem.is_empty() && !ext.is_empty() => {
-            format!("{stem}.partial.{ext}")
-        }
-        _ => format!("{file_name}.partial"),
-    };
-    match path.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => parent.join(partial_name),
-        _ => std::path::PathBuf::from(partial_name),
-    }
-}
-
 fn output_exists() -> Error {
     Error::OutputExists
 }
@@ -617,32 +593,5 @@ mod tests {
         drop(staged);
         assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 2);
         std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn partial_path_inserts_partial_before_the_extension() {
-        assert_eq!(
-            partial_path_for(Path::new("out.png")),
-            std::path::PathBuf::from("out.partial.png"),
-        );
-        assert_eq!(
-            partial_path_for(Path::new("/tmp/a/out.jpg")),
-            std::path::PathBuf::from("/tmp/a/out.partial.jpg"),
-        );
-        assert_eq!(
-            partial_path_for(Path::new("tiles.iiif")),
-            std::path::PathBuf::from("tiles.partial.iiif"),
-        );
-        assert_eq!(
-            partial_path_for(Path::new("out")),
-            std::path::PathBuf::from("out.partial"),
-        );
-        // The partial sibling keeps its own encoder extension, so the output
-        // file name still selects the encoder on a later inspection.
-        assert_eq!(
-            crate::output::infer_from_path(&partial_path_for(Path::new("out.png")))
-                .expect("partial png still infers"),
-            OutputFormat::Png,
-        );
     }
 }

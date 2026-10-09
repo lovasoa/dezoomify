@@ -390,7 +390,6 @@ mod tests {
         assert_eq!(options.timeout, Duration::from_secs(30));
         assert_eq!(options.connect_timeout, Duration::from_secs(6));
         assert_eq!(options.max_idle_per_host, 32);
-        assert!(options.keep_partial);
     }
 
     #[test]

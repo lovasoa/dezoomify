@@ -16,8 +16,13 @@ export const fr = {
   "view.diagnostics.copyFailed": "Copie impossible. Sélectionnez et copiez les détails ci-dessous.",
   "view.diagnostics.loadFailed":
     "Le rapport complet est inaccessible. Les détails disponibles sont affichés ci-dessous.",
+  "view.retry.title": "Téléchargement en pause",
+  "view.retry.summary": "{done} fragments sur {total} ont été récupérés.",
+  "view.retry.explanation":
+    "Les tentatives automatiques ont échoué. Réessayez ou annulez ; aucun fichier n’a été enregistré.",
+  "view.retry.retry": "Réessayer une fois",
+  "view.retry.cancel": "Annuler",
   "desktop.done.title": "Image enregistrée",
-  "desktop.done.partial": "Image enregistrée avec des parties manquantes",
   "desktop.done.size": "{width} × {height} pixels",
   "desktop.done.saved": "Enregistrée dans le dossier choisi.",
   "desktop.done.open": "Ouvrir l’image",
@@ -27,21 +32,6 @@ export const fr = {
   "desktop.done.folderError":
     "Impossible d’ouvrir le dossier. Vérifiez qu’un gestionnaire de fichiers est installé.",
   "desktop.done.missingError": "L’image ou le dossier n’existe plus.",
-  "view.partial.title": "L’image est incomplète",
-  "view.partial.summary": "{done} fragments sur {total} ont été récupérés.",
-  "view.partial.gaps":
-    "L’image enregistrée aura des zones manquantes. Aucun fichier n’a encore été enregistré.",
-  "view.partial.refused":
-    "Le site a refusé les fragments restants. L’image enregistrée aura des zones manquantes.",
-  "view.partial.save": "Enregistrer l’image incomplète",
-  "view.partial.cancel": "Annuler",
-  "view.partial.retry": "Réessayer les fragments en échec",
-  "view.partial.accessDenied": "Le site a refusé l’accès à cette image",
-  "view.partial.empty": "L’image n’a pas pu être récupérée",
-  "view.partial.noneSaved":
-    "Aucune partie de l’image n’a pu être récupérée. Aucun fichier n’a été enregistré.",
-  "view.partial.checkSource": "Ouvrez la page source et vérifiez que sa visionneuse fonctionne.",
-  "view.partial.openSource": "Ouvrir la page source",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Compris",
   "view.modal.closeDialog": "Fermer la boîte de dialogue",
@@ -253,10 +243,8 @@ export const fr = {
     "Cette image ({dims}) est trop grande pour le JPEG, qui accepte au plus {jpegMax} pixels par côté. Enregistrez-la en PNG à la place. Depuis {host}.",
   "desktop.output.webpLimit":
     "Cette image ({dims}) est trop grande pour le WebP, qui accepte au plus {webpMax} pixels par côté. Enregistrez-la en PNG à la place. Depuis {host}.",
-  "desktop.tile.partialDiscarded":
-    "L’image partielle a été abandonnée, aucun fichier n’a été conservé. Réessayez depuis {host} avec une connexion stable.",
-  "desktop.tile.partialChoice":
-    "Certaines parties de cette image depuis {host} n’ont pas pu être enregistrées. Réessayez les parties manquées, ou conservez l’image partielle avec des zones vides.",
+  "desktop.tile.failed":
+    "Impossible de récupérer un fragment depuis {host}. Vérifiez l’image source et réessayez.",
   "view.discovery.none":
     "Aucune image zoomable trouvée à cette adresse. Essayez une page avec un visualiseur, ou essayez l’extension.",
   "desktop.plan.none":
@@ -274,20 +262,7 @@ export const fr = {
     "Un problème inattendu a interrompu cet enregistrement depuis {host}. Réessayez, et copiez les diagnostics si cela se reproduit.",
   "desktop.save.fallback": "Impossible d’enregistrer cette image depuis {host}. Réessayez.",
   "desktop.invoke.startFallback": "Impossible de démarrer la tâche.",
-  "desktop.invoke.partial": "Le choix d’image partielle a été refusé.",
-  "desktop.rec.missing": "Fragments manquants : {shown}{rest}.",
-  "desktop.rec.more": " et {n} de plus",
-  "desktop.rec.keep": "Conserver l’image partielle",
-  "desktop.rec.discard": "Abandonner la partie",
-  "desktop.rec.retryTiles": "Réessayer les fragments manqués",
-  "desktop.rec.missingSome": "Certains fragments n’ont pas pu être enregistrés.",
-  "desktop.rec.missingCount": "Impossible d’enregistrer {count} fragments.",
-  "desktop.rec.missingOne": "Impossible d’enregistrer {count} fragment.",
-  "desktop.rec.missingList": "{n} fragments manquants : {shown}{rest}.",
-  "desktop.rec.missingOneList": "{n} fragment manquant : {shown}{rest}.",
-  "desktop.done.partialTitle": "Image partielle enregistrée",
-  "desktop.done.partialDesc":
-    "Ce fichier est marqué comme partiel : {summary} Les zones manquantes restent vides. Cela le distingue d’un enregistrement complet.",
+  "desktop.invoke.retry": "Le choix de nouvelle tentative a été refusé.",
   "desktop.cancel.note":
     "Enregistrement annulé. Le nettoyage est terminé et tout fichier inachevé a été supprimé.",
   "desktop.copy.diagnostics": "Copier les diagnostics",
@@ -363,7 +338,7 @@ export const fr = {
   "desktop.advanced.height": "Hauteur",
   "desktop.advanced.retries": "Essais",
   "desktop.advanced.retriesDesc":
-    "Réessayer les fragments échoués avant de conserver un résultat partiel.",
+    "Tentatives automatiques avant de proposer de réessayer une fois.",
   "desktop.advanced.resumeCache": "Cache de reprise",
   "desktop.advanced.resumeCacheDesc":
     "Réutiliser les fragments après un enregistrement interrompu.",

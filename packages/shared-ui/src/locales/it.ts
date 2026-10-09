@@ -16,8 +16,13 @@ export const it = {
   "view.diagnostics.copyFailed": "Copia non riuscita. Seleziona e copia i dettagli qui sotto.",
   "view.diagnostics.loadFailed":
     "Impossibile leggere il rapporto completo. I dettagli disponibili sono mostrati qui sotto.",
+  "view.retry.title": "Download in pausa",
+  "view.retry.summary": "Sono stati recuperati {done} frammenti su {total}.",
+  "view.retry.explanation":
+    "I tentativi automatici sono esauriti. Riprova o annulla; nessun file è stato salvato.",
+  "view.retry.retry": "Riprova una volta",
+  "view.retry.cancel": "Annulla",
   "desktop.done.title": "Immagine salvata",
-  "desktop.done.partial": "Immagine salvata con parti mancanti",
   "desktop.done.size": "{width} × {height} pixel",
   "desktop.done.saved": "Salvata nella cartella scelta.",
   "desktop.done.open": "Apri immagine",
@@ -27,22 +32,6 @@ export const it = {
   "desktop.done.folderError":
     "Impossibile aprire la cartella. Verifica che sia installato un gestore di file.",
   "desktop.done.missingError": "L’immagine o la cartella non esiste più.",
-  "view.partial.title": "L’immagine è incompleta",
-  "view.partial.summary": "Sono stati recuperati {done} frammenti su {total}.",
-  "view.partial.gaps":
-    "L’immagine salvata avrà parti mancanti. Nessun file è stato ancora salvato.",
-  "view.partial.refused":
-    "Il sito ha rifiutato i frammenti rimanenti. L’immagine salvata avrà parti mancanti.",
-  "view.partial.save": "Salva immagine incompleta",
-  "view.partial.cancel": "Annulla",
-  "view.partial.retry": "Riprova i frammenti non riusciti",
-  "view.partial.accessDenied": "Il sito ha rifiutato l’accesso a questa immagine",
-  "view.partial.empty": "Impossibile recuperare l’immagine",
-  "view.partial.noneSaved":
-    "Nessuna parte dell’immagine è stata recuperata. Nessun file è stato salvato.",
-  "view.partial.checkSource":
-    "Apri la pagina di origine e verifica che il suo visualizzatore funzioni.",
-  "view.partial.openSource": "Apri pagina di origine",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Capito",
   "view.modal.closeDialog": "Chiudi la finestra",
@@ -251,10 +240,8 @@ export const it = {
     "Questa immagine ({dims}) è troppo grande per il JPEG, che accetta al più {jpegMax} pixel per lato. Salvala invece come PNG. Da {host}.",
   "desktop.output.webpLimit":
     "Questa immagine ({dims}) è troppo grande per il WebP, che accetta al più {webpMax} pixel per lato. Salvala invece come PNG. Da {host}.",
-  "desktop.tile.partialDiscarded":
-    "L’immagine parziale è stata scartata, nessun file conservato. Riprova da {host} con una connessione stabile.",
-  "desktop.tile.partialChoice":
-    "Alcune parti di questa immagine da {host} non si sono potute salvare. Riprova le parti mancanti, oppure conserva l’immagine parziale con aree vuote.",
+  "desktop.tile.failed":
+    "Impossibile recuperare un frammento da {host}. Controlla l’immagine originale e riprova.",
   "view.discovery.none":
     "Nessuna immagine zoomabile trovata a questo indirizzo. Prova una pagina con un visualizzatore o l’estensione del browser.",
   "desktop.plan.none":
@@ -272,20 +259,7 @@ export const it = {
     "Un problema imprevisto ha interrotto questo salvataggio da {host}. Riprova e copia la diagnostica se ricapita.",
   "desktop.save.fallback": "Impossibile salvare questa immagine da {host}. Riprova.",
   "desktop.invoke.startFallback": "Impossibile avviare l’attività.",
-  "desktop.invoke.partial": "La scelta di immagine parziale è stata rifiutata.",
-  "desktop.rec.missing": "Frammenti mancanti: {shown}{rest}.",
-  "desktop.rec.more": " e altri {n}",
-  "desktop.rec.keep": "Conserva l’immagine parziale",
-  "desktop.rec.discard": "Scarta la parziale",
-  "desktop.rec.retryTiles": "Riprova i frammenti mancanti",
-  "desktop.rec.missingSome": "Alcuni frammenti non si sono potuti salvare.",
-  "desktop.rec.missingCount": "Impossibile salvare {count} frammenti.",
-  "desktop.rec.missingOne": "Impossibile salvare {count} frammento.",
-  "desktop.rec.missingList": "{n} frammenti mancanti: {shown}{rest}.",
-  "desktop.rec.missingOneList": "{n} frammento mancante: {shown}{rest}.",
-  "desktop.done.partialTitle": "Immagine parziale salvata",
-  "desktop.done.partialDesc":
-    "Questo file è marcato come parziale: {summary} Le aree mancanti restano vuote. Questo lo distingue da un salvataggio completo.",
+  "desktop.invoke.retry": "La scelta di riprovare è stata rifiutata.",
   "desktop.cancel.note": "Salvataggio annullato. Pulizia fatta e ogni file incompleto rimosso.",
   "desktop.copy.diagnostics": "Copia la diagnostica",
   "desktop.copy.copied": "Copiata!",
@@ -358,8 +332,7 @@ export const it = {
   "desktop.advanced.width": "Larghezza",
   "desktop.advanced.height": "Altezza",
   "desktop.advanced.retries": "Tentativi",
-  "desktop.advanced.retriesDesc":
-    "Riprova i frammenti non riusciti prima di conservare un risultato parziale.",
+  "desktop.advanced.retriesDesc": "Tentativi automatici prima di chiedere se riprovare una volta.",
   "desktop.advanced.resumeCache": "Cache di ripresa",
   "desktop.advanced.resumeCacheDesc": "Riutilizza i frammenti dopo un salvataggio interrotto.",
   "desktop.advanced.choose": "Scegli…",

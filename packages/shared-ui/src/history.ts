@@ -334,12 +334,7 @@ export function createHistory(
     },
     complete(entry: HistoryEntry | null, output: Output, savedOutput?: SavedOutput | null): void {
       update(entry, {
-        status:
-          output.disposition === "display-only"
-            ? "preview"
-            : output.missing.length === 0
-              ? "completed"
-              : "partial",
+        status: output.disposition === "display-only" ? "preview" : "completed",
         ...(output.canvas ? { width: output.canvas.width, height: output.canvas.height } : {}),
         format: output.format,
         ...(savedOutput ? { savedOutput } : {}),

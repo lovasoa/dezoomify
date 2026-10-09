@@ -57,7 +57,6 @@ const app = createBrowserApplication({
   product: "extension",
   version: api.runtime.getManifest().version,
   wasm: () => wasm,
-  partial: "prompt",
   openSource: () => {
     if (sourceTabId !== null) void api.tabs.update(sourceTabId, { active: true });
   },

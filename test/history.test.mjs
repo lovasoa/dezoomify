@@ -139,7 +139,6 @@ test("history completion and removal preserve other entries and never resurrect 
     disposition: "browser-save-ready",
     format: "png",
     canvas: { width: 100, height: 80 },
-    missing: [],
   };
   history.complete(second, output);
   assert.equal(history.entries()[0].status, "completed");
@@ -159,7 +158,6 @@ const diskOutput = {
   disposition: "native-publication",
   format: "png",
   canvas: { width: 100, height: 80 },
-  missing: [],
 };
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 

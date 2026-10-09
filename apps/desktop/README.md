@@ -13,7 +13,7 @@ file actions, and per-user `dezoomify://` protocol-handler registration.
   automatic updates are disabled, so check GitHub Releases manually.
 
 The Tauri entry point awaits `dezoomify::dezoomify` with NativeHost. IPC carries
-progress, pending partial choices, and the returned output; image bytes stay
+progress, pending retry approvals, and the returned output; image bytes stay
 native. Tests: `cargo xtask test desktop`.
 
 `node scripts/generate-desktop-capabilities.mjs` derives permission manifests
@@ -37,8 +37,8 @@ The lane builds the frontend, fixture server, and window shell (features
 `tauri,testing-webdriver`), stages lane-private copies, then runs
 `node --test specs/desktop.e2e.mjs`. The spec
 covers the user-visible journeys: automatic submit/save to an isolated output
-directory versus the `native/cli-dzi` golden, cancellation with no output, and a kept partial
-published to a `.partial` sibling. The harness configures the existing
+directory versus the `native/cli-dzi` golden, cancellation with no output, and corrupt tiles
+without publication. The harness configures the existing
 output-directory setting to an isolated temporary folder through the rendered
 settings panel, so generated filenames remain discoverable on every supported
 host. Inputs stay fixed.

@@ -7,7 +7,7 @@ import { flushSync } from "react-dom";
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
 import type { JobActivity } from "./activity.ts";
-import { canRetry, httpStatusOf, plainMessageFor } from "./failure.ts";
+import { canRetry, plainMessageFor } from "./failure.ts";
 import { HistorySection } from "./history-view.tsx";
 import type { Presentation, ResolutionChoice } from "./presentation.ts";
 import { displaySourceUrl, formatPixelCount, hostFromUrl } from "./view-helpers.ts";
@@ -373,22 +373,15 @@ function JobView({
 }) {
   const d = deriveJob(presentation, ctx);
   if (presentation.decision) {
-    const missing = presentation.decision?.missing ?? [];
-    const refused =
-      missing.length > 0 &&
-      missing.every(({ failures }) => {
-        const failure = failures.at(-1);
-        const status = failure ? httpStatusOf(failure) : undefined;
-        return status === 401 || status === 403;
-      });
     return (
-      <section className="dz-view-body dz-partial-section" aria-labelledby="dz-partial-title">
-        <h2 id="dz-partial-title">{t("view.partial.title")}</h2>
-        <p>{t("view.partial.summary", { done: d.current, total: d.total })}</p>
-        <p>{t(refused ? "view.partial.refused" : "view.partial.gaps")}</p>
+      <section className="dz-view-body dz-retry-section" aria-labelledby="dz-retry-title">
+        <h2 id="dz-retry-title">{t("view.retry.title")}</h2>
+        <p>{t("view.retry.summary", { done: d.current, total: d.total })}</p>
+        <p>{t("view.retry.explanation")}</p>
       </section>
     );
   }
+
   const acquisitionControls = presentation.headlineKey !== "view.step.saving";
   const showPause = acquisitionControls && !d.paused && typeof callbacks.onPause === "function";
   const showResume = acquisitionControls && d.paused && typeof callbacks.onResume === "function";
@@ -602,9 +595,7 @@ function CompletedView({
   const saved =
     output?.disposition === "native-publication" ||
     output?.disposition === "browser-save-initiated";
-  const title = saved
-    ? t(output.missing.length === 0 ? "desktop.done.title" : "desktop.done.partial")
-    : t("view.done.readyTitle");
+  const title = saved ? t("desktop.done.title") : t("view.done.readyTitle");
   const summary = saved
     ? canvas
       ? t("desktop.done.size", { width: canvas.width, height: canvas.height })
@@ -731,34 +722,6 @@ function FailedView({
       : typeof ctx?.jobActivity?.url === "string"
         ? ctx.jobActivity.url
         : "";
-  if (error.kind === "no-usable-tiles") {
-    const status = httpStatusOf(error);
-    const refused = status === 401 || status === 403;
-    return (
-      <section className="dz-view-body dz-error-section">
-        <h2>{t(refused ? "view.partial.accessDenied" : "view.partial.empty")}</h2>
-        <p>{t("view.partial.noneSaved")}</p>
-        {callbacks.onOpenSource ? <p>{t("view.partial.checkSource")}</p> : null}
-        <div className="dz-actions-row">
-          {callbacks.onOpenSource ? (
-            <button type="button" className="dz-btn-tactile" onClick={callbacks.onOpenSource}>
-              {t("view.partial.openSource")}
-            </button>
-          ) : null}
-          {canRetry(error) && callbacks.onRetrySameUrl ? (
-            <button type="button" className="dz-btn-secondary" onClick={callbacks.onRetrySameUrl}>
-              {t("view.fail.retry")}
-            </button>
-          ) : null}
-          {callbacks.onReset ? (
-            <button type="button" className="dz-btn-secondary" onClick={callbacks.onReset}>
-              {t("view.display.startOver")}
-            </button>
-          ) : null}
-        </div>
-      </section>
-    );
-  }
   return (
     <div className="dz-view-body dz-error-section dz-fade-in">
       <div className="dz-error-header">

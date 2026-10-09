@@ -57,8 +57,6 @@ The app saves the image automatically in that folder. When **Image saved**
 appears, use **Open image** to open it with your usual image viewer, or
 **Show in folder** to find it in your file manager. There is no second save
 step. Settings do not appear on the finished image screen.
-If some parts could not be retrieved, the app labels the image as saved with
-gaps; the open actions use that partial file.
 If opening fails, each attempt shows its own error. **Technical details &
 logs → Copy diagnostics** includes the failed action and its error kind.
 You can still open the containing folder if the image has been moved.
@@ -150,12 +148,11 @@ default 5 means 95); TIFF stays lossless at every level.
 Each save writes exactly one output. If the derived name already exists, the
 app adds a numeric suffix rather than replacing the existing file.
 
-If some tiles cannot be fetched, the app still writes what it got: the kept
-output lands next to the derived name with `.partial` inserted before the
-extension (`photo.png` becomes `photo.partial.png`), and the chosen name
-itself stays untouched, so a partial file never masquerades as the complete
-save. Run the job again with the same resume folder to reuse already-saved
-tiles; see [resuming an interrupted save](#resuming-an-interrupted-save).
+The app saves only after every required tile has been retrieved. If automatic
+retries are exhausted, the download pauses and offers **Retry once more** or
+**Cancel**. Retrying retains successfully downloaded tiles. Cancelling publishes
+no image. You can also restart with the same resume folder to reuse cached tiles;
+see [resuming an interrupted save](#resuming-an-interrupted-save).
 
 ## Settings
 
@@ -168,9 +165,8 @@ choice.
 
 ## If a save fails
 
-A failed save says what went wrong and whether retrying can help. Partially
-fetched saves need no decision from you: they are kept automatically as the
-`.partial` file described above.
+A failed save says what went wrong and whether retrying can help. Permanent
+tile failures stop the job without saving an incomplete image.
 
 ## Next steps
 

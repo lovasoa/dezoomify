@@ -43,7 +43,7 @@ fn diagnostic_budget_protects_problem_samples_and_terminal() {
         d.record(Level::Warn, "request", json!({"http":403,"tile":i}));
         d.record(Level::Debug, "sample", json!({"text":"界".repeat(2000)}));
     }
-    d.finish("failed", json!({"code":"job.no-usable-tiles"}));
+    d.finish("failed", json!({"code":"tile-failed"}));
     d.finish("retired", json!({}));
     let report = d.report();
     let context = serde_json::to_value(&report.context).unwrap();

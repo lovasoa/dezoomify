@@ -102,8 +102,13 @@ const en = {
   "view.diagnostics.copyFailed": "Could not copy. Select and copy the details below.",
   "view.diagnostics.loadFailed":
     "Could not read the full report. The available details are shown below.",
+  "view.retry.title": "Download paused",
+  "view.retry.summary": "{done} of {total} tiles were retrieved.",
+  "view.retry.explanation":
+    "Automatic retries were exhausted. Retry once more or cancel; no file has been saved.",
+  "view.retry.retry": "Retry once more",
+  "view.retry.cancel": "Cancel",
   "desktop.done.title": "Image saved",
-  "desktop.done.partial": "Image saved with gaps",
   "desktop.done.size": "{width} × {height} pixels",
   "desktop.done.saved": "Saved in your chosen folder.",
   "desktop.done.open": "Open image",
@@ -325,10 +330,8 @@ const en = {
     "This picture ({dims}) is too large for JPEG, which allows at most {jpegMax} pixels per side. Save it as PNG instead. From {host}.",
   "desktop.output.webpLimit":
     "This picture ({dims}) is too large for WebP, which allows at most {webpMax} pixels per side. Save it as PNG instead. From {host}.",
-  "desktop.tile.partialDiscarded":
-    "The partial picture was discarded so no file was kept. Try again from {host} with a steady connection.",
-  "desktop.tile.partialChoice":
-    "Some pieces of this picture from {host} could not be saved. Retry the failed pieces, or keep the partial picture with blank areas.",
+  "desktop.tile.failed":
+    "Could not retrieve a tile from {host}. Check the source image and try again.",
   "view.discovery.none":
     "No zoomable image was found at this address. Try a page that contains a zoom viewer, or try the browser extension.",
   "desktop.plan.none":
@@ -344,33 +347,7 @@ const en = {
     "Something unexpected stopped this save from {host}. Try again, and copy diagnostics if it keeps happening.",
   "desktop.save.fallback": "Could not save this picture from {host}. Try again.",
   "desktop.invoke.startFallback": "Could not start the job.",
-  "desktop.invoke.partial": "The partial-image choice was rejected.",
-  "desktop.rec.missing": "Missing tiles: {shown}{rest}.",
-  "desktop.rec.more": " and {n} more",
-  "desktop.rec.keep": "Keep partial image",
-  "desktop.rec.discard": "Discard partial",
-  "desktop.rec.retryTiles": "Retry failed tiles",
-  "view.partial.title": "The image is incomplete",
-  "view.partial.summary": "{done} of {total} tiles were retrieved.",
-  "view.partial.gaps": "The saved image will have gaps. No file has been saved yet.",
-  "view.partial.refused":
-    "The website refused the remaining tiles. The saved image will have gaps.",
-  "view.partial.save": "Save incomplete image",
-  "view.partial.cancel": "Cancel",
-  "view.partial.retry": "Retry failed tiles",
-  "view.partial.accessDenied": "The website refused access to this image",
-  "view.partial.empty": "The image could not be retrieved",
-  "view.partial.noneSaved": "None of the image could be retrieved. No file was saved.",
-  "view.partial.checkSource": "Open the source page and check that its image viewer works.",
-  "view.partial.openSource": "Open source page",
-  "desktop.rec.missingSome": "Some tiles could not be saved.",
-  "desktop.rec.missingCount": "Could not save {count} fragments.",
-  "desktop.rec.missingOne": "Could not save {count} fragment.",
-  "desktop.rec.missingList": "{n} missing fragments: {shown}{rest}.",
-  "desktop.rec.missingOneList": "{n} missing fragment: {shown}{rest}.",
-  "desktop.done.partialTitle": "Partial image saved",
-  "desktop.done.partialDesc":
-    "This file is marked as partial: {summary} Missing areas are left blank. This distinguishes it from a complete save.",
+  "desktop.invoke.retry": "The retry choice was rejected.",
   "desktop.cancel.note": "Save cancelled. Cleanup is done and any unfinished file was removed.",
   "desktop.copy.diagnostics": "Copy diagnostics",
   "desktop.copy.copied": "Copied!",
@@ -442,7 +419,7 @@ const en = {
   "desktop.advanced.width": "Width",
   "desktop.advanced.height": "Height",
   "desktop.advanced.retries": "Retries",
-  "desktop.advanced.retriesDesc": "Try failed image tiles again before keeping a partial result.",
+  "desktop.advanced.retriesDesc": "Automatic retries before asking whether to retry once more.",
   "desktop.advanced.resumeCache": "Resume cache",
   "desktop.advanced.resumeCacheDesc": "Reuse tiles after an interrupted save.",
   "desktop.advanced.choose": "Choose…",

@@ -5,13 +5,14 @@ import {
   type HistoryEntry,
   type HistoryStore,
   isValidInputUrl,
-  PartialDecisionActions,
   type Presentation,
   presentFailure,
   presentIdle,
   presentOutput,
   presentProgress,
   presentStatus,
+  RetryApproval,
+  RetryDecisionActions,
   renderView,
   type ViewContext,
 } from "@dezoomify/shared-ui";
@@ -19,11 +20,10 @@ import type {
   ErrorTransport,
   Error as JobError,
   JobInput,
-  MissingTiles,
-  Options,
   Output,
   Progress,
-  RecoveryChoice,
+  RetryChoice,
+  TileAcquisition,
 } from "@dezoomify/wasm-bindings";
 import { createElement } from "react";
 import { isJobError, unknownDetail } from "../../shared-ui/src/failure.ts";
@@ -83,7 +83,6 @@ export interface BrowserApplicationOptions {
   version?: string;
   wasm(): Promise<WasmModule>;
   capabilities(context: BrowserApplicationContext): BrowserCapabilities;
-  partial: Options["partial"];
   history?: { store: HistoryStore; key: string };
   resetToIdle?: boolean;
   onStart?(url: string): void;
@@ -121,7 +120,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       output: undefined as Output | undefined,
       failure: undefined as JobError | undefined,
       decision: undefined as
-        | { missing: MissingTiles; answer(choice: RecoveryChoice): void }
+        | { request: TileAcquisition; answer(choice: RetryChoice): void }
         | undefined,
       permission: undefined as PermissionWait | undefined,
       done: false,
@@ -148,8 +147,8 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         })
       : presentStatus("discovering");
     if (a.decision) {
-      view.decision = a.decision.missing;
-      view.headlineKey = "view.partial.title";
+      view.decision = a.decision.request;
+      view.headlineKey = "view.retry.title";
     }
     return view;
   }
@@ -234,6 +233,22 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
           }
         },
       });
+      const approval = new RetryApproval((request) => {
+        a.host?.waitForRetry(request !== undefined);
+        a.decision = request
+          ? {
+              request,
+              answer(choice) {
+                if (current !== a || a.controller.signal.aborted) return;
+                a.diagnostics.record("info", "retry-answer", { choice });
+                if (choice === "retry") approval.retry();
+                else cancel();
+              },
+            }
+          : undefined;
+        update();
+      });
+      a.controller.signal.addEventListener("abort", () => approval.cancel(), { once: true });
       a.host = new BrowserHost({
         signal: a.controller.signal,
         diagnostics: a.diagnostics,
@@ -250,27 +265,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
           }
         },
         transport: () => capabilities.transport(),
-        choosePartial: async (missing, signal) => {
-          signal.throwIfAborted();
-          const hinted = await withVerdictMissing(missing);
-          signal.throwIfAborted();
-          return new Promise((resolve, reject) => {
-            const abort = () => reject(signal.reason);
-            signal.addEventListener("abort", abort, { once: true });
-            a.decision = {
-              missing: hinted,
-              answer(choice) {
-                if (current !== a || signal.aborted) return;
-                signal.removeEventListener("abort", abort);
-                a.decision = undefined;
-                a.diagnostics.record("info", "partial-answer", { choice });
-                resolve(choice);
-                update();
-              },
-            };
-            update();
-          });
-        },
+        approveRetry: (request) => approval.acquire(request),
       });
       const limits = maximum
         ? MAXIMUM_SELECTION_LIMITS
@@ -285,7 +280,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
             max_height: limits.maxHeight,
             max_area: limits.maxArea,
           },
-          partial: options.partial,
+          interactive_retries: true,
           output: "png",
           max_concurrent: BROWSER_MAX_CONCURRENCY,
           max_tiles: BROWSER_MAX_PLAN_TILES,
@@ -299,10 +294,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       a.controller.signal.throwIfAborted();
       if (current !== a) return;
       a.output = output;
-      a.diagnostics.finish(
-        a.output.missing.length === 0 ? "completed" : "partial-completed",
-        a.output,
-      );
+      a.diagnostics.finish("completed", a.output);
       history.complete(a.historyEntry, a.output);
       options.onComplete?.(a.output);
     } catch (error) {
@@ -336,14 +328,6 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       // No verdict: the hint stays absent and retry fails closed.
     }
     return error;
-  }
-
-  /** `withVerdict` across every retained failure of a partial decision. */
-  async function withVerdictMissing(missing: MissingTiles): Promise<MissingTiles> {
-    await Promise.all(
-      missing.missing.flatMap((tile) => tile.failures.map((failure) => withVerdict(failure))),
-    );
-    return missing;
   }
 
   function submit(url: string): void {
@@ -449,8 +433,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
           : {}),
         ...(a?.decision && !a.permission
           ? {
-              after: createElement(PartialDecisionActions, {
-                decision: a.decision.missing,
+              after: createElement(RetryDecisionActions, {
                 onAnswer: a.decision.answer,
               }),
             }
