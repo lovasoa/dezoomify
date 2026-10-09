@@ -1,48 +1,19 @@
-# Shared UI Guidelines
+# Shared UI
 
-Follow the root [documentation rule](../../AGENTS.md#documentation). Keep user
-guidance in `docs/user/`; UI changes need doc edits only when existing guidance
-becomes misleading. Do not add a design or behavior page for each component.
+Follow the root [documentation rule](../../AGENTS.md#documentation).
 
-## Visual Identity & Design System
-
-Retain Dezoomify's authentic parchment aesthetic, wide proportions, and distinctive tactile controls tailored to an audience of art historians, archivists, museum researchers, and cultural heritage enthusiasts:
-
-1. **Logo & Heritage:**
-   - Use the blue-tile Dezoomify logo from the canonical `../../favicon.svg`: blue tile quadrants (`#4197a6`), a blue gradient magnifying glass, and its translucent lens. Render it as native SVG markup, never injected HTML.
-   - Pair with clean navigation buttons (`Browser Extension`, `Desktop App`), right-anchored `Help`, and bold `Donate`. Do not link to obsolete legacy external sites or duplicate links in the bottom footer.
-
-2. **Colors & Atmosphere (No Sci-Fi / LLM Smell):**
-   - Light Mode: Page background is cool off-white `#fcfeff`. Surface card and navigation use the signature warm parchment gradient `linear-gradient(180deg, #f7eded 0%, #f7eeee 100%)` with warm slate border `1px solid #a19797` and natural warm drop shadow `0 4px 20px rgba(130, 115, 110, 0.12)`.
-   - Dark Mode: Night gallery / archivist atelier palette. Warm charcoal background `#181615` (never cold blue-black), warm dark walnut/parchment surface `linear-gradient(180deg, #252220 0%, #1e1c1a 100%)`, warm stone border `1px solid #3f3935`, and natural dark shadow. Avoid cold space-terminal voids or neon halos.
-   - Link colors: scholarly sapphire `#1d4ed8` in light mode; archival olive/sage green `#acaf50` in dark mode.
-   - Primary button: tactile beveled parchment `linear-gradient(180deg, #fffafa 0%, #dfd8d8 100%)` in light mode; tactile dark bronze `linear-gradient(180deg, #332e2a 0%, #25211e 100%)` in dark mode.
-   - Interactive focus: crisp architectural focus ring `0 0 0 2px rgba(...)`, never blurry neon halos.
-
-3. **Forbidden Pills & Architectural Geometry:**
-   - "Pills" in the UI are strictly forbidden. Progress bars, tracks, badges, clear buttons, and modal step indicators use crisp architectural geometry (`border-radius: var(--dz-radius)`, 3–4px), never `9999px` or bubble pills.
-
-4. **Zero Nested Boxes (Breathable Layout):**
-   - Eliminate nested container syndrome (no box inside a box inside a box). The status card is the single surface container.
-   - In error, display-only, and completed states, content flows directly within the card with generous vertical rhythm and whitespace.
-   - Guidance paths (Extension, Desktop, FAQ) render as an open, breathable typographic grid without heavy bordered card containers.
-
-5. **Spacious Proportions & Input Visibility:**
-   - The status card must be spacious (`max-width: 960px` or `width: min(92%, 960px)`).
-   - The URL input field must be full-width (`width: 100%`) with `3.25rem` (52px) height and `1.05rem` font size, accommodating 100–250+ character URLs from IIIF manifests and digital collections without horizontal truncation.
-
-6. **Automatic Format Detection:**
-   - Display a serene, uncluttered default view: full-width input and the centered primary `Dezoomify !` button.
-   - The Rust algorithm detects the image format automatically; the UI offers no manual format override.
-   - Left-align body copy (never `text-align: justify`).
-
-7. **Pinned Bottom Footer & Error Guidance:**
-   - Footer is pinned to the true bottom (`margin-top: auto`), containing only legal and repo links (`Open Source (GPL)`, `FAQ`, `Privacy`, `Terms`, `Donate`). Avoid redundant slogans.
-   - Layer error messages: concise plain sentence first, actionable interactive guidance for our Extension and Desktop app, and collapsible diagnostics.
-   - Progress displays a smooth track and tabular counts.
-
-8. **Languages (English, French, German, Italian):**
-   - User copy renders through `t(key, vars)` against `src/i18n.ts`; English is the canonical table and `src/locales/fr.ts`, `de.ts`, `it.ts` cover it key for key with identical `{placeholders}`. Missing keys fall back to English per key, never to `undefined`.
-   - The audience includes multilingual art historians and archivists: translate buttons, messages, and guidance, but keep brand and product names (`Dezoomify`, `Chrome Web Store`, `GitHub Releases`), format names (`PNG`), codes, URLs, and diagnostics literal. Interpolation is `{name}` substitution only, with no plural rules and no markup.
-   - Hosts pick the locale with `setLocale()` (explicit picker choice) or `pickLocale()` (`Accept-Language` header or `navigator.languages`); unknown tags fail closed to English. A new locale adds a sibling table under `src/locales/` plus a `SUPPORTED_LOCALES` entry, never a second lookup path.
-   - Hosts bundle the shared UI directly (Vite for the website and desktop, WXT for the extension); there are no hand-maintained `.js` copies or `vendor/` trees. `test/ui-i18n.test.mjs` fails on missing keys, placeholder drift, or duplicated tables.
+- Keep components host-neutral: products inject storage, actions, and platform
+  capabilities. Detection and download policy belong to Rust.
+- Preserve the warm parchment aesthetic, blue-tile [logo](../../favicon.svg),
+  spacious URL input, tactile controls, and restrained rectangular geometry.
+  Avoid pills, nested cards, and neon styling. Reuse [theme tokens](src/styles/theme.css)
+  rather than copying their values into guidelines. Render the logo as native SVG.
+- Keep the default view uncluttered, with automatic format detection. Use
+  left-aligned copy, visible keyboard focus, and accessible controls. Give errors
+  a plain explanation and a next action before collapsible diagnostics. Show the
+  active transport; report saves only when the product confirms its disposition.
+- Use the shared [translation system](src/i18n.ts) for user copy. Keep locale keys
+  and placeholders aligned with English; keep names, codes, URLs, and diagnostics
+  literal. Use the existing lookup and fallback path.
+- Bundle shared sources directly; do not maintain copied JavaScript or translation
+  tables in products. Link to the [user guides](../../docs/user/README.md) for help.

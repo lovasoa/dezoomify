@@ -1,92 +1,63 @@
-All tests MUST be designed to have a high chance to catch future bugs and a low chance of churn.
-It's better not to write a test than to write a fragile test.
-Not all code changes require a new test. It's often better to improve existing tests than to add new ones.
-A single added test fixture that fits the existing test runner is preferable to many unit tests.
-"Architectural" tests or tests that try to make assertions on source file contents are forbidden.
+# Testing
 
-`cargo xtask test` runs the Rust workspace and Node units once.
-`cargo xtask test all` adds fresh WASM bindings, the website in Chromium, and
-packaged extensions in Chromium and Firefox. `cargo xtask ci local` adds static
-checks, WASM portability, and the dependency audit.
+Test behavior that could regress. Prefer improving an existing test or adding a
+fixture to the shared runner over adding many unit tests. A test should catch
+future bugs without depending on implementation details; not every change needs
+a new test. Do not assert source-file contents or invent architectural tests.
 
-CI uses the version pinned in [`.node-version`](../.node-version) for every lane.
+## Choose a test
+
+- `cargo xtask test`: Rust workspace and Node unit tests.
+- `cargo xtask test <target>`: focused iteration; use `cargo xtask --help` for targets.
+- `cargo xtask test all`: also exercises current WASM bindings, the website in
+  Chromium, and packaged extensions in Chromium and Firefox.
+- `cargo xtask ci local`: static checks, tests, WASM portability, and dependency audit.
+- `cargo xtask test desktop --e2e-window`: real desktop window; needs a display
+  (headless Linux: `xvfb-run -a`) and stays outside `test all` and `ci local`.
+
+Finish code changes with `test all` and `ci local`. Live source-site checks
+(`cargo xtask test live --public`) are opt-in and advisory, never sole coverage.
+Setup and prerequisites: [Development](development.md).
 
 ## Shared product matrix
 
-[`fixtures/`](../fixtures/README.md) contains ordinary files and relative symlinks.
-Each `format/variant/viewer.html` is discovered automatically; an optional `input.txt`
-overrides the default viewer URL. No registration, hash manifest, generated
-expectations, or route schema is needed. Every basic
-input produces the same 512×512 picture from shared PNG or JPEG tiles.
+Add a minimal fixture under [`fixtures/`](../fixtures/README.md) to exercise
+viewer discovery and saving across products. The same inputs run through CLI,
+website UI, packaged extensions, and the explicit desktop window lane. Tests
+check dimensions and every saved pixel. The fixture README owns file layout and
+tolerance rules; no per-product registration is needed.
 
-Each product iterates the same discovered inputs and checks saved dimensions
-and every pixel. Pixel comparisons are exact by default. A variant directory prefixed with
-`approximate-` permits a two-value RGB tolerance for JPEG decode differences;
-dimensions and alpha remain exact. Discovery derives the tolerance from the
-directory name, without fixture-specific test rules.
-The website drives its real UI; extensions use real packaged job tabs; CLI tests
-invoke the binary. Desktop uses the real window in its explicit window lane.
-
-```sh
-cargo xtask test native
-cargo xtask test web --e2e
-cargo xtask test extension
-cargo xtask test desktop --e2e-window
-```
-
-The desktop window lane needs a GUI session (Linux: `xvfb-run -a`) and stays outside
-`test all` and `ci local`. Its workflow runs Linux, macOS, and Windows; fixture and
-test changes trigger it. The test build embeds its frontend, like the packaged
-app, and needs no development server. Windows checkouts enable Git symlinks
-before checkout.
+Desktop fixture and test changes trigger its real-window CI matrix on Linux,
+macOS, and Windows. Windows checkouts must enable Git symlinks before checkout.
 
 ## Unit tests
 
-Pure parser tests cover malformed metadata and unusual geometry. Host tests
-cover retries, cancellation, resource limits, codecs, file publication, cache
-isolation, credentials, and cleanup. UI and product tests cover accessibility,
-permissions, source navigation, and recovery. These are behavior checks
-where a normal successful save cannot exercise the relevant failure branch.
-Boundary rules use standard Biome and Clippy checks.
+Use parser tests for malformed metadata and unusual geometry. Use Host tests
+for retries, cancellation, resource limits, codecs, publication, cache isolation,
+and credentials. UI/product tests cover accessibility, permissions, navigation,
+and recovery. These tests exercise failures a successful save cannot reveal.
+Normal Biome and Clippy checks enforce dependency boundaries.
 
-Historical reproductions under `testdata/scenarios/` remain available to focused
-regression tests. Provenance lives in their README; Git records content changes.
+Historical reproductions under [`testdata/scenarios/`](../testdata/scenarios/README.md)
+remain available to focused tests; that README owns their provenance and replay
+rules. Git records content changes.
 
 ## HTTP fixtures
 
-Node is the only runtime for repository-authored HTTP servers.
-Clients use ordinary loopback file URLs. Recorded remote resources use only
-`/fetch?url=<encoded original URL>`; harnesses build it with `replayUrl`
-(Node) or `dezoomify_fixture_server::replay_url` (Rust).
-Extension traffic fixtures use real `.dzi`, `.xml`, and `.yaml` file paths so
-discovery sees the same URL shapes as source sites.
-The fixture server trusts test clients and uses the standard URL parser.
-Unexpected requests report their method, URL, and exception in server logs and
-the request transcript; missing recordings return a 404 naming the supplied URL.
-`test/fixture-server.mjs` serves files, symlinks, and fixture-local
-`serve(request, { file, origin }): Response | null` functions, optionally asynchronous.
-Handlers return null for requests they do not own; a returned 404 is a final response.
-The optional file is the matching static file, so ordinary protocol handlers can
-yield to it while authentication handlers can protect it. The server knows no
-image formats. Query protocols and signing belong in the fixture directory.
-Native malformed-wire tests use `test/raw-server.mjs`; Rust supplies bytes over
-stdio while Node owns sockets. Parent stdin closes and stops the subprocess.
+Use Node for repository-authored HTTP servers. Rust tests launch Node and close
+its stdin to stop it; they do not bind listeners. Use ordinary loopback URLs for
+local fixtures and the replay helpers for captured remote URLs. Unknown requests
+must never reach the internet.
 
-Historical files use `payloads/{host}/{path}`; symlinks supply alternate URL paths,
-and local handlers own exceptional statuses, headers, and authentication.
-Text-file extensions and directory indexes provide captured extensionless URLs.
-Unknown URLs never reach the internet.
-Ports are allocated on loopback. Third-party desktop WebDriver and unmodified
-image servers used as test subjects are outside the authored-server rule.
-
-`cargo xtask fixtures serve --port 0` starts the fixture server manually.
-Live tests are separate: `cargo xtask test live --public` is opt-in and advisory.
+[`fixture-server`](../crates/fixture-server/README.md) covers server entry points;
+fixture-local protocol handlers and their authoring instructions belong beside
+the fixture data. Native malformed-wire tests use `test/raw-server.mjs` with bytes
+supplied over stdio. Unmodified third-party servers used as test subjects and the
+desktop WebDriver are outside the authored-server rule.
 
 ## Coverage
 
-Coverage is evidence for deleting redundant tests, not a percentage gate.
-`cargo llvm-cov --workspace` measures Rust source line and function coverage
-(including inline unit tests; exclude integration harnesses and test tooling);
-the stable toolchain does not report branch coverage. Full browser saves supplement
-that measurement and are required by the corresponding CI lanes.
-Focused command grammar and CI ownership live in [xtask](../crates/xtask/README.md).
+Use coverage to find redundant tests, not as a percentage gate.
+`cargo llvm-cov --workspace` measures Rust line/function coverage; exclude test
+harnesses and tooling. Stable Rust does not report branch coverage. Full product
+saves provide additional evidence that unit coverage cannot supply.

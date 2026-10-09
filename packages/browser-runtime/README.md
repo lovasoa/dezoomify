@@ -1,13 +1,30 @@
-# browser-runtime
+# Browser runtime
 
-What the browser can and cannot do with image bytes, in one place: readable
-fetches for decoding and saving, versus ordinary `<img>` display that stays
-visible but tainted. Script may show it, never read its pixels
-(`originClean` guards enforce this).
+BrowserHost supplies platform operations to the shared Rust algorithm. The
+website and extension share application composition and invocation lifetime;
+products inject source acquisition, transport, permissions, and saving.
+See [Architecture](../../docs/architecture.md) for ownership boundaries.
 
-`BrowserHost` supplies asynchronous operations to the Rust `dezoomify`
-function. The website and extension share `createBrowserApplication` for
-invocation lifetime, interactions, progress, history, and output presentation.
+## Image access
 
-Products inject source acquisition, transport, permissions, and saving.
-Opaque loads never provide readable bytes. Tests: `cargo xtask test browser`.
+Readable bytes permit processing, decoding, and saving. Ordinary `<img>` loads
+can display unprocessed tiles after a network failure, but may taint the canvas.
+A tainted canvas stays display-only: never read pixels or promise an encoded save.
+HTTP, permission, decoding, processing, and cancellation failures do not qualify
+as network fallback. Successful ordinary-image loading classifies the origin
+for later tiles in that job.
+
+The website tries direct metadata access before eligible public-metadata proxy
+fallback; the extension uses its source session and permission-controlled
+transport, never the proxy. Transport preserves request headers, redirect bases,
+and typed failures. Retry policy belongs to Rust.
+
+## Resource lifetime
+
+Cancellation updates presentation immediately, but settlement waits for owned
+decoding and encoding callbacks. Late bitmaps close without painting; save
+continuations must check cancellation before publishing. Product save behavior
+determines whether output is ready for a click, confirmed saved, or display-only.
+
+For current canvas and transport limits, consult [limits.ts](src/limits.ts).
+Tests: `cargo xtask test browser`.

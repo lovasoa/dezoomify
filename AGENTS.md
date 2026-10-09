@@ -1,76 +1,47 @@
-Dezoomify downloads tiled zoomable images. The website, extension,
-desktop app, and CLI share one Rust algorithm that takes a `Host` argument to interact with its environment.
- 
+Dezoomify's website, extension, desktop app, and CLI share one Rust algorithm
+with injected `Host` capabilities.
+
 ## Where to look
 
-- `crates/dezoomify/`: shared algorithm, zoomable image format parsers, geometry, and domain types. Start with [Architecture](docs/architecture.md) and [Algorithm](docs/algorithm.md).
-- `crates/dezoomify-native/` and `crates/dezoomify-wasm/`: native Host and WASM bridge.
-- `src/`, `legacy/`, and `apps/{extension,desktop,cli}/`: product integration.
-  See [Browser runtime](docs/browser-runtime.md), [Extension](docs/extension.md),
-  and [Native apps](docs/native-apps.md).
-- `packages/shared-ui/`: host-neutral react app; follow its [AGENTS.md](packages/shared-ui/AGENTS.md).
-  `packages/browser-runtime/` composes browser UI and Host capabilities.
-  [Architecture](docs/architecture.md) explains invocation ownership.
-- [Docs index](docs/README.md): user and contributor guides.
-  [User docs](docs/user/README.md): user-facing documentation, including the
-  [Desktop guide](apps/desktop/desktop-app.md), packaged in the DMG.
-- `testdata/scenarios/`: deterministic fixtures, and transcripts.
-  Read [Testing](docs/testing.md) before writing tests.
-- `crates/xtask/`: development and release tooling.
-  See [Development](docs/development.md) and [Command reference](crates/xtask/README.md).
+- [Architecture](docs/architecture.md): ownership and dependency boundaries.
+- [Development](docs/development.md) and [Testing](docs/testing.md): setup and validation.
+- [Docs index](docs/README.md): contributor and user guides.
+- `packages/shared-ui/`: follow its [instructions](packages/shared-ui/AGENTS.md).
 
 ## Invariants
 
-- Keep the legacy app served at `/` pristine. Do not include changes to
-  `legacy/` or alter its deployed files in PRs; website assembly must preserve
-  those files byte for byte. Product changes belong to the beta app and other
-  products, not the legacy app.
-- Keep parsers and geometry pure. The shared algorithm calls only injected
-  Host capabilities; Hosts own I/O, clocks, codecs, resources, and task ownership.
-  Products never import each other. Shared UI never accesses host globals;
-  browser transport and image modules receive callbacks rather than importing UI.
-- Define cross-language types once in `crates/dezoomify/src/model.rs`.
-  Import generated bindings; never redeclare or hand-edit them. Regenerate with
-  `cargo xtask bindings generate`; see [Architecture](docs/architecture.md#bindings-and-errors).
-  Branch on error `kind` and structured fields, never display strings.
-- the website's [metadata CORS proxy](functions/api/proxy.ts) allows fetching public metadata. Extension
-  browser-session fetch requires granted permissions; scans require explicit
-  user action. Declare only permissions shipped code uses.
-  Follow [Security](docs/security.md).
+- Keep `legacy/` and the app deployed at `/` pristine, byte for byte. Product
+  changes belong to `/beta` and the other products.
+- Keep parsers and geometry pure. The algorithm uses only injected Hosts for
+  I/O, clocks, codecs, resources, and task ownership. Products never import
+  each other; shared UI never accesses host globals. Browser transport and
+  image modules receive callbacks rather than importing UI.
+- Define cross-language types in `crates/dezoomify/src/model.rs`; import generated
+  bindings, never redeclare or hand-edit them. Run `cargo xtask bindings generate`
+  after boundary changes. Branch on error `kind` and structured facts, not prose.
+- The metadata proxy fetches public metadata only. Extension scans require
+  explicit user action and session access requires granted permissions.
+  Declare only permissions shipped code uses; follow [Security](docs/security.md).
 - Do not commit generated website output. Only `packages/wasm-bindings` and
-  `generated/*.json` are tracked generated trees. `scripts/build-site.mjs`
-  builds the deployed website (legacy at `/`, new app at `/beta`).
-- Use Node for repository-authored HTTP servers, including fixtures; Rust tests
-  launch Node rather than bind listeners. Live website tests are opt-in.
+  `generated/*.json` are tracked generated trees.
+- Use Node for repository-authored HTTP servers, including Rust test fixtures.
+  Live website tests are opt-in.
 - Read files before editing, use `apply_patch`, and preserve unrelated work.
-  Preserve exact URLs, settings, and error causes in bounded diagnostics.
+  Preserve exact URLs, settings, and error causes in bounded local diagnostics.
 
 ## Documentation
 
-Keep documentation only when it helps a named reader complete a task, make a
-decision, or understand a non-obvious constraint that prevents a costly mistake.
-If you cannot name the reader and the question it answers, do not add it.
-
-- Update an existing guide only when a change makes its advice wrong or leaves
-  out a necessary step. Code changes do not automatically require doc changes.
-- Prefer editing, shortening, or deleting over adding pages. A new page needs a
-  distinct, recurring reader need that an existing guide cannot serve concisely.
-- Keep user instructions in `docs/user/`, contributor guides in `docs/`, and
-  the packaged desktop guide in `apps/desktop/desktop-app.md`. Keep component
-  setup or fixture provenance in the owning README. Link to one home.
-- Source code, generated types/manifests, tests, and command help own API shapes,
-  constants, capability lists, and coverage. Link to them; do not mirror them in
-  prose. Keep architectural rationale and operational pitfalls that they cannot
-  explain on their own.
-- Do not add implementation inventories, change diaries, completion reports,
-  speculative guarantees, or a page per feature. Git history owns past changes.
-- Write for someone new to the task: lead with what they need to do or know,
-  omit repeated background, and remove obsolete guidance. These rules also apply
-  to nested agent instructions; do not add blanket requirements to grow docs.
+Keep one home for each useful reader question. Prefer shortening or deleting
+over adding pages; change guides when their advice becomes wrong or incomplete.
+Code changes do not automatically require documentation. Explain rationale and
+costly pitfalls; link to code and command help for API shapes, constants, and
+coverage. Keep user guides in `docs/user/`, the packaged desktop guide in
+`apps/desktop/desktop-app.md`, and component setup or provenance in its README.
+Do not add implementation inventories or change diaries. This applies to nested
+instructions too.
 
 ## Validation
 
-Run from the repository root: `cargo xtask check` and `cargo xtask test`,
-using `cargo xtask test <target>` for focused iteration. Finish code changes
-with `cargo xtask test all` and `cargo xtask ci local`.
-Use `cargo xtask --help` for the full command grammar.
+Run `cargo xtask check` and `cargo xtask test` from the repository root; use
+`cargo xtask test <target>` for focused iteration. Finish code changes with
+`cargo xtask test all` and `cargo xtask ci local`. See `cargo xtask --help`.

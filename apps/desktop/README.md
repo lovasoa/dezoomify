@@ -1,101 +1,49 @@
-# Desktop Application (lean shell)
+# Desktop application
 
-Dezoomify desktop: shared UI, a Rust NativeHost, validated deep links, native
-file actions, and per-user `dezoomify://` protocol-handler registration.
+The Tauri shell runs NativeHost and embeds the shared UI. Image bytes stay
+native; IPC carries generated progress, choices, and output values. See
+[Architecture](../../docs/architecture.md) for ownership and the
+[desktop guide](desktop-app.md) for installation and use.
 
-- Shell: lean `src-tauri/` (pure Rust, no Tauri SDK vendored); frontend contract from `packages/shared-ui`.
-- Deep links are validated, bounded, and confirmed before any work starts.
-- First-run protocol registration is per-user only. The lean shell exposes
-  `--register-protocol-handler` and `--unregister-protocol-handler`; the Tauri
-  app registers the handler best-effort when it starts.
-- macOS apps use ad-hoc signing; Linux and Windows installers are unsigned
-  (no paid Apple/Azure signing in this free project);
-  automatic updates are disabled, so check GitHub Releases manually.
-
-The Tauri entry point awaits `dezoomify::dezoomify` with NativeHost. IPC carries
-progress, pending partial choices, and the returned output; image bytes stay
-native. Tests: `cargo xtask test desktop`.
-
-`node scripts/generate-desktop-capabilities.mjs` derives permission manifests
-from the Rust command and event declarations. Its `--check` mode detects drift.
-
-## End-to-end
-
-The real-window E2E is the app-level gate: `selenium-webdriver` drives the
-shipped window shell against the embedded W3C WebDriver server
-(`tauri-plugin-wdio-webdriver`, compiled behind the test-only
-`testing-webdriver` cargo feature) over hermetic loopback fixtures. Because the
-server is embedded in the app, the same suite runs on Linux, macOS, and Windows
-with no external tauri-driver or platform driver. The plugin declares no IPC
-commands, so it needs no capability entry.
+## Development and tests
 
 ```sh
+cargo xtask dev desktop
+cargo xtask test desktop
 cargo xtask test desktop --e2e-window
 ```
 
-The lane builds the frontend, fixture server, and window shell (features
-`tauri,testing-webdriver`), stages lane-private copies, then runs
-`node --test specs/desktop.e2e.mjs`. The spec
-covers the user-visible journeys: automatic submit/save to an isolated output
-directory versus the `native/cli-dzi` golden, cancellation with no output, and a kept partial
-published to a `.partial` sibling. The harness configures the existing
-output-directory setting to an isolated temporary folder through the rendered
-settings panel, so generated filenames remain discoverable on every supported
-host. Inputs stay fixed.
+The real-window lane uses an embedded test-only WebDriver on Linux, macOS, and
+Windows. It needs a display (headless Linux: `xvfb-run -a`) and platform webview
+packages. No external driver is needed. [Testing](../../docs/testing.md) explains
+coverage; the [desktop workflow](../../.github/workflows/desktop.yml) owns CI lanes.
 
-The lane needs a display on headless Linux (`xvfb-run -a`); macOS and Windows
-CI runners provide a GUI session. It needs the webview system packages above;
-a missing piece fails closed naming it. The earlier app-level suites that only
-asserted internal Rust state or mocked the IPC boundary were removed: app
-behavior is verified through the real window.
+Subscribe before starting a native job and await registration before exposing
+controls, so an immediate cancel reaches its task. Retired jobs cannot update
+replacement views. Saved-file references outlive invocation resources and keep
+paths out of IPC; file availability checks must not block rendering or completion.
 
-CI (`.github/workflows/desktop.yml`, path-gated to desktop-relevant changes)
-runs `window-e2e` on ubuntu/macos/windows (`fail-fast: false`, the embedded
-server needs no external driver; Linux runs under Xvfb with one hard
-deadline). The `bundle-smoke` job keeps actual per-platform bundle, install,
-and launch coverage:
-Linux installs the `deb` (`sudo dpkg -i`) and launches it briefly under
-Xvfb (a 20 s stay-alive proves install + launch + webview init; the window
-shell has no `--version` flag), macOS mounts the `dmg`, verifies the app's
-ad-hoc signature with `codesign --verify --deep --strict`, and execs the binary
-directly (local build, Gatekeeper/SIP untouched), while Windows
-requires WiX and NSIS, installs the `msi` bundle silently, and
-fails the job if the installer cannot be built or launched.
-Smoke logs upload as `desktop-bundle-smoke-<os>`. Platform smokes do not
-install browser drivers or claim real-window E2E coverage. The desktop crate's
-lean unit tests also run in the `rust` lane of `ci.yml`. No update flow is
-exercised anywhere (updater inert).
+Permission manifests are generated from Rust commands and events by
+[`generate-desktop-capabilities.mjs`](../../scripts/generate-desktop-capabilities.mjs).
+Do not add unused capabilities or enable the updater without a service and keys.
 
 ## Bundles
 
-`cargo xtask build desktop` compiles the lean shell, then the frontend
-(`apps/desktop/dist/`), then the Tauri window shell, then generates icons
-(`scripts/gen-desktop-icons.mjs`), then bundles for the matching host:
-Linux `deb` (Tauri CLI `tauri build --bundles deb`, needs `dpkg-deb`),
-Windows `msi`/`nsis` (needs WebView2, WiX, NSIS, `icons/icon.ico`),
-macOS `dmg` (needs Xcode CLT, `icons/icon.icns`).
-Icons use the website's `favicon.svg` artwork and the pinned Tauri CLI's
-`tauri icon` command, following [Tauri's platform icon guidance](https://v2.tauri.app/develop/icons/).
-`cargo xtask build desktop --unsigned-test` compiles everything but
-produces no bundle. Linux window builds need
-`libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential`;
-macOS ships WebKit and Windows ships WebView2.
+`cargo xtask build desktop` builds the shell, frontend, icons, and matching-host
+installer. `--unsigned-test` builds without bundling.
 
-macOS apps use Tauri's `signingIdentity: "-"` for ad-hoc signing without
-an Apple account. Linux and Windows installers are unsigned. macOS apps
-are not Developer ID-signed or notarized, so downloaded apps still require
-user approval. The release workflow verifies the app signature inside the
-finished DMG before uploading the artifact. The local bundle smoke does not
-exercise Finder approval of a quarantined browser download; test that flow
-manually on a clean Mac using the user guide.
-The DMG's Finder background displays installation and first-launch steps
-generated from the macOS section of that guide by
-`scripts/generate-dmg-background.mjs` (PNG output under `target/desktop-dmg/`).
-The bundler enables Finder layout even in CI with
-`TAURI_BUNDLER_DMG_IGNORE_CI=true`; the smoke and release checks require the
-packaged background and saved Finder settings in addition to a valid signature.
-Automatic updates are disabled (no update host or key), so check
-GitHub Releases manually. Releases include Linux x86_64 `.deb`, Windows x86_64
-`.msi`, and Apple silicon macOS `.dmg` installers. The user-facing
-install note lives in the [Desktop app
-guide](./desktop-app.md#install).
+| Host | Prerequisites |
+|---|---|
+| Linux | `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential`, and `dpkg-deb` (`dpkg-dev`) |
+| Windows | WebView2, WiX v3 for MSI, NSIS, and generated `icons/icon.ico` |
+| macOS | Xcode Command Line Tools and generated `icons/icon.icns` |
+
+Icons derive from the root `favicon.svg` through the pinned Tauri CLI. Signing
+and user approval steps live in the [installation guide](desktop-app.md#install).
+Bundle smoke checks verify install/launch and macOS signatures; they do not
+exercise Finder approval of a quarantined download. Check that on a clean Mac.
+
+The macOS section of the desktop guide generates the DMG background. Preserve
+its installation heading, ordered steps, and following note; regenerate with
+`node scripts/generate-dmg-background.mjs` and inspect
+`target/desktop-dmg/background.png` after edits. The generator rejects overflow.

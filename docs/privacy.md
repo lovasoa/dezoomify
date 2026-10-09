@@ -1,93 +1,51 @@
 # Privacy
 
-dezoomify is free and open source, built by volunteers and funded by
-donations. There are no investors, no advertisers, and no data business
-behind it. Nobody here makes money from knowing what you look at, and
-we've built the whole thing so that we can't find out, even by accident.
-Here's what happens to your information when you use it, in plain words.
+Dezoomify assembles images on your device. It has no accounts, advertising,
+analytics, or automatic crash reporting. Here is what each app accesses and
+what can leave your device.
 
 ## What dezoomify does, in one paragraph
 
-Museums and libraries often show very large pictures in small pieces.
-Dezoomify saves the whole picture, at full resolution, as one ordinary
-image file. You give it the address of a page showing such a picture. It
-works out where the pieces live, fetches them, and glues them together on
-your own device. That is all it does.
+You provide an image page or description address. Dezoomify finds the tiles,
+downloads them, and assembles a picture you can save. Image tiles travel from
+the source site to your device; the project's metadata proxy does not fetch them.
 
 ## Our promises
 
-**Your pictures never pass through our computers.** The pieces travel
-straight from the museum's website to your device, and the finished file
-is assembled there. Our server is never in the middle.
+The website reads public resources without your browser login. When direct
+metadata access fails, it can use the project's helper proxy to fetch eligible
+public description files or viewer pages. That helper necessarily receives the
+requested address; it does not receive your browser cookies or Authorization
+headers. The application's proxy code does not log requested source addresses.
 
-**No backend processes your personal information.** We do run one small
-helper server, and it has one narrow job: when a website's own rules stop
-your browser from reading an image's description (the technical list of
-where the picture pieces are), the helper fetches that description for
-you. It only works on public pages, it never touches your picture data,
-and it never sees anything you'd log in with.
+Desktop and CLI fetch from your device without using that helper. Recent-image
+history, settings, cached tiles, and diagnostic reports stay on your device.
+Clearing history does not delete saved pictures.
 
-**There are no accounts and nothing to sign up for.** We don't know who
-you are, and we'd have nowhere to keep a profile on you even if we wanted
-one.
-
-**We don't track you.** Dezoomify has no analytics, no advertising tools,
-no traffic counters noting who visited which page, and no crash reports.
-When something goes wrong, the error message you see is assembled from
-information already on your device.
-
-**What you look at stays yours.** The addresses of the pages you open,
-their titles, and the pictures themselves never end up in any report or
-log of ours. A page's address can appear in the technical details an app
-shows on your own device, to help you or a volunteer understand what
-failed; those details leave your device only if you copy and send them
-yourself, and the apps remind you to remove sign-in details and tokens
-before sharing.
-
-**The helper server keeps almost no logs.** When it fetches a public
-image description for you, its log records that a request happened, and a
-short category code saying why. It never records the address of the page
-you were on.
-
-**Getting help stays in your hands.** If something fails and you want
-support, dezoomify can prepare a technical summary. Anything private gets
-cleaned out of it automatically, and nothing is sent anywhere unless you
-choose to copy it and send it yourself.
+Dezoomify does not automatically send diagnostic reports. **Technical details &
+logs** can include full page and image addresses, query parameters, settings, and
+error details. These may contain sign-in tokens or other sensitive information.
+Review and remove sensitive details before copying, saving, or sharing a report
+or submitting the issue draft the app prepares. Do not assume reports are
+automatically sanitized.
 
 ## The browser extension
 
-The extension adds dezoomify to Firefox or Chrome so that it can work
-inside the page you're looking at. Two things about it are worth knowing.
-
-**It only looks when you ask.** The extension never reads pages in the
-background or while you browse. It examines a page only after you click,
-only that one page, and it stops as soon as it's done.
-
-**It can use the logins your browser already has.** Some pictures are
-visible to members only, so you may need to be signed in to the museum's
-site to see them. The extension works with the login your browser already
-holds, so you never have to type your password anywhere new. All of this
-happens inside your browser: the project never receives your password,
-your username, or your session.
+The extension examines a source page only after you click its toolbar button.
+It reads a snapshot for that attempt, rather than watching unrelated browsing.
+The dedicated job tab handles the download; a retry takes another snapshot.
+Navigating the source page invalidates access to its old document.
 
 ### Cookies and private login information
 
-Cookies are the small notes a website keeps in your browser so it
-remembers you're signed in. They're the most sensitive thing dezoomify
-ever touches, so they get their own rules:
-
-- Cookies and sign-in details are used only inside your browser, only for
-  the site you asked dezoomify to work on, and only for a job you started
-  yourself.
-- They're never sent to the project's server, which by design can't
-  receive them.
-- The extension does not read cookie values into reports. Reports include
-  the full page and image addresses; see [extension data use](user/browser-extension.md#what-the-extension-does-with-your-data).
-- Cookies are used by your browser session to request artwork from the
-  site. The extension does not transfer them to the desktop app.
+Source-page requests can use that site's existing browser session to reach
+images you are allowed to see. Cross-origin extension requests are
+credential-free and require granted host permissions. The extension does not
+transfer browser cookies or login credentials to the project server or desktop
+app. Reports can still contain sensitive addresses; see
+[extension data use](user/browser-extension.md#what-the-extension-does-with-your-data).
 
 ## Where to learn more
 
-The technical rules behind these promises are in [Security](security.md),
-and step-by-step instructions for each app are in the [user
-documentation](user/README.md).
+[User guides](user/README.md) explain each app. [Security](security.md) describes
+the technical trust boundaries for contributors.

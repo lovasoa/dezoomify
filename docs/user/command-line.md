@@ -2,98 +2,92 @@
 
 # Command-line tool
 
-The command-line tool saves one image per run, or many with `--bulk`. It
-is the right choice for scripts and for automating regular jobs. It
-supports [protected pages](./troubleshooting.md#forbidden-or-unauthorized-errors).
-Each run saves one job to one output file (`.png`, `.jpg`/`.jpeg`,
-`.tif`/`.tiff`, `.zif`, `.webp`, `.iiif`, or extensionless `iiif-dir` by
-extension). `--tile-cache` keeps a resume folder so a repeated run
-reuses tiles instead of fetching them again; see
-[resuming an interrupted save](../../apps/desktop/desktop-app.md#resuming-an-interrupted-save).
+Use the CLI for scripts, specific image/level selection, and bulk saving.
+Download it from [GitHub Releases](https://github.com/lovasoa/dezoomify/releases/latest)
+or build it from the repository with `cargo xtask build cli`.
 
 ## Basic use
 
 ```sh
-dezoomify "https://museum.example/collection/painting" painting.png
+dezoomify \
+  "https://museum.example/painting" \
+  painting.png
 ```
 
-The first argument is the address of the viewer page or image description
-file; the second is the file to save (or pass `--outfile <file>` instead
-of the positional). When the output is omitted it auto-names from the
-image title when known, else `dezoomify` with a JPEG-fit extension and
-`_0001` collision suffixes. With no arguments the tool repeats prompts
-when a terminal is present until end of input, else it prints help. When
-several images or levels are found and no selector was given, a terminal
-prompts to pick one; without a terminal the first image and automatic
-level win. The tool takes the exact `--zoom-level` when given, else the
-largest level that fits `--max-width`/`--max-height` when given, else the
-largest level (`--largest`, implied in bulk mode without level caps,
-ignores caps).
+The first argument is a viewer, metadata address, or supported local file. The
+second names the output; omit it for automatic naming. Existing files are
+preserved unless you request `--overwrite`.
+
+With no arguments, a terminal prompts for input; without a terminal it prints
+help. Interactive runs can ask you to choose an image and level. Scripts use
+the first image and automatic level unless you supply selectors.
 
 ## Useful options
 
-| You want to… | Option |
+| Task | Example |
 |---|---|
-| Let the tool detect the format, or force one | `-d, --format auto` (default; a named format limits detection to that format, unknown names fail) |
-| Always take the highest resolution | `-l, --largest` (implied in bulk mode without level caps) |
-| Cap the resolution (e.g. 4000 pixels wide) | `-w, --max-width 4000` |
-| Cap the height | `-h, --max-height 800` |
-| Pick a level by index | `--zoom-level 0` (0 is smallest; too large uses last; wins over largest and caps) |
-| Pick a specific image when several are found | `--image-index 2` (0-based; too large uses last) |
-| Keep a partial image when some tiles fail | `--keep-partial` (default; missing regions stay blank, saved to a `.partial` sibling: `out.png` becomes `out.partial.png`) |
-| Discard partial output on tile failure | `--no-partial` (fails with `partial-discarded` and no output) |
-| Retry more often on an unreliable server | `-r, --retries 5` (default 3; 0 means no retries) |
-| Wait before retrying | `--retry-delay 2s` (base wait, doubling per attempt to 30 s max, `Retry-After` honored) |
-| Tune output compression | `--compression 5` (JPEG quality `100 - compression`, default 95; PNG fast/balanced/best tiers) |
-| Tune the connection pool | `--max-idle-per-host 32` (max idle connections per host) |
-| Go slower to stay gentle with the server | `-i, --min-interval 200ms` (bulk paces images; per-tile requests are staggered) |
-| Tune timeouts | `--timeout 30s`, `--connect-timeout 6s` (max time for one request and to connect) |
-| Tune logging | `--logging info` (error, warn, info, debug, trace; controls human stderr verbosity, `--json` stdout unchanged) |
-| Tune concurrency | `-n, --parallelism 16` (max concurrent tile downloads) |
-| Look like you come from the site's viewer | `-H "Referer: <viewer page>"` (`--header` is an alias; otherwise the http(s) input or bulk source is sent as `Referer`) |
-| Keep saved pieces to resume later | `-c, --tile-cache my-folder` |
-| Turn off address checking for odd servers | `--accept-invalid-certs` (careful: this disables protection against impostor servers) |
-| Overwrite an existing file | `--overwrite` |
-| Print machine-readable records | `--json` (failure events carry the full typed error; its `kind` names the failure) |
+| Select the highest resolution | `--largest` |
+| Limit width | `--max-width 4000` |
+| Choose an image by index | `--image-index 2` |
+| Choose a level by index | `--zoom-level 0` |
+| Retry failed tiles more often | `--retries 5` |
+| Discard incomplete output | `--no-partial` |
+| Reuse downloaded tiles | `--tile-cache my-folder` |
+| Identify the source viewer | `-H "Referer: <viewer URL>"` |
+| Replace an existing file | `--overwrite` |
+| Emit machine-readable records | `--json` |
 
-Run `dezoomify --help` (`-?` is an alias) for the full list. `-V` shows the version.
+Run `dezoomify --help` for all options, defaults, and selector precedence.
+Use `--max-height` to cap height, and replace `<viewer URL>` with the page's address.
+`--zoom-level` takes precedence over largest and dimension caps; `--largest`
+ignores caps. Error records include a stable `kind`; use it for scripts and
+bug reports rather than matching the human sentence.
 
-A failure prints one plain sentence followed by its stable `kind` on stderr (`error: <sentence> (<kind>)`), for example `error: partial output was discarded (partial-discarded)`. The sentence is rendered from the typed failure facts; the `kind` is the identifier to quote in bug reports.
+Output names choose the format: `.png`, `.jpg`/`.jpeg`, `.tif`/`.tiff`, `.zif`,
+`.webp`, or `.iiif`. An extensionless destination also creates an IIIF tile
+folder. Other extensions are rejected. See
+[choosing a format](../../apps/desktop/desktop-app.md#choosing-the-file-format).
 
 ## Saving many images
 
-Put the addresses in a text file, one per line, with an optional title after
-each one:
+Put one address per line, optionally followed by a title:
 
 ```text
-# my-collection.txt: lines starting with # are ignored
-https://museum.example/painting-1 Portrait of a lady
+# my-collection.txt
+https://museum.example/painting-1 Portrait
 https://museum.example/painting-2
-https://library.example/manuscript/info.json
 ```
-
-Then:
 
 ```sh
-dezoomify --bulk my-collection.txt --outfile collection.png
+dezoomify --bulk my-collection.txt \
+  --outfile collection.png
 ```
 
-This saves `collection_1.png`, `collection_2.png`, and so on. A failed image
-does not stop the rest; a per-image summary plus totals are printed at the
-end and the exit is 1 when any entry fails. The totals read
-`bulk: X succeeded, Y failed, Z total`. You can also pass a single IIIF
-collection manifest address to `--bulk` to save the entries it lists
-(best-effort: `manifests`/`members`/`items` ids; a single manifest saves its
-first image). Between images `--min-interval` paces the queue.
+This saves `collection_1.png`, `collection_2.png`, and so on. A failed entry
+does not stop the list; the command reports totals and exits 1 if any entry
+failed. Bulk mode selects the largest level unless you supply level caps or a
+selector. `--min-interval` paces entries. A single IIIF collection address can
+also supply the list; each referenced manifest saves its first image.
 
 ## Limits
 
-PNG, JPEG, and TIFF encode as tiles arrive, keeping decoded pixels in bounded RAM strips until their pixels are read. Unknown dimensions, missing early tiles, and out-of-order arrivals can require more buffering; WebP requires a complete pixel buffer. CLI and [desktop](../../apps/desktop/desktop-app.md) default to 80% of available memory at job start for pixels, processing and codec working space; network response buffers need additional memory. If working data cannot fit, saving stops with a typed `limit-exceeded` error and removes unpublished staging; save a smaller level with `--max-width`.
-IIIF and ZIF output keep compatible JPEG/PNG tiles in their original encoding and grid. `--compression` affects only converted tiles and new pyramid levels. ZIF uses a tiled BigTIFF container and omits alpha. For IIIF, choose an unused directory destination; existing directories and files are preserved even with `--overwrite`.
-JPEG folders advertise IIIF v2 level 0. PNG-only folders preserve PNG bytes and declare their capabilities without claiming that JPEG-required profile. Dezoomify can reopen these folders. For a web viewer, resolve the relative `@id` against the `info.json` URL and honor `preferredFormats`; width-only and explicit-dimension paths are both available.
-See [very large pictures](./troubleshooting.md#the-image-appears-blank-or-the-browser-slows-to-a-halt) when a browser tab cannot hold the image.
+Very large images are limited by available memory. Explicit raster formats can
+reduce buffering compared with automatic format selection; WebP needs a complete
+pixel buffer. If saving reaches a resource limit, try a smaller level or an IIIF
+tile folder. JPEG and WebP have additional dimension limits; see
+[rejected output names](./troubleshooting.md#the-output-name-is-rejected).
+
+Partial output is kept by default at a `.partial` sibling, leaving the intended
+complete name untouched. `--no-partial` discards it. Repeating a job reuses cached
+tiles; see [resuming](../../apps/desktop/desktop-app.md#resuming-an-interrupted-save).
+
+IIIF directories must have unused destinations, even with `--overwrite`.
+Compatible IIIF/ZIF tiles retain their original encoding; compression settings
+affect converted tiles and new levels. ZIF omits alpha. For an IIIF web viewer,
+resolve the relative service identifier against `info.json` and honor
+`preferredFormats`, especially for PNG-only output.
 
 ## Next steps
 
-- [Desktop app features](../../apps/desktop/desktop-app.md)
+- [Troubleshooting](./troubleshooting.md)
 - [Supported formats](./supported-formats.md)
