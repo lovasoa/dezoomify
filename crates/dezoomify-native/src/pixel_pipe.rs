@@ -98,6 +98,33 @@ impl PendingStrip {
     }
 }
 type TileMetadata = (Option<Vec<u8>>, Option<Vec<u8>>);
+pub(crate) struct ReceivedPixels {
+    pub(crate) decoded: crate::imaging::DecodedTile,
+    _pixels: Reservation,
+    metadata: Reservation,
+}
+impl ReceivedPixels {
+    pub(crate) fn new(
+        decoded: crate::imaging::DecodedTile,
+        mut pixels: Reservation,
+    ) -> Result<Self, Error> {
+        let bytes = decoded.icc_profile.as_ref().map_or(0, Vec::len)
+            + decoded.exif_metadata.as_ref().map_or(0, Vec::len);
+        // Keep the metadata and its finalization copies charged from decode
+        // through placement, including time spent waiting in deferred storage.
+        let metadata = pixels.budget.reserve(if bytes == 0 {
+            0
+        } else {
+            bytes as u64 * 3 + 128
+        })?;
+        pixels.shrink(decoded.image.as_raw().len() as u64);
+        Ok(Self {
+            decoded,
+            _pixels: pixels,
+            metadata,
+        })
+    }
+}
 struct Metadata {
     position: (u32, u32),
     data: TileMetadata,
@@ -200,13 +227,13 @@ impl PixelPipe {
         &self,
         id: u32,
         placement: &TilePlacement,
-        decoded: crate::imaging::DecodedTile,
-        _decode_memory: Reservation,
+        pixels: ReceivedPixels,
     ) -> Result<(), Error> {
         let mut producer = self.producer.lock().expect("pixel producer lock");
         if let Some(error) = self.error() {
             return Err(error);
         }
+        let decoded = pixels.decoded;
         let image = decoded.image;
         let metadata_bytes = decoded.icc_profile.as_ref().map_or(0, Vec::len)
             + decoded.exif_metadata.as_ref().map_or(0, Vec::len);
@@ -216,7 +243,7 @@ impl PixelPipe {
                 Metadata {
                     position: (placement.position.x, placement.position.y),
                     data: (decoded.icc_profile, decoded.exif_metadata),
-                    _memory: self.budget.reserve(metadata_bytes as u64 * 3 + 128)?,
+                    _memory: pixels.metadata,
                 },
             );
         }
@@ -396,12 +423,15 @@ pub(crate) mod tests {
         pipe.place(
             id,
             &placement(x, y),
-            DecodedTile {
-                image,
-                icc_profile: None,
-                exif_metadata: None,
-            },
-            memory,
+            ReceivedPixels::new(
+                DecodedTile {
+                    image,
+                    icc_profile: None,
+                    exif_metadata: None,
+                },
+                memory,
+            )
+            .unwrap(),
         )
         .unwrap();
     }
@@ -500,16 +530,21 @@ pub(crate) mod tests {
                 let image =
                     image::RgbaImage::from_fn(1, 256, |_, y| image::Rgba([y as u8, 0, 0, 255]));
                 let memory = producer.budget.reserve(1024).unwrap();
-                sent.send(producer.place(
-                    0,
-                    &placement(0, 0),
-                    DecodedTile {
-                        image,
-                        icc_profile: None,
-                        exif_metadata: None,
-                    },
-                    memory,
-                ))
+                sent.send(
+                    producer.place(
+                        0,
+                        &placement(0, 0),
+                        ReceivedPixels::new(
+                            DecodedTile {
+                                image,
+                                icc_profile: None,
+                                exif_metadata: None,
+                            },
+                            memory,
+                        )
+                        .unwrap(),
+                    ),
+                )
                 .unwrap();
             });
             received

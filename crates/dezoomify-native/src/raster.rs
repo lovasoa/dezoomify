@@ -388,7 +388,10 @@ mod tests {
     use super::*;
     use crate::{
         imaging::DecodedTile,
-        pixel_pipe::tests::{placement, put},
+        pixel_pipe::{
+            tests::{placement, put},
+            ReceivedPixels,
+        },
     };
     const FORMATS: [OutputFormat; 4] = [
         OutputFormat::Png,
@@ -446,12 +449,15 @@ mod tests {
                     .place(
                         x,
                         &placement(x, 0),
-                        DecodedTile {
-                            image: image::imageops::crop_imm(&source, x, 0, 1, 1).to_image(),
-                            icc_profile: (x == 1).then(|| icc.clone()),
-                            exif_metadata: (x == 0).then(|| exif.clone()),
-                        },
-                        task.pipe.budget.reserve(4).unwrap(),
+                        ReceivedPixels::new(
+                            DecodedTile {
+                                image: image::imageops::crop_imm(&source, x, 0, 1, 1).to_image(),
+                                icc_profile: (x == 1).then(|| icc.clone()),
+                                exif_metadata: (x == 0).then(|| exif.clone()),
+                            },
+                            task.pipe.budget.reserve(4).unwrap(),
+                        )
+                        .unwrap(),
                     )
                     .unwrap();
             }
