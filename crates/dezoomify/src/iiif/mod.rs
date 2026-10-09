@@ -58,17 +58,21 @@ fn image_metadata<'de, D: serde::Deserializer<'de>>(decoder: D) -> Result<ImageI
 }
 
 const ROUTES: &[DiscoveryRoute] = &[
-    image_url(|uri| image_request_info(uri).is_some()).resolve_metadata(|uri| {
-        Ok(image_request_info(uri).expect("route matched IIIF image request"))
-    }),
-    viewer(url_matches(has_manifest_parameter)).resolve_metadata(manifest_parameter),
-    onb::ROUTE,
-    contentdm::RECORD_ROUTE,
+    image_url(|uri| image_request_info(uri).is_some())
+        .resolve_metadata(|uri| {
+            Ok(image_request_info(uri).expect("route matched IIIF image request"))
+        })
+        .then_decode(decode),
+    viewer(url_matches(has_manifest_parameter))
+        .resolve_metadata(manifest_parameter)
+        .then_decode(decode),
+    onb::ROUTE.then_decode(decode),
+    contentdm::RECORD_ROUTE.then_decode(contentdm::follow_info),
     contentdm::METADATA_ROUTE,
-    micrio::ROUTE,
+    micrio::ROUTE.then_decode(decode),
     national_gallery::ROUTES[0],
     national_gallery::ROUTES[1],
-    philadelphia::ROUTE,
+    philadelphia::ROUTE.then_decode(decode),
     metadata(url_suffix("/info.json")).decode(decode),
     metadata(url_suffix("/manifest.json")).decode(decode),
     json_metadata::<Document>(),
@@ -77,7 +81,6 @@ const ROUTES: &[DiscoveryRoute] = &[
     viewer(html_matches(&REL_INFO_JSON_RE)).decode(follow_info_json_url),
     viewer(js_matches(&ABS_INFO_JSON_RE)).decode(follow_info_json_url),
     viewer(js_matches(&REL_INFO_JSON_RE)).decode(follow_info_json_url),
-    metadata(any()).child_metadata(decode),
 ];
 
 /// IIIF format. See <https://iiif.io/>.
@@ -273,7 +276,7 @@ fn follow_info_json_url(resource: DiscoveryResource<'_>) -> Result<ParsedResourc
         .ok_or_else(|| {
             DiscoveryError::InvalidMetadata("page declares no IIIF info.json URL".into())
         })?;
-    Ok(ParsedResource::Follow(Request::new(target)))
+    Ok(ParsedResource::FollowWith(Request::new(target), decode))
 }
 
 fn catalog(uri: &str, contents: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {

@@ -66,5 +66,5 @@ pub(super) fn follow_info(
     } else {
         format!("{origin}/digital/{info_uri}")
     };
-    Ok(ParsedResource::Follow(Request::new(uri)))
+    Ok(ParsedResource::FollowWith(Request::new(uri), super::decode))
 }

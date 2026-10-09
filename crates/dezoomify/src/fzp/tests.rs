@@ -13,7 +13,13 @@ fn xml(version: &str, width: u32, height: u32, tile: u32, max: u32) -> String {
 }
 
 fn parse(text: &str) -> Result<ParsedResource, DiscoveryError> {
-    crate::test_support::resource(VIEWER, text.as_bytes(), decode)
+    crate::test_support::resource(VIEWER, text.as_bytes(), |resource| {
+        if viewer::recognizes(resource) {
+            viewer::decode(resource)
+        } else {
+            decode(resource)
+        }
+    })
 }
 
 fn image(text: &str) -> ImagePlan {
@@ -24,7 +30,7 @@ fn image(text: &str) -> ImagePlan {
 }
 
 fn follow(text: &str) -> String {
-    let ParsedResource::Follow(request) = parse(text).unwrap() else {
+    let ParsedResource::FollowWith(request, _) = parse(text).unwrap() else {
         panic!("expected navigation")
     };
     request.uri

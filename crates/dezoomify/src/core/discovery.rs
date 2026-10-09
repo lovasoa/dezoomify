@@ -74,17 +74,27 @@ impl Default for DiscoveryLimits {
 
 pub enum ParsedResource {
     Follow(Request),
+    /// A reference whose decoder is known by the resource that produced it.
+    FollowWith(Request, Decoder),
     Image(ImagePlan),
     Catalog(CatalogPlan),
     Complete(DiscoveryCatalog),
 }
 impl ParsedResource {
+    /// Attach a decoder to an unresolved reference; preserve other results.
+    pub fn decode_with(self, decoder: Decoder) -> Self {
+        match self {
+            Self::Follow(request) => Self::FollowWith(request, decoder),
+            parsed => parsed,
+        }
+    }
+
     pub(crate) fn compile(self, format: &'static str) -> Result<DiscoveryCatalog, DiscoveryError> {
         match self {
             Self::Image(plan) => plan.compile(format),
             Self::Catalog(plan) => plan.compile(format),
             Self::Complete(catalog) => Ok(catalog),
-            Self::Follow(_) => Err(DiscoveryError::InvalidMetadata(
+            Self::Follow(_) | Self::FollowWith(..) => Err(DiscoveryError::InvalidMetadata(
                 "a metadata reference has no image plan".into(),
             )),
         }
@@ -223,7 +233,7 @@ impl<'a> DiscoveryContext<'a> {
         })
     }
 }
-type Decoder = for<'a> fn(DiscoveryResource<'a>) -> Result<ParsedResource, DiscoveryError>;
+pub type Decoder = for<'a> fn(DiscoveryResource<'a>) -> Result<ParsedResource, DiscoveryError>;
 type FailureHandler = for<'a> fn(
     &DiscoveryContext<'a>,
     &'a Request,
@@ -368,11 +378,6 @@ impl RoutePattern {
     ) -> DiscoveryRoute {
         self.route(RouteAction::TryDecode(decoder))
     }
-    /// Metadata that is meaningful only after this format has read its parent.
-    #[must_use]
-    pub const fn child_metadata(self, handler: Decoder) -> DiscoveryRoute {
-        self.route(RouteAction::ChildMetadata(handler))
-    }
     #[must_use]
     pub const fn resolve_metadata(self, mapper: UrlMapper) -> DiscoveryRoute {
         self.route(RouteAction::MapUrl(mapper))
@@ -411,6 +416,7 @@ impl RoutePattern {
             matcher: self.matcher,
             handler,
             kind: self.kind,
+            followed_decoder: None,
         }
     }
 }
@@ -420,6 +426,7 @@ pub struct DiscoveryRoute {
     matcher: DiscoveryMatch,
     handler: RouteAction,
     kind: RouteKind,
+    followed_decoder: Option<Decoder>,
 }
 
 impl DiscoveryRoute {
@@ -429,6 +436,21 @@ impl DiscoveryRoute {
             matcher: DiscoveryMatch::ContentRegex(regex),
             kind: RouteKind::Viewer,
             handler: RouteAction::RegexLink(regex, template, None),
+            followed_decoder: None,
+        }
+    }
+
+    /// Decode references produced by this route without running discovery again.
+    #[must_use]
+    pub const fn then_decode(mut self, decoder: Decoder) -> Self {
+        self.followed_decoder = Some(decoder);
+        self
+    }
+
+    fn followed(self, parsed: ParsedResource) -> ParsedResource {
+        match self.followed_decoder {
+            Some(decoder) => parsed.decode_with(decoder),
+            None => parsed,
         }
     }
 }
@@ -436,7 +458,6 @@ impl DiscoveryRoute {
 #[derive(Clone, Copy, Debug)]
 enum RouteAction {
     Plan(fn(&str) -> Result<ImagePlan, DiscoveryError>),
-    ChildMetadata(Decoder),
     Decode(Decoder),
     TryDecode(for<'a> fn(DiscoveryResource<'a>) -> Option<Result<ParsedResource, DiscoveryError>>),
     MapUrl(UrlMapper),
@@ -458,11 +479,6 @@ fn parse_resource(
     resource: DiscoveryResource<'_>,
 ) -> Result<ParsedResource, DiscoveryError> {
     for route in routes {
-        if matches!(route.handler, RouteAction::ChildMetadata(_))
-            && resource.context.history.is_empty()
-        {
-            continue;
-        }
         let selected = match route.matcher {
             DiscoveryMatch::Css(selector, accept) => {
                 resource.select(selector).find(|tag| accept(tag))
@@ -493,7 +509,7 @@ fn parse_resource(
             ..resource
         };
         return match route.handler {
-            RouteAction::Decode(decoder) | RouteAction::ChildMetadata(decoder) => decoder(resource),
+            RouteAction::Decode(decoder) => decoder(resource),
             RouteAction::TryDecode(decoder) => match decoder(resource) {
                 Some(result) => result,
                 None => continue,
@@ -523,7 +539,8 @@ fn parse_resource(
                 })
             }
             RouteAction::MapUrl(_) | RouteAction::Plan(_) => continue,
-        };
+        }
+        .map(|parsed| route.followed(parsed));
     }
     Err(DiscoveryError::rejected(
         RejectionKind::DidNotMatchContent,
@@ -581,23 +598,17 @@ impl FormatSpec {
     fn url_kind(&self, uri: &str) -> Option<RouteKind> {
         self.routes
             .iter()
-            .filter(|route| {
-                !matches!(route.handler, RouteAction::ChildMetadata(_))
-                    && route.matcher.url_match(uri) == Some(true)
-            })
+            .filter(|route| route.matcher.url_match(uri) == Some(true))
             .map(|route| route.kind)
             .min()
     }
 
-    fn follow(
-        &self,
-        request: Request,
-        has_history: bool,
-    ) -> Result<ParsedResource, DiscoveryError> {
-        if !self.routes.iter().any(|route| {
-            (has_history || !matches!(route.handler, RouteAction::ChildMetadata(_)))
-                && route.matcher.url_match(&request.uri) != Some(false)
-        }) {
+    fn follow(&self, request: Request) -> Result<ParsedResource, DiscoveryError> {
+        if !self
+            .routes
+            .iter()
+            .any(|route| route.matcher.url_match(&request.uri) != Some(false))
+        {
             return Err(DiscoveryError::rejected(
                 RejectionKind::DidNotMatchUrl,
                 "no matching URL route",
@@ -609,7 +620,8 @@ impl FormatSpec {
             }
             match route.handler {
                 RouteAction::MapUrl(mapper) => {
-                    return mapper(&request.uri).map(ParsedResource::Follow);
+                    return mapper(&request.uri)
+                        .map(|request| route.followed(ParsedResource::Follow(request)));
                 }
                 RouteAction::Plan(decode) => {
                     return decode(&request.uri).map(ParsedResource::Image);
@@ -1024,14 +1036,17 @@ where
         let mut history = Vec::new();
         let mut parsed = ParsedResource::Follow(Request::new(uri));
         loop {
-            let ParsedResource::Follow(request) = parsed else {
-                return parsed
-                    .compile(spec.name)
-                    .map(|catalog| Some((history.len(), catalog)));
-            };
-            parsed = spec.follow(request, !history.is_empty())?;
-            let ParsedResource::Follow(request) = parsed else {
-                continue;
+            if let ParsedResource::Follow(request) = parsed {
+                parsed = spec.follow(request)?;
+            }
+            let (request, decoder) = match parsed {
+                ParsedResource::Follow(request) => (request, None),
+                ParsedResource::FollowWith(request, decoder) => (request, Some(decoder)),
+                parsed => {
+                    return parsed
+                        .compile(spec.name)
+                        .map(|catalog| Some((history.len(), catalog)));
+                }
             };
             priority.set((
                 base.0.min(if history.is_empty() { base.0 } else { 2 }),
@@ -1087,13 +1102,14 @@ where
                 }
                 Err(error) => return Err(error),
             };
-            parsed = parse_resource(
-                spec.routes,
-                DiscoveryResource {
-                    context,
-                    ..record.resource().expect("read response")
-                },
-            )?;
+            let resource = DiscoveryResource {
+                context,
+                ..record.resource().expect("read response")
+            };
+            parsed = match decoder {
+                Some(decode) => decode(resource),
+                None => parse_resource(spec.routes, resource),
+            }?;
             history.push(record);
         }
     }

@@ -43,7 +43,6 @@ const ROUTES: &[DiscoveryRoute] = &[
     viewer(html_matches(&HTML_RE)).decode(handle_html),
     viewer(js_matches(&VIEWER_JS_RE)).decode(handle_viewer_js),
     viewer(url_matches(is_javascript_uri)).decode(handle_viewer_js),
-    metadata(any()).child_metadata(handle_xml),
 ];
 
 pub const SPEC: FormatSpec = FormatSpec::new("krpano", ROUTES)
@@ -59,7 +58,10 @@ fn handle_html(resource: DiscoveryResource<'_>) -> Result<ParsedResource, Discov
         .map(|reference| resolve_relative(resource.final_uri(), &reference))
         .or_else(|| extract_xml_from_embedpano(resource))
         .unwrap_or_else(|| sibling_uri(resource.final_uri(), "tour.xml"));
-    Ok(ParsedResource::Follow(Request::new(xml_uri)))
+    Ok(ParsedResource::FollowWith(
+        Request::new(xml_uri),
+        handle_xml,
+    ))
 }
 
 fn handle_xml(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
@@ -83,7 +85,12 @@ fn handle_xml(resource: DiscoveryResource<'_>) -> Result<ParsedResource, Discove
                     "unable to decrypt krpano XML: {error}"
                 )))
             },
-            |uri| Ok(ParsedResource::Follow(Request::new(uri))),
+            |uri| {
+                Ok(ParsedResource::FollowWith(
+                    Request::new(uri),
+                    handle_viewer_js,
+                ))
+            },
         ),
     }
 }
@@ -108,10 +115,10 @@ fn handle_viewer_js(resource: DiscoveryResource<'_>) -> Result<ParsedResource, D
                 "not krpano viewer JavaScript",
             ));
         }
-        return Ok(ParsedResource::Follow(Request::new(sibling_uri(
-            resource.final_uri(),
-            "tour.xml",
-        ))));
+        return Ok(ParsedResource::FollowWith(
+            Request::new(sibling_uri(resource.final_uri(), "tour.xml")),
+            handle_xml,
+        ));
     };
     let viewer_js =
         extract_viewer_js(resource.bytes()).unwrap_or_else(|| resource.bytes().to_vec());
@@ -123,7 +130,12 @@ fn handle_viewer_js(resource: DiscoveryResource<'_>) -> Result<ParsedResource, D
                     "unable to decrypt krpano XML: {error}"
                 )))
             },
-            |uri| Ok(ParsedResource::Follow(Request::new(uri))),
+            |uri| {
+                Ok(ParsedResource::FollowWith(
+                    Request::new(uri),
+                    handle_viewer_js,
+                ))
+            },
         ),
     }
 }
@@ -136,7 +148,10 @@ fn handle_failure(
     if let Some(xml) = find_xml(context)
         && let Some(uri) = next_viewer_after_failure(context, request.uri.as_str(), xml.final_uri())
     {
-        return Ok(ParsedResource::Follow(Request::new(uri)));
+        return Ok(ParsedResource::FollowWith(
+            Request::new(uri),
+            handle_viewer_js,
+        ));
     }
     Err(DiscoveryError::fetch_failed(failure.clone()))
 }

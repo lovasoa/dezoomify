@@ -29,21 +29,26 @@ static SEADRAGON_EMBED: LazyLock<BytesRegex> = LazyLock::new(|| {
 static WDL_MARKER_RE: LazyLock<BytesRegex> =
     LazyLock::new(|| BytesRegex::new("dziUrlTemplate").expect("constant WDL marker pattern"));
 const ROUTES: &[DiscoveryRoute] = &[
-    image_url(is_tile_url).resolve_metadata(tile_metadata),
-    viewer(url_matches(is_bl_viewer_url)).resolve_metadata(bl_metadata),
-    viewer(url_matches(is_nla_view_url)).resolve_metadata(nla_metadata),
+    image_url(is_tile_url)
+        .resolve_metadata(tile_metadata)
+        .then_decode(decode_catalog),
+    viewer(url_matches(is_bl_viewer_url))
+        .resolve_metadata(bl_metadata)
+        .then_decode(decode_catalog),
+    viewer(url_matches(is_nla_view_url))
+        .resolve_metadata(nla_metadata)
+        .then_decode(decode_catalog),
     viewer(url_matches(is_polona_item_url)).decode(follow_polona_json),
     metadata(url_matches(is_polona_json_url)).decode(follow_polona_dzi),
     paris::ARK_ROUTE,
-    paris::MANIFEST_ROUTE,
+    paris::MANIFEST_ROUTE.then_decode(decode_catalog),
     viewer(js_matches(&SEADRAGON_EMBED)).decode(follow_seadragon_embed),
     viewer(js_matches(&WDL_MARKER_RE)).decode(follow_wdl_template),
     DiscoveryRoute::regex_link(&DZI_LINK_RE, "$url"),
-    DiscoveryRoute::regex_link(&DZI_ATTR_RE, "$url"),
+    DiscoveryRoute::regex_link(&DZI_ATTR_RE, "$url").then_decode(decode_catalog),
     metadata(url_suffix(".dzi")).decode(decode_catalog),
     xml_metadata::<DziFile>(),
     metadata(any()).try_decode(embedded_metadata),
-    metadata(any()).child_metadata(decode_catalog),
 ];
 
 pub const SPEC: FormatSpec =
@@ -83,7 +88,7 @@ fn follow_wdl_template(resource: DiscoveryResource<'_>) -> Result<ParsedResource
     let url = template
         .replace("{group}", &view[1])
         .replace("{index}", &view[2]);
-    Ok(resource.follow_relative(&url))
+    Ok(resource.follow_relative(&url).decode_with(decode_catalog))
 }
 
 fn tile_metadata(input: &str) -> Result<Request, DiscoveryError> {
@@ -147,9 +152,10 @@ fn follow_polona_json(resource: DiscoveryResource<'_>) -> Result<ParsedResource,
         .and_then(|captures| captures.get(1))
         .map(|capture| capture.as_str().to_owned())
         .ok_or_else(|| DiscoveryError::InvalidMetadata("Polona item URL has no id".into()))?;
-    Ok(ParsedResource::Follow(Request::new(format!(
-        "http://polona.pl/resources/item/{id}/?format=json"
-    ))))
+    Ok(ParsedResource::FollowWith(
+        Request::new(format!("http://polona.pl/resources/item/{id}/?format=json")),
+        follow_polona_dzi,
+    ))
 }
 
 fn follow_polona_dzi(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
@@ -173,7 +179,10 @@ fn follow_polona_dzi(resource: DiscoveryResource<'_>) -> Result<ParsedResource, 
         .and_then(|page| page.get("dzi_url"))
         .and_then(|url| url.as_str())
         .ok_or_else(|| DiscoveryError::InvalidMetadata("Polona JSON has no page DZI URL".into()))?;
-    Ok(ParsedResource::Follow(Request::new(dzi.to_owned())))
+    Ok(ParsedResource::FollowWith(
+        Request::new(dzi.to_owned()),
+        decode_catalog,
+    ))
 }
 
 fn follow_seadragon_embed(
@@ -188,7 +197,9 @@ fn follow_seadragon_embed(
         .ok_or_else(|| {
             DiscoveryError::InvalidMetadata("Seadragon embed lacks a metadata URL".into())
         })?;
-    Ok(resource.follow_relative(metadata))
+    Ok(resource
+        .follow_relative(metadata)
+        .decode_with(decode_catalog))
 }
 
 mod paris;

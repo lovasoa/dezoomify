@@ -1,7 +1,7 @@
 //! Pure Google Arts & Culture two-stage discovery.
 
 use crate::Vec2d;
-use crate::core::discovery::{metadata, url_matches, url_suffix, viewer};
+use crate::core::discovery::{url_matches, viewer};
 use crate::core::{
     DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan, ParsedResource,
     ProcessingRecipe, Request, ResolvedLevel,
@@ -12,10 +12,7 @@ pub(crate) mod decryption;
 mod tile_info;
 mod url;
 
-const ROUTES: &[DiscoveryRoute] = &[
-    metadata(url_suffix("=g")).child_metadata(parse_tile_information),
-    viewer(url_matches(is_google_arts_url)).decode(parse_page),
-];
+const ROUTES: &[DiscoveryRoute] = &[viewer(url_matches(is_google_arts_url)).decode(parse_page)];
 
 pub const SPEC: FormatSpec =
     FormatSpec::new("google_arts_and_culture", ROUTES).with_display_name("Arts & Culture");
@@ -25,9 +22,10 @@ fn is_google_arts_url(uri: &str) -> bool {
 }
 
 fn parse_page(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-    Ok(ParsedResource::Follow(Request::new(
-        page_info(resource)?.tile_info_url(),
-    )))
+    Ok(ParsedResource::FollowWith(
+        Request::new(page_info(resource)?.tile_info_url()),
+        parse_tile_information,
+    ))
 }
 
 fn page_info(resource: DiscoveryResource<'_>) -> Result<PageInfo, DiscoveryError> {

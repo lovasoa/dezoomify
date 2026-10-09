@@ -220,8 +220,14 @@ fn followed_metadata_retains_errors_even_without_a_content_match() {
         ),
         (
             "second_canvas",
-            "https://museum.test/viewer?js=/metadata",
+            "https://museum.test/viewer?js=/metadata.json",
             br#"<script src="scw.min.js"></script>"#.as_slice(),
+            "https://museum.test/metadata.json",
+        ),
+        (
+            "iiif",
+            "https://museum.test/viewer?manifest=https://museum.test/metadata",
+            b"".as_slice(),
             "https://museum.test/metadata",
         ),
         (
@@ -248,6 +254,48 @@ fn followed_metadata_retains_errors_even_without_a_content_match() {
             "{format}: {diagnostics:?}"
         );
     }
+}
+
+#[test]
+fn followed_viewers_do_not_enable_metadata_fallbacks() {
+    image(
+        vec![DiscoveryInput::with_contents(
+            PAGE,
+            br#"<a href="viewer.xml">View</a>"#,
+        )],
+        &[
+            (
+                "https://museum.test/viewer.xml",
+                br#"<script>Seadragon.embed('viewer', 'title', '/art');</script>"#,
+            ),
+            ("https://museum.test/art", DZI),
+        ],
+        "deepzoom",
+    );
+    let error = lookup(
+        registry_for("second_canvas").unwrap(),
+        vec![DiscoveryInput::with_contents(
+            PAGE,
+            br#"<iframe src="https://museum.s3.amazonaws.com/web/viewer.html"></iframe>"#,
+        )],
+        &[(
+            "https://museum.s3.amazonaws.com/web/viewer.html",
+            b"<html>Unavailable</html>",
+        )],
+        Default::default(),
+        None,
+    )
+    .unwrap_err();
+    let DiscoveryError::NoCandidateAccepted { diagnostics } = error else {
+        panic!("expected candidate diagnostics")
+    };
+    assert!(
+        diagnostics.iter().all(|diagnostic| matches!(
+            diagnostic.kind,
+            RejectionKind::DidNotMatchUrl | RejectionKind::DidNotMatchContent
+        )),
+        "{diagnostics:?}"
+    );
 }
 
 #[test]
@@ -425,18 +473,23 @@ fn local_paths_and_only_supported_iframe_sources_are_followed() {
 }
 #[test]
 fn navigation_cycles_and_resource_budgets_are_independent_of_parser_count() {
-    for resources in [1, 2] {
-        let result = lookup(
-            default_registry(),
-            vec![DiscoveryInput::new(PAGE)],
-            &[(PAGE, FRAME), ("https://museum.test/art", DZI)],
-            DiscoveryLimits {
-                resources,
-                ..Default::default()
-            },
-            None,
-        );
-        assert_eq!(result.is_ok(), resources == 2);
+    for page in [
+        FRAME,
+        br#"<script>Seadragon.embed('viewer', 'title', '/art');</script>"#,
+    ] {
+        for resources in [1, 2] {
+            let result = lookup(
+                default_registry(),
+                vec![DiscoveryInput::new(PAGE)],
+                &[(PAGE, page), ("https://museum.test/art", DZI)],
+                DiscoveryLimits {
+                    resources,
+                    ..Default::default()
+                },
+                None,
+            );
+            assert_eq!(result.is_ok(), resources == 2);
+        }
     }
     assert!(
         lookup(

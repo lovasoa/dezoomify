@@ -35,15 +35,12 @@ mod metadata;
 mod tests;
 mod viewer;
 
-use crate::core::discovery::{
-    Metadata, any, metadata as route, resource_matches, viewer as viewer_route, xml_metadata,
-};
+use crate::core::discovery::{Metadata, resource_matches, viewer as viewer_route, xml_metadata};
 use crate::core::{DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ParsedResource};
 
 const ROUTES: &[DiscoveryRoute] = &[
     xml_metadata::<metadata::Document>(),
     viewer_route(resource_matches(viewer::recognizes)).decode(viewer::decode),
-    route(any()).child_metadata(decode),
 ];
 pub const SPEC: FormatSpec = FormatSpec::new("fzp", ROUTES)
     .with_display_name("FreezoomPack")
@@ -63,11 +60,7 @@ fn invalid(detail: impl std::fmt::Display) -> DiscoveryError {
 }
 
 fn decode(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-    match quick_xml::de::from_reader::<_, metadata::Document>(resource.bytes()) {
-        Ok(document) => document.decode(resource),
-        Err(error) => viewer::decode(resource).map_err(|viewer_error| match viewer_error {
-            DiscoveryError::InvalidMetadata(_) if resource.is_html() => invalid(error),
-            other => other,
-        }),
-    }
+    quick_xml::de::from_reader::<_, metadata::Document>(resource.bytes())
+        .map_err(invalid)?
+        .decode(resource)
 }

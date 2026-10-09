@@ -7,7 +7,7 @@ use serde::{Deserialize, de::IntoDeserializer};
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{Metadata, any, css, html_matches, json_metadata, metadata, viewer};
+use crate::core::discovery::{Metadata, css, html_matches, json_metadata, viewer};
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
     ParsedResource, Positioned, Request, ResolvedLevel,
@@ -24,7 +24,6 @@ const ROUTES: &[DiscoveryRoute] = &[
         "iframe[src*=\".s3.amazonaws.com/web/\" i][src*=\".html\" i]",
     ))
     .follow_attribute("src"),
-    metadata(any()).child_metadata(decode_catalog),
 ];
 
 pub const SPEC: FormatSpec =
@@ -38,10 +37,10 @@ static EMBEDDED_CONFIG_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
 });
 
 fn follow_viewer_config(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-    Ok(ParsedResource::Follow(Request::new(viewer_config_uri(
-        resource.final_uri(),
-        resource.bytes(),
-    )?)))
+    Ok(ParsedResource::FollowWith(
+        Request::new(viewer_config_uri(resource.final_uri(), resource.bytes())?),
+        decode_catalog,
+    ))
 }
 
 fn viewer_config_uri(viewer_uri: &str, viewer_bytes: &[u8]) -> Result<String, DiscoveryError> {
