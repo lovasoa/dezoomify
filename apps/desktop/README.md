@@ -1,7 +1,7 @@
 # Desktop application
 
 The Tauri shell runs NativeHost and embeds the shared UI. Image bytes stay
-native; IPC carries generated progress, choices, and output values. See
+native; IPC carries generated progress, retry approvals, and output values. See
 [Architecture](../../docs/architecture.md) for ownership and the
 [desktop guide](desktop-app.md) for installation and use.
 

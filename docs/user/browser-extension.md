@@ -54,10 +54,12 @@ artwork. Use Dezoomify when zooming stays sharp and the viewer loads many pieces
 
 ## If something goes wrong
 
-**Try again** reads the same source document again and restarts the attempt.
-For a different image or a navigated source page, click the toolbar button on
-that page. Follow [troubleshooting](./troubleshooting.md) for other errors,
-partial images, or a visible picture that cannot be saved.
+If automatic retries are exhausted, **Retry once more** continues the existing
+job and retains downloaded tiles; **Cancel** stops it without saving an incomplete
+image. After a failed job, **Try again** reads the same source document again
+and restarts the attempt. For a different image or a navigated source page, click
+the toolbar button on that page. Follow [troubleshooting](./troubleshooting.md)
+for other errors or a visible picture that cannot be saved.
 
 ## What the extension does with your data
 

@@ -57,7 +57,6 @@ const app = createBrowserApplication({
   product: "extension",
   version: api.runtime.getManifest().version,
   wasm: () => wasm,
-  partial: "prompt",
   openSource: () => {
     if (sourceTabId !== null) void api.tabs.update(sourceTabId, { active: true });
   },
@@ -228,9 +227,11 @@ api.runtime.onMessage.addListener((message: unknown) => {
       const expected =
         value.scenario === "cookie-session"
           ? "/protected/artwork.dzi"
-          : typeof value.scenario === "string" && value.scenario.startsWith("fixtures/")
-            ? `/${value.scenario}/`
-            : "/extension-inputs/";
+          : value.scenario === "retry"
+            ? "/fixtures/failures/retry-approval/retry.dzi"
+            : typeof value.scenario === "string" && value.scenario.startsWith("fixtures/")
+              ? `/${value.scenario}/`
+              : "/extension-inputs/";
       const input = scan.inputs.find((candidate) => candidate.url.includes(expected));
       if (!input) throw new Error(`direct scan did not find ${expected}`);
       const url =

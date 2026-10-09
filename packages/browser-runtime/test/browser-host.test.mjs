@@ -17,6 +17,13 @@ const tile = {
     role: { probe: false, output: true },
   },
 };
+const acquisition = (tile) => ({
+  tile,
+  attempt: 0,
+  requires_approval: false,
+  previous_failure: undefined,
+});
+
 function setup(overrides = {}) {
   const controller = new AbortController(),
     painted = [],
@@ -52,7 +59,7 @@ function setup(overrides = {}) {
       response: { bytes: new Uint8Array([1, 2]), final_uri: null },
     }),
     onProgress: (p) => reports.push(p),
-    choosePartial: async () => "keep",
+    approveRetry: async () => {},
     ...overrides,
   };
   return { host: new BrowserHost(deps), deps, controller, assembly, painted, reports, diagnostics };
@@ -60,7 +67,7 @@ function setup(overrides = {}) {
 
 test("acquisition decodes and paints readable bytes before returning", async () => {
   const h = setup();
-  assert.equal(await h.host.acquireTile(tile), undefined);
+  assert.equal(await h.host.acquireTile(acquisition(tile)), undefined);
   assert.deepEqual([...new Uint8Array(h.painted[0][2])], [1, 2]);
   assert.equal(h.painted[0][0], 0);
   assert.equal(h.painted[0][1], tile.placement);
@@ -126,7 +133,7 @@ test("HTTP failures retain status, retry hints and preview without ordinary-imag
         return { naturalWidth: 256, naturalHeight: 256 };
       },
     });
-    await assert.rejects(h.host.acquireTile(tile), {
+    await assert.rejects(h.host.acquireTile(acquisition(tile)), {
       kind: "resource",
       request: tile.request.uri,
       resource_kind: "tile",
@@ -162,13 +169,13 @@ test("an unreadable origin is classified once across concurrent probes and ordin
   });
   const [measured, ...results] = await Promise.all([
     h.host.probe({ ...tile, placement: { ...tile.placement, role: { output: false } } }),
-    ...[1, 2].map((index) => h.host.acquireTile({ ...tile, index })),
+    ...[1, 2].map((index) => h.host.acquireTile(acquisition({ ...tile, index }))),
   ]);
   assert.deepEqual(measured, { status: "available", width: 256, height: 256 });
   assert.equal(reads, 1);
   assert.equal(displays, 3);
   assert.ok(results.every((result) => result === undefined));
-  await h.host.acquireTile({ ...tile, index: 3 });
+  await h.host.acquireTile(acquisition({ ...tile, index: 3 }));
   assert.equal(reads, 1);
 });
 
@@ -201,7 +208,7 @@ test("processed tiles, policy and resource limits never use ordinary images", as
         ? failure
         : { kind: "resource", request: tile.request.uri, resource_kind: "tile", source: failure };
     await assert.rejects(
-      h.host.acquireTile({ ...tile, placement: { ...tile.placement, processing } }),
+      h.host.acquireTile(acquisition({ ...tile, placement: { ...tile.placement, processing } })),
       expected,
     );
     if (["policy-denied", "cancelled"].includes(failure.kind))
@@ -285,7 +292,7 @@ test("only successful ordinary-image loading establishes display-only mode", asy
     throw { kind: "output-unavailable", detail: "paint failed" };
   };
   for (let index = 1; index <= 2; index++)
-    await assert.rejects(h.host.acquireTile({ ...tile, index }), {
+    await assert.rejects(h.host.acquireTile(acquisition({ ...tile, index })), {
       source: { kind: "output-unavailable", detail: "paint failed" },
     });
   assert.equal(
@@ -361,7 +368,7 @@ test("decode, processing and painting failures retain their cause without transp
         }
         return true;
       };
-      await assert.rejects(h.host.acquireTile(input), rejects);
+      await assert.rejects(h.host.acquireTile(acquisition(input)), rejects);
       if (stage === "decode") assert.deepEqual(await h.host.probe(input), { status: "missing" });
       else await assert.rejects(h.host.probe(input), rejects);
       assert.equal(reads, 2);
@@ -372,7 +379,7 @@ test("decode, processing and painting failures retain their cause without transp
     }
 });
 
-test("output waits for saving and preserves actual disposition and missing tiles", async () => {
+test("output waits for saving and preserves actual disposition", async () => {
   const h = setup();
   let save;
   h.assembly.finalizeOutput = () =>
@@ -380,19 +387,17 @@ test("output waits for saving and preserves actual disposition and missing tiles
       save = resolve;
     });
   let finished = false;
-  const pending = h.host
-    .finish({ canvas: tile.placement.canvas, format: "png", missing: [2] })
-    .then((output) => {
-      finished = true;
-      return output;
-    });
+  const pending = h.host.finish({ canvas: tile.placement.canvas, format: "png" }).then((output) => {
+    finished = true;
+    return output;
+  });
   await tick();
   assert.equal(finished, false);
   save("browser-save-initiated");
   assert.deepEqual(await pending, {
     canvas: tile.placement.canvas,
     format: "png",
-    missing: [2],
+
     disposition: "browser-save-initiated",
   });
 });
@@ -402,7 +407,7 @@ test("surface and output failures retain their typed kind", async () => {
   h.assembly.prepare = () => {
     throw { kind: "output-unavailable", detail: "No canvas" };
   };
-  await assert.rejects(h.host.acquireTile(tile), {
+  await assert.rejects(h.host.acquireTile(acquisition(tile)), {
     kind: "resource",
     request: tile.request.uri,
     resource_kind: "tile",
@@ -452,7 +457,7 @@ test("canonical failures retain their precise request and affected resource", as
       };
     },
   });
-  await assert.rejects(h.host.acquireTile(tile), {
+  await assert.rejects(h.host.acquireTile(acquisition(tile)), {
     kind: "resource",
     request: tile.request.uri,
     resource_kind: "tile",
@@ -467,7 +472,7 @@ test("canonical failures retain their precise request and affected resource", as
   h.assembly.prepare = () => {
     throw { kind: "output-unavailable", detail: "the output cannot be allocated" };
   };
-  await assert.rejects(h.host.acquireTile(tile), {
+  await assert.rejects(h.host.acquireTile(acquisition(tile)), {
     kind: "resource",
     request: tile.request.uri,
     resource_kind: "tile",
@@ -515,7 +520,7 @@ test("cancellation rejects late readable bytes before painting", async () => {
         complete = resolve;
       }),
   });
-  const rejected = assert.rejects(h.host.acquireTile(tile), { kind: "cancelled" });
+  const rejected = assert.rejects(h.host.acquireTile(acquisition(tile)), { kind: "cancelled" });
   h.controller.abort();
   complete({ kind: "response", response: { bytes: new Uint8Array([1]), final_uri: null } });
   await rejected;
@@ -594,31 +599,14 @@ test("settlement waits for native decoding after promptly rejecting the cancelle
   assert.deepEqual(h.painted, []);
 });
 
-test("settlement cancels a permission interaction and suppresses a late image", async () => {
-  let image, signal;
-  const h = setup({
-    fetchResource: async () => {
-      throw { kind: "network-failure", transport: "direct" };
-    },
-    loadDisplayImage: (_url, owned) => {
-      signal = owned;
-      return new Promise((resolve) => {
-        image = resolve;
-      });
-    },
-    choosePartial: (_missing, owned) =>
-      new Promise((_, reject) =>
-        owned.addEventListener("abort", () => reject(owned.reason), { once: true }),
-      ),
-  });
-  const painting = assert.rejects(h.host.acquireTile(tile), { kind: "cancelled" });
-  const choosing = assert.rejects(h.host.choosePartial({ missing: [] }), {
-    kind: "cancelled",
-  });
+test("settlement cancels a pending retry approval without requiring a host response", async () => {
+  const h = setup({ approveRetry: () => new Promise(() => {}) });
+  const acquiring = assert.rejects(
+    h.host.acquireTile({ tile, attempt: 4, requires_approval: true }),
+    { kind: "cancelled" },
+  );
   await tick();
-  const cleanup = h.host.settle();
-  assert.equal(signal.aborted, true);
-  image({ naturalWidth: 256, naturalHeight: 256 });
-  await Promise.all([painting, choosing, cleanup]);
+  assert.deepEqual(h.painted, []);
+  await Promise.all([acquiring, h.host.settle()]);
   assert.deepEqual(h.painted, []);
 });

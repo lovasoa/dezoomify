@@ -27,6 +27,9 @@ operations finite, cancellable, and validated at the job-page boundary.
 
 ## Saving and packaging
 
+Optional tile retries await approval in the job tab and retain successful tiles.
+Cancellation settles pending approval; incomplete downloads are not saved.
+
 A clean result finishes only when the browser download manager confirms saving.
 Keep its Blob URL alive until a terminal event or cancellation settles. A tainted
 canvas is display-only. Open/reveal actions use the confirmed download identity.

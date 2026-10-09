@@ -65,7 +65,6 @@ const app = root
       root,
       product: "website",
       wasm: () => wasm,
-      partial: "discard",
       resetToIdle: true,
       history: { store: historyStore, key: HISTORY_KEY_WEBSITE },
       onStart(url) {

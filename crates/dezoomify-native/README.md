@@ -2,7 +2,8 @@
 
 CLI and desktop supply NativeHost to the shared Rust algorithm. The Host owns
 HTTP and local resources, cache, codecs, output publication, and cleanup;
-Rust owns discovery, selection, retries, and partial choices.
+Rust owns discovery, selection, retry limits, and backoff. Desktop acquisitions
+await user approval before optional retries.
 
 ## Memory and output
 
@@ -17,8 +18,8 @@ Return the typed resource-limit failure instead. Reservations track owned workin
 memory, not total process RSS.
 
 Tiled outputs preserve compatible compressed source bytes. Convert locally only
-when required by the chosen output; preserve failures in acquisition's retry and
-partial handling. Encoder compatibility rules live in
+when required by the chosen output; preserve failures in acquisition's retry
+handling. Encoder compatibility rules live in
 [tile_output.rs](src/tile_output.rs) and [zif_output.rs](src/zif_output.rs).
 
 ## Publication and cleanup
@@ -27,8 +28,8 @@ All output routes share [staging and publication](src/output.rs). Reserve unique
 staging paths; check cancellation and destination conflicts before committing.
 An uncommitted cancellation publishes nothing and preserves existing files;
 committed output survives retirement. Cleanup waits for owned decoders and
-encoders before removing staging. Keep partial output at a distinct `.partial`
-sibling so it cannot masquerade as a complete save.
+encoders before removing staging. Every required tile must succeed before
+finalization; incomplete downloads are not published.
 
 Tests: `cargo xtask test native` and `cargo xtask test scenario`.
 User-facing formats and limits: [command-line guide](../../docs/user/command-line.md).

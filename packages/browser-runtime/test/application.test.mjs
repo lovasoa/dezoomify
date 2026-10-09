@@ -8,8 +8,7 @@ const { createBrowserApplication } = await import("../src/application.ts");
 const output = {
   canvas: { width: 256, height: 256 },
   format: "png",
-  complete: true,
-  missing: [],
+
   disposition: "browser-save-ready",
 };
 const progress = {
@@ -30,7 +29,6 @@ function harness(resetToIdle = true, fetchResource = async () => assert.fail("un
     app = createBrowserApplication({
       root,
       product: "website",
-      partial: "prompt",
       resetToIdle,
       history: {
         key: "history",
@@ -177,7 +175,7 @@ test("cancel remains visible when its invocation resolves output late", async ()
   await act(() => h.app.dispose());
 });
 
-test("partial actions resolve the awaited choice and disappear before completed output", async () => {
+test("retry approval pauses the job, resumes acquisition, and disappears on completion", async () => {
   const h = harness();
   let run;
   act(() => {
@@ -185,36 +183,35 @@ test("partial actions resolve the awaited choice and disappear before completed 
   });
   await tick();
   const call = h.calls[0];
-  let answer;
+  let painted = 0;
+  call.host.paintTile = async () => {
+    painted++;
+  };
+  let acquiring;
   act(() => {
     call.host.report(progress);
-    answer = call.host.choosePartial({
-      missing: [
-        {
-          tile: 2,
-          failures: [
-            {
-              kind: "http-error",
-              status: 403,
-              transport: "direct",
-              detail: "the website refused this tile",
-            },
-          ],
-        },
-      ],
+    acquiring = call.host.acquireTile({
+      tile: {},
+      attempt: 4,
+      requires_approval: true,
+      previous_failure: { kind: "timeout", transport: "direct" },
     });
   });
   await tick();
-  const keep = h.root.querySelector('[data-dz-partial-choice="keep"]');
-  assert.ok(keep);
+  const retry = h.root.querySelector('[data-dz-retry-choice="retry"]');
+  assert.ok(retry);
+  assert.equal(painted, 0);
+  assert.equal(call.host.retryWaiting, true);
   assert.equal(h.root.querySelector('[role="progressbar"]'), null);
-  click(keep);
-  assert.equal(await answer, "keep");
-  act(() => call.resolve({ ...output, complete: false, missing: [2] }));
+  click(retry);
+  await acquiring;
+  assert.equal(painted, 1);
+  assert.equal(call.host.retryWaiting, false);
+  act(() => call.resolve(output));
   await act(() => run);
-  assert.equal(h.root.querySelector("[data-dz-partial-decision]"), null);
-  assert.deepEqual(h.app.presentation().output, { ...output, complete: false, missing: [2] });
-  assert.equal(JSON.parse(h.store.get("history"))[0].status, "partial");
+  assert.equal(h.root.querySelector("[data-dz-retry-actions]"), null);
+  assert.deepEqual(h.app.presentation().output, output);
+  assert.equal(JSON.parse(h.store.get("history"))[0].status, "completed");
   await act(() => h.app.dispose());
 });
 

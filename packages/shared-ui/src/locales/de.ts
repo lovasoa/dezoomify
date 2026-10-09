@@ -17,8 +17,13 @@ export const de = {
     "Kopieren fehlgeschlagen. Markieren und kopieren Sie die Details unten.",
   "view.diagnostics.loadFailed":
     "Der vollständige Bericht konnte nicht gelesen werden. Die verfügbaren Details stehen unten.",
+  "view.retry.title": "Download angehalten",
+  "view.retry.summary": "{done} von {total} Kacheln wurden geladen.",
+  "view.retry.explanation":
+    "Die automatischen Versuche sind ausgeschöpft. Erneut versuchen oder abbrechen; es wurde keine Datei gespeichert.",
+  "view.retry.retry": "Noch einmal versuchen",
+  "view.retry.cancel": "Abbrechen",
   "desktop.done.title": "Bild gespeichert",
-  "desktop.done.partial": "Bild mit Lücken gespeichert",
   "desktop.done.size": "{width} × {height} Pixel",
   "desktop.done.saved": "Im gewählten Ordner gespeichert.",
   "desktop.done.open": "Bild öffnen",
@@ -28,22 +33,6 @@ export const de = {
   "desktop.done.folderError":
     "Der Ordner konnte nicht geöffnet werden. Prüfen Sie, ob ein Dateimanager installiert ist.",
   "desktop.done.missingError": "Das gespeicherte Bild oder der Ordner ist nicht mehr vorhanden.",
-  "view.partial.title": "Das Bild ist unvollständig",
-  "view.partial.summary": "{done} von {total} Fragmenten wurden abgerufen.",
-  "view.partial.gaps":
-    "Das gespeicherte Bild wird Lücken haben. Es wurde noch keine Datei gespeichert.",
-  "view.partial.refused":
-    "Die Website hat die restlichen Fragmente verweigert. Das gespeicherte Bild wird Lücken haben.",
-  "view.partial.save": "Unvollständiges Bild speichern",
-  "view.partial.cancel": "Abbrechen",
-  "view.partial.retry": "Fehlgeschlagene Fragmente erneut abrufen",
-  "view.partial.accessDenied": "Die Website hat den Zugriff auf dieses Bild verweigert",
-  "view.partial.empty": "Das Bild konnte nicht abgerufen werden",
-  "view.partial.noneSaved":
-    "Kein Teil des Bildes konnte abgerufen werden. Es wurde keine Datei gespeichert.",
-  "view.partial.checkSource":
-    "Öffnen Sie die Quellseite und prüfen Sie, ob deren Bildbetrachter funktioniert.",
-  "view.partial.openSource": "Quellseite öffnen",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Verstanden",
   "view.modal.closeDialog": "Dialog schließen",
@@ -142,6 +131,7 @@ export const de = {
   "view.display.deskDescClean":
     "Für ein sauberes Speichern in voller Größe, wenn der Browser das Bild nur zeigen kann.",
   "view.display.startOver": "Von vorn beginnen",
+  "view.resolution.title": "Bild zu groß für diesen Browser",
   "view.resolution.notice":
     "Wegen Browser-Beschränkungen wird nicht in maximaler Auflösung geladen. Die Desktop-App entfernt diese Beschränkungen.",
   "view.resolution.sizes": "Speichert mit {selected} Pixeln statt des Maximums {maximum} Pixel.",
@@ -190,7 +180,6 @@ export const de = {
   "view.history.removeImage": "{image} aus den letzten Bildern entfernen",
   "view.history.status.started": "Gestartet",
   "view.history.status.completed": "Abgeschlossen",
-  "view.history.status.partial": "Mit Lücken",
   "view.history.status.preview": "Nur Vorschau",
   "view.history.status.failed": "Fehlgeschlagen",
   "view.history.status.cancelled": "Abgebrochen",
@@ -256,10 +245,8 @@ export const de = {
     "Dieses Bild ({dims}) ist zu groß für JPEG, das höchstens {jpegMax} Pixel je Seite erlaubt. Speichern Sie es stattdessen als PNG. Von {host}.",
   "desktop.output.webpLimit":
     "Dieses Bild ({dims}) ist zu groß für WebP, das höchstens {webpMax} Pixel je Seite erlaubt. Speichern Sie es stattdessen als PNG. Von {host}.",
-  "desktop.tile.partialDiscarded":
-    "Das Teilbild wurde verworfen, sodass keine Datei blieb. Versuchen Sie es von {host} aus mit stabiler Verbindung erneut.",
-  "desktop.tile.partialChoice":
-    "Einige Teile dieses Bildes von {host} konnten nicht gespeichert werden. Versuchen Sie die fehlenden Teile erneut oder behalten Sie das Teilbild mit leeren Flächen.",
+  "desktop.tile.failed":
+    "Eine Kachel von {host} konnte nicht geladen werden. Prüfen Sie das Quellbild und versuchen Sie es erneut.",
   "view.discovery.none":
     "Unter dieser Adresse wurde kein zoombares Bild gefunden. Versuchen Sie eine Seite mit Betrachter oder die Browsererweiterung.",
   "desktop.plan.none":
@@ -278,20 +265,7 @@ export const de = {
   "desktop.save.fallback":
     "Dieses Bild von {host} konnte nicht gespeichert werden. Versuchen Sie es erneut.",
   "desktop.invoke.startFallback": "Der Auftrag konnte nicht gestartet werden.",
-  "desktop.invoke.partial": "Die Teilbildwahl wurde abgelehnt.",
-  "desktop.rec.missing": "Fehlende Fragmente: {shown}{rest}.",
-  "desktop.rec.more": " und {n} weitere",
-  "desktop.rec.keep": "Teilbild behalten",
-  "desktop.rec.discard": "Teilbild verwerfen",
-  "desktop.rec.retryTiles": "Fehlende Fragmente erneut versuchen",
-  "desktop.rec.missingSome": "Einige Fragmente konnten nicht gespeichert werden.",
-  "desktop.rec.missingCount": "{count} Fragmente konnten nicht gespeichert werden.",
-  "desktop.rec.missingOne": "{count} Fragment konnte nicht gespeichert werden.",
-  "desktop.rec.missingList": "{n} fehlende Fragmente: {shown}{rest}.",
-  "desktop.rec.missingOneList": "{n} fehlendes Fragment: {shown}{rest}.",
-  "desktop.done.partialTitle": "Teilbild gespeichert",
-  "desktop.done.partialDesc":
-    "Diese Datei ist als Teilbild markiert: {summary} Fehlende Flächen bleiben leer. So unterscheidet sie sich von einem vollständigen Speichern.",
+  "desktop.invoke.retry": "Die Auswahl zum erneuten Versuch wurde abgelehnt.",
   "desktop.cancel.note":
     "Speichern abgebrochen. Aufgeräumt, und jede unfertige Datei wurde entfernt.",
   "desktop.copy.diagnostics": "Diagnose kopieren",
@@ -366,7 +340,7 @@ export const de = {
   "desktop.advanced.height": "Höhe",
   "desktop.advanced.retries": "Versuche",
   "desktop.advanced.retriesDesc":
-    "Fehlgeschlagene Bildfragmente erneut versuchen, bevor ein Teilergebnis bleibt.",
+    "Automatische Versuche, bevor ein weiterer Versuch angeboten wird.",
   "desktop.advanced.resumeCache": "Fortsetzungs-Cache",
   "desktop.advanced.resumeCacheDesc":
     "Fragmente nach einem unterbrochenen Speichern wiederverwenden.",

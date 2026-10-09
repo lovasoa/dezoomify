@@ -161,74 +161,23 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
             tile.map(|tile| portable_tile(tile, canvas.clone()))
                 .map_err(Error::from)
         });
-    let mut missing = acquire_round(tiles, host, options, &mut progress).await?;
-    if progress.completed == 0 {
-        // Lower levels cannot turn an unusable selected image into success.
-        let settled: Vec<&Error> = missing.iter().flat_map(|(_, f)| f.iter()).collect();
-        return Err(Error::NoUsableTiles {
-            transient: settled.iter().any(|f| f.retryable()),
-            retry_after_ms: settled.iter().filter_map(|f| f.retry_after_ms()).max(),
-        });
-    }
+    acquire_tiles(tiles, host, options, &mut progress).await?;
     let mut offset = base_count as u32;
     for grid in lower {
         let dimensions = Some(size(grid.image_size()));
         let count = grid.count() as u32;
-        missing.extend(
-            acquire_round(
-                grid.tiles_row_major().map(|tile| {
-                    let mut tile = portable_tile(tile.map_err(Error::from)?, dimensions.clone());
-                    tile.index += offset;
-                    Ok(tile)
-                }),
-                host,
-                options,
-                &mut progress,
-            )
-            .await?,
-        );
+        acquire_tiles(
+            grid.tiles_row_major().map(|tile| {
+                let mut tile = portable_tile(tile.map_err(Error::from)?, dimensions.clone());
+                tile.index += offset;
+                Ok(tile)
+            }),
+            host,
+            options,
+            &mut progress,
+        )
+        .await?;
         offset += count;
-    }
-    while !missing.is_empty() {
-        missing.sort_by_key(|(tile, _)| tile.index);
-        host.checkpoint(Gate::Acquisition).await?;
-        let choice = match options.partial {
-            PartialPolicy::Keep => RecoveryChoice::Keep,
-            PartialPolicy::Discard => RecoveryChoice::Discard,
-            PartialPolicy::Prompt => {
-                host.choose_partial(MissingTiles {
-                    missing: missing
-                        .iter()
-                        .map(|(tile, failures)| MissingTile {
-                            tile: tile.index,
-                            failures: failures.clone(),
-                        })
-                        .collect(),
-                })
-                .await?
-            }
-        };
-        match choice {
-            RecoveryChoice::Keep => break,
-            RecoveryChoice::Discard => {
-                // Like the no-usable-tiles aggregate: derived facts only.
-                let settled: Vec<&Error> = missing.iter().flat_map(|(_, f)| f.iter()).collect();
-                return Err(Error::PartialDiscarded {
-                    transient: settled.iter().any(|f| f.retryable()),
-                    retry_after_ms: settled.iter().filter_map(|f| f.retry_after_ms()).max(),
-                });
-            }
-            RecoveryChoice::Retry => {
-                let retry = std::mem::take(&mut missing);
-                missing = acquire_round(
-                    retry.into_iter().map(|(tile, _)| Ok(tile)),
-                    host,
-                    options,
-                    &mut progress,
-                )
-                .await?;
-            }
-        }
     }
     host.checkpoint(Gate::Acquisition).await?;
     progress.phase = ProgressPhase::Output;
@@ -237,7 +186,6 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
         canvas,
         format: options.output,
         title: image.title,
-        missing: missing.into_iter().map(|(tile, _)| tile.index).collect(),
         reused_tiles,
     })
     .await
@@ -596,58 +544,60 @@ pub(crate) async fn probe(
     }
 }
 
-async fn acquire_round(
+async fn acquire_tiles(
     tiles: impl Iterator<Item = Result<Tile, Error>>,
     host: &impl Host,
     options: &Options,
     progress: &mut Progress,
-) -> Result<Vec<(Tile, Vec<Error>)>, Error> {
-    let mut missing = Vec::new();
+) -> Result<(), Error> {
     let acquisitions =
         stream::iter(tiles.map(|tile| async { acquire(host, tile?, options).await }));
     let mut pending = acquisitions.buffer_unordered(options.max_concurrent as usize);
     while let Some(result) = pending.next().await {
-        let (tile, failures) = result?;
-        if let Some(failures) = failures {
-            missing.push((tile, failures));
-        } else {
-            progress.completed += 1;
-        }
+        result?;
+        progress.completed += 1;
         host.report(progress.clone());
     }
-    Ok(missing)
+    Ok(())
 }
 
-async fn acquire(
-    host: &impl Host,
-    tile: Tile,
-    options: &Options,
-) -> Result<(Tile, Option<Vec<Error>>), Error> {
-    let mut failures = Vec::new();
-    for attempt in 0..=options.max_retries {
+async fn acquire(host: &impl Host, tile: Tile, options: &Options) -> Result<(), Error> {
+    let mut attempt = 0;
+    let mut previous_failure = None;
+    loop {
         host.checkpoint(Gate::Acquisition).await?;
-        match host.acquire_tile(tile.clone()).await {
-            Ok(()) => return Ok((tile, None)),
-            Err(error) if error.is_terminal() || error.is_output() => {
-                return Err(error);
-            }
+        let request = TileAcquisition {
+            tile: tile.clone(),
+            attempt,
+            requires_approval: attempt > options.max_retries,
+            previous_failure,
+        };
+        match host.acquire_tile(request).await {
+            Ok(()) => return Ok(()),
+            Err(error) if error.is_terminal() || error.is_output() => return Err(error),
             Err(error) => {
-                let retry = error.retryable() && attempt < options.max_retries;
+                if !error.retryable()
+                    || (!options.interactive_retries && attempt >= options.max_retries)
+                    || attempt == u32::MAX
+                {
+                    return Err(Error::TileFailed {
+                        tile: tile.index,
+                        attempts: attempt.saturating_add(1),
+                        cause: Box::new(error),
+                    });
+                }
                 let delay = crate::retry::retry_delay_ms(
                     attempt + 1,
                     error.retry_after_ms(),
                     options.retry_base_delay_ms,
                 );
-                failures.push(error);
-                if !retry {
-                    break;
-                }
+                previous_failure = Some(Box::new(error));
+                attempt += 1;
                 host.checkpoint(Gate::Acquisition).await?;
                 host.sleep(delay as u32).await?;
             }
         }
     }
-    Ok((tile, Some(failures)))
 }
 
 fn empty_plan() -> Error {

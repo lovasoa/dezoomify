@@ -26,7 +26,7 @@ fn freezoompack_outputs_match_both_rounding_profile_goldens() {
                 // Public level positions run from smallest to largest.
                 options.zoom_level = Some(levels.len() - 1 - position);
                 options.max_retries = 0;
-                options.keep_partial = false;
+
                 options.overwrite = true;
             })
             .unwrap();
@@ -34,7 +34,7 @@ fn freezoompack_outputs_match_both_rounding_profile_goldens() {
                 outcome.tile_count as u64,
                 golden["tile_count"].as_u64().unwrap()
             );
-            assert!(outcome.output.missing.is_empty());
+
             let image = image::open(&output).unwrap().to_rgb8();
             assert_eq!(image.dimensions(), (width, height));
             for (pixel, gray) in image

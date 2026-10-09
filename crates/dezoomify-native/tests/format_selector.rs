@@ -31,7 +31,7 @@ fn named_deepzoom_selects_the_single_program() {
         .expect("named deepzoom succeeds");
     assert_eq!(outcome.source_format, "deepzoom");
     assert_eq!(outcome.tile_count, 4);
-    assert!(outcome.output.is_complete());
+    assert!(outcome.output.disposition == dezoomify::model::OutputDisposition::NativePublication);
     assert!(output.is_file());
 }
 

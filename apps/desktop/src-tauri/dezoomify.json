@@ -1,6 +1,6 @@
 {
   "commands": [
-    "answer_partial",
+    "answer_retry",
     "cancel_job",
     "dezoomify",
     "forget_saved_output",
@@ -35,9 +35,9 @@
     "iiif-dir"
   ],
   "eventChannels": [
-    "dezoomify://partial",
     "dezoomify://progress",
-    "dezoomify://registered"
+    "dezoomify://registered",
+    "dezoomify://retry"
   ],
   "updater": {
     "allowlist": [],

@@ -6,7 +6,7 @@
     "core:default",
     "dialog:allow-open",
     "opener:allow-open-url",
-    "dezoomify:allow-answer-partial",
+    "dezoomify:allow-answer-retry",
     "dezoomify:allow-cancel-job",
     "dezoomify:allow-dezoomify",
     "dezoomify:allow-forget-saved-output",
@@ -25,7 +25,7 @@
   ],
   "x-dezoomify": {
     "commands": [
-      "answer_partial",
+      "answer_retry",
       "cancel_job",
       "dezoomify",
       "forget_saved_output",
@@ -60,9 +60,9 @@
       "iiif-dir"
     ],
     "eventChannels": [
-      "dezoomify://partial",
       "dezoomify://progress",
-      "dezoomify://registered"
+      "dezoomify://registered",
+      "dezoomify://retry"
     ],
     "updater": {
       "allowlist": [],

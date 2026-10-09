@@ -53,51 +53,24 @@ fn file_uri_tiles_assemble_from_a_remote_manifest() {
 }
 
 #[test]
-fn partial_keep_policy_encodes_acquired_tiles() {
-    // The default policy keeps partial output: missing regions stay blank.
-    assert!(JobOptions::default().keep_partial);
+fn failed_tiles_publish_nothing() {
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/corrupt.dzi");
-    let out_dir = temp_dir("partial");
-    let output = out_dir.join("partial.png");
-    let config = JobOptions::default();
-    let outcome = support::run_with_options(
+    let out_dir = temp_dir("failed-tiles");
+    let output = out_dir.join("output.png");
+    let error = support::run_with_options(
         &input,
-        output.to_str().expect("utf8 output"),
+        output.to_str().unwrap(),
         false,
-        &config,
+        &JobOptions::default(),
         &mut |_| {},
     )
-    .expect("keep policy publishes a partial");
-    assert!(
-        !outcome.output.is_complete(),
-        "kept output is marked partial"
-    );
-    assert_eq!(outcome.tile_count, 3);
-    // Kept partials publish to a `.partial` sibling, never to the requested
-    // complete-save path: the partial stays distinguishable on disk.
-    let partial_path = out_dir.join("partial.partial.png");
-    assert_eq!(outcome.path, partial_path);
-    assert!(
-        !output.exists(),
-        "the requested complete-save path stays untouched on a partial"
-    );
-    // The corrupt quadrant stays blank (transparent black), the rest decodes.
-    let bytes = std::fs::read(&partial_path).expect("partial output written");
-    let decoded = image::load_from_memory(&bytes)
-        .expect("partial output decodes")
-        .to_rgba8();
-    assert_eq!((decoded.width(), decoded.height()), (512, 512));
-    let pixel = |x: u32, y: u32| {
-        let p = decoded.get_pixel(x, y).0;
-        (p[0], p[1], p[2])
-    };
-    assert_eq!(pixel(64, 64), (196, 48, 48), "top-left quadrant red");
-    assert_eq!(pixel(64, 448), (48, 72, 200), "bottom-left quadrant blue");
+    .expect_err("corrupt tiles must not produce an incomplete save");
+    assert!(matches!(error, Error::TileFailed { .. }));
     assert_eq!(
-        (pixel(448, 448).0, pixel(448, 448).1, pixel(448, 448).2),
-        (0, 0, 0),
-        "corrupt quadrant stays blank"
+        std::fs::read_dir(&out_dir).unwrap().count(),
+        0,
+        "failed acquisition removes all staging"
     );
 }
 
@@ -149,7 +122,7 @@ fn jpg_output_decodes_at_full_size() {
         ),
         (512, 512)
     );
-    assert!(outcome.output.is_complete());
+    assert!(outcome.output.disposition == dezoomify::model::OutputDisposition::NativePublication);
     let bytes = std::fs::read(&output).expect("jpeg output written");
     assert!(
         bytes.starts_with(&[0xFF, 0xD8, 0xFF]),
@@ -325,7 +298,7 @@ fn iiif_dir_writes_manifest_and_addressable_tiles() {
         ),
         (512, 512)
     );
-    assert!(outcome.output.is_complete());
+    assert!(outcome.output.disposition == dezoomify::model::OutputDisposition::NativePublication);
     // The manifest is spec-shaped: v2 context, real dimensions, one tile
     // block matching the files on disk.
     let info: serde_json::Value = serde_json::from_slice(
@@ -410,7 +383,7 @@ fn tile_cache_reuses_tiles_after_the_server_loses_them() {
     )
     .expect("second run reuses the cache");
     assert_eq!(resumed.tile_count, 4);
-    assert!(resumed.output.is_complete());
+    assert!(resumed.output.disposition == dezoomify::model::OutputDisposition::NativePublication);
 }
 
 #[test]
@@ -477,7 +450,7 @@ fn interrupted_job_resumes_without_refetching_completed_tiles() {
     let cache_dir = out_dir.join("cache");
     let failing = JobOptions {
         cache_dir: Some(cache_dir.clone()),
-        keep_partial: false,
+
         ..Default::default()
     };
     let first_output = out_dir.join("first.png");
@@ -489,7 +462,7 @@ fn interrupted_job_resumes_without_refetching_completed_tiles() {
         &mut |_| {},
     )
     .expect_err("interrupted run fails honestly");
-    assert!(matches!(error, Error::PartialDiscarded { .. }));
+    assert!(matches!(error, Error::TileFailed { .. }));
     assert!(
         !first_output.exists(),
         "failed runs write no output even with cached tiles"
@@ -532,7 +505,7 @@ fn interrupted_job_resumes_without_refetching_completed_tiles() {
     )
     .expect("repeated run resumes from the cache");
     assert_eq!(resumed.tile_count, 4);
-    assert!(resumed.output.is_complete());
+    assert!(resumed.output.disposition == dezoomify::model::OutputDisposition::NativePublication);
 }
 
 #[test]
@@ -742,7 +715,7 @@ fn first_catalog_entry_wins_with_two_deferred_images() {
     let decoded = image::load_from_memory(&bytes).expect("decodes").to_rgba8();
     assert_eq!(decoded.dimensions(), (256, 256));
     assert_eq!(outcome.tile_count, 1);
-    assert!(outcome.output.is_complete());
+    assert!(outcome.output.disposition == dezoomify::model::OutputDisposition::NativePublication);
     assert_eq!(decoded.get_pixel(8, 8).0[0..3], [196, 48, 48]);
     assert_eq!(decoded.get_pixel(200, 200).0[0..3], [196, 48, 48]);
 }

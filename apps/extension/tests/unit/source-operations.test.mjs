@@ -53,11 +53,13 @@ test("candidate snapshot orders rendered document and readable iframe DOM before
   const oldPerformance = globalThis.performance;
   const child = {
     location: { href: "https://gallery.example/frame" },
+    contentType: "application/xhtml+xml",
     documentElement: { outerHTML: "<html><script>dynamic viewer config</script></html>" },
     querySelectorAll: () => [],
   };
   globalThis.location = { href: "https://gallery.example/page" };
   globalThis.document = {
+    contentType: "text/html",
     documentElement: { outerHTML: "<html><body>rendered page</body></html>" },
     querySelectorAll: () => [
       { contentDocument: child, src: child.location.href },
@@ -86,6 +88,30 @@ test("candidate snapshot orders rendered document and readable iframe DOM before
       },
       { url: "https://gallery.example/TileGroup0/1-0-0.jpg", kind: "observed-resource" },
     ]);
+  } finally {
+    globalThis.location = oldLocation;
+    globalThis.document = oldDocument;
+    globalThis.performance = oldPerformance;
+  }
+});
+
+test("metadata documents retain their URL without supplying the browser's rendered viewer", () => {
+  const oldLocation = globalThis.location;
+  const oldDocument = globalThis.document;
+  const oldPerformance = globalThis.performance;
+  globalThis.location = { href: "https://gallery.example/image.dzi" };
+  globalThis.performance = { getEntriesByType: () => [] };
+  try {
+    for (const contentType of ["application/xml", "text/xml", "application/json", "text/plain"]) {
+      globalThis.document = {
+        contentType,
+        documentElement: { outerHTML: "<html><body>browser metadata viewer</body></html>" },
+        querySelectorAll: () => [],
+      };
+      assert.deepEqual(collectCandidates().inputs, [
+        { url: "https://gallery.example/image.dzi", kind: "source" },
+      ]);
+    }
   } finally {
     globalThis.location = oldLocation;
     globalThis.document = oldDocument;

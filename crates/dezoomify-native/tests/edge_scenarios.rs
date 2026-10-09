@@ -9,7 +9,7 @@ mod support;
 fn edge_responses_control_publication_and_keep_request_context() {
     let origin = support::start_fixture_server();
     for (input, code, retryable, purpose) in [
-        ("cache-304/pyramid.dzi", "partial-discarded", false, "tile"),
+        ("cache-304/pyramid.dzi", "tile-failed", false, "tile"),
         ("exif/pyramid.dzi", "ok", false, "metadata"),
         (
             "gzip-cache/pyramid.dzi",
@@ -29,21 +29,11 @@ fn edge_responses_control_publication_and_keep_request_context() {
             false,
             "metadata",
         ),
-        (
-            "range-truncate/pyramid.dzi",
-            "partial-discarded",
-            false,
-            "tile",
-        ),
+        ("range-truncate/pyramid.dzi", "tile-failed", false, "tile"),
         ("redirect-chain/start", "ok", false, "metadata"),
         ("redirect-loop/start", "redirect-limit", false, "metadata"),
         ("resume-offline/pyramid.dzi", "ok", false, "metadata"),
-        (
-            "throttle-429/pyramid.dzi",
-            "partial-discarded",
-            true,
-            "tile",
-        ),
+        ("throttle-429/pyramid.dzi", "tile-failed", true, "tile"),
         ("zero-tile/empty.dzi", "no-image-found", false, "metadata"),
     ] {
         let dir = support::temp_dir(&format!("edge-{}", input.replace('/', "-")));
@@ -61,7 +51,7 @@ fn edge_responses_control_publication_and_keep_request_context() {
                 input_url: format!("{origin}/fetch?url=https://fixtures.test/edge/{input}"),
                 output: OutputTarget::File(output.clone()),
                 cache_dir: Some(dir.join("cache")),
-                keep_partial: false,
+
                 ..Default::default()
             },
             diagnostics,
@@ -70,12 +60,24 @@ fn edge_responses_control_publication_and_keep_request_context() {
         let result = support::run_host(&host);
         if code == "ok" {
             let publication = result.unwrap_or_else(|error| panic!("{input}: {error}"));
-            assert!(publication.output.is_complete(), "{input}");
+            assert!(
+                publication.output.disposition
+                    == dezoomify::model::OutputDisposition::NativePublication,
+                "{input}"
+            );
             assert_eq!(publication.tile_count, 4, "{input}");
             assert_eq!(image::open(output).unwrap().width(), 512, "{input}");
         } else {
             let error = result.expect_err(input);
-            assert_eq!(error.cause().kind(), code, "{input}: {error}");
+            assert_eq!(
+                if code == "tile-failed" {
+                    error.kind()
+                } else {
+                    error.cause().kind()
+                },
+                code,
+                "{input}: {error}"
+            );
             assert_eq!(error.retryable(), retryable, "{input}: {error}");
             assert!(!output.exists(), "{input} wrote output after failure");
             assert!(

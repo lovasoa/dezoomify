@@ -2,7 +2,7 @@
 
 All four products call `dezoomify(inputs, options, host)`, one asynchronous Rust
 algorithm. Rust discovers images, selects a resolution, plans and acquires tiles,
-handles retries and partial output, then awaits saving and cleanup. Hosts supply
+handles retries, then awaits saving and cleanup. Hosts supply
 platform operations. This keeps download behavior consistent across products
 without making the core depend on a browser or operating system.
 
@@ -34,12 +34,13 @@ extension scan supplies evidence rather than recognizing formats itself.
 Discovery explores accessible alternatives before requesting interactive access.
 The Host owns the actual permission prompt.
 
-The core owns selection, retry classification, scheduling, and partial-output
-decisions. Hosts make individual acquisition attempts and report structured
-failures; they must not add a second retry policy. Output failures remain output
-failures rather than becoming missing tiles. Retry of partial output retains good
-tiles and acquires only missing ones. Exact policies live in the
-[core implementation](../crates/dezoomify/src/core/).
+The core owns selection, retry classification, scheduling, retry budgets, and
+backoff. Hosts make individual acquisition attempts and report structured
+failures; they must not add a second retry policy. GUI Hosts await Retry or Cancel
+inside optional acquisitions, pausing new work while in-flight operations settle.
+Retry approval retains successful tiles. Every required tile must succeed before
+finalization; permanent tile and output failures stop the job. Exact policies
+live in the [core implementation](../crates/dezoomify/src/run.rs).
 
 ## Bindings and errors
 

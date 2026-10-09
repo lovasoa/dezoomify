@@ -245,11 +245,11 @@ async fn dezoomify(
                 serde_json::json!({"job": job, "progress": progress}),
             );
         });
-        host.on_partial(|missing| {
-            let (question, answer) = registration.request_partial();
+        host.on_retry(|request| {
+            let (question, answer) = registration.request_retry();
             let _ = app.emit(
-                crate::jobs::CHANNEL_PARTIAL,
-                serde_json::json!({"job": job, "question": question, "missing": missing}),
+                crate::jobs::CHANNEL_RETRY,
+                serde_json::json!({"job": job, "question": question, "request": request}),
             );
             Box::pin(async move { answer.await.map_err(|_| Error::InteractionExpired) })
         });
@@ -303,15 +303,15 @@ async fn resume_job(state: State<'_, Mutex<JobTable>>, job: String) -> Result<()
     Ok(())
 }
 #[tauri::command]
-async fn answer_partial(
+async fn answer_retry(
     state: State<'_, Mutex<JobTable>>,
     job: String,
     question: u64,
-    answer: dezoomify::model::RecoveryChoice,
+    answer: dezoomify::model::RetryChoice,
 ) -> Result<(), Error> {
     lock_table(&state)?
         .live(&job)?
-        .answer_partial(question, answer)?;
+        .answer_retry(question, answer)?;
     Ok(())
 }
 #[tauri::command]

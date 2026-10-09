@@ -14,7 +14,7 @@ const progress = (extra = {}) => ({ phase: "acquisition", completed: 2, total: 4
 const output = (extra = {}) => ({
   canvas: { width: 512, height: 512 },
   format: "png",
-  missing: [],
+
   disposition: "browser-save-ready",
   ...extra,
 });
@@ -70,15 +70,14 @@ test("ordinary image display keeps progress during work and presents its final p
   assert.equal(done.headlineKey, "view.display.title");
 });
 
-test("results without progress retain partial output and exact missing tile identities", () => {
+test("results without progress retain output disposition", () => {
   const result = output({
-    missing: [10, 11, 12],
     disposition: "native-publication",
   });
-  const partial = presentOutput(result, undefined);
-  assert.equal(partial.phase, "completed");
-  assert.equal(partial.progress, null);
-  assert.deepEqual(partial.output, result);
+  const presented = presentOutput(result, undefined);
+  assert.equal(presented.phase, "completed");
+  assert.equal(presented.progress, null);
+  assert.deepEqual(presented.output, result);
 });
 
 test("failed presentation retains the canonical failure", () => {

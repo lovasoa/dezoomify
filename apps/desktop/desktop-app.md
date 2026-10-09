@@ -108,11 +108,12 @@ values are refused rather than starting a job with them.
 
 ## If a save fails
 
-Read the error's suggested next step. If some tiles are missing, choose retry,
-keep, or discard where offered; without an answer, desktop applies its default
-after 60 seconds. Kept output uses a `.partial` sibling (`photo.partial.png`),
-leaving the intended complete filename untouched. Run again to reuse good cached
-tiles. A job with no usable tiles saves nothing.
+Read the error's suggested next step. After automatic retries are exhausted,
+the download pauses and offers **Retry once more** or **Cancel**. Retrying keeps
+successfully downloaded tiles; the app waits for your answer without a timeout.
+Permanent tile failures or cancellation stop the job without publishing an
+incomplete image. Restarting the job can reuse good cached tiles; see
+[resuming](#resuming-an-interrupted-save).
 
 If opening a saved file fails, try **Show in folder**. Use **Technical details &
 logs** for a report, reviewing sensitive addresses and settings before sharing.

@@ -31,7 +31,6 @@ the first image and automatic level unless you supply selectors.
 | Choose an image by index | `--image-index 2` |
 | Choose a level by index | `--zoom-level 0` |
 | Retry failed tiles more often | `--retries 5` |
-| Discard incomplete output | `--no-partial` |
 | Reuse downloaded tiles | `--tile-cache my-folder` |
 | Identify the source viewer | `-H "Referer: <viewer URL>"` |
 | Replace an existing file | `--overwrite` |
@@ -77,9 +76,10 @@ pixel buffer. If saving reaches a resource limit, try a smaller level or an IIIF
 tile folder. JPEG and WebP have additional dimension limits; see
 [rejected output names](./troubleshooting.md#the-output-name-is-rejected).
 
-Partial output is kept by default at a `.partial` sibling, leaving the intended
-complete name untouched. `--no-partial` discards it. Repeating a job reuses cached
-tiles; see [resuming](../../apps/desktop/desktop-app.md#resuming-an-interrupted-save).
+If a required tile still fails after automatic retries, the job stops without
+publishing an image. The error retains its address, attempt count, and original
+cause. Increase `--retries` for transient failures or repeat the job to reuse
+good cached tiles; see [resuming](../../apps/desktop/desktop-app.md#resuming-an-interrupted-save).
 
 IIIF directories must have unused destinations, even with `--overwrite`.
 Compatible IIIF/ZIF tiles retain their original encoding; compression settings

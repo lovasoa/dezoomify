@@ -27,7 +27,7 @@ const GATEWAY_DZI = "https://fixtures.test/cli/pyramid.dzi";
 // Two tiles answer 429 with Retry-After, so the job stays running through
 // retry backoff long enough to cancel deterministically.
 const SLOW_DZI = "https://fixtures.test/edge/throttle-429/pyramid.dzi";
-const PARTIAL_DZI = "https://fixtures.test/desktop/tile-failure-keep/corrupt.dzi";
+const CORRUPT_DZI = "https://fixtures.test/cli/corrupt.dzi";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -48,7 +48,6 @@ async function snapshot(driver) {
       error: !!q(".dz-error-section"),
       errorText: text("#dz-error-message"),
       errorDiagnostics: text("#dz-error-diagnostics"),
-      partialNote: text(".dz-partial-note"),
     };
   });
 }
@@ -232,7 +231,6 @@ describe("Dezoomify desktop window", () => {
     assert.equal(terminal.completed, true, "the completion view is shown");
     const outputs = outputFiles(runOutputDir());
     assert.equal(outputs.length, 1, "automatic save writes exactly one PNG");
-    assert.ok(!outputs[0].includes(".partial."), "a complete save is not a partial sibling");
     assertSavedPyramid(readFileSync(outputs[0]));
     await resetToIdle(driver);
     await waitFor(
@@ -303,31 +301,12 @@ describe("Dezoomify desktop window", () => {
     assert.equal(outputFiles(runOutputDir()).length, 0, "cancelled jobs publish no output");
   });
 
-  it("keeps a partial download as a .partial sibling", async () => {
+  it("rejects corrupt tiles without publishing an incomplete image", async () => {
     clearOutput();
-    await submitUrl(driver, gatewayInput(PARTIAL_DZI));
-    await waitFor(
-      driver,
-      async () => {
-        const state = await snapshot(driver);
-        return state.completed || state.error;
-      },
-      180000,
-      "partial terminal",
-    );
-
+    await submitUrl(driver, gatewayInput(CORRUPT_DZI));
+    await waitFor(driver, async () => (await snapshot(driver)).error, 180000, "failed tile");
     const terminal = await snapshot(driver);
-    assert.equal(
-      terminal.error,
-      false,
-      `a kept partial is not a hard error: ${errorDetail(terminal)}`,
-    );
-    assert.ok(terminal.partialNote, "the completion view reports missing tiles");
-    const outputs = outputFiles(runOutputDir());
-    assert.equal(outputs.length, 1, "exactly one partial output is published");
-    assert.ok(
-      outputs[0].includes(".partial."),
-      "kept bytes land at the .partial sibling, never the granted path",
-    );
+    assert.equal(terminal.completed, false, errorDetail(terminal));
+    assert.equal(outputFiles(runOutputDir()).length, 0);
   });
 });

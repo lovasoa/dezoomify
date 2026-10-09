@@ -17,13 +17,7 @@ import { causeOf, isJobError, unknownDetail } from "./failure.ts";
 
 export const HISTORY_MAX = 20;
 
-export type HistoryStatus =
-  | "started"
-  | "completed"
-  | "partial"
-  | "preview"
-  | "failed"
-  | "cancelled";
+export type HistoryStatus = "started" | "completed" | "preview" | "failed" | "cancelled";
 
 export const HISTORY_KEY_WEBSITE = "dezoomify.history.v2";
 
@@ -207,9 +201,7 @@ export function parseHistoryJson(text: string | null | undefined): Array<History
         const saved = savedOutputOf(typed.savedOutput);
         if (saved) entry.savedOutput = saved;
         if (
-          ["started", "completed", "partial", "preview", "failed", "cancelled"].includes(
-            typed.status ?? "",
-          )
+          ["started", "completed", "preview", "failed", "cancelled"].includes(typed.status ?? "")
         ) {
           entry.status = typed.status;
         }
@@ -334,12 +326,7 @@ export function createHistory(
     },
     complete(entry: HistoryEntry | null, output: Output, savedOutput?: SavedOutput | null): void {
       update(entry, {
-        status:
-          output.disposition === "display-only"
-            ? "preview"
-            : output.missing.length === 0
-              ? "completed"
-              : "partial",
+        status: output.disposition === "display-only" ? "preview" : "completed",
         ...(output.canvas ? { width: output.canvas.width, height: output.canvas.height } : {}),
         format: output.format,
         ...(savedOutput ? { savedOutput } : {}),

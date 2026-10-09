@@ -258,7 +258,6 @@ fn job_options_for(parsed: &Args, input: &str, output: &Path) -> JobOptions {
         max_height: parsed.max_height,
         max_retries: parsed.retries,
         retry_base_delay: parsed.retry_delay,
-        keep_partial: parsed.keep_partial,
         compression: parsed.compression,
         headers: user_headers,
         cache_dir: parsed.tile_cache.clone(),
@@ -283,7 +282,7 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
         if json {
             println!("{}", report::machine_failed(&job_id, error));
         }
-        eprintln!("error: {error} ({})", error.cause().kind());
+        eprintln!("error: {error} ({})", error.kind());
         false
     };
     let result = run_native(parsed, input, output, true);
@@ -304,27 +303,16 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
                         width: size.width,
                         height: size.height,
                         tile_count: summary.tile_count,
-                        partial: !summary.output.is_complete(),
                     })
                 );
             } else if report::show_success(level) {
-                if !summary.output.is_complete() {
-                    eprintln!(
-                        "kept partial {} ({} tiles, {}x{}) (missing tiles left blank)",
-                        summary.path.display(),
-                        summary.tile_count,
-                        size.width,
-                        size.height,
-                    );
-                } else {
-                    eprintln!(
-                        "saved {} ({} tiles, {}x{})",
-                        summary.path.display(),
-                        summary.tile_count,
-                        size.width,
-                        size.height,
-                    );
-                }
+                eprintln!(
+                    "saved {} ({} tiles, {}x{})",
+                    summary.path.display(),
+                    summary.tile_count,
+                    size.width,
+                    size.height,
+                );
             }
             true
         }

@@ -108,6 +108,10 @@ test("static accessibility contract: failed view layers guidance with named reco
     { sourceUrl: "https://museum.example.org/viewer?page=1" },
   );
   const card = el.querySelector(".dz-card");
+  const notice = card.querySelector(".dz-error-section");
+  assert.equal(notice.querySelector("h2").id, notice.getAttribute("aria-labelledby"));
+  assert.ok(notice.querySelector('[role="alert"]'), "the failure message is announced");
+  assert.equal(notice.querySelector('[role="alert"] button'), null);
   assert.ok(
     (card.querySelector("#dz-error-message").textContent || "").length > 0,
     "error message slot is populated",
@@ -137,8 +141,7 @@ test("native completion opens saved output without browser save guidance", () =>
     presentOutput({
       disposition: "native-publication",
       format: "png",
-      complete: true,
-      missing: [],
+
       canvas: { width: 100, height: 80 },
     }),
     { ...callbacks, onOpenOutput() {}, onRevealOutput() {} },
@@ -220,6 +223,11 @@ test("recent table separates metadata and removes just the requested row", () =>
   assert.match(rows[0].textContent, /1200 × 800/);
   assert.match(rows[0].textContent, /Failed/);
   assert.equal(rows[1].querySelector(".dz-history-main").textContent, entries[1].url);
+  assert.equal(
+    rows[1].querySelectorAll("td")[3].textContent,
+    "–",
+    "unknown outcomes remain neutral",
+  );
   assertButtonsNamed(el, "recent pictures");
   click(rows[0].querySelector(".dz-history-remove"));
   assert.equal(removed, entries[0]);
@@ -241,7 +249,7 @@ test("idle product content renders between the URL input and recent pictures", (
   );
 });
 
-test("confirmed partial saves name the incomplete output and never offer another save", () => {
+test("confirmed saves name the output and never offer another save", () => {
   for (const disposition of ["native-publication", "browser-save-initiated"]) {
     const el = makeContainer();
     render(
@@ -249,13 +257,12 @@ test("confirmed partial saves name the incomplete output and never offer another
       presentOutput({
         disposition,
         format: "png",
-        complete: false,
-        missing: [1],
+
         canvas: { width: 100, height: 80 },
       }),
       callbacks,
     );
-    assert.equal(el.querySelector(".dz-completed-title").textContent, "Image saved with gaps");
+    assert.equal(el.querySelector(".dz-completed-title").textContent, "Image saved");
     assert.equal(el.querySelector("#dz-btn-save"), null);
     assertButtonsNamed(el, disposition);
   }
@@ -268,8 +275,7 @@ test("static accessibility contract: completed and display-only views keep every
     presentOutput({
       disposition: "browser-save-ready",
       format: "png",
-      complete: true,
-      missing: [],
+
       canvas: { width: 100, height: 80 },
     }),
     callbacks,
@@ -283,8 +289,7 @@ test("static accessibility contract: completed and display-only views keep every
     presentOutput({
       disposition: "display-only",
       format: "png",
-      complete: true,
-      missing: [],
+
       canvas: { width: 100, height: 80 },
     }),
     callbacks,

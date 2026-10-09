@@ -36,11 +36,12 @@ the extension. Dezoomify labels display-only output rather than claiming it save
 
 ## The save stopped partway
 
-Temporary tile failures retry automatically. When only part of the image is
-available, choose retry, keep, or discard where offered. Kept partial output
-has gaps; native apps use a `.partial` sibling filename. Desktop defaults to
-keeping it after 60 seconds without an answer. CLI applies its partial setting
-immediately. A job with no usable tiles fails without saving.
+Temporary tile failures retry automatically. If those retries are exhausted,
+the website, extension, and desktop pause and offer **Retry once more** or
+**Cancel**. Retrying keeps successfully downloaded tiles. The job waits for your
+answer; it does not automatically save an incomplete image. Permanent tile
+failures stop the job without saving. CLI stops when its retry budget is exhausted;
+increase `--retries` for transient failures or restart using cached tiles.
 
 For native downloads, repeat the job to reuse cached tiles; see
 [resuming](../../apps/desktop/desktop-app.md#resuming-an-interrupted-save).
