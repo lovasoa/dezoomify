@@ -14,8 +14,6 @@
       const scenario = new URLSearchParams(location.search).get("scenario");
       const sourceName = scenario === "corrupt"
         ? "corrupt"
-        : scenario === "retry"
-          ? "retry"
         : scenario === "permission"
           ? "permission-tiles"
           : scenario === "tile-redirect"
@@ -25,7 +23,10 @@
       // The permission fixture's metadata is source-tab readable, while its
       // tile URLs deliberately use the equivalent but ungranted localhost
       // origin. This isolates the optional-host boundary from CORS behavior.
-      const sourceUrl = new URL(`/extension-inputs/${sourceName}.${extension}`, location.origin);
+      const sourcePath = scenario === "retry"
+        ? "/fixtures/failures/retry-approval/retry.dzi"
+        : `/extension-inputs/${sourceName}.${extension}`;
+      const sourceUrl = new URL(sourcePath, location.origin);
       fetch(sourceUrl)
         .then((r) => {
           if (!r.ok) throw new Error(`status ${r.status}`);

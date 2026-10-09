@@ -6,11 +6,13 @@ const source = "../../../testdata/scenarios/native/cli-dzi/payloads/fixtures.tes
 
 export function serve(request) {
   const url = new URL(request.url);
-  if (url.pathname === "/extension-inputs/retry.dzi") {
+  if (url.pathname === "/fixtures/failures/retry-approval/retry.dzi") {
     attempts.clear();
     return fileResponse(new URL(`${source}pyramid.dzi`, import.meta.url));
   }
-  const tile = url.pathname.match(/^\/extension-inputs\/retry_files\/9\/([01])_([01])\.png$/);
+  const tile = url.pathname.match(
+    /^\/fixtures\/failures\/retry-approval\/retry_files\/9\/([01])_([01])\.png$/,
+  );
   if (!tile) return null;
   const count = (attempts.get(url.pathname) ?? 0) + 1;
   attempts.set(url.pathname, count);
