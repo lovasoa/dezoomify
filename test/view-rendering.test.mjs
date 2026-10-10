@@ -462,19 +462,15 @@ test("failed view offers retry only for retryable errors and start over only whe
   assert.equal(retried, 2, "retry stays wired without a reset callback");
 });
 
-test("resolution notice offers maximum retry and stop while fetching, keeps the choice when done", () => {
+test("resolution notice has one desktop action during the job and after output actions", () => {
   const el = container();
   let stopped = 0;
-  let tried = 0;
   const actions = {
     onSubmitUrl: () => {},
     onCancel: () => {
       stopped += 1;
     },
     onReset: () => {},
-    onTryMaximum: () => {
-      tried += 1;
-    },
   };
   render(
     el,
@@ -486,22 +482,19 @@ test("resolution notice offers maximum retry and stop while fetching, keeps the 
       maximum: { width: 40000, height: 20000 },
     }),
     actions,
+    { offerDesktopApp: true },
   );
   assert.ok(el.querySelector("#dz-resolution-notice"), "shown while tiles are still in flight");
   const notice = el.querySelector("#dz-resolution-notice");
-  assert.equal(notice.querySelector("h2").textContent, "Image too large for this browser");
+  assert.equal(notice.querySelector("h2").textContent, "Lower-resolution image");
   assert.ok(notice.querySelector('[role="status"]'));
   assert.ok(el.querySelector('[role="progressbar"]'), "size warning leaves downloading visible");
   assert.ok(notice.querySelector("#dz-btn-download-desktop"));
-  const sizes = el.querySelector("#dz-resolution-sizes").textContent;
+  const sizes = el.querySelector("#dz-resolution-message").textContent;
   assert.match(sizes, /20000×10000/, "selected resolution");
   assert.match(sizes, /40000×20000/, "maximum resolution");
-  assert.match(el.querySelector("#dz-resolution-message").textContent, /maximal resolution/i);
-  click(el.querySelector("#dz-btn-try-maximum"));
-  assert.equal(tried, 1, "Try maximum restarts at the maximum known resolution");
-  assert.ok(el.querySelector("#dz-btn-resolution-stop"));
-  click(el.querySelector("#dz-btn-resolution-stop"));
-  assert.equal(stopped, 1, "Stop ends the smaller download");
+  assert.equal(notice.querySelectorAll("button").length, 1);
+  assert.equal(stopped, 0);
 
   render(
     el,
@@ -516,13 +509,66 @@ test("resolution notice offers maximum retry and stop while fetching, keeps the 
       },
     ),
     actions,
+    { offerDesktopApp: true },
   );
   assert.ok(el.querySelector("#dz-resolution-notice"), "the offer survives completion");
   assert.equal(el.querySelector("#dz-btn-resolution-stop"), null, "stop is gone once done");
-  assert.ok(el.querySelector("#dz-btn-try-maximum"));
+  assert.equal(el.querySelector("#dz-btn-try-maximum"), null);
+  assert.ok(el.querySelector(".dz-actions-row + #dz-resolution-notice"));
 });
 
-test("hosts without a maximum retry never show the resolution notice", () => {
+test("desktop handoff shows and copies the discovered URL, handles failure and unavailable sources", async () => {
+  const el = container();
+  const result = presentOutput(
+    { format: "png", disposition: "browser-save-initiated" },
+    {
+      phase: "output",
+      completed: 4,
+      total: 4,
+      selected: { width: 20000, height: 10000 },
+      maximum: { width: 40000, height: 20000 },
+    },
+  );
+  const source = "https://image.test/selected/info.json?signature=exact%2Bvalue";
+  let copied;
+  let rejectCopy = false;
+  const actions = {
+    ...callbacks,
+    async onCopyText(text) {
+      if (rejectCopy) throw new Error("unavailable");
+      copied = text;
+    },
+  };
+  render(el, result, actions, {
+    offerDesktopApp: true,
+    sourceUrl: "https://museum.test/page",
+    desktopSourceUrl: source,
+  });
+  click(el.querySelector("#dz-btn-download-desktop"));
+  let dialog = document.querySelector('[role="dialog"]');
+  assert.ok(dialog.querySelector('a[href="https://github.com/lovasoa/dezoomify/releases/latest"]'));
+  assert.equal(dialog.querySelector("input").value, source);
+  assert.ok(dialog.querySelector("label").textContent.includes("Paste"));
+  const copy = dialog.querySelector(".dz-btn-secondary");
+  await act(async () => click(copy));
+  assert.equal(copied, source);
+  assert.match(dialog.querySelector('[role="status"]').textContent, /URL copied/);
+  rejectCopy = true;
+  await act(async () => click(copy));
+  assert.match(dialog.querySelector('[role="alert"]').textContent, /copy it manually/);
+  assert.equal(dialog.querySelector("input").value, source);
+  click(dialog.querySelector(".dz-modal-close"));
+  assert.equal(document.querySelector('[role="dialog"]'), null);
+
+  render(el, result, actions, { offerDesktopApp: true, sourceUrl: "https://museum.test/page" });
+  click(el.querySelector("#dz-btn-download-desktop"));
+  dialog = document.querySelector('[role="dialog"]');
+  assert.equal(dialog.querySelector("input"), null, "never substitutes the scanned page URL");
+  assert.match(dialog.textContent, /No reusable source URL/);
+  click(dialog.querySelector(".dz-modal-close"));
+});
+
+test("hosts without desktop handoff never show the resolution notice", () => {
   const el = container();
   render(
     el,

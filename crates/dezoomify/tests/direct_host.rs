@@ -55,6 +55,9 @@ fn full_output_uses_lazy_geometry_and_honest_disposition() {
     assert_eq!(host.peak.get(), 4);
     assert_eq!(host.settled.get(), 1);
     assert_eq!(host.outputs.borrow().len(), 1);
+    assert!(host.progress.borrow().iter().any(|progress| {
+        progress.source_url.as_deref() == Some("https://images.test/image.dzi")
+    }));
     assert_eq!(
         host.acquired.borrow()[3].placement.position,
         Point { x: 256, y: 256 }

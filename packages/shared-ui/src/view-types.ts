@@ -12,8 +12,6 @@ export interface ViewCallbacks {
   onReset?(): void;
   onRetrySameUrl?(): void;
   onRetryChoice?(choice: RetryChoice): void;
-  /** Restart the job at the maximum known resolution (browser products). */
-  onTryMaximum?(): void;
   onSave?(): void;
   onOpenOutput?(): Promise<void>;
   onRevealOutput?(): Promise<void>;
@@ -21,6 +19,7 @@ export interface ViewCallbacks {
   onOpenHistory?(entry: HistoryEntry): Promise<void>;
   onOpenExternalLink?(url: string): void;
   onCopyDiagnostics?(text: string): void | Promise<void>;
+  onCopyText?(text: string): Promise<void>;
   onSaveDiagnostics?(report: DiagnosticReport): void | Promise<void>;
   onLoadDiagnostics?(): Promise<DiagnosticReport>;
   onClearHistory?(): void;
@@ -44,6 +43,10 @@ export interface ViewContext {
   jobActivity?: JobActivity;
   initialUrl?: string;
   sourceUrl?: string;
+  /** Core-discovered URL to paste into the desktop app, rather than the scanned page. */
+  desktopSourceUrl?: string;
+  /** Browser products offer the desktop app for larger images. */
+  offerDesktopApp?: boolean;
   history?: HistoryRow[];
   historyNow?: number;
 }

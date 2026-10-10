@@ -131,13 +131,24 @@ export const de = {
   "view.display.deskDescClean":
     "Für ein sauberes Speichern in voller Größe, wenn der Browser das Bild nur zeigen kann.",
   "view.display.startOver": "Von vorn beginnen",
-  "view.resolution.title": "Bild zu groß für diesen Browser",
-  "view.resolution.notice":
-    "Wegen Browser-Beschränkungen wird nicht in maximaler Auflösung geladen. Die Desktop-App entfernt diese Beschränkungen.",
-  "view.resolution.sizes": "Speichert mit {selected} Pixeln statt des Maximums {maximum} Pixel.",
-  "view.resolution.download": "Desktop-App herunterladen",
-  "view.resolution.tryMaximum": "Maximum versuchen",
-  "view.resolution.stop": "Stoppen",
+  "view.resolution.title": "Bild mit geringerer Auflösung",
+  "view.resolution.sizes": "Bildgröße: {selected} Pixel. Verfügbares Maximum: {maximum} Pixel.",
+  "view.resolution.download": "Volle Auflösung mit der Desktop-App erhalten",
+  "view.desktop.handoffTitle": "Dieses Bild in der Desktop-App herunterladen",
+  "view.desktop.handoffDownload": "Desktop-App herunterladen",
+  "view.desktop.handoffInstall":
+    "Wählen Sie das Installationsprogramm für Ihr Betriebssystem und öffnen Sie Dezoomify.",
+  "view.desktop.handoffPaste": "Fügen Sie diese URL in das URL-Feld der Desktop-App ein:",
+  "view.desktop.handoffCopy": "URL kopieren",
+  "view.desktop.handoffCopied": "URL kopiert. Fügen Sie sie in die Desktop-App ein.",
+  "view.desktop.handoffCopyFailed":
+    "Kopieren fehlgeschlagen. Markieren Sie die URL oben und kopieren Sie sie manuell.",
+  "view.desktop.handoffStart":
+    "Starten Sie den Download und wählen Sie die größte Auflösung. Wenn mehrere Bilder erscheinen, wählen Sie das gewünschte Bild.",
+  "view.desktop.handoffAccess":
+    "Die Desktop-App übernimmt die Anmeldung Ihres Browsers nicht. Die URL muss von der App aus zugänglich sein.",
+  "view.desktop.handoffUnavailable":
+    "Für diesen Auftrag ist keine wiederverwendbare Quell-URL verfügbar. Öffnen Sie die ursprüngliche Seite und suchen Sie die URL des zoombaren Bildes oder Manifests zum Einfügen in die App.",
   // Completion section.
   "view.done.ready": "Ihr Bild ist bereit.",
   "view.done.readyTitle": "Bereit zum Speichern",

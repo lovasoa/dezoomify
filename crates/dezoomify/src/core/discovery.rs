@@ -1045,7 +1045,7 @@ where
                 parsed => {
                     return parsed
                         .compile(spec.name)
-                        .map(|catalog| Some((history.len(), catalog)));
+                        .map(|catalog| Some((history.len(), catalog.with_source_url(uri))));
                 }
             };
             priority.set((

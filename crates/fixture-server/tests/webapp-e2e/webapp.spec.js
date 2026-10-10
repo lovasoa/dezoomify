@@ -357,9 +357,8 @@ test("webapp follows a deferred IIIF manifest request to the info.json and tiles
 
 // One DZI pyramid whose maximum level (40000x1000) exceeds the browser
 // canvas side limit while the level below (20000x500) fits: automatic
-// selection takes the smaller level, the notice names both resolutions while
-// tiles are still in flight, and "Try maximum" retries the declared maximum,
-// which reports the large-canvas error with the desktop-app action. The
+// selection takes the smaller level, and one notice opens the desktop handoff
+// while tiles are in flight or after completion. The
 // fixture is served entirely from this test: metadata inline, tiles as one
 // held 1x1 PNG, so the only real pipeline runs unmodified.
 const TINY_PNG = Buffer.from(
@@ -368,15 +367,18 @@ const TINY_PNG = Buffer.from(
 );
 const RESOLUTION_DZI =
   '<Image xmlns="http://schemas.microsoft.com/deepzoom/2008" TileSize="10000" Overlap="0" Format="jpg">' +
-  '<Size Width="40000" Height="10000"/></Image>';
+  '<Size Width="40000" Height="1000"/></Image>';
 
-test("resolution notice during fetching offers Try maximum and reports the large canvas", async ({ page }) => {
+test("lower resolution opens a desktop handoff with the exact URL and keyboard navigation", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  let releaseTiles;
+  const tilesReady = new Promise((resolve) => { releaseTiles = resolve; });
   await page.route(
     (url) => url.host === "fixtures.test",
     async (route) => {
       if (route.request().url().includes("_files/")) {
         // Hold tile responses so the notice is observable mid-fetch.
-        await new Promise((resolve) => setTimeout(resolve, 700));
+        await tilesReady;
         await route.fulfill({ status: 200, contentType: "image/png", body: TINY_PNG });
         return;
       }
@@ -397,15 +399,42 @@ test("resolution notice during fetching offers Try maximum and reports the large
   const notice = page.locator("#dz-resolution-notice");
   await expect(notice).toBeVisible({ timeout: 30000 });
   await expect(page.locator(".dz-completed-section")).toHaveCount(0);
-  await expect(page.locator("#dz-resolution-message")).toContainText(/maximal resolution/i);
-  const sizes = await page.locator("#dz-resolution-sizes").textContent();
+  await expect(notice.getByRole("button")).toHaveCount(1);
+  const sizes = await page.locator("#dz-resolution-message").textContent();
   assert.match(sizes ?? "", /20000×500/, "selected resolution");
   assert.match(sizes ?? "", /40000×1000/, "maximum resolution");
 
-  // "Try maximum" retries the declared maximum resolution.
-  await page.locator("#dz-btn-try-maximum").click();
-  await expect(page.locator(".dz-error-section")).toBeVisible({ timeout: 30000 });
-  await expect(page.locator("#dz-error-message")).toContainText(/too large/i);
+  const action = page.locator("#dz-btn-download-desktop");
+  await action.click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("link", { name: "Download desktop app" })).toHaveAttribute(
+    "href", "https://github.com/lovasoa/dezoomify/releases/latest",
+  );
+  const source = dialog.getByRole("textbox");
+  await expect(source).toHaveValue("https://fixtures.test/resolution/big.dzi");
+  await expect(source).toHaveAttribute("readonly", "");
+  const close = dialog.getByRole("button", { name: "Close dialog" });
+  await expect(close).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  const copy = dialog.getByRole("button", { name: "Copy URL" });
+  await expect(copy).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(close).toBeFocused();
+  await copy.click();
+  await expect(dialog.getByRole("status")).toContainText("URL copied");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    "https://fixtures.test/resolution/big.dzi",
+  );
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(action).toBeFocused();
+  releaseTiles();
+  await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 60000 });
+  await action.click();
+  await expect(source).toHaveValue("https://fixtures.test/resolution/big.dzi");
+  await close.click();
+  await expect(page.getByRole("button", { name: "Save image" })).toBeVisible();
 });
 
 // website/proxy-fallback flow contract: a non-readable metadata URL takes

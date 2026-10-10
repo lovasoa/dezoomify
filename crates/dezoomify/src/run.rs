@@ -40,6 +40,7 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
     let mut progress = Progress {
         phase: ProgressPhase::Planning,
         source_format: Some(image.format.into()),
+        source_url: image.source_url.clone(),
         title: image.title.clone(),
         selected: image.levels[level].source.image_size().map(size),
         maximum: image
