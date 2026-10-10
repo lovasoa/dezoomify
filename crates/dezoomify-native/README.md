@@ -1,9 +1,9 @@
 # Native Host
 
 CLI and desktop supply NativeHost to the shared Rust algorithm. The Host owns
-HTTP and local resources, cache, codecs, output publication, and cleanup;
-Rust owns discovery, selection, retry limits, and backoff. Desktop acquisitions
-await user approval before optional retries.
+HTTP and local resources, image and resolution choices, cache, codecs, output
+publication, and cleanup; Rust owns discovery, retry limits, and backoff.
+Desktop acquisitions await user approval before optional retries.
 
 ## Memory and output
 

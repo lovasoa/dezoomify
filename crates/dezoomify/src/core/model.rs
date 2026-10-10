@@ -304,7 +304,7 @@ impl DiscoveryCatalog {
         Self(entries)
     }
 
-    /// Ordered image choices for an interactive host.
+    /// Ordered image choices for a host.
     #[must_use]
     pub fn public_catalog(&self) -> Catalog {
         Catalog {

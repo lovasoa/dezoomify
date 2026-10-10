@@ -174,6 +174,7 @@ fn slow_first_tile_does_not_hold_back_other_completions() {
 #[test]
 fn accepted_catalog_warns_once_for_malformed_siblings_and_keeps_valid_images() {
     let host = MemoryHost::default();
+    host.image.set(1);
     let output = futures::executor::block_on(dezoomify(
         vec![JobInput {
             url: "https://images.test/tour.xml".into(),
@@ -188,11 +189,6 @@ fn accepted_catalog_warns_once_for_malformed_siblings_and_keeps_valid_images() {
         }],
         Options {
             format: Some("krpano".into()),
-            selection: SelectionPolicy::Fitting {
-                max_width: 1000,
-                max_height: 1000,
-                max_area: 1_000_000,
-            },
             ..Default::default()
         },
         &host,
@@ -540,68 +536,7 @@ fn image_and_level_choices_are_checked() {
     );
     assert!(host.acquired.borrow().is_empty());
 }
-#[test]
-fn browser_fitting_and_native_selection_preserve_dimension_policy() {
-    for (selection, expected) in [
-        (
-            SelectionPolicy::Fitting {
-                max_width: 300,
-                max_height: 300,
-                max_area: 90000,
-            },
-            256,
-        ),
-        (
-            SelectionPolicy::Fitting {
-                max_width: 1,
-                max_height: 1,
-                max_area: 1,
-            },
-            1,
-        ),
-        (
-            SelectionPolicy::Automatic {
-                image_index: usize::MAX,
-                largest: true,
-                max_width: Some(1),
-                max_height: Some(1),
-                zoom_level: None,
-            },
-            512,
-        ),
-        (
-            SelectionPolicy::Automatic {
-                image_index: 0,
-                largest: false,
-                max_width: Some(300),
-                max_height: Some(300),
-                zoom_level: None,
-            },
-            256,
-        ),
-        (
-            SelectionPolicy::Automatic {
-                image_index: 0,
-                largest: true,
-                max_width: None,
-                max_height: None,
-                zoom_level: Some(0),
-            },
-            1,
-        ),
-    ] {
-        let host = MemoryHost::default();
-        let output = invoke(
-            &host,
-            Options {
-                selection,
-                ..options()
-            },
-        )
-        .unwrap();
-        assert_eq!(output.canvas.unwrap().width, expected);
-    }
-}
+
 #[test]
 fn generic_probes_reuse_placed_tiles_and_keep_boundaries() {
     let host = MemoryHost::default();
@@ -710,7 +645,7 @@ fn pause_blocks_new_acquisition_and_retry_waits_until_resume() {
 }
 
 #[test]
-fn automatic_selection_follows_catalog_entries_and_rejects_cycles() {
+fn host_selection_follows_catalog_entries_and_rejects_cycles() {
     let mut host = MemoryHost::default();
     host.resources.insert(
         "https://images.test/image.dzi".into(),
@@ -731,17 +666,20 @@ fn automatic_selection_follows_catalog_entries_and_rejects_cycles() {
             kind: Some(DiscoveryInputKind::ObservedResource),
         },
     ];
+    host.level.set(Some(8));
     let opts = Options {
         max_deferred_follows: 1,
-        selection: SelectionPolicy::Fitting {
-            max_width: 300,
-            max_height: 300,
-            max_area: 90000,
-        },
         ..Default::default()
     };
     let output = futures::executor::block_on(dezoomify(inputs, opts, &host)).unwrap();
     assert_eq!(output.canvas.unwrap().width, 256);
+    let catalogs = host.catalogs.borrow();
+    assert_eq!(catalogs.len(), 2);
+    assert!(matches!(
+        catalogs[0].entries[0],
+        CatalogEntry::ImageRequest(_)
+    ));
+    assert!(matches!(catalogs[1].entries[0], CatalogEntry::Image(_)));
     assert_eq!(
         host.fetched
             .borrow()
@@ -758,16 +696,7 @@ fn automatic_selection_follows_catalog_entries_and_rejects_cycles() {
             final_uri: None,
         },
     );
-    let options = Options {
-        selection: SelectionPolicy::Automatic {
-            image_index: 0,
-            largest: true,
-            max_width: None,
-            max_height: None,
-            zoom_level: None,
-        },
-        ..Default::default()
-    };
+    let options = Options::default();
     let error = futures::executor::block_on(dezoomify(
         vec![JobInput::new("https://images.test/list.txt")],
         options,
@@ -817,7 +746,7 @@ fn deferred_cycles_do_not_reacquire_supplied_sources_or_their_redirected_address
 }
 
 #[test]
-fn unsupported_schemes_and_zero_canvas_limits_are_rejected() {
+fn unsupported_schemes_are_rejected() {
     for uri in [
         "ftp://images.test/image.dzi",
         "javascript:void(0)",
@@ -831,20 +760,6 @@ fn unsupported_schemes_and_zero_canvas_limits_are_rejected() {
         assert_eq!(error.kind(), "invalid-input");
         assert!(host.fetched.borrow().is_empty());
     }
-    let host = MemoryHost::default();
-    let error = invoke(
-        &host,
-        Options {
-            selection: SelectionPolicy::Fitting {
-                max_width: 0,
-                max_height: 10,
-                max_area: 100,
-            },
-            ..options()
-        },
-    )
-    .unwrap_err();
-    assert_eq!(error.kind(), "invalid-options");
 }
 
 #[test]

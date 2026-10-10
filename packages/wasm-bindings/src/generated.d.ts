@@ -363,7 +363,6 @@ export interface Level {
 
 export interface Options {
     format?: string | undefined;
-    selection?: SelectionPolicy;
     /**
      * Issue approval-required attempts after the automatic retry allowance.
      */
@@ -409,8 +408,6 @@ export type ResourceKind = "metadata" | "tile" | "probe" | "output";
 export type ResourceRead = { kind: "response"; response: ResourceResponse } | { kind: "needs-access"; origin: string };
 
 export type RetryChoice = "retry" | "cancel";
-
-export type SelectionPolicy = { kind: "interactive" } | { kind: "fitting"; max_width: number; max_height: number; max_area: number } | { kind: "automatic"; image_index: number; largest: boolean; max_width: number | undefined; max_height: number | undefined; zoom_level: number | undefined };
 
 
 /**

@@ -1214,32 +1214,11 @@ pub struct FinishRequest {
     pub reused_tiles: Vec<ReusedTile>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum SelectionPolicy {
-    #[default]
-    Interactive,
-    Fitting {
-        max_width: u32,
-        max_height: u32,
-        max_area: u64,
-    },
-    Automatic {
-        image_index: usize,
-        largest: bool,
-        max_width: Option<u32>,
-        max_height: Option<u32>,
-        zoom_level: Option<usize>,
-    },
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct Options {
     pub format: Option<String>,
-    pub selection: SelectionPolicy,
     /// Issue approval-required attempts after the automatic retry allowance.
     pub interactive_retries: bool,
     pub output: OutputFormat,
@@ -1255,7 +1234,6 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             format: None,
-            selection: SelectionPolicy::default(),
             interactive_retries: false,
             output: OutputFormat::Png,
             max_concurrent: 4,
