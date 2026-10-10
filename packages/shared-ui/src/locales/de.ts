@@ -248,7 +248,7 @@ export const de = {
   "desktop.tile.failed":
     "Eine Kachel von {host} konnte nicht geladen werden. Prüfen Sie das Quellbild und versuchen Sie es erneut.",
   "view.discovery.none":
-    "Unter dieser Adresse wurde kein zoombares Bild gefunden. Versuchen Sie eine Seite mit Betrachter oder die Browsererweiterung.",
+    "Unter dieser Adresse wurde kein zoombares Bild gefunden. Versuchen Sie eine Seite mit Betrachter.",
   "desktop.plan.none":
     "Dieses Bild hat von {host} aus keine speicherbare Größe. Versuchen Sie ein anderes Bild oder eine kleinere Max. Breite.",
   "desktop.transport.stalled":

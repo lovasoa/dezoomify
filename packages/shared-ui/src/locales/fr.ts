@@ -246,7 +246,7 @@ export const fr = {
   "desktop.tile.failed":
     "Impossible de récupérer un fragment depuis {host}. Vérifiez l’image source et réessayez.",
   "view.discovery.none":
-    "Aucune image zoomable trouvée à cette adresse. Essayez une page avec un visualiseur, ou essayez l’extension.",
+    "Aucune image zoomable trouvée à cette adresse. Essayez une page avec un visualiseur.",
   "desktop.plan.none":
     "Cette image n’a aucune taille utilisable à enregistrer depuis {host}. Essayez une autre image ou une Largeur max plus petite.",
   "desktop.transport.stalled":

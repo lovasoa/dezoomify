@@ -243,7 +243,7 @@ export const it = {
   "desktop.tile.failed":
     "Impossibile recuperare un frammento da {host}. Controlla l’immagine originale e riprova.",
   "view.discovery.none":
-    "Nessuna immagine zoomabile trovata a questo indirizzo. Prova una pagina con un visualizzatore o l’estensione del browser.",
+    "Nessuna immagine zoomabile trovata a questo indirizzo. Prova una pagina con un visualizzatore.",
   "desktop.plan.none":
     "Questa immagine non ha dimensioni utili da salvare da {host}. Prova un’altra immagine o una Larghezza max minore.",
   "desktop.transport.stalled":

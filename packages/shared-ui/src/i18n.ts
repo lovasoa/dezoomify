@@ -333,7 +333,7 @@ const en = {
   "desktop.tile.failed":
     "Could not retrieve a tile from {host}. Check the source image and try again.",
   "view.discovery.none":
-    "No zoomable image was found at this address. Try a page that contains a zoom viewer, or try the browser extension.",
+    "No zoomable image was found at this address. Try a page that contains a zoom viewer.",
   "desktop.plan.none":
     "This picture has no usable size to save from {host}. Try a different picture or a smaller Max width.",
   "desktop.transport.stalled":
