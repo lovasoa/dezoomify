@@ -80,7 +80,16 @@ export async function scanOpenSeadragon(deadlineAt: number) {
   };
   const yieldSlice = async () => {
     if (Date.now() - slice >= limits.sliceMs) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      // Posted-message tasks yield without background-tab timer throttling.
+      await new Promise<void>((resolve) => {
+        const channel = new MessageChannel();
+        channel.port1.onmessage = () => {
+          channel.port1.close();
+          channel.port2.close();
+          resolve();
+        };
+        channel.port2.postMessage(null);
+      });
       slice = Date.now();
     }
   };

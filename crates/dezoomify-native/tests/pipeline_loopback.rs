@@ -450,7 +450,9 @@ fn interrupted_job_resumes_without_refetching_completed_tiles() {
     let cache_dir = out_dir.join("cache");
     let failing = JobOptions {
         cache_dir: Some(cache_dir.clone()),
-
+        // Finish the three good tiles before the final corrupt tile cancels
+        // the job; concurrent completion order is deliberately unspecified.
+        max_concurrent: 1,
         ..Default::default()
     };
     let first_output = out_dir.join("first.png");

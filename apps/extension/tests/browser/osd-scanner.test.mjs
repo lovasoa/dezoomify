@@ -207,16 +207,26 @@ for (const [name, engine] of [
           // exercise the slice budget too; verify a queued task can run.
           const measured = await page.evaluate(`(async () => {
               const now = Date.now;
+              const timeout = window.setTimeout;
               let elapsed = 0, taskRan = false;
               if (${mode === "large-dom"}) {
                 Date.now = () => now() + (elapsed += 0.001);
-                setTimeout(() => { taskRan = true; }, 0);
+                window.setTimeout = (callback, delay = 0, ...args) =>
+                  timeout.call(window, callback, Math.max(1000, delay), ...args);
+                const channel = new MessageChannel();
+                channel.port1.onmessage = () => {
+                  taskRan = true;
+                  channel.port1.close();
+                  channel.port2.close();
+                };
+                channel.port2.postMessage(null);
               }
               try {
                 const result = await (${scanOpenSeadragon.toString()})(${Date.now() + 1500});
                 return { result, taskRan };
               } finally {
                 Date.now = now;
+                window.setTimeout = timeout;
               }
             })()`);
           const result = measured.result;
