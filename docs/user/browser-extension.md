@@ -2,94 +2,76 @@
 
 # Browser extension
 
-The extension adds Dezoomify to your browser. While you look at a zoomable
-image, it can find the image behind the viewer automatically, including on
-pages where you are signed in, such as library portals, museum
-subscriptions, and academic archives.
-
-## 1. Click the Dezoomify icon
-
-On the page with the image, click Dezoomify in the browser toolbar. If it is
-hidden, open the puzzle-piece menu and pin it.
-
-## 2. Let the page settle
-
-Dezoomify reads the page's retained resource entries without reloading it. Wait
-for the job tab to open, then zoom in on the image once.
-
-## 3. Start dezooming
-
-Dezoomify opens a new tab and starts dezooming automatically. Leave it open
-until it confirms that your image has been saved.
-
-## Tiled or static?
-
-Use the browser's normal save action when **Save image as** gives you the
-complete artwork. Use Dezoomify when zooming stays sharp and the viewer loads
-many tiles or strips instead of one image.
+Use the extension to find an image behind a viewer or save from a page where
+you are signed in. For images beyond browser size limits, use the
+[desktop app](../../apps/desktop/desktop-app.md).
 
 ## Install
 
-Install it from the
-[Chrome Web Store](https://chromewebstore.google.com/detail/dezoomify/iapjjopjejpelnfdonefbffahmcndfbm)
-(works with Chrome, Edge, Brave, and other Chromium-based browsers) or
-[Firefox Browser Add-ons](https://addons.mozilla.org/en-US/firefox/addon/dezoomify/).
+Install from the [Chrome Web Store](https://chromewebstore.google.com/detail/dezoomify/iapjjopjejpelnfdonefbffahmcndfbm)
+(Chrome, Edge, Brave, and other Chromium browsers) or
+[Firefox Add-ons](https://addons.mozilla.org/en-US/firefox/addon/dezoomify/).
+Pin Dezoomify through the browser's extension menu if its icon is hidden.
 
 ## Save an image
 
-1. Open the page that shows the zoomable image.
-2. Press the Dezoomify magnifying-glass button in the browser toolbar.
-   The grey icon turns blue with a dot: the extension is now working on that
-   tab's explicit job.
-3. Pressing the button needs no extra permission: Dezoomify only ever looks
-   at the tab you pointed it at, never at all your browsing. If the image
-   or its tiles live on other addresses, the browser may ask for permission
-   to look at those too; approve it to continue.
-4. The dedicated job tab takes one bounded snapshot of the source page and
-   runs the job there. Pressing the button again focuses that job tab and
-   cancels an active job. Close the job tab to stop the job. If you navigate
-   the source tab, Dezoomify
-   stops reading the old page; it can continue only with image data it has
-   already found and can fetch through the browser's extension transport.
-5. The extension selects the largest image it finds and the highest
-   resolution that fits in a browser tab, then saves it automatically. When
-   the highest resolution would not fit, the save continues at the largest
-   one that does and a message shows the resolution being saved and the
-   maximum available, with the desktop app, **Try maximum**, and **Stop**;
-   after the save completes, the offer stays without **Stop**. There
-   is no list to pick from in the extension. To choose a particular image or
-   level, use the [command-line tool](./command-line.md).
+1. Open the image's viewing page, sign in if needed, and let the viewer load.
+   Zoom in once to ensure its image resources have loaded before starting.
+2. Click Dezoomify in the browser toolbar. A dedicated job tab opens and starts
+   automatically. The source page is not reloaded.
+3. If the job asks for access to another site hosting the image or tiles, approve
+   that visible request to continue.
+4. Leave the job tab open until the browser confirms saving. Then choose
+   **Open image** or **Show in folder**.
 
-The job finishes when your browser confirms the saved file. If saving fails,
-the job tab shows an error. Stopping the job also cancels an unfinished save.
-Once saving finishes, choose **Open image** or **Show in folder** to access
-the saved file.
+The extension selects the largest image and resolution that fit in a browser
+tab. If it saves a smaller resolution, it shows both sizes and offers the desktop
+app or **Try maximum**. Trying maximum can still fail at the browser's limits.
+To choose a specific image or level, use the [CLI](./command-line.md).
+
+Clicking the toolbar button again focuses the existing job tab and cancels an
+active job. Closing the job tab also stops it, including an unfinished save.
+Source-page navigation ends access to the old document; a job can continue only
+with discovered data it can fetch without that document's session.
+
+## 1. Click the Dezoomify icon
+
+Follow [Save an image](#save-an-image) above; pin the icon if it is hidden.
+
+## 2. Let the page settle
+
+Let the viewer load and zoom before clicking. Each attempt reads one snapshot;
+the extension does not keep watching for resources loaded afterward.
+
+## 3. Start dezooming
+
+The job tab starts automatically and confirms when saving finishes.
+
+## Tiled or static?
+
+Use the browser's normal **Save image as** when it already gives you the complete
+artwork. Use Dezoomify when zooming stays sharp and the viewer loads many pieces.
 
 ## If something goes wrong
 
-A temporary failure shows **Try again** in the job tab. Pressing it reads the
-page again and restarts the job from the page's retained entries. If the
-message instead points to another fix, the problem is not temporary. There is
-no **Start over** in the extension: to work on a different image, open its page
-and press the Dezoomify toolbar button.
+If automatic retries are exhausted, **Retry once more** continues the existing
+job and retains downloaded tiles; **Cancel** stops it without saving an incomplete
+image. After a failed job, **Try again** reads the same source document again
+and restarts the attempt. For a different image or a navigated source page, click
+the toolbar button on that page. Follow [troubleshooting](./troubleshooting.md)
+for other errors or a visible picture that cannot be saved.
 
 ## What the extension does with your data
 
-- It only looks at the page you pointed it at, only after you pressed the
-  button. It does not watch your browsing in the background. Each job takes
-  one bounded snapshot per attempt and stops by itself when it finds an image
-  or when you close its job tab; a retry is always explicit.
-- It uses your existing browser session, so images behind a sign-in work.
-  Your credentials stay in your browser; Dezoomify never stores or sends
-  them anywhere else.
-- Sign-in details stay in the browser. The extension does not transfer them
-  to the desktop app.
+The extension examines only the source page you select, after your click. It
+can use that site's browser session, but does not transfer login credentials
+to the project server or desktop app.
 
-**Technical details & logs** includes the full page and image addresses.
-If this site requires you to sign in, these details may contain sensitive
-information. Review them before sharing.
+**Technical details & logs** includes full page and image addresses. They may
+contain sensitive information, especially on signed-in sites. Review them before
+sharing; reports are not automatically sanitized.
 
 ## Next steps
 
-- [The extension found nothing? See troubleshooting](./troubleshooting.md)
-- [Very large images belong in the desktop app](../../apps/desktop/desktop-app.md)
+- [Find an image address manually](./finding-the-image-address.md)
+- [Use desktop for very large images](../../apps/desktop/desktop-app.md)

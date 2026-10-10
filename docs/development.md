@@ -1,11 +1,7 @@
 # Development
 
-One monorepo: Rust crates, generated WASM bindings, shared UI, hosts, extension packaging, and release tooling change together.
-Tests and the development server import TypeScript directly using Node's default type stripping, and the TSX test loader uses synchronous module hooks.
-
-## Task grammar
-
-The canonical form is `cargo xtask <task> [target] [options]`.
+Install Rust and the Node.js version in [`.node-version`](../.node-version), then
+run these commands from the repository root:
 
 ```sh
 cargo xtask setup
@@ -14,74 +10,62 @@ cargo xtask test
 cargo xtask dev web
 ```
 
-`setup` checks Rust, Node, WASM and wasm-bindgen tools, installs frozen workspace
-dependencies and the pinned Firefox driver, and reports browser status. It does
-not install browsers or Rust toolchains. It also installs the versioned hooks:
-Rust formatting on commit and `cargo xtask ci check` on push.
+`setup` installs frozen JavaScript dependencies and the pinned Firefox driver,
+checks WASM tools, and installs the versioned Git hooks. It does not install
+Rust toolchains or browsers. WASM builds need `wasm-bindgen-cli` matching
+`Cargo.lock`; setup reports mismatches.
 
-The [command reference](../crates/xtask/README.md) owns task grammar and CI lanes.
-Use direct Cargo or pnpm commands for component debugging.
-See [Architecture](architecture.md) to choose where a change belongs and
-[Testing](testing.md) to choose useful regression coverage.
+Read [Architecture](architecture.md) to choose where a change belongs and
+[Testing](testing.md) to choose regression coverage. For new site support, use
+[Contributing a format](CONTRIBUTING-format.md).
 
 ## Builds
 
-`favicon.svg` is the canonical blue-tile logo for the beta website,
-help pages, and desktop icon generation. Native SVG UI markup mirrors that
-artwork; the extension uses its blue PNG sizes and grey inactive variants.
-The website builder copies these favicon assets only under `/beta/`. The legacy
-app served at `/` retains its original files and artwork unchanged.
-
 | Command | Output |
 |---|---|
-| `cargo xtask build web` | Assembled website in `dist/`: legacy at `/`, new app at `/beta`, WASM and generated help |
+| `cargo xtask build web` | `dist/`: legacy at `/`, new app at `/beta`, WASM and help |
 | `cargo xtask build cli` | `target/debug/dezoomify-cli` |
 | `cargo xtask build extension` | Chromium and Firefox ZIPs in `target/extension/` |
-| `cargo xtask build desktop` | Tauri app and matching-host installer; [prerequisites](native-apps.md#desktop-bundles) |
+| `cargo xtask build desktop` | Matching-host installer; [prerequisites](../apps/desktop/README.md#bundles) |
 | `cargo xtask build wasm` | WASM under `target/wasm32-unknown-unknown/` |
 
-WASM builds need `wasm-bindgen-cli` matching `Cargo.lock`. Browser products bundle
-the same TypeScript/TSX sources directly. Never commit `dist/`, `wasm/`, or
-`help/`; the deploy workflow builds them from source.
+Do not commit `dist/`, `wasm/`, or `help/`. Website assembly must preserve
+`legacy/` byte for byte. [Operations](operations.md) covers deployment and releases.
 
 ## Local servers
 
 | Command | Environment |
 |---|---|
-| `cargo xtask dev web` | Full assembled site at `http://127.0.0.1:8080/`, including the proxy |
+| `cargo xtask dev web` | Full site and proxy at `http://127.0.0.1:8080/` |
 | `cargo xtask dev ui` | Beta UI at `http://127.0.0.1:8081/beta` |
-| `cargo xtask dev desktop` | Tauri shell with Vite at `http://localhost:1420/`; requires platform webview packages |
-| `cargo xtask dev extension --browser chromium` | Packaged extension in a throwaway browser profile; rerun after changes |
+| `cargo xtask dev desktop` | Tauri with Vite at `http://localhost:1420/`; needs platform webview packages |
+| `cargo xtask dev extension --browser chromium` | Packaged extension in a temporary browser profile; rerun after changes |
 
-Dev commands print cleanup instructions and bind loopback. The web server uses
-the deployed site's assembled tree and proxy implementation.
-For standalone deterministic origins, run `cargo xtask fixtures serve --port 0`.
+Dev commands bind loopback and print cleanup instructions. The web server uses
+the deployed site's assembled tree and proxy implementation. For a deterministic
+fixture origin, run `cargo xtask fixtures serve --port 0`.
 
 ## Bindings and dependencies
 
-Edit Rust boundary types, then run `cargo xtask bindings generate`.
-`cargo xtask bindings check` compiles the contract, tests the generated package,
-and checks WASM portability. Generated glue can differ across tool versions and
-operating systems; inspect the change rather than hand-editing it.
+After changing Rust boundary types, run `cargo xtask bindings generate` and
+inspect the generated diff. `cargo xtask bindings check` verifies the contract
+and WASM portability. Do not hand-edit generated declarations.
 
 The root pnpm lockfile owns active JavaScript dependencies. Playwright is pinned
-repo-wide through `pnpm.overrides`; move the override and workspace specs together
-when upgrading. Browser binaries are installed separately.
+through `pnpm.overrides`; update the override and workspace specs together.
+Install browser binaries separately. Direct Cargo and pnpm commands are useful
+for component debugging; `cargo xtask --help` is the command reference.
 
 ## Validation
 
-During iteration, use `cargo xtask check`, `cargo xtask test`, and focused
-`cargo xtask test <target>` commands. Finish code changes with
-`cargo xtask test all` and `cargo xtask ci local`. The desktop real-window lane
-is explicit: `cargo xtask test desktop --e2e-window`.
-Live source-site checks are opt-in, advisory, and never substitute for fixtures.
+Use `cargo xtask check`, `cargo xtask test`, and focused `test <target>` commands
+while iterating. Finish code changes with `cargo xtask test all` and
+`cargo xtask ci local`; [Testing](testing.md) explains additional browser and
+desktop coverage. Live source-site checks are opt-in and advisory.
 
-To compare native output performance on Linux, build release CLIs in separate
+For native output performance comparisons, build release CLIs in separate
 checkouts and Cargo target directories with
 `cargo build --release --locked -p dezoomify-cli`, then run
-`node scripts/bench-native-output.mjs /path/to/old-cli /path/to/current-cli`.
-The [benchmark script](../scripts/bench-native-output.mjs) emits timing, peak process
-RSS, request counts, exit status, and output size using fresh tile caches.
-
-For a new site format, follow [Contributing a format](CONTRIBUTING-format.md).
-For releases and deployment, follow [Operations](operations.md).
+[`bench-native-output.mjs`](../scripts/bench-native-output.mjs) with the old and
+new executable paths. It measures timing, peak RSS, request counts, and output
+size using fresh tile caches.

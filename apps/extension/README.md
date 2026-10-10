@@ -1,27 +1,41 @@
-# Browser Extension
+# Browser extension
 
-Detects zoomable images in your current tab and hands the job to Dezoomify,
-using your browser's own session so logged-in and interactive viewers work.
+Use: [browser extension guide](../../docs/user/browser-extension.md).
+Development: `cargo xtask dev extension --browser chromium`.
+Tests: `cargo xtask test extension` builds current WASM and both WXT packages,
+then runs units and packaged Chromium/Firefox browsers. Package-local `pnpm test`
+and `pnpm test:unit` run units only.
 
-- **Use:** click the extension button on a page with a zoomable image (grey
-  idle becomes blue with a dot while the job is active); the dedicated job tab
-  snapshots the source page and saves the result. The source page is not
-  reloaded. A second click focuses the existing job tab and cancels an active
-  job.
-  Full steps: [browser extension](../../docs/user/browser-extension.md).
-- Explicit-action jobs only: no background watching, auto-rearm, or unrelated
-  tab monitoring. The job page owns each job and invalidates its source access
-  on navigation. Detection runs in the core wasm; source reads use direct
-  `executeScript()` calls with no metadata proxy.
-- The extension uses `activeTab`, `scripting`, `downloads`, and
-  `downloads.open`, plus optional host permissions requested for the active job.
+## Ownership and permissions
 
-Contributing: narrow manifest permissions, explicit-action scans with cleanup,
-no private signing keys in shipped JS. `cargo xtask test extension` is the full
-integration gate: current generated WASM, Chromium and Firefox WXT builds, all
-units, and both headless browsers. The package-local `pnpm test` and
-`pnpm test:unit` scripts are pure unit-only loops with no generated builds or
-browsers.
-Store publishing: `apps/extension/scripts/chrome-webstore-publish.sh`
-(see `.env.example`); CI packages every push via `store-submit`, which
-updates the existing Chromium and Firefox (AMO) listings in place.
+The toolbar click opens or focuses a dedicated job tab. That tab owns scanning,
+the Rust invocation, permission prompts, cancellation, and saving. The background
+only launches/focuses tabs and remembers source/job associations; a background
+restart must not stop an existing job.
+
+One source-access object belongs to one source document. Scan once per attempt;
+navigation invalidates access, and late replies must not revive it. Already
+discovered input can continue through extension-origin fetching, but never
+silently rebind to the new page. The extension supplies observed documents and
+resources; Rust owns format recognition and discovery order.
+
+Source-origin fetches can use the page's session. Cross-origin access uses
+credential-free extension fetches under explicitly granted host permissions.
+Request permissions synchronously from a visible action to preserve user
+activation. HTTP refusals must not open permission prompts. Keep injected
+operations finite, cancellable, and validated at the job-page boundary.
+
+## Saving and packaging
+
+Optional tile retries await approval in the job tab and retain successful tiles.
+Cancellation settles pending approval; incomplete downloads are not saved.
+
+A clean result finishes only when the browser download manager confirms saving.
+Keep its Blob URL alive until a terminal event or cancellation settles. A tainted
+canvas is display-only. Open/reveal actions use the confirmed download identity.
+
+[`wxt.config.ts`](wxt.config.ts) owns Chromium/Firefox manifests. Declare only
+permissions shipped code uses; ship no permanent host access or content scripts.
+Use root workspace dependencies and the pinned Firefox driver installed by setup.
+Store publication uses immutable release artifacts; see
+[Operations](../../docs/operations.md).

@@ -2,144 +2,93 @@
 
 # Troubleshooting
 
-Start with the question closest to what you are seeing. Every answer
-suggests a concrete next step.
+Find the symptom below and try its next step.
 
 ## No image found
 
-The website or extension could not recognize a zoomable image at that
-address. Check that you pasted the address of the page that *shows* the
-image (not an image file itself, not a search page). If it still fails, the
-site hides its image description file: follow
-[finding the image address](./finding-the-image-address.md), or let the
-[browser extension](./browser-extension.md) find it for you.
+Use the address of the page showing the image, not a search page. Try the
+[extension](./browser-extension.md) after the viewer has loaded, or
+[find the description address](./finding-the-image-address.md) manually.
 
 ## Forbidden or unauthorized errors
 
-The site sends an error instead of the image. Two different reasons, two
-remedies:
+If the page requires sign-in, use the extension while signed in. Desktop
+cannot reuse your browser login, and copying an address alone does not transfer
+that access.
 
-- **You normally need to sign in to see this image.** The website runs
-  without any sign-in, so the site does not recognize it. Use the
-  [browser extension](./browser-extension.md), which works with your own
-  signed-in browser, or get the image address with the extension and send
-  the job to the [desktop app](../../apps/desktop/desktop-app.md).
-- **The site only serves the image to its own pages.** Some servers check
-  where a request comes from and refuse everyone else. The
-  [desktop app](../../apps/desktop/desktop-app.md) can introduce itself as coming from the
-  site's own viewer page; on the command line, pass
-   `-H/--header "Referer: https://the-site.example/its/viewer/page"`.
-
-Never paste passwords, cookies, or session contents into web forms,
-chat messages, or bug reports.
+Some servers require the viewer page as the request's referrer. In desktop,
+set that request header; on CLI use
+`-H "Referer: https://the-site.example/viewer"`. If the site's own viewer also
+fails, resolve access there first. Never share passwords, cookies, or sessions.
 
 ## The image appears blank, or the browser slows to a halt
 
-Very large pictures can exceed what a browser tab is allowed to hold. The
-website then saves the largest copy that fits and names the maximum
-resolution; **Try maximum** attempts the maximum and stops with an error
-pointing to the [desktop app](../../apps/desktop/desktop-app.md). Options:
-
-- Use the desktop app, which assembles the image in memory (up to its
-  currently available memory) and writes the
-  finished output to disk. This
-  is the fix for images that exceed browser limits but fit available memory.
-- To save a smaller copy, use the [command-line tool](./command-line.md)
-  with `--max-width`.
+Use [desktop](../../apps/desktop/desktop-app.md) for images beyond browser
+limits, or CLI `--max-width` for a smaller copy. **Try maximum** attempts the
+full resolution but cannot remove browser limits. The extension has the same
+image-size limits as the website.
 
 ## The image is visible but the browser cannot save it
 
-Some browsers fail to save very large pictures even when they can display
-them. Nothing on the website can bypass that browser limit. Use the
-[desktop app](../../apps/desktop/desktop-app.md), which assembles the image in memory (up
-to its currently available memory) and writes the
-finished output to disk. The
-browser extension stays inside the same browser memory and save
-limits and never fixes this case.
+The browser may display an image too large to encode, or the site may permit
+display without readable pixels. Try desktop; for source-session access, try
+the extension. Dezoomify labels display-only output rather than claiming it saved.
 
 ## The save stopped partway
 
-If no part of the image can be retrieved, Dezoomify stops without saving a file.
-When the extension reports that the website refused access, use **Open source page**
-and check that the site's own image viewer works.
+Temporary tile failures retry automatically. If those retries are exhausted,
+the website, extension, and desktop pause and offer **Retry once more** or
+**Cancel**. Retrying keeps successfully downloaded tiles. The job waits for your
+answer; it does not automatically save an incomplete image. Permanent tile
+failures stop the job without saving. CLI stops when its retry budget is exhausted;
+increase `--retries` for transient failures or restart using cached tiles.
 
-If only part of the image is available, the extension shows how many tiles were
-retrieved. **Save incomplete image** saves a picture with gaps; **Cancel** leaves
-it unsaved. **Retry failed tiles** is offered when the remaining failures are
-temporary. These choices appear above technical details, which include a link
-to report the problem.
-
-Small network interruptions are retried automatically. The tile cache stays
-on by default, so run the job again and already-saved tiles are reused
-instead of fetched again (a custom folder uses `--tile-cache` on the
-command line):
-see [resuming an interrupted save](../../apps/desktop/desktop-app.md#resuming-an-interrupted-save).
-If the site changed its image since the first attempt, remove the resume
-folder and start fresh. On the website, reloading stops the current run;
-enter the address again to restart it.
+For native downloads, repeat the job to reuse cached tiles; see
+[resuming](../../apps/desktop/desktop-app.md#resuming-an-interrupted-save).
+If the source image changed, remove its cached tiles before retrying. Browser
+jobs do not use that native disk cache; reloading stops the current run.
 
 ## The output name is rejected
 
-The output name selects the format: `.png` saves PNG, `.jpg` or `.jpeg`
-saves JPEG, `.tif` or `.tiff` saves TIFF, `.zif` saves a multi-resolution
-pyramid, `.webp` saves WebP, and `.iiif` or a name with no extension
-saves a IIIF tile folder. Any other extension stops the job before
-anything is saved. Rename the output to one of the supported forms and run
-again. A JPEG save of an image larger than 65535 pixels per side also
-stops with a typed error, as does a WebP save larger than 16383 pixels
-per side; save such images as PNG, TIFF, ZIF, or a IIIF tile
-folder instead.
+Use `.png`, `.jpg`/`.jpeg`, `.tif`/`.tiff`, `.zif`, `.webp`, or `.iiif`;
+an extensionless path creates an IIIF folder. Other extensions are rejected.
+JPEG is limited to 65,535 pixels per side and WebP to 16,383. Use PNG, TIFF,
+ZIF, or IIIF for larger dimensions. Choose an unused IIIF destination;
+`--overwrite` does not replace an existing directory.
 
 ## The site only works without encryption
 
-A few old sites serve their images without encryption. A secure website is
-not allowed by your browser to load those. The desktop app can still fetch
-them: it is an ordinary program on your computer and follows the site's own
-setup.
+Browsers block insecure resources from secure pages. Try desktop, which can
+fetch the source site's ordinary HTTP resources.
 
 ## The site limited requests for that image
 
-The image site is receiving too many requests right now, or it limited
-repeated fetching. Dezoomify itself fetches from your own device and
-browser session (the website reads directly, with a small public-metadata
-helper as fallback); nothing changes when you switch devices or networks
-except the request rate. Wait a few minutes and try the same address
-again, or save from your own connection with the
-[browser extension](./browser-extension.md) or the [desktop app](../../apps/desktop/desktop-app.md).
+Wait before retrying. On CLI, reduce concurrency or increase pacing with the
+options in `dezoomify --help`. Changing apps does not remove the site's limit.
 
 ## The site asks you to wait a few minutes
 
-The image site is receiving too many requests right now. Wait a few minutes
-and try the same address again.
+Follow [request-limit advice](#the-site-limited-requests-for-that-image) above.
 
 ## The image shows but cannot be saved
 
-The site shows the picture without letting Dezoomify save a copy from it.
-Open the page and use the [browser extension](./browser-extension.md) to find
-the image there; see [finding the image address](./finding-the-image-address.md).
+Follow [visible-image advice](#the-image-is-visible-but-the-browser-cannot-save-it)
+above.
 
 ## Sending a signed-in image to another app asks for approval
 
-That approval step is expected. The [browser extension](./browser-extension.md)
-asks first before passing anything needed for that job; see
-[what the extension does with your data](./browser-extension.md#what-the-extension-does-with-your-data)
-and the [desktop app](../../apps/desktop/desktop-app.md).
+Review any proposed handoff before accepting. Desktop does not receive your
+browser credentials, so a signed-in image may still require the extension.
+See [extension data use](./browser-extension.md#what-the-extension-does-with-your-data).
 
 ## Still stuck?
 
-- Disable other browser extensions and try once more; some of them
-  interfere with Dezoomify.
-- Open **Technical details & logs** to copy or save the diagnostic report,
-  even if the image completed but looks wrong. The report link opens GitHub
-  with the address and failure details filled in. Review the draft and add
-  a screenshot. You can also
-  [open an issue](https://github.com/lovasoa/dezoomify/issues) yourself with
-  the same details.
-
-Support is free and done by volunteers; a precise report gets answered much
-faster.
+Open **Technical details & logs** to copy or save a report or prepare an issue
+draft. Reports can contain sensitive addresses or settings: review them before
+sharing. Include the viewing page, app, error, and a screenshot in a
+[GitHub issue](https://github.com/lovasoa/dezoomify/issues).
 
 ## Next steps
 
-- [Start here](./start-here.md)
+- [Find the image address](./finding-the-image-address.md)
 - [Supported formats](./supported-formats.md)

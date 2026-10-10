@@ -2,64 +2,35 @@
 
 # Desktop app
 
-The desktop app runs Dezoomify natively on Windows, macOS, and Linux,
-beyond what a browser tab can hold, subject to the memory currently available
-to the process.
-Use it when:
+Use desktop for images beyond browser limits, local sources, or more output
+formats. It runs on Windows, macOS, and Linux and saves directly to your chosen
+folder. It cannot reuse your browser login; use the
+[extension](../../docs/user/browser-extension.md) for signed-in pages.
 
-- the image is **very large**: a browser may refuse to display or save
-  images beyond a certain size; the desktop app assembles larger images
-  than a browser tab (subject to available memory) and writes the
-  finished output directly to disk;
-- the site **refuses visitors from other pages**: the app can introduce
-  itself as coming from the site's own viewer page.
-
-Each job saves to one output file or IIIF tile folder. PNG, JPEG and TIFF
-compress while pieces arrive and release decoded pieces as their pixels are
-read. Compatible IIIF/ZIF pieces keep their compressed bytes. Working pixels
-stay in RAM, with a budget based on 80% of available memory at job start.
-Pixel processing and codec working space share that budget; network response
-buffers need additional memory. Unknown dimensions, missing
-early pieces and WebP output can need more buffering. If the working data
-cannot fit, the save stops with a typed error and removes unpublished output.
-Choose a smaller resolution in that case.
-
-Tile counts show acquisition; the progress bar and counts switch to pixels
-while the saved image finishes. Pause affects acquisition. Cancel remains available
-through output preparation.
+Large images are still limited by available memory. If a save reaches that
+limit, choose a smaller resolution or a tile folder. Explicit output formats
+can reduce buffering; WebP needs the complete picture in memory.
 
 ## Resuming an interrupted save
 
-Small network interruptions are retried automatically. The tile cache stays
-on by default, so running the same job again reuses the tiles already saved
-instead of fetching them again, without passing any extra option. A custom
-resume folder remains available with `--tile-cache` on the command line and
-the cache directory setting in the app; reuse the same folder to resume.
-Tiles are keyed by digest of their address, so only response bytes persist
-there, never passwords, cookies, or session contents. If the site changes
-its image, remove the resume folder and start fresh.
+Run the same job again to reuse cached tiles. The cache is enabled by default;
+choose a custom folder in settings or with CLI `--tile-cache`. If the source
+image changed, remove its cached tiles first. Cached tiles do not contain your
+browser session.
 
 ## Recent pictures
 
-The app keeps your last 20 started images on this device only, including failed
-and cancelled attempts. Each row shows the title (or source address), time since
-starting, known pixel dimensions, and status. Saved images show their file name;
-click the row to open the local image. Files that are no longer there show
-**Deleted**. Other rows fill and focus the address field so you can review it
-before starting again. File availability is checked in the background when you
-return to the main screen or app. Use the trash icon to remove one row, or
-**Clear history** to remove all entries; this never deletes your saved images.
+History keeps your last 20 started images on this device. Click a saved entry
+to open its file; missing files show **Deleted**. Other entries fill the address
+field without starting. Remove entries with the trash icon or **Clear history**;
+this never deletes saved images.
 
 ## Saving and opening images
 
-Choose the folder, format, size, and network settings on the main screen.
-The app saves the image automatically in that folder. When **Image saved**
-appears, use **Open image** to open it with your usual image viewer, or
-**Show in folder** to find it in your file manager. There is no second save
-step. Settings do not appear on the finished image screen.
-If opening fails, each attempt shows its own error. **Technical details &
-logs → Copy diagnostics** includes the failed action and its error kind.
-You can still open the containing folder if the image has been moved.
+Choose the folder, format, and size on the main screen, paste an address, and
+start. Saving is automatic. When **Image saved** appears, use **Open image** or
+**Show in folder**. Settings return on the main screen, not the result screen.
+Pause stops new tile downloads; Cancel remains available while output finishes.
 
 ## Install
 
@@ -107,68 +78,47 @@ either warning is the ordinary developer-approval prompt.
 
 ## Save an image
 
-Paste the address of the page (or of the image description file) into the
-app and start dezooming. The app immediately saves to the folder selected on
-the main screen; it does not ask for a second file choice. The native app
-uses the image title it finds to determine the file name and adds the extension
-for the selected format. You can also start the app with the address as an
-argument, or drive it from the terminal; see the
-[command-line guide](../../docs/user/command-line.md).
+Paste the viewer page or image description address and start dezooming. The app
+names the output from the image title and adds a numeric suffix if needed;
+existing files are preserved. Copy an address from the website to continue here.
+For terminal use, see the [CLI guide](../../docs/user/command-line.md).
 
-**Members-only sites:** the desktop app cannot reuse your browser sign-in.
-Use the [browser extension](../../docs/user/browser-extension.md) to work with pages that
-require your existing browser session.
-
-**From the website:** copy the image address and paste it into the desktop app.
-
-**Sites that refuse visitors:** some servers only send their image to
-requests that appear to come from the site's own viewer. If the save
-fails with a "forbidden" style error, tell the app which page the image
-belongs to (most image viewers open with such a page) and it will introduce
-itself as coming from there. On the command line, this is the
-`-H/--header "Referer: …"` option; see [protected pages](../../docs/user/troubleshooting.md#forbidden-or-unauthorized-errors).
+If a server accepts requests only from its viewer, add that page as the Referer
+header in settings. See [access refusals](../../docs/user/troubleshooting.md#forbidden-or-unauthorized-errors).
+This does not sign you in or transfer your browser session.
 
 ## Choosing the file format
 
-Use the **Format** quick setting to pick Auto (the default), PNG, JPEG, TIFF,
-ZIF, WebP, or an IIIF tile folder. Auto saves JPEG for opaque images when both
-dimensions are at most 65,535 pixels; transparency or larger images use PNG.
-The app remembers your choice.
-The native app uses that choice to add the matching
-extension to its derived output name: `.png`, `.jpg`, `.tif`, `.zif`, `.webp`,
-or `.iiif`. An IIIF folder contains `info.json` and the image tiles, ready to
-serve from a static file server.
+- **Auto** chooses JPEG for an opaque image within JPEG's dimensions, otherwise PNG.
+- **PNG or TIFF** are lossless choices for archiving and editing.
+- **JPEG** suits smaller on-screen copies; it is limited to 65,535 pixels per side.
+- **WebP** is lossless here, but needs a complete pixel buffer and is limited to
+  16,383 pixels per side.
+- **ZIF** is a tiled multi-resolution image and omits transparency.
+- **IIIF** saves a folder with `info.json` and tiles for a static web viewer.
 
-JPEG versions stay small and suit on-screen viewing; TIFF and PNG suit
-archiving and further editing. JPEG cannot address images larger than
-65535 pixels per side; such images save as PNG or TIFF. The compression
-setting changes the JPEG quality (quality is 100 minus compression, so the
-default 5 means 95); TIFF stays lossless at every level.
-
-Each save writes exactly one output. If the derived name already exists, the
-app adds a numeric suffix rather than replacing the existing file.
-
-The app saves only after every required tile has been retrieved. If automatic
-retries are exhausted, the download pauses and offers **Retry once more** or
-**Cancel**. Retrying retains successfully downloaded tiles. Cancelling publishes
-no image. You can also restart with the same resume folder to reuse cached tiles;
-see [resuming an interrupted save](#resuming-an-interrupted-save).
+Compression controls JPEG quality (100 minus compression); TIFF stays lossless.
+Compatible IIIF/ZIF tiles keep their original compressed bytes.
 
 ## Settings
 
-The settings panel holds the output folder, the compression level,
-optional width and height caps, the retry budget, the resume cache folder,
-and extra request headers. Every setting is validated when you change it:
-invalid values are refused and the last good settings stay in force. Settings
-persist on the device across restarts, together with the output format
-choice.
+Choose an output folder, format, compression, optional size caps, retry budget,
+cache folder, and request headers. Settings persist on this device. Invalid
+values are refused rather than starting a job with them.
 
 ## If a save fails
 
-A failed save says what went wrong and whether retrying can help. Permanent
-tile failures stop the job without saving an incomplete image.
+Read the error's suggested next step. After automatic retries are exhausted,
+the download pauses and offers **Retry once more** or **Cancel**. Retrying keeps
+successfully downloaded tiles; the app waits for your answer without a timeout.
+Permanent tile failures or cancellation stop the job without publishing an
+incomplete image. Restarting the job can reuse good cached tiles; see
+[resuming](#resuming-an-interrupted-save).
+
+If opening a saved file fails, try **Show in folder**. Use **Technical details &
+logs** for a report, reviewing sensitive addresses and settings before sharing.
 
 ## Next steps
 
-- [Command-line usage](../../docs/user/command-line.md)
 - [Troubleshooting](../../docs/user/troubleshooting.md)
+- [Command-line usage](../../docs/user/command-line.md)

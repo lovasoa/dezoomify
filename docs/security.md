@@ -1,36 +1,56 @@
 # Security
 
-Apply judgement before blindly applying security rules.
-Do not implement protections against vulnerabilities that have not be proven to exist, do not have a real risk or impact.
-
-Source sites, metadata, tiles, and output names are all untrusted input. Each runtime takes only the access its active user-started job needs.
+Source pages, metadata, tiles, and output names are untrusted input. Apply
+protections for concrete risks while retaining Dezoomify's ability to download
+very large images. Each runtime takes only the access its user-started job needs.
 
 ## Trust boundaries
 
-- The website runs under normal browser origin rules.
-- Page policy allows cross-origin images for plain tile display; shown tiles taint the canvas, keeping it unreadable to scripts.
-- The extension background accepts requests only from its own authenticated contexts.
-- Native apps reach network and filesystem, so they validate typed input and require user-picked local destinations.
-
-Parsers and decoders cap input, dimensions, tile counts, allocation, recursion, and decompression, but dezoomify's entire purpose is to allow downloading very large, gigapixel images, so all caps must be high. URLs normalize before policy checks.
+- The website obeys browser origin rules. Cross-origin images may display on a
+  tainted canvas, but script cannot read or encode its pixels.
+- The extension scans only after explicit user action. Its job tab owns source
+  access and permissions; source navigation invalidates that access.
+- Native apps can reach network and filesystem, so native validation and output
+  publication must protect destinations independently of frontend checks.
+- Parsers and decoders bound untrusted data and allocations. Keep limits high
+  enough for gigapixel work and preserve typed failures.
 
 ## Credentials
 
-Auth headers including cookies should be stripped from logs on a best effort basis. Logs stay local unless the user explicitly sends them.
-Diagnostic capture preserves supplied URLs, query parameters, paths, and settings as supplied. Reports stay local until the user copies, saves, or opens a prefilled issue draft. The extension's technical-details panel shows a conditional sign-in warning before its sharing controls; it does not infer authentication from cookies. User guidance: [extension data use](user/browser-extension.md#what-the-extension-does-with-your-data).
+Website requests omit cookies and Authorization; its proxy handles only public
+metadata. The extension can fetch from the source document with that site's
+browser session. Extension-origin fetches are credential-free and require active
+host permissions. It does not transfer browser credentials to desktop.
 
-Website direct and proxy requests omit cookies and `Authorization`. The proxy also forwards no caller credentials upstream and never fetches credential-bearing resources. Signed or token-bearing URLs are proxy-ineligible. The extension fetches in the tab origin with the page's session and from the extension origin credential-free, only for origins under active host permissions. It does not send browser cookies or other credentials to another product.
+Diagnostics are local until the user shares them. They preserve exact supplied
+URLs, query parameters, paths, settings, and error causes; do not promise automatic
+sanitization. Avoid recording authentication headers and cookies, and tell users
+to review reports before sharing. See [extension data use](user/browser-extension.md#what-the-extension-does-with-your-data).
 
-The secret/credential query-key vocabulary lives once in Rust (`SENSITIVE_QUERY_KEYS` in [`model.rs`](../crates/dezoomify/src/model.rs)) and crosses the boundary only as the `isSecretKey`/`hasSecretParams` callables; TypeScript callers with a runtime ask the boundary. The one TypeScript list (`SENSITIVE_QUERY_KEYS` in [`source-url.ts`](../packages/shared-ui/src/source-url.ts)) is the wire-format counterpart of `isSecretKey`, kept only for pure callers that load no runtime. The deliberately narrower signed-params policy (`SIGNED_QUERY_KEYS`) governs metadata-proxy eligibility and is applied through one `hasSignedQuery` check by both `web-fetch.ts` and `src/server/security.ts`. Desktop settings and trusted-header validation live once in the native shell (`parse_settings`/`parse_header_line`) with direct unit tests; the frontend shape-normalizes only and trusts the shell's typed rejection. The retry policy exists once in Rust (`Error::retryable`) and is exposed at each host boundary (`isRetryable`/`is_retryable`); TypeScript holds no copy.
+Use the shared secret-query helpers from the Rust boundary where a runtime is
+available; pure TypeScript callers use [`source-url.ts`](../packages/shared-ui/src/source-url.ts).
+Proxy eligibility uses its narrower signed-query policy, not an independently
+invented credential vocabulary.
 
 ## Proxy controls
 
-Direct browser fetch goes first with a short 1500 ms completion window. A classified CORS or network failure, or an unfinished direct fetch inside that window, triggers automatic proxy fallback, and only for an eligible public, non-credential `http(s)` metadata request. No per-attempt consent. The website shows the active transport. Full order: [Browser runtime](browser-runtime.md#request-order).
+The metadata proxy must not become a general-purpose network relay. Public
+metadata only, no tiles or credentials; reject private and reserved destinations
+before connection and across redirects. Bound redirects, response bodies,
+duration, and concurrency, and allowlist forwarded headers.
 
-The proxy allows only supported methods and serves metadata only, never tiles. It resolves and rejects loopback, private, link-local, reserved, and cloud-metadata addresses before connecting and after redirects. It rechecks eligibility across redirects; bounds redirects, bytes, duration, and concurrency; accepts only expected metadata content (structured metadata, viewer HTML; image bodies rejected); omits credentials; strips non-allowlisted headers; forwards the client's User-Agent, Accept-Language, and Accept upstream and sends the target URL as Referer; and applies abuse controls. The page holds at most 4 proxy requests in flight and starts at most 4 per second under one global budget; direct tile requests pace separately. A transient rate-limit response retries at most once after a bounded delay; persistent throttles fail closed. Auth failures and ordinary HTTP errors never qualify as CORS/network failures and never trigger fallback.
+[`src/server/security.ts`](../src/server/security.ts) owns eligibility and network
+policy, shared by local and deployed proxy adapters. The browser transport owns
+fallback; HTTP refusals must not be reclassified as CORS failures to bypass them.
 
 ## Extension and desktop
 
-Extension behavior is defined once in [Extension](extension.md): the job tab owns each job and calls finite source operations directly after the toolbar action; there are no content scripts, no `<all_urls>`, no metadata proxy, and the background only launches and focuses the job page. Source results are validated at the job-page boundary and bounded before transfer; cookies and auth values never leave the source tab. Tauri exposes allowlisted commands and opaque file handles instead of raw paths where practical. The desktop declares only permissions its shipped code uses, and external links leave only through `opener:allow-open-url` for valid `https` URLs.
+Declare only permissions shipped code uses. Keep scans explicit and permissions
+requested from a visible user action. Validate injected source results at the
+job-page boundary; implementation notes are in the [extension README](../apps/extension/README.md).
 
-Website deep links are untrusted input for native validation plus user confirmation; no client-side signing. They contain bounded non-secret job input and never transfer browser credentials. Security regressions are covered in [Testing](testing.md).
+Tauri uses allowlisted commands and opaque saved-file handles where practical.
+Validate deep links natively and confirm them before starting work. Deep links
+carry bounded non-secret input, never browser credentials. Open external links
+only through the declared opener capability. Choose useful regression coverage
+from [Testing](testing.md).

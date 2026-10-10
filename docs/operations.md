@@ -1,26 +1,24 @@
 # Operations
 
-Use immutable release artifacts for publication and rollback. Source URLs never
-enter monitoring.
+Publish immutable artifacts and reuse them for rollback. Never rebuild under an
+existing version. Source URLs must not enter monitoring.
 
 ## Release runbook
 
-Green `master` CI auto-publishes the next rolling version. One version covers
-all apps and bindings from the same revision. `cargo xtask release version`
-derives it from Git: `vX.Y.Z` is `X.Y.Z`; each subsequent first-parent commit
-bumps `Z`. Builds receive `DEZOOMIFY_VERSION`, rather than manifest edits.
+Green `master` CI auto-publishes rolling releases. Numbered versions come from
+annotated `vX.Y.Z` tags; subsequent first-parent commits increase the patch
+version. One revision/version covers every app and binding.
 
-The release plan freezes the revision, capabilities, and targets from
-`release/targets.toml` and `generated/release-capabilities.json`. Every planned
-target is mandatory and builds on its matching host. Each stage validates the
-previous stage's digests; publication verifies again and requires `origin/master`
-to match the plan. Rolling tags use `rolling-v<version>`; numbered tags use `vX.Y.Z`.
+The release plan freezes its revision and required targets from
+[`release/targets.toml`](../release/targets.toml). Builds run on matching hosts;
+verification and publication check the frozen plan and artifact digests.
+Publication also requires `origin/master` to match the plan.
 
 ### Preparing a release
 
 1. Pick a version above `cargo xtask release version`; tag annotated `vX.Y.Z` on `master`.
-2. Push the tag; dispatch the `release` workflow with that tag as `ref`.
-3. The workflow requires green CI and edits no app manifest.
+2. Push the tag and dispatch the `release` workflow with that tag as `ref`.
+3. The workflow requires green CI; versions are injected, not edited into manifests.
 
 ### Cutting a release
 
@@ -28,42 +26,40 @@ From the tagged revision:
 
 1. `export DEZOOMIFY_VERSION="$(cargo xtask release version)"`
 2. `cargo xtask release plan --numbered`
-3. `cargo xtask release build --plan target/release-dist/<version>/plan.json --target <target>` per target, each on its matching host (plan lists them; all mandatory).
-4. `cargo xtask release verify --plan ... --artifacts target/release-dist/<version>` (names against plan).
-5. `cargo xtask release publish --plan ... --artifacts ...`.
+3. `cargo xtask release build --plan target/release-dist/<version>/plan.json --target <target>` for each planned target on its matching host.
+4. `cargo xtask release verify --plan ... --artifacts target/release-dist/<version>`
+5. `cargo xtask release publish --plan ... --artifacts ...`
 
-Then: GitHub Release publication, plus parallel submission of the exact Chromium ZIP to the Chrome Web Store and Firefox ZIP to AMO. Store jobs rebuild nothing; release artifacts are the source of truth. Submission is automatic; availability waits for store approval. Linux x86_64 `.deb` and Windows x86_64 `.msi` installers stay unsigned; the app in the Apple silicon `.dmg` is ad-hoc signed and its packaged signature is verified before upload, with no paid signing or notarization. No in-app updates; users check GitHub Releases manually. Working trees under `target/release-dist/<version>/` are never committed. User install note: [Desktop app guide](../apps/desktop/desktop-app.md#install).
-
-The `release` workflow runs all five stages. Signing and publishing stay separate protected jobs. It then waits for the parallel store submissions; a green release run has reached every target, though store approval is still pending in some cases.
+The workflow submits the exact Chromium and Firefox release ZIPs to the existing
+store listings, without rebuilding. Submission can finish before store approval.
+Signing and installation policy: [desktop guide](../apps/desktop/desktop-app.md#install).
+Release working trees under `target/release-dist/` are never committed.
 
 ## Website deployment contract
 
-One Cloudflare Pages project (the original `dezoomify`) builds from GitHub Actions via `.github/workflows/website-deploy.yml`:
+[`website-deploy.yml`](../.github/workflows/website-deploy.yml) is the sole publisher
+to the original Cloudflare Pages project, `dezoomify`; automatic Git deployment
+is disabled. [`build-site.mjs`](../scripts/build-site.mjs) assembles legacy files
+verbatim at `/`, the new app/help at `/beta`, and both proxy routes.
 
-1. `scripts/build-site.mjs` builds the Vite app, help pages, and wasm glue into `dist/`: legacy site (vendored `legacy/`, verbatim) serves `/`, the new app serves `/beta`, `_routes.json` limits Functions to `/api/proxy` (new) and `/proxy` (legacy, re-exported from `legacy/functions/proxy.js`).
-2. A `master` push uploads production. A same-repo PR targeting `master` uploads a preview at `pr-<number>.dezoomify.pages.dev` from the merge ref, so it verifies exactly what merges. Automatic git deployments are off; this workflow is the only publisher, so a push never clobbers production with a raw tree.
-3. GitHub records each deploy in `production`/`preview` and links it as the PR's **View deployment**; the preview URL survives new commits.
-4. The workflow probes the live deploy (production or preview): both apps, both proxy routes, wasm content types, generated help, no repository files served.
-
-`master` is the single production branch. Fork PRs get no previews: the normal `pull_request` event runs the credentialed job for same-repo PRs only, keeping untrusted code out of `pull_request_target`. Previews are public with `noindex` and share production's proxy and file-exposure gates. Internal docs are never served.
+`master` publishes production. Same-repository PRs targeting `master` publish a
+stable `pr-<number>.dezoomify.pages.dev` preview from the merge ref. Fork PRs get
+no credentialed preview. Previews are public with `noindex`; internal source and
+docs must not be served. Deployment probes check both apps, proxies, WASM, help,
+and source-file exclusion.
 
 ## Rollback
 
-Reinstall a previous immutable GitHub Release artifact; never rebuild under an
-existing version. There is no automatic desktop updater or staged rollout.
-
-1. Pick the previous immutable release tag (`release publish` refuses republishing a tag).
-2. Download its artifacts.
-3. Reinstall the matching previous `.deb` / `.msi` / `.dmg` by hand; no updater pulls the rollback.
-4. Stores accept no old version as a new submission. Revert on `master`, let it produce a higher rolling version, submit that through `store-submit`; never a new store item.
-5. Preserve user output and settings; record affected tags and verify the restored app with packaged fixtures.
+- Reinstall a previous immutable GitHub Release artifact, preserving output and
+  settings. Desktop has no automatic updater.
+- Stores require a higher version: revert on `master` and submit the resulting
+  release through `store-submit`, retaining the existing listing.
+- Verify recovery with packaged fixtures and record affected tags in the incident.
 
 ## Incident response
 
-Contact the release owners in `release/config.toml` for compromised keys,
-credential exposure, proxy abuse, or broken publication.
-
-1. Pause the affected promotion (website alias or store submission; no updater rollout exists) without rebuilding under the same version.
-2. Preserve logs, digests, evidence; revoke test credentials.
-3. Follow [Rollback](#rollback) for the affected channel only.
-4. Record evidence and recovery actions in the incident issue.
+Contact release owners in [`release/config.toml`](../release/config.toml) for
+compromised keys, credential exposure, proxy abuse, or broken publication.
+Pause the affected publication, preserve evidence, revoke affected credentials,
+and follow the relevant rollback path. Record recovery actions in the incident
+issue rather than a new documentation page.
