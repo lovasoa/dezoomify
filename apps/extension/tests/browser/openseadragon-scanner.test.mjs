@@ -220,6 +220,10 @@ for (const [name, engine] of [
               const now = Date.now;
               const timeout = window.setTimeout;
               let elapsed = 0, taskRan = false;
+              // Make broad reference traversal exhaust its budget deterministically.
+              // The targeted canvas probe must collect the image first.
+              if (${mode === "throwing-listener"})
+                Date.now = () => now() + (elapsed += 0.1);
               if (${mode === "large-dom"}) {
                 Date.now = () => now() + (elapsed += 0.001);
                 window.setTimeout = (callback, delay = 0, ...args) =>
@@ -287,6 +291,8 @@ for (const [name, engine] of [
             hooked: window.hookDuringTask ?? false,
           }));
           assert.equal(tasks.hooked, false, "the prototype hook never survives into another task");
+          if (mode === "throwing-listener")
+            assert.ok(result.diagnostics.stopped.includes("time-budget"));
           if (mode === "large-dom") {
             assert.ok(measured.taskRan, "large DOM scanning yields to page tasks");
             assert.equal(result.diagnostics.truncated, true);

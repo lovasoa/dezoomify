@@ -41,8 +41,9 @@ export class PageTraversal {
     const registry = openSeadragon?.registry(realm);
     if (registry) await this.viewers.readAll(registry, doc, until);
     const elements = await this.collectElements(doc, queue, until);
-    await this.scanReferences(realm, queue, until);
+    // Probe known canvases before broad reference traversal can exhaust the budget.
     await this.viewers.probe(realm, elements, until);
+    await this.scanReferences(realm, queue, until);
     await this.scanFrames(win);
   }
 
