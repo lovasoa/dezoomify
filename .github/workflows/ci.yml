@@ -41,13 +41,13 @@ jobs:
           install: ${{ matrix.lane-group == 'check' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' || matrix.lane-group == 'bindings+security' }}
       - name: Set up Rust toolchain (WASM target)
         if: matrix.lane-group == 'check' || matrix.lane-group == 'wasm' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' || matrix.lane-group == 'bindings+security'
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # pinned
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # pinned
         with:
           toolchain: 1.98.1 # must match rust-toolchain.toml
           targets: wasm32-unknown-unknown
       - name: Set up Rust toolchain
         if: matrix.lane-group == 'rust'
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # pinned
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # pinned
         with:
           toolchain: 1.98.1 # must match rust-toolchain.toml
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -65,7 +65,7 @@ jobs:
         uses: ./.github/actions/setup-wasm-bindgen
       - name: Install cargo-deny 0.20.2
         if: matrix.lane-group == 'check'
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2.87.24
         with:
           tool: cargo-deny@0.20.2
       - name: Cache Playwright Chromium
