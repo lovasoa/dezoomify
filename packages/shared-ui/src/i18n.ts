@@ -235,6 +235,7 @@ const en = {
   "view.fail.helpDesc":
     "How to find the image address on museum & archive sites, and what to try when nothing is found.",
   "view.fail.reportBug": "Report a bug on GitHub",
+  "view.fail.reportBugDesc": "Prepare a GitHub issue with the diagnostics from this attempt.",
   "view.fail.retry": "Try again",
   // Browser canvas failure family (allocation, 2D context):
   // the desktop app is the recovery, so every message names it.
@@ -333,7 +334,9 @@ const en = {
   "desktop.tile.failed":
     "Could not retrieve a tile from {host}. Check the source image and try again.",
   "view.discovery.none":
-    "No zoomable image was found at this address. Try a page that contains a zoom viewer.",
+    "No zoomable image was found at this address. Try a page that contains a zoom viewer, or try the browser extension.",
+  "view.discovery.noneExtension":
+    "No zoomable image was found on this page. Report a bug with the diagnostics, or follow the guide to find the image address.",
   "desktop.plan.none":
     "This picture has no usable size to save from {host}. Try a different picture or a smaller Max width.",
   "desktop.transport.stalled":

@@ -4,6 +4,7 @@
 // from the one policy in Rust (`Error::retryable`).
 import type { BlockedReason, Error as JobError } from "@dezoomify/wasm-bindings";
 import { type I18nKey, t } from "./i18n.ts";
+import type { ViewContext } from "./view-types.ts";
 
 // JPEG addresses at most 65535 px per side; WebP at most 16383 px
 // (copy interpolation only).
@@ -244,6 +245,11 @@ export function causeOf(error: JobError): RootCause {
   return error;
 }
 
+/** Discovery failures share the recovery actions for an image that was not found. */
+export function isDiscoveryFailure(error: JobError): boolean {
+  return COPY[causeOf(error).kind] === "view.discovery.none";
+}
+
 /** The observed HTTP status of a fetch failure, when there is one. */
 export function httpStatusOf(error: JobError): number | undefined {
   const cause = causeOf(error);
@@ -304,7 +310,11 @@ function policyHintFor(
  * names, statuses, raw failure chains) stays out of this sentence; it
  * belongs in the collapsible detail built beside it.
  */
-export function plainMessageFor(error: JobError, host: string): string {
+export function plainMessageFor(
+  error: JobError,
+  host: string,
+  product: ViewContext["product"] = "website",
+): string {
   const cause = causeOf(error);
   switch (cause.kind) {
     // Structured limit facts come from `limit`; display prose is never parsed.
@@ -355,6 +365,9 @@ export function plainMessageFor(error: JobError, host: string): string {
   // Unrecognized payloads stay on the generic sentence at runtime; the
   // compile-time exhaustiveness lives in `COPY`.
   const key = Object.hasOwn(COPY, cause.kind) ? COPY[cause.kind] : undefined;
+  if (key === "view.discovery.none" && product === "extension") {
+    return t("view.discovery.noneExtension");
+  }
   return t(key ?? "desktop.save.fallback", { host });
 }
 

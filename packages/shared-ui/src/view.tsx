@@ -7,7 +7,7 @@ import { flushSync } from "react-dom";
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
 import type { JobActivity } from "./activity.ts";
-import { canRetry, plainMessageFor } from "./failure.ts";
+import { canRetry, isDiscoveryFailure, plainMessageFor } from "./failure.ts";
 import { HistorySection } from "./history-view.tsx";
 import type { Presentation, ResolutionChoice } from "./presentation.ts";
 import { displaySourceUrl, formatPixelCount, hostFromUrl } from "./view-helpers.ts";
@@ -23,7 +23,7 @@ export type {
 } from "./view-types.ts";
 
 import { formatElapsed, renderCompletion, renderSaveGuidance } from "./components.ts";
-import { DiagnosticDetails } from "./diagnostic-details.tsx";
+import { DiagnosticDetails, diagnosticIssueUrl } from "./diagnostic-details.tsx";
 import { t } from "./i18n.ts";
 import { Notice, NoticeAction, NoticeActions } from "./notice.tsx";
 import { RetryActions } from "./retry-actions.tsx";
@@ -686,6 +686,8 @@ function FailedView({
   hostDocument: Document;
 }) {
   const error: JobError = presentation.error ?? { kind: "internal" };
+  const extension = ctx?.product === "extension";
+  const extensionDiscovery = extension && isDiscoveryFailure(error);
   const retry = canRetry(error) ? callbacks.onRetrySameUrl : undefined;
   const source =
     typeof ctx?.sourceUrl === "string"
@@ -699,7 +701,7 @@ function FailedView({
       className="dz-error-section dz-fade-in"
       tone="error"
       title={t("view.fail.title")}
-      message={plainMessageFor(error, hostFromUrl(source))}
+      message={plainMessageFor(error, hostFromUrl(source), ctx?.product)}
       messageId="dz-error-message"
       actions={
         retry || callbacks.onReset ? (
@@ -721,14 +723,37 @@ function FailedView({
       <div className="dz-guidance-section">
         <h3 className="dz-guidance-title">{t("view.display.waysTitle")}</h3>
         <div className="dz-guidance-grid">
-          <ExtensionGuideButton onOpen={() => showExtensionGuidance(hostDocument)} />
-          <DesktopGuideButton
-            onOpen={() => showDesktopAppGuidance(hostDocument)}
-            description={t("view.fail.deskDescLimits")}
-          />
+          {extensionDiscovery ? (
+            ctx?.diagnosticReport ? (
+              <a
+                className="dz-guidance-item"
+                id="dz-card-report-bug"
+                href={diagnosticIssueUrl(ctx.diagnosticReport, error)}
+                target="_blank"
+                rel="noopener"
+              >
+                <div className="dz-guidance-item-header">
+                  <span className="dz-guidance-item-title">{t("view.fail.reportBug")}</span>
+                </div>
+                <span className="dz-guidance-item-desc">{t("view.fail.reportBugDesc")}</span>
+              </a>
+            ) : null
+          ) : (
+            <>
+              <ExtensionGuideButton onOpen={() => showExtensionGuidance(hostDocument)} />
+              <DesktopGuideButton
+                onOpen={() => showDesktopAppGuidance(hostDocument)}
+                description={t("view.fail.deskDescLimits")}
+              />
+            </>
+          )}
           <a
             className="dz-guidance-item"
-            href="./help/finding-the-image-address.html"
+            href={
+              extension
+                ? "https://dezoomify.ophir.dev/help/finding-the-image-address.html"
+                : "./help/finding-the-image-address.html"
+            }
             target="_blank"
             rel="noopener"
           >
@@ -752,6 +777,9 @@ function FailedView({
             <span className="dz-guidance-item-desc">{t("view.fail.helpDesc")}</span>
           </a>
         </div>
+        {extensionDiscovery && ctx?.diagnosticReport ? (
+          <p>{t("view.diagnostics.signedInNote")}</p>
+        ) : null}
       </div>
     </Notice>
   );

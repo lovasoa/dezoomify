@@ -151,6 +151,7 @@ export const fr = {
   "view.fail.helpDesc":
     "Comment trouver l’adresse de l’image sur les sites de musées et d’archives, et quoi essayer quand rien n’est trouvé.",
   "view.fail.reportBug": "Signaler un bogue sur GitHub",
+  "view.fail.reportBugDesc": "Préparez un ticket GitHub avec les diagnostics de cette tentative.",
   "view.fail.retry": "Réessayer",
   "view.fail.canvasAllocation":
     "Cette image est trop grande pour être assemblée dans cet onglet. L’application de bureau peut l’enregistrer en taille réelle.",
@@ -246,7 +247,9 @@ export const fr = {
   "desktop.tile.failed":
     "Impossible de récupérer un fragment depuis {host}. Vérifiez l’image source et réessayez.",
   "view.discovery.none":
-    "Aucune image zoomable trouvée à cette adresse. Essayez une page avec un visualiseur.",
+    "Aucune image zoomable trouvée à cette adresse. Essayez une page avec un visualiseur, ou essayez l’extension.",
+  "view.discovery.noneExtension":
+    "Aucune image zoomable trouvée sur cette page. Signalez un bogue avec les diagnostics, ou suivez le guide pour trouver l’adresse de l’image.",
   "desktop.plan.none":
     "Cette image n’a aucune taille utilisable à enregistrer depuis {host}. Essayez une autre image ou une Largeur max plus petite.",
   "desktop.transport.stalled":
