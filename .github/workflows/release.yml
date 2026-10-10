@@ -24,7 +24,7 @@ env:
 
 jobs:
   prepare:
-    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master' && github.event.workflow_run.head_repository.full_name == github.repository)
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.value }}
@@ -46,7 +46,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sha="$(git rev-parse HEAD)"
-          test -n "$(gh run list --workflow ci.yml --branch master --event push --commit "$sha" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          test -n "$(gh run list --workflow ci.yml --branch main --event push --commit "$sha" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
       - id: version
         run: echo "value=$(cargo xtask release version)" >> "$GITHUB_OUTPUT"
       - id: release_tag

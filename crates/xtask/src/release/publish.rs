@@ -52,10 +52,10 @@ fn release_publish(plan: &Plan, artifacts: &std::path::Path) -> Result<(), Strin
     {
         return Err("gh is not available or authenticated; cannot publish".to_string());
     }
-    let master = remote_master_commit()?;
-    if master != plan.commit {
+    let main = remote_main_commit()?;
+    if main != plan.commit {
         return Err(format!(
-            "plan pins {}, but origin/master is {master}; refusing to publish an outdated commit",
+            "plan pins {}, but origin/main is {main}; refusing to publish an outdated commit",
             plan.commit
         ));
     }
@@ -105,17 +105,17 @@ fn release_publish(plan: &Plan, artifacts: &std::path::Path) -> Result<(), Strin
     Ok(())
 }
 
-fn remote_master_commit() -> Result<String, String> {
+fn remote_main_commit() -> Result<String, String> {
     let out = Command::new("git")
-        .args(["ls-remote", "origin", "refs/heads/master"])
+        .args(["ls-remote", "origin", "refs/heads/main"])
         .current_dir(crate::repo_root())
         .output()
-        .map_err(|e| format!("failed to inspect origin/master: {e}"))?;
+        .map_err(|e| format!("failed to inspect origin/main: {e}"))?;
     let text = String::from_utf8(out.stdout).map_err(|e| format!("git output: {e}"))?;
     let commit = text
         .split_whitespace()
         .next()
-        .ok_or_else(|| "origin/master did not resolve".to_string())?;
+        .ok_or_else(|| "origin/main did not resolve".to_string())?;
     Ok(commit.to_string())
 }
 

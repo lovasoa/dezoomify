@@ -60,12 +60,12 @@ pub fn verify(a: &[String]) -> Result<(), String> {
         &["250 ?ms", "docs", "README.md"],
         "stale 250 ms window (canonical is the 1500 ms metadata window)",
     )?;
-    // Stale branch: `master` is the single branch (website-deploy.yml
+    // Stale branch: `main` is the single branch (website-deploy.yml
     // triggers on it); no contract doc still points pushes at `ng`.
     f(
         &r,
         &["to `ng`", "docs"],
-        "stale ng branch (canonical is master)",
+        "stale ng branch (canonical is main)",
     )?;
     // Native provides PNG, JPEG, TIFF, ZIF, WebP, and iiif-dir output.
     f(

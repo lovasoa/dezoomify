@@ -4,13 +4,13 @@ name: website-deploy
 # Vite+React app at /beta. It uploads dist/ to the existing Cloudflare Pages project
 # (dezoomify) with wrangler; the project's automatic git deployments are
 # disabled, so this workflow is the only publisher (see docs/development.md).
-# Pushes to master are production deployments; same-repository pull requests
+# Pushes to main are production deployments; same-repository pull requests
 # get stable PR-number preview aliases. Nothing generated is committed.
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
-    branches: [master]
+    branches: [main]
     types: [opened, synchronize, reopened]
   workflow_dispatch: {}
 env:
