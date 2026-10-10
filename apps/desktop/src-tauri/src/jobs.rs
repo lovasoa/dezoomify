@@ -75,6 +75,8 @@ impl Default for Registration {
 #[derive(Default)]
 pub struct JobTable {
     jobs: HashMap<String, Arc<Registration>>,
+    retiring: Vec<Arc<Registration>>,
+    updating: bool,
 }
 
 impl JobTable {
@@ -82,6 +84,13 @@ impl JobTable {
         Self::default()
     }
     pub fn insert(&mut self, id: &str) -> Result<Arc<Registration>, Error> {
+        self.retiring
+            .retain(|job| !job.completed.load(Ordering::SeqCst));
+        if self.updating {
+            return Err(Error::InvalidState(
+                "an application update is in progress".into(),
+            ));
+        }
         if !crate::commands::is_valid_job_id(id) {
             return Err(Error::InvalidInput(
                 "job id must look like job:<suffix>".to_string().into(),
@@ -97,6 +106,27 @@ impl JobTable {
     pub fn get(&self, id: &str) -> Result<Arc<Registration>, Error> {
         self.jobs.get(id).cloned().ok_or_else(|| unknown_job(id))
     }
+    /// Reserve installation only after all native jobs have settled.
+    pub fn begin_update(&mut self) -> Result<(), Error> {
+        self.retiring
+            .retain(|job| !job.completed.load(Ordering::SeqCst));
+        if self.updating
+            || !self.retiring.is_empty()
+            || self
+                .jobs
+                .values()
+                .any(|job| !job.completed.load(Ordering::SeqCst))
+        {
+            return Err(Error::InvalidState(
+                "finish or cancel the current save before updating".into(),
+            ));
+        }
+        self.updating = true;
+        Ok(())
+    }
+    pub fn end_update(&mut self) {
+        self.updating = false;
+    }
     pub fn live(&self, id: &str) -> Result<Arc<Registration>, Error> {
         let entry = self.get(id)?;
         if entry.completed.load(Ordering::SeqCst) {
@@ -107,6 +137,9 @@ impl JobTable {
     pub fn release_job(&mut self, id: &str) {
         if let Some(entry) = self.jobs.remove(id) {
             entry.controls.cancel();
+            if !entry.completed.load(Ordering::SeqCst) {
+                self.retiring.push(entry);
+            }
         }
     }
     pub fn diagnostic_report(&self, id: &str) -> Option<DiagnosticReport> {
@@ -137,6 +170,21 @@ pub fn unknown_job(id: &str) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn updates_wait_for_cancelled_jobs_to_settle_and_exclude_new_jobs() {
+        let mut table = JobTable::new();
+        let job = table.insert("job:save").unwrap();
+        assert!(table.begin_update().is_err());
+        table.release_job("job:save");
+        assert!(job.controls.is_cancelled());
+        assert!(table.begin_update().is_err());
+        job.finish(None);
+        table.begin_update().unwrap();
+        assert!(table.insert("job:new").is_err());
+        assert!(table.begin_update().is_err());
+        table.end_update();
+        assert!(table.insert("job:new").is_ok());
+    }
     #[test]
     fn retirement_cancels_work_and_revokes_output_access() {
         let mut table = JobTable::new();
