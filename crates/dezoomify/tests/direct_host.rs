@@ -5,6 +5,44 @@ use std::num::NonZeroU64;
 use support::MemoryHost;
 const DZI: &str =
     r#"<Image TileSize="256" Overlap="0" Format="jpg"><Size Width="512" Height="512"/></Image>"#;
+
+#[test]
+fn supplied_viewer_metadata_preserves_all_images_without_fetching() {
+    use dezoomify::core::{
+        default_registry,
+        discovery::{DiscoveryInput, DiscoveryLimits},
+    };
+    let larger = DZI.replace("512", "1024");
+    let catalog = futures::executor::block_on(default_registry().discover(
+        vec![
+            DiscoveryInput::with_contents("https://page.test", DZI),
+            DiscoveryInput::with_contents("https://page.test#openseadragon-0", DZI)
+                .with_kind(DiscoveryInputKind::ObservedMetadata),
+            DiscoveryInput::with_contents("https://page.test#openseadragon-1", larger)
+                .with_kind(DiscoveryInputKind::ObservedMetadata),
+        ],
+        DiscoveryLimits::default(),
+        |_, _| async { panic!("loaded metadata must not fetch") },
+        support::parse_html,
+    ))
+    .unwrap();
+    assert_eq!(catalog.len(), 2);
+}
+
+#[test]
+fn unreadable_viewer_metadata_falls_back_without_following_links() {
+    let host = MemoryHost::default();
+    let loaded = JobInput {
+        url: "https://page.test#openseadragon".into(),
+        contents: Some(r#"<a href="https://must-not-fetch.test/info.json">image</a>"#.into()),
+        kind: Some(DiscoveryInputKind::ObservedMetadata),
+    };
+    let result =
+        futures::executor::block_on(dezoomify(vec![input().remove(0), loaded], options(), &host))
+            .unwrap();
+    assert_eq!(result.canvas.unwrap().width, 512);
+    assert!(host.fetched.borrow().is_empty());
+}
 fn input() -> Vec<JobInput> {
     vec![JobInput {
         url: "https://images.test/image.dzi".into(),

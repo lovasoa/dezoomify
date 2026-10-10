@@ -123,6 +123,7 @@ const app = createBrowserApplication({
             document_url: scan.documentUrl,
             candidates: scan.inputs.length,
             overflow: scan.overflow,
+            memory: scan.memory,
           },
         });
         for (const [index, input] of scan.inputs.entries())
@@ -225,13 +226,15 @@ api.runtime.onMessage.addListener((message: unknown) => {
     return (async () => {
       const scan = await bound.scan();
       const expected =
-        value.scenario === "cookie-session"
-          ? "/protected/artwork.dzi"
-          : value.scenario === "retry"
-            ? "/fixtures/failures/retry-approval/retry.dzi"
-            : typeof value.scenario === "string" && value.scenario.startsWith("fixtures/")
-              ? `/${value.scenario}/`
-              : "/extension-inputs/";
+        typeof value.scenario === "string" && value.scenario.startsWith("memory-openseadragon-")
+          ? "/memory-openseadragon.html"
+          : value.scenario === "cookie-session"
+            ? "/protected/artwork.dzi"
+            : value.scenario === "retry"
+              ? "/fixtures/failures/retry-approval/retry.dzi"
+              : typeof value.scenario === "string" && value.scenario.startsWith("fixtures/")
+                ? `/${value.scenario}/`
+                : "/extension-inputs/";
       const input = scan.inputs.find((candidate) => candidate.url.includes(expected));
       if (!input) throw new Error(`direct scan did not find ${expected}`);
       const url =

@@ -7,15 +7,20 @@ import {
   validateRequestHeaders,
 } from "@dezoomify/browser-runtime";
 import type { Error as JobError, ResourceRequest } from "@dezoomify/wasm-bindings";
-import type { WxtBrowser } from "wxt/browser";
+import type { PublicPath, WxtBrowser } from "wxt/browser";
 import { transportError } from "../runtime/fetch.ts";
 import { cancelSourceFetch, collectCandidates, fetchSource } from "./source-operations.ts";
 
 type SourceApi = Pick<WxtBrowser, "tabs" | "scripting">;
-type CandidateSnapshot = Awaited<ReturnType<typeof collectCandidates>>;
+type CandidateSnapshot = Awaited<ReturnType<typeof collectCandidates>> & {
+  memory?: Record<string, number | boolean | string | string[]>;
+};
 type CandidateInput = CandidateSnapshot["inputs"][number];
 type SourceRequest = Parameters<typeof fetchSource>[0];
 type FetchResult = Awaited<ReturnType<typeof fetchSource>>;
+type SourceScript<Args extends unknown[], Result> =
+  | { func: (...args: Args) => Result; args: Args; world?: "ISOLATED" | "MAIN" }
+  | { files: Extract<PublicPath, `${string}.js`>[]; world: "MAIN" };
 
 const MAX_URL_LENGTH = 2048;
 const MAX_CANDIDATES = 100;
@@ -44,7 +49,8 @@ function validCandidate(value: unknown): value is CandidateInput {
     value.kind !== undefined &&
     value.kind !== "source" &&
     value.kind !== "observed-document" &&
-    value.kind !== "observed-resource"
+    value.kind !== "observed-resource" &&
+    value.kind !== "observed-metadata"
   )
     return false;
   if (value.url.length > MAX_URL_LENGTH || !isPublicHttpUrl(value.url)) return false;
@@ -137,8 +143,7 @@ export function createSourceAccess(
   }
 
   async function injectUnchecked<Args extends unknown[], Result>(
-    func: (...args: Args) => Result,
-    args: Args,
+    script: SourceScript<Args, Result>,
     signal: AbortSignal,
     onLaunch?: () => void,
   ): Promise<Awaited<Result>> {
@@ -159,8 +164,7 @@ export function createSourceAccess(
     const results = await browserApi.scripting
       .executeScript<Args, Result>({
         target: { tabId, frameIds: [0] },
-        func,
-        args,
+        ...script,
       })
       .catch((cause: unknown) => {
         assertLive();
@@ -190,9 +194,8 @@ export function createSourceAccess(
   }
 
   /** Bound the whole browser operation, including a lost executeScript reply. */
-  async function inject<Args extends unknown[], Result>(
-    func: (...args: Args) => Result,
-    args: Args,
+  async function inject<Args extends unknown[] = [], Result = unknown>(
+    script: SourceScript<Args, Result>,
     signal?: AbortSignal,
     onAbort?: () => Promise<void>,
     deadlineAt = Date.now() + timeoutMs,
@@ -204,6 +207,7 @@ export function createSourceAccess(
       transport: "browser-session",
       detail: "the source operation timed out",
     };
+    if (Date.now() >= deadlineAt) throw timeout;
     let reachDeadline = () => {};
     const deadlineReached = new Promise<void>((resolve) => {
       reachDeadline = resolve;
@@ -245,7 +249,7 @@ export function createSourceAccess(
         abort();
         return await aborted;
       }
-      const operation = injectUnchecked(func, args, combined, () => {
+      const operation = injectUnchecked(script, combined, () => {
         launched = true;
       });
       operationDone = operation.then(
@@ -263,11 +267,91 @@ export function createSourceAccess(
   }
 
   async function scan(signal?: AbortSignal): Promise<CandidateSnapshot> {
-    const snapshot = await inject(collectCandidates, [], signal);
+    const scanDeadline = Date.now() + timeoutMs;
+    let observed: CandidateInput[] = [];
+    let memory: CandidateSnapshot["memory"];
+    try {
+      const deadlineAt = Math.min(scanDeadline, Date.now() + 1500);
+      const reply = await inject(
+        { files: ["/openseadragon-scanner.js"], world: "MAIN" },
+        signal,
+        undefined,
+        deadlineAt,
+      );
+      if (isRecord(reply) && Array.isArray(reply.inputs) && reply.inputs.length <= 100) {
+        let bytes = 0;
+        const inputs: CandidateInput[] = [];
+        for (const input of reply.inputs) {
+          if (
+            !validCandidate(input) ||
+            input.kind !== "observed-metadata" ||
+            typeof input.contents !== "string"
+          )
+            continue;
+          const candidate: CandidateInput = {
+            url: input.url,
+            kind: "observed-metadata",
+            contents: input.contents,
+          };
+          bytes += new TextEncoder().encode(JSON.stringify(candidate)).byteLength;
+          if (bytes <= 1024 * 1024) inputs.push(candidate);
+        }
+        observed = inputs;
+        if (isRecord(reply.diagnostics)) {
+          memory = {};
+          for (const key of [
+            "documents",
+            "nodes",
+            "references",
+            "viewers",
+            "probes",
+            "rejected",
+            "bytes",
+            "truncated",
+            "elapsedMs",
+            "versions",
+            "stopped",
+            "frames",
+          ] as const) {
+            const value = reply.diagnostics[key];
+            if (
+              (typeof value === "number" && Number.isFinite(value) && value >= 0) ||
+              typeof value === "boolean" ||
+              (typeof value === "string" && value.length <= 1024) ||
+              (Array.isArray(value) &&
+                value.length <= 16 &&
+                value.every((v) => typeof v === "string" && v.length <= 2048))
+            )
+              memory[key] = value;
+          }
+        }
+      }
+    } catch (error) {
+      // A memory scan is optional evidence; source loss/cancellation still
+      // fails the following normal scan through the same lifetime guard.
+      assertLive();
+      signal?.throwIfAborted();
+      memory = {
+        unavailable: true,
+        detail: String(
+          isRecord(error) ? (error.detail ?? error.kind ?? "memory scan failed") : error,
+        ).slice(0, 2048),
+      };
+    }
+    const snapshot = await inject(
+      { func: collectCandidates, args: [] },
+      signal,
+      undefined,
+      scanDeadline,
+    );
     if (!validSnapshot(snapshot, documentUrl))
       throw transportError("bad-url", "invalid source scan result");
     assertLive();
-    return snapshot;
+    return {
+      ...snapshot,
+      inputs: [...snapshot.inputs, ...observed],
+      ...(memory ? { memory } : {}),
+    };
   }
 
   async function fetch(request: Pick<ResourceRequest, "uri" | "headers">, signal: AbortSignal) {
@@ -301,7 +385,12 @@ export function createSourceAccess(
         })
         .then(() => undefined);
     };
-    const result = await inject(fetchSource, [sourceRequest], signal, cancel, deadlineAt);
+    const result = await inject(
+      { func: fetchSource, args: [sourceRequest] },
+      signal,
+      cancel,
+      deadlineAt,
+    );
     if (signal.aborted) throw transportError("cancelled", "source fetch cancelled");
     assertLive();
     if (!validFetchResult(result, documentUrl))

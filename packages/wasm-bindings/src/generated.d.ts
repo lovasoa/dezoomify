@@ -263,7 +263,7 @@ export interface Failure {
  * The source of discovery evidence. Products report facts; core discovery
  * decides when a supplied document or observed resource is relevant.
  */
-export type DiscoveryInputKind = "source" | "observed-document" | "observed-resource";
+export type DiscoveryInputKind = "source" | "observed-document" | "observed-resource" | "observed-metadata";
 
 /**
  * Unit progress for the active phase (totals stay unknown until the plan

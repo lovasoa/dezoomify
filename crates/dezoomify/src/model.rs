@@ -314,6 +314,8 @@ pub enum DiscoveryInputKind {
     Source,
     ObservedDocument,
     ObservedResource,
+    /// Complete metadata reconstructed from a loaded viewer; never fetched.
+    ObservedMetadata,
 }
 
 /// One discovery input. An omitted kind is a user-supplied source for

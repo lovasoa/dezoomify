@@ -1032,6 +1032,7 @@ where
         interactive: bool,
         priority: &Cell<Priority>,
         base: Priority,
+        metadata_only: bool,
     ) -> Result<Option<(usize, DiscoveryCatalog)>, DiscoveryError> {
         let mut history = Vec::new();
         let mut parsed = ParsedResource::Follow(Request::new(uri));
@@ -1048,8 +1049,11 @@ where
                         .map(|catalog| Some((history.len(), catalog)));
                 }
             };
+            if metadata_only && !self.supplied.contains_key(&request) {
+                return Ok(None);
+            }
             priority.set((
-                base.0.min(if history.is_empty() { base.0 } else { 2 }),
+                base.0.min(if history.is_empty() { base.0 } else { 3 }),
                 base.1 + history.len() + 1,
                 base.2,
                 base.3,
@@ -1147,16 +1151,17 @@ where
         .enumerate()
         .map(|(order, input)| {
             let evidence = match input.kind {
-                DiscoveryInputKind::Source => 0,
-                DiscoveryInputKind::ObservedDocument if input.contents.is_some() => 1,
+                DiscoveryInputKind::ObservedMetadata if input.contents.is_some() => 0,
+                DiscoveryInputKind::Source => 1,
+                DiscoveryInputKind::ObservedDocument if input.contents.is_some() => 2,
                 _ => match specs
                     .iter()
                     .filter_map(|spec| spec.url_kind(&input.url))
                     .min()
                 {
-                    Some(RouteKind::Metadata | RouteKind::Image) => 2,
-                    Some(RouteKind::Viewer) => 3,
-                    None => 4,
+                    Some(RouteKind::Metadata | RouteKind::Image) => 3,
+                    Some(RouteKind::Viewer) => 4,
+                    None => 5,
                 },
             };
             (evidence, 0usize, order, input)
@@ -1219,28 +1224,31 @@ where
             .take_while(|(evidence, depth, _, _)| Some((*evidence, *depth)) == tier)
             .count();
         for (evidence, depth, order, input) in roots.drain(..ready) {
+            let metadata_only = input.kind == DiscoveryInputKind::ObservedMetadata;
             let mut formats = specs.to_vec();
             formats.sort_by_key(|spec| {
                 let kind = spec.url_kind(&input.url);
                 (kind.is_none(), kind)
             });
-            candidates.extend(
-                formats
-                    .into_iter()
-                    .enumerate()
-                    .map(|(rank, spec)| ((evidence, depth, order, rank), spec, input.url.clone())),
-            );
+            candidates.extend(formats.into_iter().enumerate().map(|(rank, spec)| {
+                (
+                    (evidence, depth, order, rank),
+                    spec,
+                    input.url.clone(),
+                    metadata_only,
+                )
+            }));
         }
         let priorities: Vec<_> = candidates
             .iter()
-            .map(|(rank, spec, uri)| {
+            .map(|(rank, spec, uri, _)| {
                 let direct = spec.url_kind(uri) == Some(RouteKind::Image);
                 Cell::new((rank.0, rank.1 + usize::from(!direct), rank.2, rank.3))
             })
             .collect();
         let mut finished = vec![false; candidates.len()];
         let mut results = stream::iter(candidates.iter().enumerate().map(
-            |(index, (rank, spec, uri))| {
+            |(index, (rank, spec, uri, metadata_only))| {
                 let priority = &priorities[index];
                 let resources = &resources;
                 async move {
@@ -1249,13 +1257,16 @@ where
                         *rank,
                         *spec,
                         uri.clone(),
-                        resources.resolve(*spec, uri, false, priority, *rank).await,
+                        resources
+                            .resolve(*spec, uri, false, priority, *rank, *metadata_only)
+                            .await,
                     )
                 }
             },
         ))
         .buffer_unordered(limits.concurrent.max(1));
         let mut winner: Option<(Priority, DiscoveryCatalog)> = None;
+        let mut metadata = Vec::new();
         loop {
             let next = futures_util::future::poll_fn(|cx| {
                 use futures_util::Stream;
@@ -1287,12 +1298,14 @@ where
             match result {
                 Ok(Some((distance, catalog))) => {
                     let rank = (
-                        rank.0.min(if distance > 1 { 2 } else { rank.0 }),
+                        rank.0.min(if distance > 1 { 3 } else { rank.0 }),
                         rank.1 + distance,
                         rank.2,
                         rank.3,
                     );
-                    if winner.as_ref().is_none_or(|(best, _)| rank < *best) {
+                    if rank.0 == 0 {
+                        metadata.push((rank, catalog));
+                    } else if winner.as_ref().is_none_or(|(best, _)| rank < *best) {
                         winner = Some((rank, catalog));
                     }
                 }
@@ -1301,6 +1314,14 @@ where
             }
         }
         drop(results);
+        if !metadata.is_empty() {
+            // All loaded images matter, rather than only the first viewer.
+            metadata.sort_by_key(|(rank, _)| *rank);
+            metadata.dedup_by_key(|(rank, _)| rank.2);
+            return Ok(DiscoveryCatalog::new(
+                metadata.into_iter().flat_map(|(_, c)| c.into_entries()),
+            ));
+        }
         if let Some((_, catalog)) = winner {
             return Ok(catalog);
         }
@@ -1329,7 +1350,7 @@ where
                 };
                 if supported && visited.insert(uri.clone()) && roots.len() < limits.resources {
                     let depth = resources.depths.borrow().get(request).copied().unwrap_or(0) + 1;
-                    roots.push((3, depth, branch, DiscoveryInput::new(uri)));
+                    roots.push((4, depth, branch, DiscoveryInput::new(uri)));
                     branch += 1;
                 }
             }
@@ -1341,7 +1362,7 @@ where
     blocked.sort_by_key(|(rank, _, _)| *rank);
     for (rank, spec, uri) in blocked {
         match resources
-            .resolve(spec, &uri, true, &Cell::new(rank), rank)
+            .resolve(spec, &uri, true, &Cell::new(rank), rank, rank.0 == 0)
             .await
         {
             Ok(Some((_, catalog))) => return Ok(catalog),
