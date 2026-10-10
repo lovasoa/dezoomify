@@ -413,6 +413,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       callbacks,
       {
         ...(a ? { ...a.view, diagnosticReport: report } : { initialUrl }),
+        product: options.product,
         history: history.entries(),
         historyNow: Date.now(),
       },

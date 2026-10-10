@@ -150,6 +150,8 @@ export const it = {
   "view.fail.helpDesc":
     "Come trovare l’indirizzo dell’immagine nei siti di musei e archivi, e cosa provare quando non si trova nulla.",
   "view.fail.reportBug": "Segnala un problema su GitHub",
+  "view.fail.reportBugDesc":
+    "Prepara una segnalazione su GitHub con la diagnostica di questo tentativo.",
   "view.fail.retry": "Riprova",
   "view.fail.canvasAllocation":
     "Questa immagine è troppo grande per essere assemblata in questa scheda del browser. L’applicazione desktop può salvarla a dimensione piena.",
@@ -244,6 +246,8 @@ export const it = {
     "Impossibile recuperare un frammento da {host}. Controlla l’immagine originale e riprova.",
   "view.discovery.none":
     "Nessuna immagine zoomabile trovata a questo indirizzo. Prova una pagina con un visualizzatore o l’estensione del browser.",
+  "view.discovery.noneExtension":
+    "Nessuna immagine zoomabile trovata su questa pagina. Segnala un problema con la diagnostica o segui la guida per trovare l’indirizzo dell’immagine.",
   "desktop.plan.none":
     "Questa immagine non ha dimensioni utili da salvare da {host}. Prova un’altra immagine o una Larghezza max minore.",
   "desktop.transport.stalled":

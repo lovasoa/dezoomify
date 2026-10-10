@@ -318,6 +318,56 @@ test("failed state updates error details in place without destroying error conta
   );
 });
 
+test("website discovery failure keeps the extension suggestion and opens its guidance modal", () => {
+  setLocale("en");
+  const el = container();
+  render(el, failurePresentation({ kind: "no-image-found" }), callbacks, { product: "website" });
+  assert.match(el.querySelector("#dz-error-message").textContent, /try the browser extension/);
+  click(el.querySelector("#dz-card-extension"));
+  const modal = document.querySelector(".dz-modal-backdrop");
+  assert.ok(modal);
+  assert.match(modal.textContent, /Chrome Web Store/);
+  click(modal.querySelector(".dz-modal-close"));
+});
+
+test("extension discovery failure offers a diagnostic issue draft and the hosted URL guide", () => {
+  const el = container();
+  const input = "https://museum.example/viewer?item=123";
+  const error = { kind: "no-image-found", detail: "no image references were found on this page" };
+  const d = createDiagnosticRecorder({
+    id: "extension-failure",
+    now: () => 0,
+    context: { product: "extension", input },
+  });
+  d.record("debug", "scan-complete", { candidates: 0 });
+  d.finish("failed", error);
+  for (const locale of ["en", "fr", "de", "it"]) {
+    setLocale(locale);
+    render(el, failurePresentation(error), callbacks, {
+      product: "extension",
+      diagnosticReport: d.report(),
+    });
+    assert.equal(
+      el.querySelector("#dz-error-message").textContent,
+      t("view.discovery.noneExtension"),
+    );
+    const guidance = el.querySelector(".dz-guidance-grid");
+    assert.equal(guidance.children.length, 2);
+    assert.equal(el.querySelector("#dz-card-extension"), null);
+    assert.equal(el.querySelector("#dz-card-desktop"), null);
+    const draft = new URL(guidance.querySelector("#dz-card-report-bug").getAttribute("href"));
+    assert.equal(draft.origin + draft.pathname, "https://github.com/lovasoa/dezoomify/issues/new");
+    assert.match(draft.searchParams.get("body"), /scan-complete/);
+    assert.ok(draft.searchParams.get("body").includes(input));
+    assert.ok(draft.searchParams.get("body").includes(t("view.discovery.noneExtension")));
+    assert.equal(
+      guidance.querySelectorAll("a")[1].getAttribute("href"),
+      "https://dezoomify.ophir.dev/help/finding-the-image-address.html",
+    );
+  }
+  setLocale("en");
+});
+
 test("error layering: plain message prominent, parser diagnostics only in technical details", () => {
   const el = container();
   const details =

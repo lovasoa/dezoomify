@@ -151,6 +151,8 @@ export const de = {
   "view.fail.helpDesc":
     "So finden Sie die Bildadresse auf Museums- und Archivseiten, und was Sie versuchen können, wenn nichts gefunden wird.",
   "view.fail.reportBug": "Fehler auf GitHub melden",
+  "view.fail.reportBugDesc":
+    "Erstellen Sie einen GitHub-Bericht mit den Diagnosedaten dieses Versuchs.",
   "view.fail.retry": "Erneut versuchen",
   "view.fail.canvasAllocation":
     "Dieses Bild ist zu groß für diesen Browser-Tab. Die Desktop-App kann es in voller Größe speichern.",
@@ -249,6 +251,8 @@ export const de = {
     "Eine Kachel von {host} konnte nicht geladen werden. Prüfen Sie das Quellbild und versuchen Sie es erneut.",
   "view.discovery.none":
     "Unter dieser Adresse wurde kein zoombares Bild gefunden. Versuchen Sie eine Seite mit Betrachter oder die Browsererweiterung.",
+  "view.discovery.noneExtension":
+    "Auf dieser Seite wurde kein zoombares Bild gefunden. Melden Sie einen Fehler mit den Diagnosedaten oder folgen Sie der Anleitung, um die Bildadresse zu finden.",
   "desktop.plan.none":
     "Dieses Bild hat von {host} aus keine speicherbare Größe. Versuchen Sie ein anderes Bild oder eine kleinere Max. Breite.",
   "desktop.transport.stalled":

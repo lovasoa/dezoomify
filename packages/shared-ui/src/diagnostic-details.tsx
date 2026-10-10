@@ -19,12 +19,13 @@ export function diagnosticIssueUrl(report: DiagnosticReport, error?: JobError): 
   } catch {
     /* Invalid input still deserves a report. */
   }
-  const product = ["website", "extension", "desktop"].includes(String(report.context.product))
-    ? String(report.context.product)
-    : "website";
+  const product =
+    report.context.product === "extension" || report.context.product === "desktop"
+      ? report.context.product
+      : "website";
   const facts = error ? diagnosticFields(error) : (report.outcome?.fields ?? {});
   const message = error
-    ? plainMessageFor(error, host)
+    ? plainMessageFor(error, host, product)
     : String(
         facts.message ??
           facts["error.message"] ??
