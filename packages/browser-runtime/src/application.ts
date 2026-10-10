@@ -263,7 +263,6 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         onProgress: (progress) => {
           if (current === a && !a.controller.signal.aborted) {
             a.progress = progress;
-            a.view.desktopSourceUrl = progress.source_url;
             history.progress(a.historyEntry, progress);
             a.activity.touchProgress();
             a.activity.scheduleUpdate();
@@ -413,6 +412,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       callbacks,
       {
         ...(a ? { ...a.view, diagnosticReport: report } : { initialUrl }),
+        desktopSourceUrl: a?.progress?.source_url ?? a?.url,
         product: options.product,
         history: history.entries(),
         historyNow: Date.now(),

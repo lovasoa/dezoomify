@@ -235,7 +235,7 @@ impl CatalogPlan {
 #[doc(hidden)]
 pub struct ResolvedImage {
     pub title: Option<String>,
-    /// Discovery input which can resolve this catalog again without browser observations.
+    /// Format-designated entry point which can resolve this image's catalog independently.
     pub source_url: Option<String>,
     /// Static registry name of the format which produced this descriptor.
     pub format: &'static str,

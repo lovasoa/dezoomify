@@ -4,6 +4,14 @@ Implement a pure parser and tile plan in `crates/dezoomify`, then register its
 stable id in `core/registry.rs`. Parsing uses supplied bytes and injected Host
 capabilities, per [Architecture](architecture.md).
 
+Routes can designate a reusable entry point with `canonical_source()` for the
+matched resource or `canonical_target()` for a forwarded resource. Opt in only
+when opening that URL alone can reconstruct the image or catalog. A later
+resource may require earlier page context, so a successful fetch is insufficient.
+Discovery preserves redirects and reports the selected image's designated URL;
+browser handoff falls back to the entered URL when no route designates one.
+See [`DiscoveryRoute`](../crates/dezoomify/src/core/discovery.rs) for the contract.
+
 Add a folder under [`fixtures/<format>/<variant>/`](../fixtures/README.md):
 a `viewer.html`, minimal metadata, and links to shared tile images. Add `input.txt`
 only to override the viewer entry point with a relative input URL. Static responses

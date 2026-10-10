@@ -79,12 +79,22 @@ pub enum ParsedResource {
     Image(ImagePlan),
     Catalog(CatalogPlan),
     Complete(DiscoveryCatalog),
+    /// A format route explicitly designated this entry point as reusable.
+    #[doc(hidden)]
+    CanonicalSource {
+        uri: String,
+        parsed: Box<Self>,
+    },
 }
 impl ParsedResource {
     /// Attach a decoder to an unresolved reference; preserve other results.
     pub fn decode_with(self, decoder: Decoder) -> Self {
         match self {
             Self::Follow(request) => Self::FollowWith(request, decoder),
+            Self::CanonicalSource { uri, parsed } => Self::CanonicalSource {
+                uri,
+                parsed: Box::new(parsed.decode_with(decoder)),
+            },
             parsed => parsed,
         }
     }
@@ -94,6 +104,9 @@ impl ParsedResource {
             Self::Image(plan) => plan.compile(format),
             Self::Catalog(plan) => plan.compile(format),
             Self::Complete(catalog) => Ok(catalog),
+            Self::CanonicalSource { uri, parsed } => parsed
+                .compile(format)
+                .map(|catalog| catalog.with_source_url(&uri)),
             Self::Follow(_) | Self::FollowWith(..) => Err(DiscoveryError::InvalidMetadata(
                 "a metadata reference has no image plan".into(),
             )),
@@ -417,6 +430,7 @@ impl RoutePattern {
             handler,
             kind: self.kind,
             followed_decoder: None,
+            canonical: None,
         }
     }
 }
@@ -427,6 +441,13 @@ pub struct DiscoveryRoute {
     handler: RouteAction,
     kind: RouteKind,
     followed_decoder: Option<Decoder>,
+    canonical: Option<CanonicalSource>,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum CanonicalSource {
+    Current,
+    Target,
 }
 
 impl DiscoveryRoute {
@@ -437,6 +458,7 @@ impl DiscoveryRoute {
             kind: RouteKind::Viewer,
             handler: RouteAction::RegexLink(regex, template, None),
             followed_decoder: None,
+            canonical: None,
         }
     }
 
@@ -447,9 +469,42 @@ impl DiscoveryRoute {
         self
     }
 
-    fn followed(self, parsed: ParsedResource) -> ParsedResource {
-        match self.followed_decoder {
+    /// The matched resource can independently resolve this image or catalog.
+    /// Use for self-contained metadata, or a page needed by later decoders.
+    #[must_use]
+    pub const fn canonical_source(mut self) -> Self {
+        self.canonical = Some(CanonicalSource::Current);
+        self
+    }
+
+    /// The forwarded target can independently resolve this image or catalog.
+    /// Do not mark targets which require context from an earlier resource.
+    #[must_use]
+    pub const fn canonical_target(mut self) -> Self {
+        self.canonical = Some(CanonicalSource::Target);
+        self
+    }
+
+    fn followed(self, parsed: ParsedResource, current_uri: &str) -> ParsedResource {
+        let parsed = match self.followed_decoder {
             Some(decoder) => parsed.decode_with(decoder),
+            None => parsed,
+        };
+        let uri = match self.canonical {
+            Some(CanonicalSource::Current) => Some(current_uri.to_owned()),
+            Some(CanonicalSource::Target) => match &parsed {
+                ParsedResource::Follow(request) | ParsedResource::FollowWith(request, _) => {
+                    Some(request.uri.clone())
+                }
+                _ => None,
+            },
+            None => None,
+        };
+        match uri {
+            Some(uri) => ParsedResource::CanonicalSource {
+                uri,
+                parsed: Box::new(parsed),
+            },
             None => parsed,
         }
     }
@@ -540,7 +595,7 @@ fn parse_resource(
             }
             RouteAction::MapUrl(_) | RouteAction::Plan(_) => continue,
         }
-        .map(|parsed| route.followed(parsed));
+        .map(|parsed| route.followed(parsed, resource.final_uri()));
     }
     Err(DiscoveryError::rejected(
         RejectionKind::DidNotMatchContent,
@@ -620,11 +675,13 @@ impl FormatSpec {
             }
             match route.handler {
                 RouteAction::MapUrl(mapper) => {
-                    return mapper(&request.uri)
-                        .map(|request| route.followed(ParsedResource::Follow(request)));
+                    return mapper(&request.uri).map(|target| {
+                        route.followed(ParsedResource::Follow(target), &request.uri)
+                    });
                 }
                 RouteAction::Plan(decode) => {
-                    return decode(&request.uri).map(ParsedResource::Image);
+                    return decode(&request.uri)
+                        .map(|image| route.followed(ParsedResource::Image(image), &request.uri));
                 }
                 _ => {}
             }
@@ -1036,17 +1093,30 @@ where
     ) -> Result<Option<(usize, DiscoveryCatalog)>, DiscoveryError> {
         let mut history = Vec::new();
         let mut parsed = ParsedResource::Follow(Request::new(uri));
+        let mut canonical_uri = None;
         loop {
+            while let ParsedResource::CanonicalSource { uri, parsed: inner } = parsed {
+                canonical_uri = Some(uri);
+                parsed = *inner;
+            }
             if let ParsedResource::Follow(request) = parsed {
                 parsed = spec.follow(request)?;
+            }
+            while let ParsedResource::CanonicalSource { uri, parsed: inner } = parsed {
+                canonical_uri = Some(uri);
+                parsed = *inner;
             }
             let (request, decoder) = match parsed {
                 ParsedResource::Follow(request) => (request, None),
                 ParsedResource::FollowWith(request, decoder) => (request, Some(decoder)),
                 parsed => {
-                    return parsed
-                        .compile(spec.name)
-                        .map(|catalog| Some((history.len(), catalog.with_source_url(uri))));
+                    return parsed.compile(spec.name).map(|catalog| {
+                        let catalog = match canonical_uri {
+                            Some(uri) => catalog.with_source_url(&uri),
+                            None => catalog,
+                        };
+                        Some((history.len(), catalog))
+                    });
                 }
             };
             if metadata_only && !self.supplied.contains_key(&request) {
@@ -1110,6 +1180,9 @@ where
                 context,
                 ..record.resource().expect("read response")
             };
+            if canonical_uri.as_deref() == Some(request.uri.as_str()) {
+                canonical_uri = Some(resource.final_uri().to_owned());
+            }
             parsed = match decoder {
                 Some(decode) => decode(resource),
                 None => parse_resource(spec.routes, resource),

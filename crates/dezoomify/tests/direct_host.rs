@@ -721,6 +721,9 @@ fn host_selection_follows_catalog_entries_and_rejects_cycles() {
         CatalogEntry::ImageRequest(_)
     ));
     assert!(matches!(catalogs[1].entries[0], CatalogEntry::Image(_)));
+    assert!(host.progress.borrow().iter().filter(|progress| progress.selected.is_some()).all(
+        |progress| progress.source_url.as_deref() == Some("https://images.test/image.dzi")
+    ));
     assert_eq!(
         host.fetched
             .borrow()

@@ -273,7 +273,7 @@ export interface Progress {
     phase: ProgressPhase;
     source_format: string | undefined;
     /**
-     * Discovery URL for the selected image's catalog, independent of browser observations.
+     * Format-designated reusable URL for the selected image's catalog, if known.
      */
     source_url?: string;
     title: string | undefined;

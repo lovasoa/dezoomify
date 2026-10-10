@@ -353,6 +353,40 @@ fn desktop_source_is_the_winning_observed_resource_and_can_be_rediscovered() {
     let replayed = trace(vec![DiscoveryInput::new(uri)], &replies);
     assert_eq!(catalog.public_catalog(), replayed.public_catalog());
 }
+
+#[test]
+fn national_gallery_handoff_uses_the_detected_iiif_metadata() {
+    const PAGE: &str =
+        "https://www.nationalgallery.org.uk/paintings/hans-holbein-the-younger-the-ambassadors";
+    const INFO: &str = "https://www.nationalgallery.org.uk/server.iip?IIIF=/fronts/N-1314-00-000267-XL-PYR.tif/info.json";
+    let page = br#"<img src="/server.iip?IIIF=/fronts/N-1314-00-000267-XL-PYR.tif/full/!80,50/0/default.jpg">"#;
+    let info = br#"{"@context":"http://iiif.io/api/image/3/context.json","id":"https://www.nationalgallery.org.uk/server.iip?IIIF=/fronts/N-1314-00-000267-XL-PYR.tif","type":"ImageService3","width":512,"height":512,"tiles":[{"width":256,"scaleFactors":[1,2]}]}"#;
+    let catalog = trace(
+        vec![DiscoveryInput::with_contents(PAGE, page)],
+        &[(INFO, info)],
+    );
+    let [DiscoveredEntry::Ready(image)] = catalog.entries() else {
+        panic!("one ready image expected")
+    };
+    assert_eq!(image.source_url.as_deref(), Some(INFO));
+    let replayed = trace(vec![DiscoveryInput::new(INFO)], &[(INFO, info)]);
+    assert_eq!(catalog.public_catalog(), replayed.public_catalog());
+}
+
+#[test]
+fn canonical_target_retains_redirects_and_exact_query_parameters() {
+    let requested = "https://image.test/book/info.json?download=exact%2Bvalue";
+    let redirected = "https://cdn.test/book/info.json?download=exact%2Bvalue&version=2";
+    let page = format!(r#"<script>const image = "{requested}";</script>"#);
+    let (catalog, _) = support::discover_inputs(
+        registry_for("iiif").unwrap(),
+        vec![DiscoveryInput::with_contents(PAGE, page)],
+        Default::default(),
+        |uri| (uri == requested).then(|| Ok((IIIF.to_vec(), Some(redirected.into())))),
+    );
+    let image = support::ready_image(catalog.unwrap());
+    assert_eq!(image.source_url.as_deref(), Some(redirected));
+}
 #[test]
 fn source_catalogs_and_readable_documents_precede_observed_previews() {
     let manifest = include_bytes!(

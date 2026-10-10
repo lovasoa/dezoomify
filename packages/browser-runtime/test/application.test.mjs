@@ -112,7 +112,14 @@ test("desktop handoff keeps the discovered source through completion and resets 
   click(document.querySelector(".dz-modal-close"));
   act(() => h.app.submit("https://museum.test/next"));
   await tick();
-  assert.equal(h.contexts[1].view.desktopSourceUrl, undefined);
+  act(() => {
+    h.calls[1].host.report({ ...progress, maximum: { width: 512, height: 512 } });
+    h.calls[1].resolve(output);
+  });
+  await tick();
+  click(h.root.querySelector("#dz-btn-download-desktop"));
+  assert.equal(document.querySelector('[role="dialog"] input').value, "https://museum.test/next");
+  click(document.querySelector(".dz-modal-close"));
   await act(() => h.app.dispose());
 });
 

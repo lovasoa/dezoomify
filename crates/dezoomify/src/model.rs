@@ -956,7 +956,7 @@ impl Error {
 pub struct Progress {
     pub phase: ProgressPhase,
     pub source_format: Option<String>,
-    /// Discovery URL for the selected image's catalog, independent of browser observations.
+    /// Format-designated reusable URL for the selected image's catalog, if known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_url: Option<String>,
     pub title: Option<String>,

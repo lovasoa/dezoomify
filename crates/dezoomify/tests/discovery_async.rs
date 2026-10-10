@@ -25,13 +25,15 @@ const FIRST: FormatSpec = FormatSpec::new(
     "first",
     &[viewer(url_suffix("/root"))
         .resolve_metadata(|_| Ok(Request::new("https://test/a")))
-        .then_decode(catalog)],
+        .then_decode(catalog)
+        .canonical_target()],
 );
 const SECOND: FormatSpec = FormatSpec::new(
     "second",
     &[viewer(url_suffix("/root"))
         .resolve_metadata(|_| Ok(Request::new("https://test/b")))
-        .then_decode(catalog)],
+        .then_decode(catalog)
+        .canonical_target()],
 );
 fn registry() -> core::Registry {
     let mut r = core::Registry::new();
@@ -49,8 +51,95 @@ fn response(text: &str) -> ResourceRead {
 }
 fn selected(catalog: DiscoveryCatalog) -> String {
     match &catalog.entries()[0] {
-        DiscoveredEntry::Ready(image) => image.title.clone().unwrap(),
+        DiscoveredEntry::Ready(image) => {
+            if image
+                .title
+                .as_deref()
+                .is_some_and(|title| title.starts_with("https://test/"))
+            {
+                assert_eq!(
+                    image.source_url, image.title,
+                    "canonical URL belongs to the winning branch"
+                );
+            }
+            image.title.clone().unwrap()
+        }
         _ => panic!("ready image"),
+    }
+}
+
+#[test]
+fn a_context_dependent_decoder_can_designate_its_page_instead_of_its_last_fetch() {
+    fn page(_: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+        Ok(ParsedResource::FollowWith(
+            Request::new("https://test/auxiliary"),
+            contextual_image,
+        ))
+    }
+    fn contextual_image(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+        assert_eq!(
+            resource.context().resources().next().unwrap().uri(),
+            "https://test/root"
+        );
+        catalog(resource)
+    }
+    const ROUTE: core::DiscoveryRoute = viewer(url_suffix("/root")).decode(page);
+    const UNMARKED: FormatSpec = FormatSpec::new("context", &[ROUTE]);
+    const MARKED: FormatSpec = FormatSpec::new("context", &[ROUTE.canonical_source()]);
+    for marked in [false, true] {
+        let mut registry = core::Registry::new();
+        registry.register(if marked { MARKED } else { UNMARKED });
+        let result = futures::executor::block_on(registry.discover(
+            vec![DiscoveryInput::new("https://test/root")],
+            Default::default(),
+            |_, _| async { Ok(response("image")) },
+            support::parse_html,
+        ))
+        .unwrap();
+        let [DiscoveredEntry::Ready(image)] = result.entries() else {
+            panic!("ready image")
+        };
+        assert_eq!(
+            image.source_url.as_deref(),
+            marked.then_some("https://test/root")
+        );
+    }
+}
+#[test]
+fn a_successful_fetch_with_rejected_metadata_cannot_set_the_winners_source() {
+    fn rejected(_: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+        Err(DiscoveryError::InvalidMetadata("not an image".into()))
+    }
+    const REJECTED: FormatSpec = FormatSpec::new(
+        "rejected",
+        &[viewer(url_suffix("/root"))
+            .resolve_metadata(|_| Ok(Request::new("https://test/a")))
+            .then_decode(rejected)
+            .canonical_target()],
+    );
+    const UNMARKED: FormatSpec = FormatSpec::new(
+        "unmarked",
+        &[viewer(url_suffix("/root"))
+            .resolve_metadata(|_| Ok(Request::new("https://test/b")))
+            .then_decode(catalog)],
+    );
+    for marked in [false, true] {
+        let mut registry = core::Registry::new();
+        registry.register(REJECTED);
+        registry.register(if marked { SECOND } else { UNMARKED });
+        let result = futures::executor::block_on(registry.discover(
+            vec![DiscoveryInput::new("https://test/root")],
+            Default::default(),
+            |request, _| async move { Ok(response(&request.uri)) },
+            support::parse_html,
+        ))
+        .unwrap();
+        let image = support::ready_image(result);
+        assert_eq!(image.title.as_deref(), Some("https://test/b"));
+        assert_eq!(
+            image.source_url.as_deref(),
+            marked.then_some("https://test/b")
+        );
     }
 }
 #[test]
