@@ -186,6 +186,7 @@ impl ImagePlan {
         }
         Ok(DiscoveredEntry::Ready(ResolvedImage {
             title: self.title,
+            source_url: None,
             format,
             levels: self.levels,
             warnings: self.warnings,
@@ -234,6 +235,8 @@ impl CatalogPlan {
 #[doc(hidden)]
 pub struct ResolvedImage {
     pub title: Option<String>,
+    /// Discovery input which can resolve this catalog again without browser observations.
+    pub source_url: Option<String>,
     /// Static registry name of the format which produced this descriptor.
     pub format: &'static str,
     pub levels: Vec<ResolvedLevel>,
@@ -343,6 +346,15 @@ impl DiscoveryCatalog {
     pub fn into_entries(self) -> Vec<DiscoveredEntry> {
         self.0
     }
+
+    pub(crate) fn with_source_url(mut self, uri: &str) -> Self {
+        for entry in &mut self.0 {
+            if let DiscoveredEntry::Ready(image) = entry {
+                image.source_url = Some(uri.into());
+            }
+        }
+        self
+    }
 }
 
 impl From<&ResolvedImage> for Image {
@@ -432,6 +444,7 @@ mod tests {
     fn normalization_orders_levels_deterministically() {
         let catalog = DiscoveryCatalog::new([DiscoveredEntry::Ready(ResolvedImage {
             title: None,
+            source_url: None,
             format: "test",
             levels: vec![level(300), level(100)],
             warnings: Vec::new(),

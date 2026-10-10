@@ -126,6 +126,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       historyEntry: null as HistoryEntry | null,
       view: {
         sourceUrl: url,
+        offerDesktopApp: true,
         jobActivity: activity.state,
       } as ViewContext,
     };
@@ -262,6 +263,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         onProgress: (progress) => {
           if (current === a && !a.controller.signal.aborted) {
             a.progress = progress;
+            a.view.desktopSourceUrl = progress.source_url;
             history.progress(a.historyEntry, progress);
             a.activity.touchProgress();
             a.activity.scheduleUpdate();
@@ -371,9 +373,6 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       onRetrySameUrl: () => {
         if (a && current === a) void run(a.url);
       },
-      onTryMaximum: () => {
-        if (a && current === a) void run(a.url, true);
-      },
       onPause: () => {
         if (a && current === a) {
           a.host?.pause();
@@ -394,6 +393,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         a?.output && a.capabilities?.revealOutput ? a.capabilities.revealOutput : undefined,
       onOpenSource: options.openSource,
       onCopyDiagnostics: copyDiagnosticText,
+      onCopyText: copyDiagnosticText,
       onSaveDiagnostics: saveDiagnosticReport,
       onOpenExternalLink: (url: string) => {
         location.href = url;

@@ -1046,7 +1046,7 @@ where
                 parsed => {
                     return parsed
                         .compile(spec.name)
-                        .map(|catalog| Some((history.len(), catalog)));
+                        .map(|catalog| Some((history.len(), catalog.with_source_url(uri))));
                 }
             };
             if metadata_only && !self.supplied.contains_key(&request) {

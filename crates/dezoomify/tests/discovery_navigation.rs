@@ -337,6 +337,22 @@ fn declared_and_observed_metadata_precede_generic_frames() {
         );
     }
 }
+
+#[test]
+fn desktop_source_is_the_winning_observed_resource_and_can_be_rediscovered() {
+    let uri = "https://image.test/book/info.json?signature=exact%2Bvalue";
+    let replies = [(uri, IIIF)];
+    let catalog = trace(
+        vec![DiscoveryInput::with_contents(PAGE, FRAME), observed(uri)],
+        &replies,
+    );
+    let [DiscoveredEntry::Ready(image)] = catalog.entries() else {
+        panic!("one ready image expected")
+    };
+    assert_eq!(image.source_url.as_deref(), Some(uri));
+    let replayed = trace(vec![DiscoveryInput::new(uri)], &replies);
+    assert_eq!(catalog.public_catalog(), replayed.public_catalog());
+}
 #[test]
 fn source_catalogs_and_readable_documents_precede_observed_previews() {
     let manifest = include_bytes!(

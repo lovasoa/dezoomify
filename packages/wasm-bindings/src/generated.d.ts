@@ -272,6 +272,10 @@ export type DiscoveryInputKind = "source" | "observed-document" | "observed-reso
 export interface Progress {
     phase: ProgressPhase;
     source_format: string | undefined;
+    /**
+     * Discovery URL for the selected image's catalog, independent of browser observations.
+     */
+    source_url?: string;
     title: string | undefined;
     selected: Size | undefined;
     maximum: Size | undefined;

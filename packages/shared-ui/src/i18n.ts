@@ -215,13 +215,23 @@ const en = {
   "view.display.startOver": "Start over",
   // Resolution downgrade notice: automatic selection took a smaller known
   // level than the maximum because of browser limits (website and extension).
-  "view.resolution.title": "Image too large for this browser",
-  "view.resolution.notice":
-    "Not downloading at maximal resolution due to browser limitations. Try the desktop app to remove browser limitations.",
-  "view.resolution.sizes": "Saving at {selected} pixels instead of the maximum {maximum} pixels.",
-  "view.resolution.download": "Download desktop app",
-  "view.resolution.tryMaximum": "Try maximum",
-  "view.resolution.stop": "Stop",
+  "view.resolution.title": "Lower-resolution image",
+  "view.resolution.sizes": "Image size: {selected} pixels. Maximum available: {maximum} pixels.",
+  "view.resolution.download": "Get full resolution with the desktop app",
+  "view.desktop.handoffTitle": "Download this image in the desktop app",
+  "view.desktop.handoffDownload": "Download desktop app",
+  "view.desktop.handoffInstall":
+    "Choose the installer for your operating system, then open Dezoomify.",
+  "view.desktop.handoffPaste": "Paste this URL into the desktop app’s URL field:",
+  "view.desktop.handoffCopy": "Copy URL",
+  "view.desktop.handoffCopied": "URL copied. Paste it into the desktop app.",
+  "view.desktop.handoffCopyFailed": "Could not copy. Select the URL above and copy it manually.",
+  "view.desktop.handoffStart":
+    "Start the download and choose the largest resolution. If several images appear, choose the one you want.",
+  "view.desktop.handoffAccess":
+    "The desktop app does not share your browser’s sign-in session. This URL must be accessible from the app.",
+  "view.desktop.handoffUnavailable":
+    "No reusable source URL is available for this job. Open the original page and find the zoomable image or manifest URL to paste into the app.",
   // Completion section.
   "view.done.ready": "Your image is ready.",
   "view.done.readyTitle": "Ready to save",

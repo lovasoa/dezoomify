@@ -2,7 +2,7 @@
 
 import type { Error as JobError } from "@dezoomify/wasm-bindings";
 import type { ReactElement, ReactNode } from "react";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
@@ -129,18 +129,18 @@ function DesktopGuideButton({ onOpen, description }: { onOpen(): void; descripti
 /**
  * Browser-limits notice: automatic selection took a smaller known level, so
  * the banner names the selected and maximum resolutions and offers the
- * desktop app, a maximum retry, and (while the job runs) stop. Hosts opt in
- * by supplying `onTryMaximum`; the desktop product never does.
+ * desktop app through one contextual action. Browser hosts opt in with
+ * `offerDesktopApp`; the desktop product never does.
  */
 function ResolutionNotice({
   choice,
   callbacks,
-  running,
+  sourceUrl,
   hostDocument,
 }: {
   choice: ResolutionChoice;
   callbacks: ViewCallbacks;
-  running: boolean;
+  sourceUrl?: string;
   hostDocument: Document;
 }) {
   const dims = (size: { width: number; height: number }) => `${size.width}×${size.height}`;
@@ -150,53 +150,40 @@ function ResolutionNotice({
       className="dz-resolution-notice"
       tone="warning"
       title={t("view.resolution.title")}
-      message={t("view.resolution.notice")}
+      message={t("view.resolution.sizes", {
+        selected: dims(choice.selected),
+        maximum: dims(choice.maximum),
+      })}
       messageId="dz-resolution-message"
-      details={
-        <p id="dz-resolution-sizes">
-          {t("view.resolution.sizes", {
-            selected: dims(choice.selected),
-            maximum: dims(choice.maximum),
-          })}
-        </p>
-      }
       actions={
         <NoticeActions>
           <NoticeAction
             primary
             id="dz-btn-download-desktop"
-            onClick={() => showDesktopAppGuidance(hostDocument)}
+            onClick={() => showDesktopHandoff(hostDocument, sourceUrl, callbacks.onCopyText)}
           >
             {t("view.resolution.download")}
           </NoticeAction>
-          <NoticeAction id="dz-btn-try-maximum" onClick={() => callbacks.onTryMaximum?.()}>
-            {t("view.resolution.tryMaximum")}
-          </NoticeAction>
-          {running ? (
-            <NoticeAction id="dz-btn-resolution-stop" onClick={() => callbacks.onCancel()}>
-              {t("view.resolution.stop")}
-            </NoticeAction>
-          ) : null}
         </NoticeActions>
       }
     />
   );
 }
 
-/** Resolution notice for hosts that offer "Try maximum" (website and extension). */
+/** Resolution notice for browser hosts that offer the desktop app. */
 function resolutionNoticeOf(
   presentation: Presentation,
   callbacks: ViewCallbacks,
-  running: boolean,
+  ctx: ViewContext | undefined,
   hostDocument: Document,
 ): ReactElement | null {
-  const choice = callbacks.onTryMaximum ? presentation.resolution : undefined;
+  const choice = ctx?.offerDesktopApp ? presentation.resolution : undefined;
   if (!choice) return null;
   return (
     <ResolutionNotice
       choice={choice}
       callbacks={callbacks}
-      running={running}
+      sourceUrl={ctx?.desktopSourceUrl}
       hostDocument={hostDocument}
     />
   );
@@ -468,7 +455,7 @@ function JobView({
           />
         </div>
       </div>
-      {resolutionNoticeOf(presentation, callbacks, true, hostDocument)}
+      {resolutionNoticeOf(presentation, callbacks, ctx, hostDocument)}
     </div>
   );
 }
@@ -533,10 +520,12 @@ function DisplayOnlyView({
 function CompletedView({
   presentation,
   callbacks,
+  ctx,
   hostDocument,
 }: {
   presentation: Presentation;
   callbacks: ViewCallbacks;
+  ctx?: ViewContext;
   hostDocument: Document;
 }) {
   const [outputAction, setOutputAction] = useState<"open" | "folder" | null>(null);
@@ -597,7 +586,6 @@ function CompletedView({
         </div>
       </div>
       <p className="dz-completed-guidance">{guidance}</p>
-      {resolutionNoticeOf(presentation, callbacks, false, hostDocument)}
       <div className="dz-actions-row">
         {callbacks.onOpenOutput ? (
           <button
@@ -670,6 +658,7 @@ function CompletedView({
           ({outputError.kind})
         </p>
       ) : null}
+      {resolutionNoticeOf(presentation, callbacks, ctx, hostDocument)}
     </div>
   );
 }
@@ -833,6 +822,7 @@ function SharedView({
           key={ctx?.outputKey}
           presentation={presentation}
           callbacks={callbacks}
+          ctx={ctx}
           hostDocument={hostDocument}
         />
       ) : null}
@@ -902,9 +892,35 @@ function ModalCard({
   showClose?: boolean;
   onClose(): void;
 }) {
+  const dialog = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    const focusable = () =>
+      Array.from(
+        dialog.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex="0"]',
+        ) ?? [],
+      );
+    (focusable()[0] ?? dialog.current)?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
+      if (e.key === "Tab") {
+        const items = focusable();
+        const first = items[0];
+        const last = items.at(-1);
+        if (!first || !last) {
+          e.preventDefault();
+          dialog.current?.focus();
+        } else if (!items.includes(hostDocument.activeElement as HTMLElement)) {
+          e.preventDefault();
+          (e.shiftKey ? last : first).focus();
+        } else if (e.shiftKey && hostDocument.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && hostDocument.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
     hostDocument.addEventListener("keydown", onKey);
     return () => hostDocument.removeEventListener("keydown", onKey);
@@ -912,6 +928,8 @@ function ModalCard({
   return (
     <div
       id={id}
+      ref={dialog}
+      tabIndex={-1}
       className="dz-modal-backdrop"
       role="dialog"
       aria-modal="true"
@@ -947,6 +965,7 @@ function mountOverlay(
   render: (close: () => void) => ReactElement,
 ): { close(): void } {
   activeOverlay?.close();
+  const previousFocus = hostDocument.activeElement as HTMLElement | null;
   const host = hostDocument.createElement("div");
   hostDocument.body.appendChild(host);
   const root = createRoot(host);
@@ -960,6 +979,8 @@ function mountOverlay(
     // render, so the next overlay replaces this one immediately.
     host.remove();
     root.unmount();
+    if (previousFocus?.isConnected) previousFocus.focus();
+    else if (previousFocus?.id) hostDocument.getElementById(previousFocus.id)?.focus();
   };
   const overlay = { close };
   activeOverlay = overlay;
@@ -1012,6 +1033,99 @@ function detectPlatform(hints?: PlatformHints): { name: string; installer: strin
 }
 
 const RELEASES_URL = "https://github.com/lovasoa/dezoomify/releases/latest";
+
+function DesktopHandoffBody({
+  sourceUrl,
+  onCopy,
+}: {
+  sourceUrl?: string;
+  onCopy?: (text: string) => Promise<void>;
+}) {
+  const [copyState, setCopyState] = useState<"idle" | "pending" | "copied" | "failed">("idle");
+  const urlId = useId();
+  async function copy() {
+    if (!sourceUrl || !onCopy || copyState === "pending") return;
+    setCopyState("pending");
+    try {
+      await onCopy(sourceUrl);
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
+  }
+  return (
+    <div className="dz-modal-steps">
+      <div className="dz-modal-step">
+        <span className="dz-modal-step-num">1</span>
+        <div>
+          <a
+            href={RELEASES_URL}
+            target="_blank"
+            rel="noopener"
+            className="dz-btn-tactile dz-handoff-download"
+          >
+            {t("view.desktop.handoffDownload")}
+          </a>
+          <p>{t("view.desktop.handoffInstall")}</p>
+        </div>
+      </div>
+      <div className="dz-modal-step">
+        <span className="dz-modal-step-num">2</span>
+        <div className="dz-desktop-source">
+          {sourceUrl ? (
+            <>
+              <label htmlFor={urlId}>{t("view.desktop.handoffPaste")}</label>
+              <input
+                id={urlId}
+                className="dz-input"
+                type="text"
+                readOnly
+                value={sourceUrl}
+                onFocus={(event) => event.currentTarget.select()}
+              />
+              {onCopy ? (
+                <button
+                  type="button"
+                  className="dz-btn-secondary"
+                  disabled={copyState === "pending"}
+                  onClick={() => void copy()}
+                >
+                  {t("view.desktop.handoffCopy")}
+                </button>
+              ) : null}
+              <p role={copyState === "failed" ? "alert" : "status"}>
+                {copyState === "copied"
+                  ? t("view.desktop.handoffCopied")
+                  : copyState === "failed"
+                    ? t("view.desktop.handoffCopyFailed")
+                    : null}
+              </p>
+              <p>{t("view.desktop.handoffStart")}</p>
+              <p className="dz-modal-subtitle">{t("view.desktop.handoffAccess")}</p>
+            </>
+          ) : (
+            <p>{t("view.desktop.handoffUnavailable")}</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function showDesktopHandoff(
+  hostDocument: Document,
+  sourceUrl?: string,
+  onCopy?: (text: string) => Promise<void>,
+): void {
+  mountOverlay(hostDocument, (close) => (
+    <ModalCard
+      title={t("view.desktop.handoffTitle")}
+      hostDocument={hostDocument}
+      onClose={close}
+      body={<DesktopHandoffBody sourceUrl={sourceUrl} onCopy={onCopy} />}
+    />
+  ));
+}
 
 export function showDesktopAppGuidance(hostDocument: Document, hints?: PlatformHints): void {
   const p = detectPlatform(hints);
