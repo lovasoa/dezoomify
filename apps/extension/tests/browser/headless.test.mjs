@@ -116,7 +116,7 @@ async function startFixtureServer(workDir) {
     "utf8",
   );
   writeFileSync(
-    path.join(staticDir, "osd-fixture.js"),
+    path.join(staticDir, "openseadragon-fixture.js"),
     `(()=>{${library}\nwindow.OpenSeadragon=OpenSeadragon;})()`,
   );
   const addrFile = path.join(workDir, "server.addr");
@@ -772,16 +772,18 @@ for (const [browser, runJob] of [
   ["chromium", runChromiumJob],
   ["firefox", runFirefoxJob],
 ]) {
-  test(`${browser}: private OSD sources download through existing metadata parsers`, {
+  test(`${browser}: private OpenSeadragon sources download through existing metadata parsers`, {
     timeout: 240000,
   }, async () => {
-    const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-memory-osd-"));
+    const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-memory-openseadragon-"));
     try {
       for (const type of ["deepzoom", "iiif", "zoomify", "iip"]) {
         const caseWork = path.join(work, type);
         mkdirSync(caseWork);
         const offset = readFileSync(fixtureServer.logFile, "utf8").length;
-        assertPng(await runJob(fixtureServer.base, caseWork, { scenario: `memory-osd-${type}` }));
+        assertPng(
+          await runJob(fixtureServer.base, caseWork, { scenario: `memory-openseadragon-${type}` }),
+        );
         const events = newFixtureEvents(fixtureServer.logFile, offset);
         assert.equal(
           events.filter(

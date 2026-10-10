@@ -226,8 +226,8 @@ api.runtime.onMessage.addListener((message: unknown) => {
     return (async () => {
       const scan = await bound.scan();
       const expected =
-        typeof value.scenario === "string" && value.scenario.startsWith("memory-osd-")
-          ? "/memory-osd.html"
+        typeof value.scenario === "string" && value.scenario.startsWith("memory-openseadragon-")
+          ? "/memory-openseadragon.html"
           : value.scenario === "cookie-session"
             ? "/protected/artwork.dzi"
             : value.scenario === "retry"

@@ -1,8 +1,19 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { build } from "esbuild";
 import { chromium, firefox } from "playwright";
-import { scanOpenSeadragon } from "../../src/job/osd-scanner.ts";
+
+const bundle = await build({
+  entryPoints: [fileURLToPath(new URL("../../src/job/openseadragon-scanner.ts", import.meta.url))],
+  bundle: true,
+  write: false,
+  format: "iife",
+  globalName: "OpenSeadragonScanner",
+  target: "es2022",
+});
+const scannerScript = bundle.outputFiles[0].text;
 
 const tile = readFileSync(new URL("../../../../fixtures/tiles/0-0.png", import.meta.url));
 
@@ -10,7 +21,7 @@ for (const [name, engine] of [
   ["Chromium", chromium],
   ["Firefox", firefox],
 ]) {
-  test(`${name}: memory-only OSD observations and probe restoration`, async () => {
+  test(`${name}: memory-only OpenSeadragon observations and probe restoration`, async () => {
     const browser = await engine.launch({ headless: true });
     try {
       const version = "6.1.1";
@@ -67,7 +78,7 @@ for (const [name, engine] of [
             await scope.addScriptTag({ content: library });
           }
           await scope.evaluate((mode) => {
-            const OSD = window.OpenSeadragon;
+            const OpenSeadragon = window.OpenSeadragon;
             const element = document.getElementById("v");
             window.getterCalls = 0;
             Object.defineProperty(window, "dangerousGetter", {
@@ -120,7 +131,7 @@ for (const [name, engine] of [
                         Size: { Width: 1024, Height: 768 },
                       },
                     };
-            const viewer = OSD({
+            const viewer = OpenSeadragon({
               element,
               prefixUrl: "",
               tileSources: source,
@@ -161,7 +172,7 @@ for (const [name, engine] of [
                 delete window.OpenSeadragon;
               if (mode === "private-disabled") viewer.setMouseNavEnabled(false);
               if (mode === "sparse-dzi")
-                viewer.source.displayRects = [new OSD.DisplayRect(0, 0, 256, 256, 0, 10)];
+                viewer.source.displayRects = [new OpenSeadragon.DisplayRect(0, 0, 256, 256, 0, 10)];
               if (mode === "throwing-proxy")
                 window.trapped = new Proxy(
                   {},
@@ -222,7 +233,8 @@ for (const [name, engine] of [
                 channel.port2.postMessage(null);
               }
               try {
-                const result = await (${scanOpenSeadragon.toString()})(${Date.now() + 1500});
+                ${scannerScript}
+                const result = await OpenSeadragonScanner.scanOpenSeadragon(${Date.now() + 1500});
                 return { result, taskRan };
               } finally {
                 Date.now = now;
@@ -285,7 +297,10 @@ for (const [name, engine] of [
             mode === "throwing-listener" ? ["fixture listener"] : [],
             `${version}/${mode}`,
           );
-          const expired = await page.evaluate(scanOpenSeadragon, Date.now() - 1);
+          const expired = await page.evaluate(`(async () => {
+            ${scannerScript}
+            return OpenSeadragonScanner.scanOpenSeadragon(${Date.now() - 1});
+          })()`);
           assert.equal(expired.inputs.length, 0);
           assert.equal(expired.diagnostics.truncated, true);
         } finally {

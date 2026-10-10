@@ -12,12 +12,13 @@ fn supplied_viewer_metadata_preserves_all_images_without_fetching() {
         default_registry,
         discovery::{DiscoveryInput, DiscoveryLimits},
     };
+    let larger = DZI.replace("512", "1024");
     let catalog = futures::executor::block_on(default_registry().discover(
         vec![
             DiscoveryInput::with_contents("https://page.test", DZI),
-            DiscoveryInput::with_contents("https://page.test#osd-0", DZI)
+            DiscoveryInput::with_contents("https://page.test#openseadragon-0", DZI)
                 .with_kind(DiscoveryInputKind::ObservedMetadata),
-            DiscoveryInput::with_contents("https://page.test#osd-1", DZI.replace("512", "1024"))
+            DiscoveryInput::with_contents("https://page.test#openseadragon-1", larger)
                 .with_kind(DiscoveryInputKind::ObservedMetadata),
         ],
         DiscoveryLimits::default(),
@@ -32,7 +33,7 @@ fn supplied_viewer_metadata_preserves_all_images_without_fetching() {
 fn unreadable_viewer_metadata_falls_back_without_following_links() {
     let host = MemoryHost::default();
     let loaded = JobInput {
-        url: "https://page.test#osd".into(),
+        url: "https://page.test#openseadragon".into(),
         contents: Some(r#"<a href="https://must-not-fetch.test/info.json">image</a>"#.into()),
         kind: Some(DiscoveryInputKind::ObservedMetadata),
     };

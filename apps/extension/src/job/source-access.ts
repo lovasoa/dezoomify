@@ -7,9 +7,8 @@ import {
   validateRequestHeaders,
 } from "@dezoomify/browser-runtime";
 import type { Error as JobError, ResourceRequest } from "@dezoomify/wasm-bindings";
-import type { WxtBrowser } from "wxt/browser";
+import type { PublicPath, WxtBrowser } from "wxt/browser";
 import { transportError } from "../runtime/fetch.ts";
-import { scanOpenSeadragon } from "./osd-scanner.ts";
 import { cancelSourceFetch, collectCandidates, fetchSource } from "./source-operations.ts";
 
 type SourceApi = Pick<WxtBrowser, "tabs" | "scripting">;
@@ -19,6 +18,9 @@ type CandidateSnapshot = Awaited<ReturnType<typeof collectCandidates>> & {
 type CandidateInput = CandidateSnapshot["inputs"][number];
 type SourceRequest = Parameters<typeof fetchSource>[0];
 type FetchResult = Awaited<ReturnType<typeof fetchSource>>;
+type SourceScript<Args extends unknown[], Result> =
+  | { func: (...args: Args) => Result; args: Args; world?: "ISOLATED" | "MAIN" }
+  | { files: Extract<PublicPath, `${string}.js`>[]; world: "MAIN" };
 
 const MAX_URL_LENGTH = 2048;
 const MAX_CANDIDATES = 100;
@@ -141,11 +143,9 @@ export function createSourceAccess(
   }
 
   async function injectUnchecked<Args extends unknown[], Result>(
-    func: (...args: Args) => Result,
-    args: Args,
+    script: SourceScript<Args, Result>,
     signal: AbortSignal,
     onLaunch?: () => void,
-    world: "ISOLATED" | "MAIN" = "ISOLATED",
   ): Promise<Awaited<Result>> {
     assertLive();
     signal.throwIfAborted();
@@ -164,9 +164,7 @@ export function createSourceAccess(
     const results = await browserApi.scripting
       .executeScript<Args, Result>({
         target: { tabId, frameIds: [0] },
-        func,
-        args,
-        world,
+        ...script,
       })
       .catch((cause: unknown) => {
         assertLive();
@@ -196,13 +194,11 @@ export function createSourceAccess(
   }
 
   /** Bound the whole browser operation, including a lost executeScript reply. */
-  async function inject<Args extends unknown[], Result>(
-    func: (...args: Args) => Result,
-    args: Args,
+  async function inject<Args extends unknown[] = [], Result = unknown>(
+    script: SourceScript<Args, Result>,
     signal?: AbortSignal,
     onAbort?: () => Promise<void>,
     deadlineAt = Date.now() + timeoutMs,
-    world: "ISOLATED" | "MAIN" = "ISOLATED",
   ): Promise<Awaited<Result>> {
     assertLive();
     const deadline = new AbortController();
@@ -253,15 +249,9 @@ export function createSourceAccess(
         abort();
         return await aborted;
       }
-      const operation = injectUnchecked(
-        func,
-        args,
-        combined,
-        () => {
-          launched = true;
-        },
-        world,
-      );
+      const operation = injectUnchecked(script, combined, () => {
+        launched = true;
+      });
       operationDone = operation.then(
         () => {},
         () => {},
@@ -278,17 +268,15 @@ export function createSourceAccess(
 
   async function scan(signal?: AbortSignal): Promise<CandidateSnapshot> {
     const scanDeadline = Date.now() + timeoutMs;
-    let observed: Awaited<ReturnType<typeof scanOpenSeadragon>> | undefined;
+    let observed: CandidateInput[] = [];
     let memory: CandidateSnapshot["memory"];
     try {
       const deadlineAt = Math.min(scanDeadline, Date.now() + 1500);
       const reply = await inject(
-        scanOpenSeadragon,
-        [deadlineAt],
+        { files: ["/openseadragon-scanner.js"], world: "MAIN" },
         signal,
         undefined,
         deadlineAt,
-        "MAIN",
       );
       if (isRecord(reply) && Array.isArray(reply.inputs) && reply.inputs.length <= 100) {
         let bytes = 0;
@@ -308,7 +296,7 @@ export function createSourceAccess(
           bytes += new TextEncoder().encode(JSON.stringify(candidate)).byteLength;
           if (bytes <= 1024 * 1024) inputs.push(candidate);
         }
-        observed = { ...reply, inputs };
+        observed = inputs;
         if (isRecord(reply.diagnostics)) {
           memory = {};
           for (const key of [
@@ -350,13 +338,18 @@ export function createSourceAccess(
         ).slice(0, 2048),
       };
     }
-    const snapshot = await inject(collectCandidates, [], signal, undefined, scanDeadline);
+    const snapshot = await inject(
+      { func: collectCandidates, args: [] },
+      signal,
+      undefined,
+      scanDeadline,
+    );
     if (!validSnapshot(snapshot, documentUrl))
       throw transportError("bad-url", "invalid source scan result");
     assertLive();
     return {
       ...snapshot,
-      inputs: [...snapshot.inputs, ...(observed?.inputs ?? [])],
+      inputs: [...snapshot.inputs, ...observed],
       ...(memory ? { memory } : {}),
     };
   }
@@ -392,7 +385,12 @@ export function createSourceAccess(
         })
         .then(() => undefined);
     };
-    const result = await inject(fetchSource, [sourceRequest], signal, cancel, deadlineAt);
+    const result = await inject(
+      { func: fetchSource, args: [sourceRequest] },
+      signal,
+      cancel,
+      deadlineAt,
+    );
     if (signal.aborted) throw transportError("cancelled", "source fetch cancelled");
     assertLive();
     if (!validFetchResult(result, documentUrl))

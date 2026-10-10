@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { scanOpenSeadragon } from "../../src/job/osd-scanner.ts";
 import { createSourceAccess } from "../../src/job/source-access.ts";
 import {
   cancelSourceFetch,
@@ -61,15 +60,17 @@ function snapshot(documentUrl = SOURCE_URL) {
 
 test("MAIN-world observations are independently validated and preserve document evidence", async () => {
   const observation = {
-    url: `${SOURCE_URL}#dezoomify-osd-0`,
+    url: `${SOURCE_URL}#dezoomify-openseadragon-0`,
     kind: "observed-metadata",
     contents:
       '<Image TileSize="256" Overlap="0" Format="png"><Size Width="512" Height="512"/></Image>',
   };
   const fake = fakeBrowser(async (injection) => {
-    if (injection.func === scanOpenSeadragon) {
+    if (injection.files) {
+      assert.deepEqual(injection.files, ["/openseadragon-scanner.js"]);
       assert.equal(injection.world, "MAIN");
-      assert.equal(typeof injection.args[0], "number");
+      assert.equal(injection.func, undefined);
+      assert.equal(injection.args, undefined);
       return {
         ok: true,
         documentUrl: SOURCE_URL,
@@ -81,7 +82,7 @@ test("MAIN-world observations are independently validated and preserve document 
         diagnostics: { rejected: 0, truncated: false },
       };
     }
-    assert.equal(injection.world, "ISOLATED");
+    assert.equal(injection.world ?? "ISOLATED", "ISOLATED");
     return snapshot();
   });
   const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
@@ -96,7 +97,7 @@ test("MAIN-world observations are independently validated and preserve document 
 
 test("memory injection failure preserves its cause and falls back to document discovery", async () => {
   const fake = fakeBrowser(async ({ func }) => {
-    if (func === scanOpenSeadragon) throw new Error("page MAIN world unavailable");
+    if (!func) throw new Error("page MAIN world unavailable");
     return snapshot();
   });
   const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
@@ -112,7 +113,7 @@ test("memory injection failure preserves its cause and falls back to document di
 
 test("job-page source access calls injected scan and fetch with inferred argument shapes", async () => {
   const fake = fakeBrowser(async ({ func, args }) => {
-    if (func.name === "scanOpenSeadragon") return { ...snapshot(), inputs: [] };
+    if (!func) return { ...snapshot(), inputs: [] };
     if (func === collectCandidates) return snapshot();
     assert.equal(func, fetchSource);
     assert.equal(args[0].url, "https://gallery.example/info.json");

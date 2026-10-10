@@ -46,8 +46,8 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
 
   const targetUrl = scenario.startsWith("fixtures/")
     ? `${origin}/${scenario}/viewer.html`
-    : scenario.startsWith("memory-osd-")
-      ? `${origin}/memory-osd.html?type=${encodeURIComponent(scenario.slice(11))}`
+    : scenario.startsWith("memory-openseadragon-")
+      ? `${origin}/memory-openseadragon.html?type=${encodeURIComponent(scenario.slice("memory-openseadragon-".length))}`
       : scenario === "retry"
         ? `${origin}/fixtures/failures/retry-approval/retry.dzi`
         : scenario === "observed-zoomify"
