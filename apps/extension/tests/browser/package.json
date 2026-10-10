@@ -9,6 +9,7 @@
   },
   "devDependencies": {
     "geckodriver": "^7.0.0",
+    "openseadragon": "6.1.1",
     "playwright": "1.63.0",
     "selenium-webdriver": "^4.50.0"
   },

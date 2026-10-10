@@ -46,13 +46,15 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
 
   const targetUrl = scenario.startsWith("fixtures/")
     ? `${origin}/${scenario}/viewer.html`
-    : scenario === "retry"
-      ? `${origin}/fixtures/failures/retry-approval/retry.dzi`
-      : scenario === "observed-zoomify"
-        ? `${origin}/observed-zoomify/viewer.html`
-        : scenario === ""
-          ? `${origin}/target.html`
-          : `${origin}/target.html?scenario=${encodeURIComponent(scenario)}`;
+    : scenario.startsWith("memory-osd-")
+      ? `${origin}/memory-osd.html?type=${encodeURIComponent(scenario.slice(11))}`
+      : scenario === "retry"
+        ? `${origin}/fixtures/failures/retry-approval/retry.dzi`
+        : scenario === "observed-zoomify"
+          ? `${origin}/observed-zoomify/viewer.html`
+          : scenario === ""
+            ? `${origin}/target.html`
+            : `${origin}/target.html?scenario=${encodeURIComponent(scenario)}`;
   const target = await api.tabs.create({ url: targetUrl, active: true });
   if (typeof target?.id !== "number") throw new Error("extension E2E source tab did not open");
 

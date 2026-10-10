@@ -7,12 +7,14 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import {
   copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -107,6 +109,16 @@ function stagePackage(
 }
 
 async function startFixtureServer(workDir) {
+  const staticDir = path.join(workDir, "static");
+  cpSync(STATIC_DIR, staticDir, { recursive: true });
+  const library = readFileSync(
+    new URL(import.meta.resolve("openseadragon/build/openseadragon/openseadragon.min.js")),
+    "utf8",
+  );
+  writeFileSync(
+    path.join(staticDir, "osd-fixture.js"),
+    `(()=>{${library}\nwindow.OpenSeadragon=OpenSeadragon;})()`,
+  );
   const addrFile = path.join(workDir, "server.addr");
   const proc = spawn(process.execPath, [
     path.join(REPO_ROOT, "test/fixture-server.mjs"),
@@ -118,7 +130,7 @@ async function startFixtureServer(workDir) {
     "--scenarios-dir",
     path.join(REPO_ROOT, "testdata/scenarios"),
     "--static-dir",
-    STATIC_DIR,
+    staticDir,
     "--request-log",
     path.join(workDir, "fixture-requests.jsonl"),
   ]);
@@ -760,6 +772,37 @@ for (const [browser, runJob] of [
   ["chromium", runChromiumJob],
   ["firefox", runFirefoxJob],
 ]) {
+  test(`${browser}: private OSD sources download through existing metadata parsers`, {
+    timeout: 240000,
+  }, async () => {
+    const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-memory-osd-"));
+    try {
+      for (const type of ["deepzoom", "iiif", "zoomify", "iip"]) {
+        const caseWork = path.join(work, type);
+        mkdirSync(caseWork);
+        const offset = readFileSync(fixtureServer.logFile, "utf8").length;
+        assertPng(await runJob(fixtureServer.base, caseWork, { scenario: `memory-osd-${type}` }));
+        const events = newFixtureEvents(fixtureServer.logFile, offset);
+        assert.equal(
+          events.filter(
+            (e) =>
+              e.path !== "/extension-inputs/pyramid.dzi" &&
+              /info\.json|\.dzi|ImageProperties\.xml/.test(e.path),
+          ).length,
+          0,
+          `${type}: no metadata discovery fetch`,
+        );
+        if (type === "iip")
+          assert.equal(
+            events.filter((e) => e.path === "/memory-iip" && e.query?.includes("obj=")).length,
+            1,
+            "only the page initializes IIP metadata",
+          );
+      }
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
   test(`${browser}: observed Zoomify metadata wins without analytics access`, {
     timeout: 180000,
   }, async () => {

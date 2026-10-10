@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { scanOpenSeadragon } from "../../src/job/osd-scanner.ts";
 import { createSourceAccess } from "../../src/job/source-access.ts";
 import {
   cancelSourceFetch,
@@ -58,8 +59,60 @@ function snapshot(documentUrl = SOURCE_URL) {
   };
 }
 
+test("MAIN-world observations are independently validated and preserve document evidence", async () => {
+  const observation = {
+    url: `${SOURCE_URL}#dezoomify-osd-0`,
+    kind: "observed-metadata",
+    contents:
+      '<Image TileSize="256" Overlap="0" Format="png"><Size Width="512" Height="512"/></Image>',
+  };
+  const fake = fakeBrowser(async (injection) => {
+    if (injection.func === scanOpenSeadragon) {
+      assert.equal(injection.world, "MAIN");
+      assert.equal(typeof injection.args[0], "number");
+      return {
+        ok: true,
+        documentUrl: SOURCE_URL,
+        inputs: [
+          { ...observation, extra: "discard this" },
+          { ...observation, contents: {} },
+          { ...observation, url: "javascript:bad" },
+        ],
+        diagnostics: { rejected: 0, truncated: false },
+      };
+    }
+    assert.equal(injection.world, "ISOLATED");
+    return snapshot();
+  });
+  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  try {
+    const scan = await source.scan();
+    assert.deepEqual(scan.inputs, [...snapshot().inputs, observation]);
+    assert.deepEqual(scan.memory, { rejected: 0, truncated: false });
+  } finally {
+    source.dispose();
+  }
+});
+
+test("memory injection failure preserves its cause and falls back to document discovery", async () => {
+  const fake = fakeBrowser(async ({ func }) => {
+    if (func === scanOpenSeadragon) throw new Error("page MAIN world unavailable");
+    return snapshot();
+  });
+  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  try {
+    const scan = await source.scan();
+    assert.deepEqual(scan.inputs, snapshot().inputs);
+    assert.equal(scan.memory.unavailable, true);
+    assert.equal(scan.memory.detail, "page MAIN world unavailable");
+  } finally {
+    source.dispose();
+  }
+});
+
 test("job-page source access calls injected scan and fetch with inferred argument shapes", async () => {
   const fake = fakeBrowser(async ({ func, args }) => {
+    if (func.name === "scanOpenSeadragon") return { ...snapshot(), inputs: [] };
     if (func === collectCandidates) return snapshot();
     assert.equal(func, fetchSource);
     assert.equal(args[0].url, "https://gallery.example/info.json");
@@ -89,10 +142,11 @@ test("job-page source access calls injected scan and fetch with inferred argumen
     assert.deepEqual([...result.bytes], [1, 2, 3]);
     assert.equal(result.contentType, "text/html");
     assert.equal(result.http, 200);
-    assert.equal(fake.calls.length, 2);
+    assert.equal(fake.calls.length, 3);
     assert.deepEqual(
       fake.calls.map((call) => call.target),
       [
+        { tabId: 9, frameIds: [0] },
         { tabId: 9, frameIds: [0] },
         { tabId: 9, frameIds: [0] },
       ],

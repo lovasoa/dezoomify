@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Private OSD viewer fixture</title></head>
+  <body>
+    <div id="viewer" style="width:600px;height:600px"></div>
+    <script src="/osd-fixture.js"></script>
+    <script>
+      (() => {
+        const OSD = window.OpenSeadragon;
+        const type = new URLSearchParams(location.search).get("type");
+        const base = location.origin;
+        const source = type === "iiif"
+          ? { "@context": "http://iiif.io/api/image/3/context.json", id: `${base}/memory-iiif`, protocol: "http://iiif.io/api/image", type: "ImageService3", profile: "level2", width: 512, height: 512, tileFormat: "png", tiles: [{ width: 256, scaleFactors: [1, 2] }] }
+          : type === "zoomify"
+            ? { type: "zoomifytileservice", width: 512, height: 512, tileSize: 256, tilesUrl: `${base}/memory-zoomify/` }
+            : type === "iip"
+              ? { iipsrv: `${base}/memory-iip`, image: "private.tif" }
+              : { Image: { xmlns: "http://schemas.microsoft.com/deepzoom/2008", Url: `${base}/memory-tiles/`, Format: "png", Overlap: 0, TileSize: 256, Size: { Width: 512, Height: 512 } } };
+        const viewer = OSD({ id: "viewer", tileSources: source, showNavigationControl: false });
+        const ready = () => { document.documentElement.dataset.viewerReady = "true"; };
+        viewer.addHandler("open", ready);
+        if (viewer.isOpen()) ready();
+        delete window.OpenSeadragon;
+      })();
+    </script>
+  </body>
+</html>
