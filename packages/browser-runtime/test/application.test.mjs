@@ -93,6 +93,29 @@ test("a replacement invocation ignores late progress, output and history from it
   await act(() => h.app.dispose());
 });
 
+test("desktop handoff keeps the discovered source through completion and resets for a new job", async () => {
+  const h = harness();
+  act(() => h.app.submit("https://museum.test/page"));
+  await tick();
+  const discovered = "https://image.test/selected/info.json?signature=exact%2Bvalue";
+  act(() => {
+    h.calls[0].host.report({
+      ...progress,
+      source_url: discovered,
+      maximum: { width: 512, height: 512 },
+    });
+    h.calls[0].resolve(output);
+  });
+  await tick();
+  click(h.root.querySelector("#dz-btn-download-desktop"));
+  assert.equal(document.querySelector('[role="dialog"] input').value, discovered);
+  click(document.querySelector(".dz-modal-close"));
+  act(() => h.app.submit("https://museum.test/next"));
+  await tick();
+  assert.equal(h.contexts[1].view.desktopSourceUrl, undefined);
+  await act(() => h.app.dispose());
+});
+
 test("a replacement renders immediately and waits for prior resources before starting work", async () => {
   let release;
   const h = harness(

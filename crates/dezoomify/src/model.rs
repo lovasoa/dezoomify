@@ -956,6 +956,9 @@ impl Error {
 pub struct Progress {
     pub phase: ProgressPhase,
     pub source_format: Option<String>,
+    /// Discovery URL for the selected image's catalog, independent of browser observations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
     pub title: Option<String>,
     pub selected: Option<Size>,
     pub maximum: Option<Size>,
@@ -978,6 +981,7 @@ impl Default for Progress {
         Self {
             phase: ProgressPhase::Discovery,
             source_format: None,
+            source_url: None,
             title: None,
             selected: None,
             maximum: None,

@@ -1899,6 +1899,27 @@ abbr[title] {
   margin: 0.75rem 0;
 }
 
+.dz-desktop-source {
+  min-width: 0;
+  flex: 1;
+}
+
+.dz-desktop-source .dz-input {
+  margin: 0.75rem 0;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--dz-font-mono);
+  font-size: 0.9rem;
+  padding-right: 1.15rem;
+  border-color: var(--dz-surface-border);
+}
+
+.dz-handoff-download,
+.dz-handoff-download:visited {
+  color: var(--dz-btn-text);
+  text-decoration: none;
+}
+
 .dz-modal-step {
   display: flex;
   gap: 0.85rem;

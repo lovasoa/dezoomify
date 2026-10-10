@@ -130,13 +130,25 @@ export const it = {
   "view.display.deskDescClean":
     "Per un salvataggio pulito a piena dimensione quando il browser può solo mostrare l’immagine.",
   "view.display.startOver": "Ricomincia",
-  "view.resolution.title": "Immagine troppo grande per questo browser",
-  "view.resolution.notice":
-    "A causa dei limiti del browser non si scarica alla risoluzione massima. Prova l’applicazione desktop per rimuovere i limiti del browser.",
-  "view.resolution.sizes": "Salvataggio a {selected} pixel invece del massimo {maximum} pixel.",
-  "view.resolution.download": "Scarica l’applicazione desktop",
-  "view.resolution.tryMaximum": "Prova il massimo",
-  "view.resolution.stop": "Ferma",
+  "view.resolution.title": "Immagine a risoluzione ridotta",
+  "view.resolution.sizes":
+    "Dimensioni dell’immagine: {selected} pixel. Massimo disponibile: {maximum} pixel.",
+  "view.resolution.download": "Ottieni la risoluzione completa con l’applicazione desktop",
+  "view.desktop.handoffTitle": "Scarica questa immagine nell’applicazione desktop",
+  "view.desktop.handoffDownload": "Scarica l’applicazione desktop",
+  "view.desktop.handoffInstall":
+    "Scegli l’installer per il tuo sistema operativo, poi apri Dezoomify.",
+  "view.desktop.handoffPaste": "Incolla questo URL nel campo URL dell’applicazione desktop:",
+  "view.desktop.handoffCopy": "Copia URL",
+  "view.desktop.handoffCopied": "URL copiato. Incollalo nell’applicazione desktop.",
+  "view.desktop.handoffCopyFailed":
+    "Copia non riuscita. Seleziona l’URL qui sopra e copialo manualmente.",
+  "view.desktop.handoffStart":
+    "Avvia il download e scegli la risoluzione più alta. Se appaiono più immagini, scegli quella desiderata.",
+  "view.desktop.handoffAccess":
+    "L’applicazione desktop non condivide la sessione di accesso del browser. L’URL deve essere accessibile dall’applicazione.",
+  "view.desktop.handoffUnavailable":
+    "Non è disponibile un URL sorgente riutilizzabile per questa operazione. Apri la pagina originale e cerca l’URL dell’immagine zoomabile o del manifesto da incollare nell’applicazione.",
   // Completion section.
   "view.done.ready": "La tua immagine è pronta.",
   "view.done.readyTitle": "Pronta da salvare",
