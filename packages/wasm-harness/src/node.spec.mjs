@@ -22,7 +22,6 @@ const document = new TextEncoder().encode(
   '<Image TileSize="256" Overlap="0" Format="jpg" xmlns="http://schemas.microsoft.com/deepzoom/2008"><Size Width="512" Height="512"/></Image>',
 );
 const options = {
-  selection: { kind: "automatic", image_index: 0, largest: true },
   max_concurrent: 2,
   max_retries: 0,
 };
@@ -106,6 +105,9 @@ test("FreezoomPack WASM plans match the native/browser fixture golden", async ()
         path.join(scenario, `payloads/127.0.0.1/fzp/resources/${profile}/root.xml`),
       );
       const platform = host({
+        async chooseLevel() {
+          return levels.length - 1 - position;
+        },
         async fetch(request) {
           platform.observed.reads.push(request);
           assert.equal(request.uri, source);
@@ -113,19 +115,7 @@ test("FreezoomPack WASM plans match the native/browser fixture golden", async ()
           return { kind: "response", response: { bytes, final_uri: source } };
         },
       });
-      const output = await wasm.dezoomify(
-        [{ url: source }],
-        {
-          ...options,
-          selection: {
-            kind: "automatic",
-            image_index: 0,
-            largest: false,
-            zoom_level: levels.length - 1 - position,
-          },
-        },
-        platform,
-      );
+      const output = await wasm.dezoomify([{ url: source }], options, platform);
       assert.deepEqual(output.canvas, { width: golden.width, height: golden.height });
       const tiles = platform.observed.tiles.sort((a, b) => a.index - b.index);
       assert.deepEqual(
@@ -347,4 +337,22 @@ test("cancelled invocation settles late reads before returning and never saves",
   await assert.rejects(running, { kind: "cancelled" });
   assert.equal(platform.observed.settled, 1);
   assert.equal(platform.observed.tiles.length, 0);
+});
+
+test("choice failures and cancellation settle without downloading", async () => {
+  for (const method of ["chooseImage", "chooseLevel"]) {
+    for (const error of [
+      { kind: "cancelled" },
+      { kind: "choice-failed", detail: "choice unavailable" },
+    ]) {
+      const platform = host({
+        [method]: async () => {
+          throw error;
+        },
+      });
+      await assert.rejects(wasm.dezoomify([{ url }], options, platform), error);
+      assert.equal(platform.observed.tiles.length, 0);
+      assert.equal(platform.observed.settled, 1);
+    }
+  }
 });

@@ -3,6 +3,7 @@ import test from "node:test";
 import { createDiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
 import { createCanvasAssembly } from "../src/assembly.ts";
 import { BrowserHost } from "../src/browser-host.ts";
+import { MAXIMUM_SELECTION_LIMITS } from "../src/limits.ts";
 import { createTileDecoder } from "../src/tile-decode.ts";
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -45,6 +46,7 @@ function setup(overrides = {}) {
   };
   const deps = {
     signal: controller.signal,
+    selectionLimits: { maxWidth: 300, maxHeight: 300, maxArea: 90000 },
     diagnostics,
     assembly,
     decoder: {
@@ -609,4 +611,66 @@ test("settlement cancels a pending retry approval without requiring a host respo
   assert.deepEqual(h.painted, []);
   await Promise.all([acquiring, h.host.settle()]);
   assert.deepEqual(h.painted, []);
+});
+
+const image = (sizes) => ({ format: "test", levels: sizes.map((size) => ({ label: "", size })) });
+const square = (width) => ({ width, height: width });
+
+test("image choice compares actual levels, skips deferred entries, and preserves ties", async () => {
+  const host = setup().host;
+  const deferred = { kind: "image-request", uri: "https://images.test/info.json" };
+  const wide = {
+    kind: "image",
+    ...image([
+      { width: 1000, height: 1 },
+      { width: 1, height: 1000 },
+    ]),
+    size: square(1000),
+  };
+  const bigger = { kind: "image", ...image([square(100)]) };
+  assert.equal(await host.chooseImage({ entries: [deferred, wide, bigger] }), 2);
+  assert.equal(await host.chooseImage({ entries: [deferred, deferred] }), 0);
+  assert.equal(await host.chooseImage({ entries: [bigger, bigger] }), 1);
+  assert.equal(
+    await host.chooseImage({ entries: [deferred, { kind: "image", ...image([undefined]) }] }),
+    1,
+  );
+});
+
+test("resolution choice fits device limits and preserves fallback behavior", async () => {
+  const host = setup().host;
+  for (const [sizes, expected] of [
+    [[square(1), square(256), square(512)], 1],
+    [[square(512), square(1024)], 0],
+    [[undefined, undefined], 1],
+    [[square(0), square(256)], 1],
+    [[square(256), square(256)], 1],
+    [
+      [
+        { width: 300, height: 300 },
+        { width: 301, height: 1 },
+      ],
+      0,
+    ],
+  ])
+    assert.equal(await host.chooseLevel(image(sizes)), expected);
+  const areaHost = setup({
+    selectionLimits: { maxWidth: 1000, maxHeight: 1000, maxArea: 100 },
+  }).host;
+  assert.equal(await areaHost.chooseLevel(image([square(10), square(20)])), 0);
+  const maximum = setup({ selectionLimits: MAXIMUM_SELECTION_LIMITS }).host;
+  assert.equal(await maximum.chooseLevel(image([square(256), square(32768)])), 1);
+});
+
+test("invalid resolution limits fail before fetching and cancelled choices reject", async () => {
+  for (const key of ["maxWidth", "maxHeight", "maxArea"]) {
+    assert.throws(
+      () => setup({ selectionLimits: { maxWidth: 300, maxHeight: 300, maxArea: 90000, [key]: 0 } }),
+      { kind: "invalid-options" },
+    );
+  }
+  const h = setup();
+  h.controller.abort();
+  await assert.rejects(h.host.chooseImage({ entries: [] }), { kind: "cancelled" });
+  await assert.rejects(h.host.chooseLevel(image([square(1)])), { kind: "cancelled" });
 });

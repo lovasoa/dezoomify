@@ -34,8 +34,9 @@ extension scan supplies evidence rather than recognizing formats itself.
 Discovery explores accessible alternatives before requesting interactive access.
 The Host owns the actual permission prompt.
 
-The core owns selection, retry classification, scheduling, retry budgets, and
-backoff. Hosts make individual acquisition attempts and report structured
+Hosts choose images and resolutions from the catalogs supplied by Rust.
+The core owns deferred resolution, retry classification, scheduling, retry budgets,
+and backoff. Hosts make individual acquisition attempts and report structured
 failures; they must not add a second retry policy. GUI Hosts await Retry or Cancel
 inside optional acquisitions, pausing new work while in-flight operations settle.
 Retry approval retains successful tiles. Every required tile must succeed before

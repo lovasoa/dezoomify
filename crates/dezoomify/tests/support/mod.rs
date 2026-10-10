@@ -47,6 +47,7 @@ pub struct MemoryHost {
     pub resume: RefCell<Option<futures::channel::oneshot::Receiver<()>>>,
     pub image: Cell<u32>,
     pub level: Cell<Option<u32>>,
+    pub catalogs: RefCell<Vec<Catalog>>,
     pub display_only: Cell<bool>,
 }
 struct Active<'a>(&'a Cell<u32>);
@@ -172,11 +173,15 @@ impl Host for MemoryHost {
         self.outputs.borrow_mut().push(request);
         Ok(output)
     }
-    async fn choose_image(&self, _: Catalog) -> Result<u32, Error> {
+    async fn choose_image(&self, catalog: Catalog) -> Result<u32, Error> {
+        self.catalogs.borrow_mut().push(catalog);
         Ok(self.image.get())
     }
     async fn choose_level(&self, image: Image) -> Result<u32, Error> {
-        Ok(self.level.get().unwrap_or(image.levels.len() as u32 - 1))
+        Ok(self
+            .level
+            .get()
+            .unwrap_or(image.levels.len().saturating_sub(1) as u32))
     }
     async fn checkpoint(&self, gate: Gate) -> Result<(), Error> {
         if self.cancelled.get() {

@@ -389,13 +389,6 @@ impl<'a> NativeHost<'a> {
         Options {
             format: self.options.format.clone(),
             output: self.format,
-            selection: SelectionPolicy::Automatic {
-                image_index: self.options.image_index.unwrap_or(0),
-                largest: self.options.largest,
-                max_width: self.options.max_width,
-                max_height: self.options.max_height,
-                zoom_level: self.options.zoom_level,
-            },
             max_concurrent: self.options.max_concurrent as u32,
             max_tiles: self.options.max_tiles as u32,
             max_retries: self.options.max_retries,
@@ -1268,20 +1261,53 @@ impl Host for NativeHost<'_> {
         Ok(output)
     }
 
-    async fn choose_image(&self, _catalog: Catalog) -> Result<u32, Error> {
-        Err(Error::ChoiceFailed(
-            "native image selection requires a configured policy"
-                .to_string()
-                .into(),
-        ))
+    async fn choose_image(&self, catalog: Catalog) -> Result<u32, Error> {
+        let last = catalog
+            .entries
+            .len()
+            .checked_sub(1)
+            .ok_or(Error::PlanEmpty)?;
+        Ok(self.options.image_index.unwrap_or(0).min(last) as u32)
     }
 
-    async fn choose_level(&self, _image: Image) -> Result<u32, Error> {
-        Err(Error::ChoiceFailed(
-            "native level selection requires a configured policy"
-                .to_string()
-                .into(),
-        ))
+    async fn choose_level(&self, image: Image) -> Result<u32, Error> {
+        let JobOptions {
+            largest,
+            max_width,
+            max_height,
+            zoom_level,
+            ..
+        } = &self.options;
+        let levels = &image.levels;
+        let sizes = levels.iter().enumerate();
+        let area = |level: &Level| {
+            level
+                .size
+                .as_ref()
+                .map_or(0, |s| u64::from(s.width) * u64::from(s.height))
+        };
+        let index = if let Some(level) = zoom_level {
+            levels.len().checked_sub(1).map(|last| (*level).min(last))
+        } else if *largest || (max_width.is_none() && max_height.is_none()) {
+            sizes.clone().max_by_key(|(_, l)| area(l)).map(|(i, _)| i)
+        } else {
+            sizes
+                .clone()
+                .filter(|(_, l)| {
+                    l.size.as_ref().is_some_and(|s| {
+                        max_width.is_none_or(|cap| s.width > 0 && s.width <= cap)
+                            && max_height.is_none_or(|cap| s.height > 0 && s.height <= cap)
+                    })
+                })
+                .max_by_key(|(_, l)| area(l))
+                .map(|(i, _)| i)
+                .or_else(|| {
+                    sizes
+                        .min_by_key(|(_, l)| l.size.as_ref().map_or(u32::MAX, |s| s.width))
+                        .map(|(i, _)| i)
+                })
+        };
+        index.map(|i| i as u32).ok_or(Error::PlanEmpty)
     }
 
     async fn checkpoint(&self, gate: Gate) -> Result<(), Error> {
@@ -1428,6 +1454,71 @@ impl Drop for Flight<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn configured_choices_preserve_native_defaults_caps_and_precedence() {
+        let image = Image {
+            title: None,
+            format: "test".into(),
+            size: None,
+            levels: [None, Some(1), Some(256), Some(512)]
+                .into_iter()
+                .map(|width| Level {
+                    label: String::new(),
+                    tile_size: None,
+                    size: width.map(|width| Size {
+                        width,
+                        height: width,
+                    }),
+                })
+                .collect(),
+        };
+        for (image_index, largest, max_width, max_height, zoom_level, expected) in [
+            (None, false, None, None, None, [3, 3]),
+            (Some(1), false, Some(300), Some(300), None, [2, 0]),
+            (Some(usize::MAX), true, Some(1), Some(1), None, [3, 3]),
+            (None, true, None, None, Some(1), [1, 1]),
+            (None, false, None, None, Some(usize::MAX), [3, 3]),
+            (None, false, Some(300), None, None, [2, 0]),
+            (None, false, None, Some(300), None, [2, 0]),
+            (None, false, Some(0), Some(0), None, [1, 0]),
+        ] {
+            let host = NativeHost::new(JobOptions {
+                input_url: "https://images.test/image.dzi".into(),
+                output: OutputTarget::AutoImageDir {
+                    dir: std::env::temp_dir(),
+                },
+                image_index,
+                largest,
+                max_width,
+                max_height,
+                zoom_level,
+                ..Default::default()
+            })
+            .unwrap();
+            host.transport.block_on(async {
+                let catalog = Catalog {
+                    entries: vec![
+                        CatalogEntry::ImageRequest(ImageRequest {
+                            title: None,
+                            uri: "info.json".into(),
+                        }),
+                        CatalogEntry::Image(image.clone()),
+                    ],
+                };
+                assert_eq!(
+                    host.choose_image(catalog).await.unwrap(),
+                    image_index.unwrap_or(0).min(1) as u32
+                );
+                assert_eq!(host.choose_level(image.clone()).await.unwrap(), expected[0]);
+                let mut unknown = image.clone();
+                for level in &mut unknown.levels {
+                    level.size = None;
+                }
+                assert_eq!(host.choose_level(unknown).await.unwrap(), expected[1]);
+            });
+        }
+    }
 
     #[test]
     fn decoded_metadata_stays_budgeted_before_placement() {

@@ -22,11 +22,13 @@ import type { DiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
 import { causeOf, isJobError, unknownDetail } from "../../shared-ui/src/failure.ts";
 import type { CanvasAssembly } from "./assembly.ts";
 import { originOfUrl } from "./fetch-primitives.ts";
+import type { SelectionLimits } from "./limits.ts";
 import type { TileDecoder } from "./tile-decode.ts";
 import type { TileImageLike } from "./tile-draw.ts";
 
 export interface BrowserHostDependencies {
   signal: AbortSignal;
+  selectionLimits: SelectionLimits;
   diagnostics?: DiagnosticRecorder;
   assembly: CanvasAssembly;
   decoder: TileDecoder;
@@ -56,6 +58,14 @@ export class BrowserHost implements Host {
   retryWaiting = false;
 
   constructor(deps: BrowserHostDependencies) {
+    if (
+      Object.values(deps.selectionLimits).some((limit) => !Number.isFinite(limit) || limit <= 0)
+    ) {
+      throw {
+        kind: "invalid-options",
+        detail: "canvas limits must be positive",
+      } satisfies JobError;
+    }
     this.deps = deps;
     this.signal = AbortSignal.any([deps.signal, this.resources.signal]);
   }
@@ -321,11 +331,36 @@ export class BrowserHost implements Host {
   }
 
   async chooseImage(catalog: Catalog): Promise<number> {
-    const index = catalog.entries.findIndex((entry) => entry.kind === "image");
-    return Math.max(0, index);
+    await this.checkpoint("cancellation");
+    let chosen = 0,
+      bestArea = -1;
+    catalog.entries.forEach((entry, index) => {
+      if (entry.kind !== "image") return;
+      const area = entry.levels.reduce(
+        (largest, level) =>
+          Math.max(largest, level.size ? level.size.width * level.size.height : 0),
+        0,
+      );
+      if (area >= bestArea) {
+        chosen = index;
+        bestArea = area;
+      }
+    });
+    return chosen;
   }
   async chooseLevel(image: Image): Promise<number> {
-    return Math.max(0, image.levels.length - 1);
+    await this.checkpoint("cancellation");
+    const { maxWidth, maxHeight, maxArea } = this.deps.selectionLimits;
+    const levels = image.levels.flatMap(({ size }, index) =>
+      size && size.width > 0 && size.height > 0
+        ? [{ index, size, area: size.width * size.height }]
+        : [],
+    );
+    levels.sort((a, b) => a.area - b.area);
+    const fitting = levels.filter(
+      ({ size, area }) => size.width <= maxWidth && size.height <= maxHeight && area <= maxArea,
+    );
+    return fitting.at(-1)?.index ?? levels[0]?.index ?? image.levels.length - 1;
   }
   private updatePauseGate(): void {
     if (this.paused || this.retryWaiting) {

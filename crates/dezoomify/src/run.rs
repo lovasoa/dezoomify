@@ -370,31 +370,7 @@ async fn select(
         if catalog.is_empty() {
             return Err(empty_plan());
         }
-        let index = match &options.selection {
-            SelectionPolicy::Interactive => {
-                host.choose_image(catalog.public_catalog()).await? as usize
-            }
-            SelectionPolicy::Automatic { image_index, .. } => (*image_index).min(catalog.len() - 1),
-            SelectionPolicy::Fitting { .. } => catalog
-                .entries()
-                .iter()
-                .enumerate()
-                .filter_map(|(index, entry)| match entry {
-                    DiscoveredEntry::Ready(image) => Some((
-                        index,
-                        image
-                            .levels
-                            .iter()
-                            .filter_map(|level| level.source.image_size())
-                            .map(|size| size.area())
-                            .max()
-                            .unwrap_or(0),
-                    )),
-                    _ => None,
-                })
-                .max_by_key(|(_, area)| *area)
-                .map_or(0, |(index, _)| index),
-        };
+        let index = host.choose_image(catalog.public_catalog()).await? as usize;
         let Some(entry) = catalog.into_entries().into_iter().nth(index) else {
             return Err(Error::InvalidState(
                 "image selection is out of range".to_string().into(),
@@ -412,12 +388,7 @@ async fn select(
                     discover(vec![JobInput::new(&resource.uri)], options, host, followed).await?;
             }
             DiscoveredEntry::Ready(image) => {
-                let level = match &options.selection {
-                    SelectionPolicy::Interactive => {
-                        host.choose_level((&image).into()).await? as usize
-                    }
-                    policy => select_level(&image, policy).ok_or_else(empty_plan)?,
-                };
+                let level = host.choose_level((&image).into()).await? as usize;
                 if level >= image.levels.len() {
                     return Err(Error::InvalidState(
                         "level selection is out of range".to_string().into(),
@@ -426,69 +397,6 @@ async fn select(
                 return Ok((image, level));
             }
         }
-    }
-}
-
-fn select_level(image: &core::ResolvedImage, policy: &SelectionPolicy) -> Option<usize> {
-    let levels = &image.levels;
-    match policy {
-        SelectionPolicy::Fitting {
-            max_width,
-            max_height,
-            max_area,
-        } => {
-            let sizes = || {
-                levels.iter().enumerate().filter_map(|(i, l)| {
-                    l.source
-                        .image_size()
-                        .filter(|s| s.x > 0 && s.y > 0)
-                        .map(|s| (i, s))
-                })
-            };
-            sizes()
-                .filter(|(_, s)| s.x <= *max_width && s.y <= *max_height && s.area() <= *max_area)
-                .max_by_key(|(_, s)| s.area())
-                .or_else(|| sizes().min_by_key(|(_, s)| s.area()))
-                .map(|(i, _)| i)
-                .or_else(|| levels.len().checked_sub(1))
-        }
-        SelectionPolicy::Automatic {
-            largest,
-            max_width,
-            max_height,
-            zoom_level,
-            ..
-        } => {
-            if let Some(level) = zoom_level {
-                return levels.len().checked_sub(1).map(|last| (*level).min(last));
-            }
-            if *largest || (max_width.is_none() && max_height.is_none()) {
-                return levels
-                    .iter()
-                    .enumerate()
-                    .max_by_key(|(_, l)| l.source.image_size().map_or(0, |size| size.area()))
-                    .map(|(i, _)| i);
-            }
-            levels
-                .iter()
-                .enumerate()
-                .filter(|(_, l)| {
-                    l.source.image_size().is_some_and(|s| {
-                        max_width.is_none_or(|cap| s.x > 0 && s.x <= cap)
-                            && max_height.is_none_or(|cap| s.y > 0 && s.y <= cap)
-                    })
-                })
-                .max_by_key(|(_, l)| l.source.image_size().map_or(0, |size| size.area()))
-                .map(|(i, _)| i)
-                .or_else(|| {
-                    levels
-                        .iter()
-                        .enumerate()
-                        .min_by_key(|(_, l)| l.source.image_size().map_or(u32::MAX, |s| s.x))
-                        .map(|(i, _)| i)
-                })
-        }
-        SelectionPolicy::Interactive => None,
     }
 }
 
@@ -667,17 +575,6 @@ fn validate(inputs: &[JobInput], options: &Options) -> Result<(), Error> {
     if options.max_concurrent > options.max_tiles {
         return Err(Error::InvalidOptions(
             "max_concurrent cannot exceed max_tiles".to_string().into(),
-        ));
-    }
-    if let SelectionPolicy::Fitting {
-        max_width,
-        max_height,
-        max_area,
-    } = options.selection
-        && (max_width == 0 || max_height == 0 || max_area == 0)
-    {
-        return Err(Error::InvalidOptions(
-            "canvas limits must be positive".to_string().into(),
         ));
     }
     if inputs.iter().any(|input| {

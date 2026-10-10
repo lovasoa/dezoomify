@@ -248,7 +248,11 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         update();
       });
       a.controller.signal.addEventListener("abort", () => approval.cancel(), { once: true });
+      const limits = maximum
+        ? MAXIMUM_SELECTION_LIMITS
+        : selectionLimitsFor(navigator as unknown as ClientHints);
       a.host = new BrowserHost({
+        selectionLimits: limits,
         signal: a.controller.signal,
         diagnostics: a.diagnostics,
         assembly,
@@ -266,19 +270,10 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         transport: () => capabilities.transport(),
         approveRetry: (request) => approval.acquire(request),
       });
-      const limits = maximum
-        ? MAXIMUM_SELECTION_LIMITS
-        : selectionLimitsFor(navigator as unknown as ClientHints);
       const output = await wasm.dezoomify(
         inputs,
         {
           format: undefined,
-          selection: {
-            kind: "fitting",
-            max_width: limits.maxWidth,
-            max_height: limits.maxHeight,
-            max_area: limits.maxArea,
-          },
           interactive_retries: true,
           output: "png",
           max_concurrent: BROWSER_MAX_CONCURRENCY,
