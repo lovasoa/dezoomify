@@ -30,7 +30,7 @@ export function trimTechnical(text: string, max = 2000): string {
 export function displaySourceUrl(value: string): string {
   try {
     const url = new URL(value);
-    return truncateMiddle(`${url.host}${url.pathname}`, 90);
+    return truncateMiddle(`${url.host}${url.pathname}${url.search}${url.hash}`, 90);
   } catch {
     return "source unavailable";
   }

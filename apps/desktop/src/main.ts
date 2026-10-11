@@ -681,6 +681,7 @@ function update() {
     },
     {
       diagnosticReport: attempt.diagnostics.report(),
+      sourceUrl: attempt.progress?.source_url ?? attempt.lastInputUrl,
       ...(presentation.phase === "completed" ? { outputKey: attempt.activeHandle?.id } : {}),
       ...(currentAttempt.viewCtx.jobActivity
         ? { jobActivity: currentAttempt.viewCtx.jobActivity }

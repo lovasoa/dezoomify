@@ -230,6 +230,7 @@ interface JobDerived {
   step: string;
   detail?: string;
   sourceUrl: string;
+  sourceTitle: string;
   timeText: string;
   countsText: string;
   determinate: boolean;
@@ -275,7 +276,8 @@ function deriveJob(presentation: Presentation, ctx?: ViewContext): JobDerived {
       : showStalled
         ? t("view.job.waiting", { host: hostFromUrl(activity.url) })
         : t(presentation.headlineKey, presentation.headlineVars);
-  const sourceUrl = activity.url ? displaySourceUrl(activity.url) : "";
+  const sourceTitle = ctx?.sourceUrl ?? activity.url ?? "";
+  const sourceUrl = sourceTitle ? displaySourceUrl(sourceTitle) : "";
   const estimatedTotalMs = preparing
     ? undefined
     : (ctx?.currentProgress?.estimatedTotalMs ??
@@ -300,6 +302,7 @@ function deriveJob(presentation: Presentation, ctx?: ViewContext): JobDerived {
     step,
     ...(detail ? { detail } : {}),
     sourceUrl,
+    sourceTitle,
     timeText,
     countsText,
     determinate,
@@ -352,7 +355,7 @@ function JobView({
         className="dz-job-source-row"
         id="dz-job-source-line"
         style={{ display: d.sourceUrl ? "" : "none" }}
-        title={d.sourceUrl}
+        title={d.sourceTitle}
       >
         <span className="dz-job-source-label">{t("view.job.sourceLabel")}</span>
         <span className="dz-source-url" id="dz-job-source-url">

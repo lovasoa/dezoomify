@@ -412,6 +412,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       callbacks,
       {
         ...(a ? { ...a.view, diagnosticReport: report } : { initialUrl }),
+        sourceUrl: a?.progress?.source_url ?? a?.url,
         desktopSourceUrl: a?.progress?.source_url ?? a?.url,
         product: options.product,
         history: history.entries(),

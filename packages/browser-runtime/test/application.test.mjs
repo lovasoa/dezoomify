@@ -97,6 +97,7 @@ test("desktop handoff keeps the discovered source through completion and resets 
   const h = harness();
   act(() => h.app.submit("https://museum.test/page"));
   await tick();
+  assert.equal(h.root.querySelector("#dz-job-source-line").title, "https://museum.test/page");
   const discovered = "https://image.test/selected/info.json?signature=exact%2Bvalue";
   act(() => {
     h.calls[0].host.report({
@@ -104,6 +105,14 @@ test("desktop handoff keeps the discovered source through completion and resets 
       source_url: discovered,
       maximum: { width: 512, height: 512 },
     });
+  });
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  assert.equal(h.root.querySelector("#dz-job-source-line").title, discovered);
+  assert.equal(
+    h.root.querySelector("#dz-job-source-url").textContent,
+    "image.test/selected/info.json?signature=exact%2Bvalue",
+  );
+  act(() => {
     h.calls[0].resolve(output);
   });
   await tick();
@@ -112,6 +121,7 @@ test("desktop handoff keeps the discovered source through completion and resets 
   click(document.querySelector(".dz-modal-close"));
   act(() => h.app.submit("https://museum.test/next"));
   await tick();
+  assert.equal(h.root.querySelector("#dz-job-source-line").title, "https://museum.test/next");
   act(() => {
     h.calls[1].host.report({ ...progress, maximum: { width: 512, height: 512 } });
     h.calls[1].resolve(output);
