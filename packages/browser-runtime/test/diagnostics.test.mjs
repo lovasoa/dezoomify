@@ -84,3 +84,90 @@ test("clipboard rejection propagates instead of claiming a successful copy", asy
     else delete globalThis.navigator;
   }
 });
+
+test("wide reports prioritize exact sources and retain differing facts without repeating inferred ones", () => {
+  const canonical = "https://image.test/info.json?sig=exact%2Bvalue";
+  const d = createDiagnosticRecorder({
+    id: "wide",
+    now: () => 42,
+    context: {
+      input: "https://museum.test/page",
+      product: "website",
+      version: "test",
+      user_agent: "Firefox (Linux x86_64)",
+      platform: "Linux x86_64",
+      presented_phase: "completed",
+      presented_error: "",
+    },
+  });
+  d.observe({
+    phase: "acquisition",
+    completed: 2,
+    total: 2,
+    source_url: canonical,
+    source_format: "iiif",
+    selected: { width: 20, height: 10 },
+    maximum: { width: 20, height: 10 },
+  });
+  d.context({
+    canvas: { width: 20, height: 10 },
+    canvas_bytes: 800,
+    canvas_limits: { maxWidth: 32768, maxHeight: 32768 },
+    unusual: { detail: "keep me" },
+  });
+  d.record("info", "request", {
+    url: canonical,
+    final_url: canonical,
+    http: 200,
+    "error.stack": "",
+  });
+  d.record("debug", "tile-geometry", { canvas: { width: 20, height: 10 }, decoded_width: 7 });
+  d.record("warn", "request", {
+    url: "https://image.test/old",
+    final_url: canonical,
+    http: 403,
+    preview: "blocked",
+  });
+  d.finish("completed", {
+    canvas: { width: 20, height: 10 },
+    format: "png",
+    disposition: "browser-save-ready",
+  });
+  const report = d.report();
+  const before = structuredClone(report);
+  const text = formatDiagnosticReport(report);
+  assert.ok(text.startsWith("Outcome:"));
+  assert.ok(text.indexOf(`canonical: ${canonical}`) < text.indexOf("Problem"));
+  assert.ok(text.indexOf("Problem") < text.indexOf("Counts:"));
+  assert.ok(text.indexOf("Runtime:") > text.indexOf("Timeline"));
+  assert.match(text, /Counts: tiles_completed=2 tiles_total=2/);
+  assert.match(text, /canvas_limits: maxWidth=32768 maxHeight=32768/);
+  assert.match(text, /unusual: detail=keep me/);
+  assert.equal(text.match(/http=403/g).length, 1);
+  assert.equal(text.match(/completed canvas.width=20 canvas.height=10/g).length, 1);
+  assert.equal(text.match(/canvas.width=20/g).length, 1);
+  assert.match(text, /tile-geometry decoded_width=7/);
+  assert.equal(text.match(/final_url=/g).length, 1, "only real redirects remain");
+  assert.ok(
+    !/presented_phase|presented_error|canvas_bytes|platform=|selection:|maximum:|error.stack=/.test(
+      text,
+    ),
+  );
+  assert.match(text, /phase acquisition/);
+  assert.deepEqual(report, before, "formatting preserves structured evidence");
+  report.context.input = canonical;
+  assert.ok(
+    !formatDiagnosticReport(report).includes("\ninput:"),
+    "identical input is inferred from canonical",
+  );
+  report.context["maximum.width"] = 40;
+  report.context["maximum.height"] = 20;
+  report.context.canvas_bytes = 900;
+  report.context.platform = "different platform";
+  assert.match(formatDiagnosticReport(report), /maximum: width=40 height=20/);
+  assert.match(formatDiagnosticReport(report), /canvas_bytes=900/);
+  assert.match(formatDiagnosticReport(report), /platform=different platform/);
+  const failed = createDiagnosticRecorder({ id: "failed", now: () => 0 });
+  failed.finish("failed", { kind: "canvas-too-large", detail: "unique terminal cause" });
+  assert.equal(formatDiagnosticReport(failed.report()).match(/unique terminal cause/g).length, 1);
+});

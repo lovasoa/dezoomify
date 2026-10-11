@@ -1457,9 +1457,10 @@ abbr[title] {
   font-size: 0.84rem;
   line-height: 1.6;
   padding: 0.9rem 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  white-space: pre;
+  overflow-x: auto;
+  overflow-wrap: normal;
+  word-break: normal;
   color: var(--dz-text-secondary);
   margin: 0.5rem 0;
 }
