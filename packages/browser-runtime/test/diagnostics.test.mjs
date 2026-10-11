@@ -100,6 +100,8 @@ test("wide reports prioritize exact sources and retain differing facts without r
       presented_error: "",
     },
   });
+  d.observe({ phase: "planning", completed: 0, source_url: canonical, source_format: "iiif" });
+  assert.equal(d.report().context.canonical, canonical, "source is known before dimensions");
   d.observe({
     phase: "acquisition",
     completed: 2,

@@ -37,10 +37,6 @@ fn diagnostic_budget_protects_problem_samples_and_terminal() {
     d.observe(&dezoomify::model::Progress {
         source_url: Some("https://images.test/info.json?sig=exact%2Bvalue".into()),
         source_format: Some("iiif".into()),
-        selected: Some(dezoomify::model::Size {
-            width: 20,
-            height: 10,
-        }),
         ..Default::default()
     });
     d.record(

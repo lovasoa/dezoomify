@@ -293,7 +293,11 @@ export function createDiagnosticRecorder(options: {
     state.context = Object.fromEntries(Object.entries(merged).slice(0, 128));
   }
   function observe(progress: Progress): void {
-    context({ phase: progress.phase });
+    context({
+      phase: progress.phase,
+      canonical: progress.source_url,
+      format: progress.source_format,
+    });
     state.counters.tiles_completed = progress.completed;
     if (progress.total != null) state.counters.tiles_total = progress.total;
     if (phase !== progress.phase) {
@@ -305,8 +309,6 @@ export function createDiagnosticRecorder(options: {
         selection: progress.selected,
         maximum: progress.maximum,
         title: progress.title,
-        format: progress.source_format,
-        canonical: progress.source_url,
       });
   }
   function finish(event: string, fields?: unknown): void {
