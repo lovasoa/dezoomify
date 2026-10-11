@@ -75,8 +75,17 @@ test("webapp discovers, downloads, assembles, and saves a real DZI pyramid", asy
   await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 60000 });
   await expect(page.locator(".dz-completed-section")).toContainText(/512/);
   const report = await page.locator("#dz-job-diagnostics").textContent();
-  assert.match(report, /presented_phase: completed/);
-  assert.match(report, /first_tile.url: .*pyramid_files/);
+  assert.match(report, /^Outcome: .*completed/);
+  assert.ok(report.includes(`canonical: ${url}`));
+  assert.match(report, /first_tile: url=.*pyramid_files/);
+  await page.locator(".dz-details > summary").click();
+  const layout = await page.locator("#dz-job-diagnostics").evaluate((element) => ({
+    whiteSpace: getComputedStyle(element).whiteSpace,
+    horizontallyScrollable: element.scrollWidth > element.clientWidth,
+  }));
+  assert.equal(layout.whiteSpace, "pre");
+  assert.ok(layout.horizontallyScrollable, "wide diagnostics scroll without wrapping");
+  await page.locator(".dz-details > summary").click();
   // Tiles paint live during acquisition, so the assembled
   // picture stays visible next to the save button on the clean path too.
   await expect(canvas).toBeVisible();
