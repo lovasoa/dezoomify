@@ -290,6 +290,7 @@ impl Diagnostics {
                 json!({"phase": progress.phase}),
             );
         }
+        self.context(json!({"canonical": progress.source_url, "format": progress.source_format}));
         if progress.selected.is_some() {
             self.context(json!({"selection": {"title": progress.title, "size": progress.selected, "maximum": progress.maximum}}));
         }

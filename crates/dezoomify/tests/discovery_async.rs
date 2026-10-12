@@ -49,8 +49,149 @@ fn response(text: &str) -> ResourceRead {
 }
 fn selected(catalog: DiscoveryCatalog) -> String {
     match &catalog.entries()[0] {
-        DiscoveredEntry::Ready(image) => image.title.clone().unwrap(),
+        DiscoveredEntry::Ready(image) => {
+            if image
+                .title
+                .as_deref()
+                .is_some_and(|title| title.starts_with("https://test/"))
+            {
+                assert_eq!(
+                    image.source_url, image.title,
+                    "canonical URL belongs to the winning branch"
+                );
+            }
+            image.title.clone().unwrap()
+        }
         _ => panic!("ready image"),
+    }
+}
+
+#[test]
+fn decoding_defaults_to_the_final_target_through_decoder_bound_references() {
+    fn page(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+        Ok(resource.follow_relative("metadata").decode_with(metadata))
+    }
+    fn metadata(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+        Ok(resource
+            .follow_relative("image?token=exact%2Fvalue&size=full")
+            .decode_with(catalog))
+    }
+    const SPEC: FormatSpec =
+        FormatSpec::new("default", &[viewer(url_suffix("/root")).decode(page)]);
+    let mut registry = core::Registry::new();
+    registry.register(SPEC);
+    let result = futures::executor::block_on(registry.discover(
+        vec![DiscoveryInput::new("https://test/root")],
+        Default::default(),
+        |request, _| async move {
+            Ok(ResourceRead::Response {
+                response: ResourceResponse {
+                    bytes: request.uri.as_bytes().to_vec(),
+                    final_uri: request.uri.contains("/image?").then(|| {
+                        "https://redirect.test/image?token=exact%2Fvalue&size=full".into()
+                    }),
+                },
+            })
+        },
+        support::parse_html,
+    ))
+    .unwrap();
+    assert_eq!(
+        support::ready_image(result).source_url.as_deref(),
+        Some("https://redirect.test/image?token=exact%2Fvalue&size=full")
+    );
+}
+
+#[test]
+fn intermediate_decoding_retains_the_default_page_source() {
+    fn page(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+        Ok(resource
+            .follow_relative("auxiliary")
+            .decode_intermediate_with(contextual_image))
+    }
+    fn contextual_image(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+        let page =
+            resource.context().resources().next().ok_or_else(|| {
+                DiscoveryError::InvalidMetadata("page context is required".into())
+            })?;
+        assert_eq!(page.uri(), "https://test/root");
+        catalog(resource)
+    }
+    const ROUTE: core::DiscoveryRoute = viewer(url_suffix("/root")).decode(page);
+    const UNMARKED: FormatSpec = FormatSpec::new("context", &[ROUTE.non_canonical()]);
+    const DEFAULT: FormatSpec = FormatSpec::new("context", &[ROUTE]);
+    const BOUND: FormatSpec = FormatSpec::new(
+        "context",
+        &[viewer(url_suffix("/root"))
+            .decode(|resource| Ok(resource.follow_relative("auxiliary")))
+            .then_decode_intermediate(contextual_image)],
+    );
+    const ROUTED: FormatSpec = FormatSpec::new(
+        "context",
+        &[
+            viewer(url_suffix("/root"))
+                .decode(|resource| Ok(resource.follow_relative("auxiliary"))),
+            viewer(url_suffix("/auxiliary"))
+                .decode(contextual_image)
+                .non_canonical(),
+        ],
+    );
+    for (spec, expected) in [
+        (UNMARKED, None),
+        (DEFAULT, Some("https://test/root")),
+        (BOUND, Some("https://test/root")),
+        (ROUTED, Some("https://test/root")),
+    ] {
+        let mut registry = core::Registry::new();
+        registry.register(spec);
+        let result = futures::executor::block_on(registry.discover(
+            vec![DiscoveryInput::new("https://test/root")],
+            Default::default(),
+            |_, _| async { Ok(response("image")) },
+            support::parse_html,
+        ))
+        .unwrap();
+        let [DiscoveredEntry::Ready(image)] = result.entries() else {
+            panic!("ready image")
+        };
+        assert_eq!(image.source_url.as_deref(), expected);
+    }
+}
+#[test]
+fn a_successful_fetch_with_rejected_metadata_cannot_set_the_winners_source() {
+    fn rejected(_: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+        Err(DiscoveryError::InvalidMetadata("not an image".into()))
+    }
+    const REJECTED: FormatSpec = FormatSpec::new(
+        "rejected",
+        &[viewer(url_suffix("/root"))
+            .resolve_metadata(|_| Ok(Request::new("https://test/a")))
+            .then_decode(rejected)],
+    );
+    const UNMARKED: FormatSpec = FormatSpec::new(
+        "unmarked",
+        &[viewer(url_suffix("/root"))
+            .resolve_metadata(|_| Ok(Request::new("https://test/b")))
+            .then_decode_intermediate(catalog)
+            .non_canonical()],
+    );
+    for marked in [false, true] {
+        let mut registry = core::Registry::new();
+        registry.register(REJECTED);
+        registry.register(if marked { SECOND } else { UNMARKED });
+        let result = futures::executor::block_on(registry.discover(
+            vec![DiscoveryInput::new("https://test/root")],
+            Default::default(),
+            |request, _| async move { Ok(response(&request.uri)) },
+            support::parse_html,
+        ))
+        .unwrap();
+        let image = support::ready_image(result);
+        assert_eq!(image.title.as_deref(), Some("https://test/b"));
+        assert_eq!(
+            image.source_url.as_deref(),
+            marked.then_some("https://test/b")
+        );
     }
 }
 #[test]

@@ -130,14 +130,25 @@ export const fr = {
   "view.display.deskDescClean":
     "Pour un enregistrement propre en pleine taille quand le navigateur peut seulement montrer l’image.",
   "view.display.startOver": "Recommencer",
-  "view.resolution.title": "Image trop grande pour ce navigateur",
-  "view.resolution.notice":
-    "Le téléchargement ne se fait pas à la résolution maximale à cause des limites du navigateur. Essayez l’application de bureau pour supprimer les limites du navigateur.",
+  "view.resolution.title": "Image de résolution réduite",
   "view.resolution.sizes":
-    "Enregistrement en {selected} pixels au lieu du maximum {maximum} pixels.",
-  "view.resolution.download": "Télécharger l’application de bureau",
-  "view.resolution.tryMaximum": "Essayer le maximum",
-  "view.resolution.stop": "Arrêter",
+    "Taille de l’image : {selected} pixels. Maximum disponible : {maximum} pixels.",
+  "view.resolution.download": "Obtenir la résolution maximale avec l’application de bureau",
+  "view.desktop.handoffTitle": "Télécharger cette image dans l’application de bureau",
+  "view.desktop.handoffDownload": "Télécharger l’application de bureau",
+  "view.desktop.handoffInstall":
+    "Choisissez l’installeur pour votre système, puis ouvrez Dezoomify.",
+  "view.desktop.handoffPaste": "Collez cette URL dans le champ URL de l’application de bureau :",
+  "view.desktop.handoffCopy": "Copier l’URL",
+  "view.desktop.handoffCopied": "URL copiée. Collez-la dans l’application de bureau.",
+  "view.desktop.handoffCopyFailed":
+    "Copie impossible. Sélectionnez l’URL ci-dessus et copiez-la manuellement.",
+  "view.desktop.handoffStart":
+    "Lancez le téléchargement et choisissez la plus grande résolution. Si plusieurs images apparaissent, choisissez celle souhaitée.",
+  "view.desktop.handoffAccess":
+    "L’application de bureau ne partage pas la session de connexion du navigateur. Cette URL doit être accessible depuis l’application.",
+  "view.desktop.handoffUnavailable":
+    "Aucune URL source réutilisable n’est disponible pour cette tâche. Ouvrez la page d’origine et cherchez l’URL de l’image zoomable ou du manifeste à coller dans l’application.",
   // Completion section.
   "view.done.ready": "Votre image est prête.",
   "view.done.readyTitle": "Prêt à enregistrer",

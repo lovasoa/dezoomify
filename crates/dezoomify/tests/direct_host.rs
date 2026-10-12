@@ -93,6 +93,9 @@ fn full_output_uses_lazy_geometry_and_honest_disposition() {
     assert_eq!(host.peak.get(), 4);
     assert_eq!(host.settled.get(), 1);
     assert_eq!(host.outputs.borrow().len(), 1);
+    assert!(host.progress.borrow().iter().any(|progress| {
+        progress.source_url.as_deref() == Some("https://images.test/image.dzi")
+    }));
     assert_eq!(
         host.acquired.borrow()[3].placement.position,
         Point { x: 256, y: 256 }
@@ -718,6 +721,9 @@ fn host_selection_follows_catalog_entries_and_rejects_cycles() {
         CatalogEntry::ImageRequest(_)
     ));
     assert!(matches!(catalogs[1].entries[0], CatalogEntry::Image(_)));
+    assert!(host.progress.borrow().iter().filter(|progress| progress.selected.is_some()).all(
+        |progress| progress.source_url.as_deref() == Some("https://images.test/image.dzi")
+    ));
     assert_eq!(
         host.fetched
             .borrow()

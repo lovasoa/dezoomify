@@ -76,15 +76,39 @@ pub enum ParsedResource {
     Follow(Request),
     /// A reference whose decoder is known by the resource that produced it.
     FollowWith(Request, Decoder),
+    /// Decode an auxiliary resource which needs earlier discovery context.
+    FollowIntermediate(Request, Decoder),
     Image(ImagePlan),
     Catalog(CatalogPlan),
     Complete(DiscoveryCatalog),
+    /// A format route designated this entry point as reusable.
+    #[doc(hidden)]
+    CanonicalSource {
+        uri: String,
+        parsed: Box<Self>,
+    },
 }
 impl ParsedResource {
     /// Attach a decoder to an unresolved reference; preserve other results.
     pub fn decode_with(self, decoder: Decoder) -> Self {
         match self {
             Self::Follow(request) => Self::FollowWith(request, decoder),
+            Self::CanonicalSource { uri, parsed } => Self::CanonicalSource {
+                uri,
+                parsed: Box::new(parsed.decode_with(decoder)),
+            },
+            parsed => parsed,
+        }
+    }
+
+    /// Attach a context-dependent decoder without making its resource canonical.
+    pub fn decode_intermediate_with(self, decoder: Decoder) -> Self {
+        match self {
+            Self::Follow(request) => Self::FollowIntermediate(request, decoder),
+            Self::CanonicalSource { uri, parsed } => Self::CanonicalSource {
+                uri,
+                parsed: Box::new(parsed.decode_intermediate_with(decoder)),
+            },
             parsed => parsed,
         }
     }
@@ -94,9 +118,12 @@ impl ParsedResource {
             Self::Image(plan) => plan.compile(format),
             Self::Catalog(plan) => plan.compile(format),
             Self::Complete(catalog) => Ok(catalog),
-            Self::Follow(_) | Self::FollowWith(..) => Err(DiscoveryError::InvalidMetadata(
-                "a metadata reference has no image plan".into(),
-            )),
+            Self::CanonicalSource { uri, parsed } => parsed
+                .compile(format)
+                .map(|catalog| catalog.with_source_url(&uri)),
+            Self::Follow(_) | Self::FollowWith(..) | Self::FollowIntermediate(..) => Err(
+                DiscoveryError::InvalidMetadata("a metadata reference has no image plan".into()),
+            ),
         }
     }
 }
@@ -348,6 +375,7 @@ pub const fn xml_metadata<T: Metadata>() -> DiscoveryRoute {
 }
 
 /// Semantic input pattern paired with a decoding or reference-resolution action.
+/// Decoding designates the matched resource as canonical unless opted out.
 pub struct RoutePattern {
     matcher: DiscoveryMatch,
     kind: RouteKind,
@@ -417,6 +445,8 @@ impl RoutePattern {
             handler,
             kind: self.kind,
             followed_decoder: None,
+            followed_intermediate: false,
+            canonical: true,
         }
     }
 }
@@ -427,6 +457,8 @@ pub struct DiscoveryRoute {
     handler: RouteAction,
     kind: RouteKind,
     followed_decoder: Option<Decoder>,
+    followed_intermediate: bool,
+    canonical: bool,
 }
 
 impl DiscoveryRoute {
@@ -437,6 +469,8 @@ impl DiscoveryRoute {
             kind: RouteKind::Viewer,
             handler: RouteAction::RegexLink(regex, template, None),
             followed_decoder: None,
+            followed_intermediate: false,
+            canonical: true,
         }
     }
 
@@ -444,13 +478,40 @@ impl DiscoveryRoute {
     #[must_use]
     pub const fn then_decode(mut self, decoder: Decoder) -> Self {
         self.followed_decoder = Some(decoder);
+        self.followed_intermediate = false;
         self
     }
 
-    fn followed(self, parsed: ParsedResource) -> ParsedResource {
-        match self.followed_decoder {
+    /// Decode an auxiliary target while retaining the preceding canonical source.
+    #[must_use]
+    pub const fn then_decode_intermediate(mut self, decoder: Decoder) -> Self {
+        self.followed_decoder = Some(decoder);
+        self.followed_intermediate = true;
+        self
+    }
+
+    /// Preserve the preceding canonical URL rather than designating this route's
+    /// resource. Use for intermediate resources which cannot
+    /// independently reconstruct the image or catalog.
+    #[must_use]
+    pub const fn non_canonical(mut self) -> Self {
+        self.canonical = false;
+        self
+    }
+
+    fn followed(self, parsed: ParsedResource, current_uri: &str) -> ParsedResource {
+        let parsed = match self.followed_decoder {
+            Some(decoder) if self.followed_intermediate => parsed.decode_intermediate_with(decoder),
             Some(decoder) => parsed.decode_with(decoder),
             None => parsed,
+        };
+        if self.canonical {
+            ParsedResource::CanonicalSource {
+                uri: current_uri.to_owned(),
+                parsed: Box::new(parsed),
+            }
+        } else {
+            parsed
         }
     }
 }
@@ -540,7 +601,7 @@ fn parse_resource(
             }
             RouteAction::MapUrl(_) | RouteAction::Plan(_) => continue,
         }
-        .map(|parsed| route.followed(parsed));
+        .map(|parsed| route.followed(parsed, resource.final_uri()));
     }
     Err(DiscoveryError::rejected(
         RejectionKind::DidNotMatchContent,
@@ -620,11 +681,13 @@ impl FormatSpec {
             }
             match route.handler {
                 RouteAction::MapUrl(mapper) => {
-                    return mapper(&request.uri)
-                        .map(|request| route.followed(ParsedResource::Follow(request)));
+                    return mapper(&request.uri).map(|target| {
+                        route.followed(ParsedResource::Follow(target), &request.uri)
+                    });
                 }
                 RouteAction::Plan(decode) => {
-                    return decode(&request.uri).map(ParsedResource::Image);
+                    return decode(&request.uri)
+                        .map(|image| route.followed(ParsedResource::Image(image), &request.uri));
                 }
                 _ => {}
             }
@@ -1036,17 +1099,33 @@ where
     ) -> Result<Option<(usize, DiscoveryCatalog)>, DiscoveryError> {
         let mut history = Vec::new();
         let mut parsed = ParsedResource::Follow(Request::new(uri));
+        let mut canonical_uri = None;
         loop {
+            while let ParsedResource::CanonicalSource { uri, parsed: inner } = parsed {
+                canonical_uri = Some(uri);
+                parsed = *inner;
+            }
             if let ParsedResource::Follow(request) = parsed {
                 parsed = spec.follow(request)?;
             }
-            let (request, decoder) = match parsed {
-                ParsedResource::Follow(request) => (request, None),
-                ParsedResource::FollowWith(request, decoder) => (request, Some(decoder)),
+            while let ParsedResource::CanonicalSource { uri, parsed: inner } = parsed {
+                canonical_uri = Some(uri);
+                parsed = *inner;
+            }
+            let (request, decoder, canonical) = match parsed {
+                ParsedResource::Follow(request) => (request, None, false),
+                ParsedResource::FollowWith(request, decoder) => (request, Some(decoder), true),
+                ParsedResource::FollowIntermediate(request, decoder) => {
+                    (request, Some(decoder), false)
+                }
                 parsed => {
-                    return parsed
-                        .compile(spec.name)
-                        .map(|catalog| Some((history.len(), catalog)));
+                    return parsed.compile(spec.name).map(|catalog| {
+                        let catalog = match canonical_uri {
+                            Some(uri) => catalog.with_source_url(&uri),
+                            None => catalog,
+                        };
+                        Some((history.len(), catalog))
+                    });
                 }
             };
             if metadata_only && !self.supplied.contains_key(&request) {
@@ -1110,8 +1189,20 @@ where
                 context,
                 ..record.resource().expect("read response")
             };
+            if canonical_uri.as_deref() == Some(request.uri.as_str()) {
+                canonical_uri = Some(resource.final_uri().to_owned());
+            }
             parsed = match decoder {
-                Some(decode) => decode(resource),
+                Some(decode) => decode(resource).map(|parsed| {
+                    if canonical {
+                        ParsedResource::CanonicalSource {
+                            uri: resource.final_uri().to_owned(),
+                            parsed: Box::new(parsed),
+                        }
+                    } else {
+                        parsed
+                    }
+                }),
                 None => parse_resource(spec.routes, resource),
             }?;
             history.push(record);
@@ -1435,12 +1526,15 @@ mod tests {
             (xml_metadata::<Document>(), br#"<Image width="4"/>"#),
         ] {
             PARSES.store(0, Ordering::Relaxed);
-            let ParsedResource::Image(image) =
+            let catalog =
                 parse_resource(&[route], DiscoveryResource::new("memory://metadata", bytes))
                     .unwrap()
-            else {
+                    .compile("test")
+                    .unwrap();
+            let super::super::model::DiscoveredEntry::Ready(image) = &catalog.entries()[0] else {
                 panic!("expected an image")
             };
+            assert_eq!(image.source_url.as_deref(), Some("memory://metadata"));
             assert_eq!(
                 image.levels[0].source.image_size(),
                 Some(crate::Vec2d::square(4))

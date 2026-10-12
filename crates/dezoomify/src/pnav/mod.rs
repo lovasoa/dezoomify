@@ -48,7 +48,7 @@ fn extract_image_url(resource: DiscoveryResource<'_>) -> Option<String> {
 fn follow_image_json(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let image = extract_image_url(resource)
         .ok_or_else(|| DiscoveryError::InvalidMetadata("pnav page has no og:image URL".into()))?;
-    Ok(ParsedResource::FollowWith(
+    Ok(ParsedResource::FollowIntermediate(
         Request::new(json_url(&image)?),
         complete_from_json,
     ))

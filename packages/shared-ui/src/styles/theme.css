@@ -1457,9 +1457,10 @@ abbr[title] {
   font-size: 0.84rem;
   line-height: 1.6;
   padding: 0.9rem 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  white-space: pre;
+  overflow-x: auto;
+  overflow-wrap: normal;
+  word-break: normal;
   color: var(--dz-text-secondary);
   margin: 0.5rem 0;
 }
@@ -1897,6 +1898,27 @@ abbr[title] {
   flex-direction: column;
   gap: 0.75rem;
   margin: 0.75rem 0;
+}
+
+.dz-desktop-source {
+  min-width: 0;
+  flex: 1;
+}
+
+.dz-desktop-source .dz-input {
+  margin: 0.75rem 0;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--dz-font-mono);
+  font-size: 0.9rem;
+  padding-right: 1.15rem;
+  border-color: var(--dz-surface-border);
+}
+
+.dz-handoff-download,
+.dz-handoff-download:visited {
+  color: var(--dz-btn-text);
+  text-decoration: none;
 }
 
 .dz-modal-step {

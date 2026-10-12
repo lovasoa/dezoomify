@@ -126,6 +126,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       historyEntry: null as HistoryEntry | null,
       view: {
         sourceUrl: url,
+        offerDesktopApp: true,
         jobActivity: activity.state,
       } as ViewContext,
     };
@@ -371,9 +372,6 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       onRetrySameUrl: () => {
         if (a && current === a) void run(a.url);
       },
-      onTryMaximum: () => {
-        if (a && current === a) void run(a.url, true);
-      },
       onPause: () => {
         if (a && current === a) {
           a.host?.pause();
@@ -394,6 +392,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         a?.output && a.capabilities?.revealOutput ? a.capabilities.revealOutput : undefined,
       onOpenSource: options.openSource,
       onCopyDiagnostics: copyDiagnosticText,
+      onCopyText: copyDiagnosticText,
       onSaveDiagnostics: saveDiagnosticReport,
       onOpenExternalLink: (url: string) => {
         location.href = url;
@@ -413,6 +412,8 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       callbacks,
       {
         ...(a ? { ...a.view, diagnosticReport: report } : { initialUrl }),
+        sourceUrl: a?.progress?.source_url ?? a?.url,
+        desktopSourceUrl: a?.progress?.source_url ?? a?.url,
         product: options.product,
         history: history.entries(),
         historyNow: Date.now(),
