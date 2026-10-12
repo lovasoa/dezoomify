@@ -14,9 +14,7 @@ use crate::core::{
 use crate::web_page::page_title;
 
 const TILE_SIZE: u32 = 512;
-const ROUTES: &[DiscoveryRoute] = &[viewer(url_matches(is_pnav_url))
-    .decode(follow_image_json)
-    .canonical_source()];
+const ROUTES: &[DiscoveryRoute] = &[viewer(url_matches(is_pnav_url)).decode(follow_image_json)];
 
 pub const SPEC: FormatSpec = FormatSpec::new("pnav", ROUTES)
     .with_display_name("pnav")
@@ -50,7 +48,7 @@ fn extract_image_url(resource: DiscoveryResource<'_>) -> Option<String> {
 fn follow_image_json(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let image = extract_image_url(resource)
         .ok_or_else(|| DiscoveryError::InvalidMetadata("pnav page has no og:image URL".into()))?;
-    Ok(ParsedResource::FollowWith(
+    Ok(ParsedResource::FollowIntermediate(
         Request::new(json_url(&image)?),
         complete_from_json,
     ))

@@ -103,26 +103,47 @@ fn decoding_defaults_to_the_final_target_through_decoder_bound_references() {
 }
 
 #[test]
-fn a_context_dependent_decoder_can_designate_its_page_instead_of_its_last_fetch() {
-    fn page(_: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-        Ok(ParsedResource::FollowWith(
-            Request::new("https://test/auxiliary"),
-            contextual_image,
-        ))
+fn intermediate_decoding_retains_the_default_page_source() {
+    fn page(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+        Ok(resource
+            .follow_relative("auxiliary")
+            .decode_intermediate_with(contextual_image))
     }
     fn contextual_image(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-        assert_eq!(
-            resource.context().resources().next().unwrap().uri(),
-            "https://test/root"
-        );
+        let page =
+            resource.context().resources().next().ok_or_else(|| {
+                DiscoveryError::InvalidMetadata("page context is required".into())
+            })?;
+        assert_eq!(page.uri(), "https://test/root");
         catalog(resource)
     }
     const ROUTE: core::DiscoveryRoute = viewer(url_suffix("/root")).decode(page);
     const UNMARKED: FormatSpec = FormatSpec::new("context", &[ROUTE.non_canonical()]);
-    const MARKED: FormatSpec = FormatSpec::new("context", &[ROUTE.canonical_source()]);
-    for marked in [false, true] {
+    const DEFAULT: FormatSpec = FormatSpec::new("context", &[ROUTE]);
+    const BOUND: FormatSpec = FormatSpec::new(
+        "context",
+        &[viewer(url_suffix("/root"))
+            .decode(|resource| Ok(resource.follow_relative("auxiliary")))
+            .then_decode_intermediate(contextual_image)],
+    );
+    const ROUTED: FormatSpec = FormatSpec::new(
+        "context",
+        &[
+            viewer(url_suffix("/root"))
+                .decode(|resource| Ok(resource.follow_relative("auxiliary"))),
+            viewer(url_suffix("/auxiliary"))
+                .decode(contextual_image)
+                .non_canonical(),
+        ],
+    );
+    for (spec, expected) in [
+        (UNMARKED, None),
+        (DEFAULT, Some("https://test/root")),
+        (BOUND, Some("https://test/root")),
+        (ROUTED, Some("https://test/root")),
+    ] {
         let mut registry = core::Registry::new();
-        registry.register(if marked { MARKED } else { UNMARKED });
+        registry.register(spec);
         let result = futures::executor::block_on(registry.discover(
             vec![DiscoveryInput::new("https://test/root")],
             Default::default(),
@@ -133,10 +154,7 @@ fn a_context_dependent_decoder_can_designate_its_page_instead_of_its_last_fetch(
         let [DiscoveredEntry::Ready(image)] = result.entries() else {
             panic!("ready image")
         };
-        assert_eq!(
-            image.source_url.as_deref(),
-            marked.then_some("https://test/root")
-        );
+        assert_eq!(image.source_url.as_deref(), expected);
     }
 }
 #[test]
@@ -154,7 +172,7 @@ fn a_successful_fetch_with_rejected_metadata_cannot_set_the_winners_source() {
         "unmarked",
         &[viewer(url_suffix("/root"))
             .resolve_metadata(|_| Ok(Request::new("https://test/b")))
-            .then_decode(catalog)
+            .then_decode_intermediate(catalog)
             .non_canonical()],
     );
     for marked in [false, true] {

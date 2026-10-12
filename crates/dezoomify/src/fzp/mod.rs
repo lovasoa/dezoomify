@@ -40,9 +40,7 @@ use crate::core::{DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec,
 
 const ROUTES: &[DiscoveryRoute] = &[
     xml_metadata::<metadata::Document>(),
-    viewer_route(resource_matches(viewer::recognizes))
-        .decode(viewer::decode)
-        .canonical_source(),
+    viewer_route(resource_matches(viewer::recognizes)).decode(viewer::decode),
 ];
 pub const SPEC: FormatSpec = FormatSpec::new("fzp", ROUTES)
     .with_display_name("FreezoomPack")

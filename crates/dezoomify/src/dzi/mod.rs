@@ -38,9 +38,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     viewer(url_matches(is_nla_view_url))
         .resolve_metadata(nla_metadata)
         .then_decode(decode_catalog),
-    viewer(url_matches(is_polona_item_url))
-        .decode(follow_polona_json)
-        .canonical_source(),
+    viewer(url_matches(is_polona_item_url)).decode(follow_polona_json),
     metadata(url_matches(is_polona_json_url))
         .decode(follow_polona_dzi)
         .non_canonical(),
@@ -156,7 +154,7 @@ fn follow_polona_json(resource: DiscoveryResource<'_>) -> Result<ParsedResource,
         .and_then(|captures| captures.get(1))
         .map(|capture| capture.as_str().to_owned())
         .ok_or_else(|| DiscoveryError::InvalidMetadata("Polona item URL has no id".into()))?;
-    Ok(ParsedResource::FollowWith(
+    Ok(ParsedResource::FollowIntermediate(
         Request::new(format!("http://polona.pl/resources/item/{id}/?format=json")),
         follow_polona_dzi,
     ))

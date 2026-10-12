@@ -4,11 +4,11 @@ Implement a pure parser and tile plan in `crates/dezoomify`, then register its
 stable id in `core/registry.rs`. Parsing uses supplied bytes and injected Host
 capabilities, per [Architecture](architecture.md).
 
-Routes designate the forwarded target as canonical by default, or the matched
-resource when decoding returns an image or catalog directly. That URL must be
-able to reconstruct the image or catalog on its own. Use `non_canonical()` for
-intermediate resources which need earlier context, or `canonical_source()` when
-the matched page is needed by later decoders. Discovery preserves redirects and
+Decoding and metadata parsing designate the decoded resource as canonical by
+default. That URL must be able to reconstruct the image or catalog on its own.
+Use `non_canonical()` for intermediate routes, and `decode_intermediate_with()`
+or `then_decode_intermediate()` for decoder-bound targets needing earlier context.
+These opt-outs retain the preceding canonical source. Discovery preserves redirects and
 reports the selected image's canonical URL; browser handoff falls back to the
 entered URL when no route designates one.
 See [`DiscoveryRoute`](../crates/dezoomify/src/core/discovery.rs) for the contract.

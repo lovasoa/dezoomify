@@ -37,22 +37,12 @@ static HTML_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
 });
 
 const ROUTES: &[DiscoveryRoute] = &[
-    metadata(url_suffix("/tiles.xml"))
-        .decode(handle_xml)
-        .canonical_source(),
-    metadata(url_suffix("/tour.xml"))
-        .decode(handle_xml)
-        .canonical_source(),
-    metadata(any()).try_decode(try_xml).canonical_source(),
-    viewer(html_matches(&HTML_RE))
-        .decode(handle_html)
-        .canonical_source(),
-    viewer(js_matches(&VIEWER_JS_RE))
-        .decode(handle_viewer_js)
-        .canonical_source(),
-    viewer(url_matches(is_javascript_uri))
-        .decode(handle_viewer_js)
-        .canonical_source(),
+    metadata(url_suffix("/tiles.xml")).decode(handle_xml),
+    metadata(url_suffix("/tour.xml")).decode(handle_xml),
+    metadata(any()).try_decode(try_xml),
+    viewer(html_matches(&HTML_RE)).decode(handle_html),
+    viewer(js_matches(&VIEWER_JS_RE)).decode(handle_viewer_js),
+    viewer(url_matches(is_javascript_uri)).decode(handle_viewer_js),
 ];
 
 pub const SPEC: FormatSpec = FormatSpec::new("krpano", ROUTES)
@@ -68,7 +58,7 @@ fn handle_html(resource: DiscoveryResource<'_>) -> Result<ParsedResource, Discov
         .map(|reference| resolve_relative(resource.final_uri(), &reference))
         .or_else(|| extract_xml_from_embedpano(resource))
         .unwrap_or_else(|| sibling_uri(resource.final_uri(), "tour.xml"));
-    Ok(ParsedResource::FollowWith(
+    Ok(ParsedResource::FollowIntermediate(
         Request::new(xml_uri),
         handle_xml,
     ))
@@ -96,7 +86,7 @@ fn handle_xml(resource: DiscoveryResource<'_>) -> Result<ParsedResource, Discove
                 )))
             },
             |uri| {
-                Ok(ParsedResource::FollowWith(
+                Ok(ParsedResource::FollowIntermediate(
                     Request::new(uri),
                     handle_viewer_js,
                 ))
@@ -125,7 +115,7 @@ fn handle_viewer_js(resource: DiscoveryResource<'_>) -> Result<ParsedResource, D
                 "not krpano viewer JavaScript",
             ));
         }
-        return Ok(ParsedResource::FollowWith(
+        return Ok(ParsedResource::FollowIntermediate(
             Request::new(sibling_uri(resource.final_uri(), "tour.xml")),
             handle_xml,
         ));
@@ -141,7 +131,7 @@ fn handle_viewer_js(resource: DiscoveryResource<'_>) -> Result<ParsedResource, D
                 )))
             },
             |uri| {
-                Ok(ParsedResource::FollowWith(
+                Ok(ParsedResource::FollowIntermediate(
                     Request::new(uri),
                     handle_viewer_js,
                 ))
@@ -158,7 +148,7 @@ fn handle_failure(
     if let Some(xml) = find_xml(context)
         && let Some(uri) = next_viewer_after_failure(context, request.uri.as_str(), xml.final_uri())
     {
-        return Ok(ParsedResource::FollowWith(
+        return Ok(ParsedResource::FollowIntermediate(
             Request::new(uri),
             handle_viewer_js,
         ));

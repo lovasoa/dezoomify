@@ -12,9 +12,7 @@ pub(crate) mod decryption;
 mod tile_info;
 mod url;
 
-const ROUTES: &[DiscoveryRoute] = &[viewer(url_matches(is_google_arts_url))
-    .decode(parse_page)
-    .canonical_source()];
+const ROUTES: &[DiscoveryRoute] = &[viewer(url_matches(is_google_arts_url)).decode(parse_page)];
 
 pub const SPEC: FormatSpec =
     FormatSpec::new("google_arts_and_culture", ROUTES).with_display_name("Arts & Culture");
@@ -24,7 +22,7 @@ fn is_google_arts_url(uri: &str) -> bool {
 }
 
 fn parse_page(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-    Ok(ParsedResource::FollowWith(
+    Ok(ParsedResource::FollowIntermediate(
         Request::new(page_info(resource)?.tile_info_url()),
         parse_tile_information,
     ))
