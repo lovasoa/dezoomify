@@ -37,12 +37,22 @@ static HTML_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
 });
 
 const ROUTES: &[DiscoveryRoute] = &[
-    metadata(url_suffix("/tiles.xml")).decode(handle_xml),
-    metadata(url_suffix("/tour.xml")).decode(handle_xml),
-    metadata(any()).try_decode(try_xml),
-    viewer(html_matches(&HTML_RE)).decode(handle_html),
-    viewer(js_matches(&VIEWER_JS_RE)).decode(handle_viewer_js),
-    viewer(url_matches(is_javascript_uri)).decode(handle_viewer_js),
+    metadata(url_suffix("/tiles.xml"))
+        .decode(handle_xml)
+        .canonical_source(),
+    metadata(url_suffix("/tour.xml"))
+        .decode(handle_xml)
+        .canonical_source(),
+    metadata(any()).try_decode(try_xml).canonical_source(),
+    viewer(html_matches(&HTML_RE))
+        .decode(handle_html)
+        .canonical_source(),
+    viewer(js_matches(&VIEWER_JS_RE))
+        .decode(handle_viewer_js)
+        .canonical_source(),
+    viewer(url_matches(is_javascript_uri))
+        .decode(handle_viewer_js)
+        .canonical_source(),
 ];
 
 pub const SPEC: FormatSpec = FormatSpec::new("krpano", ROUTES)

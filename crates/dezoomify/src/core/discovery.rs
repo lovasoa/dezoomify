@@ -79,7 +79,7 @@ pub enum ParsedResource {
     Image(ImagePlan),
     Catalog(CatalogPlan),
     Complete(DiscoveryCatalog),
-    /// A format route explicitly designated this entry point as reusable.
+    /// A format route designated this entry point as reusable.
     #[doc(hidden)]
     CanonicalSource {
         uri: String,
@@ -361,6 +361,8 @@ pub const fn xml_metadata<T: Metadata>() -> DiscoveryRoute {
 }
 
 /// Semantic input pattern paired with a decoding or reference-resolution action.
+/// Routes designate their forwarded target (or the decoded resource for a direct
+/// image/catalog) as canonical unless explicitly overridden.
 pub struct RoutePattern {
     matcher: DiscoveryMatch,
     kind: RouteKind,
@@ -430,7 +432,7 @@ impl RoutePattern {
             handler,
             kind: self.kind,
             followed_decoder: None,
-            canonical: None,
+            canonical: Some(CanonicalSource::Decoded),
         }
     }
 }
@@ -446,8 +448,24 @@ pub struct DiscoveryRoute {
 
 #[derive(Clone, Copy, Debug)]
 enum CanonicalSource {
+    Decoded,
     Current,
-    Target,
+}
+
+impl CanonicalSource {
+    fn apply(self, parsed: ParsedResource, current_uri: &str) -> ParsedResource {
+        let uri = match (self, &parsed) {
+            (
+                Self::Decoded,
+                ParsedResource::Follow(request) | ParsedResource::FollowWith(request, _),
+            ) => request.uri.clone(),
+            _ => current_uri.to_owned(),
+        };
+        ParsedResource::CanonicalSource {
+            uri,
+            parsed: Box::new(parsed),
+        }
+    }
 }
 
 impl DiscoveryRoute {
@@ -458,7 +476,7 @@ impl DiscoveryRoute {
             kind: RouteKind::Viewer,
             handler: RouteAction::RegexLink(regex, template, None),
             followed_decoder: None,
-            canonical: None,
+            canonical: Some(CanonicalSource::Decoded),
         }
     }
 
@@ -477,11 +495,12 @@ impl DiscoveryRoute {
         self
     }
 
-    /// The forwarded target can independently resolve this image or catalog.
-    /// Do not mark targets which require context from an earlier resource.
+    /// Preserve the preceding canonical URL rather than designating this route's
+    /// resource or forwarded target. Use for intermediate resources which cannot
+    /// independently reconstruct the image or catalog.
     #[must_use]
-    pub const fn canonical_target(mut self) -> Self {
-        self.canonical = Some(CanonicalSource::Target);
+    pub const fn non_canonical(mut self) -> Self {
+        self.canonical = None;
         self
     }
 
@@ -490,21 +509,8 @@ impl DiscoveryRoute {
             Some(decoder) => parsed.decode_with(decoder),
             None => parsed,
         };
-        let uri = match self.canonical {
-            Some(CanonicalSource::Current) => Some(current_uri.to_owned()),
-            Some(CanonicalSource::Target) => match &parsed {
-                ParsedResource::Follow(request) | ParsedResource::FollowWith(request, _) => {
-                    Some(request.uri.clone())
-                }
-                _ => None,
-            },
-            None => None,
-        };
-        match uri {
-            Some(uri) => ParsedResource::CanonicalSource {
-                uri,
-                parsed: Box::new(parsed),
-            },
+        match self.canonical {
+            Some(canonical) => canonical.apply(parsed, current_uri),
             None => parsed,
         }
     }
@@ -1184,7 +1190,15 @@ where
                 canonical_uri = Some(resource.final_uri().to_owned());
             }
             parsed = match decoder {
-                Some(decode) => decode(resource),
+                Some(decode) => decode(resource).map(|parsed| {
+                    // Continue canonical discovery through decoder-bound references.
+                    // A route which retained an earlier page or opted out keeps it.
+                    if canonical_uri.as_deref() == Some(resource.final_uri()) {
+                        CanonicalSource::Decoded.apply(parsed, resource.final_uri())
+                    } else {
+                        parsed
+                    }
+                }),
                 None => parse_resource(spec.routes, resource),
             }?;
             history.push(record);
@@ -1508,12 +1522,15 @@ mod tests {
             (xml_metadata::<Document>(), br#"<Image width="4"/>"#),
         ] {
             PARSES.store(0, Ordering::Relaxed);
-            let ParsedResource::Image(image) =
+            let catalog =
                 parse_resource(&[route], DiscoveryResource::new("memory://metadata", bytes))
                     .unwrap()
-            else {
+                    .compile("test")
+                    .unwrap();
+            let super::super::model::DiscoveredEntry::Ready(image) = &catalog.entries()[0] else {
                 panic!("expected an image")
             };
+            assert_eq!(image.source_url.as_deref(), Some("memory://metadata"));
             assert_eq!(
                 image.levels[0].source.image_size(),
                 Some(crate::Vec2d::square(4))

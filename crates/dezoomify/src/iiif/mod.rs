@@ -62,39 +62,25 @@ const ROUTES: &[DiscoveryRoute] = &[
         .resolve_metadata(|uri| {
             Ok(image_request_info(uri).expect("route matched IIIF image request"))
         })
-        .then_decode(decode)
-        .canonical_target(),
+        .then_decode(decode),
     viewer(url_matches(has_manifest_parameter))
         .resolve_metadata(manifest_parameter)
-        .then_decode(decode)
-        .canonical_target(),
-    onb::ROUTE.then_decode(decode).canonical_target(),
+        .then_decode(decode),
+    onb::ROUTE.then_decode(decode),
     contentdm::RECORD_ROUTE.then_decode(contentdm::follow_info),
     contentdm::METADATA_ROUTE,
-    micrio::ROUTE.then_decode(decode).canonical_target(),
+    micrio::ROUTE.then_decode(decode),
     national_gallery::ROUTES[0],
     national_gallery::ROUTES[1],
-    philadelphia::ROUTE.then_decode(decode).canonical_target(),
-    metadata(url_suffix("/info.json"))
-        .decode(decode)
-        .canonical_source(),
-    metadata(url_suffix("/manifest.json"))
-        .decode(decode)
-        .canonical_source(),
-    json_metadata::<Document>().canonical_source(),
+    philadelphia::ROUTE.then_decode(decode),
+    metadata(url_suffix("/info.json")).decode(decode),
+    metadata(url_suffix("/manifest.json")).decode(decode),
+    json_metadata::<Document>(),
     metadata(any()).try_decode(embedded_metadata),
-    viewer(html_matches(&ABS_INFO_JSON_RE))
-        .decode(follow_info_json_url)
-        .canonical_target(),
-    viewer(html_matches(&REL_INFO_JSON_RE))
-        .decode(follow_info_json_url)
-        .canonical_target(),
-    viewer(js_matches(&ABS_INFO_JSON_RE))
-        .decode(follow_info_json_url)
-        .canonical_target(),
-    viewer(js_matches(&REL_INFO_JSON_RE))
-        .decode(follow_info_json_url)
-        .canonical_target(),
+    viewer(html_matches(&ABS_INFO_JSON_RE)).decode(follow_info_json_url),
+    viewer(html_matches(&REL_INFO_JSON_RE)).decode(follow_info_json_url),
+    viewer(js_matches(&ABS_INFO_JSON_RE)).decode(follow_info_json_url),
+    viewer(js_matches(&REL_INFO_JSON_RE)).decode(follow_info_json_url),
 ];
 
 /// IIIF format. See <https://iiif.io/>.

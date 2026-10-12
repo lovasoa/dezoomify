@@ -14,7 +14,9 @@ use crate::core::{
 use crate::web_page::page_title;
 
 const TILE_SIZE: u32 = 512;
-const ROUTES: &[DiscoveryRoute] = &[viewer(url_matches(is_pnav_url)).decode(follow_image_json)];
+const ROUTES: &[DiscoveryRoute] = &[viewer(url_matches(is_pnav_url))
+    .decode(follow_image_json)
+    .canonical_source()];
 
 pub const SPEC: FormatSpec = FormatSpec::new("pnav", ROUTES)
     .with_display_name("pnav")

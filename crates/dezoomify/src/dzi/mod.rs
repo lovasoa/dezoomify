@@ -31,36 +31,27 @@ static WDL_MARKER_RE: LazyLock<BytesRegex> =
 const ROUTES: &[DiscoveryRoute] = &[
     image_url(is_tile_url)
         .resolve_metadata(tile_metadata)
-        .then_decode(decode_catalog)
-        .canonical_target(),
+        .then_decode(decode_catalog),
     viewer(url_matches(is_bl_viewer_url))
         .resolve_metadata(bl_metadata)
-        .then_decode(decode_catalog)
-        .canonical_target(),
+        .then_decode(decode_catalog),
     viewer(url_matches(is_nla_view_url))
         .resolve_metadata(nla_metadata)
-        .then_decode(decode_catalog)
-        .canonical_target(),
-    viewer(url_matches(is_polona_item_url)).decode(follow_polona_json),
-    metadata(url_matches(is_polona_json_url)).decode(follow_polona_dzi),
-    paris::ARK_ROUTE,
-    paris::MANIFEST_ROUTE
-        .then_decode(decode_catalog)
-        .canonical_target(),
-    viewer(js_matches(&SEADRAGON_EMBED))
-        .decode(follow_seadragon_embed)
-        .canonical_target(),
-    viewer(js_matches(&WDL_MARKER_RE))
-        .decode(follow_wdl_template)
-        .canonical_target(),
-    DiscoveryRoute::regex_link(&DZI_LINK_RE, "$url"),
-    DiscoveryRoute::regex_link(&DZI_ATTR_RE, "$url")
-        .then_decode(decode_catalog)
-        .canonical_target(),
-    metadata(url_suffix(".dzi"))
-        .decode(decode_catalog)
+        .then_decode(decode_catalog),
+    viewer(url_matches(is_polona_item_url))
+        .decode(follow_polona_json)
         .canonical_source(),
-    xml_metadata::<DziFile>().canonical_source(),
+    metadata(url_matches(is_polona_json_url))
+        .decode(follow_polona_dzi)
+        .non_canonical(),
+    paris::ARK_ROUTE,
+    paris::MANIFEST_ROUTE.then_decode(decode_catalog),
+    viewer(js_matches(&SEADRAGON_EMBED)).decode(follow_seadragon_embed),
+    viewer(js_matches(&WDL_MARKER_RE)).decode(follow_wdl_template),
+    DiscoveryRoute::regex_link(&DZI_LINK_RE, "$url"),
+    DiscoveryRoute::regex_link(&DZI_ATTR_RE, "$url").then_decode(decode_catalog),
+    metadata(url_suffix(".dzi")).decode(decode_catalog),
+    xml_metadata::<DziFile>(),
     metadata(any()).try_decode(embedded_metadata),
 ];
 

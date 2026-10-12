@@ -25,15 +25,13 @@ const FIRST: FormatSpec = FormatSpec::new(
     "first",
     &[viewer(url_suffix("/root"))
         .resolve_metadata(|_| Ok(Request::new("https://test/a")))
-        .then_decode(catalog)
-        .canonical_target()],
+        .then_decode(catalog)],
 );
 const SECOND: FormatSpec = FormatSpec::new(
     "second",
     &[viewer(url_suffix("/root"))
         .resolve_metadata(|_| Ok(Request::new("https://test/b")))
-        .then_decode(catalog)
-        .canonical_target()],
+        .then_decode(catalog)],
 );
 fn registry() -> core::Registry {
     let mut r = core::Registry::new();
@@ -69,6 +67,42 @@ fn selected(catalog: DiscoveryCatalog) -> String {
 }
 
 #[test]
+fn decoding_defaults_to_the_final_target_through_decoder_bound_references() {
+    fn page(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+        Ok(resource.follow_relative("metadata").decode_with(metadata))
+    }
+    fn metadata(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+        Ok(resource
+            .follow_relative("image?token=exact%2Fvalue&size=full")
+            .decode_with(catalog))
+    }
+    const SPEC: FormatSpec =
+        FormatSpec::new("default", &[viewer(url_suffix("/root")).decode(page)]);
+    let mut registry = core::Registry::new();
+    registry.register(SPEC);
+    let result = futures::executor::block_on(registry.discover(
+        vec![DiscoveryInput::new("https://test/root")],
+        Default::default(),
+        |request, _| async move {
+            Ok(ResourceRead::Response {
+                response: ResourceResponse {
+                    bytes: request.uri.as_bytes().to_vec(),
+                    final_uri: request.uri.contains("/image?").then(|| {
+                        "https://redirect.test/image?token=exact%2Fvalue&size=full".into()
+                    }),
+                },
+            })
+        },
+        support::parse_html,
+    ))
+    .unwrap();
+    assert_eq!(
+        support::ready_image(result).source_url.as_deref(),
+        Some("https://redirect.test/image?token=exact%2Fvalue&size=full")
+    );
+}
+
+#[test]
 fn a_context_dependent_decoder_can_designate_its_page_instead_of_its_last_fetch() {
     fn page(_: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
         Ok(ParsedResource::FollowWith(
@@ -84,7 +118,7 @@ fn a_context_dependent_decoder_can_designate_its_page_instead_of_its_last_fetch(
         catalog(resource)
     }
     const ROUTE: core::DiscoveryRoute = viewer(url_suffix("/root")).decode(page);
-    const UNMARKED: FormatSpec = FormatSpec::new("context", &[ROUTE]);
+    const UNMARKED: FormatSpec = FormatSpec::new("context", &[ROUTE.non_canonical()]);
     const MARKED: FormatSpec = FormatSpec::new("context", &[ROUTE.canonical_source()]);
     for marked in [false, true] {
         let mut registry = core::Registry::new();
@@ -114,14 +148,14 @@ fn a_successful_fetch_with_rejected_metadata_cannot_set_the_winners_source() {
         "rejected",
         &[viewer(url_suffix("/root"))
             .resolve_metadata(|_| Ok(Request::new("https://test/a")))
-            .then_decode(rejected)
-            .canonical_target()],
+            .then_decode(rejected)],
     );
     const UNMARKED: FormatSpec = FormatSpec::new(
         "unmarked",
         &[viewer(url_suffix("/root"))
             .resolve_metadata(|_| Ok(Request::new("https://test/b")))
-            .then_decode(catalog)],
+            .then_decode(catalog)
+            .non_canonical()],
     );
     for marked in [false, true] {
         let mut registry = core::Registry::new();

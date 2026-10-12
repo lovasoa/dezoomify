@@ -12,7 +12,9 @@ pub(crate) mod decryption;
 mod tile_info;
 mod url;
 
-const ROUTES: &[DiscoveryRoute] = &[viewer(url_matches(is_google_arts_url)).decode(parse_page)];
+const ROUTES: &[DiscoveryRoute] = &[viewer(url_matches(is_google_arts_url))
+    .decode(parse_page)
+    .canonical_source()];
 
 pub const SPEC: FormatSpec =
     FormatSpec::new("google_arts_and_culture", ROUTES).with_display_name("Arts & Culture");
