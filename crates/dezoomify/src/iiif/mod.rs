@@ -129,6 +129,17 @@ fn embedded_metadata(
     )
 }
 
+#[test]
+fn schema_org_primary_image_is_not_embedded_iiif_metadata() {
+    let page = br#"<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"ImageObject","inLanguage":"it-IT","@id":"https://pinacotecabrera.org/collezioni/collezione-on-line/sposalizio-della-vergine/#primaryimage","url":"https://pinacotecabrera.org/wp-content/uploads/2024/11/Raffaello_Sposalizio-della-Vergine-scaled.jpg","contentUrl":"https://pinacotecabrera.org/wp-content/uploads/2024/11/Raffaello_Sposalizio-della-Vergine-scaled.jpg","width":1785,"height":2560,"caption":"Sposalizio delle vergine di Raffaello"}]}</script>"#;
+    let resource = DiscoveryResource::new(
+        "https://pinacotecabrera.org/collezioni/collezione-on-line/sposalizio-della-vergine/",
+        page,
+    );
+
+    assert!(embedded_metadata(resource).is_none());
+}
+
 /// Determines the best title for an image from IIIF manifest metadata
 #[must_use]
 pub fn determine_title(image_info: &manifest_types::ExtractedImageInfo) -> Option<String> {

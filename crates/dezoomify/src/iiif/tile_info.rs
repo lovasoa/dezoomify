@@ -179,16 +179,41 @@ impl ImageInfo {
     /// that this is not in fact a valid IIIF image
     #[must_use]
     pub fn has_distinctive_iiif_properties(&self) -> bool {
+        let iiif_type = self.iiif_type.as_deref();
+        let schema_image_object = matches!(
+            iiif_type,
+            Some(
+                "ImageObject"
+                    | "schema:ImageObject"
+                    | "http://schema.org/ImageObject"
+                    | "https://schema.org/ImageObject"
+            )
+        );
+        let has_iiif_signature = self.protocol.as_deref() == Some("http://iiif.io/api/image")
+            || self.context.as_deref().is_some_and(|context| {
+                context.contains("iiif.io/api/image/")
+                    || context.contains("library.stanford.edu/iiif/image-api/")
+            })
+            || self.tiles.is_some()
+            || self.formats.is_some()
+            || matches!(
+                iiif_type,
+                Some("iiif:Image" | "iiif:ImageProfile" | "ImageService2" | "ImageService3")
+            );
+
+        // Schema.org ImageObjects commonly carry an @id and dimensions, but
+        // those describe a static web image rather than a IIIF image service.
+        // Keep accepting them when the object also has an explicit IIIF field.
+        if schema_image_object && !has_iiif_signature {
+            return false;
+        }
+
         self.id.is_some()
             || self.protocol.is_some()
             || self.context.is_some()
             || self.tiles.is_some()
             || self.formats.is_some()
-            || self
-                .iiif_type
-                .as_ref()
-                .as_ref()
-                .is_some_and(|&s| s == "iiif:ImageProfile" || s == "ImageService3")
+            || matches!(iiif_type, Some("iiif:ImageProfile" | "ImageService3"))
     }
 
     /// Some info.json files contain a an invalid value for "@id",
@@ -420,6 +445,48 @@ fn test_deserialisation() {
     }"#,
     )
     .unwrap();
+}
+
+#[test]
+fn schema_image_objects_need_an_explicit_iiif_signature() {
+    let image = |iiif_type: &str, context: &str, protocol: Option<&str>| ImageInfo {
+        context: Some(context.into()),
+        iiif_type: Some(iiif_type.into()),
+        protocol: protocol.map(str::to_owned),
+        id: Some("https://example.org/page/#primaryimage".into()),
+        width: 1785,
+        height: 2560,
+        ..ImageInfo::default()
+    };
+    for iiif_type in [
+        "ImageObject",
+        "schema:ImageObject",
+        "http://schema.org/ImageObject",
+        "https://schema.org/ImageObject",
+    ] {
+        assert!(!image(iiif_type, "https://schema.org", None).has_distinctive_iiif_properties());
+    }
+    assert!(
+        image(
+            "ImageObject",
+            "https://schema.org",
+            Some("http://iiif.io/api/image")
+        )
+        .has_distinctive_iiif_properties()
+    );
+    for context in [
+        "http://library.stanford.edu/iiif/image-api/1.1/context.json",
+        "http://iiif.io/api/image/3/context.json",
+    ] {
+        assert!(image("ImageObject", context, None).has_distinctive_iiif_properties());
+    }
+
+    // Existing lenient discovery for untyped service URLs remains intact.
+    let legacy_service: ImageInfo = serde_json::from_str(
+        r#"{"@id":"https://example.org/iiif/image","width":1785,"height":2560}"#,
+    )
+    .unwrap();
+    assert!(legacy_service.has_distinctive_iiif_properties());
 }
 
 #[test]
