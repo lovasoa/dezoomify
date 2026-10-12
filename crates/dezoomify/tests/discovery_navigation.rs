@@ -374,6 +374,39 @@ fn national_gallery_handoff_uses_the_detected_iiif_metadata() {
 }
 
 #[test]
+fn self_contained_metadata_handoffs_are_canonical_and_independently_reusable() {
+    let cases: &[(&str, &[u8], &str, &[u8])] = &[
+        ("deepzoom", br#"<script>Seadragon.embed('viewer', 'image', 'https://image.test/art.dzi');</script>"#, "https://image.test/art.dzi", DZI),
+        ("iiif", br#"<script>const image = 'https://image.test/book/info.json';</script>"#, "https://image.test/book/info.json", IIIF),
+        ("zoomify", br#"<script>zoomifyImagePath = 'https://image.test/pyramid';</script>"#, "https://image.test/pyramid/ImageProperties.xml", ZOOMIFY),
+        ("fzp", br#"<script>lime('image','fzp',{path:'https://image.test/resources/'});</script>"#, "https://image.test/resources/image/root.xml", br#"<pal ver="1.3"><content><resource service="FZP" url="." x="0" y="0" width="512" height="512" tilewidth="256" tileheight="256" min="0" max="1"/></content></pal>"#),
+    ];
+    for &(format, page, metadata_uri, metadata) in cases {
+        let discover = |input| {
+            lookup(
+                registry_for(format).unwrap(),
+                vec![input],
+                &[(metadata_uri, metadata)],
+                Default::default(),
+                None,
+            )
+            .unwrap()
+        };
+        let from_page = discover(DiscoveryInput::with_contents(PAGE, page));
+        let [DiscoveredEntry::Ready(image)] = from_page.entries() else {
+            panic!("{format}: one ready image expected")
+        };
+        assert_eq!(image.source_url.as_deref(), Some(metadata_uri), "{format}");
+        let from_metadata = discover(DiscoveryInput::new(metadata_uri));
+        assert_eq!(
+            from_page.public_catalog(),
+            from_metadata.public_catalog(),
+            "{format}"
+        );
+    }
+}
+
+#[test]
 fn canonical_target_retains_redirects_and_exact_query_parameters() {
     let requested = "https://image.test/book/info.json?download=exact%2Bvalue";
     let redirected = "https://cdn.test/book/info.json?download=exact%2Bvalue&version=2";
