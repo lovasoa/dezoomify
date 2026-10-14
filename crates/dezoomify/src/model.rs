@@ -330,6 +330,10 @@ pub struct JobInput {
     pub kind: Option<DiscoveryInputKind>,
 }
 
+/// Additional discovery evidence supplied by a Host. Empty means no more
+/// sources are available under the requested interaction policy.
+pub type JobInputs = Vec<JobInput>;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]

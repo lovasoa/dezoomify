@@ -42,12 +42,85 @@ function fakeBrowser(execute) {
       scripting: {
         async executeScript(injection) {
           calls.push(injection);
-          return [{ frameId: 0, result: await execute(injection) }];
+          return [{ frameId: injection.target.frameIds[0], result: await execute(injection) }];
         },
       },
     },
   };
 }
+
+test("nested frames use existing grants first, then one deferred permission and their own session", async () => {
+  const foreign = "https://viewer.example/widget";
+  const nested = "https://gallery.example/nested";
+  const calls = [];
+  const fake = fakeBrowser(async (injection) => {
+    const frameId = injection.target.frameIds[0];
+    const documentUrl = frameId === 8 ? foreign : nested;
+    if (injection.func === fetchSource) {
+      calls.push(["fetch", frameId]);
+      return {
+        ok: true,
+        documentUrl,
+        status: 200,
+        url: injection.args[0].url,
+        bytes: 1,
+        data: "AQ==",
+      };
+    }
+    if (injection.files) return { ok: true, documentUrl, inputs: [] };
+    calls.push(["scan", frameId]);
+    return {
+      ...snapshot(documentUrl),
+      inputs: [{ url: documentUrl, kind: "source", contents: "<html></html>" }],
+    };
+  });
+  fake.api.webNavigation = {
+    getAllFrames: async () => [
+      { frameId: 0, url: SOURCE_URL },
+      { frameId: 8, parentFrameId: 0, url: foreign },
+      { frameId: 9, parentFrameId: 8, url: nested },
+    ],
+  };
+  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  const granted = new Set();
+  const access = {
+    hasPermission: async (origin) => granted.has(origin),
+    ensurePermission: async (origin) => {
+      calls.push(["permission", origin]);
+      granted.add(origin);
+    },
+    scanned: () => {},
+    failed: (_frame, error) => {
+      throw error;
+    },
+  };
+  const observe = source.observations(access);
+  const signal = new AbortController().signal;
+  try {
+    assert.equal((await observe("forbidden", signal))[0].kind, "observed-document");
+    assert.deepEqual(await observe("forbidden", signal), []);
+    assert.deepEqual(
+      calls,
+      [["scan", 9]],
+      "a permitted descendant is reachable through an unpermitted parent",
+    );
+    assert.equal((await observe("allowed", signal))[0].url, foreign);
+    await source.fetch({ uri: "https://viewer.example/file.dzi", headers: [] }, signal);
+    assert.deepEqual(calls, [
+      ["scan", 9],
+      ["permission", "https://viewer.example"],
+      ["scan", 8],
+      ["fetch", 8],
+    ]);
+    assert.deepEqual(await observe("allowed", signal), []);
+    // A new invocation rescans live frames, retaining already-granted access.
+    const next = source.observations(access);
+    assert.equal((await next("forbidden", signal))[0].url, foreign);
+    assert.equal(calls.filter(([kind]) => kind === "permission").length, 1);
+  } finally {
+    source.dispose();
+  }
+});
 
 function snapshot(documentUrl = SOURCE_URL) {
   return {

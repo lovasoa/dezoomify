@@ -94,6 +94,7 @@ fn decoding_defaults_to_the_final_target_through_decoder_bound_references() {
             })
         },
         support::parse_html,
+        |_| async { Ok(Vec::new()) },
     ))
     .unwrap();
     assert_eq!(
@@ -149,6 +150,7 @@ fn intermediate_decoding_retains_the_default_page_source() {
             Default::default(),
             |_, _| async { Ok(response("image")) },
             support::parse_html,
+            |_| async { Ok(Vec::new()) },
         ))
         .unwrap();
         let [DiscoveredEntry::Ready(image)] = result.entries() else {
@@ -184,6 +186,7 @@ fn a_successful_fetch_with_rejected_metadata_cannot_set_the_winners_source() {
             Default::default(),
             |request, _| async move { Ok(response(&request.uri)) },
             support::parse_html,
+            |_| async { Ok(Vec::new()) },
         ))
         .unwrap();
         let image = support::ready_image(result);
@@ -216,6 +219,7 @@ fn an_earlier_ordinary_read_keeps_precedence_over_a_later_ready_image() {
             }
         },
         support::parse_html,
+        |_| async { Ok(Vec::new()) },
     );
     let mut future = Box::pin(future);
     assert!(future.as_mut().now_or_never().is_none());
@@ -253,6 +257,7 @@ fn a_later_stalled_read_cannot_delay_an_earlier_winner() {
             }
         },
         support::parse_html,
+        |_| async { Ok(Vec::new()) },
     );
     let mut future = Box::pin(future);
     assert!(future.as_mut().now_or_never().is_none());
@@ -288,6 +293,7 @@ fn blocked_access_yields_to_ordinary_work_without_asking_for_permission() {
             }
         },
         support::parse_html,
+        |_| async { Ok(Vec::new()) },
     ))
     .unwrap();
     assert_eq!(selected(catalog), "public");
@@ -296,6 +302,140 @@ fn blocked_access_yields_to_ordinary_work_without_asking_for_permission() {
             .borrow()
             .iter()
             .all(|(_, i)| *i == Interaction::Forbidden)
+    );
+}
+
+#[test]
+fn live_observations_win_before_blocked_http_access() {
+    const DZI: &str = "<Image TileSize=\"256\" Overlap=\"0\" Format=\"jpg\"><Size Width=\"512\" Height=\"512\"/></Image>";
+    let calls = RefCell::new(Vec::new());
+    let catalog = futures::executor::block_on(core::default_registry().discover(
+        vec![DiscoveryInput::with_contents(
+            "https://test/root",
+            br#"<a href="https://blocked.test/image.dzi">image</a>"#,
+        )],
+        Default::default(),
+        |_, interaction| async move {
+            assert_eq!(interaction, Interaction::Forbidden);
+            Ok(ResourceRead::NeedsAccess {
+                origin: "https://blocked.test".into(),
+            })
+        },
+        support::parse_html,
+        |interaction| {
+            calls.borrow_mut().push(interaction);
+            async move {
+                assert_eq!(interaction, Interaction::Forbidden);
+                Ok(vec![
+                    DiscoveryInput::with_contents("https://viewer.test/#loaded", DZI)
+                        .with_kind(dezoomify::model::DiscoveryInputKind::ObservedMetadata),
+                ])
+            }
+        },
+    ))
+    .unwrap();
+    assert_eq!(support::ready_image(catalog).format, "deepzoom");
+    assert_eq!(*calls.borrow(), [Interaction::Forbidden]);
+}
+
+#[test]
+fn deferred_frame_observations_precede_permissions_for_unrelated_resources() {
+    let observations = RefCell::new(Vec::new());
+    let catalog = futures::executor::block_on(core::default_registry().discover(
+        vec![DiscoveryInput::new("https://analytics.test/script.js")
+            .with_kind(dezoomify::model::DiscoveryInputKind::ObservedResource)],
+        Default::default(),
+        |_, interaction| async move {
+            assert_eq!(interaction, Interaction::Forbidden, "the viewer should win before analytics access");
+            Ok(ResourceRead::NeedsAccess { origin: "https://analytics.test".into() })
+        },
+        support::parse_html,
+        |interaction| {
+            observations.borrow_mut().push(interaction);
+            async move {
+                Ok(if interaction == Interaction::Forbidden { Vec::new() } else {
+                    vec![DiscoveryInput::with_contents("https://viewer.test/#loaded", br#"<Image TileSize="256" Overlap="0" Format="jpg"><Size Width="512" Height="512"/></Image>"#)
+                        .with_kind(dezoomify::model::DiscoveryInputKind::ObservedMetadata)]
+                })
+            }
+        },
+    )).unwrap();
+    assert_eq!(support::ready_image(catalog).format, "deepzoom");
+    assert_eq!(
+        *observations.borrow(),
+        [Interaction::Forbidden, Interaction::Allowed]
+    );
+}
+
+#[test]
+fn a_new_source_session_can_make_an_already_rejected_metadata_url_readable() {
+    const URL: &str = "https://viewer.test/file.dzi";
+    let granted = Cell::new(false);
+    let reads = Cell::new(0);
+    let catalog = futures::executor::block_on(core::default_registry().discover(
+        vec![DiscoveryInput::new(URL)],
+        Default::default(),
+        |_, _| {
+            reads.set(reads.get() + 1);
+            let body = if granted.get() {
+                r#"<Image TileSize="256" Overlap="0" Format="jpg"><Size Width="512" Height="512"/></Image>"#
+            } else { "<html>Sign in</html>" };
+            async move { Ok(response(body)) }
+        },
+        support::parse_html,
+        |interaction| {
+            let inputs = if interaction == Interaction::Allowed && !granted.replace(true) {
+                vec![DiscoveryInput::new(URL).with_kind(dezoomify::model::DiscoveryInputKind::ObservedResource)]
+            } else { Vec::new() };
+            async { Ok(inputs) }
+        },
+    )).unwrap();
+    assert_eq!(support::ready_image(catalog).format, "deepzoom");
+    assert_eq!(reads.get(), 2);
+}
+
+#[test]
+fn additional_rendered_documents_replace_inert_reads_and_continue_recursive_discovery() {
+    use dezoomify::model::DiscoveryInputKind;
+    const DZI: &str = "<Image TileSize=\"256\" Overlap=\"0\" Format=\"jpg\"><Size Width=\"512\" Height=\"512\"/></Image>";
+    let reads = RefCell::new(Vec::new());
+    let observations = RefCell::new(Vec::new());
+    let rendered = Cell::new(false);
+    let catalog = futures::executor::block_on(core::default_registry().discover(
+        vec![DiscoveryInput::with_contents("https://test/root", br#"<iframe src="/frame"></iframe>"#)],
+        Default::default(),
+        |request, interaction| {
+            assert_eq!(interaction, Interaction::Forbidden);
+            reads.borrow_mut().push(request.uri);
+            async { Ok(response("<html><head><title>Jarvis DZI viewer</title><link href='style.css'></head></html>")) }
+        },
+        support::parse_html,
+        |interaction| {
+            observations.borrow_mut().push(interaction);
+            let inputs = if interaction == Interaction::Allowed {
+                vec![DiscoveryInput::with_contents("https://test/nested#loaded", DZI)
+                    .with_kind(DiscoveryInputKind::ObservedMetadata)]
+            } else if !rendered.replace(true) {
+                vec![DiscoveryInput::with_contents("https://test/frame", br#"<iframe src="/nested"></iframe>"#)
+                    .with_kind(DiscoveryInputKind::ObservedDocument)]
+            } else {
+                Vec::new()
+            };
+            async { Ok(inputs) }
+        },
+    )).unwrap();
+    assert_eq!(support::ready_image(catalog).format, "deepzoom");
+    assert_eq!(
+        *reads.borrow(),
+        ["https://test/frame", "https://test/nested"]
+    );
+    assert_eq!(
+        *observations.borrow(),
+        [
+            Interaction::Forbidden,
+            Interaction::Forbidden,
+            Interaction::Allowed
+        ]
     );
 }
 #[test]
@@ -324,6 +464,7 @@ fn deferred_access_runs_after_every_runnable_branch_and_reuses_its_resource() {
             }
         },
         support::parse_html,
+        |_| async { Ok(Vec::new()) },
     ))
     .unwrap();
     assert_eq!(selected(catalog), "authorized");
@@ -388,6 +529,7 @@ fn shared_reads_keep_branch_history_headers_and_redirected_bases() {
             }
         },
         support::parse_html,
+        |_| async { Ok(Vec::new()) },
     ))
     .unwrap();
     assert_eq!(selected(catalog), "child");
@@ -433,6 +575,7 @@ fn live_resource_concurrency_stays_within_the_declared_bound() {
             }
         },
         support::parse_html,
+        |_| async { Ok(Vec::new()) },
     ))
     .unwrap();
     assert!(peak.get() <= 2);
@@ -461,6 +604,7 @@ fn rejected_candidates_retain_host_failure_facts() {
             Default::default(),
             |_, _| futures::future::ready(Err(failure.clone())),
             support::parse_html,
+            |_| async { Ok(Vec::new()) },
         ))
         .unwrap_err();
         let DiscoveryError::NoCandidateAccepted { diagnostics } = error else {

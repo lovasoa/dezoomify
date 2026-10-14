@@ -68,7 +68,7 @@ static DZI_LINK_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
 });
 
 static DZI_ATTR_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r#"(?i)[^a-z]dzi["'<>\s:=]+(?P<url>[^<"']*)"#)
+    BytesRegex::new(r#"(?i)\bdzi["']?\s*[:=]\s*["'](?P<url>[^<"']+)["']"#)
         .expect("constant DZI attribute pattern")
 });
 

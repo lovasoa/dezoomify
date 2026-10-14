@@ -24,6 +24,7 @@ fn supplied_viewer_metadata_preserves_all_images_without_fetching() {
         DiscoveryLimits::default(),
         |_, _| async { panic!("loaded metadata must not fetch") },
         support::parse_html,
+        |_| async { Ok(Vec::new()) },
     ))
     .unwrap();
     assert_eq!(catalog.len(), 2);

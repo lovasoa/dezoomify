@@ -89,6 +89,7 @@ const app = createBrowserApplication({
     });
     let downloadId: number | undefined;
     let fetchResource: ReturnType<typeof createResourceFetcher> | undefined;
+    let observe: ReturnType<ReturnType<typeof createSourceAccess>["observations"]> | undefined;
     return {
       async inputs() {
         if (!source) {
@@ -112,6 +113,25 @@ const app = createBrowserApplication({
           installTestAccess();
         }
         const scan = await source.scan(context.signal);
+        observe = source.observations({
+          hasPermission: (origin) => permissionApi.contains({ origins: [`${origin}/*`] }),
+          ensurePermission: (origin, signal) => permissions.ensure(origin, signal),
+          scanned(snapshot) {
+            context.diagnostics.record("debug", "frame-scan", {
+              document_url: snapshot.documentUrl,
+              candidates: snapshot.inputs.length,
+              overflow: snapshot.overflow,
+              ...snapshot.memory,
+            });
+          },
+          failed(frame, error) {
+            context.diagnostics.record("warn", "frame-scan-failed", {
+              frame_id: frame.frameId,
+              document_url: frame.documentUrl,
+              error,
+            });
+          },
+        });
         context.signal.throwIfAborted();
         context.view.sourceUrl = source.documentUrl;
         context.activity.state.url = source.documentUrl;
@@ -159,6 +179,7 @@ const app = createBrowserApplication({
         if (!fetchResource) return Promise.reject(new Error("The source has not been scanned."));
         return fetchResource(request, signal, interaction);
       },
+      observe: (interaction, signal) => observe?.(interaction, signal) ?? Promise.resolve([]),
       loadDisplayImage: (url, signal) => loadTileImage(url, { signal }),
       canvas: () => document.createElement("canvas"),
       async save(blob, width, height, signal, title) {
@@ -226,15 +247,17 @@ api.runtime.onMessage.addListener((message: unknown) => {
     return (async () => {
       const scan = await bound.scan();
       const expected =
-        typeof value.scenario === "string" && value.scenario.startsWith("memory-openseadragon-")
-          ? "/memory-openseadragon.html"
-          : value.scenario === "cookie-session"
-            ? "/protected/artwork.dzi"
-            : value.scenario === "retry"
-              ? "/fixtures/failures/retry-approval/retry.dzi"
-              : typeof value.scenario === "string" && value.scenario.startsWith("fixtures/")
-                ? `/${value.scenario}/`
-                : "/extension-inputs/";
+        value.scenario === "recursive-iframe"
+          ? "/recursive-iframe"
+          : typeof value.scenario === "string" && value.scenario.startsWith("memory-openseadragon-")
+            ? "/memory-openseadragon.html"
+            : value.scenario === "cookie-session"
+              ? "/protected/artwork.dzi"
+              : value.scenario === "retry"
+                ? "/fixtures/failures/retry-approval/retry.dzi"
+                : typeof value.scenario === "string" && value.scenario.startsWith("fixtures/")
+                  ? `/${value.scenario}/`
+                  : "/extension-inputs/";
       const input = scan.inputs.find((candidate) => candidate.url.includes(expected));
       if (!input) throw new Error(`direct scan did not find ${expected}`);
       const url =

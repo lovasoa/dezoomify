@@ -47,7 +47,7 @@ test("candidate snapshot includes the document and retained resources in one bat
   }
 });
 
-test("candidate snapshot orders rendered document and readable iframe DOM before URL-only resources", () => {
+test("candidate snapshot reads one document; frame traversal belongs to source access", () => {
   const oldLocation = globalThis.location;
   const oldDocument = globalThis.document;
   const oldPerformance = globalThis.performance;
@@ -80,11 +80,6 @@ test("candidate snapshot orders rendered document and readable iframe DOM before
         url: "https://gallery.example/page",
         kind: "source",
         contents: "<html><body>rendered page</body></html>",
-      },
-      {
-        url: "https://gallery.example/frame",
-        kind: "observed-document",
-        contents: "<html><script>dynamic viewer config</script></html>",
       },
       { url: "https://gallery.example/TileGroup0/1-0-0.jpg", kind: "observed-resource" },
     ]);

@@ -13,13 +13,17 @@ the Rust invocation, permission prompts, cancellation, and saving. The backgroun
 only launches/focuses tabs and remembers source/job associations; a background
 restart must not stop an existing job.
 
-One source-access object belongs to one source document. Scan once per attempt;
-navigation invalidates access, and late replies must not revive it. Already
-discovered input can continue through extension-origin fetching, but never
+One source-access object belongs to one tab's source document. Navigation
+invalidates access, and late replies must not revive it. Discovered input can
+continue through extension-origin fetching, but never
 silently rebind to the new page. The extension supplies observed documents and
-resources; Rust owns format recognition and discovery order.
+resources; Rust owns format recognition and discovery order. When discovery
+needs more evidence, scan remaining permitted frames before asking for another
+origin. `webNavigation.getAllFrames` enumerates nested frames only during that
+user-started job. Resource snapshots inspect one document; memory scanning also
+retains readable DOM traversal for inline frames.
 
-Source-origin fetches can use the page's session. Cross-origin access uses
+Scanned origins can use their frame's session. Other cross-origin access uses
 credential-free extension fetches under explicitly granted host permissions.
 Request permissions synchronously from a visible action to preserve user
 activation. HTTP refusals must not open permission prompts. Keep injected

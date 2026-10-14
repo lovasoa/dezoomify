@@ -852,6 +852,10 @@ impl<'a> NativeHost<'a> {
 }
 
 impl Host for NativeHost<'_> {
+    async fn observe(&self, _: Interaction) -> Result<JobInputs, Error> {
+        Ok(Vec::new())
+    }
+
     async fn parse_html(
         &self,
         query: dezoomify::model::HtmlQuery,

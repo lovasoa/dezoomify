@@ -19,7 +19,7 @@ Pin Dezoomify through the browser's extension menu if its icon is hidden.
    Zoom in once to ensure its image resources have loaded before starting.
 2. Click Dezoomify in the browser toolbar. A dedicated job tab opens and starts
    automatically. The source page is not reloaded.
-3. If the job asks for access to another site hosting the image or tiles, approve
+3. If the job asks for access to another site hosting the viewer, image, or tiles, approve
    that visible request to continue.
 4. Leave the job tab open until the browser confirms saving. Then choose
    **Open image** or **Show in folder**.
@@ -40,8 +40,8 @@ Follow [Save an image](#save-an-image) above; pin the icon if it is hidden.
 
 ## 2. Let the page settle
 
-Let the viewer load and zoom before clicking. Each attempt reads one snapshot;
-the extension does not keep watching for resources loaded afterward.
+Let the viewer load and zoom before clicking. The extension does not keep
+watching for resources loaded afterward.
 
 ## 3. Start dezooming
 

@@ -9,6 +9,7 @@ import type {
   Image,
   Interaction,
   Error as JobError,
+  JobInput,
   Output,
   OutputPlan,
   ProbeOutcome,
@@ -32,6 +33,7 @@ export interface BrowserHostDependencies {
   diagnostics?: DiagnosticRecorder;
   assembly: CanvasAssembly;
   decoder: TileDecoder;
+  observe?(interaction: Interaction, signal: AbortSignal): Promise<JobInput[]>;
   fetchResource(
     request: ResourceRequest,
     signal: AbortSignal,
@@ -102,6 +104,17 @@ export class BrowserHost implements Host {
 
   fetch(request: ResourceRequest, interaction: Interaction): Promise<ResourceRead> {
     return this.own(() => this.readResource(request, interaction));
+  }
+
+  observe(interaction: Interaction): Promise<JobInput[]> {
+    return this.own(async () => {
+      this.signal.throwIfAborted();
+      const inputs = await this.deps.observe?.(interaction, this.signal);
+      this.signal.throwIfAborted();
+      return inputs ?? [];
+    }).catch((error) => {
+      throw this.failure(error);
+    });
   }
 
   parseHtml(query: HtmlQuery): Promise<HtmlDocument> {

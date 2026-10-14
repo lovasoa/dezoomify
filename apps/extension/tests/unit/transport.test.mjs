@@ -16,6 +16,7 @@ function setup({ sourceFailure, origin = "https://source.test" } = {}) {
     diagnostics,
     sourceAccess: {
       origin,
+      hasOrigin: (value) => value === origin,
       async fetch(input, owned) {
         calls.push(["source", input, owned]);
         if (sourceFailure) throw sourceFailure;

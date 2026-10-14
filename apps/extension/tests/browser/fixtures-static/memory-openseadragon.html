@@ -17,7 +17,10 @@
               ? { iipsrv: `${base}/memory-iip`, image: "private.tif" }
               : { Image: { xmlns: "http://schemas.microsoft.com/deepzoom/2008", Url: `${base}/memory-tiles/`, Format: "png", Overlap: 0, TileSize: 256, Size: { Width: 512, Height: 512 } } };
         const viewer = OpenSeadragon({ id: "viewer", tileSources: source, showNavigationControl: false });
-        const ready = () => { document.documentElement.dataset.viewerReady = "true"; };
+        const ready = () => {
+          document.documentElement.dataset.viewerReady = "true";
+          if (parent !== window) parent.postMessage("viewer-ready", "*");
+        };
         viewer.addHandler("open", ready);
         if (viewer.isOpen()) ready();
         delete window.OpenSeadragon;
