@@ -218,14 +218,16 @@ for (const [name, engine] of [
           // exercise the slice budget too; verify a queued task can run.
           const measured = await page.evaluate(`(async () => {
               const now = Date.now;
+              const started = now();
               const timeout = window.setTimeout;
               let elapsed = 0, taskRan = false;
               // Make broad reference traversal exhaust its budget deterministically.
               // The targeted canvas probe must collect the image first.
+              // Freeze wall time so runner delays cannot consume the simulated budget.
               if (${mode === "throwing-listener"})
-                Date.now = () => now() + (elapsed += 0.1);
+                Date.now = () => started + (elapsed += 0.1);
               if (${mode === "large-dom"}) {
-                Date.now = () => now() + (elapsed += 0.001);
+                Date.now = () => started + (elapsed += 0.001);
                 window.setTimeout = (callback, delay = 0, ...args) =>
                   timeout.call(window, callback, Math.max(1000, delay), ...args);
                 const channel = new MessageChannel();
@@ -238,7 +240,7 @@ for (const [name, engine] of [
               }
               try {
                 ${scannerScript}
-                const result = await OpenSeadragonScanner.scanOpenSeadragon(${Date.now() + 1500});
+                const result = await OpenSeadragonScanner.scanOpenSeadragon(Date.now() + 1500);
                 return { result, taskRan };
               } finally {
                 Date.now = now;
@@ -305,7 +307,7 @@ for (const [name, engine] of [
           );
           const expired = await page.evaluate(`(async () => {
             ${scannerScript}
-            return OpenSeadragonScanner.scanOpenSeadragon(${Date.now() - 1});
+            return OpenSeadragonScanner.scanOpenSeadragon(Date.now() - 1);
           })()`);
           assert.equal(expired.inputs.length, 0);
           assert.equal(expired.diagnostics.truncated, true);
