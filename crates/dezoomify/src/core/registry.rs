@@ -54,20 +54,23 @@ impl Registry {
     }
 
     /// Resolve supplied sources with platform resource acquisition.
-    pub async fn discover<F, Fut, P, PFut>(
+    pub async fn discover<F, Fut, P, PFut, O, OFut>(
         &self,
         inputs: Vec<DiscoveryInput>,
         limits: DiscoveryLimits,
         fetch: F,
         parse_html: P,
+        observe: O,
     ) -> Result<super::DiscoveryCatalog, super::DiscoveryError>
     where
         F: Fn(super::Request, crate::model::Interaction) -> Fut,
         Fut: std::future::Future<Output = Result<crate::model::ResourceRead, crate::model::Error>>,
         P: Fn(crate::model::HtmlQuery) -> PFut,
         PFut: std::future::Future<Output = Result<crate::model::HtmlDocument, crate::model::Error>>,
+        O: Fn(crate::model::Interaction) -> OFut,
+        OFut: std::future::Future<Output = Result<Vec<DiscoveryInput>, crate::model::Error>>,
     {
-        super::discovery::discover(inputs, &self.specs, limits, fetch, parse_html).await
+        super::discovery::discover(inputs, &self.specs, limits, fetch, parse_html, observe).await
     }
 
     /// Look up a registered format by stable id.
@@ -141,6 +144,7 @@ mod tests {
             DiscoveryLimits::default(),
             |_, _| async { panic!("supplied HTML must not be fetched") },
             |query| { parses.set(parses.get() + 1); crate::test_support::parse_html(query) },
+            |_| async { Ok(Vec::new()) },
         ))
         .unwrap();
         assert_eq!(parses.get(), 1);
@@ -196,6 +200,7 @@ mod tests {
                     }
                 },
                 crate::test_support::parse_html,
+                |_| async { Ok(Vec::new()) },
             ));
             assert!(result.is_err());
             assert_eq!(calls.get(), 1, "{name}");

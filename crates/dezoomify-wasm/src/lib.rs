@@ -36,6 +36,9 @@ mod bindings {
     }
 
     macro_rules! ts_type {
+        (JobInputs) => {
+            "JobInput[]"
+        };
         (u32) => {
             "number"
         };

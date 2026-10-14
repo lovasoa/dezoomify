@@ -73,6 +73,7 @@ fn unrelated_content_is_a_route_miss_but_declared_metadata_keeps_its_error() {
         br#"{"theme":"dark"}"#,
         br#"{"description":"scw.min.js TileMatrixSet <krpano> topviews TileSize"}"#,
         br#"<p>Seadragon.embed('x', 'y', 'unrelated')</p>"#,
+        br#"<html><head><title>Jarvis DZI viewer</title><link href="viewer.css" rel="stylesheet"></head><body></body></html>"#,
     ] {
         for (uri, expected) in [
             (PAGE, None),
@@ -657,6 +658,7 @@ fn observed_metadata_wins_without_reading_a_valid_but_lower_priority_frame() {
             }
         },
         support::parse_html,
+        |_| async { Ok(Vec::new()) },
     ))
     .unwrap();
     assert!(matches!(&catalog.entries()[0],DiscoveredEntry::Ready(image) if image.format=="iiif"));

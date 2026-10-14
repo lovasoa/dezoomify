@@ -59,7 +59,7 @@ export interface BrowserApplicationContext {
   permission(pending: PermissionWait[]): void;
 }
 export interface BrowserCapabilities
-  extends Pick<BrowserHostDependencies, "fetchResource" | "loadDisplayImage"> {
+  extends Pick<BrowserHostDependencies, "fetchResource" | "loadDisplayImage" | "observe"> {
   inputs(url: string): Promise<JobInput[]>;
   canvas(): HTMLCanvasElement;
   showCanvas?(canvas: HTMLCanvasElement): void;
@@ -259,6 +259,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         assembly,
         decoder,
         fetchResource: capabilities.fetchResource,
+        observe: capabilities.observe,
         loadDisplayImage: capabilities.loadDisplayImage,
         onProgress: (progress) => {
           if (current === a && !a.controller.signal.aborted) {

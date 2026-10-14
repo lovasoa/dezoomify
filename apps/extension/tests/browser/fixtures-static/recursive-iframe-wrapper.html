@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Jarvis DZI viewer</title><link href="/style.css" rel="stylesheet"></head>
+  <body>
+    <iframe id="viewer" title="Zoomable artwork" style="width:650px;height:650px"></iframe>
+    <script>
+      const frame = document.getElementById("viewer");
+      const address = new URL("/memory-openseadragon.html?type=deepzoom", location.origin);
+      address.hostname = "localhost";
+      frame.src = address.href;
+      window.addEventListener("message", (event) => {
+        if (event.source === frame.contentWindow && event.data === "viewer-ready")
+          parent.postMessage("viewer-ready", "*");
+      });
+    </script>
+  </body>
+</html>

@@ -7,6 +7,7 @@ macro_rules! host_members {
     ($consumer:ident) => {
         $consumer! {
             async {
+                observe => observe(interaction: Interaction) -> JobInputs;
                 fetch => fetch(request: ResourceRequest, interaction: Interaction) -> ResourceRead;
                 parse_html => parseHtml(query: HtmlQuery) -> HtmlDocument;
                 probe => probe(tile: Tile) -> ProbeOutcome;

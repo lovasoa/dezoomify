@@ -6,12 +6,13 @@ import {
   SOURCE_FETCH_BYTE_LIMIT,
   validateRequestHeaders,
 } from "@dezoomify/browser-runtime";
-import type { Error as JobError, ResourceRequest } from "@dezoomify/wasm-bindings";
+import type { Interaction, Error as JobError, ResourceRequest } from "@dezoomify/wasm-bindings";
 import type { PublicPath, WxtBrowser } from "wxt/browser";
 import { transportError } from "../runtime/fetch.ts";
 import { cancelSourceFetch, collectCandidates, fetchSource } from "./source-operations.ts";
 
-type SourceApi = Pick<WxtBrowser, "tabs" | "scripting">;
+type SourceApi = Pick<WxtBrowser, "tabs" | "scripting" | "webNavigation">;
+type SourceFrame = { frameId: number; documentUrl: string };
 type CandidateSnapshot = Awaited<ReturnType<typeof collectCandidates>> & {
   memory?: Record<string, number | boolean | string | string[]>;
 };
@@ -115,6 +116,9 @@ export function createSourceAccess(
     throw transportError("bad-url", "invalid source document URL");
 
   const { tabId, documentUrl } = reference;
+  const sourceOrigin = originOfUrl(documentUrl);
+  const rootFrame: SourceFrame = { frameId: 0, documentUrl };
+  const sessionFrames = new Map<string, SourceFrame>([[sourceOrigin, rootFrame]]);
   const timeoutMs = options.timeoutMs ?? 30_000;
   const lifetime = new AbortController();
   let invalidated = false;
@@ -146,6 +150,7 @@ export function createSourceAccess(
     script: SourceScript<Args, Result>,
     signal: AbortSignal,
     onLaunch?: () => void,
+    frame = rootFrame,
   ): Promise<Awaited<Result>> {
     assertLive();
     signal.throwIfAborted();
@@ -163,7 +168,7 @@ export function createSourceAccess(
     onLaunch?.();
     const results = await browserApi.scripting
       .executeScript<Args, Result>({
-        target: { tabId, frameIds: [0] },
+        target: { tabId, frameIds: [frame.frameId] },
         ...script,
       })
       .catch((cause: unknown) => {
@@ -175,7 +180,7 @@ export function createSourceAccess(
       });
     signal.throwIfAborted();
     assertLive();
-    if (!Array.isArray(results) || results.length !== 1 || results[0]?.frameId !== 0)
+    if (!Array.isArray(results) || results.length !== 1 || results[0]?.frameId !== frame.frameId)
       throw transportError("bad-url", "source operation returned an invalid result");
     const tabAfter = await browserApi.tabs.get(tabId).catch(() => null);
     if (!tabAfter?.url || !sameDocumentUrl(tabAfter.url, documentUrl)) {
@@ -186,8 +191,8 @@ export function createSourceAccess(
     const result = results[0].result;
     const resultDocumentUrl =
       isRecord(result) && typeof result.documentUrl === "string" ? result.documentUrl : null;
-    if (!resultDocumentUrl || !sameDocumentUrl(resultDocumentUrl, documentUrl)) {
-      invalidate();
+    if (!resultDocumentUrl || !sameDocumentUrl(resultDocumentUrl, frame.documentUrl)) {
+      if (frame.frameId === 0) invalidate();
       throw transportError("source-lost", "source result belongs to another document");
     }
     return result as Awaited<Result>;
@@ -199,6 +204,7 @@ export function createSourceAccess(
     signal?: AbortSignal,
     onAbort?: () => Promise<void>,
     deadlineAt = Date.now() + timeoutMs,
+    frame = rootFrame,
   ): Promise<Awaited<Result>> {
     assertLive();
     const deadline = new AbortController();
@@ -249,9 +255,14 @@ export function createSourceAccess(
         abort();
         return await aborted;
       }
-      const operation = injectUnchecked(script, combined, () => {
-        launched = true;
-      });
+      const operation = injectUnchecked(
+        script,
+        combined,
+        () => {
+          launched = true;
+        },
+        frame,
+      );
       operationDone = operation.then(
         () => {},
         () => {},
@@ -266,7 +277,7 @@ export function createSourceAccess(
     }
   }
 
-  async function scan(signal?: AbortSignal): Promise<CandidateSnapshot> {
+  async function scan(signal?: AbortSignal, frame = rootFrame): Promise<CandidateSnapshot> {
     const scanDeadline = Date.now() + timeoutMs;
     let observed: CandidateInput[] = [];
     let memory: CandidateSnapshot["memory"];
@@ -277,6 +288,7 @@ export function createSourceAccess(
         signal,
         undefined,
         deadlineAt,
+        frame,
       );
       if (isRecord(reply) && Array.isArray(reply.inputs) && reply.inputs.length <= 100) {
         let bytes = 0;
@@ -343,14 +355,69 @@ export function createSourceAccess(
       signal,
       undefined,
       scanDeadline,
+      frame,
     );
-    if (!validSnapshot(snapshot, documentUrl))
+    if (!validSnapshot(snapshot, frame.documentUrl))
       throw transportError("bad-url", "invalid source scan result");
     assertLive();
     return {
       ...snapshot,
-      inputs: [...snapshot.inputs, ...observed],
+      inputs: [...snapshot.inputs, ...observed].map((input) =>
+        frame.frameId !== 0 && input.kind === "source"
+          ? { ...input, kind: "observed-document" as const }
+          : input,
+      ),
       ...(memory ? { memory } : {}),
+    };
+  }
+
+  /** One lazy traversal per Rust invocation, including nested cross-origin frames. */
+  function observations(access: {
+    hasPermission(origin: string): Promise<boolean>;
+    ensurePermission(origin: string, signal: AbortSignal): Promise<void>;
+    scanned(snapshot: CandidateSnapshot): void;
+    failed(frame: SourceFrame, error: unknown): void;
+  }) {
+    let frames: SourceFrame[] | undefined;
+    const seen = new Set<number>([0]);
+    return async (interaction: Interaction, signal: AbortSignal): Promise<CandidateInput[]> => {
+      signal = AbortSignal.any([signal, lifetime.signal]);
+      assertLive();
+      signal.throwIfAborted();
+      if (!frames) {
+        const tree = await browserApi.webNavigation.getAllFrames({ tabId });
+        assertLive();
+        signal.throwIfAborted();
+        frames = (tree ?? [])
+          .filter(
+            (frame) =>
+              isPublicHttpUrl(frame.url) &&
+              frame.url.length <= MAX_URL_LENGTH &&
+              !frame.errorOccurred,
+          )
+          .slice(0, 16)
+          .map((frame) => ({ frameId: frame.frameId, documentUrl: frame.url }));
+      }
+      for (const frame of frames) {
+        if (seen.has(frame.frameId)) continue;
+        const origin = originOfUrl(frame.documentUrl);
+        const granted = origin === sourceOrigin || (await access.hasPermission(origin));
+        signal.throwIfAborted();
+        if (!granted && interaction === "forbidden") continue;
+        seen.add(frame.frameId);
+        if (!granted) await access.ensurePermission(origin, signal);
+        try {
+          const snapshot = await scan(signal, frame);
+          if (origin !== sourceOrigin) sessionFrames.set(origin, frame);
+          access.scanned(snapshot);
+          return snapshot.inputs;
+        } catch (error) {
+          assertLive();
+          signal.throwIfAborted();
+          access.failed(frame, error);
+        }
+      }
+      return [];
     };
   }
 
@@ -367,6 +434,7 @@ export function createSourceAccess(
     if (!headers) throw transportError("bad-url", "invalid source request headers");
 
     const operationId = crypto.randomUUID();
+    const frame = sessionFrames.get(originOfUrl(request.uri)) ?? rootFrame;
     const deadlineAt = Date.now() + timeoutMs;
     const sourceRequest: SourceRequest = {
       url: request.uri,
@@ -379,7 +447,7 @@ export function createSourceAccess(
     const cancel = () => {
       return browserApi.scripting
         .executeScript({
-          target: { tabId, frameIds: [0] },
+          target: { tabId, frameIds: [frame.frameId] },
           func: cancelSourceFetch,
           args: [operationId, deadlineAt],
         })
@@ -390,10 +458,11 @@ export function createSourceAccess(
       signal,
       cancel,
       deadlineAt,
+      frame,
     );
     if (signal.aborted) throw transportError("cancelled", "source fetch cancelled");
     assertLive();
-    if (!validFetchResult(result, documentUrl))
+    if (!validFetchResult(result, frame.documentUrl))
       throw transportError("bad-url", "invalid source fetch result");
     if (result.ok === false) throw result.error;
     const bytes = decodeBase64Payload(result.data, SOURCE_FETCH_BYTE_LIMIT);
@@ -410,13 +479,17 @@ export function createSourceAccess(
 
   return {
     scan,
+    observations,
     fetch,
+    hasOrigin(origin: string) {
+      return sessionFrames.has(origin);
+    },
     dispose,
     get documentUrl() {
       return documentUrl;
     },
     get origin() {
-      return originOfUrl(documentUrl);
+      return sourceOrigin;
     },
   };
 }

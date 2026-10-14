@@ -337,6 +337,7 @@ export interface Header {
 }
 
 export interface Host {
+    observe(interaction: Interaction,): Promise<JobInput[]>;
     fetch(request: ResourceRequest,interaction: Interaction,): Promise<ResourceRead>;
     parseHtml(query: HtmlQuery,): Promise<HtmlDocument>;
     probe(tile: Tile,): Promise<ProbeOutcome>;

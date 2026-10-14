@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Nested viewer fixture</title></head>
+  <body>
+    <iframe id="frame" title="Viewer wrapper" src="/recursive-iframe-wrapper.html" style="width:700px;height:700px"></iframe>
+    <script>
+      window.addEventListener("message", (event) => {
+        if (event.source === document.getElementById("frame").contentWindow && event.data === "viewer-ready")
+          document.documentElement.dataset.viewerReady = "true";
+      });
+    </script>
+  </body>
+</html>

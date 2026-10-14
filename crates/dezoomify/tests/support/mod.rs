@@ -57,6 +57,10 @@ impl Drop for Active<'_> {
     }
 }
 impl Host for MemoryHost {
+    async fn observe(&self, _: Interaction) -> Result<JobInputs, Error> {
+        Ok(Vec::new())
+    }
+
     async fn parse_html(&self, query: HtmlQuery) -> Result<HtmlDocument, Error> {
         parse_html(query).await
     }

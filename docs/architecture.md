@@ -32,7 +32,8 @@ Inputs can describe a source, an observed document, or an observed resource.
 The core interprets this evidence, orders discovery, and bounds traversal; an
 extension scan supplies evidence rather than recognizing formats itself.
 Discovery explores accessible alternatives before requesting interactive access.
-The Host owns the actual permission prompt.
+The Host owns the actual permission prompt. It can supply additional observations
+while discovery is running; each batch shares the existing job's cache and limits.
 
 Hosts choose images and resolutions from the catalogs supplied by Rust.
 The core owns deferred resolution, retry classification, scheduling, retry budgets,

@@ -22,11 +22,7 @@ export function createResourceFetcher(deps: {
     signal: AbortSignal,
     interaction: Interaction,
   ): Promise<ResourceRead> => {
-    const sourceOrigin = deps.sourceAccess.origin;
-    if (
-      request.purpose === "metadata" ||
-      (sourceOrigin !== "" && originOfUrl(request.uri) === sourceOrigin)
-    ) {
+    if (request.purpose === "metadata" || deps.sourceAccess.hasOrigin(originOfUrl(request.uri))) {
       const started = performance.now();
       deps.diagnostics?.count("requests");
       deps.diagnostics?.count("requests_pending");

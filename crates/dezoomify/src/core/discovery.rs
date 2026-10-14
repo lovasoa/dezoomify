@@ -14,7 +14,9 @@ use regex::bytes::Regex as BytesRegex;
 use super::model::{CatalogPlan, DiscoveryCatalog, ImagePlan, Request};
 use super::tile_plan::TileSourceError;
 use super::uri::resolve_relative;
-use crate::model::{DiscoveryInputKind, Error, HtmlDocument, HtmlElement, HtmlQuery};
+use crate::model::{
+    DiscoveryInputKind, Error, HtmlDocument, HtmlElement, HtmlQuery, Interaction, JobInput,
+};
 static SCRIPT_MARKUP: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"(?i)<(?:script|base|body)\b").expect("constant markup pattern")
 });
@@ -25,6 +27,16 @@ pub struct DiscoveryInput {
     pub url: String,
     pub contents: Option<Vec<u8>>,
     pub kind: DiscoveryInputKind,
+}
+
+impl From<JobInput> for DiscoveryInput {
+    fn from(input: JobInput) -> Self {
+        Self {
+            url: input.url,
+            contents: input.contents.map(String::into_bytes),
+            kind: input.kind.unwrap_or_default(),
+        }
+    }
 }
 
 impl DiscoveryInput {
@@ -994,6 +1006,58 @@ where
     P: Fn(HtmlQuery) -> PFut,
     PFut: std::future::Future<Output = Result<HtmlDocument, Error>> + 'a,
 {
+    fn supply(&mut self, input: &DiscoveryInput) -> Result<bool, DiscoveryError> {
+        let request = Request::new(&input.url);
+        if let Some(bytes) = &input.contents {
+            if self.supplied.get(&request) == Some(bytes) {
+                return Ok(false);
+            }
+            let total = self
+                .retained
+                .get()
+                .checked_add(bytes.len())
+                .filter(|total| *total <= self.limits.retained_bytes)
+                .ok_or(DiscoveryError::MetadataSizeLimitExceeded)?;
+            self.retained.set(total);
+            self.supplied.insert(request.clone(), bytes.clone());
+        } else if self.supplied.contains_key(&request)
+            || !self
+                .reads
+                .borrow()
+                .iter()
+                .any(|(key, _, _)| *key == request)
+        {
+            return Ok(false);
+        }
+        // A live observation can improve earlier evidence, including a URL
+        // now readable through a newly permitted source's session.
+        self.reads
+            .borrow_mut()
+            .retain(|(key, _, _)| *key != request);
+        self.responses
+            .borrow_mut()
+            .retain(|read| read.request != request);
+        Ok(true)
+    }
+
+    async fn resolve_blocked(
+        &self,
+        candidates: impl Iterator<Item = (Priority, FormatSpec, String)>,
+        diagnostics: &mut Vec<CandidateDiagnostic>,
+    ) -> Result<Option<DiscoveryCatalog>, DiscoveryError> {
+        for (rank, spec, uri) in candidates {
+            match self
+                .resolve(spec, &uri, true, &Cell::new(rank), rank, rank.0 == 0)
+                .await
+            {
+                Ok(Some((_, catalog))) => return Ok(Some(catalog)),
+                Ok(None) => {}
+                Err(error) => record_diagnostic(diagnostics, spec, error)?,
+            }
+        }
+        Ok(None)
+    }
+
     async fn read(&self, request: Request, interactive: bool) -> Result<Read, DiscoveryError> {
         use futures_util::FutureExt;
         let cached = self
@@ -1210,19 +1274,39 @@ where
     }
 }
 
-/// Resolve formats through shared, bounded asynchronous resource reads.
-pub async fn discover<F, Fut, P, PFut>(
+fn evidence_rank(input: &DiscoveryInput, specs: &[FormatSpec]) -> u8 {
+    match input.kind {
+        DiscoveryInputKind::ObservedMetadata if input.contents.is_some() => 0,
+        DiscoveryInputKind::Source => 1,
+        DiscoveryInputKind::ObservedDocument if input.contents.is_some() => 2,
+        _ => match specs
+            .iter()
+            .filter_map(|spec| spec.url_kind(&input.url))
+            .min()
+        {
+            Some(RouteKind::Metadata | RouteKind::Image) => 3,
+            Some(RouteKind::Viewer) => 4,
+            None => 5,
+        },
+    }
+}
+
+/// Resolve formats through shared, bounded resource reads and Host observations.
+pub async fn discover<F, Fut, P, PFut, O, OFut>(
     inputs: Vec<DiscoveryInput>,
     specs: &[FormatSpec],
     limits: DiscoveryLimits,
     fetch: F,
     parse_html: P,
+    observe: O,
 ) -> Result<DiscoveryCatalog, DiscoveryError>
 where
     F: Fn(Request, crate::model::Interaction) -> Fut,
     Fut: std::future::Future<Output = Result<crate::model::ResourceRead, crate::model::Error>>,
     P: Fn(HtmlQuery) -> PFut,
     PFut: std::future::Future<Output = Result<HtmlDocument, Error>>,
+    O: Fn(Interaction) -> OFut,
+    OFut: std::future::Future<Output = Result<Vec<DiscoveryInput>, Error>>,
 {
     use futures_util::{StreamExt, stream};
     if inputs.len() > limits.resources {
@@ -1240,26 +1324,10 @@ where
     let mut roots: Vec<_> = inputs
         .into_iter()
         .enumerate()
-        .map(|(order, input)| {
-            let evidence = match input.kind {
-                DiscoveryInputKind::ObservedMetadata if input.contents.is_some() => 0,
-                DiscoveryInputKind::Source => 1,
-                DiscoveryInputKind::ObservedDocument if input.contents.is_some() => 2,
-                _ => match specs
-                    .iter()
-                    .filter_map(|spec| spec.url_kind(&input.url))
-                    .min()
-                {
-                    Some(RouteKind::Metadata | RouteKind::Image) => 3,
-                    Some(RouteKind::Viewer) => 4,
-                    None => 5,
-                },
-            };
-            (evidence, 0usize, order, input)
-        })
+        .map(|(order, input)| (evidence_rank(&input, specs), 0usize, order, input))
         .collect();
     roots.sort_by_key(|(evidence, depth, order, _)| (*evidence, *depth, *order));
-    let resources = Resources {
+    let mut resources = Resources {
         fetch: &fetch,
         parse_html: &parse_html,
         selectors: HtmlDocument::PAGE_QUERIES
@@ -1416,52 +1484,85 @@ where
         if let Some((_, catalog)) = winner {
             return Ok(catalog);
         }
-        let reads = resources.reads.borrow();
-        let responses = resources.responses.borrow();
-        for (request, _, _) in reads.iter() {
-            let Some(resource) = responses
-                .iter()
-                .find(|resource| resource.request == *request)
-            else {
-                continue;
-            };
-            let Some(page) = resource.resource() else {
-                continue;
-            };
-            let base = page.final_uri();
-            visited.insert(resource.request.uri.clone());
-            visited.insert(base.to_owned());
-            let document_base = crate::web_page::page_base(page);
-            for source in crate::web_page::iframe_sources(page) {
-                let uri = resolve_relative(&document_base, source);
-                let supported = match url::Url::parse(&uri) {
-                    Ok(url) => matches!(url.scheme(), "http" | "https" | "file"),
-                    Err(url::ParseError::RelativeUrlWithoutBase) => url::Url::parse(base).is_err(),
-                    Err(_) => false,
+        {
+            let reads = resources.reads.borrow();
+            let responses = resources.responses.borrow();
+            for (request, _, _) in reads.iter() {
+                let Some(resource) = responses
+                    .iter()
+                    .find(|resource| resource.request == *request)
+                else {
+                    continue;
                 };
-                if supported && visited.insert(uri.clone()) && roots.len() < limits.resources {
-                    let depth = resources.depths.borrow().get(request).copied().unwrap_or(0) + 1;
-                    roots.push((4, depth, branch, DiscoveryInput::new(uri)));
-                    branch += 1;
+                let Some(page) = resource.resource() else {
+                    continue;
+                };
+                let base = page.final_uri();
+                visited.insert(resource.request.uri.clone());
+                visited.insert(base.to_owned());
+                let document_base = crate::web_page::page_base(page);
+                for source in crate::web_page::iframe_sources(page) {
+                    let uri = resolve_relative(&document_base, source);
+                    let supported = match url::Url::parse(&uri) {
+                        Ok(url) => matches!(url.scheme(), "http" | "https" | "file"),
+                        Err(url::ParseError::RelativeUrlWithoutBase) => {
+                            url::Url::parse(base).is_err()
+                        }
+                        Err(_) => false,
+                    };
+                    if supported && visited.insert(uri.clone()) && roots.len() < limits.resources {
+                        let depth =
+                            resources.depths.borrow().get(request).copied().unwrap_or(0) + 1;
+                        roots.push((4, depth, branch, DiscoveryInput::new(uri)));
+                        branch += 1;
+                    }
                 }
             }
         }
-        if roots.is_empty() {
-            break;
+        if !roots.is_empty() {
+            continue;
         }
-    }
-    blocked.sort_by_key(|(rank, _, _)| *rank);
-    for (rank, spec, uri) in blocked {
-        match resources
-            .resolve(spec, &uri, true, &Cell::new(rank), rank, rank.0 == 0)
+        // A Host can supply another live document without restarting the job.
+        // Drain already-accessible observations before any interactive access.
+        let mut inputs = observe(Interaction::Forbidden)
             .await
-        {
-            Ok(Some((_, catalog))) => return Ok(catalog),
-            Ok(None) => {}
-            Err(error) => record_diagnostic(&mut diagnostics, spec, error)?,
+            .map_err(|error| DiscoveryError::Host(Box::new(error)))?;
+        if inputs.is_empty() {
+            blocked.sort_by_key(|(rank, _, _)| *rank);
+            // Concrete source/metadata evidence precedes viewer access. Unrelated
+            // observed scripts and fonts must not prompt before a frame can win.
+            let concrete = blocked.partition_point(|(rank, _, _)| rank.0 < 4);
+            if let Some(catalog) = resources
+                .resolve_blocked(blocked.drain(..concrete), &mut diagnostics)
+                .await?
+            {
+                return Ok(catalog);
+            }
+            inputs = observe(Interaction::Allowed)
+                .await
+                .map_err(|error| DiscoveryError::Host(Box::new(error)))?;
+            if inputs.is_empty() {
+                if let Some(catalog) = resources
+                    .resolve_blocked(blocked.drain(..), &mut diagnostics)
+                    .await?
+                {
+                    return Ok(catalog);
+                }
+                return Err(DiscoveryError::NoCandidateAccepted { diagnostics });
+            }
+        }
+        for input in inputs {
+            let supplied = resources.supply(&input)?;
+            if !visited.insert(input.url.clone()) && !supplied {
+                continue;
+            }
+            if branch >= limits.resources {
+                return Err(DiscoveryError::ResourceLimitExceeded);
+            }
+            roots.push((evidence_rank(&input, specs), 0, branch, input));
+            branch += 1;
         }
     }
-    Err(DiscoveryError::NoCandidateAccepted { diagnostics })
 }
 
 fn record_diagnostic(

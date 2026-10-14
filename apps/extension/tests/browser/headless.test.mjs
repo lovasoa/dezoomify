@@ -320,6 +320,11 @@ async function runChromiumJob(base, work, options = {}) {
       `Chromium test driver failed: ${JSON.stringify(driverResult)}`,
     );
     const jobPage = await waitForJobPage(context);
+    if (options.grantAccess) {
+      await waitForVisible(jobPage, "[data-dz-allow-access=true]", "deferred frame permission");
+      assert.equal(await jobPage.locator(".dz-error-section").count(), 0);
+      await jobPage.locator("[data-dz-allow-access=true]").click();
+    }
     if (options.beforeCompletion) await options.beforeCompletion(jobPage);
     if (options.expectFailure) {
       await waitForVisible(jobPage, ".dz-error-section", "failed acquisition");
@@ -494,6 +499,18 @@ async function runFirefoxJob(base, work, runOptions = {}) {
       undefined,
       50,
     );
+    if (runOptions.grantAccess) {
+      for (const handle of await driver.getAllWindowHandles()) {
+        await driver.switchTo().window(handle);
+        if ((await driver.getCurrentUrl()).includes("/job.html#sourceTabId=")) break;
+      }
+      const grant = await driver.wait(async () => {
+        const [button] = await driver.findElements(webdriver.By.css("[data-dz-allow-access=true]"));
+        return button;
+      }, 30000);
+      assert.equal((await driver.findElements(webdriver.By.css(".dz-error-section"))).length, 0);
+      await grant.click();
+    }
     const deadline = Date.now() + 90000;
     const output = await readCompletedPng(downloadsDir, deadline).catch(async (error) => {
       const pages = [];
@@ -772,6 +789,18 @@ for (const [browser, runJob] of [
   ["chromium", runChromiumJob],
   ["firefox", runFirefoxJob],
 ]) {
+  test(`${browser}: recursive iframe scanning defers access and saves a dynamic viewer`, {
+    timeout: 180000,
+  }, async () => {
+    const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-recursive-iframe-"));
+    try {
+      assertPng(
+        await runJob(fixtureServer.base, work, { scenario: "recursive-iframe", grantAccess: true }),
+      );
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
   test(`${browser}: private OpenSeadragon sources download through existing metadata parsers`, {
     timeout: 240000,
   }, async () => {

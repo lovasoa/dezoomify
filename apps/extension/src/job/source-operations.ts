@@ -21,9 +21,8 @@ type SourceRequest = {
 type SourceFetch = { controller: AbortController; finished: Promise<void> };
 
 /**
- * Take one bounded snapshot of rendered document roots followed by retained
- * resource URLs. Same-origin iframe DOM is readable here; cross-origin frames
- * throw on access and are skipped.
+ * Take one bounded snapshot of the rendered document and retained resource
+ * URLs. The job page owns frame traversal and permission checks.
  */
 export function collectCandidates(): {
   ok: true;
@@ -66,30 +65,14 @@ export function collectCandidates(): {
     });
   };
 
-  const visit = (doc: Document, url: string, kind: DiscoveryInputKind) => {
-    let html = "";
-    try {
-      // Browsers render XML, JSON, and plain text inside their own viewers.
-      // Only HTML DOM is source evidence; other documents need original bytes.
-      if (doc.contentType === "text/html" || doc.contentType === "application/xhtml+xml")
-        html = String(doc.documentElement?.outerHTML ?? "");
-    } catch {}
-    append(url, kind, html);
-    let frames: Element[] = [];
-    try {
-      frames = Array.from(doc.querySelectorAll?.("iframe") ?? []);
-    } catch {}
-    for (const element of frames) {
-      try {
-        const frame = element as HTMLIFrameElement;
-        const child = frame.contentDocument;
-        if (child)
-          visit(child, String(child.location?.href ?? frame.src ?? ""), "observed-document");
-      } catch {}
-    }
-  };
   try {
-    visit(globalThis.document, documentUrl, "source");
+    const doc = globalThis.document;
+    // Only HTML DOM is source evidence; browser XML/JSON viewers need original bytes.
+    const html =
+      doc.contentType === "text/html" || doc.contentType === "application/xhtml+xml"
+        ? String(doc.documentElement?.outerHTML ?? "")
+        : undefined;
+    append(documentUrl, "source", html);
   } catch {
     append(documentUrl, "source");
   }

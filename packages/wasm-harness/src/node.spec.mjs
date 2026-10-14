@@ -30,6 +30,9 @@ function host(overrides = {}) {
   const observed = { reads: [], tiles: [], progress: [], warnings: [], delays: [], settled: 0 };
   return {
     observed,
+    async observe() {
+      return [];
+    },
     async parseHtml() {
       return {}; // These bridge fixtures use XML metadata and need no HTML projections.
     },
@@ -93,6 +96,36 @@ test("async Host reads binary metadata and saves the full selected image", async
   assert.equal(platform.observed.settled, 1);
   assert.ok(platform.observed.reads.every((request) => request.uri === url));
   assert.ok(platform.observed.progress.some((progress) => progress.completed === 4));
+});
+
+test("additional observations finish the same WASM invocation after inert discovery fails", async () => {
+  const interactions = [];
+  const platform = host({
+    async fetch(request) {
+      platform.observed.reads.push(request);
+      return {
+        kind: "response",
+        response: { bytes: new TextEncoder().encode("<html></html>"), final_uri: request.uri },
+      };
+    },
+    async observe(interaction) {
+      interactions.push(interaction);
+      return interaction === "forbidden"
+        ? []
+        : [
+            {
+              url: "https://viewer.example/#loaded",
+              kind: "observed-metadata",
+              contents: new TextDecoder().decode(document),
+            },
+          ];
+    },
+  });
+  const output = await wasm.dezoomify([{ url: "https://example.com/viewer" }], options, platform);
+  assert.deepEqual(output.canvas, { width: 512, height: 512 });
+  assert.deepEqual(interactions, ["forbidden", "allowed"]);
+  assert.equal(platform.observed.tiles.length, 4);
+  assert.equal(platform.observed.settled, 1);
 });
 
 test("FreezoomPack WASM plans match the native/browser fixture golden", async () => {

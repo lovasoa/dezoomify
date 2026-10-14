@@ -206,14 +206,7 @@ async fn discover(
     };
     let catalog = registry
         .discover(
-            inputs
-                .into_iter()
-                .map(|input| DiscoveryInput {
-                    url: input.url,
-                    contents: input.contents.map(String::into_bytes),
-                    kind: input.kind.unwrap_or_default(),
-                })
-                .collect(),
+            inputs.into_iter().map(DiscoveryInput::from).collect(),
             DiscoveryLimits {
                 concurrent: options.max_concurrent as usize,
                 ..Default::default()
@@ -264,6 +257,15 @@ async fn discover(
                 Ok(result)
             },
             |query| host.parse_html(query),
+            |interaction| async move {
+                host.checkpoint(Gate::Cancellation).await?;
+                Ok(host
+                    .observe(interaction)
+                    .await?
+                    .into_iter()
+                    .map(DiscoveryInput::from)
+                    .collect())
+            },
         )
         .await
         .map_err(|error| match error {
