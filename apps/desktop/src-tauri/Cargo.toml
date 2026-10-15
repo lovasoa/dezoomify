@@ -44,6 +44,7 @@ tauri = { version = "=2.12.2", optional = true , features = [] }
 tauri-plugin-dialog = { version = "=2.7.3", optional = true }
 tauri-plugin-opener = { version = "=2.7.0", optional = true }
 tauri-plugin-single-instance = { version = "=2.4.5", optional = true }
+tauri-plugin-updater = { version = "=2.12.0", optional = true }
 # Embedded W3C WebDriver server for the real-window E2E only. Registered
 # behind the non-default `testing-webdriver` feature so release bundles never
 # open a WebDriver port (the plugin starts its server unconditionally on init).
@@ -59,7 +60,7 @@ default = []
 # Real Tauri window shell. Requires the platform webview system packages
 # (on Linux: libwebkit2gtk-4.1-dev, libgtk-3-dev, libsoup-3.0-dev); the lean
 # offline shell stays the default so this manifest keeps building anywhere.
-tauri = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-dialog", "dep:tauri-plugin-opener", "dep:tauri-plugin-single-instance", "dep:open"]
+tauri = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-dialog", "dep:tauri-plugin-opener", "dep:tauri-plugin-single-instance", "dep:tauri-plugin-updater", "dep:open"]
 # Test-only embedded WebDriver server, used exclusively by
 # `cargo xtask test desktop --e2e-window` (selenium-webdriver client).
 # Never enable this in a release bundle.

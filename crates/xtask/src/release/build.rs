@@ -113,9 +113,7 @@ fn build_extension_artifact(browser: &str, out: &Path) -> Result<(), String> {
 
 /// Desktop release artifact: runs the canonical `cargo xtask build desktop`
 /// pipeline (lean shell, frontend, window shell, icons, host bundler), then
-/// copies the single release installer to `out`. Only the artifact named by
-/// `expected_artifact_name` ships; anything else the bundler leaves on disk
-/// is never published.
+/// copies the installer plus the signed updater bundle and signature to `out`'s directory.
 fn build_desktop_artifact(target: &str, target_os: &str, out: &Path) -> Result<(), String> {
     let host_ok = match target_os {
         "linux" => cfg!(target_os = "linux"),
@@ -127,6 +125,12 @@ fn build_desktop_artifact(target: &str, target_os: &str, out: &Path) -> Result<(
         return Err(format!(
             "target {target} must be built on a {target_os} host (release builds never cross-compile installers)"
         ));
+    }
+    if std::env::var("TAURI_SIGNING_PRIVATE_KEY")
+        .unwrap_or_default()
+        .is_empty()
+    {
+        return Err("desktop releases require the TAURI_SIGNING_PRIVATE_KEY Actions secret".into());
     }
     crate::desktop::build_desktop(&[])?;
     let (subdir, extension, arch_token): (&str, &str, Option<&str>) = match target {
@@ -164,6 +168,44 @@ fn build_desktop_artifact(target: &str, target_os: &str, out: &Path) -> Result<(
         ));
     }
     std::fs::copy(&hits[0], out).map_err(|e| format!("copy {}: {e}", hits[0].display()))?;
+    let (subdir, extension) = match target {
+        "desktop-linux-x86_64" => ("deb", "deb"),
+        "desktop-windows-x86_64" => ("msi", "msi"),
+        "desktop-macos-aarch64" => ("macos", "app.tar.gz"),
+        _ => return Err(format!("missing updater recipe for {target}")),
+    };
+    let dir = crate::repo_root()
+        .join("target/release/bundle")
+        .join(subdir);
+    let bundles = std::fs::read_dir(&dir)
+        .map_err(|error| format!("{}: {error}", dir.display()))?
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|path| path.to_string_lossy().ends_with(&format!(".{extension}")))
+        .collect::<Vec<_>>();
+    let [bundle] = bundles.as_slice() else {
+        return Err(format!("expected one updater bundle in {}", dir.display()));
+    };
+    let name = super::updater::bundle_name(
+        target,
+        &std::env::var("DEZOOMIFY_VERSION").map_err(|error| error.to_string())?,
+    )
+    .ok_or("missing updater bundle name")?;
+    let destination = out.parent().ok_or("missing release artifact directory")?;
+    if bundle != &hits[0] {
+        std::fs::copy(bundle, destination.join(&name)).map_err(|error| error.to_string())?;
+    }
+    let signature = bundle.with_file_name(format!(
+        "{}.sig",
+        bundle
+            .file_name()
+            .ok_or("missing bundle filename")?
+            .to_string_lossy()
+    ));
+    std::fs::copy(signature, destination.join(format!("{name}.sig")))
+        .map_err(|error| format!("copy updater signature: {error}"))?;
     Ok(())
 }
 

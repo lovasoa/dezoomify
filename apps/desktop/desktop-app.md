@@ -41,8 +41,11 @@ The macOS app has an ad-hoc signature, which requires no paid Apple account,
 but is not signed with Developer ID or notarized by Apple. The operating
 system may ask you to confirm that you trust the app.
 
-There is no automatic in-app update: when a new version appears on the
-releases page, download it manually and install it yourself.
+Choose **Help → Check for updates…** to check GitHub Releases. The app asks
+before downloading a signed update and restarting. Finish or cancel any
+current save first. Linux and Windows may ask for administrator permission
+to install the update. Older versions without this menu need one manual
+upgrade to gain the updater.
 
 You can also build the app locally with `cargo xtask build desktop`, which
 produces an installer with the same signing policy for the matching host under

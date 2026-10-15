@@ -15,12 +15,3 @@ privacy_policy_url = "https://dezoomify.ophir.dev/beta/privacy"
 # create a new store item.
 id = "{14074c89-8a5f-4813-98df-a7117f062871}"
 store_url = "https://addons.mozilla.org/en-US/firefox/addon/dezoomify/"
-
-# Desktop updater decision (todo 5.8): automatic in-app updates are
-# disabled for this free project. No update host is deployed and no updater
-# key exists; users check GitHub Releases manually.
-[updater]
-enabled = false
-channel = "stable"
-endpoints = []
-pubkey_file = ""
