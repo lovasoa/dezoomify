@@ -29,11 +29,6 @@ export function HistorySection({
   onSelect(entry: HistoryEntry): void;
 }) {
   const entries = ctx?.history;
-  function activate(entry: NonNullable<ViewContext["history"]>[number]) {
-    if (entry.savedOutput && callbacks.onOpenHistory) {
-      if (!entry.opening && entry.outputState !== "deleted") void callbacks.onOpenHistory(entry);
-    } else onSelect(entry);
-  }
   if (!entries) return <div className="dz-history-section" id="dz-history" />;
   return (
     <section className="dz-history-section" id="dz-history" aria-labelledby="dz-history-title">
@@ -48,10 +43,10 @@ export function HistorySection({
           <table className="dz-history-table" aria-labelledby="dz-history-title">
             <thead>
               <tr>
-                <th scope="col">{t("view.history.image")}</th>
+                <th scope="col">{t("view.history.source")}</th>
                 <th scope="col">{t("view.history.time")}</th>
                 <th scope="col">{t("view.history.size")}</th>
-                <th scope="col">{t("view.history.status")}</th>
+                <th scope="col">{t("view.history.result")}</th>
                 <th scope="col" aria-label={t("view.history.remove")} />
               </tr>
             </thead>
@@ -62,7 +57,7 @@ export function HistorySection({
                   entry={entry}
                   callbacks={callbacks}
                   now={ctx?.historyNow}
-                  activate={activate}
+                  onSelect={onSelect}
                 />
               ))}
             </tbody>
@@ -87,28 +82,22 @@ function HistoryEntryRow({
   entry,
   callbacks,
   now,
-  activate,
+  onSelect,
 }: {
   entry: HistoryRow;
   callbacks: ViewCallbacks;
   now?: number;
-  activate(entry: HistoryRow): void;
+  onSelect(entry: HistoryEntry): void;
 }) {
-  const file = entry.savedOutput && callbacks.onOpenHistory;
-  const label = file ? entry.savedOutput?.filename : entry.title || entry.url;
+  const label = entry.title || entry.url;
   return (
-    <tr onClick={() => activate(entry)}>
+    <tr>
       <td>
         <button
           type="button"
           className="dz-history-main"
           title={entry.url}
-          disabled={entry.opening || entry.outputState === "deleted"}
-          aria-label={
-            file
-              ? t("view.history.openImage", { image: entry.savedOutput?.filename ?? "" })
-              : undefined
-          }
+          onClick={() => onSelect(entry)}
         >
           {label}
         </button>
@@ -122,7 +111,7 @@ function HistoryEntryRow({
         </time>
       </td>
       <td>{entry.width && entry.height ? `${entry.width} × ${entry.height}` : "–"}</td>
-      <HistoryStatusCell entry={entry} file={Boolean(file)} />
+      <HistoryResultCell entry={entry} onOpen={callbacks.onOpenHistory} />
       <td>
         <RemoveHistoryButton
           entry={entry}
@@ -134,13 +123,37 @@ function HistoryEntryRow({
   );
 }
 
-function HistoryStatusCell({ entry, file }: { entry: HistoryRow; file: boolean }) {
-  const fileStatus =
-    file && entry.outputState !== "available" ? (entry.outputState ?? "checking") : undefined;
-  const status = entry.opening ? "opening" : (fileStatus ?? entry.status);
+function historyResultStatus(entry: HistoryRow, file: boolean) {
+  if (entry.opening) return "opening";
+  if (file)
+    return entry.outputState === "available" ? undefined : (entry.outputState ?? "checking");
+  return entry.status;
+}
+
+function HistoryResultCell({
+  entry,
+  onOpen,
+}: {
+  entry: HistoryRow;
+  onOpen: ViewCallbacks["onOpenHistory"];
+}) {
+  const saved = onOpen ? entry.savedOutput : undefined;
+  const status = historyResultStatus(entry, Boolean(saved));
   return (
     <td title={entry.outputError ? detailOf(entry.outputError) : undefined}>
-      {status ? t(`view.history.status.${status}`) : "–"}
+      {saved ? (
+        <button
+          type="button"
+          className="dz-history-output"
+          title={saved.filename}
+          disabled={entry.opening || entry.outputState === "deleted"}
+          aria-label={t("view.history.openImage", { image: saved.filename })}
+          onClick={() => void onOpen?.(entry)}
+        >
+          {saved.filename}
+        </button>
+      ) : null}
+      {status ? <span>{t(`view.history.status.${status}`)}</span> : saved ? null : "–"}
       {entry.outputError && entry.outputState !== "unavailable" ? (
         <span role="alert" title={detailOf(entry.outputError)}>
           {t("view.history.openFailed")}
