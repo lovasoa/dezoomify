@@ -19,8 +19,9 @@ with injected `Host` capabilities.
 - Define cross-language types in `crates/dezoomify/src/model.rs`; import generated
   bindings, never redeclare or hand-edit them. Run `cargo xtask bindings generate`
   after boundary changes. Branch on error `kind` and structured facts, not prose.
-- The metadata proxy fetches public metadata only. Extension scans require
-  explicit user action and session access requires granted permissions.
+- The website proxy fetches only public source resources needed for image
+  downloads, without credentials. Extension scans require explicit user action
+  and session access requires granted permissions.
   Declare only permissions shipped code uses; follow [Security](docs/security.md).
 - Do not commit generated website output. Only `packages/wasm-bindings` and
   `generated/*.json` are tracked generated trees.

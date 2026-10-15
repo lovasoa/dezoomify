@@ -25,19 +25,25 @@ opt-level = "s"
 lto = true
 codegen-units = 1
 
-# Shared lint defaults. Crates either inherit these tables or declare their
-# own policy: Cargo does not combine workspace inheritance with per-lint overrides.
+# Every crate inherits these defaults; capability restrictions stay scoped to
+# the pure domain crate in its crate root and the dedicated Clippy check.
 # `clippy::unwrap_used` is deliberately NOT in this table: a workspace deny
 # would also lint integration `tests/` targets, while the policy is "deny
 # in shipped `src`, allow in tests". Each crate therefore denies it at its
 # own crate roots (`lib.rs`/`main.rs`/bins, which never cover `tests/`),
 # and unit tests are exempt via `allow-unwrap-in-tests` in `clippy.toml`.
 [workspace.lints.rust]
-missing_docs = "warn"
+rust_2018_idioms = "deny"
+unused_must_use = "deny"
+unsafe_op_in_unsafe_fn = "deny"
 
 [workspace.lints.clippy]
-pedantic = "warn"
-nursery = "allow"
+pedantic = { level = "allow", priority = -1 }
+nursery = { level = "allow", priority = -1 }
+cognitive_complexity = "deny"
+redundant_clone = "deny"
+match_same_arms = "deny"
+nonminimal_bool = "deny"
 
 [workspace.dependencies]
 ed25519-dalek = { version = "3", default-features = false }

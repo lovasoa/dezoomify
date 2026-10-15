@@ -4,7 +4,8 @@ import { handleProxyRequest } from "../src/server/proxy.ts";
 import {
   buildProxyCorsHeaders,
   createProxyRequestId,
-  isAllowedMetadataContentType,
+  forwardedClientHeaders,
+  isAllowedSourceContentType,
   isBlockedIPv4Value,
   isBlockedIPv6,
   parseIPv4,
@@ -95,13 +96,21 @@ test("DNS rebinding double-check blocks private resolution", () => {
   assert.equal(validateProxyTarget("https://evil.test/x.json", { resolveHost: resolve }).ok, false);
 });
 
-test("metadata content types", () => {
-  assert.equal(isAllowedMetadataContentType("application/x-javascript"), true);
-  assert.equal(isAllowedMetadataContentType("application/ecmascript; charset=utf-8"), true);
-  assert.equal(isAllowedMetadataContentType("TEXT/JAVASCRIPT; charset=UTF-8"), true);
-  assert.equal(isAllowedMetadataContentType("image/png"), false);
-  assert.equal(isAllowedMetadataContentType("image/jpeg"), false);
-  assert.equal(isAllowedMetadataContentType(null), false);
+test("public source content types", () => {
+  for (const type of [
+    "application/x-javascript",
+    "application/ecmascript; charset=utf-8",
+    "TEXT/JAVASCRIPT; charset=UTF-8",
+    "image/png",
+    "image/jpeg",
+    "image/tiff",
+    "application/octet-stream",
+  ]) {
+    assert.equal(isAllowedSourceContentType(type), true, type);
+  }
+  for (const type of [null, "video/mp4", "application/zip", "application/pdf"]) {
+    assert.equal(isAllowedSourceContentType(type), false, type);
+  }
 });
 
 test("header stripping + restrictive CORS + request ids", () => {
@@ -117,6 +126,11 @@ test("header stripping + restrictive CORS + request ids", () => {
   );
   assert.equal(stripped.accept, "application/json");
   assert.ok(!("x-custom" in stripped));
+  assert.equal(forwardedClientHeaders({ Range: "bytes=0-3" }).range, "bytes=0-3");
+  assert.equal(
+    forwardedClientHeaders({ Range: ["bytes=0-3", "bytes=4-7"] }).range,
+    "bytes=0-3,bytes=4-7",
+  );
   const cors = buildProxyCorsHeaders("https://site.test", "https://site.test");
   assert.equal(cors["access-control-allow-origin"], "https://site.test");
   assert.deepEqual(buildProxyCorsHeaders("https://site.test", "https://evil.test"), {});
@@ -127,16 +141,15 @@ test("header stripping + restrictive CORS + request ids", () => {
   assert.ok(!id1.includes("?") && !id1.includes("="));
 });
 
-test("relay: valid public metadata succeeds; tiles rejected by content-type", async () => {
+test("relay: public metadata and image data succeed", async () => {
   const okDeps = {
     fetchUpstream: async () => ({
       status: 200,
       headers: hdr({ "content-type": "text/javascript", "content-length": "10" }),
-      async arrayBuffer() {
-        return new Uint8Array([1, 2]).buffer;
-      },
+      body: new Response(new Uint8Array([1, 2])).body,
     }),
     websiteOrigin: "https://site.test",
+    disableOriginBucket: true,
   };
   const ok = await handleProxyRequest(
     { method: "POST", targetUrl: "https://public.test/config.js", protocolVersion: 1 },
@@ -155,17 +168,16 @@ test("relay: valid public metadata succeeds; tiles rejected by content-type", as
       fetchUpstream: async () => ({
         status: 200,
         headers: hdr({ "content-type": "image/jpeg" }),
-        async arrayBuffer() {
-          return new Uint8Array([1]).buffer;
-        },
+        body: new Response(new Uint8Array([1])).body,
       }),
     },
   );
-  assert.equal(tile.status, 415);
+  assert.equal(tile.status, 200);
+  assert.deepEqual(new Uint8Array(tile.body), new Uint8Array([1]));
 });
 
 test("relay: method, private target, redirect-to-private, oversize", async () => {
-  const base = { websiteOrigin: "https://site.test" };
+  const base = { websiteOrigin: "https://site.test", disableOriginBucket: true };
   const badMethod = await handleProxyRequest(
     { method: "GET", targetUrl: "https://public.test/x.json", protocolVersion: 1 },
     {
@@ -211,12 +223,176 @@ test("relay: method, private target, redirect-to-private, oversize", async () =>
       fetchUpstream: async () => ({
         status: 200,
         headers: hdr({ "content-type": "application/json" }),
-        async arrayBuffer() {
-          return new Uint8Array(100).buffer;
-        },
+        body: new Response(new Uint8Array(100)).body,
       }),
     },
   );
   assert.equal(oversize.status, 413);
   assert.equal(oversize.code, "PROXY_BUDGET_EXCEEDED");
+});
+
+test("relay preserves exact public container ranges through validated redirects", async () => {
+  const seen = [];
+  let cancelledRedirect = false;
+  const result = await handleProxyRequest(
+    {
+      method: "POST",
+      targetUrl: "https://public.test/source.bin",
+      protocolVersion: 1,
+      headers: { Range: "bytes=10-13", Cookie: "secret", Authorization: "secret" },
+    },
+    {
+      websiteOrigin: "https://site.test",
+      disableOriginBucket: true,
+      fetchUpstream: async (url, init) => {
+        seen.push({ url, ...init });
+        if (seen.length === 1)
+          return {
+            status: 302,
+            headers: new Headers({ location: "https://cdn.test/source.bin" }),
+            body: new ReadableStream({
+              cancel() {
+                cancelledRedirect = true;
+              },
+            }),
+          };
+        return new Response(new Uint8Array([10, 11, 12, 13]), {
+          status: 206,
+          headers: {
+            "content-type": "image/tiff",
+            "content-range": "bytes 10-13/20000000",
+            "content-length": "4",
+          },
+        });
+      },
+    },
+  );
+  assert.equal(result.status, 206);
+  assert.deepEqual(new Uint8Array(result.body), new Uint8Array([10, 11, 12, 13]));
+  assert.equal(result.headers["content-range"], "bytes 10-13/20000000");
+  assert.match(result.headers["access-control-expose-headers"], /content-range/);
+  assert.equal(result.upstreamUrl, "https://cdn.test/source.bin");
+  assert.equal(cancelledRedirect, true);
+  assert.equal(seen.length, 2);
+  for (const { headers, signal } of seen) {
+    assert.equal(headers.range, "bytes=10-13");
+    assert.equal(headers.accept, "*/*");
+    assert.equal(headers.cookie, undefined);
+    assert.equal(headers.authorization, undefined);
+    assert.ok(signal instanceof AbortSignal);
+  }
+});
+
+const rangeRequest = {
+  method: "POST",
+  targetUrl: "https://public.test/container",
+  protocolVersion: 1,
+  headers: { Range: "bytes=4-7" },
+};
+const relayDeps = { websiteOrigin: "https://site.test", disableOriginBucket: true };
+
+test("relay rejects malformed and oversized ranges before fetching", async () => {
+  for (const [value, status] of [
+    ["bytes=0-", 422],
+    ["bytes=0-2097152", 413],
+  ]) {
+    const result = await handleProxyRequest(
+      { ...rangeRequest, headers: { Range: value } },
+      { ...relayDeps, fetchUpstream: () => assert.fail("must not fetch") },
+    );
+    assert.equal(result.status, status);
+  }
+});
+
+test("relay cancels ignored ranges without buffering the container", async () => {
+  let cancelled = false;
+  const result = await handleProxyRequest(rangeRequest, {
+    ...relayDeps,
+    fetchUpstream: async () =>
+      new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { headers: { "content-type": "image/tiff", "content-length": "20000000" } },
+      ),
+  });
+  assert.equal(result.status, 502);
+  assert.equal(result.code, "TRANSPORT_NETWORK_ERROR");
+  assert.match(result.preview, /invalid byte-range response:/);
+  assert.equal(cancelled, true);
+});
+
+test("relay bounds streaming image bodies without a declared length", async () => {
+  let cancelled = false;
+  const result = await handleProxyRequest(
+    { ...rangeRequest, headers: {} },
+    {
+      ...relayDeps,
+      maxBytes: 4,
+      fetchUpstream: async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new Uint8Array(5));
+            },
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          { headers: { "content-type": "image/png" } },
+        ),
+    },
+  );
+  assert.equal(result.status, 413);
+  assert.equal(result.code, "PROXY_BUDGET_EXCEEDED");
+  assert.equal(cancelled, true);
+});
+
+test("relay shares cancellation and deadline across upstream headers and body", async () => {
+  // Timeout signals do not keep Node alive; real fetch sockets do.
+  const keepAlive = setTimeout(() => {}, 1000);
+  try {
+    for (const stalledBody of [false, true]) {
+      for (const cancel of [false, true]) {
+        const controller = new AbortController();
+        let fetchSignal;
+        let cancelledBody = false;
+        const pending = handleProxyRequest(rangeRequest, {
+          ...relayDeps,
+          timeoutMs: 10,
+          signal: controller.signal,
+          fetchUpstream: async (_url, { signal }) => {
+            fetchSignal = signal;
+            if (!stalledBody)
+              return new Promise((_, reject) =>
+                signal.addEventListener("abort", () => reject(signal.reason), { once: true }),
+              );
+            return new Response(
+              new ReadableStream({
+                cancel() {
+                  cancelledBody = true;
+                },
+              }),
+              {
+                status: 206,
+                headers: {
+                  "content-type": "image/tiff",
+                  "content-range": "bytes 4-7/20",
+                },
+              },
+            );
+          },
+        });
+        if (cancel) setTimeout(() => controller.abort(), 1);
+        const result = await pending;
+        assert.equal(result.status, cancel ? 499 : 504);
+        assert.equal(fetchSignal.aborted, true);
+        if (stalledBody) assert.equal(cancelledBody, true);
+      }
+    }
+  } finally {
+    clearTimeout(keepAlive);
+  }
 });

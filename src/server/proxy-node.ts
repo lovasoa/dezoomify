@@ -1,4 +1,4 @@
-// Node HTTP adapter for the pure metadata proxy relay.
+// Node HTTP adapter for the bounded public source proxy relay.
 //
 // This is the local-development twin of functions/api/proxy.ts (Cloudflare
 // Pages Function) and the node:test seam. All three call the exact same core
@@ -24,7 +24,7 @@ function websiteOriginOf(req: IncomingMessage): string {
   return `http://${req.headers.host ?? "127.0.0.1"}`;
 }
 
-function requestSignal(req: IncomingMessage): AbortSignal {
+function requestSignal(req: IncomingMessage, res: ServerResponse): AbortSignal {
   const controller = new AbortController();
   if (req.destroyed) {
     controller.abort();
@@ -33,6 +33,9 @@ function requestSignal(req: IncomingMessage): AbortSignal {
   // `aborted` is the precise client-cancel signal; a normal body end is not
   // an abort, so upstream fetches keep running until the relay finishes.
   req.once("aborted", () => controller.abort());
+  res.once?.("close", () => {
+    if (!res.writableEnded) controller.abort();
+  });
   return controller.signal;
 }
 
@@ -94,7 +97,7 @@ export async function handleNodeProxyRequest(
     ) => Promise<Response>;
   } = {},
 ): Promise<void> {
-  const signal = requestSignal(req);
+  const signal = requestSignal(req, res);
   const websiteOrigin = websiteOriginOf(req);
   const cors = buildProxyCorsHeaders(websiteOrigin, req.headers.origin);
 
@@ -107,7 +110,7 @@ export async function handleNodeProxyRequest(
     res.writeHead(204, {
       ...cors,
       "access-control-allow-methods": "POST",
-      "access-control-allow-headers": "content-type",
+      "access-control-allow-headers": "content-type, range",
       "access-control-max-age": "600",
     });
     res.end();

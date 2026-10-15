@@ -555,6 +555,10 @@ function resolveDesktopExternalUrl(href: string): string | null {
   }
   if (raw.startsWith("https://")) return raw;
   if (raw.startsWith("http://")) return `https://${raw.slice("http://".length)}`;
+  return desktopDocumentationUrl(raw);
+}
+
+function desktopDocumentationUrl(raw: string): string | null {
   let path = raw;
   while (path.startsWith("../")) path = path.slice(3);
   if (path.startsWith("./")) path = path.slice(2);

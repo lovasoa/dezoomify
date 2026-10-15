@@ -21,12 +21,8 @@ path = "src/lib.rs"
 name = "dezoomify-desktop"
 path = "src/main.rs"
 
-# Known debt: shell docs pending.
-[lints.rust]
-missing_docs = "allow"
-
-[lints.clippy]
-pedantic = "allow"
+[lints]
+workspace = true
 
 [dependencies]
 # Shared algorithm and native platform capabilities.

@@ -71,7 +71,7 @@ export default defineConfig({
     },
     name: "Dezoomify",
     optional_host_permissions: ["http://*/*", "https://*/*"],
-    permissions: ["activeTab", "downloads", "downloads.open", "scripting", "webNavigation"],
+    permissions: ["activeTab", "downloads", "downloads.open", "scripting"],
     minimum_chrome_version: browser === "chrome" ? "140" : undefined,
   }),
   hooks: {
@@ -83,8 +83,8 @@ export default defineConfig({
       for (const file of ["dezoomify-wasm.js", "dezoomify-wasm_bg.wasm"]) {
         try {
           await access(path.join(wasm, file));
-        } catch {
-          throw new Error(`missing wasm/${file}; run cargo xtask build extension first`);
+        } catch (cause) {
+          throw new Error(`missing wasm/${file}; run cargo xtask build extension first`, { cause });
         }
       }
 

@@ -30,6 +30,12 @@ export function saveExtensionBlob(
       else reject(result.error);
     };
     const failed = (detail: string) => outputError("write-failed", detail);
+    const finishState = (state?: string, error?: string) => {
+      if (id === null) return;
+      if (aborted) finish({ error: signal.reason });
+      else if (state === "complete") finish({ id });
+      else if (state === "interrupted") finish({ error: failed(error ?? "download interrupted") });
+    };
     const onChanged = (delta: DownloadDelta) => {
       if (delta.state?.current !== "complete" && delta.state?.current !== "interrupted") return;
       if (id === null) {
@@ -37,9 +43,7 @@ export function saveExtensionBlob(
         return;
       }
       if (delta.id !== id) return;
-      if (aborted) finish({ error: signal.reason });
-      else if (delta.state.current === "complete") finish({ id });
-      else finish({ error: failed(delta.error?.current ?? "download interrupted") });
+      finishState(delta.state.current, delta.error?.current);
     };
     const cancelAndFinish = (error: unknown) => {
       if (id === null || settled || cancelling) return;
@@ -55,40 +59,37 @@ export function saveExtensionBlob(
       cancelAndFinish(signal.reason ?? new DOMException("Job cancelled", "AbortError"));
     };
 
+    const inspectDownload = async (startedId: number) => {
+      try {
+        const [item] = await downloads.search({ id: startedId });
+        if (settled) return;
+        if (signal.aborted) onAbort();
+        else finishState(item?.state, item?.error);
+      } catch (error) {
+        cancelAndFinish(failed(error instanceof Error ? error.message : String(error)));
+      }
+    };
+    const onStarted = async (startedId: number) => {
+      id = startedId;
+      if (aborted || signal.aborted) {
+        onAbort();
+        return;
+      }
+      const event = early.get(startedId);
+      if (event) {
+        onChanged(event);
+        if (settled) return;
+      }
+      await inspectDownload(startedId);
+    };
     downloads.onChanged.addListener(onChanged);
     signal.addEventListener("abort", onAbort, { once: true });
-    void downloads.download({ url, filename, saveAs: false }).then(
-      async (startedId) => {
-        id = startedId;
-        if (aborted || signal.aborted) {
-          onAbort();
-          return;
-        }
-        const event = early.get(startedId);
-        if (event) {
-          onChanged(event);
-          if (settled) return;
-        }
-        try {
-          const [item] = await downloads.search({ id: startedId });
-          if (settled) return;
-          if (signal.aborted) {
-            onAbort();
-          } else if (item?.state === "complete") {
-            finish({ id: startedId });
-          } else if (item?.state === "interrupted") {
-            finish({ error: failed(item.error ?? "download interrupted") });
-          }
-        } catch (error) {
-          cancelAndFinish(failed(error instanceof Error ? error.message : String(error)));
-        }
-      },
-      (error) =>
-        finish({
-          error: signal.aborted
-            ? (signal.reason ?? new DOMException("Job cancelled", "AbortError"))
-            : failed(error instanceof Error ? error.message : String(error)),
-        }),
+    void downloads.download({ url, filename, saveAs: false }).then(onStarted, (error) =>
+      finish({
+        error: signal.aborted
+          ? (signal.reason ?? new DOMException("Job cancelled", "AbortError"))
+          : failed(error instanceof Error ? error.message : String(error)),
+      }),
     );
   });
 }

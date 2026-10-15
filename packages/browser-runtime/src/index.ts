@@ -3,6 +3,7 @@
 export * from "./assembly.ts";
 export * from "./browser-assembly.ts";
 export * from "./browser-host.ts";
+export * from "./byte-range.ts";
 export * from "./canvas-save.ts";
 export * from "./diagnostics.ts";
 export * from "./failure.ts";

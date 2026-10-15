@@ -1,0 +1,14 @@
+<!doctype html>
+<title>Zoomify ZIF viewer</title>
+<div id="myContainer"></div>
+<script>
+  const Z = {
+    async showImage(container, path) {
+      const response = await fetch(path, { headers: { Range: "bytes=0-15" } });
+      await response.arrayBuffer();
+      document.documentElement.dataset.viewerReady = "true";
+    },
+  };
+  var thisimg = "image";
+  Z.showImage("myContainer", "./" + thisimg + ".zif", "zLogoVisible=0");
+</script>

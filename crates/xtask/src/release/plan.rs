@@ -47,7 +47,7 @@ fn release_plan_at(base: &Path, numbered: bool) -> Result<PathBuf, String> {
         channel: if numbered { "stable" } else { "rolling" }.to_string(),
         version: version.clone(),
         commit,
-        capabilities: caps.capabilities.clone(),
+        capabilities: caps.capabilities,
         targets: targets
             .list
             .iter()

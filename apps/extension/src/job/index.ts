@@ -234,6 +234,34 @@ function installTestAccess() {
     .catch(() => {});
 }
 
+function testScenarioPath(scenario: unknown): string {
+  if (scenario === "recursive-iframe") return "/recursive-iframe";
+  if (typeof scenario === "string" && scenario.startsWith("memory-openseadragon-"))
+    return "/memory-openseadragon.html";
+  if (scenario === "cookie-session") return "/protected/artwork.dzi";
+  if (scenario === "retry") return "/fixtures/failures/retry-approval/retry.dzi";
+  if (typeof scenario === "string" && scenario.startsWith("fixtures/")) return `/${scenario}/`;
+  return "/extension-inputs/";
+}
+
+async function testSourceAccess(bound: NonNullable<typeof source>, scenario: unknown) {
+  const scan = await bound.scan();
+  const expected = testScenarioPath(scenario);
+  const input = scan.inputs.find((candidate) => candidate.url.includes(expected));
+  if (!input) throw new Error(`direct scan did not find ${expected}`);
+  const url =
+    scenario === "cookie-session"
+      ? new URL("/__source-access-proof", bound.documentUrl).href
+      : input.url;
+  const result = await bound.fetch({ uri: url, headers: [] }, new AbortController().signal);
+  return {
+    ok: true,
+    documentUrl: scan.documentUrl,
+    candidates: scan.inputs.length,
+    bytes: result.bytes.byteLength,
+  };
+}
+
 api.runtime.onMessage.addListener((message: unknown) => {
   if (!message || typeof message !== "object" || !("type" in message)) return;
   const value = message as Record<string, unknown>;
@@ -244,34 +272,7 @@ api.runtime.onMessage.addListener((message: unknown) => {
   if (!TESTING || !source) return;
   const bound = source;
   if (value.type === "dezoomify-test-source-access")
-    return (async () => {
-      const scan = await bound.scan();
-      const expected =
-        value.scenario === "recursive-iframe"
-          ? "/recursive-iframe"
-          : typeof value.scenario === "string" && value.scenario.startsWith("memory-openseadragon-")
-            ? "/memory-openseadragon.html"
-            : value.scenario === "cookie-session"
-              ? "/protected/artwork.dzi"
-              : value.scenario === "retry"
-                ? "/fixtures/failures/retry-approval/retry.dzi"
-                : typeof value.scenario === "string" && value.scenario.startsWith("fixtures/")
-                  ? `/${value.scenario}/`
-                  : "/extension-inputs/";
-      const input = scan.inputs.find((candidate) => candidate.url.includes(expected));
-      if (!input) throw new Error(`direct scan did not find ${expected}`);
-      const url =
-        value.scenario === "cookie-session"
-          ? new URL("/__source-access-proof", bound.documentUrl).href
-          : input.url;
-      const result = await bound.fetch({ uri: url, headers: [] }, new AbortController().signal);
-      return {
-        ok: true,
-        documentUrl: scan.documentUrl,
-        candidates: scan.inputs.length,
-        bytes: result.bytes.byteLength,
-      };
-    })().catch((error: unknown) => ({
+    return testSourceAccess(bound, value.scenario).catch((error: unknown) => ({
       ok: false,
       error: error instanceof Error ? error.message : String(error),
     }));
@@ -296,7 +297,7 @@ api.permissions.onRemoved.addListener((removed) => {
     testGrantedOrigins.delete(origin.replace(/\/\*$/, ""));
 });
 window.addEventListener("beforeunload", () => {
-  app.dispose();
+  void app.dispose();
   syncIndicator(false, false);
   source?.dispose();
 });

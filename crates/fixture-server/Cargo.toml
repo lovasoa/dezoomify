@@ -20,9 +20,5 @@ hmac.workspace = true
 sha1.workspace = true
 reqwest.workspace = true
 
-# 6.1 (unblocked for cargo 1.98): dev-only server docs pending.
-[lints.rust]
-missing_docs = "allow"
-
-[lints.clippy]
-pedantic = "allow"
+[lints]
+workspace = true

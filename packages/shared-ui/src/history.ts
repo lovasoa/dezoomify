@@ -146,20 +146,7 @@ export function pushHistory(
 function isValidEntry(raw: unknown): raw is HistoryEntry {
   if (!raw || typeof raw !== "object") return false;
   const entry = raw as Record<string, unknown>;
-  if (typeof entry.origin !== "string" || (entry.origin as string) === "") return false;
-  try {
-    const parsed = new URL(entry.origin as string);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
-  } catch {
-    return false;
-  }
-  if (typeof entry.url !== "string" || (entry.url as string).trim() === "") return false;
-  try {
-    const parsedUrl = new URL((entry.url as string).trim());
-    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") return false;
-  } catch {
-    return false;
-  }
+  if (!validHistoryAddress(entry.origin) || !validHistoryAddress(entry.url)) return false;
   if (
     typeof entry.at !== "number" ||
     !Number.isFinite(entry.at) ||
@@ -179,6 +166,34 @@ function isValidEntry(raw: unknown): raw is HistoryEntry {
   return true;
 }
 
+function validHistoryAddress(value: unknown): boolean {
+  if (typeof value !== "string" || value.trim() === "") return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function normalizeHistoryEntry(typed: HistoryEntry): HistoryEntry {
+  const entry: HistoryEntry = {
+    origin: typed.origin,
+    url: typed.url.trim(),
+    at: Math.floor(typed.at),
+  };
+  if (typeof typed.width === "number") entry.width = Math.floor(typed.width);
+  if (typeof typed.height === "number") entry.height = Math.floor(typed.height);
+  if (typeof typed.format === "string") entry.format = typed.format;
+  if (typeof typed.title === "string") entry.title = typed.title.trim().slice(0, 512);
+  const saved = savedOutputOf(typed.savedOutput);
+  if (saved) entry.savedOutput = saved;
+  if (["started", "completed", "preview", "failed", "cancelled"].includes(typed.status ?? "")) {
+    entry.status = typed.status;
+  }
+  return entry;
+}
+
 /** Parse stored JSON into validated entries (fail-closed: bad payloads yield an empty list). */
 export function parseHistoryJson(text: string | null | undefined): Array<HistoryEntry> {
   if (typeof text !== "string" || text.trim() === "") return [];
@@ -188,24 +203,7 @@ export function parseHistoryJson(text: string | null | undefined): Array<History
     const out: Array<HistoryEntry> = [];
     for (const item of parsed) {
       if (isValidEntry(item)) {
-        const entry: HistoryEntry = {
-          origin: (item as HistoryEntry).origin,
-          url: String((item as HistoryEntry).url).trim(),
-          at: Math.floor((item as HistoryEntry).at),
-        };
-        const typed = item as HistoryEntry;
-        if (typeof typed.width === "number") entry.width = Math.floor(typed.width);
-        if (typeof typed.height === "number") entry.height = Math.floor(typed.height);
-        if (typeof typed.format === "string") entry.format = typed.format;
-        if (typeof typed.title === "string") entry.title = typed.title.trim().slice(0, 512);
-        const saved = savedOutputOf(typed.savedOutput);
-        if (saved) entry.savedOutput = saved;
-        if (
-          ["started", "completed", "preview", "failed", "cancelled"].includes(typed.status ?? "")
-        ) {
-          entry.status = typed.status;
-        }
-        out.push(entry);
+        out.push(normalizeHistoryEntry(item));
         if (out.length >= HISTORY_MAX) break;
       }
     }
@@ -268,6 +266,38 @@ export function createHistory(
   const files = new Map<string, Pick<HistoryRow, "outputState" | "opening" | "outputError">>();
   let refreshing: Promise<void> | undefined;
   const contains = (id: string) => entries.some((entry) => entry.savedOutput?.id === id);
+  async function inspectSaved(saved: SavedOutput, provider: HistoryOutputs): Promise<void> {
+    if (!files.has(saved.id)) files.set(saved.id, { outputState: "checking" });
+    const before = files.get(saved.id);
+    try {
+      const outputState = await provider.inspect(saved);
+      if (contains(saved.id) && files.get(saved.id) === before)
+        files.set(saved.id, { ...files.get(saved.id), outputState, outputError: undefined });
+    } catch (error) {
+      if (contains(saved.id) && files.get(saved.id) === before)
+        files.set(saved.id, {
+          ...files.get(saved.id),
+          outputState: "unavailable",
+          outputError: outputError(error),
+        });
+    }
+    provider.onChange();
+  }
+  function recordOpenFailure(id: string, error: unknown): void {
+    if (!contains(id)) return;
+    if (isJobError(error) && causeOf(error).kind === "output-not-found") {
+      files.set(id, { outputState: "deleted" });
+      return;
+    }
+    const state = files.get(id);
+    files.set(id, {
+      ...state,
+      outputState:
+        !state?.outputState || state.outputState === "checking" ? "unavailable" : state.outputState,
+      opening: false,
+      outputError: outputError(error),
+    });
+  }
   function persist(previous: HistoryEntry[]): void {
     saveHistory(store, key, entries);
     for (const entry of previous) {
@@ -358,21 +388,7 @@ export function createHistory(
       }
       const worker = async () => {
         for (let saved = next(); saved; saved = next()) {
-          if (!files.has(saved.id)) files.set(saved.id, { outputState: "checking" });
-          const before = files.get(saved.id);
-          try {
-            const outputState = await provider.inspect(saved);
-            if (contains(saved.id) && files.get(saved.id) === before)
-              files.set(saved.id, { ...files.get(saved.id), outputState, outputError: undefined });
-          } catch (error) {
-            if (contains(saved.id) && files.get(saved.id) === before)
-              files.set(saved.id, {
-                ...files.get(saved.id),
-                outputState: "unavailable",
-                outputError: outputError(error),
-              });
-          }
-          provider.onChange();
+          await inspectSaved(saved, provider);
         }
       };
       refreshing = Promise.all([worker(), worker()])
@@ -391,23 +407,7 @@ export function createHistory(
         await outputs.open(saved);
         if (contains(saved.id)) files.set(saved.id, { outputState: "available" });
       } catch (error) {
-        if (contains(saved.id)) {
-          const state = files.get(saved.id);
-          files.set(
-            saved.id,
-            isJobError(error) && causeOf(error).kind === "output-not-found"
-              ? { outputState: "deleted" }
-              : {
-                  ...state,
-                  outputState:
-                    !state?.outputState || state.outputState === "checking"
-                      ? "unavailable"
-                      : state.outputState,
-                  opening: false,
-                  outputError: outputError(error),
-                },
-          );
-        }
+        recordOpenFailure(saved.id, error);
       }
       outputs.onChange();
     },

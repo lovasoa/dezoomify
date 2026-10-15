@@ -856,7 +856,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_timing_compression_idle_logging_defaults() {
+    fn timing_compression_idle_logging_defaults() {
         let args = parse(&[
             "https://example.com/x.dzi".to_string(),
             "out.png".to_string(),
@@ -873,6 +873,10 @@ mod tests {
         assert!(!args.largest);
         assert_eq!(args.max_height, None);
         assert_eq!(args.zoom_level, None);
+    }
+
+    #[test]
+    fn parses_timing_compression_idle_logging_flags() {
         let timed = parse(&[
             "--retry-delay".to_string(),
             "500ms".to_string(),

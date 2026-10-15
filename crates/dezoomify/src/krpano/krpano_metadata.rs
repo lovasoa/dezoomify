@@ -82,7 +82,7 @@ impl KrpanoMetadata {
             .find_map(|details| (!details.subject.is_empty()).then_some(details.subject.as_str()))
             .or_else(|| {
                 self.data.iter().find_map(|bytes| {
-                    serde_json::from_str::<KrpanoMetaData>(bytes)
+                    serde_json::from_str::<KrpanoMetaData<'_>>(bytes)
                         .ok()
                         .map(|m| m.title)
                 })

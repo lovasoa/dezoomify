@@ -13,6 +13,14 @@ reports the selected image's canonical URL; browser handoff falls back to the
 entered URL when no route designates one.
 See [`DiscoveryRoute`](../crates/dezoomify/src/core/discovery.rs) for the contract.
 
+For container formats, request bounded metadata and tile slices with the existing
+`Request` headers instead of fetching the entire file. Hosts validate partial
+responses and distinguish slices in their caches; this transport is shared across
+formats. Incremental parsers can replay discovery resources, including their
+original requests, to reconstruct state without owning I/O. The
+[`ZIF adapter`](../crates/dezoomify/src/zif.rs) demonstrates using a Sans-I/O library
+this way. Keep container parsing in that library rather than duplicating it in Hosts.
+
 Add a folder under [`fixtures/<format>/<variant>/`](../fixtures/README.md):
 a `viewer.html`, minimal metadata, and links to shared tile images. Add `input.txt`
 only to override the viewer entry point with a relative input URL. Static responses

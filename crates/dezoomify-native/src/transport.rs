@@ -181,6 +181,7 @@ impl NativeTransport {
         user: Option<&UserHeaders>,
         limits: &FetchLimits,
     ) -> Result<FetchOutcome, Error> {
+        reject_duplicate_ranges(request.headers.iter().map(|header| header.name.as_str()))?;
         let mut headers: BTreeMap<String, String> = dezoomify::default_headers()
             .into_iter()
             .map(|(name, value)| (name.to_ascii_lowercase(), value))
@@ -240,13 +241,28 @@ impl NativeTransport {
         user: Option<&UserHeaders>,
         limits: &FetchLimits,
     ) -> Result<FetchOutcome, Error> {
+        reject_duplicate_ranges(extra_headers.keys().map(String::as_str))?;
         if !is_http_uri(uri) {
-            return fetch_local(uri, limits);
+            let range = extra_headers
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("range"))
+                .map(|(_, value)| ByteRange::parse(value))
+                .transpose()?;
+            return fetch_local(uri, range, limits);
         }
         let mut request = build_request(uri, extra_headers)?;
         reject_userinfo_uri(uri)?;
         if let Some(user) = user {
             user.apply(&mut request);
+        }
+        if extra_headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("range"))
+            .is_some_and(|(_, range)| request.headers.get("range") != Some(range))
+        {
+            return Err(Error::BadUrl(
+                "user Range header conflicts with the resource byte range".into(),
+            ));
         }
         let deadline = Instant::now() + limits.timeout;
         fetch_loop(&self.client, request, user, limits, &deadline).await
@@ -276,6 +292,20 @@ fn is_http_uri(uri: &str) -> bool {
     uri.starts_with("http://") || uri.starts_with("https://")
 }
 
+fn reject_duplicate_ranges<'a>(names: impl Iterator<Item = &'a str>) -> Result<(), Error> {
+    if names
+        .filter(|name| name.eq_ignore_ascii_case("range"))
+        .take(2)
+        .count()
+        > 1
+    {
+        return Err(Error::BadUrl(
+            "expected at most one Range request header".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Reject credential-bearing userinfo in the request URI itself, matching
 /// the redirect-target rule.
 fn reject_userinfo_uri(uri: &str) -> Result<(), Error> {
@@ -295,6 +325,11 @@ async fn fetch_loop(
 ) -> Result<FetchOutcome, Error> {
     let mut redirects: usize = 0;
     loop {
+        let range = request
+            .headers
+            .get("range")
+            .map(|value| ByteRange::parse(value))
+            .transpose()?;
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             return Err(Error::Timeout {
@@ -325,7 +360,10 @@ async fn fetch_loop(
                 .and_then(|value| value.to_str().ok())
                 .map(str::to_string);
             let body = if (200..300).contains(&status) {
-                read_body_capped(response, limits).await?
+                if let Some(range) = range {
+                    range.validate_response(status, response.headers(), &final_uri)?;
+                }
+                read_body_capped(response, limits, range.map(ByteRange::len), &final_uri).await?
             } else {
                 read_error_prefix(response).await
             };
@@ -349,6 +387,77 @@ async fn fetch_loop(
             user.apply(&mut request);
         }
     }
+}
+
+/// Container readers request one finite interval and receive only those bytes.
+#[derive(Clone, Copy)]
+struct ByteRange {
+    start: u64,
+    end: u64,
+}
+
+impl ByteRange {
+    fn parse(value: &str) -> Result<Self, Error> {
+        let parse = || {
+            let (start, end) = value.strip_prefix("bytes=")?.split_once('-')?;
+            let (start, end) = (decimal(start)?, decimal(end)?);
+            end.checked_sub(start)?.checked_add(1)?;
+            Some(Self { start, end })
+        };
+        parse()
+            .ok_or_else(|| Error::BadUrl("expected one finite byte range (bytes=start-end)".into()))
+    }
+
+    fn len(self) -> u64 {
+        self.end - self.start + 1
+    }
+
+    fn validate_response(
+        self,
+        status: u16,
+        headers: &reqwest::header::HeaderMap,
+        uri: &str,
+    ) -> Result<(), Error> {
+        let content_range = headers
+            .get(reqwest::header::CONTENT_RANGE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("");
+        let valid = status == 206
+            && headers
+                .get_all(reqwest::header::CONTENT_RANGE)
+                .iter()
+                .count()
+                == 1
+            && content_range
+                .strip_prefix("bytes ")
+                .and_then(|value| value.split_once('/'))
+                .is_some_and(|(interval, total)| {
+                    Self::parse(&format!("bytes={interval}"))
+                        .is_ok_and(|range| range.start == self.start && range.end == self.end)
+                        && decimal(total).is_some_and(|total| total > self.end)
+                });
+        if !valid {
+            return Err(range_response_error(
+                uri,
+                &format!("expected HTTP 206 and Content-Range for bytes={}-{}; received HTTP {status}, Content-Range: {}", self.start, self.end, content_range.chars().take(256).collect::<String>()),
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn decimal(value: &str) -> Option<u64> {
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    value.parse().ok()
+}
+
+fn range_response_error(uri: &str, detail: &str) -> Error {
+    Error::BadUrl(Failure {
+        request: Some(bounded_uri(uri.to_owned())),
+        detail: Some(detail.to_owned()),
+    })
 }
 
 // Diagnostic reads never replace an observed HTTP refusal with a body error.
@@ -384,13 +493,21 @@ async fn fetch_once(
     Ok(call.send().await.map_err(TransportError::from)?)
 }
 
-/// Stream the body with a hard cap (`max_bytes + 1`): oversize responses fail
-/// `transport.size-limit` without buffering the excess.
+/// Stream within the resource cap and any declared byte interval, rejecting
+/// excess bytes before retaining them.
 async fn read_body_capped(
     mut response: reqwest::Response,
     limits: &FetchLimits,
+    range_length: Option<u64>,
+    uri: &str,
 ) -> Result<Vec<u8>, Error> {
     if let Some(declared) = response.content_length() {
+        if range_length.is_some_and(|length| length != declared) {
+            return Err(range_response_error(
+                uri,
+                "byte range body length does not match the requested range",
+            ));
+        }
         if declared > limits.max_bytes {
             return Err(Error::SizeLimit {
                 max_bytes: limits.max_bytes,
@@ -398,24 +515,26 @@ async fn read_body_capped(
         }
     }
     let mut body = Vec::new();
-    loop {
-        match response.chunk().await {
-            Ok(Some(chunk)) => {
-                body.extend_from_slice(&chunk);
-                if body.len() as u64 > limits.max_bytes {
-                    return Err(Error::SizeLimit {
-                        max_bytes: limits.max_bytes,
-                    });
-                }
-            }
-            Ok(None) => break,
-            Err(e) => {
-                return Err(Error::NetworkFailure {
-                    transport: ErrorTransport::Native,
-                    failure: dezoomify::model::chain_text(&e).into(),
-                });
-            }
+    while let Some(chunk) = response.chunk().await.map_err(TransportError::from)? {
+        let received = (body.len() as u64).saturating_add(chunk.len() as u64);
+        if range_length.is_some_and(|length| received > length) {
+            return Err(range_response_error(
+                uri,
+                "byte range body length exceeds the requested range",
+            ));
         }
+        if received > limits.max_bytes {
+            return Err(Error::SizeLimit {
+                max_bytes: limits.max_bytes,
+            });
+        }
+        body.extend_from_slice(&chunk);
+    }
+    if range_length.is_some_and(|length| body.len() as u64 != length) {
+        return Err(range_response_error(
+            uri,
+            "byte range body length does not match the requested range",
+        ));
     }
     Ok(body)
 }
@@ -472,24 +591,57 @@ fn local_path_for_uri(uri: &str) -> Result<&str, Error> {
     Ok(uri)
 }
 
-/// Read a local resource with the same outcome shape as an HTTP 200: the
-/// final URI stays the input URI. Oversize files report `size-limit`;
+/// Read a local resource or seek to one finite byte interval; the final URI
+/// stays the input URI. Oversize resources report `size-limit`;
 /// unreadable paths report `network-failure` carrying only the OS message
 /// (never the path text).
-fn fetch_local(uri: &str, limits: &FetchLimits) -> Result<FetchOutcome, Error> {
+fn fetch_local(
+    uri: &str,
+    range: Option<ByteRange>,
+    limits: &FetchLimits,
+) -> Result<FetchOutcome, Error> {
+    use std::io::{Read, Seek, SeekFrom};
     let path = local_path_for_uri(uri)?;
-    let body = std::fs::read(path).map_err(|e| Error::NetworkFailure {
+    let local_error = |e| Error::NetworkFailure {
         transport: ErrorTransport::Native,
         failure: format!("local file read failed: {e}").into(),
-    })?;
+    };
+    let mut file = std::fs::File::open(path).map_err(local_error)?;
+    let file_len = file.metadata().map_err(local_error)?.len();
+    if range.is_some_and(|range| range.end >= file_len) {
+        return Err(range_response_error(
+            uri,
+            "requested byte range exceeds the local file",
+        ));
+    }
+    let length = range.map_or(file_len, ByteRange::len);
+    if length > limits.max_bytes {
+        return Err(Error::SizeLimit {
+            max_bytes: limits.max_bytes,
+        });
+    }
+    if let Some(range) = range {
+        file.seek(SeekFrom::Start(range.start))
+            .map_err(local_error)?;
+    }
+    let mut body = Vec::new();
+    file.take(range.map_or(limits.max_bytes.saturating_add(1), ByteRange::len))
+        .read_to_end(&mut body)
+        .map_err(local_error)?;
     if body.len() as u64 > limits.max_bytes {
         return Err(Error::SizeLimit {
             max_bytes: limits.max_bytes,
         });
     }
+    if range.is_some() && body.len() as u64 != length {
+        return Err(range_response_error(
+            uri,
+            "local file ended before the requested bytes were read",
+        ));
+    }
     Ok(FetchOutcome {
         content_type: None,
-        status: 200,
+        status: if range.is_some() { 206 } else { 200 },
         final_uri: uri.to_string(),
         body,
         retry_after_ms: None,

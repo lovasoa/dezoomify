@@ -171,20 +171,10 @@ function isJobErrorAt(value: unknown, depth: number): boolean {
   if (typeof kind !== "string" || !Object.hasOwn(COPY, kind) || !boundedText(value, depth)) {
     return false;
   }
-  const num = (field: unknown) => typeof field === "number" && Number.isFinite(field);
   const transport = (field: unknown) => typeof field === "string" && TRANSPORTS.has(field);
-  const size = (field: unknown) => {
-    const dimensions = field as Record<string, unknown> | undefined;
-    return (
-      dimensions !== undefined &&
-      typeof dimensions === "object" &&
-      num(dimensions.width) &&
-      num(dimensions.height)
-    );
-  };
   switch (kind) {
     case "http-error":
-      return num(record.status) && transport(record.transport);
+      return isFiniteNumber(record.status) && transport(record.transport);
     case "rate-limited":
     case "timeout":
     case "network-failure":
@@ -194,29 +184,19 @@ function isJobErrorAt(value: unknown, depth: number): boolean {
       return transport(record.transport) && blockedReason(record.blocked_reason) !== undefined;
     case "redirect-limit":
     case "deferred-limit":
-      return num(record.max);
+      return isFiniteNumber(record.max);
     case "size-limit":
-      return num(record.max_bytes);
+      return isFiniteNumber(record.max_bytes);
     case "unknown-format":
       return typeof record.format === "string" && record.format.length > 0;
-    case "limit-exceeded": {
-      const limit = record.limit as Record<string, unknown> | undefined;
-      const reason = limit?.reason;
-      const codec =
-        reason && typeof reason === "object"
-          ? (reason as Record<string, unknown>)["codec-side"]
-          : undefined;
-      return (
-        !!limit &&
-        typeof limit === "object" &&
-        (reason === "memory" || outputCodecs.some((entry) => entry.format === codec)) &&
-        (limit.dimensions === undefined || size(limit.dimensions)) &&
-        (limit.bytes_required === undefined || num(limit.bytes_required)) &&
-        (limit.bytes_available === undefined || num(limit.bytes_available))
-      );
-    }
+    case "limit-exceeded":
+      return isLimitContext(record.limit);
     case "tile-failed":
-      return num(record.tile) && num(record.attempts) && isJobErrorAt(record.cause, depth + 1);
+      return (
+        isFiniteNumber(record.tile) &&
+        isFiniteNumber(record.attempts) &&
+        isJobErrorAt(record.cause, depth + 1)
+      );
     case "resource":
       return (
         typeof record.request === "string" &&
@@ -231,6 +211,31 @@ function isJobErrorAt(value: unknown, depth: number): boolean {
       // beyond the bounded text already checked.
       return true;
   }
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isLimitContext(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const limit = value as Record<string, unknown>;
+  const reason = limit.reason;
+  const codec =
+    reason && typeof reason === "object"
+      ? (reason as Record<string, unknown>)["codec-side"]
+      : undefined;
+  const size = (field: unknown) => {
+    if (!field || typeof field !== "object") return false;
+    const dimensions = field as Record<string, unknown>;
+    return isFiniteNumber(dimensions.width) && isFiniteNumber(dimensions.height);
+  };
+  return (
+    (reason === "memory" || outputCodecs.some((entry) => entry.format === codec)) &&
+    (limit.dimensions === undefined || size(limit.dimensions)) &&
+    (limit.bytes_required === undefined || isFiniteNumber(limit.bytes_required)) &&
+    (limit.bytes_available === undefined || isFiniteNumber(limit.bytes_available))
+  );
 }
 
 /** The underlying failure, seen through the composition wrappers (`resource`
@@ -317,49 +322,13 @@ export function plainMessageFor(
   const cause = causeOf(error);
   switch (cause.kind) {
     // Structured limit facts come from `limit`; display prose is never parsed.
-    case "limit-exceeded": {
-      const dims = cause.limit.dimensions
-        ? t("desktop.msg.dimsPixels", {
-            a: String(cause.limit.dimensions.width),
-            b: String(cause.limit.dimensions.height),
-          })
-        : t("desktop.msg.thisPicture");
-      const need =
-        cause.limit.bytes_required !== undefined
-          ? t("desktop.msg.needAbout", { need: formatBytes(cause.limit.bytes_required) })
-          : "";
-      const available =
-        cause.limit.bytes_available !== undefined
-          ? formatBytes(cause.limit.bytes_available)
-          : "currently available memory";
-      const reason = cause.limit.reason;
-      const format = reason === "memory" ? null : reason["codec-side"];
-      const codec = outputCodecs.find((codec) => codec.format === format);
-      if (codec?.max_side) {
-        return t("desktop.output.codecLimit", {
-          dims,
-          format: codec.name,
-          maxSide: codec.max_side,
-          host,
-        });
-      }
-      return t("desktop.output.canvasLimit", {
-        dims,
-        need,
-        limit: available,
-        host,
-      });
-    }
+    case "limit-exceeded":
+      return limitMessage(cause.limit, host);
     case "rate-limited":
       return t(rateKey(cause.transport));
     case "http-error": {
-      const status = cause.status;
-      if (status === 429) return t(rateKey(cause.transport));
-      if (status === 404) return t("view.fail.httpNotFound");
-      if (status === 401 || status === 403 || status === 406) {
-        return t("view.fail.httpRefused", { http: String(status) });
-      }
-      if (status >= 500) return t("view.fail.httpSiteProblem");
+      const message = httpMessage(cause.status, cause.transport);
+      if (message) return message;
       break;
     }
     case "policy-denied":
@@ -372,6 +341,52 @@ export function plainMessageFor(
     return t("view.discovery.noneExtension");
   }
   return t(key ?? "desktop.save.fallback", { host });
+}
+
+function limitMessage(
+  limit: Extract<JobError, { kind: "limit-exceeded" }>["limit"],
+  host: string,
+): string {
+  const dims = limit.dimensions
+    ? t("desktop.msg.dimsPixels", {
+        a: String(limit.dimensions.width),
+        b: String(limit.dimensions.height),
+      })
+    : t("desktop.msg.thisPicture");
+  const need =
+    limit.bytes_required !== undefined
+      ? t("desktop.msg.needAbout", { need: formatBytes(limit.bytes_required) })
+      : "";
+  const available =
+    limit.bytes_available !== undefined
+      ? formatBytes(limit.bytes_available)
+      : "currently available memory";
+  const format = limit.reason === "memory" ? null : limit.reason["codec-side"];
+  const codec = outputCodecs.find((codec) => codec.format === format);
+  if (codec?.max_side) {
+    return t("desktop.output.codecLimit", {
+      dims,
+      format: codec.name,
+      maxSide: codec.max_side,
+      host,
+    });
+  }
+  return t("desktop.output.canvasLimit", {
+    dims,
+    need,
+    limit: available,
+    host,
+  });
+}
+
+function httpMessage(status: number, transport: string): string | undefined {
+  if (status === 429) return t(rateKey(transport));
+  if (status === 404) return t("view.fail.httpNotFound");
+  if (status === 401 || status === 403 || status === 406) {
+    return t("view.fail.httpRefused", { http: String(status) });
+  }
+  if (status >= 500) return t("view.fail.httpSiteProblem");
+  return undefined;
 }
 
 /** 429s read as rate limits, branded by the transport that saw them. */

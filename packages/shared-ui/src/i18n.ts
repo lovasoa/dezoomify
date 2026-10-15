@@ -78,19 +78,23 @@ function parseAcceptLanguage(header: string): Array<string> {
     const segments = parts[i].split(";");
     const tag = segments[0].trim();
     if (tag === "" || tag === "*") continue;
-    let q = 1;
-    for (let s = 1; s < segments.length; s++) {
-      const pair = segments[s].trim().split("=");
-      if (pair.length === 2 && pair[0].trim().toLowerCase() === "q") {
-        const parsed = Number(pair[1].trim());
-        if (Number.isFinite(parsed)) q = parsed;
-      }
-    }
+    const q = languageQuality(segments.slice(1));
     if (!(q > 0)) continue;
     ranked.push({ tag, q, order: i });
   }
   ranked.sort((a, b) => (b.q !== a.q ? b.q - a.q : a.order - b.order));
   return ranked.map((entry) => entry.tag);
+}
+
+function languageQuality(parameters: string[]): number {
+  let quality = 1;
+  for (const parameter of parameters) {
+    const pair = parameter.trim().split("=");
+    if (pair.length !== 2 || pair[0].trim().toLowerCase() !== "q") continue;
+    const parsed = Number(pair[1].trim());
+    if (Number.isFinite(parsed)) quality = parsed;
+  }
+  return quality;
 }
 
 export type I18nVars = Record<string, string | number>;

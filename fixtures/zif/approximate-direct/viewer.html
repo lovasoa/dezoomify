@@ -1,0 +1,8 @@
+<!doctype html>
+<title>Direct ZIF input</title>
+<script>
+  fetch("{{input}}", { headers: { Range: "bytes=0-15" } }).then(async response => {
+    await response.arrayBuffer();
+    document.documentElement.dataset.viewerReady = "true";
+  });
+</script>

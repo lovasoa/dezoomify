@@ -83,6 +83,18 @@ export const SIGNED_QUERY_KEYS = new Set([
 
 const SECRET_FRAGMENT_KEY_RE = /^[?#]+/;
 
+function isSecretFragmentPair(pair: string): boolean {
+  const eq = pair.indexOf("=");
+  const key = (eq < 0 ? pair : pair.slice(0, eq)).replace(SECRET_FRAGMENT_KEY_RE, "");
+  if (!key) return false;
+  if (SENSITIVE_QUERY_KEYS.has(key.toLowerCase())) return true;
+  try {
+    return SENSITIVE_QUERY_KEYS.has(decodeURIComponent(key.replace(/\+/g, " ")).toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Secret-bearing query or fragment keys in a source URL, the pure
  * counterpart of the boundary's `hasSecretParams` callable: a pair's key is
@@ -100,23 +112,7 @@ export function hasSecretQueryParams(urlString: string): boolean {
   for (const key of parsed.searchParams.keys()) {
     if (SENSITIVE_QUERY_KEYS.has(key.toLowerCase())) return true;
   }
-  if (parsed.hash) {
-    for (const pair of parsed.hash.slice(1).split("&")) {
-      if (pair.length === 0) continue;
-      const eq = pair.indexOf("=");
-      const rawKey = (eq < 0 ? pair : pair.slice(0, eq)).replace(SECRET_FRAGMENT_KEY_RE, "");
-      if (rawKey.length === 0) continue;
-      if (SENSITIVE_QUERY_KEYS.has(rawKey.toLowerCase())) return true;
-      let decodedKey: string;
-      try {
-        decodedKey = decodeURIComponent(rawKey.replace(/\+/g, " "));
-      } catch {
-        continue;
-      }
-      if (SENSITIVE_QUERY_KEYS.has(decodedKey.toLowerCase())) return true;
-    }
-  }
-  return false;
+  return parsed.hash.slice(1).split("&").some(isSecretFragmentPair);
 }
 
 /**
@@ -145,6 +141,32 @@ function isPrefillable(candidate: string): boolean {
   return isValidInputUrl(candidate) && !hasSecretQueryParams(candidate);
 }
 
+function prefillValue(value: string | null): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  return isPrefillable(trimmed) ? trimmed : null;
+}
+
+function decodePrefill(value: string): string | null {
+  try {
+    return prefillValue(decodeURIComponent(value.replace(/\+/g, " ")));
+  } catch {
+    return null;
+  }
+}
+
+function hashPrefill(hash: string): string | null {
+  if (!hash.startsWith("#")) return null;
+  const body = hash.slice(1);
+  if (body.startsWith("?")) {
+    const params = new URLSearchParams(body.slice(1));
+    return prefillValue(params.get("url") ?? params.get("src"));
+  }
+  if (body.startsWith("url=")) return decodePrefill(body.slice(4));
+  if (body.length === 0 || body.length > 2048) return null;
+  return decodePrefill(body);
+}
+
 export function readInitialUrl(loc?: { search?: string; hash?: string }): string | null {
   try {
     if (!loc) return null;
@@ -152,35 +174,13 @@ export function readInitialUrl(loc?: { search?: string; hash?: string }): string
     if (search) {
       const params = new URLSearchParams(search);
       for (const key of ["url", "src", "input_url", "inputUrl"]) {
-        const v = params.get(key);
-        if (v && isPrefillable(v.trim())) return v.trim();
+        const value = prefillValue(params.get(key));
+        if (value) return value;
       }
     }
     const hash = typeof loc.hash === "string" ? loc.hash : "";
-    if (hash?.startsWith("#")) {
-      const body = hash.slice(1);
-      if (body.startsWith("?")) {
-        const params = new URLSearchParams(body.slice(1));
-        const v = params.get("url") ?? params.get("src");
-        if (v && isPrefillable(v.trim())) return v.trim();
-      } else if (body.startsWith("url=")) {
-        try {
-          const v = decodeURIComponent(body.slice(4).replace(/\+/g, " "));
-          if (isPrefillable(v.trim())) return v.trim();
-        } catch {
-          return null;
-        }
-      } else if (body.length > 0 && body.length <= 2048) {
-        try {
-          const v = decodeURIComponent(body.replace(/\+/g, " "));
-          if (isPrefillable(v.trim())) return v.trim();
-        } catch {
-          return null;
-        }
-      }
-    }
+    return hashPrefill(hash);
   } catch {
     return null;
   }
-  return null;
 }

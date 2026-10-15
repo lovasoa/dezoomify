@@ -44,12 +44,16 @@ function formatLimit(format: DesktopSettings["output_format"]): number {
   return format === "auto" ? 1_000_000 : (codecFor(format).max_side ?? 1_000_000);
 }
 
+function localizedSideLimit(format: DesktopSettings["output_format"]): string {
+  return new Intl.NumberFormat(getLocale()).format(codecFor(format).max_side ?? 0);
+}
+
 function formatDescription(format: DesktopSettings["output_format"]): string {
   const key = `desktop.quick.format.${format === "iiif-dir" ? "iiifDir" : format}` as I18nKey;
   return key in getDictionary(getLocale())
     ? t(key, {
-        maxSide: new Intl.NumberFormat(getLocale()).format(codecFor(format).max_side ?? 0),
-        jpegMax: new Intl.NumberFormat(getLocale()).format(codecFor("jpeg").max_side ?? 0),
+        maxSide: localizedSideLimit(format),
+        jpegMax: localizedSideLimit("jpeg"),
       })
     : t("desktop.quick.format.generic", { format: codecFor(format).name });
 }
@@ -204,14 +208,7 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
-    const isOpen = dialog.open || dialog.hasAttribute("open");
-    if ((advancedOpen || help) && !isOpen) {
-      if (typeof dialog.showModal === "function") dialog.showModal();
-      else dialog.setAttribute("open", "");
-    } else if (!advancedOpen && !help && isOpen) {
-      if (typeof dialog.close === "function") dialog.close();
-      else dialog.removeAttribute("open");
-    }
+    syncDialog(dialog, Boolean(advancedOpen || help));
   }, [advancedOpen, help]);
 
   // These caps select source levels, not resized output dimensions. The smallest
@@ -240,17 +237,6 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
     else setAdvancedOpen(true);
   };
 
-  const codec = codecFor(settings.output_format);
-  const lossy = codec.control.kind === "quality";
-  const minimum = codec.control.kind === "quality" ? codec.control.minimum : 0;
-  const showCompression = codec.control.kind !== "none";
-  const compressionValue = lossy
-    ? Math.max(minimum, 100 - settings.compression)
-    : settings.compression;
-  const compressionLabel = lossy
-    ? t("desktop.advanced.codecQuality", { format: codec.name })
-    : t("desktop.advanced.compressionEffort");
-
   return (
     <section
       id="dz-desktop-settings"
@@ -276,15 +262,7 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
             onChange={(value) =>
               commit({ output_format: value as DesktopSettings["output_format"] })
             }
-            choices={formats.map((format) => ({
-              ...format,
-              disabled:
-                Math.max(settings.max_width ?? 0, settings.max_height ?? 0) >
-                formatLimit(format.value),
-              hint: t(
-                `desktop.quick.hint.${format.value === "auto" ? "adaptive" : codecFor(format.value).hint}` as I18nKey,
-              ),
-            }))}
+            choices={formatOptions(settings)}
           />
         </QuickOption>
 
@@ -371,9 +349,7 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
             <div className="dz-settings-explanation">
               <p>
                 {t(`desktop.quick.${help}Info`, {
-                  jpegMax: new Intl.NumberFormat(getLocale()).format(
-                    codecFor("jpeg").max_side ?? 0,
-                  ),
+                  jpegMax: localizedSideLimit("jpeg"),
                 })}
               </p>
               {help === "format" ? (
@@ -439,69 +415,13 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
             </div>
           ) : (
             <>
-              {showCompression ? (
-                <PreferenceRow
-                  title={compressionLabel}
-                  description={
-                    lossy
-                      ? t("desktop.advanced.qualityDesc")
-                      : t("desktop.advanced.compressionEffortDesc")
-                  }
-                >
-                  <div className="dz-slider-control">
-                    <input
-                      type="range"
-                      min={minimum}
-                      max="100"
-                      aria-label={compressionLabel}
-                      value={compressionValue}
-                      onChange={(event) => {
-                        const value = Number(event.currentTarget.value);
-                        commit({ compression: lossy ? 100 - value : value });
-                      }}
-                    />
-                    <output>{lossy ? `${compressionValue}%` : compressionValue}</output>
-                  </div>
-                </PreferenceRow>
-              ) : null}
+              <CompressionPreference settings={settings} commit={commit} />
 
               <PreferenceRow
                 title={t("desktop.advanced.dimensions")}
                 description={t("desktop.advanced.dimensionsDesc")}
               >
-                <div className="dz-size-control">
-                  <input
-                    type="number"
-                    min="1"
-                    max={formatLimit(settings.output_format)}
-                    placeholder={t("desktop.advanced.width")}
-                    aria-label={t("desktop.advanced.width")}
-                    value={settings.max_width ?? ""}
-                    onChange={(event) =>
-                      commit({
-                        max_width: event.currentTarget.value
-                          ? Number(event.currentTarget.value)
-                          : null,
-                      })
-                    }
-                  />
-                  <span aria-hidden="true">×</span>
-                  <input
-                    type="number"
-                    min="1"
-                    max={formatLimit(settings.output_format)}
-                    placeholder={t("desktop.advanced.height")}
-                    aria-label={t("desktop.advanced.height")}
-                    value={settings.max_height ?? ""}
-                    onChange={(event) =>
-                      commit({
-                        max_height: event.currentTarget.value
-                          ? Number(event.currentTarget.value)
-                          : null,
-                      })
-                    }
-                  />
-                </div>
+                <DimensionInputs settings={settings} commit={commit} />
               </PreferenceRow>
 
               <PreferenceRow
@@ -561,5 +481,107 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
         </div>
       </dialog>
     </section>
+  );
+}
+
+function DimensionInputs({
+  settings,
+  commit,
+}: {
+  settings: DesktopSettings;
+  commit(patch: Partial<DesktopSettings>): void;
+}) {
+  return (
+    <div className="dz-size-control">
+      <input
+        type="number"
+        min="1"
+        max={formatLimit(settings.output_format)}
+        placeholder={t("desktop.advanced.width")}
+        aria-label={t("desktop.advanced.width")}
+        value={settings.max_width ?? ""}
+        onChange={(event) =>
+          commit({
+            max_width: event.currentTarget.value ? Number(event.currentTarget.value) : null,
+          })
+        }
+      />
+      <span aria-hidden="true">×</span>
+      <input
+        type="number"
+        min="1"
+        max={formatLimit(settings.output_format)}
+        placeholder={t("desktop.advanced.height")}
+        aria-label={t("desktop.advanced.height")}
+        value={settings.max_height ?? ""}
+        onChange={(event) =>
+          commit({
+            max_height: event.currentTarget.value ? Number(event.currentTarget.value) : null,
+          })
+        }
+      />
+    </div>
+  );
+}
+
+function formatOptions(settings: DesktopSettings) {
+  const maximum = Math.max(settings.max_width ?? 0, settings.max_height ?? 0);
+  return formatChoices().map((format) => ({
+    ...format,
+    disabled: maximum > formatLimit(format.value),
+    hint: t(
+      `desktop.quick.hint.${format.value === "auto" ? "adaptive" : codecFor(format.value).hint}` as I18nKey,
+    ),
+  }));
+}
+
+function syncDialog(dialog: HTMLDialogElement, open: boolean): void {
+  const isOpen = dialog.open || dialog.hasAttribute("open");
+  if (open && !isOpen) {
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+  } else if (!open && isOpen) {
+    if (typeof dialog.close === "function") dialog.close();
+    else dialog.removeAttribute("open");
+  }
+}
+
+function CompressionPreference({
+  settings,
+  commit,
+}: {
+  settings: DesktopSettings;
+  commit(patch: Partial<DesktopSettings>): void;
+}) {
+  const codec = codecFor(settings.output_format);
+  if (codec.control.kind === "none") return null;
+  const lossy = codec.control.kind === "quality";
+  const minimum = codec.control.kind === "quality" ? codec.control.minimum : 0;
+  const value = lossy ? Math.max(minimum, 100 - settings.compression) : settings.compression;
+  const label = lossy
+    ? t("desktop.advanced.codecQuality", { format: codec.name })
+    : t("desktop.advanced.compressionEffort");
+  return (
+    <PreferenceRow
+      title={label}
+      description={t(
+        lossy ? "desktop.advanced.qualityDesc" : "desktop.advanced.compressionEffortDesc",
+      )}
+    >
+      <div className="dz-slider-control">
+        <input
+          type="range"
+          min={minimum}
+          max="100"
+          aria-label={label}
+          value={value}
+          onChange={(event) => {
+            const next = Number(event.currentTarget.value);
+            commit({ compression: lossy ? 100 - next : next });
+          }}
+        />
+        <output>{lossy ? `${value}%` : value}</output>
+      </div>
+    </PreferenceRow>
   );
 }

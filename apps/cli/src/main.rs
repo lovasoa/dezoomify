@@ -227,9 +227,8 @@ fn prompt_line(prompt: &str) -> Option<String> {
     let _ = std::io::stderr().flush();
     let mut line = String::new();
     match std::io::stdin().read_line(&mut line) {
-        Ok(0) => None,
+        Ok(0) | Err(_) => None,
         Ok(_) => Some(line.trim_end_matches(['\r', '\n']).to_string()),
-        Err(_) => None,
     }
 }
 

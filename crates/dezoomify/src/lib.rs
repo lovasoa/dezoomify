@@ -1,15 +1,9 @@
 //! Shared image discovery, geometry, and asynchronous dezooming.
 //! Platform I/O is supplied through the Host capability contract.
 #![forbid(unsafe_code)]
+#![deny(clippy::too_many_lines)]
 #![cfg_attr(not(test), deny(clippy::disallowed_methods, clippy::disallowed_types))]
 #![cfg_attr(test, allow(clippy::disallowed_methods, clippy::disallowed_types))]
-#![deny(clippy::cognitive_complexity)]
-#![deny(clippy::too_many_lines)]
-#![allow(clippy::pedantic)]
-// The discovery API is documented for readers, but does not yet annotate every
-// `Result`-returning function with `# Errors` and `# Panics` sections.
-#![allow(clippy::missing_errors_doc)]
-#![allow(clippy::missing_panics_doc)]
 
 #[cfg(test)]
 extern crate self as dezoomify;
@@ -35,6 +29,7 @@ pub mod vec2d;
 pub mod vls;
 pub mod wmts;
 pub mod xlimage;
+pub mod zif;
 pub mod zoomify;
 
 /// Canonical public values shared by discovery and hosts.

@@ -78,6 +78,9 @@ pub enum RequestPurpose {
 /// One portable resource description. URI text is preserved exactly after
 /// the core's approved normalization; secret headers are never carried here
 /// (hosts attach scoped authorization out-of-band).
+/// A finite single `Range: bytes=start-end` asks the Host for exactly that
+/// inclusive interval. Hosts validate partial response headers and body length
+/// before returning bytes, and include the range in any resource cache key.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct ResourceRequest {
@@ -836,7 +839,7 @@ fn limit_facts(limit: &LimitContext) -> String {
         LimitReason::Memory => "memory".to_string(),
         LimitReason::CodecSide(format) => format!("{} per-side", format.as_str()),
     };
-    let mut facts = vec![reason.to_string()];
+    let mut facts = vec![reason];
     if let Some(dimensions) = &limit.dimensions {
         facts.push(format!("{}x{}", dimensions.width, dimensions.height));
     }
@@ -869,8 +872,8 @@ impl Error {
     pub fn cause(&self) -> &Self {
         match self {
             Self::Resource { source, .. } => source.cause(),
-            Self::TileFailed { cause, .. } => cause.cause(),
-            Self::DiscoveryFailed {
+            Self::TileFailed { cause, .. }
+            | Self::DiscoveryFailed {
                 cause: Some(cause), ..
             } => cause.cause(),
             other => other,
@@ -954,10 +957,10 @@ impl Error {
             | Self::NetworkFailure { .. }
             | Self::ProxyError { .. } => true,
             Self::Resource { source, .. } => source.retryable(),
-            Self::DiscoveryFailed {
+            Self::TileFailed { cause, .. }
+            | Self::DiscoveryFailed {
                 cause: Some(cause), ..
             } => cause.retryable(),
-            Self::TileFailed { cause, .. } => cause.retryable(),
             _ => false,
         }
     }
@@ -976,9 +979,9 @@ impl Error {
                 retry_after_ms: Some(hint),
                 ..
             } => Some(*hint),
-            Self::TileFailed { cause, .. } => cause.retry_after_ms(),
             Self::Resource { source, .. } => source.retry_after_ms(),
-            Self::DiscoveryFailed {
+            Self::TileFailed { cause, .. }
+            | Self::DiscoveryFailed {
                 cause: Some(cause), ..
             } => cause.retry_after_ms(),
             _ => None,
@@ -1174,7 +1177,9 @@ pub struct DiagnosticReport {
     pub truncated_fields: u32,
 }
 
-/// A direct resource read, including its redirected base address.
+/// A direct resource read, including its redirected base address. For a ranged
+/// request, bytes cover exactly the requested interval; the Host validates this
+/// contract before returning a successful response.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct ResourceResponse {

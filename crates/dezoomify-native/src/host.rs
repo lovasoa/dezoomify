@@ -446,7 +446,7 @@ impl<'a> NativeHost<'a> {
                 preview: None,
                 transport: ErrorTransport::Native,
                 failure: Failure {
-                    request: Some(dezoomify::model::bounded_uri(outcome.final_uri.clone())),
+                    request: Some(dezoomify::model::bounded_uri(outcome.final_uri)),
                     detail: None,
                 },
             };
@@ -459,7 +459,7 @@ impl<'a> NativeHost<'a> {
         &self,
         bytes: Vec<u8>,
         processing: dezoomify::core::model::ProcessingRecipe,
-        store: Option<(PathBuf, String, String)>,
+        store: Option<(PathBuf, String, ResourceRequest)>,
     ) -> Result<ReceivedPixels, Error> {
         let permit = self.decode_tails.reserve(bytes.len());
         let decode_tails = Arc::clone(&self.decode_tails);
@@ -479,8 +479,8 @@ impl<'a> NativeHost<'a> {
                     .apply(bytes)
                     .map_err(|error| Error::ProcessingFailed(error.to_string().into()))?;
                 processing_memory.shrink(bytes.len() as u64);
-                if let Some((dir, namespace, uri)) = &store {
-                    let _ = crate::cache::store(dir, namespace, uri, &bytes);
+                if let Some((dir, namespace, request)) = &store {
+                    let _ = crate::cache::store(dir, namespace, request, &bytes);
                 }
                 let (dimensions, _) = crate::tile_output::inspect(&bytes, budget.available())?;
                 // Charge before the pixel decoder can allocate. The temporary
@@ -513,7 +513,7 @@ impl<'a> NativeHost<'a> {
             .cache_dir
             .clone()
             .unwrap_or_else(crate::imaging::default_tile_cache_dir);
-        if let Some(bytes) = crate::cache::load(&dir, &namespace, &tile.request.uri) {
+        if let Some(bytes) = crate::cache::load(&dir, &namespace, &tile.request) {
             self.diagnostics.count("cache_reads", 1.0);
             match self.decode(bytes, Default::default(), None).await {
                 Ok(decoded) => return Ok(decoded),
@@ -523,7 +523,7 @@ impl<'a> NativeHost<'a> {
             self.controls.checkpoint(false).await?;
             let _ = std::fs::remove_file(
                 dir.join(&namespace)
-                    .join(crate::cache::cache_key(&tile.request.uri)),
+                    .join(crate::cache::cache_key(&tile.request)),
             );
         }
         if !self.options.min_interval.is_zero() {
@@ -545,7 +545,7 @@ impl<'a> NativeHost<'a> {
         self.decode(
             response.body,
             tile.placement.processing,
-            Some((dir, namespace, tile.request.uri.clone())),
+            Some((dir, namespace, tile.request.clone())),
         )
         .await
     }
@@ -581,7 +581,7 @@ impl<'a> NativeHost<'a> {
             .cache_dir
             .clone()
             .unwrap_or_else(crate::imaging::default_tile_cache_dir);
-        if let Some(bytes) = crate::cache::load(&dir, &namespace, &tile.request.uri) {
+        if let Some(bytes) = crate::cache::load(&dir, &namespace, &tile.request) {
             match self.inspect_encoded(bytes).await {
                 Ok((bytes, size, format)) => {
                     self.diagnostics.count("cache_reads", 1.0);
@@ -599,7 +599,7 @@ impl<'a> NativeHost<'a> {
             }
             let _ = std::fs::remove_file(
                 dir.join(&namespace)
-                    .join(crate::cache::cache_key(&tile.request.uri)),
+                    .join(crate::cache::cache_key(&tile.request)),
             );
         }
         if !self.options.min_interval.is_zero() {
@@ -619,7 +619,7 @@ impl<'a> NativeHost<'a> {
         let processing = tile.placement.processing;
         let permit = self.decode_tails.reserve(response.body.len());
         self.check_encoded_inflight()?;
-        let uri = tile.request.uri.clone();
+        let request = tile.request.clone();
         let budget = self
             .options
             .output_retain_cap
@@ -633,7 +633,7 @@ impl<'a> NativeHost<'a> {
                         .map_err(|e| Error::ProcessingFailed(e.to_string().into()))?;
                     crate::tile_output::normalize_orientation(&mut bytes);
                     let (size, format) = crate::tile_output::inspect(&bytes, budget)?;
-                    let _ = crate::cache::store(&dir, &namespace, &uri, &bytes);
+                    let _ = crate::cache::store(&dir, &namespace, &request, &bytes);
                     Ok((bytes, size, format))
                 })
                 .await
@@ -686,7 +686,7 @@ impl<'a> NativeHost<'a> {
                 .unwrap_or_else(crate::imaging::default_tile_cache_dir);
             let _ = std::fs::remove_file(
                 dir.join(crate::cache::job_namespace(&self.options.input_url))
-                    .join(crate::cache::cache_key(&tile.request.uri)),
+                    .join(crate::cache::cache_key(&tile.request)),
             );
         }
     }
@@ -826,6 +826,106 @@ impl<'a> NativeHost<'a> {
             self.report_preparation(&pipe);
         }
         Ok(())
+    }
+
+    async fn finish_raster(
+        &self,
+        request: &FinishRequest,
+    ) -> Result<(OutputFormat, crate::output::PreparedOutput), Error> {
+        let mut format = self.format;
+        if self.raster.borrow().is_none() {
+            let dimensions = request.canvas.clone().unwrap_or_else(|| {
+                let mut dimensions = Size {
+                    width: 0,
+                    height: 0,
+                };
+                for pending in self.pending_pixels.borrow().iter() {
+                    let image = &pending.pixels.decoded.image;
+                    let w = image.width().min(
+                        pending
+                            .placement
+                            .expected_size
+                            .as_ref()
+                            .map_or(image.width(), |s| s.width),
+                    );
+                    let h = image.height().min(
+                        pending
+                            .placement
+                            .expected_size
+                            .as_ref()
+                            .map_or(image.height(), |s| s.height),
+                    );
+                    dimensions.width = dimensions
+                        .width
+                        .max(pending.placement.position.x.saturating_add(w));
+                    dimensions.height = dimensions
+                        .height
+                        .max(pending.placement.position.y.saturating_add(h));
+                }
+                dimensions
+            });
+            if matches!(self.options.output, OutputTarget::AutoImageDir { .. }) {
+                // Auto waits for alpha and coverage; explicit formats can
+                // encode while acquisition is still running.
+                let pending = self.pending_pixels.borrow();
+                let covered = pending.len() == 1
+                    && pending[0].placement.position == (Point { x: 0, y: 0 })
+                    && pending[0].pixels.decoded.image.width() >= dimensions.width
+                    && pending[0].pixels.decoded.image.height() >= dimensions.height;
+                let grid_covered = self
+                    .output_plan
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|plan| plan.grid.is_some())
+                    && pending.iter().all(|tile| {
+                        tile.placement.expected_size.as_ref().is_some_and(|extent| {
+                            tile.pixels.decoded.image.width() >= extent.width
+                                && tile.pixels.decoded.image.height() >= extent.height
+                        })
+                    });
+                let transparent = !(covered || grid_covered)
+                    || pending.iter().any(|tile| {
+                        tile.pixels
+                            .decoded
+                            .image
+                            .pixels()
+                            .any(|pixel| pixel[3] != 255)
+                    });
+                format = automatic_image_format(size(&dimensions), transparent);
+            }
+            self.start_raster(dimensions, request.title.as_deref(), format)
+                .await?;
+        }
+        let pipe = Arc::clone(&self.raster.borrow().as_ref().expect("raster task").pipe);
+        let producer = Arc::clone(&pipe);
+        let reused = request.reused_tiles.clone();
+        let permit = self.decode_tails.reserve(0);
+        self.controlled(async {
+            tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                producer.finish(&reused)
+            })
+            .await
+            .map_err(|_| Error::Internal("pixel producer task failed".into()))?
+        })
+        .await?;
+        let task = self.raster.borrow_mut().take().expect("raster task");
+        let mut wait = std::pin::pin!(task.wait());
+        let mut updates = tokio::time::interval(Duration::from_millis(100));
+        let staging = loop {
+            tokio::select! {
+                result = &mut wait => break result?,
+                _ = updates.tick() => self.report_preparation(&pipe),
+            }
+        };
+        self.report_preparation(&pipe);
+        let prepared = crate::output::PreparedOutput {
+            staging: crate::output::StagedOutput::File(staging),
+            size: pipe.size.clone(),
+            pixel_decodes: 0,
+            late_writes: pipe.late(),
+        };
+        Ok((format, prepared))
     }
 
     fn next_auto_destination(&self, title: Option<&str>, format: OutputFormat) -> PathBuf {
@@ -1111,98 +1211,9 @@ impl Host for NativeHost<'_> {
         let mut prepared = if let Some(prepared) = tiled_result {
             prepared
         } else {
-            if self.raster.borrow().is_none() {
-                let dimensions = request.canvas.clone().unwrap_or_else(|| {
-                    let mut dimensions = Size {
-                        width: 0,
-                        height: 0,
-                    };
-                    for pending in self.pending_pixels.borrow().iter() {
-                        let image = &pending.pixels.decoded.image;
-                        let w = image.width().min(
-                            pending
-                                .placement
-                                .expected_size
-                                .as_ref()
-                                .map_or(image.width(), |s| s.width),
-                        );
-                        let h = image.height().min(
-                            pending
-                                .placement
-                                .expected_size
-                                .as_ref()
-                                .map_or(image.height(), |s| s.height),
-                        );
-                        dimensions.width = dimensions
-                            .width
-                            .max(pending.placement.position.x.saturating_add(w));
-                        dimensions.height = dimensions
-                            .height
-                            .max(pending.placement.position.y.saturating_add(h));
-                    }
-                    dimensions
-                });
-                if matches!(self.options.output, OutputTarget::AutoImageDir { .. }) {
-                    // Auto waits for alpha and coverage; explicit formats can
-                    // encode while acquisition is still running.
-                    let pending = self.pending_pixels.borrow();
-                    let covered = pending.len() == 1
-                        && pending[0].placement.position == (Point { x: 0, y: 0 })
-                        && pending[0].pixels.decoded.image.width() >= dimensions.width
-                        && pending[0].pixels.decoded.image.height() >= dimensions.height;
-                    let grid_covered = self
-                        .output_plan
-                        .borrow()
-                        .as_ref()
-                        .is_some_and(|plan| plan.grid.is_some())
-                        && pending.iter().all(|tile| {
-                            tile.placement.expected_size.as_ref().is_some_and(|extent| {
-                                tile.pixels.decoded.image.width() >= extent.width
-                                    && tile.pixels.decoded.image.height() >= extent.height
-                            })
-                        });
-                    let transparent = !(covered || grid_covered)
-                        || pending.iter().any(|tile| {
-                            tile.pixels
-                                .decoded
-                                .image
-                                .pixels()
-                                .any(|pixel| pixel[3] != 255)
-                        });
-                    format = automatic_image_format(size(&dimensions), transparent);
-                }
-                self.start_raster(dimensions, request.title.as_deref(), format)
-                    .await?;
-            }
-            let pipe = Arc::clone(&self.raster.borrow().as_ref().expect("raster task").pipe);
-            let producer = Arc::clone(&pipe);
-            let reused = request.reused_tiles.clone();
-            let permit = self.decode_tails.reserve(0);
-            self.controlled(async {
-                tokio::task::spawn_blocking(move || {
-                    let _permit = permit;
-                    producer.finish(&reused)
-                })
-                .await
-                .map_err(|_| Error::Internal("pixel producer task failed".into()))?
-            })
-            .await?;
-            let task = self.raster.borrow_mut().take().expect("raster task");
-            let mut wait = std::pin::pin!(task.wait());
-            let mut updates = tokio::time::interval(Duration::from_millis(100));
-            let staging = loop {
-                tokio::select! {
-                    result = &mut wait => break result?,
-                    _ = updates.tick() => self.report_preparation(&pipe),
-                }
-            };
-            self.report_preparation(&pipe);
-            crate::output::PreparedOutput {
-                staging: crate::output::StagedOutput::File(staging),
-                size: pipe.size.clone(),
-                pixel_decodes: 0,
-                late_writes: pipe.late(),
-            }
+            let (raster_format, prepared) = self.finish_raster(&request).await?;
+            format = raster_format;
+            prepared
         };
         let image_size = size(&prepared.size);
         let destination = destination_for(format);

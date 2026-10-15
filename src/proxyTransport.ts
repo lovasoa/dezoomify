@@ -6,7 +6,13 @@
 // over-budget body.
 
 import type { ResourceRequest } from "@dezoomify/wasm-bindings";
+import {
+  readRequestedBytes,
+  requestedByteRange,
+} from "../packages/browser-runtime/src/byte-range.ts";
+import { forwardCoreHeaders } from "../packages/browser-runtime/src/fetch-primitives.ts";
 import { readResponseBytes, retryAfterMs } from "../packages/browser-runtime/src/response-body.ts";
+import { isProxyEligible } from "../packages/browser-runtime/src/web-fetch.ts";
 
 export const PROXY_UPSTREAM_URL_HEADER = "x-proxy-upstream-url";
 
@@ -33,7 +39,7 @@ export interface ProxyFetchResult {
 export type ProxyFetchImpl = typeof fetch;
 
 /**
- * Frontend guard for the Cloudflare metadata CORS proxy: at most 4 proxy
+ * Frontend guard for the Cloudflare public image data relay: at most 4 proxy
  * requests in flight at a time and at most 4 proxy request starts per
  * second. The backend enforces its own limit; this client-side gate keeps a
  * single page (discovery fan-out plus any tile-image fetches that also use
@@ -165,54 +171,69 @@ export function createProxyRateLimiter(clock?: ProxyRateClock): ProxyRateLimiter
     });
   }
 
+  type Step =
+    | { kind: "admit" }
+    | { kind: "abort" }
+    | { kind: "wait-rate"; ms: number }
+    | { kind: "wait-inflight" };
+  function admission(signal?: AbortSignal): Step {
+    if (signal?.aborted) return { kind: "abort" };
+    const now = nowFn();
+    while (starts.length > 0 && (starts[0] as number) <= now - PROXY_RATE_WINDOW_MS) {
+      starts.shift();
+    }
+    if (inflight >= PROXY_MAX_INFLIGHT) return { kind: "wait-inflight" };
+    if (starts.length >= PROXY_MAX_REQUESTS_PER_SECOND) {
+      const waitMs = (starts[0] as number) + PROXY_RATE_WINDOW_MS - nowFn();
+      return { kind: "wait-rate", ms: waitMs > 0 ? waitMs : 0 };
+    }
+    starts.push(nowFn());
+    inflight += 1;
+    return { kind: "admit" };
+  }
+
+  function releaseSlot(): () => void {
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      inflight = Math.max(0, inflight - 1);
+      notifyInflight();
+    };
+  }
+
   async function acquire(signal?: AbortSignal): Promise<(() => void) | null> {
     if (signal?.aborted) return null;
     for (;;) {
-      type Step =
-        | { kind: "admit" }
-        | { kind: "abort" }
-        | { kind: "wait-rate"; ms: number }
-        | { kind: "wait-inflight" };
-      const step: Step = await withMutex((): Step => {
-        if (signal?.aborted) return { kind: "abort" };
-        const now = nowFn();
-        while (starts.length > 0 && (starts[0] as number) <= now - PROXY_RATE_WINDOW_MS) {
-          starts.shift();
-        }
-        if (inflight >= PROXY_MAX_INFLIGHT) return { kind: "wait-inflight" };
-        if (starts.length >= PROXY_MAX_REQUESTS_PER_SECOND) {
-          const waitMs = (starts[0] as number) + PROXY_RATE_WINDOW_MS - nowFn();
-          return { kind: "wait-rate", ms: waitMs > 0 ? waitMs : 0 };
-        }
-        starts.push(nowFn());
-        inflight += 1;
-        return { kind: "admit" };
-      });
-      if (step.kind === "admit") {
-        if (signal?.aborted) {
-          await withMutex(() => {
-            inflight = Math.max(0, inflight - 1);
-          });
-          notifyInflight();
-          return null;
-        }
-        let done = false;
-        return () => {
-          if (done) return;
-          done = true;
-          inflight = Math.max(0, inflight - 1);
-          notifyInflight();
-        };
-      }
+      const step = await withMutex(() => admission(signal));
+      if (step.kind === "admit") return admittedSlot(signal);
       if (step.kind === "abort") return null;
-      if (step.kind === "wait-rate") {
-        const aborted = await abortableSleep(step.ms, signal);
-        if (aborted || signal?.aborted) return null;
-        continue;
-      }
-      const aborted = await waitForInflight(signal);
-      if (aborted || signal?.aborted) return null;
+      if (await waitForAdmission(step, signal)) return null;
     }
+  }
+
+  function admittedSlot(signal?: AbortSignal): (() => void) | Promise<null> {
+    if (!signal?.aborted) return releaseSlot();
+    return rollbackAdmission();
+  }
+
+  async function rollbackAdmission(): Promise<null> {
+    await withMutex(() => {
+      inflight = Math.max(0, inflight - 1);
+    });
+    notifyInflight();
+    return null;
+  }
+
+  async function waitForAdmission(
+    step: Extract<Step, { kind: "wait-rate" | "wait-inflight" }>,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const aborted =
+      step.kind === "wait-rate"
+        ? await abortableSleep(step.ms, signal)
+        : await waitForInflight(signal);
+    return aborted || (signal?.aborted ?? false);
   }
 
   function reset(): void {
@@ -287,27 +308,10 @@ export function createProxyTransport(
     request: ResourceRequest,
     callOpts?: { signal?: AbortSignal },
   ): Promise<ProxyFetchResult> {
-    if (request.purpose !== "metadata") {
-      return { ok: false, status: 0, code: "PROXY_POLICY_DENIED", reason: "method" };
-    }
-    if (
-      (request.headers ?? []).some(
-        ({ name }) => !["accept", "accept-language"].includes(name.toLowerCase()),
-      )
-    ) {
-      return { ok: false, status: 0, code: "PROXY_POLICY_DENIED", reason: "unsupported-header" };
-    }
+    const admission = admitProxyRequest(request);
+    if ("ok" in admission) return admission;
+    const { range } = admission;
     const targetUrl = request.uri;
-    // Reject credential-bearing targets before any proxy request.
-    let parsed: URL;
-    try {
-      parsed = new URL(targetUrl);
-    } catch {
-      return { ok: false, status: 0, code: "PROXY_POLICY_DENIED", reason: "invalid-url" };
-    }
-    if (parsed.username !== "" || parsed.password !== "") {
-      return { ok: false, status: 0, code: "PROXY_POLICY_DENIED", reason: "userinfo" };
-    }
     if (callOpts?.signal?.aborted) {
       return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
     }
@@ -322,73 +326,12 @@ export function createProxyTransport(
         signal: callOpts?.signal,
         headers: {
           "content-type": "application/json",
-          ...Object.fromEntries((request.headers ?? []).map(({ name, value }) => [name, value])),
+          ...forwardCoreHeaders(request.headers, request.purpose),
         },
         // Only target URL + protocol version; no cookies/auth/referrer/user headers.
         body: JSON.stringify({ targetUrl, protocolVersion: opts.protocolVersion }),
       });
-      const requestId = response.headers.get("x-request-id") ?? undefined;
-      if (callOpts?.signal?.aborted) {
-        void response.body?.cancel().catch(() => {});
-        return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
-      }
-      if (response.status === 429) {
-        void response.body?.cancel().catch(() => {});
-        const delay = retryAfterMs(response.headers.get("retry-after"));
-        return {
-          ok: false,
-          status: 429,
-          code: "PROXY_RATE_LIMITED",
-          requestId,
-          ...(delay !== undefined ? { retryAfterMs: Math.min(delay, 30000) } : {}),
-        };
-      }
-      if (response.status === 413) {
-        void response.body?.cancel().catch(() => {});
-        return { ok: false, status: 413, code: "PROXY_BUDGET_EXCEEDED", requestId };
-      }
-      let bytes: ArrayBuffer;
-      try {
-        bytes = (
-          await readResponseBytes(
-            response,
-            response.ok ? opts.maxBytes : 4096,
-            callOpts?.signal,
-            !response.ok,
-          )
-        ).buffer;
-      } catch (error) {
-        if (callOpts?.signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
-        if ((error as { kind?: string })?.kind === "size-limit")
-          return { ok: false, status: response.status, code: "PROXY_BUDGET_EXCEEDED", requestId };
-        return { ok: false, status: response.status, code: "TRANSPORT_NETWORK_ERROR", requestId };
-      }
-      if (response.status < 200 || response.status > 299) {
-        const relay = parseRelayError(bytes);
-        if (relay.code !== undefined) {
-          return {
-            ok: false,
-            status: response.status,
-            code: relay.code,
-            requestId,
-            ...(relay.preview ? { preview: relay.preview } : {}),
-            ...(relay.reason !== undefined ? { reason: relay.reason } : {}),
-          };
-        }
-        if (response.status === 403 || response.status === 422) {
-          return { ok: false, status: response.status, code: "PROXY_POLICY_DENIED", requestId };
-        }
-        return { ok: false, status: response.status, code: "TRANSPORT_HTTP_ERROR", requestId };
-      }
-      const upstream = response.headers.get(PROXY_UPSTREAM_URL_HEADER);
-      return {
-        ok: true,
-        requestId,
-        status: response.status,
-        bytes,
-        contentType: response.headers.get("content-type") ?? undefined,
-        ...(upstream ? { finalUrl: upstream } : {}),
-      };
+      return await readProxyResponse(response, range, callOpts?.signal);
     } catch {
       return callOpts?.signal?.aborted
         ? { ok: false, status: 0, code: "TRANSPORT_CANCELLED" }
@@ -398,5 +341,123 @@ export function createProxyTransport(
     }
   }
 
+  function admitProxyRequest(
+    request: ResourceRequest,
+  ): ProxyFetchResult | { range: ReturnType<typeof requestedByteRange> } {
+    if (!["metadata", "tile", "probe"].includes(request.purpose)) {
+      return { ok: false, status: 0, code: "PROXY_POLICY_DENIED", reason: "method" };
+    }
+    const eligibility = isProxyEligible(request);
+    if (!eligibility.eligible)
+      return { ok: false, status: 0, code: "PROXY_POLICY_DENIED", reason: eligibility.reason };
+    let range: ReturnType<typeof requestedByteRange>;
+    try {
+      range = requestedByteRange(request.headers);
+    } catch {
+      return { ok: false, status: 0, code: "PROXY_POLICY_DENIED", reason: "malformed-body" };
+    }
+    if (range && range.length > opts.maxBytes)
+      return { ok: false, status: 413, code: "PROXY_BUDGET_EXCEEDED" };
+    return { range };
+  }
+
+  async function readProxyResponse(
+    response: Response,
+    range: ReturnType<typeof requestedByteRange>,
+    signal?: AbortSignal,
+  ): Promise<ProxyFetchResult> {
+    const requestId = response.headers.get("x-request-id") ?? undefined;
+    const early = earlyProxyResponse(response, requestId, signal);
+    if (early) return early;
+    let bytes: ArrayBuffer;
+    try {
+      bytes = response.ok
+        ? (await readRequestedBytes(response, range, opts.maxBytes, signal)).buffer
+        : (await readResponseBytes(response, 4096, signal, true)).buffer;
+    } catch (error) {
+      return proxyReadFailure(error, response.status, requestId, signal);
+    }
+    if (response.status < 200 || response.status > 299) {
+      return proxyHttpFailure(bytes, response.status, requestId);
+    }
+    const upstream = response.headers.get(PROXY_UPSTREAM_URL_HEADER);
+    return {
+      ok: true,
+      requestId,
+      status: response.status,
+      bytes,
+      contentType: response.headers.get("content-type") ?? undefined,
+      ...(upstream ? { finalUrl: upstream } : {}),
+    };
+  }
+
   return { fetchViaProxy };
+}
+
+function earlyProxyResponse(
+  response: Response,
+  requestId: string | undefined,
+  signal?: AbortSignal,
+): ProxyFetchResult | undefined {
+  if (signal?.aborted) {
+    void response.body?.cancel().catch(() => {});
+    return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
+  }
+  if (response.status === 429) {
+    void response.body?.cancel().catch(() => {});
+    const delay = retryAfterMs(response.headers.get("retry-after"));
+    return {
+      ok: false,
+      status: 429,
+      code: "PROXY_RATE_LIMITED",
+      requestId,
+      ...(delay !== undefined ? { retryAfterMs: Math.min(delay, 30000) } : {}),
+    };
+  }
+  if (response.status === 413) {
+    void response.body?.cancel().catch(() => {});
+    return { ok: false, status: 413, code: "PROXY_BUDGET_EXCEEDED", requestId };
+  }
+  return undefined;
+}
+
+function proxyReadFailure(
+  error: unknown,
+  status: number,
+  requestId?: string,
+  signal?: AbortSignal,
+): ProxyFetchResult {
+  if (signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
+  const code =
+    (error as { kind?: string })?.kind === "size-limit"
+      ? "PROXY_BUDGET_EXCEEDED"
+      : "TRANSPORT_NETWORK_ERROR";
+  const preview =
+    (error as { kind?: string })?.kind === "bad-url"
+      ? String((error as { detail?: string }).detail ?? "invalid relay response").slice(0, 300)
+      : undefined;
+  return { ok: false, status, code, requestId, ...(preview === undefined ? {} : { preview }) };
+}
+
+function proxyHttpFailure(
+  bytes: ArrayBuffer,
+  status: number,
+  requestId?: string,
+): ProxyFetchResult {
+  const relay = parseRelayError(bytes);
+  if (relay.code !== undefined)
+    return {
+      ok: false,
+      status,
+      code: relay.code,
+      requestId,
+      ...(relay.preview ? { preview: relay.preview } : {}),
+      ...(relay.reason !== undefined ? { reason: relay.reason } : {}),
+    };
+  return {
+    ok: false,
+    status,
+    code: status === 403 || status === 422 ? "PROXY_POLICY_DENIED" : "TRANSPORT_HTTP_ERROR",
+    requestId,
+  };
 }

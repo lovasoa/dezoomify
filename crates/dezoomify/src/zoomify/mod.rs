@@ -37,9 +37,11 @@ const ROUTES: &[DiscoveryRoute] = &[
 
 pub const SPEC: FormatSpec = FormatSpec::new("zoomify", ROUTES).with_display_name("Zoomify");
 
-static SHOW_IMAGE_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r#"(?i)(?:\bZ\s*\.\s*)?\bshowImage\s*\([^,]*,\s*["'](?P<image>[^"']+)["']"#)
-        .expect("constant Zoomify showImage pattern")
+static SHOW_IMAGE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    let literal = r#"(?:'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*")"#;
+    Regex::new(&format!(
+        r#"(?i)(?:\bZ\s*\.\s*)?\bshowImage\s*\(\s*(?:{literal}|[^,'"()]+)\s*,\s*(?P<prefix>{literal})(?:\s*\+\s*(?P<variable>[a-z_$][a-z0-9_$]*)\s*\+\s*(?P<suffix>{literal}))?\s*[,)]"#,
+    )).expect("constant Zoomify showImage pattern")
 });
 
 static TILE_SERVICE_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
@@ -122,6 +124,9 @@ fn extract_image_properties_url(
     let image_path = extract_image_path(resource).ok_or_else(|| {
         DiscoveryError::InvalidMetadata("Zoomify viewer page does not declare an image path".into())
     })?;
+    if crate::zif::is_zif(&image_path) {
+        return crate::zif::follow(resource, &image_path);
+    }
     Ok(resource.follow_file(&image_path, "ImageProperties.xml"))
 }
 
@@ -263,15 +268,57 @@ fn contains_zoomify_declaration(resource: crate::core::DiscoveryResource<'_>) ->
 
 fn extract_image_path(resource: crate::core::DiscoveryResource<'_>) -> Option<String> {
     crate::web_page::script_bodies(resource).find_map(|script| {
-        [&IMAGE_PATH_RE, &SHOW_IMAGE_RE, &TILE_SERVICE_RE]
+        let source = crate::javascript::mask(&String::from_utf8_lossy(script));
+        let paths = [&IMAGE_PATH_RE, &TILE_SERVICE_RE]
             .into_iter()
-            .filter_map(|regex| regex.captures(script))
-            .filter_map(|captures| {
-                Some((captures.get(0)?.start(), capture_text(&captures, "image")?))
-            })
+            .filter_map(|regex| {
+                let captures = regex.captures(source.as_bytes())?;
+                let matched = captures.get(0)?;
+                let tail = source[matched.end()..]
+                    .trim_start_matches(['\'', '"'])
+                    .trim_start();
+                if !tail.is_empty() && !tail.starts_with([';', ',', '}', ']', '&']) {
+                    return None;
+                }
+                Some((matched.start(), capture_text(&captures, "image")?))
+            });
+        let calls = crate::javascript::captures(&SHOW_IMAGE_RE, &source).filter_map(|captures| {
+            let matched = captures.get(0)?;
+            if matched.len() > 8192 {
+                return None;
+            }
+            let mut path: String = json5::from_str(captures.name("prefix")?.as_str()).ok()?;
+            if let Some(variable) = captures.name("variable") {
+                path.push_str(&literal_variable(
+                    &source[..matched.start()],
+                    variable.as_str(),
+                )?);
+                path.push_str(&json5::from_str::<String>(captures.name("suffix")?.as_str()).ok()?);
+            }
+            (!path.is_empty() && path.len() <= 8192).then(|| (matched.start(), path))
+        });
+        paths
+            .chain(calls)
             .min_by_key(|(offset, _)| *offset)
             .map(|(_, path)| path)
     })
+}
+
+fn literal_variable(source: &str, name: &str) -> Option<String> {
+    if name.len() > 128 {
+        return None;
+    }
+    let name = regex::escape(name);
+    // Only one earlier reference: a literal declaration, with no intervening
+    // reads or mutations. More involved JavaScript is deliberately unsupported.
+    let references = Regex::new(&format!(r"\b{name}\b")).ok()?;
+    if crate::javascript::captures(&references, source).count() != 1 {
+        return None;
+    }
+    let declaration = crate::javascript::literal_regex(&format!(
+        r#"(?m)\b(?:var|let|const)\s+{name}\s*=\s*(?:'([^']*)'|"([^"]*)")\s*(?:;|$)"#,
+    ));
+    crate::javascript::captured(&declaration, source).filter(|value| value.len() <= 8192)
 }
 
 fn capture_text(captures: &regex::bytes::Captures<'_>, name: &str) -> Option<String> {
@@ -534,6 +581,11 @@ mod tests {
     fn extracts_general_zoomify_declarations() {
         for (page, expected) in [
             (r#"if (a<b) showImage("viewer", "/zoomify");"#, "/zoomify"),
+            (r#"var zoomifyImagePath=/zoomify";"#, "/zoomify"),
+            (
+                r#"Z.showImage("viewer,container", "maps/\u0061");"#,
+                "maps/a",
+            ),
             (
                 r#"const html = '<script src="x.js"></script><div>'; showImage(viewer, "/zoomify");"#,
                 "/zoomify",
@@ -551,6 +603,41 @@ mod tests {
         assert_eq!(crate::test_support::resource("", br#"<script>var config = {"type": "zoomifytileservice", "tilesUrl": "/zoomify"};</script>"#, extract_image_path).as_deref(), Some("/zoomify"));
         // Configuration snippets displayed outside scripts are ignored.
         assert_eq!(crate::test_support::resource("", br#"<pre>{"type": "zoomifytileservice", "tilesUrl": "/displayed-not-executed"}</pre>"#, extract_image_path), None);
+    }
+
+    #[test]
+    fn refuses_partial_paths_from_dynamic_expressions() {
+        for script in [
+            r#"Z.showImage("viewer", "./zif/" + unknown + ".zif");"#,
+            r#"Z.showImage("viewer", "./zif/" + getName() + ".zif");"#,
+            r#"var name = 'known'; name += getName(); Z.showImage("viewer", './zif/' + name + '.zif');"#,
+            r#"zoomifyImagePath = '/partial/' + unknown;"#,
+        ] {
+            assert_eq!(
+                crate::test_support::resource("", script.as_bytes(), extract_image_path),
+                None,
+                "{script}"
+            );
+        }
+    }
+
+    #[test]
+    fn viewer_zif_paths_follow_the_container_with_a_bounded_header_request() {
+        let source = r#"<base href="https://images.test/maps/"><script>var thisimg="004672986_o"; Z.showImage("viewer", "./zif/" + thisimg + ".zif?token=secret");</script>"#;
+        let parsed = crate::test_support::resource(
+            "https://viewer.test/page",
+            source.as_bytes(),
+            extract_image_properties_url,
+        )
+        .unwrap();
+        let ParsedResource::FollowWith(request, _) = parsed else {
+            panic!("ZIF viewer must follow its container decoder")
+        };
+        assert_eq!(
+            request.uri,
+            "https://images.test/maps/zif/004672986_o.zif?token=secret"
+        );
+        assert_eq!(request.header("range"), Some("bytes=0-15"));
     }
 
     #[test]

@@ -1,14 +1,14 @@
-// Website fetching with direct reads and metadata proxy fallback.
-// Direct browser fetch first; the metadata CORS proxy is an automatic
-// fallback for eligible public metadata only (never tiles, never
-// credentials). The single-policy proxy transport instance is supplied by
-// the caller. Progress and diagnostics callbacks update the job view.
+// Website fetching with direct reads and public-source proxy fallback.
+// Direct browser fetch first; the website proxy is an automatic fallback
+// for eligible public resources, without credentials. The caller supplies the
+// proxy transport. Progress and diagnostics callbacks update the job view.
 
 import type { ErrorTransport, Error as JobError, ResourceRequest } from "@dezoomify/wasm-bindings";
 import type { DiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
 import { hasSignedQuery } from "../../shared-ui/src/source-url.ts";
+import { readRequestedBytes, requestedByteRange } from "./byte-range.ts";
 import { blockedReason, isJobError } from "./failure.ts";
-import { readErrorPreview, readResponseBytes, retryAfterMs } from "./response-body.ts";
+import { readErrorPreview, retryAfterMs } from "./response-body.ts";
 import {
   combineTimeout,
   DIRECT_METADATA_TIMEOUT_MS,
@@ -20,7 +20,7 @@ import {
 // Signed/credential query keys gate proxy fallback: URLs whose signature would
 // break, or that carry credentials, must never be proxied. The policy lives
 // once in `packages/shared-ui/src/source-url.ts` (`hasSignedQuery`) and is
-// shared with the metadata CORS proxy validator in `src/server/security.ts`.
+// shared with the website proxy validator in `src/server/security.ts`.
 
 function hasCredentialHeader(headers: ResourceRequest["headers"]): boolean {
   if (!headers) return false;
@@ -45,14 +45,7 @@ function isPrivateOrLocalHostname(hostname: string): boolean {
 }
 
 export function isProxyEligible(req: ResourceRequest): { eligible: boolean; reason: string } {
-  if (req.purpose !== "metadata") return { eligible: false, reason: "tile-never-proxied" };
   if (hasCredentialHeader(req.headers)) return { eligible: false, reason: "credential-header" };
-  if (
-    (req.headers ?? []).some(
-      ({ name }) => !["accept", "accept-language"].includes(name.toLowerCase()),
-    )
-  )
-    return { eligible: false, reason: "unsupported-header" };
   let u: URL;
   try {
     u = new URL(req.uri);
@@ -65,14 +58,21 @@ export function isProxyEligible(req: ResourceRequest): { eligible: boolean; reas
     return { eligible: false, reason: "private-local-target" };
   if (u.protocol !== "http:" && u.protocol !== "https:")
     return { eligible: false, reason: "scheme" };
-  return { eligible: true, reason: "public-non-credential-metadata" };
+  return { eligible: true, reason: "public-source-resource" };
 }
 
 const DIRECT_METADATA_MAX_BYTES = 8 * 1024 * 1024;
 const DIRECT_TILE_MAX_BYTES = 64 * 1024 * 1024;
 
 export interface DirectOutcome {
-  outcome: "readable" | "http-error" | "network-error" | "cancelled" | "too-large";
+  outcome:
+    | "readable"
+    | "http-error"
+    | "network-error"
+    | "cancelled"
+    | "too-large"
+    | "invalid-response";
+  error?: JobError;
   finalUrl?: string;
   status?: number;
   bytes?: ArrayBuffer;
@@ -104,6 +104,30 @@ export interface ProxyTransportLike {
 export interface ProxyEligibility {
   eligible: boolean;
   reason: string;
+}
+
+type ProxyOutcome = Awaited<ReturnType<ProxyTransportLike["fetchViaProxy"]>>;
+
+function normalizeProxyResponse(res: ProxyOutcome, targetUrl: string): ProxyOutcome {
+  if (!res.ok) {
+    return {
+      ok: false,
+      status: res.status,
+      code: res.code ?? "PROXY_ERROR",
+      ...(typeof res.reason === "string" && res.reason !== "" ? { reason: res.reason } : {}),
+      ...(typeof res.retryAfterMs === "number" ? { retryAfterMs: res.retryAfterMs } : {}),
+      requestId: res.requestId,
+      preview: res.preview,
+    };
+  }
+  // The relay follows upstream redirects internally; surface the
+  // post-redirect URL when the transport provides it, otherwise fall back
+  // to the requested URL downstream. Never leave the base empty: an empty
+  // final URI makes relative tile URLs resolve against the app page and
+  // 404.
+  const upstream =
+    typeof res.finalUrl === "string" && res.finalUrl !== "" ? res.finalUrl : targetUrl;
+  return { ok: true, status: res.status, bytes: res.bytes, finalUrl: upstream };
 }
 
 /** Request activity and repaint callbacks from the browser application. */
@@ -177,7 +201,7 @@ export function classifyProxyFailure(proxied: {
   retryAfterMs?: number;
 }): JobError {
   const code = proxied.code ?? "PROXY_ERROR";
-  const detail = `proxy failure: ${code}${proxied.reason ? ` (${proxied.reason})` : ""}`;
+  const detail = proxyFailureDetail(code, proxied.reason);
   const reason = blockedReason(proxied.reason);
   const preview = proxied.preview || undefined;
   const retry_after_ms = proxied.retryAfterMs;
@@ -207,6 +231,10 @@ export function classifyProxyFailure(proxied: {
     };
   }
   return { kind: "proxy-error", transport: "metadata-proxy", detail };
+}
+
+function proxyFailureDetail(code: string, reason?: string): string {
+  return `proxy failure: ${code}${reason ? ` (${reason})` : ""}`;
 }
 
 function cancelledFailure(): JobError {
@@ -286,6 +314,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       );
     };
     try {
+      const range = requestedByteRange(request.headers);
       const res = await fetchImpl(url, {
         headers: Object.fromEntries(
           (request.headers ?? []).map(({ name, value }) => [name, value]),
@@ -295,33 +324,34 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         redirect: "follow",
       });
       responseStatus = res.status;
+      return await readDirectResponse(res, range);
+    } catch (e) {
+      end(false);
+      return failedDirect(e);
+    } finally {
+      combined.cleanup();
+      hooks.onUpdate();
+    }
+    async function readDirectResponse(
+      res: Response,
+      range: ReturnType<typeof requestedByteRange>,
+    ): Promise<DirectOutcome> {
       if (!(res.status >= 200 && res.status <= 299)) {
-        const preview = await readErrorPreview(res, combined.signal);
-        // The status is authoritative even if its optional diagnostic body
-        // stalls. Only cancellation by the caller overrides an HTTP refusal.
-        signal?.throwIfAborted();
-        const retryAfter = retryAfterMs(res.headers.get("retry-after"), now());
+        return await directHttpFailure(res);
+      }
+      if (range && res.status === 206 && res.type === "cors" && !res.headers.has("content-range")) {
+        // CORS can expose the body without the header needed to locate it.
+        // The relay can validate that header without accepting unlocated bytes.
+        void res.body?.cancel().catch(() => {});
         end(false);
         deps.diagnostics?.count("request_failures");
         report(
-          {
-            outcome: "http-error",
-            http: res.status,
-            preview,
-            retry_after_ms: retryAfter,
-            content_type: res.headers.get("content-type"),
-          },
+          { outcome: "unreadable-headers", header: "content-range", http: res.status },
           res.url,
         );
-        return {
-          outcome: "http-error",
-          finalUrl: res.url || url,
-          status: res.status,
-          ...(retryAfter === undefined ? {} : { retryAfterMs: retryAfter }),
-          ...(preview ? { preview } : {}),
-        };
+        return { outcome: "network-error" };
       }
-      const bytes = (await readResponseBytes(res, maxBytes, combined.signal)).buffer;
+      const bytes = (await readRequestedBytes(res, range, maxBytes, combined.signal)).buffer;
       end(true);
       const contentType = res.headers.get("content-type") || undefined;
       deps.diagnostics?.count("bytes_fetched", bytes.byteLength);
@@ -341,10 +371,42 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         bytes,
         ...(contentType ? { contentType } : {}),
       };
-    } catch (e) {
+    }
+
+    async function directHttpFailure(res: Response): Promise<DirectOutcome> {
+      const preview = await readErrorPreview(res, combined.signal);
+      // The status is authoritative even if its optional diagnostic body
+      // stalls. Only cancellation by the caller overrides an HTTP refusal.
+      signal?.throwIfAborted();
+      const retryAfter = retryAfterMs(res.headers.get("retry-after"), now());
       end(false);
+      deps.diagnostics?.count("request_failures");
+      report(
+        {
+          outcome: "http-error",
+          http: res.status,
+          preview,
+          retry_after_ms: retryAfter,
+          content_type: res.headers.get("content-type"),
+        },
+        res.url,
+      );
+      return {
+        outcome: "http-error",
+        finalUrl: res.url || url,
+        status: res.status,
+        ...(retryAfter === undefined ? {} : { retryAfterMs: retryAfter }),
+        ...(preview ? { preview } : {}),
+      };
+    }
+
+    function failedDirect(e: unknown): DirectOutcome {
       if (signal?.aborted) return { outcome: "cancelled" };
       deps.diagnostics?.count("request_failures");
+      if (isJobError(e) && e.kind === "bad-url") {
+        report({ outcome: "invalid-response", http: responseStatus, error: e });
+        return { outcome: "invalid-response", error: e };
+      }
       if (isJobError(e) && e.kind === "size-limit") {
         report({ outcome: "too-large", limit_bytes: maxBytes, http: responseStatus });
         return { outcome: "too-large" };
@@ -356,9 +418,6 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       }
       report({ outcome: "network-or-cors", http: responseStatus, error: e });
       return { outcome: "network-error" };
-    } finally {
-      combined.cleanup();
-      hooks.onUpdate();
     }
   }
 
@@ -409,27 +468,8 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         hooks.onRequestEnd(reqId, false);
         return { ok: false, status: 0, code: "PROXY_NETWORK_ERROR" };
       }
-      if (!res.ok) {
-        hooks.onRequestEnd(reqId, false);
-        return {
-          ok: false,
-          status: res.status,
-          code: res.code ?? "PROXY_ERROR",
-          ...(typeof res.reason === "string" && res.reason !== "" ? { reason: res.reason } : {}),
-          ...(typeof res.retryAfterMs === "number" ? { retryAfterMs: res.retryAfterMs } : {}),
-          requestId: res.requestId,
-          preview: res.preview,
-        };
-      }
-      hooks.onRequestEnd(reqId, true);
-      // The relay follows upstream redirects internally; surface the
-      // post-redirect URL when the transport provides it, otherwise fall back
-      // to the requested URL downstream. Never leave the base empty: an empty
-      // final URI makes relative tile URLs resolve against the app page and
-      // 404.
-      const upstream =
-        typeof res.finalUrl === "string" && res.finalUrl !== "" ? res.finalUrl : targetUrl;
-      return { ok: true, status: res.status, bytes: res.bytes, finalUrl: upstream };
+      hooks.onRequestEnd(reqId, res.ok);
+      return normalizeProxyResponse(res, targetUrl);
     } catch (e) {
       hooks.onRequestEnd(reqId, false);
       if (signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
@@ -446,54 +486,89 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     }
   }
 
-  /** Fetch metadata directly, then use the eligible metadata proxy after unreadable responses. */
-  async function fetchMetadataFor(
+  /** Direct reads and eligible proxy fallback share one transport policy. */
+  async function fetchResourceFor(
     request: ResourceRequest,
     signal?: AbortSignal,
   ): Promise<{ bytes: ArrayBuffer; finalUri?: string }> {
     if (signal?.aborted) throw cancelledFailure();
+    const metadata = request.purpose === "metadata";
+    const maxBytes = metadata ? DIRECT_METADATA_MAX_BYTES : DIRECT_TILE_MAX_BYTES;
+    if (!metadata && deps.throttle) await deps.throttle(request.uri);
+    if (signal?.aborted) throw cancelledFailure();
     activeTransport = "direct";
-    const direct = await fetchDirect(request, signal, metadataMs, DIRECT_METADATA_MAX_BYTES);
-    if (direct.outcome === "readable" && direct.bytes)
-      return { bytes: direct.bytes, finalUri: direct.finalUrl || request.uri };
+    const direct = await fetchDirect(request, signal, metadata ? metadataMs : requestMs, maxBytes);
     if (
       direct.outcome === "network-error" &&
       !signal?.aborted &&
       deps.isProxyEligible(request).eligible
     ) {
-      activeTransport = "metadata-proxy";
-      deps.diagnostics?.record("info", "transport-fallback", {
-        from: "direct",
-        to: "metadata-proxy",
-        reason: direct.outcome,
-        url: request.uri,
-      });
-      let proxied = await fetchViaProxy(request, signal);
-      if (!proxied.ok && proxied.code === "PROXY_RATE_LIMITED") {
-        const delay = proxyRateLimitDelayMs(proxied.retryAfterMs);
-        if (delay !== null) {
-          deps.diagnostics?.record("debug", "proxy-retry", { delay_ms: delay });
-          if (await sleepUnlessAborted(delay, sleepFn, signal)) throw cancelledFailure();
-          proxied = await fetchViaProxy(request, signal);
-        }
-      }
-      if (signal?.aborted || proxied.code === "TRANSPORT_CANCELLED") throw cancelledFailure();
-      if (proxied.ok && proxied.bytes)
-        return { bytes: proxied.bytes, finalUri: proxied.finalUrl || request.uri };
-      if (proxied.code === "PROXY_RATE_LIMITED") {
-        throw {
-          kind: "rate-limited",
-          transport: "metadata-proxy",
-          ...(proxied.retryAfterMs === undefined ? {} : { retry_after_ms: proxied.retryAfterMs }),
-        } satisfies JobError;
-      }
-      throw classifyProxyFailure(proxied);
+      return await fetchProxiedResource(request, signal);
     }
+    return directResourceResult(direct, request, signal, maxBytes);
+  }
+
+  async function fetchProxiedResource(
+    request: ResourceRequest,
+    signal?: AbortSignal,
+  ): Promise<{ bytes: ArrayBuffer; finalUri?: string }> {
+    activeTransport = "metadata-proxy";
+    deps.diagnostics?.record("info", "transport-fallback", {
+      from: "direct",
+      to: "metadata-proxy",
+      reason: "network-error",
+      url: request.uri,
+    });
+    const proxied = await retryProxy(request, signal);
+    if (signal?.aborted || proxied.code === "TRANSPORT_CANCELLED") throw cancelledFailure();
+    if (proxied.ok && proxied.bytes)
+      return { bytes: proxied.bytes, finalUri: proxied.finalUrl || request.uri };
+    if (proxied.code === "PROXY_RATE_LIMITED") {
+      throw {
+        kind: "rate-limited",
+        transport: "metadata-proxy",
+        ...(proxied.retryAfterMs === undefined ? {} : { retry_after_ms: proxied.retryAfterMs }),
+      } satisfies JobError;
+    }
+    throw classifyProxyFailure(proxied);
+  }
+
+  async function retryProxy(request: ResourceRequest, signal?: AbortSignal): Promise<ProxyOutcome> {
+    let proxied = await fetchViaProxy(request, signal);
+    // Discovery has no tile retry scheduler. Acquisition retries remain in Rust.
+    if (request.purpose === "metadata" && !proxied.ok && proxied.code === "PROXY_RATE_LIMITED") {
+      const delay = proxyRateLimitDelayMs(proxied.retryAfterMs);
+      if (delay !== null) {
+        deps.diagnostics?.record("debug", "proxy-retry", { delay_ms: delay });
+        if (await sleepUnlessAborted(delay, sleepFn, signal)) throw cancelledFailure();
+        proxied = await fetchViaProxy(request, signal);
+      }
+    }
+    return proxied;
+  }
+
+  function directResourceResult(
+    direct: DirectOutcome,
+    request: ResourceRequest,
+    signal: AbortSignal | undefined,
+    maxBytes: number,
+  ): { bytes: ArrayBuffer; finalUri?: string } {
+    if (direct.error) throw direct.error;
+    if (direct.outcome === "readable" && direct.bytes)
+      return { bytes: direct.bytes, finalUri: direct.finalUrl || request.uri };
     if (direct.outcome === "cancelled" || signal?.aborted) throw cancelledFailure();
+    return failDirectResource(direct, request, maxBytes);
+  }
+
+  function failDirectResource(
+    direct: DirectOutcome,
+    request: ResourceRequest,
+    maxBytes: number,
+  ): never {
     if (direct.outcome === "too-large")
       throw {
         kind: "size-limit",
-        max_bytes: DIRECT_METADATA_MAX_BYTES,
+        max_bytes: maxBytes,
       } satisfies JobError;
     if (direct.outcome === "http-error" && direct.status === 429) {
       throw {
@@ -503,54 +578,24 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       } satisfies JobError;
     }
     if (direct.outcome === "http-error") {
-      throw {
-        kind: "http-error",
-        status: direct.status ?? 502,
-        request: request.uri,
-        transport: "direct",
-        ...(direct.preview ? { preview: direct.preview } : {}),
-        ...(direct.retryAfterMs === undefined ? {} : { retry_after_ms: direct.retryAfterMs }),
-        detail: `metadata fetch: ${direct.outcome}`,
-      } satisfies JobError;
+      throw directHttpError(direct, request);
     }
     throw {
       kind: "network-failure",
       transport: "direct",
-      detail: `metadata fetch: ${direct.outcome}`,
+      detail: `${request.purpose} fetch: ${direct.outcome}`,
     } satisfies JobError;
   }
 
-  async function fetchTileFor(
-    request: ResourceRequest,
-    signal?: AbortSignal,
-  ): Promise<{ bytes: ArrayBuffer; finalUri?: string }> {
-    if (signal?.aborted) throw cancelledFailure();
-    if (deps.throttle) await deps.throttle(request.uri);
-    if (signal?.aborted) throw cancelledFailure();
-    const direct = await fetchDirect(request, signal, requestMs);
-    if (direct.outcome === "readable" && direct.bytes)
-      return { bytes: direct.bytes, finalUri: direct.finalUrl };
-    if (direct.outcome === "cancelled" || signal?.aborted) throw cancelledFailure();
-    if (direct.outcome === "too-large")
-      throw {
-        kind: "size-limit",
-        max_bytes: DIRECT_TILE_MAX_BYTES,
-      } satisfies JobError;
-    if (direct.status) {
-      throw {
-        kind: "http-error",
-        status: direct.status,
-        request: request.uri,
-        transport: "direct",
-        ...(direct.preview ? { preview: direct.preview } : {}),
-        ...(direct.retryAfterMs === undefined ? {} : { retry_after_ms: direct.retryAfterMs }),
-        detail: `tile fetch: ${direct.outcome} (HTTP ${direct.status})`,
-      } satisfies JobError;
-    }
-    throw {
-      kind: "network-failure",
+  function directHttpError(direct: DirectOutcome, request: ResourceRequest): JobError {
+    return {
+      kind: "http-error",
+      status: direct.status ?? 502,
+      request: request.uri,
       transport: "direct",
-      detail: `tile fetch: ${direct.outcome} (HTTP n/a)`,
+      ...(direct.preview ? { preview: direct.preview } : {}),
+      ...(direct.retryAfterMs === undefined ? {} : { retry_after_ms: direct.retryAfterMs }),
+      detail: `${request.purpose} fetch: ${direct.outcome}`,
     } satisfies JobError;
   }
 
@@ -559,11 +604,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
   }
 
   async function fetchResource(request: ResourceRequest, signal: AbortSignal) {
-    if (request.purpose === "metadata") {
-      const result = await fetchMetadataFor(request, signal);
-      return { bytes: new Uint8Array(result.bytes), finalUri: result.finalUri };
-    }
-    const result = await fetchTileFor(request, signal);
+    const result = await fetchResourceFor(request, signal);
     return { bytes: new Uint8Array(result.bytes), finalUri: result.finalUri };
   }
 

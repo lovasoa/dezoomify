@@ -16,6 +16,21 @@ if (typeof Uint8Array.prototype.toBase64 !== "function") {
   };
 }
 
+const documentToken = "source-document";
+test.beforeEach(() => {
+  globalThis.__dezoomifyDocumentToken = documentToken;
+});
+function sourceRequest(overrides = {}) {
+  return {
+    url: "https://gallery.example/info.json",
+    headers: [],
+    operationId: crypto.randomUUID(),
+    deadlineAt: Date.now() + 30000,
+    documentToken,
+    ...overrides,
+  };
+}
+
 test("candidate snapshot includes the document and retained resources in one batch", () => {
   const oldLocation = globalThis.location;
   const oldPerformance = globalThis.performance;
@@ -140,20 +155,17 @@ test("a queued source request cannot start after cancellation or its deadline", 
   const oldFetch = globalThis.fetch;
   globalThis.fetch = async () => assert.fail("cancelled or expired work cannot fetch");
   try {
-    const request = {
-      url: "https://gallery.example/info.json",
-      headers: [],
+    const request = sourceRequest({
       operationId: "queued",
-      deadlineAt: Date.now() + 30000,
-    };
-    await cancelSourceFetch(request.operationId, request.deadlineAt);
+    });
+    await cancelSourceFetch(request.operationId, request.deadlineAt, documentToken);
     assert.equal((await fetchSource(request)).error.kind, "cancelled");
     assert.equal(
       (await fetchSource({ ...request, operationId: "expired", deadlineAt: Date.now() - 1 })).error
         .kind,
       "timeout",
     );
-    await cancelSourceFetch("never-started", Date.now() + 10);
+    await cancelSourceFetch("never-started", Date.now() + 10, documentToken);
     assert.equal(globalThis.__dezoomifySourceFetches.has("never-started"), true);
     t.mock.timers.tick(10);
     assert.equal(globalThis.__dezoomifySourceFetches.has("never-started"), false);
@@ -172,14 +184,9 @@ test("source cancellation acknowledges only after its fetch settles", async () =
     });
   try {
     const deadlineAt = Date.now() + 30000;
-    const pending = fetchSource({
-      url: "https://gallery.example/info.json",
-      headers: [],
-      operationId: "running",
-      deadlineAt,
-    });
+    const pending = fetchSource(sourceRequest({ operationId: "running", deadlineAt }));
     let acknowledged = false;
-    const cancellation = cancelSourceFetch("running", deadlineAt).then(() => {
+    const cancellation = cancelSourceFetch("running", deadlineAt, documentToken).then(() => {
       acknowledged = true;
     });
     await new Promise((resolve) => setImmediate(resolve));
@@ -219,11 +226,9 @@ test("source fetch returns one bounded base64 payload", async () => {
     };
   };
   try {
-    const result = await fetchSource({
-      url: "https://gallery.example/info.json",
-      method: "GET",
-      headers: [{ name: "Accept", value: "application/json" }],
-    });
+    const result = await fetchSource(
+      sourceRequest({ headers: [{ name: "Accept", value: "application/json" }] }),
+    );
     assert.deepEqual([...Buffer.from(result.data, "base64")], [1, 2, 3]);
     assert.equal(result.bytes, 3);
     assert.equal(result.status, 200);
@@ -237,6 +242,29 @@ test("source fetch returns one bounded base64 payload", async () => {
   }
 });
 
+test("missing or stale document tokens prevent fetches and cancellation markers", async () => {
+  const oldFetch = globalThis.fetch;
+  const oldToken = globalThis.__dezoomifyDocumentToken;
+  const oldRequests = globalThis.__dezoomifySourceFetches;
+  globalThis.__dezoomifyDocumentToken = "replacement";
+  globalThis.__dezoomifySourceFetches = new Map();
+  globalThis.fetch = () => assert.fail("a replacement document must not fetch");
+  try {
+    for (const token of [undefined, "", "original"]) {
+      assert.equal(
+        (await fetchSource(sourceRequest({ documentToken: token }))).error.blocked_reason,
+        "source-document-lost",
+      );
+      await cancelSourceFetch("never-started", Date.now() + 30000, token);
+    }
+    assert.equal(globalThis.__dezoomifySourceFetches.size, 0);
+  } finally {
+    globalThis.fetch = oldFetch;
+    globalThis.__dezoomifyDocumentToken = oldToken;
+    globalThis.__dezoomifySourceFetches = oldRequests;
+  }
+});
+
 test("source fetch classifies failures without returning response details", async () => {
   const oldFetch = globalThis.fetch;
   globalThis.fetch = async () => ({
@@ -247,7 +275,7 @@ test("source fetch classifies failures without returning response details", asyn
     body: null,
   });
   try {
-    assert.deepEqual(await fetchSource({ url: "https://gallery.example/info.json", headers: [] }), {
+    assert.deepEqual(await fetchSource(sourceRequest()), {
       ok: false,
       error: {
         kind: "http-error",
@@ -257,6 +285,44 @@ test("source fetch classifies failures without returning response details", asyn
       },
       documentUrl: "",
     });
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("source range fetch rejects ignored ranges before reading and bounds partial bodies", async () => {
+  const oldFetch = globalThis.fetch;
+  const request = sourceRequest({
+    url: "https://gallery.example/image.zif",
+    headers: [{ name: "Range", value: "bytes=10-13" }],
+    rangeBytes: 4,
+  });
+  try {
+    globalThis.fetch = async (_url, init) => {
+      assert.equal(init.headers.Range, "bytes=10-13");
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        body: {
+          getReader() {
+            assert.fail("ignored ranges must not be read");
+          },
+        },
+      };
+    };
+    assert.equal((await fetchSource(request)).error.kind, "bad-url");
+    globalThis.fetch = async () =>
+      new Response("data", {
+        status: 206,
+        headers: { "content-range": "bytes 10-13/100", "content-length": "4" },
+      });
+    const result = await fetchSource(request);
+    assert.equal(result.ok, true);
+    assert.equal(result.contentRange, "bytes 10-13/100");
+    assert.equal(result.bytes, 4);
+    globalThis.fetch = async () => new Response("oversized", { status: 206 });
+    assert.deepEqual((await fetchSource(request)).error, { kind: "size-limit", max_bytes: 4 });
   } finally {
     globalThis.fetch = oldFetch;
   }

@@ -235,6 +235,7 @@ export async function startFixtureServer(workDir) {
     throw new Error(
       `window E2E: fixture gateway unreachable at ${base}: ${error.message}\n` +
         `${fixture.logs()}\n${log}`,
+      { cause: error },
     );
   }
   return fixture;

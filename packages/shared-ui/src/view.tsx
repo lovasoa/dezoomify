@@ -241,10 +241,7 @@ interface JobDerived {
   activePct: number;
 }
 
-function deriveJob(presentation: Presentation, ctx?: ViewContext): JobDerived {
-  // Clock readings are host-injected through `jobActivity.now`; the view never
-  // reads a global clock. Hosts without job timing get the zero epoch.
-  const activity: JobActivity = ctx?.jobActivity ?? { now: 0 };
+function jobProgress(presentation: Presentation, ctx?: ViewContext) {
   const current = presentation.progress?.current ?? 0;
   const total = presentation.progress?.total ?? 0;
   const pixels = presentation.progress?.unit === "pixels";
@@ -255,9 +252,16 @@ function deriveJob(presentation: Presentation, ctx?: ViewContext): JobDerived {
       ? Math.max(0, Math.min(ctx?.currentProgress?.active ?? 0, Math.max(0, total - current)))
       : 0;
   const activePct = determinate ? (active / total) * 100 : 0;
-  const retrying = Math.max(0, Math.min(ctx?.currentProgress?.retrying ?? 0, active));
-  const preparing = presentation.headlineKey === "view.step.saving";
-  const paused = !preparing && (presentation.paused || activity.paused === true);
+  return { current, total, pixels, determinate, donePct, active, activePct };
+}
+
+function jobTiming(
+  activity: JobActivity,
+  preparing: boolean,
+  progress: ReturnType<typeof jobProgress>,
+  estimate?: number,
+) {
+  const { current, total, determinate } = progress;
   const now = activity.now;
   const startedAt = activity.startedAt ?? now;
   const timerNow = preparing ? now : (activity.pausedAt ?? now);
@@ -265,46 +269,77 @@ function deriveJob(presentation: Presentation, ctx?: ViewContext): JobDerived {
   const elapsed = formatElapsed(elapsedMs);
   const lastProgressAt = activity.lastProgressAt ?? startedAt;
   const stalledMs = Math.max(0, timerNow - lastProgressAt);
-  const showStalled = stalledMs >= 10000 && presentation.headlineKey !== "view.step.saving";
-  const detail = presentation.detailKey
-    ? t(presentation.detailKey, presentation.detailVars)
-    : undefined;
-  const step = paused
-    ? t("view.job.paused")
-    : retrying > 0
-      ? t("view.job.retryingTiles", { count: retrying })
-      : showStalled
-        ? t("view.job.waiting", { host: hostFromUrl(activity.url) })
-        : t(presentation.headlineKey, presentation.headlineVars);
-  const sourceTitle = ctx?.sourceUrl ?? activity.url ?? "";
-  const sourceUrl = sourceTitle ? displaySourceUrl(sourceTitle) : "";
+  const showStalled = stalledMs >= 10000 && !preparing;
   const estimatedTotalMs = preparing
     ? undefined
-    : (ctx?.currentProgress?.estimatedTotalMs ??
+    : (estimate ??
       (determinate && current >= 2 && elapsedMs >= 2000
         ? Math.round((elapsedMs / current) * total)
         : undefined));
   const timeText = elapsed
     ? `${elapsed}${typeof estimatedTotalMs === "number" && estimatedTotalMs > elapsedMs ? ` / ~${formatElapsed(estimatedTotalMs)}` : ""}`
     : "";
-  const countsText = determinate
-    ? pixels
-      ? t("view.job.pixelCounts", {
-          current: formatPixelCount(current),
-          total: formatPixelCount(total),
-        })
-      : active > 0
-        ? t("view.job.countsActive", { current, total, active })
-        : t("view.job.countsFull", { current, total })
-    : "";
+  return { timeText, showStalled };
+}
+
+function jobCounts({
+  determinate,
+  pixels,
+  current,
+  total,
+  active,
+}: ReturnType<typeof jobProgress>): string {
+  if (!determinate) return "";
+  if (pixels)
+    return t("view.job.pixelCounts", {
+      current: formatPixelCount(current),
+      total: formatPixelCount(total),
+    });
+  return active > 0
+    ? t("view.job.countsActive", { current, total, active })
+    : t("view.job.countsFull", { current, total });
+}
+
+function jobStep(
+  presentation: Presentation,
+  activity: JobActivity,
+  paused: boolean,
+  retrying: number,
+  stalled: boolean,
+): string {
+  if (paused) return t("view.job.paused");
+  if (retrying > 0) return t("view.job.retryingTiles", { count: retrying });
+  if (stalled) return t("view.job.waiting", { host: hostFromUrl(activity.url) });
+  return t(presentation.headlineKey, presentation.headlineVars);
+}
+
+function deriveJob(presentation: Presentation, ctx?: ViewContext): JobDerived {
+  // Clock readings are host-injected; hosts without timing get the zero epoch.
+  const activity: JobActivity = ctx?.jobActivity ?? { now: 0 };
+  const progress = jobProgress(presentation, ctx);
+  const { current, total, active, determinate, donePct, activePct } = progress;
+  const retrying = Math.max(0, Math.min(ctx?.currentProgress?.retrying ?? 0, active));
+  const preparing = presentation.headlineKey === "view.step.saving";
+  const paused = !preparing && (presentation.paused || activity.paused === true);
+  const { timeText, showStalled } = jobTiming(
+    activity,
+    preparing,
+    progress,
+    ctx?.currentProgress?.estimatedTotalMs,
+  );
+  const detail = presentation.detailKey
+    ? t(presentation.detailKey, presentation.detailVars)
+    : undefined;
+  const sourceTitle = ctx?.sourceUrl ?? activity.url ?? "";
+  const sourceUrl = sourceTitle ? displaySourceUrl(sourceTitle) : "";
   return {
     paused,
-    step,
+    step: jobStep(presentation, activity, paused, retrying, showStalled),
     ...(detail ? { detail } : {}),
     sourceUrl,
     sourceTitle,
     timeText,
-    countsText,
+    countsText: jobCounts(progress),
     determinate,
     current,
     total,
@@ -312,6 +347,16 @@ function deriveJob(presentation: Presentation, ctx?: ViewContext): JobDerived {
     donePct,
     activePct,
   };
+}
+
+function progressValueText(d: JobDerived, presentation: Presentation): string {
+  if (!d.determinate) return d.step;
+  if (presentation.progress?.unit === "pixels") return d.countsText;
+  return t("view.job.progressValue", {
+    done: d.current,
+    active: d.active,
+    remaining: Math.max(0, d.total - d.current - d.active),
+  });
 }
 
 function JobView({
@@ -431,17 +476,7 @@ function JobView({
           aria-valuemin={0}
           aria-valuemax={d.total || 100}
           aria-label={d.step}
-          aria-valuetext={
-            d.determinate
-              ? presentation.progress?.unit === "pixels"
-                ? d.countsText
-                : t("view.job.progressValue", {
-                    done: d.current,
-                    active: d.active,
-                    remaining: Math.max(0, d.total - d.current - d.active),
-                  })
-              : d.step
-          }
+          aria-valuetext={progressValueText(d, presentation)}
         >
           <div
             className="dz-progress-done"
@@ -553,18 +588,11 @@ function CompletedView({
     }
   }
   const output = presentation.output;
-  const canvas = output?.canvas;
   const saved =
     output?.disposition === "native-publication" ||
     output?.disposition === "browser-save-initiated";
   const title = saved ? t("desktop.done.title") : t("view.done.readyTitle");
-  const summary = saved
-    ? canvas
-      ? t("desktop.done.size", { width: canvas.width, height: canvas.height })
-      : t("desktop.done.saved")
-    : canvas
-      ? renderCompletion(canvas.width, canvas.height, `image/${output.format}`)
-      : t("view.done.ready");
+  const summary = completionSummary(presentation, saved);
   const showSaveButton = output?.disposition === "browser-save-ready" && !!callbacks.onSave;
   const guidance = saved ? t("desktop.done.saved") : renderSaveGuidance(true);
   return (
@@ -666,6 +694,18 @@ function CompletedView({
   );
 }
 
+function completionSummary(presentation: Presentation, saved: boolean): string {
+  const output = presentation.output;
+  const canvas = output?.canvas;
+  if (saved)
+    return canvas
+      ? t("desktop.done.size", { width: canvas.width, height: canvas.height })
+      : t("desktop.done.saved");
+  return canvas
+    ? renderCompletion(canvas.width, canvas.height, `image/${output?.format}`)
+    : t("view.done.ready");
+}
+
 function FailedView({
   presentation,
   callbacks,
@@ -681,12 +721,7 @@ function FailedView({
   const extension = ctx?.product === "extension";
   const extensionDiscovery = extension && isDiscoveryFailure(error);
   const retry = canRetry(error) ? callbacks.onRetrySameUrl : undefined;
-  const source =
-    typeof ctx?.sourceUrl === "string"
-      ? ctx.sourceUrl
-      : typeof ctx?.jobActivity?.url === "string"
-        ? ctx.jobActivity.url
-        : "";
+  const source = failureSource(ctx);
   return (
     <Notice
       id="dz-failure"
@@ -775,6 +810,11 @@ function FailedView({
       </div>
     </Notice>
   );
+}
+
+function failureSource(ctx?: ViewContext): string {
+  if (typeof ctx?.sourceUrl === "string") return ctx.sourceUrl;
+  return typeof ctx?.jobActivity?.url === "string" ? ctx.jobActivity.url : "";
 }
 
 function CancelledView({ callbacks }: { callbacks: ViewCallbacks }) {
@@ -934,24 +974,8 @@ function ModalCard({
     (focusable()[0] ?? dialog.current)?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
-      if (e.key === "Tab") {
-        const items = focusable();
-        const first = items[0];
-        const last = items.at(-1);
-        if (!first || !last) {
-          e.preventDefault();
-          dialog.current?.focus();
-        } else if (!items.includes(hostDocument.activeElement as HTMLElement)) {
-          e.preventDefault();
-          (e.shiftKey ? last : first).focus();
-        } else if (e.shiftKey && hostDocument.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && hostDocument.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
+      if (e.key === "Tab")
+        trapModalFocus(e, focusable(), dialog.current, hostDocument.activeElement);
     };
     hostDocument.addEventListener("keydown", onKey);
     return () => hostDocument.removeEventListener("keydown", onKey);
@@ -987,6 +1011,31 @@ function ModalCard({
       </div>
     </div>
   );
+}
+
+function trapModalFocus(
+  event: KeyboardEvent,
+  items: HTMLElement[],
+  dialog: HTMLElement | null,
+  active: Element | null,
+): void {
+  const first = items[0],
+    last = items.at(-1);
+  if (!first || !last) {
+    event.preventDefault();
+    dialog?.focus();
+    return;
+  }
+  if (!items.includes(active as HTMLElement)) {
+    event.preventDefault();
+    (event.shiftKey ? last : first).focus();
+  } else if (event.shiftKey && active === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && active === last) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 let activeOverlay: { close(): void } | null = null;
