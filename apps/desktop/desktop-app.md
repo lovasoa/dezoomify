@@ -99,14 +99,18 @@ This does not sign you in or transfer your browser session.
   16,383 pixels per side.
 - **AVIF** saves lossy images with transparency, up to 65,535 pixels per side.
   It needs the complete image in memory and does not preserve embedded color
-  profiles. Quality 100 is not a lossless mode. Size estimates follow the chosen
-  quality and are approximate, not file-size or memory limits.
+  profiles. Quality 100 is not a lossless mode.
 - **ZIF** is a tiled multi-resolution image and omits transparency.
 - **IIIF** saves a folder with `info.json` and tiles for a static web viewer.
 
 Compression controls JPEG and AVIF quality (100 minus compression, at least 1
 for AVIF); TIFF stays lossless. AVIF uses a fixed encoding speed.
 Compatible IIIF/ZIF tiles keep their original compressed bytes.
+
+Size estimates assume an image filling the selected maximum dimensions; smaller
+sources or different aspect ratios can produce much smaller files. They use the
+chosen format and quality to give a rough budget, not a guaranteed file-size or
+memory limit. Auto assumes an opaque JPEG.
 
 ## Settings
 

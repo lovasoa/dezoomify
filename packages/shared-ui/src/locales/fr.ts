@@ -281,17 +281,17 @@ export const fr = {
   "desktop.settings.reset": "Réinitialiser les paramètres",
   "desktop.quick.info": "Plus d’informations",
   "desktop.quick.auto": "Automatique",
-  "desktop.quick.sizeEstimate": "≈{size} Mo",
+  "desktop.quick.sizeEstimate": "Jusqu’à environ {size} Mo",
   "desktop.quick.folderInfo": "Choisissez où enregistrer les images téléchargées.",
   "desktop.quick.formatInfo":
     "Choisissez un format. Le mode automatique enregistre en JPEG les images opaques jusqu’à {jpegMax} pixels par côté ; sinon en PNG.",
   "desktop.quick.sizeInfo":
-    "Les préréglages choisissent un niveau source dans les dimensions cibles. Si aucun ne convient, le plus petit est utilisé et peut dépasser les cibles ou les limites de l’encodeur. Les images ne sont pas redimensionnées. Les estimations utilisent des mesures par format et qualité, les niveaux de pyramide nécessaires, une marge de 10 % et un arrondi aux 5 Mo supérieurs. Ce sont des tailles approximatives, pas des limites de fichier ou de mémoire. Détails, transparence et métadonnées influencent le résultat. Le mode automatique suppose un JPEG opaque ; la transparence utilise le PNG. Les tailles entière/personnalisée nécessitent les dimensions source.",
+    "Chaque estimation suppose une image occupant la largeur et la hauteur maximales du préréglage. Une source plus petite ou un autre rapport largeur/hauteur peut produire un fichier bien plus petit. Les estimations interpolent des mesures par format et qualité, incluent les niveaux de pyramide nécessaires, ajoutent une marge de 10 % et sont arrondies aux 5 Mo supérieurs. Ce sont des budgets indicatifs, pas des limites garanties de fichier ou de mémoire ; détails, transparence et métadonnées influencent le résultat. Le mode automatique suppose un JPEG opaque ; la transparence utilise le PNG. Les préréglages choisissent un niveau source sans redimensionner. Si aucun ne convient, le plus petit est utilisé et peut dépasser le maximum choisi. Les tailles entière/personnalisée dépendent de la source.",
   "desktop.quick.maxWidth": "Largeur max.",
   "desktop.quick.maxHeight": "Hauteur max.",
   "desktop.quick.original": "Originale",
   "desktop.quick.userDefined": "Personnalisée",
-  "desktop.quick.estimatedSize": "Taille estimée ({format})",
+  "desktop.quick.estimatedSize": "Estimation à la taille max. ({format})",
   "desktop.quick.networkInfo":
     "Rapide utilise jusqu’à 16 requêtes simultanées sans délai. Équilibré lance jusqu’à 5 requêtes par seconde ; Doux jusqu’à 2. Un rythme réduit peut aider les serveurs chargés.",
   "desktop.quick.source": "Selon la source",

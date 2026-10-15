@@ -279,17 +279,17 @@ export const it = {
   "desktop.settings.reset": "Reimposta le impostazioni",
   "desktop.quick.info": "Altre informazioni",
   "desktop.quick.auto": "Automatico",
-  "desktop.quick.sizeEstimate": "≈{size} MB",
+  "desktop.quick.sizeEstimate": "Fino a circa {size} MB",
   "desktop.quick.folderInfo": "Scegli dove salvare le immagini scaricate.",
   "desktop.quick.formatInfo":
     "Scegli un formato. Automatico salva in JPEG le immagini opache fino a {jpegMax} pixel per lato, altrimenti in PNG.",
   "desktop.quick.sizeInfo":
-    "Le preimpostazioni scelgono un livello sorgente entro le dimensioni indicate. Se nessuno rientra, viene usato il più piccolo, che può superare gli obiettivi o i limiti del codificatore. Le immagini non vengono ridimensionate. Le stime usano misure per formato e qualità, livelli aggiuntivi della piramide, un margine del 10 % e arrotondamento ai 5 MB successivi. Stimano le dimensioni dei file, non limiti di file o memoria; dettagli, trasparenza e metadati influenzano il risultato. Automatico presume un JPEG opaco; la trasparenza usa PNG. Le dimensioni intere/personalizzate richiedono quelle della sorgente.",
+    "Ogni stima presuppone un’immagine che occupi la larghezza e l’altezza massime della preimpostazione. Una sorgente più piccola o proporzioni diverse possono produrre un file molto più piccolo. Le stime interpolano misure per formato e qualità, includono i livelli aggiuntivi della piramide, aggiungono un margine del 10 % e sono arrotondate ai 5 MB successivi. Sono indicazioni orientative, non limiti garantiti di file o memoria; dettagli, trasparenza e metadati influenzano il risultato. Automatico presume un JPEG opaco; la trasparenza usa PNG. Le preimpostazioni scelgono un livello sorgente senza ridimensionare. Se nessuno rientra, viene usato il più piccolo, che può superare il massimo scelto. Le dimensioni intere/personalizzate dipendono dalla sorgente.",
   "desktop.quick.maxWidth": "Larghezza max.",
   "desktop.quick.maxHeight": "Altezza max.",
   "desktop.quick.original": "Originale",
   "desktop.quick.userDefined": "Personalizzata",
-  "desktop.quick.estimatedSize": "Dimensione stimata ({format})",
+  "desktop.quick.estimatedSize": "Stima alla dimensione max. ({format})",
   "desktop.quick.networkInfo":
     "Veloce usa fino a 16 richieste simultanee senza attesa. Bilanciato avvia fino a 5 richieste al secondo; Delicato fino a 2. Un ritmo ridotto può aiutare i server occupati.",
   "desktop.quick.source": "Dipende dalla fonte",

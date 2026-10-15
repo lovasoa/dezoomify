@@ -51,7 +51,7 @@ test("desktop quick choices apply sizes and update estimates with the format", (
     presets
       .find((button) => button.firstElementChild.textContent === "Full HD")
       .querySelector(".dz-choice-hint").textContent,
-    "≈5 MB",
+    "Up to about 5 MB",
   );
   const dimensions = [
     [1920, 1080],
@@ -68,8 +68,8 @@ test("desktop quick choices apply sizes and update estimates with the format", (
   }
   for (const button of presets.slice(1, -1)) {
     const hint = button.querySelector(".dz-choice-hint").textContent;
-    assert.match(hint, /^≈\d+ MB$/);
-    assert.equal(Number(hint.slice(1, -3)) % 5, 0);
+    assert.match(hint, /^Up to about \d+ MB$/);
+    assert.equal(Number(hint.replace(/[^0-9]/g, "")) % 5, 0);
   }
   const button = [...size.querySelectorAll("button")].find(
     (button) => button.firstElementChild.textContent === "4K",
@@ -101,8 +101,12 @@ test("desktop quick choices apply sizes and update estimates with the format", (
   assert.equal(size.querySelector(".dz-quick-info"), null);
   click(container.querySelector('button[aria-label="Size: More information"]'));
   const explanation = container.querySelector(".dz-settings-explanation");
-  assert.match(explanation.textContent, /measurements for the codec/);
-  assert.match(explanation.textContent, /Estimated size \(PNG\)/);
+  assert.match(explanation.textContent, /interpolate measurements for the codec/);
+  assert.match(explanation.textContent, /Estimate at max size \(PNG\)/);
+  assert.match(explanation.textContent, /image filling the preset's maximum width and height/);
+  assert.match(explanation.textContent, /much smaller file/);
+  assert.match(explanation.textContent, /Auto assumes an opaque JPEG/);
+  assert.doesNotMatch(container.textContent, /≈/);
   assert.deepEqual(
     [...explanation.querySelectorAll("tbody tr")]
       .slice(1, -1)
@@ -124,8 +128,12 @@ test("quick settings translate the automatic preference and estimated units", ()
     const hints = [...container.querySelectorAll(".dz-choice-hint")].map(
       (hint) => hint.textContent,
     );
-    assert.ok(hints.includes("≈5 Mo"));
-    assert.ok(hints.some((hint) => hint === `≈${new Intl.NumberFormat("fr").format(935)} Mo`));
+    assert.ok(hints.includes("Jusqu’à environ 5 Mo"));
+    assert.ok(
+      hints.some(
+        (hint) => hint === `Jusqu’à environ ${new Intl.NumberFormat("fr").format(935)} Mo`,
+      ),
+    );
   } finally {
     act(() => root.unmount());
     setLocale("en");
@@ -188,14 +196,14 @@ test("file size estimates follow the output encoder and JPEG quality", () => {
     act(() => root.unmount());
   }
   assert.deepEqual(estimates, {
-    auto: "≈15 MB",
-    jpeg: "≈15 MB",
-    png: "≈60 MB",
-    tiff: "≈110 MB",
-    webp: "≈50 MB",
-    avif: "≈20 MB",
-    zif: "≈150 MB",
-    "iiif-dir": "≈20 MB",
+    auto: "Up to about 15 MB",
+    jpeg: "Up to about 15 MB",
+    png: "Up to about 60 MB",
+    tiff: "Up to about 110 MB",
+    webp: "Up to about 50 MB",
+    avif: "Up to about 20 MB",
+    zif: "Up to about 150 MB",
+    "iiif-dir": "Up to about 20 MB",
   });
   const { container, root } = renderSettings({
     settings: { output_format: "jpeg", compression: 50 },
@@ -203,26 +211,26 @@ test("file size estimates follow the output encoder and JPEG quality", () => {
   const preset = [...container.querySelectorAll('.dz-quick-menu[aria-label="Size"] button')].find(
     (button) => button.firstElementChild.textContent === "8K",
   );
-  assert.equal(preset.querySelector(".dz-choice-hint").textContent, "≈10 MB");
+  assert.equal(preset.querySelector(".dz-choice-hint").textContent, "Up to about 10 MB");
   act(() => root.unmount());
 });
 
 test("estimation buffer is applied consistently before rounding to 5 MB", () => {
   for (const [format, compression, label, expected] of [
-    ["png", 5, "Full HD", "≈5 MB"],
-    ["png", 5, "QHD", "≈10 MB"],
+    ["png", 5, "Full HD", "Up to about 5 MB"],
+    ["png", 5, "QHD", "Up to about 10 MB"],
     // 32K PNG is 849.35 MB before buffering, 934.28 MB afterwards.
-    ["png", 5, "32K", "≈935 MB"],
+    ["png", 5, "32K", "Up to about 935 MB"],
     // Quality-50 8K JPEG crosses the 5 MB bucket only with the buffer.
-    ["jpeg", 50, "8K", "≈10 MB"],
-    ["jpeg", 2, "8K", "≈20 MB"],
-    ["jpeg", 0, "8K", "≈20 MB"],
-    ["webp", 5, "8K", "≈50 MB"],
-    ["avif", 100, "8K", "≈5 MB"],
-    ["avif", 50, "8K", "≈5 MB"],
-    ["avif", 25, "8K", "≈10 MB"],
-    ["avif", 2, "8K", "≈30 MB"],
-    ["avif", 0, "8K", "≈45 MB"],
+    ["jpeg", 50, "8K", "Up to about 10 MB"],
+    ["jpeg", 2, "8K", "Up to about 20 MB"],
+    ["jpeg", 0, "8K", "Up to about 20 MB"],
+    ["webp", 5, "8K", "Up to about 50 MB"],
+    ["avif", 100, "8K", "Up to about 5 MB"],
+    ["avif", 50, "8K", "Up to about 5 MB"],
+    ["avif", 25, "8K", "Up to about 10 MB"],
+    ["avif", 2, "8K", "Up to about 30 MB"],
+    ["avif", 0, "8K", "Up to about 45 MB"],
   ]) {
     const { container, root } = renderSettings({
       settings: { output_format: format, compression },
@@ -231,6 +239,41 @@ test("estimation buffer is applied consistently before rounding to 5 MB", () => 
       (button) => button.firstElementChild.textContent === label,
     );
     assert.equal(preset.querySelector(".dz-choice-hint").textContent, expected);
+    act(() => root.unmount());
+  }
+});
+
+test("size budgets interpolate quality samples and clamp at the first sample", () => {
+  for (const [format, compression, megabytes] of [
+    ["avif", 10, 705],
+    ["avif", 9, 775],
+    ["avif", 8, 845],
+    ["avif", 6, 985],
+    ["avif", 5, 1055],
+    ["avif", 4, 1250],
+    ["avif", 1, 2165],
+    ["avif", 0, 2690],
+    ["avif", 99, 120],
+    ["avif", 100, 120],
+    ["jpeg", 100, 235],
+    ["jpeg", 75, 235],
+    ["jpeg", 74, 240],
+    ["jpeg", 9, 750],
+    ["jpeg", 7, 845],
+    ["jpeg", 1, 1110],
+    ["jpeg", 0, 1170],
+  ]) {
+    const { container, root } = renderSettings({
+      settings: { output_format: format, compression },
+    });
+    const preset = [...container.querySelectorAll('.dz-quick-menu[aria-label="Size"] button')].find(
+      (button) => button.firstElementChild.textContent === "64K",
+    );
+    assert.equal(
+      preset.querySelector(".dz-choice-hint").textContent,
+      `Up to about ${new Intl.NumberFormat("en").format(megabytes)} MB`,
+      `${format} at quality ${100 - compression}`,
+    );
     act(() => root.unmount());
   }
 });
@@ -265,7 +308,7 @@ test("AVIF quality uses the persisted compression setting and updates estimates"
     [...container.querySelectorAll('.dz-quick-menu[aria-label="Size"] button')]
       .find((button) => button.firstElementChild.textContent === "8K")
       .querySelector(".dz-choice-hint").textContent;
-  assert.equal(estimate(), "≈5 MB");
+  assert.equal(estimate(), "Up to about 5 MB");
   click(container.querySelector(".dz-settings-more"));
   const slider = container.querySelector('input[aria-label="AVIF quality"]');
   assert.equal(slider.getAttribute("min"), "1");
@@ -273,7 +316,7 @@ test("AVIF quality uses the persisted compression setting and updates estimates"
   assert.equal(container.querySelector('input[aria-label="Width"]').getAttribute("max"), "65535");
   typeInto(slider, "100");
   assert.equal(current().compression, 0);
-  assert.equal(estimate(), "≈45 MB");
+  assert.equal(estimate(), "Up to about 45 MB");
   click(container.querySelector(".dz-settings-close"));
   click(container.querySelector('button[aria-label="Size: More information"]'));
   assert.match(
@@ -283,13 +326,13 @@ test("AVIF quality uses the persisted compression setting and updates estimates"
   act(() => root.unmount());
 });
 
-test("AVIF estimates use localized approximate units", () => {
+test("AVIF estimates localize size budgets", () => {
   setLocale("fr");
   const { container, root } = renderSettings({ settings: { output_format: "avif" } });
   try {
     assert.ok(
       [...container.querySelectorAll(".dz-choice-hint")].some(
-        (hint) => hint.textContent === "≈20 Mo",
+        (hint) => hint.textContent === "Jusqu’à environ 20 Mo",
       ),
     );
   } finally {

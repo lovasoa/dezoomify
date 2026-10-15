@@ -285,17 +285,17 @@ export const de = {
   "desktop.settings.reset": "Einstellungen zurücksetzen",
   "desktop.quick.info": "Weitere Informationen",
   "desktop.quick.auto": "Automatisch",
-  "desktop.quick.sizeEstimate": "≈{size} MB",
+  "desktop.quick.sizeEstimate": "Bis etwa {size} MB",
   "desktop.quick.folderInfo": "Wählen Sie den Speicherort für heruntergeladene Bilder.",
   "desktop.quick.formatInfo":
     "Wählen Sie ein Ausgabeformat. Automatisch speichert undurchsichtige Bilder bis {jpegMax} Pixel pro Seite als JPEG, sonst als PNG.",
   "desktop.quick.sizeInfo":
-    "Vorgaben wählen eine Quellstufe innerhalb der Zielmaße. Passt keine, wird die kleinste verwendet; sie kann Zielmaße oder Encodergrenzen überschreiten. Bilder werden nicht skaliert. Schätzungen basieren auf Messungen für Format und Qualität, zusätzlichen Pyramidenstufen, 10 % Reserve und Aufrundung auf 5 MB. Sie schätzen Dateigrößen, keine Datei- oder Speichergrenzen; Details, Transparenz und Metadaten beeinflussen das Ergebnis. Automatisch nimmt ein undurchsichtiges JPEG an; Transparenz verwendet PNG. Volle und eigene Größen benötigen die Quellmaße.",
+    "Jede Schätzung setzt ein Bild mit der maximalen Breite und Höhe der Vorgabe voraus. Eine kleinere Quelle oder ein anderes Seitenverhältnis kann eine viel kleinere Datei ergeben. Die Schätzungen interpolieren Messwerte für Format und Qualität, berücksichtigen zusätzliche Pyramidenstufen, addieren 10 % Reserve und runden auf 5 MB auf. Es sind grobe Richtwerte, keine garantierten Datei- oder Speichergrenzen; Details, Transparenz und Metadaten beeinflussen das Ergebnis. Automatisch nimmt ein undurchsichtiges JPEG an; Transparenz verwendet PNG. Vorgaben wählen eine Quellstufe ohne Skalierung. Passt keine, wird die kleinste verwendet; sie kann das gewählte Maximum überschreiten. Volle und eigene Größen hängen von der Quelle ab.",
   "desktop.quick.maxWidth": "Max. Breite",
   "desktop.quick.maxHeight": "Max. Höhe",
   "desktop.quick.original": "Original",
   "desktop.quick.userDefined": "Benutzerdefiniert",
-  "desktop.quick.estimatedSize": "Geschätzte Größe ({format})",
+  "desktop.quick.estimatedSize": "Schätzung bei Maximalgröße ({format})",
   "desktop.quick.networkInfo":
     "Schnell nutzt bis zu 16 gleichzeitige Anfragen ohne Drosselung. Ausgewogen startet bis zu 5 Anfragen pro Sekunde, Schonend bis zu 2. Langsameres Tempo kann ausgelasteten Servern helfen.",
   "desktop.quick.source": "Quellabhängig",

@@ -370,17 +370,17 @@ const en = {
   "desktop.settings.reset": "Reset settings",
   "desktop.quick.info": "More information",
   "desktop.quick.auto": "Auto",
-  "desktop.quick.sizeEstimate": "≈{size} MB",
+  "desktop.quick.sizeEstimate": "Up to about {size} MB",
   "desktop.quick.folderInfo": "Choose where downloaded images are saved.",
   "desktop.quick.formatInfo":
     "Choose an output format. Auto saves JPEG for opaque images up to {jpegMax} pixels per side; otherwise PNG.",
   "desktop.quick.sizeInfo":
-    "Presets select a source level within the width and height targets. If none fits, the smallest level is used and may exceed the targets or encoder limits. Images are not resized. Estimates use measurements for the codec and selected quality, extra pyramid levels where applicable, a 10% buffer and rounding up to 5 MB. They approximate file sizes, not file-size or memory limits; detail, transparency and metadata affect actual files. Auto assumes an opaque JPEG; transparency uses PNG. Full/custom sizes need source dimensions.",
+    "Each estimate assumes an image filling the preset's maximum width and height. A smaller source or different aspect ratio can produce a much smaller file. Estimates interpolate measurements for the codec and selected quality, include extra pyramid levels where applicable, add a 10% buffer and round up to 5 MB. They are rough budgets, not guaranteed file-size or memory limits; detail, transparency and metadata affect actual files. Auto assumes an opaque JPEG; transparency uses PNG. Presets select a source level without resizing. If none fits, the smallest level is used and may exceed the selected maximum. Full/custom sizes depend on the source.",
   "desktop.quick.maxWidth": "Max width",
   "desktop.quick.maxHeight": "Max height",
   "desktop.quick.original": "Original",
   "desktop.quick.userDefined": "User-defined",
-  "desktop.quick.estimatedSize": "Estimated size ({format})",
+  "desktop.quick.estimatedSize": "Estimate at max size ({format})",
   "desktop.quick.networkInfo":
     "Fast uses up to 16 simultaneous requests without pacing. Balanced starts up to 5 requests per second; Gentle starts up to 2. Slower pacing can help busy servers.",
   "desktop.quick.source": "Source-dependent",

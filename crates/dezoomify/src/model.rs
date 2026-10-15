@@ -168,7 +168,7 @@ pub struct OutputCodec {
     pub control: OutputControl,
     pub layout: OutputLayout,
     pub hint: &'static str,
-    /// Upper quality bucket and estimated bytes/pixel; measurements, not bounds.
+    /// Quality samples and estimated bytes/pixel, interpolated between samples.
     pub size_coefficients: &'static [(u8, f64)],
 }
 
@@ -225,7 +225,7 @@ macro_rules! output_codecs {
 // JPEG: native calibration on two paintings and a map. AVIF: image 0.25.10,
 // speed 4, Zoomify test_custom_size, Arts & Culture tile, generic map_expected,
 // and a painting alpha gradient fitted within 512x512. Upper measured AVIF
-// bytes/pixel rounded up to 0.05, then made nondecreasing across quality buckets.
+// bytes/pixel rounded up to 0.05, then made nondecreasing across sampled qualities.
 const JPEG_SIZES: &[(u8, f64)] = &[
     (25, 0.1),
     (50, 0.15),

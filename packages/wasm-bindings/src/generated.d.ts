@@ -158,7 +158,7 @@ export interface OutputCodec {
     layout: OutputLayout;
     hint: string;
     /**
-     * Upper quality bucket and estimated bytes/pixel; measurements, not bounds.
+     * Quality samples and estimated bytes/pixel, interpolated between samples.
      */
     size_coefficients: [number, number][];
 }

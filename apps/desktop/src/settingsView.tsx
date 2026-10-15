@@ -1,4 +1,5 @@
 import { getDictionary, getLocale, type I18nKey, t } from "@dezoomify/shared-ui";
+import type { OutputCodec } from "@dezoomify/wasm-bindings";
 import { outputCodecs } from "@dezoomify/wasm-bindings/codecs";
 import type { ReactElement, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
@@ -58,13 +59,24 @@ function formatDescription(format: DesktopSettings["output_format"]): string {
     : t("desktop.quick.format.generic", { format: codecFor(format).name });
 }
 
+function estimatedBytesPerPixel(codec: OutputCodec, quality: number): number {
+  let lower = codec.size_coefficients[0];
+  if (!lower) throw new Error(`Missing size estimates for ${codec.name}`);
+  if (quality <= lower[0]) return lower[1];
+  for (const upper of codec.size_coefficients.slice(1)) {
+    if (quality <= upper[0]) {
+      const fraction = (quality - lower[0]) / (upper[0] - lower[0]);
+      return lower[1] + fraction * (upper[1] - lower[1]);
+    }
+    lower = upper;
+  }
+  return lower[1];
+}
+
 function estimateSize(width: number, height: number, settings: DesktopSettings): string {
+  // Tiled images almost never have an alpha channel, so Auto assumes opaque JPEG.
   const codec = codecFor(settings.output_format);
-  const quality = 100 - settings.compression;
-  const coefficient = codec.size_coefficients.find(([upper]) => quality <= upper);
-  if (!coefficient)
-    throw new Error(`Missing size estimate for ${codec.name} at quality ${quality}`);
-  const bytesPerPixel = coefficient[1];
+  const bytesPerPixel = estimatedBytesPerPixel(codec, 100 - settings.compression);
   const pyramid = codec.layout === "pyramid" || codec.layout === "directory" ? 4 / 3 : 1;
   const pixels = width * height;
   const mb = (pixels * bytesPerPixel * pyramid) / 1_000_000;
