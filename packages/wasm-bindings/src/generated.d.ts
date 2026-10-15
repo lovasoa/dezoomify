@@ -140,6 +140,28 @@ export interface TileRole {
 }
 
 /**
+ * How an output owns its encoded image or pyramid.
+ */
+export type OutputLayout = "streaming" | "buffered" | "pyramid" | "directory";
+
+/**
+ * Native output capabilities, also exported as generated data for presentation.
+ */
+export interface OutputCodec {
+    format: OutputFormat;
+    name: string;
+    extensions: string[];
+    max_side?: number;
+    control: OutputControl;
+    layout: OutputLayout;
+    hint: string;
+    /**
+     * Upper quality bucket and estimated bytes/pixel; measurements, not bounds.
+     */
+    size_coefficients: [number, number][];
+}
+
+/**
  * One acquisition attempt. The core owns retries; Hosts await approval for
  * optional attempts before performing I/O. Attempt zero is the initial request.
  */
@@ -216,11 +238,6 @@ export interface Output {
 export type RequestPurpose = "metadata" | "tile" | "probe";
 
 /**
- * Saved encoding preference, distinct from the concrete published format.
- */
-export type OutputPreference = "auto" | "png" | "jpeg" | "tiff" | "zif" | "webp" | "avif" | "iiif-dir";
-
-/**
  * Selected elements in document order, with decoded attributes and textContent.
  */
 export type HtmlDocument = Record<string, HtmlElement[]>;
@@ -245,9 +262,9 @@ export interface LimitContext {
 }
 
 /**
- * The requested output encoding.
+ * The meaning of the existing compression setting for a codec.
  */
-export type OutputFormat = "png" | "jpeg" | "tiff" | "zif" | "webp" | "avif" | "iiif-dir";
+export type OutputControl = { kind: "quality"; minimum: number } | { kind: "effort" } | { kind: "none" };
 
 /**
  * The shared failure context, defined once instead of per variant:
@@ -307,7 +324,7 @@ export interface DiagnosticReport {
  * [`LimitContext`]; `message` prose is presentation only and is never a
  * data channel between languages.
  */
-export type LimitReason = "memory" | "jpeg-side" | "webp-side" | "avif-side";
+export type LimitReason = "memory" | "jpeg-side" | "webp-side" | { "codec-side": OutputFormat };
 
 export interface DiagnosticFailureGroup {
     key: string;
@@ -403,6 +420,10 @@ export type ErrorTransport = "direct" | "metadata-proxy" | "browser-session" | "
 export type Gate = "cancellation" | "acquisition";
 
 export type Interaction = "forbidden" | "allowed";
+
+export type OutputFormat = "png" | "jpeg" | "tiff" | "webp" | "avif" | "zif" | "iiif-dir";
+
+export type OutputPreference = "auto" | "png" | "jpeg" | "tiff" | "webp" | "avif" | "zif" | "iiif-dir";
 
 export type ProbeOutcome = { status: "missing" } | { status: "available"; width: number; height: number };
 

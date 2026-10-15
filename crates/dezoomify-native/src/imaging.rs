@@ -1,32 +1,37 @@
 //! Image decoding, metadata, encoders, and memory limits.
 use std::path::PathBuf;
 
-use dezoomify::model::{Error, LimitContext, LimitReason, Size};
+use dezoomify::model::{Error, LimitContext, LimitReason, OutputFormat, OutputLayout, Size};
 
 /// JPEG caps both dimensions at 65535 pixels.
-pub const JPEG_MAX_SIDE: u32 = 65_535;
+pub const JPEG_MAX_SIDE: u32 = OutputFormat::Jpeg
+    .codec()
+    .max_side
+    .expect("JPEG side limit");
 
 /// WebP lossless caps both dimensions at 16383 px.
-pub const WEBP_MAX_SIDE: u32 = 16_383;
-
-/// The rav1e AVIF encoder caps both dimensions at 65535 px.
-pub const AVIF_MAX_SIDE: u32 = 65_535;
+pub const WEBP_MAX_SIDE: u32 = OutputFormat::Webp
+    .codec()
+    .max_side
+    .expect("WebP side limit");
 
 pub(crate) fn check_dimensions(
     format: dezoomify::model::OutputFormat,
     size: &Size,
 ) -> Result<(), Error> {
-    use dezoomify::model::OutputFormat;
-    let (maximum, reason) = match format {
-        OutputFormat::Jpeg => (JPEG_MAX_SIDE, LimitReason::JpegSide),
-        OutputFormat::Webp => (WEBP_MAX_SIDE, LimitReason::WebpSide),
-        OutputFormat::Avif => (AVIF_MAX_SIDE, LimitReason::AvifSide),
-        _ => return Ok(()),
+    let Some(maximum) = format.codec().max_side else {
+        return Ok(());
     };
     if size.width > maximum || size.height > maximum {
         return Err(Error::LimitExceeded {
             limit: LimitContext {
-                reason,
+                // Preserve the two released reason strings; new codecs carry
+                // their format instead of introducing another error variant.
+                reason: match format {
+                    OutputFormat::Jpeg => LimitReason::JpegSide,
+                    OutputFormat::Webp => LimitReason::WebpSide,
+                    _ => LimitReason::CodecSide(format),
+                },
                 dimensions: Some(size.clone()),
                 bytes_required: None,
                 bytes_available: None,
@@ -34,6 +39,22 @@ pub(crate) fn check_dimensions(
         });
     }
     Ok(())
+}
+
+pub(crate) fn encoder_workspace(format: OutputFormat, size: &Size) -> u64 {
+    let (width, height) = (u64::from(size.width), u64::from(size.height));
+    match format {
+        OutputFormat::Png => width * 16 + (1 << 20),
+        OutputFormat::Tiff => width * 8 + height * 24 + (128 << 10),
+        OutputFormat::Webp => width * height * 32 + (128 << 10),
+        // Conservative full-image, encoded-file and codec workspace reservation,
+        // not a process RSS guarantee. Saturation makes overflow fail the budget.
+        _ if format.codec().layout == OutputLayout::Buffered => width
+            .saturating_mul(height)
+            .saturating_mul(64)
+            .saturating_add(16 << 20),
+        _ => 128 << 10,
+    }
 }
 
 /// Default number of tile acquisitions in flight.
@@ -209,34 +230,58 @@ pub(crate) fn encode_jpeg_to<W: std::io::Write>(
     Ok(())
 }
 
-/// Lossless WebP requires contiguous pixels; preserve the selected ICC profile.
-pub(crate) fn encode_webp_to<W: std::io::Write>(
-    writer: W,
+/// The common image-crate path. Override construction only when the crate's
+/// default encoder cannot express the codec's settings or metadata contract.
+pub(crate) fn encode_buffered_to<W: std::io::Write + std::io::Seek>(
+    mut writer: W,
     image: &image::RgbaImage,
+    format: OutputFormat,
+    compression: u8,
     icc_profile: Option<&[u8]>,
 ) -> Result<(), Error> {
-    check_dimensions(
-        dezoomify::model::OutputFormat::Webp,
-        &Size {
-            width: image.width(),
-            height: image.height(),
-        },
-    )?;
-    let mut encoder = image::codecs::webp::WebPEncoder::new_lossless(writer);
-    if let Some(profile) = icc_profile {
-        let _ = image::ImageEncoder::set_icc_profile(&mut encoder, profile.to_vec());
+    macro_rules! encode {
+        ($encoder:expr) => {
+            image::ImageEncoder::write_image(
+                $encoder,
+                image.as_raw(),
+                image.width(),
+                image.height(),
+                image::ExtendedColorType::Rgba8,
+            )
+        };
     }
-    image::ImageEncoder::write_image(
-        encoder,
-        image.as_raw(),
-        image.width(),
-        image.height(),
-        image::ExtendedColorType::Rgba8,
-    )
-    .map_err(|e| {
-        Error::EncodeFailed(
-            format!("webp encode failed: {}", dezoomify::model::chain_text(&e)).into(),
+    let result = match format {
+        OutputFormat::Webp => {
+            let mut encoder = image::codecs::webp::WebPEncoder::new_lossless(writer);
+            if let Some(profile) = icc_profile {
+                let _ = image::ImageEncoder::set_icc_profile(&mut encoder, profile.to_vec());
+            }
+            encode!(encoder)
+        }
+        OutputFormat::Avif => encode!(image::codecs::avif::AvifEncoder::new_with_speed_quality(
+            writer,
+            4,
+            format.codec().control.quality(compression),
         )
-    })?;
-    Ok(())
+        .with_num_threads(Some(1))),
+        _ => image::write_buffer_with_format(
+            &mut writer,
+            image.as_raw(),
+            image.width(),
+            image.height(),
+            image::ExtendedColorType::Rgba8,
+            image::ImageFormat::from_extension(format.extension())
+                .ok_or_else(|| Error::InvalidState("unregistered image encoder".into()))?,
+        ),
+    };
+    result.map_err(|error| {
+        Error::EncodeFailed(
+            format!(
+                "{} encode failed: {}",
+                format.as_str(),
+                dezoomify::model::chain_text(&error)
+            )
+            .into(),
+        )
+    })
 }

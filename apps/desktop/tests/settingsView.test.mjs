@@ -51,7 +51,7 @@ test("desktop quick choices apply sizes and update estimates with the format", (
     presets
       .find((button) => button.firstElementChild.textContent === "Full HD")
       .querySelector(".dz-choice-hint").textContent,
-    "<5 MB",
+    "≈5 MB",
   );
   const dimensions = [
     [1920, 1080],
@@ -68,7 +68,7 @@ test("desktop quick choices apply sizes and update estimates with the format", (
   }
   for (const button of presets.slice(1, -1)) {
     const hint = button.querySelector(".dz-choice-hint").textContent;
-    assert.match(hint, /^<\d+ MB$/);
+    assert.match(hint, /^≈\d+ MB$/);
     assert.equal(Number(hint.slice(1, -3)) % 5, 0);
   }
   const button = [...size.querySelectorAll("button")].find(
@@ -101,7 +101,7 @@ test("desktop quick choices apply sizes and update estimates with the format", (
   assert.equal(size.querySelector(".dz-quick-info"), null);
   click(container.querySelector('button[aria-label="Size: More information"]'));
   const explanation = container.querySelector(".dz-settings-explanation");
-  assert.match(explanation.textContent, /width × height/);
+  assert.match(explanation.textContent, /measurements for the codec/);
   assert.match(explanation.textContent, /Estimated size \(PNG\)/);
   assert.deepEqual(
     [...explanation.querySelectorAll("tbody tr")]
@@ -124,8 +124,8 @@ test("quick settings translate the automatic preference and estimated units", ()
     const hints = [...container.querySelectorAll(".dz-choice-hint")].map(
       (hint) => hint.textContent,
     );
-    assert.ok(hints.includes("<5 Mo"));
-    assert.ok(hints.some((hint) => hint === `<${new Intl.NumberFormat("fr").format(935)} Mo`));
+    assert.ok(hints.includes("≈5 Mo"));
+    assert.ok(hints.some((hint) => hint === `≈${new Intl.NumberFormat("fr").format(935)} Mo`));
   } finally {
     act(() => root.unmount());
     setLocale("en");
@@ -188,14 +188,14 @@ test("file size estimates follow the output encoder and JPEG quality", () => {
     act(() => root.unmount());
   }
   assert.deepEqual(estimates, {
-    auto: "<15 MB",
-    jpeg: "<15 MB",
-    png: "<60 MB",
-    tiff: "<110 MB",
-    webp: "<50 MB",
+    auto: "≈15 MB",
+    jpeg: "≈15 MB",
+    png: "≈60 MB",
+    tiff: "≈110 MB",
+    webp: "≈50 MB",
     avif: "≈20 MB",
-    zif: "<150 MB",
-    "iiif-dir": "<20 MB",
+    zif: "≈150 MB",
+    "iiif-dir": "≈20 MB",
   });
   const { container, root } = renderSettings({
     settings: { output_format: "jpeg", compression: 50 },
@@ -203,21 +203,21 @@ test("file size estimates follow the output encoder and JPEG quality", () => {
   const preset = [...container.querySelectorAll('.dz-quick-menu[aria-label="Size"] button')].find(
     (button) => button.firstElementChild.textContent === "8K",
   );
-  assert.equal(preset.querySelector(".dz-choice-hint").textContent, "<10 MB");
+  assert.equal(preset.querySelector(".dz-choice-hint").textContent, "≈10 MB");
   act(() => root.unmount());
 });
 
 test("estimation buffer is applied consistently before rounding to 5 MB", () => {
   for (const [format, compression, label, expected] of [
-    ["png", 5, "Full HD", "<5 MB"],
-    ["png", 5, "QHD", "<10 MB"],
+    ["png", 5, "Full HD", "≈5 MB"],
+    ["png", 5, "QHD", "≈10 MB"],
     // 32K PNG is 849.35 MB before buffering, 934.28 MB afterwards.
-    ["png", 5, "32K", "<935 MB"],
+    ["png", 5, "32K", "≈935 MB"],
     // Quality-50 8K JPEG crosses the 5 MB bucket only with the buffer.
-    ["jpeg", 50, "8K", "<10 MB"],
-    ["jpeg", 2, "8K", "<20 MB"],
-    ["jpeg", 0, "8K", "<20 MB"],
-    ["webp", 5, "8K", "<50 MB"],
+    ["jpeg", 50, "8K", "≈10 MB"],
+    ["jpeg", 2, "8K", "≈20 MB"],
+    ["jpeg", 0, "8K", "≈20 MB"],
+    ["webp", 5, "8K", "≈50 MB"],
     ["avif", 100, "8K", "≈5 MB"],
     ["avif", 50, "8K", "≈5 MB"],
     ["avif", 25, "8K", "≈10 MB"],
@@ -276,7 +276,10 @@ test("AVIF quality uses the persisted compression setting and updates estimates"
   assert.equal(estimate(), "≈45 MB");
   click(container.querySelector(".dz-settings-close"));
   click(container.querySelector('button[aria-label="Size: More information"]'));
-  assert.match(container.querySelector(".dz-settings-explanation").textContent, /AVIF estimates/);
+  assert.match(
+    container.querySelector(".dz-settings-explanation").textContent,
+    /codec and selected quality/,
+  );
   act(() => root.unmount());
 });
 

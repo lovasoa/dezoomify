@@ -23,7 +23,7 @@ test("AVIF dimension failures use structured facts and give a saving alternative
   const message = plainMessageFor(
     {
       kind: "limit-exceeded",
-      limit: { reason: "avif-side", dimensions: { width: 65_536, height: 12 } },
+      limit: { reason: { "codec-side": "avif" }, dimensions: { width: 65_536, height: 12 } },
     },
     "museum.test",
   );

@@ -1,4 +1,5 @@
-import { getLocale, t } from "@dezoomify/shared-ui";
+import { getDictionary, getLocale, type I18nKey, t } from "@dezoomify/shared-ui";
+import { outputCodecs } from "@dezoomify/wasm-bindings/codecs";
 import type { ReactElement, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { DesktopSettings, NetworkProfile } from "./settings.ts";
@@ -14,13 +15,7 @@ interface Props {
 function formatChoices(): Array<{ value: DesktopSettings["output_format"]; label: string }> {
   return [
     { value: "auto", label: t("desktop.quick.auto") },
-    { value: "png", label: "PNG" },
-    { value: "jpeg", label: "JPEG" },
-    { value: "tiff", label: "TIFF" },
-    { value: "webp", label: "WebP" },
-    { value: "avif", label: "AVIF" },
-    { value: "zif", label: "ZIF" },
-    { value: "iiif-dir", label: "IIIF folder" },
+    ...outputCodecs.map((codec) => ({ value: codec.format, label: codec.name })),
   ];
 }
 
@@ -37,56 +32,35 @@ const sizes = [
 ];
 type SizePreset = string;
 
-function formatLimit(format: DesktopSettings["output_format"]): number {
-  return format === "jpeg" || format === "avif" ? 65_535 : format === "webp" ? 16_383 : 1_000_000;
+function codecFor(format: DesktopSettings["output_format"]) {
+  return (
+    outputCodecs.find((codec) => codec.format === (format === "auto" ? "jpeg" : format)) ??
+    outputCodecs[0]
+  );
 }
 
-// Rounded-up measurements from the native JPEG encoder on the Zoomify painting
-// and map fixtures plus Met artwork 437498. Small sample; these are heuristics.
-const jpegSizeCoefficients = [
-  { quality: 25, bytes: 0.1 },
-  { quality: 50, bytes: 0.15 },
-  { quality: 75, bytes: 0.2 },
-  { quality: 90, bytes: 0.3 },
-  { quality: 95, bytes: 0.4 },
-  { quality: 98, bytes: 0.45 },
-  { quality: 100, bytes: 0.5 },
-];
+function formatLimit(format: DesktopSettings["output_format"]): number {
+  return format === "auto" ? 1_000_000 : (codecFor(format).max_side ?? 1_000_000);
+}
 
-// scripts/calibrate-avif.mjs: Zoomify test_custom_size, Arts & Culture tile,
-// generic map_expected and a painting alpha gradient, fitted within 512x512.
-// Production image 0.25.10/ravif 0.13, speed 4; maximum measured bytes/pixel
-// rounded up to 0.05 and made nondecreasing. A small sample, not a size bound.
-const avifSizeCoefficients = [
-  { quality: 1, bytes: 0.05 },
-  { quality: 25, bytes: 0.05 },
-  { quality: 50, bytes: 0.1 },
-  { quality: 75, bytes: 0.15 },
-  { quality: 90, bytes: 0.3 },
-  { quality: 95, bytes: 0.45 },
-  { quality: 98, bytes: 0.7 },
-  { quality: 100, bytes: 1.15 },
-];
+function formatDescription(format: DesktopSettings["output_format"]): string {
+  const key = `desktop.quick.format.${format === "iiif-dir" ? "iiifDir" : format}` as I18nKey;
+  return key in getDictionary(getLocale())
+    ? t(key, {
+        maxSide: new Intl.NumberFormat(getLocale()).format(codecFor(format).max_side ?? 0),
+        jpegMax: new Intl.NumberFormat(getLocale()).format(codecFor("jpeg").max_side ?? 0),
+      })
+    : t("desktop.quick.format.generic", { format: codecFor(format).name });
+}
 
 function estimateSize(width: number, height: number, settings: DesktopSettings): string {
-  const format = settings.output_format;
+  const codec = codecFor(settings.output_format);
   const quality = 100 - settings.compression;
-  const jpeg = jpegSizeCoefficients.find((entry) => quality <= entry.quality)?.bytes ?? 0.5;
-  const avif = avifSizeCoefficients.find((entry) => quality <= entry.quality)?.bytes ?? 1.15;
-  const bytesPerPixel =
-    format === "auto" || format === "jpeg" || format === "iiif-dir"
-      ? jpeg
-      : format === "avif"
-        ? avif
-        : format === "webp"
-          ? 1.3
-          : format === "png"
-            ? 1.6
-            : 3;
-  const pyramid = format === "zif" || format === "iiif-dir" ? 4 / 3 : 1;
+  const bytesPerPixel = codec.size_coefficients.find(([upper]) => quality <= upper)?.[1] ?? 0;
+  const pyramid = codec.layout === "pyramid" || codec.layout === "directory" ? 4 / 3 : 1;
   const pixels = width * height;
   const mb = (pixels * bytesPerPixel * pyramid) / 1_000_000;
-  return t(format === "avif" ? "desktop.quick.approximateSize" : "desktop.quick.sizeEstimate", {
+  return t("desktop.quick.sizeEstimate", {
     size: new Intl.NumberFormat(getLocale()).format(Math.ceil((mb * 1.1) / 5) * 5),
   });
 }
@@ -262,18 +236,16 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
     else setAdvancedOpen(true);
   };
 
-  const avif = settings.output_format === "avif";
-  const lossy = avif || settings.output_format === "jpeg" || settings.output_format === "auto";
-  const showCompression =
-    settings.output_format !== "webp" && settings.output_format !== "iiif-dir";
+  const codec = codecFor(settings.output_format);
+  const lossy = codec.control.kind === "quality";
+  const minimum = codec.control.kind === "quality" ? codec.control.minimum : 0;
+  const showCompression = codec.control.kind !== "none";
   const compressionValue = lossy
-    ? Math.max(avif ? 1 : 0, 100 - settings.compression)
+    ? Math.max(minimum, 100 - settings.compression)
     : settings.compression;
-  const compressionLabel = avif
-    ? t("desktop.advanced.avifQuality")
-    : lossy
-      ? t("desktop.advanced.jpegQuality")
-      : t("desktop.advanced.compressionEffort");
+  const compressionLabel = lossy
+    ? t("desktop.advanced.codecQuality", { format: codec.name })
+    : t("desktop.advanced.compressionEffort");
 
   return (
     <section
@@ -306,7 +278,7 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
                 Math.max(settings.max_width ?? 0, settings.max_height ?? 0) >
                 formatLimit(format.value),
               hint: t(
-                `desktop.quick.hint.${format.value === "iiif-dir" ? "iiifDir" : format.value}`,
+                `desktop.quick.hint.${format.value === "auto" ? "adaptive" : codecFor(format.value).hint}` as I18nKey,
               ),
             }))}
           />
@@ -393,20 +365,19 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
 
           {help ? (
             <div className="dz-settings-explanation">
-              <p>{t(`desktop.quick.${help}Info`)}</p>
-              {help === "size" && settings.output_format === "avif" ? (
-                <p>{t("desktop.quick.avifSizeInfo")}</p>
-              ) : null}
+              <p>
+                {t(`desktop.quick.${help}Info`, {
+                  jpegMax: new Intl.NumberFormat(getLocale()).format(
+                    codecFor("jpeg").max_side ?? 0,
+                  ),
+                })}
+              </p>
               {help === "format" ? (
                 <dl>
                   {formats.map((format) => (
                     <div key={format.value}>
                       <dt>{format.label}</dt>
-                      <dd>
-                        {t(
-                          `desktop.quick.format.${format.value === "iiif-dir" ? "iiifDir" : format.value}`,
-                        )}
-                      </dd>
+                      <dd>{formatDescription(format.value)}</dd>
                     </div>
                   ))}
                 </dl>
@@ -469,14 +440,14 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
                   title={compressionLabel}
                   description={
                     lossy
-                      ? t("desktop.advanced.jpegQualityDesc")
+                      ? t("desktop.advanced.qualityDesc")
                       : t("desktop.advanced.compressionEffortDesc")
                   }
                 >
                   <div className="dz-slider-control">
                     <input
                       type="range"
-                      min={avif ? 1 : 0}
+                      min={minimum}
                       max="100"
                       aria-label={compressionLabel}
                       value={compressionValue}

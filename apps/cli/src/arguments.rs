@@ -479,6 +479,10 @@ pub fn generate_bulk_output_name(base: &std::path::Path, index: usize) -> PathBu
 }
 
 fn help() -> String {
+    let output_help = format!(
+        "  --outfile <file>            explicit output file ({},",
+        dezoomify::model::output_extensions()
+    );
     [
         "usage: dezoomify-cli [options] <input-url> <output>",
         "  or: dezoomify-cli --bulk <file-or-url> [--outfile <file>] [options]",
@@ -507,7 +511,7 @@ fn help() -> String {
         "  -c, --tile-cache <dir>      resume folder reusing downloaded tiles",
         "  --bulk <file-or-url>        text list file (URL plus optional title per line, # comments)",
         "                              or IIIF collection manifest URL; saves one output per entry",
-        "  --outfile <file>            explicit output file (.png, .jpg, .jpeg, .tif, .tiff, .zif, .webp, .avif, .iiif,",
+        &output_help,
         "                              or extensionless iiif-dir), or bulk base name (bulk_1.ext, …)",
         "  -?, --help                  show this help",
         "  -V, --version               show version",

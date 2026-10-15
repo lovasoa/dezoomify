@@ -4,7 +4,7 @@ use crate::{
     output::StagedFile,
     pixel_pipe::{MemoryBudget, PixelPipe, PixelStrip},
 };
-use dezoomify::model::{Error, OutputFormat, Size};
+use dezoomify::model::{Error, OutputFormat, OutputLayout, Size};
 use std::{
     cell::{Cell, RefCell},
     io::{Read, Seek, Write},
@@ -30,20 +30,7 @@ impl EncoderTask {
         }
         crate::imaging::check_dimensions(format, &size)?;
         let pipe = PixelPipe::new(size.clone(), budget);
-        let work = match format {
-            OutputFormat::Png => u64::from(size.width) * 16 + (1 << 20),
-            OutputFormat::Tiff => {
-                u64::from(size.width) * 8 + u64::from(size.height) * 24 + (128 << 10)
-            }
-            // The WebP API requires a contiguous image and whole-image codec
-            // workspace. Reserve this fallback explicitly before acquisition.
-            OutputFormat::Webp => u64::from(size.width) * u64::from(size.height) * 32 + (128 << 10),
-            // Full RGBA, encoded bytes and rav1e workspace. This is conservative
-            // accounting headroom, not a hard bound on the codec's process RSS.
-            // check_dimensions bounds both factors to u16::MAX before this sum.
-            OutputFormat::Avif => u64::from(size.width) * u64::from(size.height) * 64 + (16 << 20),
-            _ => 128 << 10,
-        };
+        let work = crate::imaging::encoder_workspace(format, &size);
         let workspace = pipe.budget.reserve(work)?;
         let staging = StagedFile::new(destination)?;
         controls.watch(&pipe);
@@ -152,7 +139,7 @@ fn encode(
                 let view = JpegView::new(pipe)?;
                 image::codecs::jpeg::JpegEncoder::new_with_quality(
                     &mut output,
-                    100u8.saturating_sub(compression),
+                    format.codec().control.quality(compression),
                 )
                 .encode_image(&view)
                 .map_err(encoding_error)?;
@@ -223,7 +210,7 @@ fn encode(
                 }
                 directory.finish().map_err(encoding_error)?;
             }
-            OutputFormat::Avif => {
+            _ if format.codec().layout == OutputLayout::Buffered => {
                 let length = u64::from(pipe.size.width) * u64::from(pipe.size.height) * 4;
                 let length = usize::try_from(length).map_err(encoding_error)?;
                 let mut pixels = Vec::new();
@@ -235,38 +222,24 @@ fn encode(
                 if let Some(error) = pipe.error() {
                     return Err(error);
                 }
-                // AvifEncoder is synchronous and buffers its result internally;
-                // keep our completed output in memory until encoding succeeds.
-                let mut encoded = BufferedAvif::default();
-                image::ImageEncoder::write_image(
-                    image::codecs::avif::AvifEncoder::new_with_speed_quality(
-                        &mut encoded,
-                        4,
-                        100u8.saturating_sub(compression).max(1),
-                    )
-                    .with_num_threads(Some(1)),
-                    &pixels,
-                    pipe.size.width,
-                    pipe.size.height,
-                    image::ExtendedColorType::Rgba8,
-                )
-                .map_err(encoding_error)?;
+                let image =
+                    image::RgbaImage::from_raw(pipe.size.width, pipe.size.height, pixels)
+                        .ok_or_else(|| Error::InvalidState("incomplete buffered pixels".into()))?;
+                let (icc, _) = pipe.metadata()?;
+                let mut encoded = MemoryOutput::default();
+                crate::imaging::encode_buffered_to(
+                    &mut encoded,
+                    &image,
+                    format,
+                    compression,
+                    icc.as_deref(),
+                )?;
                 if let Some(error) = pipe.error() {
                     return Err(error);
                 }
-                output.write_all(&encoded.0).map_err(encoding_error)?;
-            }
-            OutputFormat::Webp => {
-                let mut pixels =
-                    Vec::with_capacity(pipe.size.width as usize * pipe.size.height as usize * 4);
-                while let Some(strip) = pipe.receive()? {
-                    pixels.extend_from_slice(&strip.rgba);
-                    pipe.consumed_strip(&strip);
-                }
-                let image = image::RgbaImage::from_raw(pipe.size.width, pipe.size.height, pixels)
-                    .expect("complete WebP pixels");
-                let (icc, _) = pipe.metadata()?;
-                crate::imaging::encode_webp_to(&mut output, &image, icc.as_deref())?;
+                output
+                    .write_all(encoded.0.get_ref())
+                    .map_err(encoding_error)?;
             }
             _ => return Err(Error::InvalidState("tile format in raster encoder".into())),
         }
@@ -309,19 +282,29 @@ fn encoding_error(error: impl std::fmt::Display) -> Error {
     Error::EncodeFailed(error.to_string().into())
 }
 
-/// Fallible allocation for the completed AVIF file, before any disk writes.
+/// Fallible, seekable allocation for a completed buffered image.
 #[derive(Default)]
-struct BufferedAvif(Vec<u8>);
-impl Write for BufferedAvif {
+struct MemoryOutput(std::io::Cursor<Vec<u8>>);
+impl Write for MemoryOutput {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let end = usize::try_from(self.0.position())
+            .ok()
+            .and_then(|pos| pos.checked_add(bytes.len()))
+            .ok_or_else(|| std::io::Error::other("image buffer overflow"))?;
+        let additional = end.saturating_sub(self.0.get_ref().len());
         self.0
-            .try_reserve(bytes.len())
+            .get_mut()
+            .try_reserve(additional)
             .map_err(std::io::Error::other)?;
-        self.0.extend_from_slice(bytes);
-        Ok(bytes.len())
+        self.0.write(bytes)
     }
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
+    }
+}
+impl Seek for MemoryOutput {
+    fn seek(&mut self, position: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.0.seek(position)
     }
 }
 
@@ -446,12 +429,38 @@ mod tests {
             ReceivedPixels,
         },
     };
-    const FORMATS: [OutputFormat; 4] = [
-        OutputFormat::Png,
-        OutputFormat::Jpeg,
-        OutputFormat::Tiff,
-        OutputFormat::Webp,
-    ];
+    fn raster_formats() -> impl Iterator<Item = OutputFormat> {
+        dezoomify::model::OUTPUT_CODECS
+            .iter()
+            .filter(|codec| {
+                matches!(
+                    codec.layout,
+                    OutputLayout::Streaming | OutputLayout::Buffered
+                )
+            })
+            .map(|codec| codec.format)
+    }
+
+    fn decode_buffered(path: &Path) -> image::RgbaImage {
+        let decoded = std::process::Command::new("node")
+            .args(["--input-type=module", "-e", r#"
+                import sharp from 'sharp';
+                const {data, info} = await sharp(process.argv[1]).ensureAlpha().raw().toBuffer({resolveWithObject:true});
+                const header = Buffer.alloc(8);
+                header.writeUInt32LE(info.width); header.writeUInt32LE(info.height, 4);
+                process.stdout.write(header); process.stdout.write(data);
+            "#])
+            .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+            .arg(path).output().unwrap();
+        assert!(
+            decoded.status.success(),
+            "{}",
+            String::from_utf8_lossy(&decoded.stderr)
+        );
+        let width = u32::from_le_bytes(decoded.stdout[0..4].try_into().unwrap());
+        let height = u32::from_le_bytes(decoded.stdout[4..8].try_into().unwrap());
+        image::RgbaImage::from_raw(width, height, decoded.stdout[8..].to_vec()).unwrap()
+    }
 
     fn directory() -> std::path::PathBuf {
         let path = crate::output::temp_sibling(&std::env::temp_dir().join("raster-test"));
@@ -459,7 +468,7 @@ mod tests {
         path
     }
     fn start(path: &Path, format: OutputFormat, size: Size, controls: Controls) -> EncoderTask {
-        let cap = if format == OutputFormat::Avif {
+        let cap = if format.codec().layout == OutputLayout::Buffered {
             32 << 20
         } else {
             8 << 20
@@ -491,7 +500,13 @@ mod tests {
         ];
         let exif = vec![0x45, 0x78, 0x69, 0x66, 0, 0, 0x4d, 0x4d, 0, 0x2a];
         let source = image::RgbaImage::from_pixel(2, 1, image::Rgba([40, 80, 120, 255]));
-        for format in FORMATS {
+        // These encoders promise embedded profile preservation.
+        for format in [
+            OutputFormat::Png,
+            OutputFormat::Jpeg,
+            OutputFormat::Tiff,
+            OutputFormat::Webp,
+        ] {
             let destination = directory.join(format.extension());
             let task = start(
                 &destination,
@@ -574,7 +589,7 @@ mod tests {
                     if (x + y) % 3 == 0 { 128 } else { 255 },
                 ])
             });
-            for format in FORMATS {
+            for format in raster_formats() {
                 let destination =
                     directory.join(format!("{width}-{height}.{}", format.extension()));
                 let task = start(
@@ -611,17 +626,42 @@ mod tests {
                         "{width}x{height}"
                     );
                 } else {
-                    assert_eq!(
-                        image::load_from_memory(&bytes).unwrap().into_rgba8(),
-                        source,
-                        "{format:?} {width}x{height}"
-                    );
+                    let decoded = if format.codec().layout == OutputLayout::Buffered {
+                        decode_buffered(&destination)
+                    } else {
+                        image::load_from_memory(&bytes).unwrap().into_rgba8()
+                    };
+                    assert_eq!(decoded.dimensions(), source.dimensions());
+                    if matches!(
+                        format.codec().control,
+                        dezoomify::model::OutputControl::Quality { .. }
+                    ) {
+                        let error: u64 = decoded
+                            .as_raw()
+                            .iter()
+                            .zip(source.as_raw())
+                            .map(|(a, b)| u64::from(a.abs_diff(*b)))
+                            .sum();
+                        assert!(
+                            error as f64 / source.as_raw().len() as f64 <= 5.0,
+                            "{format:?} {width}x{height}"
+                        );
+                    } else {
+                        assert_eq!(decoded, source, "{format:?} {width}x{height}");
+                    }
                 }
                 assert_eq!(pipe.queued_strips(), 0);
                 assert_eq!(pipe.consumed(), u64::from(width) * u64::from(height));
                 drop(pipe);
                 assert_eq!(budget.current(), 0, "all allocations released");
-                assert!(budget.peak() <= 8 << 20);
+                assert!(
+                    budget.peak()
+                        <= if format.codec().layout == OutputLayout::Buffered {
+                            32 << 20
+                        } else {
+                            8 << 20
+                        }
+                );
             }
         }
         std::fs::remove_dir_all(directory).unwrap();
@@ -630,7 +670,7 @@ mod tests {
     #[tokio::test]
     async fn cancellation_and_source_failure_wake_waiting_encoders_and_remove_staging() {
         let directory = directory();
-        for format in FORMATS.into_iter().chain([OutputFormat::Avif]) {
+        for format in raster_formats() {
             for cancellation in [true, false] {
                 let controls = Controls::default();
                 let task = start(
@@ -657,110 +697,6 @@ mod tests {
                 assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
             }
         }
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[tokio::test]
-    async fn avif_limits_fail_before_staging_and_release_reservations() {
-        use dezoomify::model::LimitReason;
-        let directory = directory();
-        for (size, reason) in [
-            (
-                Size {
-                    width: 65_536,
-                    height: 1,
-                },
-                LimitReason::AvifSide,
-            ),
-            (
-                Size {
-                    width: 1,
-                    height: 65_536,
-                },
-                LimitReason::AvifSide,
-            ),
-            (
-                Size {
-                    width: 512,
-                    height: 512,
-                },
-                LimitReason::Memory,
-            ),
-        ] {
-            let budget = MemoryBudget::new(8 << 20);
-            let result = EncoderTask::start(
-                &directory.join("output.avif"),
-                size,
-                OutputFormat::Avif,
-                5,
-                Arc::clone(&budget),
-                Controls::default(),
-            );
-            assert!(
-                matches!(result, Err(Error::LimitExceeded { limit }) if limit.reason == reason)
-            );
-            assert_eq!(budget.current(), 0);
-            assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
-        }
-        let task = start(
-            &directory.join("boundary.avif"),
-            OutputFormat::Avif,
-            Size {
-                width: 65_535,
-                height: 1,
-            },
-            Controls::default(),
-        );
-        let budget = Arc::clone(&task.pipe.budget);
-        task.abort().await;
-        assert_eq!(budget.current(), 0);
-        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[tokio::test]
-    async fn avif_cancel_after_pixels_never_replaces_existing_output() {
-        let directory = directory();
-        let destination = directory.join("existing.avif");
-        std::fs::write(&destination, b"previous output").unwrap();
-        let controls = Controls::default();
-        let task = start(
-            &destination,
-            OutputFormat::Avif,
-            Size {
-                width: 129,
-                height: 65,
-            },
-            controls.clone(),
-        );
-        let budget = Arc::clone(&task.pipe.budget);
-        put(
-            &task.pipe,
-            0,
-            0,
-            0,
-            image::RgbaImage::from_pixel(129, 65, image::Rgba([120, 40, 80, 128])),
-        );
-        task.pipe.finish(&[]).unwrap();
-        tokio::time::timeout(std::time::Duration::from_secs(3), async {
-            while task.pipe.consumed() != 129 * 65 {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
-        controls.cancel();
-        // If the codec already finished, publication still checks cancellation.
-        match task.wait().await {
-            Err(error) => assert_eq!(error, Error::Cancelled),
-            Ok(mut staged) => assert_eq!(
-                staged.publish(&destination, true, controls.cancel_flag()),
-                Err(Error::Cancelled)
-            ),
-        }
-        assert_eq!(std::fs::read(&destination).unwrap(), b"previous output");
-        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
-        assert_eq!(budget.current(), 0);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
@@ -796,29 +732,9 @@ mod tests {
                 );
             }
             publish(task, &destination).await;
-            let decoded = std::process::Command::new("node")
-                .arg(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../test/support/decode-image.mjs"
-                ))
-                .arg(&destination)
-                .output()
-                .unwrap();
-            assert!(
-                decoded.status.success(),
-                "{}",
-                String::from_utf8_lossy(&decoded.stderr)
-            );
-            assert_eq!(
-                u32::from_le_bytes(decoded.stdout[0..4].try_into().unwrap()),
-                33
-            );
-            assert_eq!(
-                u32::from_le_bytes(decoded.stdout[4..8].try_into().unwrap()),
-                19
-            );
-            let rgba = &decoded.stdout[8..];
-            assert_eq!(rgba.len(), 33 * 19 * 4);
+            let decoded = decode_buffered(&destination);
+            assert_eq!(decoded.dimensions(), (33, 19));
+            let rgba = decoded.as_raw();
             // Flat colors remain recognizable even at quality 1. Quality 95+
             // has tighter tolerances, and alpha must survive on both sides.
             let tolerance = if compression <= 5 { 5 } else { 35 };
@@ -834,5 +750,19 @@ mod tests {
             assert_eq!(budget.current(), 0);
         }
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn default_image_encoder_uses_the_shared_buffered_path() {
+        let source = image::RgbaImage::from_pixel(7, 9, image::Rgba([120, 40, 80, 128]));
+        let mut encoded = MemoryOutput::default();
+        crate::imaging::encode_buffered_to(&mut encoded, &source, OutputFormat::Png, 5, None)
+            .unwrap();
+        assert_eq!(
+            image::load_from_memory(encoded.0.get_ref())
+                .unwrap()
+                .into_rgba8(),
+            source
+        );
     }
 }

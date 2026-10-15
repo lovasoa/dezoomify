@@ -337,12 +337,8 @@ const en = {
   "desktop.msg.needAbout": " It needs about {need} of memory",
   "desktop.output.canvasLimit":
     "This picture is too large to assemble on this computer ({dims},{need} at 4 bytes per pixel, limit {limit}). Save a smaller version with Max width (CLI: --max-width). Note: JPEG saves at most {jpegMax} pixels per side; keep PNG for larger pictures. From {host}.",
-  "desktop.output.jpegLimit":
-    "This picture ({dims}) is too large for JPEG, which allows at most {jpegMax} pixels per side. Save it as PNG instead. From {host}.",
-  "desktop.output.webpLimit":
-    "This picture ({dims}) is too large for WebP, which allows at most {webpMax} pixels per side. Save it as PNG instead. From {host}.",
-  "desktop.output.avifLimit":
-    "This picture ({dims}) is too large for AVIF, which allows at most {avifMax} pixels per side. Save it as PNG instead. From {host}.",
+  "desktop.output.codecLimit":
+    "This picture ({dims}) is too large for {format}, which allows at most {maxSide} pixels per side. Save it as PNG instead. From {host}.",
   "desktop.tile.failed":
     "Could not retrieve a tile from {host}. Check the source image and try again.",
   "view.discovery.none":
@@ -370,15 +366,12 @@ const en = {
   "desktop.settings.reset": "Reset settings",
   "desktop.quick.info": "More information",
   "desktop.quick.auto": "Auto",
-  "desktop.quick.sizeEstimate": "<{size} MB",
-  "desktop.quick.approximateSize": "≈{size} MB",
-  "desktop.quick.avifSizeInfo":
-    "AVIF estimates use a small sample of paintings, a map and transparency, encoded at the selected quality with fixed speed. They add a 10% buffer and round up to 5 MB. These are approximate file sizes, not limits or memory estimates; image detail and transparency can increase the size.",
+  "desktop.quick.sizeEstimate": "≈{size} MB",
   "desktop.quick.folderInfo": "Choose where downloaded images are saved.",
   "desktop.quick.formatInfo":
-    "Choose an output format. Auto saves JPEG for opaque images up to 65,535 pixels per side; otherwise PNG.",
+    "Choose an output format. Auto saves JPEG for opaque images up to {jpegMax} pixels per side; otherwise PNG.",
   "desktop.quick.sizeInfo":
-    "Presets select the largest source level within these width and height targets. If none fits, the smallest level is used, which may exceed the targets and encoder limits. Images are not resized. Estimates assume the listed dimensions; actual sizes and format compatibility depend on the source. Estimated MB = width × height × bytes/pixel / 1,000,000. PNG uses 1.6 bytes/pixel; lossless WebP 1.3; TIFF/ZIF 3. JPEG uses a small native-encoder calibration sample (two paintings and a map): quality ≤25: 0.1; ≤50: 0.15; ≤75: 0.2; ≤90: 0.3; ≤95: 0.4; ≤98: 0.45; ≤100: 0.5 bytes/pixel. Auto estimates an opaque JPEG; transparency uses PNG instead. ZIF/IIIF add one third for pyramid levels. Every estimate gets a 10% buffer, then rounds up to the next 5 MB. These are heuristics, not guaranteed file-size limits; detail, source compression, aspect ratio, metadata and encoder settings affect actual files. Full/custom sizes need source dimensions.",
+    "Presets select a source level within the width and height targets. If none fits, the smallest level is used and may exceed the targets or encoder limits. Images are not resized. Estimates use measurements for the codec and selected quality, extra pyramid levels where applicable, a 10% buffer and rounding up to 5 MB. They approximate file sizes, not file-size or memory limits; detail, transparency and metadata affect actual files. Auto assumes an opaque JPEG; transparency uses PNG. Full/custom sizes need source dimensions.",
   "desktop.quick.maxWidth": "Max width",
   "desktop.quick.maxHeight": "Max height",
   "desktop.quick.original": "Original",
@@ -389,24 +382,22 @@ const en = {
   "desktop.quick.source": "Source-dependent",
   "desktop.quick.exact": "Custom",
   "desktop.quick.upTo": "Up to {size}K",
-  "desktop.quick.hint.auto": "adaptive",
-  "desktop.quick.hint.png": "lossless",
-  "desktop.quick.hint.jpeg": "compressed",
-  "desktop.quick.hint.tiff": "archival",
-  "desktop.quick.hint.webp": "lossless",
-  "desktop.quick.hint.avif": "compressed",
-  "desktop.quick.hint.zif": "zoomable",
-  "desktop.quick.hint.iiifDir": "tiled",
+  "desktop.quick.hint.adaptive": "adaptive",
+  "desktop.quick.hint.lossless": "lossless",
+  "desktop.quick.hint.compressed": "compressed",
+  "desktop.quick.hint.archival": "archival",
+  "desktop.quick.hint.zoomable": "zoomable",
+  "desktop.quick.hint.tiled": "tiled",
   "desktop.quick.format.auto":
-    "JPEG for opaque images up to 65,535 pixels per side; PNG for transparency or larger images. JPEG quality also applies to Auto.",
+    "JPEG for opaque images up to {jpegMax} pixels per side; PNG for transparency or larger images. JPEG quality also applies to Auto.",
   "desktop.quick.format.png":
     "Lossless pixels and transparency; larger files, suitable for editing.",
   "desktop.quick.format.jpeg":
-    "Smaller lossy files. No transparency; limited to 65,535 pixels per side. Adjust quality in More settings.",
+    "Smaller lossy files. No transparency; limited to {maxSide} pixels per side. Adjust quality in More settings.",
   "desktop.quick.format.tiff": "Lossless output for archiving and editing.",
-  "desktop.quick.format.webp": "Lossless compressed output, limited to 16,383 pixels per side.",
+  "desktop.quick.format.webp": "Lossless compressed output, limited to {maxSide} pixels per side.",
   "desktop.quick.format.avif":
-    "Lossy output with transparency, limited to 65,535 pixels per side. Quality is adjustable in More settings. Needs the complete image in memory and does not preserve embedded color profiles. Quality 100 is not a lossless mode.",
+    "Lossy output with transparency, limited to {maxSide} pixels per side. Quality is adjustable in More settings. Needs the complete image in memory and does not preserve embedded color profiles. Quality 100 is not a lossless mode.",
   "desktop.quick.format.zif": "A lossless tiled TIFF pyramid for zooming at several resolutions.",
   "desktop.quick.format.iiifDir": "A folder of JPEG tiles and info.json for hosting an IIIF image.",
   "desktop.quick.rate.maximum": "16 parallel",
@@ -429,9 +420,9 @@ const en = {
   "desktop.quick.more": "More settings",
   "desktop.advanced.title": "Advanced settings",
   "desktop.advanced.done": "Done",
-  "desktop.advanced.jpegQuality": "JPEG quality",
-  "desktop.advanced.avifQuality": "AVIF quality",
-  "desktop.advanced.jpegQualityDesc": "Higher keeps more image detail.",
+  "desktop.advanced.codecQuality": "{format} quality",
+  "desktop.quick.format.generic": "Save the image as {format}.",
+  "desktop.advanced.qualityDesc": "Higher keeps more image detail.",
   "desktop.advanced.compressionEffort": "Compression effort",
   "desktop.advanced.compressionEffortDesc":
     "Image quality stays lossless; higher values take longer.",

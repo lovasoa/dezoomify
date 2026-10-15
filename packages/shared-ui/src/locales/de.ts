@@ -254,10 +254,6 @@ export const de = {
   "desktop.msg.needAbout": " Es braucht etwa {need} Speicher",
   "desktop.output.canvasLimit":
     "Dieses Bild ist zu groß, um es auf diesem Rechner zusammenzusetzen ({dims},{need} bei 4 Byte je Pixel, Grenze {limit}). Speichern Sie eine kleinere Fassung mit Max. Breite (CLI: --max-width). Hinweis: JPEG erlaubt höchstens {jpegMax} Pixel je Seite; behalten Sie PNG für größere Bilder. Von {host}.",
-  "desktop.output.jpegLimit":
-    "Dieses Bild ({dims}) ist zu groß für JPEG, das höchstens {jpegMax} Pixel je Seite erlaubt. Speichern Sie es stattdessen als PNG. Von {host}.",
-  "desktop.output.webpLimit":
-    "Dieses Bild ({dims}) ist zu groß für WebP, das höchstens {webpMax} Pixel je Seite erlaubt. Speichern Sie es stattdessen als PNG. Von {host}.",
   "desktop.tile.failed":
     "Eine Kachel von {host} konnte nicht geladen werden. Prüfen Sie das Quellbild und versuchen Sie es erneut.",
   "view.discovery.none":
@@ -289,12 +285,12 @@ export const de = {
   "desktop.settings.reset": "Einstellungen zurücksetzen",
   "desktop.quick.info": "Weitere Informationen",
   "desktop.quick.auto": "Automatisch",
-  "desktop.quick.sizeEstimate": "<{size} MB",
+  "desktop.quick.sizeEstimate": "≈{size} MB",
   "desktop.quick.folderInfo": "Wählen Sie den Speicherort für heruntergeladene Bilder.",
   "desktop.quick.formatInfo":
-    "Wählen Sie ein Ausgabeformat. Automatisch speichert undurchsichtige Bilder bis 65.535 Pixel pro Seite als JPEG, sonst als PNG.",
+    "Wählen Sie ein Ausgabeformat. Automatisch speichert undurchsichtige Bilder bis {jpegMax} Pixel pro Seite als JPEG, sonst als PNG.",
   "desktop.quick.sizeInfo":
-    "Vorgaben wählen die größte Quellstufe innerhalb dieser Maße. Passt keine, wird die kleinste verwendet; sie kann die Vorgaben und Encodergrenzen überschreiten. Bilder werden nicht skaliert. Schätzungen nehmen die angegebenen Maße an; tatsächliche Größe und Formatkompatibilität hängen von der Quelle ab. Geschätzte MB = Breite × Höhe × Byte/Pixel / 1.000.000. PNG: 1,6 Byte/Pixel; verlustfreies WebP: 1,3; TIFF/ZIF: 3. JPEG wurde mit dem nativen Encoder an zwei Gemälden und einer Karte kalibriert: Qualität ≤25: 0,1; ≤50: 0,15; ≤75: 0,2; ≤90: 0,3; ≤95: 0,4; ≤98: 0,45; ≤100: 0,5 Byte/Pixel. Automatisch schätzt ein undurchsichtiges JPEG; Transparenz verwendet PNG. ZIF/IIIF rechnen ein Drittel für Pyramidenstufen hinzu. Jede Schätzung erhält 10 % Reserve und wird dann auf die nächsten 5 MB aufgerundet. Heuristiken, keine garantierten Dateigrößen; Details, Quellkompression, Seitenverhältnis, Metadaten und Encoder-Einstellungen beeinflussen die tatsächliche Größe. Volle/eigene Größen benötigen Quelldimensionen.",
+    "Vorgaben wählen eine Quellstufe innerhalb der Zielmaße. Passt keine, wird die kleinste verwendet; sie kann Zielmaße oder Encodergrenzen überschreiten. Bilder werden nicht skaliert. Schätzungen basieren auf Messungen für Format und Qualität, zusätzlichen Pyramidenstufen, 10 % Reserve und Aufrundung auf 5 MB. Sie schätzen Dateigrößen, keine Datei- oder Speichergrenzen; Details, Transparenz und Metadaten beeinflussen das Ergebnis. Automatisch nimmt ein undurchsichtiges JPEG an; Transparenz verwendet PNG. Volle und eigene Größen benötigen die Quellmaße.",
   "desktop.quick.maxWidth": "Max. Breite",
   "desktop.quick.maxHeight": "Max. Höhe",
   "desktop.quick.original": "Original",
@@ -305,21 +301,20 @@ export const de = {
   "desktop.quick.source": "Quellabhängig",
   "desktop.quick.exact": "Individuell",
   "desktop.quick.upTo": "Bis zu {size}K",
-  "desktop.quick.hint.auto": "adaptiv",
-  "desktop.quick.hint.png": "verlustfrei",
-  "desktop.quick.hint.jpeg": "komprimiert",
-  "desktop.quick.hint.tiff": "Archivierung",
-  "desktop.quick.hint.webp": "verlustfrei",
-  "desktop.quick.hint.zif": "zoombar",
-  "desktop.quick.hint.iiifDir": "gekachelt",
+  "desktop.quick.hint.adaptive": "adaptiv",
+  "desktop.quick.hint.lossless": "verlustfrei",
+  "desktop.quick.hint.compressed": "komprimiert",
+  "desktop.quick.hint.archival": "Archivierung",
+  "desktop.quick.hint.zoomable": "zoombar",
+  "desktop.quick.hint.tiled": "gekachelt",
   "desktop.quick.format.auto":
-    "JPEG für undurchsichtige Bilder bis 65.535 Pixel pro Seite; PNG bei Transparenz oder größeren Bildern. Die JPEG-Qualität gilt auch für Automatisch.",
+    "JPEG für undurchsichtige Bilder bis {jpegMax} Pixel pro Seite; PNG bei Transparenz oder größeren Bildern. Die JPEG-Qualität gilt auch für Automatisch.",
   "desktop.quick.format.png":
     "Verlustfreie Pixel und Transparenz; größere Dateien, für die Bearbeitung geeignet.",
   "desktop.quick.format.jpeg":
-    "Kleinere verlustbehaftete Dateien. Keine Transparenz; bis 65.535 Pixel pro Seite. Qualität unter Weitere Einstellungen ändern.",
+    "Kleinere verlustbehaftete Dateien. Keine Transparenz; bis {maxSide} Pixel pro Seite. Qualität unter Weitere Einstellungen ändern.",
   "desktop.quick.format.tiff": "Verlustfreie Ausgabe zur Archivierung und Bearbeitung.",
-  "desktop.quick.format.webp": "Verlustfrei komprimierte Ausgabe bis 16.383 Pixel pro Seite.",
+  "desktop.quick.format.webp": "Verlustfrei komprimierte Ausgabe bis {maxSide} Pixel pro Seite.",
   "desktop.quick.format.zif": "Eine verlustfreie gekachelte TIFF-Pyramide für mehrere Zoomstufen.",
   "desktop.quick.format.iiifDir":
     "Ordner mit JPEG-Kacheln und info.json zum Hosten eines IIIF-Bildes.",
@@ -343,17 +338,13 @@ export const de = {
   "desktop.quick.more": "Weitere Einstellungen",
   "desktop.advanced.title": "Erweiterte Einstellungen",
   "desktop.advanced.done": "Fertig",
-  "desktop.advanced.jpegQuality": "JPEG-Qualität",
-  "desktop.advanced.avifQuality": "AVIF-Qualität",
-  "desktop.output.avifLimit":
-    "Dieses Bild ({dims}) ist zu groß für AVIF, das höchstens {avifMax} Pixel pro Seite erlaubt. Speichern Sie es als PNG. Quelle: {host}.",
-  "desktop.quick.approximateSize": "≈{size} MB",
-  "desktop.quick.avifSizeInfo":
-    "AVIF-Schätzungen basieren auf einer kleinen Auswahl von Gemälden, einer Karte und Transparenz, kodiert mit der gewählten Qualität und fester Geschwindigkeit. Sie enthalten 10 % Reserve und werden auf die nächsten 5 MB aufgerundet. Dies sind ungefähre Dateigrößen, keine Grenzen oder Speicherschätzungen; Details und Transparenz können die Größe erhöhen.",
-  "desktop.quick.hint.avif": "komprimiert",
+  "desktop.advanced.codecQuality": "{format}-Qualität",
+  "desktop.output.codecLimit":
+    "Dieses Bild ({dims}) ist zu groß für {format}, das höchstens {maxSide} Pixel pro Seite erlaubt. Speichern Sie es als PNG. Quelle: {host}.",
   "desktop.quick.format.avif":
-    "Verlustbehaftete Ausgabe mit Transparenz, begrenzt auf 65.535 Pixel pro Seite. Die Qualität ist in den Einstellungen anpassbar. Benötigt das gesamte Bild im Arbeitsspeicher und erhält eingebettete Farbprofile nicht. Qualität 100 ist kein verlustfreier Modus.",
-  "desktop.advanced.jpegQualityDesc": "Höhere Werte erhalten mehr Bilddetails.",
+    "Verlustbehaftete Ausgabe mit Transparenz, begrenzt auf {maxSide} Pixel pro Seite. Die Qualität ist in den Einstellungen anpassbar. Benötigt das gesamte Bild im Arbeitsspeicher und erhält eingebettete Farbprofile nicht. Qualität 100 ist kein verlustfreier Modus.",
+  "desktop.quick.format.generic": "Das Bild als {format} speichern.",
+  "desktop.advanced.qualityDesc": "Höhere Werte erhalten mehr Bilddetails.",
   "desktop.advanced.compressionEffort": "Kompressionsaufwand",
   "desktop.advanced.compressionEffortDesc":
     "Die Bildqualität bleibt verlustfrei; höhere Werte dauern länger.",

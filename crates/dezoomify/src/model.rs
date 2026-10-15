@@ -122,80 +122,143 @@ pub enum ProcessingRecipe {
     GoogleArtsDecrypt,
 }
 
-/// The requested output encoding.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// How an output owns its encoded image or pyramid.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum OutputFormat {
-    #[default]
-    Png,
-    Jpeg,
-    Tiff,
-    Zif,
-    Webp,
-    Avif,
-    IiifDir,
+pub enum OutputLayout {
+    Streaming,
+    Buffered,
+    Pyramid,
+    Directory,
 }
 
-impl OutputFormat {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Png => "png",
-            Self::Jpeg => "jpeg",
-            Self::Tiff => "tiff",
-            Self::Zif => "zif",
-            Self::Webp => "webp",
-            Self::Avif => "avif",
-            Self::IiifDir => "iiif-dir",
-        }
-    }
-
-    #[must_use]
-    pub const fn extension(self) -> &'static str {
-        match self {
-            Self::Jpeg => "jpg",
-            Self::Tiff => "tif",
-            Self::IiifDir => "iiif",
-            format => format.as_str(),
-        }
-    }
-
-    #[must_use]
-    pub const fn is_directory(self) -> bool {
-        matches!(self, Self::IiifDir)
-    }
-}
-
-/// Saved encoding preference, distinct from the concrete published format.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+/// The meaning of the existing compression setting for a codec.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum OutputPreference {
-    #[default]
-    Auto,
-    Png,
-    Jpeg,
-    Tiff,
-    Zif,
-    Webp,
-    Avif,
-    IiifDir,
+pub enum OutputControl {
+    Quality { minimum: u8 },
+    Effort,
+    None,
 }
 
-impl OutputPreference {
-    pub const fn format(self) -> Option<OutputFormat> {
-        match self {
-            Self::Auto => None,
-            Self::Png => Some(OutputFormat::Png),
-            Self::Jpeg => Some(OutputFormat::Jpeg),
-            Self::Tiff => Some(OutputFormat::Tiff),
-            Self::Zif => Some(OutputFormat::Zif),
-            Self::Webp => Some(OutputFormat::Webp),
-            Self::Avif => Some(OutputFormat::Avif),
-            Self::IiifDir => Some(OutputFormat::IiifDir),
-        }
+impl OutputControl {
+    pub fn quality(self, compression: u8) -> u8 {
+        let minimum = match self {
+            Self::Quality { minimum } => minimum,
+            _ => 0,
+        };
+        100u8.saturating_sub(compression).max(minimum)
     }
+}
+
+/// Native output capabilities, also exported as generated data for presentation.
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct OutputCodec {
+    pub format: OutputFormat,
+    pub name: &'static str,
+    pub extensions: &'static [&'static str],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_side: Option<u32>,
+    pub control: OutputControl,
+    pub layout: OutputLayout,
+    pub hint: &'static str,
+    /// Upper quality bucket and estimated bytes/pixel; measurements, not bounds.
+    pub size_coefficients: &'static [(u8, f64)],
+}
+
+// One declaration owns the format/preference wire variants and their metadata.
+// A buffered image-crate codec needs one row here and its Cargo feature. Only
+// encoders with configurable construction need an override in native imaging.
+macro_rules! output_codecs {
+    ($($variant:ident => ($id:literal, $name:literal, $extensions:expr, $limit:expr,
+        $control:expr, $layout:ident, $hint:literal, $sizes:expr)),* $(,)?) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+        #[serde(rename_all = "kebab-case")]
+        #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+        pub enum OutputFormat { $(#[serde(rename = $id)] $variant),* }
+
+        impl Default for OutputFormat { fn default() -> Self { Self::Png } }
+
+        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+        #[serde(rename_all = "kebab-case")]
+        #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+        pub enum OutputPreference { #[default] Auto, $(#[serde(rename = $id)] $variant),* }
+
+        impl OutputPreference {
+            pub const fn format(self) -> Option<OutputFormat> {
+                match self { Self::Auto => None, $(Self::$variant => Some(OutputFormat::$variant)),* }
+            }
+        }
+
+        pub const OUTPUT_CODECS: &[OutputCodec] = &[$(OutputCodec {
+            format: OutputFormat::$variant, name: $name, extensions: $extensions,
+            max_side: $limit, control: $control, layout: OutputLayout::$layout,
+            hint: $hint, size_coefficients: $sizes,
+        }),*];
+
+        impl OutputFormat {
+            pub const fn as_str(self) -> &'static str {
+                match self { $(Self::$variant => $id),* }
+            }
+            pub const fn codec(self) -> &'static OutputCodec { &OUTPUT_CODECS[self as usize] }
+            pub const fn extension(self) -> &'static str { self.codec().extensions[0] }
+            pub const fn is_directory(self) -> bool {
+                matches!(self.codec().layout, OutputLayout::Directory)
+            }
+            pub fn from_extension(extension: &str) -> Option<Self> {
+                OUTPUT_CODECS.iter().find(|codec| codec.extensions.contains(&extension))
+                    .map(|codec| codec.format)
+            }
+        }
+    };
+}
+
+// JPEG: native calibration on two paintings and a map. AVIF: image 0.25.10,
+// speed 4, Zoomify test_custom_size, Arts & Culture tile, generic map_expected,
+// and a painting alpha gradient fitted within 512x512. Upper measured AVIF
+// bytes/pixel rounded up to 0.05, then made nondecreasing across quality buckets.
+const JPEG_SIZES: &[(u8, f64)] = &[
+    (25, 0.1),
+    (50, 0.15),
+    (75, 0.2),
+    (90, 0.3),
+    (95, 0.4),
+    (98, 0.45),
+    (100, 0.5),
+];
+const AVIF_SIZES: &[(u8, f64)] = &[
+    (1, 0.05),
+    (25, 0.05),
+    (50, 0.1),
+    (75, 0.15),
+    (90, 0.3),
+    (95, 0.45),
+    (98, 0.7),
+    (100, 1.15),
+];
+
+output_codecs! {
+    Png => ("png", "PNG", &["png"], None, OutputControl::Effort, Streaming, "lossless", &[(100, 1.6)]),
+    Jpeg => ("jpeg", "JPEG", &["jpg", "jpeg"], Some(65_535), OutputControl::Quality { minimum: 0 }, Streaming, "compressed", JPEG_SIZES),
+    Tiff => ("tiff", "TIFF", &["tif", "tiff"], None, OutputControl::Effort, Streaming, "archival", &[(100, 3.0)]),
+    Webp => ("webp", "WebP", &["webp"], Some(16_383), OutputControl::None, Buffered, "lossless", &[(100, 1.3)]),
+    Avif => ("avif", "AVIF", &["avif"], Some(65_535), OutputControl::Quality { minimum: 1 }, Buffered, "compressed", AVIF_SIZES),
+    Zif => ("zif", "ZIF", &["zif"], None, OutputControl::Effort, Pyramid, "zoomable", &[(100, 3.0)]),
+    IiifDir => ("iiif-dir", "IIIF folder", &["iiif", ""], None, OutputControl::None, Directory, "tiled", JPEG_SIZES),
+}
+
+/// File suffixes accepted by native output, for command help and diagnostics.
+pub fn output_extensions() -> String {
+    OUTPUT_CODECS
+        .iter()
+        .flat_map(|codec| codec.extensions)
+        .filter(|ext| !ext.is_empty())
+        .map(|ext| format!(".{ext}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// How an acquired tile participates in probing and final output. `probe`
@@ -497,8 +560,8 @@ pub enum LimitReason {
     JpegSide,
     /// A side exceeded the WebP 16383 px bound.
     WebpSide,
-    /// A side exceeded the AVIF encoder's 65535 px bound.
-    AvifSide,
+    /// A side exceeded the registered codec's dimension limit.
+    CodecSide(OutputFormat),
 }
 
 /// Structured facts behind an output-limit refusal. Every field is optional
@@ -771,10 +834,10 @@ fn attempt_count(attempts: &u32) -> String {
 /// reads the same fields and never parses this text.
 fn limit_facts(limit: &LimitContext) -> String {
     let reason = match limit.reason {
-        LimitReason::Memory => "memory",
-        LimitReason::JpegSide => "jpeg per-side",
-        LimitReason::WebpSide => "webp per-side",
-        LimitReason::AvifSide => "avif per-side",
+        LimitReason::Memory => "memory".to_string(),
+        LimitReason::JpegSide => "jpeg per-side".to_string(),
+        LimitReason::WebpSide => "webp per-side".to_string(),
+        LimitReason::CodecSide(format) => format!("{} per-side", format.as_str()),
     };
     let mut facts = vec![reason.to_string()];
     if let Some(dimensions) = &limit.dimensions {

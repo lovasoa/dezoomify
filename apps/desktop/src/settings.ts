@@ -21,6 +21,7 @@
 // imports from apps/web, apps/extension, or browser-runtime. No fetch/XHR.
 
 import type { OutputPreference } from "@dezoomify/wasm-bindings";
+import { outputCodecs } from "@dezoomify/wasm-bindings/codecs";
 import { invoke } from "@tauri-apps/api/core";
 import { downloadDir } from "@tauri-apps/api/path";
 
@@ -39,13 +40,7 @@ export interface DesktopSettings {
 export const SETTINGS_STORAGE_KEY = "dezoomify.desktop.settings.v1" as const;
 export const OUTPUT_FORMATS: ReadonlyArray<DesktopSettings["output_format"]> = [
   "auto",
-  "png",
-  "jpeg",
-  "tiff",
-  "zif",
-  "webp",
-  "avif",
-  "iiif-dir",
+  ...outputCodecs.map((codec) => codec.format),
 ] as const;
 export const DEFAULT_OUTPUT_FORMAT = "auto" as const;
 export const DEFAULT_COMPRESSION = 5 as const;

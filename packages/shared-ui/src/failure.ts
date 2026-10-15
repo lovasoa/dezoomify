@@ -3,14 +3,12 @@
 // message text is parsed. The retry verdict is stamped by host boundaries
 // from the one policy in Rust (`Error::retryable`).
 import type { BlockedReason, Error as JobError } from "@dezoomify/wasm-bindings";
+import { outputCodecs } from "@dezoomify/wasm-bindings/codecs";
 import { type I18nKey, t } from "./i18n.ts";
 import type { ViewContext } from "./view-types.ts";
 
-// JPEG addresses at most 65535 px per side; WebP at most 16383 px
-// (copy interpolation only).
-const JPEG_MAX_SIDE = 65535;
-const WEBP_MAX_SIDE = 16383;
-const AVIF_MAX_SIDE = 65535;
+// Kept only for the existing memory-limit guidance template.
+const JPEG_MAX_SIDE = outputCodecs.find((codec) => codec.format === "jpeg")?.max_side ?? 0;
 
 // Human-readable byte counts for limit copy (exact bytes plus a
 // GiB/MiB approximation).
@@ -334,14 +332,23 @@ export function plainMessageFor(
         cause.limit.bytes_available !== undefined
           ? formatBytes(cause.limit.bytes_available)
           : "currently available memory";
-      if (cause.limit.reason === "jpeg-side") {
-        return t("desktop.output.jpegLimit", { dims, jpegMax: JPEG_MAX_SIDE, host });
-      }
-      if (cause.limit.reason === "webp-side") {
-        return t("desktop.output.webpLimit", { dims, webpMax: WEBP_MAX_SIDE, host });
-      }
-      if (cause.limit.reason === "avif-side") {
-        return t("desktop.output.avifLimit", { dims, avifMax: AVIF_MAX_SIDE, host });
+      const reason = cause.limit.reason;
+      const format =
+        typeof reason === "object"
+          ? reason["codec-side"]
+          : reason === "jpeg-side"
+            ? "jpeg"
+            : reason === "webp-side"
+              ? "webp"
+              : null;
+      const codec = outputCodecs.find((codec) => codec.format === format);
+      if (codec?.max_side) {
+        return t("desktop.output.codecLimit", {
+          dims,
+          format: codec.name,
+          maxSide: codec.max_side,
+          host,
+        });
       }
       return t("desktop.output.canvasLimit", {
         dims,

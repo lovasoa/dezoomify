@@ -67,6 +67,11 @@ fn host_thrown_objects_deserialize_into_the_same_enum() {
         serde_json::from_value(serde_json::to_value(&error).expect("serializes"))
             .expect("round trip");
     assert_eq!(round_tripped, error);
+    let limit = serde_json::json!({
+        "kind": "limit-exceeded", "limit": { "reason": { "codec-side": "avif" }, "dimensions": { "width": 70000, "height": 1 } },
+    });
+    let error: Error = serde_json::from_value(limit.clone()).expect("codec limit deserializes");
+    assert_eq!(serde_json::to_value(error).unwrap(), limit);
 }
 
 #[test]

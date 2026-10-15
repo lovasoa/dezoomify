@@ -111,66 +111,24 @@ fn output_refuses_mismatch_and_requires_overwrite() {
 #[test]
 fn output_format_follows_the_destination_extension() {
     use std::path::Path;
-    assert_eq!(
-        output::infer_from_path(Path::new("painting.png")),
-        Ok(OutputFormat::Png)
-    );
-    assert_eq!(
-        output::infer_from_path(Path::new("painting.jpg")),
-        Ok(OutputFormat::Jpeg)
-    );
-    assert_eq!(
-        output::infer_from_path(Path::new("painting.jpeg")),
-        Ok(OutputFormat::Jpeg)
-    );
-    assert_eq!(
-        output::infer_from_path(Path::new("painting.tif")),
-        Ok(OutputFormat::Tiff)
-    );
-    assert_eq!(
-        output::infer_from_path(Path::new("painting.tiff")),
-        Ok(OutputFormat::Tiff)
-    );
-    // `.zif` selects the ZIF pyramid encoder (TIFF-compatible
-    // multi-directory output); `.iiif` selects an `iiif-dir` tree at that
-    // path.
-    assert_eq!(
-        output::infer_from_path(Path::new("painting.zif")),
-        Ok(OutputFormat::Zif)
-    );
-    assert_eq!(
-        output::infer_from_path(Path::new("painting.ZIF")),
-        Ok(OutputFormat::Zif)
-    );
-    assert_eq!(
-        output::infer_from_path(Path::new("painting.webp")),
-        Ok(OutputFormat::Webp)
-    );
-    assert_eq!(
-        output::infer_from_path(Path::new("painting.WEBP")),
-        Ok(OutputFormat::Webp)
-    );
-    for name in ["painting.avif", "painting.AVIF"] {
-        assert_eq!(
-            output::infer_from_path(Path::new(name)),
-            Ok(OutputFormat::Avif)
-        );
+    for codec in dezoomify::model::OUTPUT_CODECS {
+        for extension in codec.extensions {
+            let name = if extension.is_empty() {
+                "painting".to_string()
+            } else {
+                format!("painting.{extension}")
+            };
+            for name in [name.clone(), name.to_ascii_uppercase()] {
+                assert_eq!(output::infer_from_path(Path::new(&name)), Ok(codec.format));
+            }
+        }
     }
-    assert_eq!(
-        output::infer_from_path(Path::new("painting.iiif")),
-        Ok(OutputFormat::IiifDir)
-    );
-    // Extensionless paths name an iiif-dir directory destination.
-    assert_eq!(
-        output::infer_from_path(Path::new("painting")),
-        Ok(OutputFormat::IiifDir)
-    );
     // Unknown extensions fail before any work starts, instead of writing a
     // mislabeled file. The error names every supported extension.
-    let bmp = output::infer_from_path(Path::new("painting.bmp"));
-    let error = bmp.expect_err("bmp stays unsupported");
+    let unknown = output::infer_from_path(Path::new("painting.not-an-image"));
+    let error = unknown.expect_err("unknown output suffix stays unsupported");
     assert!(matches!(error, Error::UnsupportedExtension { .. }));
-    for supported in [".png", ".jpg", ".tif", ".zif", ".webp", ".avif", ".iiif"] {
+    for supported in dezoomify::model::output_extensions().split(", ") {
         assert!(
             error.to_string().contains(supported),
             "unsupported-extension error lists {supported}: {error}"

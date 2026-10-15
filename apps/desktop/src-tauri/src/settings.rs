@@ -121,7 +121,14 @@ fn parse_output_format(value: Option<&serde_json::Value>) -> Result<OutputPrefer
         .map(str::to_ascii_lowercase)
         .ok_or_else(|| "output_format must be a string".to_string())?;
     serde_json::from_value(serde_json::Value::String(format)).map_err(|_| {
-        "output_format must be auto, png, jpeg, tiff, zif, webp, avif, or iiif-dir".to_string()
+        format!(
+            "output_format must be auto or {}",
+            dezoomify::model::OUTPUT_CODECS
+                .iter()
+                .map(|codec| codec.format.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     })
 }
 

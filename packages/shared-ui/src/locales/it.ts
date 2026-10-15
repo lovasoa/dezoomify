@@ -250,10 +250,6 @@ export const it = {
   "desktop.msg.needAbout": " Serve circa {need} di memoria",
   "desktop.output.canvasLimit":
     "Questa immagine è troppo grande per essere composta su questo computer ({dims},{need} a 4 byte per pixel, limite {limit}). Salva una versione più piccola con Larghezza max (CLI: --max-width). Nota: il JPEG accetta al più {jpegMax} pixel per lato; usa il PNG per immagini più grandi. Da {host}.",
-  "desktop.output.jpegLimit":
-    "Questa immagine ({dims}) è troppo grande per il JPEG, che accetta al più {jpegMax} pixel per lato. Salvala invece come PNG. Da {host}.",
-  "desktop.output.webpLimit":
-    "Questa immagine ({dims}) è troppo grande per il WebP, che accetta al più {webpMax} pixel per lato. Salvala invece come PNG. Da {host}.",
   "desktop.tile.failed":
     "Impossibile recuperare un frammento da {host}. Controlla l’immagine originale e riprova.",
   "view.discovery.none":
@@ -283,12 +279,12 @@ export const it = {
   "desktop.settings.reset": "Reimposta le impostazioni",
   "desktop.quick.info": "Altre informazioni",
   "desktop.quick.auto": "Automatico",
-  "desktop.quick.sizeEstimate": "<{size} MB",
+  "desktop.quick.sizeEstimate": "≈{size} MB",
   "desktop.quick.folderInfo": "Scegli dove salvare le immagini scaricate.",
   "desktop.quick.formatInfo":
-    "Scegli un formato. Automatico salva in JPEG le immagini opache fino a 65.535 pixel per lato, altrimenti in PNG.",
+    "Scegli un formato. Automatico salva in JPEG le immagini opache fino a {jpegMax} pixel per lato, altrimenti in PNG.",
   "desktop.quick.sizeInfo":
-    "Le preimpostazioni selezionano il livello sorgente più grande entro queste dimensioni. Se nessuno rientra, viene usato il più piccolo, che può superare le dimensioni e i limiti dell’encoder. Le immagini non vengono ridimensionate. Le stime assumono le dimensioni indicate; dimensioni reali e compatibilità dipendono dalla sorgente. MB stimati = larghezza × altezza × byte/pixel / 1.000.000. PNG: 1,6 byte/pixel; WebP senza perdita: 1,3; TIFF/ZIF: 3. JPEG è calibrato con l’encoder nativo su due dipinti e una mappa: qualità ≤25: 0,1; ≤50: 0,15; ≤75: 0,2; ≤90: 0,3; ≤95: 0,4; ≤98: 0,45; ≤100: 0,5 byte/pixel. Automatico stima un JPEG opaco; la trasparenza usa PNG. ZIF/IIIF aggiungono un terzo per la piramide. Ogni stima aggiunge un margine del 10 %, poi viene arrotondata per eccesso a multipli di 5 MB. Sono euristiche, non limiti garantiti; dettaglio, compressione sorgente, proporzioni, metadati e impostazioni dell’encoder influenzano la dimensione reale. Dimensioni intere/personalizzate richiedono le dimensioni sorgente.",
+    "Le preimpostazioni scelgono un livello sorgente entro le dimensioni indicate. Se nessuno rientra, viene usato il più piccolo, che può superare gli obiettivi o i limiti del codificatore. Le immagini non vengono ridimensionate. Le stime usano misure per formato e qualità, livelli aggiuntivi della piramide, un margine del 10 % e arrotondamento ai 5 MB successivi. Stimano le dimensioni dei file, non limiti di file o memoria; dettagli, trasparenza e metadati influenzano il risultato. Automatico presume un JPEG opaco; la trasparenza usa PNG. Le dimensioni intere/personalizzate richiedono quelle della sorgente.",
   "desktop.quick.maxWidth": "Larghezza max.",
   "desktop.quick.maxHeight": "Altezza max.",
   "desktop.quick.original": "Originale",
@@ -299,21 +295,20 @@ export const it = {
   "desktop.quick.source": "Dipende dalla fonte",
   "desktop.quick.exact": "Personalizzato",
   "desktop.quick.upTo": "Fino a {size}K",
-  "desktop.quick.hint.auto": "adattivo",
-  "desktop.quick.hint.png": "senza perdita",
-  "desktop.quick.hint.jpeg": "compresso",
-  "desktop.quick.hint.tiff": "archivio",
-  "desktop.quick.hint.webp": "senza perdita",
-  "desktop.quick.hint.zif": "ingrandibile",
-  "desktop.quick.hint.iiifDir": "a tasselli",
+  "desktop.quick.hint.adaptive": "adattivo",
+  "desktop.quick.hint.lossless": "senza perdita",
+  "desktop.quick.hint.compressed": "compresso",
+  "desktop.quick.hint.archival": "archivio",
+  "desktop.quick.hint.zoomable": "ingrandibile",
+  "desktop.quick.hint.tiled": "a tasselli",
   "desktop.quick.format.auto":
-    "JPEG per immagini opache fino a 65.535 pixel per lato; PNG per trasparenza o immagini più grandi. La qualità JPEG vale anche per Automatico.",
+    "JPEG per immagini opache fino a {jpegMax} pixel per lato; PNG per trasparenza o immagini più grandi. La qualità JPEG vale anche per Automatico.",
   "desktop.quick.format.png":
     "Pixel senza perdita e trasparenza; file più grandi, adatti alla modifica.",
   "desktop.quick.format.jpeg":
-    "File più piccoli con perdita. Nessuna trasparenza; massimo 65.535 pixel per lato. Regola la qualità nelle impostazioni.",
+    "File più piccoli con perdita. Nessuna trasparenza; massimo {maxSide} pixel per lato. Regola la qualità nelle impostazioni.",
   "desktop.quick.format.tiff": "Formato senza perdita per archiviazione e modifica.",
-  "desktop.quick.format.webp": "Formato compresso senza perdita, massimo 16.383 pixel per lato.",
+  "desktop.quick.format.webp": "Formato compresso senza perdita, massimo {maxSide} pixel per lato.",
   "desktop.quick.format.zif": "Piramide TIFF a tasselli senza perdita per diverse risoluzioni.",
   "desktop.quick.format.iiifDir":
     "Cartella con tasselli JPEG e info.json per ospitare un’immagine IIIF.",
@@ -337,17 +332,13 @@ export const it = {
   "desktop.quick.more": "Altre impostazioni",
   "desktop.advanced.title": "Impostazioni avanzate",
   "desktop.advanced.done": "Fine",
-  "desktop.advanced.jpegQuality": "Qualità JPEG",
-  "desktop.advanced.avifQuality": "Qualità AVIF",
-  "desktop.output.avifLimit":
-    "Questa immagine ({dims}) è troppo grande per AVIF, che consente al massimo {avifMax} pixel per lato. Salvala in PNG. Origine: {host}.",
-  "desktop.quick.approximateSize": "≈{size} MB",
-  "desktop.quick.avifSizeInfo":
-    "Le stime AVIF usano un piccolo campione di dipinti, una mappa e trasparenza, codificati con la qualità scelta e velocità fissa. Aggiungono un margine del 10 % e arrotondano ai 5 MB successivi. Sono dimensioni approssimative dei file, non limiti né stime della memoria; dettagli e trasparenza possono aumentare la dimensione.",
-  "desktop.quick.hint.avif": "compresso",
+  "desktop.advanced.codecQuality": "Qualità {format}",
+  "desktop.output.codecLimit":
+    "Questa immagine ({dims}) è troppo grande per {format}, che consente al massimo {maxSide} pixel per lato. Salvala in PNG. Origine: {host}.",
   "desktop.quick.format.avif":
-    "Formato con perdita e trasparenza, massimo 65.535 pixel per lato. Qualità regolabile nelle impostazioni. Richiede l’immagine completa in memoria e non conserva i profili colore incorporati. La qualità 100 non è una modalità senza perdita.",
-  "desktop.advanced.jpegQualityDesc": "Un valore maggiore conserva più dettagli dell’immagine.",
+    "Formato con perdita e trasparenza, massimo {maxSide} pixel per lato. Qualità regolabile nelle impostazioni. Richiede l’immagine completa in memoria e non conserva i profili colore incorporati. La qualità 100 non è una modalità senza perdita.",
+  "desktop.quick.format.generic": "Salva l’immagine in formato {format}.",
+  "desktop.advanced.qualityDesc": "Un valore maggiore conserva più dettagli dell’immagine.",
   "desktop.advanced.compressionEffort": "Impegno di compressione",
   "desktop.advanced.compressionEffortDesc":
     "La qualità resta senza perdita; valori maggiori richiedono più tempo.",
