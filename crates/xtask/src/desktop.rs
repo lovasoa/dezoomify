@@ -881,12 +881,17 @@ fn bundle() -> Result<(), String> {
         "--bundles",
     ];
     pnpm_args.extend(targets.iter().copied());
-    let version_config = std::env::var("DEZOOMIFY_VERSION")
-        .ok()
-        .map(|version| format!(r#"{{"version":"{version}"}}"#));
-    if let Some(config) = version_config.as_deref() {
-        pnpm_args.extend(["--config", config]);
+    // Local bundles need no release secret. Release builds require the key
+    // before reaching this pipeline and leave updater artifact creation enabled.
+    let mut config = serde_json::json!({});
+    if let Ok(version) = std::env::var("DEZOOMIFY_VERSION") {
+        config["version"] = version.into();
     }
+    if std::env::var_os("TAURI_SIGNING_PRIVATE_KEY").is_none() {
+        config["bundle"] = serde_json::json!({"createUpdaterArtifacts": false});
+    }
+    let config = config.to_string();
+    pnpm_args.extend(["--config", &config]);
     // The prebuilt CLI goes through `pnpm_command()` so Windows resolves the
     // `.cmd` shim via `cmd /c`.
     #[cfg(target_os = "macos")]

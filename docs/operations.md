@@ -35,6 +35,19 @@ store listings, without rebuilding. Submission can finish before store approval.
 Signing and installation policy: [desktop guide](../apps/desktop/desktop-app.md#install).
 Release working trees under `target/release-dist/` are never committed.
 
+Desktop release builds require the repository Actions secret
+`TAURI_SIGNING_PRIVATE_KEY`, containing the Tauri signing key, and optionally
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` for an encrypted key. Keep a secure backup:
+losing this key prevents existing installations from trusting future updates.
+The matching public key is committed in the desktop Tauri configuration.
+Local bundles omit updater signatures when no signing key is supplied.
+
+Release verification checks every updater bundle against the public key before
+publication. Each GitHub Release carries `latest.json` with signatures and
+version-specific download URLs. The app follows GitHub's latest release,
+including rolling releases, and asks before installation. Linux `.deb` and
+Windows `.msi` installations may require administrator approval.
+
 ## Website deployment contract
 
 [`website-deploy.yml`](../.github/workflows/website-deploy.yml) is the sole publisher
@@ -51,7 +64,7 @@ and source-file exclusion.
 ## Rollback
 
 - Reinstall a previous immutable GitHub Release artifact, preserving output and
-  settings. Desktop has no automatic updater.
+  settings. The desktop updater only installs newer versions; rollback is manual.
 - Stores require a higher version: revert on `master` and submit the resulting
   release through `store-submit`, retaining the existing listing.
 - Verify recovery with packaged fixtures and record affected tags in the incident.

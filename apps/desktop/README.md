@@ -25,7 +25,9 @@ paths out of IPC; file availability checks must not block rendering or completio
 
 Permission manifests are generated from Rust commands and events by
 [`generate-desktop-capabilities.mjs`](../../scripts/generate-desktop-capabilities.mjs).
-Do not add unused capabilities or enable the updater without a service and keys.
+The updater runs through native menus and dialogs, so it needs no webview
+updater permissions. Its endpoint and public key live in `tauri.conf.json`;
+release signing setup belongs in [Operations](../../docs/operations.md#release-runbook).
 
 ## Bundles
 

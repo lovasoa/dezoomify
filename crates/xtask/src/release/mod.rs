@@ -18,6 +18,7 @@ mod build;
 mod common;
 mod plan;
 mod publish;
+mod updater;
 mod verify;
 
 pub fn run(args: &[String]) -> Result<(), String> {

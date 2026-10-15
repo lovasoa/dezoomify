@@ -346,7 +346,9 @@ pub fn run() {
             focus_main_window(app);
         }))
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .on_menu_event(crate::updater::on_menu_event);
     // Test-only embedded WebDriver server for the real-window E2E. The plugin
     // starts its server unconditionally, so it is compiled in only for the
     // non-default `testing-webdriver` feature and never reaches a release bundle.
@@ -360,6 +362,7 @@ pub fn run() {
     builder
         .manage(Mutex::new(JobTable::new()))
         .setup(|app| {
+            crate::updater::setup(app)?;
             app.manage(Arc::new(SavedOutputs::new(
                 app.path().app_data_dir()?.join("saved-outputs"),
             )));
