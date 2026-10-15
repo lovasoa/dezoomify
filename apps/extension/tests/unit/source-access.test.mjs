@@ -183,6 +183,31 @@ test("a grant acquired between observation batches reveals the existing viewer",
   }
 });
 
+test("a successful frame probe overrides an inconsistent permission-pattern match", async () => {
+  const foreign = "https://viewer.example:8443/widget";
+  const fake = fakeBrowser(async () => snapshot(foreign));
+  fake.setFrames([
+    { frameId: 0, documentUrl: SOURCE_URL, token: "root", frames: [foreign] },
+    { frameId: 8, documentUrl: foreign, token: "viewer" },
+  ]);
+  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  const observe = source.observations({
+    hasPermission: async () => false,
+    ensurePermission: () => assert.fail("the browser already allowed this frame"),
+    scanned: () => {},
+    failed: (_frame, error) => {
+      throw error;
+    },
+  });
+  try {
+    const signal = new AbortController().signal;
+    assert.ok((await observe("forbidden", signal)).length > 0);
+    assert.deepEqual(await observe("allowed", signal), []);
+  } finally {
+    source.dispose();
+  }
+});
+
 test("a same-URL reload during MAIN-world scanning invalidates the document token", async () => {
   let token = "original";
   const fake = fakeBrowser(async () => {

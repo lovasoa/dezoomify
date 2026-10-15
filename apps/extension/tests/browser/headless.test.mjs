@@ -828,7 +828,8 @@ for (const [browser, runJob] of [
   ["chromium", runChromiumJob],
   ["firefox", runFirefoxJob],
 ]) {
-  test(`${browser}: recursive iframe scanning defers access and saves a dynamic viewer`, {
+  const deferredAccess = browser === "chromium";
+  test(`${browser}: recursive iframe scanning ${deferredAccess ? "defers access" : "uses existing access"} and saves a dynamic viewer`, {
     timeout: 180000,
   }, async () => {
     const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-recursive-iframe-"));
@@ -836,8 +837,8 @@ for (const [browser, runJob] of [
       assertPng(
         await runJob(fixtureServer.base, work, {
           scenario: "recursive-iframe",
-          grantAccess: true,
-          nativeFrameGrant: browser === "chromium",
+          grantAccess: deferredAccess,
+          nativeFrameGrant: deferredAccess,
         }),
       );
     } finally {

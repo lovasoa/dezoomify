@@ -532,9 +532,10 @@ export function createSourceAccess(
           const key = `${frame.frameId}:${frame.token}`;
           if (frame.frameId === 0 || seen.has(key) || seen.size >= 16) continue;
           const origin = originOfUrl(frame.documentUrl);
-          const granted = origin === sourceOrigin || (await access.hasPermission(origin));
+          // A successful isolated-world probe is the browser's access check.
+          // Rechecking a match pattern can disagree with activeTab or older
+          // Firefox's handling of explicit ports.
           signal.throwIfAborted();
-          if (!granted) continue;
           seen.add(key);
           try {
             const snapshot = await scan(signal, frame);
@@ -553,6 +554,7 @@ export function createSourceAccess(
           if (
             origin !== sourceOrigin &&
             !requested.has(origin) &&
+            !available.frames.some((frame) => originOfUrl(frame.documentUrl) === origin) &&
             !(await access.hasPermission(origin))
           ) {
             next = origin;
