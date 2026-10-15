@@ -12,31 +12,22 @@ const FORBIDDEN_IPC_KEYS = new Set([
 ]);
 
 function containsForbiddenKey(value: unknown, seen: Set<unknown>): boolean {
-  if (value === null || value === undefined) return false;
-  if (typeof value === "string") return false;
-  if (typeof value === "number" || typeof value === "boolean") return false;
-  if (seen.has(value)) return false;
+  if (value === null || typeof value !== "object" || seen.has(value)) return false;
   seen.add(value);
   if (value instanceof ArrayBuffer) return true;
   if (ArrayBuffer.isView(value)) return true;
   if (Array.isArray(value)) {
-    for (const item of value) {
-      if (containsForbiddenKey(item, seen)) return true;
-    }
-    return false;
+    return value.some((item) => containsForbiddenKey(item, seen));
   }
-  if (typeof value === "object") {
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      const lower = k.toLowerCase().replace(/[-_]/g, "");
-      // `bytes` alone is allowed only as a small numeric count, never as
-      // a buffer. Buffers are caught above via ArrayBuffer/view checks.
-      if (FORBIDDEN_IPC_KEYS.has(k.toLowerCase()) || FORBIDDEN_IPC_KEYS.has(lower)) {
-        return true;
-      }
-      if (containsForbiddenKey(v, seen)) return true;
-    }
-  }
-  return false;
+  return Object.entries(value).some(([key, item]) => {
+    const lower = key.toLowerCase();
+    // Numeric byte counters are allowed; buffers and pixel fields are not.
+    return (
+      FORBIDDEN_IPC_KEYS.has(lower) ||
+      FORBIDDEN_IPC_KEYS.has(lower.replace(/[-_]/g, "")) ||
+      containsForbiddenKey(item, seen)
+    );
+  });
 }
 
 // Throw when a payload would carry tile bytes over IPC.

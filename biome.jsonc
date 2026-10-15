@@ -13,7 +13,7 @@
       "test/**",
       "fixtures/**/*.js",
       "testdata/scenarios/**/*.js",
-      "!testdata/scenarios/**/payloads/**",
+      "!testdata/scenarios/**/payloads",
       "packages/**",
       "apps/**",
       "*.js",
@@ -56,7 +56,18 @@
       "playwright": "recommended"
     },
     "rules": {
-      "preset": "recommended"
+      "preset": "recommended",
+      "complexity": {
+        "noExcessiveCognitiveComplexity": {
+          "level": "error",
+          "options": { "maxAllowedComplexity": 15 }
+        }
+      },
+      "style": { "useErrorCause": "error" },
+      "suspicious": { "noDeprecatedImports": "error" },
+      "nursery": {
+        "noFloatingPromises": { "level": "error", "fix": "none" }
+      }
     }
   },
   "assist": {

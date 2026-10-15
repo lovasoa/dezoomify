@@ -805,8 +805,8 @@ impl Error {
     pub fn cause(&self) -> &Self {
         match self {
             Self::Resource { source, .. } => source.cause(),
-            Self::TileFailed { cause, .. } => cause.cause(),
-            Self::DiscoveryFailed {
+            Self::TileFailed { cause, .. }
+            | Self::DiscoveryFailed {
                 cause: Some(cause), ..
             } => cause.cause(),
             other => other,
@@ -890,10 +890,10 @@ impl Error {
             | Self::NetworkFailure { .. }
             | Self::ProxyError { .. } => true,
             Self::Resource { source, .. } => source.retryable(),
-            Self::DiscoveryFailed {
+            Self::TileFailed { cause, .. }
+            | Self::DiscoveryFailed {
                 cause: Some(cause), ..
             } => cause.retryable(),
-            Self::TileFailed { cause, .. } => cause.retryable(),
             _ => false,
         }
     }
@@ -912,9 +912,9 @@ impl Error {
                 retry_after_ms: Some(hint),
                 ..
             } => Some(*hint),
-            Self::TileFailed { cause, .. } => cause.retry_after_ms(),
             Self::Resource { source, .. } => source.retry_after_ms(),
-            Self::DiscoveryFailed {
+            Self::TileFailed { cause, .. }
+            | Self::DiscoveryFailed {
                 cause: Some(cause), ..
             } => cause.retry_after_ms(),
             _ => None,

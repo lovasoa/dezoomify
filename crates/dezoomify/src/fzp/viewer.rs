@@ -384,7 +384,7 @@ fn navigate(
             let second_base = secondary_path
                 .map(|path| resolve_relative(&document_base, &directory(&path)))
                 .unwrap_or_else(|| base.clone());
-            let entries = [(name, base.clone()), (secondary, second_base)]
+            let entries = [(name, base), (secondary, second_base)]
                 .into_iter()
                 .map(|(name, base)| {
                     Ok(DeferredResource {

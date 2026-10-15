@@ -63,6 +63,12 @@ while iterating. Finish code changes with `cargo xtask test all` and
 `cargo xtask ci local`; [Testing](testing.md) explains additional browser and
 desktop coverage. Live source-site checks are opt-in and advisory.
 
+Biome keeps its recommended rules and treats cognitive complexity above 15 as
+an error, including in tests. Clippy uses the same cognitive threshold across
+the workspace; the pure core also limits functions to 100 lines. Extract named
+operations that clarify responsibilities rather than suppressing these checks.
+Workspace crates must inherit `[workspace.lints]` through `[lints] workspace = true`.
+
 For native output performance comparisons, build release CLIs in separate
 checkouts and Cargo target directories with
 `cargo build --release --locked -p dezoomify-cli`, then run

@@ -135,6 +135,18 @@ describe("Dezoomify desktop window", () => {
   let fixture = null;
   let runDirs = null;
 
+  function historyStatus(expected) {
+    return driver.executeScript((expected) => {
+      const row = document.querySelector(".dz-history-table tbody tr");
+      return row?.cells[3]?.textContent.trim() === expected;
+    }, expected);
+  }
+
+  async function isIdle() {
+    const state = await snapshot(driver);
+    return !state.job && !state.completed && !state.error;
+  }
+
   async function teardown() {
     if (driver) {
       try {
@@ -145,18 +157,9 @@ describe("Dezoomify desktop window", () => {
       driver = null;
     }
     await stopWindowApp(app);
-    if (app) {
-      const logs = app.logs().trim();
-      if (logs) process.stderr.write(`window E2E app log:\n${logs.slice(-4000)}\n`);
-    }
+    writeAppLogs(app);
     app = null;
-    if (fixture) {
-      const requestLog = existsSync(fixture.requestLog)
-        ? readFileSync(fixture.requestLog, "utf8")
-        : "";
-      const logs = `${fixture.logs()}\n${requestLog}`.trim();
-      if (logs) process.stderr.write(`window E2E fixture log:\n${logs.slice(-4000)}\n`);
-    }
+    writeFixtureLogs(fixture);
     stopFixtureServer(fixture);
     fixture = null;
     if (runDirs) {
@@ -167,6 +170,21 @@ describe("Dezoomify desktop window", () => {
       }
       runDirs = null;
     }
+  }
+
+  function writeAppLogs(app) {
+    if (!app) return;
+    const logs = app.logs().trim();
+    if (logs) process.stderr.write(`window E2E app log:\n${logs.slice(-4000)}\n`);
+  }
+
+  function writeFixtureLogs(fixture) {
+    if (!fixture) return;
+    const requestLog = existsSync(fixture.requestLog)
+      ? readFileSync(fixture.requestLog, "utf8")
+      : "";
+    const logs = `${fixture.logs()}\n${requestLog}`.trim();
+    if (logs) process.stderr.write(`window E2E fixture log:\n${logs.slice(-4000)}\n`);
   }
 
   before(async () => {
@@ -233,31 +251,13 @@ describe("Dezoomify desktop window", () => {
     assert.equal(outputs.length, 1, "automatic save writes exactly one PNG");
     assertSavedPyramid(readFileSync(outputs[0]));
     await resetToIdle(driver);
-    await waitFor(
-      driver,
-      async () =>
-        driver.executeScript(() => {
-          const row = document.querySelector(".dz-history-table tbody tr");
-          return row?.cells[3]?.textContent.trim() === "Completed";
-        }),
-      30000,
-      "saved file history",
-    );
+    await waitFor(driver, () => historyStatus("Completed"), 30000, "saved file history");
     const title = await driver.findElement(By.css(".dz-history-main"));
     assert.equal(await title.getText(), path.basename(outputs[0]));
     assert.equal(await title.isEnabled(), true);
     rmSync(outputs[0]);
     await driver.executeScript(() => window.dispatchEvent(new Event("focus")));
-    await waitFor(
-      driver,
-      async () =>
-        driver.executeScript(() => {
-          const row = document.querySelector(".dz-history-table tbody tr");
-          return row?.cells[3]?.textContent.trim() === "Deleted";
-        }),
-      30000,
-      "deleted file history",
-    );
+    await waitFor(driver, () => historyStatus("Deleted"), 30000, "deleted file history");
     assert.equal(await title.isEnabled(), false);
   });
 
@@ -289,15 +289,7 @@ describe("Dezoomify desktop window", () => {
     // The throttled job keeps running through retry backoff, so the cancel
     // control is present and reaches the runtime before the job can complete.
     await (await driver.findElement(By.css("#dz-btn-cancel"))).click();
-    await waitFor(
-      driver,
-      async () => {
-        const state = await snapshot(driver);
-        return !state.job && !state.completed && !state.error;
-      },
-      60000,
-      "cancelled view",
-    );
+    await waitFor(driver, isIdle, 60000, "cancelled view");
     assert.equal(outputFiles(runOutputDir()).length, 0, "cancelled jobs publish no output");
   });
 

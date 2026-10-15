@@ -5,6 +5,8 @@
 #   use `unwrap`/`expect` for fixture setup and assertions. Shipped code
 #   must return structured domain errors instead of panicking.
 allow-unwrap-in-tests = true
+cognitive-complexity-threshold = 15
+too-many-lines-threshold = 100
 
 # The pure domain crate denies these semantic Clippy lints in non-test builds.
 # Clippy resolves aliases and re-exports before comparing paths.

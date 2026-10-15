@@ -411,8 +411,7 @@ pub fn infer_from_path(path: &Path) -> Result<OutputFormat, Error> {
             "tif" | "tiff" => Ok(OutputFormat::Tiff),
             "zif" => Ok(OutputFormat::Zif),
             "webp" => Ok(OutputFormat::Webp),
-            "iiif" => Ok(OutputFormat::IiifDir),
-            "" => Ok(OutputFormat::IiifDir),
+            "iiif" | "" => Ok(OutputFormat::IiifDir),
             other => Err(crate::output::unsupported_extension(format!(
                 "unsupported output extension .{other}; use .png, .jpg, .jpeg, .tif, .tiff, .zif, .webp, .iiif, or an extensionless directory path for iiif-dir"
             ))),

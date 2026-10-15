@@ -302,30 +302,7 @@ fn validate(target_list: &[LiveTarget]) -> Result<usize, String> {
     Ok(target_list.len())
 }
 
-pub fn test_live(args: &[String]) -> Result<(), String> {
-    if args == ["--dry-run", "--fixtures"] {
-        // No network: actually validate the target inventory before
-        // claiming it is validated.
-        let count = validate(TARGETS)?;
-        println!(
-            "test live --dry-run --fixtures: ok ({count} targets validated: \
-             absolute http(s) URLs, unique names, well-formed headers; \
-             no public targets hit)"
-        );
-        return Ok(());
-    }
-    if args.first().map(String::as_str) != Some("--public") {
-        if args == ["--packaged", "--low-volume"] {
-            return Err("live packaged runs require explicit production approval; use `cargo xtask test live --public` for the opted-in public check".to_string());
-        }
-        if args == ["--webapp"] {
-            return run_live_webapp();
-        }
-        return Err(
-            "usage: cargo xtask test live --dry-run --fixtures | --public [--limit <n>] [--site <name>] | --webapp"
-                .to_string(),
-        );
-    }
+fn select_public_targets(args: &[String]) -> Result<Vec<&'static LiveTarget>, String> {
     let mut limit: Option<usize> = None;
     let mut only: Option<&str> = None;
     let mut i = 1;
@@ -364,6 +341,35 @@ pub fn test_live(args: &[String]) -> Result<(), String> {
     if targets.is_empty() {
         return Err("no live targets selected".to_string());
     }
+
+    Ok(targets)
+}
+
+pub fn test_live(args: &[String]) -> Result<(), String> {
+    if args == ["--dry-run", "--fixtures"] {
+        // No network: actually validate the target inventory before
+        // claiming it is validated.
+        let count = validate(TARGETS)?;
+        println!(
+            "test live --dry-run --fixtures: ok ({count} targets validated: \
+             absolute http(s) URLs, unique names, well-formed headers; \
+             no public targets hit)"
+        );
+        return Ok(());
+    }
+    if args.first().map(String::as_str) != Some("--public") {
+        if args == ["--packaged", "--low-volume"] {
+            return Err("live packaged runs require explicit production approval; use `cargo xtask test live --public` for the opted-in public check".to_string());
+        }
+        if args == ["--webapp"] {
+            return run_live_webapp();
+        }
+        return Err(
+            "usage: cargo xtask test live --dry-run --fixtures | --public [--limit <n>] [--site <name>] | --webapp"
+                .to_string(),
+        );
+    }
+    let targets = select_public_targets(args)?;
 
     let cli = build_cli()?;
     let temp_dir = std::env::temp_dir().join(format!("dezoomify-live-{}", std::process::id()));

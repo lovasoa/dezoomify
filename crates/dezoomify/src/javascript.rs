@@ -255,28 +255,31 @@ pub(crate) fn mask(text: &str) -> String {
             continue;
         } else if byte == b'/'
             && regex_start(std::str::from_utf8(&out[..position]).expect("masked UTF-8"))
+            && let Some(end) = regex_end(bytes, position)
         {
-            let mut end = position + 1;
-            let mut class = false;
-            while end < bytes.len() && !matches!(bytes[end], b'\n' | b'\r') {
-                match bytes[end] {
-                    b'\\' => end += 1,
-                    b'[' => class = true,
-                    b']' => class = false,
-                    b'/' if !class => break,
-                    _ => {}
-                }
-                end += 1;
-            }
-            if bytes.get(end) == Some(&b'/') {
-                out[position..=end].fill(b' ');
-                position = end + 1;
-                continue;
-            }
+            out[position..=end].fill(b' ');
+            position = end + 1;
+            continue;
         }
         position += 1;
     }
     String::from_utf8(out).expect("comment removal preserves UTF-8")
+}
+
+fn regex_end(bytes: &[u8], position: usize) -> Option<usize> {
+    let mut end = position + 1;
+    let mut class = false;
+    while end < bytes.len() && !matches!(bytes[end], b'\n' | b'\r') {
+        match bytes[end] {
+            b'\\' => end += 1,
+            b'[' => class = true,
+            b']' => class = false,
+            b'/' if !class => break,
+            _ => {}
+        }
+        end += 1;
+    }
+    (bytes.get(end) == Some(&b'/')).then_some(end)
 }
 
 fn regex_start(prefix: &str) -> bool {

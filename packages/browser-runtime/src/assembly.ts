@@ -89,6 +89,14 @@ function placementGeometry(
   return { x: placement.position.x, y: placement.position.y, w, h };
 }
 
+function closeBitmap(bitmap: TileBitmap): void {
+  try {
+    bitmap.close();
+  } catch {
+    // Bitmap cleanup is best-effort.
+  }
+}
+
 export function createCanvasAssembly<C extends AssemblyCanvas>(
   deps: CanvasAssemblyDeps<C>,
 ): CanvasAssembly {
@@ -149,6 +157,23 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
     }
     signal.throwIfAborted();
     const bitmap = await deps.decode(input);
+    recordGeometry(tile, placement, bitmap);
+    if (signal.aborted) {
+      bitmap.close();
+      signal.throwIfAborted();
+    }
+    if (!canvas) {
+      bitmaps.set(tile, bitmap);
+      return;
+    }
+    try {
+      drawPlacedTile(canvas.ctx2d, bitmap, placementGeometry(placement, bitmap));
+    } finally {
+      closeBitmap(bitmap);
+    }
+  }
+
+  function recordGeometry(tile: number, placement: TilePlacement, bitmap: TileBitmap): void {
     const mismatch =
       placement.expected_size &&
       (placement.expected_size.width !== bitmap.width ||
@@ -161,23 +186,6 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
         ...placement,
       });
     if (mismatch) deps.diagnostics?.count("geometry_mismatches");
-    if (signal.aborted) {
-      bitmap.close();
-      signal.throwIfAborted();
-    }
-    if (!canvas) {
-      bitmaps.set(tile, bitmap);
-      return;
-    }
-    try {
-      drawPlacedTile(canvas.ctx2d, bitmap, placementGeometry(placement, bitmap));
-    } finally {
-      try {
-        bitmap.close();
-      } catch {
-        // Bitmap cleanup is best-effort.
-      }
-    }
   }
 
   function markDisplayOnly(): void {
@@ -196,11 +204,7 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
         drawPlacedTile(canvas.ctx2d, bitmap, placementGeometry(placement, bitmap));
       } finally {
         bitmaps.delete(tile);
-        try {
-          bitmap.close();
-        } catch {
-          // Bitmap cleanup is best-effort.
-        }
+        closeBitmap(bitmap);
       }
     }
     for (const [tile, image] of displayImages) {

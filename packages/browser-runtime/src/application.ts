@@ -168,7 +168,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
 
   function cancel(): void {
     if (options.resetToIdle) {
-      retire();
+      void retire();
       idle = presentIdle();
       initialUrl = undefined;
       options.onReset?.();
@@ -194,84 +194,8 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
     try {
       await retired;
       a.controller.signal.throwIfAborted();
-      const capabilities = options.capabilities({
-        signal: a.controller.signal,
-        diagnostics: a.diagnostics,
-        activity: a.activity,
-        view: a.view,
-        update: () => {
-          if (current === a) update();
-        },
-        permission: (pending) => {
-          if (current === a && !a.controller.signal.aborted) {
-            a.permission = pending[0];
-            update();
-          }
-        },
-      });
-      a.capabilities = capabilities;
-      const [wasm, inputs] = await Promise.all([options.wasm(), capabilities.inputs(url)]);
+      const { wasm, inputs, host } = await prepareInvocation(a, url, maximum);
       a.controller.signal.throwIfAborted();
-      url = a.view.sourceUrl || inputs[0]?.url || url;
-      a.url = url;
-      const decoder = createTileDecoder(undefined, a.diagnostics);
-      const assembly = createBrowserAssembly({
-        diagnostics: a.diagnostics,
-        signal: a.controller.signal,
-        decoder,
-        sourceUrl: url,
-        processTile: (recipe, bytes) =>
-          wasm.applyProcessing(recipe, new Uint8Array(bytes)).slice().buffer,
-        canvas: capabilities.canvas,
-        showCanvas: capabilities.showCanvas,
-        limits: browserLimitsFor(navigator as unknown as ClientHints),
-        save: (blob, width, height, signal) =>
-          capabilities.save(blob, width, height, signal, a.progress?.title ?? undefined),
-        onDisplayOnly: () => {
-          if (current === a) {
-            update();
-          }
-        },
-      });
-      const approval = new RetryApproval((request) => {
-        a.host?.waitForRetry(request !== undefined);
-        a.retryApproval = request
-          ? {
-              request,
-              answer(choice) {
-                if (current !== a || a.controller.signal.aborted) return;
-                a.diagnostics.record("info", "retry-answer", { choice });
-                if (choice === "retry") approval.retry();
-                else cancel();
-              },
-            }
-          : undefined;
-        update();
-      });
-      a.controller.signal.addEventListener("abort", () => approval.cancel(), { once: true });
-      const limits = maximum
-        ? MAXIMUM_SELECTION_LIMITS
-        : selectionLimitsFor(navigator as unknown as ClientHints);
-      a.host = new BrowserHost({
-        selectionLimits: limits,
-        signal: a.controller.signal,
-        diagnostics: a.diagnostics,
-        assembly,
-        decoder,
-        fetchResource: capabilities.fetchResource,
-        observe: capabilities.observe,
-        loadDisplayImage: capabilities.loadDisplayImage,
-        onProgress: (progress) => {
-          if (current === a && !a.controller.signal.aborted) {
-            a.progress = progress;
-            history.progress(a.historyEntry, progress);
-            a.activity.touchProgress();
-            a.activity.scheduleUpdate();
-          }
-        },
-        transport: () => capabilities.transport(),
-        approveRetry: (request) => approval.acquire(request),
-      });
       const output = await wasm.dezoomify(
         inputs,
         {
@@ -285,33 +209,137 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
           max_deferred_follows: 8,
           retry_base_delay_ms: 1000,
         },
-        a.host,
+        host,
       );
-      a.controller.signal.throwIfAborted();
-      if (current !== a) return;
-      a.output = output;
-      a.diagnostics.finish("completed", a.output);
-      history.complete(a.historyEntry, a.output);
-      options.onComplete?.(a.output);
+      completeInvocation(a, output);
     } catch (error) {
-      if (current !== a) return;
-      const outcome = a.controller.signal.aborted ? "cancelled" : "failed";
-      history.update(a.historyEntry, { status: outcome });
-      if (outcome === "failed") {
-        a.failure = await withVerdict(
-          isJobError(error) ? error : { kind: "internal", detail: unknownDetail(error) },
-        );
-      }
-      a.diagnostics.finish(outcome, error);
+      await failInvocation(a, error);
     } finally {
-      a.activity.stopHeartbeat();
-      if (!a.output) a.controller.abort();
-      await a.host?.settle();
-      if (current === a) {
-        a.done = true;
-        update();
-      }
+      await settleInvocation(a);
     }
+  }
+
+  function completeInvocation(a: ReturnType<typeof invocation>, output: Output): void {
+    a.controller.signal.throwIfAborted();
+    if (current !== a) return;
+    a.output = output;
+    a.diagnostics.finish("completed", a.output);
+    history.complete(a.historyEntry, a.output);
+    options.onComplete?.(a.output);
+  }
+
+  async function failInvocation(a: ReturnType<typeof invocation>, error: unknown): Promise<void> {
+    if (current !== a) return;
+    const outcome = a.controller.signal.aborted ? "cancelled" : "failed";
+    history.update(a.historyEntry, { status: outcome });
+    if (outcome === "failed") {
+      a.failure = await withVerdict(
+        isJobError(error) ? error : { kind: "internal", detail: unknownDetail(error) },
+      );
+    }
+    a.diagnostics.finish(outcome, error);
+  }
+
+  async function settleInvocation(a: ReturnType<typeof invocation>): Promise<void> {
+    a.activity.stopHeartbeat();
+    if (!a.output) a.controller.abort();
+    await a.host?.settle();
+    if (current === a) {
+      a.done = true;
+      update();
+    }
+  }
+
+  async function prepareInvocation(
+    a: ReturnType<typeof invocation>,
+    url: string,
+    maximum: boolean,
+  ) {
+    const capabilities = options.capabilities({
+      signal: a.controller.signal,
+      diagnostics: a.diagnostics,
+      activity: a.activity,
+      view: a.view,
+      update: () => {
+        if (current === a) update();
+      },
+      permission: (pending) => {
+        if (current === a && !a.controller.signal.aborted) {
+          a.permission = pending[0];
+          update();
+        }
+      },
+    });
+    a.capabilities = capabilities;
+    const [wasm, inputs] = await Promise.all([options.wasm(), capabilities.inputs(url)]);
+    a.controller.signal.throwIfAborted();
+    url = a.view.sourceUrl || inputs[0]?.url || url;
+    a.url = url;
+    const decoder = createTileDecoder(undefined, a.diagnostics);
+    const assembly = createBrowserAssembly({
+      diagnostics: a.diagnostics,
+      signal: a.controller.signal,
+      decoder,
+      sourceUrl: url,
+      processTile: (recipe, bytes) =>
+        wasm.applyProcessing(recipe, new Uint8Array(bytes)).slice().buffer,
+      canvas: capabilities.canvas,
+      showCanvas: capabilities.showCanvas,
+      limits: browserLimitsFor(navigator as unknown as ClientHints),
+      save: (blob, width, height, signal) =>
+        capabilities.save(blob, width, height, signal, a.progress?.title ?? undefined),
+      onDisplayOnly: () => {
+        if (current === a) {
+          update();
+        }
+      },
+    });
+    const approval = retryApprovalFor(a);
+    a.controller.signal.addEventListener("abort", () => approval.cancel(), { once: true });
+    const limits = maximum
+      ? MAXIMUM_SELECTION_LIMITS
+      : selectionLimitsFor(navigator as unknown as ClientHints);
+    const host = new BrowserHost({
+      selectionLimits: limits,
+      signal: a.controller.signal,
+      diagnostics: a.diagnostics,
+      assembly,
+      decoder,
+      fetchResource: capabilities.fetchResource,
+      observe: capabilities.observe,
+      loadDisplayImage: capabilities.loadDisplayImage,
+      onProgress: (progress) => {
+        if (current === a && !a.controller.signal.aborted) {
+          a.progress = progress;
+          history.progress(a.historyEntry, progress);
+          a.activity.touchProgress();
+          a.activity.scheduleUpdate();
+        }
+      },
+      transport: () => capabilities.transport(),
+      approveRetry: (request) => approval.acquire(request),
+    });
+    a.host = host;
+    return { wasm, inputs, host };
+  }
+
+  function retryApprovalFor(a: ReturnType<typeof invocation>): RetryApproval {
+    const approval = new RetryApproval((request) => {
+      a.host?.waitForRetry(request !== undefined);
+      a.retryApproval = request
+        ? {
+            request,
+            answer(choice) {
+              if (current !== a || a.controller.signal.aborted) return;
+              a.diagnostics.record("info", "retry-answer", { choice });
+              if (choice === "retry") approval.retry();
+              else cancel();
+            },
+          }
+        : undefined;
+      update();
+    });
+    return approval;
   }
 
   /** Stamp the boundary's retry verdict (`isRetryable`, the one policy in
@@ -333,7 +361,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       const error: JobError = { kind: "invalid-url" };
       idle = presentFailure(error);
       if (!current || current.done) {
-        retire();
+        void retire();
         const a = invocation(url);
         a.done = true;
         a.failure = error;
@@ -355,6 +383,39 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       presented_error: shown.error?.kind ?? "",
     });
     const report = a?.diagnostics.report();
+    updateCurrentProgress(a, shown, report);
+    renderView(
+      options.root,
+      shown,
+      callbacksFor(a),
+      {
+        ...(a ? { ...a.view, diagnosticReport: report } : { initialUrl }),
+        sourceUrl: a?.progress?.source_url ?? a?.url,
+        desktopSourceUrl: a?.progress?.source_url ?? a?.url,
+        product: options.product,
+        history: history.entries(),
+        historyNow: Date.now(),
+      },
+      {
+        ...(a?.permission
+          ? {
+              replace: createElement(AccessRequestView, {
+                origin: a.permission.origin,
+                requesting: a.permission.requesting,
+                onRequest: a.permission.request,
+              }),
+            }
+          : {}),
+      },
+    );
+    options.onStatus?.(shown, a?.url ?? "");
+  }
+
+  function updateCurrentProgress(
+    a: ReturnType<typeof invocation> | undefined,
+    shown: Presentation,
+    report: ReturnType<DiagnosticRecorder["report"]> | undefined,
+  ): void {
     if (a)
       a.view.currentProgress =
         shown.phase === "job"
@@ -365,7 +426,11 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
               ),
             }
           : undefined;
-    const callbacks = {
+  }
+
+  function callbacksFor(a: ReturnType<typeof invocation> | undefined) {
+    const outputCapabilities = a?.output ? a.capabilities : undefined;
+    return {
       onSubmitUrl: submit,
       onCancel: cancel,
       onRetryChoice: a?.retryApproval?.answer,
@@ -388,9 +453,8 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         }
       },
       onSave: a?.capabilities?.saveOutput,
-      onOpenOutput: a?.output && a.capabilities?.openOutput ? a.capabilities.openOutput : undefined,
-      onRevealOutput:
-        a?.output && a.capabilities?.revealOutput ? a.capabilities.revealOutput : undefined,
+      onOpenOutput: outputCapabilities?.openOutput,
+      onRevealOutput: outputCapabilities?.revealOutput,
       onOpenSource: options.openSource,
       onCopyDiagnostics: copyDiagnosticText,
       onCopyText: copyDiagnosticText,
@@ -407,31 +471,6 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         update();
       },
     };
-    renderView(
-      options.root,
-      shown,
-      callbacks,
-      {
-        ...(a ? { ...a.view, diagnosticReport: report } : { initialUrl }),
-        sourceUrl: a?.progress?.source_url ?? a?.url,
-        desktopSourceUrl: a?.progress?.source_url ?? a?.url,
-        product: options.product,
-        history: history.entries(),
-        historyNow: Date.now(),
-      },
-      {
-        ...(a?.permission
-          ? {
-              replace: createElement(AccessRequestView, {
-                origin: a.permission.origin,
-                requesting: a.permission.requesting,
-                onRequest: a.permission.request,
-              }),
-            }
-          : {}),
-      },
-    );
-    options.onStatus?.(shown, a?.url ?? "");
   }
   update();
   return {

@@ -22,8 +22,8 @@ export function createBrowserAssembly(
       try {
         element.width = width;
         element.height = height;
-      } catch {
-        throw canvasAllocationFailure(width, height, deps.sourceUrl ?? "");
+      } catch (cause) {
+        throw canvasAllocationFailure(width, height, deps.sourceUrl ?? "", cause);
       }
       if (element.width !== width || element.height !== height)
         throw canvasAllocationFailure(width, height, deps.sourceUrl ?? "");

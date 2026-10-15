@@ -123,6 +123,10 @@ fn verified_geometry_and_original_coordinate_edge_filenames() {
         assert_eq!(reduced.expected_size, Some(reduced_size));
         assert_eq!(reduced.processing, crate::core::ProcessingRecipe::None);
     }
+}
+
+#[test]
+fn version_rounding_preserves_partial_edges_and_coordinate_fields() {
     let floor = image(&xml("1.2", 9, 7, 2, 5));
     assert_eq!(floor.levels.len(), 3); // Zero-sized levels are omitted.
     assert_eq!(
@@ -441,8 +445,15 @@ fn failed_auxiliary_scripts_preserve_required_fetch_errors() {
     }
 }
 
-#[test]
-fn deployed_wrappers_share_document_relative_discovery() {
+type WrapperCase = (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+);
+
+fn deployed_wrapper_cases() -> [WrapperCase; 10] {
     const NARA: &str = r#"(function(window,document){window.lime=function(src,type,param){
         if(typeof param['path']==='undefined') param['path']='../resources/';
         window.jQuery(document).ready(function(){
@@ -451,9 +462,7 @@ fn deployed_wrappers_share_document_relative_discovery() {
     const NIHON: &str = r#"window.lime=function(src,type){window.jQuery(document).ready(function(){
         Lime.Viewer.init('view',{preview:{resourcepath:'../resources/',indexpath:'../xmls/'}});
         Lime.Viewer.loadIn('view',{name:src,type:type});});};"#;
-    let metadata = xml("1.1", 9, 7, 2, 2);
-    let viewer = "https://images.test/collection/views/book.html?l=1&amp;n=6";
-    for (script_path, call, config, target, first) in [
+    [
         (
             "../limescripts/lime.js",
             "lime('book');",
@@ -528,7 +537,14 @@ fn deployed_wrappers_share_document_relative_discovery() {
             "../resources/image/root.xml",
             "../resources/image/root.xml",
         ),
-    ] {
+    ]
+}
+
+#[test]
+fn deployed_wrappers_share_document_relative_discovery() {
+    let metadata = xml("1.1", 9, 7, 2, 2);
+    let viewer = "https://images.test/collection/views/book.html?l=1&amp;n=6";
+    for (script_path, call, config, target, first) in deployed_wrapper_cases() {
         // Shared scripts can be hosted elsewhere; configuration stays document-relative.
         let page = format!(
             "<script src='{}'></script><body onclick=\"lime('unused','fzp')\" onload=\"{call}\">",

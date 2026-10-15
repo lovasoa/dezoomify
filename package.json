@@ -36,7 +36,7 @@
   "scripts": {
     "lint": "biome lint --error-on-warnings .",
     "format": "biome check --write .",
-    "check:biome": "biome check .",
+    "check:biome": "biome check --error-on-warnings .",
     "fix:biome": "biome lint --write --unsafe .",
     "typecheck": "tsc --noEmit && pnpm -r typecheck",
     "build": "vite build",
