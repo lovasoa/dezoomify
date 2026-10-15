@@ -203,9 +203,12 @@ macro_rules! output_codecs {
             pub const fn as_str(self) -> &'static str {
                 match self { $(Self::$variant => $id),* }
             }
-            pub const fn codec(self) -> &'static OutputCodec { &OUTPUT_CODECS[self as usize] }
-            pub const fn extension(self) -> &'static str { self.codec().extensions[0] }
-            pub const fn is_directory(self) -> bool {
+            pub fn codec(self) -> &'static OutputCodec {
+                OUTPUT_CODECS.iter().find(|codec| codec.format == self)
+                    .expect("every output format has a registry entry")
+            }
+            pub fn extension(self) -> &'static str { self.codec().extensions[0] }
+            pub fn is_directory(self) -> bool {
                 matches!(self.codec().layout, OutputLayout::Directory)
             }
             pub fn from_extension(extension: &str) -> Option<Self> {
@@ -556,10 +559,6 @@ pub enum LimitReason {
     /// Output assembly (canvas, tile retention, or spooling) exceeded a
     /// memory budget.
     Memory,
-    /// A side exceeded the JPEG 65535 px bound.
-    JpegSide,
-    /// A side exceeded the WebP 16383 px bound.
-    WebpSide,
     /// A side exceeded the registered codec's dimension limit.
     CodecSide(OutputFormat),
 }
@@ -835,8 +834,6 @@ fn attempt_count(attempts: &u32) -> String {
 fn limit_facts(limit: &LimitContext) -> String {
     let reason = match limit.reason {
         LimitReason::Memory => "memory".to_string(),
-        LimitReason::JpegSide => "jpeg per-side".to_string(),
-        LimitReason::WebpSide => "webp per-side".to_string(),
         LimitReason::CodecSide(format) => format!("{} per-side", format.as_str()),
     };
     let mut facts = vec![reason.to_string()];

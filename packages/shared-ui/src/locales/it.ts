@@ -249,7 +249,7 @@ export const it = {
   "desktop.msg.dimsPixels": "{a} per {b} pixel",
   "desktop.msg.needAbout": " Serve circa {need} di memoria",
   "desktop.output.canvasLimit":
-    "Questa immagine è troppo grande per essere composta su questo computer ({dims},{need} a 4 byte per pixel, limite {limit}). Salva una versione più piccola con Larghezza max (CLI: --max-width). Nota: il JPEG accetta al più {jpegMax} pixel per lato; usa il PNG per immagini più grandi. Da {host}.",
+    "Questa immagine richiede più memoria di quella disponibile ({dims},{need}; limite {limit}). Salva una versione più piccola con Larghezza max (CLI: --max-width), oppure scegli una cartella di tessere. Da {host}.",
   "desktop.tile.failed":
     "Impossibile recuperare un frammento da {host}. Controlla l’immagine originale e riprova.",
   "view.discovery.none":

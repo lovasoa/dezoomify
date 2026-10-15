@@ -3,18 +3,6 @@ use std::path::PathBuf;
 
 use dezoomify::model::{Error, LimitContext, LimitReason, OutputFormat, OutputLayout, Size};
 
-/// JPEG caps both dimensions at 65535 pixels.
-pub const JPEG_MAX_SIDE: u32 = OutputFormat::Jpeg
-    .codec()
-    .max_side
-    .expect("JPEG side limit");
-
-/// WebP lossless caps both dimensions at 16383 px.
-pub const WEBP_MAX_SIDE: u32 = OutputFormat::Webp
-    .codec()
-    .max_side
-    .expect("WebP side limit");
-
 pub(crate) fn check_dimensions(
     format: dezoomify::model::OutputFormat,
     size: &Size,
@@ -25,13 +13,7 @@ pub(crate) fn check_dimensions(
     if size.width > maximum || size.height > maximum {
         return Err(Error::LimitExceeded {
             limit: LimitContext {
-                // Preserve the two released reason strings; new codecs carry
-                // their format instead of introducing another error variant.
-                reason: match format {
-                    OutputFormat::Jpeg => LimitReason::JpegSide,
-                    OutputFormat::Webp => LimitReason::WebpSide,
-                    _ => LimitReason::CodecSide(format),
-                },
+                reason: LimitReason::CodecSide(format),
                 dimensions: Some(size.clone()),
                 bytes_required: None,
                 bytes_available: None,

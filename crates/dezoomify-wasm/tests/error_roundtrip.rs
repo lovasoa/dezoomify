@@ -83,7 +83,9 @@ fn the_kind_tag_is_the_single_stable_identifier() {
         (
             Error::LimitExceeded {
                 limit: dezoomify::model::LimitContext {
-                    reason: dezoomify::model::LimitReason::JpegSide,
+                    reason: dezoomify::model::LimitReason::CodecSide(
+                        dezoomify::model::OutputFormat::Jpeg,
+                    ),
                     dimensions: None,
                     bytes_required: None,
                     bytes_available: None,

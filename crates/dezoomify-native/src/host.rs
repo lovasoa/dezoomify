@@ -112,8 +112,14 @@ fn safe_output_stem(title: Option<&str>) -> String {
 
 fn automatic_image_format(size: Vec2d, transparent: bool) -> OutputFormat {
     if !transparent
-        && size.x <= crate::imaging::JPEG_MAX_SIDE
-        && size.y <= crate::imaging::JPEG_MAX_SIDE
+        && crate::imaging::check_dimensions(
+            OutputFormat::Jpeg,
+            &Size {
+                width: size.x,
+                height: size.y,
+            },
+        )
+        .is_ok()
     {
         OutputFormat::Jpeg
     } else {

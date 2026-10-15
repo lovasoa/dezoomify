@@ -324,7 +324,7 @@ export interface DiagnosticReport {
  * [`LimitContext`]; `message` prose is presentation only and is never a
  * data channel between languages.
  */
-export type LimitReason = "memory" | "jpeg-side" | "webp-side" | { "codec-side": OutputFormat };
+export type LimitReason = "memory" | { "codec-side": OutputFormat };
 
 export interface DiagnosticFailureGroup {
     key: string;

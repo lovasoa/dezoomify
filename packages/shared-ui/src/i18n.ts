@@ -336,7 +336,7 @@ const en = {
   "desktop.msg.dimsPixels": "{a} by {b} pixels",
   "desktop.msg.needAbout": " It needs about {need} of memory",
   "desktop.output.canvasLimit":
-    "This picture is too large to assemble on this computer ({dims},{need} at 4 bytes per pixel, limit {limit}). Save a smaller version with Max width (CLI: --max-width). Note: JPEG saves at most {jpegMax} pixels per side; keep PNG for larger pictures. From {host}.",
+    "This picture needs more memory than is available ({dims},{need}; limit {limit}). Save a smaller version with Max width (CLI: --max-width), or choose a tile folder. From {host}.",
   "desktop.output.codecLimit":
     "This picture ({dims}) is too large for {format}, which allows at most {maxSide} pixels per side. Save it as PNG instead. From {host}.",
   "desktop.tile.failed":

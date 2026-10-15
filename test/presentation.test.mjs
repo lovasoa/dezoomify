@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { outputCodecs } from "@dezoomify/wasm-bindings/codecs";
 import { renderSaveGuidance } from "../packages/shared-ui/src/components.ts";
-import { canRetry, detailOf, plainMessageFor } from "../packages/shared-ui/src/failure.ts";
+import {
+  canRetry,
+  detailOf,
+  isJobError,
+  plainMessageFor,
+} from "../packages/shared-ui/src/failure.ts";
 import {
   presentFailure,
   presentIdle,
@@ -19,18 +25,26 @@ const output = (extra = {}) => ({
   ...extra,
 });
 
-test("AVIF dimension failures use structured facts and give a saving alternative", () => {
-  const message = plainMessageFor(
-    {
+test("codec dimension failures use the registry for validation and guidance", () => {
+  for (const codec of outputCodecs.filter((codec) => codec.max_side)) {
+    const error = {
       kind: "limit-exceeded",
-      limit: { reason: { "codec-side": "avif" }, dimensions: { width: 65_536, height: 12 } },
-    },
-    "museum.test",
+      limit: {
+        reason: { "codec-side": codec.format },
+        dimensions: { width: codec.max_side + 1, height: 12 },
+      },
+    };
+    assert.equal(isJobError(error), true);
+    const message = plainMessageFor(error, "museum.test");
+    assert.ok(message.includes(codec.name));
+    assert.ok(message.includes(String(codec.max_side)));
+    assert.match(message, /PNG/);
+    assert.match(message, /museum.test/);
+  }
+  assert.equal(
+    isJobError({ kind: "limit-exceeded", limit: { reason: { "codec-side": "unknown" } } }),
+    false,
   );
-  assert.match(message, /AVIF/);
-  assert.match(message, /65535/);
-  assert.match(message, /PNG/);
-  assert.match(message, /museum.test/);
 });
 
 test("native output preparation uses pixel progress and does not pause compression", () => {

@@ -33,10 +33,11 @@ const sizes = [
 type SizePreset = string;
 
 function codecFor(format: DesktopSettings["output_format"]) {
-  return (
-    outputCodecs.find((codec) => codec.format === (format === "auto" ? "jpeg" : format)) ??
-    outputCodecs[0]
+  const codec = outputCodecs.find(
+    (codec) => codec.format === (format === "auto" ? "jpeg" : format),
   );
+  if (!codec) throw new Error(`Unregistered output format: ${format}`);
+  return codec;
 }
 
 function formatLimit(format: DesktopSettings["output_format"]): number {
@@ -56,7 +57,10 @@ function formatDescription(format: DesktopSettings["output_format"]): string {
 function estimateSize(width: number, height: number, settings: DesktopSettings): string {
   const codec = codecFor(settings.output_format);
   const quality = 100 - settings.compression;
-  const bytesPerPixel = codec.size_coefficients.find(([upper]) => quality <= upper)?.[1] ?? 0;
+  const coefficient = codec.size_coefficients.find(([upper]) => quality <= upper);
+  if (!coefficient)
+    throw new Error(`Missing size estimate for ${codec.name} at quality ${quality}`);
+  const bytesPerPixel = coefficient[1];
   const pyramid = codec.layout === "pyramid" || codec.layout === "directory" ? 4 / 3 : 1;
   const pixels = width * height;
   const mb = (pixels * bytesPerPixel * pyramid) / 1_000_000;

@@ -250,7 +250,7 @@ export const fr = {
   "desktop.msg.dimsPixels": "{a} par {b} pixels",
   "desktop.msg.needAbout": " Elle a besoin d’environ {need} de mémoire",
   "desktop.output.canvasLimit":
-    "Cette image est trop grande pour être assemblée sur cet ordinateur ({dims},{need} à 4 octets par pixel, limite {limit}). Enregistrez une version plus petite avec Largeur max (CLI : --max-width). Note : le JPEG accepte au plus {jpegMax} pixels par côté ; gardez le PNG pour les images plus grandes. Depuis {host}.",
+    "Cette image nécessite plus de mémoire que la quantité disponible ({dims},{need} ; limite {limit}). Enregistrez une version plus petite avec Largeur max (CLI : --max-width), ou choisissez un dossier de tuiles. Depuis {host}.",
   "desktop.tile.failed":
     "Impossible de récupérer un fragment depuis {host}. Vérifiez l’image source et réessayez.",
   "view.discovery.none":

@@ -42,11 +42,7 @@ fn known_codec_limits_fail_before_ordinary_tile_fetches() {
             ))
             .unwrap_err();
         assert!(matches!(error.cause(), Error::LimitExceeded { limit }
-        if limit.reason == match codec.format {
-            dezoomify::model::OutputFormat::Jpeg => LimitReason::JpegSide,
-            dezoomify::model::OutputFormat::Webp => LimitReason::WebpSide,
-            format => LimitReason::CodecSide(format),
-        }));
+            if limit.reason == LimitReason::CodecSide(codec.format)));
         assert!(host.publication().is_none());
     }
     assert_eq!(counts.lock().unwrap().len(), 1, "only metadata was fetched");

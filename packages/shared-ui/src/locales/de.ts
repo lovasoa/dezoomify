@@ -253,7 +253,7 @@ export const de = {
   "desktop.msg.dimsPixels": "{a} mal {b} Pixel",
   "desktop.msg.needAbout": " Es braucht etwa {need} Speicher",
   "desktop.output.canvasLimit":
-    "Dieses Bild ist zu groß, um es auf diesem Rechner zusammenzusetzen ({dims},{need} bei 4 Byte je Pixel, Grenze {limit}). Speichern Sie eine kleinere Fassung mit Max. Breite (CLI: --max-width). Hinweis: JPEG erlaubt höchstens {jpegMax} Pixel je Seite; behalten Sie PNG für größere Bilder. Von {host}.",
+    "Dieses Bild benötigt mehr Arbeitsspeicher als verfügbar ({dims},{need}; Grenze {limit}). Speichern Sie eine kleinere Fassung mit Max. Breite (CLI: --max-width), oder wählen Sie einen Kachelordner. Von {host}.",
   "desktop.tile.failed":
     "Eine Kachel von {host} konnte nicht geladen werden. Prüfen Sie das Quellbild und versuchen Sie es erneut.",
   "view.discovery.none":

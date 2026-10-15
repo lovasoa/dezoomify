@@ -7,9 +7,6 @@ import { outputCodecs } from "@dezoomify/wasm-bindings/codecs";
 import { type I18nKey, t } from "./i18n.ts";
 import type { ViewContext } from "./view-types.ts";
 
-// Kept only for the existing memory-limit guidance template.
-const JPEG_MAX_SIDE = outputCodecs.find((codec) => codec.format === "jpeg")?.max_side ?? 0;
-
 // Human-readable byte counts for limit copy (exact bytes plus a
 // GiB/MiB approximation).
 function formatBytes(bytes: number): string {
@@ -123,8 +120,8 @@ const TRANSPORTS = new Set([
   "display-only",
 ]);
 const RESOURCE_KINDS = new Set(["metadata", "tile", "probe", "output"]);
-// Closed enums of the generated contract's wire values (`BlockedReason`,
-// `LimitReason`); the generated package declares types only, so this runtime
+// Closed enum of the generated contract's `BlockedReason` wire values;
+// the generated package declares types only, so this runtime
 // list is their wire spelling. An unknown member is a binding error waiting
 // to happen.
 const BLOCKED_REASONS = new Set([
@@ -155,7 +152,6 @@ const BLOCKED_REASONS = new Set([
   "throttled",
   "userinfo",
 ]);
-const LIMIT_REASONS = new Set(["memory", "jpeg-side", "webp-side"]);
 
 /** Narrow a wire value to the generated `BlockedReason` union; an unknown
  * member is simply absent. */
@@ -205,11 +201,15 @@ function isJobErrorAt(value: unknown, depth: number): boolean {
       return typeof record.format === "string" && record.format.length > 0;
     case "limit-exceeded": {
       const limit = record.limit as Record<string, unknown> | undefined;
+      const reason = limit?.reason;
+      const codec =
+        reason && typeof reason === "object"
+          ? (reason as Record<string, unknown>)["codec-side"]
+          : undefined;
       return (
         !!limit &&
         typeof limit === "object" &&
-        typeof limit.reason === "string" &&
-        LIMIT_REASONS.has(limit.reason) &&
+        (reason === "memory" || outputCodecs.some((entry) => entry.format === codec)) &&
         (limit.dimensions === undefined || size(limit.dimensions)) &&
         (limit.bytes_required === undefined || num(limit.bytes_required)) &&
         (limit.bytes_available === undefined || num(limit.bytes_available))
@@ -333,14 +333,7 @@ export function plainMessageFor(
           ? formatBytes(cause.limit.bytes_available)
           : "currently available memory";
       const reason = cause.limit.reason;
-      const format =
-        typeof reason === "object"
-          ? reason["codec-side"]
-          : reason === "jpeg-side"
-            ? "jpeg"
-            : reason === "webp-side"
-              ? "webp"
-              : null;
+      const format = reason === "memory" ? null : reason["codec-side"];
       const codec = outputCodecs.find((codec) => codec.format === format);
       if (codec?.max_side) {
         return t("desktop.output.codecLimit", {
@@ -354,7 +347,6 @@ export function plainMessageFor(
         dims,
         need,
         limit: available,
-        jpegMax: JPEG_MAX_SIDE,
         host,
       });
     }
