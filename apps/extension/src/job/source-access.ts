@@ -130,7 +130,6 @@ export function createSourceAccess(
   const sessionFrames = new Map<string, SourceFrame>([[sourceOrigin, rootFrame]]);
   const timeoutMs = options.timeoutMs ?? 30_000;
   const lifetime = new AbortController();
-  let invalidated = false;
   const onUpdated = (updatedTabId: number, changeInfo: { status?: string; url?: string }) => {
     if (updatedTabId !== tabId) return;
     if (changeInfo.status === "loading") {
@@ -144,15 +143,26 @@ export function createSourceAccess(
     if (removedTabId === tabId) invalidate();
   };
   function invalidate() {
-    if (invalidated) return;
-    invalidated = true;
     lifetime.abort(transportError("source-lost", "source document changed"));
   }
   browserApi.tabs.onUpdated.addListener(onUpdated);
   browserApi.tabs.onRemoved.addListener(onRemoved);
 
   function assertLive() {
-    if (invalidated) throw transportError("source-lost", "source document changed");
+    lifetime.signal.throwIfAborted();
+  }
+
+  async function checkSourceTab(signal: AbortSignal) {
+    const tab = await browserApi.tabs.get(tabId).catch(() => null);
+    signal.throwIfAborted();
+    assertLive();
+    if (!tab?.url || !sameDocumentUrl(tab.url, documentUrl)) {
+      invalidate();
+      throw transportError(
+        "source-lost",
+        tab ? "source document changed" : "source tab is unavailable",
+      );
+    }
   }
 
   function target(frame: SourceFrame) {
@@ -206,17 +216,7 @@ export function createSourceAccess(
   ): Promise<Awaited<Result>> {
     assertLive();
     signal.throwIfAborted();
-    const tab = await browserApi.tabs.get(tabId).catch(() => null);
-    signal.throwIfAborted();
-    if (!tab) {
-      invalidate();
-      throw transportError("source-lost", "source tab is unavailable");
-    }
-    if (!tab.url || !sameDocumentUrl(tab.url, documentUrl)) {
-      invalidate();
-      throw transportError("source-lost", "source document changed");
-    }
-    assertLive();
+    await checkSourceTab(signal);
     // Native document targets reject replacement documents atomically. Older
     // Firefox uses isolated-world tokens, checked again before accepting data.
     if (!frame.documentId) await inspect(frame, signal);
@@ -247,12 +247,7 @@ export function createSourceAccess(
       throw transportError("bad-url", "source operation returned an invalid result");
     if (frame.documentId && results[0].documentId !== frame.documentId) throw lostFrame(frame);
     if (!frame.documentId) await inspect(frame, signal);
-    const tabAfter = await browserApi.tabs.get(tabId).catch(() => null);
-    if (!tabAfter?.url || !sameDocumentUrl(tabAfter.url, documentUrl)) {
-      invalidate();
-      throw transportError("source-lost", "source document changed");
-    }
-    assertLive();
+    await checkSourceTab(signal);
     const result = results[0].result;
     const resultDocumentUrl =
       isRecord(result) && typeof result.documentUrl === "string" ? result.documentUrl : null;
@@ -468,10 +463,7 @@ export function createSourceAccess(
         !sameDocumentUrl(root.result.documentUrl, documentUrl)
       )
         throw lostFrame(rootFrame);
-      const tab = await browserApi.tabs.get(tabId).catch(() => null);
-      owned.throwIfAborted();
-      assertLive();
-      if (!tab?.url || !sameDocumentUrl(tab.url, documentUrl)) throw lostFrame(rootFrame);
+      await checkSourceTab(owned);
       const frames: SourceFrame[] = [];
       const origins = new Set<string>();
       for (const reply of replies) {
@@ -586,12 +578,10 @@ export function createSourceAccess(
     const operationId = crypto.randomUUID();
     const frame = sessionFrames.get(originOfUrl(request.uri)) ?? rootFrame;
     const deadlineAt = Date.now() + timeoutMs;
-    const sourceRequest: SourceRequest = {
+    const sourceRequest = {
       url: request.uri,
-      method: "GET",
       headers,
       operationId,
-      timeoutMs,
       deadlineAt,
     };
     const cancel = () => {
@@ -599,7 +589,7 @@ export function createSourceAccess(
         .executeScript({
           target: target(frame),
           func: cancelSourceFetch,
-          args: [operationId, deadlineAt, frame.token],
+          args: [operationId, deadlineAt, frame.token ?? ""],
         })
         .then(() => undefined);
     };

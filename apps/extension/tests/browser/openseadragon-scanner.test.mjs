@@ -33,6 +33,8 @@ for (const [name, engine] of [
         "zoomify",
         "iip",
         "frame",
+        "blob-frame",
+        "http-frame",
         "large-dom",
         "negative",
         "throwing-listener",
@@ -46,6 +48,11 @@ for (const [name, engine] of [
         page.on("pageerror", (error) => pageErrors.push(error.message));
         try {
           await page.route("https://fixture.invalid/**", async (route) => {
+            if (route.request().isNavigationRequest())
+              return route.fulfill({
+                contentType: "text/html",
+                body: '<div id="v" style="width:800px;height:600px"></div>',
+              });
             if (route.request().url().includes("obj="))
               return route.fulfill({
                 contentType: "text/plain",
@@ -53,9 +60,7 @@ for (const [name, engine] of [
               });
             return route.fulfill({ contentType: "image/png", body: tile });
           });
-          await page.setContent(
-            '<base href="https://fixture.invalid/"><div id="v" style="width:800px;height:600px"></div>',
-          );
+          await page.goto("https://fixture.invalid/parent");
           const library = readFileSync(
             new URL(import.meta.resolve("openseadragon/build/openseadragon/openseadragon.min.js")),
             "utf8",
@@ -64,13 +69,17 @@ for (const [name, engine] of [
             content: `(()=>{${library}\nwindow.OpenSeadragon=OpenSeadragon;})()`,
           });
           let scope = page;
-          if (mode === "frame") {
-            await page.evaluate(() => {
+          if (["frame", "blob-frame", "http-frame"].includes(mode)) {
+            await page.evaluate((mode) => {
               const frame = document.createElement("iframe");
-              frame.srcdoc =
+              const html =
                 '<base href="https://fixture.invalid/"><div id="v" style="width:800px;height:600px"></div>';
+              if (mode === "frame") frame.srcdoc = html;
+              else if (mode === "blob-frame")
+                frame.src = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+              else frame.src = "https://fixture.invalid/frame";
               document.body.append(frame);
-            });
+            }, mode);
             await page.waitForFunction(() =>
               document.querySelector("iframe").contentDocument?.getElementById("v"),
             );
@@ -248,9 +257,22 @@ for (const [name, engine] of [
               }
             })()`);
           const result = measured.result;
+          if (mode === "http-frame") {
+            assert.equal(result.diagnostics.documents, 1, "the parent scans only its document");
+            const child = await scope.evaluate(`(async () => {
+              ${scannerScript}
+              return OpenSeadragonScanner.scanOpenSeadragon(Date.now() + 1500);
+            })()`);
+            assert.equal(child.inputs.length, 1, "the inventory can scan the HTTP child directly");
+            assert.equal(child.diagnostics.documents, 1);
+          }
           assert.equal(
             result.inputs.length,
-            ["negative", "frozen-apply", "private-disabled", "sparse-dzi"].includes(mode) ? 0 : 1,
+            ["http-frame", "negative", "frozen-apply", "private-disabled", "sparse-dzi"].includes(
+              mode,
+            )
+              ? 0
+              : 1,
             `${version}/${mode}: ${JSON.stringify(result.diagnostics)}`,
           );
           for (const input of result.inputs) {

@@ -46,27 +46,29 @@ function fakeBrowser(execute) {
       },
       scripting: {
         async executeScript(injection) {
-          const documents = frames();
+          const documents = frames().filter(
+            (frame) =>
+              injection.target.allFrames ||
+              injection.target.frameIds?.includes(frame.frameId) ||
+              injection.target.documentIds?.includes(frame.documentId),
+          );
           if (injection.func === inspectSourceDocument) {
-            return documents
-              .filter(
-                (frame) =>
-                  injection.target.allFrames ||
-                  injection.target.frameIds?.includes(frame.frameId) ||
-                  injection.target.documentIds?.includes(frame.documentId),
-              )
-              .map((frame) => ({
-                frameId: frame.frameId,
-                ...(frame.documentId ? { documentId: frame.documentId } : {}),
-                result: {
-                  documentUrl: frame.documentUrl,
-                  token: frame.token,
-                  frames: frame.frames ?? [],
-                },
-              }));
+            return documents.map((frame) => ({
+              frameId: frame.frameId,
+              ...(frame.documentId ? { documentId: frame.documentId } : {}),
+              result: {
+                documentUrl: frame.documentUrl,
+                token: frame.token,
+                frames: frame.frames ?? [],
+              },
+            }));
           }
+          if (documents.length === 0) throw new Error("The targeted document no longer exists");
           calls.push(injection);
-          return [{ frameId: injection.target.frameIds[0], result: await execute(injection) }];
+          const { frameId, documentId } = documents[0];
+          return [
+            { frameId, ...(documentId ? { documentId } : {}), result: await execute(injection) },
+          ];
         },
       },
     },
@@ -227,6 +229,36 @@ test("a same-URL reload during MAIN-world scanning invalidates the document toke
   }
 });
 
+test("native document targets prevent a frame's session from rebinding after a same-URL reload", async () => {
+  const foreign = "https://viewer.example/widget";
+  const fake = fakeBrowser(async () => snapshot(foreign));
+  const root = { frameId: 0, documentUrl: SOURCE_URL, token: "root", documentId: "root-id" };
+  const child = { frameId: 8, documentUrl: foreign, token: "viewer", documentId: "viewer-id" };
+  fake.setFrames([root, child]);
+  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  const observe = source.observations({
+    hasPermission: () => assert.fail("a successful probe already establishes access"),
+    ensurePermission: () => assert.fail("no new permission needed"),
+    scanned: () => {},
+    failed: (_frame, error) => {
+      throw error;
+    },
+  });
+  const signal = new AbortController().signal;
+  try {
+    await observe("forbidden", signal);
+    assert.ok(fake.calls.every((call) => call.target.documentIds?.[0] === "viewer-id"));
+    fake.setFrames([root, { ...child, token: "replacement", documentId: "replacement-id" }]);
+    await assert.rejects(source.fetch({ uri: foreign, headers: [] }, signal), {
+      kind: "network-failure",
+      detail: "The targeted document no longer exists",
+    });
+    assert.equal(fake.calls.length, 2, "no fetch executes in the replacement document");
+  } finally {
+    source.dispose();
+  }
+});
+
 test("a lost frame-inventory reply remains bounded", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const fake = fakeBrowser(() => assert.fail("no full scan should run"));
@@ -315,7 +347,7 @@ test("job-page source access calls injected scan and fetch with inferred argumen
     if (func === collectCandidates) return snapshot();
     assert.equal(func, fetchSource);
     assert.equal(args[0].url, "https://gallery.example/info.json");
-    assert.equal(args[0].method, "GET");
+    assert.equal(args[0].documentToken, "root");
     assert.deepEqual(args[0].headers, [{ name: "Accept", value: "application/json" }]);
     assert.equal(typeof args[0].operationId, "string");
     return {

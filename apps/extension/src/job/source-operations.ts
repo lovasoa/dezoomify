@@ -11,12 +11,10 @@ import type { DiscoveryInputKind, Error as JobError, JobInput } from "@dezoomify
 
 type SourceRequest = {
   url: string;
-  method?: string;
   headers: Array<{ name: string; value: string }>;
-  operationId?: string;
-  timeoutMs?: number;
-  deadlineAt?: number;
-  documentToken?: string;
+  operationId: string;
+  deadlineAt: number;
+  documentToken: string;
 };
 
 type SourceFetch = { controller: AbortController; finished: Promise<void> };
@@ -140,7 +138,7 @@ export function collectCandidates(): {
 
 /**
  * Fetch one source request in the source tab's origin and return only
- * bounded, structured-cloneable data. The job page validates URL, method,
+ * bounded, structured-cloneable data. The job page validates URL
  * and headers before injection; this function performs tab-side I/O.
  * Credentials default to
  * same-origin: the page's session applies to its own origin, while public
@@ -169,7 +167,7 @@ export async function fetchSource(request: SourceRequest): Promise<
     __dezoomifySourceFetches?: Map<string, SourceFetch | null>;
     __dezoomifyDocumentToken?: string;
   };
-  if (request.documentToken && world.__dezoomifyDocumentToken !== request.documentToken)
+  if (!request.documentToken || world.__dezoomifyDocumentToken !== request.documentToken)
     return {
       ok: false,
       documentUrl,
@@ -190,15 +188,15 @@ export async function fetchSource(request: SourceRequest): Promise<
   const headers: Record<string, string> = {};
   for (const header of request.headers) headers[header.name] = header.value;
 
-  const deadlineAt = request.deadlineAt ?? Date.now() + (request.timeoutMs ?? 30_000);
+  const { deadlineAt, operationId } = request;
   if (Date.now() >= deadlineAt)
     return fail({
       kind: "timeout",
       transport: "browser-session",
       detail: "the source request timed out",
     });
-  if (request.operationId && controllers.get(request.operationId) === null) {
-    controllers.delete(request.operationId);
+  if (controllers.get(operationId) === null) {
+    controllers.delete(operationId);
     return fail({ kind: "cancelled" });
   }
   const controller = new AbortController();
@@ -214,12 +212,12 @@ export async function fetchSource(request: SourceRequest): Promise<
     },
     Math.max(0, deadlineAt - Date.now()),
   );
-  if (request.operationId) controllers.set(request.operationId, { controller, finished });
+  controllers.set(operationId, { controller, finished });
   try {
     const response = await fetch(request.url, {
-      method: request.method ?? "GET",
+      method: "GET",
       headers,
-      signal: controller?.signal,
+      signal: controller.signal,
     });
     if (!response || typeof response.status !== "number")
       return fail({
@@ -279,9 +277,7 @@ export async function fetchSource(request: SourceRequest): Promise<
       const value = part instanceof Uint8Array ? part : new Uint8Array(part ?? []);
       total += value.byteLength;
       if (total > MAX_SOURCE_FETCH_BYTES) {
-        try {
-          controller?.abort?.();
-        } catch {}
+        controller.abort();
         throw { kind: "size-limit", max_bytes: MAX_SOURCE_FETCH_BYTES };
       }
       parts.push(value);
@@ -336,7 +332,7 @@ export async function fetchSource(request: SourceRequest): Promise<
   } finally {
     controller.abort();
     clearTimeout(timer);
-    if (request.operationId) controllers.delete(request.operationId);
+    controllers.delete(operationId);
     finish();
   }
 }
@@ -345,13 +341,13 @@ export async function fetchSource(request: SourceRequest): Promise<
 export async function cancelSourceFetch(
   operationId: string,
   deadlineAt: number,
-  documentToken?: string,
+  documentToken: string,
 ): Promise<void> {
   const world = globalThis as typeof globalThis & {
     __dezoomifySourceFetches?: Map<string, SourceFetch | null>;
     __dezoomifyDocumentToken?: string;
   };
-  if (documentToken && world.__dezoomifyDocumentToken !== documentToken) return;
+  if (!documentToken || world.__dezoomifyDocumentToken !== documentToken) return;
   world.__dezoomifySourceFetches ??= new Map();
   const requests = world.__dezoomifySourceFetches;
   const running = requests.get(operationId);
