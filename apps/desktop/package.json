@@ -13,18 +13,18 @@
     "@dezoomify/browser-runtime": "workspace:*",
     "@dezoomify/shared-ui": "workspace:*",
     "@dezoomify/wasm-bindings": "workspace:*",
-    "@tauri-apps/api": "2.11.1",
-    "@tauri-apps/plugin-opener": "2.5.5",
+    "@tauri-apps/api": "2.12.1",
+    "@tauri-apps/plugin-opener": "2.7.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.12.1",
+    "@tauri-apps/cli": "2.12.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^6.1.1",
+    "@vitejs/plugin-react": "^6.1.2",
     "linkedom": "^0.18.13",
     "typescript": "^7.0.2",
-    "vite": "^8.3.1"
+    "vite": "^8.3.4"
   }
 }

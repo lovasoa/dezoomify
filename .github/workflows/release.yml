@@ -37,7 +37,7 @@ jobs:
           fetch-depth: 0
       - id: commit
         run: echo "value=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # pinned
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # pinned
         with:
           toolchain: 1.98.1
       - name: Require green CI for a numbered release
@@ -64,7 +64,7 @@ jobs:
           else
             cargo xtask release plan
           fi
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-plan
           path: target/release-dist
@@ -96,7 +96,7 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
         with:
           install: true
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # pinned
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # pinned
         with:
           toolchain: 1.98.1
           targets: wasm32-unknown-unknown
@@ -156,7 +156,7 @@ jobs:
           cargo xtask release build --plan "target/release-dist/$v/plan.json" --target "${{ matrix.target }}"
           if ($LASTEXITCODE -ne 0) { throw "release artifact build failed" }
           Remove-Item "target/release-dist/$v/plan.json", "target/release-dist/$v/notes.md"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-${{ matrix.target }}
           path: target/release-dist
@@ -170,7 +170,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.commit }}
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # pinned
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # pinned
         with:
           toolchain: 1.98.1
       - name: Reassemble artifacts
@@ -186,7 +186,7 @@ jobs:
         run: |
           v="${{ needs.prepare.outputs.version }}"
           cargo xtask release verify --plan "target/release-dist/$v/plan.json" --artifacts "target/release-dist/$v"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-verified
           path: target/release-dist
@@ -203,7 +203,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.commit }}
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # pinned
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # pinned
         with:
           toolchain: 1.98.1
       - name: Download verified artifacts
