@@ -6,7 +6,13 @@
 // over-budget body.
 
 import type { ResourceRequest } from "@dezoomify/wasm-bindings";
+import {
+  readRequestedBytes,
+  requestedByteRange,
+} from "../packages/browser-runtime/src/byte-range.ts";
+import { forwardCoreHeaders } from "../packages/browser-runtime/src/fetch-primitives.ts";
 import { readResponseBytes, retryAfterMs } from "../packages/browser-runtime/src/response-body.ts";
+import { isProxyEligible } from "../packages/browser-runtime/src/web-fetch.ts";
 
 export const PROXY_UPSTREAM_URL_HEADER = "x-proxy-upstream-url";
 
@@ -33,7 +39,7 @@ export interface ProxyFetchResult {
 export type ProxyFetchImpl = typeof fetch;
 
 /**
- * Frontend guard for the Cloudflare metadata CORS proxy: at most 4 proxy
+ * Frontend guard for the Cloudflare public image data relay: at most 4 proxy
  * requests in flight at a time and at most 4 proxy request starts per
  * second. The backend enforces its own limit; this client-side gate keeps a
  * single page (discovery fan-out plus any tile-image fetches that also use
@@ -287,27 +293,21 @@ export function createProxyTransport(
     request: ResourceRequest,
     callOpts?: { signal?: AbortSignal },
   ): Promise<ProxyFetchResult> {
-    if (request.purpose !== "metadata") {
+    if (!["metadata", "tile", "probe"].includes(request.purpose)) {
       return { ok: false, status: 0, code: "PROXY_POLICY_DENIED", reason: "method" };
     }
-    if (
-      (request.headers ?? []).some(
-        ({ name }) => !["accept", "accept-language"].includes(name.toLowerCase()),
-      )
-    ) {
-      return { ok: false, status: 0, code: "PROXY_POLICY_DENIED", reason: "unsupported-header" };
-    }
-    const targetUrl = request.uri;
-    // Reject credential-bearing targets before any proxy request.
-    let parsed: URL;
+    const eligibility = isProxyEligible(request);
+    if (!eligibility.eligible)
+      return { ok: false, status: 0, code: "PROXY_POLICY_DENIED", reason: eligibility.reason };
+    let range: ReturnType<typeof requestedByteRange>;
     try {
-      parsed = new URL(targetUrl);
+      range = requestedByteRange(request.headers);
     } catch {
-      return { ok: false, status: 0, code: "PROXY_POLICY_DENIED", reason: "invalid-url" };
+      return { ok: false, status: 0, code: "PROXY_POLICY_DENIED", reason: "malformed-body" };
     }
-    if (parsed.username !== "" || parsed.password !== "") {
-      return { ok: false, status: 0, code: "PROXY_POLICY_DENIED", reason: "userinfo" };
-    }
+    if (range && range.length > opts.maxBytes)
+      return { ok: false, status: 413, code: "PROXY_BUDGET_EXCEEDED" };
+    const targetUrl = request.uri;
     if (callOpts?.signal?.aborted) {
       return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
     }
@@ -322,7 +322,7 @@ export function createProxyTransport(
         signal: callOpts?.signal,
         headers: {
           "content-type": "application/json",
-          ...Object.fromEntries((request.headers ?? []).map(({ name, value }) => [name, value])),
+          ...forwardCoreHeaders(request.headers, request.purpose),
         },
         // Only target URL + protocol version; no cookies/auth/referrer/user headers.
         body: JSON.stringify({ targetUrl, protocolVersion: opts.protocolVersion }),
@@ -349,18 +349,23 @@ export function createProxyTransport(
       }
       let bytes: ArrayBuffer;
       try {
-        bytes = (
-          await readResponseBytes(
-            response,
-            response.ok ? opts.maxBytes : 4096,
-            callOpts?.signal,
-            !response.ok,
-          )
-        ).buffer;
+        bytes = response.ok
+          ? (await readRequestedBytes(response, range, opts.maxBytes, callOpts?.signal)).buffer
+          : (await readResponseBytes(response, 4096, callOpts?.signal, true)).buffer;
       } catch (error) {
         if (callOpts?.signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
         if ((error as { kind?: string })?.kind === "size-limit")
           return { ok: false, status: response.status, code: "PROXY_BUDGET_EXCEEDED", requestId };
+        if ((error as { kind?: string })?.kind === "bad-url")
+          return {
+            ok: false,
+            status: response.status,
+            code: "TRANSPORT_NETWORK_ERROR",
+            requestId,
+            preview: String(
+              (error as { detail?: string }).detail ?? "invalid relay response",
+            ).slice(0, 300),
+          };
         return { ok: false, status: response.status, code: "TRANSPORT_NETWORK_ERROR", requestId };
       }
       if (response.status < 200 || response.status > 299) {

@@ -8,9 +8,9 @@ export const REQUEST_TIMEOUT_MS = 30000;
 
 /**
  * Head-start window for the direct metadata fetch: if the site does not
- * answer within 1500 ms, the eligible metadata proxy takes over
+ * answer within 1500 ms, the eligible website proxy takes over
  * automatically after the direct request settles.
- * Tiles keep the full 30 s timeout (they never use the proxy).
+ * Tiles keep the full 30 s timeout before eligible proxy fallback.
  */
 export const DIRECT_METADATA_TIMEOUT_MS = 1500;
 

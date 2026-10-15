@@ -116,12 +116,14 @@ test("oversized declared body -> 413 budget", async (t) => {
   assert.equal(res.status, 413);
 });
 
-test("tile-like image content type -> 415 (metadata only)", async (t) => {
+test("bounded public image data is relayed", async (t) => {
   mockUpstream(() => ({ status: 200, headers: { "content-type": "image/jpeg" }, body: "jpeg" }), t);
   const res = await onRequestPost({
     request: postRequest('{"targetUrl":"https://public.test/tile.jpg","protocolVersion":1}'),
   });
-  assert.equal(res.status, 415);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "image/jpeg");
+  assert.equal(await res.text(), "jpeg");
 });
 
 test("viewer HTML page (e.g. a Google Arts asset page) is relayed as metadata", async (t) => {
@@ -141,7 +143,7 @@ test("viewer HTML page (e.g. a Google Arts asset page) is relayed as metadata", 
   assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
 });
 
-test("binary non-metadata upstream response -> 415", async (t) => {
+test("bounded public binary container data is relayed", async (t) => {
   mockUpstream(
     () => ({ status: 200, headers: { "content-type": "application/octet-stream" }, body: "\x00" }),
     t,
@@ -149,7 +151,48 @@ test("binary non-metadata upstream response -> 415", async (t) => {
   const res = await onRequestPost({
     request: postRequest('{"targetUrl":"https://public.test/blob","protocolVersion":1}'),
   });
-  assert.equal(res.status, 415);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "application/octet-stream");
+  assert.deepEqual(new Uint8Array(await res.arrayBuffer()), new Uint8Array([0]));
+});
+
+test("the Pages adapter forwards Range and exposes the partial response", async (t) => {
+  const calls = mockUpstream(
+    () => ({
+      status: 206,
+      headers: {
+        "content-type": "image/tiff",
+        "content-range": "bytes 4-7/20000000",
+        "content-length": "4",
+      },
+      body: "4567",
+    }),
+    t,
+  );
+  const res = await onRequestPost({
+    request: postRequest('{"targetUrl":"https://public.test/container","protocolVersion":1}', {
+      Range: "bytes=4-7",
+      Cookie: "secret",
+    }),
+  });
+  assert.equal(res.status, 206);
+  assert.equal(res.headers.get("content-range"), "bytes 4-7/20000000");
+  assert.match(res.headers.get("access-control-expose-headers"), /content-range/);
+  assert.equal(await res.text(), "4567");
+  assert.equal(calls.mock.calls[0].arguments[1].headers.range, "bytes=4-7");
+  assert.equal(calls.mock.calls[0].arguments[1].headers.cookie, undefined);
+});
+
+test("successful upstream bodyless statuses remain readable empty proxy payloads", async (t) => {
+  for (const status of [204, 205]) {
+    const calls = mockUpstream(() => ({ status, headers: { "content-type": "text/plain" } }), t);
+    const res = await onRequestPost({
+      request: postRequest('{"targetUrl":"https://public.test/empty","protocolVersion":1}'),
+    });
+    assert.equal(res.status, 200);
+    assert.equal((await res.arrayBuffer()).byteLength, 0);
+    calls.mock.restore();
+  }
 });
 
 test("transient upstream 429 is retried once and succeeds", async (t) => {

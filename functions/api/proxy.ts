@@ -1,5 +1,5 @@
 // Cloudflare Pages Function: binds POST /api/proxy to the pure relay in
-// ../../src/server/proxy.ts. Metadata files only, never tiles; no cookies or
+// ../../src/server/proxy.ts. Bounded public source data; no cookies or
 // credentials are accepted or forwarded. Pure modules live outside functions/
 // so that every file under it is a real route (legacy/functions/proxy.js owns
 // the /proxy route for the legacy site).
@@ -103,7 +103,7 @@ export async function onRequestOptions(context: { request: Request }): Promise<R
     headers: {
       ...cors,
       "access-control-allow-methods": "POST",
-      "access-control-allow-headers": "content-type",
+      "access-control-allow-headers": "content-type, range",
       "access-control-max-age": "600",
     },
   });

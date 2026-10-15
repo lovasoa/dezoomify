@@ -1,8 +1,7 @@
-// Website fetching with direct reads and metadata proxy fallback.
-// Direct browser fetch first; the metadata CORS proxy is an automatic
-// fallback for eligible public metadata only (never tiles, never
-// credentials). The single-policy proxy transport instance is supplied by
-// the caller. Progress and diagnostics callbacks update the job view.
+// Website fetching with direct reads and public-source proxy fallback.
+// Direct browser fetch first; the website proxy is an automatic fallback
+// for eligible public resources, without credentials. The caller supplies the
+// proxy transport. Progress and diagnostics callbacks update the job view.
 
 import type { ErrorTransport, Error as JobError, ResourceRequest } from "@dezoomify/wasm-bindings";
 import type { DiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
@@ -21,7 +20,7 @@ import {
 // Signed/credential query keys gate proxy fallback: URLs whose signature would
 // break, or that carry credentials, must never be proxied. The policy lives
 // once in `packages/shared-ui/src/source-url.ts` (`hasSignedQuery`) and is
-// shared with the metadata CORS proxy validator in `src/server/security.ts`.
+// shared with the website proxy validator in `src/server/security.ts`.
 
 function hasCredentialHeader(headers: ResourceRequest["headers"]): boolean {
   if (!headers) return false;
@@ -46,14 +45,7 @@ function isPrivateOrLocalHostname(hostname: string): boolean {
 }
 
 export function isProxyEligible(req: ResourceRequest): { eligible: boolean; reason: string } {
-  if (req.purpose !== "metadata") return { eligible: false, reason: "tile-never-proxied" };
   if (hasCredentialHeader(req.headers)) return { eligible: false, reason: "credential-header" };
-  if (
-    (req.headers ?? []).some(
-      ({ name }) => !["accept", "accept-language"].includes(name.toLowerCase()),
-    )
-  )
-    return { eligible: false, reason: "unsupported-header" };
   let u: URL;
   try {
     u = new URL(req.uri);
@@ -66,7 +58,7 @@ export function isProxyEligible(req: ResourceRequest): { eligible: boolean; reas
     return { eligible: false, reason: "private-local-target" };
   if (u.protocol !== "http:" && u.protocol !== "https:")
     return { eligible: false, reason: "scheme" };
-  return { eligible: true, reason: "public-non-credential-metadata" };
+  return { eligible: true, reason: "public-source-resource" };
 }
 
 const DIRECT_METADATA_MAX_BYTES = 8 * 1024 * 1024;
@@ -330,6 +322,18 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
           ...(preview ? { preview } : {}),
         };
       }
+      if (range && res.status === 206 && res.type === "cors" && !res.headers.has("content-range")) {
+        // CORS can expose the body without the header needed to locate it.
+        // The relay can validate that header without accepting unlocated bytes.
+        void res.body?.cancel().catch(() => {});
+        end(false);
+        deps.diagnostics?.count("request_failures");
+        report(
+          { outcome: "unreadable-headers", header: "content-range", http: res.status },
+          res.url,
+        );
+        return { outcome: "network-error" };
+      }
       const bytes = (await readRequestedBytes(res, range, maxBytes, combined.signal)).buffer;
       end(true);
       const contentType = res.headers.get("content-type") || undefined;
@@ -459,14 +463,18 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     }
   }
 
-  /** Fetch metadata directly, then use the eligible metadata proxy after unreadable responses. */
-  async function fetchMetadataFor(
+  /** Direct reads and eligible proxy fallback share one transport policy. */
+  async function fetchResourceFor(
     request: ResourceRequest,
     signal?: AbortSignal,
   ): Promise<{ bytes: ArrayBuffer; finalUri?: string }> {
     if (signal?.aborted) throw cancelledFailure();
+    const metadata = request.purpose === "metadata";
+    const maxBytes = metadata ? DIRECT_METADATA_MAX_BYTES : DIRECT_TILE_MAX_BYTES;
+    if (!metadata && deps.throttle) await deps.throttle(request.uri);
+    if (signal?.aborted) throw cancelledFailure();
     activeTransport = "direct";
-    const direct = await fetchDirect(request, signal, metadataMs, DIRECT_METADATA_MAX_BYTES);
+    const direct = await fetchDirect(request, signal, metadata ? metadataMs : requestMs, maxBytes);
     if (direct.error) throw direct.error;
     if (direct.outcome === "readable" && direct.bytes)
       return { bytes: direct.bytes, finalUri: direct.finalUrl || request.uri };
@@ -483,7 +491,8 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         url: request.uri,
       });
       let proxied = await fetchViaProxy(request, signal);
-      if (!proxied.ok && proxied.code === "PROXY_RATE_LIMITED") {
+      // Discovery has no tile retry scheduler. Acquisition retries remain in Rust.
+      if (metadata && !proxied.ok && proxied.code === "PROXY_RATE_LIMITED") {
         const delay = proxyRateLimitDelayMs(proxied.retryAfterMs);
         if (delay !== null) {
           deps.diagnostics?.record("debug", "proxy-retry", { delay_ms: delay });
@@ -507,7 +516,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     if (direct.outcome === "too-large")
       throw {
         kind: "size-limit",
-        max_bytes: DIRECT_METADATA_MAX_BYTES,
+        max_bytes: maxBytes,
       } satisfies JobError;
     if (direct.outcome === "http-error" && direct.status === 429) {
       throw {
@@ -524,48 +533,13 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         transport: "direct",
         ...(direct.preview ? { preview: direct.preview } : {}),
         ...(direct.retryAfterMs === undefined ? {} : { retry_after_ms: direct.retryAfterMs }),
-        detail: `metadata fetch: ${direct.outcome}`,
+        detail: `${request.purpose} fetch: ${direct.outcome}`,
       } satisfies JobError;
     }
     throw {
       kind: "network-failure",
       transport: "direct",
-      detail: `metadata fetch: ${direct.outcome}`,
-    } satisfies JobError;
-  }
-
-  async function fetchTileFor(
-    request: ResourceRequest,
-    signal?: AbortSignal,
-  ): Promise<{ bytes: ArrayBuffer; finalUri?: string }> {
-    if (signal?.aborted) throw cancelledFailure();
-    if (deps.throttle) await deps.throttle(request.uri);
-    if (signal?.aborted) throw cancelledFailure();
-    const direct = await fetchDirect(request, signal, requestMs);
-    if (direct.error) throw direct.error;
-    if (direct.outcome === "readable" && direct.bytes)
-      return { bytes: direct.bytes, finalUri: direct.finalUrl };
-    if (direct.outcome === "cancelled" || signal?.aborted) throw cancelledFailure();
-    if (direct.outcome === "too-large")
-      throw {
-        kind: "size-limit",
-        max_bytes: DIRECT_TILE_MAX_BYTES,
-      } satisfies JobError;
-    if (direct.status) {
-      throw {
-        kind: "http-error",
-        status: direct.status,
-        request: request.uri,
-        transport: "direct",
-        ...(direct.preview ? { preview: direct.preview } : {}),
-        ...(direct.retryAfterMs === undefined ? {} : { retry_after_ms: direct.retryAfterMs }),
-        detail: `tile fetch: ${direct.outcome} (HTTP ${direct.status})`,
-      } satisfies JobError;
-    }
-    throw {
-      kind: "network-failure",
-      transport: "direct",
-      detail: `tile fetch: ${direct.outcome} (HTTP n/a)`,
+      detail: `${request.purpose} fetch: ${direct.outcome}`,
     } satisfies JobError;
   }
 
@@ -574,11 +548,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
   }
 
   async function fetchResource(request: ResourceRequest, signal: AbortSignal) {
-    if (request.purpose === "metadata") {
-      const result = await fetchMetadataFor(request, signal);
-      return { bytes: new Uint8Array(result.bytes), finalUri: result.finalUri };
-    }
-    const result = await fetchTileFor(request, signal);
+    const result = await fetchResourceFor(request, signal);
     return { bytes: new Uint8Array(result.bytes), finalUri: result.finalUri };
   }
 
