@@ -6,6 +6,8 @@ use dezoomify_native::cache;
 use dezoomify_native::client;
 use dezoomify_native::output;
 use std::collections::BTreeMap;
+mod support;
+use support::tile_request;
 
 #[test]
 fn public_headers_reject_cookie_and_authorization() {
@@ -19,22 +21,20 @@ fn cache_keys_distinguish_resources_and_never_persist_secrets() {
     // The key digests the full URI: query-addressed resources must never
     // collide (serving one tile's bytes for another is silent corruption).
     assert_ne!(
-        cache::cache_key("https://h/tile?x=0&y=0"),
-        cache::cache_key("https://h/tile?x=9&y=9")
+        cache::cache_key(&tile_request("https://h/tile?x=0&y=0")),
+        cache::cache_key(&tile_request("https://h/tile?x=9&y=9"))
     );
     assert_ne!(
-        cache::cache_key("https://h/tile"),
-        cache::cache_key("https://h/tile?token=secret")
+        cache::cache_key(&tile_request("https://h/tile")),
+        cache::cache_key(&tile_request("https://h/tile?token=secret"))
     );
     let dir = std::env::temp_dir().join(format!("dz-cache-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     // A credential-bearing URL must never leak into the cache path or the
     // stored artifact: only the digest key and the payload itself.
-    let path = cache::store(&dir, "job1", "https://h/item?token=CANARY", b"bytes").unwrap();
-    assert_eq!(
-        cache::load(&dir, "job1", "https://h/item?token=CANARY").unwrap(),
-        b"bytes"
-    );
+    let first = tile_request("https://h/item?token=CANARY");
+    let path = cache::store(&dir, "job1", &first, b"bytes").unwrap();
+    assert_eq!(cache::load(&dir, "job1", &first).unwrap(), b"bytes");
     let path_text = path.to_string_lossy();
     assert!(
         !path_text.contains("CANARY") && !path_text.contains("token"),
@@ -47,16 +47,11 @@ fn cache_keys_distinguish_resources_and_never_persist_secrets() {
     );
     // Two distinct query-addressed URIs produce two distinct entries, each
     // loading back its own bytes.
-    let path_b = cache::store(&dir, "job1", "https://h/item?token=CANARY&x=1", b"bytes-b").unwrap();
+    let second = tile_request("https://h/item?token=CANARY&x=1");
+    let path_b = cache::store(&dir, "job1", &second, b"bytes-b").unwrap();
     assert_ne!(path, path_b);
-    assert_eq!(
-        cache::load(&dir, "job1", "https://h/item?token=CANARY&x=1").unwrap(),
-        b"bytes-b"
-    );
-    assert_eq!(
-        cache::load(&dir, "job1", "https://h/item?token=CANARY").unwrap(),
-        b"bytes"
-    );
+    assert_eq!(cache::load(&dir, "job1", &second).unwrap(), b"bytes-b");
+    assert_eq!(cache::load(&dir, "job1", &first).unwrap(), b"bytes");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -80,26 +75,18 @@ fn container_tile_cache_isolates_ranges_without_persisting_headers() {
     };
     let first = request("bytes=0-3");
     let second = request("bytes=4-7");
-    let path = cache::store_resource(&work, "job", &first, b"tile1").unwrap();
-    assert!(cache::load_resource(&work, "job", &second).is_none());
-    cache::store_resource(&work, "job", &second, b"tile2").unwrap();
-    cache::store(&work, "job", &first.uri, b"whole").unwrap();
-    assert_eq!(
-        cache::load_resource(&work, "job", &first).unwrap(),
-        b"tile1"
-    );
-    assert_eq!(
-        cache::load_resource(&work, "job", &second).unwrap(),
-        b"tile2"
-    );
-    assert_eq!(cache::load(&work, "job", &first.uri).unwrap(), b"whole");
+    let whole = tile_request(&first.uri);
+    let path = cache::store(&work, "job", &first, b"tile1").unwrap();
+    assert!(cache::load(&work, "job", &second).is_none());
+    cache::store(&work, "job", &second, b"tile2").unwrap();
+    cache::store(&work, "job", &whole, b"whole").unwrap();
+    assert_eq!(cache::load(&work, "job", &first).unwrap(), b"tile1");
+    assert_eq!(cache::load(&work, "job", &second).unwrap(), b"tile2");
+    assert_eq!(cache::load(&work, "job", &whole).unwrap(), b"whole");
     let mut equivalent = first.clone();
     equivalent.headers[0].name = "rAnGe".into();
     equivalent.headers[1].value = "OTHER-SECRET".into();
-    assert_eq!(
-        cache::resource_cache_key(&first),
-        cache::resource_cache_key(&equivalent)
-    );
+    assert_eq!(cache::cache_key(&first), cache::cache_key(&equivalent));
     assert!(!path.to_string_lossy().contains("CANARY"));
     assert!(!path.to_string_lossy().contains("bytes"));
     assert_eq!(std::fs::read(path).unwrap(), b"tile1");
@@ -119,17 +106,15 @@ fn cache_namespaces_isolate_jobs_and_reject_traversal() {
     );
     let dir = std::env::temp_dir().join(format!("dz-ns-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    cache::store(&dir, &first, "https://h/tile?x=0", b"bytes").unwrap();
-    assert_eq!(
-        cache::load(&dir, &first, "https://h/tile?x=0").unwrap(),
-        b"bytes"
-    );
+    let tile = tile_request("https://h/tile?x=0");
+    cache::store(&dir, &first, &tile, b"bytes").unwrap();
+    assert_eq!(cache::load(&dir, &first, &tile).unwrap(), b"bytes");
     // A missing entry is a miss, not an error.
-    assert!(cache::load(&dir, &first, "https://h/tile?x=1").is_none());
+    assert!(cache::load(&dir, &first, &tile_request("https://h/tile?x=1")).is_none());
     // Foreign namespaces never read or write outside the cache root.
-    assert!(cache::store(&dir, "../escape", "https://h/t", b"x").is_err());
-    assert!(cache::store(&dir, "a/b", "https://h/t", b"x").is_err());
-    assert!(cache::load(&dir, "../escape", "https://h/t").is_none());
+    assert!(cache::store(&dir, "../escape", &tile, b"x").is_err());
+    assert!(cache::store(&dir, "a/b", &tile, b"x").is_err());
+    assert!(cache::load(&dir, "../escape", &tile).is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

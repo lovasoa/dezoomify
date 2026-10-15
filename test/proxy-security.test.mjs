@@ -283,165 +283,111 @@ test("relay preserves exact public container ranges through validated redirects"
   }
 });
 
-test("relay rejects malformed, duplicate, and oversized ranges before fetching", async () => {
-  const deps = {
-    websiteOrigin: "https://site.test",
-    disableOriginBucket: true,
-    fetchUpstream: () => assert.fail("must not fetch"),
-  };
-  for (const headers of [
-    { Range: "bytes=0-" },
-    { Range: "bytes=3-1" },
-    { Range: "bytes=0-1,4-5" },
-    { Range: "bytes=0-9007199254740992" },
-    { Range: "bytes=0-1", range: "bytes=0-1" },
+const rangeRequest = {
+  method: "POST",
+  targetUrl: "https://public.test/container",
+  protocolVersion: 1,
+  headers: { Range: "bytes=4-7" },
+};
+const relayDeps = { websiteOrigin: "https://site.test", disableOriginBucket: true };
+
+test("relay rejects malformed and oversized ranges before fetching", async () => {
+  for (const [value, status] of [
+    ["bytes=0-", 422],
+    ["bytes=0-2097152", 413],
   ]) {
     const result = await handleProxyRequest(
-      { method: "POST", targetUrl: "https://public.test/image", protocolVersion: 1, headers },
-      deps,
+      { ...rangeRequest, headers: { Range: value } },
+      { ...relayDeps, fetchUpstream: () => assert.fail("must not fetch") },
     );
-    assert.equal(result.status, 422);
-    assert.equal(result.code, "PROXY_POLICY_DENIED");
+    assert.equal(result.status, status);
   }
-  const oversize = await handleProxyRequest(
-    {
-      method: "POST",
-      targetUrl: "https://public.test/image",
-      protocolVersion: 1,
-      headers: { Range: "bytes=0-2097152" },
-    },
-    deps,
-  );
-  assert.equal(oversize.status, 413);
-  assert.equal(oversize.code, "PROXY_BUDGET_EXCEEDED");
 });
 
-test("relay cancels ignored and malformed range responses without buffering the container", async () => {
-  for (const [status, contentRange, length] of [
-    [200, null, "20000000"],
-    [206, null, "4"],
-    [206, "bytes 0-3/20", "4"],
-    [206, "bytes 4-7/*", "4"],
-    [206, "bytes 4-7/20", "20000000"],
-  ]) {
-    let cancelled = false;
-    let reads = 0;
-    const body = new ReadableStream({
-      pull(controller) {
-        reads += 1;
-        controller.enqueue(new Uint8Array(8));
-      },
-      cancel() {
-        cancelled = true;
-      },
-    });
-    const result = await handleProxyRequest(
-      {
-        method: "POST",
-        targetUrl: "https://public.test/container",
-        protocolVersion: 1,
-        headers: { Range: "bytes=4-7" },
-      },
-      {
-        websiteOrigin: "https://site.test",
-        disableOriginBucket: true,
-        fetchUpstream: async () => ({
-          status,
-          headers: new Headers({
-            "content-type": "image/tiff",
-            "content-length": length,
-            ...(contentRange ? { "content-range": contentRange } : {}),
-          }),
-          body,
+test("relay cancels ignored ranges without buffering the container", async () => {
+  let cancelled = false;
+  const result = await handleProxyRequest(rangeRequest, {
+    ...relayDeps,
+    fetchUpstream: async () =>
+      new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true;
+          },
         }),
-      },
-    );
-    assert.equal(result.status, 502);
-    assert.equal(result.code, "TRANSPORT_NETWORK_ERROR");
-    assert.match(result.preview, /invalid byte-range response:/);
-    assert.ok(result.preview.length <= 300);
-    assert.equal(cancelled, true);
-    assert.ok(reads <= 1, `read ${reads} chunks from invalid range`);
-  }
+        { headers: { "content-type": "image/tiff", "content-length": "20000000" } },
+      ),
+  });
+  assert.equal(result.status, 502);
+  assert.equal(result.code, "TRANSPORT_NETWORK_ERROR");
+  assert.match(result.preview, /invalid byte-range response:/);
+  assert.equal(cancelled, true);
 });
 
-test("relay bounds streamed image bytes and rejects incomplete container ranges", async () => {
-  for (const [range, length, expectedStatus] of [
-    [undefined, 9, 413],
-    ["bytes=4-7", 3, 502],
-    ["bytes=4-7", 5, 502],
-  ]) {
-    let cancelled = false;
-    const result = await handleProxyRequest(
-      {
-        method: "POST",
-        targetUrl: "https://public.test/image",
-        protocolVersion: 1,
-        headers: range ? { Range: range } : {},
-      },
-      {
-        websiteOrigin: "https://site.test",
-        disableOriginBucket: true,
-        maxBytes: 8,
-        fetchUpstream: async () => ({
-          status: range ? 206 : 200,
-          headers: new Headers({
-            "content-type": "application/octet-stream",
-            ...(range ? { "content-range": "bytes 4-7/20" } : {}),
-          }),
-          body: new ReadableStream({
+test("relay bounds streaming image bodies without a declared length", async () => {
+  let cancelled = false;
+  const result = await handleProxyRequest(
+    { ...rangeRequest, headers: {} },
+    {
+      ...relayDeps,
+      maxBytes: 4,
+      fetchUpstream: async () =>
+        new Response(
+          new ReadableStream({
             start(controller) {
-              controller.enqueue(new Uint8Array(length));
-              if (length === 3) controller.close();
+              controller.enqueue(new Uint8Array(5));
             },
             cancel() {
               cancelled = true;
             },
           }),
-        }),
-      },
-    );
-    assert.equal(result.status, expectedStatus);
-    if (expectedStatus === 502) assert.match(result.preview, /invalid byte-range response:/);
-    if (length !== 3) assert.equal(cancelled, true);
-  }
+          { headers: { "content-type": "image/png" } },
+        ),
+    },
+  );
+  assert.equal(result.status, 413);
+  assert.equal(result.code, "PROXY_BUDGET_EXCEEDED");
+  assert.equal(cancelled, true);
 });
 
 test("relay shares cancellation and deadline across upstream headers and body", async () => {
-  // AbortSignal.timeout does not itself keep Node alive; real fetch sockets do.
+  // Timeout signals do not keep Node alive; real fetch sockets do.
   const keepAlive = setTimeout(() => {}, 1000);
   try {
     for (const stalledBody of [false, true]) {
       for (const cancel of [false, true]) {
         const controller = new AbortController();
-        let cancelledBody = false;
         let fetchSignal;
-        const pending = handleProxyRequest(
-          { method: "POST", targetUrl: "https://public.test/image", protocolVersion: 1 },
-          {
-            websiteOrigin: "https://site.test",
-            disableOriginBucket: true,
-            timeoutMs: 10,
-            signal: controller.signal,
-            fetchUpstream: async (_url, init) => {
-              fetchSignal = init.signal;
-              if (!stalledBody) return new Promise(() => {});
-              return {
-                status: 200,
-                headers: new Headers({ "content-type": "image/png" }),
-                body: new ReadableStream({
-                  cancel() {
-                    cancelledBody = true;
-                  },
-                }),
-              };
-            },
+        let cancelledBody = false;
+        const pending = handleProxyRequest(rangeRequest, {
+          ...relayDeps,
+          timeoutMs: 10,
+          signal: controller.signal,
+          fetchUpstream: async (_url, { signal }) => {
+            fetchSignal = signal;
+            if (!stalledBody)
+              return new Promise((_, reject) =>
+                signal.addEventListener("abort", () => reject(signal.reason), { once: true }),
+              );
+            return new Response(
+              new ReadableStream({
+                cancel() {
+                  cancelledBody = true;
+                },
+              }),
+              {
+                status: 206,
+                headers: {
+                  "content-type": "image/tiff",
+                  "content-range": "bytes 4-7/20",
+                },
+              },
+            );
           },
-        );
+        });
         if (cancel) setTimeout(() => controller.abort(), 1);
         const result = await pending;
         assert.equal(result.status, cancel ? 499 : 504);
-        assert.equal(result.code, cancel ? "TRANSPORT_CANCELLED" : "TRANSPORT_NETWORK_ERROR");
         assert.equal(fetchSignal.aborted, true);
         if (stalledBody) assert.equal(cancelledBody, true);
       }

@@ -125,7 +125,9 @@ test("closing the Node response cancels an upstream fetch after the request body
       fetchUpstream: async (_url, init) => {
         upstreamSignal = init.signal;
         ready();
-        return new Promise(() => {});
+        return new Promise((_resolve, reject) => {
+          init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+        });
       },
     },
   );

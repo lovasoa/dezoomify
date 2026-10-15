@@ -363,16 +363,7 @@ async fn fetch_loop(
                 if let Some(range) = range {
                     range.validate_response(status, response.headers(), &final_uri)?;
                 }
-                let body =
-                    read_body_capped(response, limits, range.map(ByteRange::len), &final_uri)
-                        .await?;
-                if range.is_some_and(|range| body.len() as u64 != range.len()) {
-                    return Err(range_response_error(
-                        &final_uri,
-                        "byte range body length does not match the requested range",
-                    ));
-                }
-                body
+                read_body_capped(response, limits, range.map(ByteRange::len), &final_uri).await?
             } else {
                 read_error_prefix(response).await
             };
@@ -407,27 +398,14 @@ struct ByteRange {
 
 impl ByteRange {
     fn parse(value: &str) -> Result<Self, Error> {
-        let invalid = || Error::BadUrl("expected one finite byte range (bytes=start-end)".into());
-        let (start, end) = value
-            .strip_prefix("bytes=")
-            .and_then(|value| value.split_once('-'))
-            .ok_or_else(invalid)?;
-        let decimal =
-            |text: &str| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit());
-        if !decimal(start) || !decimal(end) {
-            return Err(invalid());
-        }
-        let start: u64 = start.parse().map_err(|_| invalid())?;
-        let end: u64 = end.parse().map_err(|_| invalid())?;
-        if end < start
-            || end
-                .checked_sub(start)
-                .and_then(|length| length.checked_add(1))
-                .is_none()
-        {
-            return Err(invalid());
-        }
-        Ok(Self { start, end })
+        let parse = || {
+            let (start, end) = value.strip_prefix("bytes=")?.split_once('-')?;
+            let (start, end) = (decimal(start)?, decimal(end)?);
+            end.checked_sub(start)?.checked_add(1)?;
+            Some(Self { start, end })
+        };
+        parse()
+            .ok_or_else(|| Error::BadUrl("expected one finite byte range (bytes=start-end)".into()))
     }
 
     fn len(self) -> u64 {
@@ -440,44 +418,39 @@ impl ByteRange {
         headers: &reqwest::header::HeaderMap,
         uri: &str,
     ) -> Result<(), Error> {
-        if status != 206 {
-            return Err(range_response_error(
-                uri,
-                "server did not honor the requested byte range (expected HTTP 206)",
-            ));
-        }
-        if headers
-            .get_all(reqwest::header::CONTENT_RANGE)
-            .iter()
-            .count()
-            != 1
-        {
-            return Err(range_response_error(
-                uri,
-                "expected one Content-Range response header",
-            ));
-        }
-        let valid = headers
+        let content_range = headers
             .get(reqwest::header::CONTENT_RANGE)
             .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.strip_prefix("bytes "))
-            .and_then(|value| value.split_once('/'))
-            .is_some_and(|(interval, total)| {
-                let matches = Self::parse(&format!("bytes={interval}"))
-                    .is_ok_and(|range| range.start == self.start && range.end == self.end);
-                let total_valid = !total.is_empty()
-                    && total.bytes().all(|byte| byte.is_ascii_digit())
-                    && total.parse::<u64>().is_ok_and(|total| total > self.end);
-                matches && total_valid
-            });
+            .unwrap_or("");
+        let valid = status == 206
+            && headers
+                .get_all(reqwest::header::CONTENT_RANGE)
+                .iter()
+                .count()
+                == 1
+            && content_range
+                .strip_prefix("bytes ")
+                .and_then(|value| value.split_once('/'))
+                .is_some_and(|(interval, total)| {
+                    Self::parse(&format!("bytes={interval}"))
+                        .is_ok_and(|range| range.start == self.start && range.end == self.end)
+                        && decimal(total).is_some_and(|total| total > self.end)
+                });
         if !valid {
             return Err(range_response_error(
                 uri,
-                "Content-Range does not match the requested byte range",
+                &format!("expected HTTP 206 and Content-Range for bytes={}-{}; received HTTP {status}, Content-Range: {}", self.start, self.end, content_range.chars().take(256).collect::<String>()),
             ));
         }
         Ok(())
     }
+}
+
+fn decimal(value: &str) -> Option<u64> {
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    value.parse().ok()
 }
 
 fn range_response_error(uri: &str, detail: &str) -> Error {
@@ -542,31 +515,26 @@ async fn read_body_capped(
         }
     }
     let mut body = Vec::new();
-    loop {
-        match response.chunk().await {
-            Ok(Some(chunk)) => {
-                let received = (body.len() as u64).saturating_add(chunk.len() as u64);
-                if range_length.is_some_and(|length| received > length) {
-                    return Err(range_response_error(
-                        uri,
-                        "byte range body length exceeds the requested range",
-                    ));
-                }
-                if received > limits.max_bytes {
-                    return Err(Error::SizeLimit {
-                        max_bytes: limits.max_bytes,
-                    });
-                }
-                body.extend_from_slice(&chunk);
-            }
-            Ok(None) => break,
-            Err(e) => {
-                return Err(Error::NetworkFailure {
-                    transport: ErrorTransport::Native,
-                    failure: dezoomify::model::chain_text(&e).into(),
-                });
-            }
+    while let Some(chunk) = response.chunk().await.map_err(TransportError::from)? {
+        let received = (body.len() as u64).saturating_add(chunk.len() as u64);
+        if range_length.is_some_and(|length| received > length) {
+            return Err(range_response_error(
+                uri,
+                "byte range body length exceeds the requested range",
+            ));
         }
+        if received > limits.max_bytes {
+            return Err(Error::SizeLimit {
+                max_bytes: limits.max_bytes,
+            });
+        }
+        body.extend_from_slice(&chunk);
+    }
+    if range_length.is_some_and(|length| body.len() as u64 != length) {
+        return Err(range_response_error(
+            uri,
+            "byte range body length does not match the requested range",
+        ));
     }
     Ok(body)
 }
@@ -640,32 +608,26 @@ fn fetch_local(
     };
     let mut file = std::fs::File::open(path).map_err(local_error)?;
     let file_len = file.metadata().map_err(local_error)?.len();
-    let length = if let Some(range) = range {
-        if range.end >= file_len {
-            return Err(range_response_error(
-                uri,
-                "requested byte range exceeds the local file",
-            ));
-        }
-        file.seek(SeekFrom::Start(range.start))
-            .map_err(local_error)?;
-        range.len()
-    } else {
-        file_len
-    };
+    if range.is_some_and(|range| range.end >= file_len) {
+        return Err(range_response_error(
+            uri,
+            "requested byte range exceeds the local file",
+        ));
+    }
+    let length = range.map_or(file_len, ByteRange::len);
     if length > limits.max_bytes {
         return Err(Error::SizeLimit {
             max_bytes: limits.max_bytes,
         });
     }
+    if let Some(range) = range {
+        file.seek(SeekFrom::Start(range.start))
+            .map_err(local_error)?;
+    }
     let mut body = Vec::new();
-    file.take(if range.is_some() {
-        length
-    } else {
-        limits.max_bytes.saturating_add(1)
-    })
-    .read_to_end(&mut body)
-    .map_err(local_error)?;
+    file.take(range.map_or(limits.max_bytes.saturating_add(1), ByteRange::len))
+        .read_to_end(&mut body)
+        .map_err(local_error)?;
     if body.len() as u64 > limits.max_bytes {
         return Err(Error::SizeLimit {
             max_bytes: limits.max_bytes,

@@ -13,14 +13,9 @@ use std::path::{Path, PathBuf};
 
 pub const CACHE_VERSION: u32 = 3;
 
-#[must_use]
-pub fn cache_key(uri: &str) -> String {
-    digest_key(uri, None)
-}
-
 /// A container's tiles share one URI but occupy distinct byte intervals.
 #[must_use]
-pub fn resource_cache_key(request: &ResourceRequest) -> String {
+pub fn cache_key(request: &ResourceRequest) -> String {
     let range = request
         .headers
         .iter()
@@ -42,45 +37,29 @@ fn digest_key(uri: &str, range: Option<&str>) -> String {
     format!("v{CACHE_VERSION}-{hex}")
 }
 
-pub fn store(cache_dir: &Path, job: &str, uri: &str, bytes: &[u8]) -> Result<PathBuf, String> {
-    store_key(cache_dir, job, &cache_key(uri), bytes)
-}
-
-pub fn store_resource(
+pub fn store(
     cache_dir: &Path,
     job: &str,
     request: &ResourceRequest,
     bytes: &[u8],
 ) -> Result<PathBuf, String> {
-    store_key(cache_dir, job, &resource_cache_key(request), bytes)
-}
-
-fn store_key(cache_dir: &Path, job: &str, key: &str, bytes: &[u8]) -> Result<PathBuf, String> {
     if job.contains(['/', '\\', '.']) {
         return Err("bad job namespace".to_string());
     }
     let dir = cache_dir.join(job);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let dest = dir.join(key);
+    let dest = dir.join(cache_key(request));
     let tmp = dest.with_extension("tmp");
     std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, &dest).map_err(|e| e.to_string())?;
     Ok(dest)
 }
 
-pub fn load(cache_dir: &Path, job: &str, uri: &str) -> Option<Vec<u8>> {
-    load_key(cache_dir, job, &cache_key(uri))
-}
-
-pub fn load_resource(cache_dir: &Path, job: &str, request: &ResourceRequest) -> Option<Vec<u8>> {
-    load_key(cache_dir, job, &resource_cache_key(request))
-}
-
-fn load_key(cache_dir: &Path, job: &str, key: &str) -> Option<Vec<u8>> {
+pub fn load(cache_dir: &Path, job: &str, request: &ResourceRequest) -> Option<Vec<u8>> {
     if job.contains(['/', '\\', '.']) {
         return None;
     }
-    let dest = cache_dir.join(job).join(key);
+    let dest = cache_dir.join(job).join(cache_key(request));
     std::fs::read(dest).ok()
 }
 
@@ -90,5 +69,5 @@ fn load_key(cache_dir: &Path, job: &str, key: &str) -> Option<Vec<u8>> {
 /// validation and carries no URL text, headers, or cookies.
 #[must_use]
 pub fn job_namespace(input_url: &str) -> String {
-    format!("job-{}", cache_key(input_url))
+    format!("job-{}", digest_key(input_url, None))
 }

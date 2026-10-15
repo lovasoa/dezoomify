@@ -2,10 +2,7 @@
 //! inline `OpenSeadragon` `zoomifytileservice` configurations (which carry
 //! their own geometry, so no metadata fetch is needed).
 
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, LazyLock},
-};
+use std::sync::{Arc, LazyLock};
 
 use serde::{Deserialize, Deserializer};
 use url::Url;
@@ -40,11 +37,11 @@ const ROUTES: &[DiscoveryRoute] = &[
 
 pub const SPEC: FormatSpec = FormatSpec::new("zoomify", ROUTES).with_display_name("Zoomify");
 
-static SCRIPT_PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"(?P<show>(?i:(?:\bZ\s*\.\s*)?\bshowImage\s*\())|\b(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*(?P<operator>(?:\*\*|>>>|>>|<<|&&|\|\||\?\?|[-+*/%&|^])?=|\+\+|--)",
-    )
-    .expect("constant Zoomify declaration pattern")
+static SHOW_IMAGE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    let literal = r#"(?:'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*")"#;
+    Regex::new(&format!(
+        r#"(?i)(?:\bZ\s*\.\s*)?\bshowImage\s*\(\s*(?:{literal}|[^,'"()]+)\s*,\s*(?P<prefix>{literal})(?:\s*\+\s*(?P<variable>[a-z_$][a-z0-9_$]*)\s*\+\s*(?P<suffix>{literal}))?\s*[,)]"#,
+    )).expect("constant Zoomify showImage pattern")
 });
 
 static TILE_SERVICE_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
@@ -97,6 +94,11 @@ where
 
 /// At most this many inline sources become catalog entries.
 const MAX_INLINE_SERVICES: usize = 8;
+
+static IMAGE_PATH_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+    BytesRegex::new(r#"zoomifyImagePath\s*=\s*["']?(?P<image>[^"'&\s;]+)"#)
+        .expect("constant Zoomify image path pattern")
+});
 
 static FLUID_ACCESS_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(r#"(?i)accessnumber\s*=\s*["']?(?P<access>[^"'&\s;]+)"#)
@@ -265,158 +267,58 @@ fn contains_zoomify_declaration(resource: crate::core::DiscoveryResource<'_>) ->
 }
 
 fn extract_image_path(resource: crate::core::DiscoveryResource<'_>) -> Option<String> {
-    let mut variables = BTreeMap::new();
     crate::web_page::script_bodies(resource).find_map(|script| {
         let source = crate::javascript::mask(&String::from_utf8_lossy(script));
-        let declaration = script_image_path(&source, &mut variables);
-        let service = TILE_SERVICE_RE
-            .captures(source.as_bytes())
-            .and_then(|captures| {
+        let paths = [&IMAGE_PATH_RE, &TILE_SERVICE_RE]
+            .into_iter()
+            .filter_map(|regex| {
+                let captures = regex.captures(source.as_bytes())?;
                 let matched = captures.get(0)?;
-                // A quoted prefix of a computed value is not a complete path.
                 let tail = source[matched.end()..]
-                    .strip_prefix(['\'', '"'])?
+                    .trim_start_matches(['\'', '"'])
                     .trim_start();
-                if !tail.is_empty() && !tail.starts_with([',', '}', ']']) {
+                if !tail.is_empty() && !tail.starts_with([';', ',', '}', ']', '&']) {
                     return None;
                 }
                 Some((matched.start(), capture_text(&captures, "image")?))
             });
-        declaration
-            .into_iter()
-            .chain(service)
+        let calls = crate::javascript::captures(&SHOW_IMAGE_RE, &source).filter_map(|captures| {
+            let matched = captures.get(0)?;
+            if matched.len() > 8192 {
+                return None;
+            }
+            let mut path: String = json5::from_str(captures.name("prefix")?.as_str()).ok()?;
+            if let Some(variable) = captures.name("variable") {
+                path.push_str(&literal_variable(
+                    &source[..matched.start()],
+                    variable.as_str(),
+                )?);
+                path.push_str(&json5::from_str::<String>(captures.name("suffix")?.as_str()).ok()?);
+            }
+            (!path.is_empty() && path.len() <= 8192).then(|| (matched.start(), path))
+        });
+        paths
+            .chain(calls)
             .min_by_key(|(offset, _)| *offset)
             .map(|(_, path)| path)
     })
 }
 
-// Resolve only bounded concatenations of strings and earlier literal values.
-// This never evaluates JavaScript or guesses a path from a partial expression.
-fn script_image_path(
-    source: &str,
-    variables: &mut BTreeMap<String, String>,
-) -> Option<(usize, String)> {
-    for captures in crate::javascript::captures(&SCRIPT_PATH_RE, source) {
-        let matched = captures.get(0)?;
-        if captures.name("show").is_some() {
-            let Some(start) = second_argument(source, matched.end()) else {
-                continue;
-            };
-            if let Some((path, end)) = path_expression(&source[start..], variables)
-                && source[start + end..].trim_start().starts_with([',', ')'])
-            {
-                return Some((matched.start(), path));
-            }
-            continue;
-        }
-        let name = captures.name("name")?.as_str();
-        if source[matched.end()..].starts_with(['=', '>'])
-            || crate::javascript::inside_function(source, matched.start())
-        {
-            continue;
-        }
-        if captures.name("operator")?.as_str() != "=" {
-            variables.remove(name);
-            continue;
-        }
-        let value = path_expression(&source[matched.end()..], variables)
-            .filter(|(_, end)| {
-                let tail = &source[matched.end() + end..];
-                tail.trim_start().is_empty()
-                    || tail.trim_start().starts_with([';', ','])
-                    || tail[..tail.len() - tail.trim_start().len()].contains(['\n', '\r'])
-            })
-            .map(|(value, _)| value);
-        if name == "zoomifyImagePath" {
-            if let Some(path) = value.or_else(|| flash_path(&source[matched.end()..])) {
-                return Some((matched.start(), path));
-            }
-        } else if let Some(value) = value {
-            if (variables.len() < 128 || variables.contains_key(name)) && name.len() <= 128 {
-                variables.insert(name.to_owned(), value);
-            }
-        } else {
-            variables.remove(name);
-        }
+fn literal_variable(source: &str, name: &str) -> Option<String> {
+    if name.len() > 128 {
+        return None;
     }
-    None
-}
-
-fn flash_path(source: &str) -> Option<String> {
-    // Historical Flash snippets contain an unquoted slash path terminated by
-    // a quote. Keep that narrow compatibility case separate from expressions.
-    let (path, tail) = source.trim_start().split_once(['\'', '"'])?;
-    (path.starts_with('/')
-        && path.len() <= 8192
-        && path
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || b"/._-~%:@".contains(&byte))
-        && (tail.trim_start().is_empty() || tail.trim_start().starts_with([';', ','])))
-    .then(|| path.to_owned())
-}
-
-fn second_argument(source: &str, start: usize) -> Option<usize> {
-    let (mut quote, mut escaped, mut depth) = (None, false, 0usize);
-    for (offset, byte) in source.bytes().enumerate().skip(start).take(8192) {
-        match quote {
-            Some(_) if escaped => escaped = false,
-            Some(_) if byte == b'\\' => escaped = true,
-            Some(delimiter) if byte == delimiter => quote = None,
-            None if matches!(byte, b'\'' | b'"' | b'`') => quote = Some(byte),
-            None if matches!(byte, b'(' | b'[' | b'{') => depth += 1,
-            None if byte == b',' && depth == 0 => return Some(offset + 1),
-            None if matches!(byte, b')' | b']' | b'}') => depth = depth.checked_sub(1)?,
-            _ => {}
-        }
+    let name = regex::escape(name);
+    // Only one earlier reference: a literal declaration, with no intervening
+    // reads or mutations. More involved JavaScript is deliberately unsupported.
+    let references = Regex::new(&format!(r"\b{name}\b")).ok()?;
+    if crate::javascript::captures(&references, source).count() != 1 {
+        return None;
     }
-    None
-}
-
-fn path_expression(source: &str, variables: &BTreeMap<String, String>) -> Option<(String, usize)> {
-    let mut end = 0;
-    let mut value = String::new();
-    for _ in 0..16 {
-        end += source[end..].len() - source[end..].trim_start().len();
-        let start = end;
-        let first = *source.as_bytes().get(start)?;
-        let term = if matches!(first, b'\'' | b'"') {
-            let mut escaped = false;
-            end += 1;
-            while let Some(&byte) = source.as_bytes().get(end) {
-                end += 1;
-                if !escaped && byte == first {
-                    break;
-                }
-                escaped = !escaped && byte == b'\\';
-                if end - start > 8192 {
-                    return None;
-                }
-            }
-            json5::from_str::<String>(&source[start..end]).ok()?
-        } else {
-            if !first.is_ascii_alphabetic() && !matches!(first, b'_' | b'$') {
-                return None;
-            }
-            while source
-                .as_bytes()
-                .get(end)
-                .is_some_and(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$'))
-            {
-                end += 1;
-            }
-            variables.get(&source[start..end])?.clone()
-        };
-        if value.len().checked_add(term.len())? > 8192 {
-            return None;
-        }
-        value.push_str(&term);
-        let next = end + source[end..].len() - source[end..].trim_start().len();
-        if source.as_bytes().get(next) != Some(&b'+') {
-            return (!value.is_empty()).then_some((value.replace("&amp;", "&"), end));
-        }
-        end = next + 1;
-    }
-    None
+    let declaration = crate::javascript::literal_regex(&format!(
+        r#"(?m)\b(?:var|let|const)\s+{name}\s*=\s*(?:'([^']*)'|"([^"]*)")\s*(?:;|$)"#,
+    ));
+    crate::javascript::captured(&declaration, source).filter(|value| value.len() <= 8192)
 }
 
 fn capture_text(captures: &regex::bytes::Captures<'_>, name: &str) -> Option<String> {
@@ -679,6 +581,11 @@ mod tests {
     fn extracts_general_zoomify_declarations() {
         for (page, expected) in [
             (r#"if (a<b) showImage("viewer", "/zoomify");"#, "/zoomify"),
+            (r#"var zoomifyImagePath=/zoomify";"#, "/zoomify"),
+            (
+                r#"Z.showImage("viewer,container", "maps/\u0061");"#,
+                "maps/a",
+            ),
             (
                 r#"const html = '<script src="x.js"></script><div>'; showImage(viewer, "/zoomify");"#,
                 "/zoomify",
@@ -699,58 +606,17 @@ mod tests {
     }
 
     #[test]
-    fn resolves_literal_zoomify_path_expressions_without_partial_paths() {
-        for (page, expected) in [
-            (
-                r#"<script>var thisimg = "004672986_o"; Z.showImage("myContainer", "./zif/" + thisimg + ".zif", "zLogoVisible=0");</script>"#,
-                Some("./zif/004672986_o.zif"),
-            ),
-            (
-                r#"<script>const thisimg = "004672986_o";</script><script>Z.showImage("viewer", "./zif/" + thisimg + ".zif?token=a&b=c");</script>"#,
-                Some("./zif/004672986_o.zif?token=a&b=c"),
-            ),
-            (
-                r#"<script>const path = 'maps/' + 'sample'; zoomifyImagePath = path;</script>"#,
-                Some("maps/sample"),
-            ),
-            (
-                r#"<script>var zoomifyImagePath=/zoomify";</script>"#,
-                Some("/zoomify"),
-            ),
-            (
-                r#"<script>Z.showImage("viewer,container", "maps/\u0061");</script>"#,
-                Some("maps/a"),
-            ),
-            (
-                r#"<script>Z.showImage("viewer", "./zif/" + unknown + ".zif");</script>"#,
-                None,
-            ),
-            (
-                r#"<script>Z.showImage("viewer", "./zif/" + getName() + ".zif");</script>"#,
-                None,
-            ),
-            (
-                r#"<script>var name = 'known'; name = getName(); Z.showImage("viewer", './zif/' + name + '.zif');</script>"#,
-                None,
-            ),
-            (
-                r#"<script>var name = 'known'; name += getName(); Z.showImage("viewer", './zif/' + name + '.zif');</script>"#,
-                None,
-            ),
-            (
-                r#"<script>zoomifyImagePath = '/partial/' + unknown;</script>"#,
-                None,
-            ),
-            (
-                r#"<script>const example = 'Z.showImage("viewer", "fake")'; // Z.showImage("viewer", "comment")
-                Z.showImage("viewer", "real");</script>"#,
-                Some("real"),
-            ),
+    fn refuses_partial_paths_from_dynamic_expressions() {
+        for script in [
+            r#"Z.showImage("viewer", "./zif/" + unknown + ".zif");"#,
+            r#"Z.showImage("viewer", "./zif/" + getName() + ".zif");"#,
+            r#"var name = 'known'; name += getName(); Z.showImage("viewer", './zif/' + name + '.zif');"#,
+            r#"zoomifyImagePath = '/partial/' + unknown;"#,
         ] {
             assert_eq!(
-                crate::test_support::resource("", page.as_bytes(), extract_image_path).as_deref(),
-                expected,
-                "{page}"
+                crate::test_support::resource("", script.as_bytes(), extract_image_path),
+                None,
+                "{script}"
             );
         }
     }

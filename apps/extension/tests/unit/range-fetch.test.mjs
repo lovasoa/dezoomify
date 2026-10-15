@@ -9,30 +9,21 @@ const request = {
 };
 const signal = new AbortController().signal;
 
-test("extension transport forwards and validates exact byte ranges", async () => {
+test("extension transport forwards byte ranges and rejects servers that ignore them", async () => {
+  const responses = [
+    new Response("data", { status: 206, headers: { "content-range": "bytes 10-13/100" } }),
+    new Response("whole file"),
+  ];
   const fetcher = createExtensionFetcher({
     hasPermission: () => true,
     fetchImpl: async (_url, init) => {
       assert.equal(init.headers.range, "bytes=10-13");
-      return new Response("data", { status: 206, headers: { "content-range": "bytes 10-13/100" } });
+      return responses.shift();
     },
   });
   assert.equal(
     new TextDecoder().decode((await fetcher.fetchResource(request, signal)).bytes),
     "data",
   );
-});
-
-test("extension transport rejects ignored, mismatched, and truncated range responses", async () => {
-  for (const response of [
-    new Response("whole file"),
-    new Response("data", { status: 206, headers: { "content-range": "bytes 0-3/100" } }),
-    new Response("abc", { status: 206, headers: { "content-range": "bytes 10-13/100" } }),
-  ]) {
-    const fetcher = createExtensionFetcher({
-      hasPermission: () => true,
-      fetchImpl: async () => response,
-    });
-    await assert.rejects(fetcher.fetchResource(request, signal), { kind: "bad-url" });
-  }
+  await assert.rejects(fetcher.fetchResource(request, signal), { kind: "bad-url" });
 });

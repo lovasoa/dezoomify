@@ -116,16 +116,6 @@ test("oversized declared body -> 413 budget", async (t) => {
   assert.equal(res.status, 413);
 });
 
-test("bounded public image data is relayed", async (t) => {
-  mockUpstream(() => ({ status: 200, headers: { "content-type": "image/jpeg" }, body: "jpeg" }), t);
-  const res = await onRequestPost({
-    request: postRequest('{"targetUrl":"https://public.test/tile.jpg","protocolVersion":1}'),
-  });
-  assert.equal(res.status, 200);
-  assert.equal(res.headers.get("content-type"), "image/jpeg");
-  assert.equal(await res.text(), "jpeg");
-});
-
 test("viewer HTML page (e.g. a Google Arts asset page) is relayed as metadata", async (t) => {
   mockUpstream(
     () => ({
@@ -141,19 +131,6 @@ test("viewer HTML page (e.g. a Google Arts asset page) is relayed as metadata", 
   assert.equal(res.status, 200);
   assert.match(await res.text(), /asset page/);
   assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
-});
-
-test("bounded public binary container data is relayed", async (t) => {
-  mockUpstream(
-    () => ({ status: 200, headers: { "content-type": "application/octet-stream" }, body: "\x00" }),
-    t,
-  );
-  const res = await onRequestPost({
-    request: postRequest('{"targetUrl":"https://public.test/blob","protocolVersion":1}'),
-  });
-  assert.equal(res.status, 200);
-  assert.equal(res.headers.get("content-type"), "application/octet-stream");
-  assert.deepEqual(new Uint8Array(await res.arrayBuffer()), new Uint8Array([0]));
 });
 
 test("the Pages adapter forwards Range and exposes the partial response", async (t) => {

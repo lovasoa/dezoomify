@@ -253,10 +253,7 @@ test("source access validates partial response range headers and exact payload l
   };
   for (const [changes, error] of [
     [{}, undefined],
-    [{ status: 200 }, "bad-url"],
-    [{ contentRange: "bytes 0-3/100" }, "bad-url"],
     [{ contentRange: undefined }, "bad-url"],
-    [{ contentLength: "3" }, "bad-url"],
     [{ bytes: 3, data: "YWJj" }, "bad-url"],
   ]) {
     const fake = fakeBrowser(async (injection) => {

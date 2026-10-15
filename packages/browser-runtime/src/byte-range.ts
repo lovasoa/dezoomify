@@ -1,5 +1,5 @@
 import type { Error as JobError, ResourceRequest } from "@dezoomify/wasm-bindings";
-import { readResponseBytes } from "./response-body.ts";
+import { type ReadableResponse, readResponseBytes } from "./response-body.ts";
 
 export interface ByteRange {
   start: number;
@@ -70,7 +70,7 @@ export function validateByteRangeLength(range: ByteRange, length: number): void 
 
 /** Read only the requested bytes; never consume a full ignored-range response. */
 export async function readRequestedBytes(
-  response: Response,
+  response: ReadableResponse & { status: number },
   range: ByteRange | undefined,
   maxBytes: number,
   signal?: AbortSignal,

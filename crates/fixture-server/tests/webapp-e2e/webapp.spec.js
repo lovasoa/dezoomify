@@ -5,7 +5,11 @@ const { test, expect, chromium } = require("@playwright/test");
 const fs = require("node:fs");
 const path = require("node:path");
 const assert = require("node:assert/strict");
-const { replayUrl } = require("../../../../test/fixture-files.mjs");
+// Match the in-process fixture server's native ESM loading of these helpers.
+let replayUrl;
+test.beforeAll(async () => {
+  ({ replayUrl } = await import("../../../../test/fixture-files.mjs"));
+});
 const {
   assertSavedPyramid,
   decodePngPixels,
@@ -16,32 +20,33 @@ const {
 const ADDR = process.env.DEZOOMIFY_E2E_ADDR;
 const { formats } = require("../../../../test/support/formats.cjs");
 const {
-  PUBLIC_ZIF_URL,
-  relayZifRequest,
-  startNoCorsZifServer,
-} = require("../../../../test/support/no-cors-zif.mjs");
+  relayFixtureRequest,
+  startPublicFixtureSource,
+} = require("../../../../test/support/public-relay.mjs");
 
 test("website saves a no-CORS ZIF URL through real public-data relay policies", async () => {
-  const source = await startNoCorsZifServer();
+  const source = await startPublicFixtureSource();
+  const resource = "/fixtures/zif/approximate-direct/image.zif";
+  const publicUrl = source.publicOrigin + resource;
   let browser;
   try {
-    const fullFile = await fetch(`${source.origin}/image.zif`);
+    const fullFile = await fetch(source.origin + resource);
     assert.equal(fullFile.status, 400, "the source refuses unbounded full-file GETs");
     assert.equal(fullFile.headers.get("access-control-allow-origin"), null);
     await fullFile.arrayBuffer();
     browser = await chromium.launch({ args: [
-      `--host-resolver-rules=MAP zif-relay.test 127.0.0.1:${source.port}`,
+      `--host-resolver-rules=MAP source.test 127.0.0.1:${source.port}`,
       "--no-proxy-server",
     ] });
     const page = await browser.newPage({ acceptDownloads: true });
     const relayed = [];
     const directFailures = [];
     page.on("requestfailed", (request) => {
-      if (request.url() === PUBLIC_ZIF_URL) directFailures.push(request.failure().errorText);
+      if (request.url() === publicUrl) directFailures.push(request.failure().errorText);
     });
-    await page.route("**/api/proxy", (route) => relayZifRequest(route, source.origin, ADDR, relayed));
+    await page.route("**/api/proxy", (route) => relayFixtureRequest(route, source, ADDR, relayed));
     await page.goto(`${ADDR}/beta/`);
-    await page.locator("#dz-url-input").fill(PUBLIC_ZIF_URL);
+    await page.locator("#dz-url-input").fill(publicUrl);
     await page.getByRole("button", { name: /find image/i }).click();
     await expect(page.locator(".dz-completed-section, .dz-error-section, .dz-retry-section"))
       .toBeVisible({ timeout: 60000 });
@@ -57,7 +62,7 @@ test("website saves a no-CORS ZIF URL through real public-data relay policies", 
     assert.ok(directFailures.length > 0, "the browser cannot read the separate source without CORS");
     assert.ok(source.requests.some(({ origin, range }) => origin === ADDR && range === "bytes=0-15"),
       "direct requests really reach the separate source before relay fallback");
-    assert.ok(relayed.every(({ target, status, range }) => target === PUBLIC_ZIF_URL &&
+    assert.ok(relayed.every(({ target, status, range }) => target === publicUrl &&
       (range === undefined ? status === 400 : status === 206 && /^bytes=\d+-\d+$/.test(range))),
       "only exact byte ranges succeed; discovery's unbounded guesses are refused");
     assert.ok(relayed.some(({ range }) => range === "bytes=0-15"), "relay reads container metadata");

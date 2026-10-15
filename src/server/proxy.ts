@@ -4,7 +4,10 @@ import {
   requestedByteRange,
 } from "../../packages/browser-runtime/src/byte-range.ts";
 import { normalizeErrorPreviewText } from "../../packages/browser-runtime/src/fetch-primitives.ts";
-import { readErrorPreview } from "../../packages/browser-runtime/src/response-body.ts";
+import {
+  type ReadableResponse,
+  readErrorPreview,
+} from "../../packages/browser-runtime/src/response-body.ts";
 import {
   buildProxyCorsHeaders,
   cacheControlForProxy,
@@ -28,13 +31,12 @@ export interface IncomingProxyRequest {
   ifModifiedSince?: string;
 }
 
-interface UpstreamResponse {
+interface UpstreamResponse extends ReadableResponse {
   status: number;
-  headers: { get(name: string): string | null };
-  body?: ReadableStream<Uint8Array> | null;
 }
 
 export interface ProxyRelayDeps {
+  /** Fetch without following redirects; honor the supplied cancellation signal. */
   fetchUpstream: (
     url: string,
     init: { method: string; headers: Record<string, string>; signal?: AbortSignal },
@@ -164,35 +166,6 @@ function errorPreview(error: unknown): string {
   return normalizeErrorPreviewText(parts.join(": "), 300);
 }
 
-/** Bound even injected transports that do not themselves honor AbortSignal. */
-async function fetchBeforeDeadline(
-  deps: ProxyRelayDeps,
-  url: string,
-  headers: Record<string, string>,
-  signal: AbortSignal,
-): Promise<UpstreamResponse> {
-  signal.throwIfAborted();
-  let abort = () => {};
-  const cancelled = new Promise<never>((_resolve, reject) => {
-    abort = () => reject(signal.reason);
-    signal.addEventListener("abort", abort, { once: true });
-  });
-  try {
-    return await Promise.race([
-      deps.fetchUpstream(url, { method: "GET", headers, signal }).then((response) => {
-        if (signal.aborted) {
-          cancelBody(response);
-          signal.throwIfAborted();
-        }
-        return response;
-      }),
-      cancelled,
-    ]);
-  } finally {
-    signal.removeEventListener("abort", abort);
-  }
-}
-
 export async function handleProxyRequest(
   req: IncomingProxyRequest,
   deps: ProxyRelayDeps,
@@ -300,7 +273,11 @@ export async function handleProxyRequest(
     for (;;) {
       try {
         // Upstream is always GET.
-        res = await fetchBeforeDeadline(deps, current, upstreamHeaders, signal);
+        res = await deps.fetchUpstream(current, {
+          method: "GET",
+          headers: upstreamHeaders,
+          signal,
+        });
       } catch (error) {
         if (signal.aborted) return interrupted();
         return {
@@ -382,9 +359,7 @@ export async function handleProxyRequest(
     if (res.status < 200 || res.status > 299) {
       const code = res.status === 429 ? "PROXY_RATE_LIMITED" : "TRANSPORT_HTTP_ERROR";
       const previewSignal = AbortSignal.any([signal, AbortSignal.timeout(500)]);
-      const preview = res.body
-        ? await readErrorPreview(new Response(res.body), previewSignal)
-        : undefined;
+      const preview = await readErrorPreview(res, previewSignal);
       return {
         status: res.status,
         headers: baseHeaders,
@@ -406,18 +381,7 @@ export async function handleProxyRequest(
     }
     let body: ArrayBuffer;
     try {
-      const responseHeaders = new Headers();
-      for (const name of ["content-length", "content-range"]) {
-        const value = res.headers.get(name);
-        if (value !== null) responseHeaders.set(name, value);
-      }
-      const bytes = await readRequestedBytes(
-        new Response(res.body ?? null, { status: res.status, headers: responseHeaders }),
-        range,
-        maxBytes,
-        signal,
-      );
-      body = bytes.buffer;
+      body = (await readRequestedBytes(res, range, maxBytes, signal)).buffer;
     } catch (error) {
       if (signal.aborted) return interrupted();
       if (

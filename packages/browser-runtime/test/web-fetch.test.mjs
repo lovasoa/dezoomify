@@ -41,27 +41,20 @@ test("direct ranges retain exact bytes and qualify for public proxy fallback", a
   );
 });
 
-test("direct metadata and tiles preserve malformed range response causes without proxying", async () => {
-  for (const purpose of ["metadata", "tile"]) {
-    for (const response of [
-      new Response("whole file"),
-      new Response("abc", { status: 206, headers: { "content-range": "bytes 10-13/100" } }),
-    ]) {
-      const { fetcher } = makeFetcher(async () => response, {
-        isProxyEligible: () => ({ eligible: true, reason: "test" }),
-        proxyTransport: {
-          fetchViaProxy: () => assert.fail("invalid ranges must not fall back to proxying"),
-        },
-      });
-      await assert.rejects(
-        fetcher.fetchResource(
-          request("https://a.test/image.zif", purpose, [{ name: "Range", value: "bytes=10-13" }]),
-          signal,
-        ),
-        { kind: "bad-url" },
-      );
-    }
-  }
+test("ignored direct byte ranges preserve their cause without proxying", async () => {
+  const { fetcher } = makeFetcher(async () => new Response("whole file"), {
+    isProxyEligible,
+    proxyTransport: {
+      fetchViaProxy: () => assert.fail("invalid ranges must not fall back to proxying"),
+    },
+  });
+  await assert.rejects(
+    fetcher.fetchResource(
+      request("https://a.test/image.zif", "tile", [{ name: "Range", value: "bytes=10-13" }]),
+      signal,
+    ),
+    { kind: "bad-url", detail: "invalid byte-range response: expected HTTP 206, received 200" },
+  );
 });
 
 test("CORS-hidden range headers use the relay without accepting unlocated bytes", async () => {

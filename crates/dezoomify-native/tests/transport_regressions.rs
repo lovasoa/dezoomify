@@ -116,105 +116,76 @@ fn duplicate_ranges_are_rejected_before_header_normalization() {
 
 #[test]
 fn finite_ranges_require_exact_partial_responses_after_redirects() {
-    let server = NodeServer::raw("127.0.0.1", |request| {
+    let cases = [
+        ("valid", 206, "bytes 4-7/10", "4567"),
+        ("ignored", 200, "", "0123456789"),
+        ("missing", 206, "", "4567"),
+        ("wrong", 206, "bytes 0-3/10", "0123"),
+        ("unknown-total", 206, "bytes 4-7/*", "4567"),
+        ("bad-total", 206, "bytes 4-7/7", "4567"),
+        ("short", 206, "bytes 4-7/10", "456"),
+        ("long", 206, "bytes 4-7/10", "45678"),
+        (
+            "duplicate",
+            206,
+            "bytes 4-7/10\r\nContent-Range: bytes 0-3/10",
+            "4567",
+        ),
+        ("refused", 416, "", "range refused"),
+    ];
+    let server = NodeServer::raw("127.0.0.1", move |request| {
         assert!(request.head.to_lowercase().contains("range: bytes=4-7"));
+        // The raw server closes these sockets; advertise that so the pool
+        // cannot reuse one before its FIN arrives during an early rejection.
+        if request.path == "/redirect" {
+            return response(
+                "HTTP/1.1 302 Found",
+                &[("connection", "close"), ("location", "/valid")],
+                b"",
+            )
+            .into();
+        }
         if request.path == "/chunked-short" || request.path == "/chunked-long" {
             let chunk = if request.path == "/chunked-short" {
                 "3\r\n456"
             } else {
                 "5\r\n45678"
             };
-            return format!("HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 4-7/10\r\nTransfer-Encoding: chunked\r\n\r\n{chunk}\r\n0\r\n\r\n").into_bytes().into();
+            return format!("HTTP/1.1 206 Partial Content\r\nConnection: close\r\nContent-Range: bytes 4-7/10\r\nTransfer-Encoding: chunked\r\n\r\n{chunk}\r\n0\r\n\r\n").into_bytes().into();
         }
-        let (status, headers, body): (&str, &[(&str, &str)], &[u8]) = match request.path.as_str() {
-            "/redirect" => ("HTTP/1.1 302 Found", &[("location", "/valid")], b""),
-            "/valid" => (
-                "HTTP/1.1 206 Partial Content",
-                &[("content-range", "bytes 4-7/10")],
-                b"4567",
-            ),
-            "/ignored" => ("HTTP/1.1 200 OK", &[], b"0123456789"),
-            "/missing" => ("HTTP/1.1 206 Partial Content", &[], b"4567"),
-            "/wrong" => (
-                "HTTP/1.1 206 Partial Content",
-                &[("content-range", "bytes 0-3/10")],
-                b"0123",
-            ),
-            "/duplicate" => (
-                "HTTP/1.1 206 Partial Content",
-                &[
-                    ("content-range", "bytes 4-7/10"),
-                    ("content-range", "bytes 0-3/10"),
-                ],
-                b"4567",
-            ),
-            "/unknown-total" => (
-                "HTTP/1.1 206 Partial Content",
-                &[("content-range", "bytes 4-7/*")],
-                b"4567",
-            ),
-            "/bad-total" => (
-                "HTTP/1.1 206 Partial Content",
-                &[("content-range", "bytes 4-7/7")],
-                b"4567",
-            ),
-            "/short" => (
-                "HTTP/1.1 206 Partial Content",
-                &[("content-range", "bytes 4-7/10")],
-                b"456",
-            ),
-            "/long" => (
-                "HTTP/1.1 206 Partial Content",
-                &[("content-range", "bytes 4-7/10")],
-                b"45678",
-            ),
-            "/refused" => ("HTTP/1.1 416 Range Not Satisfiable", &[], b"range refused"),
-            _ => panic!("unexpected request"),
-        };
-        response(status, headers, body).into()
+        let (_, status, range, body) = cases
+            .iter()
+            .find(|(path, ..)| request.path == format!("/{path}"))
+            .expect("known case");
+        let mut headers = vec![("connection", "close")];
+        if !range.is_empty() {
+            headers.push(("content-range", *range));
+        }
+        response(&format!("HTTP/1.1 {status}"), &headers, body.as_bytes()).into()
     });
     let transport = transport();
     let headers = BTreeMap::from([("Range".into(), "bytes=4-7".into())]);
-    let valid = transport
-        .fetch(
-            &format!("{}/redirect", server.origin),
+    let fetch = |path| {
+        transport.fetch(
+            &format!("{}/{path}", server.origin),
             &headers,
             None,
             &limits(),
         )
-        .unwrap();
+    };
+    let valid = fetch("redirect").unwrap();
     assert_eq!(valid.status, 206);
     assert_eq!(valid.body, b"4567");
-    for path in [
-        "ignored",
-        "missing",
-        "wrong",
-        "unknown-total",
-        "bad-total",
-        "short",
-        "long",
-        "chunked-short",
-        "chunked-long",
-        "duplicate",
-    ] {
-        let error = transport
-            .fetch(
-                &format!("{}/{path}", server.origin),
-                &headers,
-                None,
-                &limits(),
-            )
-            .unwrap_err();
+    for path in cases
+        .iter()
+        .filter(|case| !["valid", "refused"].contains(&case.0))
+        .map(|case| case.0)
+        .chain(["chunked-short", "chunked-long"])
+    {
+        let error = fetch(path).unwrap_err();
         assert!(matches!(error, Error::BadUrl(_)), "{path}: {error}");
     }
-    let refusal = transport
-        .fetch(
-            &format!("{}/refused", server.origin),
-            &headers,
-            None,
-            &limits(),
-        )
-        .unwrap();
+    let refusal = fetch("refused").unwrap();
     assert_eq!(refusal.status, 416);
     let user = UserHeaders::new(BTreeMap::from([("Range".into(), "bytes=0-1".into())]), None);
     assert!(matches!(

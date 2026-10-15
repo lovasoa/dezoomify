@@ -30,7 +30,16 @@ test("requests accept one finite safe byte range and reject ambiguous ranges", (
 });
 
 test("exact partial responses retain the requested bytes", async () => {
-  const bytes = await readRequestedBytes(new Response("data", { status: 206, headers }), range, 8);
+  const response = new Response("data", { status: 206, headers });
+  const bytes = await readRequestedBytes(
+    {
+      status: response.status,
+      headers: { get: (name) => response.headers.get(name) },
+      body: response.body,
+    },
+    range,
+    8,
+  );
   assert.equal(new TextDecoder().decode(bytes), "data");
 });
 
