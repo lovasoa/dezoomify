@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyProxyFailure, createWebFetcher } from "../src/web-fetch.ts";
+import { classifyProxyFailure, createWebFetcher, isProxyEligible } from "../src/web-fetch.ts";
 
 function request(uri, purpose = "metadata", headers = []) {
   return { uri, purpose, headers };
@@ -25,6 +25,44 @@ function makeFetcher(fetchImpl, extra = {}) {
   });
   return { fetcher, events };
 }
+
+test("direct ranges retain exact bytes and never qualify for metadata proxying", async () => {
+  const input = request("https://a.test/image.zif", "metadata", [
+    { name: "Range", value: "bytes=10-13" },
+  ]);
+  assert.equal(isProxyEligible(input).eligible, false);
+  const { fetcher } = makeFetcher(async (_url, init) => {
+    assert.equal(init.headers.Range, "bytes=10-13");
+    return new Response("data", { status: 206, headers: { "content-range": "bytes 10-13/100" } });
+  });
+  assert.equal(
+    new TextDecoder().decode((await fetcher.fetchResource(input, signal)).bytes),
+    "data",
+  );
+});
+
+test("direct metadata and tiles preserve malformed range response causes without proxying", async () => {
+  for (const purpose of ["metadata", "tile"]) {
+    for (const response of [
+      new Response("whole file"),
+      new Response("abc", { status: 206, headers: { "content-range": "bytes 10-13/100" } }),
+    ]) {
+      const { fetcher } = makeFetcher(async () => response, {
+        isProxyEligible: () => ({ eligible: true, reason: "test" }),
+        proxyTransport: {
+          fetchViaProxy: () => assert.fail("invalid ranges must not fall back to proxying"),
+        },
+      });
+      await assert.rejects(
+        fetcher.fetchResource(
+          request("https://a.test/image.zif", purpose, [{ name: "Range", value: "bytes=10-13" }]),
+          signal,
+        ),
+        { kind: "bad-url" },
+      );
+    }
+  }
+});
 
 test("direct metadata keeps the final URI and readable bytes", async () => {
   const response = new Response(new Uint8Array([1, 2]), {

@@ -14,7 +14,8 @@ import {
   isPublicHttpUrl,
   originOfUrl,
   readErrorPreview,
-  readResponseBytes,
+  readRequestedBytes,
+  requestedByteRange,
   retryAfterMs,
   unknownDetail,
 } from "@dezoomify/browser-runtime";
@@ -98,6 +99,7 @@ export function createExtensionFetcher(deps: FetchDeps) {
     const started = performance.now();
     signal.throwIfAborted();
     const parsed = checkedUrl(request.uri);
+    const range = requestedByteRange(request.headers);
     const origin = originOfUrl(parsed.href);
     if (!(await deps.hasPermission(origin))) {
       throw {
@@ -166,8 +168,9 @@ export function createExtensionFetcher(deps: FetchDeps) {
           : ALLOWED_MIME_PREFIXES.filter((mime) => mime !== "text/html");
       if (contentType && !accepted.some((prefix) => contentType.toLowerCase().startsWith(prefix)))
         throw transportError("bad-url", `unsupported response type ${contentType}`);
-      const bytes = await readResponseBytes(
+      const bytes = await readRequestedBytes(
         response,
+        range,
         deps.maxBytes ?? MAX_BYTES_DEFAULT,
         controller.signal,
       );
@@ -202,6 +205,7 @@ export function createExtensionFetcher(deps: FetchDeps) {
         });
       throw observed;
     } finally {
+      controller.abort();
       deps.diagnostics?.count("requests_pending", -1);
       (deps.clearTimeoutFn ?? clearTimeout)(timer);
       signal.removeEventListener("abort", abort);

@@ -453,7 +453,7 @@ impl<'a> NativeHost<'a> {
         &self,
         bytes: Vec<u8>,
         processing: dezoomify::core::model::ProcessingRecipe,
-        store: Option<(PathBuf, String, String)>,
+        store: Option<(PathBuf, String, ResourceRequest)>,
     ) -> Result<ReceivedPixels, Error> {
         let permit = self.decode_tails.reserve(bytes.len());
         let decode_tails = Arc::clone(&self.decode_tails);
@@ -473,8 +473,8 @@ impl<'a> NativeHost<'a> {
                     .apply(bytes)
                     .map_err(|error| Error::ProcessingFailed(error.to_string().into()))?;
                 processing_memory.shrink(bytes.len() as u64);
-                if let Some((dir, namespace, uri)) = &store {
-                    let _ = crate::cache::store(dir, namespace, uri, &bytes);
+                if let Some((dir, namespace, request)) = &store {
+                    let _ = crate::cache::store_resource(dir, namespace, request, &bytes);
                 }
                 let (dimensions, _) = crate::tile_output::inspect(&bytes, budget.available())?;
                 // Charge before the pixel decoder can allocate. The temporary
@@ -507,7 +507,7 @@ impl<'a> NativeHost<'a> {
             .cache_dir
             .clone()
             .unwrap_or_else(crate::imaging::default_tile_cache_dir);
-        if let Some(bytes) = crate::cache::load(&dir, &namespace, &tile.request.uri) {
+        if let Some(bytes) = crate::cache::load_resource(&dir, &namespace, &tile.request) {
             self.diagnostics.count("cache_reads", 1.0);
             match self.decode(bytes, Default::default(), None).await {
                 Ok(decoded) => return Ok(decoded),
@@ -517,7 +517,7 @@ impl<'a> NativeHost<'a> {
             self.controls.checkpoint(false).await?;
             let _ = std::fs::remove_file(
                 dir.join(&namespace)
-                    .join(crate::cache::cache_key(&tile.request.uri)),
+                    .join(crate::cache::resource_cache_key(&tile.request)),
             );
         }
         if !self.options.min_interval.is_zero() {
@@ -539,7 +539,7 @@ impl<'a> NativeHost<'a> {
         self.decode(
             response.body,
             tile.placement.processing,
-            Some((dir, namespace, tile.request.uri.clone())),
+            Some((dir, namespace, tile.request.clone())),
         )
         .await
     }
@@ -575,7 +575,7 @@ impl<'a> NativeHost<'a> {
             .cache_dir
             .clone()
             .unwrap_or_else(crate::imaging::default_tile_cache_dir);
-        if let Some(bytes) = crate::cache::load(&dir, &namespace, &tile.request.uri) {
+        if let Some(bytes) = crate::cache::load_resource(&dir, &namespace, &tile.request) {
             match self.inspect_encoded(bytes).await {
                 Ok((bytes, size, format)) => {
                     self.diagnostics.count("cache_reads", 1.0);
@@ -593,7 +593,7 @@ impl<'a> NativeHost<'a> {
             }
             let _ = std::fs::remove_file(
                 dir.join(&namespace)
-                    .join(crate::cache::cache_key(&tile.request.uri)),
+                    .join(crate::cache::resource_cache_key(&tile.request)),
             );
         }
         if !self.options.min_interval.is_zero() {
@@ -613,7 +613,7 @@ impl<'a> NativeHost<'a> {
         let processing = tile.placement.processing;
         let permit = self.decode_tails.reserve(response.body.len());
         self.check_encoded_inflight()?;
-        let uri = tile.request.uri.clone();
+        let request = tile.request.clone();
         let budget = self
             .options
             .output_retain_cap
@@ -627,7 +627,7 @@ impl<'a> NativeHost<'a> {
                         .map_err(|e| Error::ProcessingFailed(e.to_string().into()))?;
                     crate::tile_output::normalize_orientation(&mut bytes);
                     let (size, format) = crate::tile_output::inspect(&bytes, budget)?;
-                    let _ = crate::cache::store(&dir, &namespace, &uri, &bytes);
+                    let _ = crate::cache::store_resource(&dir, &namespace, &request, &bytes);
                     Ok((bytes, size, format))
                 })
                 .await
@@ -680,7 +680,7 @@ impl<'a> NativeHost<'a> {
                 .unwrap_or_else(crate::imaging::default_tile_cache_dir);
             let _ = std::fs::remove_file(
                 dir.join(crate::cache::job_namespace(&self.options.input_url))
-                    .join(crate::cache::cache_key(&tile.request.uri)),
+                    .join(crate::cache::resource_cache_key(&tile.request)),
             );
         }
     }

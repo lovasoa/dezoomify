@@ -7,8 +7,9 @@
 import type { ErrorTransport, Error as JobError, ResourceRequest } from "@dezoomify/wasm-bindings";
 import type { DiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
 import { hasSignedQuery } from "../../shared-ui/src/source-url.ts";
+import { readRequestedBytes, requestedByteRange } from "./byte-range.ts";
 import { blockedReason, isJobError } from "./failure.ts";
-import { readErrorPreview, readResponseBytes, retryAfterMs } from "./response-body.ts";
+import { readErrorPreview, retryAfterMs } from "./response-body.ts";
 import {
   combineTimeout,
   DIRECT_METADATA_TIMEOUT_MS,
@@ -72,7 +73,14 @@ const DIRECT_METADATA_MAX_BYTES = 8 * 1024 * 1024;
 const DIRECT_TILE_MAX_BYTES = 64 * 1024 * 1024;
 
 export interface DirectOutcome {
-  outcome: "readable" | "http-error" | "network-error" | "cancelled" | "too-large";
+  outcome:
+    | "readable"
+    | "http-error"
+    | "network-error"
+    | "cancelled"
+    | "too-large"
+    | "invalid-response";
+  error?: JobError;
   finalUrl?: string;
   status?: number;
   bytes?: ArrayBuffer;
@@ -286,6 +294,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       );
     };
     try {
+      const range = requestedByteRange(request.headers);
       const res = await fetchImpl(url, {
         headers: Object.fromEntries(
           (request.headers ?? []).map(({ name, value }) => [name, value]),
@@ -321,7 +330,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
           ...(preview ? { preview } : {}),
         };
       }
-      const bytes = (await readResponseBytes(res, maxBytes, combined.signal)).buffer;
+      const bytes = (await readRequestedBytes(res, range, maxBytes, combined.signal)).buffer;
       end(true);
       const contentType = res.headers.get("content-type") || undefined;
       deps.diagnostics?.count("bytes_fetched", bytes.byteLength);
@@ -345,6 +354,10 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       end(false);
       if (signal?.aborted) return { outcome: "cancelled" };
       deps.diagnostics?.count("request_failures");
+      if (isJobError(e) && e.kind === "bad-url") {
+        report({ outcome: "invalid-response", http: responseStatus, error: e });
+        return { outcome: "invalid-response", error: e };
+      }
       if (isJobError(e) && e.kind === "size-limit") {
         report({ outcome: "too-large", limit_bytes: maxBytes, http: responseStatus });
         return { outcome: "too-large" };
@@ -454,6 +467,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     if (signal?.aborted) throw cancelledFailure();
     activeTransport = "direct";
     const direct = await fetchDirect(request, signal, metadataMs, DIRECT_METADATA_MAX_BYTES);
+    if (direct.error) throw direct.error;
     if (direct.outcome === "readable" && direct.bytes)
       return { bytes: direct.bytes, finalUri: direct.finalUrl || request.uri };
     if (
@@ -528,6 +542,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     if (deps.throttle) await deps.throttle(request.uri);
     if (signal?.aborted) throw cancelledFailure();
     const direct = await fetchDirect(request, signal, requestMs);
+    if (direct.error) throw direct.error;
     if (direct.outcome === "readable" && direct.bytes)
       return { bytes: direct.bytes, finalUri: direct.finalUrl };
     if (direct.outcome === "cancelled" || signal?.aborted) throw cancelledFailure();

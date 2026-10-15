@@ -122,7 +122,7 @@ export async function startFixtureServer({
       res.writeHead(response.status, {
         ...Object.fromEntries(response.headers),
         "access-control-allow-origin": "*",
-        "access-control-expose-headers": "X-Set-Cookie",
+        "access-control-expose-headers": "X-Set-Cookie, Content-Range",
         "content-length": bytes.length,
       });
       entry.status = response.status;

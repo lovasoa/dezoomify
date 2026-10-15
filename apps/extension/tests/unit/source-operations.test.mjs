@@ -261,3 +261,41 @@ test("source fetch classifies failures without returning response details", asyn
     globalThis.fetch = oldFetch;
   }
 });
+
+test("source range fetch rejects ignored ranges before reading and bounds partial bodies", async () => {
+  const oldFetch = globalThis.fetch;
+  const request = {
+    url: "https://gallery.example/image.zif",
+    headers: [{ name: "Range", value: "bytes=10-13" }],
+    rangeBytes: 4,
+  };
+  try {
+    globalThis.fetch = async (_url, init) => {
+      assert.equal(init.headers.Range, "bytes=10-13");
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        body: {
+          getReader() {
+            assert.fail("ignored ranges must not be read");
+          },
+        },
+      };
+    };
+    assert.equal((await fetchSource(request)).error.kind, "bad-url");
+    globalThis.fetch = async () =>
+      new Response("data", {
+        status: 206,
+        headers: { "content-range": "bytes 10-13/100", "content-length": "4" },
+      });
+    const result = await fetchSource(request);
+    assert.equal(result.ok, true);
+    assert.equal(result.contentRange, "bytes 10-13/100");
+    assert.equal(result.bytes, 4);
+    globalThis.fetch = async () => new Response("oversized", { status: 206 });
+    assert.deepEqual((await fetchSource(request)).error, { kind: "size-limit", max_bytes: 4 });
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});

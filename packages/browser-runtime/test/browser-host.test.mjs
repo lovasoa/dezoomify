@@ -181,6 +181,45 @@ test("an unreadable origin is classified once across concurrent probes and ordin
   assert.equal(reads, 1);
 });
 
+test("ranged tiles require readable bytes even on a display-only origin", async () => {
+  for (const preclassified of [false, true]) {
+    let reads = 0;
+    let displays = 0;
+    const failure = { kind: "network-failure", transport: "direct", detail: "unreadable" };
+    const h = setup({
+      fetchResource: async () => {
+        reads++;
+        throw failure;
+      },
+      loadDisplayImage: async () => {
+        displays++;
+        return { naturalWidth: 256, naturalHeight: 256 };
+      },
+    });
+    if (preclassified) await h.host.acquireTile(acquisition(tile));
+    const beforeReads = reads;
+    const beforeDisplays = displays;
+    const ranged = {
+      ...tile,
+      request: {
+        ...tile.request,
+        uri: "https://tiles.test/image.zif",
+        headers: [{ name: "rAnGe", value: "bytes=10-13" }],
+      },
+    };
+    await assert.rejects(h.host.acquireTile(acquisition(ranged)), {
+      kind: "resource",
+      request: ranged.request.uri,
+      resource_kind: "tile",
+      source: failure,
+    });
+    assert.equal(reads, beforeReads + 1);
+    assert.equal(displays, beforeDisplays);
+    assert.deepEqual(await h.host.probe(ranged), { status: "missing" });
+    assert.equal(displays, beforeDisplays);
+  }
+});
+
 test("processed tiles, policy and resource limits never use ordinary images", async () => {
   const network = { kind: "network-failure", transport: "direct" };
   const denied = {

@@ -3,7 +3,7 @@
 use super::discovery::{DiscoveryInput, DiscoveryLimits, FormatSpec};
 use crate::{
     arcgis, bulk_text, custom_yaml, dzi, fsi, fzp, generic, google_arts_and_culture, hungaricana,
-    iiif, iipimage, krpano, lizardtech, pnav, second_canvas, topviewer, vls, wmts, xlimage,
+    iiif, iipimage, krpano, lizardtech, pnav, second_canvas, topviewer, vls, wmts, xlimage, zif,
     zoomify,
 };
 
@@ -11,6 +11,7 @@ use crate::{
 const BUILTINS: &[FormatSpec] = &[
     custom_yaml::SPEC,
     google_arts_and_culture::SPEC,
+    zif::SPEC,
     zoomify::SPEC,
     iiif::SPEC,
     dzi::SPEC,

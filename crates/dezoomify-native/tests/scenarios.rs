@@ -61,6 +61,52 @@ fn cache_keys_distinguish_resources_and_never_persist_secrets() {
 }
 
 #[test]
+fn container_tile_cache_isolates_ranges_without_persisting_headers() {
+    use dezoomify::model::{Header, RequestPurpose, ResourceRequest};
+    let work = dezoomify_fixture_server::temp_dir("range-cache");
+    let request = |range: &str| ResourceRequest {
+        uri: "https://h/container.zif?token=CANARY".into(),
+        purpose: RequestPurpose::Tile,
+        headers: vec![
+            Header {
+                name: "Range".into(),
+                value: range.into(),
+            },
+            Header {
+                name: "X-Private".into(),
+                value: "SECRET-HEADER".into(),
+            },
+        ],
+    };
+    let first = request("bytes=0-3");
+    let second = request("bytes=4-7");
+    let path = cache::store_resource(&work, "job", &first, b"tile1").unwrap();
+    assert!(cache::load_resource(&work, "job", &second).is_none());
+    cache::store_resource(&work, "job", &second, b"tile2").unwrap();
+    cache::store(&work, "job", &first.uri, b"whole").unwrap();
+    assert_eq!(
+        cache::load_resource(&work, "job", &first).unwrap(),
+        b"tile1"
+    );
+    assert_eq!(
+        cache::load_resource(&work, "job", &second).unwrap(),
+        b"tile2"
+    );
+    assert_eq!(cache::load(&work, "job", &first.uri).unwrap(), b"whole");
+    let mut equivalent = first.clone();
+    equivalent.headers[0].name = "rAnGe".into();
+    equivalent.headers[1].value = "OTHER-SECRET".into();
+    assert_eq!(
+        cache::resource_cache_key(&first),
+        cache::resource_cache_key(&equivalent)
+    );
+    assert!(!path.to_string_lossy().contains("CANARY"));
+    assert!(!path.to_string_lossy().contains("bytes"));
+    assert_eq!(std::fs::read(path).unwrap(), b"tile1");
+    std::fs::remove_dir_all(work).unwrap();
+}
+
+#[test]
 fn cache_namespaces_isolate_jobs_and_reject_traversal() {
     // The namespace derives from the input URL alone: repeated runs of one
     // job share entries, distinct jobs never do, and no URL text survives.

@@ -3,7 +3,10 @@ import {
   isJobError,
   isPublicHttpUrl,
   originOfUrl,
+  requestedByteRange,
   SOURCE_FETCH_BYTE_LIMIT,
+  validateByteRangeLength,
+  validateByteRangeResponse,
   validateRequestHeaders,
 } from "@dezoomify/browser-runtime";
 import type { Interaction, Error as JobError, ResourceRequest } from "@dezoomify/wasm-bindings";
@@ -84,6 +87,10 @@ function validFetchResult(value: unknown, expectedUrl: string): value is FetchRe
     value.ok === true &&
     (value.contentType === undefined ||
       (typeof value.contentType === "string" && value.contentType.length <= 256)) &&
+    (value.contentRange === undefined ||
+      (typeof value.contentRange === "string" && value.contentRange.length <= 256)) &&
+    (value.contentLength === undefined ||
+      (typeof value.contentLength === "string" && value.contentLength.length <= 256)) &&
     typeof value.data === "string" &&
     value.data.length <= MAX_BASE64_CHARS &&
     typeof value.bytes === "number" &&
@@ -432,6 +439,9 @@ export function createSourceAccess(
       throw transportError("bad-url", "invalid source request URL");
     const headers = validateRequestHeaders(request.headers ?? []);
     if (!headers) throw transportError("bad-url", "invalid source request headers");
+    const range = requestedByteRange(headers);
+    if (range && range.length > SOURCE_FETCH_BYTE_LIMIT)
+      throw { kind: "size-limit", max_bytes: SOURCE_FETCH_BYTE_LIMIT } satisfies JobError;
 
     const operationId = crypto.randomUUID();
     const frame = sessionFrames.get(originOfUrl(request.uri)) ?? rootFrame;
@@ -443,6 +453,7 @@ export function createSourceAccess(
       operationId,
       timeoutMs,
       deadlineAt,
+      ...(range ? { rangeBytes: range.length } : {}),
     };
     const cancel = () => {
       return browserApi.scripting
@@ -465,6 +476,10 @@ export function createSourceAccess(
     if (!validFetchResult(result, frame.documentUrl))
       throw transportError("bad-url", "invalid source fetch result");
     if (result.ok === false) throw result.error;
+    if (range) {
+      validateByteRangeResponse(range, result.status, result.contentRange, result.contentLength);
+      validateByteRangeLength(range, result.bytes);
+    }
     const bytes = decodeBase64Payload(result.data, SOURCE_FETCH_BYTE_LIMIT);
     if (!bytes || bytes.byteLength !== result.bytes)
       throw transportError("bad-url", "invalid source payload");

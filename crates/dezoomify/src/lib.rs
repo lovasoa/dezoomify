@@ -35,6 +35,7 @@ pub mod vec2d;
 pub mod vls;
 pub mod wmts;
 pub mod xlimage;
+pub mod zif;
 pub mod zoomify;
 
 /// Canonical public values shared by discovery and hosts.
