@@ -11,14 +11,65 @@ import type { DiscoveryInputKind, Error as JobError, JobInput } from "@dezoomify
 
 type SourceRequest = {
   url: string;
-  method?: string;
   headers: Array<{ name: string; value: string }>;
-  operationId?: string;
-  timeoutMs?: number;
-  deadlineAt?: number;
+  operationId: string;
+  deadlineAt: number;
+  documentToken: string;
 };
 
 type SourceFetch = { controller: AbortController; finished: Promise<void> };
+
+/** A finite permission-filtered probe, also used to bind Firefox 133 documents. */
+export function inspectSourceDocument(includeFrames = false) {
+  const world = globalThis as typeof globalThis & { __dezoomifyDocumentToken?: string };
+  // getRandomValues also works on ordinary HTTP pages, unlike randomUUID.
+  world.__dezoomifyDocumentToken ??= crypto.getRandomValues(new Uint32Array(4)).join("-");
+  const frames = new Set<string>();
+  const append = (value: unknown) => {
+    if (frames.size >= 16 || typeof value !== "string" || value.length > 2048) return;
+    try {
+      const url = new URL(value);
+      if (url.protocol === "http:" || url.protocol === "https:") frames.add(url.href);
+    } catch {}
+  };
+  if (includeFrames) {
+    const roots: (Document | ShadowRoot)[] = [document];
+    const dom = (
+      globalThis as { chrome?: { dom?: { openOrClosedShadowRoot(e: Element): ShadowRoot | null } } }
+    ).chrome?.dom;
+    let visited = 0;
+    while (roots.length > 0 && visited < 2048 && frames.size < 16) {
+      const root = roots.shift();
+      if (!root) break;
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+      for (let node = walker.nextNode(); node && visited++ < 2048; node = walker.nextNode()) {
+        const element = node as Element & {
+          src?: string;
+          openOrClosedShadowRoot?: ShadowRoot | null;
+        };
+        if (element.localName === "iframe" || element.localName === "frame") append(element.src);
+        let shadow = element.shadowRoot;
+        try {
+          // Chromium's extension DOM API rejects SVG elements. One such
+          // element must not discard this document's entire inventory reply.
+          shadow = dom?.openOrClosedShadowRoot(element) ?? element.openOrClosedShadowRoot ?? shadow;
+        } catch {}
+        if (shadow) roots.push(shadow);
+        if (frames.size >= 16) break;
+      }
+    }
+    let entries = 0;
+    for (const entry of performance.getEntriesByType("resource")) {
+      if (entries++ >= 2048 || frames.size >= 16) break;
+      if ((entry as PerformanceResourceTiming).initiatorType === "iframe") append(entry.name);
+    }
+  }
+  return {
+    documentUrl: String(globalThis.location?.href ?? ""),
+    token: world.__dezoomifyDocumentToken,
+    frames: [...frames],
+  };
+}
 
 /**
  * Take one bounded snapshot of the rendered document and retained resource
@@ -87,7 +138,7 @@ export function collectCandidates(): {
 
 /**
  * Fetch one source request in the source tab's origin and return only
- * bounded, structured-cloneable data. The job page validates URL, method,
+ * bounded, structured-cloneable data. The job page validates URL
  * and headers before injection; this function performs tab-side I/O.
  * Credentials default to
  * same-origin: the page's session applies to its own origin, while public
@@ -114,7 +165,19 @@ export async function fetchSource(request: SourceRequest): Promise<
   const documentUrl = String(globalThis.location?.href ?? "");
   const world = globalThis as typeof globalThis & {
     __dezoomifySourceFetches?: Map<string, SourceFetch | null>;
+    __dezoomifyDocumentToken?: string;
   };
+  if (!request.documentToken || world.__dezoomifyDocumentToken !== request.documentToken)
+    return {
+      ok: false,
+      documentUrl,
+      error: {
+        kind: "policy-denied",
+        blocked_reason: "source-document-lost",
+        transport: "browser-session",
+        detail: "source document changed before fetching",
+      },
+    };
   let controllers = world.__dezoomifySourceFetches;
   if (!controllers) {
     controllers = new Map();
@@ -125,15 +188,15 @@ export async function fetchSource(request: SourceRequest): Promise<
   const headers: Record<string, string> = {};
   for (const header of request.headers) headers[header.name] = header.value;
 
-  const deadlineAt = request.deadlineAt ?? Date.now() + (request.timeoutMs ?? 30_000);
+  const { deadlineAt, operationId } = request;
   if (Date.now() >= deadlineAt)
     return fail({
       kind: "timeout",
       transport: "browser-session",
       detail: "the source request timed out",
     });
-  if (request.operationId && controllers.get(request.operationId) === null) {
-    controllers.delete(request.operationId);
+  if (controllers.get(operationId) === null) {
+    controllers.delete(operationId);
     return fail({ kind: "cancelled" });
   }
   const controller = new AbortController();
@@ -149,12 +212,12 @@ export async function fetchSource(request: SourceRequest): Promise<
     },
     Math.max(0, deadlineAt - Date.now()),
   );
-  if (request.operationId) controllers.set(request.operationId, { controller, finished });
+  controllers.set(operationId, { controller, finished });
   try {
     const response = await fetch(request.url, {
-      method: request.method ?? "GET",
+      method: "GET",
       headers,
-      signal: controller?.signal,
+      signal: controller.signal,
     });
     if (!response || typeof response.status !== "number")
       return fail({
@@ -214,9 +277,7 @@ export async function fetchSource(request: SourceRequest): Promise<
       const value = part instanceof Uint8Array ? part : new Uint8Array(part ?? []);
       total += value.byteLength;
       if (total > MAX_SOURCE_FETCH_BYTES) {
-        try {
-          controller?.abort?.();
-        } catch {}
+        controller.abort();
         throw { kind: "size-limit", max_bytes: MAX_SOURCE_FETCH_BYTES };
       }
       parts.push(value);
@@ -271,16 +332,22 @@ export async function fetchSource(request: SourceRequest): Promise<
   } finally {
     controller.abort();
     clearTimeout(timer);
-    if (request.operationId) controllers.delete(request.operationId);
+    controllers.delete(operationId);
     finish();
   }
 }
 
 /** Cancel a live fetch in this extension's isolated world for this document. */
-export async function cancelSourceFetch(operationId: string, deadlineAt: number): Promise<void> {
+export async function cancelSourceFetch(
+  operationId: string,
+  deadlineAt: number,
+  documentToken: string,
+): Promise<void> {
   const world = globalThis as typeof globalThis & {
     __dezoomifySourceFetches?: Map<string, SourceFetch | null>;
+    __dezoomifyDocumentToken?: string;
   };
+  if (!documentToken || world.__dezoomifyDocumentToken !== documentToken) return;
   world.__dezoomifySourceFetches ??= new Map();
   const requests = world.__dezoomifySourceFetches;
   const running = requests.get(operationId);

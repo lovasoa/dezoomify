@@ -9,10 +9,15 @@ import {
 import type { Interaction, Error as JobError, ResourceRequest } from "@dezoomify/wasm-bindings";
 import type { PublicPath, WxtBrowser } from "wxt/browser";
 import { transportError } from "../runtime/fetch.ts";
-import { cancelSourceFetch, collectCandidates, fetchSource } from "./source-operations.ts";
+import {
+  cancelSourceFetch,
+  collectCandidates,
+  fetchSource,
+  inspectSourceDocument,
+} from "./source-operations.ts";
 
-type SourceApi = Pick<WxtBrowser, "tabs" | "scripting" | "webNavigation">;
-type SourceFrame = { frameId: number; documentUrl: string };
+type SourceApi = Pick<WxtBrowser, "tabs" | "scripting">;
+type SourceFrame = { frameId: number; documentUrl: string; token?: string; documentId?: string };
 type CandidateSnapshot = Awaited<ReturnType<typeof collectCandidates>> & {
   memory?: Record<string, number | boolean | string | string[]>;
 };
@@ -20,7 +25,11 @@ type CandidateInput = CandidateSnapshot["inputs"][number];
 type SourceRequest = Parameters<typeof fetchSource>[0];
 type FetchResult = Awaited<ReturnType<typeof fetchSource>>;
 type SourceScript<Args extends unknown[], Result> =
-  | { func: (...args: Args) => Result; args: Args; world?: "ISOLATED" | "MAIN" }
+  | {
+      func: (...args: Args) => Result;
+      args: Args | ((token: string) => Args);
+      world?: "ISOLATED" | "MAIN";
+    }
   | { files: Extract<PublicPath, `${string}.js`>[]; world: "MAIN" };
 
 const MAX_URL_LENGTH = 2048;
@@ -121,7 +130,6 @@ export function createSourceAccess(
   const sessionFrames = new Map<string, SourceFrame>([[sourceOrigin, rootFrame]]);
   const timeoutMs = options.timeoutMs ?? 30_000;
   const lifetime = new AbortController();
-  let invalidated = false;
   const onUpdated = (updatedTabId: number, changeInfo: { status?: string; url?: string }) => {
     if (updatedTabId !== tabId) return;
     if (changeInfo.status === "loading") {
@@ -135,15 +143,69 @@ export function createSourceAccess(
     if (removedTabId === tabId) invalidate();
   };
   function invalidate() {
-    if (invalidated) return;
-    invalidated = true;
     lifetime.abort(transportError("source-lost", "source document changed"));
   }
   browserApi.tabs.onUpdated.addListener(onUpdated);
   browserApi.tabs.onRemoved.addListener(onRemoved);
 
   function assertLive() {
-    if (invalidated) throw transportError("source-lost", "source document changed");
+    lifetime.signal.throwIfAborted();
+  }
+
+  async function checkSourceTab(signal: AbortSignal) {
+    const tab = await browserApi.tabs.get(tabId).catch(() => null);
+    signal.throwIfAborted();
+    assertLive();
+    if (!tab?.url || !sameDocumentUrl(tab.url, documentUrl)) {
+      invalidate();
+      throw transportError(
+        "source-lost",
+        tab ? "source document changed" : "source tab is unavailable",
+      );
+    }
+  }
+
+  function target(frame: SourceFrame) {
+    return frame.documentId
+      ? { tabId, documentIds: [frame.documentId] }
+      : { tabId, frameIds: [frame.frameId] };
+  }
+
+  function lostFrame(frame: SourceFrame) {
+    if (frame.frameId === 0) invalidate();
+    return transportError("source-lost", "source operation belongs to another document");
+  }
+
+  async function inspect(frame: SourceFrame, signal: AbortSignal) {
+    const replies = await browserApi.scripting
+      .executeScript({
+        target: target(frame),
+        func: inspectSourceDocument,
+        args: [],
+      })
+      .catch((cause: unknown) => {
+        throw transportError(
+          "network-failure",
+          cause instanceof Error ? cause.message : String(cause),
+        );
+      });
+    signal.throwIfAborted();
+    assertLive();
+    const reply = replies[0];
+    const value = reply?.result;
+    if (
+      replies.length !== 1 ||
+      reply?.frameId !== frame.frameId ||
+      !value ||
+      typeof value.token !== "string" ||
+      value.token.length === 0 ||
+      value.token.length > 128 ||
+      !sameDocumentUrl(value.documentUrl, frame.documentUrl) ||
+      (frame.token !== undefined && frame.token !== value.token)
+    )
+      throw lostFrame(frame);
+    frame.token = value.token;
+    if (reply.documentId) frame.documentId = reply.documentId;
   }
 
   async function injectUnchecked<Args extends unknown[], Result>(
@@ -154,22 +216,23 @@ export function createSourceAccess(
   ): Promise<Awaited<Result>> {
     assertLive();
     signal.throwIfAborted();
-    const tab = await browserApi.tabs.get(tabId).catch(() => null);
+    await checkSourceTab(signal);
+    // Native document targets reject replacement documents atomically. Older
+    // Firefox uses isolated-world tokens, checked again before accepting data.
+    if (!frame.documentId) await inspect(frame, signal);
     signal.throwIfAborted();
-    if (!tab) {
-      invalidate();
-      throw transportError("source-lost", "source tab is unavailable");
-    }
-    if (!tab.url || !sameDocumentUrl(tab.url, documentUrl)) {
-      invalidate();
-      throw transportError("source-lost", "source document changed");
-    }
-    assertLive();
     onLaunch?.();
+    const executable =
+      "files" in script
+        ? script
+        : {
+            ...script,
+            args: typeof script.args === "function" ? script.args(frame.token ?? "") : script.args,
+          };
     const results = await browserApi.scripting
       .executeScript<Args, Result>({
-        target: { tabId, frameIds: [frame.frameId] },
-        ...script,
+        target: target(frame),
+        ...executable,
       })
       .catch((cause: unknown) => {
         assertLive();
@@ -182,30 +245,25 @@ export function createSourceAccess(
     assertLive();
     if (!Array.isArray(results) || results.length !== 1 || results[0]?.frameId !== frame.frameId)
       throw transportError("bad-url", "source operation returned an invalid result");
-    const tabAfter = await browserApi.tabs.get(tabId).catch(() => null);
-    if (!tabAfter?.url || !sameDocumentUrl(tabAfter.url, documentUrl)) {
-      invalidate();
-      throw transportError("source-lost", "source document changed");
-    }
-    assertLive();
+    if (frame.documentId && results[0].documentId !== frame.documentId) throw lostFrame(frame);
+    if (!frame.documentId) await inspect(frame, signal);
+    await checkSourceTab(signal);
     const result = results[0].result;
     const resultDocumentUrl =
       isRecord(result) && typeof result.documentUrl === "string" ? result.documentUrl : null;
     if (!resultDocumentUrl || !sameDocumentUrl(resultDocumentUrl, frame.documentUrl)) {
-      if (frame.frameId === 0) invalidate();
-      throw transportError("source-lost", "source result belongs to another document");
+      throw lostFrame(frame);
     }
     return result as Awaited<Result>;
   }
 
   /** Bound the whole browser operation, including a lost executeScript reply. */
-  async function inject<Args extends unknown[] = [], Result = unknown>(
-    script: SourceScript<Args, Result>,
+  async function bounded<Result>(
+    run: (signal: AbortSignal, onLaunch: () => void) => Promise<Result>,
     signal?: AbortSignal,
     onAbort?: () => Promise<void>,
     deadlineAt = Date.now() + timeoutMs,
-    frame = rootFrame,
-  ): Promise<Awaited<Result>> {
+  ): Promise<Result> {
     assertLive();
     const deadline = new AbortController();
     const timeout: JobError = {
@@ -255,14 +313,9 @@ export function createSourceAccess(
         abort();
         return await aborted;
       }
-      const operation = injectUnchecked(
-        script,
-        combined,
-        () => {
-          launched = true;
-        },
-        frame,
-      );
+      const operation = run(combined, () => {
+        launched = true;
+      });
       operationDone = operation.then(
         () => {},
         () => {},
@@ -275,6 +328,21 @@ export function createSourceAccess(
       clearTimeout(timer);
       combined.removeEventListener("abort", abort);
     }
+  }
+
+  function inject<Args extends unknown[] = [], Result = unknown>(
+    script: SourceScript<Args, Result>,
+    signal?: AbortSignal,
+    onAbort?: () => Promise<void>,
+    deadlineAt = Date.now() + timeoutMs,
+    frame = rootFrame,
+  ) {
+    return bounded(
+      (owned, launched) => injectUnchecked(script, owned, launched, frame),
+      signal,
+      onAbort,
+      deadlineAt,
+    );
   }
 
   async function scan(signal?: AbortSignal, frame = rootFrame): Promise<CandidateSnapshot> {
@@ -371,51 +439,125 @@ export function createSourceAccess(
     };
   }
 
-  /** One lazy traversal per Rust invocation, including nested cross-origin frames. */
+  function inventory(signal: AbortSignal) {
+    return bounded(async (owned) => {
+      if (!rootFrame.token) await inspect(rootFrame, owned);
+      const replies = await browserApi.scripting
+        .executeScript({
+          target: { tabId, allFrames: true },
+          func: inspectSourceDocument,
+          args: [true],
+        })
+        .catch((cause: unknown) => {
+          throw transportError(
+            "network-failure",
+            cause instanceof Error ? cause.message : String(cause),
+          );
+        });
+      owned.throwIfAborted();
+      assertLive();
+      const root = replies.find((reply) => reply.frameId === 0);
+      if (
+        !root?.result ||
+        root.result.token !== rootFrame.token ||
+        !sameDocumentUrl(root.result.documentUrl, documentUrl)
+      )
+        throw lostFrame(rootFrame);
+      await checkSourceTab(owned);
+      const frames: SourceFrame[] = [];
+      const origins = new Set<string>();
+      for (const reply of replies) {
+        const value = reply.result;
+        if (frames.length >= 16) break;
+        if (
+          !Number.isSafeInteger(reply.frameId) ||
+          reply.frameId < 0 ||
+          !value ||
+          typeof value.documentUrl !== "string" ||
+          value.documentUrl.length > MAX_URL_LENGTH ||
+          !isPublicHttpUrl(value.documentUrl) ||
+          typeof value.token !== "string" ||
+          value.token.length === 0 ||
+          value.token.length > 128 ||
+          !Array.isArray(value.frames) ||
+          value.frames.length > 16
+        )
+          continue;
+        frames.push({
+          frameId: reply.frameId,
+          documentUrl: value.documentUrl,
+          token: value.token,
+          ...(reply.documentId ? { documentId: reply.documentId } : {}),
+        });
+        for (const url of [value.documentUrl, ...value.frames]) {
+          if (
+            origins.size < 16 &&
+            typeof url === "string" &&
+            url.length <= MAX_URL_LENGTH &&
+            isPublicHttpUrl(url)
+          )
+            origins.add(originOfUrl(url));
+        }
+      }
+      return { frames, origins };
+    }, signal);
+  }
+
+  /** One lazy traversal per Rust invocation; grants refresh the accessible inventory. */
   function observations(access: {
     hasPermission(origin: string): Promise<boolean>;
     ensurePermission(origin: string, signal: AbortSignal): Promise<void>;
     scanned(snapshot: CandidateSnapshot): void;
     failed(frame: SourceFrame, error: unknown): void;
   }) {
-    let frames: SourceFrame[] | undefined;
-    const seen = new Set<number>([0]);
+    const seen = new Set<string>();
+    const requested = new Set<string>();
     return async (interaction: Interaction, signal: AbortSignal): Promise<CandidateInput[]> => {
       signal = AbortSignal.any([signal, lifetime.signal]);
       assertLive();
       signal.throwIfAborted();
-      if (!frames) {
-        const tree = await browserApi.webNavigation.getAllFrames({ tabId });
-        assertLive();
-        signal.throwIfAborted();
-        frames = (tree ?? [])
-          .filter(
-            (frame) =>
-              isPublicHttpUrl(frame.url) &&
-              frame.url.length <= MAX_URL_LENGTH &&
-              !frame.errorOccurred,
-          )
-          .slice(0, 16)
-          .map((frame) => ({ frameId: frame.frameId, documentUrl: frame.url }));
-      }
-      for (const frame of frames) {
-        if (seen.has(frame.frameId)) continue;
-        const origin = originOfUrl(frame.documentUrl);
-        const granted = origin === sourceOrigin || (await access.hasPermission(origin));
-        signal.throwIfAborted();
-        if (!granted && interaction === "forbidden") continue;
-        seen.add(frame.frameId);
-        if (!granted) await access.ensurePermission(origin, signal);
-        try {
-          const snapshot = await scan(signal, frame);
-          if (origin !== sourceOrigin) sessionFrames.set(origin, frame);
-          access.scanned(snapshot);
-          return snapshot.inputs;
-        } catch (error) {
-          assertLive();
+      // A metadata fetch may have acquired access since the previous batch.
+      // Re-probe live frames without repeating already-scanned documents.
+      let available = await inventory(signal);
+      while (seen.size < 16) {
+        for (const frame of available.frames) {
+          const key = `${frame.frameId}:${frame.token}`;
+          if (frame.frameId === 0 || seen.has(key) || seen.size >= 16) continue;
+          const origin = originOfUrl(frame.documentUrl);
+          // A successful isolated-world probe is the browser's access check.
+          // Rechecking a match pattern can disagree with activeTab or older
+          // Firefox's handling of explicit ports.
           signal.throwIfAborted();
-          access.failed(frame, error);
+          seen.add(key);
+          try {
+            const snapshot = await scan(signal, frame);
+            if (origin !== sourceOrigin) sessionFrames.set(origin, frame);
+            access.scanned(snapshot);
+            return snapshot.inputs;
+          } catch (error) {
+            assertLive();
+            signal.throwIfAborted();
+            access.failed(frame, error);
+          }
         }
+        if (interaction === "forbidden" || requested.size >= 16) return [];
+        let next: string | undefined;
+        for (const origin of available.origins) {
+          if (
+            origin !== sourceOrigin &&
+            !requested.has(origin) &&
+            !available.frames.some((frame) => originOfUrl(frame.documentUrl) === origin) &&
+            !(await access.hasPermission(origin))
+          ) {
+            next = origin;
+            break;
+          }
+        }
+        signal.throwIfAborted();
+        if (!next) return [];
+        requested.add(next);
+        await access.ensurePermission(next, signal);
+        available = await inventory(signal);
       }
       return [];
     };
@@ -436,25 +578,26 @@ export function createSourceAccess(
     const operationId = crypto.randomUUID();
     const frame = sessionFrames.get(originOfUrl(request.uri)) ?? rootFrame;
     const deadlineAt = Date.now() + timeoutMs;
-    const sourceRequest: SourceRequest = {
+    const sourceRequest = {
       url: request.uri,
-      method: "GET",
       headers,
       operationId,
-      timeoutMs,
       deadlineAt,
     };
     const cancel = () => {
       return browserApi.scripting
         .executeScript({
-          target: { tabId, frameIds: [frame.frameId] },
+          target: target(frame),
           func: cancelSourceFetch,
-          args: [operationId, deadlineAt],
+          args: [operationId, deadlineAt, frame.token ?? ""],
         })
         .then(() => undefined);
     };
     const result = await inject(
-      { func: fetchSource, args: [sourceRequest] },
+      {
+        func: fetchSource,
+        args: (documentToken): [SourceRequest] => [{ ...sourceRequest, documentToken }],
+      },
       signal,
       cancel,
       deadlineAt,
