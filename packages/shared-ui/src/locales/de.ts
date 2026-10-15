@@ -290,12 +290,14 @@ export const de = {
     "Höhere Werte zielen auf kleinere Dateien. Jedes Format bestimmt die Wirkung auf Bildqualität und Kodierzeit.",
   "desktop.quick.compressionUnavailable":
     "Für dieses Format ist die Kompression nicht einstellbar.",
-  "desktop.quick.sizeEstimate": "Bis etwa {size} MB",
+  "desktop.quick.compressionWarning":
+    "Starker Detailverlust: Diese Kompression kann Text und feine Details unlesbar machen.",
+  "desktop.quick.sizeEstimate": "Bis etwa {size}",
   "desktop.quick.folderInfo": "Wählen Sie den Speicherort für heruntergeladene Bilder.",
   "desktop.quick.formatInfo":
     "Wählen Sie ein Ausgabeformat. Automatisch wählt ein für das Bild geeignetes Format.",
   "desktop.quick.sizeInfo":
-    "Jede Schätzung setzt ein Bild mit der maximalen Breite und Höhe der Vorgabe voraus. Eine kleinere Quelle oder ein anderes Seitenverhältnis kann eine viel kleinere Datei ergeben. Die Schätzungen interpolieren Messwerte für Format und Kompression, berücksichtigen zusätzliche Pyramidenstufen, addieren 10 % Reserve und runden auf 5 MB auf. Es sind grobe Richtwerte, keine garantierten Datei- oder Speichergrenzen; Details, Transparenz und Metadaten beeinflussen das Ergebnis. Automatisch nimmt ein undurchsichtiges JPEG an; Transparenz verwendet PNG. Vorgaben wählen eine Quellstufe ohne Skalierung. Passt keine, wird die kleinste verwendet; sie kann das gewählte Maximum überschreiten. Volle und eigene Größen hängen von der Quelle ab.",
+    "Jede Schätzung setzt ein Bild mit der maximalen Breite und Höhe der Vorgabe voraus. Eine kleinere Quelle oder ein anderes Seitenverhältnis kann eine viel kleinere Datei ergeben. Die Schätzungen interpolieren Messwerte für Format und Kompression, berücksichtigen zusätzliche Pyramidenstufen, addieren 10 % Reserve und runden auf zwei signifikante Stellen mit passender Größeneinheit auf. Es sind grobe Richtwerte, keine garantierten Datei- oder Speichergrenzen; Details, Transparenz und Metadaten beeinflussen das Ergebnis. Automatisch nimmt ein undurchsichtiges JPEG an; Transparenz verwendet PNG. Vorgaben wählen eine Quellstufe ohne Skalierung. Passt keine, wird die kleinste verwendet; sie kann das gewählte Maximum überschreiten. Volle und eigene Größen hängen von der Quelle ab.",
   "desktop.quick.maxWidth": "Max. Breite",
   "desktop.quick.maxHeight": "Max. Höhe",
   "desktop.quick.original": "Original",

@@ -374,12 +374,14 @@ const en = {
   "desktop.quick.compressionInfo":
     "Higher values aim for smaller files. Each format determines the effect on image quality and encoding time.",
   "desktop.quick.compressionUnavailable": "Compression cannot be adjusted for this format.",
-  "desktop.quick.sizeEstimate": "Up to about {size} MB",
+  "desktop.quick.compressionWarning":
+    "Severe detail loss: this compression may make text and fine details unreadable.",
+  "desktop.quick.sizeEstimate": "Up to about {size}",
   "desktop.quick.folderInfo": "Choose where downloaded images are saved.",
   "desktop.quick.formatInfo":
     "Choose an output format. Auto selects a format appropriate for the image.",
   "desktop.quick.sizeInfo":
-    "Each estimate assumes an image filling the preset's maximum width and height. A smaller source or different aspect ratio can produce a much smaller file. Estimates interpolate measurements for the codec and compression setting, include extra pyramid levels where applicable, add a 10% buffer and round up to 5 MB. They are rough budgets, not guaranteed file-size or memory limits; detail, transparency and metadata affect actual files. Auto assumes an opaque JPEG; transparency uses PNG. Presets select a source level without resizing. If none fits, the smallest level is used and may exceed the selected maximum. Full/custom sizes depend on the source.",
+    "Each estimate assumes an image filling the preset's maximum width and height. A smaller source or different aspect ratio can produce a much smaller file. Estimates interpolate measurements for the codec and compression setting, include extra pyramid levels where applicable, add a 10% buffer and round up to two significant digits with units appropriate to the size. They are rough budgets, not guaranteed file-size or memory limits; detail, transparency and metadata affect actual files. Auto assumes an opaque JPEG; transparency uses PNG. Presets select a source level without resizing. If none fits, the smallest level is used and may exceed the selected maximum. Full/custom sizes depend on the source.",
   "desktop.quick.maxWidth": "Max width",
   "desktop.quick.maxHeight": "Max height",
   "desktop.quick.original": "Original",

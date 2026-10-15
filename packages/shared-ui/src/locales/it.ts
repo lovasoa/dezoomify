@@ -283,12 +283,14 @@ export const it = {
   "desktop.quick.compressionInfo":
     "Valori più elevati mirano a file più piccoli. Ogni formato determina l’effetto sulla qualità e sui tempi di codifica.",
   "desktop.quick.compressionUnavailable": "La compressione non è regolabile per questo formato.",
-  "desktop.quick.sizeEstimate": "Fino a circa {size} MB",
+  "desktop.quick.compressionWarning":
+    "Forte perdita di dettagli: questa compressione può rendere il testo e i dettagli fini illeggibili.",
+  "desktop.quick.sizeEstimate": "Fino a circa {size}",
   "desktop.quick.folderInfo": "Scegli dove salvare le immagini scaricate.",
   "desktop.quick.formatInfo":
     "Scegli un formato. Automatico seleziona un formato adatto all’immagine.",
   "desktop.quick.sizeInfo":
-    "Ogni stima presuppone un’immagine che occupi la larghezza e l’altezza massime della preimpostazione. Una sorgente più piccola o proporzioni diverse possono produrre un file molto più piccolo. Le stime interpolano misure per formato e compressione, includono i livelli aggiuntivi della piramide, aggiungono un margine del 10 % e sono arrotondate ai 5 MB successivi. Sono indicazioni orientative, non limiti garantiti di file o memoria; dettagli, trasparenza e metadati influenzano il risultato. Automatico presume un JPEG opaco; la trasparenza usa PNG. Le preimpostazioni scelgono un livello sorgente senza ridimensionare. Se nessuno rientra, viene usato il più piccolo, che può superare il massimo scelto. Le dimensioni intere/personalizzate dipendono dalla sorgente.",
+    "Ogni stima presuppone un’immagine che occupi la larghezza e l’altezza massime della preimpostazione. Una sorgente più piccola o proporzioni diverse possono produrre un file molto più piccolo. Le stime interpolano misure per formato e compressione, includono i livelli aggiuntivi della piramide, aggiungono un margine del 10 % e sono arrotondate per eccesso a due cifre significative con unità adatte alla dimensione. Sono indicazioni orientative, non limiti garantiti di file o memoria; dettagli, trasparenza e metadati influenzano il risultato. Automatico presume un JPEG opaco; la trasparenza usa PNG. Le preimpostazioni scelgono un livello sorgente senza ridimensionare. Se nessuno rientra, viene usato il più piccolo, che può superare il massimo scelto. Le dimensioni intere/personalizzate dipendono dalla sorgente.",
   "desktop.quick.maxWidth": "Larghezza max.",
   "desktop.quick.maxHeight": "Altezza max.",
   "desktop.quick.original": "Originale",

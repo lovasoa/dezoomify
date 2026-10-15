@@ -141,7 +141,7 @@ pub enum OutputLayout {
 #[serde(tag = "kind", rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum OutputControl {
-    Quality { minimum: u8 },
+    Quality { minimum: u8, warning_below: u8 },
     Effort,
     None,
 }
@@ -149,7 +149,7 @@ pub enum OutputControl {
 impl OutputControl {
     pub fn quality(self, compression: u8) -> u8 {
         let minimum = match self {
-            Self::Quality { minimum } => minimum,
+            Self::Quality { minimum, .. } => minimum,
             _ => 0,
         };
         100u8.saturating_sub(compression).max(minimum)
@@ -214,6 +214,8 @@ pub struct OutputOption {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description_max_side: Option<u32>,
     pub compression_supported: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compression_warning_above: Option<u8>,
     /// Estimated bytes/pixel for each integer compression value from 0 to 100.
     pub compression_estimates: Vec<f64>,
 }
@@ -237,6 +239,10 @@ pub fn output_options() -> Vec<OutputOption> {
                 max_side: format.and_then(|format| format.codec().max_side),
                 description_max_side: codec.max_side,
                 compression_supported: codec.control != OutputControl::None,
+                compression_warning_above: match codec.control {
+                    OutputControl::Quality { warning_below, .. } => Some(100 - warning_below),
+                    _ => None,
+                },
                 compression_estimates: (0..=100)
                     .map(|compression| codec.estimated_bytes_per_pixel(compression))
                     .collect(),
@@ -303,11 +309,14 @@ macro_rules! output_codecs {
 
 // Paired native image 0.25.10 JPEG/AVIF measurements on opaque Zoomify
 // test_custom_size, Arts & Culture tile and generic map_expected, fitted within
-// 512x512. AVIF speed 4; its painting alpha-gradient check also fits these values.
-// Upper measured bytes/pixel rounded up to 0.05, then made nondecreasing.
+// 512x512, using AVIF speed 4. Transparency and different content may cost more.
+// Low-quality samples keep finer precision so heavy compression remains visible.
 const JPEG_SIZES: &[(u8, f64)] = &[
-    (1, 0.05),
-    (25, 0.1),
+    (1, 0.035),
+    (5, 0.044),
+    (10, 0.057),
+    (20, 0.076),
+    (25, 0.085),
     (50, 0.15),
     (75, 0.25),
     (90, 0.4),
@@ -316,8 +325,11 @@ const JPEG_SIZES: &[(u8, f64)] = &[
     (100, 1.15),
 ];
 const AVIF_SIZES: &[(u8, f64)] = &[
-    (1, 0.05),
-    (25, 0.05),
+    (1, 0.012),
+    (5, 0.013),
+    (10, 0.016),
+    (20, 0.023),
+    (25, 0.027),
     (50, 0.1),
     (75, 0.15),
     (90, 0.3),
@@ -326,14 +338,19 @@ const AVIF_SIZES: &[(u8, f64)] = &[
     (100, 1.15),
 ];
 
+// Warning thresholds are conservative UI heuristics, not universal usability
+// cutoffs. JPEG guidance describes <50 as low quality and 5-10 as index-only:
+// https://github.com/libjpeg-turbo/libjpeg-turbo/blob/main/doc/usage.txt
+// ravif's scale is only roughly comparable; warn well below its normal range:
+// https://github.com/kornelski/cavif-rs#advanced-usage
 output_codecs! {
     Png => ("png", "PNG", &["png"], None, OutputControl::Effort, Streaming, "lossless", &[(100, 1.6)]),
-    Jpeg => ("jpeg", "JPEG", &["jpg", "jpeg"], Some(65_535), OutputControl::Quality { minimum: 0 }, Streaming, "compressed", JPEG_SIZES),
+    Jpeg => ("jpeg", "JPEG", &["jpg", "jpeg"], Some(65_535), OutputControl::Quality { minimum: 0, warning_below: 25 }, Streaming, "compressed", JPEG_SIZES),
     Tiff => ("tiff", "TIFF", &["tif", "tiff"], None, OutputControl::Effort, Streaming, "archival", &[(100, 3.0)]),
     Webp => ("webp", "WebP", &["webp"], Some(16_383), OutputControl::None, Buffered, "lossless", &[(100, 1.3)]),
-    Avif => ("avif", "AVIF", &["avif"], Some(65_535), OutputControl::Quality { minimum: 1 }, Buffered, "advancedCompression", AVIF_SIZES),
+    Avif => ("avif", "AVIF", &["avif"], Some(65_535), OutputControl::Quality { minimum: 1, warning_below: 30 }, Buffered, "advancedCompression", AVIF_SIZES),
     Zif => ("zif", "ZIF", &["zif"], None, OutputControl::Effort, Pyramid, "zoomable", &[(100, 3.0)]),
-    IiifDir => ("iiif-dir", "IIIF folder", &["iiif", ""], None, OutputControl::Quality { minimum: 0 }, Directory, "tiled", JPEG_SIZES),
+    IiifDir => ("iiif-dir", "IIIF folder", &["iiif", ""], None, OutputControl::Quality { minimum: 0, warning_below: 25 }, Directory, "tiled", JPEG_SIZES),
 }
 
 /// File suffixes accepted by native output, for command help and diagnostics.
@@ -1526,7 +1543,9 @@ mod tests {
     fn compression_estimates_follow_encoder_mapping_and_output_layout() {
         let avif = OutputFormat::Avif.codec();
         assert!((avif.estimated_bytes_per_pixel(9) - 0.33).abs() < 1e-12);
-        assert_eq!(avif.estimated_bytes_per_pixel(100), 0.05);
+        assert_eq!(avif.estimated_bytes_per_pixel(100), 0.012);
+        assert!(avif.estimated_bytes_per_pixel(99) < avif.estimated_bytes_per_pixel(90));
+        assert!(avif.estimated_bytes_per_pixel(90) < avif.estimated_bytes_per_pixel(80));
         assert_eq!(avif.estimated_bytes_per_pixel(0), 1.15);
         let webp = OutputFormat::Webp.codec();
         assert_eq!(

@@ -285,12 +285,14 @@ export const fr = {
   "desktop.quick.compressionInfo":
     "Les valeurs élevées visent des fichiers plus petits. Chaque format détermine l’effet sur la qualité et le temps d’encodage.",
   "desktop.quick.compressionUnavailable": "La compression n’est pas réglable pour ce format.",
-  "desktop.quick.sizeEstimate": "Jusqu’à environ {size} Mo",
+  "desktop.quick.compressionWarning":
+    "Forte perte de détails : cette compression peut rendre le texte et les détails fins illisibles.",
+  "desktop.quick.sizeEstimate": "Jusqu’à environ {size}",
   "desktop.quick.folderInfo": "Choisissez où enregistrer les images téléchargées.",
   "desktop.quick.formatInfo":
     "Choisissez un format. Le mode automatique sélectionne un format adapté à l’image.",
   "desktop.quick.sizeInfo":
-    "Chaque estimation suppose une image occupant la largeur et la hauteur maximales du préréglage. Une source plus petite ou un autre rapport largeur/hauteur peut produire un fichier bien plus petit. Les estimations interpolent des mesures par format et compression, incluent les niveaux de pyramide nécessaires, ajoutent une marge de 10 % et sont arrondies aux 5 Mo supérieurs. Ce sont des budgets indicatifs, pas des limites garanties de fichier ou de mémoire ; détails, transparence et métadonnées influencent le résultat. Le mode automatique suppose un JPEG opaque ; la transparence utilise le PNG. Les préréglages choisissent un niveau source sans redimensionner. Si aucun ne convient, le plus petit est utilisé et peut dépasser le maximum choisi. Les tailles entière/personnalisée dépendent de la source.",
+    "Chaque estimation suppose une image occupant la largeur et la hauteur maximales du préréglage. Une source plus petite ou un autre rapport largeur/hauteur peut produire un fichier bien plus petit. Les estimations interpolent des mesures par format et compression, incluent les niveaux de pyramide nécessaires, ajoutent une marge de 10 % et sont arrondies vers le haut à deux chiffres significatifs avec une unité adaptée à la taille. Ce sont des budgets indicatifs, pas des limites garanties de fichier ou de mémoire ; détails, transparence et métadonnées influencent le résultat. Le mode automatique suppose un JPEG opaque ; la transparence utilise le PNG. Les préréglages choisissent un niveau source sans redimensionner. Si aucun ne convient, le plus petit est utilisé et peut dépasser le maximum choisi. Les tailles entière/personnalisée dépendent de la source.",
   "desktop.quick.maxWidth": "Largeur max.",
   "desktop.quick.maxHeight": "Hauteur max.",
   "desktop.quick.original": "Originale",

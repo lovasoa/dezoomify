@@ -623,7 +623,14 @@ body {
 }
 
 #dz-desktop-settings .dz-compression-control output {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   font-variant-numeric: tabular-nums;
+}
+
+#dz-desktop-settings .dz-compression-warning {
+  color: var(--dz-notice-accent);
 }
 
 #dz-desktop-settings .dz-size-control {

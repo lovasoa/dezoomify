@@ -248,6 +248,7 @@ export interface OutputOption {
     max_side?: number;
     description_max_side?: number;
     compression_supported: boolean;
+    compression_warning_above?: number;
     /**
      * Estimated bytes/pixel for each integer compression value from 0 to 100.
      */
@@ -286,7 +287,7 @@ export interface LimitContext {
 /**
  * The meaning of the existing compression setting for a codec.
  */
-export type OutputControl = { kind: "quality"; minimum: number } | { kind: "effort" } | { kind: "none" };
+export type OutputControl = { kind: "quality"; minimum: number; warning_below: number } | { kind: "effort" } | { kind: "none" };
 
 /**
  * The shared failure context, defined once instead of per variant:

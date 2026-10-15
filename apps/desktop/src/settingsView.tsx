@@ -58,9 +58,22 @@ function estimateSize(width: number, height: number, settings: DesktopSettings):
   const compression = Math.round(Math.max(0, Math.min(100, settings.compression)));
   const bytesPerPixel = option.compression_estimates[compression];
   const pixels = width * height;
-  const mb = (pixels * bytesPerPixel) / 1_000_000;
+  const bytes = pixels * bytesPerPixel * 1.1;
+  const step = 10 ** (Math.floor(Math.log10(bytes)) - 1);
+  const rounded = Math.max(1, Math.ceil(bytes / step) * step);
+  const unit =
+    rounded < 1_000
+      ? { name: "byte", bytes: 1 }
+      : rounded < 1_000_000
+        ? { name: "kilobyte", bytes: 1_000 }
+        : { name: "megabyte", bytes: 1_000_000 };
   return t("desktop.quick.sizeEstimate", {
-    size: new Intl.NumberFormat(getLocale()).format(Math.ceil((mb * 1.1) / 5) * 5),
+    size: new Intl.NumberFormat(getLocale(), {
+      style: "unit",
+      unit: unit.name,
+      unitDisplay: "short",
+      maximumSignificantDigits: 2,
+    }).format(rounded / unit.bytes),
   });
 }
 
@@ -542,7 +555,11 @@ function CompressionControl({
   commit(patch: Partial<DesktopSettings>): void;
 }) {
   const id = useId();
-  const supported = optionFor(settings.output_format).compression_supported;
+  const option = optionFor(settings.output_format);
+  const supported = option.compression_supported;
+  const warning =
+    option.compression_warning_above !== undefined &&
+    settings.compression > option.compression_warning_above;
   return (
     <label
       className="dz-compression-control"
@@ -552,7 +569,20 @@ function CompressionControl({
       )}
     >
       <span>{t("desktop.quick.compression")}</span>
-      <output htmlFor={id}>{settings.compression}%</output>
+      <output htmlFor={id}>
+        {warning ? (
+          <span
+            id={`${id}-warning`}
+            className="dz-compression-warning"
+            role="img"
+            aria-label={t("desktop.quick.compressionWarning")}
+            title={t("desktop.quick.compressionWarning")}
+          >
+            ⚠
+          </span>
+        ) : null}
+        {settings.compression}%
+      </output>
       <input
         id={id}
         type="range"
@@ -560,7 +590,7 @@ function CompressionControl({
         max="100"
         step="1"
         aria-label={t("desktop.quick.compression")}
-        title={t("desktop.quick.compressionInfo")}
+        aria-describedby={warning ? `${id}-warning` : undefined}
         disabled={!supported}
         value={settings.compression}
         onInput={(event) => {

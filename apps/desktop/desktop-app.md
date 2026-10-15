@@ -107,6 +107,8 @@ The Compression slider at the top of the Size menu updates the size budgets as
 you drag it. Its value passes unchanged to the encoder: higher compression aims
 for smaller files, and each format decides the tradeoff in detail and encoding
 time. The slider is disabled when the format cannot adjust compression.
+An amber warning marks very low lossy quality, where text and fine details may
+become unreadable. The cutoff is a guideline; the effect depends on the image.
 Compatible IIIF/ZIF tiles keep their original compressed bytes.
 
 Size estimates assume an image filling the selected maximum dimensions; smaller
