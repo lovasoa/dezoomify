@@ -671,7 +671,11 @@ impl ZifWriter {
                 crate::imaging::encode_jpeg_to(
                     &mut bytes,
                     pixels,
-                    (100 - self.compression).max(1),
+                    dezoomify::model::OutputFormat::Jpeg
+                        .codec()
+                        .control
+                        .quality(self.compression)
+                        .max(1),
                     icc,
                 )?;
             }

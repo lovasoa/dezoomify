@@ -94,10 +94,11 @@ pub(crate) fn png_compression_for(compression: u8) -> image::codecs::png::Compre
 /// no inner-JPEG quality knob, and native never re-encodes lossy inside
 /// TIFF: higher compression only trades slower encodes for smaller files.
 pub(crate) fn tiff_compression_for(compression: u8) -> tiff::encoder::compression::DeflateLevel {
+    use image::codecs::png::CompressionType;
     use tiff::encoder::compression::DeflateLevel;
-    match compression {
-        0..=19 => DeflateLevel::Fast,
-        20..=60 => DeflateLevel::Balanced,
+    match png_compression_for(compression) {
+        CompressionType::Fast => DeflateLevel::Fast,
+        CompressionType::Default => DeflateLevel::Balanced,
         _ => DeflateLevel::Best,
     }
 }

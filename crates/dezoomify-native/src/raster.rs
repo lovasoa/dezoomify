@@ -117,9 +117,9 @@ fn encode(
                 let mut encoder = png::Encoder::new(&mut output, pipe.size.width, pipe.size.height);
                 encoder.set_color(png::ColorType::Rgba);
                 encoder.set_depth(png::BitDepth::Eight);
-                encoder.set_compression(match compression {
-                    0..=19 => png::Compression::Fast,
-                    20..=60 => png::Compression::Balanced,
+                encoder.set_compression(match crate::imaging::png_compression_for(compression) {
+                    image::codecs::png::CompressionType::Fast => png::Compression::Fast,
+                    image::codecs::png::CompressionType::Default => png::Compression::Balanced,
                     _ => png::Compression::High,
                 });
                 let mut writer = encoder.write_header().map_err(encoding_error)?;
