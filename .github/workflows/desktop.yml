@@ -26,7 +26,6 @@ on:
       - .node-version
       - .github/workflows/desktop.yml
       - .github/actions/setup-windows-bundlers/action.yml
-      - .github/actions/build-signed-macos/**
   push:
     branches: [master]
     paths: *desktop-paths
@@ -200,10 +199,10 @@ jobs:
         run: |
           echo "version=$(cargo xtask release version)" >> "$GITHUB_OUTPUT"
           cargo xtask release plan
-      - uses: ./.github/actions/build-signed-macos
-        with:
-          version: ${{ steps.plan.outputs.version }}
+      - name: Build and test signed macOS artifacts
+        run: bash scripts/build-signed-macos.sh
         env:
+          DEZOOMIFY_VERSION: ${{ steps.plan.outputs.version }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}

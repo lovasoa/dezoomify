@@ -126,9 +126,6 @@ fn build_desktop_artifact(target: &str, target_os: &str, out: &Path) -> Result<(
             "target {target} must be built on a {target_os} host (release builds never cross-compile installers)"
         ));
     }
-    if target_os == "macos" {
-        require_macos_signing(|name| std::env::var(name).ok())?;
-    }
     if std::env::var("TAURI_SIGNING_PRIVATE_KEY")
         .unwrap_or_default()
         .is_empty()
@@ -212,29 +209,6 @@ fn build_desktop_artifact(target: &str, target_os: &str, out: &Path) -> Result<(
     Ok(())
 }
 
-fn require_macos_signing(env: impl Fn(&str) -> Option<String>) -> Result<(), String> {
-    for name in [
-        "APPLE_CERTIFICATE",
-        "APPLE_CERTIFICATE_PASSWORD",
-        "APPLE_SIGNING_IDENTITY",
-        "APPLE_ID",
-        "APPLE_PASSWORD",
-        "APPLE_TEAM_ID",
-    ] {
-        if env(name).is_none_or(|value| value.trim().is_empty()) {
-            return Err(format!(
-                "macOS releases require {name}; see docs/operations.md#apple-signing-setup"
-            ));
-        }
-    }
-    if !env("APPLE_SIGNING_IDENTITY")
-        .is_some_and(|value| value.starts_with("Developer ID Application: "))
-    {
-        return Err("macOS releases require a Developer ID Application signing identity".into());
-    }
-    Ok(())
-}
-
 /// Native CLI archive with its executable and license.
 fn tar_gz(file: &Path, inner_name: &str, out: &Path) -> Result<(), String> {
     let staging = out
@@ -273,55 +247,4 @@ fn run_cmd(cmd: &[&str]) -> Result<(), String> {
         .success()
         .then_some(())
         .ok_or_else(|| format!("{} failed", cmd[0]))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::require_macos_signing;
-
-    fn signing_env(name: &str) -> Option<String> {
-        Some(match name {
-            "APPLE_SIGNING_IDENTITY" => "Developer ID Application: Example (ABCDEFGHIJ)".into(),
-            _ => "configured".into(),
-        })
-    }
-
-    #[test]
-    fn macos_release_requires_complete_credentials() {
-        assert!(require_macos_signing(signing_env).is_ok());
-        for missing in [
-            "APPLE_CERTIFICATE",
-            "APPLE_CERTIFICATE_PASSWORD",
-            "APPLE_SIGNING_IDENTITY",
-            "APPLE_ID",
-            "APPLE_PASSWORD",
-            "APPLE_TEAM_ID",
-        ] {
-            for empty in [None, Some("".into()), Some("  ".into())] {
-                let error = require_macos_signing(|name| {
-                    if name == missing {
-                        empty.clone()
-                    } else {
-                        signing_env(name)
-                    }
-                })
-                .unwrap_err();
-                assert!(error.contains(missing));
-            }
-        }
-    }
-
-    #[test]
-    fn macos_release_rejects_adhoc_and_development_identities() {
-        for identity in ["-", "Apple Development: Example (ABCDEFGHIJ)"] {
-            assert!(require_macos_signing(|name| {
-                if name == "APPLE_SIGNING_IDENTITY" {
-                    Some(identity.into())
-                } else {
-                    signing_env(name)
-                }
-            })
-            .is_err());
-        }
-    }
 }

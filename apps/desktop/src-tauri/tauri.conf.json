@@ -56,7 +56,6 @@
     },
     "macOS": {
       "signingIdentity": "-",
-      "hardenedRuntime": true,
       "dmg": {
         "background": "../../../target/desktop-dmg/background.png",
         "windowSize": { "width": 760, "height": 660 },

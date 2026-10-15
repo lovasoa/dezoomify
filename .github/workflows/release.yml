@@ -144,41 +144,8 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          set -euo pipefail
-          v="$DEZOOMIFY_VERSION"
-          # Tauri imports the certificate, signs with hardened runtime, and
-          # notarizes/staples the app before creating its signed updater archive.
-          cargo xtask release build --plan "target/release-dist/$v/plan.json" --target desktop-macos-aarch64
-          # Notarize the finished disk image too, preserving the app/updater bytes.
-          DMG="target/release-dist/$v/desktop-macos-aarch64/dezoomify-desktop-v$v-macos-aarch64.dmg"
-          xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
-          xcrun stapler staple "$DMG"
-          rm "target/release-dist/$v/plan.json" "target/release-dist/$v/notes.md"
-      - name: Verify macOS installer and updater signing and notarization
-        if: matrix.target == 'desktop-macos-aarch64'
-        env:
-          DEZOOMIFY_VERSION: ${{ needs.prepare.outputs.version }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          set -euo pipefail
-          DMG="target/release-dist/$DEZOOMIFY_VERSION/desktop-macos-aarch64/dezoomify-desktop-v$DEZOOMIFY_VERSION-macos-aarch64.dmg"
-          REQUIREMENT="anchor apple generic and certificate leaf[subject.OU] = \"$APPLE_TEAM_ID\""
-          codesign --verify --strict --verbose=4 -R="$REQUIREMENT" "$DMG"
-          xcrun stapler validate "$DMG"
-          spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG"
-          MNT="$(mktemp -d)"
-          UPDATER="$(mktemp -d)"
-          trap 'hdiutil detach "$MNT"; rmdir "$MNT"; rm -rf "$UPDATER"' EXIT
-          printf 'Y\n' | hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MNT"
-          cmp target/desktop-dmg/background.png "$MNT/.background/background.png"
-          test -s "$MNT/.DS_Store"
-          tar -xzf "target/release-dist/$DEZOOMIFY_VERSION/desktop-macos-aarch64/dezoomify-desktop-v$DEZOOMIFY_VERSION-macos-aarch64.app.tar.gz" -C "$UPDATER"
-          for APP in "$MNT/Dezoomify.app" "$UPDATER/Dezoomify.app"; do
-            codesign --verify --deep --strict --verbose=4 -R="$REQUIREMENT and identifier \"dev.ophir.dezoomify\"" "$APP"
-            codesign --display --verbose=4 "$APP" 2>&1 | grep -E 'flags=.*\(.*runtime.*\)'
-            xcrun stapler validate "$APP"
-            spctl --assess --type execute --verbose=4 "$APP"
-          done
+          bash scripts/build-signed-macos.sh
+          rm "target/release-dist/$DEZOOMIFY_VERSION/plan.json" "target/release-dist/$DEZOOMIFY_VERSION/notes.md"
       - name: Build artifact (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
