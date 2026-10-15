@@ -477,9 +477,13 @@ mod tests {
     }
     async fn publish(task: EncoderTask, destination: &Path) -> Vec<u8> {
         task.pipe.finish(&[]).unwrap();
-        let mut staged = tokio::time::timeout(std::time::Duration::from_secs(3), task.wait())
+        // A deadlock watchdog, not a compression benchmark: full-image codecs
+        // can take seconds in unoptimized builds on shared CI runners.
+        let mut staged = tokio::time::timeout(std::time::Duration::from_secs(30), task.wait())
             .await
-            .expect("encoder must finish")
+            .unwrap_or_else(|error| {
+                panic!("encoder for {} must finish: {error}", destination.display())
+            })
             .unwrap();
         staged
             .publish(
