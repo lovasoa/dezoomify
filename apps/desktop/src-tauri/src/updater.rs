@@ -60,7 +60,7 @@ async fn check_and_install(app: &AppHandle) -> Result<(), String> {
         .timeout(std::time::Duration::from_secs(60))
         .build()
         .map_err(|error| error.to_string())?;
-    let Some(update) = updater.check().await.map_err(|error| error.to_string())? else {
+    let Some(mut update) = updater.check().await.map_err(|error| error.to_string())? else {
         app.dialog()
             .message("You are using the latest version of Dezoomify.")
             .title("Dezoomify updates")
@@ -81,6 +81,9 @@ async fn check_and_install(app: &AppHandle) -> Result<(), String> {
     if !response.await.unwrap_or(false) {
         return Ok(());
     }
+    // The check timeout is not inherited by downloads. Bound the transfer so
+    // a stalled update reaches end_update() and allows saves again.
+    update.timeout = Some(std::time::Duration::from_secs(10 * 60));
     let jobs = app.state::<Mutex<JobTable>>();
     jobs.lock()
         .map_err(|error| error.to_string())?
