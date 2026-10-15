@@ -44,7 +44,7 @@ export class PageTraversal {
     // Probe known canvases before broad reference traversal can exhaust the budget.
     await this.viewers.probe(realm, elements, until);
     await this.scanReferences(realm, queue, until);
-    await this.scanFrames(win);
+    await this.scanInlineFrames(win);
   }
 
   private frameLimit(): boolean {
@@ -136,11 +136,15 @@ export class PageTraversal {
       this.state.truncate("reference-limit");
   }
 
-  private async scanFrames(win: Window): Promise<void> {
+  private async scanInlineFrames(win: Window): Promise<void> {
     for (let index = 0; index < win.length && !this.state.expired(this.state.end); index++) {
       if (this.frameLimit()) break;
       try {
-        await this.scan(win[index]);
+        const child = win[index];
+        // HTTP documents belong to the job's permission-filtered inventory.
+        // Readable inline/blob documents have no HTTP inventory target.
+        const protocol = child.location.protocol;
+        if (protocol !== "http:" && protocol !== "https:") await this.scan(child);
       } catch {}
       await this.state.yieldSlice();
     }
