@@ -1,5 +1,6 @@
 name: desktop
 on:
+  workflow_dispatch:
   pull_request:
     paths: &desktop-paths
       - apps/desktop/**
@@ -39,6 +40,7 @@ jobs:
   # is installed; Linux needs a display (Xvfb), macOS and Windows runners
   # provide a GUI session.
   window-e2e:
+    if: github.event_name != 'workflow_dispatch'
     name: Window E2E (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
@@ -77,6 +79,7 @@ jobs:
   # Every supported release target builds and installs its real bundle, then
   # verifies that the window stays alive. Missing host tools fail the job.
   bundle-smoke:
+    if: github.event_name != 'workflow_dispatch'
     name: Bundle smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
@@ -173,3 +176,47 @@ jobs:
             signature.log
             dmg-installation.png
           retention-days: 30
+  signed-macos-e2e:
+    name: Signed macOS release E2E
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-pnpm
+        with:
+          install: true
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # pinned
+        with:
+          toolchain: 1.98.1
+          targets: wasm32-unknown-unknown
+      - uses: ./.github/actions/setup-wasm-bindgen
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Freeze the checked-out branch's release plan
+        id: plan
+        run: |
+          echo "version=$(cargo xtask release version)" >> "$GITHUB_OUTPUT"
+          cargo xtask release plan
+      - name: Build and test signed macOS artifacts
+        run: cargo xtask release build --plan "target/release-dist/$DEZOOMIFY_VERSION/plan.json" --target desktop-macos-aarch64
+        env:
+          DEZOOMIFY_VERSION: ${{ steps.plan.outputs.version }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Upload signing artifacts and diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-signing-e2e-${{ github.sha }}
+          path: |
+            target/release-dist
+            target/macos-signing
+          retention-days: 14

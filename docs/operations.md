@@ -48,6 +48,22 @@ version-specific download URLs. The app follows GitHub's latest release,
 including rolling releases, and asks before installation. Linux `.deb` and
 Windows `.msi` installations may require administrator approval.
 
+### Apple signing setup
+
+Configure the repository Actions secrets used by the macOS step in
+[`release.yml`](../.github/workflows/release.yml), following
+[Tauri's Developer ID and notarization setup](https://v2.tauri.app/distribute/sign/macos/).
+Use a **Developer ID Application** certificate exported with its private key as a
+base64-encoded, password-protected `.p12`, and an **app-specific** Apple password.
+Export the `.p12` from Keychain Access: OpenSSL 3's default PKCS#12 format can fail
+macOS Keychain import. Back up the certificate and key; renew before expiry.
+Apple credentials are separate from the existing Tauri updater signing key.
+
+`cargo xtask release build` signs, notarizes, and verifies the macOS DMG and
+updater app, then installs and launches both. Before merging,
+run `gh workflow run desktop.yml --ref <reviewed-branch>` and require success.
+This uploads test artifacts without publishing. Automatic PR builds stay ad-hoc.
+
 ## Website deployment contract
 
 [`website-deploy.yml`](../.github/workflows/website-deploy.yml) is the sole publisher
