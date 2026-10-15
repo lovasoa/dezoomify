@@ -1,6 +1,7 @@
-import { getLocale, t } from "@dezoomify/shared-ui";
+import { getDictionary, getLocale, type I18nKey, t } from "@dezoomify/shared-ui";
+import { outputOptions } from "@dezoomify/wasm-bindings/codecs";
 import type { ReactElement, ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { DesktopSettings, NetworkProfile } from "./settings.ts";
 import { headersToEditableText, pickDirectory } from "./settings.ts";
 
@@ -12,15 +13,10 @@ interface Props {
 }
 
 function formatChoices(): Array<{ value: DesktopSettings["output_format"]; label: string }> {
-  return [
-    { value: "auto", label: t("desktop.quick.auto") },
-    { value: "png", label: "PNG" },
-    { value: "jpeg", label: "JPEG" },
-    { value: "tiff", label: "TIFF" },
-    { value: "webp", label: "WebP" },
-    { value: "zif", label: "ZIF" },
-    { value: "iiif-dir", label: "IIIF folder" },
-  ];
+  return outputOptions.map((option) => ({
+    value: option.format,
+    label: option.label_key ? t(option.label_key as I18nKey) : option.name,
+  }));
 }
 
 const profiles: NetworkProfile[] = ["maximum", "balanced", "gentle"];
@@ -36,39 +32,48 @@ const sizes = [
 ];
 type SizePreset = string;
 
-function formatLimit(format: DesktopSettings["output_format"]): number {
-  return format === "jpeg" ? 65_535 : format === "webp" ? 16_383 : 1_000_000;
+function optionFor(format: DesktopSettings["output_format"]) {
+  const option = outputOptions.find((option) => option.format === format);
+  if (!option) throw new Error(`Unregistered output format: ${format}`);
+  return option;
 }
 
-// Rounded-up measurements from the native JPEG encoder on the Zoomify painting
-// and map fixtures plus Met artwork 437498. Small sample; these are heuristics.
-const jpegSizeCoefficients = [
-  { quality: 25, bytes: 0.1 },
-  { quality: 50, bytes: 0.15 },
-  { quality: 75, bytes: 0.2 },
-  { quality: 90, bytes: 0.3 },
-  { quality: 95, bytes: 0.4 },
-  { quality: 98, bytes: 0.45 },
-  { quality: 100, bytes: 0.5 },
-];
+function formatLimit(format: DesktopSettings["output_format"]): number {
+  return optionFor(format).max_side ?? 1_000_000;
+}
+
+function formatDescription(format: DesktopSettings["output_format"]): string {
+  const option = optionFor(format);
+  const name = format.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase());
+  const key = `desktop.quick.format.${name}` as I18nKey;
+  return key in getDictionary(getLocale())
+    ? t(key, {
+        maxSide: new Intl.NumberFormat(getLocale()).format(option.description_max_side ?? 0),
+      })
+    : t("desktop.quick.format.generic", { format: option.name });
+}
 
 function estimateSize(width: number, height: number, settings: DesktopSettings): string {
-  const format = settings.output_format;
-  const quality = 100 - settings.compression;
-  const jpeg = jpegSizeCoefficients.find((entry) => quality <= entry.quality)?.bytes ?? 0.5;
-  const bytesPerPixel =
-    format === "auto" || format === "jpeg" || format === "iiif-dir"
-      ? jpeg
-      : format === "webp"
-        ? 1.3
-        : format === "png"
-          ? 1.6
-          : 3;
-  const pyramid = format === "zif" || format === "iiif-dir" ? 4 / 3 : 1;
+  const option = optionFor(settings.output_format);
+  const compression = Math.round(Math.max(0, Math.min(100, settings.compression)));
+  const bytesPerPixel = option.compression_estimates[compression];
   const pixels = width * height;
-  const mb = (pixels * bytesPerPixel * pyramid) / 1_000_000;
+  const bytes = pixels * bytesPerPixel * 1.1;
+  const step = 10 ** (Math.floor(Math.log10(bytes)) - 1);
+  const rounded = Math.max(1, Math.ceil(bytes / step) * step);
+  const unit =
+    rounded < 1_000
+      ? { name: "byte", bytes: 1 }
+      : rounded < 1_000_000
+        ? { name: "kilobyte", bytes: 1_000 }
+        : { name: "megabyte", bytes: 1_000_000 };
   return t("desktop.quick.sizeEstimate", {
-    size: new Intl.NumberFormat(getLocale()).format(Math.ceil((mb * 1.1) / 5) * 5),
+    size: new Intl.NumberFormat(getLocale(), {
+      style: "unit",
+      unit: unit.name,
+      unitDisplay: "short",
+      maximumSignificantDigits: 2,
+    }).format(rounded / unit.bytes),
   });
 }
 
@@ -91,11 +96,13 @@ function QuickChoice({
   value,
   choices,
   onChange,
+  children,
 }: {
   label: string;
   value: string;
   choices: Array<{ value: string; label: string; hint: string; disabled?: boolean }>;
   onChange(value: string): void;
+  children?: ReactNode;
 }) {
   const ref = useRef<HTMLDetailsElement>(null);
   const selected = choices.find((choice) => choice.value === value) ?? choices[0];
@@ -118,6 +125,7 @@ function QuickChoice({
         <span aria-hidden="true">▾</span>
       </summary>
       <fieldset className="dz-quick-menu" aria-label={label}>
+        {children}
         {choices.map((choice) => (
           <div className="dz-quick-menu-row" key={choice.value}>
             <button
@@ -288,7 +296,9 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
                 hint: t("desktop.quick.exact"),
               },
             ]}
-          />
+          >
+            <CompressionControl settings={settings} commit={commit} />
+          </QuickChoice>
         </QuickOption>
 
         <QuickOption label={t("desktop.quick.network")} onInfo={() => setHelp("network")}>
@@ -352,11 +362,7 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
                   {formats.map((format) => (
                     <div key={format.value}>
                       <dt>{format.label}</dt>
-                      <dd>
-                        {t(
-                          `desktop.quick.format.${format.value === "iiif-dir" ? "iiifDir" : format.value}`,
-                        )}
-                      </dd>
+                      <dd>{formatDescription(format.value)}</dd>
                     </div>
                   ))}
                 </dl>
@@ -414,8 +420,6 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
             </div>
           ) : (
             <>
-              <CompressionPreference settings={settings} commit={commit} />
-
               <PreferenceRow
                 title={t("desktop.advanced.dimensions")}
                 description={t("desktop.advanced.dimensionsDesc")}
@@ -528,7 +532,7 @@ function formatOptions(settings: DesktopSettings) {
   return formatChoices().map((format) => ({
     ...format,
     disabled: maximum > formatLimit(format.value),
-    hint: t(`desktop.quick.hint.${format.value === "iiif-dir" ? "iiifDir" : format.value}`),
+    hint: t(`desktop.quick.hint.${optionFor(format.value).hint}` as I18nKey),
   }));
 }
 
@@ -543,38 +547,56 @@ function syncDialog(dialog: HTMLDialogElement, open: boolean): void {
   }
 }
 
-function CompressionPreference({
+function CompressionControl({
   settings,
   commit,
 }: {
   settings: DesktopSettings;
   commit(patch: Partial<DesktopSettings>): void;
 }) {
-  if (settings.output_format === "webp" || settings.output_format === "iiif-dir") return null;
-  const jpeg = settings.output_format === "jpeg" || settings.output_format === "auto";
-  const value = jpeg ? 100 - settings.compression : settings.compression;
-  const label = t(jpeg ? "desktop.advanced.jpegQuality" : "desktop.advanced.compressionEffort");
+  const id = useId();
+  const option = optionFor(settings.output_format);
+  const supported = option.compression_supported;
+  const warning =
+    option.compression_warning_above !== undefined &&
+    settings.compression > option.compression_warning_above;
   return (
-    <PreferenceRow
-      title={label}
-      description={t(
-        jpeg ? "desktop.advanced.jpegQualityDesc" : "desktop.advanced.compressionEffortDesc",
+    <label
+      className="dz-compression-control"
+      htmlFor={id}
+      title={t(
+        supported ? "desktop.quick.compressionInfo" : "desktop.quick.compressionUnavailable",
       )}
     >
-      <div className="dz-slider-control">
-        <input
-          type="range"
-          min="0"
-          max="100"
-          aria-label={label}
-          value={value}
-          onChange={(event) => {
-            const next = Number(event.currentTarget.value);
-            commit({ compression: jpeg ? 100 - next : next });
-          }}
-        />
-        <output>{jpeg ? `${value}%` : value}</output>
-      </div>
-    </PreferenceRow>
+      <span>{t("desktop.quick.compression")}</span>
+      <output htmlFor={id}>
+        {warning ? (
+          <span
+            id={`${id}-warning`}
+            className="dz-compression-warning"
+            role="img"
+            aria-label={t("desktop.quick.compressionWarning")}
+            title={t("desktop.quick.compressionWarning")}
+          >
+            ⚠
+          </span>
+        ) : null}
+        {settings.compression}%
+      </output>
+      <input
+        id={id}
+        type="range"
+        min="0"
+        max="100"
+        step="1"
+        aria-label={t("desktop.quick.compression")}
+        aria-describedby={warning ? `${id}-warning` : undefined}
+        disabled={!supported}
+        value={settings.compression}
+        onInput={(event) => {
+          if (supported) commit({ compression: Number(event.currentTarget.value) });
+        }}
+      />
+    </label>
   );
 }

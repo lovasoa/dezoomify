@@ -9,6 +9,7 @@ name = "xtask"
 path = "src/main.rs"
 
 [dependencies]
+dezoomify = { path = "../dezoomify" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

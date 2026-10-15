@@ -987,7 +987,10 @@ impl IiifWriter {
             crate::imaging::encode_jpeg_to(
                 file.writer(cancelled),
                 pixels,
-                100 - self.compression,
+                dezoomify::model::OutputFormat::Jpeg
+                    .codec()
+                    .control
+                    .quality(self.compression),
                 self.icc_profile.as_deref(),
             )
         } else {

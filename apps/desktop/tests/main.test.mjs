@@ -325,3 +325,17 @@ test("a refused settings edit shows the shell reason and persists nothing", asyn
   assert.equal(loadSettings().retries, 5, "the refused edit persists nothing");
   delete globalThis.desktopTestNative.validateSettings;
 });
+
+test("AVIF settings persist and reach the native invocation", async () => {
+  const avif = [...root.querySelectorAll('.dz-quick-menu[aria-label="Format"] button')].find(
+    (button) => button.firstElementChild.textContent === "AVIF",
+  );
+  click(avif);
+  await tick();
+  assert.equal(loadSettings().output_format, "avif");
+  const invocation = await start();
+  assert.equal(invocation.request.settings.output_format, "avif");
+  await act(async () => invocation.resolve({ ...output, format: "avif" }));
+  await tick();
+  await reset();
+});

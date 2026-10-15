@@ -3,13 +3,9 @@
 // message text is parsed. The retry verdict is stamped by host boundaries
 // from the one policy in Rust (`Error::retryable`).
 import type { BlockedReason, Error as JobError } from "@dezoomify/wasm-bindings";
+import { outputCodecs } from "@dezoomify/wasm-bindings/codecs";
 import { type I18nKey, t } from "./i18n.ts";
 import type { ViewContext } from "./view-types.ts";
-
-// JPEG addresses at most 65535 px per side; WebP at most 16383 px
-// (copy interpolation only).
-const JPEG_MAX_SIDE = 65535;
-const WEBP_MAX_SIDE = 16383;
 
 // Human-readable byte counts for limit copy (exact bytes plus a
 // GiB/MiB approximation).
@@ -124,8 +120,8 @@ const TRANSPORTS = new Set([
   "display-only",
 ]);
 const RESOURCE_KINDS = new Set(["metadata", "tile", "probe", "output"]);
-// Closed enums of the generated contract's wire values (`BlockedReason`,
-// `LimitReason`); the generated package declares types only, so this runtime
+// Closed enum of the generated contract's `BlockedReason` wire values;
+// the generated package declares types only, so this runtime
 // list is their wire spelling. An unknown member is a binding error waiting
 // to happen.
 const BLOCKED_REASONS = new Set([
@@ -156,7 +152,6 @@ const BLOCKED_REASONS = new Set([
   "throttled",
   "userinfo",
 ]);
-const LIMIT_REASONS = new Set(["memory", "jpeg-side", "webp-side"]);
 
 /** Narrow a wire value to the generated `BlockedReason` union; an unknown
  * member is simply absent. */
@@ -176,20 +171,10 @@ function isJobErrorAt(value: unknown, depth: number): boolean {
   if (typeof kind !== "string" || !Object.hasOwn(COPY, kind) || !boundedText(value, depth)) {
     return false;
   }
-  const num = (field: unknown) => typeof field === "number" && Number.isFinite(field);
   const transport = (field: unknown) => typeof field === "string" && TRANSPORTS.has(field);
-  const size = (field: unknown) => {
-    const dimensions = field as Record<string, unknown> | undefined;
-    return (
-      dimensions !== undefined &&
-      typeof dimensions === "object" &&
-      num(dimensions.width) &&
-      num(dimensions.height)
-    );
-  };
   switch (kind) {
     case "http-error":
-      return num(record.status) && transport(record.transport);
+      return isFiniteNumber(record.status) && transport(record.transport);
     case "rate-limited":
     case "timeout":
     case "network-failure":
@@ -199,25 +184,19 @@ function isJobErrorAt(value: unknown, depth: number): boolean {
       return transport(record.transport) && blockedReason(record.blocked_reason) !== undefined;
     case "redirect-limit":
     case "deferred-limit":
-      return num(record.max);
+      return isFiniteNumber(record.max);
     case "size-limit":
-      return num(record.max_bytes);
+      return isFiniteNumber(record.max_bytes);
     case "unknown-format":
       return typeof record.format === "string" && record.format.length > 0;
-    case "limit-exceeded": {
-      const limit = record.limit as Record<string, unknown> | undefined;
-      return (
-        !!limit &&
-        typeof limit === "object" &&
-        typeof limit.reason === "string" &&
-        LIMIT_REASONS.has(limit.reason) &&
-        (limit.dimensions === undefined || size(limit.dimensions)) &&
-        (limit.bytes_required === undefined || num(limit.bytes_required)) &&
-        (limit.bytes_available === undefined || num(limit.bytes_available))
-      );
-    }
+    case "limit-exceeded":
+      return isLimitContext(record.limit);
     case "tile-failed":
-      return num(record.tile) && num(record.attempts) && isJobErrorAt(record.cause, depth + 1);
+      return (
+        isFiniteNumber(record.tile) &&
+        isFiniteNumber(record.attempts) &&
+        isJobErrorAt(record.cause, depth + 1)
+      );
     case "resource":
       return (
         typeof record.request === "string" &&
@@ -232,6 +211,31 @@ function isJobErrorAt(value: unknown, depth: number): boolean {
       // beyond the bounded text already checked.
       return true;
   }
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isLimitContext(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const limit = value as Record<string, unknown>;
+  const reason = limit.reason;
+  const codec =
+    reason && typeof reason === "object"
+      ? (reason as Record<string, unknown>)["codec-side"]
+      : undefined;
+  const size = (field: unknown) => {
+    if (!field || typeof field !== "object") return false;
+    const dimensions = field as Record<string, unknown>;
+    return isFiniteNumber(dimensions.width) && isFiniteNumber(dimensions.height);
+  };
+  return (
+    (reason === "memory" || outputCodecs.some((entry) => entry.format === codec)) &&
+    (limit.dimensions === undefined || size(limit.dimensions)) &&
+    (limit.bytes_required === undefined || isFiniteNumber(limit.bytes_required)) &&
+    (limit.bytes_available === undefined || isFiniteNumber(limit.bytes_available))
+  );
 }
 
 /** The underlying failure, seen through the composition wrappers (`resource`
@@ -357,17 +361,20 @@ function limitMessage(
     limit.bytes_available !== undefined
       ? formatBytes(limit.bytes_available)
       : "currently available memory";
-  if (limit.reason === "jpeg-side") {
-    return t("desktop.output.jpegLimit", { dims, jpegMax: JPEG_MAX_SIDE, host });
-  }
-  if (limit.reason === "webp-side") {
-    return t("desktop.output.webpLimit", { dims, webpMax: WEBP_MAX_SIDE, host });
+  const format = limit.reason === "memory" ? null : limit.reason["codec-side"];
+  const codec = outputCodecs.find((codec) => codec.format === format);
+  if (codec?.max_side) {
+    return t("desktop.output.codecLimit", {
+      dims,
+      format: codec.name,
+      maxSide: codec.max_side,
+      host,
+    });
   }
   return t("desktop.output.canvasLimit", {
     dims,
     need,
     limit: available,
-    jpegMax: JPEG_MAX_SIDE,
     host,
   });
 }

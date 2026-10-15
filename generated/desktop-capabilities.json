@@ -27,15 +27,17 @@
     "png",
     "jpeg",
     "tiff",
-    "zif",
-    "webp"
+    "webp",
+    "avif",
+    "zif"
   ],
   "outputFormats": [
     "png",
     "jpeg",
     "tiff",
-    "zif",
     "webp",
+    "avif",
+    "zif",
     "iiif-dir"
   ],
   "eventChannels": [

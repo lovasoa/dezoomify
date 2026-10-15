@@ -1,4 +1,9 @@
 [advisories]
+ignore = [
+    # rav1e 0.8.1 still uses this compile-time macro crate. This advisory
+    # reports upstream archival, not a vulnerability; remove on upstream migration.
+    { id = "RUSTSEC-2024-0436", reason = "rav1e's transitive paste 1.0.15 is unmaintained; no vulnerability is reported or compatible replacement available" },
+]
 
 [licenses]
 allow = ["0BSD", "AGPL-3.0-only", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause", "BSL-1.0", "CDLA-Permissive-2.0", "GPL-3.0-only", "GPL-3.0-or-later", "ISC", "MIT", "Unicode-3.0", "Unlicense", "Zlib"]
@@ -8,6 +13,8 @@ exceptions = [
     { crate = "cssparser-macros", allow = ["MPL-2.0"] },
     { crate = "dtoa-short", allow = ["MPL-2.0"] },
     { crate = "selectors", allow = ["MPL-2.0"] },
+    # rav1e's cfg(fuzzing)-only dependency; not linked into shipped products.
+    { crate = "libfuzzer-sys", allow = ["NCSA"] },
 ]
 
 [bans]

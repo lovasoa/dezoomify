@@ -50,9 +50,9 @@ jobs do not use that native disk cache; reloading stops the current run.
 
 ## The output name is rejected
 
-Use `.png`, `.jpg`/`.jpeg`, `.tif`/`.tiff`, `.zif`, `.webp`, or `.iiif`;
+Use `.png`, `.jpg`/`.jpeg`, `.tif`/`.tiff`, `.zif`, `.webp`, `.avif`, or `.iiif`;
 an extensionless path creates an IIIF folder. Other extensions are rejected.
-JPEG is limited to 65,535 pixels per side and WebP to 16,383. Use PNG, TIFF,
+JPEG and AVIF are limited to 65,535 pixels per side and WebP to 16,383. Use PNG, TIFF,
 ZIF, or IIIF for larger dimensions. Choose an unused IIIF destination;
 `--overwrite` does not replace an existing directory.
 

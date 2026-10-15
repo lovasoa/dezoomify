@@ -405,31 +405,20 @@ pub fn infer_from_path(path: &Path) -> Result<OutputFormat, Error> {
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    match ext.as_str() {
-            "png" => Ok(OutputFormat::Png),
-            "jpg" | "jpeg" => Ok(OutputFormat::Jpeg),
-            "tif" | "tiff" => Ok(OutputFormat::Tiff),
-            "zif" => Ok(OutputFormat::Zif),
-            "webp" => Ok(OutputFormat::Webp),
-            "iiif" | "" => Ok(OutputFormat::IiifDir),
-            other => Err(crate::output::unsupported_extension(format!(
-                "unsupported output extension .{other}; use .png, .jpg, .jpeg, .tif, .tiff, .zif, .webp, .iiif, or an extensionless directory path for iiif-dir"
-            ))),
-        }
+    OutputFormat::from_extension(&ext).ok_or_else(|| unsupported_extension(format!(
+        "unsupported output extension .{ext}; use {}, or an extensionless directory path for iiif-dir",
+        dezoomify::model::output_extensions(),
+    )))
 }
 
 /// Image extensions that always name a single file, never an `iiif-dir`
 /// directory destination. `.zif` names a single multi-directory pyramid
 /// file; `.iiif` names a directory and is intentionally absent here.
 fn is_single_file_extension(path: &Path) -> bool {
-    matches!(
-        path.extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase()
-            .as_str(),
-        "png" | "jpg" | "jpeg" | "tif" | "tiff" | "zif" | "webp"
-    )
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .and_then(|ext| OutputFormat::from_extension(&ext.to_ascii_lowercase()))
+        .is_some_and(|format| !format.is_directory())
 }
 
 pub fn validate_destination(

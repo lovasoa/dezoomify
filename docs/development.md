@@ -1,7 +1,9 @@
 # Development
 
-Install Rust and the Node.js version in [`.node-version`](../.node-version), then
-run these commands from the repository root:
+Install Rust and the Node.js version in [`.node-version`](../.node-version).
+Native x86-64 builds also require NASM 2.15 or newer for AVIF's SIMD routines
+(`apt install nasm`, `brew install nasm`, or `choco install nasm`). Then run these
+commands from the repository root:
 
 ```sh
 cargo xtask setup

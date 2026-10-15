@@ -8,11 +8,12 @@ export default defineConfig({
   base: "/beta/",
   plugins: [react()],
   resolve: {
-    alias: {
-      "@dezoomify/wasm-bindings": fileURLToPath(
-        new URL("./wasm/dezoomify-wasm.js", import.meta.url),
-      ),
-    },
+    alias: [
+      {
+        find: /^@dezoomify\/wasm-bindings$/,
+        replacement: fileURLToPath(new URL("./wasm/dezoomify-wasm.js", import.meta.url)),
+      },
+    ],
   },
   define: { __DEZOOMIFY_VERSION__: JSON.stringify(process.env.DEZOOMIFY_VERSION ?? "development") },
   build: {

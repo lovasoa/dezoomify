@@ -142,31 +142,24 @@ fn output_refuses_mismatch_and_requires_overwrite() {
 #[test]
 fn output_format_follows_the_destination_extension() {
     use std::path::Path;
-    for (path, format) in [
-        ("painting.png", OutputFormat::Png),
-        ("painting.jpg", OutputFormat::Jpeg),
-        ("painting.jpeg", OutputFormat::Jpeg),
-        ("painting.tif", OutputFormat::Tiff),
-        ("painting.tiff", OutputFormat::Tiff),
-        ("painting.zif", OutputFormat::Zif),
-        ("painting.ZIF", OutputFormat::Zif),
-        ("painting.webp", OutputFormat::Webp),
-        ("painting.WEBP", OutputFormat::Webp),
-        ("painting.iiif", OutputFormat::IiifDir),
-        ("painting", OutputFormat::IiifDir),
-    ] {
-        assert_eq!(
-            output::infer_from_path(Path::new(path)),
-            Ok(format),
-            "{path}"
-        );
+    for codec in dezoomify::model::OUTPUT_CODECS {
+        for extension in codec.extensions {
+            let name = if extension.is_empty() {
+                "painting".to_string()
+            } else {
+                format!("painting.{extension}")
+            };
+            for name in [name.clone(), name.to_ascii_uppercase()] {
+                assert_eq!(output::infer_from_path(Path::new(&name)), Ok(codec.format));
+            }
+        }
     }
     // Unknown extensions fail before any work starts, instead of writing a
     // mislabeled file. The error names every supported extension.
-    let bmp = output::infer_from_path(Path::new("painting.bmp"));
-    let error = bmp.expect_err("bmp stays unsupported");
+    let unknown = output::infer_from_path(Path::new("painting.not-an-image"));
+    let error = unknown.expect_err("unknown output suffix stays unsupported");
     assert!(matches!(error, Error::UnsupportedExtension { .. }));
-    for supported in [".png", ".jpg", ".tif", ".zif", ".webp", ".iiif"] {
+    for supported in dezoomify::model::output_extensions().split(", ") {
         assert!(
             error.to_string().contains(supported),
             "unsupported-extension error lists {supported}: {error}"
@@ -201,6 +194,9 @@ fn output_destinations_validate_format_and_preserve_existing_content() {
         ("out.webp", OutputFormat::Webp, false, true),
         ("out.webp", OutputFormat::Jpeg, true, false),
         ("out.webp", OutputFormat::IiifDir, true, false),
+        ("out.avif", OutputFormat::Avif, false, true),
+        ("out.avif", OutputFormat::Jpeg, true, false),
+        ("out.avif", OutputFormat::IiifDir, true, false),
     ] {
         assert_eq!(
             output::validate_destination(&dir.join(name), &format, overwrite).is_ok(),
@@ -217,6 +213,22 @@ fn output_destinations_validate_format_and_preserve_existing_content() {
     assert!(output::validate_destination(&iiif, &OutputFormat::IiifDir, true).is_err());
     assert_eq!(std::fs::read(&iiif).unwrap(), b"stale");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn existing_single_file_outputs_require_overwrite_without_changing_content() {
+    let dir = dezoomify_fixture_server::temp_dir("existing-output");
+    for codec in dezoomify::model::OUTPUT_CODECS
+        .iter()
+        .filter(|codec| !codec.format.is_directory())
+    {
+        let path = dir.join(format!("out.{}", codec.format.extension()));
+        std::fs::write(&path, b"previous output").unwrap();
+        assert!(output::validate_destination(&path, &codec.format, false).is_err());
+        assert!(output::validate_destination(&path, &codec.format, true).is_ok());
+        assert_eq!(std::fs::read(&path).unwrap(), b"previous output");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]

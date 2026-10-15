@@ -43,7 +43,7 @@ ignores caps. Error records include a stable `kind`; use it for scripts and
 bug reports rather than matching the human sentence.
 
 Output names choose the format: `.png`, `.jpg`/`.jpeg`, `.tif`/`.tiff`, `.zif`,
-`.webp`, or `.iiif`. An extensionless destination also creates an IIIF tile
+`.webp`, `.avif`, or `.iiif`. An extensionless destination also creates an IIIF tile
 folder. Other extensions are rejected. See
 [choosing a format](../../apps/desktop/desktop-app.md#choosing-the-file-format).
 
@@ -71,9 +71,11 @@ also supply the list; each referenced manifest saves its first image.
 ## Limits
 
 Very large images are limited by available memory. Explicit raster formats can
-reduce buffering compared with automatic format selection; WebP needs a complete
-pixel buffer. If saving reaches a resource limit, try a smaller level or an IIIF
-tile folder. JPEG and WebP have additional dimension limits; see
+reduce buffering compared with automatic format selection; WebP and AVIF need a
+complete pixel buffer. AVIF uses quality `max(1, 100 - --compression)` at fixed
+encoding speed and does not preserve embedded color profiles. If saving reaches
+a resource limit, try a smaller level or an IIIF tile folder. JPEG, WebP and AVIF
+have additional dimension limits; see
 [rejected output names](./troubleshooting.md#the-output-name-is-rejected).
 
 If a required tile still fails after automatic retries, the job stops without

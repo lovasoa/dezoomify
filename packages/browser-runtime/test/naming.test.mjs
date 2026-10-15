@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { defaultSaveExtension, outputCodecs } from "@dezoomify/wasm-bindings/codecs";
 import {
   extensionForSaveFormat,
   safeTitleStem,
@@ -11,12 +12,16 @@ test("suggestedNameFor builds dezoomify-WxH names with format extensions", () =>
   assert.equal(suggestedNameFor(800, 600, "jpeg"), "dezoomify-800x600.jpg");
   assert.equal(suggestedNameFor(0, 600, "png"), "dezoomify.png");
   assert.equal(suggestedNameFor(undefined, undefined, "tiff"), "dezoomify.tif");
-  assert.equal(extensionForSaveFormat("jpg"), "jpg");
-  assert.equal(extensionForSaveFormat("tif"), "tif");
-  assert.equal(extensionForSaveFormat("zif"), "zif");
-  assert.equal(extensionForSaveFormat("webp"), "webp");
-  assert.equal(extensionForSaveFormat("iiif"), "iiif");
-  assert.equal(extensionForSaveFormat("iiif-dir"), "iiif");
+  for (const codec of outputCodecs) {
+    for (const name of [codec.format, ...codec.extensions.filter(Boolean)]) {
+      assert.equal(extensionForSaveFormat(name), codec.extensions[0]);
+      assert.equal(extensionForSaveFormat(name.toUpperCase()), codec.extensions[0]);
+    }
+  }
+  for (const unknown of [undefined, null, "", "unknown-format"]) {
+    assert.equal(extensionForSaveFormat(unknown), defaultSaveExtension);
+  }
+  assert.equal(suggestedNameFor(800, 600, "avif"), "dezoomify-800x600.avif");
   assert.equal(suggestedNameFor(800, 600, "zif"), "dezoomify-800x600.zif");
   assert.equal(suggestedNameFor(800, 600, "webp"), "dezoomify-800x600.webp");
   assert.equal(suggestedNameFor(800, 600, "iiif-dir"), "dezoomify-800x600.iiif");

@@ -20,10 +20,11 @@ fn known_codec_limits_fail_before_ordinary_tile_fetches() {
         )]))),
         Arc::clone(&counts),
     );
-    for (extension, reason) in [
-        ("jpg", LimitReason::JpegSide),
-        ("webp", LimitReason::WebpSide),
-    ] {
+    for codec in dezoomify::model::OUTPUT_CODECS
+        .iter()
+        .filter(|codec| codec.max_side.is_some())
+    {
+        let extension = codec.format.extension();
         let host = NativeHost::new(JobOptions {
             input_url: format!("{base}/large.dzi"),
             output: OutputTarget::File(work.join(format!("image.{extension}"))),
@@ -40,7 +41,8 @@ fn known_codec_limits_fail_before_ordinary_tile_fetches() {
                 &host,
             ))
             .unwrap_err();
-        assert!(matches!(error.cause(), Error::LimitExceeded { limit } if limit.reason == reason));
+        assert!(matches!(error.cause(), Error::LimitExceeded { limit }
+            if limit.reason == LimitReason::CodecSide(codec.format)));
         assert!(host.publication().is_none());
     }
     assert_eq!(counts.lock().unwrap().len(), 1, "only metadata was fetched");

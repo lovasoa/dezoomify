@@ -135,6 +135,54 @@ fn jpg_output_decodes_at_full_size() {
 }
 
 #[test]
+fn avif_output_is_published_and_independently_decodes() {
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let directory = temp_dir("avif");
+    let output = directory.join("pyramid.avif");
+    let publication = support::run_file(&input, &output, |_| {}).expect("AVIF pipeline succeeds");
+    assert_eq!(
+        publication.output.format,
+        dezoomify::model::OutputFormat::Avif
+    );
+    assert_eq!(publication.tile_count, 4);
+    assert_eq!(
+        publication.output.canvas,
+        Some(dezoomify::model::Size {
+            width: 512,
+            height: 512
+        })
+    );
+    assert!(std::fs::read(&output)
+        .unwrap()
+        .windows(8)
+        .any(|bytes| bytes == b"ftypavif"));
+    assert_eq!(
+        std::fs::read_dir(&directory).unwrap().count(),
+        1,
+        "no staging remains"
+    );
+    // Desktop uses automatic naming with an explicit format, rather than a
+    // CLI filename. Exercise that publication route through the same Host.
+    let desktop_dir = directory.join("desktop");
+    let automatic = support::run_file(&input, &output, |options| {
+        options.output = dezoomify_native::OutputTarget::AutoDir {
+            dir: desktop_dir.clone(),
+            format: dezoomify::model::OutputFormat::Avif,
+        };
+    })
+    .expect("desktop AVIF publication succeeds");
+    assert_eq!(automatic.path.parent(), Some(desktop_dir.as_path()));
+    assert_eq!(automatic.path.extension().unwrap(), "avif");
+    assert_eq!(
+        std::fs::read(&automatic.path).unwrap(),
+        std::fs::read(&output).unwrap()
+    );
+    assert_eq!(std::fs::read_dir(&desktop_dir).unwrap().count(), 1);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn tiff_output_decodes_losslessly() {
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
