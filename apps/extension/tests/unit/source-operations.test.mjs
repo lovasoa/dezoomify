@@ -237,6 +237,29 @@ test("source fetch returns one bounded base64 payload", async () => {
   }
 });
 
+test("stale document tokens prevent fetches and cancellation markers in a replacement", async () => {
+  const oldFetch = globalThis.fetch;
+  const oldToken = globalThis.__dezoomifyDocumentToken;
+  const oldRequests = globalThis.__dezoomifySourceFetches;
+  globalThis.__dezoomifyDocumentToken = "replacement";
+  globalThis.__dezoomifySourceFetches = new Map();
+  globalThis.fetch = () => assert.fail("a replacement document must not fetch");
+  try {
+    const request = {
+      url: "https://gallery.example/info.json",
+      headers: [],
+      documentToken: "original",
+    };
+    assert.equal((await fetchSource(request)).error.blocked_reason, "source-document-lost");
+    await cancelSourceFetch("never-started", Date.now() + 30000, "original");
+    assert.equal(globalThis.__dezoomifySourceFetches.size, 0);
+  } finally {
+    globalThis.fetch = oldFetch;
+    globalThis.__dezoomifyDocumentToken = oldToken;
+    globalThis.__dezoomifySourceFetches = oldRequests;
+  }
+});
+
 test("source fetch classifies failures without returning response details", async () => {
   const oldFetch = globalThis.fetch;
   globalThis.fetch = async () => ({

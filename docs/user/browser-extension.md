@@ -61,6 +61,10 @@ and restarts the attempt. For a different image or a navigated source page, clic
 the toolbar button on that page. Follow [troubleshooting](./troubleshooting.md)
 for other errors or a visible picture that cannot be saved.
 
+If an embedded viewer still cannot be found after granting access, open its frame
+in a new tab using the browser's context menu, then click Dezoomify there. A frame
+that redirects to another site can hide its final address from the parent page.
+
 ## What the extension does with your data
 
 The extension examines only the source page you select, after your click. It

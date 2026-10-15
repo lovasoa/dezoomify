@@ -19,9 +19,10 @@ continue through extension-origin fetching, but never
 silently rebind to the new page. The extension supplies observed documents and
 resources; Rust owns format recognition and discovery order. When discovery
 needs more evidence, scan remaining permitted frames before asking for another
-origin. `webNavigation.getAllFrames` enumerates nested frames only during that
-user-started job. Resource snapshots inspect one document; memory scanning also
-retains readable DOM traversal for inline frames.
+origin. A finite `scripting` probe inventories permitted frames and iframe URL
+hints, then refreshes after a grant. Bind follow-up operations to the document;
+frame IDs survive reloads. Resource snapshots inspect one document; memory
+scanning also retains readable DOM traversal for inline frames.
 
 Scanned origins can use their frame's session. Other cross-origin access uses
 credential-free extension fetches under explicitly granted host permissions.

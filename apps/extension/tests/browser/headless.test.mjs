@@ -292,6 +292,21 @@ async function runChromiumJob(base, work, options = {}) {
     // can observe the onInstalled-opened page. Reuse that page when it exists
     // so its test driver starts only one job; create a page only as fallback.
     const extensionId = new URL(serviceWorker.url()).hostname;
+    if (options.nativeFrameGrant) {
+      const settings = await context.newPage();
+      await settings.goto("chrome://extensions/");
+      await settings.evaluate(
+        async ({ id, origin }) => {
+          await chrome.developerPrivate.updateExtensionConfiguration({
+            extensionId: id,
+            hostAccess: "ON_SPECIFIC_SITES",
+          });
+          await chrome.developerPrivate.addHostPermission(id, `${origin}/*`);
+        },
+        { id: extensionId, origin: new URL(base).origin },
+      );
+      await settings.close();
+    }
     const driverUrl = `chrome-extension://${extensionId}/test/driver.html`;
     let driverPage = context.pages().find((page) => page.url().startsWith(driverUrl));
     const driverDeadline = Date.now() + 5000;
@@ -323,6 +338,30 @@ async function runChromiumJob(base, work, options = {}) {
     if (options.grantAccess) {
       await waitForVisible(jobPage, "[data-dz-allow-access=true]", "deferred frame permission");
       assert.equal(await jobPage.locator(".dz-error-section").count(), 0);
+      if (options.nativeFrameGrant) {
+        const sourceTabId = Number(
+          new URLSearchParams(new URL(jobPage.url()).hash.slice(1)).get("sourceTabId"),
+        );
+        const accessible = await jobPage.evaluate(
+          async (tabId) =>
+            chrome.scripting.executeScript({
+              target: { tabId, allFrames: true },
+              func: () => location.href,
+            }),
+          sourceTabId,
+        );
+        assert.ok(
+          accessible.every((frame) => new URL(frame.result).hostname !== "localhost"),
+          "native permissions withhold the viewer frame",
+        );
+        const settings = await context.newPage();
+        await settings.goto("chrome://extensions/");
+        await settings.evaluate(
+          async (id) => chrome.developerPrivate.addHostPermission(id, "http://localhost/*"),
+          extensionId,
+        );
+        await settings.close();
+      }
       await jobPage.locator("[data-dz-allow-access=true]").click();
     }
     if (options.beforeCompletion) await options.beforeCompletion(jobPage);
@@ -795,7 +834,11 @@ for (const [browser, runJob] of [
     const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-recursive-iframe-"));
     try {
       assertPng(
-        await runJob(fixtureServer.base, work, { scenario: "recursive-iframe", grantAccess: true }),
+        await runJob(fixtureServer.base, work, {
+          scenario: "recursive-iframe",
+          grantAccess: true,
+          nativeFrameGrant: browser === "chromium",
+        }),
       );
     } finally {
       rmSync(work, { recursive: true, force: true });
