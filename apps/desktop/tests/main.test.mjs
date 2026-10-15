@@ -202,7 +202,11 @@ test("saved history renders during slow disk checks, opens the file after retire
     root.querySelector("#dz-url-input"),
     "the main input is ready while the disk check is pending",
   );
-  assert.equal(root.querySelector(".dz-history-main").textContent, saved.filename);
+  assert.equal(root.querySelector(".dz-history-main").textContent, invocation.request.inputUrl);
+  assert.equal(
+    root.querySelector("tbody tr td:nth-child(4) .dz-history-output").textContent,
+    saved.filename,
+  );
   assert.match(root.querySelector("tbody tr").textContent, /Checking file/);
   root.querySelector("#dz-url-input").value = "https://other.test/image";
   await act(async () => check.resolve("available"));
@@ -213,17 +217,20 @@ test("saved history renders during slow disk checks, opens the file after retire
     assert.deepEqual(reference, saved);
     throw { kind: "output-not-found" };
   };
-  click(root.querySelector("tbody tr td:nth-child(3)"));
+  click(root.querySelector(".dz-history-output"));
   await tick();
   assert.equal(root.querySelector("#dz-url-input").value, "https://other.test/image");
   assert.equal(invocations.length, count);
   assert.match(root.querySelector("tbody tr").textContent, /Deleted/);
-  assert.equal(root.querySelector(".dz-history-main").disabled, true);
+  assert.equal(root.querySelector(".dz-history-output").disabled, true);
+  click(root.querySelector(".dz-history-main"));
+  assert.equal(root.querySelector("#dz-url-input").value, invocation.request.inputUrl);
+  assert.equal(invocations.length, count, "a deleted result still allows selecting its source");
   globalThis.desktopTestNative.inspectSavedOutput = async () => "available";
   act(() => window.dispatchEvent(new window.Event("focus")));
   await tick();
   assert.equal(
-    root.querySelector(".dz-history-main").disabled,
+    root.querySelector(".dz-history-output").disabled,
     false,
     "a restored file becomes available again",
   );
@@ -231,7 +238,7 @@ test("saved history renders during slow disk checks, opens the file after retire
   globalThis.desktopTestNative.openHistoryOutput = async () => {
     opened++;
   };
-  click(root.querySelector(".dz-history-main"));
+  click(root.querySelector(".dz-history-output"));
   await tick();
   assert.equal(opened, 1);
   click(root.querySelector(".dz-history-remove"));

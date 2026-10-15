@@ -1713,7 +1713,8 @@ abbr[title] {
   display: block;
 }
 
-.dz-history-main {
+.dz-history-main,
+.dz-history-output {
   display: block;
   width: 100%;
   overflow: hidden;
@@ -1722,6 +1723,7 @@ abbr[title] {
 }
 
 .dz-history-main,
+.dz-history-output,
 .dz-history-remove,
 .dz-history-clear {
   padding: 0;
@@ -1733,16 +1735,18 @@ abbr[title] {
 }
 
 .dz-history-main:hover,
+.dz-history-output:hover,
 .dz-history-clear:hover {
   text-decoration: underline;
 }
 
-.dz-history-main:disabled {
+.dz-history-output:disabled {
   cursor: default;
   text-decoration: none;
 }
 
 .dz-history-main:focus-visible,
+.dz-history-output:focus-visible,
 .dz-history-remove:focus-visible,
 .dz-history-clear:focus-visible {
   outline: none;

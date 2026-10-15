@@ -251,13 +251,23 @@ describe("Dezoomify desktop window", () => {
     assert.equal(outputs.length, 1, "automatic save writes exactly one PNG");
     assertSavedPyramid(readFileSync(outputs[0]));
     await resetToIdle(driver);
-    await waitFor(driver, () => historyStatus("Completed"), 30000, "saved file history");
-    const title = await driver.findElement(By.css(".dz-history-main"));
+    await waitFor(
+      driver,
+      () => historyStatus(path.basename(outputs[0])),
+      30000,
+      "saved file history",
+    );
+    const title = await driver.findElement(By.css(".dz-history-output"));
     assert.equal(await title.getText(), path.basename(outputs[0]));
     assert.equal(await title.isEnabled(), true);
     rmSync(outputs[0]);
     await driver.executeScript(() => window.dispatchEvent(new Event("focus")));
-    await waitFor(driver, () => historyStatus("Deleted"), 30000, "deleted file history");
+    await waitFor(
+      driver,
+      () => historyStatus(`${path.basename(outputs[0])}Deleted`),
+      30000,
+      "deleted file history",
+    );
     assert.equal(await title.isEnabled(), false);
   });
 

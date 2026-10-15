@@ -20,10 +20,10 @@ browser session.
 
 ## Recent pictures
 
-History keeps your last 20 started images on this device. Click a saved entry
-to open its file; missing files show **Deleted**. Other entries fill the address
-field without starting. Remove entries with the trash icon or **Clear history**;
-this never deletes saved images.
+History keeps your last 20 started images on this device. Click a saved filename
+under **Result** to open its file; missing files show **Deleted**. Click **Source**
+to fill the address field without starting. Remove entries with the trash icon
+or **Clear history**; this never deletes saved images.
 
 ## Saving and opening images
 

@@ -216,6 +216,10 @@ test("recent table separates metadata and removes just the requested row", () =>
     { history: entries, historyNow: 120_000 },
   );
   const rows = el.querySelectorAll("tbody tr");
+  assert.deepEqual(
+    Array.from(el.querySelectorAll("thead th"), (cell) => cell.textContent),
+    ["Source", "Started", "Size (px)", "Result", ""],
+  );
   assert.equal(rows.length, 2);
   assert.equal(rows[0].querySelector(".dz-history-main").textContent, "A painting");
   assert.equal(rows[0].querySelector(".dz-history-main").title, entries[0].url);
