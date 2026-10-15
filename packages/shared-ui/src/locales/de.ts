@@ -304,6 +304,7 @@ export const de = {
   "desktop.quick.hint.adaptive": "adaptiv",
   "desktop.quick.hint.lossless": "verlustfrei",
   "desktop.quick.hint.compressed": "komprimiert",
+  "desktop.quick.hint.advancedCompression": "fortgeschrittene Kompression",
   "desktop.quick.hint.archival": "Archivierung",
   "desktop.quick.hint.zoomable": "zoombar",
   "desktop.quick.hint.tiled": "gekachelt",
@@ -342,9 +343,10 @@ export const de = {
   "desktop.output.codecLimit":
     "Dieses Bild ({dims}) ist zu groß für {format}, das höchstens {maxSide} Pixel pro Seite erlaubt. Speichern Sie es als PNG. Quelle: {host}.",
   "desktop.quick.format.avif":
-    "Verlustbehaftete Ausgabe mit Transparenz, begrenzt auf {maxSide} Pixel pro Seite. Die Qualität ist in den Einstellungen anpassbar. Benötigt das gesamte Bild im Arbeitsspeicher und erhält eingebettete Farbprofile nicht. Qualität 100 ist kein verlustfreier Modus.",
+    "Fortgeschrittene Kompression mit Transparenz. Verlustbehaftete Ausgabe, begrenzt auf {maxSide} Pixel pro Seite. Die Qualität ist in den Einstellungen anpassbar. Benötigt das gesamte Bild im Arbeitsspeicher und erhält eingebettete Farbprofile nicht. Qualität 100 ist kein verlustfreier Modus.",
   "desktop.quick.format.generic": "Das Bild als {format} speichern.",
-  "desktop.advanced.qualityDesc": "Höhere Werte erhalten mehr Bilddetails.",
+  "desktop.advanced.qualityDesc":
+    "Höhere Werte erhalten mehr Bilddetails. Qualitätswerte sind formatspezifisch.",
   "desktop.advanced.compressionEffort": "Kompressionsaufwand",
   "desktop.advanced.compressionEffortDesc":
     "Die Bildqualität bleibt verlustfrei; höhere Werte dauern länger.",

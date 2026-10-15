@@ -298,6 +298,7 @@ export const it = {
   "desktop.quick.hint.adaptive": "adattivo",
   "desktop.quick.hint.lossless": "senza perdita",
   "desktop.quick.hint.compressed": "compresso",
+  "desktop.quick.hint.advancedCompression": "compressione avanzata",
   "desktop.quick.hint.archival": "archivio",
   "desktop.quick.hint.zoomable": "ingrandibile",
   "desktop.quick.hint.tiled": "a tasselli",
@@ -336,9 +337,10 @@ export const it = {
   "desktop.output.codecLimit":
     "Questa immagine ({dims}) è troppo grande per {format}, che consente al massimo {maxSide} pixel per lato. Salvala in PNG. Origine: {host}.",
   "desktop.quick.format.avif":
-    "Formato con perdita e trasparenza, massimo {maxSide} pixel per lato. Qualità regolabile nelle impostazioni. Richiede l’immagine completa in memoria e non conserva i profili colore incorporati. La qualità 100 non è una modalità senza perdita.",
+    "Compressione avanzata con trasparenza. Formato con perdita, massimo {maxSide} pixel per lato. Qualità regolabile nelle impostazioni. Richiede l’immagine completa in memoria e non conserva i profili colore incorporati. La qualità 100 non è una modalità senza perdita.",
   "desktop.quick.format.generic": "Salva l’immagine in formato {format}.",
-  "desktop.advanced.qualityDesc": "Un valore maggiore conserva più dettagli dell’immagine.",
+  "desktop.advanced.qualityDesc":
+    "Un valore maggiore conserva più dettagli dell’immagine. I valori di qualità sono specifici per ciascun formato.",
   "desktop.advanced.compressionEffort": "Impegno di compressione",
   "desktop.advanced.compressionEffortDesc":
     "La qualità resta senza perdita; valori maggiori richiedono più tempo.",

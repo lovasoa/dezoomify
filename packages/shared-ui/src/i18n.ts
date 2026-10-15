@@ -389,6 +389,7 @@ const en = {
   "desktop.quick.hint.adaptive": "adaptive",
   "desktop.quick.hint.lossless": "lossless",
   "desktop.quick.hint.compressed": "compressed",
+  "desktop.quick.hint.advancedCompression": "advanced compression",
   "desktop.quick.hint.archival": "archival",
   "desktop.quick.hint.zoomable": "zoomable",
   "desktop.quick.hint.tiled": "tiled",
@@ -401,7 +402,7 @@ const en = {
   "desktop.quick.format.tiff": "Lossless output for archiving and editing.",
   "desktop.quick.format.webp": "Lossless compressed output, limited to {maxSide} pixels per side.",
   "desktop.quick.format.avif":
-    "Lossy output with transparency, limited to {maxSide} pixels per side. Quality is adjustable in More settings. Needs the complete image in memory and does not preserve embedded color profiles. Quality 100 is not a lossless mode.",
+    "Advanced compression with transparency. Lossy output, limited to {maxSide} pixels per side. Quality is adjustable in More settings. Needs the complete image in memory and does not preserve embedded color profiles. Quality 100 is not a lossless mode.",
   "desktop.quick.format.zif": "A lossless tiled TIFF pyramid for zooming at several resolutions.",
   "desktop.quick.format.iiifDir": "A folder of JPEG tiles and info.json for hosting an IIIF image.",
   "desktop.quick.rate.maximum": "16 parallel",
@@ -426,7 +427,8 @@ const en = {
   "desktop.advanced.done": "Done",
   "desktop.advanced.codecQuality": "{format} quality",
   "desktop.quick.format.generic": "Save the image as {format}.",
-  "desktop.advanced.qualityDesc": "Higher keeps more image detail.",
+  "desktop.advanced.qualityDesc":
+    "Higher keeps more image detail. Quality numbers are specific to each format.",
   "desktop.advanced.compressionEffort": "Compression effort",
   "desktop.advanced.compressionEffortDesc":
     "Image quality stays lossless; higher values take longer.",

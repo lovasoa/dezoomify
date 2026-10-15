@@ -222,18 +222,19 @@ macro_rules! output_codecs {
     };
 }
 
-// JPEG: native calibration on two paintings and a map. AVIF: image 0.25.10,
-// speed 4, Zoomify test_custom_size, Arts & Culture tile, generic map_expected,
-// and a painting alpha gradient fitted within 512x512. Upper measured AVIF
-// bytes/pixel rounded up to 0.05, then made nondecreasing across sampled qualities.
+// Paired native image 0.25.10 JPEG/AVIF measurements on opaque Zoomify
+// test_custom_size, Arts & Culture tile and generic map_expected, fitted within
+// 512x512. AVIF speed 4; its painting alpha-gradient check also fits these values.
+// Upper measured bytes/pixel rounded up to 0.05, then made nondecreasing.
 const JPEG_SIZES: &[(u8, f64)] = &[
+    (1, 0.05),
     (25, 0.1),
     (50, 0.15),
-    (75, 0.2),
-    (90, 0.3),
-    (95, 0.4),
-    (98, 0.45),
-    (100, 0.5),
+    (75, 0.25),
+    (90, 0.4),
+    (95, 0.55),
+    (98, 0.85),
+    (100, 1.15),
 ];
 const AVIF_SIZES: &[(u8, f64)] = &[
     (1, 0.05),
@@ -251,7 +252,7 @@ output_codecs! {
     Jpeg => ("jpeg", "JPEG", &["jpg", "jpeg"], Some(65_535), OutputControl::Quality { minimum: 0 }, Streaming, "compressed", JPEG_SIZES),
     Tiff => ("tiff", "TIFF", &["tif", "tiff"], None, OutputControl::Effort, Streaming, "archival", &[(100, 3.0)]),
     Webp => ("webp", "WebP", &["webp"], Some(16_383), OutputControl::None, Buffered, "lossless", &[(100, 1.3)]),
-    Avif => ("avif", "AVIF", &["avif"], Some(65_535), OutputControl::Quality { minimum: 1 }, Buffered, "compressed", AVIF_SIZES),
+    Avif => ("avif", "AVIF", &["avif"], Some(65_535), OutputControl::Quality { minimum: 1 }, Buffered, "advancedCompression", AVIF_SIZES),
     Zif => ("zif", "ZIF", &["zif"], None, OutputControl::Effort, Pyramid, "zoomable", &[(100, 3.0)]),
     IiifDir => ("iiif-dir", "IIIF folder", &["iiif", ""], None, OutputControl::None, Directory, "tiled", JPEG_SIZES),
 }
