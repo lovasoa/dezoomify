@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
-# Shared by release builds and the manually dispatched PR signing check.
+# Called by `cargo xtask release build` after Tauri signs/notarizes the app.
 set -euo pipefail
 
-dist="target/release-dist/${DEZOOMIFY_VERSION:?}/desktop-macos-aarch64"
+dist="${1:?release artifact directory}"
 requirement="anchor apple generic and certificate leaf[subject.OU] = \"${APPLE_TEAM_ID:?}\""
 identifier="$(node -p 'require("./apps/desktop/src-tauri/tauri.conf.json").identifier')"
 product="$(node -p 'require("./apps/desktop/src-tauri/tauri.conf.json").productName')"
 
-# Tauri signs and notarizes the app before packaging its signed updater archive.
-cargo xtask release build --plan "target/release-dist/$DEZOOMIFY_VERSION/plan.json" --target desktop-macos-aarch64
 set -- "$dist"/*.dmg
 test "$#" -eq 1
 dmg="$1"

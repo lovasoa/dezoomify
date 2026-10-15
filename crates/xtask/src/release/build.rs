@@ -206,6 +206,13 @@ fn build_desktop_artifact(target: &str, target_os: &str, out: &Path) -> Result<(
     ));
     std::fs::copy(signature, destination.join(format!("{name}.sig")))
         .map_err(|error| format!("copy updater signature: {error}"))?;
+    if target_os == "macos" {
+        run_cmd(&[
+            "bash",
+            "scripts/notarize-macos-release.sh",
+            destination.to_str().ok_or("non-UTF-8 release directory")?,
+        ])?;
+    }
     Ok(())
 }
 

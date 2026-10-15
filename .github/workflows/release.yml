@@ -121,31 +121,22 @@ jobs:
         env:
           DEZOOMIFY_VERSION: ${{ needs.prepare.outputs.version }}
         run: xvfb-run -a cargo xtask test desktop --e2e-window
-      - name: Build artifact (Linux)
-        if: runner.os == 'Linux'
+      - name: Build artifact (Unix)
+        if: runner.os != 'Windows'
         env:
           DEZOOMIFY_VERSION: ${{ needs.prepare.outputs.version }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ startsWith(matrix.target, 'desktop-') && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_ID: ${{ runner.os == 'macOS' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
         run: |
           v="$DEZOOMIFY_VERSION"
           cargo xtask release build --plan "target/release-dist/$v/plan.json" --target "${{ matrix.target }}"
           rm "target/release-dist/$v/plan.json" "target/release-dist/$v/notes.md"
-      - name: Build, sign, and notarize macOS artifacts
-        if: matrix.target == 'desktop-macos-aarch64'
-        env:
-          DEZOOMIFY_VERSION: ${{ needs.prepare.outputs.version }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          bash scripts/build-signed-macos.sh
-          rm "target/release-dist/$DEZOOMIFY_VERSION/plan.json" "target/release-dist/$DEZOOMIFY_VERSION/notes.md"
       - name: Build artifact (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

@@ -200,7 +200,7 @@ jobs:
           echo "version=$(cargo xtask release version)" >> "$GITHUB_OUTPUT"
           cargo xtask release plan
       - name: Build and test signed macOS artifacts
-        run: bash scripts/build-signed-macos.sh
+        run: cargo xtask release build --plan "target/release-dist/$DEZOOMIFY_VERSION/plan.json" --target desktop-macos-aarch64
         env:
           DEZOOMIFY_VERSION: ${{ steps.plan.outputs.version }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

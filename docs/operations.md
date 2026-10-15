@@ -59,9 +59,8 @@ Export the `.p12` from Keychain Access: OpenSSL 3's default PKCS#12 format can f
 macOS Keychain import. Back up the certificate and key; renew before expiry.
 Apple credentials are separate from the existing Tauri updater signing key.
 
-Both release and manual desktop workflows use
-[`build-signed-macos.sh`](../scripts/build-signed-macos.sh) to sign, notarize,
-and verify the DMG and updater app, then install and launch both. Before merging,
+`cargo xtask release build` signs, notarizes, and verifies the macOS DMG and
+updater app, then installs and launches both. Before merging,
 run `gh workflow run desktop.yml --ref <reviewed-branch>` and require success.
 This uploads test artifacts without publishing. Automatic PR builds stay ad-hoc.
 
