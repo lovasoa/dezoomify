@@ -1,4 +1,4 @@
-import type { FormEvent, ReactElement } from "react";
+import type { ReactElement, SubmitEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { t } from "./i18n.ts";
 
@@ -32,7 +32,7 @@ export function UrlInput({
     }
   }, [selection]);
 
-  const submit = (event: FormEvent) => {
+  const submit = (event: SubmitEvent) => {
     event.preventDefault();
     const url = inputRef.current?.value.trim() ?? "";
     if (!url) return inputRef.current?.focus();

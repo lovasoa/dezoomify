@@ -46,25 +46,40 @@ const FORWARDED_CLIENT_HEADERS = ["user-agent", "accept-language", "accept", "ra
 export function forwardedClientHeaders(
   headers: Record<string, string | string[] | undefined>,
 ): Record<string, string> {
-  const lower: Record<string, string> = {};
-  for (const [name, value] of Object.entries(headers)) {
-    if (name.toLowerCase() === "range" && value !== undefined) {
-      const ranges = Array.isArray(value) ? value.join(",") : value;
-      lower.range = lower.range === undefined ? ranges : `${lower.range},${ranges}`;
-      continue;
-    }
-    const first = Array.isArray(value) ? value[0] : value;
-    if (typeof first === "string" && first !== "") {
-      const key = name.toLowerCase();
-      if (lower[key] === undefined) lower[key] = first;
-    }
-  }
+  const lower = lowerClientHeaders(headers);
   const out: Record<string, string> = {};
   for (const name of FORWARDED_CLIENT_HEADERS) {
     const found = lower[name];
     if (found !== undefined) out[name] = found;
   }
   return out;
+}
+
+function lowerClientHeaders(
+  headers: Record<string, string | string[] | undefined>,
+): Record<string, string> {
+  const lower: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    appendClientHeader(lower, name, value);
+  }
+  return lower;
+}
+
+function appendClientHeader(
+  lower: Record<string, string>,
+  name: string,
+  value: string | string[] | undefined,
+): void {
+  if (name.toLowerCase() === "range" && value !== undefined) {
+    const ranges = Array.isArray(value) ? value.join(",") : value;
+    lower.range = lower.range === undefined ? ranges : `${lower.range},${ranges}`;
+    return;
+  }
+  const first = Array.isArray(value) ? value[0] : value;
+  if (typeof first === "string" && first !== "") {
+    const key = name.toLowerCase();
+    if (lower[key] === undefined) lower[key] = first;
+  }
 }
 
 function parseNumericPart(part: string): number | null {
@@ -107,6 +122,10 @@ export function parseIPv4(host: string): number | null {
     if (n === null) return null;
     nums.push(n);
   }
+  return packIPv4(nums);
+}
+
+function packIPv4(nums: number[]): number | null {
   if (nums.length === 1) {
     if (nums[0] > 0xffffffff) return null;
     return nums[0] >>> 0;
@@ -125,48 +144,50 @@ export function parseIPv4(host: string): number | null {
 
 export function isBlockedIPv4Value(n: number): boolean {
   const v = n >>> 0;
-  const b0 = (v >>> 24) & 0xff;
-  const b1 = (v >>> 16) & 0xff;
-  // 0.0.0.0/8
-  if (b0 === 0) return true;
-  // 10.0.0.0/8
-  if (b0 === 10) return true;
-  // 127.0.0.0/8 loopback
-  if (b0 === 127) return true;
-  // 169.254.0.0/16 link-local (+ metadata 169.254.169.254)
-  if (b0 === 169 && b1 === 254) return true;
-  // 172.16.0.0/12
-  if (b0 === 172 && b1 >= 16 && b1 <= 31) return true;
-  // 192.168.0.0/16
-  if (b0 === 192 && b1 === 168) return true;
-  // 192.0.2.0/24 TEST-NET-1, 198.51.100.0/24, 203.0.113.0/24 -> treat as blocked for proxy
-  if (b0 === 192 && b1 === 0 && ((v >>> 8) & 0xff) === 2) return true;
-  if (b0 === 198 && b1 === 51 && ((v >>> 8) & 0xff) === 100) return true;
-  if (b0 === 203 && b1 === 0 && ((v >>> 8) & 0xff) === 113) return true;
-  // 224.0.0.0/4 multicast + 240.0.0.0/4 reserved
-  if (b0 >= 224) return true;
-  return false;
+  return BLOCKED_IPV4_RANGES.some(([network, mask]) => (v & mask) >>> 0 === network);
 }
 
-function expandIPv6(host: string): number[] | null {
-  // Returns 8 groups of 16 bits, or null if not IPv6.
+const BLOCKED_IPV4_RANGES = [
+  [0x00000000, 0xff000000], // 0.0.0.0/8
+  [0x0a000000, 0xff000000], // 10.0.0.0/8
+  [0x7f000000, 0xff000000], // 127.0.0.0/8 loopback
+  [0xa9fe0000, 0xffff0000], // 169.254.0.0/16 link-local and metadata
+  [0xac100000, 0xfff00000], // 172.16.0.0/12
+  [0xc0a80000, 0xffff0000], // 192.168.0.0/16
+  [0xc0000200, 0xffffff00], // 192.0.2.0/24 TEST-NET-1
+  [0xc6336400, 0xffffff00], // 198.51.100.0/24 TEST-NET-2
+  [0xcb007100, 0xffffff00], // 203.0.113.0/24 TEST-NET-3
+  [0xe0000000, 0xe0000000], // 224.0.0.0/4 multicast and 240.0.0.0/4 reserved
+] as const;
+
+function normalizeIPv6(host: string): string | null {
   let h = host.toLowerCase();
   // Strip brackets if present.
   if (h.startsWith("[") && h.endsWith("]")) h = h.slice(1, -1);
   if (!h.includes(":")) return null;
   // Handle embedded IPv4 (e.g. ::ffff:127.0.0.1 or ::ffff:7f00:1 variants).
-  let embedded: number | null = null;
   const lastColon = h.lastIndexOf(":");
   const tail = h.slice(lastColon + 1);
   if (tail.includes(".")) {
-    embedded = parseIPv4(tail);
+    const embedded = parseIPv4(tail);
     if (embedded === null) return null;
     h = `${h.slice(0, lastColon)}:${((embedded >>> 16) & 0xffff).toString(16)}:${(embedded & 0xffff).toString(16)}`;
   }
+  return h;
+}
+
+function ipv6Groups(part: string): string[] {
+  return part === "" ? [] : part.split(":");
+}
+
+function expandIPv6(host: string): number[] | null {
+  // Returns 8 groups of 16 bits, or null if not IPv6.
+  const h = normalizeIPv6(host);
+  if (h === null) return null;
   const halves = h.split("::");
   if (halves.length > 2) return null;
-  const head = halves[0] === "" ? [] : halves[0].split(":");
-  const tailGroups = halves.length === 2 ? (halves[1] === "" ? [] : halves[1].split(":")) : [];
+  const head = ipv6Groups(halves[0]);
+  const tailGroups = halves.length === 2 ? ipv6Groups(halves[1]) : [];
   for (const g of [...head, ...tailGroups]) {
     if (!/^[0-9a-f]{0,4}$/.test(g) || g === "") return null;
   }
@@ -182,7 +203,6 @@ function expandIPv6(host: string): number[] | null {
     ...tailGroups.map((g) => parseInt(g, 16)),
   ];
   if (groups.length !== 8) return null;
-  void embedded;
   return groups;
 }
 
@@ -305,65 +325,80 @@ export function validateProxyTarget(
   } catch {
     return { ok: false, code: "PROXY_POLICY_DENIED", reason: "invalid-url" };
   }
-  if (u.protocol !== "https:" && u.protocol !== "http:") {
-    return { ok: false, code: "PROXY_POLICY_DENIED", reason: "scheme" };
-  }
   void opts?.allowHttp;
+  const lower = u.hostname.toLowerCase().replace(/\.$/, "");
+  const reason =
+    proxyUrlReason(u) ?? literalHostReason(lower) ?? resolvedHostReason(lower, opts?.resolveHost);
+  return reason ? { ok: false, code: "PROXY_POLICY_DENIED", reason } : { ok: true };
+}
+
+function proxyUrlReason(u: URL): string | undefined {
+  if (u.protocol !== "https:" && u.protocol !== "http:") {
+    return "scheme";
+  }
   if (u.username !== "" || u.password !== "") {
-    return { ok: false, code: "PROXY_POLICY_DENIED", reason: "userinfo" };
+    return "userinfo";
   }
   if (hasSignedQuery(u)) {
-    return { ok: false, code: "PROXY_POLICY_DENIED", reason: "signed-query" };
+    return "signed-query";
   }
   // Standard ports only unless explicitly allowlisted (not allowlisted here).
   if (u.port !== "") {
     const expected = u.protocol === "https:" ? "443" : "80";
     if (u.port !== expected) {
-      return { ok: false, code: "PROXY_POLICY_DENIED", reason: "non-standard-port" };
+      return "non-standard-port";
     }
   }
-  const host = u.hostname;
-  const lower = host.toLowerCase().replace(/\.$/, "");
+  return undefined;
+}
+
+function literalHostReason(lower: string): string | undefined {
   if (lower === "localhost" || lower.endsWith(".localhost")) {
-    return { ok: false, code: "PROXY_POLICY_DENIED", reason: "loopback-host" };
+    return "loopback-host";
   }
   if (lower.endsWith(".local") || lower.endsWith(".internal") || lower.endsWith(".lan")) {
-    return { ok: false, code: "PROXY_POLICY_DENIED", reason: "private-host" };
+    return "private-host";
   }
   // Literal IPv4 in any notation.
   const v4 = parseIPv4(lower);
   if (v4 !== null) {
     if (isBlockedIPv4Value(v4)) {
-      return { ok: false, code: "PROXY_POLICY_DENIED", reason: "blocked-ipv4" };
+      return "blocked-ipv4";
     }
   } else if (lower.includes(":")) {
     if (isBlockedIPv6(lower)) {
-      return { ok: false, code: "PROXY_POLICY_DENIED", reason: "blocked-ipv6" };
+      return "blocked-ipv6";
     }
   }
+  return undefined;
+}
+
+function resolvedAddressReason(address: string): string | undefined {
+  const v4 = parseIPv4(address);
+  if (v4 !== null && isBlockedIPv4Value(v4)) return "dns-rebinding";
+  if (address.includes(":") && isBlockedIPv6(address)) return "dns-rebinding-v6";
+  if (address.toLowerCase() === "localhost") return "dns-rebinding";
+  return undefined;
+}
+
+function resolvedHostReason(
+  lower: string,
+  resolveHost?: (host: string) => string[] | null,
+): string | undefined {
   // Optional DNS double-check (rebinding test doubles).
-  if (opts?.resolveHost) {
+  if (resolveHost) {
     let addrs: string[] | null = null;
     try {
-      addrs = opts.resolveHost(lower);
+      addrs = resolveHost(lower);
     } catch {
       addrs = null;
     }
     if (addrs) {
       for (const a of addrs) {
-        const v = parseIPv4(a);
-        if (v !== null && isBlockedIPv4Value(v)) {
-          return { ok: false, code: "PROXY_POLICY_DENIED", reason: "dns-rebinding" };
-        }
-        if (a.includes(":") && isBlockedIPv6(a)) {
-          return { ok: false, code: "PROXY_POLICY_DENIED", reason: "dns-rebinding-v6" };
-        }
-        const la = a.toLowerCase();
-        if (la === "localhost") {
-          return { ok: false, code: "PROXY_POLICY_DENIED", reason: "dns-rebinding" };
-        }
+        const reason = resolvedAddressReason(a);
+        if (reason) return reason;
       }
     }
   }
-  return { ok: true };
+  return undefined;
 }

@@ -167,6 +167,10 @@ mod tests {
         assert_eq!(scripts[1].base, "https://images.test/assets/");
         assert_eq!(scripts[2].source.as_deref(), Some("second.js"));
         assert_eq!(scripts[2].base, scripts[1].base);
+    }
+
+    #[test]
+    fn deferred_scripts_use_the_final_document_base() {
         let scripts = ordered(
             b"<script src=''>ignored</script><script src=' &#32; '>ignored</script><script type=MODULE>module</script><script defer src=config.js></script><script>immediate</script><base href='/assets/'>",
             "https://images.test/",

@@ -435,7 +435,7 @@ fn levels_from_info(url: &str, mut image_info: ImageInfo) -> Result<Vec<Resolved
                     description: error.to_string(),
                 })?;
                 let adaptive = AdaptiveSource::Iiif(IiifProbe {
-                    declared: source.clone(),
+                    declared: source,
                     requests,
                 });
                 Ok(ResolvedLevel::new(adaptive)
@@ -643,7 +643,7 @@ impl std::fmt::Display for TileSizeFormatter {
 }
 
 impl std::fmt::Debug for IIIFLevel {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = self
             .page_info
             .id

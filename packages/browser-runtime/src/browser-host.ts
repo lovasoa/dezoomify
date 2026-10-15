@@ -288,19 +288,13 @@ export class BrowserHost implements Host {
     let classified: ((displayOnly: boolean) => void) | undefined;
     try {
       this.signal.throwIfAborted();
-      if (ordinary) {
-        if (this.displayOrigins.has(origin)) return await this.display(tile.request);
-        const pending = this.classifying.get(origin);
-        if (pending) {
-          if (await this.wait(pending)) return await this.display(tile.request);
-        } else
-          this.classifying.set(
-            origin,
-            new Promise((resolve) => {
-              classified = resolve;
-            }),
-          );
-      }
+      if (
+        ordinary &&
+        (await this.classifyOrigin(origin, (resolve) => {
+          classified = resolve;
+        }))
+      )
+        return await this.display(tile.request);
       let bytes: ArrayBuffer;
       try {
         bytes = await this.readable(tile.request);
@@ -325,6 +319,17 @@ export class BrowserHost implements Host {
         this.classifying.delete(origin);
       }
     }
+  }
+
+  private async classifyOrigin(
+    origin: string,
+    register: (resolve: (displayOnly: boolean) => void) => void,
+  ): Promise<boolean> {
+    if (this.displayOrigins.has(origin)) return true;
+    const pending = this.classifying.get(origin);
+    if (pending) return await this.wait(pending);
+    this.classifying.set(origin, new Promise(register));
+    return false;
   }
 
   finish(request: FinishRequest): Promise<Output> {

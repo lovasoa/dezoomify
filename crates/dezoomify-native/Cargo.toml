@@ -33,9 +33,5 @@ rustix = { version = "1", features = ["fs"] }
 tokio.workspace = true
 dezoomify-fixture-server = { path = "../fixture-server" }
 
-# Known debt: runtime docs and pedantic cleanups pending.
-[lints.rust]
-missing_docs = "allow"
-
-[lints.clippy]
-pedantic = "allow"
+[lints]
+workspace = true

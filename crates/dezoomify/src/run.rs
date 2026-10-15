@@ -55,6 +55,36 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
     };
     host.report(progress.clone());
     host.checkpoint(Gate::Cancellation).await?;
+    let plan = prepare_plan(&image, level, options, host).await?;
+    let canvas = plan.canvas.clone();
+    let reused_tiles = acquire_plan(plan, host, options, &mut progress).await?;
+    host.checkpoint(Gate::Acquisition).await?;
+    progress.phase = ProgressPhase::Output;
+    host.report(progress);
+    host.finish(FinishRequest {
+        canvas,
+        format: options.output,
+        title: image.title,
+        reused_tiles,
+    })
+    .await
+}
+
+struct AcquisitionPlan {
+    source: TileSource,
+    previous: Vec<Vec2d>,
+    lower: Vec<core::tile_plan::Grid>,
+    canvas: Option<Size>,
+    base_count: u64,
+    total: u64,
+}
+
+async fn prepare_plan(
+    image: &core::ResolvedImage,
+    level: usize,
+    options: &Options,
+    host: &impl Host,
+) -> Result<AcquisitionPlan, Error> {
     let (source, previous) = match &image.levels[level].source {
         TileSource::Adaptive(source) => {
             let resolved = source
@@ -74,36 +104,7 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
         TileSource::Positioned(source) => (TileSource::Positioned(source.clone()), Vec::new()),
     };
     let base_count = source.count().ok_or_else(empty_plan)?;
-    // ZIF can reuse the source pyramid without asking a pixel encoder to
-    // reproduce its codec or JPEG sampling. Keep requests lazy and preserve
-    // the selected level as the full-size output.
-    let mut lower = Vec::new();
-    if options.output == OutputFormat::Zif
-        && let TileSource::Grid(base) = &source
-        && base.overlap() == Vec2d::default()
-        && base.tile_size().x == base.tile_size().y
-        && base.tile_size().x.is_multiple_of(16)
-    {
-        let mut dimensions = base.image_size();
-        while dimensions.x > base.tile_size().x || dimensions.y > base.tile_size().y {
-            dimensions = Vec2d {
-                x: dimensions.x.div_ceil(2),
-                y: dimensions.y.div_ceil(2),
-            };
-            if let Some(grid) = image.levels.iter().find_map(|level| match &level.source {
-                TileSource::Grid(grid)
-                    if grid.image_size() == dimensions
-                        && grid.tile_size() == base.tile_size()
-                        && grid.overlap() == Vec2d::default() =>
-                {
-                    Some(grid.clone())
-                }
-                _ => None,
-            }) {
-                lower.push(grid);
-            }
-        }
-    }
+    let lower = reusable_levels(options.output, &source, image);
     let total = base_count + lower.iter().map(core::tile_plan::Grid::count).sum::<u64>();
     if total == 0 {
         return Err(empty_plan());
@@ -130,6 +131,68 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
         title: image.title.clone(),
     })
     .await?;
+    Ok(AcquisitionPlan {
+        source,
+        previous,
+        lower,
+        canvas,
+        base_count,
+        total,
+    })
+}
+
+fn reusable_levels(
+    output: OutputFormat,
+    source: &TileSource,
+    image: &core::ResolvedImage,
+) -> Vec<core::tile_plan::Grid> {
+    // ZIF can reuse the source pyramid without asking a pixel encoder to
+    // reproduce its codec or JPEG sampling. Keep requests lazy and preserve
+    // the selected level as the full-size output.
+    let mut lower = Vec::new();
+    if output == OutputFormat::Zif
+        && let TileSource::Grid(base) = source
+        && base.overlap() == Vec2d::default()
+        && base.tile_size().x == base.tile_size().y
+        && base.tile_size().x.is_multiple_of(16)
+    {
+        let mut dimensions = base.image_size();
+        while dimensions.x > base.tile_size().x || dimensions.y > base.tile_size().y {
+            dimensions = Vec2d {
+                x: dimensions.x.div_ceil(2),
+                y: dimensions.y.div_ceil(2),
+            };
+            if let Some(grid) = image.levels.iter().find_map(|level| match &level.source {
+                TileSource::Grid(grid)
+                    if grid.image_size() == dimensions
+                        && grid.tile_size() == base.tile_size()
+                        && grid.overlap() == Vec2d::default() =>
+                {
+                    Some(grid.clone())
+                }
+                _ => None,
+            }) {
+                lower.push(grid);
+            }
+        }
+    }
+    lower
+}
+
+async fn acquire_plan(
+    plan: AcquisitionPlan,
+    host: &impl Host,
+    options: &Options,
+    progress: &mut Progress,
+) -> Result<Vec<ReusedTile>, Error> {
+    let AcquisitionPlan {
+        source,
+        previous,
+        lower,
+        canvas,
+        base_count,
+        total,
+    } = plan;
     let tiles: Box<dyn Iterator<Item = Result<TileSpec, core::TileSourceError>>> = match source {
         TileSource::Grid(grid) => Box::new(grid.tiles_row_major()),
         TileSource::Positioned(source) => Box::new(source.tiles()),
@@ -162,7 +225,7 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
             tile.map(|tile| portable_tile(tile, canvas.clone()))
                 .map_err(Error::from)
         });
-    acquire_tiles(tiles, host, options, &mut progress).await?;
+    acquire_tiles(tiles, host, options, progress).await?;
     let mut offset = base_count as u32;
     for grid in lower {
         let dimensions = Some(size(grid.image_size()));
@@ -175,21 +238,12 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
             }),
             host,
             options,
-            &mut progress,
+            progress,
         )
         .await?;
         offset += count;
     }
-    host.checkpoint(Gate::Acquisition).await?;
-    progress.phase = ProgressPhase::Output;
-    host.report(progress);
-    host.finish(FinishRequest {
-        canvas,
-        format: options.output,
-        title: image.title,
-        reused_tiles,
-    })
-    .await
+    Ok(reused_tiles)
 }
 
 async fn discover(
@@ -211,51 +265,7 @@ async fn discover(
                 concurrent: options.max_concurrent as usize,
                 ..Default::default()
             },
-            |request, interaction| async move {
-                host.checkpoint(Gate::Cancellation).await?;
-                let uri = request.uri.clone();
-                let result = host
-                    .fetch(
-                        ResourceRequest {
-                            uri: request.uri,
-                            headers: request.headers,
-                            purpose: RequestPurpose::Metadata,
-                        },
-                        interaction,
-                    )
-                    .await
-                    .map_err(|error| match error {
-                        Error::Resource { .. } => error,
-                        other => other.resource(uri.clone(), ResourceKind::Metadata),
-                    })?;
-                if let ResourceRead::Response { response } = &result {
-                    if let Some(final_uri) =
-                        response.final_uri.as_ref().filter(|uri| !uri.is_empty())
-                    {
-                        let mut followed = followed.borrow_mut();
-                        if followed.contains(&uri) {
-                            followed.insert(final_uri.clone());
-                        }
-                    }
-                    let read = response
-                        .final_uri
-                        .as_deref()
-                        .filter(|uri| !uri.is_empty())
-                        .unwrap_or(&uri)
-                        .to_string();
-                    if response.bytes.is_empty() {
-                        return Err(Error::EmptyResource.resource(read, ResourceKind::Metadata));
-                    }
-                    if u64::try_from(response.bytes.len()).unwrap_or(u64::MAX) > options.max_bytes {
-                        return Err(Error::ResourceLimit(
-                            format!("metadata resource exceeds max_bytes {}", options.max_bytes)
-                                .into(),
-                        )
-                        .resource(read, ResourceKind::Metadata));
-                    }
-                }
-                Ok(result)
-            },
+            |request, interaction| fetch_metadata(request, interaction, options, host, followed),
             |query| host.parse_html(query),
             |interaction| async move {
                 host.checkpoint(Gate::Cancellation).await?;
@@ -268,81 +278,7 @@ async fn discover(
             },
         )
         .await
-        .map_err(|error| match error {
-            core::DiscoveryError::Host(error) => *error,
-            error => {
-                // A document some format parsed as an empty image is
-                // `no-image-found`; an unparseable or unrecognized document
-                // is `malformed-metadata`/`discovery-failed`. When every
-                // candidate failed on observed fetch facts, the first typed
-                // cause stays attached: its context and retry verdict are
-                // the authoritative ones.
-                let cause = match &error {
-                    core::DiscoveryError::NoCandidateAccepted { diagnostics }
-                        if diagnostics.iter().all(|diagnostic| {
-                            matches!(
-                                diagnostic.kind,
-                                core::RejectionKind::FetchFailed
-                                    | core::RejectionKind::DidNotMatchUrl
-                            )
-                        }) =>
-                    {
-                        diagnostics
-                            .iter()
-                            .find_map(|diagnostic| diagnostic.cause.clone())
-                    }
-                    _ => None,
-                };
-                let detail = Some(error.detail());
-                let empty_image = matches!(
-                    &error,
-                    core::DiscoveryError::Rejected {
-                        kind: core::RejectionKind::NoImage,
-                        ..
-                    }
-                ) || matches!(&error, core::DiscoveryError::NoCandidateAccepted { diagnostics }
-                if diagnostics.iter().any(|diagnostic| {
-                    diagnostic.kind == core::RejectionKind::NoImage
-                }));
-                let malformed = matches!(
-                    &error,
-                    core::DiscoveryError::InvalidMetadata(_)
-                        | core::DiscoveryError::Rejected {
-                            kind: core::RejectionKind::InvalidMetadata,
-                            ..
-                        }
-                ) || matches!(&error, core::DiscoveryError::NoCandidateAccepted { diagnostics }
-                if !diagnostics.is_empty()
-                    && diagnostics.iter().any(|diagnostic| {
-                        diagnostic.kind == core::RejectionKind::InvalidMetadata
-                    }));
-                match &error {
-                    core::DiscoveryError::ParseLimitExceeded
-                    | core::DiscoveryError::ResourceLimitExceeded
-                    | core::DiscoveryError::MetadataSizeLimitExceeded => {
-                        Error::ResourceLimit(Failure {
-                            request: None,
-                            detail,
-                        })
-                    }
-                    _ if empty_image => Error::NoImageFound(Failure {
-                        request: None,
-                        detail,
-                    }),
-                    _ if cause.is_none() && malformed => Error::MalformedMetadata(Failure {
-                        request: None,
-                        detail,
-                    }),
-                    _ => Error::DiscoveryFailed {
-                        failure: Failure {
-                            request: None,
-                            detail,
-                        },
-                        cause,
-                    },
-                }
-            }
-        })?;
+        .map_err(discovery_failure)?;
     let mut seen = HashSet::new();
     for entry in catalog.entries() {
         let (warnings, levels) = match entry {
@@ -359,6 +295,132 @@ async fn discover(
         }
     }
     Ok(catalog)
+}
+
+async fn fetch_metadata(
+    request: core::Request,
+    interaction: Interaction,
+    options: &Options,
+    host: &impl Host,
+    followed: &RefCell<HashSet<String>>,
+) -> Result<ResourceRead, Error> {
+    host.checkpoint(Gate::Cancellation).await?;
+    let uri = request.uri.clone();
+    let result = host
+        .fetch(
+            ResourceRequest {
+                uri: request.uri,
+                headers: request.headers,
+                purpose: RequestPurpose::Metadata,
+            },
+            interaction,
+        )
+        .await
+        .map_err(|error| match error {
+            Error::Resource { .. } => error,
+            other => other.resource(uri.clone(), ResourceKind::Metadata),
+        })?;
+    if let ResourceRead::Response { response } = &result {
+        if let Some(final_uri) = response.final_uri.as_ref().filter(|uri| !uri.is_empty()) {
+            let mut followed = followed.borrow_mut();
+            if followed.contains(&uri) {
+                followed.insert(final_uri.clone());
+            }
+        }
+        let read = response
+            .final_uri
+            .as_deref()
+            .filter(|uri| !uri.is_empty())
+            .unwrap_or(&uri)
+            .to_string();
+        if response.bytes.is_empty() {
+            return Err(Error::EmptyResource.resource(read, ResourceKind::Metadata));
+        }
+        if u64::try_from(response.bytes.len()).unwrap_or(u64::MAX) > options.max_bytes {
+            return Err(Error::ResourceLimit(
+                format!("metadata resource exceeds max_bytes {}", options.max_bytes).into(),
+            )
+            .resource(read, ResourceKind::Metadata));
+        }
+    }
+    Ok(result)
+}
+
+fn discovery_failure(error: core::DiscoveryError) -> Error {
+    match error {
+        core::DiscoveryError::Host(error) => *error,
+        error => {
+            // A document some format parsed as an empty image is
+            // `no-image-found`; an unparseable or unrecognized document
+            // is `malformed-metadata`/`discovery-failed`. When every
+            // candidate failed on observed fetch facts, the first typed
+            // cause stays attached: its context and retry verdict are
+            // the authoritative ones.
+            let cause = match &error {
+                core::DiscoveryError::NoCandidateAccepted { diagnostics }
+                    if diagnostics.iter().all(|diagnostic| {
+                        matches!(
+                            diagnostic.kind,
+                            core::RejectionKind::FetchFailed | core::RejectionKind::DidNotMatchUrl
+                        )
+                    }) =>
+                {
+                    diagnostics
+                        .iter()
+                        .find_map(|diagnostic| diagnostic.cause.clone())
+                }
+                _ => None,
+            };
+            let detail = Some(error.detail());
+            let empty_image = matches!(
+                &error,
+                core::DiscoveryError::Rejected {
+                    kind: core::RejectionKind::NoImage,
+                    ..
+                }
+            ) || matches!(&error, core::DiscoveryError::NoCandidateAccepted { diagnostics }
+            if diagnostics.iter().any(|diagnostic| {
+                diagnostic.kind == core::RejectionKind::NoImage
+            }));
+            let malformed = matches!(
+                &error,
+                core::DiscoveryError::InvalidMetadata(_)
+                    | core::DiscoveryError::Rejected {
+                        kind: core::RejectionKind::InvalidMetadata,
+                        ..
+                    }
+            ) || matches!(&error, core::DiscoveryError::NoCandidateAccepted { diagnostics }
+            if !diagnostics.is_empty()
+                && diagnostics.iter().any(|diagnostic| {
+                    diagnostic.kind == core::RejectionKind::InvalidMetadata
+                }));
+            match &error {
+                core::DiscoveryError::ParseLimitExceeded
+                | core::DiscoveryError::ResourceLimitExceeded
+                | core::DiscoveryError::MetadataSizeLimitExceeded => {
+                    Error::ResourceLimit(Failure {
+                        request: None,
+                        detail,
+                    })
+                }
+                _ if empty_image => Error::NoImageFound(Failure {
+                    request: None,
+                    detail,
+                }),
+                _ if cause.is_none() && malformed => Error::MalformedMetadata(Failure {
+                    request: None,
+                    detail,
+                }),
+                _ => Error::DiscoveryFailed {
+                    failure: Failure {
+                        request: None,
+                        detail,
+                    },
+                    cause,
+                },
+            }
+        }
+    }
 }
 
 async fn select(

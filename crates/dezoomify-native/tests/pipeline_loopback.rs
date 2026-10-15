@@ -402,7 +402,6 @@ fn resume_cache_is_on_by_default() {
     assert_eq!(
         explicit_none
             .cache_dir
-            .clone()
             .unwrap_or_else(imaging::default_tile_cache_dir),
         default_dir,
         "explicit None still resolves to the default on-disk cache"
@@ -410,7 +409,6 @@ fn resume_cache_is_on_by_default() {
     assert_eq!(
         config
             .cache_dir
-            .clone()
             .unwrap_or_else(imaging::default_tile_cache_dir),
         default_dir,
         "default config resolves to the default on-disk cache"
@@ -500,7 +498,7 @@ fn interrupted_job_resumes_without_refetching_completed_tiles() {
         second_output.to_str().expect("utf8 output"),
         false,
         &JobOptions {
-            cache_dir: Some(cache_dir.clone()),
+            cache_dir: Some(cache_dir),
             ..Default::default()
         },
         &mut |_| {},

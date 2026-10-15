@@ -318,45 +318,13 @@ export function plainMessageFor(
   const cause = causeOf(error);
   switch (cause.kind) {
     // Structured limit facts come from `limit`; display prose is never parsed.
-    case "limit-exceeded": {
-      const dims = cause.limit.dimensions
-        ? t("desktop.msg.dimsPixels", {
-            a: String(cause.limit.dimensions.width),
-            b: String(cause.limit.dimensions.height),
-          })
-        : t("desktop.msg.thisPicture");
-      const need =
-        cause.limit.bytes_required !== undefined
-          ? t("desktop.msg.needAbout", { need: formatBytes(cause.limit.bytes_required) })
-          : "";
-      const available =
-        cause.limit.bytes_available !== undefined
-          ? formatBytes(cause.limit.bytes_available)
-          : "currently available memory";
-      if (cause.limit.reason === "jpeg-side") {
-        return t("desktop.output.jpegLimit", { dims, jpegMax: JPEG_MAX_SIDE, host });
-      }
-      if (cause.limit.reason === "webp-side") {
-        return t("desktop.output.webpLimit", { dims, webpMax: WEBP_MAX_SIDE, host });
-      }
-      return t("desktop.output.canvasLimit", {
-        dims,
-        need,
-        limit: available,
-        jpegMax: JPEG_MAX_SIDE,
-        host,
-      });
-    }
+    case "limit-exceeded":
+      return limitMessage(cause.limit, host);
     case "rate-limited":
       return t(rateKey(cause.transport));
     case "http-error": {
-      const status = cause.status;
-      if (status === 429) return t(rateKey(cause.transport));
-      if (status === 404) return t("view.fail.httpNotFound");
-      if (status === 401 || status === 403 || status === 406) {
-        return t("view.fail.httpRefused", { http: String(status) });
-      }
-      if (status >= 500) return t("view.fail.httpSiteProblem");
+      const message = httpMessage(cause.status, cause.transport);
+      if (message) return message;
       break;
     }
     case "policy-denied":
@@ -369,6 +337,49 @@ export function plainMessageFor(
     return t("view.discovery.noneExtension");
   }
   return t(key ?? "desktop.save.fallback", { host });
+}
+
+function limitMessage(
+  limit: Extract<JobError, { kind: "limit-exceeded" }>["limit"],
+  host: string,
+): string {
+  const dims = limit.dimensions
+    ? t("desktop.msg.dimsPixels", {
+        a: String(limit.dimensions.width),
+        b: String(limit.dimensions.height),
+      })
+    : t("desktop.msg.thisPicture");
+  const need =
+    limit.bytes_required !== undefined
+      ? t("desktop.msg.needAbout", { need: formatBytes(limit.bytes_required) })
+      : "";
+  const available =
+    limit.bytes_available !== undefined
+      ? formatBytes(limit.bytes_available)
+      : "currently available memory";
+  if (limit.reason === "jpeg-side") {
+    return t("desktop.output.jpegLimit", { dims, jpegMax: JPEG_MAX_SIDE, host });
+  }
+  if (limit.reason === "webp-side") {
+    return t("desktop.output.webpLimit", { dims, webpMax: WEBP_MAX_SIDE, host });
+  }
+  return t("desktop.output.canvasLimit", {
+    dims,
+    need,
+    limit: available,
+    jpegMax: JPEG_MAX_SIDE,
+    host,
+  });
+}
+
+function httpMessage(status: number, transport: string): string | undefined {
+  if (status === 429) return t(rateKey(transport));
+  if (status === 404) return t("view.fail.httpNotFound");
+  if (status === 401 || status === 403 || status === 406) {
+    return t("view.fail.httpRefused", { http: String(status) });
+  }
+  if (status >= 500) return t("view.fail.httpSiteProblem");
+  return undefined;
 }
 
 /** 429s read as rate limits, branded by the transport that saw them. */

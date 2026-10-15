@@ -18,6 +18,24 @@ const FACT_FIELD = /^(?:.*\.)?(?:kind|status|transport|blocked_reason|resource_k
 // JSON escaping and UTF-8 use at most six bytes per UTF-16 code unit.
 const size = (value: unknown) => JSON.stringify(value).length * 6;
 
+function objectFields(item: object): Array<[string, unknown]> {
+  return Object.entries(
+    item instanceof Error
+      ? {
+          ...item,
+          name: item.name,
+          message: item.message,
+          cause: item.cause,
+          stack: item.stack,
+        }
+      : item,
+  );
+}
+
+function binaryField(name: string, value: unknown): boolean {
+  return /^(contents|body|pixels|tile_bytes|bytes)$/i.test(name) && typeof value !== "number";
+}
+
 /** Flatten bounded facts; explicitly retain Error's non-enumerable properties. */
 export function diagnosticFields(
   value: unknown,
@@ -26,6 +44,29 @@ export function diagnosticFields(
   const out: DiagnosticFields = {};
   const seen = new Set<unknown>();
   let remaining = 8192;
+  function writeString(key: string, item: string): void {
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: Strip terminal control characters.
+    const text = item.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "");
+    const limit = Math.max(0, Math.min(FIELD_LIMIT, remaining));
+    out[key] = text.length > limit ? `${text.slice(0, limit)}…[truncated]` : text;
+    remaining -= Math.min(limit, text.length);
+    if (text.length > limit) truncated();
+  }
+  function visitObject(key: string, item: object, depth: number): void {
+    if (item instanceof ArrayBuffer || ArrayBuffer.isView(item)) return;
+    if (seen.has(item) || depth > 3) {
+      truncated();
+      return;
+    }
+    seen.add(item);
+    const entries = objectFields(item);
+    const prefix = key ? `${key}.` : "";
+    for (const [child, next] of entries.slice(0, MAX_FIELDS)) {
+      if (binaryField(child, next)) continue;
+      visit(`${prefix}${child}`, next, depth + 1);
+    }
+    if (entries.length > MAX_FIELDS) truncated();
+  }
   function visit(key: string, item: unknown, depth: number): void {
     key = key.slice(0, 256);
     if (Object.keys(out).length >= MAX_FIELDS) {
@@ -36,35 +77,9 @@ export function diagnosticFields(
     if (typeof item === "boolean" || (typeof item === "number" && Number.isFinite(item))) {
       out[key] = item;
     } else if (typeof item === "string") {
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: Strip terminal control characters.
-      const text = item.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "");
-      const limit = Math.max(0, Math.min(FIELD_LIMIT, remaining));
-      out[key] = text.length > limit ? `${text.slice(0, limit)}…[truncated]` : text;
-      remaining -= Math.min(limit, text.length);
-      if (text.length > limit) truncated();
+      writeString(key, item);
     } else if (typeof item === "object") {
-      if (item instanceof ArrayBuffer || ArrayBuffer.isView(item)) return;
-      if (seen.has(item) || depth > 3) {
-        truncated();
-        return;
-      }
-      seen.add(item);
-      const entries =
-        item instanceof Error
-          ? Object.entries({
-              ...item,
-              name: item.name,
-              message: item.message,
-              cause: item.cause,
-              stack: item.stack,
-            })
-          : Object.entries(item);
-      for (const [child, next] of entries.slice(0, MAX_FIELDS)) {
-        if (/^(contents|body|pixels|tile_bytes|bytes)$/i.test(child) && typeof next !== "number")
-          continue;
-        visit(key ? `${key}.${child}` : child, next, depth + 1);
-      }
-      if (entries.length > MAX_FIELDS) truncated();
+      visitObject(key, item, depth);
     }
   }
   if (value && typeof value === "object") visit("", value, 0);
@@ -88,10 +103,9 @@ function formatFacts(fields: DiagnosticFields): string {
     .join(" ");
 }
 
-export function formatDiagnosticReport(report: DiagnosticReport): string {
-  const context = { ...report.context };
+function takeSource(context: DiagnosticFields): string {
   const canonical = context.canonical;
-  const source = ["canonical", "input", "title", "format"]
+  return ["canonical", "input", "title", "format"]
     .map((key) => {
       const value = context[key];
       delete context[key];
@@ -100,6 +114,9 @@ export function formatDiagnosticReport(report: DiagnosticReport): string {
     })
     .filter(Boolean)
     .join("\n");
+}
+
+function takeRuntime(context: DiagnosticFields): DiagnosticFields {
   const runtime: DiagnosticFields = {};
   for (const key of ["product", "version", "build", "user_agent", "platform"]) {
     if (context[key] !== undefined && context[key] !== "") runtime[key] = context[key];
@@ -107,6 +124,10 @@ export function formatDiagnosticReport(report: DiagnosticReport): string {
   }
   if (runtime.platform && String(runtime.user_agent ?? "").includes(String(runtime.platform)))
     delete runtime.platform;
+  return runtime;
+}
+
+function compactContext(context: DiagnosticFields, report: DiagnosticReport): void {
   if (context.presented_phase === report.outcome?.event) delete context.presented_phase;
   const lastPhase = [...report.records].reverse().find((record) => record.event === "phase")
     ?.fields.phase;
@@ -117,6 +138,9 @@ export function formatDiagnosticReport(report: DiagnosticReport): string {
   for (const [key, value] of Object.entries(context)) {
     if (result[key] === value) delete context[key];
   }
+}
+
+function compactDimensions(context: DiagnosticFields, result: DiagnosticFields) {
   const width = result["canvas.width"] ?? context["canvas.width"];
   const height = result["canvas.height"] ?? context["canvas.height"];
   for (const prefix of ["selection", "maximum", "selection.size", "selection.maximum"]) {
@@ -143,6 +167,10 @@ export function formatDiagnosticReport(report: DiagnosticReport): string {
     context.canvas_bytes === width * height * 4
   )
     delete context.canvas_bytes;
+  return { width, height };
+}
+
+function groupContext(context: DiagnosticFields): Map<string, DiagnosticFields> {
   const groups = new Map<string, DiagnosticFields>();
   for (const [key, value] of Object.entries(context)) {
     if (value === "") continue;
@@ -152,6 +180,16 @@ export function formatDiagnosticReport(report: DiagnosticReport): string {
     fields[dot < 0 ? key : key.slice(dot + 1)] = value;
     groups.set(group, fields);
   }
+  return groups;
+}
+
+export function formatDiagnosticReport(report: DiagnosticReport): string {
+  const context = { ...report.context };
+  const source = takeSource(context);
+  const runtime = takeRuntime(context);
+  compactContext(context, report);
+  const { width, height } = compactDimensions(context, report.outcome?.fields ?? {});
+  const groups = groupContext(context);
   const samples = new Set(
     report.failures.flatMap((group) => [group.first.sequence, group.last.sequence]),
   );

@@ -106,6 +106,30 @@ export interface ProxyEligibility {
   reason: string;
 }
 
+type ProxyOutcome = Awaited<ReturnType<ProxyTransportLike["fetchViaProxy"]>>;
+
+function normalizeProxyResponse(res: ProxyOutcome, targetUrl: string): ProxyOutcome {
+  if (!res.ok) {
+    return {
+      ok: false,
+      status: res.status,
+      code: res.code ?? "PROXY_ERROR",
+      ...(typeof res.reason === "string" && res.reason !== "" ? { reason: res.reason } : {}),
+      ...(typeof res.retryAfterMs === "number" ? { retryAfterMs: res.retryAfterMs } : {}),
+      requestId: res.requestId,
+      preview: res.preview,
+    };
+  }
+  // The relay follows upstream redirects internally; surface the
+  // post-redirect URL when the transport provides it, otherwise fall back
+  // to the requested URL downstream. Never leave the base empty: an empty
+  // final URI makes relative tile URLs resolve against the app page and
+  // 404.
+  const upstream =
+    typeof res.finalUrl === "string" && res.finalUrl !== "" ? res.finalUrl : targetUrl;
+  return { ok: true, status: res.status, bytes: res.bytes, finalUrl: upstream };
+}
+
 /** Request activity and repaint callbacks from the browser application. */
 export interface WebFetchHooks {
   onRequestStart(): number;
@@ -177,7 +201,7 @@ export function classifyProxyFailure(proxied: {
   retryAfterMs?: number;
 }): JobError {
   const code = proxied.code ?? "PROXY_ERROR";
-  const detail = `proxy failure: ${code}${proxied.reason ? ` (${proxied.reason})` : ""}`;
+  const detail = proxyFailureDetail(code, proxied.reason);
   const reason = blockedReason(proxied.reason);
   const preview = proxied.preview || undefined;
   const retry_after_ms = proxied.retryAfterMs;
@@ -207,6 +231,10 @@ export function classifyProxyFailure(proxied: {
     };
   }
   return { kind: "proxy-error", transport: "metadata-proxy", detail };
+}
+
+function proxyFailureDetail(code: string, reason?: string): string {
+  return `proxy failure: ${code}${reason ? ` (${reason})` : ""}`;
 }
 
 function cancelledFailure(): JobError {
@@ -296,31 +324,20 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         redirect: "follow",
       });
       responseStatus = res.status;
+      return await readDirectResponse(res, range);
+    } catch (e) {
+      end(false);
+      return failedDirect(e);
+    } finally {
+      combined.cleanup();
+      hooks.onUpdate();
+    }
+    async function readDirectResponse(
+      res: Response,
+      range: ReturnType<typeof requestedByteRange>,
+    ): Promise<DirectOutcome> {
       if (!(res.status >= 200 && res.status <= 299)) {
-        const preview = await readErrorPreview(res, combined.signal);
-        // The status is authoritative even if its optional diagnostic body
-        // stalls. Only cancellation by the caller overrides an HTTP refusal.
-        signal?.throwIfAborted();
-        const retryAfter = retryAfterMs(res.headers.get("retry-after"), now());
-        end(false);
-        deps.diagnostics?.count("request_failures");
-        report(
-          {
-            outcome: "http-error",
-            http: res.status,
-            preview,
-            retry_after_ms: retryAfter,
-            content_type: res.headers.get("content-type"),
-          },
-          res.url,
-        );
-        return {
-          outcome: "http-error",
-          finalUrl: res.url || url,
-          status: res.status,
-          ...(retryAfter === undefined ? {} : { retryAfterMs: retryAfter }),
-          ...(preview ? { preview } : {}),
-        };
+        return await directHttpFailure(res);
       }
       if (range && res.status === 206 && res.type === "cors" && !res.headers.has("content-range")) {
         // CORS can expose the body without the header needed to locate it.
@@ -354,8 +371,36 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         bytes,
         ...(contentType ? { contentType } : {}),
       };
-    } catch (e) {
+    }
+
+    async function directHttpFailure(res: Response): Promise<DirectOutcome> {
+      const preview = await readErrorPreview(res, combined.signal);
+      // The status is authoritative even if its optional diagnostic body
+      // stalls. Only cancellation by the caller overrides an HTTP refusal.
+      signal?.throwIfAborted();
+      const retryAfter = retryAfterMs(res.headers.get("retry-after"), now());
       end(false);
+      deps.diagnostics?.count("request_failures");
+      report(
+        {
+          outcome: "http-error",
+          http: res.status,
+          preview,
+          retry_after_ms: retryAfter,
+          content_type: res.headers.get("content-type"),
+        },
+        res.url,
+      );
+      return {
+        outcome: "http-error",
+        finalUrl: res.url || url,
+        status: res.status,
+        ...(retryAfter === undefined ? {} : { retryAfterMs: retryAfter }),
+        ...(preview ? { preview } : {}),
+      };
+    }
+
+    function failedDirect(e: unknown): DirectOutcome {
       if (signal?.aborted) return { outcome: "cancelled" };
       deps.diagnostics?.count("request_failures");
       if (isJobError(e) && e.kind === "bad-url") {
@@ -373,9 +418,6 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       }
       report({ outcome: "network-or-cors", http: responseStatus, error: e });
       return { outcome: "network-error" };
-    } finally {
-      combined.cleanup();
-      hooks.onUpdate();
     }
   }
 
@@ -426,27 +468,8 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         hooks.onRequestEnd(reqId, false);
         return { ok: false, status: 0, code: "PROXY_NETWORK_ERROR" };
       }
-      if (!res.ok) {
-        hooks.onRequestEnd(reqId, false);
-        return {
-          ok: false,
-          status: res.status,
-          code: res.code ?? "PROXY_ERROR",
-          ...(typeof res.reason === "string" && res.reason !== "" ? { reason: res.reason } : {}),
-          ...(typeof res.retryAfterMs === "number" ? { retryAfterMs: res.retryAfterMs } : {}),
-          requestId: res.requestId,
-          preview: res.preview,
-        };
-      }
-      hooks.onRequestEnd(reqId, true);
-      // The relay follows upstream redirects internally; surface the
-      // post-redirect URL when the transport provides it, otherwise fall back
-      // to the requested URL downstream. Never leave the base empty: an empty
-      // final URI makes relative tile URLs resolve against the app page and
-      // 404.
-      const upstream =
-        typeof res.finalUrl === "string" && res.finalUrl !== "" ? res.finalUrl : targetUrl;
-      return { ok: true, status: res.status, bytes: res.bytes, finalUrl: upstream };
+      hooks.onRequestEnd(reqId, res.ok);
+      return normalizeProxyResponse(res, targetUrl);
     } catch (e) {
       hooks.onRequestEnd(reqId, false);
       if (signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
@@ -475,44 +498,73 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     if (signal?.aborted) throw cancelledFailure();
     activeTransport = "direct";
     const direct = await fetchDirect(request, signal, metadata ? metadataMs : requestMs, maxBytes);
-    if (direct.error) throw direct.error;
-    if (direct.outcome === "readable" && direct.bytes)
-      return { bytes: direct.bytes, finalUri: direct.finalUrl || request.uri };
     if (
       direct.outcome === "network-error" &&
       !signal?.aborted &&
       deps.isProxyEligible(request).eligible
     ) {
-      activeTransport = "metadata-proxy";
-      deps.diagnostics?.record("info", "transport-fallback", {
-        from: "direct",
-        to: "metadata-proxy",
-        reason: direct.outcome,
-        url: request.uri,
-      });
-      let proxied = await fetchViaProxy(request, signal);
-      // Discovery has no tile retry scheduler. Acquisition retries remain in Rust.
-      if (metadata && !proxied.ok && proxied.code === "PROXY_RATE_LIMITED") {
-        const delay = proxyRateLimitDelayMs(proxied.retryAfterMs);
-        if (delay !== null) {
-          deps.diagnostics?.record("debug", "proxy-retry", { delay_ms: delay });
-          if (await sleepUnlessAborted(delay, sleepFn, signal)) throw cancelledFailure();
-          proxied = await fetchViaProxy(request, signal);
-        }
-      }
-      if (signal?.aborted || proxied.code === "TRANSPORT_CANCELLED") throw cancelledFailure();
-      if (proxied.ok && proxied.bytes)
-        return { bytes: proxied.bytes, finalUri: proxied.finalUrl || request.uri };
-      if (proxied.code === "PROXY_RATE_LIMITED") {
-        throw {
-          kind: "rate-limited",
-          transport: "metadata-proxy",
-          ...(proxied.retryAfterMs === undefined ? {} : { retry_after_ms: proxied.retryAfterMs }),
-        } satisfies JobError;
-      }
-      throw classifyProxyFailure(proxied);
+      return await fetchProxiedResource(request, signal);
     }
+    return directResourceResult(direct, request, signal, maxBytes);
+  }
+
+  async function fetchProxiedResource(
+    request: ResourceRequest,
+    signal?: AbortSignal,
+  ): Promise<{ bytes: ArrayBuffer; finalUri?: string }> {
+    activeTransport = "metadata-proxy";
+    deps.diagnostics?.record("info", "transport-fallback", {
+      from: "direct",
+      to: "metadata-proxy",
+      reason: "network-error",
+      url: request.uri,
+    });
+    const proxied = await retryProxy(request, signal);
+    if (signal?.aborted || proxied.code === "TRANSPORT_CANCELLED") throw cancelledFailure();
+    if (proxied.ok && proxied.bytes)
+      return { bytes: proxied.bytes, finalUri: proxied.finalUrl || request.uri };
+    if (proxied.code === "PROXY_RATE_LIMITED") {
+      throw {
+        kind: "rate-limited",
+        transport: "metadata-proxy",
+        ...(proxied.retryAfterMs === undefined ? {} : { retry_after_ms: proxied.retryAfterMs }),
+      } satisfies JobError;
+    }
+    throw classifyProxyFailure(proxied);
+  }
+
+  async function retryProxy(request: ResourceRequest, signal?: AbortSignal): Promise<ProxyOutcome> {
+    let proxied = await fetchViaProxy(request, signal);
+    // Discovery has no tile retry scheduler. Acquisition retries remain in Rust.
+    if (request.purpose === "metadata" && !proxied.ok && proxied.code === "PROXY_RATE_LIMITED") {
+      const delay = proxyRateLimitDelayMs(proxied.retryAfterMs);
+      if (delay !== null) {
+        deps.diagnostics?.record("debug", "proxy-retry", { delay_ms: delay });
+        if (await sleepUnlessAborted(delay, sleepFn, signal)) throw cancelledFailure();
+        proxied = await fetchViaProxy(request, signal);
+      }
+    }
+    return proxied;
+  }
+
+  function directResourceResult(
+    direct: DirectOutcome,
+    request: ResourceRequest,
+    signal: AbortSignal | undefined,
+    maxBytes: number,
+  ): { bytes: ArrayBuffer; finalUri?: string } {
+    if (direct.error) throw direct.error;
+    if (direct.outcome === "readable" && direct.bytes)
+      return { bytes: direct.bytes, finalUri: direct.finalUrl || request.uri };
     if (direct.outcome === "cancelled" || signal?.aborted) throw cancelledFailure();
+    return failDirectResource(direct, request, maxBytes);
+  }
+
+  function failDirectResource(
+    direct: DirectOutcome,
+    request: ResourceRequest,
+    maxBytes: number,
+  ): never {
     if (direct.outcome === "too-large")
       throw {
         kind: "size-limit",
@@ -526,19 +578,23 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       } satisfies JobError;
     }
     if (direct.outcome === "http-error") {
-      throw {
-        kind: "http-error",
-        status: direct.status ?? 502,
-        request: request.uri,
-        transport: "direct",
-        ...(direct.preview ? { preview: direct.preview } : {}),
-        ...(direct.retryAfterMs === undefined ? {} : { retry_after_ms: direct.retryAfterMs }),
-        detail: `${request.purpose} fetch: ${direct.outcome}`,
-      } satisfies JobError;
+      throw directHttpError(direct, request);
     }
     throw {
       kind: "network-failure",
       transport: "direct",
+      detail: `${request.purpose} fetch: ${direct.outcome}`,
+    } satisfies JobError;
+  }
+
+  function directHttpError(direct: DirectOutcome, request: ResourceRequest): JobError {
+    return {
+      kind: "http-error",
+      status: direct.status ?? 502,
+      request: request.uri,
+      transport: "direct",
+      ...(direct.preview ? { preview: direct.preview } : {}),
+      ...(direct.retryAfterMs === undefined ? {} : { retry_after_ms: direct.retryAfterMs }),
       detail: `${request.purpose} fetch: ${direct.outcome}`,
     } satisfies JobError;
   }

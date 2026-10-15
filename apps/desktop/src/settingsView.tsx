@@ -207,14 +207,7 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
-    const isOpen = dialog.open || dialog.hasAttribute("open");
-    if ((advancedOpen || help) && !isOpen) {
-      if (typeof dialog.showModal === "function") dialog.showModal();
-      else dialog.setAttribute("open", "");
-    } else if (!advancedOpen && !help && isOpen) {
-      if (typeof dialog.close === "function") dialog.close();
-      else dialog.removeAttribute("open");
-    }
+    syncDialog(dialog, Boolean(advancedOpen || help));
   }, [advancedOpen, help]);
 
   // These caps select source levels, not resized output dimensions. The smallest
@@ -243,14 +236,6 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
     else setAdvancedOpen(true);
   };
 
-  const jpeg = settings.output_format === "jpeg" || settings.output_format === "auto";
-  const showCompression =
-    settings.output_format !== "webp" && settings.output_format !== "iiif-dir";
-  const compressionValue = jpeg ? 100 - settings.compression : settings.compression;
-  const compressionLabel = jpeg
-    ? t("desktop.advanced.jpegQuality")
-    : t("desktop.advanced.compressionEffort");
-
   return (
     <section
       id="dz-desktop-settings"
@@ -276,15 +261,7 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
             onChange={(value) =>
               commit({ output_format: value as DesktopSettings["output_format"] })
             }
-            choices={formats.map((format) => ({
-              ...format,
-              disabled:
-                Math.max(settings.max_width ?? 0, settings.max_height ?? 0) >
-                formatLimit(format.value),
-              hint: t(
-                `desktop.quick.hint.${format.value === "iiif-dir" ? "iiifDir" : format.value}`,
-              ),
-            }))}
+            choices={formatOptions(settings)}
           />
         </QuickOption>
 
@@ -437,69 +414,13 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
             </div>
           ) : (
             <>
-              {showCompression ? (
-                <PreferenceRow
-                  title={compressionLabel}
-                  description={
-                    jpeg
-                      ? t("desktop.advanced.jpegQualityDesc")
-                      : t("desktop.advanced.compressionEffortDesc")
-                  }
-                >
-                  <div className="dz-slider-control">
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      aria-label={compressionLabel}
-                      value={compressionValue}
-                      onChange={(event) => {
-                        const value = Number(event.currentTarget.value);
-                        commit({ compression: jpeg ? 100 - value : value });
-                      }}
-                    />
-                    <output>{jpeg ? `${compressionValue}%` : compressionValue}</output>
-                  </div>
-                </PreferenceRow>
-              ) : null}
+              <CompressionPreference settings={settings} commit={commit} />
 
               <PreferenceRow
                 title={t("desktop.advanced.dimensions")}
                 description={t("desktop.advanced.dimensionsDesc")}
               >
-                <div className="dz-size-control">
-                  <input
-                    type="number"
-                    min="1"
-                    max={formatLimit(settings.output_format)}
-                    placeholder={t("desktop.advanced.width")}
-                    aria-label={t("desktop.advanced.width")}
-                    value={settings.max_width ?? ""}
-                    onChange={(event) =>
-                      commit({
-                        max_width: event.currentTarget.value
-                          ? Number(event.currentTarget.value)
-                          : null,
-                      })
-                    }
-                  />
-                  <span aria-hidden="true">×</span>
-                  <input
-                    type="number"
-                    min="1"
-                    max={formatLimit(settings.output_format)}
-                    placeholder={t("desktop.advanced.height")}
-                    aria-label={t("desktop.advanced.height")}
-                    value={settings.max_height ?? ""}
-                    onChange={(event) =>
-                      commit({
-                        max_height: event.currentTarget.value
-                          ? Number(event.currentTarget.value)
-                          : null,
-                      })
-                    }
-                  />
-                </div>
+                <DimensionInputs settings={settings} commit={commit} />
               </PreferenceRow>
 
               <PreferenceRow
@@ -559,5 +480,101 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
         </div>
       </dialog>
     </section>
+  );
+}
+
+function DimensionInputs({
+  settings,
+  commit,
+}: {
+  settings: DesktopSettings;
+  commit(patch: Partial<DesktopSettings>): void;
+}) {
+  return (
+    <div className="dz-size-control">
+      <input
+        type="number"
+        min="1"
+        max={formatLimit(settings.output_format)}
+        placeholder={t("desktop.advanced.width")}
+        aria-label={t("desktop.advanced.width")}
+        value={settings.max_width ?? ""}
+        onChange={(event) =>
+          commit({
+            max_width: event.currentTarget.value ? Number(event.currentTarget.value) : null,
+          })
+        }
+      />
+      <span aria-hidden="true">×</span>
+      <input
+        type="number"
+        min="1"
+        max={formatLimit(settings.output_format)}
+        placeholder={t("desktop.advanced.height")}
+        aria-label={t("desktop.advanced.height")}
+        value={settings.max_height ?? ""}
+        onChange={(event) =>
+          commit({
+            max_height: event.currentTarget.value ? Number(event.currentTarget.value) : null,
+          })
+        }
+      />
+    </div>
+  );
+}
+
+function formatOptions(settings: DesktopSettings) {
+  const maximum = Math.max(settings.max_width ?? 0, settings.max_height ?? 0);
+  return formatChoices().map((format) => ({
+    ...format,
+    disabled: maximum > formatLimit(format.value),
+    hint: t(`desktop.quick.hint.${format.value === "iiif-dir" ? "iiifDir" : format.value}`),
+  }));
+}
+
+function syncDialog(dialog: HTMLDialogElement, open: boolean): void {
+  const isOpen = dialog.open || dialog.hasAttribute("open");
+  if (open && !isOpen) {
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+  } else if (!open && isOpen) {
+    if (typeof dialog.close === "function") dialog.close();
+    else dialog.removeAttribute("open");
+  }
+}
+
+function CompressionPreference({
+  settings,
+  commit,
+}: {
+  settings: DesktopSettings;
+  commit(patch: Partial<DesktopSettings>): void;
+}) {
+  if (settings.output_format === "webp" || settings.output_format === "iiif-dir") return null;
+  const jpeg = settings.output_format === "jpeg" || settings.output_format === "auto";
+  const value = jpeg ? 100 - settings.compression : settings.compression;
+  const label = t(jpeg ? "desktop.advanced.jpegQuality" : "desktop.advanced.compressionEffort");
+  return (
+    <PreferenceRow
+      title={label}
+      description={t(
+        jpeg ? "desktop.advanced.jpegQualityDesc" : "desktop.advanced.compressionEffortDesc",
+      )}
+    >
+      <div className="dz-slider-control">
+        <input
+          type="range"
+          min="0"
+          max="100"
+          aria-label={label}
+          value={value}
+          onChange={(event) => {
+            const next = Number(event.currentTarget.value);
+            commit({ compression: jpeg ? 100 - next : next });
+          }}
+        />
+        <output>{jpeg ? `${value}%` : value}</output>
+      </div>
+    </PreferenceRow>
   );
 }

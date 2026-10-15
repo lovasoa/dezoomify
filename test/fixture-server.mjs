@@ -86,38 +86,7 @@ export async function startFixtureServer({
       if (requestLog) fs.appendFileSync(requestLog, `${JSON.stringify(entry)}\n`);
     };
     try {
-      const incoming = new URL(req.url, origin);
-      const url =
-        incoming.pathname === "/fetch" ? new URL(incoming.searchParams.get("url")) : incoming;
-      Object.assign(entry, {
-        url: url === incoming ? url.href : incoming.searchParams.get("url"),
-        path: incoming.pathname,
-        query: incoming.search.slice(1) || null,
-      });
-      const file =
-        payloadFile(payloads, url) ??
-        (url.pathname.startsWith("/fixtures/")
-          ? staticFile(fixturesDir, decodeURIComponent(url.pathname.slice(10)))
-          : null);
-      const request = new Request(url, { method: req.method, headers: req.headers });
-      let response;
-      for (const handler of handlers) {
-        response = await handler.serve(request, { file, origin });
-        if (response) {
-          entry.handler = path.relative(root, handler.file);
-          break;
-        }
-      }
-      if (!response && file) {
-        entry.file = path.relative(root, file);
-        response = fileResponse(file);
-      }
-      const fixture = response;
-      if (!response && url === incoming && staticDir) {
-        const staticPath = staticFile(staticDir, decodeURIComponent(url.pathname.slice(1)));
-        if (staticPath) response = fileResponse(staticPath);
-      }
-      response ??= new Response(`No fixture for ${entry.url}`, { status: 404 });
+      const { response, fixture, file, url } = await routeFixture(req, entry);
       let bytes = Buffer.from(await response.arrayBuffer());
       if (fixture) bytes = template(bytes, response.headers, file, origin, url.hostname);
       res.writeHead(response.status, {
@@ -145,6 +114,47 @@ export async function startFixtureServer({
       res.end(String(error));
     }
   });
+
+  async function routeFixture(req, entry) {
+    const incoming = new URL(req.url, origin);
+    const url =
+      incoming.pathname === "/fetch" ? new URL(incoming.searchParams.get("url")) : incoming;
+    Object.assign(entry, {
+      url: url === incoming ? url.href : incoming.searchParams.get("url"),
+      path: incoming.pathname,
+      query: incoming.search.slice(1) || null,
+    });
+    const file =
+      payloadFile(payloads, url) ??
+      (url.pathname.startsWith("/fixtures/")
+        ? staticFile(fixturesDir, decodeURIComponent(url.pathname.slice(10)))
+        : null);
+    const request = new Request(url, { method: req.method, headers: req.headers });
+    let response = await matchFixture(request, file, entry);
+    const fixture = response;
+    if (!response && url === incoming && staticDir) {
+      const staticPath = staticFile(staticDir, decodeURIComponent(url.pathname.slice(1)));
+      if (staticPath) response = fileResponse(staticPath);
+    }
+    response ??= new Response(`No fixture for ${entry.url}`, { status: 404 });
+    return { response, fixture, file, url };
+  }
+
+  async function matchFixture(request, file, entry) {
+    let response;
+    for (const handler of handlers) {
+      response = await handler.serve(request, { file, origin });
+      if (response) {
+        entry.handler = path.relative(root, handler.file);
+        break;
+      }
+    }
+    if (!response && file) {
+      entry.file = path.relative(root, file);
+      response = fileResponse(file);
+    }
+    return response;
+  }
   return new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, "127.0.0.1", () => {

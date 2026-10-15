@@ -44,7 +44,7 @@ impl Registration {
 
     pub fn answer_retry(&self, question: u64, answer: RetryChoice) -> Result<(), Error> {
         let mut pending = self.retry.lock().unwrap_or_else(|error| error.into_inner());
-        if !pending.as_ref().is_some_and(|(id, _)| *id == question) {
+        if pending.as_ref().is_none_or(|(id, _)| *id != question) {
             return Err(Error::InteractionExpired);
         }
         if let Some((_, send)) = pending.take() {

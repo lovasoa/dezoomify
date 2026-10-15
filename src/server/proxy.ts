@@ -181,69 +181,9 @@ export async function handleProxyRequest(
     "x-request-id": requestId,
   };
 
-  // Incoming must be POST (same-origin /api/proxy with JSON body).
-  if (req.method.toUpperCase() !== "POST") {
-    return {
-      status: 405,
-      headers: baseHeaders,
-      code: "PROXY_POLICY_DENIED",
-      reason: "method",
-      requestId,
-    };
-  }
-  if (!Number.isInteger(req.protocolVersion) || req.protocolVersion < 1) {
-    return {
-      status: 422,
-      headers: baseHeaders,
-      code: "PROXY_POLICY_DENIED",
-      reason: "protocol-version",
-      requestId,
-    };
-  }
   let range: ReturnType<typeof requestedByteRange>;
-  try {
-    range = requestedByteRange(
-      Object.entries(req.headers ?? {}).map(([name, value]) => ({ name, value })),
-    );
-  } catch (error) {
-    return {
-      status: 422,
-      headers: baseHeaders,
-      code: "PROXY_POLICY_DENIED",
-      reason: "malformed-body",
-      requestId,
-      preview: errorPreview(error),
-    };
-  }
-  if (range && range.length > maxBytes) {
-    return { status: 413, headers: baseHeaders, code: "PROXY_BUDGET_EXCEEDED", requestId };
-  }
-  const first = validateProxyTarget(req.targetUrl, { resolveHost: deps.resolveHost });
-  if (!first.ok) {
-    return {
-      status: 403,
-      headers: baseHeaders,
-      code: "PROXY_POLICY_DENIED",
-      reason: first.reason ?? "denied",
-      requestId,
-    };
-  }
-  if (!deps.disableOriginBucket) {
-    const key = proxyOriginKey(req.targetUrl);
-    if (key === null) {
-      return {
-        status: 403,
-        headers: baseHeaders,
-        code: "PROXY_POLICY_DENIED",
-        reason: "origin",
-        requestId,
-      };
-    }
-    const nowMs = deps.nowMs?.() ?? Date.now();
-    if (!takeOriginToken(key, nowMs)) {
-      return { status: 429, headers: baseHeaders, code: "PROXY_RATE_LIMITED", requestId };
-    }
-  }
+  const refusal = admitRequest();
+  if (refusal) return refusal;
 
   const deadline = AbortSignal.timeout(deps.timeoutMs ?? UPSTREAM_TIMEOUT_MS);
   const signal = deps.signal ? AbortSignal.any([deps.signal, deadline]) : deadline;
@@ -253,13 +193,111 @@ export async function handleProxyRequest(
     code: deps.signal?.aborted ? "TRANSPORT_CANCELLED" : "TRANSPORT_NETWORK_ERROR",
     requestId,
   });
-  let current = req.targetUrl;
-  let hops = 0;
-  for (;;) {
-    if (signal.aborted) return interrupted();
+  return relayResource();
+
+  async function relayResource(): Promise<ProxyRelayResult> {
+    let current = req.targetUrl;
+    let hops = 0;
+    for (;;) {
+      const fetched = await fetchHop(current);
+      if (!fetched.ok) return fetched.failure;
+      const res = fetched.response;
+      // Upstream revalidation: a 304 stays a 304 with validators, no body.
+      if (res.status === 304) {
+        cancelBody(res);
+        return notModified(res);
+      }
+      // Redirect handling with per-hop revalidation.
+      if (res.status < 300 || res.status > 399) return relayResponse(res, current);
+      cancelBody(res);
+      hops += 1;
+      const redirected = checkedRedirect(res, current, hops);
+      if (typeof redirected !== "string") return redirected;
+      current = redirected;
+    }
+  }
+
+  async function fetchHop(current: string): ReturnType<typeof fetchWithRetry> {
+    if (signal.aborted) return { ok: false, failure: interrupted() };
     // The client's actual headers, filtered to the narrow safe set
     // (cookies, auth, and caller referer/origin never flow upstream).
     // Referer is always the target (legacy /proxy parity).
+    const upstreamHeaders = headersForUpstream();
+    return fetchWithRetry(current, upstreamHeaders);
+  }
+
+  function admitRequest(): ProxyRelayResult | undefined {
+    // Incoming must be POST (same-origin /api/proxy with JSON body).
+    if (req.method.toUpperCase() !== "POST") {
+      return {
+        status: 405,
+        headers: baseHeaders,
+        code: "PROXY_POLICY_DENIED",
+        reason: "method",
+        requestId,
+      };
+    }
+    if (!Number.isInteger(req.protocolVersion) || req.protocolVersion < 1) {
+      return {
+        status: 422,
+        headers: baseHeaders,
+        code: "PROXY_POLICY_DENIED",
+        reason: "protocol-version",
+        requestId,
+      };
+    }
+    try {
+      range = requestedByteRange(
+        Object.entries(req.headers ?? {}).map(([name, value]) => ({ name, value })),
+      );
+    } catch (error) {
+      return {
+        status: 422,
+        headers: baseHeaders,
+        code: "PROXY_POLICY_DENIED",
+        reason: "malformed-body",
+        requestId,
+        preview: errorPreview(error),
+      };
+    }
+    if (range && range.length > maxBytes) {
+      return { status: 413, headers: baseHeaders, code: "PROXY_BUDGET_EXCEEDED", requestId };
+    }
+    const first = validateProxyTarget(req.targetUrl, { resolveHost: deps.resolveHost });
+    if (!first.ok) {
+      return {
+        status: 403,
+        headers: baseHeaders,
+        code: "PROXY_POLICY_DENIED",
+        reason: first.reason ?? "denied",
+        requestId,
+      };
+    }
+    return originRefusal();
+  }
+
+  function originRefusal(): ProxyRelayResult | undefined {
+    if (!deps.disableOriginBucket) {
+      const key = proxyOriginKey(req.targetUrl);
+      if (key === null) {
+        return {
+          status: 403,
+          headers: baseHeaders,
+          code: "PROXY_POLICY_DENIED",
+          reason: "origin",
+          requestId,
+        };
+      }
+      const nowMs = deps.nowMs?.() ?? Date.now();
+      if (!takeOriginToken(key, nowMs)) {
+        return { status: 429, headers: baseHeaders, code: "PROXY_RATE_LIMITED", requestId };
+      }
+    }
+
+    return undefined;
+  }
+
+  function headersForUpstream(): Record<string, string> {
     const upstreamHeaders = stripUpstreamHeaders(forwardedClientHeaders(req.headers ?? {}));
     if (upstreamHeaders.accept === undefined) upstreamHeaders.accept = "*/*";
     upstreamHeaders.referer = req.targetUrl;
@@ -268,6 +306,13 @@ export async function handleProxyRequest(
     const ifModifiedSince =
       req.ifModifiedSince ?? headerCase(req.headers ?? {}, "if-modified-since");
     if (ifModifiedSince) upstreamHeaders["if-modified-since"] = ifModifiedSince;
+    return upstreamHeaders;
+  }
+
+  async function fetchWithRetry(
+    current: string,
+    upstreamHeaders: Record<string, string>,
+  ): Promise<{ ok: true; response: UpstreamResponse } | { ok: false; failure: ProxyRelayResult }> {
     let res: UpstreamResponse;
     let rateLimitAttempts = 0;
     for (;;) {
@@ -279,83 +324,91 @@ export async function handleProxyRequest(
           signal,
         });
       } catch (error) {
-        if (signal.aborted) return interrupted();
-        return {
-          status: 502,
-          headers: baseHeaders,
-          code: "TRANSPORT_NETWORK_ERROR",
-          requestId,
-          preview: errorPreview(error),
-        };
+        return { ok: false, failure: fetchFailure(error) };
       }
       if (res.status !== 429 || rateLimitAttempts >= 1) break;
       cancelBody(res);
       rateLimitAttempts += 1;
       await delayBeforeRetry(retryDelayMs, signal);
-      if (signal.aborted) return interrupted();
+      if (signal.aborted) return { ok: false, failure: interrupted() };
     }
-    // Upstream revalidation: a 304 stays a 304 with validators, no body.
-    if (res.status === 304) {
-      cancelBody(res);
-      const notModifiedHeaders: Record<string, string> = { ...baseHeaders };
-      const notModifiedExposed: string[] = [];
-      const notModifiedEtag = res.headers.get("etag");
-      if (notModifiedEtag) {
-        notModifiedHeaders.etag = notModifiedEtag;
-        notModifiedExposed.push("etag");
-      }
-      const notModifiedLastModified = res.headers.get("last-modified");
-      if (notModifiedLastModified) {
-        notModifiedHeaders["last-modified"] = notModifiedLastModified;
-        notModifiedExposed.push("last-modified");
-      }
-      if (notModifiedExposed.length > 0) {
-        notModifiedHeaders["access-control-expose-headers"] = notModifiedExposed.join(", ");
-      }
-      return { status: 304, headers: notModifiedHeaders, requestId };
+    return { ok: true, response: res };
+  }
+
+  function fetchFailure(error: unknown): ProxyRelayResult {
+    if (signal.aborted) return interrupted();
+    return {
+      status: 502,
+      headers: baseHeaders,
+      code: "TRANSPORT_NETWORK_ERROR",
+      requestId,
+      preview: errorPreview(error),
+    };
+  }
+
+  function notModified(res: UpstreamResponse): ProxyRelayResult {
+    const notModifiedHeaders: Record<string, string> = { ...baseHeaders };
+    const notModifiedExposed: string[] = [];
+    const notModifiedEtag = res.headers.get("etag");
+    if (notModifiedEtag) {
+      notModifiedHeaders.etag = notModifiedEtag;
+      notModifiedExposed.push("etag");
     }
-    // Redirect handling with per-hop revalidation.
-    if (res.status >= 300 && res.status <= 399) {
-      cancelBody(res);
-      const loc = res.headers.get("location");
-      if (!loc) {
-        return { status: 502, headers: baseHeaders, code: "TRANSPORT_NETWORK_ERROR", requestId };
-      }
-      hops += 1;
-      if (hops > maxRedirects) {
-        return {
-          status: 508,
-          headers: baseHeaders,
-          code: "PROXY_POLICY_DENIED",
-          reason: "redirect-limit",
-          requestId,
-        };
-      }
-      let next: string;
-      try {
-        next = new URL(loc, current).toString();
-      } catch {
-        return {
-          status: 502,
-          headers: baseHeaders,
-          code: "PROXY_POLICY_DENIED",
-          reason: "redirect-target",
-          requestId,
-        };
-      }
-      const hopCheck = validateProxyTarget(next, { resolveHost: deps.resolveHost });
-      if (!hopCheck.ok) {
-        return {
-          status: 403,
-          headers: baseHeaders,
-          code: "PROXY_POLICY_DENIED",
-          reason: hopCheck.reason ?? "redirect-target",
-          requestId,
-        };
-      }
-      current = next;
-      continue;
+    const notModifiedLastModified = res.headers.get("last-modified");
+    if (notModifiedLastModified) {
+      notModifiedHeaders["last-modified"] = notModifiedLastModified;
+      notModifiedExposed.push("last-modified");
     }
+    if (notModifiedExposed.length > 0) {
+      notModifiedHeaders["access-control-expose-headers"] = notModifiedExposed.join(", ");
+    }
+    return { status: 304, headers: notModifiedHeaders, requestId };
+  }
+
+  function checkedRedirect(
+    res: UpstreamResponse,
+    current: string,
+    hops: number,
+  ): string | ProxyRelayResult {
+    const loc = res.headers.get("location");
+    if (!loc) {
+      return { status: 502, headers: baseHeaders, code: "TRANSPORT_NETWORK_ERROR", requestId };
+    }
+    if (hops > maxRedirects) {
+      return {
+        status: 508,
+        headers: baseHeaders,
+        code: "PROXY_POLICY_DENIED",
+        reason: "redirect-limit",
+        requestId,
+      };
+    }
+    let next: string;
+    try {
+      next = new URL(loc, current).toString();
+    } catch {
+      return {
+        status: 502,
+        headers: baseHeaders,
+        code: "PROXY_POLICY_DENIED",
+        reason: "redirect-target",
+        requestId,
+      };
+    }
+    const hopCheck = validateProxyTarget(next, { resolveHost: deps.resolveHost });
+    if (!hopCheck.ok) {
+      return {
+        status: 403,
+        headers: baseHeaders,
+        code: "PROXY_POLICY_DENIED",
+        reason: hopCheck.reason ?? "redirect-target",
+        requestId,
+      };
+    }
+    return next;
+  }
+
+  async function relayResponse(res: UpstreamResponse, current: string): Promise<ProxyRelayResult> {
     if (res.status < 200 || res.status > 299) {
       const code = res.status === 429 ? "PROXY_RATE_LIMITED" : "TRANSPORT_HTTP_ERROR";
       const previewSignal = AbortSignal.any([signal, AbortSignal.timeout(500)]);
@@ -383,32 +436,50 @@ export async function handleProxyRequest(
     try {
       body = (await readRequestedBytes(res, range, maxBytes, signal)).buffer;
     } catch (error) {
-      if (signal.aborted) return interrupted();
-      if (
-        typeof error === "object" &&
-        error !== null &&
-        "kind" in error &&
-        error.kind === "size-limit"
-      ) {
-        return range
-          ? {
-              status: 502,
-              headers: baseHeaders,
-              code: "TRANSPORT_NETWORK_ERROR",
-              requestId,
-              preview: `invalid byte-range response: body exceeds the requested ${range.length} bytes`,
-            }
-          : { status: 413, headers: baseHeaders, code: "PROXY_BUDGET_EXCEEDED", requestId };
-      }
-      cancelBody(res);
-      return {
-        status: 502,
-        headers: baseHeaders,
-        code: "TRANSPORT_NETWORK_ERROR",
-        requestId,
-        preview: errorPreview(error),
-      };
+      return readFailure(error, res);
     }
+    const outHeaders = responseHeaders(res, current, contentType);
+    return {
+      status: res.status === 206 ? 206 : 200,
+      headers: outHeaders,
+      body,
+      requestId,
+      upstreamUrl: current,
+    };
+  }
+  function readFailure(error: unknown, res: UpstreamResponse): ProxyRelayResult {
+    if (signal.aborted) return interrupted();
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "kind" in error &&
+      error.kind === "size-limit"
+    ) {
+      return range
+        ? {
+            status: 502,
+            headers: baseHeaders,
+            code: "TRANSPORT_NETWORK_ERROR",
+            requestId,
+            preview: `invalid byte-range response: body exceeds the requested ${range.length} bytes`,
+          }
+        : { status: 413, headers: baseHeaders, code: "PROXY_BUDGET_EXCEEDED", requestId };
+    }
+    cancelBody(res);
+    return {
+      status: 502,
+      headers: baseHeaders,
+      code: "TRANSPORT_NETWORK_ERROR",
+      requestId,
+      preview: errorPreview(error),
+    };
+  }
+
+  function responseHeaders(
+    res: UpstreamResponse,
+    current: string,
+    contentType: string | null,
+  ): Record<string, string> {
     const outHeaders: Record<string, string> = {
       ...baseHeaders,
       "content-type": contentType ?? "application/octet-stream",
@@ -434,12 +505,6 @@ export async function handleProxyRequest(
       exposed.push("last-modified");
     }
     outHeaders["access-control-expose-headers"] = exposed.join(", ");
-    return {
-      status: res.status === 206 ? 206 : 200,
-      headers: outHeaders,
-      body,
-      requestId,
-      upstreamUrl: current,
-    };
+    return outHeaders;
   }
 }

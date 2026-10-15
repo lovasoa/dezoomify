@@ -26,6 +26,11 @@ type CandidateSnapshot = Awaited<ReturnType<typeof collectCandidates>> & {
 };
 type CandidateInput = CandidateSnapshot["inputs"][number];
 type SourceRequest = Parameters<typeof fetchSource>[0];
+type InspectionReply = {
+  frameId: number;
+  documentId?: string;
+  result?: ReturnType<typeof inspectSourceDocument>;
+};
 type FetchResult = Awaited<ReturnType<typeof fetchSource>>;
 type SourceScript<Args extends unknown[], Result> =
   | {
@@ -114,6 +119,84 @@ function validFetchResult(value: unknown, expectedUrl: string): value is FetchRe
     value.url.length <= MAX_URL_LENGTH &&
     isPublicHttpUrl(value.url)
   );
+}
+
+function readSourcePayload(
+  result: unknown,
+  expectedUrl: string,
+  range: ReturnType<typeof requestedByteRange>,
+) {
+  if (!validFetchResult(result, expectedUrl))
+    throw transportError("bad-url", "invalid source fetch result");
+  if (!result.ok) throw result.error;
+  if (range) {
+    validateByteRangeResponse(range, result.status, result.contentRange, result.contentLength);
+    validateByteRangeLength(range, result.bytes);
+  }
+  const bytes = decodeBase64Payload(result.data, SOURCE_FETCH_BYTE_LIMIT);
+  if (!bytes || bytes.byteLength !== result.bytes)
+    throw transportError("bad-url", "invalid source payload");
+  return { bytes, finalUri: result.url, http: result.status, contentType: result.contentType };
+}
+
+function observedMetadata(inputs: unknown[]): CandidateInput[] {
+  let bytes = 0;
+  const observed: CandidateInput[] = [];
+  for (const input of inputs) {
+    if (!validCandidate(input)) continue;
+    if (input.kind !== "observed-metadata" || typeof input.contents !== "string") continue;
+    const candidate: CandidateInput = {
+      url: input.url,
+      kind: "observed-metadata",
+      contents: input.contents,
+    };
+    bytes += new TextEncoder().encode(JSON.stringify(candidate)).byteLength;
+    if (bytes <= 1024 * 1024) observed.push(candidate);
+  }
+  return observed;
+}
+
+function validMemoryValue(value: unknown): value is number | boolean | string | string[] {
+  if (typeof value === "number") return Number.isFinite(value) && value >= 0;
+  if (typeof value === "boolean") return true;
+  if (typeof value === "string") return value.length <= 1024;
+  return (
+    Array.isArray(value) &&
+    value.length <= 16 &&
+    value.every((item) => typeof item === "string" && item.length <= 2048)
+  );
+}
+
+function memoryDiagnostics(value: unknown): CandidateSnapshot["memory"] {
+  if (!isRecord(value)) return undefined;
+  const memory: NonNullable<CandidateSnapshot["memory"]> = {};
+  for (const key of [
+    "documents",
+    "nodes",
+    "references",
+    "viewers",
+    "probes",
+    "rejected",
+    "bytes",
+    "truncated",
+    "elapsedMs",
+    "versions",
+    "stopped",
+    "frames",
+  ]) {
+    const field = value[key];
+    if (validMemoryValue(field)) memory[key] = field;
+  }
+  return memory;
+}
+
+function memoryScanReply(reply: unknown): {
+  observed: CandidateInput[];
+  memory?: CandidateSnapshot["memory"];
+} {
+  if (!isRecord(reply) || !Array.isArray(reply.inputs) || reply.inputs.length > 100)
+    return { observed: [] };
+  return { observed: observedMetadata(reply.inputs), memory: memoryDiagnostics(reply.diagnostics) };
 }
 
 /**
@@ -252,15 +335,8 @@ export function createSourceAccess(
     assertLive();
     if (!Array.isArray(results) || results.length !== 1 || results[0]?.frameId !== frame.frameId)
       throw transportError("bad-url", "source operation returned an invalid result");
-    if (frame.documentId && results[0].documentId !== frame.documentId) throw lostFrame(frame);
-    if (!frame.documentId) await inspect(frame, signal);
-    await checkSourceTab(signal);
     const result = results[0].result;
-    const resultDocumentUrl =
-      isRecord(result) && typeof result.documentUrl === "string" ? result.documentUrl : null;
-    if (!resultDocumentUrl || !sameDocumentUrl(resultDocumentUrl, frame.documentUrl)) {
-      throw lostFrame(frame);
-    }
+    await checkInjectionDocument(result, results[0].documentId, frame, signal);
     return result as Awaited<Result>;
   }
 
@@ -365,54 +441,7 @@ export function createSourceAccess(
         deadlineAt,
         frame,
       );
-      if (isRecord(reply) && Array.isArray(reply.inputs) && reply.inputs.length <= 100) {
-        let bytes = 0;
-        const inputs: CandidateInput[] = [];
-        for (const input of reply.inputs) {
-          if (
-            !validCandidate(input) ||
-            input.kind !== "observed-metadata" ||
-            typeof input.contents !== "string"
-          )
-            continue;
-          const candidate: CandidateInput = {
-            url: input.url,
-            kind: "observed-metadata",
-            contents: input.contents,
-          };
-          bytes += new TextEncoder().encode(JSON.stringify(candidate)).byteLength;
-          if (bytes <= 1024 * 1024) inputs.push(candidate);
-        }
-        observed = inputs;
-        if (isRecord(reply.diagnostics)) {
-          memory = {};
-          for (const key of [
-            "documents",
-            "nodes",
-            "references",
-            "viewers",
-            "probes",
-            "rejected",
-            "bytes",
-            "truncated",
-            "elapsedMs",
-            "versions",
-            "stopped",
-            "frames",
-          ] as const) {
-            const value = reply.diagnostics[key];
-            if (
-              (typeof value === "number" && Number.isFinite(value) && value >= 0) ||
-              typeof value === "boolean" ||
-              (typeof value === "string" && value.length <= 1024) ||
-              (Array.isArray(value) &&
-                value.length <= 16 &&
-                value.every((v) => typeof v === "string" && v.length <= 2048))
-            )
-              memory[key] = value;
-          }
-        }
-      }
+      ({ observed, memory } = memoryScanReply(reply));
     } catch (error) {
       // A memory scan is optional evidence; source loss/cancellation still
       // fails the following normal scan through the same lifetime guard.
@@ -446,6 +475,80 @@ export function createSourceAccess(
     };
   }
 
+  async function checkInjectionDocument(
+    result: unknown,
+    resultDocumentId: string | undefined,
+    frame: SourceFrame,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (frame.documentId && resultDocumentId !== frame.documentId) throw lostFrame(frame);
+    if (!frame.documentId) await inspect(frame, signal);
+    await checkSourceTab(signal);
+    const resultDocumentUrl =
+      isRecord(result) && typeof result.documentUrl === "string" ? result.documentUrl : null;
+    if (!resultDocumentUrl || !sameDocumentUrl(resultDocumentUrl, frame.documentUrl)) {
+      throw lostFrame(frame);
+    }
+  }
+
+  function inventoryFrame(reply: InspectionReply): SourceFrame | undefined {
+    const value = reply.result;
+    if (
+      !Number.isSafeInteger(reply.frameId) ||
+      reply.frameId < 0 ||
+      !value ||
+      typeof value.documentUrl !== "string" ||
+      value.documentUrl.length > MAX_URL_LENGTH ||
+      !isPublicHttpUrl(value.documentUrl) ||
+      typeof value.token !== "string" ||
+      value.token.length === 0 ||
+      value.token.length > 128 ||
+      !Array.isArray(value.frames) ||
+      value.frames.length > 16
+    )
+      return undefined;
+    return {
+      frameId: reply.frameId,
+      documentUrl: value.documentUrl,
+      token: value.token,
+      ...(reply.documentId ? { documentId: reply.documentId } : {}),
+    };
+  }
+
+  function collectOrigins(
+    value: ReturnType<typeof inspectSourceDocument> | undefined,
+    origins: Set<string>,
+  ): void {
+    if (!value) return;
+    for (const url of [value.documentUrl, ...value.frames]) {
+      if (
+        origins.size < 16 &&
+        typeof url === "string" &&
+        url.length <= MAX_URL_LENGTH &&
+        isPublicHttpUrl(url)
+      )
+        origins.add(originOfUrl(url));
+    }
+  }
+
+  function inventoryReplies(replies: InspectionReply[]) {
+    const frames: SourceFrame[] = [];
+    const origins = new Set<string>();
+    for (const reply of replies) {
+      const value = reply.result;
+      if (frames.length >= 16) break;
+      const frame = inventoryFrame(reply);
+      if (!frame) continue;
+      frames.push(frame);
+      collectOrigins(value, origins);
+    }
+    return { frames, origins };
+  }
+
+  function validSourceRequestUrl(uri: unknown): uri is string {
+    return typeof uri === "string" && uri.length <= MAX_URL_LENGTH && isPublicHttpUrl(uri);
+  }
+
   function inventory(signal: AbortSignal) {
     return bounded(async (owned) => {
       if (!rootFrame.token) await inspect(rootFrame, owned);
@@ -471,42 +574,7 @@ export function createSourceAccess(
       )
         throw lostFrame(rootFrame);
       await checkSourceTab(owned);
-      const frames: SourceFrame[] = [];
-      const origins = new Set<string>();
-      for (const reply of replies) {
-        const value = reply.result;
-        if (frames.length >= 16) break;
-        if (
-          !Number.isSafeInteger(reply.frameId) ||
-          reply.frameId < 0 ||
-          !value ||
-          typeof value.documentUrl !== "string" ||
-          value.documentUrl.length > MAX_URL_LENGTH ||
-          !isPublicHttpUrl(value.documentUrl) ||
-          typeof value.token !== "string" ||
-          value.token.length === 0 ||
-          value.token.length > 128 ||
-          !Array.isArray(value.frames) ||
-          value.frames.length > 16
-        )
-          continue;
-        frames.push({
-          frameId: reply.frameId,
-          documentUrl: value.documentUrl,
-          token: value.token,
-          ...(reply.documentId ? { documentId: reply.documentId } : {}),
-        });
-        for (const url of [value.documentUrl, ...value.frames]) {
-          if (
-            origins.size < 16 &&
-            typeof url === "string" &&
-            url.length <= MAX_URL_LENGTH &&
-            isPublicHttpUrl(url)
-          )
-            origins.add(originOfUrl(url));
-        }
-      }
-      return { frames, origins };
+      return inventoryReplies(replies);
     }, signal);
   }
 
@@ -519,6 +587,72 @@ export function createSourceAccess(
   }) {
     const seen = new Set<string>();
     const requested = new Set<string>();
+    async function scanAvailable(
+      frames: SourceFrame[],
+      signal: AbortSignal,
+    ): Promise<CandidateSnapshot | undefined> {
+      for (const frame of frames) {
+        const snapshot = await scanObservedFrame(frame, signal);
+        if (snapshot) return snapshot;
+      }
+      return undefined;
+    }
+
+    async function scanObservedFrame(
+      frame: SourceFrame,
+      signal: AbortSignal,
+    ): Promise<CandidateSnapshot | undefined> {
+      const key = `${frame.frameId}:${frame.token}`;
+      if (frame.frameId === 0 || seen.has(key) || seen.size >= 16) return undefined;
+      const origin = originOfUrl(frame.documentUrl);
+      // A successful isolated-world probe is the browser's access check.
+      // Rechecking a match pattern can disagree with activeTab or older
+      // Firefox's handling of explicit ports.
+      signal.throwIfAborted();
+      seen.add(key);
+      try {
+        const snapshot = await scan(signal, frame);
+        if (origin !== sourceOrigin) sessionFrames.set(origin, frame);
+        access.scanned(snapshot);
+        return snapshot;
+      } catch (error) {
+        assertLive();
+        signal.throwIfAborted();
+        access.failed(frame, error);
+      }
+      return undefined;
+    }
+
+    async function nextOrigin(
+      available: ReturnType<typeof inventoryReplies>,
+    ): Promise<string | undefined> {
+      for (const origin of available.origins) {
+        if (
+          origin !== sourceOrigin &&
+          !requested.has(origin) &&
+          !available.frames.some((frame) => originOfUrl(frame.documentUrl) === origin) &&
+          !(await access.hasPermission(origin))
+        ) {
+          return origin;
+        }
+      }
+      return undefined;
+    }
+
+    async function grantNextOrigin(
+      available: ReturnType<typeof inventoryReplies>,
+      interaction: Interaction,
+      signal: AbortSignal,
+    ): Promise<boolean> {
+      if (interaction === "forbidden" || requested.size >= 16) return false;
+      const next = await nextOrigin(available);
+      signal.throwIfAborted();
+      if (!next) return false;
+      requested.add(next);
+      await access.ensurePermission(next, signal);
+      return true;
+    }
+
     return async (interaction: Interaction, signal: AbortSignal): Promise<CandidateInput[]> => {
       signal = AbortSignal.any([signal, lifetime.signal]);
       assertLive();
@@ -527,43 +661,9 @@ export function createSourceAccess(
       // Re-probe live frames without repeating already-scanned documents.
       let available = await inventory(signal);
       while (seen.size < 16) {
-        for (const frame of available.frames) {
-          const key = `${frame.frameId}:${frame.token}`;
-          if (frame.frameId === 0 || seen.has(key) || seen.size >= 16) continue;
-          const origin = originOfUrl(frame.documentUrl);
-          // A successful isolated-world probe is the browser's access check.
-          // Rechecking a match pattern can disagree with activeTab or older
-          // Firefox's handling of explicit ports.
-          signal.throwIfAborted();
-          seen.add(key);
-          try {
-            const snapshot = await scan(signal, frame);
-            if (origin !== sourceOrigin) sessionFrames.set(origin, frame);
-            access.scanned(snapshot);
-            return snapshot.inputs;
-          } catch (error) {
-            assertLive();
-            signal.throwIfAborted();
-            access.failed(frame, error);
-          }
-        }
-        if (interaction === "forbidden" || requested.size >= 16) return [];
-        let next: string | undefined;
-        for (const origin of available.origins) {
-          if (
-            origin !== sourceOrigin &&
-            !requested.has(origin) &&
-            !available.frames.some((frame) => originOfUrl(frame.documentUrl) === origin) &&
-            !(await access.hasPermission(origin))
-          ) {
-            next = origin;
-            break;
-          }
-        }
-        signal.throwIfAborted();
-        if (!next) return [];
-        requested.add(next);
-        await access.ensurePermission(next, signal);
+        const snapshot = await scanAvailable(available.frames, signal);
+        if (snapshot) return snapshot.inputs;
+        if (!(await grantNextOrigin(available, interaction, signal))) return [];
         available = await inventory(signal);
       }
       return [];
@@ -573,11 +673,7 @@ export function createSourceAccess(
   async function fetch(request: Pick<ResourceRequest, "uri" | "headers">, signal: AbortSignal) {
     assertLive();
     if (signal.aborted) throw transportError("cancelled", "source fetch cancelled");
-    if (
-      typeof request.uri !== "string" ||
-      request.uri.length > MAX_URL_LENGTH ||
-      !isPublicHttpUrl(request.uri)
-    )
+    if (!validSourceRequestUrl(request.uri))
       throw transportError("bad-url", "invalid source request URL");
     const headers = validateRequestHeaders(request.headers ?? []);
     if (!headers) throw transportError("bad-url", "invalid source request headers");
@@ -616,17 +712,7 @@ export function createSourceAccess(
     );
     if (signal.aborted) throw transportError("cancelled", "source fetch cancelled");
     assertLive();
-    if (!validFetchResult(result, frame.documentUrl))
-      throw transportError("bad-url", "invalid source fetch result");
-    if (result.ok === false) throw result.error;
-    if (range) {
-      validateByteRangeResponse(range, result.status, result.contentRange, result.contentLength);
-      validateByteRangeLength(range, result.bytes);
-    }
-    const bytes = decodeBase64Payload(result.data, SOURCE_FETCH_BYTE_LIMIT);
-    if (!bytes || bytes.byteLength !== result.bytes)
-      throw transportError("bad-url", "invalid source payload");
-    return { bytes, finalUri: result.url, http: result.status, contentType: result.contentType };
+    return readSourcePayload(result, frame.documentUrl, range);
   }
 
   function dispose() {

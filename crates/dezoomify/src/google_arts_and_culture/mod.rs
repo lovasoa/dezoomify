@@ -167,6 +167,10 @@ mod tests {
                 .display_label(position)
                 .contains("©Designers Anonymes")
         }));
+        assert_fixture_geometry(image);
+    }
+
+    fn assert_fixture_geometry(image: &crate::core::ResolvedImage) {
         let areas: Vec<_> = image
             .levels
             .iter()

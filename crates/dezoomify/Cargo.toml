@@ -40,9 +40,5 @@ scraper = { version = "0.27", default-features = false }
 [features]
 typescript = ["dep:tsify", "dep:wasm-bindgen"]
 
-[lints.rust]
-missing_docs = "allow"
-
-[lints.clippy]
-pedantic = "allow"
-unwrap_used = "allow"
+[lints]
+workspace = true

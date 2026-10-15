@@ -196,6 +196,38 @@ fn compatible_single_tile_iiif_preserves_bytes_without_pixel_decoding() {
     std::fs::remove_dir_all(work).unwrap();
 }
 
+fn write_odd_sized_tiles(tiles: &std::path::Path, mixed: bool, icc: &[u8]) -> image::RgbaImage {
+    let mut original = image::RgbaImage::new(513, 513);
+    for y in 0..3 {
+        for x in 0..3 {
+            let pixels = image::RgbaImage::from_pixel(
+                if x == 2 { 1 } else { 256 },
+                if y == 2 { 1 } else { 256 },
+                image::Rgba([x * 60, y * 80, 90, 255]),
+            );
+            let bytes = if mixed && x == 0 {
+                dezoomify_native::imaging::encode_jpeg(&pixels, 83, Some(icc)).unwrap()
+            } else {
+                dezoomify_native::imaging::encode_png(
+                    &pixels,
+                    image::codecs::png::CompressionType::Fast,
+                    Some(icc),
+                    None,
+                )
+                .unwrap()
+            };
+            image::imageops::overlay(
+                &mut original,
+                &image::load_from_memory(&bytes).unwrap().into_rgba8(),
+                i64::from(x) * 256,
+                i64::from(y) * 256,
+            );
+            std::fs::write(tiles.join(format!("{x}_{y}.jpg")), bytes).unwrap();
+        }
+    }
+    original
+}
+
 #[test]
 fn odd_sized_and_mixed_codec_iiif_trees_roundtrip_through_the_reader() {
     use image::ImageDecoder as _;
@@ -213,34 +245,7 @@ fn odd_sized_and_mixed_codec_iiif_trees_roundtrip_through_the_reader() {
                 .replace("Format=\"png\"", "Format=\"jpg\""),
         )
         .unwrap();
-        let mut original = image::RgbaImage::new(513, 513);
-        for y in 0..3 {
-            for x in 0..3 {
-                let pixels = image::RgbaImage::from_pixel(
-                    if x == 2 { 1 } else { 256 },
-                    if y == 2 { 1 } else { 256 },
-                    image::Rgba([x * 60, y * 80, 90, 255]),
-                );
-                let bytes = if mixed && x == 0 {
-                    dezoomify_native::imaging::encode_jpeg(&pixels, 83, Some(&icc)).unwrap()
-                } else {
-                    dezoomify_native::imaging::encode_png(
-                        &pixels,
-                        image::codecs::png::CompressionType::Fast,
-                        Some(&icc),
-                        None,
-                    )
-                    .unwrap()
-                };
-                image::imageops::overlay(
-                    &mut original,
-                    &image::load_from_memory(&bytes).unwrap().into_rgba8(),
-                    i64::from(x) * 256,
-                    i64::from(y) * 256,
-                );
-                std::fs::write(tiles.join(format!("{x}_{y}.jpg")), bytes).unwrap();
-            }
-        }
+        let original = write_odd_sized_tiles(&tiles, mixed, &icc);
         let destination = work.join(format!("out-{mixed}.iiif"));
         let result = support::run_file(source.to_str().unwrap(), &destination, |o| {
             o.largest = true;
@@ -348,6 +353,81 @@ fn odd_sized_and_mixed_codec_iiif_trees_roundtrip_through_the_reader() {
     std::fs::remove_dir_all(work).unwrap();
 }
 
+fn assert_zif_tile_decoding(container: &[u8], extension: &str) {
+    let metadata = zif_tiff::std::read_zif(std::io::Cursor::new(container)).unwrap();
+    for level in metadata.levels() {
+        assert_eq!(
+            level.ycbcr_subsampling(),
+            (extension == "jpg").then_some((1, 1))
+        );
+    }
+    for level in 0..metadata.level_count() {
+        for tile in metadata.level_tiles(level).unwrap() {
+            let range = tile.byte_range();
+            image::load_from_memory(&container[range.start as usize..range.end as usize]).unwrap();
+        }
+    }
+}
+
+fn write_lower_zif_source(work: &std::path::Path, extension: &str, width: u32) -> Option<Vec<u8>> {
+    if width == 32 {
+        let lower = work.join(format!("source-{extension}-{width}_files/4"));
+        std::fs::create_dir_all(&lower).unwrap();
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::RgbImage::from_pixel(16, 8, image::Rgb([90, 70, 40]))
+            .write_to(
+                &mut bytes,
+                if extension == "jpg" {
+                    image::ImageFormat::Jpeg
+                } else {
+                    image::ImageFormat::Png
+                },
+            )
+            .unwrap();
+        let bytes = bytes.into_inner();
+        std::fs::write(lower.join(format!("0_0.{extension}")), &bytes).unwrap();
+        Some(bytes)
+    } else {
+        None
+    }
+}
+
+fn assert_zif_reuse(
+    host: &NativeHost<'_>,
+    index: u32,
+    extension: &str,
+    bytes: &[u8],
+    lower_bytes: Option<Vec<u8>>,
+) {
+    let publication = host.publication().unwrap();
+    assert_eq!(publication.instrumentation.pixel_decodes, 0);
+    assert_eq!(
+        publication.instrumentation.peak_retained_bytes, 0,
+        "received grid tiles stream even when tile zero is missing"
+    );
+    let container = std::fs::read(publication.path).unwrap();
+    let metadata = zif_tiff::std::read_zif(std::io::Cursor::new(&container)).unwrap();
+    assert_eq!(metadata.level_count(), if index == 0 { 1 } else { 2 });
+    assert_eq!(metadata.level(0).unwrap().tile_size(), (16, 16));
+    assert_zif_tile_decoding(&container, extension);
+    let range = metadata
+        .level_tiles(0)
+        .unwrap()
+        .nth(index as usize)
+        .unwrap()
+        .byte_range();
+    assert_eq!(&container[range.start as usize..range.end as usize], bytes);
+    if let Some(bytes) = lower_bytes {
+        let range = metadata
+            .level_tiles(1)
+            .unwrap()
+            .next()
+            .unwrap()
+            .byte_range();
+        assert_eq!(&container[range.start as usize..range.end as usize], bytes);
+    }
+}
+
 #[test]
 fn zif_reuses_standalone_jpeg_and_rgb_png_tiles() {
     let work = temp_dir("zif-reuse");
@@ -376,26 +456,7 @@ fn zif_reuses_standalone_jpeg_and_rgb_png_tiles() {
             .unwrap();
         let bytes = bytes.into_inner();
         std::fs::write(tiles.join(format!("{index}_0.{extension}")), &bytes).unwrap();
-        let lower_bytes = if width == 32 {
-            let lower = work.join(format!("source-{extension}-{width}_files/4"));
-            std::fs::create_dir_all(&lower).unwrap();
-            let mut bytes = std::io::Cursor::new(Vec::new());
-            image::RgbImage::from_pixel(16, 8, image::Rgb([90, 70, 40]))
-                .write_to(
-                    &mut bytes,
-                    if extension == "jpg" {
-                        image::ImageFormat::Jpeg
-                    } else {
-                        image::ImageFormat::Png
-                    },
-                )
-                .unwrap();
-            let bytes = bytes.into_inner();
-            std::fs::write(lower.join(format!("0_0.{extension}")), &bytes).unwrap();
-            Some(bytes)
-        } else {
-            None
-        };
+        let lower_bytes = write_lower_zif_source(&work, extension, width);
         dezoomify_native::cache::store(
             &work.join("cache"),
             &dezoomify_native::cache::job_namespace(source.to_str().unwrap()),
@@ -435,46 +496,14 @@ fn zif_reuses_standalone_jpeg_and_rgb_png_tiles() {
             continue;
         }
         result.unwrap();
-        let publication = host.publication().unwrap();
-        assert_eq!(publication.instrumentation.pixel_decodes, 0);
-        assert_eq!(
-            publication.instrumentation.peak_retained_bytes, 0,
-            "received grid tiles stream even when tile zero is missing"
-        );
-        let container = std::fs::read(publication.path).unwrap();
-        let metadata = zif_tiff::std::read_zif(std::io::Cursor::new(&container)).unwrap();
-        assert_eq!(metadata.level_count(), if index == 0 { 1 } else { 2 });
-        assert_eq!(metadata.level(0).unwrap().tile_size(), (16, 16));
-        for level in metadata.levels() {
-            assert_eq!(
-                level.ycbcr_subsampling(),
-                (extension == "jpg").then_some((1, 1))
-            );
-        }
-        for level in 0..metadata.level_count() {
-            for tile in metadata.level_tiles(level).unwrap() {
-                let range = tile.byte_range();
-                image::load_from_memory(&container[range.start as usize..range.end as usize])
-                    .unwrap();
-            }
-        }
-        let range = metadata
-            .level_tiles(0)
-            .unwrap()
-            .nth(index as usize)
-            .unwrap()
-            .byte_range();
-        assert_eq!(&container[range.start as usize..range.end as usize], bytes);
-        if let Some(bytes) = lower_bytes {
-            let range = metadata
-                .level_tiles(1)
-                .unwrap()
-                .next()
-                .unwrap()
-                .byte_range();
-            assert_eq!(&container[range.start as usize..range.end as usize], bytes);
-        }
+        assert_zif_reuse(&host, index, extension, &bytes, lower_bytes);
     }
+    std::fs::remove_dir_all(work).unwrap();
+}
+
+#[test]
+fn zif_reuses_subsampled_jpeg_levels() {
+    let work = temp_dir("zif-subsampled-reuse");
     let bytes = std::fs::read(
         dezoomify_fixture_server::scenarios_dir()
             .join("rs-core/formats/payloads/google_arts_and_culture/tile.jpg"),
@@ -901,7 +930,7 @@ fn automatic_output_uses_the_selected_title_and_avoids_overwriting() {
     let large = support::run_options_observed(
         JobOptions {
             input_url: manifest.to_string_lossy().into_owned(),
-            output: OutputTarget::AutoImageDir { dir: work.clone() },
+            output: OutputTarget::AutoImageDir { dir: work },
             ..Default::default()
         },
         |_, _| {},
