@@ -111,6 +111,8 @@ jobs:
       # install` source compile.
       - uses: ./.github/actions/setup-windows-bundlers
         if: matrix.target == 'desktop-windows-x86_64'
+      - uses: ./.github/actions/setup-nasm
+        if: startsWith(matrix.target, 'cli-') || startsWith(matrix.target, 'desktop-')
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Download plan
         env:

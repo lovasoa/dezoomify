@@ -25,6 +25,7 @@ on:
       - .node-version
       - .github/workflows/desktop.yml
       - .github/actions/setup-windows-bundlers/action.yml
+      - .github/actions/setup-nasm/action.yml
   push:
     branches: [master]
     paths: *desktop-paths
@@ -58,6 +59,7 @@ jobs:
         with:
           toolchain: 1.98.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: ./.github/actions/setup-nasm
       - name: Install Linux webview packages
         if: runner.os == 'Linux'
         run: |
@@ -93,6 +95,7 @@ jobs:
         with:
           toolchain: 1.98.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: ./.github/actions/setup-nasm
       - name: Install Linux webview packages
         if: runner.os == 'Linux'
         run: |

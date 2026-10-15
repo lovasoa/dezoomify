@@ -40,6 +40,8 @@ jobs:
         with:
           # Native AVIF tests independently decode with the existing Sharp dependency.
           install: ${{ matrix.lane-group == 'check' || matrix.lane-group == 'rust' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' || matrix.lane-group == 'bindings+security' }}
+      - uses: ./.github/actions/setup-nasm
+        if: matrix.lane-group == 'check' || matrix.lane-group == 'rust'
       - name: Set up Rust toolchain (WASM target)
         if: matrix.lane-group == 'check' || matrix.lane-group == 'wasm' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' || matrix.lane-group == 'bindings+security'
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # pinned

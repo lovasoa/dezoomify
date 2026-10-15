@@ -17,6 +17,10 @@ reservation includes conservative codec headroom, not a hard process RSS limit.
 The synchronous codec cannot be interrupted mid-encode; cancellation waits for
 the worker and prevents publication.
 
+AVIF uses the shared Rayon pool and SIMD assembly. Keep the native `image`
+features `rayon` and `nasm` enabled; release optimization alone does not enable
+either. Native build prerequisites are in [Development](../../docs/development.md).
+
 To add a default `image` encoder, enable its native Cargo feature and add one
 entry to `output_codecs!` in [`model.rs`](../dezoomify/src/model.rs), then run
 `cargo xtask bindings generate`. Override construction in [`imaging.rs`](src/imaging.rs)

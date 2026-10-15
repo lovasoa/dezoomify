@@ -245,8 +245,7 @@ pub(crate) fn encode_buffered_to<W: std::io::Write + std::io::Seek>(
             writer,
             4,
             format.codec().control.quality(compression),
-        )
-        .with_num_threads(Some(1))),
+        )),
         _ => image::write_buffer_with_format(
             &mut writer,
             image.as_raw(),
