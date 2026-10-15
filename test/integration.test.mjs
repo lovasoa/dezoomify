@@ -132,8 +132,9 @@ test("metadata proxy rate-limit retries once, then succeeds", async () => {
 test("proxy eligibility matrix", () => {
   const okReq = request("https://public.test/image.json");
   assert.equal(isProxyEligible(okReq).eligible, true);
-  // Tile never proxied.
-  assert.equal(isProxyEligible({ ...okReq, purpose: "tile" }).eligible, false);
+  for (const purpose of ["metadata", "tile", "probe"]) {
+    assert.equal(isProxyEligible({ ...okReq, purpose }).eligible, true);
+  }
   // Credential-bearing targets ineligible.
   assert.equal(isProxyEligible(request("https://user:pw@public.test/x")).eligible, false);
   assert.equal(isProxyEligible(request("https://public.test/x?token=abc")).eligible, false);
@@ -153,7 +154,7 @@ test("proxy eligibility matrix", () => {
     isProxyEligible(
       request("https://public.test/x", "metadata", [{ name: "x-custom", value: "value" }]),
     ).eligible,
-    false,
+    true,
   );
   // Private/local ineligible.
   for (const u of [
@@ -166,7 +167,7 @@ test("proxy eligibility matrix", () => {
   }
 });
 
-test("no proxy for http-error, ineligible targets, cancelled, tile", async () => {
+test("no proxy for http-error, ineligible targets, or cancelled requests", async () => {
   // HTTP refusals never fall back: the failure is authoritative, not a CORS gap.
   {
     const direct = directImpl(okBytes(7), 404);
@@ -205,16 +206,20 @@ test("no proxy for http-error, ineligible targets, cancelled, tile", async () =>
     );
     assert.equal(proxy.calls, 0);
   }
-  // Tile path never proxies even on network-error.
-  {
+});
+
+test("public tile and probe reads use proxy fallback after a network failure", async () => {
+  for (const purpose of ["tile", "probe"]) {
     const direct = directCorsFail();
     const proxy = proxyImpl();
     const { deps } = webDeps({ direct, proxy });
     const fetcher = createWebFetcher(deps);
-    await assert.rejects(
-      fetcher.fetchResource(request("https://public.test/0_0.jpg", "tile"), attemptSignal),
+    const result = await fetcher.fetchResource(
+      request("https://public.test/0_0.jpg", purpose),
+      attemptSignal,
     );
-    assert.equal(proxy.calls, 0);
+    assert.deepEqual([...result.bytes], [9]);
+    assert.equal(proxy.calls, 1);
   }
 });
 
@@ -242,7 +247,7 @@ test("proxyTransport posts only targetUrl+protocolVersion, credentials omit, siz
     ]),
   );
   assert.equal(withAccept.ok, true);
-  assert.equal(seen.init.headers.Accept, "application/json");
+  assert.equal(seen.init.headers.accept, "application/json");
   // Credential-bearing target rejected before request.
   let called = 0;
   const pt2 = createProxyTransport(
@@ -310,7 +315,9 @@ test("proxyTransport caps proxy load at 4 inflight and 4 starts per second", asy
   const started = Date.now();
   const results = await Promise.all(
     Array.from({ length: 8 }, (_, i) =>
-      pt.fetchViaProxy(request(`https://public.test/burst-${i}.json`)),
+      pt.fetchViaProxy(
+        request(`https://public.test/burst-${i}.json`, ["metadata", "tile", "probe"][i % 3]),
+      ),
     ),
   );
   const elapsed = Date.now() - started;
@@ -357,4 +364,114 @@ test("proxy fallback is unconditional: no opt-out UI", () => {
     }),
   );
   assert.equal(el.querySelector("#dz-proxy-optin"), null, "idle view renders no proxy toggle");
+});
+
+test("proxy client forwards safe headers and preserves partial responses for every resource purpose", async () => {
+  const expected = new Uint8Array([10, 11, 12, 13]);
+  const transport = createProxyTransport(
+    async (_path, init) => {
+      const body = JSON.parse(init.body);
+      assert.deepEqual(Object.keys(body).sort(), ["protocolVersion", "targetUrl"]);
+      assert.equal(init.headers.range, "bytes=10-13");
+      assert.equal(init.headers.referer, undefined);
+      assert.equal(init.headers["x-custom"], undefined);
+      return new Response(expected.slice(), {
+        status: 206,
+        headers: {
+          "content-type": "image/tiff",
+          "content-range": "bytes 10-13/100",
+          "x-proxy-upstream-url": "https://public.test/final.zif",
+        },
+      });
+    },
+    { protocolVersion: 1, maxBytes: 2 * 1024 * 1024, rateLimiter: createProxyRateLimiter() },
+  );
+  for (const purpose of ["metadata", "tile", "probe"]) {
+    const result = await transport.fetchViaProxy(
+      request("https://public.test/image.zif", purpose, [
+        { name: "Range", value: "bytes=10-13" },
+        { name: "Referer", value: "https://public.test/viewer" },
+        { name: "X-Custom", value: "must-not-leave" },
+      ]),
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.status, 206);
+    assert.equal(result.contentType, "image/tiff");
+    assert.equal(result.finalUrl, "https://public.test/final.zif");
+    assert.deepEqual(new Uint8Array(result.bytes), expected);
+  }
+});
+
+test("proxy client retains invalid response causes and releases its quota", async () => {
+  let released = 0;
+  const transport = createProxyTransport(async () => new Response("whole file"), {
+    protocolVersion: 1,
+    maxBytes: 4,
+    rateLimiter: {
+      acquire: async () => () => {
+        released++;
+      },
+      reset() {},
+    },
+  });
+  const result = await transport.fetchViaProxy(
+    request("https://public.test/image.zif", "tile", [{ name: "Range", value: "bytes=10-13" }]),
+  );
+  assert.equal(result.code, "TRANSPORT_NETWORK_ERROR");
+  assert.match(result.preview, /expected HTTP 206/);
+  assert.equal(released, 1);
+});
+
+test("proxy client rejects invalid request headers and over-budget requests before admission", async () => {
+  const transport = createProxyTransport(() => assert.fail("invalid requests cannot be sent"), {
+    protocolVersion: 1,
+    maxBytes: 4,
+    rateLimiter: {
+      acquire: () => assert.fail("invalid requests cannot consume relay quota"),
+      reset() {},
+    },
+  });
+  for (const headers of [
+    [
+      { name: "Range", value: "bytes=0-1" },
+      { name: "range", value: "bytes=0-1" },
+    ],
+    [{ name: "Authorization", value: "Bearer secret" }],
+  ]) {
+    const result = await transport.fetchViaProxy(
+      request("https://public.test/image.zif", "probe", headers),
+    );
+    assert.equal(result.code, "PROXY_POLICY_DENIED");
+  }
+  const large = await transport.fetchViaProxy(
+    request("https://public.test/image.zif", "metadata", [{ name: "Range", value: "bytes=0-4" }]),
+  );
+  assert.equal(large.code, "PROXY_BUDGET_EXCEEDED");
+});
+
+test("ranged proxy requests preserve HTTP refusals and relay error previews", async () => {
+  for (const [status, body, code] of [
+    [416, "range refused", "TRANSPORT_HTTP_ERROR"],
+    [
+      502,
+      JSON.stringify({ code: "TRANSPORT_NETWORK_ERROR", preview: "original upstream failure" }),
+      "TRANSPORT_NETWORK_ERROR",
+    ],
+  ]) {
+    const transport = createProxyTransport(
+      async () => new Response(body, { status, headers: { "retry-after": "2" } }),
+      {
+        protocolVersion: 1,
+        maxBytes: 4,
+        rateLimiter: { acquire: async () => () => {}, reset() {} },
+      },
+    );
+    const result = await transport.fetchViaProxy(
+      request("https://public.test/image.zif", "probe", [{ name: "Range", value: "bytes=10-13" }]),
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.status, status);
+    assert.equal(result.code, code);
+    if (status === 502) assert.equal(result.preview, "original upstream failure");
+  }
 });

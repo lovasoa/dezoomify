@@ -78,6 +78,9 @@ pub enum RequestPurpose {
 /// One portable resource description. URI text is preserved exactly after
 /// the core's approved normalization; secret headers are never carried here
 /// (hosts attach scoped authorization out-of-band).
+/// A finite single `Range: bytes=start-end` asks the Host for exactly that
+/// inclusive interval. Hosts validate partial response headers and body length
+/// before returning bytes, and include the range in any resource cache key.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct ResourceRequest {
@@ -1107,7 +1110,9 @@ pub struct DiagnosticReport {
     pub truncated_fields: u32,
 }
 
-/// A direct resource read, including its redirected base address.
+/// A direct resource read, including its redirected base address. For a ranged
+/// request, bytes cover exactly the requested interval; the Host validates this
+/// contract before returning a successful response.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct ResourceResponse {

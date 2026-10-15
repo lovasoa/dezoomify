@@ -141,6 +141,7 @@ impl ParsedResource {
 }
 #[derive(Clone, Copy, Debug)]
 pub struct DiscoveryResource<'a> {
+    request: Option<&'a Request>,
     uri: &'a str,
     bytes: &'a [u8],
     final_uri: &'a str,
@@ -153,6 +154,7 @@ impl<'a> DiscoveryResource<'a> {
     #[must_use]
     pub const fn new(uri: &'a str, bytes: &'a [u8]) -> Self {
         Self {
+            request: None,
             uri,
             bytes,
             final_uri: uri,
@@ -168,6 +170,11 @@ impl<'a> DiscoveryResource<'a> {
     #[must_use]
     pub const fn uri(self) -> &'a str {
         self.uri
+    }
+    /// The request that supplied these bytes, including any byte range.
+    #[must_use]
+    pub const fn request(self) -> Option<&'a Request> {
+        self.request
     }
     /// The URI after host-level redirects, or [`Self::uri`] when unavailable.
     #[must_use]
@@ -957,6 +964,7 @@ impl ReadResource {
     fn resource(&self) -> Option<DiscoveryResource<'_>> {
         let response = self.response.as_ref().ok()?;
         Some(DiscoveryResource {
+            request: Some(&self.request),
             html: Some(&response.html),
             final_uri: response
                 .final_uri

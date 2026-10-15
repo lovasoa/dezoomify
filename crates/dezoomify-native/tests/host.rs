@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use dezoomify::model::ProgressPhase;
 use dezoomify_native::{JobOptions, NativeHost, OutputTarget};
 mod support;
-use support::{http_response, scenario_payload, serve_counted, temp_dir, DZI_512};
+use support::{http_response, scenario_payload, serve_counted, temp_dir, tile_request, DZI_512};
 
 #[test]
 fn known_codec_limits_fail_before_ordinary_tile_fetches() {
@@ -154,7 +154,7 @@ fn compatible_single_tile_iiif_preserves_bytes_without_pixel_decoding() {
         dezoomify_native::cache::store(
             &work.join("cache"),
             &dezoomify_native::cache::job_namespace(source.to_str().unwrap()),
-            tiles.join(format!("0_0.{extension}")).to_str().unwrap(),
+            &tile_request(tiles.join(format!("0_0.{extension}")).to_str().unwrap()),
             &bytes[..bytes.len() - 1],
         )
         .unwrap();
@@ -399,10 +399,12 @@ fn zif_reuses_standalone_jpeg_and_rgb_png_tiles() {
         dezoomify_native::cache::store(
             &work.join("cache"),
             &dezoomify_native::cache::job_namespace(source.to_str().unwrap()),
-            tiles
-                .join(format!("{index}_0.{extension}"))
-                .to_str()
-                .unwrap(),
+            &tile_request(
+                tiles
+                    .join(format!("{index}_0.{extension}"))
+                    .to_str()
+                    .unwrap(),
+            ),
             &bytes[..bytes.len() - 1],
         )
         .unwrap();

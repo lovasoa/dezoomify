@@ -68,6 +68,7 @@ export async function startFixtureServer({
   staticDir,
   requestLog,
   quiet = false,
+  cors = true,
 } = {}) {
   const fixturesDir = path.join(root, "fixtures");
   const payloads = payloadFiles(scenariosDir);
@@ -121,8 +122,12 @@ export async function startFixtureServer({
       if (fixture) bytes = template(bytes, response.headers, file, origin, url.hostname);
       res.writeHead(response.status, {
         ...Object.fromEntries(response.headers),
-        "access-control-allow-origin": "*",
-        "access-control-expose-headers": "X-Set-Cookie",
+        ...(cors
+          ? {
+              "access-control-allow-origin": "*",
+              "access-control-expose-headers": "X-Set-Cookie, Content-Range",
+            }
+          : {}),
         "content-length": bytes.length,
       });
       entry.status = response.status;
@@ -130,7 +135,10 @@ export async function startFixtureServer({
       res.end(req.method === "HEAD" ? undefined : bytes);
     } catch (error) {
       console.error(`Fixture request failed: ${req.method} ${req.url}`, error);
-      res.writeHead(500, { "content-type": "text/plain", "access-control-allow-origin": "*" });
+      res.writeHead(500, {
+        "content-type": "text/plain",
+        ...(cors ? { "access-control-allow-origin": "*" } : {}),
+      });
       entry.status = 500;
       entry.error = String(error);
       record();

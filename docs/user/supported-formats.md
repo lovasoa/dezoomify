@@ -10,12 +10,13 @@ site can be supported at all.
 
 Most of these formats are named after the software that serves them. To use
 one by hand, paste the address of the page *or* of the small description
-file listed below; see [finding the image address](./finding-the-image-address.md)
+file or image container listed below; see [finding the image address](./finding-the-image-address.md)
 for how to find that file.
 
 | Format | Used by | What you can paste |
 |---|---|---|
 | Zoomify | Many museums and libraries | The viewer page, `ImageProperties.xml`, or any tile address |
+| ZIF | Zoomify viewers with a single image container | The viewer page or the `.zif` image address |
 | Deep Zoom (Seadragon) | Microsoft-style viewers, many digital libraries | The viewer page or the `.dzi` file |
 | Second Canvas | Madpixel museum viewers | A museum page that embeds the viewer, the viewer page, or its `web/..._<language>.json` configuration file |
 | IIIF | Widely used by national and university libraries | A viewer page, an `info.json` file, or a presentation manifest for whole books |

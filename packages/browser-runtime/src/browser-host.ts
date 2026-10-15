@@ -282,7 +282,9 @@ export class BrowserHost implements Host {
   private async loadTile(tile: Tile): Promise<ArrayBuffer | TileImageLike> {
     const origin = originOfUrl(tile.request.uri);
     const ordinary =
-      tile.placement.processing === "none" && this.deps.loadDisplayImage !== undefined;
+      tile.placement.processing === "none" &&
+      this.deps.loadDisplayImage !== undefined &&
+      !(tile.request.headers ?? []).some(({ name }) => name.toLowerCase() === "range");
     let classified: ((displayOnly: boolean) => void) | undefined;
     try {
       this.signal.throwIfAborted();

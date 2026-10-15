@@ -1,8 +1,14 @@
 import { normalizeErrorPreviewText } from "./fetch-primitives.ts";
 
+/** Browser and server fetch responses share the same bounded stream reader. */
+export interface ReadableResponse {
+  headers: Pick<Headers, "get">;
+  body?: ReadableStream<Uint8Array> | null;
+}
+
 /** Read a bounded body, cancelling the reader on limits, abort, and completion. */
 export async function readResponseBytes(
-  response: Response,
+  response: ReadableResponse,
   maxBytes: number,
   signal?: AbortSignal,
   prefix = false,
@@ -47,7 +53,10 @@ export async function readResponseBytes(
   return result;
 }
 
-export async function readErrorPreview(response: Response, signal?: AbortSignal): Promise<string> {
+export async function readErrorPreview(
+  response: ReadableResponse,
+  signal?: AbortSignal,
+): Promise<string> {
   try {
     const bytes = await readResponseBytes(response, 4096, signal, true);
     return normalizeErrorPreviewText(new TextDecoder().decode(bytes), 300);

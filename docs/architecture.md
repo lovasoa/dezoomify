@@ -23,7 +23,7 @@ callbacks rather than importing UI. Parsers consume supplied data; Hosts own
 networking and inert HTML parsing, clocks, codecs, and resources.
 
 The website serves the preserved legacy app at `/` and the new app at `/beta`.
-The local and deployed metadata proxies share one implementation. See
+The local and deployed website proxies share one implementation. See
 [Operations](operations.md#website-deployment-contract) for deployment.
 
 ## Algorithm ownership

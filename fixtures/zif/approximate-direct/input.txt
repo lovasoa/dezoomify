@@ -1,0 +1,1 @@
+image.zif?token=exact%2Fvalue

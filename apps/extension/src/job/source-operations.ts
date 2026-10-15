@@ -15,6 +15,7 @@ type SourceRequest = {
   operationId: string;
   deadlineAt: number;
   documentToken: string;
+  rangeBytes?: number;
 };
 
 type SourceFetch = { controller: AbortController; finished: Promise<void> };
@@ -159,9 +160,12 @@ export async function fetchSource(request: SourceRequest): Promise<
       data: string;
       documentUrl: string;
       contentType?: string;
+      contentRange?: string;
+      contentLength?: string;
     }
 > {
   const MAX_SOURCE_FETCH_BYTES = 8 * 1024 * 1024;
+  const maxBytes = Math.min(MAX_SOURCE_FETCH_BYTES, request.rangeBytes ?? MAX_SOURCE_FETCH_BYTES);
   const documentUrl = String(globalThis.location?.href ?? "");
   const world = globalThis as typeof globalThis & {
     __dezoomifySourceFetches?: Map<string, SourceFetch | null>;
@@ -271,21 +275,29 @@ export async function fetchSource(request: SourceRequest): Promise<
     const responseUrl =
       typeof response.url === "string" && response.url !== "" ? response.url : request.url;
 
+    // This function is injected without module closures. The job page validates
+    // exact Content-Range facts; reject an ignored range before reading any body.
+    if (request.rangeBytes !== undefined && response.status !== 206)
+      return fail({
+        kind: "bad-url",
+        detail: `invalid byte-range response: expected HTTP 206, received ${response.status}`,
+      });
+
     const parts: Uint8Array[] = [];
     let total = 0;
     const append = (part: Uint8Array | ArrayBuffer | undefined) => {
       const value = part instanceof Uint8Array ? part : new Uint8Array(part ?? []);
       total += value.byteLength;
-      if (total > MAX_SOURCE_FETCH_BYTES) {
+      if (total > maxBytes) {
         controller.abort();
-        throw { kind: "size-limit", max_bytes: MAX_SOURCE_FETCH_BYTES };
+        throw { kind: "size-limit", max_bytes: maxBytes };
       }
       parts.push(value);
     };
 
     const declared = Number(response.headers?.get?.("content-length"));
-    if (Number.isSafeInteger(declared) && declared > MAX_SOURCE_FETCH_BYTES)
-      return fail({ kind: "size-limit", max_bytes: MAX_SOURCE_FETCH_BYTES });
+    if (Number.isSafeInteger(declared) && declared > maxBytes)
+      return fail({ kind: "size-limit", max_bytes: maxBytes });
     const reader = response.body?.getReader?.();
     if (reader) {
       for (;;) {
@@ -306,6 +318,12 @@ export async function fetchSource(request: SourceRequest): Promise<
       ok: true,
       status: response.status,
       contentType: String(response.headers?.get?.("content-type") ?? "").slice(0, 256),
+      ...(request.rangeBytes === undefined
+        ? {}
+        : {
+            contentRange: String(response.headers?.get?.("content-range") ?? "").slice(0, 256),
+            contentLength: response.headers?.get?.("content-length") ?? undefined,
+          }),
       url: responseUrl,
       bytes: total,
       data: bytes.toBase64(),
@@ -320,8 +338,7 @@ export async function fetchSource(request: SourceRequest): Promise<
         detail: "the source request timed out",
       });
     }
-    if (caught?.kind === "size-limit")
-      return fail({ kind: "size-limit", max_bytes: MAX_SOURCE_FETCH_BYTES });
+    if (caught?.kind === "size-limit") return fail({ kind: "size-limit", max_bytes: maxBytes });
     return caught?.name === "AbortError"
       ? fail({ kind: "cancelled" })
       : fail({

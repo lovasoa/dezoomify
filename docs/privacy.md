@@ -7,16 +7,18 @@ what can leave your device.
 ## What dezoomify does, in one paragraph
 
 You provide an image page or description address. Dezoomify finds the tiles,
-downloads them, and assembles a picture you can save. Image tiles travel from
-the source site to your device; the project's metadata proxy does not fetch them.
+downloads them, and assembles a picture you can save. Data normally travels from
+the source site to your device; the website can use the project's helper proxy
+when the source prevents direct access.
 
 ## Our promises
 
 The website reads public resources without your browser login. When direct
-metadata access fails, it can use the project's helper proxy to fetch eligible
-public description files or viewer pages. That helper necessarily receives the
-requested address; it does not receive your browser cookies or Authorization
-headers. The application's proxy code does not log requested source addresses.
+access fails, it can use the project's helper proxy to fetch eligible public
+source resources, including description files, viewer pages, and image data.
+That helper necessarily receives the requested address; it does not receive your
+browser cookies or Authorization headers. The application's proxy code does not
+log requested source addresses.
 
 Desktop and CLI fetch from your device without using that helper. Recent-image
 history, settings, cached tiles, and diagnostic reports stay on your device.

@@ -34,20 +34,25 @@ const STRIPPED_INBOUND = new Set([
 // Discovery reads both structured metadata (JSON/XML/YAML manifests,
 // JSON-LD IIIF manifests, viewer JS, vendor metadata) and viewer HTML pages
 // (a Google Arts & Culture asset page, a krpano embed, an OpenSeadragon
-// page). Tiles stay excluded by their own image/* content type.
+// page). Public images and binary image containers use the same bounded relay.
 const METADATA_TYPE =
   /^(?:application\/(?:ld\+)?json|(?:application|text)\/(?:xml|(?:x-)?(?:java|ecma)script)|text\/(?:plain|html|jscript|livescript|javascript1\.[0-5]))$/;
 
 // The client headers the relay forwards upstream. Everything else the
 // client sends (cookies, authorization, referer, origin, hop-by-hop) is
 // dropped by stripUpstreamHeaders below.
-const FORWARDED_CLIENT_HEADERS = ["user-agent", "accept-language", "accept"] as const;
+const FORWARDED_CLIENT_HEADERS = ["user-agent", "accept-language", "accept", "range"] as const;
 
 export function forwardedClientHeaders(
   headers: Record<string, string | string[] | undefined>,
 ): Record<string, string> {
   const lower: Record<string, string> = {};
   for (const [name, value] of Object.entries(headers)) {
+    if (name.toLowerCase() === "range" && value !== undefined) {
+      const ranges = Array.isArray(value) ? value.join(",") : value;
+      lower.range = lower.range === undefined ? ranges : `${lower.range},${ranges}`;
+      continue;
+    }
     const first = Array.isArray(value) ? value[0] : value;
     if (typeof first === "string" && first !== "") {
       const key = name.toLowerCase();
@@ -205,9 +210,14 @@ export function isBlockedIPv6(host: string): boolean {
   return false;
 }
 
-export function isAllowedMetadataContentType(contentType: string | null | undefined): boolean {
+export function isAllowedSourceContentType(contentType: string | null | undefined): boolean {
   const base = contentType?.split(";")[0]?.trim().toLowerCase() ?? "";
-  return base.startsWith("application/vnd.") || METADATA_TYPE.test(base);
+  return (
+    base.startsWith("image/") ||
+    base === "application/octet-stream" ||
+    base.startsWith("application/vnd.") ||
+    METADATA_TYPE.test(base)
+  );
 }
 
 export function stripUpstreamHeaders(headers: Record<string, string>): Record<string, string> {

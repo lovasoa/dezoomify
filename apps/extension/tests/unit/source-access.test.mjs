@@ -397,6 +397,40 @@ test("source scan rejects a malformed boundary result", async () => {
   source.dispose();
 });
 
+test("source access validates partial response range headers and exact payload length", async () => {
+  const valid = {
+    ok: true,
+    documentUrl: SOURCE_URL,
+    status: 206,
+    url: "https://gallery.example/image.zif",
+    bytes: 4,
+    data: "ZGF0YQ==",
+    contentRange: "bytes 10-13/100",
+    contentLength: "4",
+  };
+  for (const [changes, error] of [
+    [{}, undefined],
+    [{ contentRange: undefined }, "bad-url"],
+    [{ bytes: 3, data: "YWJj" }, "bad-url"],
+  ]) {
+    const fake = fakeBrowser(async (injection) => {
+      assert.equal(injection.args[0].rangeBytes, 4);
+      return { ...valid, ...changes };
+    });
+    const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+    try {
+      const pending = source.fetch(
+        { uri: valid.url, headers: [{ name: "Range", value: "bytes=10-13" }] },
+        new AbortController().signal,
+      );
+      if (error) await assert.rejects(pending, { kind: error });
+      else assert.equal(new TextDecoder().decode((await pending).bytes), "data");
+    } finally {
+      source.dispose();
+    }
+  }
+});
+
 test("navigation invalidates access and discards an in-flight scan result", async () => {
   let finish;
   const fake = fakeBrowser(() => new Promise((resolve) => (finish = resolve)));

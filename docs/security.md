@@ -18,9 +18,10 @@ very large images. Each runtime takes only the access its user-started job needs
 ## Credentials
 
 Website requests omit cookies and Authorization; its proxy handles only public
-metadata. The extension can fetch from the source document with that site's
-browser session. Extension-origin fetches are credential-free and require active
-host permissions. It does not transfer browser credentials to desktop.
+source resources needed for image downloads. The extension can fetch from the
+source document with that site's browser session. Extension-origin fetches are
+credential-free and require active host permissions. It does not transfer browser
+credentials to desktop.
 
 Diagnostics are local until the user shares them. They preserve exact supplied
 URLs, query parameters, paths, settings, and error causes; do not promise automatic
@@ -34,10 +35,11 @@ invented credential vocabulary.
 
 ## Proxy controls
 
-The metadata proxy must not become a general-purpose network relay. Public
-metadata only, no tiles or credentials; reject private and reserved destinations
-before connection and across redirects. Bound redirects, response bodies,
-duration, and concurrency, and allowlist forwarded headers.
+The website proxy serves public source resources needed for image downloads,
+including metadata and image data. It must not become a general-purpose network
+relay or carry credentials. Reject private and reserved destinations before
+connection and across redirects. Bound redirects, response bodies, duration,
+and concurrency, and allowlist forwarded headers.
 
 [`src/server/security.ts`](../src/server/security.ts) owns eligibility and network
 policy, shared by local and deployed proxy adapters. The browser transport owns

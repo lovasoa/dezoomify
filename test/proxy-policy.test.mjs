@@ -1,4 +1,4 @@
-// Single proxy policy vector: pins the metadata-only policy that lives once
+// Single proxy policy vector: pins the bounded public source policy that lives once
 // in src/server/security.ts and serves POST /api/proxy through
 // src/server/proxy.ts plus functions/api/proxy.ts, while GET /proxy keeps the
 // legacy policy served from legacy/. Legacy behavior at / stays byte-identical.
@@ -40,7 +40,7 @@ test("proxy policy vector: 2MB, 5 redirects, header allowlist, manual revalidati
   const missing = await shim.onRequestGet({ request: new Request("https://site.test/proxy") });
   assert.equal(missing.status, 400, "legacy GET without url fails closed");
 
-  const base = { websiteOrigin: "https://site.test" };
+  const base = { websiteOrigin: "https://site.test", disableOriginBucket: true };
   const chain = (redirectsBeforeSuccess) => {
     let calls = 0;
     return {

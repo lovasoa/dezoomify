@@ -14,9 +14,9 @@ HTTP, permission, decoding, processing, and cancellation failures do not qualify
 as network fallback. Successful ordinary-image loading classifies the origin
 for later tiles in that job.
 
-The website tries direct metadata access before eligible public-metadata proxy
-fallback; the extension uses its source session and permission-controlled
-transport, never the proxy. Transport preserves request headers, redirect bases,
+The website tries direct access, then uses its proxy for eligible public source
+resources. The extension uses its source session and permission-controlled
+transport. Transport preserves request headers, redirect bases,
 and typed failures. Retry limits and backoff belong to Rust. Optional acquisitions
 await a shared Retry/Cancel approval, pausing new work while in-flight operations
 settle. Every required tile must succeed before finalization.
