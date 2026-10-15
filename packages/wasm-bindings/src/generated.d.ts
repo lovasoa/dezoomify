@@ -218,7 +218,7 @@ export type RequestPurpose = "metadata" | "tile" | "probe";
 /**
  * Saved encoding preference, distinct from the concrete published format.
  */
-export type OutputPreference = "auto" | "png" | "jpeg" | "tiff" | "zif" | "webp" | "iiif-dir";
+export type OutputPreference = "auto" | "png" | "jpeg" | "tiff" | "zif" | "webp" | "avif" | "iiif-dir";
 
 /**
  * Selected elements in document order, with decoded attributes and textContent.
@@ -247,7 +247,7 @@ export interface LimitContext {
 /**
  * The requested output encoding.
  */
-export type OutputFormat = "png" | "jpeg" | "tiff" | "zif" | "webp" | "iiif-dir";
+export type OutputFormat = "png" | "jpeg" | "tiff" | "zif" | "webp" | "avif" | "iiif-dir";
 
 /**
  * The shared failure context, defined once instead of per variant:
@@ -307,7 +307,7 @@ export interface DiagnosticReport {
  * [`LimitContext`]; `message` prose is presentation only and is never a
  * data channel between languages.
  */
-export type LimitReason = "memory" | "jpeg-side" | "webp-side";
+export type LimitReason = "memory" | "jpeg-side" | "webp-side" | "avif-side";
 
 export interface DiagnosticFailureGroup {
     key: string;

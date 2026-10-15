@@ -10,6 +10,7 @@ import type { ViewContext } from "./view-types.ts";
 // (copy interpolation only).
 const JPEG_MAX_SIDE = 65535;
 const WEBP_MAX_SIDE = 16383;
+const AVIF_MAX_SIDE = 65535;
 
 // Human-readable byte counts for limit copy (exact bytes plus a
 // GiB/MiB approximation).
@@ -338,6 +339,9 @@ export function plainMessageFor(
       }
       if (cause.limit.reason === "webp-side") {
         return t("desktop.output.webpLimit", { dims, webpMax: WEBP_MAX_SIDE, host });
+      }
+      if (cause.limit.reason === "avif-side") {
+        return t("desktop.output.avifLimit", { dims, avifMax: AVIF_MAX_SIDE, host });
       }
       return t("desktop.output.canvasLimit", {
         dims,

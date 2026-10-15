@@ -12,6 +12,11 @@ pixels: the encoder reads exclusively owned strips without per-pixel locking.
 Unknown geometry and automatic format selection can require more buffering;
 explicit output formats can reduce memory use.
 
+AVIF buffers the complete RGBA image and encoded file before writing. Its memory
+reservation includes conservative codec headroom, not a hard process RSS limit.
+The synchronous codec cannot be interrupted mid-encode; cancellation waits for
+the worker and prevents publication.
+
 Do not wait for memory while holding acquisition slots. A missing early tile can
 block the encoder, so waiting would prevent the work needed to unblock it.
 Return the typed resource-limit failure instead. Reservations track owned working

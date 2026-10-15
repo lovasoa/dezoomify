@@ -133,6 +133,7 @@ pub enum OutputFormat {
     Tiff,
     Zif,
     Webp,
+    Avif,
     IiifDir,
 }
 
@@ -145,6 +146,7 @@ impl OutputFormat {
             Self::Tiff => "tiff",
             Self::Zif => "zif",
             Self::Webp => "webp",
+            Self::Avif => "avif",
             Self::IiifDir => "iiif-dir",
         }
     }
@@ -177,6 +179,7 @@ pub enum OutputPreference {
     Tiff,
     Zif,
     Webp,
+    Avif,
     IiifDir,
 }
 
@@ -189,6 +192,7 @@ impl OutputPreference {
             Self::Tiff => Some(OutputFormat::Tiff),
             Self::Zif => Some(OutputFormat::Zif),
             Self::Webp => Some(OutputFormat::Webp),
+            Self::Avif => Some(OutputFormat::Avif),
             Self::IiifDir => Some(OutputFormat::IiifDir),
         }
     }
@@ -493,6 +497,8 @@ pub enum LimitReason {
     JpegSide,
     /// A side exceeded the WebP 16383 px bound.
     WebpSide,
+    /// A side exceeded the AVIF encoder's 65535 px bound.
+    AvifSide,
 }
 
 /// Structured facts behind an output-limit refusal. Every field is optional
@@ -768,6 +774,7 @@ fn limit_facts(limit: &LimitContext) -> String {
         LimitReason::Memory => "memory",
         LimitReason::JpegSide => "jpeg per-side",
         LimitReason::WebpSide => "webp per-side",
+        LimitReason::AvifSide => "avif per-side",
     };
     let mut facts = vec![reason.to_string()];
     if let Some(dimensions) = &limit.dimensions {

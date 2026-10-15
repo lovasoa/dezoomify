@@ -24,7 +24,8 @@
     "jpeg",
     "tiff",
     "zif",
-    "webp"
+    "webp",
+    "avif"
   ],
   "outputFormats": [
     "png",
@@ -32,6 +33,7 @@
     "tiff",
     "zif",
     "webp",
+    "avif",
     "iiif-dir"
   ],
   "eventChannels": [

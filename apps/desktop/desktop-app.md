@@ -9,7 +9,7 @@ folder. It cannot reuse your browser login; use the
 
 Large images are still limited by available memory. If a save reaches that
 limit, choose a smaller resolution or a tile folder. Explicit output formats
-can reduce buffering; WebP needs the complete picture in memory.
+can reduce buffering; WebP and AVIF need the complete picture in memory.
 
 ## Resuming an interrupted save
 
@@ -97,10 +97,15 @@ This does not sign you in or transfer your browser session.
 - **JPEG** suits smaller on-screen copies; it is limited to 65,535 pixels per side.
 - **WebP** is lossless here, but needs a complete pixel buffer and is limited to
   16,383 pixels per side.
+- **AVIF** saves lossy images with transparency, up to 65,535 pixels per side.
+  It needs the complete image in memory and does not preserve embedded color
+  profiles. Quality 100 is not a lossless mode. Size estimates follow the chosen
+  quality and are approximate, not file-size or memory limits.
 - **ZIF** is a tiled multi-resolution image and omits transparency.
 - **IIIF** saves a folder with `info.json` and tiles for a static web viewer.
 
-Compression controls JPEG quality (100 minus compression); TIFF stays lossless.
+Compression controls JPEG and AVIF quality (100 minus compression, at least 1
+for AVIF); TIFF stays lossless. AVIF uses a fixed encoding speed.
 Compatible IIIF/ZIF tiles keep their original compressed bytes.
 
 ## Settings

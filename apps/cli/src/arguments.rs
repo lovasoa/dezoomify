@@ -507,7 +507,7 @@ fn help() -> String {
         "  -c, --tile-cache <dir>      resume folder reusing downloaded tiles",
         "  --bulk <file-or-url>        text list file (URL plus optional title per line, # comments)",
         "                              or IIIF collection manifest URL; saves one output per entry",
-        "  --outfile <file>            explicit output file (.png, .jpg, .jpeg, .tif, .tiff, .zif, .webp, .iiif,",
+        "  --outfile <file>            explicit output file (.png, .jpg, .jpeg, .tif, .tiff, .zif, .webp, .avif, .iiif,",
         "                              or extensionless iiif-dir), or bulk base name (bulk_1.ext, …)",
         "  -?, --help                  show this help",
         "  -V, --version               show version",

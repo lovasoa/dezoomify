@@ -167,9 +167,11 @@ test("size and format choices prevent exceeding JPEG and WebP dimensions", () =>
     const buttons = rendered.container.querySelectorAll(
       '.dz-quick-menu[aria-label="Format"] button',
     );
-    const jpeg = [...buttons].find((button) => button.firstElementChild.textContent === "JPEG");
-    assert.ok(jpeg.disabled);
-    click(jpeg);
+    for (const label of ["JPEG", "AVIF"]) {
+      const button = [...buttons].find((button) => button.firstElementChild.textContent === label);
+      assert.ok(button.disabled);
+      click(button);
+    }
     assert.equal(rendered.current().output_format, "auto");
     act(() => rendered.root.unmount());
   }
@@ -177,7 +179,7 @@ test("size and format choices prevent exceeding JPEG and WebP dimensions", () =>
 
 test("file size estimates follow the output encoder and JPEG quality", () => {
   const estimates = {};
-  for (const format of ["auto", "jpeg", "png", "tiff", "webp", "zif", "iiif-dir"]) {
+  for (const format of ["auto", "jpeg", "png", "tiff", "webp", "avif", "zif", "iiif-dir"]) {
     const { container, root } = renderSettings({ settings: { output_format: format } });
     const preset = [...container.querySelectorAll('.dz-quick-menu[aria-label="Size"] button')].find(
       (button) => button.firstElementChild.textContent === "8K",
@@ -191,6 +193,7 @@ test("file size estimates follow the output encoder and JPEG quality", () => {
     png: "<60 MB",
     tiff: "<110 MB",
     webp: "<50 MB",
+    avif: "≈20 MB",
     zif: "<150 MB",
     "iiif-dir": "<20 MB",
   });
@@ -215,6 +218,11 @@ test("estimation buffer is applied consistently before rounding to 5 MB", () => 
     ["jpeg", 2, "8K", "<20 MB"],
     ["jpeg", 0, "8K", "<20 MB"],
     ["webp", 5, "8K", "<50 MB"],
+    ["avif", 100, "8K", "≈5 MB"],
+    ["avif", 50, "8K", "≈5 MB"],
+    ["avif", 25, "8K", "≈10 MB"],
+    ["avif", 2, "8K", "≈30 MB"],
+    ["avif", 0, "8K", "≈45 MB"],
   ]) {
     const { container, root } = renderSettings({
       settings: { output_format: format, compression },
@@ -238,7 +246,7 @@ test("label information opens the existing modal with every format explanation",
   assert.equal(dialog.querySelector("h2").textContent, "Format");
   assert.deepEqual(
     [...dialog.querySelectorAll("dt")].map((item) => item.textContent),
-    ["Auto", "PNG", "JPEG", "TIFF", "WebP", "ZIF", "IIIF folder"],
+    ["Auto", "PNG", "JPEG", "TIFF", "WebP", "AVIF", "ZIF", "IIIF folder"],
   );
   assert.match(dialog.textContent, /65,535/);
   assert.match(dialog.textContent, /16,383/);
@@ -247,6 +255,44 @@ test("label information opens the existing modal with every format explanation",
   click(container.querySelector(".dz-settings-more"));
   assert.equal(dialog.querySelector("h2").textContent, "Advanced settings");
   act(() => root.unmount());
+});
+
+test("AVIF quality uses the persisted compression setting and updates estimates", () => {
+  const { container, root, current } = renderSettings({
+    settings: { output_format: "avif", compression: 100 },
+  });
+  const estimate = () =>
+    [...container.querySelectorAll('.dz-quick-menu[aria-label="Size"] button')]
+      .find((button) => button.firstElementChild.textContent === "8K")
+      .querySelector(".dz-choice-hint").textContent;
+  assert.equal(estimate(), "≈5 MB");
+  click(container.querySelector(".dz-settings-more"));
+  const slider = container.querySelector('input[aria-label="AVIF quality"]');
+  assert.equal(slider.getAttribute("min"), "1");
+  assert.equal(slider.value, "1");
+  assert.equal(container.querySelector('input[aria-label="Width"]').getAttribute("max"), "65535");
+  typeInto(slider, "100");
+  assert.equal(current().compression, 0);
+  assert.equal(estimate(), "≈45 MB");
+  click(container.querySelector(".dz-settings-close"));
+  click(container.querySelector('button[aria-label="Size: More information"]'));
+  assert.match(container.querySelector(".dz-settings-explanation").textContent, /AVIF estimates/);
+  act(() => root.unmount());
+});
+
+test("AVIF estimates use localized approximate units", () => {
+  setLocale("fr");
+  const { container, root } = renderSettings({ settings: { output_format: "avif" } });
+  try {
+    assert.ok(
+      [...container.querySelectorAll(".dz-choice-hint")].some(
+        (hint) => hint.textContent === "≈20 Mo",
+      ),
+    );
+  } finally {
+    act(() => root.unmount());
+    setLocale("en");
+  }
 });
 
 test("desktop advanced settings open as a labelled dialog and dismiss cleanly", () => {

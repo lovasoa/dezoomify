@@ -18,6 +18,7 @@ function formatChoices(): Array<{ value: DesktopSettings["output_format"]; label
     { value: "jpeg", label: "JPEG" },
     { value: "tiff", label: "TIFF" },
     { value: "webp", label: "WebP" },
+    { value: "avif", label: "AVIF" },
     { value: "zif", label: "ZIF" },
     { value: "iiif-dir", label: "IIIF folder" },
   ];
@@ -37,7 +38,7 @@ const sizes = [
 type SizePreset = string;
 
 function formatLimit(format: DesktopSettings["output_format"]): number {
-  return format === "jpeg" ? 65_535 : format === "webp" ? 16_383 : 1_000_000;
+  return format === "jpeg" || format === "avif" ? 65_535 : format === "webp" ? 16_383 : 1_000_000;
 }
 
 // Rounded-up measurements from the native JPEG encoder on the Zoomify painting
@@ -52,22 +53,40 @@ const jpegSizeCoefficients = [
   { quality: 100, bytes: 0.5 },
 ];
 
+// scripts/calibrate-avif.mjs: Zoomify test_custom_size, Arts & Culture tile,
+// generic map_expected and a painting alpha gradient, fitted within 512x512.
+// Production image 0.25.10/ravif 0.13, speed 4; maximum measured bytes/pixel
+// rounded up to 0.05 and made nondecreasing. A small sample, not a size bound.
+const avifSizeCoefficients = [
+  { quality: 1, bytes: 0.05 },
+  { quality: 25, bytes: 0.05 },
+  { quality: 50, bytes: 0.1 },
+  { quality: 75, bytes: 0.15 },
+  { quality: 90, bytes: 0.3 },
+  { quality: 95, bytes: 0.45 },
+  { quality: 98, bytes: 0.7 },
+  { quality: 100, bytes: 1.15 },
+];
+
 function estimateSize(width: number, height: number, settings: DesktopSettings): string {
   const format = settings.output_format;
   const quality = 100 - settings.compression;
   const jpeg = jpegSizeCoefficients.find((entry) => quality <= entry.quality)?.bytes ?? 0.5;
+  const avif = avifSizeCoefficients.find((entry) => quality <= entry.quality)?.bytes ?? 1.15;
   const bytesPerPixel =
     format === "auto" || format === "jpeg" || format === "iiif-dir"
       ? jpeg
-      : format === "webp"
-        ? 1.3
-        : format === "png"
-          ? 1.6
-          : 3;
+      : format === "avif"
+        ? avif
+        : format === "webp"
+          ? 1.3
+          : format === "png"
+            ? 1.6
+            : 3;
   const pyramid = format === "zif" || format === "iiif-dir" ? 4 / 3 : 1;
   const pixels = width * height;
   const mb = (pixels * bytesPerPixel * pyramid) / 1_000_000;
-  return t("desktop.quick.sizeEstimate", {
+  return t(format === "avif" ? "desktop.quick.approximateSize" : "desktop.quick.sizeEstimate", {
     size: new Intl.NumberFormat(getLocale()).format(Math.ceil((mb * 1.1) / 5) * 5),
   });
 }
@@ -243,13 +262,18 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
     else setAdvancedOpen(true);
   };
 
-  const jpeg = settings.output_format === "jpeg" || settings.output_format === "auto";
+  const avif = settings.output_format === "avif";
+  const lossy = avif || settings.output_format === "jpeg" || settings.output_format === "auto";
   const showCompression =
     settings.output_format !== "webp" && settings.output_format !== "iiif-dir";
-  const compressionValue = jpeg ? 100 - settings.compression : settings.compression;
-  const compressionLabel = jpeg
-    ? t("desktop.advanced.jpegQuality")
-    : t("desktop.advanced.compressionEffort");
+  const compressionValue = lossy
+    ? Math.max(avif ? 1 : 0, 100 - settings.compression)
+    : settings.compression;
+  const compressionLabel = avif
+    ? t("desktop.advanced.avifQuality")
+    : lossy
+      ? t("desktop.advanced.jpegQuality")
+      : t("desktop.advanced.compressionEffort");
 
   return (
     <section
@@ -370,6 +394,9 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
           {help ? (
             <div className="dz-settings-explanation">
               <p>{t(`desktop.quick.${help}Info`)}</p>
+              {help === "size" && settings.output_format === "avif" ? (
+                <p>{t("desktop.quick.avifSizeInfo")}</p>
+              ) : null}
               {help === "format" ? (
                 <dl>
                   {formats.map((format) => (
@@ -441,7 +468,7 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
                 <PreferenceRow
                   title={compressionLabel}
                   description={
-                    jpeg
+                    lossy
                       ? t("desktop.advanced.jpegQualityDesc")
                       : t("desktop.advanced.compressionEffortDesc")
                   }
@@ -449,16 +476,16 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
                   <div className="dz-slider-control">
                     <input
                       type="range"
-                      min="0"
+                      min={avif ? 1 : 0}
                       max="100"
                       aria-label={compressionLabel}
                       value={compressionValue}
                       onChange={(event) => {
                         const value = Number(event.currentTarget.value);
-                        commit({ compression: jpeg ? 100 - value : value });
+                        commit({ compression: lossy ? 100 - value : value });
                       }}
                     />
-                    <output>{jpeg ? `${compressionValue}%` : compressionValue}</output>
+                    <output>{lossy ? `${compressionValue}%` : compressionValue}</output>
                   </div>
                 </PreferenceRow>
               ) : null}

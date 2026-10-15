@@ -341,6 +341,15 @@ export const fr = {
   "desktop.advanced.title": "Réglages avancés",
   "desktop.advanced.done": "Terminé",
   "desktop.advanced.jpegQuality": "Qualité JPEG",
+  "desktop.advanced.avifQuality": "Qualité AVIF",
+  "desktop.output.avifLimit":
+    "Cette image ({dims}) est trop grande pour AVIF, qui accepte au maximum {avifMax} pixels par côté. Enregistrez-la en PNG. Source : {host}.",
+  "desktop.quick.approximateSize": "≈{size} Mo",
+  "desktop.quick.avifSizeInfo":
+    "Les estimations AVIF utilisent un petit échantillon de peintures, une carte et de la transparence, encodés à la qualité choisie avec une vitesse fixe. Elles ajoutent une marge de 10 % et arrondissent au multiple de 5 Mo supérieur. Ce sont des tailles de fichier approximatives, pas des limites ni des estimations de mémoire ; le détail et la transparence peuvent augmenter la taille.",
+  "desktop.quick.hint.avif": "compressé",
+  "desktop.quick.format.avif":
+    "Sortie avec perte et transparence, limitée à 65 535 pixels par côté. Qualité réglable dans les paramètres. Nécessite l’image complète en mémoire et ne conserve pas les profils colorimétriques intégrés. La qualité 100 n’est pas un mode sans perte.",
   "desktop.advanced.jpegQualityDesc": "Une valeur plus élevée conserve davantage de détails.",
   "desktop.advanced.compressionEffort": "Effort de compression",
   "desktop.advanced.compressionEffortDesc":

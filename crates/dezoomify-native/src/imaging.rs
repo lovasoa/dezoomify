@@ -9,6 +9,9 @@ pub const JPEG_MAX_SIDE: u32 = 65_535;
 /// WebP lossless caps both dimensions at 16383 px.
 pub const WEBP_MAX_SIDE: u32 = 16_383;
 
+/// The rav1e AVIF encoder caps both dimensions at 65535 px.
+pub const AVIF_MAX_SIDE: u32 = 65_535;
+
 pub(crate) fn check_dimensions(
     format: dezoomify::model::OutputFormat,
     size: &Size,
@@ -17,6 +20,7 @@ pub(crate) fn check_dimensions(
     let (maximum, reason) = match format {
         OutputFormat::Jpeg => (JPEG_MAX_SIDE, LimitReason::JpegSide),
         OutputFormat::Webp => (WEBP_MAX_SIDE, LimitReason::WebpSide),
+        OutputFormat::Avif => (AVIF_MAX_SIDE, LimitReason::AvifSide),
         _ => return Ok(()),
     };
     if size.width > maximum || size.height > maximum {

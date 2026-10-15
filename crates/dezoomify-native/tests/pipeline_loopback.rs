@@ -135,6 +135,75 @@ fn jpg_output_decodes_at_full_size() {
 }
 
 #[test]
+fn avif_output_is_published_and_independently_decodes() {
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let directory = temp_dir("avif");
+    let output = directory.join("pyramid.avif");
+    let publication = support::run_file(&input, &output, |_| {}).expect("AVIF pipeline succeeds");
+    assert_eq!(
+        publication.output.format,
+        dezoomify::model::OutputFormat::Avif
+    );
+    assert_eq!(publication.tile_count, 4);
+    let decoded = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../test/support/decode-image.mjs"
+        ))
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(
+        decoded.status.success(),
+        "{}",
+        String::from_utf8_lossy(&decoded.stderr)
+    );
+    assert_eq!(
+        u32::from_le_bytes(decoded.stdout[0..4].try_into().unwrap()),
+        512
+    );
+    assert_eq!(
+        u32::from_le_bytes(decoded.stdout[4..8].try_into().unwrap()),
+        512
+    );
+    let rgba = &decoded.stdout[8..];
+    assert_eq!(rgba.len(), 512 * 512 * 4);
+    for (x, y, expected) in [
+        (64, 64, [196u8, 48, 48, 255]),
+        (448, 448, [232, 220, 96, 255]),
+    ] {
+        let pixel = &rgba[(y * 512 + x) * 4..][..4];
+        for (actual, expected) in pixel.iter().zip(expected) {
+            assert!(actual.abs_diff(expected) <= 5, "{x},{y}: {pixel:?}");
+        }
+    }
+    assert_eq!(
+        std::fs::read_dir(&directory).unwrap().count(),
+        1,
+        "no staging remains"
+    );
+    // Desktop uses automatic naming with an explicit format, rather than a
+    // CLI filename. Exercise that publication route through the same Host.
+    let desktop_dir = directory.join("desktop");
+    let automatic = support::run_file(&input, &output, |options| {
+        options.output = dezoomify_native::OutputTarget::AutoDir {
+            dir: desktop_dir.clone(),
+            format: dezoomify::model::OutputFormat::Avif,
+        };
+    })
+    .expect("desktop AVIF publication succeeds");
+    assert_eq!(automatic.path.parent(), Some(desktop_dir.as_path()));
+    assert_eq!(automatic.path.extension().unwrap(), "avif");
+    assert_eq!(
+        std::fs::read(&automatic.path).unwrap(),
+        std::fs::read(&output).unwrap()
+    );
+    assert_eq!(std::fs::read_dir(&desktop_dir).unwrap().count(), 1);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn tiff_output_decodes_losslessly() {
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");

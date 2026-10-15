@@ -411,10 +411,11 @@ pub fn infer_from_path(path: &Path) -> Result<OutputFormat, Error> {
             "tif" | "tiff" => Ok(OutputFormat::Tiff),
             "zif" => Ok(OutputFormat::Zif),
             "webp" => Ok(OutputFormat::Webp),
+            "avif" => Ok(OutputFormat::Avif),
             "iiif" => Ok(OutputFormat::IiifDir),
             "" => Ok(OutputFormat::IiifDir),
             other => Err(crate::output::unsupported_extension(format!(
-                "unsupported output extension .{other}; use .png, .jpg, .jpeg, .tif, .tiff, .zif, .webp, .iiif, or an extensionless directory path for iiif-dir"
+                "unsupported output extension .{other}; use .png, .jpg, .jpeg, .tif, .tiff, .zif, .webp, .avif, .iiif, or an extensionless directory path for iiif-dir"
             ))),
         }
 }
@@ -429,7 +430,7 @@ fn is_single_file_extension(path: &Path) -> bool {
             .unwrap_or("")
             .to_ascii_lowercase()
             .as_str(),
-        "png" | "jpg" | "jpeg" | "tif" | "tiff" | "zif" | "webp"
+        "png" | "jpg" | "jpeg" | "tif" | "tiff" | "zif" | "webp" | "avif"
     )
 }
 

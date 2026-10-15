@@ -19,6 +19,20 @@ const output = (extra = {}) => ({
   ...extra,
 });
 
+test("AVIF dimension failures use structured facts and give a saving alternative", () => {
+  const message = plainMessageFor(
+    {
+      kind: "limit-exceeded",
+      limit: { reason: "avif-side", dimensions: { width: 65_536, height: 12 } },
+    },
+    "museum.test",
+  );
+  assert.match(message, /AVIF/);
+  assert.match(message, /65535/);
+  assert.match(message, /PNG/);
+  assert.match(message, /museum.test/);
+});
+
 test("native output preparation uses pixel progress and does not pause compression", () => {
   const view = presentProgress(
     progress({

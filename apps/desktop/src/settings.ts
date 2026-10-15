@@ -44,6 +44,7 @@ export const OUTPUT_FORMATS: ReadonlyArray<DesktopSettings["output_format"]> = [
   "tiff",
   "zif",
   "webp",
+  "avif",
   "iiif-dir",
 ] as const;
 export const DEFAULT_OUTPUT_FORMAT = "auto" as const;

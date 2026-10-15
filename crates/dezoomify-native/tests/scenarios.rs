@@ -150,6 +150,12 @@ fn output_format_follows_the_destination_extension() {
         output::infer_from_path(Path::new("painting.WEBP")),
         Ok(OutputFormat::Webp)
     );
+    for name in ["painting.avif", "painting.AVIF"] {
+        assert_eq!(
+            output::infer_from_path(Path::new(name)),
+            Ok(OutputFormat::Avif)
+        );
+    }
     assert_eq!(
         output::infer_from_path(Path::new("painting.iiif")),
         Ok(OutputFormat::IiifDir)
@@ -164,7 +170,7 @@ fn output_format_follows_the_destination_extension() {
     let bmp = output::infer_from_path(Path::new("painting.bmp"));
     let error = bmp.expect_err("bmp stays unsupported");
     assert!(matches!(error, Error::UnsupportedExtension { .. }));
-    for supported in [".png", ".jpg", ".tif", ".zif", ".webp", ".iiif"] {
+    for supported in [".png", ".jpg", ".tif", ".zif", ".webp", ".avif", ".iiif"] {
         assert!(
             error.to_string().contains(supported),
             "unsupported-extension error lists {supported}: {error}"
@@ -197,6 +203,14 @@ fn output_format_follows_the_destination_extension() {
     assert!(output::validate_destination(&webp, &OutputFormat::Webp, false).is_ok());
     assert!(output::validate_destination(&webp, &OutputFormat::Jpeg, true).is_err());
     assert!(output::validate_destination(&webp, &OutputFormat::IiifDir, true).is_err());
+    let avif = dir.join("out.avif");
+    assert!(output::validate_destination(&avif, &OutputFormat::Avif, false).is_ok());
+    assert!(output::validate_destination(&avif, &OutputFormat::Jpeg, true).is_err());
+    assert!(output::validate_destination(&avif, &OutputFormat::IiifDir, true).is_err());
+    std::fs::write(&avif, b"previous AVIF").unwrap();
+    assert!(output::validate_destination(&avif, &OutputFormat::Avif, false).is_err());
+    assert!(output::validate_destination(&avif, &OutputFormat::Avif, true).is_ok());
+    assert_eq!(std::fs::read(&avif).unwrap(), b"previous AVIF");
     let iiif = dir.join("out.iiif");
     assert!(output::validate_destination(&iiif, &OutputFormat::IiifDir, false).is_ok());
     assert!(output::validate_destination(&iiif, &OutputFormat::Tiff, true).is_err());
