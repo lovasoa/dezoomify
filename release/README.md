@@ -8,8 +8,10 @@ This directory is the single reviewed release inventory. Promotion steps
   Git tags and history.
 - `targets.toml`: the mandatory artifact target inventory. Every listed target
   builds on its matching host; a missing host, tool, or artifact fails the
-  release. macOS apps are ad-hoc signed; Linux and Windows installers are
-  unsigned. Updater artifacts have separate Tauri signatures. Installation policy:
+  release. macOS apps use Developer ID signing and Apple notarization; Linux
+  and Windows installers are unsigned. Updater artifacts have separate Tauri
+  signatures. Signing setup: [Operations](../docs/operations.md#apple-signing-setup).
+  Installation policy:
   [Desktop app guide](../apps/desktop/desktop-app.md#install).
 - Release notes use an annotated tag message or commit titles since the
   preceding release tag.

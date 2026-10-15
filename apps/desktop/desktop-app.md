@@ -37,9 +37,8 @@ Pause stops new tile downloads; Cancel remains available while output finishes.
 The [releases page](https://github.com/lovasoa/dezoomify/releases/latest)
 ships installers for Linux x86_64 (`.deb`), Windows x86_64 (`.msi`),
 and Apple silicon macOS (`.dmg`). Linux and Windows installers are unsigned.
-The macOS app has an ad-hoc signature, which requires no paid Apple account,
-but is not signed with Developer ID or notarized by Apple. The operating
-system may ask you to confirm that you trust the app.
+macOS releases use a Developer ID signature and Apple notarization. The operating
+system may ask you to confirm that you want to open a downloaded app.
 
 Choose **Help → Check for updates…** to check GitHub Releases. The app asks
 before downloading a signed update and restarting. Finish or cancel any
@@ -48,10 +47,11 @@ to install the update. Older versions without this menu need one manual
 upgrade to gain the updater.
 
 You can also build the app locally with `cargo xtask build desktop`, which
-produces an installer with the same signing policy for the matching host under
+produces an installer for the matching host under
 `target/release/bundle/` (Linux `.deb` on a Linux host with the webview
 system packages; Windows `.msi` and macOS `.dmg` only on their matching
-hosts).
+hosts). Local macOS builds use an ad-hoc signature unless Apple signing
+credentials are supplied; these builds are not notarized by default.
 
 ### Opening the macOS app
 
@@ -60,15 +60,13 @@ window displays these steps beside the app and Applications icons:
 
 1. Drag **Dezoomify** into **Applications**.
 2. Open **Dezoomify** from **Applications**.
-3. If macOS cannot verify the developer or check for malicious software,
-   open **System Settings → Privacy & Security**.
-4. Under **Security**, click **Open Anyway** for Dezoomify, then confirm **Open**.
+3. If macOS asks whether to open this downloaded app, click **Open**.
 
-Only approve a download you trust. This free app is not notarized by Apple.
+Official macOS releases are signed and notarized. Only open a download you trust.
 
-macOS remembers this app exception. See
+Older releases and local ad-hoc builds may require approval under
+**System Settings → Privacy & Security → Open Anyway**. See
 [Apple's instructions](https://support.apple.com/en-us/102445).
-Ad-hoc signing does not remove this approval step.
 
 If macOS instead says the app is damaged, will damage your computer, or has
 been moved to Trash, download a fresh copy from the releases page. If it
