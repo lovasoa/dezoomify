@@ -238,6 +238,23 @@ export interface Output {
 }
 
 /**
+ * Presentation data derived from the codec registry, including automatic output.
+ */
+export interface OutputOption {
+    format: OutputPreference;
+    name: string;
+    label_key?: string;
+    hint: string;
+    max_side?: number;
+    description_max_side?: number;
+    compression_supported: boolean;
+    /**
+     * Estimated bytes/pixel for each integer compression value from 0 to 100.
+     */
+    compression_estimates: number[];
+}
+
+/**
  * Purpose of a resource request (metadata vs tile vs probe).
  */
 export type RequestPurpose = "metadata" | "tile" | "probe";

@@ -576,26 +576,54 @@ body {
   line-height: 1.4;
 }
 
-#dz-desktop-settings .dz-slider-control {
+#dz-desktop-settings .dz-compression-control {
   display: grid;
-  grid-template-columns: 160px 2.5rem;
-  gap: 0.7rem;
+  grid-template-columns: 1fr auto;
+  gap: 0.65rem;
   align-items: center;
-}
-
-#dz-desktop-settings .dz-slider-control input[type="range"] {
-  width: 160px;
-  height: auto;
-  padding: 0;
-  accent-color: var(--dz-accent-blue);
-  background: transparent;
-  border: 0;
-}
-
-#dz-desktop-settings .dz-slider-control output {
+  padding: 0.45rem 0.5rem 0.8rem;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid var(--dz-surface-border);
   color: var(--dz-text-secondary);
+  font-size: 0.73rem;
+}
+
+#dz-desktop-settings .dz-compression-control input[type="range"] {
+  grid-column: 1 / -1;
+  appearance: none;
+  width: 100%;
+  height: 2px;
+  margin: 0.25rem 0;
+  padding: 0;
+  background: var(--dz-surface-border);
+  border: 0;
+  cursor: pointer;
+}
+
+#dz-desktop-settings .dz-compression-control input::-webkit-slider-thumb {
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--dz-accent-blue);
+}
+
+#dz-desktop-settings .dz-compression-control input::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--dz-accent-blue);
+}
+
+#dz-desktop-settings .dz-compression-control input:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+#dz-desktop-settings .dz-compression-control output {
   font-variant-numeric: tabular-nums;
-  font-size: 0.8rem;
 }
 
 #dz-desktop-settings .dz-size-control {

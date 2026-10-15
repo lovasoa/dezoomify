@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement, useState } from "react";
-import { act, click, makeContainer } from "../../../test/react-dom.mjs";
+import { act, click, input, makeContainer } from "../../../test/react-dom.mjs";
 import { defaultSettings } from "../src/settings.ts";
 
 // linkedom documents lack `oninput`, which keeps React's text-input change
@@ -305,29 +305,65 @@ test("label information opens the existing modal with every format explanation",
   act(() => root.unmount());
 });
 
-test("AVIF quality uses the persisted compression setting and updates estimates", () => {
+test("compression sits above sizes and updates budgets live without closing the menu", () => {
   const { container, root, current } = renderSettings({
-    settings: { output_format: "avif", compression: 100 },
+    settings: { output_format: "avif", compression: 0 },
+  });
+  const menu = container.querySelector('.dz-quick-menu[aria-label="Size"]');
+  const dropdown = menu.closest("details");
+  const slider = menu.querySelector('input[aria-label="Compression"]');
+  assert.equal(menu.firstElementChild.className, "dz-compression-control");
+  assert.equal(slider.getAttribute("min"), "0");
+  assert.equal(slider.getAttribute("max"), "100");
+  assert.equal(slider.value, "0");
+  act(() => {
+    dropdown.open = true;
   });
   const estimate = () =>
     [...container.querySelectorAll('.dz-quick-menu[aria-label="Size"] button')]
       .find((button) => button.firstElementChild.textContent === "8K")
       .querySelector(".dz-choice-hint").textContent;
-  assert.equal(estimate(), "Up to about 5 MB");
-  click(container.querySelector(".dz-settings-more"));
-  const slider = container.querySelector('input[aria-label="AVIF quality"]');
-  assert.equal(slider.getAttribute("min"), "1");
-  assert.equal(slider.value, "1");
-  assert.equal(container.querySelector('input[aria-label="Width"]').getAttribute("max"), "65535");
-  typeInto(slider, "100");
-  assert.equal(current().compression, 0);
   assert.equal(estimate(), "Up to about 45 MB");
+  input(slider, "50");
+  assert.equal(current().compression, 50);
+  assert.equal(estimate(), "Up to about 5 MB");
+  assert.equal(menu.querySelector("output").textContent, "50%");
+  assert.equal(dropdown.open, true);
+  click(container.querySelector(".dz-settings-more"));
+  assert.equal(container.querySelector("dialog input[type=range]"), null);
+  assert.equal(container.querySelector('input[aria-label="AVIF quality"]'), null);
+  assert.equal(container.querySelector('input[aria-label="Width"]').getAttribute("max"), "65535");
   click(container.querySelector(".dz-settings-close"));
   click(container.querySelector('button[aria-label="Size: More information"]'));
   assert.match(
     container.querySelector(".dz-settings-explanation").textContent,
-    /codec and selected quality/,
+    /codec and compression setting/,
   );
+  act(() => root.unmount());
+});
+
+test("the same compression value survives format changes and unsupported formats disable it", () => {
+  const { container, root, current } = renderSettings({
+    settings: { output_format: "webp", compression: 37 },
+  });
+  const slider = container.querySelector('input[aria-label="Compression"]');
+  assert.equal(slider.disabled, true);
+  assert.equal(slider.value, "37");
+  const format = (name) =>
+    [...container.querySelectorAll('.dz-quick-menu[aria-label="Format"] button')].find(
+      (button) => button.firstElementChild.textContent === name,
+    );
+  click(format("JPEG"));
+  assert.equal(slider.disabled, false);
+  assert.equal(slider.value, "37");
+  input(slider, "72");
+  assert.equal(current().compression, 72);
+  click(format("AVIF"));
+  assert.equal(slider.value, "72");
+  assert.equal(current().compression, 72);
+  click(format("WebP"));
+  assert.equal(slider.disabled, true);
+  assert.equal(current().compression, 72);
   act(() => root.unmount());
 });
 
@@ -353,7 +389,7 @@ test("desktop advanced settings open as a labelled dialog and dismiss cleanly", 
   assert.ok(dialog, "advanced settings render a dialog");
   assert.ok(dialog.hasAttribute("open"), "advanced settings opens as a dialog");
   assert.ok(dialog.querySelector(".dz-settings-sheet-head"));
-  assert.equal(dialog.querySelectorAll(".dz-preference-row").length, 4);
+  assert.equal(dialog.querySelectorAll(".dz-preference-row").length, 3);
   click(dialog.querySelector(".dz-settings-close"));
   assert.equal(dialog.hasAttribute("open"), false);
   act(() => root.unmount());

@@ -3,7 +3,7 @@
 // Fields:
 // - output dir (native dir picker; text input plus Browse button)
 // - output format (native encoder/directory picker, default auto)
-// - compression 0-100, default 5 (JPEG quality 100-x, PNG tier)
+// - compression 0-100, default 5 (interpreted by the selected native encoder)
 // - max-width / max-height caps, optional positive ints
 // - retries, default 3 (0 allowed = no retries), bounded 0-100
 // - cache-dir, optional resume cache (tile bodies only, never headers)
@@ -21,7 +21,7 @@
 // imports from apps/web, apps/extension, or browser-runtime. No fetch/XHR.
 
 import type { OutputPreference } from "@dezoomify/wasm-bindings";
-import { outputCodecs } from "@dezoomify/wasm-bindings/codecs";
+import { defaultOutputFormat, outputOptions } from "@dezoomify/wasm-bindings/codecs";
 import { invoke } from "@tauri-apps/api/core";
 import { downloadDir } from "@tauri-apps/api/path";
 
@@ -38,11 +38,10 @@ export interface DesktopSettings {
 }
 
 export const SETTINGS_STORAGE_KEY = "dezoomify.desktop.settings.v1" as const;
-export const OUTPUT_FORMATS: ReadonlyArray<DesktopSettings["output_format"]> = [
-  "auto",
-  ...outputCodecs.map((codec) => codec.format),
-] as const;
-export const DEFAULT_OUTPUT_FORMAT = "auto" as const;
+export const OUTPUT_FORMATS: ReadonlyArray<DesktopSettings["output_format"]> = outputOptions.map(
+  (option) => option.format,
+);
+export const DEFAULT_OUTPUT_FORMAT = defaultOutputFormat;
 export const DEFAULT_COMPRESSION = 5 as const;
 export const DEFAULT_RETRIES = 3 as const;
 export type NetworkProfile = "maximum" | "balanced" | "gentle";

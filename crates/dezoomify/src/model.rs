@@ -172,6 +172,79 @@ pub struct OutputCodec {
     pub size_coefficients: &'static [(u8, f64)],
 }
 
+impl OutputCodec {
+    /// Interpolate the registered samples using the encoder's compression mapping.
+    pub fn estimated_bytes_per_pixel(&self, compression: u8) -> f64 {
+        let quality = self.control.quality(compression);
+        let (mut lower_quality, mut lower_bytes) = self.size_coefficients[0];
+        let mut bytes = lower_bytes;
+        for &(upper_quality, upper_bytes) in &self.size_coefficients[1..] {
+            if quality <= lower_quality {
+                break;
+            }
+            if quality <= upper_quality {
+                let fraction =
+                    f64::from(quality - lower_quality) / f64::from(upper_quality - lower_quality);
+                bytes = lower_bytes + fraction * (upper_bytes - lower_bytes);
+                break;
+            }
+            lower_quality = upper_quality;
+            lower_bytes = upper_bytes;
+            bytes = upper_bytes;
+        }
+        let levels = match self.layout {
+            OutputLayout::Pyramid | OutputLayout::Directory => 4.0 / 3.0,
+            _ => 1.0,
+        };
+        bytes * levels
+    }
+}
+
+/// Presentation data derived from the codec registry, including automatic output.
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct OutputOption {
+    pub format: OutputPreference,
+    pub name: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label_key: Option<&'static str>,
+    pub hint: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_side: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description_max_side: Option<u32>,
+    pub compression_supported: bool,
+    /// Estimated bytes/pixel for each integer compression value from 0 to 100.
+    pub compression_estimates: Vec<f64>,
+}
+
+pub fn output_options() -> Vec<OutputOption> {
+    std::iter::once(OutputPreference::Auto)
+        .chain(OUTPUT_CODECS.iter().map(|codec| codec.format.into()))
+        .map(|preference| {
+            let format = preference.format();
+            // Tiled images almost never have alpha; budget Auto as opaque JPEG.
+            let codec = format.unwrap_or(OutputFormat::Jpeg).codec();
+            OutputOption {
+                format: preference,
+                name: if format.is_none() { "Auto" } else { codec.name },
+                label_key: format.is_none().then_some("desktop.quick.auto"),
+                hint: if format.is_none() {
+                    "adaptive"
+                } else {
+                    codec.hint
+                },
+                max_side: format.and_then(|format| format.codec().max_side),
+                description_max_side: codec.max_side,
+                compression_supported: codec.control != OutputControl::None,
+                compression_estimates: (0..=100)
+                    .map(|compression| codec.estimated_bytes_per_pixel(compression))
+                    .collect(),
+            }
+        })
+        .collect()
+}
+
 // One declaration owns the format/preference wire variants and their metadata.
 // A buffered image-crate codec needs one row here and its Cargo feature. Only
 // encoders with configurable construction need an override in native imaging.
@@ -193,6 +266,12 @@ macro_rules! output_codecs {
         impl OutputPreference {
             pub const fn format(self) -> Option<OutputFormat> {
                 match self { Self::Auto => None, $(Self::$variant => Some(OutputFormat::$variant)),* }
+            }
+        }
+
+        impl From<OutputFormat> for OutputPreference {
+            fn from(format: OutputFormat) -> Self {
+                match format { $(OutputFormat::$variant => Self::$variant),* }
             }
         }
 
@@ -254,7 +333,7 @@ output_codecs! {
     Webp => ("webp", "WebP", &["webp"], Some(16_383), OutputControl::None, Buffered, "lossless", &[(100, 1.3)]),
     Avif => ("avif", "AVIF", &["avif"], Some(65_535), OutputControl::Quality { minimum: 1 }, Buffered, "advancedCompression", AVIF_SIZES),
     Zif => ("zif", "ZIF", &["zif"], None, OutputControl::Effort, Pyramid, "zoomable", &[(100, 3.0)]),
-    IiifDir => ("iiif-dir", "IIIF folder", &["iiif", ""], None, OutputControl::None, Directory, "tiled", JPEG_SIZES),
+    IiifDir => ("iiif-dir", "IIIF folder", &["iiif", ""], None, OutputControl::Quality { minimum: 0 }, Directory, "tiled", JPEG_SIZES),
 }
 
 /// File suffixes accepted by native output, for command help and diagnostics.
@@ -1442,6 +1521,28 @@ pub fn has_secret_params(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compression_estimates_follow_encoder_mapping_and_output_layout() {
+        let avif = OutputFormat::Avif.codec();
+        assert!((avif.estimated_bytes_per_pixel(9) - 0.33).abs() < 1e-12);
+        assert_eq!(avif.estimated_bytes_per_pixel(100), 0.05);
+        assert_eq!(avif.estimated_bytes_per_pixel(0), 1.15);
+        let webp = OutputFormat::Webp.codec();
+        assert_eq!(
+            webp.estimated_bytes_per_pixel(0),
+            webp.estimated_bytes_per_pixel(100)
+        );
+        assert_eq!(OutputFormat::Zif.codec().estimated_bytes_per_pixel(5), 4.0);
+        let auto = output_options().remove(0);
+        assert_eq!(auto.format, OutputPreference::Auto);
+        assert_eq!(auto.max_side, None);
+        assert_eq!(auto.compression_estimates.len(), 101);
+        assert_eq!(
+            auto.compression_estimates[5],
+            OutputFormat::Jpeg.codec().estimated_bytes_per_pixel(5)
+        );
+    }
 
     #[test]
     fn messages_render_from_structured_facts_only() {
