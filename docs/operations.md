@@ -46,7 +46,8 @@ macOS releases additionally require the Apple secrets described below. The
 release workflow signs the app and DMG with Developer ID, notarizes both, and
 staples Apple's tickets. It verifies the expected team, app identifier, hardened
 runtime, Gatekeeper acceptance, and tickets in both the DMG and updater archive
-before uploading artifacts. Local and PR smoke builds retain ad-hoc signing.
+before uploading artifacts. Local and automatic PR smoke builds retain ad-hoc
+signing; the manual desktop workflow tests signing on a reviewed branch.
 
 Release verification checks every updater bundle against the public key before
 publication. Each GitHub Release carries `latest.json` with signatures and
@@ -103,8 +104,18 @@ starts a release, and missing Apple secrets now fail the macOS build.
    signing and updater signatures serve different purposes. Do not replace the
    updater key or public key. Tauri imports the Apple certificate into a
    temporary keychain; no persistent runner keychain setup is needed.
-5. Merge the PR after CI passes. The normal rolling release signs and notarizes
-   automatically; numbered releases follow the existing release instructions.
+5. Test the reviewed PR branch before merging:
+
+   ```sh
+   gh workflow run desktop.yml --repo lovasoa/dezoomify --ref <reviewed-branch>
+   ```
+
+   This manual run uses the canonical release build command, verifies Apple's
+   tickets and Gatekeeper acceptance, and installs and launches apps from the
+   DMG and updater archive. It uploads artifacts and diagnostics without
+   publishing a release. Require its success as well as normal PR CI, then
+   merge. The normal rolling release signs and notarizes automatically;
+   numbered releases follow the existing release instructions.
    The first notarization can take longer than subsequent submissions. If it
    fails, inspect the macOS build's submission ID and retrieve Apple's report
    with `xcrun notarytool log <submission-id> --apple-id <email> --team-id <team-id>`
