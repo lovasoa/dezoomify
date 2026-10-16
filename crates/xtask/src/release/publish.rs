@@ -145,23 +145,23 @@ fn labeled_asset(path: &std::path::Path) -> Result<std::ffi::OsString, String> {
         "Desktop updater manifest"
     } else if unsigned.starts_with("dezoomify-desktop-v") {
         if unsigned.ends_with("-windows-x86_64.msi") {
-            "Windows installer — x64 (MSI)"
+            "Windows installer: x64 (MSI)"
         } else if unsigned.ends_with("-linux-x86_64.deb") {
-            "Linux installer — x64 (DEB)"
+            "Linux installer: x64 (DEB)"
         } else if unsigned.ends_with("-macos-aarch64.dmg") {
-            "macOS installer — Apple Silicon (DMG)"
+            "macOS installer: Apple Silicon (DMG)"
         } else if unsigned.ends_with("-macos-aarch64.app.tar.gz") {
-            "macOS updater — Apple Silicon"
+            "macOS updater: Apple Silicon"
         } else {
             return Err(format!("release asset has no display label: {name}"));
         }
     } else if unsigned.starts_with("dezoomify-cli-v") && unsigned.ends_with("-linux-x86_64.tar.gz")
     {
-        "Command line — Linux x64 (tar.gz)"
+        "Command line: Linux x64 (tar.gz)"
     } else if unsigned.starts_with("dezoomify-chromium-v") && unsigned.ends_with(".zip") {
-        "Browser extension — Chromium (ZIP)"
+        "Browser extension: Chromium (ZIP)"
     } else if unsigned.starts_with("dezoomify-firefox-v") && unsigned.ends_with(".zip") {
-        "Browser extension — Firefox (ZIP)"
+        "Browser extension: Firefox (ZIP)"
     } else {
         return Err(format!("release asset has no display label: {name}"));
     };
@@ -169,7 +169,7 @@ fn labeled_asset(path: &std::path::Path) -> Result<std::ffi::OsString, String> {
     argument.push("#");
     argument.push(label);
     if signature {
-        argument.push(" — signature");
+        argument.push(" (signature)");
     }
     Ok(argument)
 }
@@ -244,7 +244,7 @@ mod tests {
             assert_eq!(Path::new(filename), asset);
             assert!(!label.is_empty());
             assert!(!label.contains(&plan.version));
-            assert_eq!(label.ends_with(" — signature"), filename.ends_with(".sig"));
+            assert_eq!(label.ends_with(" (signature)"), filename.ends_with(".sig"));
         }
     }
 
@@ -253,15 +253,15 @@ mod tests {
         for (file, label) in [
             (
                 "dezoomify-desktop-v3.1.123-windows-x86_64.msi",
-                "Windows installer — x64 (MSI)",
+                "Windows installer: x64 (MSI)",
             ),
             (
                 "dezoomify-desktop-v3.1.123-linux-x86_64.deb",
-                "Linux installer — x64 (DEB)",
+                "Linux installer: x64 (DEB)",
             ),
             (
                 "dezoomify-desktop-v3.1.123-macos-aarch64.dmg",
-                "macOS installer — Apple Silicon (DMG)",
+                "macOS installer: Apple Silicon (DMG)",
             ),
         ] {
             assert_eq!(
