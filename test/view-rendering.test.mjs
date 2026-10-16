@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
+import { parseHTML } from "linkedom";
 import { createDiagnosticRecorder } from "../packages/shared-ui/src/diagnostics.ts";
-import { setLocale, t } from "../packages/shared-ui/src/i18n.ts";
+import { SUPPORTED_LOCALES, setLocale, t } from "../packages/shared-ui/src/i18n.ts";
 import {
   presentFailure,
   presentIdle,
@@ -10,6 +12,7 @@ import {
   presentStatus,
 } from "../packages/shared-ui/src/presentation.ts";
 import { renderView } from "../packages/shared-ui/src/view.tsx";
+import { localizeWebsite } from "../src/copy.ts";
 import { act, click } from "./react-dom.mjs";
 
 function container() {
@@ -41,6 +44,42 @@ const callbacks = {
   onReset: () => {},
   onSave: () => {},
 };
+
+test("website navigation, preview controls, and save guidance follow the selected language", () => {
+  const { document } = parseHTML(readFileSync(new URL("../index.html", import.meta.url), "utf8"));
+  const el = document.querySelector("#app");
+  try {
+    for (const locale of SUPPORTED_LOCALES) {
+      setLocale(locale);
+      localizeWebsite(document);
+      assert.equal(
+        document.querySelector("#dz-nav-btn-desktop").textContent,
+        t("page.nav.desktop"),
+      );
+      assert.equal(
+        document.querySelector("#preview-zoom-fit").getAttribute("aria-label"),
+        t("page.preview.fitLabel"),
+      );
+      assert.equal(document.querySelector(".dz-brand svg").tagName.toLowerCase(), "svg");
+      render(
+        el,
+        presentOutput({
+          format: "png",
+          canvas: { width: 512, height: 256 },
+          disposition: "browser-save-ready",
+        }),
+        callbacks,
+      );
+      assert.equal(el.querySelector(".dz-completed-guidance").textContent, t("view.done.guidance"));
+      assert.match(el.querySelector(".dz-completed-summary").textContent, /512.*256/);
+      render(el, presentOutput({ format: "png", disposition: "display-only" }), callbacks);
+      assert.equal(el.querySelector(".dz-notice-message").textContent, t("view.display.guidance"));
+      assert.equal(el.querySelector("#dz-btn-save"), null);
+    }
+  } finally {
+    setLocale("en");
+  }
+});
 
 test("presentStatus maps host steps onto render phases", () => {
   assert.equal(presentStatus("idle").phase, "idle");
@@ -106,9 +145,9 @@ test("renderView mounts card and updates job section in place without DOM destru
   );
 
   // The step line renders the presentation headline, never host copy.
-  assert.equal(stepTextEl.textContent, "Saving image tiles…");
+  assert.equal(stepTextEl.textContent, "Downloading image pieces…");
   const countsEl = card.querySelector("#dz-job-counts");
-  assert.equal(countsEl.textContent, "15 of 60 tiles");
+  assert.equal(countsEl.textContent, "15 of 60 image pieces");
   const barEl = card.querySelector("#dz-job-bar");
   assert.equal(barEl.style.width, "25%");
 
@@ -244,7 +283,7 @@ test("retry approval replaces running progress with one warning before diagnosti
     "live announcements exclude interactive actions",
   );
   assert.match(el.textContent, /Download paused/);
-  assert.match(el.textContent, /3 of 4 tiles/);
+  assert.match(el.textContent, /3 of 4 image pieces/);
   assert.match(el.textContent, /no file has been saved/);
   assert.match(el.textContent, /Retry once more/);
   assert.equal(el.querySelector("[role=progressbar]"), null);
@@ -606,7 +645,7 @@ test("desktop handoff shows and copies the discovered URL, handles failure and u
   const copy = dialog.querySelector(".dz-btn-secondary");
   await act(async () => click(copy));
   assert.equal(copied, source);
-  assert.match(dialog.querySelector('[role="status"]').textContent, /URL copied/);
+  assert.match(dialog.querySelector('[role="status"]').textContent, /Address copied/);
   rejectCopy = true;
   await act(async () => click(copy));
   assert.match(dialog.querySelector('[role="alert"]').textContent, /copy it manually/);
@@ -618,7 +657,7 @@ test("desktop handoff shows and copies the discovered URL, handles failure and u
   click(el.querySelector("#dz-btn-download-desktop"));
   dialog = document.querySelector('[role="dialog"]');
   assert.equal(dialog.querySelector("input"), null, "never substitutes the scanned page URL");
-  assert.match(dialog.textContent, /No reusable source URL/);
+  assert.match(dialog.textContent, /no image address to copy/);
   click(dialog.querySelector(".dz-modal-close"));
 });
 

@@ -122,9 +122,9 @@ test("failed presentation retains the canonical failure", () => {
 });
 
 test("save guidance explains saving and browser color limitations", () => {
-  assert.ok(renderSaveGuidance(false).includes("right-click"));
-  assert.ok(renderSaveGuidance(false).includes("Save Image As"));
-  assert.ok(renderSaveGuidance(true).includes("save this picture"));
+  assert.match(renderSaveGuidance(false), /does not allow.*downloadable file/);
+  assert.match(renderSaveGuidance(false), /desktop app or browser extension/);
+  assert.ok(renderSaveGuidance(true).includes("save button"));
   assert.ok(renderSaveGuidance(true).includes("Colors may shift"));
 });
 

@@ -7,9 +7,13 @@ formats. It runs on Windows, macOS, and Linux and saves directly to your chosen
 folder. It cannot reuse your browser login; use the
 [extension](../../docs/user/browser-extension.md) for signed-in pages.
 
-Large images are still limited by available memory. If a save reaches that
-limit, choose a smaller resolution or a tile folder. Explicit output formats
-can reduce buffering; WebP and AVIF need the complete picture in memory.
+The app can build the output file while downloading, without keeping the whole
+image in memory. Memory use depends on the source and output format; WebP and
+AVIF still need the complete picture in memory. If a save reaches a limit,
+choose another format, a smaller resolution, or a tile folder.
+
+Image information and every image piece are downloaded through your own internet
+connection. This can help when a source site blocks Dezoomify’s shared server.
 
 ## Resuming an interrupted save
 

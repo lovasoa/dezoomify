@@ -8,18 +8,17 @@ is needed.
 ## Save an image
 
 1. Copy the address of the page showing the zoomable image.
-2. Paste it into Dezoomify and press **Dezoomify !**.
-3. Wait for the picture, then press **Save** to download a PNG.
+2. Paste it into Dezoomify and press **Find image**.
+3. Wait for the picture, then press **Save image now** to download a PNG.
 
 You can also paste a description address such as `info.json`,
 `ImageProperties.xml`, or a `.dzi` file. If nothing is found, follow
 [finding the image address](./finding-the-image-address.md).
 
 The website selects the largest image and resolution that fit. When it uses a
-smaller resolution, it shows the selected and maximum sizes, with the desktop
-app, **Try maximum**, and **Stop** while working. **Try maximum** restarts at full
-resolution but can fail at the browser's limits. For a specific image or level,
-use the [CLI](./command-line.md).
+smaller resolution, it shows the selected and maximum sizes and offers the
+[desktop app](../../apps/desktop/desktop-app.md) for full resolution. For a
+specific image or level, use the [CLI](./command-line.md).
 
 ## Saving several images
 
@@ -34,9 +33,8 @@ current run; enter its address again to restart.
 
 ## Language
 
-The interface offers English, French, German, and Italian. Choose a language
-or let the app follow your browser preference. Help pages, error codes, URLs,
-and format names remain untranslated.
+The interface follows your browser preference for English, French, German, or
+Italian. Help pages, error codes, URLs, and format names remain untranslated.
 
 ## What the website cannot do
 
